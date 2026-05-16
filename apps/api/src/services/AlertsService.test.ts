@@ -63,6 +63,7 @@ function makeWarehouseStub(state: {
 	metricsAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	logsAggregateRows?: ReadonlyArray<Record<string, unknown>>
 	logsAggregateByServiceRows?: ReadonlyArray<Record<string, unknown>>
+	rawQueryRows?: ReadonlyArray<Record<string, unknown>>
 }): WarehouseQueryServiceShape {
 	const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) => Effect.succeed(rows as never)
 
@@ -70,6 +71,7 @@ function makeWarehouseStub(state: {
 	// Route the response based on what data is configured in the test state.
 	const sqlQueryStub = () => {
 		// Return whichever data is configured — tests evaluate one rule type at a time
+		if (state.rawQueryRows?.length) return succeedRows(state.rawQueryRows)
 		if (state.logsAggregateByServiceRows?.length) return succeedRows(state.logsAggregateByServiceRows)
 		if (state.tracesAggregateRows?.length) return succeedRows(state.tracesAggregateRows)
 		if (state.metricsAggregateRows?.length) return succeedRows(state.metricsAggregateRows)
@@ -1034,10 +1036,14 @@ describe("AlertsService", () => {
 						name: "Checkout error logs",
 						severity: "critical",
 						enabled: true,
-						signalType: "query",
-						queryDataSource: "logs",
-						queryAggregation: "count",
-						queryWhereClause: 'service.name = "checkout" AND severity = "error"',
+						signalType: "builder_query",
+						queryBuilderDraft: {
+							id: "q",
+							name: "A",
+							dataSource: "logs",
+							aggregation: "count",
+							whereClause: 'service.name = "checkout" AND severity = "error"',
+						},
 						comparator: "gt",
 						threshold: 10,
 						windowMinutes: 5,
@@ -1063,6 +1069,58 @@ describe("AlertsService", () => {
 		expect(result.status).toBe("breached")
 		expect(result.value).toBe(42)
 		expect(result.sampleCount).toBe(42)
+	})
+
+	it("compiles and evaluates a raw SQL query alert", async () => {
+		const { url } = createTempDbUrl()
+
+		const result = await Effect.runPromise(
+			Effect.gen(function* () {
+				const alerts = yield* AlertsService
+				const orgId = asOrgId("org_raw_sql_test")
+				const userId = asUserId("user_raw_sql_test")
+				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+				return yield* alerts.testRule(
+					orgId,
+					userId,
+					adminRoles,
+					new AlertRuleUpsertRequest({
+						name: "Raw SQL alert",
+						severity: "critical",
+						enabled: true,
+						signalType: "raw_query",
+						rawQuerySql:
+							"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+						rawQueryReducer: "max",
+						comparator: "gt",
+						threshold: 100,
+						windowMinutes: 5,
+						minimumSampleCount: 0,
+						consecutiveBreachesRequired: 2,
+						consecutiveHealthyRequired: 2,
+						renotifyIntervalMinutes: 30,
+						destinationIds: [destination.id],
+					}),
+				)
+			}).pipe(
+				Effect.provide(
+					makeLayer(
+						url,
+						makeWarehouseStub({
+							rawQueryRows: [
+								{ value: 120, samples: 8 },
+								{ value: 240, samples: 12 },
+							],
+						}),
+					),
+				),
+			),
+		)
+
+		expect(result.status).toBe("breached")
+		expect(result.value).toBe(240)
+		expect(result.sampleCount).toBe(20)
 	})
 
 	it("rejects metrics alerts with multiple attr groupBy dimensions", async () => {
@@ -1129,10 +1187,22 @@ describe("AlertsService", () => {
 						name: "All services error logs",
 						severity: "critical",
 						enabled: true,
-						signalType: "query",
-						queryDataSource: "logs",
-						queryAggregation: "count",
-						queryWhereClause: 'severity = "error"',
+						signalType: "builder_query",
+						queryBuilderDraft: {
+							id: "q",
+							name: "A",
+							dataSource: "logs",
+							aggregation: "count",
+							whereClause: 'severity = "error"',
+							groupBy: ["service.name"],
+							addOns: {
+								groupBy: true,
+								having: false,
+								orderBy: false,
+								limit: false,
+								legend: false,
+							},
+						},
 						groupBy: ["service.name"],
 						comparator: "gt",
 						threshold: 10,

@@ -111,7 +111,12 @@ function maskLiteralsAndComments(sql: string): string {
 const fail = (code: RawSqlValidationError["code"], message: string) =>
 	Effect.fail(new RawSqlValidationError({ code, message }))
 
-function makeExpandMacros(input: ExpandMacrosInput) {
+/**
+ * Pure macro-expansion + safety pass. Exported so non-service callers (e.g.
+ * raw-SQL alert evaluation in QueryEngineService) can reuse it without wiring
+ * the `RawSqlChartService` layer.
+ */
+export function makeExpandMacros(input: ExpandMacrosInput) {
 	return Effect.gen(function* () {
 		let sql = input.sql
 

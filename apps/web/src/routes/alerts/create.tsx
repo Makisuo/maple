@@ -29,6 +29,7 @@ import {
 	destinationTypeLabels,
 	signalLabels,
 	formatSignalValue,
+	RAW_QUERY_REDUCER_LABELS,
 } from "@/lib/alerts/form-utils"
 import {
 	AlertDestinationDocument,
@@ -56,6 +57,7 @@ import {
 } from "@maple/ui/components/ui/combobox"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
+import { highlightSql } from "@/lib/sql-highlight"
 import { AGGREGATIONS_BY_SOURCE } from "@/lib/query-builder/model"
 import { GroupByMultiSelect } from "@/components/query-builder/group-by-multi-select"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
@@ -64,7 +66,64 @@ import { AutocompleteValuesProvider, useAutocompleteValuesContext } from "@/hook
 const AlertCreateSearch = Schema.Struct({
 	serviceName: Schema.optional(Schema.String),
 	ruleId: Schema.optional(Schema.String),
+	/** Set by the "Create alert" action on a dashboard chart widget. */
+	dashboardId: Schema.optional(Schema.String),
+	widgetId: Schema.optional(Schema.String),
 })
+
+/**
+ * Convert a dashboard chart widget's data source into a prefilled alert form.
+ * `custom_query_builder_*` widgets become `builder_query` alerts; `raw_sql_chart`
+ * widgets become `raw_query` alerts. Returns null when the widget is not a
+ * query-driven chart.
+ */
+function widgetToRuleForm(
+	widget: { id: string; visualization: string; dataSource?: { endpoint?: string; params?: unknown }; display?: { title?: string } },
+	base: RuleFormState,
+): RuleFormState | null {
+	const endpoint = widget.dataSource?.endpoint
+	const params = (widget.dataSource?.params ?? {}) as Record<string, unknown>
+	const name = widget.display?.title ? `Alert — ${widget.display.title}` : "Alert from chart"
+
+	if (endpoint === "raw_sql_chart") {
+		const sql = typeof params.sql === "string" ? params.sql : ""
+		return { ...base, name, signalType: "raw_query", rawQuerySql: sql }
+	}
+
+	if (
+		endpoint === "custom_query_builder_timeseries" ||
+		endpoint === "custom_query_builder_breakdown" ||
+		endpoint === "custom_query_builder_list"
+	) {
+		const queries = Array.isArray(params.queries) ? params.queries : []
+		const query = (queries[0] ?? {}) as Record<string, unknown>
+		const dataSource =
+			query.dataSource === "logs" || query.dataSource === "metrics"
+				? query.dataSource
+				: "traces"
+		return {
+			...base,
+			name,
+			signalType: "builder_query",
+			queryDataSource: dataSource,
+			queryAggregation: typeof query.aggregation === "string" ? query.aggregation : "count",
+			queryWhereClause: typeof query.whereClause === "string" ? query.whereClause : "",
+			groupBy: Array.isArray(query.groupBy)
+				? query.groupBy.filter((g): g is string => typeof g === "string" && g !== "none")
+				: [],
+			metricName: typeof query.metricName === "string" ? query.metricName : base.metricName,
+			metricType:
+				query.metricType === "sum" ||
+				query.metricType === "gauge" ||
+				query.metricType === "histogram" ||
+				query.metricType === "exponential_histogram"
+					? query.metricType
+					: base.metricType,
+		}
+	}
+
+	return null
+}
 
 export const Route = effectRoute(createFileRoute("/alerts/create"))({
 	component: AlertCreatePageWrapper,
@@ -88,8 +147,12 @@ function AlertCreatePage() {
 		reactivityKeys: ["alertDestinations"],
 	})
 	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", { reactivityKeys: ["alertRules"] })
+	const dashboardsQueryAtom = MapleApiAtomClient.query("dashboards", "list", {
+		reactivityKeys: ["dashboards"],
+	})
 	const destinationsResult = useAtomValue(destinationsQueryAtom)
 	const rulesResult = useAtomValue(rulesQueryAtom)
+	const dashboardsResult = useAtomValue(dashboardsQueryAtom)
 
 	const createRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "createRule"), {
 		mode: "promiseExit",
@@ -127,11 +190,23 @@ function AlertCreatePage() {
 	const [initialized, setInitialized] = useState(false)
 
 	useEffect(() => {
-		if (editingRule && !initialized) {
+		if (initialized) return
+		if (editingRule) {
 			setRuleForm(ruleToFormState(editingRule))
 			setInitialized(true)
+			return
 		}
-	}, [editingRule, initialized])
+		if (search.dashboardId && search.widgetId) {
+			const dashboard = Result.builder(dashboardsResult)
+				.onSuccess((response) => response.dashboards.find((d) => d.id === search.dashboardId))
+				.orElse(() => undefined)
+			const widget = dashboard?.widgets.find((w) => w.id === search.widgetId)
+			if (widget) {
+				setRuleForm((current) => widgetToRuleForm(widget, current) ?? current)
+				setInitialized(true)
+			}
+		}
+	}, [editingRule, initialized, search.dashboardId, search.widgetId, dashboardsResult])
 
 	const { chartData, chartLoading } = useAlertRuleChart(ruleForm)
 	const threshold = Number(ruleForm.threshold)
@@ -300,8 +375,8 @@ function AlertCreatePage() {
 						</div>
 					)}
 
-					{/* Custom Query builder */}
-					{ruleForm.signalType === "query" && (
+					{/* Query builder */}
+					{ruleForm.signalType === "builder_query" && (
 						<Card>
 							<CardContent className="grid gap-4 p-4">
 								<div className="space-y-2">
@@ -401,6 +476,60 @@ function AlertCreatePage() {
 						</Card>
 					)}
 
+					{/* Raw SQL query */}
+					{ruleForm.signalType === "raw_query" && (
+						<Card>
+							<CardContent className="grid gap-4 p-4">
+								<div className="space-y-2">
+									<Label htmlFor="raw-query-sql">ClickHouse SQL</Label>
+									<SqlCodeEditor
+										id="raw-query-sql"
+										value={ruleForm.rawQuerySql}
+										onChange={(value) =>
+											setRuleForm((c) => ({ ...c, rawQuerySql: value }))
+										}
+									/>
+									<p className="text-muted-foreground text-xs">
+										Return a numeric <code>value</code> column (optional{" "}
+										<code>group</code> and <code>samples</code> columns). Must reference{" "}
+										<code>$__orgFilter</code>; supports <code>$__timeFilter(col)</code>,{" "}
+										<code>$__startTime</code>, <code>$__endTime</code>,{" "}
+										<code>$__interval_s</code>.
+									</p>
+								</div>
+								<div className="space-y-2">
+									<Label>Reduce buckets by</Label>
+									<Select
+										items={RAW_QUERY_REDUCER_LABELS}
+										value={ruleForm.rawQueryReducer}
+										onValueChange={(value) => {
+											if (value)
+												setRuleForm((c) => ({
+													...c,
+													rawQueryReducer: value as RuleFormState["rawQueryReducer"],
+												}))
+										}}
+									>
+										<SelectTrigger>
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											{Object.entries(RAW_QUERY_REDUCER_LABELS).map(([val, label]) => (
+												<SelectItem key={val} value={val}>
+													{label}
+												</SelectItem>
+											))}
+										</SelectContent>
+									</Select>
+									<p className="text-muted-foreground text-xs">
+										How to collapse the query's rows into the single value compared to the
+										threshold.
+									</p>
+								</div>
+							</CardContent>
+						</Card>
+					)}
+
 					{/* Rule Name + Service */}
 					<div className="grid gap-4 sm:grid-cols-2">
 						<div className="space-y-2">
@@ -432,7 +561,7 @@ function AlertCreatePage() {
 										<Label className="text-sm text-muted-foreground">Group by</Label>
 										{(() => {
 											const effectiveDataSource =
-												ruleForm.signalType === "query"
+												ruleForm.signalType === "builder_query"
 													? ruleForm.queryDataSource
 													: ruleForm.signalType === "metric"
 														? "metrics"
@@ -660,6 +789,49 @@ function AlertCreatePage() {
 				</div>
 			</div>
 		</DashboardLayout>
+	)
+}
+
+/**
+ * SQL editor with syntax highlighting — a transparent textarea layered over a
+ * highlighted `<pre>` (same overlay technique as the dashboard raw-SQL panel),
+ * so the shared `highlightSql` tokenizer colors keywords, strings, and `$__`
+ * macros while keeping native textarea editing.
+ */
+function SqlCodeEditor({
+	id,
+	value,
+	onChange,
+}: {
+	id: string
+	value: string
+	onChange: (value: string) => void
+}) {
+	const preRef = useRef<HTMLPreElement>(null)
+	return (
+		<div className="relative w-full text-xs font-mono leading-5">
+			<pre
+				ref={preRef}
+				aria-hidden
+				className="border-input pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre-wrap break-words rounded-md border border-transparent px-3 py-2 leading-5"
+			>
+				<code dangerouslySetInnerHTML={{ __html: `${highlightSql(value)}\n` }} />
+			</pre>
+			<textarea
+				id={id}
+				value={value}
+				onChange={(e) => onChange(e.target.value)}
+				onScroll={(e) => {
+					const pre = preRef.current
+					if (!pre) return
+					pre.scrollTop = e.currentTarget.scrollTop
+					pre.scrollLeft = e.currentTarget.scrollLeft
+				}}
+				spellCheck={false}
+				rows={10}
+				className="border-input caret-foreground focus-visible:ring-ring relative w-full resize-y rounded-md border bg-transparent px-3 py-2 font-mono text-xs leading-5 text-transparent outline-none focus-visible:ring-1"
+			/>
+		</div>
 	)
 }
 

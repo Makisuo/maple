@@ -363,26 +363,33 @@ function RuleDetailPage() {
 									<ConfigRow label="Renotify interval">
 										<span className="font-medium">{rule.renotifyIntervalMinutes}min</span>
 									</ConfigRow>
-									{rule.signalType === "query" && rule.queryDataSource && (
+									{rule.signalType === "builder_query" && rule.queryBuilderDraft && (
 										<>
 											<ConfigRow label="Data source">
 												<span className="font-mono font-medium capitalize">
-													{rule.queryDataSource}
+													{rule.queryBuilderDraft.dataSource}
 												</span>
 											</ConfigRow>
 											<ConfigRow label="Aggregation">
 												<span className="font-mono font-medium">
-													{rule.queryAggregation}
+													{rule.queryBuilderDraft.aggregation}
 												</span>
 											</ConfigRow>
-											{rule.queryWhereClause && (
+											{rule.queryBuilderDraft.whereClause && (
 												<ConfigRow label="Where" wide>
 													<span className="font-mono font-medium text-right">
-														{rule.queryWhereClause}
+														{rule.queryBuilderDraft.whereClause}
 													</span>
 												</ConfigRow>
 											)}
 										</>
+									)}
+									{rule.signalType === "raw_query" && rule.rawQuerySql && (
+										<ConfigRow label="Raw SQL" wide>
+											<pre className="max-w-full overflow-x-auto whitespace-pre-wrap text-left font-mono text-xs">
+												{rule.rawQuerySql}
+											</pre>
+										</ConfigRow>
 									)}
 									<ConfigRow label="Destinations">
 										<span className="font-medium">

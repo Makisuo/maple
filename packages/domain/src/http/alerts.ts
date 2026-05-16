@@ -1,7 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import type { LogsFilters, MetricsFilters, TracesFilters } from "../query-engine"
-import { normalizeKey, parseBoolean, parseWhereClause, splitCsv } from "../where-clause"
+import { QueryEngineAlertReducer } from "../query-engine"
 import {
 	AlertDeliveryEventId,
 	AlertDestinationId,
@@ -11,6 +10,7 @@ import {
 	RoleName,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { QueryBuilderQueryDraftSchema } from "./query-engine"
 import { TinybirdQueryError, TinybirdQuotaExceededError } from "./tinybird"
 
 export const AlertDestinationType = Schema.Literals([
@@ -38,35 +38,13 @@ export const AlertSignalType = Schema.Literals([
 	"apdex",
 	"throughput",
 	"metric",
-	"query",
+	"builder_query",
+	"raw_query",
 ]).annotate({
 	identifier: "@maple/AlertSignalType",
 	title: "Alert Signal Type",
 })
 export type AlertSignalType = Schema.Schema.Type<typeof AlertSignalType>
-
-export const AlertQueryDataSource = Schema.Literals(["traces", "logs", "metrics"]).annotate({
-	identifier: "@maple/AlertQueryDataSource",
-	title: "Alert Query Data Source",
-})
-export type AlertQueryDataSource = Schema.Schema.Type<typeof AlertQueryDataSource>
-
-export const AlertQueryAggregation = Schema.Literals([
-	"count",
-	"avg_duration",
-	"p50_duration",
-	"p95_duration",
-	"p99_duration",
-	"error_rate",
-	"avg",
-	"sum",
-	"min",
-	"max",
-]).annotate({
-	identifier: "@maple/AlertQueryAggregation",
-	title: "Alert Query Aggregation",
-})
-export type AlertQueryAggregation = Schema.Schema.Type<typeof AlertQueryAggregation>
 
 export const AlertGroupByDimension = Schema.String.pipe(
 	Schema.check(Schema.isMinLength(1), Schema.isTrimmed()),
@@ -147,11 +125,6 @@ export const AlertEvaluationStatus = Schema.Literals(["breached", "healthy", "sk
 	title: "Alert Evaluation Status",
 })
 export type AlertEvaluationStatus = Schema.Schema.Type<typeof AlertEvaluationStatus>
-
-export type AlertQueryFilterSet =
-	| { readonly source: "traces"; readonly filters: TracesFilters | undefined }
-	| { readonly source: "logs"; readonly filters: LogsFilters | undefined }
-	| { readonly source: "metrics"; readonly filters: MetricsFilters }
 
 const ChannelLabel = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 
@@ -347,9 +320,9 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	metricType: Schema.NullOr(AlertMetricType),
 	metricAggregation: Schema.NullOr(AlertMetricAggregation),
 	apdexThresholdMs: Schema.NullOr(PositiveFloat),
-	queryDataSource: Schema.NullOr(AlertQueryDataSource),
-	queryAggregation: Schema.NullOr(AlertQueryAggregation),
-	queryWhereClause: Schema.NullOr(Schema.String),
+	queryBuilderDraft: Schema.NullOr(QueryBuilderQueryDraftSchema),
+	rawQuerySql: Schema.NullOr(Schema.String),
+	rawQueryReducer: Schema.NullOr(QueryEngineAlertReducer),
 	destinationIds: Schema.Array(AlertDestinationId),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
@@ -377,9 +350,9 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
 	metricType: Schema.optionalKey(Schema.NullOr(AlertMetricType)),
 	metricAggregation: Schema.optionalKey(Schema.NullOr(AlertMetricAggregation)),
 	apdexThresholdMs: Schema.optionalKey(Schema.NullOr(PositiveFloat)),
-	queryDataSource: Schema.optionalKey(Schema.NullOr(AlertQueryDataSource)),
-	queryAggregation: Schema.optionalKey(Schema.NullOr(AlertQueryAggregation)),
-	queryWhereClause: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	queryBuilderDraft: Schema.optionalKey(Schema.NullOr(QueryBuilderQueryDraftSchema)),
+	rawQuerySql: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	rawQueryReducer: Schema.optionalKey(Schema.NullOr(QueryEngineAlertReducer)),
 	destinationIds: Schema.Array(AlertDestinationId),
 }) {}
 
@@ -524,128 +497,6 @@ export class AlertDestinationInUseError extends Schema.TaggedErrorClass<AlertDes
 	},
 	{ httpApiStatus: 409 },
 ) {}
-
-export function buildAlertQueryFilterSet(params: {
-	readonly queryDataSource: AlertQueryDataSource
-	readonly serviceName: string | null
-	readonly metricName: string | null
-	readonly metricType: AlertMetricType | null
-	readonly queryWhereClause: string | null | undefined
-}): AlertQueryFilterSet | null {
-	const { clauses } = parseWhereClause(params.queryWhereClause ?? "")
-
-	if (params.queryDataSource === "traces") {
-		const filters: Record<string, unknown> =
-			params.serviceName == null ? {} : { serviceName: params.serviceName }
-
-		const attributeFilters: Array<{ key: string; value?: string; mode: "equals" | "exists" }> = []
-		const resourceAttributeFilters: Array<{ key: string; value?: string; mode: "equals" | "exists" }> = []
-
-		for (const clause of clauses) {
-			const key = normalizeKey(clause.key)
-
-			if (key.startsWith("attr.")) {
-				if (attributeFilters.length < 5) {
-					attributeFilters.push({
-						key: key.slice(5),
-						mode: clause.operator === "exists" ? "exists" : "equals",
-						...(clause.operator !== "exists" ? { value: clause.value } : {}),
-					})
-				}
-				continue
-			}
-
-			if (key.startsWith("resource.")) {
-				if (resourceAttributeFilters.length < 5) {
-					resourceAttributeFilters.push({
-						key: key.slice(9),
-						mode: clause.operator === "exists" ? "exists" : "equals",
-						...(clause.operator !== "exists" ? { value: clause.value } : {}),
-					})
-				}
-				continue
-			}
-
-			switch (key) {
-				case "service.name":
-					filters.serviceName = clause.value
-					break
-				case "span.name":
-					filters.spanName = clause.value
-					break
-				case "deployment.environment":
-					filters.environments = splitCsv(clause.value)
-					break
-				case "deployment.commit_sha":
-					filters.commitShas = splitCsv(clause.value)
-					break
-				case "root_only": {
-					const boolValue = parseBoolean(clause.value)
-					if (boolValue != null) {
-						filters.rootSpansOnly = boolValue
-					}
-					break
-				}
-				case "has_error": {
-					const boolValue = parseBoolean(clause.value)
-					if (boolValue != null) {
-						filters.errorsOnly = boolValue
-					}
-					break
-				}
-			}
-		}
-
-		if (attributeFilters.length > 0) filters.attributeFilters = attributeFilters
-		if (resourceAttributeFilters.length > 0) filters.resourceAttributeFilters = resourceAttributeFilters
-
-		return {
-			source: "traces",
-			filters: Object.keys(filters).length > 0 ? (filters as TracesFilters) : undefined,
-		}
-	}
-
-	if (params.queryDataSource === "logs") {
-		const filters: Record<string, unknown> =
-			params.serviceName == null ? {} : { serviceName: params.serviceName }
-
-		for (const clause of clauses) {
-			const key = normalizeKey(clause.key)
-			if (key === "service.name") filters.serviceName = clause.value
-			else if (key === "severity") filters.severity = clause.value
-		}
-
-		return {
-			source: "logs",
-			filters: Object.keys(filters).length > 0 ? (filters as LogsFilters) : undefined,
-		}
-	}
-
-	if (params.metricName == null || params.metricType == null) {
-		return null
-	}
-
-	const filters: Record<string, unknown> = {
-		metricName: params.metricName,
-		metricType: params.metricType,
-	}
-
-	if (params.serviceName != null) {
-		filters.serviceName = params.serviceName
-	}
-
-	for (const clause of clauses) {
-		const key = normalizeKey(clause.key)
-		if (key === "service.name") {
-			filters.serviceName = clause.value
-		}
-	}
-
-	return {
-		source: "metrics",
-		filters: filters as MetricsFilters,
-	}
-}
 
 export const AlertIncidentTransition = Schema.Literals(["none", "opened", "continued", "resolved"]).annotate({
 	identifier: "@maple/AlertIncidentTransition",

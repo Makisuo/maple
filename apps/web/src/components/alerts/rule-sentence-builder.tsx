@@ -43,7 +43,8 @@ function SignalToken({
 		{ value: "apdex", label: "Apdex", hint: "user-satisfaction score" },
 		{ value: "throughput", label: "throughput", hint: "requests per minute" },
 		{ value: "metric", label: "metric", hint: "a specific OTel metric" },
-		{ value: "query", label: "custom query", hint: "traces / logs / metrics expression" },
+		{ value: "builder_query", label: "query builder", hint: "traces / logs / metrics expression" },
+		{ value: "raw_query", label: "raw SQL", hint: "user-authored ClickHouse query" },
 	]
 	const current = options.find((o) => o.value === value)
 	return (

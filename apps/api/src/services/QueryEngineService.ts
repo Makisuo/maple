@@ -19,6 +19,7 @@ import { Array as Arr, Duration, Effect, Layer, Match, Metric, Option, Result, C
 import type { TenantContext } from "./AuthService"
 import { BucketCacheService } from "./BucketCacheService"
 import { EdgeCacheService } from "./EdgeCacheService"
+import { makeExpandMacros } from "./RawSqlChartService"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "./WarehouseQueryService"
 import type { QueryProfileName } from "./TinybirdQueryProfile"
 import * as QueryEngineMetrics from "./QueryEngineMetrics"
@@ -55,6 +56,19 @@ export interface GroupedAlertObservation {
 	readonly hasData: boolean
 }
 
+export interface QueryEngineRawSqlEvaluateRequest {
+	/** Tinybird-format datetime (`YYYY-MM-DD HH:mm:ss`) — window start. */
+	readonly startTime: string
+	/** Tinybird-format datetime — window end. */
+	readonly endTime: string
+	/** User-authored ClickHouse SQL with `$__` macros. */
+	readonly sql: string
+	/** Collapses each group's bucket rows into a single scalar. */
+	readonly reducer: QueryEngineAlertReducer
+	/** Drives the `$__interval_s` macro value. */
+	readonly windowMinutes: number
+}
+
 export type QueryEngineDirectError =
 	| QueryEngineExecutionError
 	| QueryEngineTimeoutError
@@ -77,6 +91,15 @@ export interface QueryEngineServiceShape {
 	readonly evaluate: (
 		tenant: TenantContext,
 		request: QueryEngineEvaluateRequest,
+	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
+	/**
+	 * Evaluate a raw-SQL alert query. The user SQL is macro-expanded (`$__orgFilter`,
+	 * `$__timeFilter`, …) and executed; rows are grouped by an optional `group`
+	 * column and the `value` column is collapsed per group with the reducer.
+	 */
+	readonly evaluateRawSql: (
+		tenant: TenantContext,
+		request: QueryEngineRawSqlEvaluateRequest,
 	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
 	readonly cachedDirect: <A>(
 		tenant: TenantContext,
@@ -1672,6 +1695,77 @@ export const makeQueryEngineEvaluate = (warehouse: QueryEngineWarehouse) =>
 		return result
 	})
 
+/**
+ * Evaluate a raw-SQL alert query. Mirrors `makeQueryEngineEvaluate` but the
+ * data comes from user-authored ClickHouse SQL instead of a structured spec.
+ *
+ * Column convention: the query returns a numeric `value` column; an optional
+ * `group` column splits results into per-group observations (default `"all"`),
+ * and an optional `samples` column carries the sample count (else each row
+ * counts as 1). Per group, `value` rows are collapsed with the reducer.
+ */
+export const makeQueryEngineEvaluateRawSql = (warehouse: QueryEngineWarehouse) =>
+	Effect.fn("QueryEngineService.evaluateRawSql")(function* (
+		tenant: TenantContext,
+		request: QueryEngineRawSqlEvaluateRequest,
+	): Effect.fn.Return<
+		ReadonlyArray<GroupedAlertObservation>,
+		QueryEngineValidationError | TinybirdQueryError | TinybirdQuotaExceededError
+	> {
+		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
+
+		const granularitySeconds = Math.max(request.windowMinutes * 60, 60)
+		const expanded = yield* makeExpandMacros({
+			sql: request.sql,
+			orgId: tenant.orgId,
+			startTime: request.startTime,
+			endTime: request.endTime,
+			granularitySeconds,
+		}).pipe(
+			Effect.mapError(
+				(error) =>
+					new QueryEngineValidationError({
+						message: "Invalid raw SQL alert query",
+						details: [error.message],
+					}),
+			),
+		)
+
+		const rows = yield* mapTinybirdError(
+			warehouse.sqlQuery(tenant, expanded.sql, { profile: "list", context: "alertRawQuery" }),
+			"alertRawQuery",
+		)
+
+		const byGroup = new Map<
+			string,
+			Array<{ value: number | null; sampleCount: number; hasData: boolean }>
+		>()
+		for (const row of rows) {
+			const rawGroup = row.group
+			const groupKey =
+				typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : "all"
+			const numValue = row.value == null ? null : Number(row.value)
+			const value = numValue != null && Number.isFinite(numValue) ? numValue : null
+			const rawSamples = row.samples == null ? 1 : Number(row.samples)
+			const sampleCount = Number.isFinite(rawSamples) ? rawSamples : 1
+			const list = byGroup.get(groupKey)
+			const obs = { value, sampleCount, hasData: value != null }
+			if (list) list.push(obs)
+			else byGroup.set(groupKey, [obs])
+		}
+
+		// No rows → emit a single no-data observation so the alert engine can
+		// apply its configured no-data behavior.
+		if (byGroup.size === 0) {
+			byGroup.set("all", [{ value: null, sampleCount: 0, hasData: false }])
+		}
+
+		const result = reducePerGroupObservations(byGroup, request.reducer)
+		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
+		return result
+	})
+
 export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceShape>()(
 	"QueryEngineService",
 	{
@@ -1681,6 +1775,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			const bucketCache = yield* BucketCacheService
 			const executeImpl = makeQueryEngineExecute(warehouse)
 			const evaluateImpl = makeQueryEngineEvaluate(warehouse)
+			const evaluateRawSqlImpl = makeQueryEngineEvaluateRawSql(warehouse)
 
 			const recordCacheOutcome = (hit: boolean) =>
 				Metric.update(
@@ -1849,9 +1944,19 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 					),
 				)
 
+			const evaluateRawSql = (tenant: TenantContext, request: QueryEngineRawSqlEvaluateRequest) =>
+				withTimeout(
+					evaluateRawSqlImpl(tenant, request).pipe(
+						Effect.withSpan("QueryEngineService.evaluateRawSql", {
+							attributes: { orgId: tenant.orgId },
+						}),
+					),
+				)
+
 			return {
 				execute,
 				evaluate: cachedEvaluate,
+				evaluateRawSql,
 				cachedDirect,
 			}
 		}),

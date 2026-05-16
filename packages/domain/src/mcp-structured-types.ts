@@ -302,9 +302,9 @@ export interface AlertRuleDetailRow extends AlertRuleRow {
 	metricType: string | null
 	metricAggregation: string | null
 	apdexThresholdMs: number | null
-	queryDataSource: string | null
-	queryAggregation: string | null
-	queryWhereClause: string | null
+	queryBuilderDraft: Record<string, unknown> | null
+	rawQuerySql: string | null
+	rawQueryReducer: string | null
 }
 
 export interface GetAlertRuleData {

@@ -96,11 +96,22 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 				lines.push(``)
 			}
 
-			if (rule.queryDataSource || rule.queryAggregation || rule.queryWhereClause) {
-				lines.push(`### Query Configuration`)
-				if (rule.queryDataSource) lines.push(`Data Source: ${rule.queryDataSource}`)
-				if (rule.queryAggregation) lines.push(`Aggregation: ${rule.queryAggregation}`)
-				if (rule.queryWhereClause) lines.push(`Where Clause: ${rule.queryWhereClause}`)
+			if (rule.signalType === "builder_query" && rule.queryBuilderDraft) {
+				lines.push(`### Query Builder`)
+				lines.push(`Data Source: ${rule.queryBuilderDraft.dataSource}`)
+				lines.push(`Aggregation: ${rule.queryBuilderDraft.aggregation}`)
+				if (rule.queryBuilderDraft.whereClause) {
+					lines.push(`Where: ${rule.queryBuilderDraft.whereClause}`)
+				}
+				lines.push(``)
+			}
+
+			if (rule.signalType === "raw_query" && rule.rawQuerySql) {
+				lines.push(`### Raw SQL Query`)
+				lines.push("```sql")
+				lines.push(rule.rawQuerySql)
+				lines.push("```")
+				if (rule.rawQueryReducer) lines.push(`Reducer: ${rule.rawQueryReducer}`)
 				lines.push(``)
 			}
 
@@ -143,9 +154,9 @@ export function registerGetAlertRuleTool(server: McpToolRegistrar) {
 							metricType: rule.metricType,
 							metricAggregation: rule.metricAggregation,
 							apdexThresholdMs: rule.apdexThresholdMs,
-							queryDataSource: rule.queryDataSource,
-							queryAggregation: rule.queryAggregation,
-							queryWhereClause: rule.queryWhereClause,
+							queryBuilderDraft: rule.queryBuilderDraft,
+							rawQuerySql: rule.rawQuerySql,
+							rawQueryReducer: rule.rawQueryReducer,
 							destinationIds: [...rule.destinationIds],
 							createdAt: rule.createdAt,
 							updatedAt: rule.updatedAt,

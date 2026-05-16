@@ -421,9 +421,21 @@ export class QueryEngineEvaluateResponse extends Schema.Class<QueryEngineEvaluat
 	observations: Schema.Array(QueryEngineAlertObservation),
 }) {}
 
+/**
+ * Compiled, evaluation-ready form of an alert rule's query.
+ *
+ * - `kind: "spec"` — a structured QueryEngine `QuerySpec` (built from a query
+ *   builder draft or one of the canned signal types). Evaluated via
+ *   `QueryEngineService.evaluate`.
+ * - `kind: "raw_sql"` — user-authored ClickHouse SQL with macros. Evaluated via
+ *   `QueryEngineService.evaluateRawSql`. `query`/`sampleCountStrategy` are null;
+ *   the alert value comes from the `value` column convention.
+ */
 export class CompiledAlertQueryPlan extends Schema.Class<CompiledAlertQueryPlan>("CompiledAlertQueryPlan")({
-	query: QuerySpec,
+	kind: Schema.Literals(["spec", "raw_sql"]),
+	query: Schema.NullOr(QuerySpec),
+	rawSql: Schema.NullOr(Schema.String),
 	reducer: QueryEngineAlertReducer,
-	sampleCountStrategy: QueryEngineSampleCountStrategy,
+	sampleCountStrategy: Schema.NullOr(QueryEngineSampleCountStrategy),
 	noDataBehavior: QueryEngineNoDataBehavior,
 }) {}

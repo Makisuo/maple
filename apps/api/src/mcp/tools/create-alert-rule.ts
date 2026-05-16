@@ -88,9 +88,9 @@ interface CreateAlertRuleParams {
 	metric_type?: string
 	metric_aggregation?: string
 	apdex_threshold_ms?: number
-	query_data_source?: string
-	query_aggregation?: string
-	query_where_clause?: string
+	query_builder_draft?: string
+	raw_query_sql?: string
+	raw_query_reducer?: string
 }
 
 function buildAlertRuleRequest(
@@ -147,11 +147,28 @@ function buildAlertRuleRequest(
 		}
 	}
 
-	if (signalType === "query") {
-		if (!params.query_data_source || !params.query_aggregation) {
+	let queryBuilderDraft: unknown
+	if (signalType === "builder_query") {
+		if (!params.query_builder_draft) {
 			return {
-				error: 'signal_type=query requires query_data_source and query_aggregation.\n\nExample:\n  signal_type="query" query_data_source="traces" query_aggregation="count" comparator="gt" threshold=100',
+				error: 'signal_type=builder_query requires query_builder_draft: a JSON string of a query-builder draft (the same shape dashboard custom-query widgets use). Example draft: {"id":"a","name":"A","dataSource":"traces","aggregation":"error_rate","whereClause":"","groupBy":["none"]}',
 			}
+		}
+		try {
+			queryBuilderDraft = JSON.parse(params.query_builder_draft)
+		} catch {
+			return { error: "query_builder_draft must be valid JSON" }
+		}
+	}
+
+	if (signalType === "raw_query") {
+		if (!params.raw_query_sql) {
+			return {
+				error: 'signal_type=raw_query requires raw_query_sql: ClickHouse SQL returning a numeric `value` column (optional `group`, `samples` columns). Must reference $__orgFilter and may use $__timeFilter(col), $__startTime, $__endTime, $__interval_s.',
+			}
+		}
+		if (!params.raw_query_sql.includes("$__orgFilter")) {
+			return { error: "raw_query_sql must reference $__orgFilter for org scoping" }
 		}
 	}
 
@@ -192,9 +209,9 @@ function buildAlertRuleRequest(
 	if (params.apdex_threshold_ms !== undefined) request.apdexThresholdMs = params.apdex_threshold_ms
 
 	// Query-specific fields
-	if (params.query_data_source) request.queryDataSource = params.query_data_source
-	if (params.query_aggregation) request.queryAggregation = params.query_aggregation
-	if (params.query_where_clause) request.queryWhereClause = params.query_where_clause
+	if (queryBuilderDraft !== undefined) request.queryBuilderDraft = queryBuilderDraft
+	if (params.raw_query_sql) request.rawQuerySql = params.raw_query_sql
+	if (params.raw_query_reducer) request.rawQueryReducer = params.raw_query_reducer
 
 	return { request }
 }
@@ -232,7 +249,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			enabled: optionalBooleanParam("Whether the rule is enabled (default: true)"),
 			// Custom-mode params (used when template is 'custom' or omitted)
 			signal_type: optionalStringParam(
-				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, metric, query",
+				"Signal type (for custom): error_rate, p95_latency, p99_latency, apdex, throughput, metric, builder_query, raw_query",
 			),
 			comparator: optionalStringParam(
 				"Comparison operator (for custom): gt (>), gte (>=), lt (<), lte (<=)",
@@ -258,14 +275,14 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 			apdex_threshold_ms: optionalNumberParam(
 				"Apdex threshold in milliseconds (required when signal_type=apdex)",
 			),
-			query_data_source: optionalStringParam(
-				"Query data source: traces, logs, metrics (required when signal_type=query)",
+			query_builder_draft: optionalStringParam(
+				"JSON string of a query-builder draft (required when signal_type=builder_query). Same shape as dashboard custom-query widgets: { id, name, dataSource, aggregation, whereClause, groupBy, ... }.",
 			),
-			query_aggregation: optionalStringParam(
-				"Query aggregation function (required when signal_type=query)",
+			raw_query_sql: optionalStringParam(
+				"ClickHouse SQL returning a numeric `value` column, optional `group`/`samples` columns (required when signal_type=raw_query). Must reference $__orgFilter; supports $__timeFilter(col), $__startTime, $__endTime, $__interval_s.",
 			),
-			query_where_clause: optionalStringParam(
-				"Query WHERE clause for filtering (optional, for signal_type=query)",
+			raw_query_reducer: optionalStringParam(
+				"How to collapse raw_query result rows into one value: identity, sum, avg, min, max (default: identity).",
 			),
 		}),
 		Effect.fn("McpTool.createAlertRule")(function* (params) {

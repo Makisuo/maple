@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest"
 import { Effect, Exit, Option, Schema } from "effect"
 import { OrgId, UserId } from "@maple/domain"
 import type { QueryEngineEvaluateRequest, QueryEngineExecuteRequest } from "@maple/query-engine"
-import { makeQueryEngineEvaluate, makeQueryEngineExecute } from "./QueryEngineService"
+import {
+	makeQueryEngineEvaluate,
+	makeQueryEngineEvaluateRawSql,
+	makeQueryEngineExecute,
+} from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -785,5 +789,70 @@ describe("makeQueryEngineEvaluate", () => {
 				hasData: true,
 			},
 		])
+	})
+})
+
+describe("makeQueryEngineEvaluateRawSql", () => {
+	it("groups raw SQL rows by the `group` column and reduces with the configured reducer", async () => {
+		const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			makeTinybirdStub({
+				sqlQuery: () =>
+					Effect.succeed([
+						{ group: "checkout", value: 10, samples: 4 },
+						{ group: "checkout", value: 30, samples: 6 },
+						{ group: "payments", value: 5, samples: 2 },
+					]),
+			}),
+		)
+
+		const response = await Effect.runPromise(
+			evaluateRawSql(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				sql: "SELECT group, value FROM otel_traces WHERE $__orgFilter",
+				reducer: "max",
+				windowMinutes: 5,
+			}),
+		)
+
+		const byGroup = Object.fromEntries(response.map((o) => [o.groupKey, o]))
+		expect(byGroup.checkout).toMatchObject({ value: 30, sampleCount: 10, hasData: true })
+		expect(byGroup.payments).toMatchObject({ value: 5, sampleCount: 2, hasData: true })
+	})
+
+	it("emits a single no-data observation when the query returns no rows", async () => {
+		const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			makeTinybirdStub({ sqlQuery: () => Effect.succeed([]) }),
+		)
+
+		const response = await Effect.runPromise(
+			evaluateRawSql(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				sql: "SELECT value FROM otel_traces WHERE $__orgFilter",
+				reducer: "identity",
+				windowMinutes: 5,
+			}),
+		)
+
+		expect(response).toEqual([{ groupKey: "all", value: null, sampleCount: 0, hasData: false }])
+	})
+
+	it("fails with a validation error when the SQL omits $__orgFilter", async () => {
+		const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+			makeTinybirdStub({ sqlQuery: () => Effect.die(new Error("should not run")) }),
+		)
+
+		const exit = await Effect.runPromiseExit(
+			evaluateRawSql(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				sql: "SELECT value FROM otel_traces",
+				reducer: "identity",
+				windowMinutes: 5,
+			}),
+		)
+
+		expect(Exit.isFailure(exit)).toBe(true)
 	})
 })

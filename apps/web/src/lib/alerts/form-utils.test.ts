@@ -66,7 +66,7 @@ describe("signalToQueryParams", () => {
 	it("parses traces query filters from the where clause for alert previews", () => {
 		const form = {
 			...defaultRuleForm(),
-			signalType: "query" as const,
+			signalType: "builder_query" as const,
 			queryDataSource: "traces" as const,
 			queryAggregation: "count",
 			queryWhereClause:
@@ -87,7 +87,7 @@ describe("signalToQueryParams", () => {
 	it("parses logs query filters from the where clause for alert previews", () => {
 		const form = {
 			...defaultRuleForm(),
-			signalType: "query" as const,
+			signalType: "builder_query" as const,
 			queryDataSource: "logs" as const,
 			queryAggregation: "count",
 			queryWhereClause: 'service.name = "checkout" AND severity = "error"',
@@ -106,7 +106,7 @@ describe("signalToQueryParams", () => {
 	it("parses metrics query service filters from the where clause for alert previews", () => {
 		const form = {
 			...defaultRuleForm(),
-			signalType: "query" as const,
+			signalType: "builder_query" as const,
 			queryDataSource: "metrics" as const,
 			queryAggregation: "avg",
 			metricName: "cpu.usage",

@@ -1,6 +1,5 @@
 import {
 	AlertDestinationDocument,
-	buildAlertQueryFilterSet,
 	AlertIncidentDocument,
 	AlertRuleDocument,
 	AlertRuleTestRequest,
@@ -17,12 +16,14 @@ import {
 	type AlertDestinationUpdateRequest,
 	type AlertMetricAggregation,
 	type AlertMetricType,
-	type AlertQueryAggregation,
 	type AlertRuleTestRequest as AlertRuleTestRequestType,
 	type AlertSeverity,
 	type AlertSignalType,
+	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
+import type { QueryEngineAlertReducer } from "@maple/query-engine"
 import { Cause, Exit, Option } from "effect"
+import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
 import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
 
 export type RuleFormState = {
@@ -50,9 +51,17 @@ export type RuleFormState = {
 	metricType: AlertMetricType
 	metricAggregation: AlertMetricAggregation
 	apdexThresholdMs: string
+	/**
+	 * Editing fields for the `builder_query` signal. They map 1:1 to a
+	 * `QueryBuilderQueryDraftPayload` — the same draft dashboard query-builder
+	 * charts use — which `buildRuleRequest` assembles at submit time.
+	 */
 	queryDataSource: "traces" | "logs" | "metrics"
 	queryAggregation: string
 	queryWhereClause: string
+	/** Editing fields for the `raw_query` signal. */
+	rawQuerySql: string
+	rawQueryReducer: QueryEngineAlertReducer
 	destinationIds: AlertDestinationId[]
 }
 
@@ -63,8 +72,26 @@ export const signalLabels: Record<AlertSignalType, string> = {
 	apdex: "Apdex",
 	throughput: "Throughput",
 	metric: "Metric",
-	query: "Custom Query",
+	builder_query: "Query builder",
+	raw_query: "Raw SQL",
 }
+
+export const RAW_QUERY_REDUCER_LABELS: Record<QueryEngineAlertReducer, string> = {
+	identity: "Last bucket",
+	sum: "Sum",
+	avg: "Average",
+	min: "Minimum",
+	max: "Maximum",
+}
+
+/** Default ClickHouse SQL shown when a fresh raw_query alert is created. */
+export const DEFAULT_RAW_QUERY_SQL = `SELECT
+  toStartOfInterval(Timestamp, INTERVAL $__interval_s SECOND) AS bucket,
+  count() AS value
+FROM traces
+WHERE $__orgFilter AND $__timeFilter(Timestamp)
+GROUP BY bucket
+ORDER BY bucket`
 
 export const comparatorLabels: Record<AlertComparator, string> = {
 	gt: ">",
@@ -129,7 +156,8 @@ export function formatSignalValue(signalType: AlertSignalType, value: number | n
 			return value.toFixed(3)
 		case "throughput":
 		case "metric":
-		case "query":
+		case "builder_query":
+		case "raw_query":
 			return formatNumber(value)
 	}
 }
@@ -170,6 +198,8 @@ export function defaultRuleForm(serviceName?: string): RuleFormState {
 		queryDataSource: "traces",
 		queryAggregation: "count",
 		queryWhereClause: "",
+		rawQuerySql: DEFAULT_RAW_QUERY_SQL,
+		rawQueryReducer: "identity",
 		destinationIds: [],
 	}
 }
@@ -195,11 +225,51 @@ export function ruleToFormState(rule: AlertRuleDocument): RuleFormState {
 		metricType: rule.metricType ?? "gauge",
 		metricAggregation: rule.metricAggregation ?? "avg",
 		apdexThresholdMs: rule.apdexThresholdMs == null ? "500" : String(rule.apdexThresholdMs),
-		queryDataSource: rule.queryDataSource ?? "traces",
-		queryAggregation: rule.queryAggregation ?? "count",
-		queryWhereClause: rule.queryWhereClause ?? "",
+		queryDataSource: rule.queryBuilderDraft?.dataSource ?? "traces",
+		queryAggregation: rule.queryBuilderDraft?.aggregation ?? "count",
+		queryWhereClause: rule.queryBuilderDraft?.whereClause ?? "",
+		rawQuerySql: rule.rawQuerySql ?? DEFAULT_RAW_QUERY_SQL,
+		rawQueryReducer: rule.rawQueryReducer ?? "identity",
 		destinationIds: [...rule.destinationIds],
 	}
+}
+
+/**
+ * Assemble a `QueryBuilderQueryDraftPayload` from the simple builder_query form
+ * fields. This is the same draft shape dashboard query-builder charts use, so
+ * the alert evaluates through the identical compiler.
+ */
+export function buildQueryDraftFromForm(form: RuleFormState): QueryBuilderQueryDraftPayload {
+	// Fold a single selected service into the where clause — builder_query draws
+	// all filtering from the draft, not the rule-level service scope.
+	const userWhere = form.queryWhereClause.trim()
+	const whereClause =
+		form.serviceNames.length === 1
+			? [`service.name = "${form.serviceNames[0]}"`, userWhere].filter((s) => s.length > 0).join(" AND ")
+			: userWhere
+	const base = {
+		id: "alert-query",
+		name: "A",
+		aggregation: form.queryAggregation,
+		whereClause,
+		groupBy: [...form.groupBy],
+		addOns: {
+			groupBy: form.groupBy.length > 0,
+			having: false,
+			orderBy: false,
+			limit: false,
+			legend: false,
+		},
+	}
+	if (form.queryDataSource === "metrics") {
+		return {
+			...base,
+			dataSource: "metrics",
+			metricName: form.metricName.trim(),
+			metricType: form.metricType,
+		}
+	}
+	return { ...base, dataSource: form.queryDataSource }
 }
 
 export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
@@ -224,23 +294,13 @@ export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
 		consecutiveBreachesRequired: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
 		consecutiveHealthyRequired: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
 		renotifyIntervalMinutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
-		metricName:
-			signalType === "metric"
-				? form.metricName.trim() || null
-				: signalType === "query" && form.queryDataSource === "metrics"
-					? form.metricName.trim() || null
-					: null,
-		metricType:
-			signalType === "metric"
-				? form.metricType
-				: signalType === "query" && form.queryDataSource === "metrics"
-					? form.metricType
-					: null,
+		metricName: signalType === "metric" ? form.metricName.trim() || null : null,
+		metricType: signalType === "metric" ? form.metricType : null,
 		metricAggregation: signalType === "metric" ? form.metricAggregation : null,
 		apdexThresholdMs: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
-		queryDataSource: signalType === "query" ? form.queryDataSource : null,
-		queryAggregation: signalType === "query" ? (form.queryAggregation as AlertQueryAggregation) : null,
-		queryWhereClause: signalType === "query" ? form.queryWhereClause.trim() || null : null,
+		queryBuilderDraft: signalType === "builder_query" ? buildQueryDraftFromForm(form) : null,
+		rawQuerySql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,
+		rawQueryReducer: signalType === "raw_query" ? form.rawQueryReducer : null,
 		destinationIds: [...form.destinationIds],
 	})
 }
@@ -261,8 +321,11 @@ export function isRulePreviewReady(form: RuleFormState): boolean {
 	if (isRangeComparator(form.comparator) && !Number.isFinite(Number(form.thresholdUpper))) {
 		return false
 	}
-	if (form.signalType === "query" && form.queryDataSource === "metrics") {
+	if (form.signalType === "builder_query" && form.queryDataSource === "metrics") {
 		return form.metricName.trim().length > 0
+	}
+	if (form.signalType === "raw_query") {
+		return form.rawQuerySql.trim().length > 0 && form.rawQuerySql.includes("$__orgFilter")
 	}
 	return true
 }
@@ -316,24 +379,23 @@ export function signalToQueryParams(form: RuleFormState): {
 				},
 			}
 		}
-		case "query": {
-			const filterSet = buildAlertQueryFilterSet({
-				queryDataSource: form.queryDataSource,
-				serviceName: form.serviceNames.length === 1 ? form.serviceNames[0]! : null,
-				metricName: form.metricName.trim() || null,
-				metricType: form.metricType,
-				queryWhereClause: form.queryWhereClause,
-			})
-
-			if (filterSet == null) return null
-
-			const ds = filterSet.source
+		case "builder_query": {
+			// Compile the draft with the shared query-builder compiler and read
+			// back the resolved source/metric/filters for the preview chart.
+			const built = buildTimeseriesQuerySpec(buildQueryDraftFromForm(form))
+			if (built.error != null || built.query == null || built.query.kind !== "timeseries") {
+				return null
+			}
+			const spec = built.query
 			return {
-				source: ds,
-				metric: ds === "logs" ? "count" : form.queryAggregation,
-				filters: filterSet.filters ?? {},
+				source: spec.source,
+				metric: "metric" in spec ? spec.metric : "count",
+				filters: (spec.filters as Record<string, unknown> | undefined) ?? {},
 			}
 		}
+		case "raw_query":
+			// Raw SQL alerts have no structured spec; the preview chart is skipped.
+			return null
 	}
 }
 

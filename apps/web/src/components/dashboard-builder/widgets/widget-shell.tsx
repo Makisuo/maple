@@ -6,6 +6,7 @@ import {
 	CopyIcon,
 	DotsVerticalIcon,
 	ChatBubbleSparkleIcon,
+	BellIcon,
 } from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle, CardAction } from "@maple/ui/components/ui/card"
@@ -25,6 +26,8 @@ interface WidgetShellProps {
 	onRemove?: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	/** When set, a "Create alert" menu item is shown (in edit and view mode). */
+	onCreateAlert?: () => void
 	contentClassName?: string
 	children: ReactNode
 }
@@ -35,10 +38,14 @@ export function WidgetShell({
 	onRemove,
 	onClone,
 	onConfigure,
+	onCreateAlert,
 	contentClassName,
 	children,
 }: WidgetShellProps) {
 	const isEditable = mode === "edit"
+	// The menu is also shown in view mode when "Create alert" is available, so
+	// alerts can be spun off a chart without entering dashboard edit mode.
+	const showMenu = isEditable || onCreateAlert != null
 
 	return (
 		<Card className="h-full flex flex-col">
@@ -51,7 +58,7 @@ export function WidgetShell({
 					)}
 					<CardTitle className="flex-1 truncate text-xs">{title}</CardTitle>
 				</div>
-				{isEditable && (
+				{showMenu && (
 					<CardAction>
 						<DropdownMenu>
 							<DropdownMenuTrigger
@@ -62,19 +69,25 @@ export function WidgetShell({
 								}
 							/>
 							<DropdownMenuContent align="end">
-								{onConfigure && (
+								{isEditable && onConfigure && (
 									<DropdownMenuItem onClick={onConfigure}>
 										<PencilIcon size={14} />
 										Edit
 									</DropdownMenuItem>
 								)}
-								{onClone && (
+								{isEditable && onClone && (
 									<DropdownMenuItem onClick={onClone}>
 										<CopyIcon size={14} />
 										Clone
 									</DropdownMenuItem>
 								)}
-								{onRemove && (
+								{onCreateAlert && (
+									<DropdownMenuItem onClick={onCreateAlert}>
+										<BellIcon size={14} />
+										Create alert
+									</DropdownMenuItem>
+								)}
+								{isEditable && onRemove && (
 									<>
 										<DropdownMenuSeparator />
 										<DropdownMenuItem variant="destructive" onClick={onRemove}>
@@ -104,6 +117,7 @@ interface WidgetFrameProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onCreateAlert?: () => void
 	onFix?: () => void
 	contentClassName?: string
 	loadingSkeleton: ReactNode
@@ -117,6 +131,7 @@ export function WidgetFrame({
 	onRemove,
 	onClone,
 	onConfigure,
+	onCreateAlert,
 	onFix,
 	contentClassName,
 	loadingSkeleton,
@@ -129,6 +144,7 @@ export function WidgetFrame({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onCreateAlert={onCreateAlert}
 			contentClassName={contentClassName}
 		>
 			{dataState.status === "loading" ? (
