@@ -232,7 +232,6 @@ export const ServiceMapSpans = table("service_map_spans", {
 	Duration: T.uint64,
 	StatusCode: T.string,
 	TraceState: T.string,
-	PeerService: T.string,
 	DeploymentEnv: T.string,
 })
 

@@ -3,7 +3,6 @@ import {
 	serviceUsage,
 	serviceMapSpans,
 	serviceMapChildren,
-	serviceMapEdgesHourly,
 	serviceMapDbEdgesHourly,
 	servicePlatformsHourly,
 	serviceOverviewSpans,
@@ -221,12 +220,12 @@ export const serviceUsageMetricsExpHistogramMv = defineMaterializedView(
 
 /**
  * Materialized view projecting trace spans needed for service dependency map.
- * Extracts peer.service and deployment.environment from Map columns at write time
- * so the service map JOIN query avoids scanning heavy Map columns.
+ * Extracts deployment.environment from Map columns at write time so the service
+ * map JOIN query avoids scanning heavy Map columns.
  */
 export const serviceMapSpansMv = defineMaterializedView("service_map_spans_mv", {
 	description:
-		"Materialized view projecting trace spans needed for service dependency map. Extracts peer.service and deployment.environment from Map columns at write time.",
+		"Materialized view projecting trace spans needed for service dependency map. Extracts deployment.environment from Map columns at write time.",
 	datasource: serviceMapSpans,
 	nodes: [
 		node({
@@ -243,7 +242,6 @@ export const serviceMapSpansMv = defineMaterializedView("service_map_spans_mv", 
           Duration,
           StatusCode,
           TraceState,
-          SpanAttributes['peer.service'] AS PeerService,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer', 'Server', 'Consumer')
@@ -321,50 +319,31 @@ export const serviceMapChildrenMv = defineMaterializedView("service_map_children
 	],
 })
 
-/**
- * Materialized view pre-aggregating service-to-service edges per hour.
- * Aggregates Client spans with peer.service into hourly buckets at write time
- * so the service map query scans pre-aggregated rows instead of individual spans.
- */
-export const serviceMapEdgesHourlyMv = defineMaterializedView("service_map_edges_hourly_mv", {
-	description:
-		"Pre-aggregates Client spans with peer.service into hourly service-to-service edge buckets for fast service map queries.",
-	datasource: serviceMapEdgesHourly,
-	nodes: [
-		node({
-			name: "service_map_edges_hourly_mv_node",
-			sql: `
-        SELECT
-          OrgId,
-          toStartOfHour(toDateTime(Timestamp)) AS Hour,
-          ServiceName AS SourceService,
-          SpanAttributes['peer.service'] AS TargetService,
-          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
-          count() AS CallCount,
-          countIf(StatusCode = 'Error') AS ErrorCount,
-          sum(Duration / 1000000) AS DurationSumMs,
-          max(Duration / 1000000) AS MaxDurationMs,
-          countIf(TraceState LIKE '%th:%') AS SampledSpanCount,
-          countIf(TraceState = '' OR TraceState NOT LIKE '%th:%') AS UnsampledSpanCount,
-          sum(SampleRate) AS SampleRateSum
-        FROM traces
-        WHERE SpanKind = 'Client'
-          AND SpanAttributes['peer.service'] != ''
-        GROUP BY OrgId, Hour, SourceService, TargetService, DeploymentEnv
-      `,
-		}),
-	],
-})
+// `service_map_edges_hourly` (service-to-service edges) is intentionally NOT
+// populated by a materialized view. The downstream service name can only be
+// recovered by joining a Client/Producer span to its child Server/Consumer
+// span (modern OTEL instrumentation no longer emits a `peer.service`
+// attribute) — a cross-span join that an *incremental* ClickHouse MV cannot
+// express. The table is filled by the scheduled hourly rollup in
+// `ServiceMapRollupService`, which runs that join once per completed hour.
+//
+// Why not a *refreshable* MV (`REFRESH EVERY 1 HOUR`), which can run a join?
+//  - This schema deploys to both Tinybird and ClickHouse; Tinybird has no
+//    refreshable-MV equivalent, so the rollup (routed via WarehouseQueryService)
+//    is the only mechanism that works for both backends.
+//  - Refreshable MVs are still experimental on the deployed ClickHouse (24.8).
+//  - The job adds bounded-lookback catch-up + skip-existing idempotency that a
+//    `REFRESH ... APPEND` MV does not provide.
 
 /**
  * Materialized view pre-aggregating service-to-database edges per hour.
- * Aggregates Client/Producer spans with `db.system` set into hourly buckets at
- * write time so the database-node query reads pre-aggregated rows instead of
- * scanning raw span attributes.
+ * Aggregates Client/Producer spans with `db.system.name` set into hourly
+ * buckets at write time so the database-node query reads pre-aggregated rows
+ * instead of scanning raw span attributes.
  */
 export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_edges_hourly_mv", {
 	description:
-		"Pre-aggregates Client/Producer spans with db.system into hourly service-to-database edge buckets for fast service map db-node queries.",
+		"Pre-aggregates Client/Producer spans with db.system.name into hourly service-to-database edge buckets for fast service map db-node queries.",
 	datasource: serviceMapDbEdgesHourly,
 	nodes: [
 		node({
@@ -374,7 +353,7 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           OrgId,
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
-          SpanAttributes['db.system'] AS DbSystem,
+          SpanAttributes['db.system.name'] AS DbSystem,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv,
           count() AS CallCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
@@ -385,7 +364,7 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           sum(SampleRate) AS SampleRateSum
         FROM traces
         WHERE SpanKind IN ('Client', 'Producer')
-          AND SpanAttributes['db.system'] != ''
+          AND SpanAttributes['db.system.name'] != ''
           AND ServiceName != ''
         GROUP BY OrgId, Hour, ServiceName, DbSystem, DeploymentEnv
       `,

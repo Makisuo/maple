@@ -12,6 +12,7 @@ import {
 	NotificationDispatcher,
 	OrgClickHouseSettingsService,
 	QueryEngineService,
+	ServiceMapRollupService,
 	WarehouseQueryService,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
@@ -77,10 +78,16 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EmailServiceLive)),
 	)
 
-	return Layer.mergeAll(AlertsServiceLive, DigestServiceLive, ErrorsServiceLive).pipe(
-		Layer.provideMerge(telemetry.layer),
-		Layer.provideMerge(ConfigLive),
+	const ServiceMapRollupServiceLive = ServiceMapRollupService.Live.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive)),
 	)
+
+	return Layer.mergeAll(
+		AlertsServiceLive,
+		DigestServiceLive,
+		ErrorsServiceLive,
+		ServiceMapRollupServiceLive,
+	).pipe(Layer.provideMerge(telemetry.layer), Layer.provideMerge(ConfigLive))
 }
 
 const alertTick = Effect.gen(function* () {
@@ -144,6 +151,26 @@ const digestTick = Effect.gen(function* () {
 	),
 )
 
+const serviceMapRollupTick = Effect.gen(function* () {
+	const rollup = yield* ServiceMapRollupService
+	const result = yield* rollup.runRollupTick()
+	yield* Effect.logInfo("Service map rollup tick complete").pipe(
+		Effect.annotateLogs({
+			orgsProcessed: result.orgsProcessed,
+			hoursRolledUp: result.hoursRolledUp,
+			edgesWritten: result.edgesWritten,
+			orgFailures: result.orgFailures,
+		}),
+	)
+}).pipe(
+	Effect.withSpan("alerting.service_map_rollup_tick"),
+	Effect.catchCause((cause) =>
+		Effect.logError("Service map rollup tick failed").pipe(
+			Effect.annotateLogs({ error: Cause.pretty(cause) }),
+		),
+	),
+)
+
 interface ScheduledEventLike {
 	readonly cron: string
 }
@@ -161,7 +188,9 @@ export default {
 		const program =
 			event.cron === "*/15 * * * *"
 				? digestTick
-				: Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
+				: event.cron === "0 * * * *"
+					? serviceMapRollupTick
+					: Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
 		try {
 			await runScheduledEffect(buildLayer(env), program, ctx)
 		} finally {

@@ -1,4 +1,5 @@
 import { migration_0001_initial } from "./0001_initial"
+import { migration_0002_service_map_edges_rollup } from "./0002_service_map_edges_rollup"
 
 export interface ClickHouseMigration {
 	readonly version: number
@@ -22,4 +23,5 @@ export interface ClickHouseMigration {
  */
 export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0001_initial,
+	migration_0002_service_map_edges_rollup,
 ] as const

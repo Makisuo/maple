@@ -253,13 +253,13 @@ export type ServiceUsageRow = InferRow<typeof serviceUsage>
 
 /**
  * Lightweight projection of traces for service map JOIN queries.
- * Pre-extracts peer.service and deployment.environment from Map columns.
+ * Pre-extracts deployment.environment from Map columns.
  * Sorted by (OrgId, TraceId, SpanId) to align with the JOIN key.
  * Populated by materialized view, not direct ingestion.
  */
 export const serviceMapSpans = defineDatasource("service_map_spans", {
 	description:
-		"Lightweight projection of traces for service map JOIN queries. Pre-extracts peer.service and deployment.environment from Map columns. Populated by materialized view.",
+		"Lightweight projection of traces for service map JOIN queries. Pre-extracts deployment.environment from Map columns. Populated by materialized view.",
 	jsonPaths: false,
 	schema: {
 		OrgId: t.string().lowCardinality(),
@@ -272,7 +272,6 @@ export const serviceMapSpans = defineDatasource("service_map_spans", {
 		Duration: t.uint64(),
 		StatusCode: t.string().lowCardinality(),
 		TraceState: t.string(),
-		PeerService: t.string(),
 		DeploymentEnv: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
@@ -317,15 +316,19 @@ export type ServiceMapChildrenRow = InferRow<typeof serviceMapChildren>
 
 /**
  * Pre-aggregated hourly service-to-service edges for the service map.
- * Aggregates Client spans with peer.service at write time so the service map
- * query reads ~hundreds of hourly rows instead of millions of individual spans.
- * Uses AggregatingMergeTree with SimpleAggregateFunction columns for correct
- * incremental merging of sum/max aggregates.
- * Populated by materialized view, not direct ingestion.
+ * One row per (OrgId, Hour, SourceService, TargetService, DeploymentEnv) so the
+ * service map query reads ~hundreds of hourly rows instead of millions of
+ * individual spans. Uses AggregatingMergeTree with SimpleAggregateFunction
+ * columns for correct incremental merging of sum/max aggregates.
+ *
+ * Populated by the scheduled hourly rollup in `ServiceMapRollupService` — NOT
+ * by a materialized view. The edge target service is recovered via a
+ * Client/Producer-span → child Server/Consumer-span join, which an MV cannot
+ * express. The rollup writes each completed hour exactly once (watermarked).
  */
 export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly", {
 	description:
-		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
+		"Pre-aggregated hourly service-to-service edges for the service map. Uses AggregatingMergeTree for incremental aggregation. Populated by the scheduled ServiceMapRollupService rollup (one write per completed hour).",
 	jsonPaths: false,
 	schema: {
 		OrgId: t.string().lowCardinality(),
@@ -352,15 +355,15 @@ export type ServiceMapEdgesHourlyRow = InferRow<typeof serviceMapEdgesHourly>
 
 /**
  * Pre-aggregated hourly service-to-database edges for the service map.
- * Aggregates Client/Producer spans with `db.system` set at write time so the
- * service map's database-node query reads ~hundreds of rows per window instead
+ * Aggregates Client/Producer spans with `db.system.name` set at write time so
+ * the service map's database-node query reads ~hundreds of rows per window instead
  * of millions of individual spans. Mirrors `service_map_edges_hourly` in
  * structure; one row per (OrgId, Hour, ServiceName, DbSystem, DeploymentEnv).
  * Populated by materialized view, not direct ingestion.
  */
 export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_hourly", {
 	description:
-		"Pre-aggregated hourly service-to-database edges (one row per service/db.system) for the service map's database-node query. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
+		"Pre-aggregated hourly service-to-database edges (one row per service/db.system.name) for the service map's database-node query. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
 	jsonPaths: false,
 	schema: {
 		OrgId: t.string().lowCardinality(),
