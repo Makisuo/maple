@@ -7,13 +7,14 @@
 		"./onboarding": "./src/onboarding.tsx"
 	},
 	"scripts": {
-		"dev:email": "email dev",
+		"dev:email": "email dev --dir src/emails --port 3055",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@react-email/components": "^1.0.11"
 	},
 	"devDependencies": {
+		"@react-email/preview-server": "5.2.11",
 		"@types/bun": "^1.3.11",
 		"@types/react": "catalog:react",
 		"react-email": "^5.2.10",
