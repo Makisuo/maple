@@ -8,11 +8,15 @@ import {
 	applyNodeChanges,
 	type Node,
 	type NodeChange,
+	type NodePositionChange,
 	type ReactFlowInstance,
+	type Viewport,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
-import { Result } from "@/lib/effect-atom"
+import { useAuth } from "@clerk/clerk-react"
+import { Result, useAtom } from "@/lib/effect-atom"
+import { serviceMapLayoutAtomFamily } from "@/atoms/service-map-layout-atoms"
 import { Link } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
 
@@ -778,6 +782,9 @@ function ServiceMapCanvas({
 	const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>({ ...DEFAULT_LAYOUT_CONFIG })
 	const [colorMode, setColorMode] = useState<ServiceMapColorMode>("service")
 
+	const { orgId } = useAuth()
+	const [layout, setLayout] = useAtom(serviceMapLayoutAtomFamily(orgId ?? "default"))
+
 	const { layoutedNodes, flowEdges, services } = useMemo(() => {
 		const { nodes: rawNodes, edges: rawEdges } = buildFlowElements({
 			edges: serviceEdges,
@@ -796,17 +803,19 @@ function ServiceMapCanvas({
 		return { layoutedNodes: positioned, flowEdges: rawEdges, services: allServices }
 	}, [serviceEdges, dbEdges, platforms, runtimes, overviews, workloads, durationSeconds, layoutConfig])
 
-	// Merge layout positions with selection + color-mode state
+	// Merge layout positions with selection + color-mode state. Persisted drag
+	// positions (keyed by node id) override the deterministic auto-layout.
 	const nodesWithSelection = useMemo(() => {
 		return layoutedNodes.map((node) => ({
 			...node,
+			position: layout.positions[node.id] ?? node.position,
 			data: {
 				...node.data,
 				selected: node.id === selectedServiceId,
 				colorMode,
 			},
 		}))
-	}, [layoutedNodes, selectedServiceId, colorMode])
+	}, [layoutedNodes, selectedServiceId, colorMode, layout.positions])
 
 	// Track nodes with full ReactFlow state (dimensions, positions from drag, etc.)
 	const [nodes, setNodes] = useState(nodesWithSelection)
@@ -831,26 +840,56 @@ function ServiceMapCanvas({
 		})
 	}
 
-	// Programmatic fitView after ALL nodes are measured (the fitView prop fires too early)
+	// Programmatic fitView after ALL nodes are measured (the fitView prop fires too early).
+	// Skip auto-fit entirely when a saved viewport exists so the restored camera survives.
 	const rfInstance = useRef<ReactFlowInstance | null>(null)
-	const hasFitView = useRef(false)
+	const hasFitView = useRef(layout.viewport != null)
 
-	const onNodesChange = useCallback((changes: NodeChange[]) => {
-		setNodes((prev) => {
-			const next = applyNodeChanges(changes, prev) as typeof prev
+	const onNodesChange = useCallback(
+		(changes: NodeChange[]) => {
+			setNodes((prev) => {
+				const next = applyNodeChanges(changes, prev) as typeof prev
 
-			if (!hasFitView.current && rfInstance.current && changes.some((c) => c.type === "dimensions")) {
-				const allMeasured =
-					next.length > 0 && next.every((n) => n.measured?.width && n.measured?.height)
-				if (allMeasured) {
-					hasFitView.current = true
-					setTimeout(() => rfInstance.current?.fitView(), 0)
+				if (
+					!hasFitView.current &&
+					rfInstance.current &&
+					changes.some((c) => c.type === "dimensions")
+				) {
+					const allMeasured =
+						next.length > 0 && next.every((n) => n.measured?.width && n.measured?.height)
+					if (allMeasured) {
+						hasFitView.current = true
+						setTimeout(() => rfInstance.current?.fitView(), 0)
+					}
 				}
-			}
 
-			return next
-		})
-	}, [])
+				return next
+			})
+
+			// Persist finished drags only (dragging === false), keyed by node id.
+			const dragEnds = changes.filter(
+				(c): c is NodePositionChange =>
+					c.type === "position" && c.dragging === false && c.position != null,
+			)
+			if (dragEnds.length > 0) {
+				setLayout((prev) => {
+					const positions = { ...prev.positions }
+					for (const c of dragEnds) {
+						positions[c.id] = { x: c.position!.x, y: c.position!.y }
+					}
+					return { ...prev, positions }
+				})
+			}
+		},
+		[setLayout],
+	)
+
+	const onMoveEnd = useCallback(
+		(_: unknown, viewport: Viewport) => {
+			setLayout((prev) => ({ ...prev, viewport }))
+		},
+		[setLayout],
+	)
 
 	const handleNodeClick = useCallback((_: React.MouseEvent, node: Node<ServiceNodeData>) => {
 		setSelectedServiceId((prev) => (prev === node.id ? null : node.id))
@@ -907,6 +946,8 @@ function ServiceMapCanvas({
 								onNodesChange={onNodesChange}
 								onNodeClick={handleNodeClick}
 								onPaneClick={handlePaneClick}
+								onMoveEnd={onMoveEnd}
+								defaultViewport={layout.viewport ?? undefined}
 								onInit={(instance) => {
 									rfInstance.current = instance as unknown as ReactFlowInstance
 								}}
