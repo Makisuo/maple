@@ -47,6 +47,10 @@ function makeState(): QueryBuilderWidgetState {
 		listRootOnly: true,
 		heatmapColorScale: "blues",
 		heatmapScaleType: "linear",
+		thresholds: [],
+		gaugeMin: "",
+		gaugeMax: "",
+		sparklineEnabled: false,
 	}
 }
 

@@ -55,3 +55,14 @@ export const serverFunctionMap: Record<DataSourceEndpoint, ServerFunction> = {
 	raw_sql_chart: getRawSqlChart,
 	markdown_static: markdownStaticServerFn,
 }
+
+/**
+ * Looks up a data-source server function by endpoint name. Accepts an
+ * arbitrary string (e.g. an endpoint coming from a JSON-decoded widget config
+ * whose type is only `string`) and returns `undefined` for unknown endpoints.
+ */
+export function getServerFunction(endpoint: string): ServerFunction | undefined {
+	return Object.prototype.hasOwnProperty.call(serverFunctionMap, endpoint)
+		? serverFunctionMap[endpoint as DataSourceEndpoint]
+		: undefined
+}

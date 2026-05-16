@@ -151,8 +151,181 @@ export const statScenarios: WidgetScenario[] = [
 ]
 
 // ---------------------------------------------------------------------------
+// Gauge
+// ---------------------------------------------------------------------------
+
+// Percent unit treats values as 0-1 ratios (0.42 → "42%").
+const gaugeThresholds = [
+	{ value: 0, color: "var(--color-emerald-500)" },
+	{ value: 0.7, color: "var(--color-amber-500)" },
+	{ value: 0.9, color: "var(--color-red-500)" },
+]
+
+export const gaugeScenarios: WidgetScenario[] = [
+	{
+		label: "Healthy",
+		dataState: ready(0.42),
+		display: {
+			title: "CPU utilization",
+			unit: "percent",
+			gauge: { min: 0, max: 1 },
+			thresholds: gaugeThresholds,
+		},
+	},
+	{
+		label: "Warning",
+		dataState: ready(0.78),
+		display: {
+			title: "CPU utilization",
+			unit: "percent",
+			gauge: { min: 0, max: 1 },
+			thresholds: gaugeThresholds,
+		},
+	},
+	{
+		label: "Critical",
+		dataState: ready(0.96),
+		display: {
+			title: "CPU utilization",
+			unit: "percent",
+			gauge: { min: 0, max: 1 },
+			thresholds: gaugeThresholds,
+		},
+	},
+	{
+		label: "No thresholds",
+		dataState: ready(1240),
+		display: { title: "Requests / sec", unit: "number", gauge: { min: 0, max: 2000 } },
+	},
+	{
+		label: "Custom range + duration unit",
+		dataState: ready(420),
+		display: {
+			title: "p99 latency",
+			unit: "duration_ms",
+			gauge: { min: 0, max: 1000 },
+			thresholds: [
+				{ value: 0, color: "var(--color-emerald-500)" },
+				{ value: 500, color: "var(--color-red-500)" },
+			],
+		},
+	},
+	{
+		label: "At max",
+		dataState: ready(1),
+		display: {
+			title: "Disk usage",
+			unit: "percent",
+			gauge: { min: 0, max: 1 },
+			thresholds: gaugeThresholds,
+		},
+	},
+	{
+		label: "Loading",
+		dataState: loadingState,
+		display: { title: "Error rate", unit: "percent", gauge: { min: 0, max: 10 } },
+	},
+	{
+		label: "Empty",
+		dataState: emptyState,
+		display: { title: "Error rate", gauge: { min: 0, max: 10 } },
+	},
+]
+
+// ---------------------------------------------------------------------------
+// Stat sparkline — preview the StatSparkline component directly with various
+// timeseries shapes (the full stat-widget sparkline needs a live data source).
+// ---------------------------------------------------------------------------
+
+const makeSeries = (values: number[]): Record<string, unknown>[] =>
+	values.map((value, index) => ({
+		bucket: `2026-05-13T${String(index).padStart(2, "0")}:00:00Z`,
+		value,
+	}))
+
+export interface SparklineSample {
+	label: string
+	data: Record<string, unknown>[]
+	color?: string
+}
+
+export const sparklineSamples: SparklineSample[] = [
+	{ label: "Upward trend", data: makeSeries([12, 18, 15, 24, 31, 29, 38, 44]) },
+	{ label: "Downward trend", data: makeSeries([88, 81, 84, 70, 62, 55, 41, 33]) },
+	{ label: "Flat", data: makeSeries([50, 51, 49, 50, 50, 51, 49, 50]) },
+	{
+		label: "Volatile",
+		data: makeSeries([20, 64, 18, 72, 30, 88, 12, 56]),
+		color: "var(--color-amber-500)",
+	},
+	{
+		label: "Spike (threshold red)",
+		data: makeSeries([8, 10, 9, 12, 11, 76, 14, 10]),
+		color: "var(--color-red-500)",
+	},
+	{ label: "Single point (renders nothing)", data: makeSeries([42]) },
+]
+
+// ---------------------------------------------------------------------------
+// Stat + sparkline — the stat widget with its trend sparkline enabled. In a
+// real dashboard the sparkline pulls a live timeseries derived from the stat's
+// own query; here we pass static series data so the composed layout (value +
+// trend) can be polished without a data source.
+// ---------------------------------------------------------------------------
+
+export interface StatSparklineScenario {
+	label: string
+	value: number
+	display: WidgetDisplayConfig
+	sparklineData: Record<string, unknown>[]
+	sparklineColor?: string
+}
+
+const statSparklineThresholds = [
+	{ value: 0, color: "var(--color-emerald-500)" },
+	{ value: 1, color: "var(--color-amber-500)" },
+	{ value: 5, color: "var(--color-red-500)" },
+]
+
+export const statSparklineScenarios: StatSparklineScenario[] = [
+	{
+		label: "Sparkline — upward",
+		value: 44,
+		display: { title: "Active spans", unit: "number" },
+		sparklineData: makeSeries([12, 18, 15, 24, 31, 29, 38, 44]),
+	},
+	{
+		label: "Sparkline — downward",
+		value: 33,
+		display: { title: "Throughput", unit: "number" },
+		sparklineData: makeSeries([88, 81, 84, 70, 62, 55, 41, 33]),
+	},
+	{
+		label: "Sparkline — duration",
+		value: 184.7,
+		display: { title: "p99 latency", unit: "duration_ms" },
+		sparklineData: makeSeries([120, 142, 138, 165, 151, 178, 169, 185]),
+	},
+	{
+		label: "Sparkline — threshold (red)",
+		value: 8.1,
+		display: { title: "Error rate", unit: "percent", thresholds: statSparklineThresholds },
+		sparklineData: makeSeries([1, 1.2, 0.9, 2, 1.8, 6.4, 7.2, 8.1]),
+	},
+]
+
+// ---------------------------------------------------------------------------
 // Chart — iterate every registry entry with its built-in sampleData
 // ---------------------------------------------------------------------------
+
+// Threshold + legend scenarios reuse a registry chart's bundled sample data.
+const sampleFor = (chartId: string): Record<string, unknown>[] =>
+	chartRegistry.find((entry) => entry.id === chartId)?.sampleData ?? []
+
+const latencyThresholds = [
+	{ value: 200, color: "var(--color-amber-500)", label: "Warn" },
+	{ value: 400, color: "var(--color-red-500)", label: "SLO breach" },
+]
 
 export const chartScenarios: ChartScenario[] = [
 	...chartRegistry.map(
@@ -168,6 +341,58 @@ export const chartScenarios: ChartScenario[] = [
 			},
 		}),
 	),
+	{
+		label: "Line + thresholds",
+		chartId: "query-builder-line",
+		chartName: "Query Builder Line",
+		category: "line",
+		dataState: ready(sampleFor("query-builder-line")),
+		display: {
+			title: "Latency with SLO thresholds",
+			chartId: "query-builder-line",
+			unit: "duration_ms",
+			thresholds: latencyThresholds,
+		},
+	},
+	{
+		label: "Area + thresholds",
+		chartId: "query-builder-area",
+		chartName: "Query Builder Area",
+		category: "area",
+		dataState: ready(sampleFor("query-builder-area")),
+		display: {
+			title: "Latency with SLO thresholds",
+			chartId: "query-builder-area",
+			unit: "duration_ms",
+			thresholds: latencyThresholds,
+		},
+	},
+	{
+		label: "Bar + thresholds",
+		chartId: "query-builder-bar",
+		chartName: "Query Builder Bar",
+		category: "bar",
+		dataState: ready(sampleFor("query-builder-bar")),
+		display: {
+			title: "Latency with SLO thresholds",
+			chartId: "query-builder-bar",
+			unit: "duration_ms",
+			thresholds: latencyThresholds,
+		},
+	},
+	{
+		label: "Legend — right (stats table)",
+		chartId: "query-builder-line",
+		chartName: "Query Builder Line",
+		category: "line",
+		dataState: ready(sampleFor("query-builder-line")),
+		display: {
+			title: "Latency percentiles",
+			chartId: "query-builder-line",
+			unit: "duration_ms",
+			chartPresentation: { legend: "right" },
+		},
+	},
 	{
 		label: "Loading",
 		chartId: "gradient-area",

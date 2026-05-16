@@ -63,11 +63,13 @@ export const defaultSizeForVisualization = (visualization: string): { w: number;
 	switch (visualization) {
 		case "stat":
 			return { w: 3, h: 4 }
+		case "gauge":
+			return { w: 3, h: 5 }
 		case "table":
 		case "list":
-			return { w: 6, h: 4 }
+			return { w: 6, h: 5 }
 		default:
-			return { w: 4, h: 4 }
+			return { w: 4, h: 5 }
 	}
 }
 

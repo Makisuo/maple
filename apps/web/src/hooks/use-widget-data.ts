@@ -3,8 +3,19 @@ import { Atom, Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
-import { serverFunctionMap } from "@/components/dashboard-builder/data-source-registry"
+import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
 import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
+
+/**
+ * The structural shape a data source must satisfy to be fetched. Both the
+ * web `WidgetDataSource` and the JSON-decoded `display.sparkline.dataSource`
+ * (whose `endpoint` is only typed as `string`) are assignable to this.
+ */
+export type WidgetDataSourceLike = {
+	endpoint: string
+	params?: Record<string, unknown>
+	transform?: WidgetDataSource["transform"]
+}
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import type { WidgetDataState } from "@/components/dashboard-builder/types"
 import { encodeKey } from "@/lib/cache-key"
@@ -286,13 +297,13 @@ const widgetFetchFamily = Atom.family((key: string) =>
 		Effect.try({
 			try: () =>
 				JSON.parse(key) as {
-					endpoint: DashboardWidget["dataSource"]["endpoint"]
+					endpoint: string
 					params: Record<string, unknown>
 				},
 			catch: toWidgetDataAtomError,
 		}).pipe(
 			Effect.flatMap(({ endpoint, params }) => {
-				const serverFn = serverFunctionMap[endpoint]
+				const serverFn = getServerFunction(endpoint)
 				if (!serverFn) {
 					return Effect.fail(
 						new WidgetDataAtomError({
@@ -317,33 +328,38 @@ const widgetFetchFamily = Atom.family((key: string) =>
 	).pipe(Atom.setIdleTTL(120_000)),
 )
 
-const widgetFetchAtom = (input: {
-	endpoint: DashboardWidget["dataSource"]["endpoint"]
-	params: Record<string, unknown>
-}) => widgetFetchFamily(encodeKey(input))
+const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unknown> }) =>
+	widgetFetchFamily(encodeKey(input))
 
-export function useWidgetData(widget: DashboardWidget) {
+/**
+ * Fetches and transforms data for a single data source. Powers both whole
+ * widgets (via `useWidgetData`) and secondary fetches such as a stat widget's
+ * sparkline. Pass `undefined` to render a disabled state without a fetch.
+ */
+export function useWidgetDataSource(dataSource: WidgetDataSourceLike | undefined) {
 	const {
 		state: { resolvedTimeRange },
 	} = useDashboardTimeRange()
 
-	const isStatic = widget.dataSource.endpoint === "markdown_static"
-	const hasServerFn = !!serverFunctionMap[widget.dataSource.endpoint]
+	const isStatic = dataSource?.endpoint === "markdown_static"
+	const hasServerFn = dataSource ? !!getServerFunction(dataSource.endpoint) : false
 
-	const disableReason = isStatic
-		? null
-		: !resolvedTimeRange
-			? "Unable to resolve dashboard time range"
-			: !hasServerFn
-				? `Unknown data source endpoint: ${widget.dataSource.endpoint}`
-				: null
+	const disableReason = !dataSource
+		? "No data source configured"
+		: isStatic
+			? null
+			: !resolvedTimeRange
+				? "Unable to resolve dashboard time range"
+				: !hasServerFn
+					? `Unknown data source endpoint: ${dataSource.endpoint}`
+					: null
 
 	const resolvedParams = useMemo(
 		() =>
 			resolvedTimeRange
 				? interpolateParams(
 						{
-							...widget.dataSource.params,
+							...dataSource?.params,
 							strategy: { enableEmptyRangeFallback: false },
 							startTime: resolvedTimeRange.startTime,
 							endTime: resolvedTimeRange.endTime,
@@ -351,7 +367,7 @@ export function useWidgetData(widget: DashboardWidget) {
 						resolvedTimeRange,
 					)
 				: {},
-		[resolvedTimeRange, widget.dataSource.params],
+		[resolvedTimeRange, dataSource?.params],
 	)
 
 	// Stabilise the atom reference across renders. Atom.family already dedupes
@@ -359,18 +375,18 @@ export function useWidgetData(widget: DashboardWidget) {
 	// where useAtomValue / useAtomRefresh re-subscribe and drop an in-flight
 	// fetch (the user-visible symptom: widgets stuck on the loading skeleton).
 	const fetchAtom = useMemo(() => {
-		if (disableReason !== null || isStatic) {
+		if (disableReason !== null || isStatic || !dataSource) {
 			return disabledResultAtom<unknown, WidgetDataAtomError>()
 		}
 		return widgetFetchAtom({
-			endpoint: widget.dataSource.endpoint,
+			endpoint: dataSource.endpoint,
 			params: resolvedParams,
 		})
-	}, [disableReason, isStatic, widget.dataSource.endpoint, resolvedParams])
+	}, [disableReason, isStatic, dataSource, resolvedParams])
 
 	const result = useRefreshableAtomValue(fetchAtom)
 
-	const transform = widget.dataSource.transform
+	const transform = dataSource?.transform
 
 	const dataState: WidgetDataState = useMemo(() => {
 		if (isStatic) {
@@ -399,6 +415,10 @@ export function useWidgetData(widget: DashboardWidget) {
 	return {
 		dataState,
 	}
+}
+
+export function useWidgetData(widget: DashboardWidget) {
+	return useWidgetDataSource(widget.dataSource)
 }
 
 export const __testables = {

@@ -91,6 +91,7 @@ export type WidgetLayout = DeepMutable<typeof WidgetLayoutSchema.Type>
 export type VisualizationType =
 	| "chart"
 	| "stat"
+	| "gauge"
 	| "table"
 	| "list"
 	| "pie"

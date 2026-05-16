@@ -48,6 +48,13 @@ export interface QueryBuilderWidgetState {
 	unit: ValueUnit
 	legendPosition: LegendPosition
 	tableLimit: string
+	// Threshold lines (chart) / threshold coloring (stat, gauge)
+	thresholds: Array<{ value: number; color: string }>
+	// Gauge-specific
+	gaugeMin: string
+	gaugeMax: string
+	// Stat-specific: render a trend sparkline behind the value
+	sparklineEnabled: boolean
 	// List-specific
 	listDataSource: ListDataSource
 	listWhereClause: string
@@ -114,6 +121,13 @@ export function parsePositiveNumber(raw: string): number | undefined {
 	const parsed = Number.parseInt(raw.trim(), 10)
 	if (!Number.isFinite(parsed) || parsed <= 0) return undefined
 	return parsed
+}
+
+export function parseFiniteNumber(raw: string): number | undefined {
+	const trimmed = raw.trim()
+	if (trimmed.length === 0) return undefined
+	const parsed = Number(trimmed)
+	return Number.isFinite(parsed) ? parsed : undefined
 }
 
 function toQueryGroupByArray(groupBy: unknown): string[] {
@@ -274,6 +288,13 @@ export function toInitialState(widget: DashboardWidget): QueryBuilderWidgetState
 		listRootOnly: widget.display.listRootOnly ?? true,
 		heatmapColorScale: widget.display.heatmap?.colorScale ?? "blues",
 		heatmapScaleType: widget.display.heatmap?.scaleType ?? "linear",
+		thresholds: (widget.display.thresholds ?? []).map((threshold) => ({
+			value: threshold.value,
+			color: threshold.color,
+		})),
+		gaugeMin: widget.display.gauge?.min != null ? String(widget.display.gauge.min) : "",
+		gaugeMax: widget.display.gauge?.max != null ? String(widget.display.gauge.max) : "",
+		sparklineEnabled: widget.display.sparkline?.enabled === true,
 	} satisfies Omit<QueryBuilderWidgetState, "queries" | "formulas">
 
 	// List widgets don't use the query builder — return early with a dummy query
@@ -482,7 +503,8 @@ export function buildWidgetDataSource(
 		transform: sharedTransform,
 	}
 
-	if (state.visualization === "stat") {
+	// Stat and gauge both reduce the timeseries to a single scalar.
+	if (state.visualization === "stat" || state.visualization === "gauge") {
 		return {
 			...base,
 			transform: {
@@ -574,7 +596,43 @@ export function buildWidgetDisplay(
 		display.curveType = state.curveType
 		display.unit = state.unit
 	}
-	if (state.visualization === "stat") display.unit = state.unit
+	if (state.visualization === "stat") {
+		display.unit = state.unit
+		display.sparkline = state.sparklineEnabled
+			? {
+					enabled: true,
+					// The sparkline reuses the stat's query as a raw timeseries —
+					// i.e. the same data source minus the scalar reduceToValue.
+					dataSource: buildWidgetDataSource(
+						widget,
+						{ ...state, visualization: "chart" },
+						[],
+					),
+				}
+			: undefined
+	}
+	if (state.visualization === "gauge") {
+		display.unit = state.unit
+		const min = parseFiniteNumber(state.gaugeMin)
+		const max = parseFiniteNumber(state.gaugeMax)
+		display.gauge = {
+			min: min ?? 0,
+			max: max ?? 100,
+		}
+	}
+	if (
+		state.visualization === "chart" ||
+		state.visualization === "stat" ||
+		state.visualization === "gauge"
+	) {
+		display.thresholds =
+			state.thresholds.length > 0
+				? state.thresholds.map((threshold) => ({
+						value: threshold.value,
+						color: threshold.color,
+					}))
+				: undefined
+	}
 	if (state.visualization === "heatmap") {
 		display.heatmap = {
 			colorScale: state.heatmapColorScale,

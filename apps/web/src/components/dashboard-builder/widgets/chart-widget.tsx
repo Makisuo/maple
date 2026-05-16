@@ -12,6 +12,7 @@ interface ChartWidgetProps {
 	onRemove: () => void
 	onClone?: () => void
 	onConfigure?: () => void
+	onCreateAlert?: () => void
 	onFix?: () => void
 }
 
@@ -22,6 +23,7 @@ export const ChartWidget = memo(function ChartWidget({
 	onRemove,
 	onClone,
 	onConfigure,
+	onCreateAlert,
 	onFix,
 }: ChartWidgetProps) {
 	const chartId = display.chartId ?? "gradient-area"
@@ -42,6 +44,7 @@ export const ChartWidget = memo(function ChartWidget({
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onCreateAlert={onCreateAlert}
 			onFix={onFix}
 			loadingSkeleton={<Skeleton className="h-full w-full" />}
 		>
@@ -58,6 +61,7 @@ export const ChartWidget = memo(function ChartWidget({
 					softMin={display.yAxis?.softMin}
 					softMax={display.yAxis?.softMax}
 					showPoints={display.chartPresentation?.showPoints}
+					thresholds={display.thresholds}
 				/>
 			</Suspense>
 		</WidgetFrame>

@@ -1,7 +1,9 @@
 import { memo } from "react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { formatValueByUnit } from "@maple/ui/lib/format"
 import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
+import { useWidgetDataSource, type WidgetDataSourceLike } from "@/hooks/use-widget-data"
 import type { WidgetDataState, WidgetDisplayConfig, WidgetMode } from "@/components/dashboard-builder/types"
 
 interface StatWidgetProps {
@@ -25,9 +27,9 @@ export function formatValue(value: unknown, unit?: string, prefix?: string, suff
 	return `${prefix ?? ""}${formatted}${suffix ?? ""}`
 }
 
-function getThresholdColor(
+export function getThresholdColor(
 	value: unknown,
-	thresholds?: Array<{ value: number; color: string }>,
+	thresholds?: ReadonlyArray<{ value: number; color: string }>,
 ): string | undefined {
 	if (!thresholds || thresholds.length === 0) return undefined
 	if (value === null || value === undefined || typeof value === "object") return undefined
@@ -39,6 +41,25 @@ function getThresholdColor(
 		if (num >= t.value) return t.color
 	}
 	return undefined
+}
+
+/**
+ * Fetches the stat sparkline's data source and renders the trend. Kept as a
+ * separate component so the `useWidgetDataSource` hook (which reads the
+ * dashboard time-range context) only runs when a sparkline is configured —
+ * a plain stat widget then has no dependency on a dashboard provider.
+ */
+function StatSparklineLoader({
+	dataSource,
+	color,
+}: {
+	dataSource: WidgetDataSourceLike
+	color: string
+}) {
+	const { dataState } = useWidgetDataSource(dataSource)
+	const data =
+		dataState.status === "ready" && Array.isArray(dataState.data) ? dataState.data : []
+	return <StatSparkline data={data} color={color} className="h-10 w-full shrink-0" />
 }
 
 export const StatWidget = memo(function StatWidget({
@@ -55,6 +76,15 @@ export const StatWidget = memo(function StatWidget({
 	const formattedValue = formatValue(value, display.unit, display.prefix, display.suffix)
 	const thresholdColor = getThresholdColor(value, display.thresholds)
 
+	const sparklineSource =
+		display.sparkline?.enabled === true ? display.sparkline.dataSource : undefined
+
+	const valueText = (
+		<span className="text-2xl font-bold" style={thresholdColor ? { color: thresholdColor } : undefined}>
+			{formattedValue}
+		</span>
+	)
+
 	return (
 		<WidgetFrame
 			title={displayName}
@@ -64,15 +94,24 @@ export const StatWidget = memo(function StatWidget({
 			onClone={onClone}
 			onConfigure={onConfigure}
 			onFix={onFix}
-			contentClassName="flex-1 min-h-0 flex items-center justify-center p-4"
+			contentClassName={
+				sparklineSource
+					? "flex-1 min-h-0 flex flex-col"
+					: "flex-1 min-h-0 flex items-center justify-center p-4"
+			}
 			loadingSkeleton={<Skeleton className="h-8 w-24" />}
 		>
-			<span
-				className="text-2xl font-bold"
-				style={thresholdColor ? { color: thresholdColor } : undefined}
-			>
-				{formattedValue}
-			</span>
+			{sparklineSource ? (
+				<>
+					<div className="flex flex-1 items-center justify-center px-4 pt-4">{valueText}</div>
+					<StatSparklineLoader
+						dataSource={sparklineSource}
+						color={thresholdColor ?? "var(--chart-1)"}
+					/>
+				</>
+			) : (
+				valueText
+			)}
 		</WidgetFrame>
 	)
 })

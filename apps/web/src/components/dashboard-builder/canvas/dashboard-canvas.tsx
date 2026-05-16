@@ -18,6 +18,7 @@ import {
 } from "@/components/chat/widget-fix-context"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
+import { GaugeWidget } from "@/components/dashboard-builder/widgets/gauge-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 import { PieWidget } from "@/components/dashboard-builder/widgets/pie-widget"
@@ -44,11 +45,13 @@ const visualizationRegistry: Record<
 		onRemove: () => void
 		onClone?: () => void
 		onConfigure?: () => void
+		onCreateAlert?: () => void
 		onFix?: () => void
 	}>
 > = {
 	chart: ChartWidget,
 	stat: StatWidget,
+	gauge: GaugeWidget,
 	table: TableWidget,
 	list: ListWidget,
 	pie: PieWidget,
@@ -75,6 +78,21 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 		() => (readOnly ? undefined : () => configureWidget(widget.id)),
 		[readOnly, configureWidget, widget.id],
 	)
+
+	// "Create alert" is offered for query-driven charts (query builder + raw
+	// SQL) — those data sources convert cleanly to an alert rule.
+	const onCreateAlert = useMemo(() => {
+		if (!dashboardId) return undefined
+		const endpoint = widget.dataSource?.endpoint
+		const alertable =
+			endpoint === "raw_sql_chart" ||
+			endpoint === "custom_query_builder_timeseries" ||
+			endpoint === "custom_query_builder_breakdown" ||
+			endpoint === "custom_query_builder_list"
+		if (!alertable) return undefined
+		return () =>
+			navigate({ to: "/alerts/create", search: { dashboardId, widgetId: widget.id } })
+	}, [dashboardId, widget.dataSource?.endpoint, widget.id, navigate])
 
 	const errorTitle = dataState.status === "error" ? (dataState.title ?? null) : null
 	const errorMessage = dataState.status === "error" ? (dataState.message ?? null) : null
@@ -109,6 +127,7 @@ const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: Dashbo
 			onRemove={onRemove}
 			onClone={onClone}
 			onConfigure={onConfigure}
+			onCreateAlert={onCreateAlert}
 			onFix={onFix}
 		/>
 	)

@@ -4,8 +4,16 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
-import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
+import { WidgetFrame } from "@/components/dashboard-builder/widgets/widget-shell"
+import {
+	StatWidget,
+	formatValue,
+	getThresholdColor,
+} from "@/components/dashboard-builder/widgets/stat-widget"
+import { GaugeWidget } from "@/components/dashboard-builder/widgets/gauge-widget"
 import { TableWidget } from "@/components/dashboard-builder/widgets/table-widget"
 import { ListWidget } from "@/components/dashboard-builder/widgets/list-widget"
 import { PieWidget } from "@/components/dashboard-builder/widgets/pie-widget"
@@ -15,6 +23,9 @@ import { MarkdownWidget } from "@/components/dashboard-builder/widgets/markdown-
 
 import {
 	statScenarios,
+	statSparklineScenarios,
+	gaugeScenarios,
+	sparklineSamples,
 	chartScenarios,
 	tableScenarios,
 	listScenarios,
@@ -23,6 +34,7 @@ import {
 	heatmapScenarios,
 	markdownScenarios,
 	type WidgetScenario,
+	type StatSparklineScenario,
 	type ChartScenario,
 } from "@/components/widget-lab/scenarios"
 
@@ -35,16 +47,19 @@ const handlers = {
 
 interface ScenarioCellProps {
 	label: string
+	height?: number
 	children: ReactNode
 }
 
-function ScenarioCell({ label, children }: ScenarioCellProps) {
+function ScenarioCell({ label, height = 320, children }: ScenarioCellProps) {
 	return (
 		<div className="flex flex-col gap-1.5">
 			<span className="text-[10px] font-mono uppercase tracking-wide text-muted-foreground">
 				{label}
 			</span>
-			<div className="h-[220px] w-full">{children}</div>
+			<div className="w-full" style={{ height }}>
+				{children}
+			</div>
 		</div>
 	)
 }
@@ -53,23 +68,31 @@ interface SectionProps {
 	id: string
 	title: string
 	description: string
+	minColWidth?: number
 	children: ReactNode
 }
 
-function Section({ id, title, description, children }: SectionProps) {
+function Section({ id, title, description, minColWidth = 320, children }: SectionProps) {
 	return (
 		<section id={id} className="flex flex-col gap-3 scroll-mt-20">
 			<div className="flex flex-col gap-0.5">
 				<h2 className="text-lg font-semibold">{title}</h2>
 				<p className="text-xs text-muted-foreground">{description}</p>
 			</div>
-			<div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">{children}</div>
+			<div
+				className="grid gap-4"
+				style={{ gridTemplateColumns: `repeat(auto-fill,minmax(${minColWidth}px,1fr))` }}
+			>
+				{children}
+			</div>
 		</section>
 	)
 }
 
 const NAV_ITEMS = [
 	{ id: "stat", label: "Stat" },
+	{ id: "gauge", label: "Gauge" },
+	{ id: "sparkline", label: "Sparkline" },
 	{ id: "chart", label: "Chart" },
 	{ id: "table", label: "Table" },
 	{ id: "list", label: "List" },
@@ -119,16 +142,48 @@ export function WidgetLab() {
 					id="stat"
 					title="Stat"
 					description="Single aggregated value. Polish: threshold colors, prefix/suffix, long titles, edge values."
+					minColWidth={240}
 				>
 					{statScenarios.map((s, i) => (
 						<StatScenarioCard key={`stat-${i}`} scenario={s} mode={mode} />
+					))}
+					{statSparklineScenarios.map((s, i) => (
+						<StatSparklineScenarioCard key={`stat-spark-${i}`} scenario={s} mode={mode} />
+					))}
+				</Section>
+
+				<Section
+					id="gauge"
+					title="Gauge"
+					description="Single scalar on a radial arc. Polish: threshold arc coloring, tick marks, min/max range, edge values."
+				>
+					{gaugeScenarios.map((s, i) => (
+						<GaugeScenarioCard key={`gauge-${i}`} scenario={s} mode={mode} />
+					))}
+				</Section>
+
+				<Section
+					id="sparkline"
+					title="Sparkline"
+					description="The stat-widget trend line, rendered standalone across timeseries shapes. Polish: stroke, gradient, threshold color."
+				>
+					{sparklineSamples.map((sample, i) => (
+						<ScenarioCell key={`spark-${i}`} label={sample.label}>
+							<div className="flex h-full flex-col justify-end rounded-lg border bg-card p-3">
+								<StatSparkline
+									data={sample.data}
+									color={sample.color}
+									className="h-12 w-full"
+								/>
+							</div>
+						</ScenarioCell>
 					))}
 				</Section>
 
 				<Section
 					id="chart"
 					title="Chart"
-					description="Every entry from the chart registry rendered with its bundled sample data, plus loading/error/empty states."
+					description="Every entry from the chart registry rendered with its bundled sample data, plus threshold overlays, the stats legend, and loading/error/empty states."
 				>
 					{chartScenarios.map((s, i) => (
 						<ChartScenarioCard key={`chart-${i}`} scenario={s} mode={mode} />
@@ -205,8 +260,62 @@ export function WidgetLab() {
 
 function StatScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: WidgetMode }) {
 	return (
-		<ScenarioCell label={scenario.label}>
+		<ScenarioCell label={scenario.label} height={200}>
 			<StatWidget dataState={scenario.dataState} display={scenario.display} mode={mode} {...handlers} />
+		</ScenarioCell>
+	)
+}
+
+// Mirrors the sparkline branch of StatWidget (stat-widget.tsx). The real
+// widget fetches the sparkline series live from a derived data source; here it
+// renders static lab data so the composed layout can be polished.
+function StatSparklineScenarioCard({
+	scenario,
+	mode,
+}: {
+	scenario: StatSparklineScenario
+	mode: WidgetMode
+}) {
+	const { value, display } = scenario
+	const formatted = formatValue(value, display.unit, display.prefix, display.suffix)
+	const thresholdColor = getThresholdColor(value, display.thresholds)
+	return (
+		<ScenarioCell label={scenario.label} height={220}>
+			<WidgetFrame
+				title={display.title || "Untitled"}
+				dataState={{ status: "ready", data: value }}
+				mode={mode}
+				loadingSkeleton={<Skeleton className="h-8 w-24" />}
+				contentClassName="flex-1 min-h-0 flex flex-col"
+				{...handlers}
+			>
+				<div className="flex flex-1 items-center justify-center px-4 pt-4">
+					<span
+						className="text-2xl font-bold"
+						style={thresholdColor ? { color: thresholdColor } : undefined}
+					>
+						{formatted}
+					</span>
+				</div>
+				<StatSparkline
+					data={scenario.sparklineData}
+					color={thresholdColor ?? scenario.sparklineColor ?? "var(--chart-1)"}
+					className="h-10 w-full shrink-0"
+				/>
+			</WidgetFrame>
+		</ScenarioCell>
+	)
+}
+
+function GaugeScenarioCard({ scenario, mode }: { scenario: WidgetScenario; mode: WidgetMode }) {
+	return (
+		<ScenarioCell label={scenario.label}>
+			<GaugeWidget
+				dataState={scenario.dataState}
+				display={scenario.display}
+				mode={mode}
+				{...handlers}
+			/>
 		</ScenarioCell>
 	)
 }

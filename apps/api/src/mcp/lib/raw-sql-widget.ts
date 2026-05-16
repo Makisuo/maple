@@ -22,6 +22,8 @@ export function visualizationToDisplayType(
 		case "table":
 			return "table"
 		case "stat":
+		// Gauge widgets consume the same scalar shape as stat widgets.
+		case "gauge":
 			return "stat"
 		case "pie":
 			return "pie"
@@ -55,9 +57,9 @@ export function buildRawSqlDataSource(args: {
 		params,
 	}
 
-	// Stat widgets need a reduceToValue transform so the StatWidget reads the
-	// scalar `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
-	if (args.visualization === "stat") {
+	// Stat and gauge widgets need a reduceToValue transform so the widget reads
+	// the scalar `data[0].value`. Mirrors buildRawSqlDataSource in the web app.
+	if (args.visualization === "stat" || args.visualization === "gauge") {
 		return {
 			...base,
 			transform: { reduceToValue: { field: "value", aggregate: "first" } },

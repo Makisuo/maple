@@ -171,6 +171,15 @@ export const WidgetDisplayConfigSchema = Schema.Struct({
 		}),
 	),
 
+	// Gauge-specific
+	gauge: Schema.optional(
+		Schema.Struct({
+			min: Schema.optional(Schema.Number),
+			max: Schema.optional(Schema.Number),
+			style: Schema.optional(Schema.Literals(["radial", "bar"])),
+		}),
+	),
+
 	// Markdown-specific
 	markdown: Schema.optional(
 		Schema.Struct({

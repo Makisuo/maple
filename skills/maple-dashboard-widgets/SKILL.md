@@ -119,6 +119,27 @@ For `visualization: "stat"`, add `dataSource.transform.reduceToValue`. Transform
 
 Valid `aggregate` values: `"sum" | "first" | "count" | "avg" | "max" | "min"`. **No `"last"`.** Without `reduceToValue`, the series array passes through to the renderer and the stat shows `[object Object],...`.
 
+## Gauge widget delta
+
+`visualization: "gauge"` renders the same scalar as a stat, but on a 180° radial arc. It needs the **same `reduceToValue` transform** as a stat widget. Add gauge presentation under `display`:
+
+```json
+"display": {
+  "unit": "percent",
+  "gauge": { "min": 0, "max": 100 },
+  "thresholds": [
+    { "value": 70, "color": "var(--chart-3)" },
+    { "value": 90, "color": "var(--destructive)" }
+  ]
+}
+```
+
+`display.thresholds` color the arc (the highest threshold ≤ the value wins) and place tick marks. `gauge.min`/`max` default to `0`/`100`. Arc color falls back to `var(--chart-1)` when no threshold matches.
+
+## Threshold lines on time-series charts
+
+`display.thresholds` also works on `chart` widgets — each entry draws a dashed horizontal `ReferenceLine` across line/area/bar charts, with an optional `label`. Reuse it to mark SLO/alert boundaries.
+
 ## Valid `aggregation` values per `dataSource`
 
 From `normalizeTraceAggregation` / `normalizeMetricsAggregation` in [apps/web/src/components/dashboard-builder/ai/normalize-widget-proposal.ts:148](apps/web/src/components/dashboard-builder/ai/normalize-widget-proposal.ts:148):

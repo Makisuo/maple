@@ -61,7 +61,7 @@ function normalizeWidgetLayouts(widgets: DashboardWidget[]): DashboardWidget[] {
 					: widget.visualization === "table" || widget.visualization === "list"
 						? 6
 						: 4,
-			h: 4,
+			h: widget.visualization === "stat" ? 4 : 5,
 			minW: widget.visualization === "stat" ? 2 : 3,
 			minH: widget.visualization === "table" || widget.visualization === "list" ? 3 : 2,
 		}

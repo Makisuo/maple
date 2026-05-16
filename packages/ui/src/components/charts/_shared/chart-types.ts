@@ -10,6 +10,12 @@ export interface ChartReferenceLine {
 	strokeDasharray?: string
 }
 
+export interface ChartThreshold {
+	value: number
+	color: string
+	label?: string
+}
+
 export interface BaseChartProps {
 	data?: Record<string, unknown>[]
 	className?: string
@@ -19,6 +25,11 @@ export interface BaseChartProps {
 	stacked?: boolean
 	curveType?: "linear" | "monotone"
 	referenceLines?: ChartReferenceLine[]
+	/**
+	 * Horizontal threshold lines drawn across the y-axis. Used to mark
+	 * "danger zone" values on time-series charts.
+	 */
+	thresholds?: ChartThreshold[]
 	unit?: string
 	logScale?: boolean
 	softMin?: number
