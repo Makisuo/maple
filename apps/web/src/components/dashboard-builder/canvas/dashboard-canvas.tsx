@@ -1,5 +1,4 @@
 import { memo, useCallback, useMemo, useRef } from "react"
-import { useNavigate } from "@tanstack/react-router"
 import { GridLayout, useContainerWidth, verticalCompactor } from "react-grid-layout"
 import type { Layout } from "react-grid-layout"
 import "react-grid-layout/css/styles.css"
@@ -11,11 +10,8 @@ import type {
 	WidgetMode,
 } from "@/components/dashboard-builder/types"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
+import { WidgetActionsProvider } from "@/components/dashboard-builder/widgets/widget-actions-context"
 import { useWidgetData } from "@/hooks/use-widget-data"
-import {
-	encodeWidgetFixContextToSearchParam,
-	type WidgetFixContext,
-} from "@/components/chat/widget-fix-context"
 import { ChartWidget } from "@/components/dashboard-builder/widgets/chart-widget"
 import { StatWidget } from "@/components/dashboard-builder/widgets/stat-widget"
 import { GaugeWidget } from "@/components/dashboard-builder/widgets/gauge-widget"
@@ -42,11 +38,6 @@ const visualizationRegistry: Record<
 		dataState: WidgetDataState
 		display: WidgetDisplayConfig
 		mode: WidgetMode
-		onRemove: () => void
-		onClone?: () => void
-		onConfigure?: () => void
-		onCreateAlert?: () => void
-		onFix?: () => void
 	}>
 > = {
 	chart: ChartWidget,
@@ -61,75 +52,14 @@ const visualizationRegistry: Record<
 }
 
 const WidgetRenderer = memo(function WidgetRenderer({ widget }: { widget: DashboardWidget }) {
-	const { mode, readOnly, removeWidget, cloneWidget, configureWidget, dashboardId } =
-		useDashboardActions()
+	const { mode } = useDashboardActions()
 	const { dataState } = useWidgetData(widget)
 	const Visualization = visualizationRegistry[widget.visualization] ?? visualizationRegistry.chart
-	const navigate = useNavigate()
-
-	const onRemove = useCallback(() => removeWidget(widget.id), [removeWidget, widget.id])
-
-	const onClone = useMemo(
-		() => (readOnly ? undefined : () => cloneWidget(widget.id)),
-		[readOnly, cloneWidget, widget.id],
-	)
-
-	const onConfigure = useMemo(
-		() => (readOnly ? undefined : () => configureWidget(widget.id)),
-		[readOnly, configureWidget, widget.id],
-	)
-
-	// "Create alert" is offered for query-driven charts (query builder + raw
-	// SQL) — those data sources convert cleanly to an alert rule.
-	const onCreateAlert = useMemo(() => {
-		if (!dashboardId) return undefined
-		const endpoint = widget.dataSource?.endpoint
-		const alertable =
-			endpoint === "raw_sql_chart" ||
-			endpoint === "custom_query_builder_timeseries" ||
-			endpoint === "custom_query_builder_breakdown" ||
-			endpoint === "custom_query_builder_list"
-		if (!alertable) return undefined
-		return () =>
-			navigate({ to: "/alerts/create", search: { dashboardId, widgetId: widget.id } })
-	}, [dashboardId, widget.dataSource?.endpoint, widget.id, navigate])
-
-	const errorTitle = dataState.status === "error" ? (dataState.title ?? null) : null
-	const errorMessage = dataState.status === "error" ? (dataState.message ?? null) : null
-	const errorKind = dataState.status === "error" ? dataState.kind : undefined
-	const onFix = useMemo(() => {
-		if (!dashboardId) return undefined
-		if (errorKind !== "decode") return undefined
-		return () => {
-			const ctx: WidgetFixContext = {
-				dashboardId,
-				widgetId: widget.id,
-				widgetTitle: widget.display.title ?? "Untitled",
-				widgetJson: JSON.stringify(widget),
-				errorTitle,
-				errorMessage,
-			}
-			navigate({
-				to: "/chat",
-				search: {
-					mode: "widget-fix",
-					widget: encodeWidgetFixContextToSearchParam(ctx),
-				},
-			})
-		}
-	}, [dashboardId, errorKind, errorTitle, errorMessage, widget, navigate])
 
 	return (
-		<Visualization
-			dataState={dataState}
-			display={widget.display}
-			mode={mode}
-			onRemove={onRemove}
-			onClone={onClone}
-			onConfigure={onConfigure}
-			onCreateAlert={onCreateAlert}
-			onFix={onFix}
-		/>
+		<WidgetActionsProvider widget={widget} dataState={dataState}>
+			<Visualization dataState={dataState} display={widget.display} mode={mode} />
+		</WidgetActionsProvider>
 	)
 })
 

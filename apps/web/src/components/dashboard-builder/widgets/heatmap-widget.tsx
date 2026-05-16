@@ -9,7 +9,7 @@ interface HeatmapWidgetProps {
 	dataState: WidgetDataState
 	display: WidgetDisplayConfig
 	mode: WidgetMode
-	onRemove: () => void
+	onRemove?: () => void
 	onClone?: () => void
 	onConfigure?: () => void
 	onFix?: () => void

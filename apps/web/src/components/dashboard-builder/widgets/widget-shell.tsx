@@ -19,10 +19,16 @@ import {
 	DropdownMenuSeparator,
 } from "@maple/ui/components/ui/dropdown-menu"
 import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
+import { useWidgetActions } from "@/components/dashboard-builder/widgets/widget-actions-context"
 
 interface WidgetShellProps {
 	title: string
 	mode: WidgetMode
+	/**
+	 * Action callbacks. When omitted, they fall back to the nearest
+	 * `WidgetActionsProvider`; explicit props override context (used by the
+	 * widget lab, which renders widgets outside a dashboard provider).
+	 */
 	onRemove?: () => void
 	onClone?: () => void
 	onConfigure?: () => void
@@ -42,10 +48,15 @@ export function WidgetShell({
 	contentClassName,
 	children,
 }: WidgetShellProps) {
+	const ctx = useWidgetActions()
+	const remove = onRemove ?? ctx?.remove
+	const clone = onClone ?? ctx?.clone
+	const configure = onConfigure ?? ctx?.configure
+	const createAlert = onCreateAlert ?? ctx?.createAlert
 	const isEditable = mode === "edit"
 	// The menu is also shown in view mode when "Create alert" is available, so
 	// alerts can be spun off a chart without entering dashboard edit mode.
-	const showMenu = isEditable || onCreateAlert != null
+	const showMenu = isEditable || createAlert != null
 
 	return (
 		<Card className="h-full flex flex-col">
@@ -69,28 +80,28 @@ export function WidgetShell({
 								}
 							/>
 							<DropdownMenuContent align="end">
-								{isEditable && onConfigure && (
-									<DropdownMenuItem onClick={onConfigure}>
+								{isEditable && configure && (
+									<DropdownMenuItem onClick={configure}>
 										<PencilIcon size={14} />
 										Edit
 									</DropdownMenuItem>
 								)}
-								{isEditable && onClone && (
-									<DropdownMenuItem onClick={onClone}>
+								{isEditable && clone && (
+									<DropdownMenuItem onClick={clone}>
 										<CopyIcon size={14} />
 										Clone
 									</DropdownMenuItem>
 								)}
-								{onCreateAlert && (
-									<DropdownMenuItem onClick={onCreateAlert}>
+								{createAlert && (
+									<DropdownMenuItem onClick={createAlert}>
 										<BellIcon size={14} />
 										Create alert
 									</DropdownMenuItem>
 								)}
-								{isEditable && onRemove && (
+								{isEditable && remove && (
 									<>
 										<DropdownMenuSeparator />
-										<DropdownMenuItem variant="destructive" onClick={onRemove}>
+										<DropdownMenuItem variant="destructive" onClick={remove}>
 											<TrashIcon size={14} />
 											Delete
 										</DropdownMenuItem>
@@ -114,7 +125,12 @@ interface WidgetFrameProps {
 	title: string
 	dataState: WidgetDataState
 	mode: WidgetMode
-	onRemove: () => void
+	/**
+	 * Action callbacks. When omitted, they fall back to the nearest
+	 * `WidgetActionsProvider`; explicit props override context (used by the
+	 * widget lab, which renders widgets outside a dashboard provider).
+	 */
+	onRemove?: () => void
 	onClone?: () => void
 	onConfigure?: () => void
 	onCreateAlert?: () => void
@@ -137,6 +153,11 @@ export function WidgetFrame({
 	loadingSkeleton,
 	children,
 }: WidgetFrameProps) {
+	// `WidgetShell` resolves the menu actions against context itself; `fix`
+	// drives the inline error CTA below, so it is resolved here too.
+	const ctx = useWidgetActions()
+	const fix = onFix ?? ctx?.fix
+
 	return (
 		<WidgetShell
 			title={title}
@@ -164,11 +185,11 @@ export function WidgetFrame({
 								{dataState.message}
 							</span>
 						)}
-						{onFix && dataState.kind === "decode" && (
+						{fix && dataState.kind === "decode" && (
 							<Button
 								variant="outline"
 								size="xs"
-								onClick={onFix}
+								onClick={fix}
 								className="mt-1 h-6 gap-1 text-[10px]"
 							>
 								<ChatBubbleSparkleIcon size={12} />
