@@ -61,6 +61,7 @@ export class OnboardingService extends Context.Service<OnboardingService>()("Onb
 			orgId: OrgId,
 			userId?: string,
 			email?: string,
+			opts?: { createdAt?: number },
 		) {
 			const existing = yield* findRow(orgId)
 			if (existing) return existing
@@ -75,7 +76,7 @@ export class OnboardingService extends Context.Service<OnboardingService>()("Onb
 							userId: userId ?? null,
 							email: email ?? null,
 							demoDataRequested: 0,
-							createdAt: now,
+							createdAt: opts?.createdAt ?? now,
 							updatedAt: now,
 						})
 						.onConflictDoNothing(),
@@ -184,12 +185,45 @@ export class OnboardingService extends Context.Service<OnboardingService>()("Onb
 				.pipe(Effect.mapError(toPersistenceError))
 		})
 
+		/**
+		 * Mark an org as already-onboarded so the activation email sequence never
+		 * fires for it — used for orgs that predate the onboarding-emails feature.
+		 * One-shot: the `onboardingCompletedAt IS NULL` guard means re-running is a
+		 * no-op once an org has been suppressed.
+		 */
+		const suppressOnboardingEmails = Effect.fn("OnboardingService.suppressOnboardingEmails")(
+			function* (orgId: OrgId) {
+				const now = Date.now()
+				yield* database
+					.execute((db) =>
+						db
+							.update(orgOnboardingState)
+							.set({
+								welcomeEmailSentAt: now,
+								connectNudgeEmailSentAt: now,
+								stalledEmailSentAt: now,
+								activationEmailSentAt: now,
+								onboardingCompletedAt: now,
+								updatedAt: now,
+							})
+							.where(
+								and(
+									eq(orgOnboardingState.orgId, orgId),
+									isNull(orgOnboardingState.onboardingCompletedAt),
+								),
+							),
+					)
+					.pipe(Effect.mapError(toPersistenceError))
+			},
+		)
+
 		return {
 			getState,
 			updateState,
 			ensureRow,
 			recordFirstDataReceived,
 			markEmailSent,
+			suppressOnboardingEmails,
 			listAll,
 		} as const
 	}),

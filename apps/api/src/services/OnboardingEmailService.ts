@@ -24,6 +24,13 @@ const CONNECT_NUDGE_AFTER_MS = DAY_MS
 /** Wait this long with no telemetry before the stalled re-engagement email. */
 const STALLED_AFTER_MS = 3 * DAY_MS
 
+/**
+ * Orgs created before this date predate the onboarding email sequence. They are
+ * treated as already-onboarded so the sequence never fires for the existing
+ * user base — only genuinely new signups go through welcome → nudge → activation.
+ */
+const ONBOARDING_LAUNCH_CUTOFF = Date.UTC(2026, 4, 17)
+
 /** The element type accepted by `@react-email/components`'s `render` — derived
  * here so this file doesn't need a direct `react` type dependency. */
 type EmailNode = Parameters<typeof render>[0]
@@ -139,11 +146,23 @@ export class OnboardingEmailService extends Context.Service<OnboardingEmailServi
 						)
 						if (!firstMember?.publicUserData) continue
 
+						const orgId = OrgId.make(org.id)
+						const orgCreatedAt =
+							typeof org.createdAt === "number" ? org.createdAt : Date.now()
+
 						yield* onboarding.ensureRow(
-							OrgId.make(org.id),
+							orgId,
 							firstMember.publicUserData.userId,
 							firstMember.publicUserData.identifier,
+							{ createdAt: orgCreatedAt },
 						)
+
+						// Orgs that predate this feature are existing users — never run
+						// the welcome → nudge → activation sequence for them.
+						if (orgCreatedAt < ONBOARDING_LAUNCH_CUTOFF) {
+							yield* onboarding.suppressOnboardingEmails(orgId)
+						}
+
 						ensured += 1
 					}
 					return ensured
