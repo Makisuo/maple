@@ -10,6 +10,8 @@ import {
 	ErrorsService,
 	HazelOAuthService,
 	NotificationDispatcher,
+	OnboardingEmailService,
+	OnboardingService,
 	OrgClickHouseSettingsService,
 	QueryEngineService,
 	ServiceMapRollupService,
@@ -78,6 +80,14 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EmailServiceLive)),
 	)
 
+	const OnboardingServiceLive = OnboardingService.layer.pipe(Layer.provide(BaseLive))
+
+	const OnboardingEmailServiceLive = OnboardingEmailService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(BaseLive, EmailServiceLive, OnboardingServiceLive, WarehouseQueryServiceLive),
+		),
+	)
+
 	const ServiceMapRollupServiceLive = ServiceMapRollupService.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive)),
 	)
@@ -85,6 +95,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	return Layer.mergeAll(
 		AlertsServiceLive,
 		DigestServiceLive,
+		OnboardingEmailServiceLive,
 		ErrorsServiceLive,
 		ServiceMapRollupServiceLive,
 	).pipe(Layer.provideMerge(telemetry.layer), Layer.provideMerge(ConfigLive))
@@ -151,6 +162,27 @@ const digestTick = Effect.gen(function* () {
 	),
 )
 
+const onboardingTick = Effect.gen(function* () {
+	const onboardingEmails = yield* OnboardingEmailService
+	const result = yield* onboardingEmails.runOnboardingTick()
+	yield* Effect.logInfo("Onboarding tick complete").pipe(
+		Effect.annotateLogs({
+			ensuredCount: result.ensuredCount,
+			sentCount: result.sentCount,
+			errorCount: result.errorCount,
+			firstDataDetected: result.firstDataDetected,
+			skipped: result.skipped,
+		}),
+	)
+}).pipe(
+	Effect.withSpan("alerting.onboarding_tick"),
+	Effect.catchCause((cause) =>
+		Effect.logError("Onboarding tick failed").pipe(
+			Effect.annotateLogs({ error: Cause.pretty(cause) }),
+		),
+	),
+)
+
 const serviceMapRollupTick = Effect.gen(function* () {
 	const rollup = yield* ServiceMapRollupService
 	const result = yield* rollup.runRollupTick()
@@ -190,7 +222,9 @@ export default {
 				? digestTick
 				: event.cron === "0 * * * *"
 					? serviceMapRollupTick
-					: Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
+					: event.cron === "0 9 * * *"
+						? onboardingTick
+						: Effect.all([alertTick, errorTick], { concurrency: 2, discard: true })
 		try {
 			await runScheduledEffect(buildLayer(env), program, ctx)
 		} finally {

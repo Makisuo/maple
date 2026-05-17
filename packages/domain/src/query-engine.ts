@@ -29,62 +29,62 @@ export type MetricType = Schema.Schema.Type<typeof MetricType>
 
 export const AttributeFilter = Schema.Struct({
 	key: Schema.String,
-	value: Schema.optionalKey(Schema.String),
+	value: Schema.optional(Schema.String),
 	mode: Schema.Literals(["equals", "exists", "gt", "gte", "lt", "lte", "contains"]),
-	negated: Schema.optionalKey(Schema.Boolean),
+	negated: Schema.optional(Schema.Boolean),
 })
 export type AttributeFilter = Schema.Schema.Type<typeof AttributeFilter>
 
 export const TracesMatchModes = Schema.Struct({
-	serviceName: Schema.optionalKey(Schema.Literals(["contains"])),
-	spanName: Schema.optionalKey(Schema.Literals(["contains"])),
-	deploymentEnv: Schema.optionalKey(Schema.Literals(["contains"])),
+	serviceName: Schema.optional(Schema.Literals(["contains"])),
+	spanName: Schema.optional(Schema.Literals(["contains"])),
+	deploymentEnv: Schema.optional(Schema.Literals(["contains"])),
 })
 export type TracesMatchModes = Schema.Schema.Type<typeof TracesMatchModes>
 
 export const TracesFilters = Schema.Struct({
-	serviceName: Schema.optionalKey(Schema.String),
-	spanName: Schema.optionalKey(Schema.String),
-	rootSpansOnly: Schema.optionalKey(Schema.Boolean),
-	environments: Schema.optionalKey(Schema.Array(Schema.String)),
-	commitShas: Schema.optionalKey(Schema.Array(Schema.String)),
-	groupByAttributeKeys: Schema.optionalKey(Schema.Array(Schema.String)),
-	errorsOnly: Schema.optionalKey(Schema.Boolean),
-	minDurationMs: Schema.optionalKey(Schema.Number),
-	maxDurationMs: Schema.optionalKey(Schema.Number),
-	matchModes: Schema.optionalKey(TracesMatchModes),
-	attributeFilters: Schema.optionalKey(Schema.Array(AttributeFilter)),
-	resourceAttributeFilters: Schema.optionalKey(Schema.Array(AttributeFilter)),
-	excludedServiceNames: Schema.optionalKey(Schema.Array(Schema.String)),
-	excludedSpanNames: Schema.optionalKey(Schema.Array(Schema.String)),
-	excludedEnvironments: Schema.optionalKey(Schema.Array(Schema.String)),
+	serviceName: Schema.optional(Schema.String),
+	spanName: Schema.optional(Schema.String),
+	rootSpansOnly: Schema.optional(Schema.Boolean),
+	environments: Schema.optional(Schema.Array(Schema.String)),
+	commitShas: Schema.optional(Schema.Array(Schema.String)),
+	groupByAttributeKeys: Schema.optional(Schema.Array(Schema.String)),
+	errorsOnly: Schema.optional(Schema.Boolean),
+	minDurationMs: Schema.optional(Schema.Number),
+	maxDurationMs: Schema.optional(Schema.Number),
+	matchModes: Schema.optional(TracesMatchModes),
+	attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
+	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
+	excludedServiceNames: Schema.optional(Schema.Array(Schema.String)),
+	excludedSpanNames: Schema.optional(Schema.Array(Schema.String)),
+	excludedEnvironments: Schema.optional(Schema.Array(Schema.String)),
 })
 export type TracesFilters = Schema.Schema.Type<typeof TracesFilters>
 
 export const LogsFilters = Schema.Struct({
-	serviceName: Schema.optionalKey(Schema.String),
-	severity: Schema.optionalKey(Schema.String),
-	traceId: Schema.optionalKey(Schema.String),
-	search: Schema.optionalKey(Schema.String),
-	environments: Schema.optionalKey(Schema.Array(Schema.String)),
-	deploymentEnvMatchMode: Schema.optionalKey(Schema.Literal("contains")),
+	serviceName: Schema.optional(Schema.String),
+	severity: Schema.optional(Schema.String),
+	traceId: Schema.optional(Schema.String),
+	search: Schema.optional(Schema.String),
+	environments: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvMatchMode: Schema.optional(Schema.Literal("contains")),
 })
 export type LogsFilters = Schema.Schema.Type<typeof LogsFilters>
 
 export const ErrorsFilters = Schema.Struct({
-	rootOnly: Schema.optionalKey(Schema.Boolean),
-	services: Schema.optionalKey(Schema.Array(Schema.String)),
-	deploymentEnvs: Schema.optionalKey(Schema.Array(Schema.String)),
-	errorTypes: Schema.optionalKey(Schema.Array(Schema.String)),
+	rootOnly: Schema.optional(Schema.Boolean),
+	services: Schema.optional(Schema.Array(Schema.String)),
+	deploymentEnvs: Schema.optional(Schema.Array(Schema.String)),
+	errorTypes: Schema.optional(Schema.Array(Schema.String)),
 })
 export type ErrorsFilters = Schema.Schema.Type<typeof ErrorsFilters>
 
 export const MetricsFilters = Schema.Struct({
 	metricName: Schema.String,
 	metricType: MetricType,
-	serviceName: Schema.optionalKey(Schema.String),
-	groupByAttributeKey: Schema.optionalKey(Schema.String),
-	attributeFilters: Schema.optionalKey(Schema.Array(AttributeFilter)),
+	serviceName: Schema.optional(Schema.String),
+	groupByAttributeKey: Schema.optional(Schema.String),
+	attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
 })
 export type MetricsFilters = Schema.Schema.Type<typeof MetricsFilters>
 
@@ -92,15 +92,15 @@ export const TracesTimeseriesQuery = Schema.Struct({
 	kind: Schema.Literal("timeseries"),
 	source: Schema.Literal("traces"),
 	metric: TracesMetric,
-	allMetrics: Schema.optionalKey(Schema.Boolean),
-	apdexThresholdMs: Schema.optionalKey(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))),
-	groupBy: Schema.optionalKey(
+	allMetrics: Schema.optional(Schema.Boolean),
+	apdexThresholdMs: Schema.optional(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))),
+	groupBy: Schema.optional(
 		Schema.Array(
 			Schema.Literals(["service", "span_name", "status_code", "http_method", "attribute", "none"]),
 		),
 	),
-	filters: Schema.optionalKey(TracesFilters),
-	bucketSeconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+	filters: Schema.optional(TracesFilters),
+	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
 })
 export type TracesTimeseriesQuery = Schema.Schema.Type<typeof TracesTimeseriesQuery>
 
@@ -108,9 +108,9 @@ export const LogsTimeseriesQuery = Schema.Struct({
 	kind: Schema.Literal("timeseries"),
 	source: Schema.Literal("logs"),
 	metric: Schema.Literal("count"),
-	groupBy: Schema.optionalKey(Schema.Array(Schema.Literals(["service", "severity", "none"]))),
-	filters: Schema.optionalKey(LogsFilters),
-	bucketSeconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+	groupBy: Schema.optional(Schema.Array(Schema.Literals(["service", "severity", "none"]))),
+	filters: Schema.optional(LogsFilters),
+	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
 })
 export type LogsTimeseriesQuery = Schema.Schema.Type<typeof LogsTimeseriesQuery>
 
@@ -118,9 +118,9 @@ export const MetricsTimeseriesQuery = Schema.Struct({
 	kind: Schema.Literal("timeseries"),
 	source: Schema.Literal("metrics"),
 	metric: MetricsMetric,
-	groupBy: Schema.optionalKey(Schema.Array(Schema.Literals(["service", "attribute", "none"]))),
+	groupBy: Schema.optional(Schema.Array(Schema.Literals(["service", "attribute", "none"]))),
 	filters: MetricsFilters,
-	bucketSeconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
 })
 export type MetricsTimeseriesQuery = Schema.Schema.Type<typeof MetricsTimeseriesQuery>
 
@@ -128,10 +128,10 @@ export const TracesBreakdownQuery = Schema.Struct({
 	kind: Schema.Literal("breakdown"),
 	source: Schema.Literal("traces"),
 	metric: TracesMetric,
-	apdexThresholdMs: Schema.optionalKey(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))),
+	apdexThresholdMs: Schema.optional(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))),
 	groupBy: Schema.Literals(["service", "span_name", "status_code", "http_method", "attribute"]),
-	filters: Schema.optionalKey(TracesFilters),
-	limit: Schema.optionalKey(
+	filters: Schema.optional(TracesFilters),
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),
 	),
 })
@@ -142,8 +142,8 @@ export const LogsBreakdownQuery = Schema.Struct({
 	source: Schema.Literal("logs"),
 	metric: Schema.Literal("count"),
 	groupBy: Schema.Literals(["service", "severity"]),
-	filters: Schema.optionalKey(LogsFilters),
-	limit: Schema.optionalKey(
+	filters: Schema.optional(LogsFilters),
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),
 	),
 })
@@ -155,7 +155,7 @@ export const MetricsBreakdownQuery = Schema.Struct({
 	metric: Schema.Literals(["avg", "sum", "count"]),
 	groupBy: Schema.Literal("service"),
 	filters: MetricsFilters,
-	limit: Schema.optionalKey(
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),
 	),
 })
@@ -164,38 +164,38 @@ export type MetricsBreakdownQuery = Schema.Schema.Type<typeof MetricsBreakdownQu
 export const TracesListQuery = Schema.Struct({
 	kind: Schema.Literal("list"),
 	source: Schema.Literal("traces"),
-	filters: Schema.optionalKey(TracesFilters),
-	columns: Schema.optionalKey(Schema.Array(Schema.String)),
-	limit: Schema.optionalKey(
+	filters: Schema.optional(TracesFilters),
+	columns: Schema.optional(Schema.Array(Schema.String)),
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(200)),
 	),
-	offset: Schema.optionalKey(
+	offset: Schema.optional(
 		Schema.Number.check(
 			Schema.isInt(),
 			Schema.isGreaterThanOrEqualTo(0),
 			Schema.isLessThanOrEqualTo(1000),
 		),
 	),
-	cursor: Schema.optionalKey(Schema.String),
+	cursor: Schema.optional(Schema.String),
 })
 export type TracesListQuery = Schema.Schema.Type<typeof TracesListQuery>
 
 export const LogsListQuery = Schema.Struct({
 	kind: Schema.Literal("list"),
 	source: Schema.Literal("logs"),
-	filters: Schema.optionalKey(LogsFilters),
-	limit: Schema.optionalKey(
+	filters: Schema.optional(LogsFilters),
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(200)),
 	),
-	cursor: Schema.optionalKey(Schema.String),
+	cursor: Schema.optional(Schema.String),
 })
 export type LogsListQuery = Schema.Schema.Type<typeof LogsListQuery>
 
 export const AttributeKeysQuery = Schema.Struct({
 	kind: Schema.Literal("attributeKeys"),
 	source: Schema.Literals(["traces", "logs", "metrics"]),
-	scope: Schema.optionalKey(Schema.Literals(["span", "resource"])),
-	limit: Schema.optionalKey(
+	scope: Schema.optional(Schema.Literals(["span", "resource"])),
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
 	),
 })
@@ -204,21 +204,21 @@ export type AttributeKeysQuery = Schema.Schema.Type<typeof AttributeKeysQuery>
 export const TracesFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("traces"),
-	filters: Schema.optionalKey(TracesFilters),
+	filters: Schema.optional(TracesFilters),
 })
 export type TracesFacetsQuery = Schema.Schema.Type<typeof TracesFacetsQuery>
 
 export const LogsFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("logs"),
-	filters: Schema.optionalKey(LogsFilters),
+	filters: Schema.optional(LogsFilters),
 })
 export type LogsFacetsQuery = Schema.Schema.Type<typeof LogsFacetsQuery>
 
 export const ErrorsFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("errors"),
-	filters: Schema.optionalKey(ErrorsFilters),
+	filters: Schema.optional(ErrorsFilters),
 })
 export type ErrorsFacetsQuery = Schema.Schema.Type<typeof ErrorsFacetsQuery>
 
@@ -231,7 +231,7 @@ export type ServicesFacetsQuery = Schema.Schema.Type<typeof ServicesFacetsQuery>
 export const TracesStatsQuery = Schema.Struct({
 	kind: Schema.Literal("stats"),
 	source: Schema.Literal("traces"),
-	filters: Schema.optionalKey(TracesFilters),
+	filters: Schema.optional(TracesFilters),
 })
 export type TracesStatsQuery = Schema.Schema.Type<typeof TracesStatsQuery>
 
@@ -240,7 +240,7 @@ export const AttributeValuesQuery = Schema.Struct({
 	source: Schema.Literals(["traces", "logs", "metrics"]),
 	scope: Schema.Literals(["span", "resource", "log", "metric"]),
 	attributeKey: Schema.String,
-	limit: Schema.optionalKey(
+	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
 	),
 })
@@ -249,7 +249,7 @@ export type AttributeValuesQuery = Schema.Schema.Type<typeof AttributeValuesQuer
 export const LogsCountQuery = Schema.Struct({
 	kind: Schema.Literal("count"),
 	source: Schema.Literal("logs"),
-	filters: Schema.optionalKey(LogsFilters),
+	filters: Schema.optional(LogsFilters),
 })
 export type LogsCountQuery = Schema.Schema.Type<typeof LogsCountQuery>
 
@@ -396,7 +396,7 @@ export const QueryEngineAlertObservation = Schema.Struct({
 	value: Schema.NullOr(Schema.Number),
 	sampleCount: Schema.Number,
 	hasData: Schema.Boolean,
-	label: Schema.optionalKey(Schema.String),
+	label: Schema.optional(Schema.String),
 })
 export type QueryEngineAlertObservation = Schema.Schema.Type<typeof QueryEngineAlertObservation>
 
@@ -416,7 +416,7 @@ export class QueryEngineEvaluateResponse extends Schema.Class<QueryEngineEvaluat
 	value: Schema.NullOr(Schema.Number),
 	sampleCount: Schema.Number,
 	hasData: Schema.Boolean,
-	reason: Schema.optionalKey(Schema.String),
+	reason: Schema.optional(Schema.String),
 	reducer: QueryEngineAlertReducer,
 	observations: Schema.Array(QueryEngineAlertObservation),
 }) {}

@@ -36,7 +36,7 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 		compatibility: "node",
 		compatibilityDate: "2026-04-08",
 		adopt: true,
-		crons: ["* * * * *", "*/15 * * * *"],
+		crons: ["* * * * *", "*/15 * * * *", "0 9 * * *"],
 		bindings: {
 			MAPLE_DB: mapleDb,
 			TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
