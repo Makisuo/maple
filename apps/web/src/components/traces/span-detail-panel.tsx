@@ -33,6 +33,7 @@ import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/com
 import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { HttpSpanLabel } from "./http-span-label"
+import type { SpanId, TraceId } from "@maple/domain"
 
 interface SpanDetailPanelProps {
 	span: SpanNode
@@ -180,7 +181,7 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
 	)
 }
 
-function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: string; timeZone: string }) {
+function SpanLogs({ traceId, spanId, timeZone }: { traceId: TraceId; spanId: SpanId; timeZone: string }) {
 	const [selectedLog, setSelectedLog] = useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = useState(false)
 

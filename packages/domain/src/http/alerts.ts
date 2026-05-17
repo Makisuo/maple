@@ -6,6 +6,8 @@ import {
 	AlertDestinationId,
 	AlertIncidentId,
 	AlertRuleId,
+	HazelChannelId,
+	HazelOrganizationId,
 	IsoDateTimeString,
 	RoleName,
 } from "../primitives"
@@ -184,10 +186,10 @@ export class HazelOAuthAlertDestinationConfig extends Schema.Class<HazelOAuthAle
 )({
 	type: Schema.Literal("hazel-oauth"),
 	name: ChannelLabel,
-	hazelOrganizationId: NonEmptyString,
+	hazelOrganizationId: HazelOrganizationId,
 	hazelOrganizationName: NonEmptyString,
 	hazelOrganizationLogoUrl: Schema.optionalKey(Schema.NullOr(NonEmptyString)),
-	hazelChannelId: NonEmptyString,
+	hazelChannelId: HazelChannelId,
 	hazelChannelName: NonEmptyString,
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
@@ -240,10 +242,10 @@ export class UpdateHazelOAuthAlertDestinationConfig extends Schema.Class<UpdateH
 	"UpdateHazelOAuthAlertDestinationConfig",
 )({
 	name: OptionalNonEmptyString,
-	hazelOrganizationId: Schema.optionalKey(Schema.String),
+	hazelOrganizationId: Schema.optionalKey(HazelOrganizationId),
 	hazelOrganizationName: Schema.optionalKey(Schema.String),
 	hazelOrganizationLogoUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
-	hazelChannelId: Schema.optionalKey(Schema.String),
+	hazelChannelId: Schema.optionalKey(HazelChannelId),
 	hazelChannelName: Schema.optionalKey(Schema.String),
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}

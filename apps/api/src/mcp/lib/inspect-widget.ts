@@ -166,16 +166,18 @@ export const inspectWidget = (input: InspectWidgetInput) => {
 			} satisfies InspectionOutcome
 		}
 
-		let decodedParams: Schema.Schema.Type<typeof QueryBuilderParamsSchema>
-		try {
-			decodedParams = decodeQueryBuilderParamsSync(rawParams)
-		} catch (error) {
+		const decodedParamsExit = yield* Effect.try({
+			try: () => decodeQueryBuilderParamsSync(rawParams),
+			catch: (error) => error,
+		}).pipe(Effect.exit)
+		if (Exit.isFailure(decodedParamsExit)) {
 			return {
 				kind: "skipped",
 				reason: "decode_failed",
-				detail: `Failed to decode widget params: ${String(error)}. The widget's queries[] does not match the query-builder shape.`,
+				detail: `Failed to decode widget params: ${Cause.pretty(decodedParamsExit.cause)}. The widget's queries[] does not match the query-builder shape.`,
 			} satisfies InspectionOutcome
 		}
+		const decodedParams = decodedParamsExit.value
 
 		const enabledRawDrafts = decodedParams.queries.filter((q) => q.enabled !== false)
 		if (enabledRawDrafts.length === 0) {
@@ -230,21 +232,23 @@ export const inspectWidget = (input: InspectWidgetInput) => {
 				continue
 			}
 
-			let decodedSpec
-			try {
-				decodedSpec = decodeQuerySpecSync(buildResult.query)
-			} catch (error) {
+			const decodedSpecExit = yield* Effect.try({
+				try: () => decodeQuerySpecSync(buildResult.query),
+				catch: (error) => error,
+			}).pipe(Effect.exit)
+			if (Exit.isFailure(decodedSpecExit)) {
 				queryResults.push({
 					queryId: draft.id,
 					queryName: draft.name,
 					status: "error",
-					error: `Invalid query specification: ${String(error)}`,
+					error: `Invalid query specification: ${Cause.pretty(decodedSpecExit.cause)}`,
 					stats: { rowCount: 0, seriesCount: 0, seriesStats: [] },
 					flags: ["EMPTY", ...builderWarningFlags],
 					...(builderWarnings && { builderWarnings }),
 				})
 				continue
 			}
+			const decodedSpec = decodedSpecExit.value
 
 			const exit = yield* queryEngine
 				.execute(tenant, {

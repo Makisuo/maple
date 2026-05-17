@@ -1,6 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
+import { HazelChannelId, HazelOrganizationId } from "../primitives"
 
 export class HazelIntegrationStatus extends Schema.Class<HazelIntegrationStatus>("HazelIntegrationStatus")({
 	connected: Schema.Boolean,
@@ -13,7 +14,7 @@ export class HazelIntegrationStatus extends Schema.Class<HazelIntegrationStatus>
 export class HazelOrganizationSummary extends Schema.Class<HazelOrganizationSummary>(
 	"HazelOrganizationSummary",
 )({
-	id: Schema.String,
+	id: HazelOrganizationId,
 	name: Schema.String,
 	slug: Schema.NullOr(Schema.String),
 	logoUrl: Schema.NullOr(Schema.String),
@@ -32,10 +33,10 @@ export const HazelChannelType = Schema.Literals(["public", "private"]).annotate(
 export type HazelChannelType = Schema.Schema.Type<typeof HazelChannelType>
 
 export class HazelChannelSummary extends Schema.Class<HazelChannelSummary>("HazelChannelSummary")({
-	id: Schema.String,
+	id: HazelChannelId,
 	name: Schema.String,
 	type: HazelChannelType,
-	organizationId: Schema.String,
+	organizationId: HazelOrganizationId,
 }) {}
 
 export class HazelChannelsListResponse extends Schema.Class<HazelChannelsListResponse>(
@@ -47,7 +48,7 @@ export class HazelChannelsListResponse extends Schema.Class<HazelChannelsListRes
 export class HazelStartConnectRequest extends Schema.Class<HazelStartConnectRequest>(
 	"HazelStartConnectRequest",
 )({
-	returnTo: Schema.optional(Schema.String),
+	returnTo: Schema.optionalKey(Schema.String),
 }) {}
 
 export class HazelStartConnectResponse extends Schema.Class<HazelStartConnectResponse>(
@@ -99,7 +100,7 @@ export class IntegrationsUpstreamError extends Schema.TaggedErrorClass<Integrati
 	"@maple/http/errors/IntegrationsUpstreamError",
 	{
 		message: Schema.String,
-		status: Schema.optional(Schema.Number),
+		status: Schema.optionalKey(Schema.Number),
 	},
 	{ httpApiStatus: 502 },
 ) {}
@@ -146,7 +147,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.get("hazelChannels", "/hazel/organizations/:organizationId/channels", {
 			params: {
-				organizationId: Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
+				organizationId: HazelOrganizationId,
 			},
 			success: HazelChannelsListResponse,
 			error: [

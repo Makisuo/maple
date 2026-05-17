@@ -14,10 +14,11 @@ type AttributeKeyRow = SpanAttributeKeysOutput
 // Both value endpoints share: { attributeValue, usageCount }
 type AttributeValueRow = SpanAttributeValuesOutput | ResourceAttributeValuesOutput
 
-export const exploreAttributeKeys = (
+export const exploreAttributeKeys: (
 	input: ExploreAttributesInput,
-): Effect.Effect<ReadonlyArray<AttributeKeyResult>, ObservabilityError, TinybirdExecutor> =>
-	Effect.gen(function* () {
+) => Effect.Effect<ReadonlyArray<AttributeKeyResult>, ObservabilityError, TinybirdExecutor> = Effect.fn(
+	"Observability.exploreAttributeKeys",
+)(function* (input) {
 		const executor = yield* TinybirdExecutor
 
 		const pipeName =
@@ -61,12 +62,13 @@ export const exploreAttributeKeys = (
 			result.data,
 			Arr.map((d): AttributeKeyResult => ({ key: d.attributeKey, count: Number(d.usageCount) })),
 		)
-	})
+})
 
-export const exploreAttributeValues = (
+export const exploreAttributeValues: (
 	input: ExploreAttributesInput & { key: string },
-): Effect.Effect<ReadonlyArray<AttributeValueResult>, ObservabilityError, TinybirdExecutor> =>
-	Effect.gen(function* () {
+) => Effect.Effect<ReadonlyArray<AttributeValueResult>, ObservabilityError, TinybirdExecutor> = Effect.fn(
+	"Observability.exploreAttributeValues",
+)(function* (input) {
 		const executor = yield* TinybirdExecutor
 
 		const pipeName =
@@ -90,4 +92,4 @@ export const exploreAttributeValues = (
 			result.data,
 			Arr.map((d): AttributeValueResult => ({ value: d.attributeValue, count: Number(d.usageCount) })),
 		)
-	})
+})

@@ -3,7 +3,7 @@ import { Schema } from "effect"
 import { Authorization } from "./current-tenant"
 
 export class DemoSeedRequest extends Schema.Class<DemoSeedRequest>("DemoSeedRequest")({
-	hours: Schema.optional(Schema.Number),
+	hours: Schema.optionalKey(Schema.Number),
 }) {}
 
 export class DemoSeedResponse extends Schema.Class<DemoSeedResponse>("DemoSeedResponse")({

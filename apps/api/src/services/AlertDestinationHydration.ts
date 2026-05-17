@@ -1,15 +1,16 @@
 import type { AlertDestinationRow } from "@maple/db"
+import { HazelChannelId, HazelOrganizationId, HazelWebhookId } from "@maple/domain/http"
 import { Effect, Schema } from "effect"
 import { decryptAes256Gcm } from "./Crypto"
 
 export const DestinationPublicConfigSchema = Schema.Struct({
 	summary: Schema.String,
 	channelLabel: Schema.NullOr(Schema.String),
-	hazelOrganizationId: Schema.optional(Schema.String),
-	hazelOrganizationName: Schema.optional(Schema.String),
-	hazelOrganizationLogoUrl: Schema.optional(Schema.NullOr(Schema.String)),
-	hazelChannelId: Schema.optional(Schema.String),
-	hazelChannelName: Schema.optional(Schema.String),
+	hazelOrganizationId: Schema.optionalKey(HazelOrganizationId),
+	hazelOrganizationName: Schema.optionalKey(Schema.String),
+	hazelOrganizationLogoUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	hazelChannelId: Schema.optionalKey(HazelChannelId),
+	hazelChannelName: Schema.optionalKey(Schema.String),
 })
 
 export const DestinationSecretConfigSchema = Schema.Union([
@@ -33,11 +34,11 @@ export const DestinationSecretConfigSchema = Schema.Union([
 	}),
 	Schema.Struct({
 		type: Schema.Literal("hazel-oauth"),
-		hazelOrganizationId: Schema.String,
+		hazelOrganizationId: HazelOrganizationId,
 		hazelOrganizationName: Schema.String,
-		hazelChannelId: Schema.String,
+		hazelChannelId: HazelChannelId,
 		hazelChannelName: Schema.String,
-		webhookId: Schema.String,
+		webhookId: HazelWebhookId,
 		webhookUrl: Schema.String,
 		webhookToken: Schema.String,
 	}),

@@ -28,9 +28,9 @@ export class UpsertDigestSubscriptionRequest extends Schema.Class<UpsertDigestSu
 	"UpsertDigestSubscriptionRequest",
 )({
 	email: Schema.String,
-	enabled: Schema.optional(Schema.Boolean),
-	dayOfWeek: Schema.optional(Schema.Number),
-	timezone: Schema.optional(Schema.String),
+	enabled: Schema.optionalKey(Schema.Boolean),
+	dayOfWeek: Schema.optionalKey(Schema.Number),
+	timezone: Schema.optionalKey(Schema.String),
 }) {}
 
 export class DigestPreviewResponse extends Schema.Class<DigestPreviewResponse>("DigestPreviewResponse")({

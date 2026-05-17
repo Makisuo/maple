@@ -4,8 +4,10 @@ import {
 	AlertRuleDocument,
 	AlertRuleTestRequest,
 	AlertRuleUpsertRequest,
+	HazelChannelId,
 	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
+	HazelOrganizationId,
 	PagerDutyAlertDestinationConfig,
 	SlackAlertDestinationConfig,
 	WebhookAlertDestinationConfig,
@@ -22,9 +24,12 @@ import {
 	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
 import type { QueryEngineAlertReducer } from "@maple/query-engine"
-import { Cause, Exit, Option } from "effect"
+import { Cause, Exit, Option, Schema } from "effect"
 import { buildTimeseriesQuerySpec } from "@/lib/query-builder/model"
 import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
+
+const decodeHazelOrganizationIdSync = Schema.decodeSync(HazelOrganizationId)
+const decodeHazelChannelIdSync = Schema.decodeSync(HazelChannelId)
 
 export type RuleFormState = {
 	name: string
@@ -519,16 +524,18 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
 		}
 		case "hazel-oauth": {
 			const logoUrl = form.hazelOrganizationLogoUrl
+			const hazelOrganizationId = decodeHazelOrganizationIdSync(form.hazelOrganizationId.trim())
+			const hazelChannelId = decodeHazelChannelIdSync(form.hazelChannelId.trim())
 			return new HazelOAuthAlertDestinationConfig({
 				type: "hazel-oauth",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				hazelOrganizationId: form.hazelOrganizationId.trim(),
+				hazelOrganizationId,
 				hazelOrganizationName: form.hazelOrganizationName.trim(),
 				...(logoUrl !== null && logoUrl.trim().length > 0
 					? { hazelOrganizationLogoUrl: logoUrl.trim() }
 					: {}),
-				hazelChannelId: form.hazelChannelId.trim(),
+				hazelChannelId,
 				hazelChannelName: form.hazelChannelName.trim(),
 			})
 		}
@@ -569,17 +576,21 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
 				signingSecret: form.signingSecret.trim() || undefined,
 			}
 		case "hazel-oauth":
+			const hazelOrganizationId = form.hazelOrganizationId.trim()
+			const hazelChannelId = form.hazelChannelId.trim()
 			return {
 				type: "hazel-oauth",
 				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				hazelOrganizationId: form.hazelOrganizationId.trim() || undefined,
+				hazelOrganizationId: hazelOrganizationId
+					? decodeHazelOrganizationIdSync(hazelOrganizationId)
+					: undefined,
 				hazelOrganizationName: form.hazelOrganizationName.trim() || undefined,
 				hazelOrganizationLogoUrl:
 					form.hazelOrganizationLogoUrl === null
 						? null
 						: form.hazelOrganizationLogoUrl.trim() || undefined,
-				hazelChannelId: form.hazelChannelId.trim() || undefined,
+				hazelChannelId: hazelChannelId ? decodeHazelChannelIdSync(hazelChannelId) : undefined,
 				hazelChannelName: form.hazelChannelName.trim() || undefined,
 			}
 	}

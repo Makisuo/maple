@@ -4,10 +4,11 @@ import { TinybirdExecutor, ObservabilityError } from "./TinybirdExecutor"
 import type { ListServicesInput, ServiceSummary } from "./types"
 import { aggregateServiceRows, weightedAvg } from "./aggregation"
 
-export const listServices = (
+export const listServices: (
 	input: ListServicesInput,
-): Effect.Effect<ReadonlyArray<ServiceSummary>, ObservabilityError, TinybirdExecutor> =>
-	Effect.gen(function* () {
+) => Effect.Effect<ReadonlyArray<ServiceSummary>, ObservabilityError, TinybirdExecutor> = Effect.fn(
+	"Observability.listServices",
+)(function* (input) {
 		const executor = yield* TinybirdExecutor
 
 		const result = yield* executor.query<ServiceOverviewOutput>(
@@ -40,4 +41,4 @@ export const listServices = (
 				b.throughput > a.throughput ? -1 : b.throughput < a.throughput ? 1 : 0,
 			),
 		)
-	})
+})

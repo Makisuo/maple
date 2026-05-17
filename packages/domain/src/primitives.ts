@@ -93,6 +93,15 @@ export type AlertIncidentId = Schema.Schema.Type<typeof AlertIncidentId>
 export const AlertDeliveryEventId = MapleUuidId("@maple/AlertDeliveryEventId", "Alert Delivery Event ID")
 export type AlertDeliveryEventId = Schema.Schema.Type<typeof AlertDeliveryEventId>
 
+export const HazelOrganizationId = MapleId("@maple/HazelOrganizationId", "Hazel Organization ID")
+export type HazelOrganizationId = Schema.Schema.Type<typeof HazelOrganizationId>
+
+export const HazelChannelId = MapleId("@maple/HazelChannelId", "Hazel Channel ID")
+export type HazelChannelId = Schema.Schema.Type<typeof HazelChannelId>
+
+export const HazelWebhookId = MapleId("@maple/HazelWebhookId", "Hazel Webhook ID")
+export type HazelWebhookId = Schema.Schema.Type<typeof HazelWebhookId>
+
 export const ErrorIssueId = MapleUuidId("@maple/ErrorIssueId", "Error Issue ID")
 export type ErrorIssueId = Schema.Schema.Type<typeof ErrorIssueId>
 

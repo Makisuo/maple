@@ -1,5 +1,5 @@
 import { McpSchema, McpServer as EffectMcpServer } from "effect/unstable/ai"
-import { Effect, Layer, Schema, Context } from "effect"
+import { Context, Data, Effect, Layer, Schema } from "effect"
 import { mapleToolDefinitions, toInputSchema, type MapleToolDefinition } from "./tools/registry"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./tools/types"
 
@@ -28,6 +28,10 @@ const toDecodeErrorMessage = (definition: MapleToolDefinition, error: unknown): 
 	return String(error)
 }
 
+class McpDecodeError extends Data.TaggedError("@maple/mcp/decode-error")<{
+	readonly errorMessage: string
+}> {}
+
 export const McpToolsLive = Layer.effectDiscard(
 	EffectMcpServer.McpServer.use((server) =>
 		Effect.forEach(mapleToolDefinitions, (definition) =>
@@ -46,7 +50,7 @@ export const McpToolsLive = Layer.effectDiscard(
 						}).pipe(
 							Effect.mapError((error) => {
 								const errorMessage = toDecodeErrorMessage(definition, error)
-								return { _tag: "@maple/mcp/decode-error" as const, errorMessage }
+								return new McpDecodeError({ errorMessage })
 							}),
 						)
 
@@ -73,9 +77,10 @@ export const McpToolsLive = Layer.effectDiscard(
 						),
 						Effect.catchTags({
 							"@maple/mcp/errors/McpQueryError": (error) =>
-								Effect.logError(`Tool error: ${error.message}`).pipe(
+								Effect.logError("MCP tool failed").pipe(
 									Effect.annotateLogs({
 										errorTag: error._tag,
+										errorMessage: error.message,
 										pipe: error.pipe,
 									}),
 									Effect.as(
@@ -88,8 +93,8 @@ export const McpToolsLive = Layer.effectDiscard(
 									),
 								),
 							"@maple/mcp/errors/McpTenantError": (error) =>
-								Effect.logError(`Tool error: ${error.message}`).pipe(
-									Effect.annotateLogs({ errorTag: error._tag }),
+								Effect.logError("MCP tool failed").pipe(
+									Effect.annotateLogs({ errorTag: error._tag, errorMessage: error.message }),
 									Effect.as(
 										toCallToolResult({
 											isError: true,
@@ -100,8 +105,8 @@ export const McpToolsLive = Layer.effectDiscard(
 									),
 								),
 							"@maple/mcp/errors/McpAuthMissingError": (error) =>
-								Effect.logError(`Auth error: ${error.message}`).pipe(
-									Effect.annotateLogs({ errorTag: error._tag }),
+								Effect.logError("MCP auth failed").pipe(
+									Effect.annotateLogs({ errorTag: error._tag, errorMessage: error.message }),
 									Effect.as(
 										toCallToolResult({
 											isError: true,
@@ -112,8 +117,8 @@ export const McpToolsLive = Layer.effectDiscard(
 									),
 								),
 							"@maple/mcp/errors/McpAuthInvalidError": (error) =>
-								Effect.logError(`Auth error: ${error.message}`).pipe(
-									Effect.annotateLogs({ errorTag: error._tag }),
+								Effect.logError("MCP auth failed").pipe(
+									Effect.annotateLogs({ errorTag: error._tag, errorMessage: error.message }),
 									Effect.as(
 										toCallToolResult({
 											isError: true,
@@ -124,10 +129,12 @@ export const McpToolsLive = Layer.effectDiscard(
 									),
 								),
 							"@maple/mcp/errors/McpInvalidTenantError": (error) =>
-								Effect.logError(
-									`Tenant validation error [${error.field}]: ${error.message}`,
-								).pipe(
-									Effect.annotateLogs({ errorTag: error._tag, field: error.field }),
+								Effect.logError("MCP tenant validation failed").pipe(
+									Effect.annotateLogs({
+										errorTag: error._tag,
+										errorMessage: error.message,
+										field: error.field,
+									}),
 									Effect.as(
 										toCallToolResult({
 											isError: true,
@@ -142,7 +149,8 @@ export const McpToolsLive = Layer.effectDiscard(
 								),
 						}),
 						Effect.catchDefect((error) =>
-							Effect.logError(`Tool defect: ${toErrorMessage(error)}`).pipe(
+							Effect.logError("MCP tool defect").pipe(
+								Effect.annotateLogs({ errorMessage: toErrorMessage(error) }),
 								Effect.as(
 									toCallToolResult({
 										isError: true,

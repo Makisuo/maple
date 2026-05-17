@@ -21,14 +21,15 @@ export interface ErrorDetailOutput {
 	readonly timeseries?: ReadonlyArray<{ bucket: string; count: number }>
 }
 
-export const errorDetail = (input: {
+export const errorDetail: (input: {
 	readonly errorType: string
 	readonly timeRange: TimeRange
 	readonly service?: string
 	readonly includeTimeseries?: boolean
 	readonly limit?: number
-}): Effect.Effect<ErrorDetailOutput, ObservabilityError, TinybirdExecutor> =>
-	Effect.gen(function* () {
+}) => Effect.Effect<ErrorDetailOutput, ObservabilityError, TinybirdExecutor> = Effect.fn(
+	"Observability.errorDetail",
+)(function* (input) {
 		const executor = yield* TinybirdExecutor
 		const limit = input.limit ?? 5
 
@@ -112,4 +113,4 @@ export const errorDetail = (input: {
 			),
 			timeseries,
 		}
-	})
+})

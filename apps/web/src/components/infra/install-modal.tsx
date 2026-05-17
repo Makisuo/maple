@@ -1,4 +1,4 @@
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
@@ -62,6 +62,7 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 	const [copied, setCopied] = useState(false)
 
 	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
+	const refreshKeys = useAtomRefresh(MapleApiAtomClient.query("ingestKeys", "get", {}))
 
 	const token = useMemo(
 		() =>
@@ -145,6 +146,16 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 
 					{Result.isInitial(keysResult) ? (
 						<Skeleton className="h-36 w-full" />
+					) : Result.isFailure(keysResult) ? (
+						<div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+							<p className="text-sm font-medium text-destructive">Unable to load install token</p>
+							<p className="mt-1 text-xs text-muted-foreground">
+								Refresh the ingest key lookup before copying an install command.
+							</p>
+							<Button variant="outline" size="sm" className="mt-3" onClick={() => refreshKeys()}>
+								Retry
+							</Button>
+						</div>
 					) : (
 						<InputGroup>
 							<InputGroupTextarea

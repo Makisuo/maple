@@ -32,15 +32,15 @@ const telemetry = MapleCloudflareSDK.make({ serviceName: "alerting" })
 
 const buildLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLive
-	const EnvLive = Env.Default.pipe(Layer.provide(ConfigLive))
+	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
 
 	const DatabaseLive = DatabaseD1Live.pipe(Layer.provide(WorkerEnvironmentLive))
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 
-	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.Live.pipe(Layer.provide(BaseLive))
+	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(Layer.provide(BaseLive))
 
-	const WarehouseQueryServiceLive = WarehouseQueryService.Live.pipe(
+	const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
 		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive)),
 	)
 
@@ -52,48 +52,43 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(BucketCacheServiceLive),
 	)
 
-	const HazelOAuthServiceLive = HazelOAuthService.Live.pipe(Layer.provide(BaseLive))
+	const HazelOAuthServiceLive = HazelOAuthService.layer.pipe(Layer.provide(BaseLive))
 
-	const AlertsServiceLive = AlertsService.Live.pipe(
+	const AlertsServiceLive = AlertsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
 				BaseLive,
 				QueryEngineServiceLive,
 				WarehouseQueryServiceLive,
-				AlertRuntime.Default,
+				AlertRuntime.layer,
 				HazelOAuthServiceLive,
 			),
 		),
 	)
 
-	const NotificationDispatcherLive = NotificationDispatcher.Live.pipe(
+	const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, HazelOAuthServiceLive)),
 	)
 
-	const ErrorsServiceLive = ErrorsService.Live.pipe(
+	const ErrorsServiceLive = ErrorsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, NotificationDispatcherLive)),
 	)
 
-	const EmailServiceLive = EmailService.Default.pipe(Layer.provide(EnvLive))
+	const EmailServiceLive = EmailService.layer.pipe(Layer.provide(EnvLive))
 
-	const DigestServiceLive = DigestService.Default.pipe(
+	const DigestServiceLive = DigestService.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EmailServiceLive)),
 	)
 
-	const OnboardingServiceLive = OnboardingService.Live.pipe(Layer.provide(BaseLive))
+	const OnboardingServiceLive = OnboardingService.layer.pipe(Layer.provide(BaseLive))
 
-	const OnboardingEmailServiceLive = OnboardingEmailService.Live.pipe(
+	const OnboardingEmailServiceLive = OnboardingEmailService.layer.pipe(
 		Layer.provide(
-			Layer.mergeAll(
-				BaseLive,
-				EmailServiceLive,
-				OnboardingServiceLive,
-				WarehouseQueryServiceLive,
-			),
+			Layer.mergeAll(BaseLive, EmailServiceLive, OnboardingServiceLive, WarehouseQueryServiceLive),
 		),
 	)
 
-	const ServiceMapRollupServiceLive = ServiceMapRollupService.Live.pipe(
+	const ServiceMapRollupServiceLive = ServiceMapRollupService.layer.pipe(
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive)),
 	)
 

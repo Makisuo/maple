@@ -212,10 +212,13 @@ export function IngestionSection() {
 
 	const publicKey = Result.builder(keysResult)
 		.onSuccess((v) => v.publicKey)
+		.onError(() => "Unable to load key")
 		.orElse(() => "Loading...")
 	const privateKey = Result.builder(keysResult)
 		.onSuccess((v) => v.privateKey)
+		.onError(() => "Unable to load key")
 		.orElse(() => "Loading...")
+	const keysFailed = Result.isFailure(keysResult)
 
 	return (
 		<>
@@ -267,6 +270,11 @@ export function IngestionSection() {
 						<CardDescription>Use these keys to authenticate ingestion requests.</CardDescription>
 					</CardHeader>
 					<CardContent className="space-y-4">
+						{keysFailed ? (
+							<p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+								Unable to load ingest keys. Try refreshing the keys or reloading this page.
+							</p>
+						) : null}
 						<ApiKeyRow
 							type="public"
 							label="Public"
@@ -277,7 +285,7 @@ export function IngestionSection() {
 							isCopied={copiedKey === "public"}
 							onCopy={() => handleCopy("public")}
 							onRegenerate={() => openRegenerateDialog("public")}
-							disabled={isBusy}
+							disabled={isBusy || keysFailed}
 						/>
 						<Separator />
 						<ApiKeyRow
@@ -290,7 +298,7 @@ export function IngestionSection() {
 							isCopied={copiedKey === "private"}
 							onCopy={() => handleCopy("private")}
 							onRegenerate={() => openRegenerateDialog("private")}
-							disabled={isBusy}
+							disabled={isBusy || keysFailed}
 						/>
 					</CardContent>
 				</Card>
