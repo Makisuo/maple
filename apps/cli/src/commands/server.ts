@@ -15,10 +15,11 @@ import {
 	storeMarkerPath,
 	storeOpenMarkerPath,
 } from "../server/store-version"
-import { createCheckpoint, restoreCheckpoint } from "../server/checkpoints"
+import { createCheckpoint, reconcileCheckpointRecovery, restoreCheckpoint } from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
 import { amber, bold, cyan, dim, green, underline } from "../lib/style"
 import { MAPLE_VERSION } from "../version"
+import { buildDetachedChildArgs, type DirtyStorePolicy } from "./server-args"
 
 /** A `maple start`/`maple stop` failure. The message is shown to the user and
  *  the process exits non-zero — same role the old `process.exit(1)` paths had,
@@ -135,6 +136,12 @@ const yesFlag = Flag.boolean("yes").pipe(
 	Flag.withDefault(false),
 )
 
+const checkpointIdFlag = Flag.optional(
+	Flag.string("checkpoint-id").pipe(
+		Flag.withDescription("Restore one immutable checkpoint ID instead of the selected current"),
+	),
+)
+
 const offlineFlag = Flag.boolean("offline").pipe(
 	Flag.withDescription(
 		"Use the UI bundled in this binary (served from 127.0.0.1) instead of local.maple.dev",
@@ -166,6 +173,7 @@ const startDetached = (
 	dataDir: string,
 	offline: boolean,
 	chdbConfigFile: string | undefined,
+	onDirtyStore: DirtyStorePolicy,
 ): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
 		const logPath = logFilePath(dataDir)
@@ -173,18 +181,14 @@ const startDetached = (
 		// binary injects a virtual `/$bunfs/...` entrypoint at argv[1] that must
 		// not be forwarded. In dev (`bun run src/bin.ts`) argv[1] is the real
 		// script and Bun needs it; in the compiled binary execPath alone suffices.
-		const entry = process.argv[1]
-		const runtimeArgs = entry && !entry.startsWith("/$bunfs") ? [entry] : []
-		const childArgs = [
-			...runtimeArgs,
-			"start",
-			"--port",
-			String(port),
-			"--data-dir",
+		const childArgs = buildDetachedChildArgs({
+			entry: process.argv[1],
+			port,
 			dataDir,
-			...(chdbConfigFile ? ["--chdb-config-file", chdbConfigFile] : []),
-			...(offline ? ["--offline"] : []),
-		]
+			offline,
+			chdbConfigFile,
+			onDirtyStore,
+		})
 
 		const child = yield* Effect.try({
 			try: () => {
@@ -253,6 +257,12 @@ export const start = Command.make("start", {
 				})
 			}
 			if (Option.isSome(existingPid)) yield* fs.remove(pidPath, { force: true }).pipe(Effect.ignore) // stale
+
+			// A restore transaction lives beside dataDir and must be reconciled
+			// before reset, compatibility, dirty-store, or directory creation logic.
+			yield* reconcileCheckpointRecovery(dataDir).pipe(
+				Effect.mapError((e) => new ServerError({ message: e.message })),
+			)
 
 			// `--reset`: wipe the store (and its version marker) so we bootstrap fresh.
 			// The escape hatch when an existing store is from an incompatible build.
@@ -351,6 +361,7 @@ export const start = Command.make("start", {
 					dataDir,
 					a.offline,
 					Option.getOrUndefined(a.chdbConfigFile),
+					a.onDirtyStore,
 				)
 
 			yield* Effect.sync(() =>
@@ -513,6 +524,7 @@ export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, por
 			yield* Effect.sync(() =>
 				process.stdout.write(
 					`${green("✓")} checkpoint created\n` +
+						`  ${dim("id")}        ${result.checkpointId}\n` +
 						`  ${dim("path")}      ${prettyPath(result.path)}\n` +
 						`  ${dim("traces")}    ${result.manifest.validation.traces}\n` +
 						`  ${dim("logs")}      ${result.manifest.validation.logs}\n` +
@@ -524,7 +536,11 @@ export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, por
 	),
 )
 
-export const restore = Command.make("restore", { dataDir: dataDirFlag, yes: yesFlag }).pipe(
+export const restore = Command.make("restore", {
+	dataDir: dataDirFlag,
+	checkpointId: checkpointIdFlag,
+	yes: yesFlag,
+}).pipe(
 	Command.withDescription("Restore the local chDB store from the last promoted checkpoint"),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
@@ -549,12 +565,14 @@ export const restore = Command.make("restore", { dataDir: dataDirFlag, yes: yesF
 				return
 			}
 
-			const result = yield* restoreCheckpoint(dataDir).pipe(
+			const checkpointId = Option.getOrUndefined(a.checkpointId)
+			const result = yield* restoreCheckpoint(dataDir, checkpointId ?? "current").pipe(
 				Effect.mapError((e) => new ServerError({ message: e.message })),
 			)
 			yield* Effect.sync(() =>
 				process.stderr.write(
 					`${green("✓")} restored checkpoint\n` +
+						`  ${dim("id")}         ${result.checkpointId}\n` +
 						`  ${dim("quarantine")} ${prettyPath(result.quarantinePath)}\n` +
 						`  ${dim("traces")}     ${result.validation.traces}\n` +
 						`  ${dim("logs")}       ${result.validation.logs}\n` +

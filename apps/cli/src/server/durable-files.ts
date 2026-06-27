@@ -91,12 +91,15 @@ export const durableRename = async (
 	if (dirname(to) !== dirname(from)) await syncDirectory(dirname(to), faults)
 }
 
-export const syncTree = async (path: string): Promise<void> => {
+export const syncTree = async (
+	path: string,
+	options: { readonly allowSymlinks?: boolean } = {},
+): Promise<void> => {
 	const entries = await readdir(path, { withFileTypes: true })
 	for (const entry of entries) {
 		const child = join(path, entry.name)
 		if (entry.isDirectory()) {
-			await syncTree(child)
+			await syncTree(child, options)
 		} else if (entry.isFile()) {
 			const handle = await open(child, constants.O_RDONLY)
 			try {
@@ -104,6 +107,10 @@ export const syncTree = async (path: string): Promise<void> => {
 			} finally {
 				await handle.close()
 			}
+		} else if (entry.isSymbolicLink() && options.allowSymlinks) {
+			// A closed chDB store contains engine-managed symlinks. Do not
+			// follow them; syncing this directory below durably records the link.
+			continue
 		} else {
 			throw new Error(`refusing to sync non-file checkpoint entry at ${child}`)
 		}

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { cp, lstat, mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises"
+import { cp, lstat, mkdir, readFile, readdir, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { Effect, Schema } from "effect"
@@ -9,6 +9,7 @@ import { Chdb } from "./chdb"
 import {
 	type DurabilityFaults,
 	durableJson,
+	durableRemove,
 	durableRename,
 	ensurePrivateDirectory,
 	syncDirectory,
@@ -16,11 +17,12 @@ import {
 } from "./durable-files"
 import { SCHEMA_FINGERPRINT } from "./serve"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
-import { markStoreClosed, storeMarkerJson, storeMarkerPath } from "./store-version"
+import { markStoreClosedDurable, writeStoreMarkerDurable } from "./store-version"
 
 const STATE_FORMAT_VERSION = 1
 const MANIFEST_FORMAT_VERSION = 1
 const OPERATION_FORMAT_VERSION = 1
+const RESTORE_TRANSACTION_FORMAT_VERSION = 1
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export class CheckpointError extends Schema.TaggedErrorClass<CheckpointError>()(
@@ -90,6 +92,16 @@ interface MaintenanceOwner {
 	readonly startedAt: string
 }
 
+interface RestoreTransaction {
+	readonly formatVersion: 1
+	readonly operationId: string
+	readonly checkpointId: string
+	readonly quarantineId: string
+	readonly phase: "intent" | "restore-ready" | "old-quarantined" | "new-live" | "markers-committed"
+	readonly createdAt: string
+	readonly validation: CheckpointValidation | null
+}
+
 export const checkpointRoot = (dataDir: string): string => join(resolve(dataDir), "backups")
 export const checkpointStatePath = (dataDir: string): string => join(checkpointRoot(dataDir), "state.json")
 export const checkpointSnapshotsRoot = (dataDir: string): string => join(checkpointRoot(dataDir), "snapshots")
@@ -103,6 +115,17 @@ export const checkpointSnapshotDir = (dataDir: string, checkpointId: string): st
 	join(checkpointSnapshotsRoot(dataDir), validateId(checkpointId, "checkpoint"))
 
 const maintenanceLockPath = (dataDir: string): string => `${resolve(dataDir)}.maple-maintenance-lock`
+export const restoreTransactionPath = (dataDir: string): string =>
+	`${resolve(dataDir)}.restore-transaction.json`
+export const restoreRootPath = (dataDir: string, operationId: string): string =>
+	`${resolve(dataDir)}.restore-${validateId(operationId, "restore operation")}`
+export const restoreDataPath = (dataDir: string, operationId: string): string =>
+	join(restoreRootPath(dataDir, operationId), "data")
+export const restoreQuarantinePath = (dataDir: string, operationId: string, quarantineId: string): string =>
+	`${resolve(dataDir)}.quarantine-${validateId(operationId, "restore operation")}-${validateId(
+		quarantineId,
+		"quarantine",
+	)}`
 const operationDir = (dataDir: string, operationId: string): string =>
 	join(checkpointOperationsRoot(dataDir), `checkpoint-${validateId(operationId, "operation")}`)
 const operationPath = (dataDir: string, operationId: string): string =>
@@ -401,8 +424,18 @@ const readStateFileOptional = async (dataDir: string): Promise<CheckpointState |
 const checkpointLikePaths = async (dataDir: string): Promise<string[]> => {
 	const root = checkpointRoot(dataDir)
 	try {
-		const entries = await readdir(root)
-		return entries.filter((entry) => entry !== "state.json").map((entry) => join(root, entry))
+		const entries = await readdir(root, { withFileTypes: true })
+		const unsafe: string[] = []
+		for (const entry of entries) {
+			if (entry.name === "state.json" || entry.name === "quarantine") continue
+			const path = join(root, entry.name)
+			if (["snapshots", "operations", "pins", "retiring"].includes(entry.name)) {
+				if (!entry.isDirectory() || (await readdir(path)).length > 0) unsafe.push(path)
+				continue
+			}
+			unsafe.push(path)
+		}
+		return unsafe
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
 		throw error
@@ -524,7 +557,10 @@ export const withRestoredCheckpoint = async <A>(
 	) {
 		throw new Error("scratch root must not be the live data directory or one of its descendants")
 	}
-	await ensurePrivateDirectory(scratchRoot)
+	if (existsSync(scratchRoot) && (await lstat(scratchRoot)).isSymbolicLink()) {
+		throw new Error(`scratch root must not be a symlink: ${scratchRoot}`)
+	}
+	await mkdir(scratchRoot, { recursive: true })
 	const scratchParent = join(scratchRoot, `maple-checkpoint-${randomUUID()}`)
 	await mkdir(scratchParent, { mode: 0o700 })
 	const scratchDataDir = join(scratchParent, "data")
@@ -824,6 +860,199 @@ export const createCheckpoint = (
 			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
 	})
 
+const parseRestoreTransaction = (value: unknown): RestoreTransaction => {
+	if (!isRecord(value) || value.formatVersion !== RESTORE_TRANSACTION_FORMAT_VERSION) {
+		throw new Error("unsupported or malformed restore transaction")
+	}
+	const phase = requiredString(value, "phase")
+	if (!["intent", "restore-ready", "old-quarantined", "new-live", "markers-committed"].includes(phase)) {
+		throw new Error("invalid restore transaction phase")
+	}
+	return {
+		formatVersion: 1,
+		operationId: validateId(requiredString(value, "operationId"), "restore operation"),
+		checkpointId: validateId(requiredString(value, "checkpointId"), "checkpoint"),
+		quarantineId: validateId(requiredString(value, "quarantineId"), "quarantine"),
+		phase: phase as RestoreTransaction["phase"],
+		createdAt: requiredIso(value, "createdAt"),
+		validation: value.validation === null ? null : parseValidation(value.validation),
+	}
+}
+
+const readRestoreTransaction = async (dataDir: string): Promise<RestoreTransaction | null> => {
+	try {
+		return parseRestoreTransaction(JSON.parse(await readFile(restoreTransactionPath(dataDir), "utf8")))
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+		throw error
+	}
+}
+
+const writeRestoreTransaction = async (dataDir: string, transaction: RestoreTransaction) =>
+	durableJson(restoreTransactionPath(dataDir), transaction)
+
+const restoreReadyPath = (dataDir: string, operationId: string): string =>
+	join(restoreDataPath(dataDir, operationId), ".maple-restore-ready.json")
+
+const readyIdentityMatches = (dataDir: string, transaction: RestoreTransaction): boolean => {
+	const candidates = [
+		restoreReadyPath(dataDir, transaction.operationId),
+		join(resolve(dataDir), ".maple-restore-ready.json"),
+	]
+	for (const path of candidates) {
+		if (!existsSync(path)) continue
+		try {
+			const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown
+			if (
+				isRecord(parsed) &&
+				parsed.formatVersion === 1 &&
+				parsed.operationId === transaction.operationId &&
+				parsed.checkpointId === transaction.checkpointId
+			) {
+				return true
+			}
+		} catch {
+			return false
+		}
+	}
+	return false
+}
+
+const finalizeRestoreMarkers = async (
+	dataDir: string,
+	transaction: RestoreTransaction,
+): Promise<RestoreTransaction> => {
+	if (!readyIdentityMatches(dataDir, transaction)) {
+		throw new Error("restored live store identity is missing or does not match the transaction")
+	}
+	await writeStoreMarkerDurable(dataDir, MAPLE_VERSION, new Date().toISOString(), SCHEMA_FINGERPRINT)
+	await markStoreClosedDurable(dataDir)
+	const committed: RestoreTransaction = { ...transaction, phase: "markers-committed" }
+	await writeRestoreTransaction(dataDir, committed)
+	return committed
+}
+
+const completeRestoreTransaction = async (
+	dataDir: string,
+	transaction: RestoreTransaction,
+): Promise<void> => {
+	const readyPath = join(resolve(dataDir), ".maple-restore-ready.json")
+	if (existsSync(readyPath)) await durableRemove(readyPath)
+	const root = restoreRootPath(dataDir, transaction.operationId)
+	if (existsSync(root)) {
+		await rm(root, { recursive: true })
+		await syncDirectory(dirname(root))
+	}
+	await durableRemove(restoreTransactionPath(dataDir))
+}
+
+const reconcileRestoreTransactionUnlocked = async (dataDir: string): Promise<void> => {
+	let transaction = await readRestoreTransaction(dataDir)
+	if (!transaction) {
+		const parent = dirname(resolve(dataDir))
+		const prefix = `${basename(resolve(dataDir))}.restore-`
+		let names: string[]
+		try {
+			names = await readdir(parent)
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") return
+			throw error
+		}
+		const debris = names
+			.filter(
+				(name) =>
+					(name.startsWith(prefix) && !name.includes(".quarantine-")) ||
+					name === `${basename(resolve(dataDir))}.restore-transaction.json`,
+			)
+			.map((name) => join(parent, name))
+		if (debris.length > 0) {
+			throw new Error(
+				`restore-like paths exist without a valid transaction; refusing to infer ownership: ${debris.join(", ")}`,
+			)
+		}
+		return
+	}
+	const live = resolve(dataDir)
+	const restoreRoot = restoreRootPath(dataDir, transaction.operationId)
+	const restoreData = restoreDataPath(dataDir, transaction.operationId)
+	const quarantine = restoreQuarantinePath(dataDir, transaction.operationId, transaction.quarantineId)
+	const liveExists = existsSync(live)
+	const restoreExists = existsSync(restoreData)
+	const quarantineExists = existsSync(quarantine)
+
+	if (transaction.phase === "intent") {
+		if (!liveExists || quarantineExists) {
+			throw new Error(
+				`ambiguous restore intent topology; live=${liveExists} restore=${restoreExists} quarantine=${quarantineExists}`,
+			)
+		}
+		if (existsSync(restoreRoot)) {
+			await durableRename(restoreRoot, `${restoreRoot}.quarantine-${randomUUID()}`)
+		}
+		await durableRename(
+			restoreTransactionPath(dataDir),
+			`${restoreTransactionPath(dataDir)}.quarantine-${randomUUID()}`,
+		)
+		return
+	}
+
+	if (transaction.phase === "restore-ready" && liveExists && restoreExists && !quarantineExists) {
+		if (!readyIdentityMatches(dataDir, transaction)) {
+			throw new Error("restore-ready identity is missing or mismatched")
+		}
+		await durableRename(live, quarantine)
+		transaction = { ...transaction, phase: "old-quarantined" }
+		await writeRestoreTransaction(dataDir, transaction)
+	}
+
+	if (
+		(transaction.phase === "restore-ready" || transaction.phase === "old-quarantined") &&
+		!existsSync(live) &&
+		existsSync(restoreData) &&
+		existsSync(quarantine)
+	) {
+		await durableRename(restoreData, live)
+		transaction = { ...transaction, phase: "new-live" }
+		await writeRestoreTransaction(dataDir, transaction)
+	}
+
+	if (
+		(transaction.phase === "old-quarantined" || transaction.phase === "new-live") &&
+		existsSync(live) &&
+		!existsSync(restoreData) &&
+		existsSync(quarantine)
+	) {
+		transaction = await finalizeRestoreMarkers(dataDir, {
+			...transaction,
+			phase: "new-live",
+		})
+	}
+
+	if (transaction.phase === "markers-committed" && existsSync(live) && existsSync(quarantine)) {
+		await completeRestoreTransaction(dataDir, transaction)
+		return
+	}
+
+	throw new Error(
+		`restore transaction could not be reconciled safely; phase=${transaction.phase} live=${existsSync(live)} restore=${existsSync(restoreData)} quarantine=${existsSync(quarantine)}`,
+	)
+}
+
+export const reconcileCheckpointRecovery = (dataDir: string): Effect.Effect<void, CheckpointError> =>
+	Effect.tryPromise({
+		try: async () => {
+			const operationId = randomUUID()
+			const release = await acquireMaintenance(dataDir, operationId)
+			try {
+				await reconcileRestoreTransactionUnlocked(dataDir)
+			} finally {
+				await release()
+			}
+		},
+		catch: (error) =>
+			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
+	})
+
 export const restoreCheckpoint = (
 	dataDir: string,
 	selector: "current" | "previous" | string = "current",
@@ -838,37 +1067,50 @@ export const restoreCheckpoint = (
 	Effect.tryPromise({
 		try: async () => {
 			const operationId = randomUUID()
+			const quarantineId = randomUUID()
 			const release = await acquireMaintenance(dataDir, operationId)
 			try {
+				await reconcileRestoreTransactionUnlocked(dataDir)
 				const resolvedCheckpoint = await resolveCheckpoint(dataDir, selector)
-				const quarantinePath = `${resolve(dataDir)}.quarantine-${operationId}-${randomUUID()}`
-				if (existsSync(quarantinePath))
-					throw new Error(`quarantine path already exists: ${quarantinePath}`)
-				const restored = await withRestoredCheckpoint(
-					resolvedCheckpoint,
-					{ scratchRoot: dirname(resolve(dataDir)), cleanup: "never" },
-					({ scratchDataDir, validation }) => ({ scratchDataDir, validation }),
-				)
-				await cp(checkpointRoot(dataDir), join(restored.scratchDataDir, "backups"), {
+				const restoreRoot = restoreRootPath(dataDir, operationId)
+				const restoreData = restoreDataPath(dataDir, operationId)
+				const quarantinePath = restoreQuarantinePath(dataDir, operationId, quarantineId)
+				if (existsSync(restoreRoot) || existsSync(quarantinePath)) {
+					throw new Error("restore or quarantine path already exists")
+				}
+				let transaction: RestoreTransaction = {
+					formatVersion: 1,
+					operationId,
+					checkpointId: resolvedCheckpoint.checkpointId,
+					quarantineId,
+					phase: "intent",
+					createdAt: new Date().toISOString(),
+					validation: null,
+				}
+				await writeRestoreTransaction(dataDir, transaction)
+				await mkdir(restoreRoot, { mode: 0o700 })
+				const restored = await restoreResolvedInto(resolvedCheckpoint, restoreData)
+				const validation = restored.validation
+				restored.db.close()
+				await cp(checkpointRoot(dataDir), join(restoreData, "backups"), {
 					recursive: true,
 					force: false,
 					errorOnExist: true,
 				})
-				await syncTree(join(restored.scratchDataDir, "backups"))
-				await rename(resolve(dataDir), quarantinePath)
-				await syncDirectory(dirname(resolve(dataDir)))
-				await rename(restored.scratchDataDir, resolve(dataDir))
-				await syncDirectory(dirname(resolve(dataDir)))
-				markStoreClosed(dataDir)
-				writeFileSync(
-					storeMarkerPath(dataDir),
-					storeMarkerJson(MAPLE_VERSION, new Date().toISOString(), SCHEMA_FINGERPRINT),
-					{ mode: 0o600 },
-				)
+				await syncTree(join(restoreData, "backups"))
+				await durableJson(restoreReadyPath(dataDir, operationId), {
+					formatVersion: 1,
+					operationId,
+					checkpointId: resolvedCheckpoint.checkpointId,
+				})
+				await syncTree(restoreData, { allowSymlinks: true })
+				transaction = { ...transaction, phase: "restore-ready", validation }
+				await writeRestoreTransaction(dataDir, transaction)
+				await reconcileRestoreTransactionUnlocked(dataDir)
 				return {
 					checkpointId: resolvedCheckpoint.checkpointId,
 					quarantinePath,
-					validation: restored.validation,
+					validation,
 				}
 			} finally {
 				await release()

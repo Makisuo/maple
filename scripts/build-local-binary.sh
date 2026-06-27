@@ -38,10 +38,10 @@ mkdir -p "$OUT_DIR"
 # checkout / CI only runs `bun install`, so the dist won't exist and
 # `bun build --compile` fails to resolve the import. Build it first.
 echo "==> Building @maple-dev/effect-sdk (telemetry SDK consumed by the CLI)"
-bun --filter @maple-dev/effect-sdk build
+bun run --filter @maple-dev/effect-sdk build
 
 echo "==> Building local-ui SPA"
-bun --filter @maple/local-ui build
+bun run --filter @maple/local-ui build
 
 echo "==> Inlining SPA into ui-embed.gen.ts"
 restore_stub() { git -C "$REPO_ROOT" checkout -- "$UI_EMBED" 2>/dev/null || true; }

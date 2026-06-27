@@ -129,12 +129,22 @@ export class Chdb {
 			argv[i] = BigInt(ptr(b))
 		})
 		const connPtrPtr = sym.chdb_connect(args.length, ptr(argv))
-		if (!connPtrPtr) throw new Error(Chdb.#connectFailure(options.dataDir, "chdb_connect returned NULL"))
+		if (!connPtrPtr) {
+			throw new Error(
+				Chdb.#connectFailure(options.dataDir, "chdb_connect returned NULL", options.configFile),
+			)
+		}
 		// chdb_connect returns chdb_connection* (a double pointer); chdb_query
 		// wants chdb_connection — dereference once.
 		const conn = read.ptr(connPtrPtr, 0) as Pointer
 		if (!conn)
-			throw new Error(Chdb.#connectFailure(options.dataDir, "chdb_connect produced a NULL connection"))
+			throw new Error(
+				Chdb.#connectFailure(
+					options.dataDir,
+					"chdb_connect produced a NULL connection",
+					options.configFile,
+				),
+			)
 
 		const db = new Chdb(sym, connPtrPtr, conn)
 		if (options.bootstrapSchema !== false) db.#bootstrap(options.schemaSql)
@@ -146,7 +156,13 @@ export class Chdb {
 	// kill); point the user at the recovery path rather than the raw libchdb
 	// message. A failure over an empty dir is a different problem (missing/broken
 	// libchdb), so keep the generic message there.
-	static #connectFailure(dataDir: string, raw: string): string {
+	static #connectFailure(dataDir: string, raw: string, configFile?: string): string {
+		if (configFile) {
+			return (
+				`${raw} while loading the explicit chDB config at ${configFile}. ` +
+				"The existing store was not modified; correct or remove the config before retrying."
+			)
+		}
 		if (!storeHasData(dataDir)) return raw
 		return (
 			`${raw} — the local store at ${dataDir} could not be opened ` +
