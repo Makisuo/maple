@@ -1,13 +1,27 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
-import { cp, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
+import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cp, lstat, mkdir, readFile, readdir, rename, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { basename, join, resolve, sep } from "node:path"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { Effect, Schema } from "effect"
+import { CHDB_VERSION, MAPLE_VERSION } from "../version"
 import { Chdb } from "./chdb"
+import {
+	type DurabilityFaults,
+	durableJson,
+	durableRename,
+	ensurePrivateDirectory,
+	syncDirectory,
+	syncTree,
+} from "./durable-files"
 import { SCHEMA_FINGERPRINT } from "./serve"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
 import { markStoreClosed, storeMarkerJson, storeMarkerPath } from "./store-version"
-import { CHDB_VERSION, MAPLE_VERSION } from "../version"
+
+const STATE_FORMAT_VERSION = 1
+const MANIFEST_FORMAT_VERSION = 1
+const OPERATION_FORMAT_VERSION = 1
+const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export class CheckpointError extends Schema.TaggedErrorClass<CheckpointError>()(
 	"@maple/cli/CheckpointError",
@@ -17,17 +31,153 @@ export class CheckpointError extends Schema.TaggedErrorClass<CheckpointError>()(
 export interface CheckpointOptions {
 	readonly dataDir: string
 	readonly port: number
+	readonly faults?: DurabilityFaults
 }
 
-export const checkpointRoot = (dataDir: string): string => join(dataDir, "backups")
-export const buildingDir = (dataDir: string): string => join(checkpointRoot(dataDir), "building")
-export const currentDir = (dataDir: string): string => join(checkpointRoot(dataDir), "current")
-export const previousDir = (dataDir: string): string => join(checkpointRoot(dataDir), "previous")
-const restoreBuildingDir = (dataDir: string): string => `${dataDir}.restore-building`
-const quarantineDir = (dataDir: string): string =>
-	`${dataDir}.quarantine-${new Date().toISOString().replace(/[:.]/g, "-")}`
+export interface CheckpointValidation {
+	readonly validatedAt: string
+	readonly traces: number
+	readonly logs: number
+	readonly metricsSum: number
+	readonly metricsGauge: number
+	readonly metricsHistogram: number
+	readonly metricsExponentialHistogram: number
+	readonly materializedViews: number
+}
 
-const backupSqlPath = (name: string): string => `backups/${name}/backup`
+export interface CheckpointManifest {
+	readonly formatVersion: 1
+	readonly checkpointId: string
+	readonly operationId: string
+	readonly mapleVersion: string
+	readonly chdbVersion: string
+	readonly schemaFingerprint: string
+	readonly createdAt: string
+	readonly sourceDataDir: string
+	readonly backupRelativePath: string
+	readonly backupBytes: number
+	readonly validation: CheckpointValidation
+}
+
+export interface CheckpointState {
+	readonly formatVersion: 1
+	readonly revision: string
+	readonly current: string
+	readonly previous: string | null
+	readonly committedAt: string
+}
+
+export interface ResolvedCheckpoint {
+	readonly checkpointId: string
+	readonly snapshotDir: string
+	readonly backupDir: string
+	readonly backupSqlPath: string
+	readonly manifest: CheckpointManifest
+}
+
+interface CheckpointOperation {
+	readonly formatVersion: 1
+	readonly operationId: string
+	readonly checkpointId: string
+	readonly phase: "intent" | "backup-complete" | "manifest-complete" | "pointer-complete"
+	readonly startedAt: string
+}
+
+interface MaintenanceOwner {
+	readonly formatVersion: 1
+	readonly operationId: string
+	readonly pid: number
+	readonly startedAt: string
+}
+
+export const checkpointRoot = (dataDir: string): string => join(resolve(dataDir), "backups")
+export const checkpointStatePath = (dataDir: string): string => join(checkpointRoot(dataDir), "state.json")
+export const checkpointSnapshotsRoot = (dataDir: string): string => join(checkpointRoot(dataDir), "snapshots")
+export const checkpointOperationsRoot = (dataDir: string): string =>
+	join(checkpointRoot(dataDir), "operations")
+export const checkpointPinsRoot = (dataDir: string): string => join(checkpointRoot(dataDir), "pins")
+export const checkpointQuarantineRoot = (dataDir: string): string =>
+	join(checkpointRoot(dataDir), "quarantine")
+export const checkpointRetiringRoot = (dataDir: string): string => join(checkpointRoot(dataDir), "retiring")
+export const checkpointSnapshotDir = (dataDir: string, checkpointId: string): string =>
+	join(checkpointSnapshotsRoot(dataDir), validateId(checkpointId, "checkpoint"))
+
+const maintenanceLockPath = (dataDir: string): string => `${resolve(dataDir)}.maple-maintenance-lock`
+const operationDir = (dataDir: string, operationId: string): string =>
+	join(checkpointOperationsRoot(dataDir), `checkpoint-${validateId(operationId, "operation")}`)
+const operationPath = (dataDir: string, operationId: string): string =>
+	join(operationDir(dataDir, operationId), "intent.json")
+const snapshotManifestPath = (dataDir: string, checkpointId: string): string =>
+	join(checkpointSnapshotDir(dataDir, checkpointId), "manifest.json")
+const snapshotBackupDir = (dataDir: string, checkpointId: string): string =>
+	join(checkpointSnapshotDir(dataDir, checkpointId), "backup")
+const snapshotBackupRelativePath = (checkpointId: string): string =>
+	`snapshots/${validateId(checkpointId, "checkpoint")}/backup`
+const snapshotBackupSqlPath = (checkpointId: string): string =>
+	`backups/${snapshotBackupRelativePath(checkpointId)}`
+
+const validateId = (value: string, kind: string): string => {
+	if (!CHECKPOINT_ID.test(value)) throw new Error(`invalid ${kind} ID: ${value}`)
+	return value.toLowerCase()
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const requiredString = (record: Record<string, unknown>, key: string): string => {
+	const value = record[key]
+	if (typeof value !== "string" || value.length === 0) throw new Error(`invalid ${key}`)
+	return value
+}
+
+const requiredCount = (record: Record<string, unknown>, key: string): number => {
+	const value = record[key]
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+		throw new Error(`invalid ${key}`)
+	}
+	return value
+}
+
+const requiredIso = (record: Record<string, unknown>, key: string): string => {
+	const value = requiredString(record, key)
+	if (!Number.isFinite(Date.parse(value))) throw new Error(`invalid ${key}`)
+	return value
+}
+
+const assertContained = (root: string, candidate: string, label: string): string => {
+	const absoluteRoot = resolve(root)
+	const absoluteCandidate = resolve(candidate)
+	const rel = relative(absoluteRoot, absoluteCandidate)
+	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+		throw new Error(`${label} escapes configured root`)
+	}
+	return absoluteCandidate
+}
+
+const assertNoSymlink = async (root: string, candidate: string): Promise<void> => {
+	const absoluteRoot = resolve(root)
+	const absoluteCandidate = assertContained(absoluteRoot, candidate, "checkpoint path")
+	try {
+		if ((await lstat(absoluteRoot)).isSymbolicLink()) {
+			throw new Error(`refusing symlink checkpoint root: ${absoluteRoot}`)
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+	}
+	const rel = relative(absoluteRoot, absoluteCandidate)
+	let current = absoluteRoot
+	for (const part of rel.split(sep)) {
+		current = join(current, part)
+		try {
+			if ((await lstat(current)).isSymbolicLink()) {
+				throw new Error(`refusing symlink in checkpoint path: ${current}`)
+			}
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+			return
+		}
+	}
+}
 
 const xmlEscape = (value: string): string =>
 	value
@@ -62,7 +212,20 @@ export const writeBackupConfig = (path: string, sourceDataDir?: string): void =>
   </backups>${sourceDisk}
 </clickhouse>
 `,
+		{ mode: 0o600 },
 	)
+}
+
+export class LocalQueryError extends Error {
+	readonly status: number
+	readonly detail: string
+
+	constructor(status: number, detail: string) {
+		super(`local query failed (${status})${detail ? `: ${detail}` : ""}`)
+		this.name = "LocalQueryError"
+		this.status = status
+		this.detail = detail
+	}
 }
 
 const postLocalQuery = async (port: number, sql: string): Promise<unknown> => {
@@ -73,11 +236,27 @@ const postLocalQuery = async (port: number, sql: string): Promise<unknown> => {
 	})
 	if (!response.ok) {
 		const detail = await response.text().catch(() => "")
-		throw new Error(
-			`local query failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ""}`,
-		)
+		throw new LocalQueryError(response.status, detail)
 	}
 	return response.json()
+}
+
+export const isMissingBackupConfigurationError = (error: unknown): boolean => {
+	const detail =
+		error instanceof LocalQueryError
+			? error.detail
+			: error instanceof Error
+				? error.message
+				: String(error)
+	const lower = detail.toLowerCase()
+	const backupSpecific =
+		lower.includes("backups.allowed_disk") ||
+		lower.includes("backups.allowed_path") ||
+		(lower.includes("backup") &&
+			(lower.includes("not allowed") ||
+				lower.includes("unknown disk") ||
+				lower.includes("allowed disk")))
+	return backupSpecific
 }
 
 const readJsonRows = (text: string): ReadonlyArray<Record<string, unknown>> =>
@@ -91,191 +270,554 @@ const countFrom = (rows: ReadonlyArray<Record<string, unknown>>): number => {
 	const row = rows[0]
 	if (!row) return 0
 	const value = row["count()"] ?? row.count
-	return typeof value === "number" ? value : Number(value ?? 0)
+	const count = typeof value === "number" ? value : Number(value ?? 0)
+	if (!Number.isSafeInteger(count) || count < 0) throw new Error(`invalid count result: ${value}`)
+	return count
 }
 
 const queryCount = (db: Chdb, sql: string): number => countFrom(readJsonRows(db.query(sql)))
+
+const validateRestoredDatabase = (db: Chdb): CheckpointValidation => ({
+	validatedAt: new Date().toISOString(),
+	traces: queryCount(db, "SELECT count() FROM traces"),
+	logs: queryCount(db, "SELECT count() FROM logs"),
+	metricsSum: queryCount(db, "SELECT count() FROM metrics_sum"),
+	metricsGauge: queryCount(db, "SELECT count() FROM metrics_gauge"),
+	metricsHistogram: queryCount(db, "SELECT count() FROM metrics_histogram"),
+	metricsExponentialHistogram: queryCount(db, "SELECT count() FROM metrics_exponential_histogram"),
+	materializedViews: queryCount(
+		db,
+		"SELECT count() FROM system.tables WHERE database = 'default' AND engine = 'MaterializedView'",
+	),
+})
 
 const dirSize = async (path: string): Promise<number> => {
 	let total = 0
 	const entries = await readdir(path, { withFileTypes: true })
 	for (const entry of entries) {
 		const child = join(path, entry.name)
-		if (entry.isDirectory()) {
-			total += await dirSize(child)
-		} else if (entry.isFile()) {
-			total += (await stat(child)).size
-		}
+		if (entry.isSymbolicLink()) throw new Error(`refusing symlink in checkpoint backup: ${child}`)
+		if (entry.isDirectory()) total += await dirSize(child)
+		else if (entry.isFile()) total += (await stat(child)).size
+		else throw new Error(`refusing unsupported checkpoint entry: ${child}`)
 	}
 	return total
 }
 
-interface CheckpointManifest {
-	readonly mapleVersion: string
-	readonly chdbVersion: string
-	readonly schemaFingerprint: string
-	readonly createdAt: string
-	readonly sourceDataDir: string
-	readonly backupPath: string
-	readonly backupBytes: number
-	readonly validation: {
-		readonly validatedAt: string
-		readonly traces: number
-		readonly logs: number
-		readonly metricsSum: number
-		readonly materializedViews: number
+const parseValidation = (value: unknown): CheckpointValidation => {
+	if (!isRecord(value)) throw new Error("invalid validation")
+	return {
+		validatedAt: requiredIso(value, "validatedAt"),
+		traces: requiredCount(value, "traces"),
+		logs: requiredCount(value, "logs"),
+		metricsSum: requiredCount(value, "metricsSum"),
+		metricsGauge: requiredCount(value, "metricsGauge"),
+		metricsHistogram: requiredCount(value, "metricsHistogram"),
+		metricsExponentialHistogram: requiredCount(value, "metricsExponentialHistogram"),
+		materializedViews: requiredCount(value, "materializedViews"),
 	}
 }
 
-export const readCheckpointManifest = async (dataDir: string): Promise<CheckpointManifest> => {
-	const path = join(currentDir(dataDir), "manifest.json")
-	let raw: string
+export const parseCheckpointManifest = (
+	value: unknown,
+	expectedCheckpointId?: string,
+): CheckpointManifest => {
+	if (!isRecord(value) || value.formatVersion !== MANIFEST_FORMAT_VERSION) {
+		throw new Error("unsupported or malformed checkpoint manifest")
+	}
+	const checkpointId = validateId(requiredString(value, "checkpointId"), "checkpoint")
+	if (expectedCheckpointId && checkpointId !== validateId(expectedCheckpointId, "checkpoint")) {
+		throw new Error("checkpoint manifest ID does not match its snapshot directory")
+	}
+	const operationId = validateId(requiredString(value, "operationId"), "operation")
+	const sourceDataDir = requiredString(value, "sourceDataDir")
+	if (!isAbsolute(sourceDataDir)) throw new Error("checkpoint sourceDataDir must be absolute")
+	const backupRelativePath = requiredString(value, "backupRelativePath")
+	if (backupRelativePath !== snapshotBackupRelativePath(checkpointId)) {
+		throw new Error("checkpoint backup path does not match its immutable ID")
+	}
+	const manifest: CheckpointManifest = {
+		formatVersion: 1,
+		checkpointId,
+		operationId,
+		mapleVersion: requiredString(value, "mapleVersion"),
+		chdbVersion: requiredString(value, "chdbVersion"),
+		schemaFingerprint: requiredString(value, "schemaFingerprint"),
+		createdAt: requiredIso(value, "createdAt"),
+		sourceDataDir,
+		backupRelativePath,
+		backupBytes: requiredCount(value, "backupBytes"),
+		validation: parseValidation(value.validation),
+	}
+	if (manifest.chdbVersion !== CHDB_VERSION) {
+		throw new Error(
+			`checkpoint chDB version mismatch (checkpoint: ${manifest.chdbVersion}; build: ${CHDB_VERSION})`,
+		)
+	}
+	if (manifest.schemaFingerprint !== SCHEMA_FINGERPRINT) {
+		throw new Error(
+			`checkpoint schema mismatch (checkpoint: ${manifest.schemaFingerprint}; build: ${SCHEMA_FINGERPRINT})`,
+		)
+	}
+	return manifest
+}
+
+export const parseCheckpointState = (value: unknown): CheckpointState => {
+	if (!isRecord(value) || value.formatVersion !== STATE_FORMAT_VERSION) {
+		throw new Error("unsupported or malformed checkpoint state")
+	}
+	const current = validateId(requiredString(value, "current"), "current checkpoint")
+	const previousValue = value.previous
+	const previous =
+		previousValue === null
+			? null
+			: validateId(
+					typeof previousValue === "string"
+						? previousValue
+						: (() => {
+								throw new Error("invalid previous checkpoint")
+							})(),
+					"previous checkpoint",
+				)
+	if (previous === current) throw new Error("checkpoint current and previous IDs must differ")
+	return {
+		formatVersion: 1,
+		revision: validateId(requiredString(value, "revision"), "state revision"),
+		current,
+		previous,
+		committedAt: requiredIso(value, "committedAt"),
+	}
+}
+
+const readStateFileOptional = async (dataDir: string): Promise<CheckpointState | null> => {
 	try {
-		raw = await readFile(path, "utf8")
-	} catch {
-		throw new Error(`checkpoint manifest not found at ${path}`)
+		return parseCheckpointState(JSON.parse(await readFile(checkpointStatePath(dataDir), "utf8")))
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
+		throw error
 	}
-	const parsed = JSON.parse(raw) as Partial<CheckpointManifest>
-	if (parsed.chdbVersion !== CHDB_VERSION) {
-		throw new Error(
-			`checkpoint chDB version mismatch (checkpoint: ${parsed.chdbVersion ?? "unknown"}; build: ${CHDB_VERSION})`,
-		)
-	}
-	if (parsed.schemaFingerprint !== SCHEMA_FINGERPRINT) {
-		throw new Error(
-			`checkpoint schema mismatch (checkpoint: ${parsed.schemaFingerprint ?? "unknown"}; build: ${SCHEMA_FINGERPRINT})`,
-		)
-	}
-	return parsed as CheckpointManifest
 }
 
-const validateBackup = async (dataDir: string): Promise<CheckpointManifest["validation"]> => {
-	const scratchParent = mkdtempSync(join(tmpdir(), "maple-checkpoint-"))
-	const scratchData = join(scratchParent, "data")
-	const scratchConfig = join(scratchParent, "config.xml")
-	writeBackupConfig(scratchConfig, dataDir)
+const checkpointLikePaths = async (dataDir: string): Promise<string[]> => {
+	const root = checkpointRoot(dataDir)
+	try {
+		const entries = await readdir(root)
+		return entries.filter((entry) => entry !== "state.json").map((entry) => join(root, entry))
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+		throw error
+	}
+}
+
+const assertNoLegacyLayout = (dataDir: string): void => {
+	const legacy = ["building", "current", "previous"]
+		.map((name) => join(checkpointRoot(dataDir), name))
+		.filter(existsSync)
+	if (legacy.length > 0) {
+		throw new Error(
+			`legacy preview checkpoint layout detected; refusing to infer or migrate state. Preserve and move aside after inspection: ${legacy.join(", ")}`,
+		)
+	}
+}
+
+export const readCheckpointState = async (dataDir: string): Promise<CheckpointState> => {
+	assertNoLegacyLayout(dataDir)
+	const state = await readStateFileOptional(dataDir)
+	if (!state) {
+		const paths = await checkpointLikePaths(dataDir)
+		throw new Error(
+			paths.length === 0
+				? `checkpoint state not found at ${checkpointStatePath(dataDir)}`
+				: `checkpoint state missing while checkpoint data exists; refusing to infer selection: ${paths.join(", ")}`,
+		)
+	}
+	await resolveCheckpoint(dataDir, state.current, state)
+	if (state.previous) await resolveCheckpoint(dataDir, state.previous, state)
+	return state
+}
+
+export const resolveCheckpoint = async (
+	dataDir: string,
+	selector: "current" | "previous" | string = "current",
+	knownState?: CheckpointState,
+): Promise<ResolvedCheckpoint> => {
+	const state = knownState ?? (await readCheckpointState(dataDir))
+	const checkpointId =
+		selector === "current"
+			? state.current
+			: selector === "previous"
+				? state.previous
+				: validateId(selector, "checkpoint")
+	if (!checkpointId) throw new Error("no previous checkpoint is selected")
+	const snapshotDir = checkpointSnapshotDir(dataDir, checkpointId)
+	await assertNoSymlink(checkpointSnapshotsRoot(dataDir), snapshotDir)
+	const manifest = parseCheckpointManifest(
+		JSON.parse(await readFile(snapshotManifestPath(dataDir, checkpointId), "utf8")),
+		checkpointId,
+	)
+	const backupDir = snapshotBackupDir(dataDir, checkpointId)
+	const backupStat = await stat(backupDir).catch(() => null)
+	if (!backupStat?.isDirectory()) throw new Error(`checkpoint backup is incomplete at ${backupDir}`)
+	return {
+		checkpointId,
+		snapshotDir,
+		backupDir,
+		backupSqlPath: snapshotBackupSqlPath(checkpointId),
+		manifest,
+	}
+}
+
+export const readCheckpointManifest = async (
+	dataDir: string,
+	selector: "current" | "previous" | string = "current",
+): Promise<CheckpointManifest> => (await resolveCheckpoint(dataDir, selector)).manifest
+
+const restoreResolvedInto = async (
+	resolvedCheckpoint: ResolvedCheckpoint,
+	targetDataDir: string,
+): Promise<{ readonly db: Chdb; readonly validation: CheckpointValidation }> => {
+	const scratchParent = dirname(targetDataDir)
+	const scratchConfig = join(scratchParent, `checkpoint-${randomUUID()}.xml`)
+	writeBackupConfig(scratchConfig, resolvedCheckpoint.manifest.sourceDataDir)
 	let db: Chdb | undefined
 	try {
 		db = Chdb.open({
-			dataDir: scratchData,
+			dataDir: targetDataDir,
 			schemaSql,
 			configFile: scratchConfig,
 			bootstrapSchema: false,
 		})
 		db.exec("CREATE DATABASE IF NOT EXISTS default")
 		db.exec(
-			`RESTORE DATABASE default FROM Disk('src', '${backupSqlPath("building")}') ` +
+			`RESTORE DATABASE default FROM Disk('src', '${resolvedCheckpoint.backupSqlPath}') ` +
 				"SETTINGS allow_different_database_def=1",
 		)
-		return {
-			validatedAt: new Date().toISOString(),
-			traces: queryCount(db, "SELECT count() FROM traces"),
-			logs: queryCount(db, "SELECT count() FROM logs"),
-			metricsSum: queryCount(db, "SELECT count() FROM metrics_sum"),
-			materializedViews: queryCount(
-				db,
-				"SELECT count() FROM system.tables WHERE database = 'default' AND engine = 'MaterializedView'",
-			),
-		}
-	} finally {
+		return { db, validation: validateRestoredDatabase(db) }
+	} catch (error) {
 		db?.close()
-		rmSync(scratchParent, { recursive: true, force: true })
+		throw error
+	} finally {
+		rmSync(scratchConfig, { force: true })
 	}
 }
 
-const restoreIntoScratch = async (
-	sourceDataDir: string,
-	targetDataDir: string,
-	checkpointName: "current" | "building",
-): Promise<CheckpointManifest["validation"]> => {
-	const scratchParent = mkdtempSync(join(tmpdir(), "maple-restore-"))
-	const restoreConfig = join(scratchParent, "config.xml")
-	writeBackupConfig(restoreConfig, sourceDataDir)
+export const withRestoredCheckpoint = async <A>(
+	resolvedCheckpoint: ResolvedCheckpoint,
+	options: {
+		readonly scratchRoot?: string
+		readonly cleanup?: "always" | "never"
+	},
+	use: (restored: {
+		readonly checkpointId: string
+		readonly manifest: CheckpointManifest
+		readonly scratchDataDir: string
+		readonly db: Chdb
+		readonly validation: CheckpointValidation
+	}) => A | Promise<A>,
+): Promise<A> => {
+	const scratchRoot = resolve(options.scratchRoot ?? tmpdir())
+	const sourceDataDir = resolve(resolvedCheckpoint.manifest.sourceDataDir)
+	const sourceRelation = relative(sourceDataDir, scratchRoot)
+	if (
+		scratchRoot === sourceDataDir ||
+		(sourceRelation !== "" && sourceRelation !== ".." && !sourceRelation.startsWith(`..${sep}`))
+	) {
+		throw new Error("scratch root must not be the live data directory or one of its descendants")
+	}
+	await ensurePrivateDirectory(scratchRoot)
+	const scratchParent = join(scratchRoot, `maple-checkpoint-${randomUUID()}`)
+	await mkdir(scratchParent, { mode: 0o700 })
+	const scratchDataDir = join(scratchParent, "data")
 	let db: Chdb | undefined
 	try {
-		db = Chdb.open({
-			dataDir: targetDataDir,
-			schemaSql,
-			configFile: restoreConfig,
-			bootstrapSchema: false,
+		const restored = await restoreResolvedInto(resolvedCheckpoint, scratchDataDir)
+		db = restored.db
+		return await use({
+			checkpointId: resolvedCheckpoint.checkpointId,
+			manifest: resolvedCheckpoint.manifest,
+			scratchDataDir,
+			db,
+			validation: restored.validation,
 		})
-		db.exec("CREATE DATABASE IF NOT EXISTS default")
-		db.exec(
-			`RESTORE DATABASE default FROM Disk('src', '${backupSqlPath(checkpointName)}') ` +
-				"SETTINGS allow_different_database_def=1",
-		)
-		return {
-			validatedAt: new Date().toISOString(),
-			traces: queryCount(db, "SELECT count() FROM traces"),
-			logs: queryCount(db, "SELECT count() FROM logs"),
-			metricsSum: queryCount(db, "SELECT count() FROM metrics_sum"),
-			materializedViews: queryCount(
-				db,
-				"SELECT count() FROM system.tables WHERE database = 'default' AND engine = 'MaterializedView'",
-			),
-		}
 	} finally {
 		db?.close()
-		rmSync(scratchParent, { recursive: true, force: true })
+		if (options.cleanup !== "never") await rm(scratchParent, { recursive: true, force: true })
 	}
 }
 
-export const promoteBuilding = async (dataDir: string): Promise<void> => {
-	await rm(previousDir(dataDir), { recursive: true, force: true })
-	try {
-		await rename(currentDir(dataDir), previousDir(dataDir))
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+const parseOperation = (value: unknown): CheckpointOperation => {
+	if (!isRecord(value) || value.formatVersion !== OPERATION_FORMAT_VERSION) {
+		throw new Error("unsupported or malformed checkpoint operation")
 	}
-	await rename(buildingDir(dataDir), currentDir(dataDir))
+	const phase = requiredString(value, "phase")
+	if (!["intent", "backup-complete", "manifest-complete", "pointer-complete"].includes(phase)) {
+		throw new Error("invalid checkpoint operation phase")
+	}
+	return {
+		formatVersion: 1,
+		operationId: validateId(requiredString(value, "operationId"), "operation"),
+		checkpointId: validateId(requiredString(value, "checkpointId"), "checkpoint"),
+		phase: phase as CheckpointOperation["phase"],
+		startedAt: requiredIso(value, "startedAt"),
+	}
+}
+
+const writeOperation = async (
+	dataDir: string,
+	operation: CheckpointOperation,
+	faults: DurabilityFaults = {},
+): Promise<void> => durableJson(operationPath(dataDir, operation.operationId), operation, faults)
+
+const processIsAlive = (pid: number): boolean => {
+	try {
+		process.kill(pid, 0)
+		return true
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM"
+	}
+}
+
+const acquireMaintenance = async (dataDir: string, operationId: string): Promise<() => Promise<void>> => {
+	const lockPath = maintenanceLockPath(dataDir)
+	try {
+		await mkdir(lockPath, { mode: 0o700 })
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error
+		let owner: MaintenanceOwner
+		try {
+			const parsed = JSON.parse(readFileSync(join(lockPath, "owner.json"), "utf8")) as unknown
+			if (!isRecord(parsed) || parsed.formatVersion !== 1) throw new Error("malformed owner")
+			owner = {
+				formatVersion: 1,
+				operationId: validateId(requiredString(parsed, "operationId"), "operation"),
+				pid: requiredCount(parsed, "pid"),
+				startedAt: requiredIso(parsed, "startedAt"),
+			}
+		} catch {
+			throw new Error(`maintenance lock is present but ownership is uncertain: ${lockPath}`)
+		}
+		if (processIsAlive(owner.pid)) {
+			throw new Error(`another Maple maintenance operation is active (PID ${owner.pid})`)
+		}
+		const quarantinedLock = `${lockPath}.quarantine-${randomUUID()}`
+		await durableRename(lockPath, quarantinedLock)
+		await mkdir(lockPath, { mode: 0o700 })
+	}
+	const owner: MaintenanceOwner = {
+		formatVersion: 1,
+		operationId,
+		pid: process.pid,
+		startedAt: new Date().toISOString(),
+	}
+	await durableJson(join(lockPath, "owner.json"), owner)
+	return async () => {
+		const current = JSON.parse(await readFile(join(lockPath, "owner.json"), "utf8")) as unknown
+		if (
+			!isRecord(current) ||
+			requiredString(current, "operationId") !== operationId ||
+			current.pid !== process.pid
+		) {
+			throw new Error(`maintenance lock ownership changed unexpectedly: ${lockPath}`)
+		}
+		await rm(lockPath, { recursive: true })
+		await syncDirectory(dirname(lockPath))
+	}
+}
+
+export const reconcileCheckpointOperations = async (dataDir: string): Promise<void> => {
+	const state = await readStateFileOptional(dataDir)
+	let entries
+	try {
+		entries = await readdir(checkpointOperationsRoot(dataDir), { withFileTypes: true })
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return
+		throw error
+	}
+	for (const entry of entries) {
+		if (!entry.isDirectory() || !entry.name.startsWith("checkpoint-")) {
+			throw new Error(
+				`unrecognized checkpoint operation debris: ${join(checkpointOperationsRoot(dataDir), entry.name)}`,
+			)
+		}
+		const path = join(checkpointOperationsRoot(dataDir), entry.name, "intent.json")
+		const operation = parseOperation(JSON.parse(await readFile(path, "utf8")))
+		const snapshot = checkpointSnapshotDir(dataDir, operation.checkpointId)
+		const selected =
+			state?.current === operation.checkpointId || state?.previous === operation.checkpointId
+		if (operation.phase === "pointer-complete" && selected) {
+			await rm(operationDir(dataDir, operation.operationId), { recursive: true })
+			await syncDirectory(checkpointOperationsRoot(dataDir))
+			continue
+		}
+		const quarantine = join(
+			checkpointQuarantineRoot(dataDir),
+			`operation-${operation.operationId}-${randomUUID()}`,
+		)
+		await ensurePrivateDirectory(checkpointQuarantineRoot(dataDir))
+		await ensurePrivateDirectory(quarantine)
+		if (existsSync(snapshot) && !existsSync(snapshotManifestPath(dataDir, operation.checkpointId))) {
+			await durableRename(snapshot, join(quarantine, "incomplete-snapshot"))
+		}
+		await durableRename(operationDir(dataDir, operation.operationId), join(quarantine, "operation"))
+	}
+}
+
+const hasPins = async (dataDir: string, checkpointId: string): Promise<boolean> => {
+	const path = join(checkpointPinsRoot(dataDir), checkpointId)
+	try {
+		return (await readdir(path)).length > 0
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
+		throw error
+	}
+}
+
+export const retireCheckpointIfEligible = async (
+	dataDir: string,
+	checkpointId: string | null,
+	state: CheckpointState,
+): Promise<void> => {
+	if (!checkpointId || state.current === checkpointId || state.previous === checkpointId) return
+	if (await hasPins(dataDir, checkpointId)) return
+	await resolveCheckpoint(dataDir, checkpointId, state)
+	const retirement = join(checkpointRetiringRoot(dataDir), randomUUID())
+	await ensurePrivateDirectory(retirement)
+	await durableRename(checkpointSnapshotDir(dataDir, checkpointId), join(retirement, checkpointId))
+	await rm(retirement, { recursive: true })
+	await syncDirectory(checkpointRetiringRoot(dataDir))
 }
 
 export const createCheckpoint = (
 	options: CheckpointOptions,
-): Effect.Effect<{ readonly path: string; readonly manifest: CheckpointManifest }, CheckpointError> =>
+): Effect.Effect<
+	{
+		readonly checkpointId: string
+		readonly path: string
+		readonly state: CheckpointState
+		readonly manifest: CheckpointManifest
+	},
+	CheckpointError
+> =>
 	Effect.tryPromise({
 		try: async () => {
-			const root = checkpointRoot(options.dataDir)
-			const building = buildingDir(options.dataDir)
-			const name = basename(building)
-			if (name !== "building") throw new Error("internal checkpoint path error")
-			await rm(building, { recursive: true, force: true })
-
+			const operationId = randomUUID()
+			const checkpointId = randomUUID()
+			const release = await acquireMaintenance(options.dataDir, operationId)
 			try {
-				await postLocalQuery(
-					options.port,
-					`BACKUP DATABASE default TO Disk('default', '${backupSqlPath("building")}')`,
-				)
-			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error)
-				if (
-					message.includes("backups.allowed_disk") ||
-					message.includes("INVALID_CONFIG_PARAMETER")
-				) {
+				assertCheckpointRootSafe(options.dataDir)
+				assertNoLegacyLayout(options.dataDir)
+				await reconcileCheckpointOperations(options.dataDir)
+				const oldState = await readStateFileOptional(options.dataDir)
+				if (!oldState && (await checkpointLikePaths(options.dataDir)).length > 0) {
 					throw new Error(
-						"checkpoints require the local server to be started with `--chdb-config-file` " +
-							"pointing at a ClickHouse backups config",
+						"checkpoint state is missing while checkpoint data exists; refusing to infer selection",
 					)
 				}
-				throw error
-			}
-
-			const validation = await validateBackup(options.dataDir)
-			const manifest: CheckpointManifest = {
-				mapleVersion: MAPLE_VERSION,
-				chdbVersion: CHDB_VERSION,
-				schemaFingerprint: SCHEMA_FINGERPRINT,
-				createdAt: new Date().toISOString(),
-				sourceDataDir: resolve(options.dataDir),
-				backupPath: backupSqlPath("current"),
-				backupBytes: await dirSize(join(building, "backup")),
-				validation,
-			}
-			await writeFile(join(building, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
-			await promoteBuilding(options.dataDir)
-			return {
-				path: join(root, "current"),
-				manifest: { ...manifest, backupPath: backupSqlPath("current") },
+				if (oldState) {
+					await resolveCheckpoint(options.dataDir, oldState.current, oldState)
+					if (oldState.previous) {
+						await resolveCheckpoint(options.dataDir, oldState.previous, oldState)
+					}
+				}
+				for (const path of [
+					checkpointRoot(options.dataDir),
+					checkpointSnapshotsRoot(options.dataDir),
+					checkpointOperationsRoot(options.dataDir),
+					checkpointPinsRoot(options.dataDir),
+					checkpointQuarantineRoot(options.dataDir),
+					checkpointRetiringRoot(options.dataDir),
+				]) {
+					await ensurePrivateDirectory(path)
+				}
+				const startedAt = new Date().toISOString()
+				let operation: CheckpointOperation = {
+					formatVersion: 1,
+					operationId,
+					checkpointId,
+					phase: "intent",
+					startedAt,
+				}
+				await writeOperation(options.dataDir, operation, options.faults)
+				const snapshot = checkpointSnapshotDir(options.dataDir, checkpointId)
+				await assertNoSymlink(checkpointSnapshotsRoot(options.dataDir), snapshot)
+				await mkdir(snapshot, { mode: 0o700 })
+				try {
+					await postLocalQuery(
+						options.port,
+						`BACKUP DATABASE default TO Disk('default', '${snapshotBackupSqlPath(checkpointId)}')`,
+					)
+				} catch (error) {
+					if (isMissingBackupConfigurationError(error)) {
+						throw new Error(
+							"checkpoints require the local server to be started with `--chdb-config-file` " +
+								"pointing at a ClickHouse backups config",
+							{ cause: error },
+						)
+					}
+					throw error
+				}
+				await syncTree(snapshotBackupDir(options.dataDir, checkpointId))
+				operation = { ...operation, phase: "backup-complete" }
+				await writeOperation(options.dataDir, operation, options.faults)
+				const provisionalManifest: CheckpointManifest = {
+					formatVersion: 1,
+					checkpointId,
+					operationId,
+					mapleVersion: MAPLE_VERSION,
+					chdbVersion: CHDB_VERSION,
+					schemaFingerprint: SCHEMA_FINGERPRINT,
+					createdAt: startedAt,
+					sourceDataDir: resolve(options.dataDir),
+					backupRelativePath: snapshotBackupRelativePath(checkpointId),
+					backupBytes: await dirSize(snapshotBackupDir(options.dataDir, checkpointId)),
+					validation: {
+						validatedAt: startedAt,
+						traces: 0,
+						logs: 0,
+						metricsSum: 0,
+						metricsGauge: 0,
+						metricsHistogram: 0,
+						metricsExponentialHistogram: 0,
+						materializedViews: 0,
+					},
+				}
+				const provisional: ResolvedCheckpoint = {
+					checkpointId,
+					snapshotDir: snapshot,
+					backupDir: snapshotBackupDir(options.dataDir, checkpointId),
+					backupSqlPath: snapshotBackupSqlPath(checkpointId),
+					manifest: provisionalManifest,
+				}
+				const validation = await withRestoredCheckpoint(
+					provisional,
+					{ cleanup: "always" },
+					(restored) => restored.validation,
+				)
+				const manifest: CheckpointManifest = { ...provisionalManifest, validation }
+				await durableJson(
+					snapshotManifestPath(options.dataDir, checkpointId),
+					manifest,
+					options.faults,
+				)
+				await syncDirectory(snapshot)
+				operation = { ...operation, phase: "manifest-complete" }
+				await writeOperation(options.dataDir, operation, options.faults)
+				const state: CheckpointState = {
+					formatVersion: 1,
+					revision: operationId,
+					current: checkpointId,
+					previous: oldState?.current ?? null,
+					committedAt: new Date().toISOString(),
+				}
+				await durableJson(checkpointStatePath(options.dataDir), state, options.faults)
+				operation = { ...operation, phase: "pointer-complete" }
+				await writeOperation(options.dataDir, operation, options.faults)
+				await retireCheckpointIfEligible(options.dataDir, oldState?.previous ?? null, state)
+				await rm(operationDir(options.dataDir, operationId), { recursive: true })
+				await syncDirectory(checkpointOperationsRoot(options.dataDir))
+				return { checkpointId, path: snapshot, state, manifest }
+			} finally {
+				await release()
 			}
 		},
 		catch: (error) =>
@@ -284,39 +826,67 @@ export const createCheckpoint = (
 
 export const restoreCheckpoint = (
 	dataDir: string,
+	selector: "current" | "previous" | string = "current",
 ): Effect.Effect<
-	{ readonly quarantinePath: string; readonly validation: CheckpointManifest["validation"] },
+	{
+		readonly checkpointId: string
+		readonly quarantinePath: string
+		readonly validation: CheckpointValidation
+	},
 	CheckpointError
 > =>
 	Effect.tryPromise({
 		try: async () => {
-			const sourceBackup = join(currentDir(dataDir), "backup")
-			if (!existsSync(sourceBackup)) {
-				throw new Error(`no checkpoint found at ${sourceBackup}`)
-			}
-			await readCheckpointManifest(dataDir)
-
-			const restoreDir = restoreBuildingDir(dataDir)
-			await rm(restoreDir, { recursive: true, force: true })
-			const validation = await restoreIntoScratch(dataDir, restoreDir, "current")
-
-			if (existsSync(join(dataDir, "backups"))) {
-				await cp(join(dataDir, "backups"), join(restoreDir, "backups"), {
+			const operationId = randomUUID()
+			const release = await acquireMaintenance(dataDir, operationId)
+			try {
+				const resolvedCheckpoint = await resolveCheckpoint(dataDir, selector)
+				const quarantinePath = `${resolve(dataDir)}.quarantine-${operationId}-${randomUUID()}`
+				if (existsSync(quarantinePath))
+					throw new Error(`quarantine path already exists: ${quarantinePath}`)
+				const restored = await withRestoredCheckpoint(
+					resolvedCheckpoint,
+					{ scratchRoot: dirname(resolve(dataDir)), cleanup: "never" },
+					({ scratchDataDir, validation }) => ({ scratchDataDir, validation }),
+				)
+				await cp(checkpointRoot(dataDir), join(restored.scratchDataDir, "backups"), {
 					recursive: true,
-					force: true,
+					force: false,
+					errorOnExist: true,
 				})
+				await syncTree(join(restored.scratchDataDir, "backups"))
+				await rename(resolve(dataDir), quarantinePath)
+				await syncDirectory(dirname(resolve(dataDir)))
+				await rename(restored.scratchDataDir, resolve(dataDir))
+				await syncDirectory(dirname(resolve(dataDir)))
+				markStoreClosed(dataDir)
+				writeFileSync(
+					storeMarkerPath(dataDir),
+					storeMarkerJson(MAPLE_VERSION, new Date().toISOString(), SCHEMA_FINGERPRINT),
+					{ mode: 0o600 },
+				)
+				return {
+					checkpointId: resolvedCheckpoint.checkpointId,
+					quarantinePath,
+					validation: restored.validation,
+				}
+			} finally {
+				await release()
 			}
-
-			const quarantinePath = quarantineDir(dataDir)
-			await rename(dataDir, quarantinePath)
-			await rename(restoreDir, dataDir)
-			markStoreClosed(dataDir)
-			writeFileSync(
-				storeMarkerPath(dataDir),
-				storeMarkerJson(MAPLE_VERSION, new Date().toISOString(), SCHEMA_FINGERPRINT),
-			)
-			return { quarantinePath, validation }
 		},
 		catch: (error) =>
 			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
 	})
+
+// Test helper: assert generated operation IDs remain unique and valid without
+// exposing an override in production command paths.
+export const newCheckpointId = (): string => validateId(randomUUID(), "checkpoint")
+
+// Refuse pre-existing symlink roots even before an operation allocates paths.
+export const assertCheckpointRootSafe = (dataDir: string): void => {
+	const root = checkpointRoot(dataDir)
+	if (existsSync(root) && lstatSync(root).isSymbolicLink()) {
+		throw new Error(`refusing symlink checkpoint root: ${root}`)
+	}
+	if (basename(root) !== "backups") throw new Error("invalid checkpoint root")
+}
