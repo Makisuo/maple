@@ -958,6 +958,119 @@ const hasPins = async (dataDir: string, checkpointId: string): Promise<boolean> 
 	}
 }
 
+export interface CheckpointPin {
+	readonly formatVersion: 1
+	readonly pinId: string
+	readonly checkpointId: string
+	readonly purpose: string
+	readonly createdAt: string
+}
+
+const pinFilePath = (dataDir: string, checkpointId: string, pinId: string): string =>
+	join(checkpointPinsRoot(dataDir), checkpointId, `${validateId(pinId, "pin")}.json`)
+
+const PIN_PURPOSE = /^[A-Za-z0-9 _./:-]{0,128}$/
+
+/**
+ * Acquire a persistent pin on a checkpoint so retention cannot delete its
+ * snapshot while the pin is held. The pin record is durably written under
+ * `backups/pins/<checkpoint-id>/<pin-id>.json`; `retireCheckpointIfEligible`
+ * already honors a non-empty pin directory. Callers that need pin acquisition
+ * to race neither GC nor a concurrent checkpoint operation should hold the
+ * maintenance lock (see {@link withMaintenanceLock}) while resolving and
+ * pinning. A stale pin over-retains data rather than risking deletion.
+ */
+export const acquireCheckpointPin = async (
+	dataDir: string,
+	checkpointId: string,
+	purpose = "archive",
+): Promise<string> => {
+	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
+	if (!PIN_PURPOSE.test(purpose)) throw new Error(`invalid checkpoint pin purpose: ${purpose}`)
+	// A pin on a checkpoint that does not resolve cannot protect anything; force
+	// the caller to pin real, validated state.
+	await resolveCheckpoint(dataDir, validatedCheckpointId)
+	const pinsRoot = checkpointPinsRoot(dataDir)
+	const pinDir = join(pinsRoot, validatedCheckpointId)
+	await ensurePrivateDirectory(pinsRoot)
+	await assertNoSymlink(checkpointRoot(dataDir), pinsRoot)
+	await ensurePrivateDirectory(pinDir)
+	await assertNoSymlink(pinsRoot, pinDir)
+	const pinId = randomUUID()
+	const pin: CheckpointPin = {
+		formatVersion: 1,
+		pinId,
+		checkpointId: validatedCheckpointId,
+		purpose,
+		createdAt: new Date().toISOString(),
+	}
+	const path = pinFilePath(dataDir, validatedCheckpointId, pinId)
+	await durableJson(path, pin)
+	return path
+}
+
+/**
+ * Release a pin acquired by {@link acquireCheckpointPin}. Only the exact owned
+ * pin record at `pinPath` is removed. If the path is absent, belongs to a
+ * different checkpoint, or does not match the recorded pin identity, nothing is
+ * deleted and the call fails closed — over-retention is always preferred.
+ */
+export const releaseCheckpointPin = async (
+	dataDir: string,
+	checkpointId: string,
+	pinPath: string,
+): Promise<void> => {
+	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
+	const pinsRoot = checkpointPinsRoot(dataDir)
+	const pinDir = join(pinsRoot, validatedCheckpointId)
+	// The pin file must live directly under the named checkpoint's pin dir.
+	const resolvedPinPath = resolve(pinPath)
+	if (relative(pinDir, resolvedPinPath).startsWith(`..${sep}`)) {
+		throw new Error(`pin path escapes checkpoint pin directory: ${pinPath}`)
+	}
+	if (!resolvedPinPath.endsWith(".json") || dirname(resolvedPinPath) !== resolve(pinDir)) {
+		throw new Error(`pin path is not a direct child of the checkpoint pin directory: ${pinPath}`)
+	}
+	const baseName = basename(resolvedPinPath, ".json")
+	await assertNoSymlink(checkpointRoot(dataDir), pinsRoot)
+	await assertNoSymlink(pinsRoot, pinDir)
+	if (!existsSync(resolvedPinPath)) {
+		throw new Error(`checkpoint pin not found (already released?): ${pinPath}`)
+	}
+	await assertNoSymlink(pinDir, resolvedPinPath)
+	await assertRealFile(resolvedPinPath, "checkpoint pin")
+	const parsed = JSON.parse(await readFile(resolvedPinPath, "utf8")) as unknown
+	if (
+		!isRecord(parsed) ||
+		parsed.formatVersion !== 1 ||
+		validateId(requiredString(parsed, "pinId"), "pin") !== baseName ||
+		validateId(requiredString(parsed, "checkpointId"), "checkpoint") !== validatedCheckpointId
+	) {
+		throw new Error(`checkpoint pin identity mismatch; refusing to remove: ${pinPath}`)
+	}
+	await durableRemove(resolvedPinPath)
+}
+
+/**
+ * Run `fn` while holding the sibling maintenance lock so checkpoint creation,
+ * restore, reset, and archive operations cannot overlap. A live owner is busy;
+ * an unprovable owner fails closed; a provably dead owner is reconciled by
+ * exact operation identity (see {@link acquireMaintenance}). PID age alone never
+ * authorizes deletion. The lock is released when `fn` settles.
+ */
+export const withMaintenanceLock = async <A>(
+	dataDir: string,
+	operationId: string,
+	fn: () => A | Promise<A>,
+): Promise<A> => {
+	const release = await acquireMaintenance(dataDir, validateId(operationId, "operation"))
+	try {
+		return await fn()
+	} finally {
+		await release()
+	}
+}
+
 export const retireCheckpointIfEligible = async (
 	dataDir: string,
 	checkpointId: string | null,
