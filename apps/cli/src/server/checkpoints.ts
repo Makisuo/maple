@@ -1025,8 +1025,10 @@ const removeCompletedRetirement = async (retirement: string | null): Promise<voi
 	) {
 		throw new Error(`checkpoint retirement records do not match: ${retirement}`)
 	}
-	await rm(retirement, { recursive: true })
-	await syncDirectory(dirname(retirement))
+	const cleanup = `${retirement}.cleanup-${randomUUID()}`
+	await durableRename(retirement, cleanup)
+	await rm(cleanup, { recursive: true })
+	await syncDirectory(dirname(cleanup))
 }
 
 export const createCheckpoint = (

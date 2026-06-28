@@ -509,6 +509,7 @@ describe("checkpoint reconciliation and retention", () => {
 					previous: oldPrevious,
 				})
 				const retirement = join(checkpointRoot(dataDir), "retiring", `retirement-${operationId}`)
+				const interruptedCleanup = `${retirement}.cleanup-${newCheckpointId()}`
 				if (keepRetirementRecord) {
 					mkdirSync(retirement, { recursive: true })
 					const record = {
@@ -519,11 +520,20 @@ describe("checkpoint reconciliation and retention", () => {
 					}
 					writeFileSync(join(retirement, "intent.json"), `${JSON.stringify(record)}\n`)
 					writeFileSync(join(retirement, "complete.json"), `${JSON.stringify(record)}\n`)
+				} else {
+					mkdirSync(interruptedCleanup, { recursive: true })
+					writeFileSync(join(interruptedCleanup, "preserve"), "completed cleanup debris")
 				}
 
 				await reconcileCheckpointOperations(dataDir)
 
 				ok(!existsSync(retirement))
+				if (!keepRetirementRecord) {
+					strictEqual(
+						readFileSync(join(interruptedCleanup, "preserve"), "utf8"),
+						"completed cleanup debris",
+					)
+				}
 				ok(!existsSync(join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)))
 				strictEqual((await readCheckpointState(dataDir)).current, checkpointId)
 			})
