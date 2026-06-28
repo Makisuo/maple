@@ -1,0 +1,207 @@
+import { describe, it } from "@effect/vitest"
+import { deepStrictEqual, ok, strictEqual } from "node:assert"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { randomUUID } from "node:crypto"
+import {
+	activePointerPath,
+	catalogPath,
+	generationManifestPath,
+	generationsRoot,
+	shardsRoot,
+} from "../src/server/archives/paths"
+import { activeParquetPaths, listActiveGenerations, rebuildCatalog } from "../src/server/archives/listing"
+import { type ArchiveGenerationManifest } from "../src/server/archives/manifest"
+import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
+import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+
+const withArchive = async (run: (archiveDir: string) => Promise<void> | void): Promise<void> => {
+	const parent = mkdtempSync(join(tmpdir(), "maple-archive-listing-test-"))
+	const archiveDir = join(parent, "archive")
+	mkdirSync(archiveDir, { recursive: true })
+	try {
+		await run(archiveDir)
+	} finally {
+		rmSync(parent, { recursive: true, force: true })
+	}
+}
+
+const manifest = (
+	generationId: string,
+	signal: string,
+	rangeDate: string,
+	rowCount: number,
+): ArchiveGenerationManifest => ({
+	formatVersion: 1,
+	generationId,
+	signal,
+	rangeStart: rangeDate,
+	rangeEndExclusive: `${rangeDate}T23:59:59.999999999Z`,
+	checkpointId: randomUUID(),
+	checkpointManifestFingerprint: "cid:2026-01-01:100",
+	createdAt: "2026-06-02T00:00:00.000Z",
+	mapleVersion: MAPLE_VERSION,
+	chdbVersion: CHDB_VERSION,
+	schemaFingerprint: SCHEMA_FINGERPRINT,
+	sourceRowCount: rowCount,
+	archivedRowCount: rowCount,
+	tuning: {
+		writerThreads: 1,
+		rowGroupRows: 10_000,
+		maxShardRows: 500_000,
+		maxShardBytes: 256 * 1024 * 1024,
+		targetChunkBytes: 1024 * 1024 * 1024,
+		minFreeSpaceReserve: 512 * 1024 * 1024,
+	},
+	tuningConfigName: null,
+	shards: [
+		{
+			name: "00.parquet",
+			rowCount,
+			minEventTime: `${rangeDate}T00:00:00.000Z`,
+			maxEventTime: `${rangeDate}T00:30:00.000Z`,
+			sha256: "a".repeat(64),
+			bytes: 4096,
+		},
+	],
+})
+
+/** Seed a complete, promoted generation on disk (manifest + shard + active pointer). */
+const seedActiveGeneration = (
+	archiveDir: string,
+	signal: string,
+	rangeDate: string,
+	generationId: string,
+	rowCount: number,
+): void => {
+	const shardsDir = shardsRoot(archiveDir, signal, rangeDate, generationId)
+	mkdirSync(shardsDir, { recursive: true })
+	writeFileSync(join(shardsDir, "00.parquet"), "PAR1")
+	writeFileSync(
+		generationManifestPath(archiveDir, signal, rangeDate, generationId),
+		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount))}\n`,
+	)
+	writeFileSync(
+		activePointerPath(archiveDir, signal, rangeDate),
+		`${JSON.stringify({
+			formatVersion: 1,
+			generationId,
+			signal,
+			rangeStart: rangeDate,
+			selectedAt: "2026-06-02T00:00:00.000Z",
+		})}\n`,
+	)
+}
+
+/** Seed a superseded generation: manifest + shard present, but NOT active. */
+const seedSupersededGeneration = (
+	archiveDir: string,
+	signal: string,
+	rangeDate: string,
+	generationId: string,
+	rowCount: number,
+): void => {
+	const shardsDir = shardsRoot(archiveDir, signal, rangeDate, generationId)
+	mkdirSync(shardsDir, { recursive: true })
+	writeFileSync(join(shardsDir, "00.parquet"), "PAR1-old")
+	writeFileSync(
+		generationManifestPath(archiveDir, signal, rangeDate, generationId),
+		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount))}\n`,
+	)
+}
+
+describe("archive listing", () => {
+	it("lists the active generation with its shard paths and excludes superseded generations", async () => {
+		await withArchive(async (archiveDir) => {
+			const old = randomUUID()
+			const active = randomUUID()
+			seedSupersededGeneration(archiveDir, "traces", "2026-06-01", old, 5)
+			seedActiveGeneration(archiveDir, "traces", "2026-06-01", active, 10)
+			const listing = listActiveGenerations(archiveDir)
+			strictEqual(listing.active.length, 1)
+			const summary = listing.active[0]!
+			strictEqual(summary.generationId, active)
+			strictEqual(summary.archivedRowCount, 10)
+			strictEqual(summary.shardCount, 1)
+			strictEqual(summary.shardPaths.length, 1)
+			ok(summary.shardPaths[0]!.endsWith("00.parquet"))
+			strictEqual(summary.shardBytes, 4096)
+			deepStrictEqual(listing.signals, ["traces"])
+		})
+	})
+
+	it("returns empty when no archive exists", async () => {
+		await withArchive(async (archiveDir) => {
+			const listing = listActiveGenerations(archiveDir)
+			strictEqual(listing.active.length, 0)
+		})
+	})
+
+	it("resolves active parquet paths across ranges in ascending order", async () => {
+		await withArchive(async (archiveDir) => {
+			seedActiveGeneration(archiveDir, "logs", "2026-06-02", randomUUID(), 3)
+			seedActiveGeneration(archiveDir, "logs", "2026-06-01", randomUUID(), 7)
+			const paths = activeParquetPaths(archiveDir, "logs")
+			strictEqual(paths.length, 2)
+			// Ascending range order: June 1 before June 2.
+			ok(paths[0]!.includes("2026-06-01"))
+			ok(paths[1]!.includes("2026-06-02"))
+		})
+	})
+
+	it("skips a malformed active pointer without hiding other ranges", async () => {
+		await withArchive(async (archiveDir) => {
+			seedActiveGeneration(archiveDir, "traces", "2026-06-01", randomUUID(), 4)
+			// Corrupt the pointer for a second range.
+			mkdirSync(join(archiveDir, "traces", "2026-06-02"), { recursive: true })
+			writeFileSync(activePointerPath(archiveDir, "traces", "2026-06-02"), "{bad json")
+			const listing = listActiveGenerations(archiveDir)
+			strictEqual(listing.active.length, 1)
+			strictEqual(listing.active[0]!.rangeStart, "2026-06-01")
+		})
+	})
+})
+
+describe("archive catalog rebuild", () => {
+	it("rebuilds the catalog from manifests after truncation, including superseded generations", async () => {
+		await withArchive(async (archiveDir) => {
+			const old = randomUUID()
+			const active = randomUUID()
+			seedSupersededGeneration(archiveDir, "traces", "2026-06-01", old, 5)
+			seedActiveGeneration(archiveDir, "traces", "2026-06-01", active, 10)
+			// Truncate the catalog if it exists, then rebuild.
+			const entries = rebuildCatalog(archiveDir, "traces")
+			// Both the superseded and the active generation appear, because the
+			// catalog indexes all retained generations.
+			strictEqual(entries.length, 2)
+			const ids = entries.map((e) => e.generationId).sort()
+			deepStrictEqual(ids, [active, old].sort())
+			ok(existsSync(catalogPath(archiveDir, "traces")))
+		})
+	})
+
+	it("ignores a generation directory missing its manifest", async () => {
+		await withArchive(async (archiveDir) => {
+			seedActiveGeneration(archiveDir, "traces", "2026-06-01", randomUUID(), 8)
+			// Add a stray generation dir with no manifest.
+			const stray = randomUUID()
+			mkdirSync(generationsRoot(archiveDir, "traces", "2026-06-01"), { recursive: true })
+			mkdirSync(join(generationsRoot(archiveDir, "traces", "2026-06-01"), stray), { recursive: true })
+			const entries = rebuildCatalog(archiveDir, "traces")
+			strictEqual(entries.length, 1)
+		})
+	})
+
+	it("produces a catalog with one valid JSON line per generation", async () => {
+		await withArchive(async (archiveDir) => {
+			seedActiveGeneration(archiveDir, "logs", "2026-06-01", randomUUID(), 12)
+			rebuildCatalog(archiveDir, "logs")
+			const lines = readFileSync(catalogPath(archiveDir, "logs"), "utf8").trim().split("\n")
+			strictEqual(lines.length, 1)
+			const entry = JSON.parse(lines[0]!) as { signal: string; archivedRowCount: number }
+			strictEqual(entry.signal, "logs")
+			strictEqual(entry.archivedRowCount, 12)
+		})
+	})
+})
