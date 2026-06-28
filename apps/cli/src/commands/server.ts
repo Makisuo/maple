@@ -13,9 +13,13 @@ import {
 	isStoreDirty,
 	storeMarkerJson,
 	storeMarkerPath,
-	storeOpenMarkerPath,
 } from "../server/store-version"
-import { createCheckpoint, reconcileCheckpointRecovery, restoreCheckpoint } from "../server/checkpoints"
+import {
+	createCheckpoint,
+	reconcileCheckpointRecovery,
+	resetLiveStorePreservingCheckpoints,
+	restoreCheckpoint,
+} from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
 import { amber, bold, cyan, dim, green, underline } from "../lib/style"
 import { MAPLE_VERSION } from "../version"
@@ -120,14 +124,14 @@ const backgroundFlag = Flag.boolean("background").pipe(
 
 const resetFlag = Flag.boolean("reset").pipe(
 	Flag.withDescription(
-		"Wipe the existing store (~/.maple/data) before starting — use after an incompatible upgrade",
+		"Wipe live chDB data before starting while preserving checkpoints — use after an incompatible upgrade",
 	),
 	Flag.withDefault(false),
 )
 
 const onDirtyStoreFlag = Flag.choice("on-dirty-store", ["wipe", "fail", "restore-checkpoint"]).pipe(
 	Flag.withDescription("Recovery policy when the local chDB store was not cleanly closed"),
-	Flag.withDefault("wipe" as const),
+	Flag.withDefault("fail" as const),
 )
 
 const yesFlag = Flag.boolean("yes").pipe(
@@ -265,11 +269,11 @@ export const start = Command.make("start", {
 			)
 
 			// `--reset`: wipe the store (and its version marker) so we bootstrap fresh.
-			// The escape hatch when an existing store is from an incompatible build.
+			// Preserve the checkpoint registry under dataDir/backups.
 			if (a.reset) {
-				yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
+				yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
+					Effect.mapError((e) => new ServerError({ message: e.message })),
+				)
 			}
 
 			yield* fs.makeDirectory(dataDir, { recursive: true })
@@ -322,13 +326,13 @@ export const start = Command.make("start", {
 						process.stderr.write(
 							amber(
 								"⚠ the local store was left inconsistent by an unclean shutdown — " +
-									"wiping it and starting fresh (local telemetry data is discarded)\n",
+									"explicit wipe selected; discarding live telemetry while preserving checkpoints\n",
 							),
 						),
 					)
-					yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-					yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-					yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
+					yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
+						Effect.mapError((e) => new ServerError({ message: e.message })),
+					)
 					yield* fs.makeDirectory(dataDir, { recursive: true })
 				}
 			}
@@ -337,21 +341,15 @@ export const start = Command.make("start", {
 			// place: `CREATE … IF NOT EXISTS` is a no-op on existing tables, so a
 			// column added to the schema (e.g. ServiceNamespace on trace_list_mv)
 			// never lands and facet queries referencing it fail. Rebuild from the
-			// current schema. Safe to auto-wipe — local telemetry is ephemeral and
-			// re-ingested — and only triggers once per schema change.
+			// current schema. Do not silently delete telemetry or checkpoints:
+			// require an explicit reset, which preserves the checkpoint registry.
 			if (isSchemaStale(dataDir, SCHEMA_FINGERPRINT)) {
-				yield* Effect.sync(() =>
-					process.stderr.write(
-						amber(
-							"⚠ the local store was built from an older schema — " +
-								"rebuilding it from the current schema (local telemetry data is discarded)\n",
-						),
-					),
-				)
-				yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.makeDirectory(dataDir, { recursive: true })
+				return yield* new ServerError({
+					message:
+						`the local store at ${prettyPath(dataDir)} was built from an older schema. ` +
+						`Maple preserved it and its checkpoints; explicitly rebuild live data with ` +
+						`\`${bold("maple start --reset")}\` or \`${bold("maple reset --yes")}\`.`,
+				})
 			}
 
 			// Detached: spawn the same command without --background and exit.
@@ -477,7 +475,7 @@ export const stop = Command.make("stop", { dataDir: dataDirFlag }).pipe(
 
 export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag }).pipe(
 	Command.withDescription(
-		"Delete the local chDB store (~/.maple/data) so the next `maple start` bootstraps fresh",
+		"Delete live chDB data while preserving checkpoints so the next start bootstraps fresh",
 	),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
@@ -496,18 +494,21 @@ export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag 
 			if (!a.yes) {
 				yield* Effect.sync(() =>
 					process.stderr.write(
-						`This permanently deletes the local store at ${bold(prettyPath(dataDir))}.\n` +
+						`This permanently deletes live telemetry at ${bold(prettyPath(dataDir))}.\n` +
+							`The checkpoint registry under its backups directory is preserved.\n` +
 							`Re-run with ${bold("maple reset --yes")} to confirm.\n`,
 					),
 				)
 				return
 			}
 
-			yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-			yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-			yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
+			yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
+				Effect.mapError((e) => new ServerError({ message: e.message })),
+			)
 			yield* Effect.sync(() =>
-				process.stderr.write(`${green("✓")} reset — removed ${prettyPath(dataDir)}\n`),
+				process.stderr.write(
+					`${green("✓")} reset — cleared live data and preserved checkpoints at ${prettyPath(dataDir)}\n`,
+				),
 			)
 		}),
 	),

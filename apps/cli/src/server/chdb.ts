@@ -114,8 +114,10 @@ export class Chdb {
 		// `recursive_mutex lock failed: Invalid argument` → `ASYNC_LOAD_WAIT_FAILED`
 		// → chdb_connect returns NULL. Most visible after an unclean kill, when more
 		// load/merge work is still in flight on reopen. Waiting serializes load before
-		// bootstrap and removes the race. (`--async_load_system_database=0` is already
-		// the default in this build; set for symmetry / future-proofing.)
+		// bootstrap and substantially narrows the race. One fresh-process native smoke
+		// still observed a non-reproducible ASYNC_LOAD_WAIT_FAILED before 40 focused
+		// restart passes; never retry a failed FFI open in this process.
+		// (`--async_load_system_database=0` is set explicitly for symmetry.)
 		const args = [
 			"clickhouse",
 			"--async_load_databases=0",

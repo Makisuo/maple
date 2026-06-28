@@ -151,6 +151,18 @@ assert_counts 2
 
 # Foreground dirty-store recovery.
 kill_server
+set +e
+"$MAPLE" start \
+	--port "$PORT" \
+	--data-dir "$DATA" \
+	--chdb-config-file "$CONFIG" \
+	--offline >"$ROOT/default-dirty.out" 2>&1
+default_dirty_status=$?
+set -e
+[[ "$default_dirty_status" -ne 0 ]] || fail "default dirty-store policy unexpectedly started"
+grep -q 'was not cleanly closed' "$ROOT/default-dirty.out" ||
+	fail "default dirty-store failure was not actionable: $(cat "$ROOT/default-dirty.out")"
+[[ -f "$DATA/backups/state.json" ]] || fail "default dirty-store failure removed checkpoints"
 start_server restore-checkpoint
 assert_counts 2
 
@@ -177,6 +189,19 @@ jq -e --arg c "$C3" --arg p "$C2" \
 [[ -d "$DATA/backups/snapshots/$C3" ]] || fail "current C3 is missing"
 
 stop_server
+start_server fail
+assert_counts 3
+stop_server
+
+"$MAPLE" reset --data-dir "$DATA" --yes >/dev/null
+jq -e --arg c "$C3" --arg p "$C2" \
+	'.current == $c and .previous == $p' "$DATA/backups/state.json" >/dev/null
+[[ -d "$DATA/backups/snapshots/$C2" ]] || fail "reset removed previous checkpoint C2"
+[[ -d "$DATA/backups/snapshots/$C3" ]] || fail "reset removed current checkpoint C3"
+start_server fail
+assert_counts 0
+stop_server
+"$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C3" --yes >/dev/null
 start_server fail
 assert_counts 3
 stop_server

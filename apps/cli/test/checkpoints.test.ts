@@ -28,6 +28,8 @@ import {
 	readCheckpointState,
 	reconcileCheckpointRecovery,
 	reconcileCheckpointOperations,
+	resetLiveStorePreservingCheckpoints,
+	type RestoreRecoveryFaults,
 	resolveCheckpoint,
 	restoreDataPath,
 	restoreQuarantinePath,
@@ -57,7 +59,11 @@ const withDataDir = async (run: (dataDir: string) => Promise<void> | void): Prom
 	}
 }
 
-const manifest = (checkpointId: string, operationId = newCheckpointId()): Record<string, unknown> => ({
+const manifest = (
+	checkpointId: string,
+	operationId = newCheckpointId(),
+	sourceDataDir = "/tmp/maple-data",
+): Record<string, unknown> => ({
 	formatVersion: 1,
 	checkpointId,
 	operationId,
@@ -65,7 +71,7 @@ const manifest = (checkpointId: string, operationId = newCheckpointId()): Record
 	chdbVersion: CHDB_VERSION,
 	schemaFingerprint: SCHEMA_FINGERPRINT,
 	createdAt: "2026-01-01T00:00:00.000Z",
-	sourceDataDir: "/tmp/maple-data",
+	sourceDataDir,
 	backupRelativePath: `snapshots/${checkpointId}/backup`,
 	backupBytes: 123,
 	validation: {
@@ -80,11 +86,14 @@ const manifest = (checkpointId: string, operationId = newCheckpointId()): Record
 	},
 })
 
-const writeSnapshot = (dataDir: string, checkpointId: string): void => {
+const writeSnapshot = (dataDir: string, checkpointId: string, operationId = newCheckpointId()): void => {
 	const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
 	mkdirSync(join(snapshot, "backup"), { recursive: true })
 	writeFileSync(join(snapshot, "backup", "data.bin"), "backup")
-	writeFileSync(join(snapshot, "manifest.json"), `${JSON.stringify(manifest(checkpointId))}\n`)
+	writeFileSync(
+		join(snapshot, "manifest.json"),
+		`${JSON.stringify(manifest(checkpointId, operationId, dataDir))}\n`,
+	)
 }
 
 const writeState = (
@@ -104,6 +113,35 @@ const writeState = (
 			committedAt: "2026-01-01T00:00:02.000Z",
 		})}\n`,
 	)
+}
+
+const writeCheckpointOperation = (
+	dataDir: string,
+	operationId: string,
+	checkpointId: string,
+	phase: "intent" | "backup-complete" | "manifest-complete" | "pointer-complete" | "retention-complete",
+	base: {
+		readonly revision: string | null
+		readonly current: string | null
+		readonly previous: string | null
+	} = { revision: null, current: null, previous: null },
+): string => {
+	const dir = join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)
+	mkdirSync(dir, { recursive: true })
+	writeFileSync(
+		join(dir, "intent.json"),
+		`${JSON.stringify({
+			formatVersion: 1,
+			operationId,
+			checkpointId,
+			baseRevision: base.revision,
+			baseCurrent: base.current,
+			basePrevious: base.previous,
+			phase,
+			startedAt: "2026-01-01T00:00:00.000Z",
+		})}\n`,
+	)
+	return dir
 }
 
 const restoreValidation = {
@@ -176,6 +214,11 @@ describe("checkpoint IDs and strict parsers", () => {
 	it("accepts a complete manifest and rejects ID, path, compatibility, and count corruption", () => {
 		const id = newCheckpointId()
 		strictEqual(parseCheckpointManifest(manifest(id), id).checkpointId, id)
+		strictEqual(parseCheckpointManifest(manifest(id), id, "/tmp/maple-data").checkpointId, id)
+		throwsMessage(
+			() => parseCheckpointManifest(manifest(id), id, "/tmp/different-owner"),
+			/configured owner/,
+		)
 		const wrong = newCheckpointId()
 		ok(wrong !== id)
 		throwsMessage(() => parseCheckpointManifest(manifest(id), wrong), /does not match/)
@@ -285,6 +328,28 @@ describe("checkpoint state resolution", () => {
 			throwsMessage(() => assertCheckpointRootSafe(dataDir), /symlink/)
 		})
 	})
+
+	it("rejects symlinked manifest and backup leaves outside the registry", async () => {
+		await withDataDir(async (dataDir) => {
+			const checkpointId = newCheckpointId()
+			const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
+			const outside = join(dirname(dataDir), "outside-checkpoint")
+			mkdirSync(outside)
+			writeFileSync(
+				join(outside, "manifest.json"),
+				`${JSON.stringify(manifest(checkpointId, newCheckpointId(), dataDir))}\n`,
+			)
+			mkdirSync(join(outside, "backup"))
+			mkdirSync(snapshot, { recursive: true })
+			symlinkSync(join(outside, "manifest.json"), join(snapshot, "manifest.json"))
+			symlinkSync(join(outside, "backup"), join(snapshot, "backup"))
+			writeState(dataDir, checkpointId)
+
+			await rejects(readCheckpointState(dataDir), /symlink/)
+			ok(existsSync(join(outside, "manifest.json")))
+			ok(existsSync(join(outside, "backup")))
+		})
+	})
 })
 
 describe("checkpoint reconciliation and retention", () => {
@@ -292,21 +357,10 @@ describe("checkpoint reconciliation and retention", () => {
 		await withDataDir(async (dataDir) => {
 			const operationId = newCheckpointId()
 			const checkpointId = newCheckpointId()
-			const operationDir = join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)
 			const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
 			mkdirSync(join(snapshot, "backup"), { recursive: true })
 			writeFileSync(join(snapshot, "backup", "partial.bin"), "partial")
-			mkdirSync(operationDir, { recursive: true })
-			writeFileSync(
-				join(operationDir, "intent.json"),
-				`${JSON.stringify({
-					formatVersion: 1,
-					operationId,
-					checkpointId,
-					phase: "backup-complete",
-					startedAt: "2026-01-01T00:00:00.000Z",
-				})}\n`,
-			)
+			writeCheckpointOperation(dataDir, operationId, checkpointId, "backup-complete")
 
 			await reconcileCheckpointOperations(dataDir)
 
@@ -331,6 +385,149 @@ describe("checkpoint reconciliation and retention", () => {
 			await rejects(reconcileCheckpointOperations(dataDir))
 			ok(existsSync(join(operationDir, "intent.json")))
 		})
+	})
+
+	it("rejects a symlinked operations root without touching its target", async () => {
+		await withDataDir(async (dataDir) => {
+			const outside = join(dirname(dataDir), "outside-operations")
+			const sentinel = join(outside, "sentinel")
+			mkdirSync(outside)
+			writeFileSync(sentinel, "preserve")
+			mkdirSync(checkpointRoot(dataDir), { recursive: true })
+			symlinkSync(outside, join(checkpointRoot(dataDir), "operations"))
+
+			await rejects(reconcileCheckpointOperations(dataDir), /real directory|symlink/)
+			strictEqual(readFileSync(sentinel, "utf8"), "preserve")
+		})
+	})
+
+	it("rejects mismatched operation directory and intent identities without mutation", async () => {
+		await withDataDir(async (dataDir) => {
+			const directoryId = newCheckpointId()
+			const intentId = newCheckpointId()
+			const checkpointId = newCheckpointId()
+			const directory = writeCheckpointOperation(dataDir, directoryId, checkpointId, "backup-complete")
+			const intent = JSON.parse(readFileSync(join(directory, "intent.json"), "utf8"))
+			intent.operationId = intentId
+			writeFileSync(join(directory, "intent.json"), `${JSON.stringify(intent)}\n`)
+
+			await rejects(reconcileCheckpointOperations(dataDir), /identity mismatch/)
+			ok(existsSync(join(directory, "intent.json")))
+		})
+	})
+
+	it("publishes a completed first checkpoint after an interrupted pointer update", async () => {
+		await withDataDir(async (dataDir) => {
+			const operationId = newCheckpointId()
+			const checkpointId = newCheckpointId()
+			writeSnapshot(dataDir, checkpointId, operationId)
+			writeCheckpointOperation(dataDir, operationId, checkpointId, "manifest-complete")
+
+			await reconcileCheckpointOperations(dataDir)
+
+			const state = await readCheckpointState(dataDir)
+			strictEqual(state.revision, operationId)
+			strictEqual(state.current, checkpointId)
+			strictEqual(state.previous, null)
+			ok(!existsSync(join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)))
+		})
+	})
+
+	it("resumes a based promotion and retires only the superseded previous checkpoint", async () => {
+		await withDataDir(async (dataDir) => {
+			const oldCurrent = newCheckpointId()
+			const oldPrevious = newCheckpointId()
+			const baseRevision = newCheckpointId()
+			writeSnapshot(dataDir, oldCurrent)
+			writeSnapshot(dataDir, oldPrevious)
+			writeState(dataDir, oldCurrent, oldPrevious, baseRevision)
+
+			const operationId = newCheckpointId()
+			const checkpointId = newCheckpointId()
+			writeSnapshot(dataDir, checkpointId, operationId)
+			writeCheckpointOperation(dataDir, operationId, checkpointId, "manifest-complete", {
+				revision: baseRevision,
+				current: oldCurrent,
+				previous: oldPrevious,
+			})
+
+			await reconcileCheckpointOperations(dataDir)
+
+			const state = await readCheckpointState(dataDir)
+			strictEqual(state.current, checkpointId)
+			strictEqual(state.previous, oldCurrent)
+			ok(existsSync(checkpointSnapshotDir(dataDir, oldCurrent)))
+			ok(!existsSync(checkpointSnapshotDir(dataDir, oldPrevious)))
+		})
+	})
+
+	it("converges after interruption at retirement intent and snapshot-rename boundaries", async () => {
+		for (const boundary of ["afterRetirementIntent", "afterRetirementRename"] as const) {
+			await withDataDir(async (dataDir) => {
+				const current = newCheckpointId()
+				const previous = newCheckpointId()
+				const old = newCheckpointId()
+				const retirementId = newCheckpointId()
+				writeSnapshot(dataDir, current)
+				writeSnapshot(dataDir, previous)
+				writeSnapshot(dataDir, old)
+				writeState(dataDir, current, previous)
+				const state = await readCheckpointState(dataDir)
+
+				await rejects(
+					retireCheckpointIfEligible(dataDir, old, state, retirementId, {
+						[boundary]: () => {
+							throw new Error(`injected ${boundary}`)
+						},
+					}),
+					/injected/,
+				)
+				const retirement = await retireCheckpointIfEligible(dataDir, old, state, retirementId)
+
+				ok(!existsSync(checkpointSnapshotDir(dataDir, old)), boundary)
+				ok(retirement !== null && existsSync(join(retirement, "complete.json")), boundary)
+				ok(existsSync(checkpointSnapshotDir(dataDir, current)), boundary)
+				ok(existsSync(checkpointSnapshotDir(dataDir, previous)), boundary)
+			})
+		}
+	})
+
+	it("cleans an exactly completed retirement after the operation completion record", async () => {
+		for (const keepRetirementRecord of [true, false]) {
+			await withDataDir(async (dataDir) => {
+				const oldCurrent = newCheckpointId()
+				const oldPrevious = newCheckpointId()
+				const baseRevision = newCheckpointId()
+				const operationId = newCheckpointId()
+				const checkpointId = newCheckpointId()
+				writeSnapshot(dataDir, oldCurrent)
+				writeSnapshot(dataDir, checkpointId, operationId)
+				writeState(dataDir, checkpointId, oldCurrent, operationId)
+				writeCheckpointOperation(dataDir, operationId, checkpointId, "retention-complete", {
+					revision: baseRevision,
+					current: oldCurrent,
+					previous: oldPrevious,
+				})
+				const retirement = join(checkpointRoot(dataDir), "retiring", `retirement-${operationId}`)
+				if (keepRetirementRecord) {
+					mkdirSync(retirement, { recursive: true })
+					const record = {
+						formatVersion: 1,
+						retirementId: operationId,
+						checkpointId: oldPrevious,
+						stateRevision: operationId,
+					}
+					writeFileSync(join(retirement, "intent.json"), `${JSON.stringify(record)}\n`)
+					writeFileSync(join(retirement, "complete.json"), `${JSON.stringify(record)}\n`)
+				}
+
+				await reconcileCheckpointOperations(dataDir)
+
+				ok(!existsSync(retirement))
+				ok(!existsSync(join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)))
+				strictEqual((await readCheckpointState(dataDir)).current, checkpointId)
+			})
+		}
 	})
 
 	it("retains current, previous, pinned, and malformed candidates; retires only proven safe", async () => {
@@ -364,6 +561,47 @@ describe("checkpoint reconciliation and retention", () => {
 			writeFileSync(join(checkpointSnapshotDir(dataDir, malformed), "manifest.json"), "{bad json")
 			await rejects(retireCheckpointIfEligible(dataDir, malformed, state))
 			ok(existsSync(checkpointSnapshotDir(dataDir, malformed)))
+		})
+	})
+})
+
+describe("live-store reset safety", () => {
+	it("removes live chDB data and sibling markers while preserving the checkpoint registry", async () => {
+		await withDataDir(async (dataDir) => {
+			const checkpointId = newCheckpointId()
+			writeSnapshot(dataDir, checkpointId)
+			writeState(dataDir, checkpointId)
+			mkdirSync(join(dataDir, "store"), { recursive: true })
+			mkdirSync(join(dataDir, "metadata"), { recursive: true })
+			writeFileSync(join(dataDir, "store", "part.bin"), "live")
+			writeFileSync(join(dataDir, "metadata", "table.sql"), "live")
+			writeFileSync(join(dataDir, "status"), "live")
+			writeFileSync(storeMarkerPath(dataDir), "{}")
+			writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
+
+			await Effect.runPromise(resetLiveStorePreservingCheckpoints(dataDir))
+
+			strictEqual((await readCheckpointState(dataDir)).current, checkpointId)
+			ok(existsSync(checkpointSnapshotDir(dataDir, checkpointId)))
+			ok(!existsSync(join(dataDir, "store")))
+			ok(!existsSync(join(dataDir, "metadata")))
+			ok(!existsSync(join(dataDir, "status")))
+			ok(!existsSync(storeMarkerPath(dataDir)))
+			ok(!existsSync(storeOpenMarkerPath(dataDir)))
+		})
+	})
+
+	it("fails closed before deleting live data when checkpoint infrastructure is unsafe", async () => {
+		await withDataDir(async (dataDir) => {
+			const outside = join(dirname(dataDir), "outside-pins")
+			mkdirSync(outside)
+			mkdirSync(checkpointRoot(dataDir), { recursive: true })
+			symlinkSync(outside, join(checkpointRoot(dataDir), "pins"))
+			mkdirSync(join(dataDir, "store"), { recursive: true })
+			writeFileSync(join(dataDir, "store", "preserve.bin"), "live")
+
+			await rejects(Effect.runPromise(resetLiveStorePreservingCheckpoints(dataDir)), /real directory/)
+			strictEqual(readFileSync(join(dataDir, "store", "preserve.bin"), "utf8"), "live")
 		})
 	})
 })
@@ -450,6 +688,48 @@ describe("live restore transaction reconciliation", () => {
 		})
 	})
 
+	it("converges after interruption at every live-swap, marker, and cleanup boundary", async () => {
+		const boundaries: ReadonlyArray<keyof RestoreRecoveryFaults> = [
+			"afterLiveQuarantineRename",
+			"afterOldQuarantinedRecord",
+			"afterRestoredLiveRename",
+			"afterNewLiveRecord",
+			"afterStoreMarkerWrite",
+			"afterOpenMarkerRemoval",
+			"afterMarkersCommittedRecord",
+			"afterReadyMarkerRemoval",
+			"afterRestoreRootRemoval",
+		]
+		for (const boundary of boundaries) {
+			await withDataDir(async (dataDir) => {
+				const operationId = newCheckpointId()
+				const checkpointId = newCheckpointId()
+				const quarantineId = newCheckpointId()
+				const quarantine = restoreQuarantinePath(dataDir, operationId, quarantineId)
+				writeFileSync(join(dataDir, "old-live"), "old")
+				writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
+				writeRestoreReady(dataDir, operationId, checkpointId)
+				writeFileSync(join(restoreDataPath(dataDir, operationId), "new-live"), "new")
+				writeRestoreTransaction(dataDir, operationId, checkpointId, quarantineId, "restore-ready")
+				const faults = {
+					[boundary]: () => {
+						throw new Error(`injected ${boundary}`)
+					},
+				} as RestoreRecoveryFaults
+
+				await rejects(Effect.runPromise(reconcileCheckpointRecovery(dataDir, faults)), /injected/)
+				await Effect.runPromise(reconcileCheckpointRecovery(dataDir))
+
+				ok(existsSync(join(dataDir, "new-live")), boundary)
+				ok(existsSync(join(quarantine, "old-live")), boundary)
+				ok(existsSync(storeMarkerPath(dataDir)), boundary)
+				ok(!existsSync(storeOpenMarkerPath(dataDir)), boundary)
+				ok(!existsSync(restoreTransactionPath(dataDir)), boundary)
+				ok(!existsSync(restoreRootPath(dataDir, operationId)), boundary)
+			})
+		}
+	})
+
 	it("fails closed on malformed or unrecorded restore state without deleting it", async () => {
 		await withDataDir(async (dataDir) => {
 			writeFileSync(restoreTransactionPath(dataDir), "{bad json")
@@ -464,6 +744,29 @@ describe("live restore transaction reconciliation", () => {
 				/without a valid transaction/,
 			)
 			ok(existsSync(debris))
+		})
+	})
+
+	it("rejects symlinked transaction and restore topology without touching targets", async () => {
+		await withDataDir(async (dataDir) => {
+			const outside = join(dirname(dataDir), "outside-transaction")
+			writeFileSync(outside, "{}")
+			symlinkSync(outside, restoreTransactionPath(dataDir))
+			await rejects(Effect.runPromise(reconcileCheckpointRecovery(dataDir)), /real file/)
+			strictEqual(readFileSync(outside, "utf8"), "{}")
+		})
+		await withDataDir(async (dataDir) => {
+			const operationId = newCheckpointId()
+			const checkpointId = newCheckpointId()
+			const quarantineId = newCheckpointId()
+			const outside = join(dirname(dataDir), "outside-restore")
+			mkdirSync(outside)
+			writeFileSync(join(outside, "sentinel"), "preserve")
+			writeRestoreTransaction(dataDir, operationId, checkpointId, quarantineId, "intent")
+			symlinkSync(outside, restoreRootPath(dataDir, operationId))
+
+			await rejects(Effect.runPromise(reconcileCheckpointRecovery(dataDir)), /real directory/)
+			strictEqual(readFileSync(join(outside, "sentinel"), "utf8"), "preserve")
 		})
 	})
 })

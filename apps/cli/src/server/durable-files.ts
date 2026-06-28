@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { chmod, mkdir, open, readdir, rename, rm } from "node:fs/promises"
+import { chmod, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 
 export interface DurabilityFaults {
@@ -8,6 +8,8 @@ export interface DurabilityFaults {
 	readonly beforeRename?: (from: string, to: string) => void | Promise<void>
 	readonly beforeDirectorySync?: (path: string) => void | Promise<void>
 	readonly beforeRemove?: (path: string) => void | Promise<void>
+	readonly afterRetirementIntent?: (path: string) => void | Promise<void>
+	readonly afterRetirementRename?: (path: string) => void | Promise<void>
 }
 
 // APFS and the target Linux filesystems support directory fsync. Keep the
@@ -22,7 +24,17 @@ export const isUnsupportedDirectorySyncError = (error: unknown): boolean =>
 	unsupportedDirectorySyncCodes.has(String((error as NodeJS.ErrnoException).code))
 
 export const ensurePrivateDirectory = async (path: string): Promise<void> => {
+	const before = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+		if (error.code === "ENOENT") return null
+		throw error
+	})
+	if (before?.isSymbolicLink()) throw new Error(`refusing symlink directory: ${path}`)
+	if (before && !before.isDirectory()) throw new Error(`refusing non-directory path: ${path}`)
 	await mkdir(path, { recursive: true, mode: 0o700 })
+	const after = await lstat(path)
+	if (after.isSymbolicLink() || !after.isDirectory()) {
+		throw new Error(`private directory is not a real directory: ${path}`)
+	}
 	await chmod(path, 0o700)
 }
 

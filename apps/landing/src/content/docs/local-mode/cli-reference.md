@@ -47,8 +47,8 @@ Start the local ingest + query server (embedded ClickHouse via chDB).
 | `--chdb-config-file <path>`                         |                 | Optional ClickHouse config file passed to embedded chDB                             |
 | `--offline`                                         | `false`         | Serve the UI bundled in this binary (from `127.0.0.1`) instead of `local.maple.dev` |
 | `--background`, `-d`                                | `false`         | Run detached (logs to `~/.maple/maple.log`); stop with `maple stop`                 |
-| `--reset`                                           | `false`         | Wipe the existing store before starting — use after an incompatible upgrade         |
-| `--on-dirty-store <wipe\|fail\|restore-checkpoint>` | `wipe`          | Recovery policy when the store was not cleanly closed                               |
+| `--reset`                                           | `false`         | Wipe live chDB data while preserving checkpoints                                    |
+| `--on-dirty-store <wipe\|fail\|restore-checkpoint>` | `fail`          | Recovery policy when the store was not cleanly closed                               |
 
 ```bash
 maple start                    # foreground, UI from local.maple.dev
@@ -62,6 +62,14 @@ decision, or data-directory creation, startup reconciles a recorded checkpoint
 restore transaction. Ambiguous or malformed restore state fails closed and
 prints the preserved paths.
 
+The default dirty-store policy is `fail`, so an unclean shutdown never silently
+deletes telemetry. Choose `restore-checkpoint` to recover the selected
+checkpoint, or explicitly choose `wipe` to discard only live chDB data.
+Checkpoint snapshots, pins, operation evidence, and quarantine state under
+`<data-dir>/backups` are preserved by both `--reset` and explicit wipe.
+Schema-incompatible stores also fail closed until an operator explicitly
+resets live data.
+
 ### `maple stop`
 
 Stop a running `maple start` server (reads the PID file beside the data dir).
@@ -72,11 +80,13 @@ Stop a running `maple start` server (reads the PID file beside the data dir).
 
 ### `maple reset`
 
-Delete the local chDB store so the next `maple start` bootstraps fresh. Refuses to run while a server still owns the store.
+Delete live chDB data so the next `maple start` bootstraps fresh. The checkpoint
+registry under `<data-dir>/backups` is preserved. Refuses to run while a server
+still owns the store.
 
 | Flag                | Default         | Description                  |
 | ------------------- | --------------- | ---------------------------- |
-| `--data-dir <path>` | `~/.maple/data` | Store to delete              |
+| `--data-dir <path>` | `~/.maple/data` | Store whose live data clears |
 | `--yes`, `-y`       | `false`         | Skip the confirmation prompt |
 
 ### `maple checkpoint`
@@ -411,7 +421,7 @@ The on-disk config at `~/.maple/config.json` stores `apiUrl`, `token`, `orgId`, 
 
 **`maple is already running (PID …)`.** A server already owns this data dir. Stop it with `maple stop`, or start a second instance on another port and data dir: `maple start --port 4400 --data-dir ~/.maple/data-2`.
 
-**Incompatible store after an upgrade.** If a new binary refuses to open an older store (`the local store … is incompatible`), wipe it with `maple reset`, or start fresh in one step with `maple start --reset`.
+**Incompatible store after an upgrade.** If a new binary refuses to open an older store (`the local store … is incompatible`), explicitly clear live data with `maple reset --yes`, or start fresh in one step with `maple start --reset`. Both preserve the checkpoint registry; incompatible checkpoints remain preserved and fail closed until deliberately handled.
 
 **Browser asks to "access devices on your local network" (or CORS errors).** The default dashboard at `local.maple.dev` is a public origin reaching your loopback server, which trips Chrome's Private Network Access gate. Run `maple start --offline` to serve the dashboard same-origin from `127.0.0.1` — no prompt, no internet needed.
 
