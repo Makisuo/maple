@@ -24,18 +24,20 @@ const MANIFEST_FORMAT_VERSION = 1
 const ACTIVE_POINTER_FORMAT_VERSION = 1
 
 export interface ArchiveShardRecord {
-	/** Shard file name without the `shards/` prefix, e.g. `000000.parquet`. */
+	/** Shard file name, e.g. `00-0000.parquet` (hour + sequence). */
 	readonly name: string
-	/** Row count inside the shard, validated against the source count. */
+	/** Row count READ BACK from the reopened Parquet file (not the source count). */
 	readonly rowCount: number
-	/** Minimum event time observed in the shard (ISO string). */
+	/** Minimum event time read back from the reopened Parquet (ISO string). */
 	readonly minEventTime: string
-	/** Maximum event time observed in the shard (ISO string). */
+	/** Maximum event time read back from the reopened Parquet (ISO string). */
 	readonly maxEventTime: string
 	/** SHA-256 of the shard file bytes. */
 	readonly sha256: string
-	/** Shard file size in bytes. */
+	/** Shard file size in bytes (on-disk, compressed). */
 	readonly bytes: number
+	/** Column names read back from the reopened Parquet (schema round-trip proof). */
+	readonly columns: ReadonlyArray<string>
 }
 
 export interface ArchiveGenerationManifest {
@@ -93,6 +95,12 @@ const parseShardRecord = (value: unknown): ArchiveShardRecord => {
 	if (!isRecord(value)) throw new Error("invalid archive shard record")
 	const name = requiredString(value, "name")
 	if (!/^[0-9a-z._-]+\.parquet$/i.test(name)) throw new Error(`invalid archive shard name: ${name}`)
+	const columnsRaw = value.columns
+	if (!Array.isArray(columnsRaw)) throw new Error("invalid archive shard record field: columns")
+	const columns = columnsRaw.map((c) => {
+		if (typeof c !== "string") throw new Error("invalid archive shard column name")
+		return c
+	})
 	return {
 		name,
 		rowCount: requiredCount(value, "rowCount"),
@@ -100,6 +108,7 @@ const parseShardRecord = (value: unknown): ArchiveShardRecord => {
 		maxEventTime: requiredIso(value, "maxEventTime"),
 		sha256: requiredString(value, "sha256"),
 		bytes: requiredCount(value, "bytes"),
+		columns,
 	}
 }
 

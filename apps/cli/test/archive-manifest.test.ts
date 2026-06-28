@@ -51,12 +51,13 @@ const validGenerationManifest = (overrides: Record<string, unknown> = {}) => ({
 	tuningConfigName: null,
 	shards: [
 		{
-			name: "00.parquet",
+			name: "00-0000.parquet",
 			rowCount: 100,
 			minEventTime: "2026-06-01T00:00:00.000Z",
 			maxEventTime: "2026-06-01T00:30:00.000Z",
 			sha256: "abc".repeat(22).slice(0, 64),
 			bytes: 4096,
+			columns: ["TimestampTime", "ServiceName"],
 		},
 	],
 	...overrides,

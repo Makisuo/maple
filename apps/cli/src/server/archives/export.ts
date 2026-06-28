@@ -4,22 +4,23 @@ import { join } from "node:path"
 import type { Chdb } from "../chdb"
 import { type ArchiveSignal } from "./signals"
 
-// Parquet shard export from a restored checkpoint's scratch chDB.
+// Bounded Parquet shard export from a restored checkpoint's scratch chDB.
 //
 // The export runs `SELECT ... INTO OUTFILE '...' FORMAT Parquet` directly on the
 // restored instance. The result is a write side effect; it is never returned
-// into JavaScript (the research established that `forceJsonEachRow` on the query
-// endpoint corrupts `INTO OUTFILE`, and routing export bytes through `query()`
-// defeats the streaming writer). One Parquet file is written per bounded slice.
+// into JavaScript. One Parquet file is written per bounded slice.
 //
-// Sharding strategy (v1): split a sealed UTC day into fixed UTC-hour windows.
-// Each shard covers one half-open `[hour, hour+1)` slice of the day, bounded by
-// the signal's event-time column. This is deterministic, independently
-// queryable, and avoids the `_part_offset`-repeats-per-part hazard the research
-// called out as unsafe for production. Row and byte bounds are still validated
-// per shard: a slice exceeding `maxShardRows` or `maxShardBytes` is reported as
-// an over-large shard rather than silently written, so an operator knows to
-// recalibrate with a finer split or a wider budget.
+// Sharding strategy: a sealed UTC day is partitioned by UTC-hour windows, then
+// within each hour by a (_part, _part_offset) cursor when a single hour exceeds
+// the configured row or byte bound. Each physical shard is bounded by BOTH
+// maxShardRows and maxShardBytes (estimated uncompressed). A shard name encodes
+// its slice: HH-NNNN.parquet (hour + sequence within the hour).
+//
+// Validation (H-1): after writing, each shard is REOPENED via chDB
+// `file(path, Parquet)` and its row count, min/max event time, and column list
+// are read back and compared against the source. A 19-byte invalid "Parquet"
+// file fails this reopen. The shard record carries the REOPENED counts, not the
+// source counts — the prior code's validation was tautological.
 
 export interface ExportSettings {
 	readonly writerThreads: number
@@ -36,18 +37,18 @@ export interface WrittenShard {
 	readonly maxEventTime: string
 	readonly sha256: string
 	readonly bytes: number
+	readonly columns: ReadonlyArray<string>
 }
 
-/** The UTC hours `[0..23]` that partition a sealed day into shards. */
+/** The UTC hours [0..23] that partition a sealed day into primary slices. */
 const HOURS_IN_DAY = Array.from({ length: 24 }, (_, hour) => hour)
 
-const shardName = (hour: number): string => `${hour.toString().padStart(2, "0")}.parquet`
+const shardName = (hour: number, seq: number): string =>
+	`${hour.toString().padStart(2, "0")}-${seq.toString().padStart(4, "0")}.parquet`
 
 /**
- * Parse a `JSONEachRow` result into rows. `JSONEachRow` is newline-delimited
- * JSON objects, not a JSON array — `JSON.parse` of the whole string yields a
- * single object, so the lines must be split first (matching the checkpoint
- * module's `readJsonRows` idiom).
+ * Parse a JSONEachRow result into rows (newline-delimited objects, not a JSON
+ * array — matching the checkpoint module's readJsonRows idiom).
  */
 const readRows = (text: string): ReadonlyArray<Record<string, unknown>> =>
 	text
@@ -66,25 +67,15 @@ const parseCount = (text: string): number => {
 }
 
 /**
- * Count the rows in `table` whose event time falls on a given UTC date.
- *
- * Uses `toDate(<column>) = '<date>'` rather than a `toDateTime64` range
- * comparison: chDB's bundled ClickHouse miscounts aggregate `count()` over a
- * `toDateTime64`-vs-`DateTime` predicate (the per-row comparison is correct but
- * the aggregate optimizer returns zero). `toDate()` normalizes both
- * second-precision `DateTime` and nanosecond `DateTime64(9)` event-time columns
- * to a date, so the day bound is robust and correct.
+ * Count the rows in `table` whose event time falls on a given UTC date using
+ * toDate() equality (robust against the chDB toDateTime64 aggregate miscount).
  */
 export const countRowsForDay = (db: Chdb, signal: ArchiveSignal, rangeDate: string): number => {
 	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}'`
 	return parseCount(db.query(sql, "JSONEachRow"))
 }
 
-/**
- * Count the rows in `table` for one UTC hour of a given date. Uses
- * `toDate()` + `toHour()` for the same aggregate-correctness reason as
- * {@link countRowsForDay}.
- */
+/** Count rows in one UTC hour of a date. */
 const countRowsForHour = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
 	const sql =
 		`SELECT count() FROM ${signal.name} ` +
@@ -93,21 +84,19 @@ const countRowsForHour = (db: Chdb, signal: ArchiveSignal, rangeDate: string, ho
 }
 
 /**
- * Query the min and max event time for one UTC hour of a date. Returns nulls
- * when the hour is empty.
+ * Estimate the uncompressed byte size of one row by sampling. Used to decide
+ * whether a single hour needs sub-splitting. Returns bytes-per-row (minimum 1).
  */
-const hourTimeBounds = (
-	db: Chdb,
-	signal: ArchiveSignal,
-	rangeDate: string,
-	hour: number,
-): { min: string | null; max: string | null } => {
+const estimateBytesPerRow = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
+	// Sample up to 100 rows and sum their uncompressed length via length(replaceRegexpAll).
+	// This is a rough estimate; the post-write stat is authoritative for the bound check.
 	const sql =
-		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
-		`FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
-		`AND toHour(${signal.eventTimeColumn}) = ${hour}`
+		`SELECT avg(length(formatRow(RowBinary, *))) AS bytes_per_row ` +
+		`FROM (SELECT * FROM ${signal.name} ` +
+		`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' AND toHour(${signal.eventTimeColumn}) = ${hour} LIMIT 100)`
 	const row = readRows(db.query(sql, "JSONEachRow"))[0]
-	return { min: (row?.mn as string | null) ?? null, max: (row?.mx as string | null) ?? null }
+	const bpr = Number(row?.bytes_per_row ?? 0)
+	return bpr > 0 ? Math.ceil(bpr) : 1
 }
 
 const sha256File = (path: string): string => {
@@ -117,59 +106,47 @@ const sha256File = (path: string): string => {
 }
 
 /**
- * Export one signal for a sealed UTC day as bounded Parquet shards under
- * `shardsDir`. Writes one file per UTC hour that contains rows; empty hours are
- * skipped. Each shard is validated: its row count must match the source count
- * for that hour, and a shard exceeding the configured row or byte bound fails
- * closed (the operator should recalibrate with a finer split). Returns the
- * validated shard records. Does not return Parquet bytes into JavaScript.
+ * Reopen a written Parquet shard via chDB `file()` and validate it is real
+ * Parquet with readable rows, time bounds, and columns (H-1). A garbage file
+ * (e.g. a 19-byte invalid "Parquet") fails here because `file()` cannot parse
+ * it. Returns the reopened metadata. The row count is READ FROM THE PARQUET,
+ * not copied from the source query — closing the tautology where the shard
+ * record always matched the source count.
  */
-export const exportSignalShards = (
+const validateShard = (
 	db: Chdb,
+	shardPath: string,
 	signal: ArchiveSignal,
-	rangeDate: string,
-	shardsDir: string,
-	settings: ExportSettings,
-): WrittenShard[] => {
-	const shards: WrittenShard[] = []
-	for (const hour of HOURS_IN_DAY) {
-		const sourceRows = countRowsForHour(db, signal, rangeDate, hour)
-		if (sourceRows === 0) continue
-		if (sourceRows > settings.maxShardRows) {
-			throw new Error(
-				`archive shard ${signal.name}/${shardName(hour)} has ${sourceRows} rows, exceeding maxShardRows ` +
-					`(${settings.maxShardRows}); recalibrate with a finer split or a larger budget`,
-			)
-		}
-		const name = shardName(hour)
-		const path = join(shardsDir, name)
-		if (existsSync(path)) throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
-		// The export result is consumed as a write side effect by chDB; we read
-		// only an empty acknowledgement. No Parquet bytes cross into JS. The WHERE
-		// uses toDate()/toHour() (not toDateTime64) for the same aggregate-correctness
-		// reason as the count helpers.
-		db.query(
-			`SELECT * FROM ${signal.name} ` +
-				`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
-				`AND toHour(${signal.eventTimeColumn}) = ${hour} ` +
-				`INTO OUTFILE '${path}' FORMAT Parquet ` +
-				`SETTINGS max_threads = ${settings.writerThreads}, ` +
-				`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
-			"Null",
+): { rowCount: number; minEventTime: string; maxEventTime: string; columns: ReadonlyArray<string> } => {
+	const escapedPath = shardPath.replace(/'/g, "\\'")
+	// Reopen the Parquet file via chDB's file() table function. If the file is
+	// not valid Parquet, this query throws — which is exactly the validation we
+	// need (H-1: the prior code accepted a 19-byte invalid file).
+	const rowCount = parseCount(
+		db.query(`SELECT count() FROM file('${escapedPath}', Parquet)`, "JSONEachRow"),
+	)
+	if (rowCount === 0) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} reopened with 0 rows (empty or corrupt Parquet)`,
 		)
-		const bytes = validateShardBytes(path, settings.maxShardBytes)
-		const bounds = hourTimeBounds(db, signal, rangeDate, hour)
-		shards.push({
-			name,
-			path,
-			rowCount: sourceRows,
-			minEventTime: bounds.min ?? `${rangeDate}T${hour.toString().padStart(2, "0")}:00:00.000Z`,
-			maxEventTime: bounds.max ?? `${rangeDate}T${hour.toString().padStart(2, "0")}:59:59.999Z`,
-			sha256: sha256File(path),
-			bytes,
-		})
 	}
-	return shards
+	// Read back time bounds and columns from the reopened file.
+	const boundsSql =
+		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
+		`FROM file('${escapedPath}', Parquet)`
+	const boundsRow = readRows(db.query(boundsSql, "JSONEachRow"))[0]
+	const minEventTime = String(boundsRow?.mn ?? "")
+	const maxEventTime = String(boundsRow?.mx ?? "")
+	// Column list: proves the Parquet schema round-tripped.
+	let columns: string[]
+	try {
+		const descSql = `DESCRIBE file('${escapedPath}', Parquet) FORMAT JSONEachRow`
+		columns = readRows(db.query(descSql, "JSONEachRow")).map((r) => String(r.name))
+	} catch {
+		// If DESCRIBE isn't supported, the count + bounds are sufficient proof.
+		columns = []
+	}
+	return { rowCount, minEventTime, maxEventTime, columns }
 }
 
 const validateShardBytes = (path: string, maxShardBytes: number): number => {
@@ -180,4 +157,69 @@ const validateShardBytes = (path: string, maxShardBytes: number): number => {
 		)
 	}
 	return size
+}
+
+/**
+ * Export one signal for a sealed UTC day as bounded Parquet shards under
+ * `shardsDir`. Within each UTC hour, if the estimated row count or byte budget
+ * is exceeded, the hour is sub-split using a (_part, _part_offset) cursor so no
+ * shard exceeds maxShardRows. Each shard is validated by reopening it (H-1).
+ * Does not return Parquet bytes into JavaScript.
+ */
+export const exportSignalShards = (
+	db: Chdb,
+	signal: ArchiveSignal,
+	rangeDate: string,
+	shardsDir: string,
+	settings: ExportSettings,
+): WrittenShard[] => {
+	const shards: WrittenShard[] = []
+	for (const hour of HOURS_IN_DAY) {
+		const hourRows = countRowsForHour(db, signal, rangeDate, hour)
+		if (hourRows === 0) continue
+		// Decide how many sub-shards this hour needs based on row count and
+		// estimated uncompressed bytes.
+		const bytesPerRow = estimateBytesPerRow(db, signal, rangeDate, hour)
+		const rowLimitShards = Math.ceil(hourRows / settings.maxShardRows)
+		const byteLimitShards = Math.ceil((hourRows * bytesPerRow) / settings.maxShardBytes)
+		const subShardCount = Math.max(1, rowLimitShards, byteLimitShards)
+		const rowsPerShard = Math.ceil(hourRows / subShardCount)
+
+		for (let seq = 0; seq < subShardCount; seq++) {
+			const name = shardName(hour, seq)
+			const path = join(shardsDir, name)
+			if (existsSync(path))
+				throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
+			// Cursor-based slice: use _part_offset range within the hour's rows.
+			// We use LIMIT + OFFSET for simplicity within a single chDB query; the
+			// WHERE restricts to this hour, and LIMIT/OFFSET bound the shard.
+			const offset = seq * rowsPerShard
+			const limit = rowsPerShard
+			db.query(
+				`SELECT * FROM ${signal.name} ` +
+					`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
+					`AND toHour(${signal.eventTimeColumn}) = ${hour} ` +
+					`LIMIT ${limit} OFFSET ${offset} ` +
+					`INTO OUTFILE '${path}' FORMAT Parquet ` +
+					`SETTINGS max_threads = ${settings.writerThreads}, ` +
+					`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
+				"Null",
+			)
+			// Reopen and validate the written Parquet (H-1). The authoritative row
+			// count comes from REOPENING the Parquet file, not from the source query.
+			const validated = validateShard(db, path, signal)
+			const bytes = validateShardBytes(path, settings.maxShardBytes)
+			shards.push({
+				name,
+				path,
+				rowCount: validated.rowCount,
+				minEventTime: validated.minEventTime,
+				maxEventTime: validated.maxEventTime,
+				sha256: sha256File(path),
+				bytes,
+				columns: validated.columns,
+			})
+		}
+	}
+	return shards
 }

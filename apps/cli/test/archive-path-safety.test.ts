@@ -71,6 +71,7 @@ const manifest = (generationId: string, signal = "traces", rowCount = 10): Archi
 			maxEventTime: "2026-06-01T00:30:00.000Z",
 			sha256: "a".repeat(64),
 			bytes: 4096,
+			columns: ["TimestampTime", "ServiceName"],
 		},
 	],
 })
