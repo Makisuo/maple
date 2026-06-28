@@ -6,7 +6,14 @@ import {
 	shardFilePath,
 	type ArchiveGenerationManifest,
 } from "./manifest"
-import { activePointerPath, catalogPath, generationManifestPath, generationsRoot, signalRoot } from "./paths"
+import {
+	activePointerPath,
+	assertNoSymlinkSync,
+	catalogPath,
+	generationManifestPath,
+	generationsRoot,
+	signalRoot,
+} from "./paths"
 import { ARCHIVE_SIGNALS, type ArchiveSignalName } from "./signals"
 
 // Archive read-side: listing, active-path resolution, and catalog rebuild.
@@ -33,10 +40,18 @@ export interface ActiveGenerationSummary {
 	readonly shardBytes: number
 }
 
+export interface ArchiveListingError {
+	readonly signal: string
+	readonly rangeStart: string
+	readonly error: string
+}
+
 export interface ArchiveListing {
 	readonly archiveDir: string
 	readonly active: ReadonlyArray<ActiveGenerationSummary>
 	readonly signals: ReadonlyArray<string>
+	/** Preserved errors surfaced (not silently skipped) so a corrupt range is visible (H-7). */
+	readonly errors: ReadonlyArray<ArchiveListingError>
 }
 
 /** Sum the byte sizes of a generation's shard records. */
@@ -46,20 +61,27 @@ const shardBytes = (manifest: Pick<ArchiveGenerationManifest, "shards">): number
 /**
  * List the active generation for every (signal, range) that has an `active.json`
  * pointer. Superseded generations are present on disk but never appear here. A
- * malformed or unreadable active pointer is skipped (not fatal) so a corrupt
- * pointer for one range cannot hide the others; the pointer file itself is
- * preserved untouched.
+ * malformed or unreadable active pointer or manifest for one range is SURFACED in
+ * `errors` (not silently skipped) so the operator sees corrupt state; unaffected
+ * ranges are still listed. The pointer/manifest files themselves are preserved
+ * untouched.
  */
 export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 	const active: ActiveGenerationSummary[] = []
 	const signalsPresent: string[] = []
+	const errors: ArchiveListingError[] = []
 	for (const signal of ARCHIVE_SIGNALS) {
 		const sRoot = signalRoot(archiveDir, signal.name)
 		if (!existsSync(sRoot)) continue
 		let ranges: string[]
 		try {
 			ranges = readdirSync(sRoot).filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry))
-		} catch {
+		} catch (error) {
+			errors.push({
+				signal: signal.name,
+				rangeStart: "",
+				error: `signal root unreadable: ${messageOf(error)}`,
+			})
 			continue
 		}
 		let signalHasActive = false
@@ -70,15 +92,27 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 			try {
 				const pointer = parseArchiveActivePointer(
 					JSON.parse(readFileSync(pointerPath, "utf8")) as unknown,
+					signal.name,
+					rangeDate,
 				)
 				generationId = pointer.generationId
-			} catch {
+			} catch (error) {
+				errors.push({
+					signal: signal.name,
+					rangeStart: rangeDate,
+					error: `active pointer: ${messageOf(error)}`,
+				})
 				continue
 			}
 			let manifest: ArchiveGenerationManifest
 			try {
 				manifest = readArchiveGenerationManifest(archiveDir, signal.name, rangeDate, generationId)
-			} catch {
+			} catch (error) {
+				errors.push({
+					signal: signal.name,
+					rangeStart: rangeDate,
+					error: `manifest: ${messageOf(error)}`,
+				})
 				continue
 			}
 			signalHasActive = true
@@ -98,8 +132,10 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 		}
 		if (signalHasActive) signalsPresent.push(signal.name)
 	}
-	return { archiveDir, active, signals: signalsPresent }
+	return { archiveDir, active, signals: signalsPresent, errors }
 }
+
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 /**
  * Resolve the active Parquet shard paths for one signal across all sealed
@@ -178,9 +214,11 @@ export const rebuildCatalog = (
 	}
 	// Durably rewrite the catalog from the rebuilt index. Existing content is
 	// replaced wholesale because the manifests are authoritative. The catalog
-	// lives at the signal root, not under a range.
+	// lives at the signal root, not under a range. Refuse a symlinked catalog
+	// path (C-1): a symlinked catalog.jsonl could point outside the archive root.
 	const path = catalogPath(archiveDir, signal)
-	const lines = entries.map((entry) => JSON.stringify(entry)).join("\n")
+	assertNoSymlinkSync(archiveDir, path, "archive catalog")
+	const lines = entries.map((entry) => JSON.stringify({ ...entry, formatVersion: 1 as const })).join("\n")
 	if (lines.length > 0) {
 		mkdirSync(dirname(path), { recursive: true })
 		writeFileSync(path, `${lines}\n`)

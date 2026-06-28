@@ -14,12 +14,18 @@ import {
 } from "../checkpoints"
 import { durableJson, durableRename, durableWrite, syncDirectory, syncTree } from "../durable-files"
 import { type ArchiveTuning, tuningRecord } from "./config"
-import { type ArchiveShardRecord, type ArchiveGenerationManifest } from "./manifest"
+import {
+	type ArchiveShardRecord,
+	type ArchiveGenerationManifest,
+	parseArchiveActivePointer,
+} from "./manifest"
 import {
 	activePointerPath,
+	archiveRoot,
 	assertArchiveRootSeparate,
 	assertNoSymlink,
 	assertRealDirectory,
+	assertRealFile,
 	buildingGenerationRoot,
 	buildingRoot,
 	catalogPath,
@@ -221,10 +227,38 @@ const countSignalRowsForDay = (
 	signal: ArchiveSignal,
 	rangeDate: string,
 ): number => {
-	// Use toDate() equality, not a toDateTime64 range: chDB's bundled ClickHouse
+	// Use toDate() equality, not a toDateTime64: chDB's bundled ClickHouse
 	// miscounts aggregate count() over a toDateTime64-vs-DateTime predicate.
 	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}'`
 	return parseCount(db.query(sql, "JSONEachRow"))
+}
+
+/**
+ * Strictly read the previous active pointer and return its generation id, binding
+ * the pointer's recorded signal/range to its on-disk location so a pointer
+ * copied or moved to the wrong range cannot be silently superseded (H-7).
+ * Throws on a malformed, mismatched, or unreadable pointer.
+ */
+const readPreviousPointerGenerationId = (
+	pointerPath: string,
+	expectedSignal: string,
+	expectedRange: string,
+): string | null => {
+	const parsed = JSON.parse(readFileSync(pointerPath, "utf8")) as unknown
+	const pointer = parseArchiveActivePointer(parsed)
+	if (pointer.signal !== expectedSignal) {
+		throw new Error(
+			`archive active pointer signal mismatch at ${pointerPath}: ` +
+				`expected ${expectedSignal}, recorded ${pointer.signal}`,
+		)
+	}
+	if (pointer.rangeStart !== expectedRange) {
+		throw new Error(
+			`archive active pointer range mismatch at ${pointerPath}: ` +
+				`expected ${expectedRange}, recorded ${pointer.rangeStart}`,
+		)
+	}
+	return pointer.generationId
 }
 
 /** Parse a JSONEachRow count result (newline-delimited objects, not a JSON array). */
@@ -244,15 +278,19 @@ const parseCount = (text: string): number => {
 
 const ensureOwnedBuilding = async (archiveDir: string, building: string): Promise<void> => {
 	const root = buildingRoot(archiveDir)
+	// Refuse a symlinked building root or any symlinked ancestor beneath the
+	// archive root before creating anything (C-1): mkdir -p would otherwise
+	// silently create the tree under a symlink target outside the archive root.
 	if (existsSync(root)) {
 		await assertNoSymlink(archiveDir, root, "archive building root")
 		await assertRealDirectory(root, "archive building root")
 	}
-	await ensurePrivateDirectory(root)
+	await ensurePrivateDirectory(root, archiveRoot(archiveDir))
 	if (existsSync(building)) {
 		throw new Error(`archive building generation already exists; refusing to overwrite: ${building}`)
 	}
-	await ensurePrivateDirectory(building)
+	await ensurePrivateDirectory(building, archiveRoot(archiveDir))
+	await assertNoSymlink(archiveDir, building, "archive building generation")
 }
 
 /**
@@ -275,17 +313,24 @@ export const promoteGeneration = async (
 ): Promise<string | null> => {
 	const finalGeneration = generationRoot(archiveDir, signal, rangeDate, generationId)
 	if (existsSync(finalGeneration)) {
+		await assertNoSymlink(archiveDir, finalGeneration, "archive generation")
 		throw new Error(`archive generation already exists; refusing to overwrite: ${finalGeneration}`)
 	}
 	const range = rangeRoot(archiveDir, signal, rangeDate)
-	await ensurePrivateDirectory(range)
-	await ensurePrivateDirectory(generationsRootPath(archiveDir, signal, rangeDate))
+	const generationsRootAbs = generationsRootPath(archiveDir, signal, rangeDate)
+	// Refuse symlinked ancestors on every path we are about to create or write
+	// (C-1): the signal/range/generations chain is operator-controlled on disk.
+	await ensurePrivateDirectory(range, archiveRoot(archiveDir))
+	await assertNoSymlink(archiveDir, range, "archive range")
+	await ensurePrivateDirectory(generationsRootAbs, archiveRoot(archiveDir))
+	await assertNoSymlink(archiveDir, generationsRootAbs, "archive generations root")
 	// Move the entire owned building directory into its final location. The
 	// shards travel with it, so there is no separate shards rename and no window
 	// in which the final generation exists without its shards.
 	await durableRename(building, finalGeneration)
 	await syncDirectory(dirname(finalGeneration))
 	const manifestPath = generationManifestPath(archiveDir, signal, rangeDate, generationId)
+	await assertNoSymlink(archiveDir, manifestPath, "archive manifest")
 	await durableJson(manifestPath, manifestValue)
 	await syncDirectory(dirname(manifestPath))
 	await faults.afterManifestWritten?.()
@@ -293,10 +338,11 @@ export const promoteGeneration = async (
 	// Atomically select this generation. Preserve the previous pointer to report
 	// supersession; the old generation directory stays in place.
 	const pointerPath = activePointerPath(archiveDir, signal, rangeDate)
+	await assertNoSymlink(archiveDir, pointerPath, "archive active pointer")
 	let superseded: string | null = null
 	if (existsSync(pointerPath)) {
-		const previous = JSON.parse(readFileSync(pointerPath, "utf8")) as { generationId?: string }
-		superseded = typeof previous.generationId === "string" ? previous.generationId : null
+		await assertRealFile(pointerPath, "archive active pointer")
+		superseded = readPreviousPointerGenerationId(pointerPath, signal, rangeDate)
 	}
 	await durableWrite(
 		pointerPath,
@@ -327,8 +373,13 @@ export const appendCatalog = async (
 	faults: ArchiveGenerationFaults = {},
 ): Promise<void> => {
 	const path = catalogPath(archiveDir, signal)
+	// Refuse a symlinked catalog (C-1): a symlinked catalog.jsonl could point
+	// outside the archive root and be overwritten by this append.
+	if (existsSync(path)) await assertRealFile(path, "archive catalog")
+	else await assertNoSymlink(archiveDir, path, "archive catalog")
 	const existing = existsSync(path) ? `${readFileSync(path, "utf8")}` : ""
 	const line = `${JSON.stringify({
+		formatVersion: 1,
 		generationId: manifest.generationId,
 		signal: manifest.signal,
 		rangeStart: manifest.rangeStart,

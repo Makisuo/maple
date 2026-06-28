@@ -128,6 +128,37 @@ export const assertNoSymlink = async (root: string, candidate: string, label: st
 	}
 }
 
+/**
+ * Synchronous variant of {@link assertNoSymlink} for use in synchronous
+ * read-side code (listing, catalog rebuild). Walks each existing component with
+ * `lstatSync`; a symlink anywhere on the path from `root` to `candidate` fails
+ * closed.
+ */
+export const assertNoSymlinkSync = (root: string, candidate: string, label: string): void => {
+	const absoluteRoot = resolve(root)
+	const absoluteCandidate = assertContained(absoluteRoot, candidate, label)
+	try {
+		if (lstatSync(absoluteRoot).isSymbolicLink()) {
+			throw new Error(`refusing symlink archive root: ${absoluteRoot}`)
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+	}
+	const rel = relative(absoluteRoot, absoluteCandidate)
+	let current = absoluteRoot
+	for (const part of rel.split(sep)) {
+		current = join(current, part)
+		try {
+			if (lstatSync(current).isSymbolicLink()) {
+				throw new Error(`refusing symlink in ${label}: ${current}`)
+			}
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+			return
+		}
+	}
+}
+
 export const assertRealDirectory = async (path: string, label: string): Promise<void> => {
 	const info = await lstat(path)
 	if (info.isSymbolicLink() || !info.isDirectory()) {
@@ -167,15 +198,70 @@ export const treeBytes = async (path: string): Promise<number> => {
 }
 
 /**
- * Ensure a directory exists with restrictive permissions, refusing a
- * pre-existing symlink or non-directory. Mirrors the checkpoint module's
- * `ensurePrivateDirectory`.
+ * Ensure `path` exists with restrictive permissions, refusing a pre-existing
+ * symlink or non-directory at ANY ancestor. `mkdir -p` followed by a single
+ * `lstat` of the final entry is unsafe: a symlinked ancestor (e.g.
+ * `<archive>/traces -> /outside`) is followed by recursive mkdir, silently
+ * creating the tree under the symlink target outside the configured root.
+ *
+ * This walks each existing ancestor with `lstat` first, creates missing
+ * components one at a time (refusing to cross a symlink), then verifies the
+ * final entry. `root` must be an ancestor of `path`; every component from `root`
+ * to `path` is checked.
  */
-export const ensurePrivateDirectory = async (path: string): Promise<void> => {
-	await mkdir(path, { recursive: true, mode: 0o700 })
-	const info = await lstat(path)
-	if (info.isSymbolicLink() || !info.isDirectory()) {
-		throw new Error(`archive path must be a real directory: ${path}`)
+export const ensurePrivateDirectory = async (path: string, root?: string): Promise<void> => {
+	const absolute = resolve(path)
+	const absoluteRoot = root ? resolve(root) : absolute
+	// Walk from the root down, checking each existing component is a real dir and
+	// creating missing ones. This refuses to cross a symlink at any depth.
+	let current = absoluteRoot
+	const rel = relative(absoluteRoot, absolute)
+	if (rel.startsWith("..")) throw new Error(`archive path escapes root: ${path}`)
+	for (const part of rel.split(sep)) {
+		if (part === "") continue
+		current = join(current, part)
+		let info
+		try {
+			info = await lstat(current)
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+			await mkdir(current, { mode: 0o700 })
+			continue
+		}
+		if (info.isSymbolicLink()) throw new Error(`refusing symlink in archive path: ${current}`)
+		if (!info.isDirectory()) throw new Error(`archive path component is not a directory: ${current}`)
+	}
+	// Final entry: ensure restrictive mode on the leaf we own.
+	try {
+		const finalInfo = await lstat(absolute)
+		if (finalInfo.isSymbolicLink() || !finalInfo.isDirectory()) {
+			throw new Error(`archive path must be a real directory: ${absolute}`)
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+		// Should not happen after the walk, but be safe.
+		await mkdir(absolute, { recursive: true, mode: 0o700 })
+	}
+}
+
+/**
+ * Verify a file or directory path is a real (non-symlink) entry of the expected
+ * type, contained within `root`, immediately before reading or mutating it. Use
+ * this at every read/write/rename site so a symlinked descendant cannot escape
+ * the archive root. Throws on symlink, wrong type, or path escape.
+ */
+export const assertSafeRealPath = async (
+	path: string,
+	root: string,
+	label: string,
+	type: "file" | "directory",
+): Promise<void> => {
+	await assertNoSymlink(root, path, label)
+	const info = await lstat(resolve(path))
+	if (info.isSymbolicLink()) throw new Error(`refusing symlink ${label}: ${path}`)
+	if (type === "file" && !info.isFile()) throw new Error(`${label} must be a real file: ${path}`)
+	if (type === "directory" && !info.isDirectory()) {
+		throw new Error(`${label} must be a real directory: ${path}`)
 	}
 }
 

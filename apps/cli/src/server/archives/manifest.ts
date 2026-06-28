@@ -175,15 +175,29 @@ export const readArchiveGenerationManifest = (
 	return parseArchiveGenerationManifest(parsed, signal, rangeDate, generationId)
 }
 
-export const parseArchiveActivePointer = (value: unknown): ArchiveActivePointer => {
+export const parseArchiveActivePointer = (
+	value: unknown,
+	expectedSignal?: string,
+	expectedRange?: string,
+): ArchiveActivePointer => {
 	if (!isRecord(value) || value.formatVersion !== ACTIVE_POINTER_FORMAT_VERSION) {
 		throw new Error("unsupported or malformed archive active pointer")
+	}
+	const signal = requiredString(value, "signal")
+	const rangeStart = validateRangeDate(requiredString(value, "rangeStart"))
+	// Bind the pointer to its on-disk (signal, range) directory so a pointer
+	// copied or moved to the wrong range cannot be silently accepted (H-7).
+	if (expectedSignal && signal !== expectedSignal) {
+		throw new Error(`active pointer signal mismatch: expected ${expectedSignal}, recorded ${signal}`)
+	}
+	if (expectedRange && rangeStart !== expectedRange) {
+		throw new Error(`active pointer range mismatch: expected ${expectedRange}, recorded ${rangeStart}`)
 	}
 	return {
 		formatVersion: ACTIVE_POINTER_FORMAT_VERSION,
 		generationId: validateArchiveId(requiredString(value, "generationId"), "generation"),
-		signal: requiredString(value, "signal"),
-		rangeStart: validateRangeDate(requiredString(value, "rangeStart")),
+		signal,
+		rangeStart,
 		selectedAt: requiredIso(value, "selectedAt"),
 	}
 }
