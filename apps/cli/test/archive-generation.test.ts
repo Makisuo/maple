@@ -161,7 +161,6 @@ describe("archive generation promotion", () => {
 					generationId,
 					manifest(generationId),
 					dupBuilding,
-					join(dupBuilding, "shards"),
 					{},
 				),
 				/already exists/,

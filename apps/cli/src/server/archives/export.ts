@@ -113,58 +113,109 @@ const sha256File = (path: string): string => {
  * not copied from the source query — closing the tautology where the shard
  * record always matched the source count.
  */
+/**
+ * Escape a filesystem path for safe embedding in a ClickHouse single-quoted
+ * string literal. Escapes backslashes AND single quotes so neither can break
+ * out of the literal or introduce escape sequences.
+ */
+const sqlLiteral = (path: string): string => path.replace(/\\/g, "\\\\").replace(/'/g, "\\'")
+
+/**
+ * Refuse operator-controlled archive paths containing single quotes or
+ * backslashes before export (M-1). The constraint is surfaced visibly rather
+ * than silently escaped.
+ */
+const assertSafePath = (path: string): void => {
+	if (/'/.test(path)) throw new Error(`archive path must not contain a single quote: ${path}`)
+	if (/\\/.test(path)) throw new Error(`archive path must not contain a backslash: ${path}`)
+}
+
 const validateShard = (
 	db: Chdb,
 	shardPath: string,
 	signal: ArchiveSignal,
+	rangeDate: string,
+	hour: number,
+	expectedRows: number,
 ): { rowCount: number; minEventTime: string; maxEventTime: string; columns: ReadonlyArray<string> } => {
-	const escapedPath = shardPath.replace(/'/g, "\\'")
+	const lit = sqlLiteral(shardPath)
 	// Reopen the Parquet file via chDB's file() table function. If the file is
-	// not valid Parquet, this query throws — which is exactly the validation we
-	// need (H-1: the prior code accepted a 19-byte invalid file).
-	const rowCount = parseCount(
-		db.query(`SELECT count() FROM file('${escapedPath}', Parquet)`, "JSONEachRow"),
-	)
+	// not valid Parquet, this query throws (H-1: the prior code accepted a
+	// 19-byte invalid file).
+	const rowCount = parseCount(db.query(`SELECT count() FROM file('${lit}', Parquet)`, "JSONEachRow"))
 	if (rowCount === 0) {
 		throw new Error(
 			`archive shard validation failed: ${shardPath} reopened with 0 rows (empty or corrupt Parquet)`,
 		)
 	}
-	// Read back time bounds and columns from the reopened file.
+	// Per-shard row count must match the intended slice size (H-B).
+	if (rowCount !== expectedRows) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} has ${rowCount} rows, expected ${expectedRows}`,
+		)
+	}
+	// Read back time bounds from the reopened file.
 	const boundsSql =
 		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
-		`FROM file('${escapedPath}', Parquet)`
+		`FROM file('${lit}', Parquet)`
 	const boundsRow = readRows(db.query(boundsSql, "JSONEachRow"))[0]
 	const minEventTime = String(boundsRow?.mn ?? "")
 	const maxEventTime = String(boundsRow?.mx ?? "")
-	// Column list: proves the Parquet schema round-tripped.
-	let columns: string[]
-	try {
-		const descSql = `DESCRIBE file('${escapedPath}', Parquet) FORMAT JSONEachRow`
-		columns = readRows(db.query(descSql, "JSONEachRow")).map((r) => String(r.name))
-	} catch {
-		// If DESCRIBE isn't supported, the count + bounds are sufficient proof.
-		columns = []
+	// Verify all rows fall within the expected hour window (H-B): a shard must
+	// not contain rows from a different hour.
+	const hourSql =
+		`SELECT min(toHour(${signal.eventTimeColumn})) AS hmn, max(toHour(${signal.eventTimeColumn})) AS hmx ` +
+		`FROM file('${lit}', Parquet)`
+	const hourRow = readRows(db.query(hourSql, "JSONEachRow"))[0]
+	const hmn = Number(hourRow?.hmn ?? -1)
+	const hmx = Number(hourRow?.hmx ?? -1)
+	if (hmn !== hour || hmx !== hour) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} contains rows outside hour ${hour} (min=${hmn}, max=${hmx})`,
+		)
+	}
+	// Column list proves the Parquet schema round-tripped. A DESCRIBE failure is
+	// NOT swallowed (H-A): a schema that did not round-trip must fail the shard.
+	const descSql = `DESCRIBE file('${lit}', Parquet) FORMAT JSONEachRow`
+	const columns = readRows(db.query(descSql, "JSONEachRow")).map((r) => String(r.name))
+	if (columns.length === 0) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} reopened with no columns (schema lost)`,
+		)
 	}
 	return { rowCount, minEventTime, maxEventTime, columns }
 }
 
-const validateShardBytes = (path: string, maxShardBytes: number): number => {
-	const { size } = statSync(path)
-	if (size > maxShardBytes) {
+/**
+ * Validate the UNCOMPRESSED size of a shard against the byte bound (H-C). The
+ * plan's bound is on estimated uncompressed bytes, not compressed on-disk size;
+ * compression can keep a 1 GiB-uncompressed shard under a 256 MiB compressed
+ * ceiling, so the on-disk stat is insufficient. We reopen the Parquet and sum
+ * the uncompressed column sizes from its metadata.
+ */
+const validateShardBytes = (db: Chdb, shardPath: string, maxShardBytes: number): number => {
+	const lit = sqlLiteral(shardPath)
+	// Read the uncompressed size from Parquet metadata via the column stats.
+	// SUM(uncompressed_size) over all columns gives the total uncompressed bytes.
+	const sql = `SELECT sum(uncompressed_size) AS uncompressed FROM parquet_metadata('${lit}')`
+	const row = readRows(db.query(sql, "JSONEachRow"))[0]
+	const uncompressed = Number(row?.uncompressed ?? 0)
+	if (uncompressed > maxShardBytes) {
 		throw new Error(
-			`archive shard exceeds maxShardBytes (${size} > ${maxShardBytes}): ${path}; recalibrate with a finer split`,
+			`archive shard exceeds maxShardBytes uncompressed (${uncompressed} > ${maxShardBytes}): ${shardPath}; ` +
+				`recalibrate with a finer split`,
 		)
 	}
-	return size
+	// Also record the on-disk compressed size for the shard record.
+	return statSync(shardPath).size
 }
 
 /**
  * Export one signal for a sealed UTC day as bounded Parquet shards under
  * `shardsDir`. Within each UTC hour, if the estimated row count or byte budget
- * is exceeded, the hour is sub-split using a (_part, _part_offset) cursor so no
- * shard exceeds maxShardRows. Each shard is validated by reopening it (H-1).
- * Does not return Parquet bytes into JavaScript.
+ * is exceeded, the hour is sub-split using a deterministic ORDER BY
+ * (_part, _part_offset) cursor so sub-shards form an exact partition of the
+ * hour's rows (no overlaps, no gaps). Each shard is validated by reopening it.
  */
 export const exportSignalShards = (
 	db: Chdb,
@@ -173,6 +224,7 @@ export const exportSignalShards = (
 	shardsDir: string,
 	settings: ExportSettings,
 ): WrittenShard[] => {
+	assertSafePath(shardsDir)
 	const shards: WrittenShard[] = []
 	for (const hour of HOURS_IN_DAY) {
 		const hourRows = countRowsForHour(db, signal, rangeDate, hour)
@@ -188,27 +240,35 @@ export const exportSignalShards = (
 		for (let seq = 0; seq < subShardCount; seq++) {
 			const name = shardName(hour, seq)
 			const path = join(shardsDir, name)
+			assertSafePath(path)
 			if (existsSync(path))
 				throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
-			// Cursor-based slice: use _part_offset range within the hour's rows.
-			// We use LIMIT + OFFSET for simplicity within a single chDB query; the
-			// WHERE restricts to this hour, and LIMIT/OFFSET bound the shard.
+			// Deterministic cursor: ORDER BY (_part, _part_offset) makes LIMIT/OFFSET
+			// an exact partition of the hour's rows. Without ORDER BY, ClickHouse
+			// LIMIT/OFFSET returns rows in unspecified order and sub-shards could
+			// overlap or miss rows (CR-1). The (_part, _part_offset) virtual columns
+			// are a stable per-part row identifier and avoid the repetition hazard.
 			const offset = seq * rowsPerShard
-			const limit = rowsPerShard
+			// The last shard gets the remainder (may be smaller than rowsPerShard).
+			const expectedRows = Math.min(rowsPerShard, hourRows - offset)
+			if (expectedRows <= 0) break
+			const lit = sqlLiteral(path)
 			db.query(
 				`SELECT * FROM ${signal.name} ` +
 					`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
 					`AND toHour(${signal.eventTimeColumn}) = ${hour} ` +
-					`LIMIT ${limit} OFFSET ${offset} ` +
-					`INTO OUTFILE '${path}' FORMAT Parquet ` +
+					`ORDER BY (_part, _part_offset) ` +
+					`LIMIT ${expectedRows} OFFSET ${offset} ` +
+					`INTO OUTFILE '${lit}' FORMAT Parquet ` +
 					`SETTINGS max_threads = ${settings.writerThreads}, ` +
 					`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
 				"Null",
 			)
-			// Reopen and validate the written Parquet (H-1). The authoritative row
-			// count comes from REOPENING the Parquet file, not from the source query.
-			const validated = validateShard(db, path, signal)
-			const bytes = validateShardBytes(path, settings.maxShardBytes)
+			// Reopen and validate the written Parquet (H-1, H-A, H-B). The
+			// authoritative row count comes from REOPENING the Parquet file, and is
+			// checked against the intended slice size and hour bounds.
+			const validated = validateShard(db, path, signal, rangeDate, hour, expectedRows)
+			const bytes = validateShardBytes(db, path, settings.maxShardBytes)
 			shards.push({
 				name,
 				path,
