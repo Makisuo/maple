@@ -28,6 +28,7 @@ import {
 	readCheckpointState,
 	reconcileCheckpointRecovery,
 	reconcileCheckpointOperations,
+	resetTransactionPath,
 	resetLiveStorePreservingCheckpoints,
 	type RestoreRecoveryFaults,
 	resolveCheckpoint,
@@ -90,10 +91,9 @@ const writeSnapshot = (dataDir: string, checkpointId: string, operationId = newC
 	const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
 	mkdirSync(join(snapshot, "backup"), { recursive: true })
 	writeFileSync(join(snapshot, "backup", "data.bin"), "backup")
-	writeFileSync(
-		join(snapshot, "manifest.json"),
-		`${JSON.stringify(manifest(checkpointId, operationId, dataDir))}\n`,
-	)
+	const value = manifest(checkpointId, operationId, dataDir)
+	value.backupBytes = 6
+	writeFileSync(join(snapshot, "manifest.json"), `${JSON.stringify(value)}\n`)
 }
 
 const writeState = (
@@ -350,6 +350,20 @@ describe("checkpoint state resolution", () => {
 			ok(existsSync(join(outside, "backup")))
 		})
 	})
+
+	it("rejects nested symlinks inside an otherwise real checkpoint backup", async () => {
+		await withDataDir(async (dataDir) => {
+			const checkpointId = newCheckpointId()
+			const outside = join(dirname(dataDir), "outside-backup.bin")
+			writeFileSync(outside, "sensitive")
+			writeSnapshot(dataDir, checkpointId)
+			symlinkSync(outside, join(checkpointSnapshotDir(dataDir, checkpointId), "backup", "nested-link"))
+			writeState(dataDir, checkpointId)
+
+			await rejects(readCheckpointState(dataDir), /symlink/)
+			strictEqual(readFileSync(outside, "utf8"), "sensitive")
+		})
+	})
 })
 
 describe("checkpoint reconciliation and retention", () => {
@@ -461,8 +475,13 @@ describe("checkpoint reconciliation and retention", () => {
 		})
 	})
 
-	it("converges after interruption at retirement intent and snapshot-rename boundaries", async () => {
-		for (const boundary of ["afterRetirementIntent", "afterRetirementRename"] as const) {
+	it("converges after every retirement intent, data-removal, and completion boundary", async () => {
+		for (const boundary of [
+			"afterRetirementIntent",
+			"afterRetirementRename",
+			"afterRetiredSnapshotRemoval",
+			"afterRetirementComplete",
+		] as const) {
 			await withDataDir(async (dataDir) => {
 				const current = newCheckpointId()
 				const previous = newCheckpointId()
@@ -488,6 +507,51 @@ describe("checkpoint reconciliation and retention", () => {
 				ok(retirement !== null && existsSync(join(retirement, "complete.json")), boundary)
 				ok(existsSync(checkpointSnapshotDir(dataDir, current)), boundary)
 				ok(existsSync(checkpointSnapshotDir(dataDir, previous)), boundary)
+			})
+		}
+	})
+
+	it("converges after every retirement cleanup and completed-operation boundary", async () => {
+		for (const boundary of [
+			"afterRetirementCleanupRename",
+			"afterRetirementCleanupRemoval",
+			"afterCompletedOperationPreserved",
+		] as const) {
+			await withDataDir(async (dataDir) => {
+				const oldCurrent = newCheckpointId()
+				const oldPrevious = newCheckpointId()
+				const baseRevision = newCheckpointId()
+				const operationId = newCheckpointId()
+				const checkpointId = newCheckpointId()
+				writeSnapshot(dataDir, oldCurrent)
+				writeSnapshot(dataDir, oldPrevious)
+				writeSnapshot(dataDir, checkpointId, operationId)
+				writeState(dataDir, checkpointId, oldCurrent, operationId)
+				writeCheckpointOperation(dataDir, operationId, checkpointId, "pointer-complete", {
+					revision: baseRevision,
+					current: oldCurrent,
+					previous: oldPrevious,
+				})
+				let injected = false
+
+				await rejects(
+					reconcileCheckpointOperations(dataDir, {
+						[boundary]: () => {
+							if (injected) return
+							injected = true
+							throw new Error(`injected ${boundary}`)
+						},
+					}),
+					/injected/,
+				)
+				await reconcileCheckpointOperations(dataDir)
+
+				strictEqual((await readCheckpointState(dataDir)).current, checkpointId)
+				ok(!existsSync(checkpointSnapshotDir(dataDir, oldPrevious)), boundary)
+				ok(
+					!existsSync(join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)),
+					boundary,
+				)
 			})
 		}
 	})
@@ -583,9 +647,10 @@ describe("live-store reset safety", () => {
 			writeState(dataDir, checkpointId)
 			mkdirSync(join(dataDir, "store"), { recursive: true })
 			mkdirSync(join(dataDir, "metadata"), { recursive: true })
+			mkdirSync(join(dataDir, "tmp"), { recursive: true })
 			writeFileSync(join(dataDir, "store", "part.bin"), "live")
 			writeFileSync(join(dataDir, "metadata", "table.sql"), "live")
-			writeFileSync(join(dataDir, "status"), "live")
+			writeFileSync(join(dataDir, "tmp", "scratch.bin"), "live")
 			writeFileSync(storeMarkerPath(dataDir), "{}")
 			writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
 
@@ -595,9 +660,10 @@ describe("live-store reset safety", () => {
 			ok(existsSync(checkpointSnapshotDir(dataDir, checkpointId)))
 			ok(!existsSync(join(dataDir, "store")))
 			ok(!existsSync(join(dataDir, "metadata")))
-			ok(!existsSync(join(dataDir, "status")))
+			ok(!existsSync(join(dataDir, "tmp")))
 			ok(!existsSync(storeMarkerPath(dataDir)))
 			ok(!existsSync(storeOpenMarkerPath(dataDir)))
+			ok(!existsSync(resetTransactionPath(dataDir)))
 		})
 	})
 
@@ -612,6 +678,93 @@ describe("live-store reset safety", () => {
 
 			await rejects(Effect.runPromise(resetLiveStorePreservingCheckpoints(dataDir)), /real directory/)
 			strictEqual(readFileSync(join(dataDir, "store", "preserve.bin"), "utf8"), "live")
+		})
+	})
+
+	it("preserves and reports unknown data-directory entries before any deletion", async () => {
+		await withDataDir(async (dataDir) => {
+			mkdirSync(join(dataDir, "store"), { recursive: true })
+			writeFileSync(join(dataDir, "store", "preserve.bin"), "live")
+			writeFileSync(join(dataDir, "user-owned.txt"), "preserve")
+
+			await rejects(
+				Effect.runPromise(resetLiveStorePreservingCheckpoints(dataDir)),
+				/unrecognized data-directory entries were preserved/,
+			)
+
+			strictEqual(readFileSync(join(dataDir, "store", "preserve.bin"), "utf8"), "live")
+			strictEqual(readFileSync(join(dataDir, "user-owned.txt"), "utf8"), "preserve")
+			ok(!existsSync(resetTransactionPath(dataDir)))
+		})
+	})
+
+	it("reconciles interruption at every reset deletion, marker, and journal boundary", async () => {
+		const boundaries: ReadonlyArray<keyof RestoreRecoveryFaults> = [
+			"afterResetIntent",
+			"afterResetEntryRemoval",
+			"afterResetLiveClearedRecord",
+			"afterResetStoreMarkerRemoval",
+			"afterResetOpenMarkerRemoval",
+			"afterResetMarkersClearedRecord",
+			"afterResetTransactionRemoval",
+		]
+		for (const boundary of boundaries) {
+			await withDataDir(async (dataDir) => {
+				const checkpointId = newCheckpointId()
+				writeSnapshot(dataDir, checkpointId)
+				writeState(dataDir, checkpointId)
+				for (const entry of ["data", "metadata", "store", "tmp"]) {
+					mkdirSync(join(dataDir, entry), { recursive: true })
+					writeFileSync(join(dataDir, entry, "live.bin"), "live")
+				}
+				writeFileSync(storeMarkerPath(dataDir), "{}")
+				writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
+				let injected = false
+				const faults = {
+					[boundary]: () => {
+						if (injected) return
+						injected = true
+						throw new Error(`injected ${boundary}`)
+					},
+				} as RestoreRecoveryFaults
+
+				await rejects(
+					Effect.runPromise(resetLiveStorePreservingCheckpoints(dataDir, faults)),
+					/injected/,
+				)
+				await Effect.runPromise(reconcileCheckpointRecovery(dataDir))
+
+				for (const entry of ["data", "metadata", "store", "tmp"]) {
+					ok(!existsSync(join(dataDir, entry)), `${boundary}: ${entry}`)
+				}
+				strictEqual((await readCheckpointState(dataDir)).current, checkpointId)
+				ok(!existsSync(storeMarkerPath(dataDir)), boundary)
+				ok(!existsSync(storeOpenMarkerPath(dataDir)), boundary)
+				ok(!existsSync(resetTransactionPath(dataDir)), boundary)
+			})
+		}
+	})
+
+	it("rejects malformed or escaping reset journals without mutation", async () => {
+		await withDataDir(async (dataDir) => {
+			const outside = join(dirname(dataDir), "outside-reset")
+			mkdirSync(outside)
+			writeFileSync(join(outside, "preserve"), "outside")
+			writeFileSync(
+				resetTransactionPath(dataDir),
+				`${JSON.stringify({
+					formatVersion: 1,
+					operationId: newCheckpointId(),
+					dataDir,
+					targets: ["../outside-reset"],
+					phase: "intent",
+					createdAt: "2026-01-01T00:00:00.000Z",
+				})}\n`,
+			)
+
+			await rejects(Effect.runPromise(reconcileCheckpointRecovery(dataDir)), /unsafe reset/)
+			strictEqual(readFileSync(join(outside, "preserve"), "utf8"), "outside")
+			ok(existsSync(resetTransactionPath(dataDir)))
 		})
 	})
 })

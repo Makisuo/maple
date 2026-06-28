@@ -10,6 +10,11 @@ export interface DurabilityFaults {
 	readonly beforeRemove?: (path: string) => void | Promise<void>
 	readonly afterRetirementIntent?: (path: string) => void | Promise<void>
 	readonly afterRetirementRename?: (path: string) => void | Promise<void>
+	readonly afterRetiredSnapshotRemoval?: (path: string) => void | Promise<void>
+	readonly afterRetirementComplete?: (path: string) => void | Promise<void>
+	readonly afterRetirementCleanupRename?: (path: string) => void | Promise<void>
+	readonly afterRetirementCleanupRemoval?: (path: string) => void | Promise<void>
+	readonly afterCompletedOperationPreserved?: (path: string) => void | Promise<void>
 }
 
 // APFS and the target Linux filesystems support directory fsync. Keep the

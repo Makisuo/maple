@@ -58,9 +58,9 @@ maple start -d --port 4400     # detached on a custom port
 
 Detached startup forwards the selected `--on-dirty-store` policy unchanged to
 the foreground child. Before any reset, compatibility check, dirty-store
-decision, or data-directory creation, startup reconciles a recorded checkpoint
-restore transaction. Ambiguous or malformed restore state fails closed and
-prints the preserved paths.
+decision, or data-directory creation, startup reconciles a recorded reset or
+checkpoint-restore transaction. Ambiguous, malformed, or conflicting
+transaction state fails closed and prints the preserved paths.
 
 The default dirty-store policy is `fail`, so an unclean shutdown never silently
 deletes telemetry. Choose `restore-checkpoint` to recover the selected
@@ -83,6 +83,13 @@ Stop a running `maple start` server (reads the PID file beside the data dir).
 Delete live chDB data so the next `maple start` bootstraps fresh. The checkpoint
 registry under `<data-dir>/backups` is preserved. Refuses to run while a server
 still owns the store.
+
+Reset is journaled beside the data directory and removes only the chDB-owned
+top-level directories produced by the bundled native build (`data`, `metadata`,
+`store`, and `tmp`). If any other entry exists, reset preserves everything and
+fails with the unrecognized paths so an operator can inspect them. Startup
+finishes an interrupted recorded reset before it evaluates store compatibility
+or cleanliness.
 
 | Flag                | Default         | Description                  |
 | ------------------- | --------------- | ---------------------------- |
