@@ -136,9 +136,8 @@ export const createArchiveGeneration = async (
 				{ scratchRoot: tuning.scratchRoot, cleanup: "always" },
 				async ({ db, manifest: checkpointManifest }) => {
 					await faults.afterScratchRestored?.()
-					const dayStartIso = `${rangeDate}T00:00:00.000Z`
 					const dayEndExclusiveIso = `${rangeDate}T23:59:59.999999999Z`
-					const sourceRowCount = countSignalRowsForDay(db, signal, dayStartIso, dayEndExclusiveIso)
+					const sourceRowCount = countSignalRowsForDay(db, signal, rangeDate)
 
 					const building = buildingGenerationRoot(archiveDir, generationId)
 					await ensureOwnedBuilding(archiveDir, building)
@@ -146,7 +145,7 @@ export const createArchiveGeneration = async (
 
 					const shardsDir = join(building, "shards")
 					await ensurePrivateDirectory(shardsDir)
-					const writtenShards = exportSignalShards(db, signal, dayStartIso, shardsDir, {
+					const writtenShards = exportSignalShards(db, signal, rangeDate, shardsDir, {
 						writerThreads: tuning.writerThreads,
 						rowGroupRows: tuning.rowGroupRows,
 						maxShardRows: tuning.maxShardRows,
@@ -220,16 +219,27 @@ export const createArchiveGeneration = async (
 const countSignalRowsForDay = (
 	db: { query: (sql: string, format?: string) => string },
 	signal: ArchiveSignal,
-	dayStartIso: string,
-	dayEndIso: string,
+	rangeDate: string,
 ): number => {
-	const sql =
-		`SELECT count() AS c FROM ${signal.name} ` +
-		`WHERE ${signal.eventTimeColumn} >= '${dayStartIso}' AND ${signal.eventTimeColumn} <= '${dayEndIso}'`
-	const result = db.query(sql, "JSONEachRow")
-	if (result.trim().length === 0) return 0
-	const parsed = JSON.parse(result) as ReadonlyArray<{ c: string | number }>
-	return Number(parsed[0]?.c ?? 0)
+	// Use toDate() equality, not a toDateTime64 range: chDB's bundled ClickHouse
+	// miscounts aggregate count() over a toDateTime64-vs-DateTime predicate.
+	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}'`
+	return parseCount(db.query(sql, "JSONEachRow"))
+}
+
+/** Parse a JSONEachRow count result (newline-delimited objects, not a JSON array). */
+const parseCount = (text: string): number => {
+	const rows = text
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+		.map((line) => JSON.parse(line) as Record<string, unknown>)
+	const row = rows[0]
+	if (!row) return 0
+	const value = row["count()"] ?? row.count
+	const count = typeof value === "number" ? value : Number(value ?? 0)
+	if (!Number.isSafeInteger(count) || count < 0) throw new Error(`invalid count result: ${value}`)
+	return count
 }
 
 const ensureOwnedBuilding = async (archiveDir: string, building: string): Promise<void> => {

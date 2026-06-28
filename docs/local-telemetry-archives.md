@@ -120,11 +120,11 @@ Report active generations:
 
 ```sh
 maple archive list --archive-dir /Volumes/External/maple-archive
-maple archive list --format paths --signal traces   # machine-readable paths
-maple archive list --format json                    # full JSON
+maple archive list --output paths --signal traces   # machine-readable paths
+maple archive list --output json                    # full JSON
 ```
 
-`--format paths` emits the active generation's Parquet shard paths (excluding
+`--output paths` emits the active generation's Parquet shard paths (excluding
 superseded generations) ready for DuckDB's `read_parquet`.
 
 ### `maple archive rebuild <signal>`
@@ -137,7 +137,7 @@ recovering from a truncated or missing catalog without rescanning Parquet bytes.
 1. Ingest telemetry into the running Maple store.
 2. `maple checkpoint` to create a validated checkpoint.
 3. `maple archive create 2026-06-01 traces` (and the other signals).
-4. `maple archive list --format paths --signal traces` to get the Parquet paths.
+4. `maple archive list --output paths --signal traces` to get the Parquet paths.
 5. Query in DuckDB:
 
 ```sh
@@ -147,7 +147,7 @@ duckdb -c "SELECT ServiceName, count(*) FROM read_parquet(['/path/to/00.parquet'
 ## DuckDB queries
 
 Archives are portable Parquet. Use `read_parquet` with the active paths from
-`maple archive list --format paths`. `union_by_name=true` NULL-fills columns
+`maple archive list --output paths`. `union_by_name=true` NULL-fills columns
 added between generations; without it, a schema mismatch fails closed.
 
 ```sql

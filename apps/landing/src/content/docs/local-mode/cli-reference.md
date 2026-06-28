@@ -206,8 +206,8 @@ but never listed.
 | Flag                            | Description                                                                                |
 | ------------------------------- | ------------------------------------------------------------------------------------------ |
 | `--archive-dir`                 | Archive root (default: `~/.maple/archive`)                                                 |
-| `--format summary\|paths\|json` | `summary` (default), `paths` (machine-readable active Parquet paths for DuckDB), or `json` |
-| `--signal <name>`               | Required with `--format paths`; the signal whose active paths to emit                      |
+| `--output summary\|paths\|json` | `summary` (default), `paths` (machine-readable active Parquet paths for DuckDB), or `json` |
+| `--signal <name>`               | Required with `--output paths`; the signal whose active paths to emit                      |
 
 ### `maple archive rebuild <signal>`
 

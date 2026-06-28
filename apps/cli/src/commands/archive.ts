@@ -58,7 +58,7 @@ const signalArgument = Argument.string("signal").pipe(
 	Argument.withDescription(`One of: ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`),
 )
 
-const formatFlag = Flag.choice("format", ["summary", "paths", "json"]).pipe(
+const outputFlag = Flag.choice("output", ["summary", "paths", "json"]).pipe(
 	Flag.withDescription(
 		"Output format: summary (default), paths (machine-readable active Parquet paths), or json",
 	),
@@ -158,18 +158,18 @@ const signalFlag = Flag.optional(
 
 export const archiveList = Command.make("list", {
 	archiveDir: archiveDirFlag,
-	format: formatFlag,
+	output: outputFlag,
 	signal: signalFlag,
 }).pipe(
 	Command.withDescription("List active archive generations and their Parquet shard paths"),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
 			const archiveDir = Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir()
-			if (a.format === "paths") {
+			if (a.output === "paths") {
 				const signalOpt = Option.getOrUndefined(a.signal)
 				if (!signalOpt || !isArchiveSignalName(signalOpt)) {
 					return yield* new ArchiveError({
-						message: `--format paths requires a signal argument; expected one of ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`,
+						message: `--output paths requires a signal argument; expected one of ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`,
 					})
 				}
 				const paths = activeParquetPaths(archiveDir, signalOpt)
@@ -177,7 +177,7 @@ export const archiveList = Command.make("list", {
 				return
 			}
 			const listing = listActiveGenerations(archiveDir)
-			if (a.format === "json") {
+			if (a.output === "json") {
 				yield* Effect.sync(() => process.stdout.write(`${JSON.stringify(listing, null, 2)}\n`))
 				return
 			}

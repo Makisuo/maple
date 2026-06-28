@@ -44,41 +44,70 @@ const HOURS_IN_DAY = Array.from({ length: 24 }, (_, hour) => hour)
 const shardName = (hour: number): string => `${hour.toString().padStart(2, "0")}.parquet`
 
 /**
- * Count the rows in `table` for a half-open UTC time range on the signal's
- * event-time column. Used to size a slice before writing and to validate the
- * written shard against the source.
+ * Parse a `JSONEachRow` result into rows. `JSONEachRow` is newline-delimited
+ * JSON objects, not a JSON array — `JSON.parse` of the whole string yields a
+ * single object, so the lines must be split first (matching the checkpoint
+ * module's `readJsonRows` idiom).
  */
-export const countRangeRows = (
-	db: Chdb,
-	signal: ArchiveSignal,
-	rangeStartIso: string,
-	rangeEndIso: string,
-): number => {
-	const sql = `SELECT count() AS c FROM ${signal.name} WHERE ${signal.eventTimeColumn} >= '${rangeStartIso}' AND ${signal.eventTimeColumn} < '${rangeEndIso}'`
-	const result = db.query(sql, "JSONEachRow")
-	if (result.trim().length === 0) return 0
-	const parsed = JSON.parse(result) as ReadonlyArray<{ c: string | number }>
-	return Number(parsed[0]?.c ?? 0)
+const readRows = (text: string): ReadonlyArray<Record<string, unknown>> =>
+	text
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+		.map((line) => JSON.parse(line) as Record<string, unknown>)
+
+const parseCount = (text: string): number => {
+	const row = readRows(text)[0]
+	if (!row) return 0
+	const value = row["count()"] ?? row.count
+	const count = typeof value === "number" ? value : Number(value ?? 0)
+	if (!Number.isSafeInteger(count) || count < 0) throw new Error(`invalid count result: ${value}`)
+	return count
 }
 
 /**
- * Query the min and max event time for a half-open range. Returns nulls when the
- * range is empty.
+ * Count the rows in `table` whose event time falls on a given UTC date.
+ *
+ * Uses `toDate(<column>) = '<date>'` rather than a `toDateTime64` range
+ * comparison: chDB's bundled ClickHouse miscounts aggregate `count()` over a
+ * `toDateTime64`-vs-`DateTime` predicate (the per-row comparison is correct but
+ * the aggregate optimizer returns zero). `toDate()` normalizes both
+ * second-precision `DateTime` and nanosecond `DateTime64(9)` event-time columns
+ * to a date, so the day bound is robust and correct.
  */
-const timeBounds = (
+export const countRowsForDay = (db: Chdb, signal: ArchiveSignal, rangeDate: string): number => {
+	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}'`
+	return parseCount(db.query(sql, "JSONEachRow"))
+}
+
+/**
+ * Count the rows in `table` for one UTC hour of a given date. Uses
+ * `toDate()` + `toHour()` for the same aggregate-correctness reason as
+ * {@link countRowsForDay}.
+ */
+const countRowsForHour = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
+	const sql =
+		`SELECT count() FROM ${signal.name} ` +
+		`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' AND toHour(${signal.eventTimeColumn}) = ${hour}`
+	return parseCount(db.query(sql, "JSONEachRow"))
+}
+
+/**
+ * Query the min and max event time for one UTC hour of a date. Returns nulls
+ * when the hour is empty.
+ */
+const hourTimeBounds = (
 	db: Chdb,
 	signal: ArchiveSignal,
-	rangeStartIso: string,
-	rangeEndIso: string,
+	rangeDate: string,
+	hour: number,
 ): { min: string | null; max: string | null } => {
 	const sql =
 		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
-		`FROM ${signal.name} WHERE ${signal.eventTimeColumn} >= '${rangeStartIso}' ` +
-		`AND ${signal.eventTimeColumn} < '${rangeEndIso}'`
-	const result = db.query(sql, "JSONEachRow")
-	if (result.trim().length === 0) return { min: null, max: null }
-	const parsed = JSON.parse(result) as ReadonlyArray<{ mn: string | null; mx: string | null }>
-	return { min: parsed[0]?.mn ?? null, max: parsed[0]?.mx ?? null }
+		`FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
+		`AND toHour(${signal.eventTimeColumn}) = ${hour}`
+	const row = readRows(db.query(sql, "JSONEachRow"))[0]
+	return { min: (row?.mn as string | null) ?? null, max: (row?.mx as string | null) ?? null }
 }
 
 const sha256File = (path: string): string => {
@@ -98,15 +127,13 @@ const sha256File = (path: string): string => {
 export const exportSignalShards = (
 	db: Chdb,
 	signal: ArchiveSignal,
-	dayStartIso: string,
+	rangeDate: string,
 	shardsDir: string,
 	settings: ExportSettings,
 ): WrittenShard[] => {
 	const shards: WrittenShard[] = []
 	for (const hour of HOURS_IN_DAY) {
-		const sliceStart = `${dayStartIso.replace("T00:00:00.000Z", "")}T${hour.toString().padStart(2, "0")}:00:00.000Z`
-		const sliceEnd = `${dayStartIso.replace("T00:00:00.000Z", "")}T${(hour + 1).toString().padStart(2, "0")}:00:00.000Z`
-		const sourceRows = countRangeRows(db, signal, sliceStart, sliceEnd)
+		const sourceRows = countRowsForHour(db, signal, rangeDate, hour)
 		if (sourceRows === 0) continue
 		if (sourceRows > settings.maxShardRows) {
 			throw new Error(
@@ -118,23 +145,26 @@ export const exportSignalShards = (
 		const path = join(shardsDir, name)
 		if (existsSync(path)) throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
 		// The export result is consumed as a write side effect by chDB; we read
-		// only an empty acknowledgement. No Parquet bytes cross into JS.
+		// only an empty acknowledgement. No Parquet bytes cross into JS. The WHERE
+		// uses toDate()/toHour() (not toDateTime64) for the same aggregate-correctness
+		// reason as the count helpers.
 		db.query(
 			`SELECT * FROM ${signal.name} ` +
-				`WHERE ${signal.eventTimeColumn} >= '${sliceStart}' AND ${signal.eventTimeColumn} < '${sliceEnd}' ` +
+				`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
+				`AND toHour(${signal.eventTimeColumn}) = ${hour} ` +
 				`INTO OUTFILE '${path}' FORMAT Parquet ` +
 				`SETTINGS max_threads = ${settings.writerThreads}, ` +
 				`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
 			"Null",
 		)
 		const bytes = validateShardBytes(path, settings.maxShardBytes)
-		const bounds = timeBounds(db, signal, sliceStart, sliceEnd)
+		const bounds = hourTimeBounds(db, signal, rangeDate, hour)
 		shards.push({
 			name,
 			path,
 			rowCount: sourceRows,
-			minEventTime: bounds.min ?? sliceStart,
-			maxEventTime: bounds.max ?? sliceEnd,
+			minEventTime: bounds.min ?? `${rangeDate}T${hour.toString().padStart(2, "0")}:00:00.000Z`,
+			maxEventTime: bounds.max ?? `${rangeDate}T${hour.toString().padStart(2, "0")}:59:59.999Z`,
 			sha256: sha256File(path),
 			bytes,
 		})
