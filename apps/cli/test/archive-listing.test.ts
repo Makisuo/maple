@@ -161,6 +161,27 @@ describe("archive listing", () => {
 			strictEqual(listing.active[0]!.rangeStart, "2026-06-01")
 		})
 	})
+
+	it("activeParquetPaths throws when any relevant range is malformed (no partial DuckDB output)", async () => {
+		await withArchive(async (archiveDir) => {
+			seedActiveGeneration(archiveDir, "traces", "2026-06-01", randomUUID(), 4)
+			// Corrupt the pointer for a second range of the SAME signal.
+			mkdirSync(join(archiveDir, "traces", "2026-06-02"), { recursive: true })
+			writeFileSync(activePointerPath(archiveDir, "traces", "2026-06-02"), "{bad json")
+			throwsSync(() => activeParquetPaths(archiveDir, "traces"), /malformed range/)
+		})
+	})
+
+	it("activeParquetPaths succeeds when a DIFFERENT signal has errors", async () => {
+		await withArchive(async (archiveDir) => {
+			seedActiveGeneration(archiveDir, "traces", "2026-06-01", randomUUID(), 4)
+			// Corrupt a LOGS range; traces must still be queryable.
+			mkdirSync(join(archiveDir, "logs", "2026-06-02"), { recursive: true })
+			writeFileSync(activePointerPath(archiveDir, "logs", "2026-06-02"), "{bad json")
+			const paths = activeParquetPaths(archiveDir, "traces")
+			strictEqual(paths.length, 1)
+		})
+	})
 })
 
 describe("archive catalog rebuild", () => {
@@ -181,15 +202,24 @@ describe("archive catalog rebuild", () => {
 		})
 	})
 
-	it("ignores a generation directory missing its manifest", async () => {
+	it("fails closed and preserves the existing catalog when a generation is missing its manifest", async () => {
 		await withArchive(async (archiveDir) => {
+			// Seed a valid active generation first and build its catalog.
 			seedActiveGeneration(archiveDir, "traces", "2026-06-01", randomUUID(), 8)
+			rebuildCatalog(archiveDir, "traces")
+			const catalogFile = catalogPath(archiveDir, "traces")
+			const originalCatalog = readFileSync(catalogFile, "utf8")
 			// Add a stray generation dir with no manifest.
 			const stray = randomUUID()
 			mkdirSync(generationsRoot(archiveDir, "traces", "2026-06-01"), { recursive: true })
 			mkdirSync(join(generationsRoot(archiveDir, "traces", "2026-06-01"), stray), { recursive: true })
-			const entries = rebuildCatalog(archiveDir, "traces")
-			strictEqual(entries.length, 1)
+			// Rebuild must THROW (preflight fails) and preserve the existing catalog.
+			throwsSync(() => rebuildCatalog(archiveDir, "traces"), /missing its manifest/)
+			strictEqual(
+				readFileSync(catalogFile, "utf8"),
+				originalCatalog,
+				"existing catalog preserved on error",
+			)
 		})
 	})
 
@@ -205,3 +235,13 @@ describe("archive catalog rebuild", () => {
 		})
 	})
 })
+
+const throwsSync = (fn: () => unknown, pattern: RegExp): void => {
+	try {
+		fn()
+		throw new Error("expected function to throw")
+	} catch (error) {
+		const msg = error instanceof Error ? error.message : String(error)
+		if (!pattern.test(msg)) throw new Error(`expected ${pattern}, got: ${msg}`)
+	}
+}

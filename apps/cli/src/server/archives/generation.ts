@@ -150,7 +150,7 @@ export const createArchiveGeneration = async (
 					await faults.afterBuildingCreated?.()
 
 					const shardsDir = join(building, "shards")
-					await ensurePrivateDirectory(shardsDir)
+					await ensurePrivateDirectory(shardsDir, archiveRoot(archiveDir))
 					const writtenShards = exportSignalShards(db, signal, rangeDate, shardsDir, {
 						writerThreads: tuning.writerThreads,
 						rowGroupRows: tuning.rowGroupRows,

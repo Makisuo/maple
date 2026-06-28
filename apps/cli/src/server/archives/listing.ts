@@ -9,6 +9,7 @@ import {
 import {
 	activePointerPath,
 	assertNoSymlinkSync,
+	assertRealFileSync,
 	catalogPath,
 	generationManifestPath,
 	generationsRoot,
@@ -90,9 +91,11 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 			if (!existsSync(pointerPath)) continue
 			let generationId: string
 			try {
-				// Refuse a symlinked pointer path (HIGH-1 read-side): a symlinked
-				// range dir would make this read attacker-controlled content.
+				// Refuse a symlinked or non-regular pointer path (HIGH-1 read-side):
+				// a symlinked range dir or a non-file (socket, device) would make
+				// this read attacker-controlled or undefined content.
 				assertNoSymlinkSync(archiveDir, pointerPath, "archive active pointer")
+				assertRealFileSync(pointerPath, "archive active pointer")
 				const pointer = parseArchiveActivePointer(
 					JSON.parse(readFileSync(pointerPath, "utf8")) as unknown,
 					signal.name,
@@ -161,9 +164,25 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
  * ranges, excluding superseded generations. This is the machine-readable output
  * an operator feeds to DuckDB's `read_parquet`. Returns the paths grouped by
  * range in ascending order.
+ *
+ * Fail-closed: if ANY range for this signal has a malformed pointer, manifest,
+ * or shard path, the call THROWS rather than returning a partial path list. A
+ * partial list would silently feed DuckDB incomplete data, which is worse than a
+ * visible error. The operator runs `archive rebuild` or inspects the error to
+ * recover.
  */
 export const activeParquetPaths = (archiveDir: string, signal: ArchiveSignalName): ReadonlyArray<string> => {
 	const listing = listActiveGenerations(archiveDir)
+	const relevantErrors = listing.errors.filter((e) => e.signal === signal)
+	if (relevantErrors.length > 0) {
+		const detail = relevantErrors
+			.map((e) => `${e.signal}/${e.rangeStart || "(root)"}: ${e.error}`)
+			.join("; ")
+		throw new Error(
+			`refusing to return active Parquet paths for ${signal}: ${relevantErrors.length} malformed range(s) — ` +
+				`${detail}. Run 'maple archive rebuild ${signal}' or inspect the archive.`,
+		)
+	}
 	const forSignal = listing.active
 		.filter((summary) => summary.signal === signal)
 		.sort((a, b) => a.rangeStart.localeCompare(b.rangeStart))
@@ -182,44 +201,53 @@ export interface CatalogEntry {
 
 /**
  * Rebuild `catalog.jsonl` for a signal from the authoritative generation
- * manifests. A truncated final catalog line is ignored. Every promoted
- * generation (active or superseded) appears once, because the catalog indexes
- * all retained generations, not just the active one. Returns the rebuilt
- * entries and writes them durably. Does not delete unknown catalog state; the
- * catalog is fully regenerated from manifests, so a stale or corrupt catalog is
- * simply overwritten by the rebuilt authoritative index.
+ * manifests. Every promoted generation (active or superseded) appears once,
+ * because the catalog indexes all retained generations, not just the active one.
+ *
+ * Fail-closed (H-7): the rebuild PREFLIGHTS every manifest before writing. If
+ * any generation manifest is missing, malformed, or on a symlinked path, the
+ * existing catalog is PRESERVED untouched and the call throws. A partial rebuild
+ * that silently drops corrupt generations would make the catalog lie about what
+ * is archived, which is worse than a visible error. The operator inspects the
+ * named generation and recovers.
  */
 export const rebuildCatalog = (
 	archiveDir: string,
 	signal: ArchiveSignalName,
 ): ReadonlyArray<CatalogEntry> => {
-	const entries: CatalogEntry[] = []
 	const sRoot = signalRoot(archiveDir, signal)
-	if (!existsSync(sRoot)) return entries
+	if (!existsSync(sRoot)) return []
 	let ranges: string[]
 	try {
 		ranges = readdirSync(sRoot).filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry))
-	} catch {
-		return entries
+	} catch (error) {
+		throw new Error(`archive catalog rebuild: signal root unreadable: ${messageOf(error)}`)
 	}
+	// Phase 1 — preflight: read and validate EVERY manifest before touching the
+	// catalog. Collect entries; on any error, throw without writing.
+	const entries: CatalogEntry[] = []
 	for (const rangeDate of ranges.sort()) {
 		const gensRoot = generationsRoot(archiveDir, signal, rangeDate)
 		if (!existsSync(gensRoot)) continue
 		let generationIds: string[]
 		try {
 			generationIds = readdirSync(gensRoot)
-		} catch {
-			continue
+		} catch (error) {
+			throw new Error(
+				`archive catalog rebuild: generations root unreadable for ${signal}/${rangeDate}: ${messageOf(error)}`,
+			)
 		}
 		for (const generationId of generationIds.sort()) {
 			const manifestPath = generationManifestPath(archiveDir, signal, rangeDate, generationId)
-			if (!existsSync(manifestPath)) continue
-			let manifest: ArchiveGenerationManifest
-			try {
-				manifest = readArchiveGenerationManifest(archiveDir, signal, rangeDate, generationId)
-			} catch {
-				continue
+			if (!existsSync(manifestPath)) {
+				throw new Error(
+					`archive catalog rebuild: generation ${signal}/${rangeDate}/${generationId} is missing its manifest; ` +
+						`remove the orphan generation directory or restore the manifest before rebuilding`,
+				)
 			}
+			// readArchiveGenerationManifest asserts no-symlink + real-file + strict
+			// parse + location binding; it throws on any defect.
+			const manifest = readArchiveGenerationManifest(archiveDir, signal, rangeDate, generationId)
 			entries.push({
 				generationId: manifest.generationId,
 				signal: manifest.signal,
@@ -231,16 +259,12 @@ export const rebuildCatalog = (
 			})
 		}
 	}
-	// Durably rewrite the catalog from the rebuilt index. Existing content is
-	// replaced wholesale because the manifests are authoritative. The catalog
-	// lives at the signal root, not under a range. Refuse a symlinked catalog
-	// path (C-1): a symlinked catalog.jsonl could point outside the archive root.
+	// Phase 2 — write: only reached if every manifest preflighted clean. Refuse
+	// a symlinked catalog path (C-1) before writing.
 	const path = catalogPath(archiveDir, signal)
 	assertNoSymlinkSync(archiveDir, path, "archive catalog")
 	const lines = entries.map((entry) => JSON.stringify({ ...entry, formatVersion: 1 as const })).join("\n")
-	if (lines.length > 0) {
-		mkdirSync(dirname(path), { recursive: true })
-		writeFileSync(path, `${lines}\n`)
-	}
+	mkdirSync(dirname(path), { recursive: true })
+	writeFileSync(path, `${lines}\n`)
 	return entries
 }

@@ -209,14 +209,41 @@ export const treeBytes = async (path: string): Promise<number> => {
  * final entry. `root` must be an ancestor of `path`; every component from `root`
  * to `path` is checked.
  */
-export const ensurePrivateDirectory = async (path: string, root?: string): Promise<void> => {
+export const ensurePrivateDirectory = async (path: string, root: string): Promise<void> => {
 	const absolute = resolve(path)
-	const absoluteRoot = root ? resolve(root) : absolute
+	const absoluteRoot = resolve(root)
+	// The root must exist or be creatable as the first component. If the root
+	// itself does not exist yet (fresh archive root), create it with restrictive
+	// permissions before walking. A fresh root that fails ENOENT on lstat is
+	// expected here; the prior code treated a missing root as the walk start and
+	// then failed when lstat on the first child hit a non-existent parent.
+	const rel = relative(absoluteRoot, absolute)
+	if (rel === "") {
+		// path IS the root: ensure it exists as a real private directory.
+		try {
+			const info = await lstat(absoluteRoot)
+			if (info.isSymbolicLink()) throw new Error(`refusing symlink archive root: ${absoluteRoot}`)
+			if (!info.isDirectory()) throw new Error(`archive root must be a directory: ${absoluteRoot}`)
+			return
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+			await mkdir(absoluteRoot, { recursive: true, mode: 0o700 })
+			return
+		}
+	}
+	if (rel.startsWith("..")) throw new Error(`archive path escapes root: ${path}`)
+	// Ensure the root exists first (handles fresh-root creation).
+	try {
+		const rootInfo = await lstat(absoluteRoot)
+		if (rootInfo.isSymbolicLink()) throw new Error(`refusing symlink archive root: ${absoluteRoot}`)
+		if (!rootInfo.isDirectory()) throw new Error(`archive root must be a directory: ${absoluteRoot}`)
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
+		await mkdir(absoluteRoot, { recursive: true, mode: 0o700 })
+	}
 	// Walk from the root down, checking each existing component is a real dir and
 	// creating missing ones. This refuses to cross a symlink at any depth.
 	let current = absoluteRoot
-	const rel = relative(absoluteRoot, absolute)
-	if (rel.startsWith("..")) throw new Error(`archive path escapes root: ${path}`)
 	for (const part of rel.split(sep)) {
 		if (part === "") continue
 		current = join(current, part)
@@ -231,16 +258,17 @@ export const ensurePrivateDirectory = async (path: string, root?: string): Promi
 		if (info.isSymbolicLink()) throw new Error(`refusing symlink in archive path: ${current}`)
 		if (!info.isDirectory()) throw new Error(`archive path component is not a directory: ${current}`)
 	}
-	// Final entry: ensure restrictive mode on the leaf we own.
-	try {
-		const finalInfo = await lstat(absolute)
-		if (finalInfo.isSymbolicLink() || !finalInfo.isDirectory()) {
-			throw new Error(`archive path must be a real directory: ${absolute}`)
-		}
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
-		// Should not happen after the walk, but be safe.
-		await mkdir(absolute, { recursive: true, mode: 0o700 })
+}
+
+/**
+ * Synchronously verify a path is a real (non-symlink) regular file before
+ * reading it. Use at every read site so a symlinked or non-file entry cannot
+ * feed attacker-controlled or undefined content to a parser.
+ */
+export const assertRealFileSync = (path: string, label: string): void => {
+	const info = lstatSync(path)
+	if (info.isSymbolicLink() || !info.isFile()) {
+		throw new Error(`${label} must be a real file: ${path}`)
 	}
 }
 

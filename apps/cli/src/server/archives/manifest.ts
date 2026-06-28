@@ -1,16 +1,14 @@
-import { lstatSync, readFileSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type ArchiveTuningRecord } from "./config"
-import { assertNoSymlinkSync, generationManifestPath, validateArchiveId, validateRangeDate } from "./paths"
+import {
+	assertNoSymlinkSync,
+	assertRealFileSync,
+	generationManifestPath,
+	validateArchiveId,
+	validateRangeDate,
+} from "./paths"
 import { isArchiveSignalName } from "./signals"
-
-/** Synchronously verify a path is a real (non-symlink) file before reading it. */
-const assertRealFileSync = (path: string, label: string): void => {
-	const info = lstatSync(path)
-	if (info.isSymbolicLink() || !info.isFile()) {
-		throw new Error(`${label} must be a real file: ${path}`)
-	}
-}
 
 // Versioned, strict archive manifest and pointer formats.
 //

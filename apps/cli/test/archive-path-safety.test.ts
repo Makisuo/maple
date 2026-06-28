@@ -84,6 +84,16 @@ const seedBuilding = (archiveDir: string, generationId: string): string => {
 }
 
 describe("archive path safety — symlink escapes (C-1)", () => {
+	it("ensurePrivateDirectory creates a fresh archive root and nested dir safely", async () => {
+		await withArchive(async (archiveDir) => {
+			// A completely fresh nested path: archive root exists but the signal/
+			// range/generations chain does not. Must create all without ENOENT.
+			const nested = join(archiveDir, "traces", "2026-06-01", "generations", "sub")
+			await ensurePrivateDirectory(nested, archiveDir)
+			ok(existsSync(nested), "nested dir created")
+		})
+	})
+
 	it("ensurePrivateDirectory refuses a symlinked ancestor beneath the archive root", async () => {
 		await withArchive(async (archiveDir, outside) => {
 			// <archive>/traces -> outside/traces-evil
@@ -283,9 +293,9 @@ describe("archive path safety — read-side symlink escapes (HIGH-1/HIGH-2)", ()
 				outsideGen,
 				join(generationsRootPath(archiveDir, "traces", "2026-06-01"), generationId),
 			)
-			const entries = rebuildCatalog(archiveDir, "traces")
-			// The attacker's generation must NOT appear in the rebuilt catalog.
-			strictEqual(entries.length, 0)
+			// rebuildCatalog must THROW (symlink detected at preflight) and not
+			// trust the attacker's manifest.
+			throwsSync(() => rebuildCatalog(archiveDir, "traces"), /symlink/)
 		})
 	})
 })
