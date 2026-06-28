@@ -244,27 +244,6 @@ export const ensurePrivateDirectory = async (path: string, root?: string): Promi
 	}
 }
 
-/**
- * Verify a file or directory path is a real (non-symlink) entry of the expected
- * type, contained within `root`, immediately before reading or mutating it. Use
- * this at every read/write/rename site so a symlinked descendant cannot escape
- * the archive root. Throws on symlink, wrong type, or path escape.
- */
-export const assertSafeRealPath = async (
-	path: string,
-	root: string,
-	label: string,
-	type: "file" | "directory",
-): Promise<void> => {
-	await assertNoSymlink(root, path, label)
-	const info = await lstat(resolve(path))
-	if (info.isSymbolicLink()) throw new Error(`refusing symlink ${label}: ${path}`)
-	if (type === "file" && !info.isFile()) throw new Error(`${label} must be a real file: ${path}`)
-	if (type === "directory" && !info.isDirectory()) {
-		throw new Error(`${label} must be a real directory: ${path}`)
-	}
-}
-
 /** Reject an archive root that is, or sits inside, the live Maple data dir. */
 export const assertArchiveRootSeparate = (archiveDir: string, dataDir: string): void => {
 	const archive = resolve(archiveDir)

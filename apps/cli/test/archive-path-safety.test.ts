@@ -218,7 +218,82 @@ describe("archive path safety — symlink escapes (C-1)", () => {
 	})
 })
 
+describe("archive path safety — read-side symlink escapes (HIGH-1/HIGH-2)", () => {
+	it("readArchiveGenerationManifest refuses a symlinked generation dir and does not read outside content", async () => {
+		await withArchive(async (archiveDir, outside) => {
+			const { readArchiveGenerationManifest } = await import("../src/server/archives/manifest")
+			const generationId = randomUUID()
+			// Plant a real generation outside the root with an attacker manifest.
+			const outsideGen = join(outside, "evil-gen")
+			mkdirSync(join(outsideGen, "shards"), { recursive: true })
+			writeFileSync(join(outsideGen, "manifest.json"), `${JSON.stringify(manifest(generationId))}\n`)
+			writeFileSync(join(outsideGen, "shards", "00.parquet"), "ATTACKER-SHARDS")
+			// Symlink the in-root generation dir at the outside one.
+			mkdirSync(generationsRootPath(archiveDir, "traces", "2026-06-01"), { recursive: true })
+			symlinkSync(
+				outsideGen,
+				join(generationsRootPath(archiveDir, "traces", "2026-06-01"), generationId),
+			)
+			throwsSync(
+				() => readArchiveGenerationManifest(archiveDir, "traces", "2026-06-01", generationId),
+				/symlink/,
+			)
+		})
+	})
+
+	it("listActiveGenerations refuses a symlinked shard path and surfaces it as an error", async () => {
+		await withArchive(async (archiveDir, outside) => {
+			const generationId = randomUUID()
+			// Build a valid generation with a real manifest + pointer.
+			const shardsDir = shardsRoot(archiveDir, "traces", "2026-06-01", generationId)
+			mkdirSync(shardsDir, { recursive: true })
+			writeFileSync(join(shardsDir, "00.parquet"), "PAR1")
+			writeFileSync(
+				generationManifestPath(archiveDir, "traces", "2026-06-01", generationId),
+				`${JSON.stringify(manifest(generationId))}\n`,
+			)
+			writeFileSync(
+				activePointerPath(archiveDir, "traces", "2026-06-01"),
+				`${JSON.stringify({ formatVersion: 1, generationId, signal: "traces", rangeStart: "2026-06-01", selectedAt: "2026-06-02T00:00:00.000Z" })}\n`,
+			)
+			// Now symlink the shard file at an outside target.
+			writeFileSync(join(outside, "evil.parquet"), "ATTACKER-PARQUET")
+			rmSync(join(shardsDir, "00.parquet"))
+			symlinkSync(join(outside, "evil.parquet"), join(shardsDir, "00.parquet"))
+			const listing = listActiveGenerations(archiveDir)
+			// The symlinked shard must not appear in active paths.
+			strictEqual(listing.active.length, 0)
+			ok(
+				listing.errors.some((e) => /shard path/.test(e.error)),
+				"symlinked shard surfaced as error",
+			)
+		})
+	})
+
+	it("rebuildCatalog does not trust a symlinked generation dir's manifest", async () => {
+		await withArchive(async (archiveDir, outside) => {
+			const generationId = randomUUID()
+			// Plant attacker manifest outside the root.
+			const outsideGen = join(outside, "evil-gen")
+			mkdirSync(join(outsideGen, "shards"), { recursive: true })
+			writeFileSync(join(outsideGen, "manifest.json"), `${JSON.stringify(manifest(generationId))}\n`)
+			// Symlink the in-root generation at the outside one.
+			mkdirSync(generationsRootPath(archiveDir, "traces", "2026-06-01"), { recursive: true })
+			symlinkSync(
+				outsideGen,
+				join(generationsRootPath(archiveDir, "traces", "2026-06-01"), generationId),
+			)
+			const entries = rebuildCatalog(archiveDir, "traces")
+			// The attacker's generation must NOT appear in the rebuilt catalog.
+			strictEqual(entries.length, 0)
+		})
+	})
+})
+
 const signalRootPath = (archiveDir: string, signal: string): string => join(archiveDir, signal)
+
+const generationsRootPath = (archiveDir: string, signal: string, rangeDate: string): string =>
+	join(archiveDir, signal, rangeDate, "generations")
 
 const throwsSync = (fn: () => unknown, pattern: RegExp): void => {
 	try {

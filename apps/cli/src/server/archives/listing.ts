@@ -90,6 +90,9 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 			if (!existsSync(pointerPath)) continue
 			let generationId: string
 			try {
+				// Refuse a symlinked pointer path (HIGH-1 read-side): a symlinked
+				// range dir would make this read attacker-controlled content.
+				assertNoSymlinkSync(archiveDir, pointerPath, "archive active pointer")
 				const pointer = parseArchiveActivePointer(
 					JSON.parse(readFileSync(pointerPath, "utf8")) as unknown,
 					signal.name,
@@ -116,6 +119,24 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 				continue
 			}
 			signalHasActive = true
+			// Verify each shard path is not a symlink before returning it to DuckDB
+			// (HIGH-1 read-side): a planted symlinked shard could feed attacker
+			// Parquet to the query engine even with a valid manifest.
+			let shardPaths: string[]
+			try {
+				shardPaths = manifest.shards.map((shard) => {
+					const p = shardFilePath(archiveDir, signal.name, rangeDate, generationId, shard.name)
+					assertNoSymlinkSync(archiveDir, p, "archive shard")
+					return p
+				})
+			} catch (error) {
+				errors.push({
+					signal: signal.name,
+					rangeStart: rangeDate,
+					error: `shard path: ${messageOf(error)}`,
+				})
+				continue
+			}
 			active.push({
 				signal: signal.name,
 				rangeStart: rangeDate,
@@ -124,9 +145,7 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 				shardCount: manifest.shards.length,
 				createdAt: manifest.createdAt,
 				checkpointId: manifest.checkpointId,
-				shardPaths: manifest.shards.map((shard) =>
-					shardFilePath(archiveDir, signal.name, rangeDate, generationId, shard.name),
-				),
+				shardPaths,
 				shardBytes: shardBytes(manifest),
 			})
 		}

@@ -1,8 +1,16 @@
-import { readFileSync } from "node:fs"
+import { lstatSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type ArchiveTuningRecord } from "./config"
-import { generationManifestPath, validateArchiveId, validateRangeDate } from "./paths"
+import { assertNoSymlinkSync, generationManifestPath, validateArchiveId, validateRangeDate } from "./paths"
 import { isArchiveSignalName } from "./signals"
+
+/** Synchronously verify a path is a real (non-symlink) file before reading it. */
+const assertRealFileSync = (path: string, label: string): void => {
+	const info = lstatSync(path)
+	if (info.isSymbolicLink() || !info.isFile()) {
+		throw new Error(`${label} must be a real file: ${path}`)
+	}
+}
 
 // Versioned, strict archive manifest and pointer formats.
 //
@@ -171,6 +179,12 @@ export const readArchiveGenerationManifest = (
 	generationId: string,
 ): ArchiveGenerationManifest => {
 	const path = generationManifestPath(archiveDir, signal, rangeDate, generationId)
+	// Refuse a symlinked descendant on the READ path (the C-1 write fix's mirror):
+	// a planted symlink on the signal/range/generation/manifest chain would be
+	// followed by readFileSync, reading attacker-controlled content from outside
+	// the archive root. This is the single chokepoint for manifest reads.
+	assertNoSymlinkSync(archiveDir, path, "archive manifest")
+	assertRealFileSync(path, "archive manifest")
 	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown
 	return parseArchiveGenerationManifest(parsed, signal, rangeDate, generationId)
 }
