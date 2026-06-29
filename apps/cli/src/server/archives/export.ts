@@ -88,10 +88,12 @@ const countRowsForHour = (db: Chdb, signal: ArchiveSignal, rangeDate: string, ho
  * whether a single hour needs sub-splitting. Returns bytes-per-row (minimum 1).
  */
 const estimateBytesPerRow = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
-	// Sample up to 100 rows and sum their uncompressed length via length(replaceRegexpAll).
-	// This is a rough estimate; the post-write stat is authoritative for the bound check.
+	// Sample up to 100 rows and estimate their uncompressed RowBinary wire length.
+	// 'RowBinary' MUST be a quoted string literal — the bare token `RowBinary` is
+	// an unknown identifier in chDB (code 47). This is a rough estimate; the
+	// post-write parquet_metadata check is authoritative for the byte bound.
 	const sql =
-		`SELECT avg(length(formatRow(RowBinary, *))) AS bytes_per_row ` +
+		`SELECT avg(length(formatRow('RowBinary', *))) AS bytes_per_row ` +
 		`FROM (SELECT * FROM ${signal.name} ` +
 		`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' AND toHour(${signal.eventTimeColumn}) = ${hour} LIMIT 100)`
 	const row = readRows(db.query(sql, "JSONEachRow"))[0]
@@ -130,6 +132,54 @@ const assertSafePath = (path: string): void => {
 	if (/\\/.test(path)) throw new Error(`archive path must not contain a backslash: ${path}`)
 }
 
+/** A source column's name and type, captured before export for round-trip comparison. */
+interface SourceColumn {
+	readonly name: string
+	readonly type: string
+}
+
+/**
+ * Capture the source table's schema (name + type) via DESCRIBE. The Parquet
+ * shard's reopened schema is compared against this to prove the schema
+ * round-tripped exactly — not just that it has "some" columns.
+ */
+const captureSourceSchema = (db: Chdb, signal: ArchiveSignal): ReadonlyArray<SourceColumn> => {
+	const rows = readRows(db.query(`DESCRIBE ${signal.name} FORMAT JSONEachRow`, "JSONEachRow"))
+	const cols = rows.map((r) => ({ name: String(r.name), type: String(r.type) }))
+	if (cols.length === 0) throw new Error(`source table ${signal.name} has no columns`)
+	return cols
+}
+
+/**
+ * Compare a reopened Parquet shard's schema against the captured source schema.
+ * Every source column name and type must be present in the Parquet. Type names
+ * may differ in formatting (e.g. DateTime64(9, 'UTC') vs DateTime64(9)) so we
+ * compare the base type before the first '('.
+ */
+const compareSchema = (
+	source: ReadonlyArray<SourceColumn>,
+	parquetRows: ReadonlyArray<Record<string, unknown>>,
+	shardPath: string,
+): ReadonlyArray<string> => {
+	const parquetCols = parquetRows.map((r) => ({ name: String(r.name), type: String(r.type) }))
+	if (parquetCols.length === 0) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} reopened with no columns (schema lost)`,
+		)
+	}
+	const baseType = (t: string): string => t.split("(")[0]!.trim()
+	for (const src of source) {
+		const match = parquetCols.find((p) => p.name === src.name && baseType(p.type) === baseType(src.type))
+		if (!match) {
+			throw new Error(
+				`archive shard validation failed: ${shardPath} missing source column ${src.name} (${src.type}); ` +
+					`got [${parquetCols.map((c) => `${c.name}:${c.type}`).join(", ")}]`,
+			)
+		}
+	}
+	return parquetCols.map((c) => c.name)
+}
+
 const validateShard = (
 	db: Chdb,
 	shardPath: string,
@@ -137,6 +187,7 @@ const validateShard = (
 	rangeDate: string,
 	hour: number,
 	expectedRows: number,
+	sourceSchema: ReadonlyArray<SourceColumn>,
 ): { rowCount: number; minEventTime: string; maxEventTime: string; columns: ReadonlyArray<string> } => {
 	const lit = sqlLiteral(shardPath)
 	// Reopen the Parquet file via chDB's file() table function. If the file is
@@ -154,15 +205,18 @@ const validateShard = (
 			`archive shard validation failed: ${shardPath} has ${rowCount} rows, expected ${expectedRows}`,
 		)
 	}
-	// Read back time bounds from the reopened file.
-	const boundsSql =
-		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
-		`FROM file('${lit}', Parquet)`
-	const boundsRow = readRows(db.query(boundsSql, "JSONEachRow"))[0]
-	const minEventTime = String(boundsRow?.mn ?? "")
-	const maxEventTime = String(boundsRow?.mx ?? "")
-	// Verify all rows fall within the expected hour window (H-B): a shard must
-	// not contain rows from a different hour.
+	// Verify the UTC DATE of all rows matches the sealed day (not just the hour —
+	// the same hour on a different day must fail).
+	const dateSql = `SELECT min(toDate(${signal.eventTimeColumn})) AS dmn, max(toDate(${signal.eventTimeColumn})) AS dmx FROM file('${lit}', Parquet)`
+	const dateRow = readRows(db.query(dateSql, "JSONEachRow"))[0]
+	const dmn = String(dateRow?.dmn ?? "")
+	const dmx = String(dateRow?.dmx ?? "")
+	if (dmn !== rangeDate || dmx !== rangeDate) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} contains rows outside date ${rangeDate} (min=${dmn}, max=${dmx})`,
+		)
+	}
+	// Verify all rows fall within the expected hour window.
 	const hourSql =
 		`SELECT min(toHour(${signal.eventTimeColumn})) AS hmn, max(toHour(${signal.eventTimeColumn})) AS hmx ` +
 		`FROM file('${lit}', Parquet)`
@@ -174,15 +228,18 @@ const validateShard = (
 			`archive shard validation failed: ${shardPath} contains rows outside hour ${hour} (min=${hmn}, max=${hmx})`,
 		)
 	}
-	// Column list proves the Parquet schema round-tripped. A DESCRIBE failure is
-	// NOT swallowed (H-A): a schema that did not round-trip must fail the shard.
+	// Read back time bounds from the reopened file.
+	const boundsSql =
+		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
+		`FROM file('${lit}', Parquet)`
+	const boundsRow = readRows(db.query(boundsSql, "JSONEachRow"))[0]
+	const minEventTime = String(boundsRow?.mn ?? "")
+	const maxEventTime = String(boundsRow?.mx ?? "")
+	// Compare the reopened Parquet schema against the source table schema (exact
+	// name + base type). A DESCRIBE failure is NOT swallowed (H-A).
 	const descSql = `DESCRIBE file('${lit}', Parquet) FORMAT JSONEachRow`
-	const columns = readRows(db.query(descSql, "JSONEachRow")).map((r) => String(r.name))
-	if (columns.length === 0) {
-		throw new Error(
-			`archive shard validation failed: ${shardPath} reopened with no columns (schema lost)`,
-		)
-	}
+	const parquetSchemaRows = readRows(db.query(descSql, "JSONEachRow"))
+	const columns = compareSchema(sourceSchema, parquetSchemaRows, shardPath)
 	return { rowCount, minEventTime, maxEventTime, columns }
 }
 
@@ -195,9 +252,11 @@ const validateShard = (
  */
 const validateShardBytes = (db: Chdb, shardPath: string, maxShardBytes: number): number => {
 	const lit = sqlLiteral(shardPath)
-	// Read the uncompressed size from Parquet metadata via the column stats.
-	// SUM(uncompressed_size) over all columns gives the total uncompressed bytes.
-	const sql = `SELECT sum(uncompressed_size) AS uncompressed FROM parquet_metadata('${lit}')`
+	// Read the total uncompressed size from Parquet metadata. ClickHouse's real
+	// interface is `file('<path>', ParquetMetadata)` exposing
+	// `total_uncompressed_size` — NOT DuckDB's `parquet_metadata()` function
+	// (which does not exist in bundled chDB).
+	const sql = `SELECT total_uncompressed_size AS uncompressed FROM file('${lit}', ParquetMetadata)`
 	const row = readRows(db.query(sql, "JSONEachRow"))[0]
 	const uncompressed = Number(row?.uncompressed ?? 0)
 	if (uncompressed > maxShardBytes) {
@@ -225,6 +284,8 @@ export const exportSignalShards = (
 	settings: ExportSettings,
 ): WrittenShard[] => {
 	assertSafePath(shardsDir)
+	// Capture the source table schema once for exact round-trip comparison.
+	const sourceSchema = captureSourceSchema(db, signal)
 	const shards: WrittenShard[] = []
 	for (const hour of HOURS_IN_DAY) {
 		const hourRows = countRowsForHour(db, signal, rangeDate, hour)
@@ -266,8 +327,9 @@ export const exportSignalShards = (
 			)
 			// Reopen and validate the written Parquet (H-1, H-A, H-B). The
 			// authoritative row count comes from REOPENING the Parquet file, and is
-			// checked against the intended slice size and hour bounds.
-			const validated = validateShard(db, path, signal, rangeDate, hour, expectedRows)
+			// checked against the intended slice size, hour bounds, UTC date, and the
+			// exact source schema (name + type).
+			const validated = validateShard(db, path, signal, rangeDate, hour, expectedRows, sourceSchema)
 			const bytes = validateShardBytes(db, path, settings.maxShardBytes)
 			shards.push({
 				name,

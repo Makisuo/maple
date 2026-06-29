@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { rm, statfs } from "node:fs/promises"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
 import {
@@ -33,6 +33,7 @@ import {
 	generationManifestPath,
 	generationRoot,
 	newArchiveGenerationId,
+	nextMidnightUtc,
 	rangeRoot,
 	validateRangeDate,
 } from "./paths"
@@ -93,14 +94,42 @@ const toShardRecord = (shard: WrittenShard): ArchiveShardRecord => ({
  * `minFreeSpaceReserve` bytes free. Machine conditions can change after
  * calibration, so this runs at operation time, not just at calibration.
  */
-const preflightFreeSpace = async (archiveDir: string, minFreeSpaceReserve: number): Promise<void> => {
-	if (!existsSync(archiveDir)) return // a missing root is created later; preflight is for an existing volume
-	const info = await statfs(archiveDir)
-	const free = info.bavail * info.bsize
-	if (free < minFreeSpaceReserve) {
+/**
+ * Preflight that the destination volume has enough free space for the reserve
+ * PLUS the predicted working bytes (scratch restore + Parquet output). If the
+ * archive root does not yet exist, check the volume of the closest existing
+ * ancestor (the containing volume), not skip the check. `archiveDir` and
+ * `tuning.archiveDir` must be the same path (the output destination).
+ */
+const preflightFreeSpace = async (
+	archiveDir: string,
+	tuningArchiveDir: string,
+	minFreeSpaceReserve: number,
+	estimatedWorkingBytes: number,
+): Promise<void> => {
+	if (resolve(archiveDir) !== resolve(tuningArchiveDir)) {
 		throw new Error(
-			`archive volume has ${free} bytes free, below the ${minFreeSpaceReserve}-byte reserve; ` +
-				`free space or lower the reserve after recalibration`,
+			`archive directory mismatch: output target ${archiveDir} != tuning.archiveDir ${tuningArchiveDir}`,
+		)
+	}
+	// Find the closest existing ancestor to statfs (handles a not-yet-created root).
+	let statPath = archiveDir
+	let climbs = 0
+	while (!existsSync(statPath) && climbs < 64) {
+		statPath = resolve(statPath, "..")
+		climbs++
+	}
+	if (!existsSync(statPath)) {
+		throw new Error(`cannot determine volume for archive dir ${archiveDir} (no existing ancestor)`)
+	}
+	const info = await statfs(statPath)
+	const free = info.bavail * info.bsize
+	const required = minFreeSpaceReserve + estimatedWorkingBytes
+	if (free < required) {
+		throw new Error(
+			`archive volume has ${free} bytes free, below the required ${required} bytes ` +
+				`(reserve ${minFreeSpaceReserve} + working ${estimatedWorkingBytes}); ` +
+				`free space or recalibrate`,
 		)
 	}
 }
@@ -129,7 +158,11 @@ export const createArchiveGeneration = async (
 	validateRangeDate(rangeDate)
 	assertArchiveRootSeparate(archiveDir, dataDir)
 	const signal = archiveSignal(signalName)
-	await preflightFreeSpace(tuning.archiveDir, tuning.minFreeSpaceReserve)
+	// Estimate working bytes: scratch restore (~source size) + Parquet output
+	// (~compressed). We don't know the source size yet, so use a conservative
+	// estimate of the targetChunkBytes as the working-set proxy.
+	const estimatedWorkingBytes = tuning.targetChunkBytes
+	await preflightFreeSpace(archiveDir, tuning.archiveDir, tuning.minFreeSpaceReserve, estimatedWorkingBytes)
 	const generationId = newArchiveGenerationId()
 	const operationId = randomUUID()
 
@@ -143,7 +176,7 @@ export const createArchiveGeneration = async (
 				{ scratchRoot: tuning.scratchRoot, cleanup: "always" },
 				async ({ db, manifest: checkpointManifest }) => {
 					await faults.afterScratchRestored?.()
-					const dayEndExclusiveIso = `${rangeDate}T23:59:59.999999999Z`
+					const dayEndExclusiveIso = nextMidnightUtc(rangeDate)
 					const sourceRowCount = countSignalRowsForDay(db, signal, rangeDate)
 
 					const building = buildingGenerationRoot(archiveDir, generationId)
@@ -210,13 +243,19 @@ export const createArchiveGeneration = async (
 			)
 		} finally {
 			// The pin protected the checkpoint during export. Release it now that
-			// the generation is durable. A release failure is reported but does not
-			// undo the completed archive; a stale pin over-retains data safely.
+			// the generation is durable. A release failure does NOT undo the
+			// completed archive (a stale pin over-retains data safely), but it IS
+			// surfaced to the operator via stderr so a stuck pin is visible and
+			// actionable, not silently swallowed.
 			try {
 				await releaseCheckpointPin(dataDir, resolved.checkpointId, pinPath)
 				await faults.afterPinReleased?.()
-			} catch {
-				// Preserve over-retention: report via the result path, do not throw.
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : String(error)
+				process.stderr.write(
+					`warning: failed to release checkpoint pin ${pinPath} (${msg}); ` +
+						`the snapshot is over-retained safely but the pin should be inspected and removed manually\n`,
+				)
 			}
 			await removeOwnedBuilding(archiveDir, generationId, faults)
 		}

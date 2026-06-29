@@ -5,6 +5,7 @@ import {
 	assertNoSymlinkSync,
 	assertRealFileSync,
 	generationManifestPath,
+	nextMidnightUtc,
 	validateArchiveId,
 	validateRangeDate,
 } from "./paths"
@@ -79,11 +80,13 @@ const requiredString = (record: Record<string, unknown>, key: string): string =>
 
 const requiredCount = (record: Record<string, unknown>, key: string): number => {
 	const value = record[key]
-	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-		throw new Error(`invalid archive manifest field: ${key}`)
+	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+		throw new Error(`invalid archive manifest field: ${key} (must be a safe non-negative integer)`)
 	}
 	return value
 }
+
+const SHA256_HEX = /^[0-9a-f]{64}$/
 
 const requiredIso = (record: Record<string, unknown>, key: string): string => {
 	const value = requiredString(record, key)
@@ -96,20 +99,24 @@ const parseShardRecord = (value: unknown): ArchiveShardRecord => {
 	const name = requiredString(value, "name")
 	if (!/^[0-9a-z._-]+\.parquet$/i.test(name)) throw new Error(`invalid archive shard name: ${name}`)
 	const columnsRaw = value.columns
-	if (!Array.isArray(columnsRaw)) throw new Error("invalid archive shard record field: columns")
+	if (!Array.isArray(columnsRaw) || columnsRaw.length === 0) {
+		throw new Error("invalid archive shard record field: columns (must be a nonempty array)")
+	}
 	const columns = columnsRaw.map((c) => {
-		if (typeof c !== "string") throw new Error("invalid archive shard column name")
+		if (typeof c !== "string" || c.length === 0) throw new Error("invalid archive shard column name")
 		return c
 	})
-	return {
-		name,
-		rowCount: requiredCount(value, "rowCount"),
-		minEventTime: requiredIso(value, "minEventTime"),
-		maxEventTime: requiredIso(value, "maxEventTime"),
-		sha256: requiredString(value, "sha256"),
-		bytes: requiredCount(value, "bytes"),
-		columns,
+	const sha256 = requiredString(value, "sha256")
+	if (!SHA256_HEX.test(sha256))
+		throw new Error(`invalid archive shard sha256 (must be 64 hex chars): ${sha256}`)
+	const rowCount = requiredCount(value, "rowCount")
+	const minEventTime = requiredIso(value, "minEventTime")
+	const maxEventTime = requiredIso(value, "maxEventTime")
+	if (minEventTime > maxEventTime) {
+		throw new Error(`archive shard ${name}: minEventTime > maxEventTime`)
 	}
+	const bytes = requiredCount(value, "bytes")
+	return { name, rowCount, minEventTime, maxEventTime, sha256, bytes, columns }
 }
 
 /**
@@ -145,6 +152,38 @@ export const parseArchiveGenerationManifest = (
 	const shardsRaw = value.shards
 	if (!Array.isArray(shardsRaw)) throw new Error("invalid archive manifest field: shards")
 	const shards = shardsRaw.map(parseShardRecord)
+	// Cross-field validation (H-7): unique shard names, shard-row sum equals
+	// archivedRowCount, source count equals archived count, and next-midnight
+	// exclusive end.
+	const shardNames = new Set<string>()
+	let shardRowSum = 0
+	for (const shard of shards) {
+		if (shardNames.has(shard.name)) {
+			throw new Error(`archive manifest has duplicate shard name: ${shard.name}`)
+		}
+		shardNames.add(shard.name)
+		shardRowSum += shard.rowCount
+	}
+	const sourceRowCount = requiredCount(value, "sourceRowCount")
+	const archivedRowCount = requiredCount(value, "archivedRowCount")
+	if (shardRowSum !== archivedRowCount) {
+		throw new Error(
+			`archive manifest shard row sum (${shardRowSum}) != archivedRowCount (${archivedRowCount})`,
+		)
+	}
+	if (sourceRowCount !== archivedRowCount) {
+		throw new Error(
+			`archive manifest sourceRowCount (${sourceRowCount}) != archivedRowCount (${archivedRowCount})`,
+		)
+	}
+	const rangeEndExclusive = requiredIso(value, "rangeEndExclusive")
+	// rangeEndExclusive must be the next midnight after rangeStart (exclusive end).
+	const expectedEnd = nextMidnightUtc(rangeStart)
+	if (rangeEndExclusive !== expectedEnd) {
+		throw new Error(
+			`archive manifest rangeEndExclusive must be next-midnight ${expectedEnd}, got ${rangeEndExclusive}`,
+		)
+	}
 	if (!isRecord(value.tuning)) throw new Error("invalid archive manifest field: tuning")
 	const tuningRecord = value.tuning as Record<string, unknown>
 	return {
@@ -152,15 +191,15 @@ export const parseArchiveGenerationManifest = (
 		generationId,
 		signal,
 		rangeStart,
-		rangeEndExclusive: requiredIso(value, "rangeEndExclusive"),
+		rangeEndExclusive,
 		checkpointId: validateArchiveId(requiredString(value, "checkpointId"), "checkpoint"),
 		checkpointManifestFingerprint: requiredString(value, "checkpointManifestFingerprint"),
 		createdAt: requiredIso(value, "createdAt"),
 		mapleVersion: requiredString(value, "mapleVersion"),
 		chdbVersion: requiredString(value, "chdbVersion"),
 		schemaFingerprint: requiredString(value, "schemaFingerprint"),
-		sourceRowCount: requiredCount(value, "sourceRowCount"),
-		archivedRowCount: requiredCount(value, "archivedRowCount"),
+		sourceRowCount,
+		archivedRowCount,
 		tuning: {
 			writerThreads: requiredCount(tuningRecord, "writerThreads"),
 			rowGroupRows: requiredCount(tuningRecord, "rowGroupRows"),

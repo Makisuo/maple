@@ -8,7 +8,7 @@ import { existsSync, readdirSync, statSync } from "node:fs"
 import { createArchiveGeneration } from "../server/archives/generation"
 import { listActiveGenerations, activeParquetPaths, rebuildCatalog } from "../server/archives/listing"
 import { resolveArchiveTuning, type ArchiveTuningOverrides } from "../server/archives/config"
-import { ARCHIVE_SIGNALS, isArchiveSignalName } from "../server/archives/signals"
+import { ARCHIVE_SIGNALS, isArchiveSignalName, type ArchiveSignalName } from "../server/archives/signals"
 import { validateRangeDate } from "../server/archives/paths"
 import { calibrate, recommendationToTuning, writeCalibrationConfig } from "../server/archives/calibrate"
 import { amber, bold, dim, green } from "../lib/style"
@@ -258,7 +258,12 @@ export const archiveRebuild = Command.make("rebuild", {
 				})
 			}
 			const archiveDir = Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir()
-			const entries = rebuildCatalog(archiveDir, a.signal)
+			const signalName: ArchiveSignalName = a.signal
+			const entries = yield* Effect.tryPromise({
+				try: () => rebuildCatalog(archiveDir, signalName),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
 			yield* Effect.sync(() =>
 				process.stdout.write(
 					`${green("✓")} rebuilt ${a.signal} catalog with ${entries.length} generation(s)\n`,

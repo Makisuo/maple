@@ -180,7 +180,7 @@ describe("archive path safety — symlink escapes (C-1)", () => {
 			writeFileSync(sentinel, "preserve")
 			mkdirSync(signalRootPath(archiveDir, "traces"), { recursive: true })
 			symlinkSync(sentinel, catalogPath(archiveDir, "traces"))
-			throwsSync(() => rebuildCatalog(archiveDir, "traces"), /symlink/)
+			await rejects(rebuildCatalog(archiveDir, "traces"), /symlink/)
 			strictEqual(readFileSync(sentinel, "utf8"), "preserve")
 		})
 	})
@@ -296,7 +296,7 @@ describe("archive path safety — read-side symlink escapes (HIGH-1/HIGH-2)", ()
 			)
 			// rebuildCatalog must THROW (symlink detected at preflight) and not
 			// trust the attacker's manifest.
-			throwsSync(() => rebuildCatalog(archiveDir, "traces"), /symlink/)
+			await rejects(rebuildCatalog(archiveDir, "traces"), /symlink/)
 		})
 	})
 })

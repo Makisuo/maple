@@ -27,10 +27,33 @@ export const validateArchiveId = (value: string, kind: string): string => {
 
 export const validateRangeDate = (value: string): string => {
 	if (!RANGE_DATE.test(value)) throw new Error(`invalid archive range date: ${value}`)
-	// Reject impossible calendar dates so a typo cannot create a bogus range.
-	const date = new Date(`${value}T00:00:00.000Z`)
-	if (Number.isNaN(date.getTime())) throw new Error(`invalid archive range date: ${value}`)
+	// Reject impossible calendar dates (e.g. 2026-02-31). JavaScript's Date
+	// constructor normalizes impossible dates (rolls Feb 31 to Mar 3) rather
+	// than returning NaN, so we must verify the date round-trips: construct the
+	// date, then check its UTC year/month/day match the input exactly.
+	const [, y, m, d] = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)!
+	const year = Number(y)
+	const month = Number(m) - 1 // JS months are 0-based
+	const day = Number(d)
+	const date = new Date(Date.UTC(year, month, day))
+	if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day) {
+		throw new Error(`invalid archive range date (impossible calendar date): ${value}`)
+	}
 	return value
+}
+
+/**
+ * Compute the exclusive end of a UTC day as the next day's midnight in ISO form
+ * (e.g. `2026-06-01` → `2026-06-02T00:00:00.000Z`). Used for the
+ * `rangeEndExclusive` manifest field; the prior `23:59:59.999999999Z` was
+ * inclusive, not exclusive.
+ */
+export const nextMidnightUtc = (rangeDate: string): string => {
+	const validated = validateRangeDate(rangeDate)
+	const [, y, m, d] = /^(\d{4})-(\d{2})-(\d{2})$/.exec(validated)!
+	const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)))
+	date.setUTCDate(date.getUTCDate() + 1)
+	return date.toISOString()
 }
 
 export const newArchiveGenerationId = (): string => validateArchiveId(randomUUID(), "archive generation")

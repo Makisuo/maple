@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname } from "node:path"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import {
 	readArchiveGenerationManifest,
 	parseArchiveActivePointer,
@@ -122,14 +121,16 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 				continue
 			}
 			signalHasActive = true
-			// Verify each shard path is not a symlink before returning it to DuckDB
-			// (HIGH-1 read-side): a planted symlinked shard could feed attacker
-			// Parquet to the query engine even with a valid manifest.
+			// Verify each shard path is a real existing regular file (not a
+			// symlink, not missing, not a special entry) before returning it to
+			// DuckDB (HIGH-1 + cross-check HIGH): a planted symlink or a missing
+			// shard file must fail closed, not silently return a bad path.
 			let shardPaths: string[]
 			try {
 				shardPaths = manifest.shards.map((shard) => {
 					const p = shardFilePath(archiveDir, signal.name, rangeDate, generationId, shard.name)
 					assertNoSymlinkSync(archiveDir, p, "archive shard")
+					assertRealFileSync(p, "archive shard")
 					return p
 				})
 			} catch (error) {
@@ -211,10 +212,10 @@ export interface CatalogEntry {
  * is archived, which is worse than a visible error. The operator inspects the
  * named generation and recovers.
  */
-export const rebuildCatalog = (
+export const rebuildCatalog = async (
 	archiveDir: string,
 	signal: ArchiveSignalName,
-): ReadonlyArray<CatalogEntry> => {
+): Promise<ReadonlyArray<CatalogEntry>> => {
 	const sRoot = signalRoot(archiveDir, signal)
 	if (!existsSync(sRoot)) return []
 	let ranges: string[]
@@ -259,12 +260,13 @@ export const rebuildCatalog = (
 			})
 		}
 	}
-	// Phase 2 — write: only reached if every manifest preflighted clean. Refuse
-	// a symlinked catalog path (C-1) before writing.
+	// Phase 2 — write: only reached if every manifest preflighted clean. Use the
+	// durable atomic-write primitive (temp + fsync + rename + dir sync) so an
+	// ENOSPC, short write, or interruption cannot destroy the prior catalog.
 	const path = catalogPath(archiveDir, signal)
 	assertNoSymlinkSync(archiveDir, path, "archive catalog")
 	const lines = entries.map((entry) => JSON.stringify({ ...entry, formatVersion: 1 as const })).join("\n")
-	mkdirSync(dirname(path), { recursive: true })
-	writeFileSync(path, `${lines}\n`)
+	const { durableWrite } = await import("../durable-files")
+	await durableWrite(path, `${lines}\n`)
 	return entries
 }

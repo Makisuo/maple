@@ -40,7 +40,7 @@ const manifest = (
 	generationId,
 	signal,
 	rangeStart: "2026-06-01",
-	rangeEndExclusive: "2026-06-01T23:59:59.999999999Z",
+	rangeEndExclusive: "2026-06-02T00:00:00.000Z",
 	checkpointId: randomUUID(),
 	checkpointManifestFingerprint: "cid:2026-01-01:100",
 	createdAt: "2026-06-02T00:00:00.000Z",

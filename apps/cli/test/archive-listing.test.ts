@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest"
-import { deepStrictEqual, ok, strictEqual } from "node:assert"
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -9,6 +9,7 @@ import {
 	catalogPath,
 	generationManifestPath,
 	generationsRoot,
+	nextMidnightUtc,
 	shardsRoot,
 } from "../src/server/archives/paths"
 import { activeParquetPaths, listActiveGenerations, rebuildCatalog } from "../src/server/archives/listing"
@@ -37,7 +38,7 @@ const manifest = (
 	generationId,
 	signal,
 	rangeStart: rangeDate,
-	rangeEndExclusive: `${rangeDate}T23:59:59.999999999Z`,
+	rangeEndExclusive: nextMidnightUtc(rangeDate),
 	checkpointId: randomUUID(),
 	checkpointManifestFingerprint: "cid:2026-01-01:100",
 	createdAt: "2026-06-02T00:00:00.000Z",
@@ -57,7 +58,7 @@ const manifest = (
 	tuningConfigName: null,
 	shards: [
 		{
-			name: "00.parquet",
+			name: "00-0000.parquet",
 			rowCount,
 			minEventTime: `${rangeDate}T00:00:00.000Z`,
 			maxEventTime: `${rangeDate}T00:30:00.000Z`,
@@ -78,7 +79,7 @@ const seedActiveGeneration = (
 ): void => {
 	const shardsDir = shardsRoot(archiveDir, signal, rangeDate, generationId)
 	mkdirSync(shardsDir, { recursive: true })
-	writeFileSync(join(shardsDir, "00.parquet"), "PAR1")
+	writeFileSync(join(shardsDir, "00-0000.parquet"), "PAR1")
 	writeFileSync(
 		generationManifestPath(archiveDir, signal, rangeDate, generationId),
 		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount))}\n`,
@@ -105,7 +106,7 @@ const seedSupersededGeneration = (
 ): void => {
 	const shardsDir = shardsRoot(archiveDir, signal, rangeDate, generationId)
 	mkdirSync(shardsDir, { recursive: true })
-	writeFileSync(join(shardsDir, "00.parquet"), "PAR1-old")
+	writeFileSync(join(shardsDir, "00-0000.parquet"), "PAR1-old")
 	writeFileSync(
 		generationManifestPath(archiveDir, signal, rangeDate, generationId),
 		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount))}\n`,
@@ -193,7 +194,7 @@ describe("archive catalog rebuild", () => {
 			seedSupersededGeneration(archiveDir, "traces", "2026-06-01", old, 5)
 			seedActiveGeneration(archiveDir, "traces", "2026-06-01", active, 10)
 			// Truncate the catalog if it exists, then rebuild.
-			const entries = rebuildCatalog(archiveDir, "traces")
+			const entries = await rebuildCatalog(archiveDir, "traces")
 			// Both the superseded and the active generation appear, because the
 			// catalog indexes all retained generations.
 			strictEqual(entries.length, 2)
@@ -207,7 +208,7 @@ describe("archive catalog rebuild", () => {
 		await withArchive(async (archiveDir) => {
 			// Seed a valid active generation first and build its catalog.
 			seedActiveGeneration(archiveDir, "traces", "2026-06-01", randomUUID(), 8)
-			rebuildCatalog(archiveDir, "traces")
+			await rebuildCatalog(archiveDir, "traces")
 			const catalogFile = catalogPath(archiveDir, "traces")
 			const originalCatalog = readFileSync(catalogFile, "utf8")
 			// Add a stray generation dir with no manifest.
@@ -215,7 +216,7 @@ describe("archive catalog rebuild", () => {
 			mkdirSync(generationsRoot(archiveDir, "traces", "2026-06-01"), { recursive: true })
 			mkdirSync(join(generationsRoot(archiveDir, "traces", "2026-06-01"), stray), { recursive: true })
 			// Rebuild must THROW (preflight fails) and preserve the existing catalog.
-			throwsSync(() => rebuildCatalog(archiveDir, "traces"), /missing its manifest/)
+			await rejects(rebuildCatalog(archiveDir, "traces"), /missing its manifest/)
 			strictEqual(
 				readFileSync(catalogFile, "utf8"),
 				originalCatalog,
@@ -227,7 +228,7 @@ describe("archive catalog rebuild", () => {
 	it("produces a catalog with one valid JSON line per generation", async () => {
 		await withArchive(async (archiveDir) => {
 			seedActiveGeneration(archiveDir, "logs", "2026-06-01", randomUUID(), 12)
-			rebuildCatalog(archiveDir, "logs")
+			await rebuildCatalog(archiveDir, "logs")
 			const lines = readFileSync(catalogPath(archiveDir, "logs"), "utf8").trim().split("\n")
 			strictEqual(lines.length, 1)
 			const entry = JSON.parse(lines[0]!) as { signal: string; archivedRowCount: number }
