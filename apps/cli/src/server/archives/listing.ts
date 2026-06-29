@@ -176,7 +176,8 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-/** Compute SHA-256 of a file by streaming (not reading the whole file into JS memory). */
+/** Compute SHA-256 of a file. Reads the whole file into memory; acceptable for
+ *  bounded shards (maxShardBytes) but not suitable for unbounded files. */
 const sha256FileSync = (path: string): string => {
 	const hash = createHash("sha256")
 	const data = readFileSync(path)

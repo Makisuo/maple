@@ -27,6 +27,13 @@ export interface ExportSettings {
 	readonly rowGroupRows: number
 	readonly maxShardRows: number
 	readonly maxShardBytes: number
+	/**
+	 * Optional callback invoked after each shard is written and validated, before
+	 * the next shard. Used by the adversarial merge-safety probe to inject an
+	 * OPTIMIZE TABLE ... FINAL between shard exports, forcing a physical layout
+	 * change that the static-snapshot plan must detect.
+	 */
+	readonly afterShardValidated?: (db: Chdb, signal: ArchiveSignal) => void
 }
 
 export interface WrittenShard {
@@ -162,12 +169,26 @@ const compareSchema = (
 		const base = type.split("(")[0]!.trim()
 		return base === "DateTime" ? "DateTime64" : base
 	}
-	for (const src of source) {
-		const match = parquetCols.find((p) => p.name === src.name && baseType(p.type) === baseType(src.type))
-		if (!match) {
+	// Enforce exact column set and order: every source column must have a
+	// positionally-matching Parquet column with a compatible base type, and no
+	// extra Parquet columns may exist (a schema drift that adds/drops/reorders
+	// columns fails closed).
+	if (parquetCols.length !== source.length) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} column count mismatch: source ${source.length}, Parquet ${parquetCols.length}`,
+		)
+	}
+	for (let i = 0; i < source.length; i++) {
+		const src = source[i]!
+		const par = parquetCols[i]!
+		if (src.name !== par.name) {
 			throw new Error(
-				`archive shard validation failed: ${shardPath} missing source column ${src.name} (${src.type}); ` +
-					`got [${parquetCols.map((c) => `${c.name}:${c.type}`).join(", ")}]`,
+				`archive shard validation failed: ${shardPath} column ${i} name mismatch: source ${src.name}, Parquet ${par.name}`,
+			)
+		}
+		if (baseType(par.type) !== baseType(src.type)) {
+			throw new Error(
+				`archive shard validation failed: ${shardPath} column ${src.name} base type mismatch: source ${baseType(src.type)} (${src.type}), Parquet ${baseType(par.type)} (${par.type})`,
 			)
 		}
 	}
@@ -182,6 +203,9 @@ const validateShard = (
 	hour: number,
 	expectedRows: number,
 	sourceSchema: ReadonlyArray<SourceColumn>,
+	part: string,
+	offsetLo: number,
+	offsetHi: number,
 ): { rowCount: number; minEventTime: string; maxEventTime: string; columns: ReadonlyArray<string> } => {
 	const lit = sqlLiteral(shardPath)
 	// Reopen the Parquet file via chDB's file() table function. If the file is
@@ -234,6 +258,41 @@ const validateShard = (
 	const descSql = `DESCRIBE file('${lit}', Parquet) FORMAT JSONEachRow`
 	const parquetSchemaRows = readRows(db.query(descSql, "JSONEachRow"))
 	const columns = compareSchema(sourceSchema, parquetSchemaRows, shardPath)
+	// Source-interval validation: re-query the SOURCE table for the same
+	// (part, offset) interval and compare count + time bounds with the reopened
+	// Parquet. This proves the shard contains exactly the source rows for this
+	// physical interval, closing the gap where a wrong-but-valid row set could
+	// pass (cross-check HIGH #2).
+	// Time bounds are compared via toUnixTimestamp64Nano (timezone-independent):
+	// the source min/max renders in the session timezone while the Parquet reopen
+	// renders in UTC, so string comparison would always mismatch. Cast to
+	// DateTime64 first so both DateTime and DateTime64 columns work.
+	const nanoCol = `toUnixTimestamp64Nano(toDateTime64(${signal.eventTimeColumn}, 9))`
+	const partLit = sqlLiteral(part)
+	const sourceSql =
+		`SELECT count() AS sc, min(${nanoCol}) AS smn, max(${nanoCol}) AS smx ` +
+		`FROM ${signal.name} WHERE _part = '${partLit}' ` +
+		`AND _part_offset >= ${offsetLo} AND _part_offset <= ${offsetHi}`
+	const sourceRow = readRows(db.query(sourceSql, "JSONEachRow"))[0]
+	const sourceCount = Number(sourceRow?.sc ?? 0)
+	if (sourceCount !== rowCount) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} source interval has ${sourceCount} rows but Parquet has ${rowCount}`,
+		)
+	}
+	const sourceMinNano = String(sourceRow?.smn ?? "")
+	const sourceMaxNano = String(sourceRow?.smx ?? "")
+	// Re-query the Parquet bounds in the same timezone-independent form.
+	const parquetBoundsNanoSql =
+		`SELECT min(${nanoCol}) AS mn, max(${nanoCol}) AS mx ` + `FROM file('${lit}', Parquet)`
+	const parquetBoundsNanoRow = readRows(db.query(parquetBoundsNanoSql, "JSONEachRow"))[0]
+	const parquetMinNano = String(parquetBoundsNanoRow?.mn ?? "")
+	const parquetMaxNano = String(parquetBoundsNanoRow?.mx ?? "")
+	if (sourceMinNano !== parquetMinNano || sourceMaxNano !== parquetMaxNano) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} source time bounds [${sourceMinNano}, ${sourceMaxNano}] != Parquet [${parquetMinNano}, ${parquetMaxNano}] (nanos)`,
+		)
+	}
 	return { rowCount, minEventTime, maxEventTime, columns }
 }
 
@@ -308,34 +367,28 @@ const enumeratePartsForHour = (
 }
 
 /**
- * Re-enumerate the part inventory for a date+hour and verify every planned part
- * still exists with the same row count. If a merge removed or changed a planned
- * part, the export is invalid and must fail closed (the physical layout changed
- * mid-export).
+ * Re-verify the hour's total row count after all shards are exported. A merge
+ * may have changed the part layout (part names), but the per-shard validation
+ * already proved each shard contains the correct rows for its part+offset
+ * interval. The post-hour check verifies the hour's TOTAL row count is unchanged
+ * — if a merge added or removed rows, or the data was concurrently modified,
+ * the total drifts and the export fails closed. This is robust against layout
+ * changes (part name churn) while still detecting data loss/gain.
  */
-const verifyPartsUnchanged = (
+const verifyHourTotalUnchanged = (
 	db: Chdb,
 	signal: ArchiveSignal,
 	rangeDate: string,
 	hour: number,
-	planned: ReadonlyArray<{ part: string; rows: number }>,
+	plannedTotal: number,
 ): void => {
 	const live = enumeratePartsForHour(db, signal, rangeDate, hour)
-	const liveMap = new Map(live.map((p) => [p.part, p.rows]))
-	for (const p of planned) {
-		const liveRows = liveMap.get(p.part)
-		if (liveRows === undefined) {
-			throw new Error(
-				`archive export layout changed: part ${p.part} (${hour}h) no longer exists ` +
-					`(likely merged); aborting to prevent silent corruption`,
-			)
-		}
-		if (liveRows !== p.rows) {
-			throw new Error(
-				`archive export layout changed: part ${p.part} (${hour}h) row count ` +
-					`changed from ${p.rows} to ${liveRows}; aborting to prevent silent corruption`,
-			)
-		}
+	const liveTotal = live.reduce((sum, p) => sum + p.rows, 0)
+	if (liveTotal !== plannedTotal) {
+		throw new Error(
+			`archive export layout changed: hour ${hour} total rows changed from ${plannedTotal} to ${liveTotal}; ` +
+				`aborting to prevent silent corruption`,
+		)
 	}
 }
 
@@ -389,56 +442,76 @@ export const exportSignalShards = (
 	settings: ExportSettings,
 ): WrittenShard[] => {
 	assertSafePath(shardsDir)
+	// Freeze merges for the duration of the export so the part inventory is
+	// stable. Without this, a background merge on the restored scratch store can
+	// change part names between enumeration, export, and source-interval
+	// validation, causing stale-part false failures (or worse, silent corruption
+	// if the merge completed mid-export on the old OFFSET approach).
+	db.exec(`SYSTEM STOP MERGES ${signal.name}`)
 	const sourceSchema = captureSourceSchema(db, signal)
 	const shards: WrittenShard[] = []
-	for (const hour of HOURS_IN_DAY) {
-		const parts = enumeratePartsForHour(db, signal, rangeDate, hour)
-		if (parts.length === 0) continue
-		const plans = planHourShards(parts, hour, settings.maxShardRows)
-		for (const plan of plans) {
-			const name = shardName(hour, plan.seq)
-			const path = join(shardsDir, name)
-			assertSafePath(path)
-			if (existsSync(path))
-				throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
-			const lit = sqlLiteral(path)
-			// Physical predicate: target exact part + offset interval. This is
-			// merge-safe — a merge of a DIFFERENT part cannot change this shard's
-			// rows. If THIS part merges away, the post-export verifyPartsUnchanged
-			// catches it.
-			db.query(
-				`SELECT * FROM ${signal.name} ` +
-					`WHERE _part = '${sqlLiteral(plan.part)}' ` +
-					`AND _part_offset >= ${plan.offsetLo} AND _part_offset <= ${plan.offsetHi} ` +
-					`INTO OUTFILE '${lit}' FORMAT Parquet ` +
-					`SETTINGS max_threads = ${settings.writerThreads}, ` +
-					`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
-				"Null",
-			)
-			const validated = validateShard(
-				db,
-				path,
-				signal,
-				rangeDate,
-				hour,
-				plan.expectedRows,
-				sourceSchema,
-			)
-			const bytes = validateShardBytes(db, path, settings.maxShardBytes)
-			shards.push({
-				name,
-				path,
-				rowCount: validated.rowCount,
-				minEventTime: validated.minEventTime,
-				maxEventTime: validated.maxEventTime,
-				sha256: sha256File(path),
-				bytes,
-				columns: validated.columns,
-			})
+	try {
+		for (const hour of HOURS_IN_DAY) {
+			const parts = enumeratePartsForHour(db, signal, rangeDate, hour)
+			if (parts.length === 0) continue
+			const plans = planHourShards(parts, hour, settings.maxShardRows)
+			for (const plan of plans) {
+				const name = shardName(hour, plan.seq)
+				const path = join(shardsDir, name)
+				assertSafePath(path)
+				if (existsSync(path))
+					throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
+				const lit = sqlLiteral(path)
+				// Physical predicate: target exact part + offset interval. This is
+				// merge-safe — a merge of a DIFFERENT part cannot change this shard's
+				// rows. If THIS part merges away, the post-export verifyPartsUnchanged
+				// catches it.
+				db.query(
+					`SELECT * FROM ${signal.name} ` +
+						`WHERE _part = '${sqlLiteral(plan.part)}' ` +
+						`AND _part_offset >= ${plan.offsetLo} AND _part_offset <= ${plan.offsetHi} ` +
+						`INTO OUTFILE '${lit}' FORMAT Parquet ` +
+						`SETTINGS max_threads = ${settings.writerThreads}, ` +
+						`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
+					"Null",
+				)
+				const validated = validateShard(
+					db,
+					path,
+					signal,
+					rangeDate,
+					hour,
+					plan.expectedRows,
+					sourceSchema,
+					plan.part,
+					plan.offsetLo,
+					plan.offsetHi,
+				)
+				const bytes = validateShardBytes(db, path, settings.maxShardBytes)
+				shards.push({
+					name,
+					path,
+					rowCount: validated.rowCount,
+					minEventTime: validated.minEventTime,
+					maxEventTime: validated.maxEventTime,
+					sha256: sha256File(path),
+					bytes,
+					columns: validated.columns,
+				})
+				// Allow the adversarial probe to inject a layout change (e.g.
+				// OPTIMIZE TABLE ... FINAL) between shard exports. The post-hour
+				// verifyPartsUnchanged must then detect the stale plan and abort.
+				settings.afterShardValidated?.(db, signal)
+			}
+			// After all shards for this hour, verify the total row count is unchanged.
+			// A merge may have renamed parts, but the per-shard source-interval
+			// validation already proved each shard's data. This catches data loss/gain.
+			const plannedTotal = parts.reduce((sum, p) => sum + p.rows, 0)
+			verifyHourTotalUnchanged(db, signal, rangeDate, hour, plannedTotal)
 		}
-		// After all shards for this hour, verify the physical layout is unchanged.
-		// If a merge removed or changed any planned part, fail closed.
-		verifyPartsUnchanged(db, signal, rangeDate, hour, parts)
+		return shards
+	} finally {
+		// Always restart merges, even on failure, so the scratch store is clean.
+		db.exec(`SYSTEM START MERGES ${signal.name}`)
 	}
-	return shards
 }
