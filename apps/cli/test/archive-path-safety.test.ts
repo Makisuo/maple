@@ -3,7 +3,7 @@ import { ok, rejects, strictEqual } from "node:assert"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import {
 	activePointerPath,
 	assertNoSymlink,
@@ -40,7 +40,13 @@ const withArchive = async (
 	}
 }
 
-const manifest = (generationId: string, signal = "traces", rowCount = 10): ArchiveGenerationManifest => ({
+const manifest = (
+	generationId: string,
+	signal = "traces",
+	rowCount = 10,
+	shardSha = "a".repeat(64),
+	shardBytes = 4096,
+): ArchiveGenerationManifest => ({
 	formatVersion: 1,
 	generationId,
 	signal,
@@ -65,12 +71,12 @@ const manifest = (generationId: string, signal = "traces", rowCount = 10): Archi
 	tuningConfigName: null,
 	shards: [
 		{
-			name: "00.parquet",
+			name: "00-0000.parquet",
 			rowCount,
 			minEventTime: "2026-06-01T00:00:00.000Z",
 			maxEventTime: "2026-06-01T00:30:00.000Z",
-			sha256: "a".repeat(64),
-			bytes: 4096,
+			sha256: shardSha,
+			bytes: shardBytes,
 			columns: ["TimestampTime", "ServiceName"],
 		},
 	],
@@ -191,10 +197,13 @@ describe("archive path safety — symlink escapes (C-1)", () => {
 			const generationId = randomUUID()
 			const shardsDir = shardsRoot(archiveDir, "traces", "2026-06-01", generationId)
 			mkdirSync(shardsDir, { recursive: true })
-			writeFileSync(join(shardsDir, "00.parquet"), "PAR1")
+			const shardContent = "PAR1"
+			writeFileSync(join(shardsDir, "00-0000.parquet"), shardContent)
+			const shardSha = createHash("sha256").update(shardContent).digest("hex")
+			const shardBytes = shardContent.length
 			writeFileSync(
 				generationManifestPath(archiveDir, "traces", "2026-06-01", generationId),
-				`${JSON.stringify(manifest(generationId))}\n`,
+				`${JSON.stringify(manifest(generationId, undefined, undefined, shardSha, shardBytes))}\n`,
 			)
 			writeFileSync(
 				activePointerPath(archiveDir, "traces", "2026-06-01"),

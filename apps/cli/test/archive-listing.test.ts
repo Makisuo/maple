@@ -1,9 +1,9 @@
 import { describe, it } from "@effect/vitest"
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import {
 	activePointerPath,
 	catalogPath,
@@ -33,6 +33,8 @@ const manifest = (
 	signal: string,
 	rangeDate: string,
 	rowCount: number,
+	shardSha = "a".repeat(64),
+	shardBytes = 4096,
 ): ArchiveGenerationManifest => ({
 	formatVersion: 1,
 	generationId,
@@ -62,8 +64,8 @@ const manifest = (
 			rowCount,
 			minEventTime: `${rangeDate}T00:00:00.000Z`,
 			maxEventTime: `${rangeDate}T00:30:00.000Z`,
-			sha256: "a".repeat(64),
-			bytes: 4096,
+			sha256: shardSha,
+			bytes: shardBytes,
 			columns: ["TimestampTime", "ServiceName"],
 		},
 	],
@@ -79,10 +81,14 @@ const seedActiveGeneration = (
 ): void => {
 	const shardsDir = shardsRoot(archiveDir, signal, rangeDate, generationId)
 	mkdirSync(shardsDir, { recursive: true })
-	writeFileSync(join(shardsDir, "00-0000.parquet"), "PAR1")
+	const shardPath = join(shardsDir, "00-0000.parquet")
+	const shardContent = "PAR1"
+	writeFileSync(shardPath, shardContent)
+	const shardStat = statSync(shardPath)
+	const shardSha = sha256Hex(shardContent)
 	writeFileSync(
 		generationManifestPath(archiveDir, signal, rangeDate, generationId),
-		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount))}\n`,
+		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount, shardSha, shardStat.size))}\n`,
 	)
 	writeFileSync(
 		activePointerPath(archiveDir, signal, rangeDate),
@@ -106,10 +112,14 @@ const seedSupersededGeneration = (
 ): void => {
 	const shardsDir = shardsRoot(archiveDir, signal, rangeDate, generationId)
 	mkdirSync(shardsDir, { recursive: true })
-	writeFileSync(join(shardsDir, "00-0000.parquet"), "PAR1-old")
+	const shardPath = join(shardsDir, "00-0000.parquet")
+	const shardContent = "PAR1-old"
+	writeFileSync(shardPath, shardContent)
+	const shardStat = statSync(shardPath)
+	const shardSha = sha256Hex(shardContent)
 	writeFileSync(
 		generationManifestPath(archiveDir, signal, rangeDate, generationId),
-		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount))}\n`,
+		`${JSON.stringify(manifest(generationId, signal, rangeDate, rowCount, shardSha, shardStat.size))}\n`,
 	)
 }
 
@@ -127,8 +137,8 @@ describe("archive listing", () => {
 			strictEqual(summary.archivedRowCount, 10)
 			strictEqual(summary.shardCount, 1)
 			strictEqual(summary.shardPaths.length, 1)
-			ok(summary.shardPaths[0]!.endsWith("00.parquet"))
-			strictEqual(summary.shardBytes, 4096)
+			ok(summary.shardPaths[0]!.endsWith("00-0000.parquet"))
+			strictEqual(summary.shardBytes, 4)
 			deepStrictEqual(listing.signals, ["traces"])
 		})
 	})
@@ -237,6 +247,8 @@ describe("archive catalog rebuild", () => {
 		})
 	})
 })
+
+const sha256Hex = (content: string): string => createHash("sha256").update(content).digest("hex")
 
 const throwsSync = (fn: () => unknown, pattern: RegExp): void => {
 	try {

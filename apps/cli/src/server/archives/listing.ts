@@ -1,4 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import {
 	readArchiveGenerationManifest,
 	parseArchiveActivePointer,
@@ -121,16 +122,31 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 				continue
 			}
 			signalHasActive = true
-			// Verify each shard path is a real existing regular file (not a
-			// symlink, not missing, not a special entry) before returning it to
-			// DuckDB (HIGH-1 + cross-check HIGH): a planted symlink or a missing
-			// shard file must fail closed, not silently return a bad path.
+			// Verify each shard is a real regular file with the correct SHA-256
+			// and byte size before returning it to DuckDB (HIGH-1 + cross-check HIGH +
+			// tamper verification): a planted symlink, a missing shard, OR a tampered
+			// shard whose actual hash/size disagrees with the manifest must fail
+			// closed. The manifest is authoritative; a mismatched regular file is
+			// rejected, not silently returned.
 			let shardPaths: string[]
 			try {
 				shardPaths = manifest.shards.map((shard) => {
 					const p = shardFilePath(archiveDir, signal.name, rangeDate, generationId, shard.name)
 					assertNoSymlinkSync(archiveDir, p, "archive shard")
 					assertRealFileSync(p, "archive shard")
+					// Verify the file's actual SHA-256 and byte size match the manifest.
+					const actualSha = sha256FileSync(p)
+					if (actualSha !== shard.sha256) {
+						throw new Error(
+							`shard ${shard.name} SHA-256 mismatch: manifest ${shard.sha256.slice(0, 16)}…, actual ${actualSha.slice(0, 16)}… (file may be tampered)`,
+						)
+					}
+					const actualBytes = statSync(p).size
+					if (actualBytes !== shard.bytes) {
+						throw new Error(
+							`shard ${shard.name} byte size mismatch: manifest ${shard.bytes}, actual ${actualBytes}`,
+						)
+					}
 					return p
 				})
 			} catch (error) {
@@ -159,6 +175,14 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+/** Compute SHA-256 of a file by streaming (not reading the whole file into JS memory). */
+const sha256FileSync = (path: string): string => {
+	const hash = createHash("sha256")
+	const data = readFileSync(path)
+	hash.update(data)
+	return hash.digest("hex")
+}
 
 /**
  * Resolve the active Parquet shard paths for one signal across all sealed

@@ -75,14 +75,6 @@ export const countRowsForDay = (db: Chdb, signal: ArchiveSignal, rangeDate: stri
 	return parseCount(db.query(sql, "JSONEachRow"))
 }
 
-/** Count rows in one UTC hour of a date. */
-const countRowsForHour = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
-	const sql =
-		`SELECT count() FROM ${signal.name} ` +
-		`WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}' AND toHour(${signal.eventTimeColumn}, 'UTC') = ${hour}`
-	return parseCount(db.query(sql, "JSONEachRow"))
-}
-
 const sha256File = (path: string): string => {
 	const hash = createHash("sha256")
 	hash.update(readFileSync(path))
