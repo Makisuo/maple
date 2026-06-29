@@ -42,8 +42,18 @@ import { type ArchiveSignal } from "./signals"
 // written: see reports/gate2-round5-implementation.md (probed behaviors). No
 // chDB behavior is assumed.
 
-/** The multiset digest algorithm version recorded in each manifest shard. */
-export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-multiset-v1"
+/**
+ * The multiset digest algorithm version recorded in each manifest shard. Bumped
+ * to v2 in round 5: v1 passed a bare nullable value into cityHash64, collapsing
+ * the per-row hash to NULL whenever any column was NULL (value-insensitive for
+ * all other columns). v2 never passes a bare value (NULL → sentinel) and
+ * normalizes time columns to a numeric epoch. A v2 manifest must record this
+ * exact algorithm; an unknown value fails closed.
+ */
+export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-multiset-v2"
+
+/** Digest algorithms this reader accepts in a v2 manifest shard record. */
+export const KNOWN_COMPLEX_DIGEST_ALGORITHMS: ReadonlySet<string> = new Set(["cityhash64-multiset-v2"])
 
 export interface ExportSettings {
 	readonly writerThreads: number
@@ -253,26 +263,59 @@ export const normalizeType = (type: string): string => {
 
 /**
  * Build the per-row position-bound hash argument list for the multiset digest:
- * for each column, an `(isNullFlag, normalizedValue)` pair, in column order.
+ * for each column (in order), two arguments — its column INDEX and a NULL-SAFE
+ * value form. `cityHash64` of a tuple is ORDER-SENSITIVE (measured: `cityHash64
+ * (a,b)` ≠ `cityHash64(b,a)`), so binding index+value to position means a
+ * same-typed column exchange changes the row hash.
  *
- * `cityHash64` of a tuple is ORDER-SENSITIVE (measured: `cityHash64(a,b)` ≠
- * `cityHash64(b,a)`), so binding each column's value to its position means a
- * same-typed column exchange changes the row hash — closing the round-4
- * commutative-sum defect. The `isNull` flag binds NULLs distinctly from concrete
- * values (cityHash64 returns NULL if a bare NULL arg is passed; the flag never
- * is). Bare `DateTime` is normalized to `DateTime64(3,'UTC')` because that
- * widening changes the binary hash on the Parquet side (measured). Every other
- * type hashes identically source-side and Parquet-side.
+ * NULL SAFETY (the round-5 round-1 fix): chDB's `cityHash64` returns NULL if ANY
+ * argument is NULL. Passing a bare nullable column therefore collapses the
+ * ENTIRE per-row hash to NULL — a row with NULL `Min`/`Max` (histogram tables)
+ * loses value sensitivity for ALL its other columns (verified: two datasets with
+ * NULL Min/Max but different Count/Sum produced the identical digest). So a bare
+ * value is NEVER passed: `if(isNull(c), '\x00NULL', toString(norm(c)))`. The
+ * sentinel is a string no real value renders as, and a NULL↔value flip changes
+ * both the sentinel and the value argument.
  *
- * Returns e.g. `isNull(OrgId), OrgId, isNull(TimestampTime), toDateTime64(TimestampTime, 3, 'UTC'), ...`.
+ * TIME NORMALIZATION (round-4 finding): `toString(DateTime)` and `toString
+ * (DateTime64(N))` render in the session timezone on the source but UTC on the
+ * Parquet side, so a string hash diverges source↔Parquet. Time columns are
+ * normalized to a NUMERIC epoch (tz-stable, matches on both sides): bare
+ * DateTime → `toUnixTimestamp(c, 'UTC')`; DateTime64(N) →
+ * `toUnixTimestamp64Nano(toDateTime64(c, 9))`. All other types (String, UInt*,
+ * Map, Array, nested) hash identically via toString (measured: source↔Parquet
+ * match for traces/maps/arrays/Array(Map) and logs/bare-DateTime).
+ *
+ * Returns e.g. `0, if(isNull(OrgId), '\x00NULL', toString(OrgId)), 1, if(isNull(TimestampTime), '\x00NULL', toString(toUnixTimestamp(TimestampTime, 'UTC'))), ...`.
  */
 const perRowHashArgs = (sourceSchema: ReadonlyArray<SourceColumn>): string =>
 	sourceSchema
-		.map((c) => {
-			const v = c.type.trim() === "DateTime" ? `toDateTime64(${c.name}, 3, 'UTC')` : c.name
-			return `isNull(${c.name}), ${v}`
+		.map((c, i) => {
+			const t = c.type.trim()
+			// Normalize TIME-bearing columns to a NUMERIC epoch so toString() of the
+			// value matches source↔Parquet (a raw time-type's toString renders in the
+			// session timezone on source but UTC on the Parquet side — measured). Bare
+			// DateTime/DateTime64 collapse to a scalar epoch; Array(DateTime*) map each
+			// element to an epoch. Non-time types hash identically via toString.
+			//   DateTime          -> toUnixTimestamp(c, 'UTC')
+			//   DateTime64(N)     -> toUnixTimestamp64Nano(toDateTime64(c, 9))
+			//   Array(DateTime)   -> arrayMap(x -> toUnixTimestamp(x, 'UTC'), c)
+			//   Array(DateTime64) -> arrayMap(x -> toUnixTimestamp64Nano(toDateTime64(x, 9)), c)
+			const norm = normalizeValueForHash(c.name, t)
+			return `${i}, if(isNull(${c.name}), '\\x00NULL', toString(${norm}))`
 		})
 		.join(", ")
+
+/** Normalize a column value to a timezone-stable form for the digest hash. */
+const normalizeValueForHash = (name: string, type: string): string => {
+	const t = type.trim()
+	if (t === "DateTime") return `toUnixTimestamp(${name}, 'UTC')`
+	if (/^DateTime64\(/.test(t)) return `toUnixTimestamp64Nano(toDateTime64(${name}, 9))`
+	if (t === "Array(DateTime)") return `arrayMap(x -> toUnixTimestamp(x, 'UTC'), ${name})`
+	if (/^Array\(DateTime64\(/.test(t))
+		return `arrayMap(x -> toUnixTimestamp64Nano(toDateTime64(x, 9)), ${name})`
+	return name
+}
 
 /**
  * The multiset complex-value digest of a slice: the sorted multiset of per-row

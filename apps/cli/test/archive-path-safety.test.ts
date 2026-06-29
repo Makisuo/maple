@@ -79,7 +79,7 @@ const manifest = (
 			bytes: shardBytes,
 			columns: ["TimestampTime", "ServiceName"],
 			complexDigest: "123456789",
-			complexDigestAlgorithm: "cityhash64-multiset-v1",
+			complexDigestAlgorithm: "cityhash64-multiset-v2",
 		},
 	],
 })

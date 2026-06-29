@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { type ArchiveTuningRecord } from "./config"
+import { KNOWN_COMPLEX_DIGEST_ALGORITHMS } from "./export"
 import {
 	assertNoSymlinkSync,
 	assertRealFileSync,
@@ -54,7 +55,7 @@ export interface ArchiveShardRecord {
 	 * reassociation, and dup/drop that preserve count and time extrema.
 	 */
 	readonly complexDigest: string
-	/** The digest algorithm that produced {@link complexDigest} (e.g. cityhash64-multiset-v1). */
+	/** The digest algorithm that produced {@link complexDigest} (e.g. cityhash64-multiset-v2). */
 	readonly complexDigestAlgorithm: string
 }
 
@@ -173,6 +174,12 @@ const parseShardRecord = (
 		throw new Error(`invalid archive shard complexDigest (must be a numeric digest): ${complexDigest}`)
 	}
 	const complexDigestAlgorithm = requiredString(value, "complexDigestAlgorithm")
+	if (!KNOWN_COMPLEX_DIGEST_ALGORITHMS.has(complexDigestAlgorithm)) {
+		throw new Error(
+			`invalid archive shard complexDigestAlgorithm: ${complexDigestAlgorithm} ` +
+				`(known: ${[...KNOWN_COMPLEX_DIGEST_ALGORITHMS].join(", ")}); the manifest is preserved as-is`,
+		)
+	}
 	return {
 		name,
 		rowCount,

@@ -59,7 +59,7 @@ const validGenerationManifest = (overrides: Record<string, unknown> = {}) => ({
 			bytes: 4096,
 			columns: ["TimestampTime", "ServiceName"],
 			complexDigest: "123456789",
-			complexDigestAlgorithm: "cityhash64-multiset-v1",
+			complexDigestAlgorithm: "cityhash64-multiset-v2",
 		},
 	],
 	...overrides,

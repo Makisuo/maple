@@ -220,6 +220,20 @@ describe("shard time evidence — UTC nanoseconds, host-timezone-independent (ro
 		throws(() => parseArchiveGenerationManifest(m, "traces", "2026-06-29"), /complexDigestAlgorithm/)
 	})
 
+	it("rejects an unknown complexDigestAlgorithm fail-closed (round 5)", () => {
+		// v2 made digest semantics versioned; an unknown algorithm must not be
+		// silently re-interpreted (a v1 digest, a future v3, or a bogus string).
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					manifestWith({}, { complexDigestAlgorithm: "bogus-digest" }),
+					"traces",
+					"2026-06-29",
+				),
+			/invalid archive shard complexDigestAlgorithm: bogus-digest/,
+		)
+	})
+
 	it("rejects a v1 manifest fail-closed (round 5 version bump)", () => {
 		throws(
 			() =>

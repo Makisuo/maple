@@ -33,15 +33,6 @@ const h = ArchiveProbe.create("duckdb-oracle")
 mkdirSync(h.outDir, { recursive: true })
 
 /** Run a scalar/CSV DuckDB query over a list of parquet paths. */
-const duck = (paths: string[], sqlTail: string): string => {
-	const list = paths.map((p) => `'${p}'`).join(",")
-	return execSync(
-		`duckdb -csv -noheader -c "SELECT * FROM read_parquet([${list}], union_by_name=true) ${sqlTail}"`,
-		{
-			encoding: "utf8",
-		},
-	).trim()
-}
 const duckScalar = (paths: string[], expr: string): string => {
 	const list = paths.map((p) => `'${p}'`).join(",")
 	return execSync(

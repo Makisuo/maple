@@ -64,12 +64,14 @@ any predicate must bind `_part` together with the offset range.
 **Invariant:** Map, Array, nested-Map/Array, NULL, and high-precision
 timestamp values round-trip exactly through Parquet.
 
-| Counterexample transformation                               | Named probe                            | Independent oracle                                    | Required                          |
-| ----------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------- | --------------------------------- |
-| NULL in any column (histogram `Min`/`Max`)                  | `archive-probe-null-digest.ts`         | per-column NULL-presence equality                     | digest stable, non-empty (green)  |
-| Bare `DateTime` widened to `DateTime64(3,'UTC')` by Parquet | `archive-probe-datetime-normalize.ts`  | per-column hash equality after measured normalization | match (green)                     |
-| Schema substitution `Array(UInt64)`↔`Array(String)`         | `archive-probe-schema-substitution.ts` | recursive type compare after measured normalization   | rejected (green)                  |
-| Empty vs NULL vs single-element collections                 | `archive-probe-complex-fidelity.ts`    | canonical row comparison via DuckDB                   | rejected if changed (red → green) |
+| Counterexample transformation                                   | Named probe                                                               | Independent oracle                                  | Required                     |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------- |
+| NULL in any column collapses the digest to empty                | `archive-probe-null-digest.ts`                                            | digest string non-empty                             | digest non-empty (green)     |
+| NULL-bearing rows lose value sensitivity in NON-NULL columns    | `archive-probe-null-value-sensitivity.ts`                                 | two NULL-Min datasets, different non-null values    | digests differ (red → green) |
+| Bare `DateTime` / `DateTime64(N)` render diverge source↔Parquet | covered by `archive-probe-duckdb-oracle.ts` (epoch_us on raw TIMESTAMPTZ) | numeric epoch normalization in the digest           | match (green)                |
+| Schema substitution `Array(UInt64)`↔`Array(String)`             | `archive-probe-schema-substitution.ts`                                    | recursive type compare after measured normalization | rejected (green)             |
+| A non-null map/value changed with identical count/time          | `archive-probe-complex-alter.ts`                                          | export twice, compare digests                       | digests differ (green)       |
+| Read-back fidelity via an INDEPENDENT reader (not the digest)   | `archive-probe-duckdb-oracle.ts`                                          | DuckDB epoch_us / NULL count / array contents       | match source (green)         |
 
 No chDB Parquet type/value behavior may be assumed; it is measured (see
 `reports/gate2-round4-probes.md` and the round-5 probe report) before any
