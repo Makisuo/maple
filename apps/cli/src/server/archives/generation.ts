@@ -38,7 +38,7 @@ import {
 	validateRangeDate,
 } from "./paths"
 import { type ArchiveSignal, archiveSignal } from "./signals"
-import { exportSignalShards, type WrittenShard } from "./export"
+import { COMPLEX_DIGEST_ALGORITHM, exportSignalShards, type WrittenShard } from "./export"
 
 // Archive generation write, validation, promotion, and reconciliation.
 //
@@ -82,12 +82,13 @@ const checkpointFingerprint = (manifest: CheckpointManifest): string =>
 const toShardRecord = (shard: WrittenShard): ArchiveShardRecord => ({
 	name: shard.name,
 	rowCount: shard.rowCount,
-	minEventTime: shard.minEventTime,
-	maxEventTime: shard.maxEventTime,
+	minEventTimeUnixNano: shard.minEventTimeUnixNano,
+	maxEventTimeUnixNano: shard.maxEventTimeUnixNano,
 	sha256: shard.sha256,
 	bytes: shard.bytes,
 	columns: shard.columns,
 	complexDigest: shard.complexDigest,
+	complexDigestAlgorithm: COMPLEX_DIGEST_ALGORITHM,
 })
 
 /**
@@ -204,7 +205,7 @@ export const createArchiveGeneration = async (
 					}
 
 					const manifest: ArchiveGenerationManifest = {
-						formatVersion: 1,
+						formatVersion: 2,
 						generationId,
 						signal: signal.name,
 						rangeStart: rangeDate,

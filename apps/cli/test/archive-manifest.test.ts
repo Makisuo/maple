@@ -27,7 +27,7 @@ const withArchive = async (run: (archiveDir: string) => Promise<void> | void): P
 }
 
 const validGenerationManifest = (overrides: Record<string, unknown> = {}) => ({
-	formatVersion: 1,
+	formatVersion: 2,
 	generationId: randomUUID(),
 	signal: "traces",
 	rangeStart: "2026-06-01",
@@ -53,12 +53,13 @@ const validGenerationManifest = (overrides: Record<string, unknown> = {}) => ({
 		{
 			name: "00-0000.parquet",
 			rowCount: 100,
-			minEventTime: "2026-06-01T00:00:00.000Z",
-			maxEventTime: "2026-06-01T00:30:00.000Z",
+			minEventTimeUnixNano: `${BigInt(Date.parse("2026-06-01T00:00:00.000Z")) * 1_000_000n}`,
+			maxEventTimeUnixNano: `${BigInt(Date.parse("2026-06-01T00:30:00.000Z")) * 1_000_000n}`,
 			sha256: "a".repeat(64),
 			bytes: 4096,
 			columns: ["TimestampTime", "ServiceName"],
 			complexDigest: "123456789",
+			complexDigestAlgorithm: "cityhash64-multiset-v1",
 		},
 	],
 	...overrides,
@@ -75,10 +76,19 @@ describe("archive generation manifest parser", () => {
 		strictEqual(parsed.shards[0]!.bytes, 4096)
 	})
 
-	it("rejects an unknown format version", () => {
+	it("rejects an unknown (future) format version", () => {
 		throws(
-			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 2 }),
-			/unsupported/,
+			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 3 }),
+			/unsupported archive manifest formatVersion/,
+		)
+	})
+
+	it("rejects an older (v1) format version fail-closed (round 5)", () => {
+		// A round-4 v1 manifest carried timezone-dependent time evidence and a
+		// commutative digest; the round-5 reader must not silently re-interpret it.
+		throws(
+			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 1 }),
+			/unsupported archive manifest formatVersion 1/,
 		)
 	})
 

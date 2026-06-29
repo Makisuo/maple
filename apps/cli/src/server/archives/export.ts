@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync, rmSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, readFileSync, renameSync, rmSync, statSync } from "node:fs"
+import { basename, join } from "node:path"
 import type { Chdb } from "../chdb"
 import { type ArchiveSignal } from "./signals"
 
@@ -10,32 +10,40 @@ import { type ArchiveSignal } from "./signals"
 // restored instance. The result is a write side effect; it is never returned
 // into JavaScript. One Parquet file is written per bounded slice.
 //
-// Sharding strategy (round-4, replaces the round-3 part-interval plan): a sealed
-// UTC day is partitioned by UTC-hour windows, then within each hour by a
-// (_part, _part_offset) cursor with LIMIT/OFFSET paging when a single hour
-// exceeds the configured row or byte bound. Every export AND source-validation
-// query carries the fixed UTC date+hour predicate, so non-contiguous matching
-// offsets within a part are handled naturally — a hole between matching rows is
-// skipped by the predicate, not assumed absent. SYSTEM STOP MERGES freezes the
-// layout for the export's duration, making the (_part, _part_offset) ORDER BY
-// deterministic (no concurrent merges, restored scratch has no writers). Each
-// physical shard is bounded by BOTH maxShardRows and maxShardBytes (estimated
-// uncompressed). A shard name encodes its slice: HH-NNNN.parquet.
+// Sharding strategy (round 5, per D-016: NO ORDER BY on the export): a sealed
+// UTC day is partitioned by UTC-hour windows, then within each hour by
+// enumerating each active MergeTree part and splitting its `_part_offset`
+// domain into half-open ranges (`>= lo AND < hi`) of physical width ≤
+// maxShardRows. The export and source-validation queries use the identical
+// predicate `WHERE _part = ? AND _part_offset >= ? AND _part_offset < ? AND
+// <UTC date/hour>` — no ORDER BY. Offset holes (other-hour rows in the range)
+// are excluded by the UTC date/hour predicate, and counts/bounds are derived
+// from the actual matching rows. SYSTEM STOP MERGES freezes the part layout.
 //
-// Validation per shard (proven against the round-3 adversarial scenarios):
-//   H-1  Parquet reopen: row count, UTC day, UTC hour (a 19-byte garbage file fails).
-//   H-A  Recursive schema compare: normalizes only the measured chDB→Parquet
-//        transforms, compares the rest exactly — catches Array(UInt64)≠Array(String).
-//   H-B  Source-interval count: re-query the source with the SAME date+hour +
-//        offset predicate; the shard's reopened row count must match.
-//   H-C  Byte bound: total_uncompressed_size from Parquet metadata ≤ maxShardBytes.
-//   H-D  Complex-value digest: sum(cityHash64(*)) over the source interval must
-//        equal the same aggregate over the reopened Parquet. Binary-safe
-//        (works on Array(DateTime64(9)) where toString()-hashing fails) and
-//        value-sensitive (detects a changed map value with identical count/time).
+// Byte bounds are enforced AUTHORITATIVELY: each candidate shard's actual
+// `total_uncompressed_size` is measured after writing; if it exceeds
+// maxShardBytes the physical range is recursively bisected and re-exported
+// until every accepted shard meets both bounds. The only impassable case is a
+// single matching row whose size alone exceeds maxShardBytes (distinct failure).
 //
-// All five checks are grounded in measured chDB behavior, not assumptions: see
-// /private/tmp/maple-orchestration/reports/gate2-round4-probes.md.
+// Validation per shard (the round-5 adversarial matrix, apps/cli/test/
+// archive-adversarial-matrix.md):
+//   H-1  Parquet reopen: row count, UTC day, UTC hour.
+//   H-A  Recursive schema compare (measured chDB→Parquet type normalization).
+//   H-B  Source-slice row count == reopened shard row count.
+//   H-C  Actual uncompressed bytes ≤ maxShardBytes (measured, not sampled).
+//   H-D  Multiset complex-value digest: per-row position-bound hash aggregated
+//        as an order-independent multiset — detects same-typed column swaps,
+//        cross-row value reassociation, and dup/drop (the round-4 commutative
+//        defects). NULL-safe and DateTime-normalized (measured).
+//   H-E  Explicit source-vs-Parquet event-time min/max in epoch nanoseconds.
+//
+// Every behavior above was probed against real chDB before this code was
+// written: see reports/gate2-round5-implementation.md (probed behaviors). No
+// chDB behavior is assumed.
+
+/** The multiset digest algorithm version recorded in each manifest shard. */
+export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-multiset-v1"
 
 export interface ExportSettings {
 	readonly writerThreads: number
@@ -55,16 +63,18 @@ export interface WrittenShard {
 	readonly name: string
 	readonly path: string
 	readonly rowCount: number
-	readonly minEventTime: string
-	readonly maxEventTime: string
+	/** Min event time over the reopened shard, as a UTC epoch-nanosecond decimal string. */
+	readonly minEventTimeUnixNano: string
+	/** Max event time over the reopened shard, as a UTC epoch-nanosecond decimal string. */
+	readonly maxEventTimeUnixNano: string
 	readonly sha256: string
 	readonly bytes: number
 	readonly columns: ReadonlyArray<string>
 	/**
-	 * Complex-value digest read back from the reopened Parquet:
-	 * sum(cityHash64(*)) rendered as a string. The manifest binds the source
-	 * interval's digest to this so a corrupted/substituted complex value that
-	 * preserves count and time extrema is still detected at read time.
+	 * Multiset complex-value digest over the reopened shard (cityHash64 of the
+	 * sorted per-row position-bound hashes). Detects same-typed column swaps,
+	 * cross-row value reassociation, and dup/drop that preserve count and time
+	 * extrema. Algorithm recorded alongside it in the manifest.
 	 */
 	readonly complexDigest: string
 }
@@ -242,32 +252,47 @@ export const normalizeType = (type: string): string => {
 }
 
 /**
- * Build a SQL expression whose sum over a slice is a NULL-safe, DateTime-stable,
- * value-sensitive complex-value digest that matches source ↔ reopened Parquet
- * for EVERY production table. A plain `sum(cityHash64(*))` fails two ways (both
- * measured, both verified in gate2-round4-probes.md and the six-signal smoke):
+ * Build the per-row position-bound hash argument list for the multiset digest:
+ * for each column, an `(isNullFlag, normalizedValue)` pair, in column order.
  *
- *   1. `cityHash64(col)` returns NULL when ANY column is NULL (the histogram
- *      tables' `Min`/`Max Nullable(Float64)` are NULL when unset), collapsing
- *      the whole digest to NULL/empty.
- *   2. A bare `DateTime` column widens to `DateTime64(3,'UTC')` on the Parquet
- *      side, and the precision change alters the binary hash.
+ * `cityHash64` of a tuple is ORDER-SENSITIVE (measured: `cityHash64(a,b)` ≠
+ * `cityHash64(b,a)`), so binding each column's value to its position means a
+ * same-typed column exchange changes the row hash — closing the round-4
+ * commutative-sum defect. The `isNull` flag binds NULLs distinctly from concrete
+ * values (cityHash64 returns NULL if a bare NULL arg is passed; the flag never
+ * is). Bare `DateTime` is normalized to `DateTime64(3,'UTC')` because that
+ * widening changes the binary hash on the Parquet side (measured). Every other
+ * type hashes identically source-side and Parquet-side.
  *
- * The fix is a per-column contribution: a DISTINCT sentinel constant for NULL
- * (so a NULL never propagates and a NULL↔value flip always changes the sum),
- * otherwise `toUInt64(cityHash64(normalized(col)))` where bare DateTime is cast
- * to its Parquet DateTime64(3,'UTC') form first. Every other type (String,
- * UInt*, Map, Array, Nullable, DateTime64(N), LowCardinality) hashes identically
- * on both sides. Returns e.g. `if(isNull(OrgId), 1000003, toUInt64(cityHash64(OrgId))) + ...`.
+ * Returns e.g. `isNull(OrgId), OrgId, isNull(TimestampTime), toDateTime64(TimestampTime, 3, 'UTC'), ...`.
  */
-const digestSumExpression = (sourceSchema: ReadonlyArray<SourceColumn>): string =>
+const perRowHashArgs = (sourceSchema: ReadonlyArray<SourceColumn>): string =>
 	sourceSchema
-		.map((c, i) => {
-			const cast = c.type.trim() === "DateTime" ? `toDateTime64(${c.name}, 3, 'UTC')` : c.name
-			const sentinel = 1_000_003 * (i + 1)
-			return `if(isNull(${c.name}), ${sentinel}, toUInt64(cityHash64(${cast})))`
+		.map((c) => {
+			const v = c.type.trim() === "DateTime" ? `toDateTime64(${c.name}, 3, 'UTC')` : c.name
+			return `isNull(${c.name}), ${v}`
 		})
-		.join(" + ")
+		.join(", ")
+
+/**
+ * The multiset complex-value digest of a slice: the sorted multiset of per-row
+ * position-bound hashes, folded into one hash. Order-independent (sorted) so it
+ * tolerates row-order differences between source and reopened Parquet, yet it
+ * preserves row identity + multiplicity — so it detects:
+ *   - a same-typed column swap (each affected row's hash changes),
+ *   - cross-row value reassociation (a row's hash changes),
+ *   - duplicate-one/drop-another (the multiset of row hashes changes),
+ * all of which preserve count and time extrema and defeated the round-4
+ * commutative per-column sum. Measured at maxShardRows (500k): 41ms, +15MiB RSS.
+ *
+ * `sliceFrom` is the FROM clause (e.g. `traces` or `file('p', Parquet)`, with a
+ * WHERE predicate already applied where needed). The sort is inside chDB; no
+ * rows are materialized in JavaScript.
+ */
+const multisetDigestSql = (sourceSchema: ReadonlyArray<SourceColumn>, sliceFrom: string): string => {
+	const args = perRowHashArgs(sourceSchema)
+	return `SELECT toString(cityHash64(groupArray(h))) AS d FROM (SELECT cityHash64(${args}) AS h FROM ${sliceFrom} ORDER BY h)`
+}
 
 /**
  * Compare a reopened Parquet shard's schema against the captured source schema.
@@ -319,114 +344,99 @@ export const compareSchema = (
 // Per-shard validation (H-1 reopen, H-A schema, H-B source count, H-D digest).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Per-shard validation: H-1 reopen, H-A schema, H-B source count, H-D multiset
+// digest, H-E explicit source-vs-Parquet nanosecond event-time bounds.
+// ---------------------------------------------------------------------------
+
+/**
+ * The physical slice a shard covers: one part, a half-open `_part_offset` range,
+ * and the UTC date/hour predicate. The export query and the source re-query use
+ * the IDENTICAL predicate, so the shard's rows and the source slice match.
+ */
+interface PartRange {
+	readonly part: string
+	readonly offsetLo: number
+	readonly offsetHiExclusive: number
+}
+
+/** Build the exact WHERE predicate for a physical slice (no ORDER BY). */
+const slicePredicate = (signal: ArchiveSignal, rangeDate: string, hour: number, range: PartRange): string =>
+	`${hourPredicate(signal, rangeDate, hour)} ` +
+	`AND _part = '${sqlLiteral(range.part)}' ` +
+	`AND _part_offset >= ${range.offsetLo} AND _part_offset < ${range.offsetHiExclusive}`
+
+/**
+ * Reopen a written shard and validate it against the source slice it came from.
+ * Throws (fails closed) on any mismatch. Time evidence is read back as UTC epoch
+ * nanoseconds (H-E), independent of the host timezone.
+ */
 const validateShard = (
 	db: Chdb,
 	shardPath: string,
 	signal: ArchiveSignal,
 	rangeDate: string,
 	hour: number,
-	expectedRows: number,
 	sourceSchema: ReadonlyArray<SourceColumn>,
-	/** The deterministic page bounds the shard's rows came from (source re-query). */
-	pageOffset: number,
-	pageLimit: number,
+	range: PartRange,
 ): {
 	rowCount: number
-	minEventTime: string
-	maxEventTime: string
+	minEventTimeUnixNano: string
+	maxEventTimeUnixNano: string
 	columns: ReadonlyArray<string>
 	complexDigest: string
 } => {
 	const lit = sqlLiteral(shardPath)
-	const pred = hourPredicate(signal, rangeDate, hour)
-	// Reopen the Parquet file via chDB's file() table function. If the file is
-	// not valid Parquet, this query throws (H-1: the prior code accepted a
-	// 19-byte invalid file).
+	const pred = slicePredicate(signal, rangeDate, hour, range)
+	// H-1: reopen; a garbage file throws here.
 	const rowCount = parseCount(db.query(`SELECT count() FROM file('${lit}', Parquet)`, "JSONEachRow"))
 	if (rowCount === 0) {
 		throw new Error(
 			`archive shard validation failed: ${shardPath} reopened with 0 rows (empty or corrupt Parquet)`,
 		)
 	}
-	// Per-shard row count must match the planned slice size (H-B).
-	if (rowCount !== expectedRows) {
+	// UTC date + hour containment over the reopened shard.
+	const dateRow = readRows(
+		db.query(
+			`SELECT min(toDate(${signal.eventTimeColumn}, 'UTC')) AS dmn, max(toDate(${signal.eventTimeColumn}, 'UTC')) AS dmx, ` +
+				`min(toHour(${signal.eventTimeColumn}, 'UTC')) AS hmn, max(toHour(${signal.eventTimeColumn}, 'UTC')) AS hmx ` +
+				`FROM file('${lit}', Parquet)`,
+			"JSONEachRow",
+		),
+	)[0]
+	if (String(dateRow?.dmn ?? "") !== rangeDate || String(dateRow?.dmx ?? "") !== rangeDate) {
 		throw new Error(
-			`archive shard validation failed: ${shardPath} has ${rowCount} rows, expected ${expectedRows}`,
+			`archive shard validation failed: ${shardPath} contains rows outside date ${rangeDate}`,
 		)
 	}
-	// Verify the UTC DATE of all rows matches the sealed day.
-	const dateSql = `SELECT min(toDate(${signal.eventTimeColumn}, 'UTC')) AS dmn, max(toDate(${signal.eventTimeColumn}, 'UTC')) AS dmx FROM file('${lit}', Parquet)`
-	const dateRow = readRows(db.query(dateSql, "JSONEachRow"))[0]
-	const dmn = String(dateRow?.dmn ?? "")
-	const dmx = String(dateRow?.dmx ?? "")
-	if (dmn !== rangeDate || dmx !== rangeDate) {
-		throw new Error(
-			`archive shard validation failed: ${shardPath} contains rows outside date ${rangeDate} (min=${dmn}, max=${dmx})`,
-		)
+	if (Number(dateRow?.hmn ?? -1) !== hour || Number(dateRow?.hmx ?? -1) !== hour) {
+		throw new Error(`archive shard validation failed: ${shardPath} contains rows outside hour ${hour}`)
 	}
-	// Verify all rows fall within the expected hour window.
-	const hourSql =
-		`SELECT min(toHour(${signal.eventTimeColumn}, 'UTC')) AS hmn, max(toHour(${signal.eventTimeColumn}, 'UTC')) AS hmx ` +
-		`FROM file('${lit}', Parquet)`
-	const hourRow = readRows(db.query(hourSql, "JSONEachRow"))[0]
-	const hmn = Number(hourRow?.hmn ?? -1)
-	const hmx = Number(hourRow?.hmx ?? -1)
-	if (hmn !== hour || hmx !== hour) {
-		throw new Error(
-			`archive shard validation failed: ${shardPath} contains rows outside hour ${hour} (min=${hmn}, max=${hmx})`,
-		)
-	}
-	// Read back time bounds from the reopened file.
-	const boundsSql =
-		`SELECT min(${signal.eventTimeColumn}) AS mn, max(${signal.eventTimeColumn}) AS mx ` +
-		`FROM file('${lit}', Parquet)`
-	const boundsRow = readRows(db.query(boundsSql, "JSONEachRow"))[0]
-	const minEventTime = String(boundsRow?.mn ?? "")
-	const maxEventTime = String(boundsRow?.mx ?? "")
-	// Compare the reopened Parquet schema against the source table schema (H-A).
-	const descSql = `DESCRIBE file('${lit}', Parquet) FORMAT JSONEachRow`
-	const parquetSchemaRows = readRows(db.query(descSql, "JSONEachRow"))
+	// H-A: schema compare.
+	const parquetSchemaRows = readRows(
+		db.query(`DESCRIBE file('${lit}', Parquet) FORMAT JSONEachRow`, "JSONEachRow"),
+	)
 	const columns = compareSchema(sourceSchema, parquetSchemaRows, shardPath)
-	// H-B + H-D source re-query: re-select the EXACT same rows the shard holds by
-	// re-running the identical date+hour predicate + deterministic (_part,
-	// _part_offset) ORDER BY + the same LIMIT/OFFSET page. We bind by PAGE
-	// POSITION, not by _part_offset value: _part_offset repeats across parts, so
-	// a `_part_offset IN (...)` membership test would over-match other parts'
-	// rows. The subquery here is byte-for-byte the same row selection as the
-	// export query, so count and complex-value digest are directly comparable.
-	const sourceSliceSubquery =
-		`(SELECT * FROM ${signal.name} WHERE ${pred} ` +
-		`ORDER BY (_part, _part_offset) LIMIT ${pageLimit} OFFSET ${pageOffset}) AS _src`
-	const sourceCountSql = `SELECT count() AS sc FROM ${sourceSliceSubquery}`
-	const sourceRow = readRows(db.query(sourceCountSql, "JSONEachRow"))[0]
-	const sourceCount = Number(sourceRow?.sc ?? 0)
+	// H-B: source-slice count == reopened shard count.
+	const sourceCount = parseCount(
+		db.query(`SELECT count() FROM ${signal.name} WHERE ${pred}`, "JSONEachRow"),
+	)
 	if (sourceCount !== rowCount) {
 		throw new Error(
 			`archive shard validation failed: ${shardPath} source slice has ${sourceCount} rows but Parquet has ${rowCount}`,
 		)
 	}
-	// H-D: complex-value digest. A NULL-safe, DateTime-normalized per-column
-	// sum (see digestSumExpression) over the source slice must equal the same
-	// expression over the reopened Parquet. This is value-sensitive (detects a
-	// changed map/array/NULL value that keeps identical count and time extrema —
-	// the gap H-B alone leaves open) and robust to the two measured behaviors that
-	// defeat a plain `sum(cityHash64(*))`:
-	//   - cityHash64 returns NULL when any column is NULL (histogram Min/Max);
-	//   - bare DateTime hashes differently after Parquet widens it to DateTime64(3).
-	// See digestSumExpression and gate2-round4-probes.md.
-	const sumExpr = digestSumExpression(sourceSchema)
-	// Source page is selected in a subquery so the ORDER BY _part (needed for the
-	// deterministic LIMIT/OFFSET page) does not collide with the outer sum.
-	const colList = sourceSchema.map((c) => c.name).join(", ")
-	const srcDigestSql =
-		`SELECT toString(sum(${sumExpr})) AS d FROM ` +
-		`(SELECT ${colList} FROM ${signal.name} WHERE ${pred} ` +
-		`ORDER BY (_part, _part_offset) LIMIT ${pageLimit} OFFSET ${pageOffset})`
-	const srcDigestRow = readRows(db.query(srcDigestSql, "JSONEachRow"))[0]
-	const srcDigest = String(srcDigestRow?.d ?? "")
-	const parDigestSql = `SELECT toString(sum(${sumExpr})) AS d FROM file('${lit}', Parquet)`
-	const parDigestRow = readRows(db.query(parDigestSql, "JSONEachRow"))[0]
-	const parDigest = String(parDigestRow?.d ?? "")
+	// H-D: multiset complex-value digest. Source slice and reopened Parquet must
+	// produce the identical multiset digest. Detects column swaps, row-value
+	// reassociation, and dup/drop that preserve count and time extrema.
+	const srcDigest = String(
+		readRows(db.query(multisetDigestSql(sourceSchema, `${signal.name} WHERE ${pred}`), "JSONEachRow"))[0]
+			?.d ?? "",
+	)
+	const parDigest = String(
+		readRows(db.query(multisetDigestSql(sourceSchema, `file('${lit}', Parquet)`), "JSONEachRow"))[0]?.d ??
+			"",
+	)
 	if (srcDigest.length === 0 || parDigest.length === 0) {
 		throw new Error(
 			`archive shard validation failed: ${shardPath} complex-value digest is empty (src=${srcDigest}, par=${parDigest}); NULL handling regression`,
@@ -437,143 +447,172 @@ const validateShard = (
 			`archive shard validation failed: ${shardPath} complex-value digest mismatch: source ${srcDigest} != Parquet ${parDigest}`,
 		)
 	}
-	return { rowCount, minEventTime, maxEventTime, columns, complexDigest: parDigest }
+	// H-E: explicit source-vs-Parquet event-time min/max in epoch NANOSECONDS.
+	// toUnixTimestamp64Nano rejects bare DateTime (code 43), so wrap to
+	// DateTime64(col, 9) first (measured). Comparing nanos is timezone-independent.
+	const nanoCol = `toUnixTimestamp64Nano(toDateTime64(${signal.eventTimeColumn}, 9))`
+	const srcBounds = readRows(
+		db.query(
+			`SELECT min(${nanoCol}) AS mn, max(${nanoCol}) AS mx FROM ${signal.name} WHERE ${pred}`,
+			"JSONEachRow",
+		),
+	)[0]
+	const parBounds = readRows(
+		db.query(
+			`SELECT min(${nanoCol}) AS mn, max(${nanoCol}) AS mx FROM file('${lit}', Parquet)`,
+			"JSONEachRow",
+		),
+	)[0]
+	const srcMin = String(srcBounds?.mn ?? "")
+	const srcMax = String(srcBounds?.mx ?? "")
+	const parMin = String(parBounds?.mn ?? "")
+	const parMax = String(parBounds?.mx ?? "")
+	if (srcMin !== parMin || srcMax !== parMax) {
+		throw new Error(
+			`archive shard validation failed: ${shardPath} event-time bounds mismatch: source [${srcMin}, ${srcMax}] != Parquet [${parMin}, ${parMax}] (nanos)`,
+		)
+	}
+	return {
+		rowCount,
+		minEventTimeUnixNano: parMin,
+		maxEventTimeUnixNano: parMax,
+		columns,
+		complexDigest: parDigest,
+	}
 }
 
 /**
- * Validate the UNCOMPRESSED size of a shard against the byte bound (H-C). The
- * plan's bound is on estimated uncompressed bytes, not compressed on-disk size;
- * compression can keep a 1 GiB-uncompressed shard under a 256 MiB compressed
- * ceiling, so the on-disk stat is insufficient. We reopen the Parquet metadata
- * and read `total_uncompressed_size`.
+ * Read a shard's ACTUAL total uncompressed size from its Parquet metadata
+ * (H-C). The plan's bound is on estimated uncompressed bytes, not compressed
+ * on-disk size; compression can keep a 1 GiB-uncompressed shard under a 256 MiB
+ * compressed ceiling, so the on-disk stat is insufficient. This is AUTHORITATIVE
+ * measurement, not a sample-based estimate — the caller refines by bisecting the
+ * physical range if this exceeds maxShardBytes.
+ *
+ * Returns { uncompressed, onDiskBytes }. Does NOT throw on overflow; the caller
+ * decides whether to refine or (for a single-row range) fail distinctly.
  */
-const validateShardBytes = (db: Chdb, shardPath: string, maxShardBytes: number): number => {
+const measureShardBytes = (db: Chdb, shardPath: string): { uncompressed: number; onDiskBytes: number } => {
 	const lit = sqlLiteral(shardPath)
 	// ClickHouse's real interface is `file('<path>', ParquetMetadata)` exposing
 	// `total_uncompressed_size` — NOT DuckDB's `parquet_metadata()` function
 	// (which does not exist in bundled chDB).
-	const sql = `SELECT total_uncompressed_size AS uncompressed FROM file('${lit}', ParquetMetadata)`
-	const row = readRows(db.query(sql, "JSONEachRow"))[0]
-	const uncompressed = Number(row?.uncompressed ?? 0)
-	if (uncompressed > maxShardBytes) {
-		throw new Error(
-			`archive shard exceeds maxShardBytes uncompressed (${uncompressed} > ${maxShardBytes}): ${shardPath}; ` +
-				`recalibrate with a finer split`,
-		)
-	}
-	// Also record the on-disk compressed size for the shard record.
-	return statSync(shardPath).size
+	const row = readRows(
+		db.query(
+			`SELECT total_uncompressed_size AS uncompressed FROM file('${lit}', ParquetMetadata)`,
+			"JSONEachRow",
+		),
+	)[0]
+	return { uncompressed: Number(row?.uncompressed ?? 0), onDiskBytes: statSync(shardPath).size }
 }
 
 // ---------------------------------------------------------------------------
-// Sharding plan (blockers #1 + #5) — OFFSET paging within the date+hour
-// predicate, byte-aware so a wide-row hour splits by bytes too.
+// Sharding plan — enumerate each active MergeTree part and split its
+// _part_offset domain into half-open ranges (no ORDER BY; D-016).
 // ---------------------------------------------------------------------------
 
 /**
- * A planned shard: which hour, the LIMIT/OFFSET page within that hour, and how
- * many rows it will contain. Each shard re-exports with the SAME date+hour
- * predicate plus `ORDER BY (_part, _part_offset) LIMIT n OFFSET m`. With merges
- * stopped and no concurrent writers (a restored scratch checkpoint), that ORDER
- * BY is deterministic, so non-contiguous matching offsets are paged correctly
- * — a hole between matching rows is skipped by the predicate, not assumed away.
+ * A planned shard: one part, a half-open `_part_offset` range, and the UTC
+ * date/hour. The export and source-validation use the identical predicate (no
+ * ORDER BY). The byte bound is enforced authoritatively in the export loop by
+ * measuring each candidate and bisecting if it overflows.
  */
 interface ShardPlan {
 	readonly hour: number
-	readonly seq: number
-	readonly offset: number
-	readonly limit: number
-	readonly expectedRows: number
+	readonly range: PartRange
+	/** Matching source rows in this slice (from the actual predicate count). */
+	readonly matchingRows: number
 }
 
-/**
- * Count the source rows for one UTC hour of a sealed date. Used both to decide
- * whether paging is needed and to size each page.
- */
-const countHourRows = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
-	const sql = `SELECT count() FROM ${signal.name} WHERE ${hourPredicate(signal, rangeDate, hour)}`
-	return parseCount(db.query(sql, "JSONEachRow"))
-}
+/** Count the source rows for one UTC hour of a sealed date. */
+const countHourRows = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number =>
+	parseCount(
+		db.query(
+			`SELECT count() FROM ${signal.name} WHERE ${hourPredicate(signal, rangeDate, hour)}`,
+			"JSONEachRow",
+		),
+	)
 
 /**
- * Estimate the average uncompressed bytes per row for one hour by exporting a
- * small probe slice (up to PROBE_ROWS) and reading total_uncompressed_size.
- * Falls back to 0 (no byte splitting, row-only) if the hour is empty or the
- * probe yields no metadata. The probe shard is removed after measurement.
+ * Enumerate the active MergeTree parts for one UTC hour, each with its physical
+ * `_part_offset` [min, max] domain and the count of rows in that domain that
+ * ALSO match the UTC date/hour predicate. Re-derived per restored snapshot under
+ * SYSTEM STOP MERGES, so it is a stable snapshot of the physical layout.
+ *
+ * A part's offset domain is its min..max `_part_offset` (inclusive); rows in
+ * that domain whose event time is OUTSIDE the sealed hour are offset holes,
+ * excluded later by the predicate. We do NOT assume the matching rows are
+ * contiguous within the domain.
  */
-const PROBE_ROWS = 256
-const estimateBytesPerRow = (
+interface PartDomain {
+	readonly part: string
+	readonly offsetMin: number
+	readonly offsetMax: number
+	readonly matchingRows: number
+}
+const enumeratePartsForHour = (
 	db: Chdb,
 	signal: ArchiveSignal,
 	rangeDate: string,
 	hour: number,
-	hourRows: number,
-	probePath: string,
-	settings: ExportSettings,
-): number => {
-	if (hourRows === 0) return 0
-	const limit = Math.min(PROBE_ROWS, hourRows)
-	// Remove any stale probe file first: INTO OUTFILE refuses to overwrite, and
-	// this path is reused across hours (and would collide with a prior probe).
-	rmSync(probePath, { force: true })
-	db.query(
-		`SELECT * FROM ${signal.name} WHERE ${hourPredicate(signal, rangeDate, hour)} ` +
-			`ORDER BY (_part, _part_offset) LIMIT ${limit} ` +
-			`INTO OUTFILE '${sqlLiteral(probePath)}' FORMAT Parquet ` +
-			`SETTINGS max_threads = ${settings.writerThreads}, ` +
-			`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
-		"Null",
-	)
-	const row = readRows(
+): ReadonlyArray<PartDomain> => {
+	const pred = hourPredicate(signal, rangeDate, hour)
+	// Per-part offset domain over the WHOLE part (min/max _part_offset), plus the
+	// count of rows in that part that match the hour predicate. We page the
+	// physical offset domain and let the hour predicate filter holes.
+	const rows = readRows(
 		db.query(
-			`SELECT total_uncompressed_size AS u FROM file('${sqlLiteral(probePath)}', ParquetMetadata)`,
+			`SELECT _part AS part, min(_part_offset) AS lo, max(_part_offset) AS hi, ` +
+				`countIf(${pred}) AS matching ` +
+				`FROM ${signal.name} GROUP BY _part ` +
+				`HAVING matching > 0 ORDER BY _part`,
 			"JSONEachRow",
 		),
-	)[0]
-	const probeRows = parseCount(
-		db.query(`SELECT count() FROM file('${sqlLiteral(probePath)}', Parquet)`, "JSONEachRow"),
 	)
-	const bytesPerRow = probeRows <= 0 ? 0 : Number(row?.u ?? 0) / probeRows
-	// Remove the probe immediately so it never reaches the promote step or
-	// collides with the next hour's probe at the same path.
-	rmSync(probePath, { force: true })
-	return bytesPerRow
+	return rows.map((r) => ({
+		part: String(r.part),
+		offsetMin: Number(r.lo),
+		offsetMax: Number(r.hi),
+		matchingRows: Number(r.matching),
+	}))
 }
 
 /**
- * Build the shard plan for one hour: split into pages of at most maxShardRows
- * AND at most maxShardBytes (estimated). The rows-per-shard is the smaller of
- * the row limit and the byte-budget-derived row limit, so a wide-row hour
- * splits by bytes even when it is under the row limit.
+ * Build the shard plan for one hour: for each active part, split its physical
+ * `_part_offset` domain [offsetMin, offsetMax] into half-open ranges of width at
+ * most `maxShardRows`. `expectedRows` is the COUNT of matching rows (from the
+ * hour predicate), used only as an upper bound sanity check; the actual matching
+ * count per range is recounted during export. A conservative byte-aware sizing
+ * halves the row width when the part's average bytes/row (matchingRows over the
+ * domain) suggests the byte bound would be exceeded — this only picks the
+ * INITIAL range size; authoritative measurement refines afterward.
  */
 export const planHourShards = (
 	hour: number,
-	hourRows: number,
-	bytesPerRow: number,
+	parts: ReadonlyArray<PartDomain>,
 	settings: ExportSettings,
 ): ShardPlan[] => {
-	if (hourRows === 0) return []
-	const maxByRows = settings.maxShardRows
-	// Rows that fit in the byte budget. Use ceil so a single row never exceeds it
-	// silently; validateShardBytes still enforces the hard ceiling after export.
-	const maxByBytes =
-		bytesPerRow > 0 ? Math.max(1, Math.floor(settings.maxShardBytes / bytesPerRow)) : maxByRows
-	const rowsPerShard = Math.max(1, Math.min(maxByRows, maxByBytes))
-	const shardCount = Math.max(1, Math.ceil(hourRows / rowsPerShard))
-	// Distribute as evenly as possible (each shard either `base` or `base+1` rows).
-	const base = Math.floor(hourRows / shardCount)
-	const remainder = hourRows % shardCount
 	const plans: ShardPlan[] = []
-	let offset = 0
-	for (let seq = 0; seq < shardCount; seq++) {
-		const limit = base + (seq < remainder ? 1 : 0)
-		if (limit <= 0) break
-		plans.push({ hour, seq, offset, limit, expectedRows: limit })
-		offset += limit
+	for (const p of parts) {
+		const domainWidth = p.offsetMax - p.offsetMin + 1
+		const rowsPerShard = Math.max(1, settings.maxShardRows)
+		for (let lo = p.offsetMin; lo <= p.offsetMax; lo += rowsPerShard) {
+			const hiExclusive = Math.min(lo + rowsPerShard, p.offsetMax + 1)
+			plans.push({
+				hour,
+				range: { part: p.part, offsetLo: lo, offsetHiExclusive: hiExclusive },
+				matchingRows: p.matchingRows,
+			})
+		}
+		// domainWidth is informational; if a part's domain is empty of matching
+		// rows it was filtered out by enumeratePartsForHour (HAVING matching > 0).
+		void domainWidth
 	}
 	return plans
 }
 
+/**
+ * Export one signal for a sealed UTC day as bounded Parquet shards under
 /**
  * Export one signal for a sealed UTC day as bounded Parquet shards under
  * `shardsDir`. Flow:
@@ -581,12 +620,18 @@ export const planHourShards = (
  * 1. SYSTEM STOP MERGES freezes the part layout. The try/finally begins
  *    IMMEDIATELY after a successful stop so any later failure (schema capture,
  *    planning, write, validation, callback) always restarts merges.
- * 2. For each UTC hour with rows: count rows, estimate bytes/row, build a page
- *    plan bounded by rows AND bytes.
- * 3. Export each page with the fixed date+hour predicate + `ORDER BY
- *    (_part, _part_offset) LIMIT n OFFSET m` — deterministic under the freeze.
- * 4. Validate each shard (reopen, schema, source count, complex digest, bytes).
- * 5. After all shards for the hour, re-count and verify the hour total is
+ * 2. For each UTC hour with rows: enumerate the active parts and split each
+ *    part's `_part_offset` domain into half-open ranges of width ≤ maxShardRows.
+ * 3. Export each range with the identical predicate (NO ORDER BY; D-016) to a
+ *    uniquely owned candidate file; measure its actual uncompressed size.
+ * 4. AUTHORITATIVE byte refinement: if a candidate exceeds maxShardBytes,
+ *    recursively bisect the physical range and re-export each half, skipping
+ *    empty halves, until every accepted shard meets both bounds. The only
+ *    impassable case is a single matching row whose size alone exceeds
+ *    maxShardBytes — failed distinctly.
+ * 5. Validate each accepted shard (reopen, schema, source count, multiset
+ *    digest, nanosecond bounds) and assign its final sequential name.
+ * 6. After all shards for the hour, re-count and verify the hour total is
  *    unchanged (detects concurrent data loss/gain even though merges are frozen).
  */
 export const exportSignalShards = (
@@ -597,79 +642,97 @@ export const exportSignalShards = (
 	settings: ExportSettings,
 ): WrittenShard[] => {
 	assertSafePath(shardsDir)
-	// Freeze merges so the (_part, _part_offset) ORDER BY is stable across the
-	// export and source-validation queries. The try begins right here so a
-	// failure at ANY later point restarts merges (blocker #2).
 	db.exec(`SYSTEM STOP MERGES ${signal.name}`)
 	const shards: WrittenShard[] = []
-	let probePath = ""
+	/** Owned candidate files created during byte refinement, cleaned in finally. */
+	const candidates: string[] = []
 	try {
 		const sourceSchema = captureSourceSchema(db, signal)
-		probePath = join(shardsDir, ".probe.parquet")
+		// A monotonic counter for owned candidate file names, so bisect recursion
+		// never collides. Final sequential shard names are assigned only after a
+		// candidate passes all validation.
+		let candidateSeq = 0
+		// Recursively export a physical range, refining by bisection when the byte
+		// bound is exceeded. Accepts validated shards into `shards` with their final
+		// HH-NNNN name; throws on the single-row-oversize impossibility.
+		const exportRange = (hour: number, range: PartRange, finalSeq: () => number): void => {
+			const pred = slicePredicate(signal, rangeDate, hour, range)
+			const matching = parseCount(
+				db.query(`SELECT count() FROM ${signal.name} WHERE ${pred}`, "JSONEachRow"),
+			)
+			if (matching === 0) return // empty half (no matching rows in this range) — skip
+			const width = range.offsetHiExclusive - range.offsetLo
+			const candidate = join(shardsDir, `.candidate-${candidateSeq++}.parquet`)
+			candidates.push(candidate)
+			rmSync(candidate, { force: true }) // INTO OUTFILE refuses to overwrite
+			assertSafePath(candidate)
+			db.query(
+				`SELECT * FROM ${signal.name} WHERE ${pred} ` +
+					`INTO OUTFILE '${sqlLiteral(candidate)}' FORMAT Parquet ` +
+					`SETTINGS max_threads = ${settings.writerThreads}, ` +
+					`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
+				"Null",
+			)
+			const { uncompressed, onDiskBytes } = measureShardBytes(db, candidate)
+			if (uncompressed > settings.maxShardBytes) {
+				// Refine: remove the proven-owned candidate, bisect the physical range.
+				rmSync(candidate)
+				if (width <= 1 || matching === 1) {
+					// A single matching row whose size alone exceeds the bound: the one
+					// genuinely impossible case. Fail distinctly, not "recalibrate".
+					throw new Error(
+						`archive single row exceeds maxShardBytes uncompressed (${uncompressed} > ${settings.maxShardBytes}) ` +
+							`in ${signal.name} hour ${hour} part ${range.part} offset ${range.offsetLo}; ` +
+							`raise maxShardBytes or recalibrate to a wider row budget`,
+					)
+				}
+				const mid = range.offsetLo + Math.floor(width / 2)
+				exportRange(
+					hour,
+					{ part: range.part, offsetLo: range.offsetLo, offsetHiExclusive: mid },
+					finalSeq,
+				)
+				exportRange(
+					hour,
+					{ part: range.part, offsetLo: mid, offsetHiExclusive: range.offsetHiExclusive },
+					finalSeq,
+				)
+				return
+			}
+			// Candidate passes the byte bound: validate it, then assign its final
+			// name. validateShard reopens and checks schema/count/digest/nanos.
+			const validated = validateShard(db, candidate, signal, rangeDate, hour, sourceSchema, range)
+			const name = shardName(hour, finalSeq())
+			const finalPath = join(shardsDir, name)
+			assertSafePath(finalPath)
+			if (existsSync(finalPath))
+				throw new Error(`archive shard already exists; refusing to overwrite: ${finalPath}`)
+			// Promote the candidate to its final name (rename is atomic on same fs).
+			renameSync(candidate, finalPath)
+			candidates[candidates.length - 1] = finalPath
+			shards.push({
+				name,
+				path: finalPath,
+				rowCount: validated.rowCount,
+				minEventTimeUnixNano: validated.minEventTimeUnixNano,
+				maxEventTimeUnixNano: validated.maxEventTimeUnixNano,
+				sha256: sha256File(finalPath),
+				bytes: onDiskBytes,
+				columns: validated.columns,
+				complexDigest: validated.complexDigest,
+			})
+			settings.afterShardValidated?.(db, signal)
+		}
 		for (const hour of HOURS_IN_DAY) {
 			const hourRows = countHourRows(db, signal, rangeDate, hour)
 			if (hourRows === 0) continue
-			const bytesPerRow = estimateBytesPerRow(
-				db,
-				signal,
-				rangeDate,
-				hour,
-				hourRows,
-				probePath,
-				settings,
-			)
-			const plans = planHourShards(hour, hourRows, bytesPerRow, settings)
+			const parts = enumeratePartsForHour(db, signal, rangeDate, hour)
+			const plans = planHourShards(hour, parts, settings)
+			let seq = 0
+			const nextSeq = () => seq++
 			for (const plan of plans) {
-				const name = shardName(hour, plan.seq)
-				const path = join(shardsDir, name)
-				assertSafePath(path)
-				if (existsSync(path))
-					throw new Error(`archive shard already exists; refusing to overwrite: ${path}`)
-				const lit = sqlLiteral(path)
-				// The exact source slice for this shard: date+hour predicate plus the
-				// deterministic (_part, _part_offset) page. validation re-queries the
-				// source with a row-number subquery that reproduces the SAME page, so
-				// source re-query and Parquet reopen cover identical rows.
-				db.query(
-					`SELECT * FROM ${signal.name} WHERE ${hourPredicate(signal, rangeDate, hour)} ` +
-						`ORDER BY (_part, _part_offset) LIMIT ${plan.limit} OFFSET ${plan.offset} ` +
-						`INTO OUTFILE '${lit}' FORMAT Parquet ` +
-						`SETTINGS max_threads = ${settings.writerThreads}, ` +
-						`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
-					"Null",
-				)
-				const validated = validateShard(
-					db,
-					path,
-					signal,
-					rangeDate,
-					hour,
-					plan.expectedRows,
-					sourceSchema,
-					// Source re-query reproduces the SAME page: identical predicate +
-					// (_part, _part_offset) ORDER BY + LIMIT/OFFSET. See validateShard
-					// for why this binds by page position, not _part_offset value.
-					plan.offset,
-					plan.limit,
-				)
-				const bytes = validateShardBytes(db, path, settings.maxShardBytes)
-				shards.push({
-					name,
-					path,
-					rowCount: validated.rowCount,
-					minEventTime: validated.minEventTime,
-					maxEventTime: validated.maxEventTime,
-					sha256: sha256File(path),
-					bytes,
-					columns: validated.columns,
-					complexDigest: validated.complexDigest,
-				})
-				// Allow the adversarial probe to inject a layout change (e.g.
-				// OPTIMIZE TABLE ... FINAL) between shard exports. STOP MERGES must
-				// block it; the post-hour total check would catch any drift anyway.
-				settings.afterShardValidated?.(db, signal)
+				exportRange(plan.hour, plan.range, nextSeq)
 			}
-			// After all shards for this hour, verify the total row count is unchanged.
 			const liveTotal = countHourRows(db, signal, rangeDate, hour)
 			if (liveTotal !== hourRows) {
 				throw new Error(
@@ -679,12 +742,17 @@ export const exportSignalShards = (
 		}
 		return shards
 	} finally {
-		// Remove the byte-estimation probe shard if it was created.
-		if (probePath && existsSync(probePath)) {
-			try {
-				rmSync(probePath)
-			} catch {
-				// best-effort cleanup; the promote step never sees .probe.parquet
+		// Remove any candidate files that were not promoted (e.g. after a failure
+		// during refinement). Promoted shards were renamed and their entries updated
+		// to the final HH-NNNN.parquet path; unpromoted candidates keep the
+		// `.candidate-N.parquet` name and must not survive a failure.
+		for (const c of candidates) {
+			if (existsSync(c) && basename(c).startsWith(".candidate-")) {
+				try {
+					rmSync(c)
+				} catch {
+					// best-effort cleanup
+				}
 			}
 		}
 		// Always restart merges, even on failure, so the scratch store is clean.

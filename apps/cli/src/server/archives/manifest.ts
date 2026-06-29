@@ -21,7 +21,16 @@ import { isArchiveSignalName } from "./signals"
 // path escape, count mismatch, or checksum mismatch fail closed. Mirrors the
 // checkpoint module's `formatVersion` discipline.
 
-const MANIFEST_FORMAT_VERSION = 1
+// Manifest format version history:
+//   1 — round 4. Shard time evidence as timezone-less ISO strings parsed with
+//       Date.parse (host-timezone-dependent); commutative per-column-sum digest.
+//   2 — round 5. Shard time evidence as UTC epoch-nanosecond DECIMAL STRINGS
+//       (parsed with BigInt, host-timezone-independent); multiset digest with an
+//       explicit algorithm field. An unknown or older (1) format fails closed
+//       while preserving its files, so an incompatible state is surfaced, not
+//       silently re-interpreted. (Older archives written by v1 are not migrated
+//       in place; they must be re-exported if they are to be re-validated.)
+const MANIFEST_FORMAT_VERSION = 2
 const ACTIVE_POINTER_FORMAT_VERSION = 1
 
 export interface ArchiveShardRecord {
@@ -29,10 +38,10 @@ export interface ArchiveShardRecord {
 	readonly name: string
 	/** Row count READ BACK from the reopened Parquet file (not the source count). */
 	readonly rowCount: number
-	/** Minimum event time read back from the reopened Parquet (ISO string). */
-	readonly minEventTime: string
-	/** Maximum event time read back from the reopened Parquet (ISO string). */
-	readonly maxEventTime: string
+	/** Min event time, UTC epoch nanoseconds as a decimal string (host-tz-independent). */
+	readonly minEventTimeUnixNano: string
+	/** Max event time, UTC epoch nanoseconds as a decimal string (host-tz-independent). */
+	readonly maxEventTimeUnixNano: string
 	/** SHA-256 of the shard file bytes. */
 	readonly sha256: string
 	/** Shard file size in bytes (on-disk, compressed). */
@@ -40,16 +49,17 @@ export interface ArchiveShardRecord {
 	/** Column names read back from the reopened Parquet (schema round-trip proof). */
 	readonly columns: ReadonlyArray<string>
 	/**
-	 * Complex-value digest read back from the reopened Parquet:
-	 * `sum(cityHash64(*))` rendered as a string. The manifest persists this so a
-	 * generation whose complex values were corrupted/substituted (but which
-	 * preserved row count and time extrema) is still detectable.
+	 * Complex-value digest over the reopened shard (algorithm named by
+	 * complexDigestAlgorithm). Detects same-typed column swaps, cross-row value
+	 * reassociation, and dup/drop that preserve count and time extrema.
 	 */
 	readonly complexDigest: string
+	/** The digest algorithm that produced {@link complexDigest} (e.g. cityhash64-multiset-v1). */
+	readonly complexDigestAlgorithm: string
 }
 
 export interface ArchiveGenerationManifest {
-	readonly formatVersion: 1
+	readonly formatVersion: 2
 	readonly generationId: string
 	readonly signal: string
 	readonly rangeStart: string
@@ -95,10 +105,28 @@ const requiredCount = (record: Record<string, unknown>, key: string): number => 
 
 const SHA256_HEX = /^[0-9a-f]{64}$/
 
+/**
+ * A required ISO-8601 string for MANIFEST-LEVEL timestamps (createdAt,
+ * selectedAt) and the canonical `rangeEndExclusive` (always a `...Z` ISO from
+ * nextMidnightUtc). These are NOT shard event-time evidence — that uses epoch
+ * nanoseconds (see requiredNanoDecimal) to be host-timezone-independent.
+ */
 const requiredIso = (record: Record<string, unknown>, key: string): string => {
 	const value = requiredString(record, key)
 	if (!Number.isFinite(Date.parse(value))) throw new Error(`invalid archive manifest field: ${key}`)
 	return value
+}
+
+/** A non-negative decimal integer string (epoch nanoseconds), parsed as BigInt. */
+const NANO_DECIMAL = /^[0-9]+$/
+const requiredNanoDecimal = (record: Record<string, unknown>, key: string): bigint => {
+	const value = requiredString(record, key)
+	if (!NANO_DECIMAL.test(value)) {
+		throw new Error(
+			`invalid archive manifest field: ${key} (must be a non-negative decimal integer string)`,
+		)
+	}
+	return BigInt(value)
 }
 
 const parseShardRecord = (
@@ -121,30 +149,22 @@ const parseShardRecord = (
 	if (!SHA256_HEX.test(sha256))
 		throw new Error(`invalid archive shard sha256 (must be 64 hex chars): ${sha256}`)
 	const rowCount = requiredCount(value, "rowCount")
-	const minEventTime = requiredIso(value, "minEventTime")
-	const maxEventTime = requiredIso(value, "maxEventTime")
-	if (minEventTime > maxEventTime) {
-		throw new Error(`archive shard ${name}: minEventTime > maxEventTime`)
+	const minNano = requiredNanoDecimal(value, "minEventTimeUnixNano")
+	const maxNano = requiredNanoDecimal(value, "maxEventTimeUnixNano")
+	if (minNano > maxNano) {
+		throw new Error(`archive shard ${name}: minEventTimeUnixNano > maxEventTimeUnixNano`)
 	}
-	// Bind shard time evidence to the sealed range (blocker #6). The shard's
-	// min/max event times must fall within [rangeStart 00:00:00 UTC, next midnight
-	// UTC). A 2027 shard bound for a 2026-06-29 range is rejected here, not just
-	// by min<=max. Compare via Date epoch millis so any valid ISO renders
-	// consistently regardless of trailing zeros/timezone suffix.
-	const rangeStartMs = Date.parse(`${rangeStart}T00:00:00.000Z`)
-	const rangeEndMs = Date.parse(rangeEndExclusive)
-	if (!Number.isFinite(rangeStartMs) || !Number.isFinite(rangeEndMs)) {
-		throw new Error(`archive shard ${name}: invalid sealed range bounds`)
-	}
-	const minMs = Date.parse(minEventTime)
-	const maxMs = Date.parse(maxEventTime)
-	if (!Number.isFinite(minMs) || !Number.isFinite(maxMs)) {
-		throw new Error(`archive shard ${name}: invalid event time bounds`)
-	}
-	if (minMs < rangeStartMs || maxMs >= rangeEndMs) {
+	// Bind shard time evidence to the sealed range in EPOCH NANOSECONDS
+	// (host-timezone-independent). The range bounds are computed from the UTC
+	// rangeDate and its next-midnight ISO as nanos; a shard whose min/max falls
+	// outside [rangeStart 00:00:00 UTC, next midnight UTC) is rejected. A valid
+	// 23:30 UTC late-day shard is accepted under ANY host timezone.
+	const rangeStartNano = BigInt(Date.parse(`${rangeStart}T00:00:00.000Z`)) * 1_000_000n
+	const rangeEndNano = BigInt(Date.parse(rangeEndExclusive)) * 1_000_000n
+	if (minNano < rangeStartNano || maxNano >= rangeEndNano) {
 		throw new Error(
-			`archive shard ${name}: event time [${minEventTime}, ${maxEventTime}] outside sealed range ` +
-				`[${rangeStart}T00:00:00.000Z, ${rangeEndExclusive})`,
+			`archive shard ${name}: event time [${minNano}, ${maxNano}] ns outside sealed range ` +
+				`[${rangeStartNano}, ${rangeEndNano}) ns`,
 		)
 	}
 	const bytes = requiredCount(value, "bytes")
@@ -152,7 +172,18 @@ const parseShardRecord = (
 	if (!/^[0-9]+$/.test(complexDigest)) {
 		throw new Error(`invalid archive shard complexDigest (must be a numeric digest): ${complexDigest}`)
 	}
-	return { name, rowCount, minEventTime, maxEventTime, sha256, bytes, columns, complexDigest }
+	const complexDigestAlgorithm = requiredString(value, "complexDigestAlgorithm")
+	return {
+		name,
+		rowCount,
+		minEventTimeUnixNano: minNano.toString(),
+		maxEventTimeUnixNano: maxNano.toString(),
+		sha256,
+		bytes,
+		columns,
+		complexDigest,
+		complexDigestAlgorithm,
+	}
 }
 
 /**
@@ -167,8 +198,18 @@ export const parseArchiveGenerationManifest = (
 	expectedRange?: string,
 	expectedGenerationId?: string,
 ): ArchiveGenerationManifest => {
-	if (!isRecord(value) || value.formatVersion !== MANIFEST_FORMAT_VERSION) {
-		throw new Error("unsupported or malformed archive generation manifest")
+	if (!isRecord(value)) {
+		throw new Error("malformed archive generation manifest (not a record)")
+	}
+	// Fail closed on an unknown OR older format version, preserving the files for
+	// inspection. A v1 manifest (round 4: timezone-dependent time evidence,
+	// commutative digest) is incompatible with the round-5 reader and must not be
+	// silently re-interpreted; surface it distinctly so the operator re-exports.
+	if (value.formatVersion !== MANIFEST_FORMAT_VERSION) {
+		throw new Error(
+			`unsupported archive manifest formatVersion ${String(value.formatVersion)} (expected ${MANIFEST_FORMAT_VERSION}); ` +
+				`the manifest is preserved as-is. A v1 manifest is incompatible with this reader (round 5 changed time evidence and the digest); re-export the range to re-validate.`,
+		)
 	}
 	const signal = requiredString(value, "signal")
 	if (!isArchiveSignalName(signal)) throw new Error(`unknown archive signal: ${signal}`)

@@ -36,7 +36,7 @@ const manifest = (
 	shardSha = "a".repeat(64),
 	shardBytes = 4096,
 ): ArchiveGenerationManifest => ({
-	formatVersion: 1,
+	formatVersion: 2,
 	generationId,
 	signal,
 	rangeStart: rangeDate,
@@ -62,12 +62,13 @@ const manifest = (
 		{
 			name: "00-0000.parquet",
 			rowCount,
-			minEventTime: `${rangeDate}T00:00:00.000Z`,
-			maxEventTime: `${rangeDate}T00:30:00.000Z`,
+			minEventTimeUnixNano: `${BigInt(Date.parse(`${rangeDate}T00:00:00.000Z`)) * 1_000_000n}`,
+			maxEventTimeUnixNano: `${BigInt(Date.parse(`${rangeDate}T00:30:00.000Z`)) * 1_000_000n}`,
 			sha256: shardSha,
 			bytes: shardBytes,
 			columns: ["TimestampTime", "ServiceName"],
 			complexDigest: "123456789",
+			complexDigestAlgorithm: "cityhash64-multiset-v1",
 		},
 	],
 })
