@@ -634,6 +634,21 @@ export const withRestoredCheckpoint = async <A>(
 	options: {
 		readonly scratchRoot?: string
 		readonly cleanup?: "always" | "never"
+		/**
+		 * A caller-supplied deterministic subdirectory name beneath scratchRoot,
+		 * instead of the default random `maple-checkpoint-<uuid>`. Used by the
+		 * archive generation journal so an interrupted operation records the exact
+		 * scratch path it owns and reconciliation can remove only that path.
+		 * Must be a single path segment (no separators) and not already in use.
+		 */
+		readonly scratchSubdir?: string
+		/**
+		 * Invoked after the owned scratch directory is created (and synced) but
+		 * BEFORE the checkpoint is restored into it. Used by the archive journal
+		 * to advance its phase to "scratch-allocated" so a kill during restore is
+		 * reconcilable. No-op for non-archive callers.
+		 */
+		readonly beforeRestore?: (scratchDataDir: string) => void | Promise<void>
 	},
 	use: (restored: {
 		readonly checkpointId: string
@@ -656,11 +671,31 @@ export const withRestoredCheckpoint = async <A>(
 		throw new Error(`scratch root must not be a symlink: ${scratchRoot}`)
 	}
 	await mkdir(scratchRoot, { recursive: true })
-	const scratchParent = join(scratchRoot, `maple-checkpoint-${randomUUID()}`)
+	const scratchParentName = options.scratchSubdir ?? `maple-checkpoint-${randomUUID()}`
+	// A deterministic scratchSubdir (archive journal) must be a single path
+	// segment so it cannot escape the scratch root, and must not already exist so
+	// reuse after a crash is unambiguous (the caller reconciles the prior op
+	// before allocating a new one).
+	if (options.scratchSubdir !== undefined) {
+		if (
+			scratchParentName.length === 0 ||
+			scratchParentName.includes(sep) ||
+			scratchParentName.includes("/") ||
+			scratchParentName === "." ||
+			scratchParentName === ".."
+		) {
+			throw new Error(`invalid scratch subdirectory: ${scratchParentName}`)
+		}
+	}
+	const scratchParent = join(scratchRoot, scratchParentName)
 	await mkdir(scratchParent, { mode: 0o700 })
 	const scratchDataDir = join(scratchParent, "data")
 	let db: Chdb | undefined
 	try {
+		// The owned scratch dir now exists. Give the caller (archive journal) a
+		// seam to durably record that fact BEFORE the restore begins, so a kill
+		// mid-restore leaves a reconcilable "scratch-allocated" phase.
+		if (options.beforeRestore) await options.beforeRestore(scratchDataDir)
 		const restored = await restoreResolvedInto(resolvedCheckpoint, scratchDataDir)
 		db = restored.db
 		return await use({
@@ -984,9 +1019,11 @@ export const acquireCheckpointPin = async (
 	dataDir: string,
 	checkpointId: string,
 	purpose = "archive",
+	pinId: string = randomUUID(),
 ): Promise<string> => {
 	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
 	if (!PIN_PURPOSE.test(purpose)) throw new Error(`invalid checkpoint pin purpose: ${purpose}`)
+	const validatedPinId = validateId(pinId, "pin")
 	// A pin on a checkpoint that does not resolve cannot protect anything; force
 	// the caller to pin real, validated state.
 	await resolveCheckpoint(dataDir, validatedCheckpointId)
@@ -996,15 +1033,20 @@ export const acquireCheckpointPin = async (
 	await assertNoSymlink(checkpointRoot(dataDir), pinsRoot)
 	await ensurePrivateDirectory(pinDir)
 	await assertNoSymlink(pinsRoot, pinDir)
-	const pinId = randomUUID()
+	const path = pinFilePath(dataDir, validatedCheckpointId, validatedPinId)
+	// A deterministic caller-supplied pinId (archive journal) must target an
+	// unused path so post-crash ownership is unambiguous: the journal records
+	// this exact pinId before acquisition, and reconciliation releases exactly it.
+	if (existsSync(path)) {
+		throw new Error(`checkpoint pin already exists; refusing to overwrite: ${path}`)
+	}
 	const pin: CheckpointPin = {
 		formatVersion: 1,
-		pinId,
+		pinId: validatedPinId,
 		checkpointId: validatedCheckpointId,
 		purpose,
 		createdAt: new Date().toISOString(),
 	}
-	const path = pinFilePath(dataDir, validatedCheckpointId, pinId)
 	await durableJson(path, pin)
 	return path
 }
