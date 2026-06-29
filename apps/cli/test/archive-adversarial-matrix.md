@@ -148,6 +148,54 @@ unavailable.
 The bundle must contain the exact branch and complete ancestry, never rewritten
 alternate history.
 
+### 9. Crash recovery (Gate 3a) — authoritative SIGKILL oracle
+
+**Invariant:** a process kill at ANY point in the archive generation lifecycle
+leaves state that the next operation reconciles to its exact intended outcome —
+no orphaned pin, no orphaned scratch, no half-published generation, no duplicate
+catalog entry, no clobbered pointer, and the live store unchanged. The `finally`
+block of `createArchiveGeneration` runs on a thrown error but **NOT on a real
+SIGKILL**, so the journal — written before pin acquisition, with deterministic
+identities — is the authority, not the finally.
+
+**Authoritative oracle:** the native harness
+`native-archive-crash-recovery-probe.sh` injects a real SIGKILL at each boundary
+via a committed child worker paused at a fault seam, then reconciles WITHOUT a
+fresh export and verifies exact convergence + idempotence. Hook-throw results are
+secondary deterministic coverage; they **cannot** substitute for SIGKILL evidence
+because a thrown error runs the finally (releasing the pin / removing debris)
+while SIGKILL does not.
+
+| Kill-point (SIGKILL at…)                                          | Published? | Named probe harness                      | Oracle                                                                                                  | Required                                                    |
+| ----------------------------------------------------------------- | ---------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| intent durable, before pin acquisition                            | no         | `native-archive-crash-recovery-probe.sh` | reconcile quarantines nothing-owned; no pointer, no orphan pin, no debris                               | aborted cleanly; idempotent (green)                         |
+| pin durable, before journal advance to pin-acquired               | no         | "                                        | reconcile releases the journal-named pin; no pointer                                                    | pin released; no orphan pin; idempotent (green)             |
+| scratch allocated, during restore                                 | no         | "                                        | reconcile removes owned scratch; quarantines partial building if any                                    | no scratch debris; idempotent (green)                       |
+| restore complete                                                  | no         | "                                        | reconcile removes owned scratch; no generation published                                                | no pointer; idempotent (green)                              |
+| building created                                                  | no         | "                                        | reconcile quarantines incomplete building (retained, D-004); removes owned scratch                      | building quarantined not deleted; idempotent (green)        |
+| after first durable shard (all shards written, before validation) | no         | "                                        | reconcile aborts; no promoted generation                                                                | no pointer; no final generation; idempotent (green)         |
+| manifest prepared, before promotion rename                        | no         | "                                        | reconcile aborts; manifest never at final path                                                          | no pointer; idempotent (green)                              |
+| complete generation renamed, before pointer update                | yes        | "                                        | reconcile finishes the CAS pointer update + catalog; DuckDB reads the gen with exact count              | pointer selects gen; DuckDB count exact; idempotent (green) |
+| pointer durable, before catalog update                            | yes        | "                                        | reconcile rebuilds catalog from manifests (NO duplicate append); DuckDB exact                           | catalog = manifests, no dup; idempotent (green)             |
+| catalog durable, before pin release                               | yes        | "                                        | reconcile releases the owned pin; published gen queryable                                               | no orphan pin; idempotent (green)                           |
+| pin removed, before journal advance                               | yes        | "                                        | reconcile records pin-released; pin absence now authorized                                              | idempotent (green)                                          |
+| during scratch cleanup                                            | yes        | "                                        | reconcile removes owned scratch                                                                         | no scratch debris; idempotent (green)                       |
+| operation complete, before archival of its journal                | yes        | "                                        | reconcile archives the journal to `operations/completed/`                                               | no active op remains; idempotent (green)                    |
+| (cross-cutting) a fresh `archive create` after a crash            | yes        | `native-archive-crash-recovery-probe.sh` | the new operation reconciles the prior crashed op as its first locked step, then seals a new generation | crashed op recovered + new gen sealed (green)               |
+
+The journal is written BEFORE pin acquisition and records the deterministic
+pinId, scratchSubdir, and generationId up front — closing the orphan-pin window
+where a SIGKILL between pin creation and journal write would be unreconcilable.
+The pointer flip is CAS-guarded (must equal the recorded base or already select
+the intended generation) so post-crash concurrent activity is never clobbered.
+Pin absence is success ONLY at a phase where release was already authorized.
+
+**Working rule for this section:** _how could a crash at this kill-point preserve
+every metric I currently check, or appear recovered while leaving corrupt state?_
+The answer the harness enforces: reconcile-without-export → verify exact
+convergence → reconcile AGAIN (idempotence). The recovery code returning success
+is NOT the oracle; the on-disk state after a kill is.
+
 ## How to use this matrix
 
 1. For any archive-export change, identify which invariants the diff touches.
