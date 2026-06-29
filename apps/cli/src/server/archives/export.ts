@@ -71,7 +71,7 @@ const parseCount = (text: string): number => {
  * toDate() equality (robust against the chDB toDateTime64 aggregate miscount).
  */
 export const countRowsForDay = (db: Chdb, signal: ArchiveSignal, rangeDate: string): number => {
-	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}'`
+	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}'`
 	return parseCount(db.query(sql, "JSONEachRow"))
 }
 
@@ -79,7 +79,7 @@ export const countRowsForDay = (db: Chdb, signal: ArchiveSignal, rangeDate: stri
 const countRowsForHour = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number => {
 	const sql =
 		`SELECT count() FROM ${signal.name} ` +
-		`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' AND toHour(${signal.eventTimeColumn}) = ${hour}`
+		`WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}' AND toHour(${signal.eventTimeColumn}, 'UTC') = ${hour}`
 	return parseCount(db.query(sql, "JSONEachRow"))
 }
 
@@ -95,7 +95,7 @@ const estimateBytesPerRow = (db: Chdb, signal: ArchiveSignal, rangeDate: string,
 	const sql =
 		`SELECT avg(length(formatRow('RowBinary', *))) AS bytes_per_row ` +
 		`FROM (SELECT * FROM ${signal.name} ` +
-		`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' AND toHour(${signal.eventTimeColumn}) = ${hour} LIMIT 100)`
+		`WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}' AND toHour(${signal.eventTimeColumn}, 'UTC') = ${hour} LIMIT 100)`
 	const row = readRows(db.query(sql, "JSONEachRow"))[0]
 	const bpr = Number(row?.bytes_per_row ?? 0)
 	return bpr > 0 ? Math.ceil(bpr) : 1
@@ -152,9 +152,13 @@ const captureSourceSchema = (db: Chdb, signal: ArchiveSignal): ReadonlyArray<Sou
 
 /**
  * Compare a reopened Parquet shard's schema against the captured source schema.
- * Every source column name and type must be present in the Parquet. Type names
- * may differ in formatting (e.g. DateTime64(9, 'UTC') vs DateTime64(9)) so we
- * compare the base type before the first '('.
+ * Every source column name and base type must be present in the Parquet. The
+ * base type strips parameterized wrappers that ClickHouse uses but Parquet does
+ * not preserve:
+ *   LowCardinality(String) -> String   (Parquet has no LowCardinality concept)
+ *   Nullable(T)            -> T
+ *   DateTime64(9, 'UTC')   -> DateTime64
+ *   Map(K, V)              -> Map
  */
 const compareSchema = (
 	source: ReadonlyArray<SourceColumn>,
@@ -167,7 +171,23 @@ const compareSchema = (
 			`archive shard validation failed: ${shardPath} reopened with no columns (schema lost)`,
 		)
 	}
-	const baseType = (t: string): string => t.split("(")[0]!.trim()
+	const baseType = (t: string): string => {
+		let type = t.trim()
+		// Unwrap LowCardinality(...) and Nullable(...) to the inner type's base.
+		const lc = /^LowCardinality\((.+)\)$/i
+		const nl = /^Nullable\((.+)\)$/i
+		for (let i = 0; i < 4; i++) {
+			const m1 = lc.exec(type)
+			const m2 = nl.exec(type)
+			if (m1) type = m1[1]!
+			else if (m2) type = m2[1]!
+			else break
+		}
+		// Parquet widens DateTime (UInt32 seconds) to DateTime64 on export; treat
+		// them as the same base type.
+		const base = type.split("(")[0]!.trim()
+		return base === "DateTime" ? "DateTime64" : base
+	}
 	for (const src of source) {
 		const match = parquetCols.find((p) => p.name === src.name && baseType(p.type) === baseType(src.type))
 		if (!match) {
@@ -207,7 +227,7 @@ const validateShard = (
 	}
 	// Verify the UTC DATE of all rows matches the sealed day (not just the hour —
 	// the same hour on a different day must fail).
-	const dateSql = `SELECT min(toDate(${signal.eventTimeColumn})) AS dmn, max(toDate(${signal.eventTimeColumn})) AS dmx FROM file('${lit}', Parquet)`
+	const dateSql = `SELECT min(toDate(${signal.eventTimeColumn}, 'UTC')) AS dmn, max(toDate(${signal.eventTimeColumn}, 'UTC')) AS dmx FROM file('${lit}', Parquet)`
 	const dateRow = readRows(db.query(dateSql, "JSONEachRow"))[0]
 	const dmn = String(dateRow?.dmn ?? "")
 	const dmx = String(dateRow?.dmx ?? "")
@@ -218,7 +238,7 @@ const validateShard = (
 	}
 	// Verify all rows fall within the expected hour window.
 	const hourSql =
-		`SELECT min(toHour(${signal.eventTimeColumn})) AS hmn, max(toHour(${signal.eventTimeColumn})) AS hmx ` +
+		`SELECT min(toHour(${signal.eventTimeColumn}, 'UTC')) AS hmn, max(toHour(${signal.eventTimeColumn}, 'UTC')) AS hmx ` +
 		`FROM file('${lit}', Parquet)`
 	const hourRow = readRows(db.query(hourSql, "JSONEachRow"))[0]
 	const hmn = Number(hourRow?.hmn ?? -1)
@@ -316,8 +336,8 @@ export const exportSignalShards = (
 			const lit = sqlLiteral(path)
 			db.query(
 				`SELECT * FROM ${signal.name} ` +
-					`WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}' ` +
-					`AND toHour(${signal.eventTimeColumn}) = ${hour} ` +
+					`WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}' ` +
+					`AND toHour(${signal.eventTimeColumn}, 'UTC') = ${hour} ` +
 					`ORDER BY (_part, _part_offset) ` +
 					`LIMIT ${expectedRows} OFFSET ${offset} ` +
 					`INTO OUTFILE '${lit}' FORMAT Parquet ` +

@@ -269,7 +269,7 @@ const countSignalRowsForDay = (
 ): number => {
 	// Use toDate() equality, not a toDateTime64: chDB's bundled ClickHouse
 	// miscounts aggregate count() over a toDateTime64-vs-DateTime predicate.
-	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}) = '${rangeDate}'`
+	const sql = `SELECT count() FROM ${signal.name} WHERE toDate(${signal.eventTimeColumn}, 'UTC') = '${rangeDate}'`
 	return parseCount(db.query(sql, "JSONEachRow"))
 }
 

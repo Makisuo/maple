@@ -79,12 +79,25 @@ stop_server() {
 
 insert_marker() {
 	local suffix="$1"
-	query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body) SELECT 'local', now64(9), now(), 'trace-$suffix', 'span-$suffix', 1, 'INFO', 9, 'archive-smoke', 'marker-$suffix'" >/dev/null
-	query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', now64(9), 'trace-$suffix', 'span-$suffix', '', '', 'marker-$suffix', 'Server', 'archive-smoke', 'Ok', ''" >/dev/null
-	query "INSERT INTO metrics_sum (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value, AggregationTemporality, IsMonotonic) SELECT 'local', 'archive-smoke', 'sum-$suffix', now64(9), now64(9), 1, 2, true" >/dev/null
-	query "INSERT INTO metrics_gauge (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value) SELECT 'local', 'archive-smoke', 'gauge-$suffix', now64(9), now64(9), 1" >/dev/null
-	query "INSERT INTO metrics_histogram (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Count, Sum, BucketCounts, ExplicitBounds, AggregationTemporality) SELECT 'local', 'archive-smoke', 'histogram-$suffix', now64(9), now64(9), 1, 1, [1], [1.0], 2" >/dev/null
-	query "INSERT INTO metrics_exponential_histogram (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Count, Sum, Scale, ZeroCount, PositiveOffset, PositiveBucketCounts, NegativeOffset, NegativeBucketCounts, AggregationTemporality) SELECT 'local', 'archive-smoke', 'exponential-$suffix', now64(9), now64(9), 1, 1, 0, 0, 0, [1], 0, [], 2" >/dev/null
+	# Insert at a fixed UTC noon timestamp within RANGE_DATE so the archive's
+	# toDate()/toHour() predicates find the rows regardless of the host timezone.
+	# now()/now64(9) are local-time-based and land on a different UTC day when
+	# local and UTC dates diverge. Two markers at 12:00:0N (N=0,1) seconds.
+	local sec
+	case "$suffix" in
+		A) sec="00" ;;
+		B) sec="01" ;;
+		*) sec="00" ;;
+	esac
+	local ts="${RANGE_DATE}T12:00:${sec}"
+	# Use explicit 'UTC' timezone in toDateTime64/toDateTime so the markers land
+	# on the intended UTC day/hour regardless of the host session timezone.
+	query "INSERT INTO logs (OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags, SeverityText, SeverityNumber, ServiceName, Body) SELECT 'local', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime('${ts}', 'UTC'), 'trace-$suffix', 'span-$suffix', 1, 'INFO', 9, 'archive-smoke', 'marker-$suffix'" >/dev/null
+	query "INSERT INTO traces (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'local', toDateTime64('${ts}.000000000', 9, 'UTC'), 'trace-$suffix', 'span-$suffix', '', '', 'marker-$suffix', 'Server', 'archive-smoke', 'Ok', ''" >/dev/null
+	query "INSERT INTO metrics_sum (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value, AggregationTemporality, IsMonotonic) SELECT 'local', 'archive-smoke', 'sum-$suffix', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime64('${ts}.000000000', 9, 'UTC'), 1, 2, true" >/dev/null
+	query "INSERT INTO metrics_gauge (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Value) SELECT 'local', 'archive-smoke', 'gauge-$suffix', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime64('${ts}.000000000', 9, 'UTC'), 1" >/dev/null
+	query "INSERT INTO metrics_histogram (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Count, Sum, BucketCounts, ExplicitBounds, AggregationTemporality) SELECT 'local', 'archive-smoke', 'histogram-$suffix', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime64('${ts}.000000000', 9, 'UTC'), 1, 1, [1], [1.0], 2" >/dev/null
+	query "INSERT INTO metrics_exponential_histogram (OrgId, ServiceName, MetricName, StartTimeUnix, TimeUnix, Count, Sum, Scale, ZeroCount, PositiveOffset, PositiveBucketCounts, NegativeOffset, NegativeBucketCounts, AggregationTemporality) SELECT 'local', 'archive-smoke', 'exponential-$suffix', toDateTime64('${ts}.000000000', 9, 'UTC'), toDateTime64('${ts}.000000000', 9, 'UTC'), 1, 1, 0, 0, 0, [1], 0, [], 2" >/dev/null
 }
 
 checkpoint() {
