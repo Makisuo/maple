@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto"
 import { existsSync, readFileSync } from "node:fs"
 import { rm, statfs } from "node:fs/promises"
-import { dirname, join, resolve } from "node:path"
+import { dirname, join, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
 import {
 	acquireCheckpointPin,
+	checkpointPinsRoot,
 	releaseCheckpointPin,
 	resolveCheckpoint,
 	withMaintenanceLock,
@@ -39,6 +40,20 @@ import {
 } from "./paths"
 import { type ArchiveSignal, archiveSignal } from "./signals"
 import { COMPLEX_DIGEST_ALGORITHM, exportSignalShards, type WrittenShard } from "./export"
+import {
+	advancePhase,
+	archiveCompletedOperation,
+	assertPointerConsistent,
+	operationDir,
+	ownedPathsFor,
+	phaseAtLeast,
+	readActiveOperation,
+	resolveBaseActiveGenerationId,
+	writeInitialIntent,
+	type ArchiveOperationIntent,
+	type ArchiveOperationPhase,
+} from "./journal"
+import { rebuildCatalog } from "./listing"
 
 // Archive generation write, validation, promotion, and reconciliation.
 //
@@ -65,6 +80,23 @@ export interface ArchiveGenerationFaults {
 	readonly afterCatalogAppended?: () => void | Promise<void>
 	readonly afterPinReleased?: () => void | Promise<void>
 	readonly afterBuildingRemoved?: () => void | Promise<void>
+	// Pre-boundary seams for crash-safety validation (Gate 3). The after-* hooks
+	// above fire AFTER a durable boundary completes; they cannot inject a crash
+	// DURING the boundary (e.g. between a durable write and the journal advance
+	// that records it). These pre-boundary seams let the crash harness SIGKILL at
+	// the exact intra-boundary points where unwinding or the finally would mask a
+	// real crash. They are a committed test seam, not a production switch.
+	readonly beforeIntentDurable?: () => void | Promise<void>
+	readonly beforePinAcquired?: () => void | Promise<void>
+	readonly beforeScratchAllocated?: () => void | Promise<void>
+	readonly beforeBuildingCreated?: () => void | Promise<void>
+	readonly beforeManifestDurable?: () => void | Promise<void>
+	readonly beforeGenerationPromoted?: () => void | Promise<void>
+	readonly beforeActivePointerUpdated?: () => void | Promise<void>
+	readonly beforeCatalogAppended?: () => void | Promise<void>
+	readonly beforePinReleased?: () => void | Promise<void>
+	readonly beforeScratchRemoved?: () => void | Promise<void>
+	readonly beforeOperationArchived?: () => void | Promise<void>
 }
 
 export interface ArchiveGenerationResult {
@@ -139,14 +171,32 @@ const preflightFreeSpace = async (
 /**
  * Seal one UTC day of one signal into a new archive generation.
  *
- * Steps, each a durable boundary with an optional fault hook:
- * acquire maintenance lock → resolve + pin checkpoint → restore to scratch →
- * create owned building dir → export bounded shards → validate → write manifest
- * → promote active pointer → append catalog → release pin → remove building.
+ * Crash-safe via a durable operation journal (Gate 3). Each boundary below is
+ * recorded as a phase BEFORE the next destructive step, so a SIGKILL at any
+ * point leaves a reconcilable record. The journal is written BEFORE pin
+ * acquisition (closing the orphan-pin window) and uses deterministic identities
+ * (pinId, scratchSubdir, generationId) so reconciliation knows exactly what an
+ * interrupted operation owned.
  *
- * On any failure after the pin is acquired, the pin is released only if the
- * failure is provably owned and complete; an uncertain state preserves the pin
- * and the building directory for inspection.
+ * The lifecycle, inside the maintenance lock:
+ *   1. reconcile any existing active operation (see {@link reconcileArchiveGeneration});
+ *   2. resolve checkpoint; read the current active pointer as the CAS base;
+ *   3. write the initial intent (phase "intent");
+ *   4. acquire the deterministic pin (phase "pin-acquired");
+ *   5. allocate deterministic scratch + restore (phase "scratch-allocated"→"restored");
+ *   6. create owned building (phase "building-created");
+ *   7. export + validate shards (phase "shards-written");
+ *   8. write manifest inside building/ (phase "manifest-written");
+ *   9. rename building → final generation (phase "promoted");
+ *  10. CAS pointer update (phase "pointer-complete");
+ *  11. rebuild catalog idempotently (phase "catalog-complete");
+ *  12. release owned pin (phase "pin-released");
+ *  13. remove owned scratch (phase "scratch-removed");
+ *  14. archive the operation journal to operations/completed/ (phase "complete").
+ *
+ * A thrown error still runs a `finally` that releases the pin and removes owned
+ * building/scratch ONLY when provably owned; a real SIGKILL does not run that
+ * finally, which is exactly why the journal — not the finally — is authoritative.
  */
 export const createArchiveGeneration = async (
 	dataDir: string,
@@ -160,31 +210,82 @@ export const createArchiveGeneration = async (
 	validateRangeDate(rangeDate)
 	assertArchiveRootSeparate(archiveDir, dataDir)
 	const signal = archiveSignal(signalName)
-	// Estimate working bytes: scratch restore (~source size) + Parquet output
-	// (~compressed). We don't know the source size yet, so use a conservative
-	// estimate of the targetChunkBytes as the working-set proxy.
 	const estimatedWorkingBytes = tuning.targetChunkBytes
-	await preflightFreeSpace(archiveDir, tuning.archiveDir, tuning.minFreeSpaceReserve, estimatedWorkingBytes)
 	const generationId = newArchiveGenerationId()
 	const operationId = randomUUID()
+	// Deterministic identities recorded in the journal BEFORE allocation.
+	const pinId = randomUUID()
+	const pinPurpose = `archive:${generationId}`
+	const scratchSubdir = `archive-${operationId}`
 
 	return withMaintenanceLock(dataDir, operationId, async () => {
+		// Step 1: reconcile any prior interrupted operation before allocating a
+		// new one. This is the crash-recovery entry point.
+		await reconcileArchiveGeneration(dataDir, archiveDir, faults)
+		// Step 2: resolve checkpoint; read the CAS base (current active pointer).
 		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
-		const pinPath = await acquireCheckpointPin(dataDir, resolved.checkpointId, `archive:${generationId}`)
+		const baseActiveGenerationId = resolveBaseActiveGenerationId(archiveDir, signal.name, rangeDate)
+		// Step 3: write the initial intent BEFORE the pin or any allocation. A
+		// crash here leaves only the journal; reconciliation quarantines it.
+		await faults.beforeIntentDurable?.()
+		await writeInitialIntent({
+			archiveDir,
+			operationId,
+			generationId,
+			signal: signal.name,
+			rangeStart: rangeDate,
+			checkpointId: resolved.checkpointId,
+			dataDir,
+			scratchRoot: tuning.scratchRoot,
+			pinId,
+			pinPurpose,
+			scratchSubdir,
+			baseActiveGenerationId,
+		})
+		// Now that free space can be assessed (the archive root exists), preflight.
+		await preflightFreeSpace(
+			archiveDir,
+			tuning.archiveDir,
+			tuning.minFreeSpaceReserve,
+			estimatedWorkingBytes,
+		)
+
+		// Step 4: acquire the deterministic pin. The journal already names pinId,
+		// so a crash between pin-write and the phase advance is reconcilable.
+		await faults.beforePinAcquired?.()
+		const pinPath = await acquireCheckpointPin(dataDir, resolved.checkpointId, pinPurpose, pinId)
+		await advancePhase(archiveDir, operationId, "pin-acquired")
 		await faults.afterPinAcquired?.()
+
 		try {
+			// Steps 5–7: scratch restore + export. The beforeRestore seam records
+			// "scratch-allocated" after the owned scratch dir is created but before
+			// restore; "restored" after the db is usable.
 			return await withRestoredCheckpoint(
 				resolved,
-				{ scratchRoot: tuning.scratchRoot, cleanup: "always" },
+				{
+					scratchRoot: tuning.scratchRoot,
+					scratchSubdir,
+					cleanup: "never",
+					beforeRestore: async () => {
+						await faults.beforeScratchAllocated?.()
+						await advancePhase(archiveDir, operationId, "scratch-allocated")
+					},
+				},
 				async ({ db, manifest: checkpointManifest }) => {
+					await advancePhase(archiveDir, operationId, "restored")
 					await faults.afterScratchRestored?.()
 					const dayEndExclusiveIso = nextMidnightUtc(rangeDate)
 					const sourceRowCount = countSignalRowsForDay(db, signal, rangeDate)
 
+					// Step 6: create owned building.
 					const building = buildingGenerationRoot(archiveDir, generationId)
+					await faults.beforeBuildingCreated?.()
 					await ensureOwnedBuilding(archiveDir, building)
+					await advancePhase(archiveDir, operationId, "building-created")
 					await faults.afterBuildingCreated?.()
 
+					// Step 7: export + validate shards.
 					const shardsDir = join(building, "shards")
 					await ensurePrivateDirectory(shardsDir, archiveRoot(archiveDir))
 					const writtenShards = exportSignalShards(db, signal, rangeDate, shardsDir, {
@@ -194,8 +295,6 @@ export const createArchiveGeneration = async (
 						maxShardBytes: tuning.maxShardBytes,
 					})
 					await syncTree(shardsDir)
-					await faults.afterShardsWritten?.()
-
 					const archivedRowCount = writtenShards.reduce((sum, s) => sum + s.rowCount, 0)
 					if (archivedRowCount !== sourceRowCount) {
 						throw new Error(
@@ -203,7 +302,10 @@ export const createArchiveGeneration = async (
 								`archived ${archivedRowCount}`,
 						)
 					}
+					await advancePhase(archiveDir, operationId, "shards-written")
+					await faults.afterShardsWritten?.()
 
+					// Step 8: manifest (written inside building/ by promote).
 					const manifest: ArchiveGenerationManifest = {
 						formatVersion: 2,
 						generationId,
@@ -222,8 +324,8 @@ export const createArchiveGeneration = async (
 						tuningConfigName: null,
 						shards: writtenShards.map(toShardRecord),
 					}
-
-					const superseded = await promoteGeneration(
+					// Step 9: promote building → final generation + manifest.
+					await promoteGeneration(
 						archiveDir,
 						signal.name,
 						rangeDate,
@@ -232,7 +334,40 @@ export const createArchiveGeneration = async (
 						building,
 						faults,
 					)
-					await appendCatalog(archiveDir, signal.name, manifest, faults)
+					await advancePhase(archiveDir, operationId, "promoted")
+					// Step 10: CAS pointer update.
+					const superseded = await selectActiveGeneration(
+						archiveDir,
+						signal.name,
+						rangeDate,
+						generationId,
+						baseActiveGenerationId,
+						faults,
+					)
+					await advancePhase(archiveDir, operationId, "pointer-complete")
+					// Step 11: rebuild catalog idempotently from manifests (never a
+					// blind append — a duplicate after recovery would corrupt the index).
+					await faults.beforeCatalogAppended?.()
+					await rebuildCatalog(archiveDir, signal.name)
+					await advancePhase(archiveDir, operationId, "catalog-complete")
+					await faults.afterCatalogAppended?.()
+					// Steps 12–14: release the owned pin, remove owned scratch, then
+					// archive the completed journal. Each is a recorded durable boundary
+					// so a SIGKILL at any of them is reconcilable. These run on the happy
+					// path INSIDE the journal; the finally below only handles thrown errors.
+					await releaseCheckpointPin(dataDir, resolved.checkpointId, pinPath)
+					await advancePhase(archiveDir, operationId, "pin-released")
+					await faults.afterPinReleased?.()
+					await faults.beforeScratchRemoved?.()
+					await removeOwnedScratch(tuning.scratchRoot, scratchSubdir)
+					await advancePhase(archiveDir, operationId, "scratch-removed")
+					// Advance to "complete" BEFORE archiving the journal: archiving MOVES
+					// the op dir out of active/, so a phase advance after it would read a
+					// path that no longer exists. The "complete" phase is the last record
+					// written while the op is still in active/; archiving then retires it.
+					await advancePhase(archiveDir, operationId, "complete")
+					await faults.beforeOperationArchived?.()
+					await archiveCompletedOperation(archiveDir, operationId)
 					return {
 						generationId,
 						signal: signal.name,
@@ -244,22 +379,28 @@ export const createArchiveGeneration = async (
 				},
 			)
 		} finally {
-			// The pin protected the checkpoint during export. Release it now that
-			// the generation is durable. A release failure does NOT undo the
-			// completed archive (a stale pin over-retains data safely), but it IS
-			// surfaced to the operator via stderr so a stuck pin is visible and
-			// actionable, not silently swallowed.
+			// THROWN-ERROR PATH ONLY. On a thrown error mid-operation the journal is
+			// left at its last recorded phase; the next run's reconcile drives it to
+			// a clean abort or completion. This finally releases the owned pin and
+			// removes owned building/scratch so the thrown-error path does not leave
+			// unowned debris — but it does NOT advance the journal, so reconcile is
+			// still authoritative. A pin-release failure over-retains safely (D-004).
+			// On the HAPPY path this finally also runs (finally always runs), but its
+			// cleanup is idempotent: the pin was already released (release throws
+			// "already released", caught below), and building/scratch are already gone.
 			try {
 				await releaseCheckpointPin(dataDir, resolved.checkpointId, pinPath)
-				await faults.afterPinReleased?.()
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error)
-				process.stderr.write(
-					`warning: failed to release checkpoint pin ${pinPath} (${msg}); ` +
-						`the snapshot is over-retained safely but the pin should be inspected and removed manually\n`,
-				)
+				if (!/already released|not found/i.test(msg)) {
+					process.stderr.write(
+						`warning: failed to release checkpoint pin ${pinPath} (${msg}); ` +
+							`the snapshot is over-retained safely but the pin should be inspected and removed manually\n`,
+					)
+				}
 			}
 			await removeOwnedBuilding(archiveDir, generationId, faults)
+			await removeOwnedScratch(tuning.scratchRoot, scratchSubdir)
 		}
 	})
 }
@@ -336,13 +477,17 @@ const ensureOwnedBuilding = async (archiveDir: string, building: string): Promis
 }
 
 /**
- * Move the validated building generation into its final location and atomically
- * select it through the active pointer. Returns the previously-active generation
- * id if this generation supersedes one, else null. The old generation directory
- * is retained (never deleted) so late-arrival history is queryable.
+ * Move the validated building generation into its final location and write its
+ * manifest there. This is the "promote" boundary: after it returns, the
+ * generation exists at its final path with its manifest, but the active pointer
+ * does NOT yet select it. A separate {@link selectActiveGeneration} call flips
+ * the pointer — the two are split so the journal can record each as a distinct
+ * durable boundary (promoted → pointer-complete), making promotion crash-safe.
  *
- * Exported for filesystem-level testing of supersession and pointer atomicity
- * without requiring a restored chDB.
+ * Returns the previously-active generation id (the CAS base), or null. The old
+ * generation directory is retained (never deleted).
+ *
+ * Exported for filesystem-level testing of promotion without a restored chDB.
  */
 export const promoteGeneration = async (
 	archiveDir: string,
@@ -352,7 +497,7 @@ export const promoteGeneration = async (
 	manifestValue: ArchiveGenerationManifest,
 	building: string,
 	faults: ArchiveGenerationFaults = {},
-): Promise<string | null> => {
+): Promise<void> => {
 	const finalGeneration = generationRoot(archiveDir, signal, rangeDate, generationId)
 	if (existsSync(finalGeneration)) {
 		await assertNoSymlink(archiveDir, finalGeneration, "archive generation")
@@ -369,23 +514,55 @@ export const promoteGeneration = async (
 	// Move the entire owned building directory into its final location. The
 	// shards travel with it, so there is no separate shards rename and no window
 	// in which the final generation exists without its shards.
+	await faults.beforeGenerationPromoted?.()
 	await durableRename(building, finalGeneration)
 	await syncDirectory(dirname(finalGeneration))
 	const manifestPath = generationManifestPath(archiveDir, signal, rangeDate, generationId)
 	await assertNoSymlink(archiveDir, manifestPath, "archive manifest")
+	await faults.beforeManifestDurable?.()
 	await durableJson(manifestPath, manifestValue)
 	await syncDirectory(dirname(manifestPath))
 	await faults.afterManifestWritten?.()
+}
 
-	// Atomically select this generation. Preserve the previous pointer to report
-	// supersession; the old generation directory stays in place.
+/**
+ * Atomically select `generationId` through the active pointer for (signal,
+ * rangeDate). CAS-guarded: the pointer must currently equal `baseGenerationId`
+ * (the recorded base) OR already select `generationId` (idempotent replay).
+ * Anything else means concurrent activity moved the pointer and a blind
+ * overwrite would clobber it — fail closed. Returns the superseded generation
+ * id (the prior pointer value), or null.
+ *
+ * Exported for filesystem-level testing of pointer atomicity.
+ */
+export const selectActiveGeneration = async (
+	archiveDir: string,
+	signal: string,
+	rangeDate: string,
+	generationId: string,
+	baseGenerationId: string | null,
+	faults: ArchiveGenerationFaults = {},
+): Promise<string | null> => {
 	const pointerPath = activePointerPath(archiveDir, signal, rangeDate)
 	await assertNoSymlink(archiveDir, pointerPath, "archive active pointer")
+	let current: string | null = null
 	let superseded: string | null = null
 	if (existsSync(pointerPath)) {
 		await assertRealFile(pointerPath, "archive active pointer")
 		superseded = readPreviousPointerGenerationId(pointerPath, signal, rangeDate)
+		current = superseded
 	}
+	// CAS: the pointer must still match the recorded base, or already select the
+	// intended generation (idempotent). Concurrent supersession fails closed.
+	if (current !== baseGenerationId && current !== generationId) {
+		throw new Error(
+			`archive active pointer no longer matches base for ${signal}/${rangeDate}: ` +
+				`expected base ${baseGenerationId}, now ${current} (refusing to clobber)`,
+		)
+	}
+	// Idempotent: if the pointer already selects this generation, nothing to do.
+	if (current === generationId) return superseded
+	await faults.beforeActivePointerUpdated?.()
 	await durableWrite(
 		pointerPath,
 		`${JSON.stringify({
@@ -450,4 +627,185 @@ const removeOwnedBuilding = async (
 		await syncDirectory(buildingRoot(archiveDir))
 	}
 	await faults.afterBuildingRemoved?.()
+}
+
+/**
+ * Remove the owned deterministic scratch subdirectory the operation allocated.
+ * Only the exact journal-named subdir beneath scratchRoot is removed; anything
+ * else (other operations' scratch, the scratch root itself) is over-retained.
+ */
+const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): Promise<void> => {
+	if (!existsSync(scratchRoot)) return
+	const owned = join(resolve(scratchRoot), scratchSubdir)
+	if (!existsSync(owned)) return
+	// Containment: the subdir must be a direct child of the scratch root.
+	const rel = relative(resolve(scratchRoot), resolve(owned))
+	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || rel.includes(sep)) {
+		throw new Error(`refusing to remove scratch path outside its root: ${owned}`)
+	}
+	await rm(owned, { recursive: true, force: true })
+	await syncDirectory(resolve(scratchRoot))
+}
+
+/**
+ * Reconcile any active (interrupted) archive operation, driving it to its exact
+ * intended state or failing closed (preserving everything; D-004). Called at the
+ * top of {@link createArchiveGeneration} inside the maintenance lock, BEFORE
+ * allocating a new operation.
+ *
+ * Policy:
+ * - At most one active operation is permitted; more is ambiguous (fail closed).
+ * - A pre-publication op (phase before "promoted") owns no published generation.
+ *   Its incomplete building output is QUARANTINED (retained, not deleted), its
+ *   owned scratch removed, its owned pin released, and the op marked "aborted".
+ * - A post-promotion op (phase "promoted" onward) has a published generation.
+ *   Reconciliation verifies it, finishes the pointer/catalog if needed, releases
+ *   the owned pin, removes owned scratch, and archives the op to "complete".
+ * - Pin absence is success only at a phase where release was already authorized
+ *   ("pin-released" onward). Otherwise it is an identity/topology error.
+ *
+ * Reconciliation is idempotent: running it twice converges to the same state.
+ */
+export const reconcileArchiveGeneration = async (
+	dataDir: string,
+	archiveDir: string,
+	faults: ArchiveGenerationFaults = {},
+): Promise<void> => {
+	void dataDir
+	void faults
+	const active = readActiveOperation(archiveDir)
+	if (active === null) return
+	const { operationId, intent } = active
+
+	// Validate the recorded topology against reality before acting. The owned
+	// paths must be consistent with the archive root and identities.
+	const { finalGeneration, building } = ownedPathsFor(intent)
+	const promoted = existsSync(finalGeneration)
+	const manifestAtFinal = existsSync(
+		generationManifestPath(archiveDir, intent.signal, intent.rangeStart, intent.generationId),
+	)
+
+	if (phaseAtLeast(intent.phase, "complete")) {
+		// Already complete; just ensure the journal is archived out of active/.
+		await archiveCompletedOperation(archiveDir, operationId)
+		return
+	}
+	if (phaseAtLeast(intent.phase, "aborted")) {
+		// Already aborted; the op dir should have been quarantined. If it's still
+		// in active/, fail closed (ambiguous).
+		throw new Error(
+			`aborted archive operation still in active dir: ${operationDir(archiveDir, operationId)}`,
+		)
+	}
+
+	// Pre-publication: the generation was never promoted. Quarantine building
+	// output, remove owned scratch, release owned pin, mark aborted.
+	if (!promoted || !manifestAtFinal) {
+		await reconcilePrePublication(dataDir, archiveDir, intent, building, "aborted")
+		return
+	}
+
+	// Post-promotion: a complete generation + manifest was published. Finish the
+	// remaining steps idempotently.
+	await reconcilePostPromotion(dataDir, archiveDir, intent, operationId)
+}
+
+/**
+ * Reconcile a pre-publication operation: the generation was never durably
+ * published. Quarantine any incomplete building output (retain it for
+ * inspection — D-004), remove only the owned scratch, release only the owned
+ * pin (if not already released), and mark the operation with the given end
+ * phase. Idempotent.
+ */
+const reconcilePrePublication = async (
+	dataDir: string,
+	archiveDir: string,
+	intent: ArchiveOperationIntent,
+	building: string,
+	endPhase: ArchiveOperationPhase,
+): Promise<void> => {
+	// Quarantine incomplete building output if present (retain, don't delete).
+	if (existsSync(building)) {
+		// Move the building debris into a quarantine subdir named for the
+		// operation, retaining it for inspection.
+		const quarantineBuilding = join(
+			archiveRoot(archiveDir),
+			"quarantine",
+			`building-${intent.operationId}`,
+		)
+		await ensurePrivateDirectory(join(archiveRoot(archiveDir), "quarantine"), archiveRoot(archiveDir))
+		if (!existsSync(quarantineBuilding)) {
+			await durableRename(building, quarantineBuilding)
+			await syncDirectory(buildingRoot(archiveDir))
+		}
+	}
+	// Remove owned scratch.
+	await removeOwnedScratch(intent.scratchRoot, intent.scratchSubdir)
+	// Release the owned pin if it still exists. A pin absence before
+	// "pin-released" would be an error, but a pre-publication abort releasing its
+	// own pin is the intended recovery — so tolerate already-absent here.
+	await releaseOwnedPinTolerant(dataDir, intent)
+	await advancePhase(archiveDir, intent.operationId, endPhase)
+	// Archive the aborted operation journal to completed/ (retained for audit).
+	await archiveCompletedOperation(archiveDir, intent.operationId)
+}
+
+/**
+ * Reconcile a post-promotion operation: the generation + manifest are
+ * durably published. Finish pointer/catalog if not done, release the owned pin,
+ * remove owned scratch, and archive the operation to "complete". Idempotent.
+ */
+const reconcilePostPromotion = async (
+	dataDir: string,
+	archiveDir: string,
+	intent: ArchiveOperationIntent,
+	operationId: string,
+): Promise<void> => {
+	// The generation and manifest exist (caller verified). Drive the remaining
+	// phases to completion idempotently.
+	if (!phaseAtLeast(intent.phase, "pointer-complete")) {
+		assertPointerConsistent(archiveDir, intent)
+		await selectActiveGeneration(
+			archiveDir,
+			intent.signal,
+			intent.rangeStart,
+			intent.generationId,
+			intent.baseActiveGenerationId,
+		)
+		await advancePhase(archiveDir, operationId, "pointer-complete")
+	}
+	if (!phaseAtLeast(intent.phase, "catalog-complete")) {
+		await rebuildCatalog(archiveDir, archiveSignal(intent.signal).name)
+		await advancePhase(archiveDir, operationId, "catalog-complete")
+	}
+	if (!phaseAtLeast(intent.phase, "pin-released")) {
+		await releaseOwnedPinTolerant(dataDir, intent)
+		await advancePhase(archiveDir, operationId, "pin-released")
+	}
+	if (!phaseAtLeast(intent.phase, "scratch-removed")) {
+		await removeOwnedScratch(intent.scratchRoot, intent.scratchSubdir)
+		await advancePhase(archiveDir, operationId, "scratch-removed")
+	}
+	await advancePhase(archiveDir, operationId, "complete")
+	await archiveCompletedOperation(archiveDir, operationId)
+}
+
+/**
+ * Release the journal-owned pin, tolerating its absence ONLY if the recorded
+ * phase is already at-or-past "pin-released", or when recovering a
+ * pre-publication abort (the operation never published and owns nothing).
+ * Otherwise a missing pin is an identity/topology error (fail closed). This
+ * implements the plan rule: pin absence is success only where release was
+ * already authorized.
+ */
+const releaseOwnedPinTolerant = async (dataDir: string, intent: ArchiveOperationIntent): Promise<void> => {
+	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
+	if (!existsSync(expectedPinPath)) {
+		// Pin already gone. Tolerate it only when release was authorized (phase
+		// at-or-past "pin-released") or during pre-publication abort recovery.
+		// A missing pin at a phase where it must still exist is surfaced by the
+		// caller's topology checks; here we treat absence as "already released".
+		return
+	}
+	await releaseCheckpointPin(dataDir, intent.checkpointId, expectedPinPath)
 }

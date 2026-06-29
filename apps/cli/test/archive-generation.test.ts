@@ -12,7 +12,7 @@ import {
 	shardsRoot,
 } from "../src/server/archives/paths"
 import { parseArchiveActivePointer, type ArchiveGenerationManifest } from "../src/server/archives/manifest"
-import { appendCatalog, promoteGeneration } from "../src/server/archives/generation"
+import { appendCatalog, promoteGeneration, selectActiveGeneration } from "../src/server/archives/generation"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
 
@@ -87,13 +87,23 @@ describe("archive generation promotion", () => {
 		await withArchive(async (archiveDir) => {
 			const generationId = randomUUID()
 			const building = seedBuilding(archiveDir, generationId)
-			const superseded = await promoteGeneration(
+			// Promotion moves building → final + writes manifest (does not touch the
+			// pointer). A separate CAS pointer update selects the generation.
+			await promoteGeneration(
 				archiveDir,
 				"traces",
 				"2026-06-01",
 				generationId,
 				manifest(generationId),
 				building,
+				{},
+			)
+			const superseded = await selectActiveGeneration(
+				archiveDir,
+				"traces",
+				"2026-06-01",
+				generationId,
+				null,
 				{},
 			)
 			strictEqual(superseded, null)
@@ -115,10 +125,11 @@ describe("archive generation promotion", () => {
 			const old = randomUUID()
 			const oldBuilding = seedBuilding(archiveDir, old)
 			await promoteGeneration(archiveDir, "traces", "2026-06-01", old, manifest(old), oldBuilding, {})
+			await selectActiveGeneration(archiveDir, "traces", "2026-06-01", old, null, {})
 
 			const next = randomUUID()
 			const nextBuilding = seedBuilding(archiveDir, next)
-			const superseded = await promoteGeneration(
+			await promoteGeneration(
 				archiveDir,
 				"traces",
 				"2026-06-01",
@@ -127,6 +138,9 @@ describe("archive generation promotion", () => {
 				nextBuilding,
 				{},
 			)
+			// CAS base is the previously-active generation (old). selectActiveGeneration
+			// returns the superseded id.
+			const superseded = await selectActiveGeneration(archiveDir, "traces", "2026-06-01", next, old, {})
 			strictEqual(superseded, old)
 			// The active pointer now selects the new generation...
 			const pointer = parseArchiveActivePointer(
@@ -136,6 +150,35 @@ describe("archive generation promotion", () => {
 			// ...but the old generation directory is retained, never deleted.
 			ok(existsSync(generationManifestPath(archiveDir, "traces", "2026-06-01", old)))
 			ok(existsSync(generationManifestPath(archiveDir, "traces", "2026-06-01", next)))
+		})
+	})
+
+	it("selectActiveGeneration refuses to clobber a pointer that moved off the recorded base", async () => {
+		// CAS: if the pointer no longer matches the recorded base AND does not
+		// already select the intended generation, a blind flip would clobber
+		// concurrent activity — fail closed.
+		await withArchive(async (archiveDir) => {
+			const gen = randomUUID()
+			const building = seedBuilding(archiveDir, gen)
+			await promoteGeneration(archiveDir, "traces", "2026-06-01", gen, manifest(gen), building, {})
+			// Record a base that does NOT match reality (no pointer exists; base
+			// claims a different generation).
+			await rejects(
+				selectActiveGeneration(archiveDir, "traces", "2026-06-01", gen, randomUUID(), {}),
+				/no longer matches base/,
+			)
+		})
+	})
+
+	it("selectActiveGeneration is idempotent when the pointer already selects the generation", async () => {
+		await withArchive(async (archiveDir) => {
+			const gen = randomUUID()
+			const building = seedBuilding(archiveDir, gen)
+			await promoteGeneration(archiveDir, "traces", "2026-06-01", gen, manifest(gen), building, {})
+			await selectActiveGeneration(archiveDir, "traces", "2026-06-01", gen, null, {})
+			// Re-selecting with a base equal to the generation is a no-op (no throw).
+			const superseded = await selectActiveGeneration(archiveDir, "traces", "2026-06-01", gen, gen, {})
+			strictEqual(superseded, gen)
 		})
 	})
 
