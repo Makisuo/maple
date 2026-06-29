@@ -67,6 +67,7 @@ const manifest = (
 			sha256: shardSha,
 			bytes: shardBytes,
 			columns: ["TimestampTime", "ServiceName"],
+			complexDigest: "123456789",
 		},
 	],
 })

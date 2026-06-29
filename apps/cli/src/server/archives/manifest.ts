@@ -39,6 +39,13 @@ export interface ArchiveShardRecord {
 	readonly bytes: number
 	/** Column names read back from the reopened Parquet (schema round-trip proof). */
 	readonly columns: ReadonlyArray<string>
+	/**
+	 * Complex-value digest read back from the reopened Parquet:
+	 * `sum(cityHash64(*))` rendered as a string. The manifest persists this so a
+	 * generation whose complex values were corrupted/substituted (but which
+	 * preserved row count and time extrema) is still detectable.
+	 */
+	readonly complexDigest: string
 }
 
 export interface ArchiveGenerationManifest {
@@ -94,7 +101,11 @@ const requiredIso = (record: Record<string, unknown>, key: string): string => {
 	return value
 }
 
-const parseShardRecord = (value: unknown): ArchiveShardRecord => {
+const parseShardRecord = (
+	value: unknown,
+	rangeStart: string,
+	rangeEndExclusive: string,
+): ArchiveShardRecord => {
 	if (!isRecord(value)) throw new Error("invalid archive shard record")
 	const name = requiredString(value, "name")
 	if (!/^[0-9a-z._-]+\.parquet$/i.test(name)) throw new Error(`invalid archive shard name: ${name}`)
@@ -115,8 +126,33 @@ const parseShardRecord = (value: unknown): ArchiveShardRecord => {
 	if (minEventTime > maxEventTime) {
 		throw new Error(`archive shard ${name}: minEventTime > maxEventTime`)
 	}
+	// Bind shard time evidence to the sealed range (blocker #6). The shard's
+	// min/max event times must fall within [rangeStart 00:00:00 UTC, next midnight
+	// UTC). A 2027 shard bound for a 2026-06-29 range is rejected here, not just
+	// by min<=max. Compare via Date epoch millis so any valid ISO renders
+	// consistently regardless of trailing zeros/timezone suffix.
+	const rangeStartMs = Date.parse(`${rangeStart}T00:00:00.000Z`)
+	const rangeEndMs = Date.parse(rangeEndExclusive)
+	if (!Number.isFinite(rangeStartMs) || !Number.isFinite(rangeEndMs)) {
+		throw new Error(`archive shard ${name}: invalid sealed range bounds`)
+	}
+	const minMs = Date.parse(minEventTime)
+	const maxMs = Date.parse(maxEventTime)
+	if (!Number.isFinite(minMs) || !Number.isFinite(maxMs)) {
+		throw new Error(`archive shard ${name}: invalid event time bounds`)
+	}
+	if (minMs < rangeStartMs || maxMs >= rangeEndMs) {
+		throw new Error(
+			`archive shard ${name}: event time [${minEventTime}, ${maxEventTime}] outside sealed range ` +
+				`[${rangeStart}T00:00:00.000Z, ${rangeEndExclusive})`,
+		)
+	}
 	const bytes = requiredCount(value, "bytes")
-	return { name, rowCount, minEventTime, maxEventTime, sha256, bytes, columns }
+	const complexDigest = requiredString(value, "complexDigest")
+	if (!/^[0-9]+$/.test(complexDigest)) {
+		throw new Error(`invalid archive shard complexDigest (must be a numeric digest): ${complexDigest}`)
+	}
+	return { name, rowCount, minEventTime, maxEventTime, sha256, bytes, columns, complexDigest }
 }
 
 /**
@@ -149,12 +185,21 @@ export const parseArchiveGenerationManifest = (
 			`archive manifest generation mismatch: expected ${expectedGenerationId}, got ${generationId}`,
 		)
 	}
+	// Parse and validate rangeEndExclusive BEFORE the shards so each shard record
+	// can be bound to the sealed range (blocker #6).
+	const rangeEndExclusive = requiredIso(value, "rangeEndExclusive")
+	// rangeEndExclusive must be the next midnight after rangeStart (exclusive end).
+	const expectedEnd = nextMidnightUtc(rangeStart)
+	if (rangeEndExclusive !== expectedEnd) {
+		throw new Error(
+			`archive manifest rangeEndExclusive must be next-midnight ${expectedEnd}, got ${rangeEndExclusive}`,
+		)
+	}
 	const shardsRaw = value.shards
 	if (!Array.isArray(shardsRaw)) throw new Error("invalid archive manifest field: shards")
-	const shards = shardsRaw.map(parseShardRecord)
+	const shards = shardsRaw.map((s) => parseShardRecord(s, rangeStart, rangeEndExclusive))
 	// Cross-field validation (H-7): unique shard names, shard-row sum equals
-	// archivedRowCount, source count equals archived count, and next-midnight
-	// exclusive end.
+	// archivedRowCount, source count equals archived count.
 	const shardNames = new Set<string>()
 	let shardRowSum = 0
 	for (const shard of shards) {
@@ -174,14 +219,6 @@ export const parseArchiveGenerationManifest = (
 	if (sourceRowCount !== archivedRowCount) {
 		throw new Error(
 			`archive manifest sourceRowCount (${sourceRowCount}) != archivedRowCount (${archivedRowCount})`,
-		)
-	}
-	const rangeEndExclusive = requiredIso(value, "rangeEndExclusive")
-	// rangeEndExclusive must be the next midnight after rangeStart (exclusive end).
-	const expectedEnd = nextMidnightUtc(rangeStart)
-	if (rangeEndExclusive !== expectedEnd) {
-		throw new Error(
-			`archive manifest rangeEndExclusive must be next-midnight ${expectedEnd}, got ${rangeEndExclusive}`,
 		)
 	}
 	if (!isRecord(value.tuning)) throw new Error("invalid archive manifest field: tuning")

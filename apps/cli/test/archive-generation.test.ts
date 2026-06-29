@@ -67,6 +67,7 @@ const manifest = (
 			sha256: "a".repeat(64),
 			bytes: 4096,
 			columns: ["TimestampTime", "ServiceName"],
+			complexDigest: "123456789",
 		},
 	],
 })

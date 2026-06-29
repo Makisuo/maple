@@ -87,6 +87,7 @@ const toShardRecord = (shard: WrittenShard): ArchiveShardRecord => ({
 	sha256: shard.sha256,
 	bytes: shard.bytes,
 	columns: shard.columns,
+	complexDigest: shard.complexDigest,
 })
 
 /**
