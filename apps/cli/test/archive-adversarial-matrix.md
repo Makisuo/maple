@@ -39,10 +39,11 @@ same aggregate of values.
 | Reassociate values between two rows (move row A's map to row B and vice versa), preserving count and time extrema           | `archive-probe-digest-row-swap.ts`    | per-row canonical comparison                           | rejected (red → green)                       |
 | Duplicate one row and drop another of equal count, preserving count and time extrema                                        | `archive-probe-digest-dup-drop.ts`    | per-row multiset equality                              | rejected (red → green)                       |
 
-The digest construction must bind (a) column index/name + position, (b) NULL
-flag, (c) normalized value, and aggregate rows as an order-independent multiset
-that preserves duplicates. A commutative sum of independent per-column hashes
-fails all three transformations.
+The digest construction must bind (a) column index/name + position, (b) an
+EXPLICIT NULL flag (a sentinel alone is insufficient — a real Nullable(String)
+value can equal the sentinel), (c) normalized value, and aggregate rows as an
+order-independent multiset that preserves duplicates. A commutative sum of
+independent per-column hashes fails all three transformations.
 
 ### 2. Stable physical sharding
 
@@ -68,6 +69,7 @@ timestamp values round-trip exactly through Parquet.
 | --------------------------------------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------- |
 | NULL in any column collapses the digest to empty                | `archive-probe-null-digest.ts`                                            | digest string non-empty                             | digest non-empty (green)     |
 | NULL-bearing rows lose value sensitivity in NON-NULL columns    | `archive-probe-null-value-sensitivity.ts`                                 | two NULL-Min datasets, different non-null values    | digests differ (red → green) |
+| NULL collides with a real Nullable(String) sentinel value       | `archive-probe-null-flag-binding.ts`                                      | NULL vs '\x00NULL' string                           | digests differ (red → green) |
 | Bare `DateTime` / `DateTime64(N)` render diverge source↔Parquet | covered by `archive-probe-duckdb-oracle.ts` (epoch_us on raw TIMESTAMPTZ) | numeric epoch normalization in the digest           | match (green)                |
 | Schema substitution `Array(UInt64)`↔`Array(String)`             | `archive-probe-schema-substitution.ts`                                    | recursive type compare after measured normalization | rejected (green)             |
 | A non-null map/value changed with identical count/time          | `archive-probe-complex-alter.ts`                                          | export twice, compare digests                       | digests differ (green)       |

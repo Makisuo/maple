@@ -44,16 +44,16 @@ import { type ArchiveSignal } from "./signals"
 
 /**
  * The multiset digest algorithm version recorded in each manifest shard. Bumped
- * to v2 in round 5: v1 passed a bare nullable value into cityHash64, collapsing
- * the per-row hash to NULL whenever any column was NULL (value-insensitive for
- * all other columns). v2 never passes a bare value (NULL → sentinel) and
- * normalizes time columns to a numeric epoch. A v2 manifest must record this
- * exact algorithm; an unknown value fails closed.
+ * to v3 in the round-5 repair: v1 passed a bare nullable value into cityHash64
+ * (collapsed the per-row hash to NULL); v2 used a sentinel string but a real
+ * Nullable(String) value could equal the sentinel (verified collision); v3 binds
+ * an EXPLICIT isNull(c) flag as a separate hash argument, so NULL-ness is never
+ * conflated with a value. An unknown value fails closed.
  */
-export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-multiset-v2"
+export const COMPLEX_DIGEST_ALGORITHM = "cityhash64-multiset-v3"
 
-/** Digest algorithms this reader accepts in a v2 manifest shard record. */
-export const KNOWN_COMPLEX_DIGEST_ALGORITHMS: ReadonlySet<string> = new Set(["cityhash64-multiset-v2"])
+/** Digest algorithms this reader accepts in a manifest shard record. */
+export const KNOWN_COMPLEX_DIGEST_ALGORITHMS: ReadonlySet<string> = new Set(["cityhash64-multiset-v3"])
 
 export interface ExportSettings {
 	readonly writerThreads: number
@@ -268,14 +268,19 @@ export const normalizeType = (type: string): string => {
  * (a,b)` ≠ `cityHash64(b,a)`), so binding index+value to position means a
  * same-typed column exchange changes the row hash.
  *
- * NULL SAFETY (the round-5 round-1 fix): chDB's `cityHash64` returns NULL if ANY
+ * NULL SAFETY (the round-5 repair): chDB's `cityHash64` returns NULL if ANY
  * argument is NULL. Passing a bare nullable column therefore collapses the
  * ENTIRE per-row hash to NULL — a row with NULL `Min`/`Max` (histogram tables)
  * loses value sensitivity for ALL its other columns (verified: two datasets with
  * NULL Min/Max but different Count/Sum produced the identical digest). So a bare
- * value is NEVER passed: `if(isNull(c), '\x00NULL', toString(norm(c)))`. The
- * sentinel is a string no real value renders as, and a NULL↔value flip changes
- * both the sentinel and the value argument.
+ * value is NEVER passed: each column contributes `columnIndex, isNull(c),
+ * if(isNull(c), '', toString(norm(c)))`. The EXPLICIT `isNull(c)` flag is the
+ * binding for NULL-ness — a sentinel alone is insufficient because a real
+ * Nullable(String) value could equal the sentinel string (verified collision:
+ * NULL vs '\x00NULL' produced the same digest). The `if` value is then '' for
+ * NULLs (a constant, since the flag already distinguishes NULL) or the
+ * normalized value; `cityHash64` is order-sensitive, so flag+value+index bind
+ * position, NULL-ness, and value distinctly.
  *
  * TIME NORMALIZATION (round-4 finding): `toString(DateTime)` and `toString
  * (DateTime64(N))` render in the session timezone on the source but UTC on the
@@ -286,7 +291,7 @@ export const normalizeType = (type: string): string => {
  * Map, Array, nested) hash identically via toString (measured: source↔Parquet
  * match for traces/maps/arrays/Array(Map) and logs/bare-DateTime).
  *
- * Returns e.g. `0, if(isNull(OrgId), '\x00NULL', toString(OrgId)), 1, if(isNull(TimestampTime), '\x00NULL', toString(toUnixTimestamp(TimestampTime, 'UTC'))), ...`.
+ * Returns e.g. `0, isNull(OrgId), if(isNull(OrgId), '', toString(OrgId)), 1, isNull(TimestampTime), if(isNull(TimestampTime), '', toString(toUnixTimestamp(TimestampTime, 'UTC'))), ...`.
  */
 const perRowHashArgs = (sourceSchema: ReadonlyArray<SourceColumn>): string =>
 	sourceSchema
@@ -302,7 +307,10 @@ const perRowHashArgs = (sourceSchema: ReadonlyArray<SourceColumn>): string =>
 			//   Array(DateTime)   -> arrayMap(x -> toUnixTimestamp(x, 'UTC'), c)
 			//   Array(DateTime64) -> arrayMap(x -> toUnixTimestamp64Nano(toDateTime64(x, 9)), c)
 			const norm = normalizeValueForHash(c.name, t)
-			return `${i}, if(isNull(${c.name}), '\\x00NULL', toString(${norm}))`
+			// Explicit isNull(c) flag is the binding for NULL-ness (a sentinel alone
+			// could collide with a real Nullable(String) value — verified). The
+			// value is '' when NULL (constant; the flag already distinguishes it).
+			return `${i}, isNull(${c.name}), if(isNull(${c.name}), '', toString(${norm}))`
 		})
 		.join(", ")
 
@@ -310,9 +318,9 @@ const perRowHashArgs = (sourceSchema: ReadonlyArray<SourceColumn>): string =>
 const normalizeValueForHash = (name: string, type: string): string => {
 	const t = type.trim()
 	if (t === "DateTime") return `toUnixTimestamp(${name}, 'UTC')`
-	if (/^DateTime64\(/.test(t)) return `toUnixTimestamp64Nano(toDateTime64(${name}, 9))`
+	if (t.startsWith("DateTime64(")) return `toUnixTimestamp64Nano(toDateTime64(${name}, 9))`
 	if (t === "Array(DateTime)") return `arrayMap(x -> toUnixTimestamp(x, 'UTC'), ${name})`
-	if (/^Array\(DateTime64\(/.test(t))
+	if (t.startsWith("Array(DateTime64("))
 		return `arrayMap(x -> toUnixTimestamp64Nano(toDateTime64(x, 9)), ${name})`
 	return name
 }

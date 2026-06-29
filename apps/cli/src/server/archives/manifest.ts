@@ -55,7 +55,7 @@ export interface ArchiveShardRecord {
 	 * reassociation, and dup/drop that preserve count and time extrema.
 	 */
 	readonly complexDigest: string
-	/** The digest algorithm that produced {@link complexDigest} (e.g. cityhash64-multiset-v2). */
+	/** The digest algorithm that produced {@link complexDigest} (e.g. cityhash64-multiset-v3). */
 	readonly complexDigestAlgorithm: string
 }
 
