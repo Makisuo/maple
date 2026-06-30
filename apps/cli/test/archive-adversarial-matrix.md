@@ -231,6 +231,51 @@ The answer the harness enforces: reconcile-without-export → verify exact
 convergence → reconcile AGAIN (idempotence). The recovery code returning success
 is NOT the oracle; the on-disk state after a kill is.
 
+### 10. Garbage collection (Gate 3b) — conservative journaled deletion
+
+**Invariant:** GC deletes only superseded generations it can PROVE are not the
+active pointer target — never the active generation, never quarantined/malformed/
+symlinked/ambiguous state (fail toward over-retention). It is the only archive
+operation that deletes published generations, so it journals a frozen deletion
+set (computed under the maintenance lock) and collects via a **tombstone rename**,
+never an in-place recursive delete, so a SIGKILL mid-collection leaves only whole,
+owned state that reconcile can prove ownership of. A crashed GC shares the single
+`operations/active/` slot with create and is reconciled by the same entry point
+(dispatched on `kind: "gc"`); a stranded GC must reconcile or it blocks all future
+archive work.
+
+**Policy:** `--keep N` default **1** (retain the newest superseded generation per
+signal/range; `--keep 0` reclaims all). A signal whose catalog cannot be
+authoritatively reconstructed is excluded ENTIRELY before any mutation (never
+delete a range and then discover reconstruction is impossible).
+
+| Kill-point (SIGKILL at…)                               | Probe                            | Oracle + required recovery                                                                                    |
+| ------------------------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| after GC intent durability, before any collection      | `native-archive-gc-probe.sh`     | reconcile completes the frozen set; only the active generation remains; idempotent                            |
+| after first source→tombstone rename, before removal    | "                                | reconcile resumes: source absent + tombstone present → remove the tombstone; both superseded deleted          |
+| during tombstone removal (source gone, tombstone held) | "                                | reconcile finishes tombstone removal; no tombstone retains a generation dir                                   |
+| after all removals, before catalog rebuild             | "                                | reconcile rebuilds affected catalogs from manifests; `assertCatalogExact` passes                              |
+| after catalog rebuild, before journal completion       | "                                | reconcile marks `gc-complete` + archives the journal; catalog exact; create-after succeeds                    |
+| `gc --dry-run`                                         | "                                | reports the exact delete/retain sets; NO mutation (no journal, no deletion, no catalog change)                |
+| keep-N retention ordering                              | `archive-gc.test.ts`             | newest N superseded retained per range; older ones targeted; active never selected                            |
+| pointer re-selection (CAS)                             | `archive-gc.test.ts` + reconcile | if the pointer returns to a target, collection stops and preserves it; never deletes a re-selected generation |
+| source replaced/both-present topology                  | `archive-gc.test.ts`             | source+tombstone both present, or identity differs → fail closed (preserve everything)                        |
+| malformed manifest / tampered shard / symlinked gen    | `archive-gc.test.ts`             | range/signal excluded before any mutation; over-retained; reported                                            |
+| legacy v2 create intent (pre-kind)                     | `archive-journal.test.ts`        | `migrateV2CreateIntent` lifts to v3 under the lock; a stranded 3a intent reconciles; corrupt v2 fails closed  |
+
+For every boundary the harness verifies: only the frozen targets are removed;
+the active generation stays intact and DuckDB-queryable; the pointer is
+unchanged; the catalog exactly matches authoritative manifests; no tombstone
+retains a generation; the completed GC journal is retained; a second reconcile is
+a no-op; and a subsequent `archive create` succeeds (a crashed GC never blocks
+future work). Reconciliation NEVER expands the frozen set — a resumed GC deletes
+exactly what the original decided.
+
+**Working rule for this section:** _GC is the only path that deletes published
+evidence, so it must prove it owns and may delete each generation twice — once at
+plan time (under the lock) and once at collection time (the CAS re-check)._
+"Recovery succeeded" is never the oracle; the on-disk state after a kill is.
+
 ## How to use this matrix
 
 1. For any archive-export change, identify which invariants the diff touches.

@@ -19,6 +19,8 @@ import {
 	archiveCompletedOperation,
 	activeOperationsRoot,
 	listActiveOperationIds,
+	migrateActiveIntentIfLegacy,
+	migrateV2CreateIntent,
 	operationDir,
 	parseArchiveOperationIntent,
 	readActiveOperation,
@@ -50,6 +52,7 @@ const baseIntent = (overrides: Partial<{ operationId: string; generationId: stri
 	const operationId = overrides.operationId ?? randomUUID()
 	const generationId = overrides.generationId ?? randomUUID()
 	return {
+		kind: "create" as const,
 		archiveDir: "", // set by withArchive caller
 		operationId,
 		generationId,
@@ -166,6 +169,7 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 	it("rejects a malformed/missing identity", async () => {
 		const raw: Record<string, unknown> = {
 			formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+			kind: "create",
 			phase: "intent",
 			// missing operationId, generationId, etc.
 		}
@@ -176,6 +180,7 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 		const intent = baseIntent()
 		const raw: ArchiveOperationIntent = {
 			formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+			kind: "create",
 			operationId: intent.operationId,
 			generationId: intent.generationId,
 			signal: intent.signal,
@@ -440,6 +445,112 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 				/pin is missing before release was authorized/,
 			)
 			ok(readActiveOperation(archiveDir) !== null)
+		})
+	})
+})
+
+describe("archive operation journal v2 → v3 migration (Gate 3b)", () => {
+	it("migrateV2CreateIntent lifts a clean v2 record to v3 and round-trips through the parser", () => {
+		const operationId = randomUUID()
+		const generationId = randomUUID()
+		// A v2 record (no `kind`, formatVersion 2) as a Gate 3a binary would write.
+		const v2: Record<string, unknown> = {
+			formatVersion: 2,
+			operationId,
+			generationId,
+			signal: "traces",
+			rangeStart: "2026-06-01",
+			checkpointId: randomUUID(),
+			archiveDir: "/archive",
+			dataDir: "/data",
+			scratchRoot: "/scratch",
+			pinId: randomUUID(),
+			pinPurpose: `archive:${generationId}`,
+			scratchSubdir: `archive-${operationId}`,
+			manifestSha256: null,
+			baseActiveGenerationId: null,
+			phase: "intent",
+			createdAt: "2026-06-01T00:00:00.000Z",
+			updatedAt: "2026-06-01T00:00:00.000Z",
+		}
+		const lifted = migrateV2CreateIntent("/archive", v2)
+		strictEqual(lifted.formatVersion, 3)
+		strictEqual(lifted.kind, "create")
+		// The lifted record parses cleanly as v3.
+		const parsed = parseArchiveOperationIntent("/archive", lifted)
+		strictEqual(parsed.kind, "create")
+		strictEqual(parsed.operationId, operationId)
+	})
+
+	it("migrateV2CreateIntent rejects a corrupt v2 record rather than silently lifting it", () => {
+		const corrupt: Record<string, unknown> = {
+			formatVersion: 2,
+			// missing every required field
+		}
+		rejects(
+			async () => migrateV2CreateIntent("/archive", corrupt),
+			/missing or not a string|operationId|phase|kind|invalid/,
+		)
+	})
+
+	it("migrateV2CreateIntent refuses a non-v2 record", () => {
+		rejects(
+			async () => migrateV2CreateIntent("/archive", { formatVersion: 1 }),
+			/v2 migration requires formatVersion 2/,
+		)
+		rejects(
+			async () => migrateV2CreateIntent("/archive", { formatVersion: 3, kind: "create" }),
+			/v2 migration requires formatVersion 2/,
+		)
+	})
+
+	it("migrateActiveIntentIfLegacy lifts a stranded v2 intent on disk under the lock", async () => {
+		await withArchive(async (archiveDir) => {
+			const op = randomUUID()
+			const generationId = randomUUID()
+			// Write a v2 intent directly to disk (as a Gate 3a binary would leave).
+			const dir = operationDir(archiveDir, op)
+			mkdirSync(dir, { recursive: true })
+			const v2 = {
+				formatVersion: 2,
+				operationId: op,
+				generationId,
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				checkpointId: randomUUID(),
+				archiveDir,
+				dataDir: join(archiveDir, "..", "data"),
+				scratchRoot: join(archiveDir, "..", "scratch"),
+				pinId: randomUUID(),
+				pinPurpose: `archive:${generationId}`,
+				scratchSubdir: `archive-${op}`,
+				manifestSha256: null,
+				baseActiveGenerationId: null,
+				phase: "intent",
+				createdAt: "2026-06-01T00:00:00.000Z",
+				updatedAt: "2026-06-01T00:00:00.000Z",
+			}
+			writeFileSync(join(dir, "intent.json"), JSON.stringify(v2))
+			// A direct v3 parse REJECTS the v2 record (fail-closed, no silent reinterpret).
+			rejects(async () => parseArchiveOperationIntent(archiveDir, v2), /format version/)
+			// Migration lifts it to v3 on disk.
+			const migrated = await migrateActiveIntentIfLegacy(archiveDir)
+			strictEqual(migrated, true, "v2 intent was migrated")
+			// Now the on-disk record parses cleanly as v3.
+			const active = readActiveOperation(archiveDir)
+			ok(active !== null)
+			strictEqual(active!.intent.kind, "create")
+			strictEqual(active!.intent.formatVersion, 3)
+			// A second migration is a no-op (already v3).
+			const migrated2 = await migrateActiveIntentIfLegacy(archiveDir)
+			strictEqual(migrated2, false, "already-v3 intent is not re-migrated")
+		})
+	})
+
+	it("migrateActiveIntentIfLegacy is a no-op when there is no active operation", async () => {
+		await withArchive(async (archiveDir) => {
+			const migrated = await migrateActiveIntentIfLegacy(archiveDir)
+			strictEqual(migrated, false)
 		})
 	})
 })
