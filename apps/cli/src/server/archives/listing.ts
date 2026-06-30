@@ -225,22 +225,19 @@ export interface CatalogEntry {
 	readonly createdAt: string
 }
 
+const serializeCatalogEntries = (entries: ReadonlyArray<CatalogEntry>): string =>
+	`${entries.map((entry) => JSON.stringify({ ...entry, formatVersion: 1 as const })).join("\n")}\n`
+
 /**
- * Rebuild `catalog.jsonl` for a signal from the authoritative generation
- * manifests. Every promoted generation (active or superseded) appears once,
- * because the catalog indexes all retained generations, not just the active one.
- *
- * Fail-closed (H-7): the rebuild PREFLIGHTS every manifest before writing. If
- * any generation manifest is missing, malformed, or on a symlinked path, the
- * existing catalog is PRESERVED untouched and the call throws. A partial rebuild
- * that silently drops corrupt generations would make the catalog lie about what
- * is archived, which is worse than a visible error. The operator inspects the
- * named generation and recovers.
+ * Read every authoritative manifest for a signal and derive the exact canonical
+ * catalog entries without mutating the catalog. This is shared by rebuild and
+ * crash reconciliation so a journal phase can never substitute for observed
+ * catalog state.
  */
-export const rebuildCatalog = async (
+export const authoritativeCatalogEntries = (
 	archiveDir: string,
 	signal: ArchiveSignalName,
-): Promise<ReadonlyArray<CatalogEntry>> => {
+): ReadonlyArray<CatalogEntry> => {
 	const sRoot = signalRoot(archiveDir, signal)
 	if (!existsSync(sRoot)) return []
 	let ranges: string[]
@@ -249,8 +246,6 @@ export const rebuildCatalog = async (
 	} catch (error) {
 		throw new Error(`archive catalog rebuild: signal root unreadable: ${messageOf(error)}`)
 	}
-	// Phase 1 — preflight: read and validate EVERY manifest before touching the
-	// catalog. Collect entries; on any error, throw without writing.
 	const entries: CatalogEntry[] = []
 	for (const rangeDate of ranges.sort()) {
 		const gensRoot = generationsRoot(archiveDir, signal, rangeDate)
@@ -271,8 +266,6 @@ export const rebuildCatalog = async (
 						`remove the orphan generation directory or restore the manifest before rebuilding`,
 				)
 			}
-			// readArchiveGenerationManifest asserts no-symlink + real-file + strict
-			// parse + location binding; it throws on any defect.
 			const manifest = readArchiveGenerationManifest(archiveDir, signal, rangeDate, generationId)
 			entries.push({
 				generationId: manifest.generationId,
@@ -285,13 +278,50 @@ export const rebuildCatalog = async (
 			})
 		}
 	}
+	return entries
+}
+
+/**
+ * Assert that the on-disk catalog is byte-for-byte the canonical index derived
+ * from authoritative manifests. Missing, duplicated, reordered, truncated, or
+ * tampered entries all fail closed.
+ */
+export const assertCatalogExact = (archiveDir: string, signal: ArchiveSignalName): void => {
+	const path = catalogPath(archiveDir, signal)
+	assertNoSymlinkSync(archiveDir, path, "archive catalog")
+	assertRealFileSync(path, "archive catalog")
+	const expected = serializeCatalogEntries(authoritativeCatalogEntries(archiveDir, signal))
+	const actual = readFileSync(path, "utf8")
+	if (actual !== expected) {
+		throw new Error(`archive catalog does not exactly match authoritative manifests for ${signal}`)
+	}
+}
+
+/**
+ * Rebuild `catalog.jsonl` for a signal from the authoritative generation
+ * manifests. Every promoted generation (active or superseded) appears once,
+ * because the catalog indexes all retained generations, not just the active one.
+ *
+ * Fail-closed (H-7): the rebuild PREFLIGHTS every manifest before writing. If
+ * any generation manifest is missing, malformed, or on a symlinked path, the
+ * existing catalog is PRESERVED untouched and the call throws. A partial rebuild
+ * that silently drops corrupt generations would make the catalog lie about what
+ * is archived, which is worse than a visible error. The operator inspects the
+ * named generation and recovers.
+ */
+export const rebuildCatalog = async (
+	archiveDir: string,
+	signal: ArchiveSignalName,
+): Promise<ReadonlyArray<CatalogEntry>> => {
+	if (!existsSync(signalRoot(archiveDir, signal))) return []
+	// Phase 1 — preflight every authoritative manifest before touching catalog.
+	const entries = authoritativeCatalogEntries(archiveDir, signal)
 	// Phase 2 — write: only reached if every manifest preflighted clean. Use the
 	// durable atomic-write primitive (temp + fsync + rename + dir sync) so an
 	// ENOSPC, short write, or interruption cannot destroy the prior catalog.
 	const path = catalogPath(archiveDir, signal)
 	assertNoSymlinkSync(archiveDir, path, "archive catalog")
-	const lines = entries.map((entry) => JSON.stringify({ ...entry, formatVersion: 1 as const })).join("\n")
 	const { durableWrite } = await import("../durable-files")
-	await durableWrite(path, `${lines}\n`)
+	await durableWrite(path, serializeCatalogEntries(entries))
 	return entries
 }

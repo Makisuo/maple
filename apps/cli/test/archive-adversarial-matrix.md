@@ -198,6 +198,24 @@ The pointer flip is CAS-guarded (must equal the recorded base or already select
 the intended generation) so post-crash concurrent activity is never clobbered.
 Pin absence is success ONLY at a phase where release was already authorized.
 
+### 9a. Reconciliation labels are claims, not evidence
+
+| Hostile topology                                                            | Required oracle                                                                 |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| free-space preflight fails                                                   | no new active intent exists                                                      |
+| configured scratch root has a symlinked ancestor                             | fail closed; outside sentinel unchanged; active journal retained                 |
+| partial restored store contains an internal table symlink                    | unlink owned tree without following link; outside target survives; evidence kept |
+| pointer-complete/catalog-complete label but pointer or catalog is missing    | repair from recorded CAS topology and authoritative manifests                    |
+| pointer selects neither recorded base nor intended generation                | fail closed without clobbering pointer; active journal retained                  |
+| catalog-complete label but catalog is tampered, duplicated, or truncated     | rebuild exact canonical catalog from all authoritative manifests                 |
+| complete label with manifest/shard/pointer/catalog/pin/scratch/building drift | fail closed without repair or journal retirement                                 |
+
+The `complete` phase is uniquely non-repairing: before its journal can move out
+of `operations/active/`, reconciliation must prove the final manifest hash and
+identity, every shard hash/size, intended pointer, exact canonical catalog,
+owned-pin absence, owned-scratch absence, and building absence. Any mismatch
+retains the active journal as the only authority over uncertain state.
+
 **Restore limitation, stated precisely:** chDB exposes RESTORE as one synchronous
 FFI call and provides no callback from inside that call. The authoritative
 matrix therefore covers the durable boundary immediately before RESTORE and the

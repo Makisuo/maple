@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { lstat, rm, statfs } from "node:fs/promises"
-import { dirname, join, relative, resolve, sep } from "node:path"
+import { dirname, join, parse, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
 import {
@@ -54,7 +54,7 @@ import {
 	type ArchiveOperationIntent,
 	type ArchiveOperationPhase,
 } from "./journal"
-import { rebuildCatalog } from "./listing"
+import { assertCatalogExact, rebuildCatalog } from "./listing"
 
 // Archive generation write, validation, promotion, and reconciliation.
 //
@@ -234,6 +234,15 @@ export const createArchiveGeneration = async (
 		// Step 1: reconcile any prior interrupted operation before allocating a
 		// new one. This is the crash-recovery entry point.
 		await reconcileArchiveGeneration(dataDir, archiveDir, tuning.scratchRoot, faults)
+		// Reject impossible capacity before checkpoint resolution, pointer/base
+		// reads, or creation of a new durable intent. A failed preflight must not
+		// leave an operation for reconciliation to clean up.
+		await preflightFreeSpace(
+			archiveDir,
+			tuning.archiveDir,
+			tuning.minFreeSpaceReserve,
+			estimatedWorkingBytes,
+		)
 		// Step 2: resolve checkpoint; read the CAS base (current active pointer).
 		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
 		const baseActiveGenerationId = resolveBaseActiveGenerationId(archiveDir, signal.name, rangeDate)
@@ -254,14 +263,6 @@ export const createArchiveGeneration = async (
 			scratchSubdir,
 			baseActiveGenerationId,
 		})
-		// Now that free space can be assessed (the archive root exists), preflight.
-		await preflightFreeSpace(
-			archiveDir,
-			tuning.archiveDir,
-			tuning.minFreeSpaceReserve,
-			estimatedWorkingBytes,
-		)
-
 		// Step 4: acquire the deterministic pin. The journal already names pinId,
 		// so a crash between pin-write and the phase advance is reconcilable.
 		await faults.beforePinAcquired?.()
@@ -639,7 +640,7 @@ export const appendCatalog = async (
  */
 const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): Promise<void> => {
 	if (!existsSync(scratchRoot)) return
-	await assertFilesystemPathNoSymlinks(scratchRoot, "scratch root")
+	await assertExistingPathComponentsNoSymlinks(scratchRoot, "scratch root")
 	const scratchInfo = await lstat(resolve(scratchRoot))
 	if (scratchInfo.isSymbolicLink() || !scratchInfo.isDirectory()) {
 		throw new Error(`refusing unsafe scratch root: ${scratchRoot}`)
@@ -669,6 +670,18 @@ const assertFilesystemPathNoSymlinks = async (path: string, label: string): Prom
 	if (!existsSync(absolute)) return
 	const info = await lstat(absolute)
 	if (info.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${absolute}`)
+}
+
+const assertExistingPathComponentsNoSymlinks = async (path: string, label: string): Promise<void> => {
+	const absolute = resolve(path)
+	const root = parse(absolute).root
+	let current = root
+	for (const component of relative(root, absolute).split(sep).filter(Boolean)) {
+		current = join(current, component)
+		if (!existsSync(current)) break
+		const info = await lstat(current)
+		if (info.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${current}`)
+	}
 }
 
 /**
@@ -716,7 +729,10 @@ export const reconcileArchiveGeneration = async (
 	const manifestAtFinal = existsSync(finalManifestPath)
 
 	if (phaseAtLeast(intent.phase, "complete")) {
-		// Already complete; just ensure the journal is archived out of active/.
+		// A phase label is never proof of durable reality. A crash after the
+		// complete write but before journal archival is safe to retire only when
+		// every implied invariant is observed exactly and without repair.
+		await verifyCompletedOperationInvariants(dataDir, archiveDir, intent, finalGeneration, building)
 		await archiveCompletedOperation(archiveDir, operationId)
 		return
 	}
@@ -777,7 +793,7 @@ const validateReconciliationTopology = async (
 	}
 	const ownedScratch = join(resolve(intent.scratchRoot), intent.scratchSubdir)
 	if (existsSync(intent.scratchRoot)) {
-		await assertFilesystemPathNoSymlinks(intent.scratchRoot, "scratch root")
+		await assertExistingPathComponentsNoSymlinks(intent.scratchRoot, "scratch root")
 	}
 	if (existsSync(ownedScratch)) {
 		await assertFilesystemPathNoSymlinks(ownedScratch, "owned scratch directory")
@@ -821,8 +837,12 @@ const assertReconciliationRoots = async (
 		["data", resolve(dataDir)],
 		["scratch", resolve(scratchRoot)],
 	] as const) {
+		// The configured scratch leaf may not exist yet. Its existing ancestors
+		// are still security-critical because a later mkdir/restore would follow
+		// an ancestor symlink out of the configured topology.
+		if (label === "scratch") await assertExistingPathComponentsNoSymlinks(path, `${label} root`)
 		if (!existsSync(path)) continue
-		await assertFilesystemPathNoSymlinks(path, `${label} root`)
+		if (label !== "scratch") await assertFilesystemPathNoSymlinks(path, `${label} root`)
 		const info = await lstat(path)
 		if (info.isSymbolicLink() || !info.isDirectory()) {
 			throw new Error(`refusing unsafe ${label} root: ${path}`)
@@ -946,33 +966,84 @@ const reconcilePostPromotion = async (
 	intent: ArchiveOperationIntent,
 	operationId: string,
 ): Promise<void> => {
-	// The generation and manifest exist (caller verified). Drive the remaining
-	// phases to completion idempotently.
+	// Never trust pointer/catalog phase labels. Observe the pointer, require its
+	// CAS topology to be either the recorded base or intended generation, then
+	// idempotently select the intended generation.
+	assertPointerConsistent(archiveDir, intent)
+	await selectActiveGeneration(
+		archiveDir,
+		intent.signal,
+		intent.rangeStart,
+		intent.generationId,
+		intent.baseActiveGenerationId,
+	)
 	if (!phaseAtLeast(intent.phase, "pointer-complete")) {
-		assertPointerConsistent(archiveDir, intent)
-		await selectActiveGeneration(
-			archiveDir,
-			intent.signal,
-			intent.rangeStart,
-			intent.generationId,
-			intent.baseActiveGenerationId,
-		)
 		await advancePhase(archiveDir, operationId, "pointer-complete")
 	}
+	// Rebuild even when the label says complete: this safely repairs missing,
+	// truncated, duplicated, or stale catalog state from authoritative manifests.
+	await rebuildCatalog(archiveDir, archiveSignal(intent.signal).name)
+	assertCatalogExact(archiveDir, archiveSignal(intent.signal).name)
 	if (!phaseAtLeast(intent.phase, "catalog-complete")) {
-		await rebuildCatalog(archiveDir, archiveSignal(intent.signal).name)
 		await advancePhase(archiveDir, operationId, "catalog-complete")
 	}
 	if (!phaseAtLeast(intent.phase, "pin-released")) {
 		await releaseOwnedPin(dataDir, intent)
 		await advancePhase(archiveDir, operationId, "pin-released")
+	} else {
+		assertOwnedPinAbsent(dataDir, intent)
 	}
 	if (!phaseAtLeast(intent.phase, "scratch-removed")) {
 		await removeOwnedScratch(intent.scratchRoot, intent.scratchSubdir)
 		await advancePhase(archiveDir, operationId, "scratch-removed")
+	} else {
+		assertOwnedScratchAbsent(intent)
 	}
 	await advancePhase(archiveDir, operationId, "complete")
 	await archiveCompletedOperation(archiveDir, operationId)
+}
+
+const assertOwnedPinAbsent = (dataDir: string, intent: ArchiveOperationIntent): void => {
+	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
+	if (existsSync(expectedPinPath)) {
+		throw new Error(
+			`archive operation phase requires its exact owned pin to be absent: ${expectedPinPath}`,
+		)
+	}
+}
+
+const assertOwnedScratchAbsent = (intent: ArchiveOperationIntent): void => {
+	const ownedScratch = join(resolve(intent.scratchRoot), intent.scratchSubdir)
+	if (existsSync(ownedScratch)) {
+		throw new Error(
+			`archive operation phase requires its exact owned scratch to be absent: ${ownedScratch}`,
+		)
+	}
+}
+
+const verifyCompletedOperationInvariants = async (
+	dataDir: string,
+	archiveDir: string,
+	intent: ArchiveOperationIntent,
+	finalGeneration: string,
+	building: string,
+): Promise<void> => {
+	if (!existsSync(finalGeneration)) {
+		throw new Error(`complete archive operation is missing its final generation: ${finalGeneration}`)
+	}
+	if (existsSync(building)) {
+		throw new Error(`complete archive operation retains building state: ${building}`)
+	}
+	await verifyPublishedGeneration(archiveDir, intent)
+	const current = resolveBaseActiveGenerationId(archiveDir, intent.signal, intent.rangeStart)
+	if (current !== intent.generationId) {
+		throw new Error(
+			`complete archive operation pointer mismatch: expected ${intent.generationId}, actual ${current}`,
+		)
+	}
+	assertCatalogExact(archiveDir, archiveSignal(intent.signal).name)
+	assertOwnedPinAbsent(dataDir, intent)
+	assertOwnedScratchAbsent(intent)
 }
 
 /**

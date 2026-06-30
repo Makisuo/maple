@@ -1,6 +1,15 @@
 import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -27,7 +36,7 @@ import { checkpointPinsRoot } from "../src/server/checkpoints"
 // deterministic invariants the harness does not isolate.
 
 const withArchive = async (run: (archiveDir: string) => Promise<void> | void): Promise<void> => {
-	const parent = mkdtempSync(join(tmpdir(), "maple-archive-journal-test-"))
+	const parent = realpathSync(mkdtempSync(join(tmpdir(), "maple-archive-journal-test-")))
 	const archiveDir = join(parent, "archive")
 	mkdirSync(archiveDir, { recursive: true })
 	try {
@@ -292,6 +301,84 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 			)
 			strictEqual(readFileSync(marker, "utf8"), "preserve")
 			ok(readActiveOperation(archiveDir) !== null)
+		})
+	})
+
+	it("reconciliation refuses a symlinked scratch-root ancestor and preserves outside state", async () => {
+		await withArchive(async (archiveDir) => {
+			const root = join(archiveDir, "..")
+			const dataDir = join(root, "data")
+			const realParent = join(root, "real-parent")
+			const linkedParent = join(root, "linked-parent")
+			const scratchRoot = join(linkedParent, "scratch")
+			const marker = join(realParent, "KEEP")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(realParent, { recursive: true })
+			writeFileSync(marker, "preserve")
+			symlinkSync(realParent, linkedParent)
+			const op = randomUUID()
+			await writeInitialIntent({
+				...baseIntent({ operationId: op }),
+				archiveDir,
+				dataDir,
+				scratchRoot,
+			})
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/refusing symlink in scratch root/,
+			)
+			strictEqual(readFileSync(marker, "utf8"), "preserve")
+			ok(
+				!existsSync(join(realParent, "scratch")),
+				"missing scratch leaf was not created through symlink",
+			)
+			ok(readActiveOperation(archiveDir) !== null, "active journal retained")
+		})
+	})
+
+	it("partial-restore recovery unlinks internal symlinks without following them", async () => {
+		await withArchive(async (archiveDir) => {
+			const root = join(archiveDir, "..")
+			const dataDir = join(root, "data")
+			const scratchRoot = join(root, "scratch")
+			const outside = join(root, "outside")
+			const marker = join(outside, "KEEP")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			mkdirSync(outside, { recursive: true })
+			writeFileSync(marker, "preserve")
+			const op = randomUUID()
+			const initial = { ...baseIntent({ operationId: op }), archiveDir, dataDir, scratchRoot }
+			await writeInitialIntent(initial)
+			const pinPath = join(checkpointPinsRoot(dataDir), initial.checkpointId, `${initial.pinId}.json`)
+			mkdirSync(join(pinPath, ".."), { recursive: true })
+			writeFileSync(
+				pinPath,
+				`${JSON.stringify({
+					formatVersion: 1,
+					pinId: initial.pinId,
+					checkpointId: initial.checkpointId,
+					purpose: initial.pinPurpose,
+					createdAt: new Date().toISOString(),
+				})}\n`,
+			)
+			await advancePhase(archiveDir, op, "pin-acquired")
+			const ownedScratch = join(scratchRoot, initial.scratchSubdir)
+			mkdirSync(join(ownedScratch, "store"), { recursive: true })
+			writeFileSync(join(ownedScratch, "partial"), "restore debris")
+			symlinkSync(outside, join(ownedScratch, "store", "table-link"))
+			await advancePhase(archiveDir, op, "scratch-allocated")
+
+			await reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot)
+
+			strictEqual(readFileSync(marker, "utf8"), "preserve")
+			ok(!existsSync(pinPath), "exact owned pin released")
+			ok(!existsSync(ownedScratch), "exact owned scratch removed")
+			ok(readActiveOperation(archiveDir) === null, "active authority retired")
+			ok(
+				existsSync(join(archiveDir, "operations", "completed", `archive-${op}`, "intent.json")),
+				"aborted operation evidence retained",
+			)
 		})
 	})
 

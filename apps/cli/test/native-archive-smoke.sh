@@ -11,7 +11,7 @@ set -euo pipefail
 BUNDLE_DIR="${1:?usage: native-archive-smoke.sh <bundle-dir> [port]}"
 MAPLE="$BUNDLE_DIR/maple"
 PORT="${2:-45241}"
-ROOT="$(mktemp -d "${TMPDIR:-/tmp}/maple-native-archive.XXXXXX")"
+ROOT="$(realpath "$(mktemp -d "${TMPDIR:-/tmp}/maple-native-archive.XXXXXX")")"
 DATA="$ROOT/data"
 ARCHIVE="$ROOT/archive"
 SCRATCH="$ROOT/scratch"

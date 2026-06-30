@@ -1,6 +1,14 @@
 import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createHash, randomUUID } from "node:crypto"
@@ -16,21 +24,29 @@ import {
 import { parseArchiveActivePointer, type ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import {
 	appendCatalog,
+	createArchiveGeneration,
 	promoteGeneration,
 	reconcileArchiveGeneration,
 	selectActiveGeneration,
 } from "../src/server/archives/generation"
-import { advancePhase, operationDir, writeInitialIntent } from "../src/server/archives/journal"
+import {
+	advancePhase,
+	listActiveOperationIds,
+	operationDir,
+	writeInitialIntent,
+	type ArchiveOperationPhase,
+} from "../src/server/archives/journal"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
 import { checkpointPinsRoot } from "../src/server/checkpoints"
+import { assertCatalogExact, rebuildCatalog } from "../src/server/archives/listing"
 
 // Filesystem-level tests for generation promotion, supersession, and catalog
 // append. These exercise the durable state machine without a restored chDB; the
 // full export path is covered by the native smoke script.
 
 const withArchive = async (run: (archiveDir: string) => Promise<void> | void): Promise<void> => {
-	const parent = mkdtempSync(join(tmpdir(), "maple-archive-gen-test-"))
+	const parent = realpathSync(mkdtempSync(join(tmpdir(), "maple-archive-gen-test-")))
 	const archiveDir = join(parent, "archive")
 	mkdirSync(archiveDir, { recursive: true })
 	try {
@@ -91,7 +107,96 @@ const seedBuilding = (archiveDir: string, generationId: string): string => {
 	return building
 }
 
+const seedPublishedOperation = async (
+	archiveDir: string,
+	phase: ArchiveOperationPhase,
+	options: { pointer?: boolean; catalog?: boolean } = {},
+) => {
+	const parent = join(archiveDir, "..")
+	const dataDir = join(parent, "data")
+	const scratchRoot = join(parent, "scratch")
+	mkdirSync(dataDir, { recursive: true })
+	mkdirSync(scratchRoot, { recursive: true })
+	const operationId = randomUUID()
+	const generationId = randomUUID()
+	const checkpointId = randomUUID()
+	const pinId = randomUUID()
+	const building = seedBuilding(archiveDir, generationId)
+	const shardPath = join(building, "shards", "00.parquet")
+	const baseManifest = manifest(generationId)
+	const exactManifest: ArchiveGenerationManifest = {
+		...baseManifest,
+		checkpointId,
+		shards: [
+			{
+				...baseManifest.shards[0]!,
+				bytes: statSync(shardPath).size,
+				sha256: createHash("sha256").update(readFileSync(shardPath)).digest("hex"),
+			},
+		],
+	}
+	await writeInitialIntent({
+		archiveDir,
+		operationId,
+		generationId,
+		signal: "traces",
+		rangeStart: "2026-06-01",
+		checkpointId,
+		dataDir,
+		scratchRoot,
+		pinId,
+		pinPurpose: `archive:${generationId}`,
+		scratchSubdir: `archive-${operationId}`,
+		baseActiveGenerationId: null,
+	})
+	await promoteGeneration(archiveDir, "traces", "2026-06-01", generationId, exactManifest, building)
+	const finalManifestPath = generationManifestPath(archiveDir, "traces", "2026-06-01", generationId)
+	const manifestSha256 = createHash("sha256").update(readFileSync(finalManifestPath)).digest("hex")
+	await advancePhase(archiveDir, operationId, "manifest-written", manifestSha256)
+	await advancePhase(archiveDir, operationId, "promoted")
+	if (options.pointer) {
+		await selectActiveGeneration(archiveDir, "traces", "2026-06-01", generationId, null)
+	}
+	if (options.catalog) await rebuildCatalog(archiveDir, "traces")
+	if (phase !== "promoted") await advancePhase(archiveDir, operationId, phase)
+	return {
+		archiveDir,
+		dataDir,
+		scratchRoot,
+		operationId,
+		generationId,
+		checkpointId,
+		pinId,
+		finalManifestPath,
+		finalShardPath: join(shardsRoot(archiveDir, "traces", "2026-06-01", generationId), "00.parquet"),
+	}
+}
+
 describe("archive generation promotion", () => {
+	it("fails free-space preflight before creating an active operation journal", async () => {
+		await withArchive(async (archiveDir) => {
+			const parent = join(archiveDir, "..")
+			const dataDir = join(parent, "data")
+			const scratchRoot = join(parent, "scratch")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			await rejects(
+				createArchiveGeneration(dataDir, archiveDir, "traces", "2026-06-01", {
+					writerThreads: 1,
+					rowGroupRows: 1,
+					maxShardRows: 1,
+					maxShardBytes: 1,
+					targetChunkBytes: 1,
+					minFreeSpaceReserve: Number.MAX_SAFE_INTEGER - 1,
+					archiveDir,
+					scratchRoot,
+				}),
+				/below the required/,
+			)
+			strictEqual(listActiveOperationIds(archiveDir).length, 0)
+		})
+	})
+
 	it("makes the complete manifest durable in building before publishing the generation", async () => {
 		await withArchive(async (archiveDir) => {
 			const generationId = randomUUID()
@@ -372,6 +477,136 @@ describe("archive generation promotion", () => {
 			)
 			ok(existsSync(impossibleFinal), "uncertain final state retained")
 			ok(existsSync(operationDir(archiveDir, operationId)), "journal authority retained")
+		})
+	})
+
+	it("repairs missing pointer and catalog despite journal completion labels", async () => {
+		await withArchive(async (archiveDir) => {
+			const seeded = await seedPublishedOperation(archiveDir, "catalog-complete")
+			await reconcileArchiveGeneration(seeded.dataDir, archiveDir, seeded.scratchRoot)
+			const pointer = parseArchiveActivePointer(
+				JSON.parse(readFileSync(activePointerPath(archiveDir, "traces", "2026-06-01"), "utf8")),
+				"traces",
+				"2026-06-01",
+			)
+			strictEqual(pointer.generationId, seeded.generationId)
+			assertCatalogExact(archiveDir, "traces")
+			strictEqual(listActiveOperationIds(archiveDir).length, 0)
+		})
+	})
+
+	it("fails closed when the observed pointer conflicts with the journal CAS topology", async () => {
+		await withArchive(async (archiveDir) => {
+			const seeded = await seedPublishedOperation(archiveDir, "catalog-complete")
+			writeFileSync(
+				activePointerPath(archiveDir, "traces", "2026-06-01"),
+				`${JSON.stringify({
+					formatVersion: 1,
+					generationId: randomUUID(),
+					signal: "traces",
+					rangeStart: "2026-06-01",
+					selectedAt: new Date().toISOString(),
+				})}\n`,
+			)
+			await rejects(
+				reconcileArchiveGeneration(seeded.dataDir, archiveDir, seeded.scratchRoot),
+				/no longer matches the recorded base/,
+			)
+			ok(existsSync(operationDir(archiveDir, seeded.operationId)), "journal authority retained")
+		})
+	})
+
+	it("repairs a tampered catalog from authoritative manifests despite catalog-complete", async () => {
+		await withArchive(async (archiveDir) => {
+			const seeded = await seedPublishedOperation(archiveDir, "catalog-complete", {
+				pointer: true,
+				catalog: true,
+			})
+			writeFileSync(catalogPath(archiveDir, "traces"), '{"attacker":true}\n')
+			await reconcileArchiveGeneration(seeded.dataDir, archiveDir, seeded.scratchRoot)
+			assertCatalogExact(archiveDir, "traces")
+			const lines = readFileSync(catalogPath(archiveDir, "traces"), "utf8").trim().split("\n")
+			strictEqual(lines.length, 1)
+			strictEqual((JSON.parse(lines[0]!) as { generationId: string }).generationId, seeded.generationId)
+		})
+	})
+
+	it("retains a complete journal unless every implied durable invariant is exact", async () => {
+		await withArchive(async (outerArchiveDir) => {
+			const root = join(outerArchiveDir, "..")
+			const cases: ReadonlyArray<{
+				name: string
+				mutate: (seeded: Awaited<ReturnType<typeof seedPublishedOperation>>) => void
+				error: RegExp
+			}> = [
+				{
+					name: "manifest",
+					mutate: (s) => writeFileSync(s.finalManifestPath, "{}\n"),
+					error: /manifest SHA-256 mismatch/,
+				},
+				{
+					name: "shard",
+					mutate: (s) => writeFileSync(s.finalShardPath, "tampered"),
+					error: /shard 00\.parquet (byte size|SHA-256) mismatch/,
+				},
+				{
+					name: "pointer",
+					mutate: (s) => rmSync(activePointerPath(s.archiveDir, "traces", "2026-06-01")),
+					error: /pointer mismatch/,
+				},
+				{
+					name: "catalog",
+					mutate: (s) => writeFileSync(catalogPath(s.archiveDir, "traces"), "{}\n"),
+					error: /catalog does not exactly match/,
+				},
+				{
+					name: "pin",
+					mutate: (s) => {
+						const pinPath = join(checkpointPinsRoot(s.dataDir), s.checkpointId, `${s.pinId}.json`)
+						mkdirSync(join(pinPath, ".."), { recursive: true })
+						writeFileSync(
+							pinPath,
+							`${JSON.stringify({
+								formatVersion: 1,
+								pinId: s.pinId,
+								checkpointId: s.checkpointId,
+								purpose: `archive:${s.generationId}`,
+								createdAt: new Date().toISOString(),
+							})}\n`,
+						)
+					},
+					error: /requires its exact owned pin to be absent/,
+				},
+				{
+					name: "scratch",
+					mutate: (s) =>
+						mkdirSync(join(s.scratchRoot, `archive-${s.operationId}`), { recursive: true }),
+					error: /requires its exact owned scratch to be absent/,
+				},
+				{
+					name: "building",
+					mutate: (s) =>
+						mkdirSync(buildingGenerationRoot(s.archiveDir, s.generationId), { recursive: true }),
+					error: /both building and final generation state/,
+				},
+			]
+			for (const scenario of cases) {
+				const archiveDir = join(root, `complete-${scenario.name}`, "archive")
+				mkdirSync(archiveDir, { recursive: true })
+				const seeded = await seedPublishedOperation(archiveDir, "complete", {
+					pointer: true,
+					catalog: true,
+				})
+				scenario.mutate(seeded)
+				await rejects(
+					reconcileArchiveGeneration(seeded.dataDir, archiveDir, seeded.scratchRoot),
+					scenario.error,
+				)
+				ok(
+					existsSync(operationDir(archiveDir, seeded.operationId)),
+					`${scenario.name}: active journal retained`,
+				)
+			}
 		})
 	})
 })

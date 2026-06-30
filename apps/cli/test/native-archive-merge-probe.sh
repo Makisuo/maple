@@ -13,7 +13,7 @@ set -euo pipefail
 BUNDLE_DIR="${1:?usage: native-archive-merge-probe.sh <bundle-dir> [port]}"
 MAPLE="$BUNDLE_DIR/maple"
 PORT="${2:-45330}"
-ROOT="$(mktemp -d "${TMPDIR:-/tmp}/maple-merge-probe.XXXXXX")"
+ROOT="$(realpath "$(mktemp -d "${TMPDIR:-/tmp}/maple-merge-probe.XXXXXX")")"
 DATA="$ROOT/data"
 CONFIG="$ROOT/backups.xml"
 ARCHIVE="$ROOT/archive"

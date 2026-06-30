@@ -77,7 +77,10 @@ build_store() {
 	if [[ -n "${ROOT:-}" && -d "$ROOT" && "${KEEP_ROOT:-0}" != "1" ]]; then
 		rm -rf "$ROOT"
 	fi
-	ROOT="$(mktemp -d "${TMPDIR:-/tmp}/maple-crash.XXXXXX")"
+	# Canonicalize macOS's /var -> /private/var alias. Gate 3 deliberately
+	# rejects configured scratch roots with symlinked ancestors, so fixtures must
+	# pass the real path rather than a system alias.
+	ROOT="$(realpath "$(mktemp -d "${TMPDIR:-/tmp}/maple-crash.XXXXXX")")"
 	local data="$ROOT/data" archive="$ROOT/archive" scratch="$ROOT/scratch"
 	local config="$ROOT/backups.xml"
 	printf '%s\n' '<clickhouse><backups><allowed_disk>default</allowed_disk><allowed_path>backups</allowed_path></backups></clickhouse>' >"$config"

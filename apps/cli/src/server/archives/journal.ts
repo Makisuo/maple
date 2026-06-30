@@ -452,6 +452,8 @@ export const readActiveGenerationId = (
 ): string | null => {
 	const pointerPath = activePointerPath(archiveDir, signal, rangeDate)
 	if (!existsSync(pointerPath)) return null
+	assertNoSymlinkSync(archiveDir, pointerPath, "archive active pointer")
+	assertRealFileSync(pointerPath, "archive active pointer")
 	const parsed = JSON.parse(readFileSync(pointerPath, "utf8")) as unknown
 	const pointer = parseArchiveActivePointer(parsed, signal, rangeDate)
 	return pointer.generationId
