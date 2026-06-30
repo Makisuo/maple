@@ -42,8 +42,18 @@ import { archiveSignal } from "./signals"
 // operations, so at most one `operations/active/` entry should exist; if more
 // than one is found, the state is ambiguous and reconciliation fails closed.
 
-/** Versioned journal format. The parser accepts only this version (fail-closed). */
-export const ARCHIVE_OPERATION_FORMAT_VERSION = 2 as const
+/**
+ * Versioned journal format. The parser accepts only this version (fail-closed on
+ * any other). Gate 3b raises v2 → v3 to introduce the `kind` discriminator
+ * (create vs gc) so reconcile can dispatch on operation type. A v2 create intent
+ * is migrated to v3 under the maintenance lock by {@link migrateV2CreateIntent};
+ * the parser never silently reinterprets a v2 record.
+ */
+export const ARCHIVE_OPERATION_FORMAT_VERSION = 3 as const
+
+/** Operation kind discriminator recorded in every v3 intent. */
+export const ARCHIVE_OPERATION_KINDS = ["create", "gc"] as const
+export type ArchiveOperationKind = (typeof ARCHIVE_OPERATION_KINDS)[number]
 
 /**
  * Phases record the last COMPLETED durable boundary. Advancement happens only
@@ -81,17 +91,30 @@ export const phaseAtLeast = (a: ArchiveOperationPhase, b: ArchiveOperationPhase)
 const phaseRequiresManifest = (phase: ArchiveOperationPhase): boolean =>
 	phase !== "aborted" && phaseAtLeast(phase, "manifest-written")
 
-export interface ArchiveOperationIntent {
+/** Fields common to every operation kind. */
+export interface ArchiveOperationBase {
 	readonly formatVersion: typeof ARCHIVE_OPERATION_FORMAT_VERSION
+	readonly kind: ArchiveOperationKind
 	readonly operationId: string
-	readonly generationId: string
-	readonly signal: string
-	readonly rangeStart: string
-	readonly checkpointId: string
 	/** Configured roots recorded so reconciliation can locate owned state. */
 	readonly archiveDir: string
 	readonly dataDir: string
 	readonly scratchRoot: string
+	readonly phase: ArchiveOperationPhase
+	readonly createdAt: string
+	readonly updatedAt: string
+}
+
+/**
+ * A create-generation operation intent (Gate 3a). Carries the deterministic
+ * pin/scratch/generation identities and the manifest SHA-256 once published.
+ */
+export interface CreateOperationIntent extends ArchiveOperationBase {
+	readonly kind: "create"
+	readonly generationId: string
+	readonly signal: string
+	readonly rangeStart: string
+	readonly checkpointId: string
 	/** Deterministic identities recorded BEFORE allocation. */
 	readonly pinId: string
 	readonly pinPurpose: string
@@ -100,10 +123,41 @@ export interface ArchiveOperationIntent {
 	readonly manifestSha256: string | null
 	/** The generation this operation supersedes, or null if none (CAS base). */
 	readonly baseActiveGenerationId: string | null
-	readonly phase: ArchiveOperationPhase
-	readonly createdAt: string
-	readonly updatedAt: string
 }
+
+/**
+ * A single target of garbage collection: one superseded generation to delete,
+ * with the evidence (manifest SHA + per-shard bytes/SHA) reconciliation uses to
+ * revalidate the source before each tombstone rename, and the recorded active
+ * generation for its range so collection can refuse a pointer that came back.
+ */
+export interface GcTarget {
+	readonly signal: string
+	readonly rangeStart: string
+	readonly generationId: string
+	readonly createdAt: string
+	readonly manifestSha256: string
+	readonly bytes: number
+	readonly shards: ReadonlyArray<{ readonly name: string; readonly bytes: number; readonly sha256: string }>
+	/** The exact active generation recorded for this target's range at plan time. */
+	readonly recordedActiveGenerationId: string
+}
+
+/**
+ * A garbage-collection operation intent (Gate 3b). Records the FROZEN deletion
+ * set computed under the maintenance lock. Reconciliation drives the frozen set
+ * to completion idempotently and NEVER expands it — a resumed GC deletes exactly
+ * what the original decided.
+ */
+export interface GcOperationIntent extends ArchiveOperationBase {
+	readonly kind: "gc"
+	readonly keep: number
+	readonly targets: ReadonlyArray<GcTarget>
+	/** Number of targets whose deletion has completed (progress cursor). */
+	readonly completedTargets: number
+}
+
+export type ArchiveOperationIntent = CreateOperationIntent | GcOperationIntent
 
 /** Directory holding a single active operation's journal. */
 export const operationDir = (archiveDir: string, operationId: string): string =>
@@ -131,11 +185,14 @@ const requiredString = (value: unknown, field: string): string => {
 }
 
 /**
- * Strict parse of an operation intent. Validates format version, every identity,
- * phase, and path containment. Throws on any defect (fail-closed); the caller
- * preserves the offending files. The parsed identities are validated to be real
+ * Strict parse of an operation intent. Validates format version, the `kind`
+ * discriminator, every identity, phase, and path containment, then dispatches
+ * create-vs-gc field parsing. Throws on any defect (fail-closed); the caller
+ * preserves the offending files. Parsed identities are validated to be real
  * archive IDs / range dates so a corrupted or hand-edited journal cannot direct
- * reconciliation at arbitrary paths.
+ * reconciliation at arbitrary paths. A v2 (pre-kind) record is rejected here;
+ * use {@link migrateV2CreateIntent} to lift a v2 create intent to v3 under the
+ * maintenance lock before parsing.
  */
 export const parseArchiveOperationIntent = (
 	archiveDir: string,
@@ -147,23 +204,14 @@ export const parseArchiveOperationIntent = (
 	if (raw.formatVersion !== ARCHIVE_OPERATION_FORMAT_VERSION) {
 		throw new Error(`unsupported archive operation format version: ${String(raw.formatVersion)}`)
 	}
+	const kind = requiredString(raw.kind, "kind") as ArchiveOperationKind
+	if (!ARCHIVE_OPERATION_KINDS.includes(kind)) {
+		throw new Error(`invalid archive operation kind: ${kind}`)
+	}
 	const operationId = validateArchiveId(requiredString(raw.operationId, "operationId"), "operation")
-	const generationId = validateArchiveId(requiredString(raw.generationId, "generationId"), "generation")
-	const signal = archiveSignal(requiredString(raw.signal, "signal")).name
-	const rangeStart = validateRangeDate(requiredString(raw.rangeStart, "rangeStart"))
-	const checkpointId = validateArchiveId(requiredString(raw.checkpointId, "checkpointId"), "checkpoint")
 	const phase = requiredString(raw.phase, "phase") as ArchiveOperationPhase
 	if (!ARCHIVE_OPERATION_PHASES.includes(phase)) {
 		throw new Error(`invalid archive operation phase: ${phase}`)
-	}
-	const pinId = validateArchiveId(requiredString(raw.pinId, "pinId"), "pin")
-	const scratchSubdir = requiredString(raw.scratchSubdir, "scratchSubdir")
-	if (scratchSubdir !== `archive-${operationId}`) {
-		throw new Error(`invalid scratch subdir in journal: ${scratchSubdir}`)
-	}
-	const pinPurpose = requiredString(raw.pinPurpose, "pinPurpose")
-	if (pinPurpose !== `archive:${generationId}`) {
-		throw new Error(`archive operation pin purpose does not match generation: ${pinPurpose}`)
 	}
 	const recordedArchiveDir = resolve(requiredString(raw.archiveDir, "archiveDir"))
 	const recordedDataDir = resolve(requiredString(raw.dataDir, "dataDir"))
@@ -183,6 +231,56 @@ export const parseArchiveOperationIntent = (
 			`archive operation scratch root mismatch: journal ${recordedScratchRoot}, invocation ${resolve(expectedScratchRoot)}`,
 		)
 	}
+	const createdAt = requiredString(raw.createdAt, "createdAt")
+	const updatedAt = requiredString(raw.updatedAt, "updatedAt")
+	// Roots are recorded for inspection/recovery; they are not authority to act
+	// outside the archive root. The archive root itself is re-derived.
+	if (kind === "create")
+		return parseCreateIntent(
+			raw,
+			operationId,
+			phase,
+			recordedArchiveDir,
+			recordedDataDir,
+			recordedScratchRoot,
+			createdAt,
+			updatedAt,
+		)
+	return parseGcIntent(
+		raw,
+		operationId,
+		phase,
+		recordedArchiveDir,
+		recordedDataDir,
+		recordedScratchRoot,
+		createdAt,
+		updatedAt,
+	)
+}
+
+const parseCreateIntent = (
+	raw: Record<string, unknown>,
+	operationId: string,
+	phase: ArchiveOperationPhase,
+	recordedArchiveDir: string,
+	recordedDataDir: string,
+	recordedScratchRoot: string,
+	createdAt: string,
+	updatedAt: string,
+): CreateOperationIntent => {
+	const generationId = validateArchiveId(requiredString(raw.generationId, "generationId"), "generation")
+	const signal = archiveSignal(requiredString(raw.signal, "signal")).name
+	const rangeStart = validateRangeDate(requiredString(raw.rangeStart, "rangeStart"))
+	const checkpointId = validateArchiveId(requiredString(raw.checkpointId, "checkpointId"), "checkpoint")
+	const pinId = validateArchiveId(requiredString(raw.pinId, "pinId"), "pin")
+	const scratchSubdir = requiredString(raw.scratchSubdir, "scratchSubdir")
+	if (scratchSubdir !== `archive-${operationId}`) {
+		throw new Error(`invalid scratch subdir in journal: ${scratchSubdir}`)
+	}
+	const pinPurpose = requiredString(raw.pinPurpose, "pinPurpose")
+	if (pinPurpose !== `archive:${generationId}`) {
+		throw new Error(`archive operation pin purpose does not match generation: ${pinPurpose}`)
+	}
 	const manifestSha256Raw = raw.manifestSha256
 	const manifestSha256 =
 		manifestSha256Raw === null ? null : requiredString(manifestSha256Raw, "manifestSha256").toLowerCase()
@@ -200,10 +298,9 @@ export const parseArchiveOperationIntent = (
 					requiredString(baseActiveGenerationIdRaw, "baseActiveGenerationId"),
 					"base generation",
 				)
-	// Roots are recorded for inspection/recovery; they are not authority to act
-	// outside the archive root. The archive root itself is re-derived.
-	const intent: ArchiveOperationIntent = {
+	return {
 		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+		kind: "create",
 		operationId,
 		generationId,
 		signal,
@@ -218,11 +315,174 @@ export const parseArchiveOperationIntent = (
 		manifestSha256,
 		baseActiveGenerationId,
 		phase,
-		createdAt: requiredString(raw.createdAt, "createdAt"),
-		updatedAt: requiredString(raw.updatedAt, "updatedAt"),
+		createdAt,
+		updatedAt,
 	}
-	void archiveDir
-	return intent
+}
+
+const parseGcIntent = (
+	raw: Record<string, unknown>,
+	operationId: string,
+	phase: ArchiveOperationPhase,
+	recordedArchiveDir: string,
+	recordedDataDir: string,
+	recordedScratchRoot: string,
+	createdAt: string,
+	updatedAt: string,
+): GcOperationIntent => {
+	const keepRaw = raw.keep
+	if (typeof keepRaw !== "number" || !Number.isSafeInteger(keepRaw) || keepRaw < 0) {
+		throw new Error(`archive operation gc intent has invalid keep: ${String(keepRaw)}`)
+	}
+	const completedTargetsRaw = raw.completedTargets
+	if (
+		typeof completedTargetsRaw !== "number" ||
+		!Number.isSafeInteger(completedTargetsRaw) ||
+		completedTargetsRaw < 0
+	) {
+		throw new Error(
+			`archive operation gc intent has invalid completedTargets: ${String(completedTargetsRaw)}`,
+		)
+	}
+	const targetsRaw = raw.targets
+	if (!Array.isArray(targetsRaw)) {
+		throw new Error("archive operation gc intent targets is not an array")
+	}
+	const targets: GcTarget[] = targetsRaw.map((t, i) => parseGcTarget(t, i))
+	if (completedTargetsRaw > targets.length) {
+		throw new Error(
+			`archive operation gc intent completedTargets ${completedTargetsRaw} exceeds targets ${targets.length}`,
+		)
+	}
+	return {
+		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+		kind: "gc",
+		operationId,
+		keep: keepRaw,
+		targets,
+		completedTargets: completedTargetsRaw,
+		archiveDir: recordedArchiveDir,
+		dataDir: recordedDataDir,
+		scratchRoot: recordedScratchRoot,
+		phase,
+		createdAt,
+		updatedAt,
+	}
+}
+
+const parseGcTarget = (raw: unknown, index: number): GcTarget => {
+	if (!isRecord(raw)) throw new Error(`archive gc target ${index} is not a record`)
+	const signal = archiveSignal(requiredString(raw.signal, "signal")).name
+	const rangeStart = validateRangeDate(requiredString(raw.rangeStart, "rangeStart"))
+	const generationId = validateArchiveId(requiredString(raw.generationId, "generationId"), "generation")
+	const createdAt = requiredString(raw.createdAt, "createdAt")
+	const manifestSha256 = requiredString(raw.manifestSha256, "manifestSha256").toLowerCase()
+	if (!/^[0-9a-f]{64}$/.test(manifestSha256)) {
+		throw new Error(`archive gc target ${index} has invalid manifestSha256`)
+	}
+	const bytesRaw = raw.bytes
+	if (typeof bytesRaw !== "number" || !Number.isSafeInteger(bytesRaw) || bytesRaw < 0) {
+		throw new Error(`archive gc target ${index} has invalid bytes: ${String(bytesRaw)}`)
+	}
+	const recordedActiveGenerationId = validateArchiveId(
+		requiredString(raw.recordedActiveGenerationId, "recordedActiveGenerationId"),
+		"active generation",
+	)
+	const shardsRaw = raw.shards
+	if (!Array.isArray(shardsRaw)) {
+		throw new Error(`archive gc target ${index} shards is not an array`)
+	}
+	const shards = shardsRaw.map((s, j) => {
+		if (!isRecord(s)) throw new Error(`archive gc target ${index} shard ${j} is not a record`)
+		const name = requiredString(s.name, "name")
+		const bytes = s.bytes
+		if (typeof bytes !== "number" || !Number.isSafeInteger(bytes) || bytes < 0) {
+			throw new Error(`archive gc target ${index} shard ${j} invalid bytes`)
+		}
+		const sha256 = requiredString(s.sha256, "sha256").toLowerCase()
+		if (!/^[0-9a-f]{64}$/.test(sha256)) {
+			throw new Error(`archive gc target ${index} shard ${j} invalid sha256`)
+		}
+		return { name, bytes, sha256 }
+	})
+	return {
+		signal,
+		rangeStart,
+		generationId,
+		createdAt,
+		manifestSha256,
+		bytes: bytesRaw,
+		shards,
+		recordedActiveGenerationId,
+	}
+}
+
+/**
+ * Migrate a v2 (pre-kind) create intent record to v3 under the maintenance lock.
+ * This is a mechanical, validated field addition: `kind: "create"` is the only
+ * new field, and no existing semantics change. The input is re-validated strictly
+ * so a corrupt v2 record fails migration (and reconciliation) rather than being
+ * silently lifted. Returns the v3 record (unparsed, for durably rewriting the
+ * intent.json) — callers should re-parse via {@link parseArchiveOperationIntent}.
+ *
+ * Never used for a v1 record or any record that is not a clean v2 create intent.
+ */
+export const migrateV2CreateIntent = (
+	archiveDir: string,
+	raw: unknown,
+	expectedDataDir?: string,
+	expectedScratchRoot?: string,
+): Record<string, unknown> => {
+	if (!isRecord(raw)) throw new Error("archive operation intent is not a record (v2 migration)")
+	if (raw.formatVersion !== 2) {
+		throw new Error(`v2 migration requires formatVersion 2, got ${String(raw.formatVersion)}`)
+	}
+	// Re-validate every v2 field strictly before lifting. Reuse the create parser
+	// by synthesizing a v3 record: parse it, then emit it. This guarantees the
+	// migrated record passes the v3 parser byte-for-byte.
+	const lifted: Record<string, unknown> = {
+		...raw,
+		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+		kind: "create",
+	}
+	// parseArchiveOperationIntent validates all fields + the kind discriminator.
+	parseArchiveOperationIntent(archiveDir, lifted, expectedDataDir, expectedScratchRoot)
+	return lifted
+}
+
+/**
+ * If the single active operation's intent is a legacy v2 record, durably migrate
+ * it to v3 under the maintenance lock BEFORE reading/parsing it. Returns true if
+ * a migration occurred. A v2 record left by a pre-v3 binary (Gate 3a) would
+ * otherwise strand — the v3 parser rejects it and reconciliation fails closed,
+ * blocking all future archive work. This lifts it so reconcile can proceed.
+ *
+ * No-op when there is no active op, more than one (ambiguous), or the record is
+ * already v3. A malformed v2 record fails migration and reconcile fails closed.
+ */
+export const migrateActiveIntentIfLegacy = async (
+	archiveDir: string,
+	expectedDataDir?: string,
+	expectedScratchRoot?: string,
+): Promise<boolean> => {
+	const ids = listActiveOperationIds(archiveDir)
+	if (ids.length !== 1) return false
+	const operationId = ids[0]!
+	const path = intentPath(archiveDir, operationId)
+	if (!existsSync(path)) return false
+	let raw: unknown
+	try {
+		raw = JSON.parse(readFileSync(path, "utf8")) as unknown
+	} catch {
+		return false
+	}
+	if (!isRecord(raw) || raw.formatVersion !== 2) return false
+	// Lift + validate. A corrupt v2 record throws here → reconcile fails closed.
+	const lifted = migrateV2CreateIntent(archiveDir, raw, expectedDataDir, expectedScratchRoot)
+	const { durableJson } = await import("../durable-files")
+	await durableJson(path, lifted)
+	await syncDirectory(operationDir(archiveDir, operationId))
+	return true
 }
 
 /** Read and strictly parse the intent for an operation dir. */
@@ -263,8 +523,9 @@ export const writeInitialIntent = async (intent: {
 	await ensurePrivateDirectory(dir, archiveRoot(intent.archiveDir))
 	await assertNoSymlink(intent.archiveDir, dir, "archive operation")
 	const now = new Date().toISOString()
-	const record: ArchiveOperationIntent = {
+	const record: CreateOperationIntent = {
 		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+		kind: "create",
 		operationId: intent.operationId,
 		generationId: intent.generationId,
 		signal: intent.signal,
@@ -290,6 +551,7 @@ export const writeInitialIntent = async (intent: {
  * Advance the recorded phase to the next completed durable boundary. Called
  * only AFTER the named boundary is fsync-durable. Reads the current intent,
  * validates the transition is a forward step, and rewrites it durably.
+ * `manifestSha256` applies only to create intents (ignored for gc).
  */
 export const advancePhase = async (
 	archiveDir: string,
@@ -303,17 +565,87 @@ export const advancePhase = async (
 	if (PHASE_ORDER[next] < PHASE_ORDER[current.phase]) {
 		throw new Error(`archive operation phase regression: ${current.phase} -> ${next}`)
 	}
-	const updated: ArchiveOperationIntent = {
-		...current,
-		phase: next,
-		manifestSha256: next === "aborted" ? null : (manifestSha256 ?? current.manifestSha256),
-		updatedAt: new Date().toISOString(),
+	let updated: ArchiveOperationIntent
+	if (current.kind === "create") {
+		const nextManifestSha256 = next === "aborted" ? null : (manifestSha256 ?? current.manifestSha256)
+		if (
+			phaseRequiresManifest(next) &&
+			(nextManifestSha256 === null || !/^[0-9a-f]{64}$/.test(nextManifestSha256))
+		) {
+			throw new Error(`archive operation phase ${next} requires a manifest SHA-256`)
+		}
+		updated = {
+			...current,
+			phase: next,
+			manifestSha256: nextManifestSha256,
+			updatedAt: new Date().toISOString(),
+		}
+	} else {
+		updated = { ...current, phase: next, updatedAt: new Date().toISOString() }
 	}
-	if (
-		phaseRequiresManifest(next) &&
-		(updated.manifestSha256 === null || !/^[0-9a-f]{64}$/.test(updated.manifestSha256))
-	) {
-		throw new Error(`archive operation phase ${next} requires a manifest SHA-256`)
+	await durableJson(intentPath(archiveDir, operationId), updated)
+	await syncDirectory(operationDir(archiveDir, operationId))
+	return updated
+}
+
+/**
+ * Persist the initial GC intent BEFORE any collection. Records the FROZEN
+ * deletion set computed under the maintenance lock, so a crashed/resumed GC
+ * deletes exactly what the original decided — never re-expanded.
+ */
+export const writeGcIntent = async (intent: {
+	readonly archiveDir: string
+	readonly operationId: string
+	readonly dataDir: string
+	readonly scratchRoot: string
+	readonly keep: number
+	readonly targets: ReadonlyArray<GcTarget>
+}): Promise<void> => {
+	const dir = operationDir(intent.archiveDir, intent.operationId)
+	await ensurePrivateDirectory(dir, archiveRoot(intent.archiveDir))
+	await assertNoSymlink(intent.archiveDir, dir, "archive operation")
+	const now = new Date().toISOString()
+	const record: GcOperationIntent = {
+		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+		kind: "gc",
+		operationId: intent.operationId,
+		keep: intent.keep,
+		targets: intent.targets,
+		completedTargets: 0,
+		archiveDir: resolve(intent.archiveDir),
+		dataDir: resolve(intent.dataDir),
+		scratchRoot: resolve(intent.scratchRoot),
+		phase: "intent",
+		createdAt: now,
+		updatedAt: now,
+	}
+	await durableJson(intentPath(intent.archiveDir, intent.operationId), record)
+	await syncDirectory(dir)
+}
+
+/**
+ * Rewrite a GC intent's progress cursor (completedTargets) + phase. Used by the
+ * crash-safe collector after each target completes so a resume resumes at the
+ * right point. The frozen target list is never mutated.
+ */
+export const persistGcProgress = async (
+	archiveDir: string,
+	operationId: string,
+	completedTargets: number,
+	phase: ArchiveOperationPhase,
+): Promise<GcOperationIntent> => {
+	const current = readIntent(archiveDir, operationId)
+	if (current.kind !== "gc") {
+		throw new Error(`archive operation is not a gc operation: ${operationId}`)
+	}
+	if (PHASE_ORDER[phase] < PHASE_ORDER[current.phase]) {
+		throw new Error(`archive operation phase regression: ${current.phase} -> ${phase}`)
+	}
+	const updated: GcOperationIntent = {
+		...current,
+		completedTargets,
+		phase,
+		updatedAt: new Date().toISOString(),
 	}
 	await durableJson(intentPath(archiveDir, operationId), updated)
 	await syncDirectory(operationDir(archiveDir, operationId))
@@ -495,7 +827,7 @@ export const ownedPathsFor = (intent: {
  * with the on-disk pointer for that location. Used by reconcile to validate that
  * the recorded CAS base still matches reality before flipping the pointer.
  */
-export const assertPointerConsistent = (archiveDir: string, intent: ArchiveOperationIntent): void => {
+export const assertPointerConsistent = (archiveDir: string, intent: CreateOperationIntent): void => {
 	const current = readActiveGenerationId(archiveDir, intent.signal, intent.rangeStart)
 	// The pointer must either still select the recorded base, or already select
 	// the intended generation (an earlier promotion completed). Anything else
