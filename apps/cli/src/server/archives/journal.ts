@@ -82,7 +82,7 @@ export const ARCHIVE_OPERATION_PHASES = [
 ] as const
 export type ArchiveOperationPhase = (typeof ARCHIVE_OPERATION_PHASES)[number]
 
-const PHASE_ORDER: Readonly<Record<ArchiveOperationPhase, number>> = Object.fromEntries(
+export const PHASE_ORDER: Readonly<Record<ArchiveOperationPhase, number>> = Object.fromEntries(
 	ARCHIVE_OPERATION_PHASES.map((phase, index) => [phase, index]),
 ) as Readonly<Record<ArchiveOperationPhase, number>>
 
