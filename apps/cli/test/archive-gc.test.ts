@@ -25,7 +25,8 @@ import { type ArchiveGenerationManifest, parseArchiveActivePointer } from "../sr
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
 import { rebuildCatalog } from "../src/server/archives/listing"
-import { planArchiveGc, runArchiveGc } from "../src/server/archives/gc"
+import { planArchiveGc, runArchiveGc, verifyCompletedGcInvariants } from "../src/server/archives/gc"
+import { writeInitialIntent, type GcOperationIntent } from "../src/server/archives/journal"
 
 // Hostile unit tests for archive garbage collection (Gate 3b). These cover the
 // deterministic deletion-set logic, keep-N retention, fail-closed on
@@ -182,18 +183,21 @@ describe("archive gc planning", () => {
 		})
 	})
 
-	it("never targets a generation with no active pointer (nothing is superseded)", async () => {
+	it("over-retains a range with no active pointer (missing pointer is uncertain)", async () => {
 		await withArchive(async (archiveDir) => {
-			// No pointer at all: no generation is "active", so all are treated as
-			// superseded (recordedActiveGenerationId ""). keep=1 retains newest, but
-			// a range with NO pointer is ambiguous — verify the planner handles it.
+			// No pointer at all: every generation is ambiguous (none is provably
+			// active). A missing pointer is uncertain state — the range is excluded
+			// entirely and nothing is targeted (blocker 4: never encode absence as
+			// an invalid empty-string sentinel that strands the journal).
 			await seedPublishedGeneration(archiveDir, { createdAt: "2026-06-02T00:00:00.000Z" })
 			await seedPublishedGeneration(archiveDir, { createdAt: "2026-06-03T00:00:00.000Z" })
 			await rebuildSignalCatalog(archiveDir, "traces")
-			const plan = planArchiveGc(archiveDir, 1)
-			// With no active pointer, the recorded active is ""; keep=1 retains the
-			// newest and targets the older. This is acceptable (nothing selected).
-			strictEqual(plan.deleteSet.length, 1)
+			const plan = planArchiveGc(archiveDir, 0)
+			strictEqual(plan.deleteSet.length, 0, "nothing targeted without an active pointer")
+			ok(
+				plan.excludedRanges.some((r) => r.rangeStart === "2026-06-01"),
+				"range excluded as uncertain",
+			)
 		})
 	})
 
@@ -322,6 +326,134 @@ describe("archive gc execution", () => {
 			const activeDir = join(archiveDir, "operations", "active")
 			const activeCount = existsSync(activeDir) ? readdirSync(activeDir).length : 0
 			strictEqual(activeCount, 0, "no active op journal after gc")
+		})
+	})
+})
+
+describe("archive gc dry-run nonmutation with an active operation (Gate 3b repair)", () => {
+	// A snapshot of the durable state (journal/pins/pointers/catalogs/generations)
+	// to compare before/after a dry-run that must not mutate.
+	const snapshot = (archiveDir: string, dataDir: string): string => {
+		const { execSync } = require("node:child_process") as typeof import("node:child_process")
+		try {
+			return execSync(
+				`find "${archiveDir}" "${dataDir}" -type f 2>/dev/null | sort | xargs shasum -a 256 2>/dev/null | shasum -a 256`,
+				{ encoding: "utf8" },
+			).trim()
+		} catch {
+			return "snapshot-failed"
+		}
+	}
+
+	it("gc --dry-run mutates nothing even when an active operation is present", async () => {
+		await withArchive(async (archiveDir, dataDir, scratchRoot) => {
+			await seedPublishedGeneration(archiveDir, { createdAt: "2026-06-02T00:00:00.000Z" })
+			await seedPublishedGeneration(archiveDir, {
+				createdAt: "2026-06-03T00:00:00.000Z",
+				selectActive: true,
+			})
+			await rebuildSignalCatalog(archiveDir, "traces")
+			// Seed an active CREATE operation journal (an interrupted op present).
+			const op = randomUUID()
+			await writeInitialIntent({
+				archiveDir,
+				operationId: op,
+				generationId: randomUUID(),
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				checkpointId: randomUUID(),
+				dataDir,
+				scratchRoot,
+				pinId: randomUUID(),
+				pinPurpose: `archive:${op}`,
+				scratchSubdir: `archive-${op}`,
+				baseActiveGenerationId: null,
+			})
+			const before = snapshot(archiveDir, dataDir)
+			// dry-run must NOT reconcile the active op or delete anything.
+			const result = await runArchiveGc({ dataDir, archiveDir, scratchRoot, keep: 0, dryRun: true })
+			const after = snapshot(archiveDir, dataDir)
+			strictEqual(before, after, "dry-run mutated durable state with an active op present")
+			// With an active op present, dry-run reports the blocker (no deletion set predicted).
+			strictEqual(result.deleted.length, 0)
+		})
+	})
+
+	it("gc --dry-run mutates nothing on a clean archive", async () => {
+		await withArchive(async (archiveDir, dataDir, scratchRoot) => {
+			await seedPublishedGeneration(archiveDir, { createdAt: "2026-06-02T00:00:00.000Z" })
+			await seedPublishedGeneration(archiveDir, {
+				createdAt: "2026-06-03T00:00:00.000Z",
+				selectActive: true,
+			})
+			await rebuildSignalCatalog(archiveDir, "traces")
+			const before = snapshot(archiveDir, dataDir)
+			await runArchiveGc({ dataDir, archiveDir, scratchRoot, keep: 0, dryRun: true })
+			const after = snapshot(archiveDir, dataDir)
+			strictEqual(before, after, "dry-run mutated durable state on a clean archive")
+		})
+	})
+})
+
+describe("archive gc terminal invariant verification (Gate 3b repair)", () => {
+	it("verifyCompletedGcInvariants fails when a frozen target source still exists", async () => {
+		await withArchive(async (archiveDir) => {
+			const active = await seedPublishedGeneration(archiveDir, {
+				createdAt: "2026-06-03T00:00:00.000Z",
+				selectActive: true,
+			})
+			const target = {
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				generationId: active.generationId,
+				createdAt: "2026-06-03T00:00:00.000Z",
+				manifestSha256: "a".repeat(64),
+				bytes: 100,
+				shards: [{ name: "00.parquet", bytes: 100, sha256: "b".repeat(64) }],
+				recordedActiveGenerationId: active.generationId,
+			}
+			const intent = {
+				kind: "gc" as const,
+				operationId: randomUUID(),
+				keep: 0,
+				targets: [target],
+				completedTargets: 1,
+				formatVersion: 3 as const,
+				archiveDir,
+				dataDir: "/d",
+				scratchRoot: "/s",
+				phase: "complete" as const,
+				createdAt: "x",
+				updatedAt: "x",
+			} as GcOperationIntent
+			// The target source (the active gen) still exists → must fail closed.
+			await rejects(
+				async () => verifyCompletedGcInvariants(archiveDir, intent),
+				/target source still exists/,
+			)
+		})
+	})
+
+	it("verifyCompletedGcInvariants fails when completedTargets !== targets.length", async () => {
+		await withArchive(async (archiveDir) => {
+			const intent = {
+				kind: "gc" as const,
+				operationId: randomUUID(),
+				keep: 0,
+				targets: [],
+				completedTargets: 1,
+				formatVersion: 3 as const,
+				archiveDir,
+				dataDir: "/d",
+				scratchRoot: "/s",
+				phase: "complete" as const,
+				createdAt: "x",
+				updatedAt: "x",
+			} as GcOperationIntent
+			await rejects(
+				async () => verifyCompletedGcInvariants(archiveDir, intent),
+				/completedTargets === targets.length/,
+			)
 		})
 	})
 })

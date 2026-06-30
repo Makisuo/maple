@@ -76,6 +76,7 @@ export const ARCHIVE_OPERATION_PHASES = [
 	"catalog-complete", // catalog rebuilt/upserted
 	"pin-released", // the journal-named pin removed
 	"scratch-removed", // owned scratch subdir removed
+	"gc-collecting", // (GC only) ≥1 target collected; catalog not yet rebuilt. Cursor in completedTargets.
 	"complete", // operation journal moved to operations/completed/
 	"aborted", // pre-publication op reconciled away cleanly (nothing published)
 ] as const
@@ -87,6 +88,31 @@ const PHASE_ORDER: Readonly<Record<ArchiveOperationPhase, number>> = Object.from
 
 export const phaseAtLeast = (a: ArchiveOperationPhase, b: ArchiveOperationPhase): boolean =>
 	PHASE_ORDER[a] >= PHASE_ORDER[b]
+
+/**
+ * Phases valid for each operation kind. The parser rejects kind-incompatible
+ * phases so a GC intent can never carry a create-only phase (e.g. pin-acquired)
+ * and a create intent can never carry gc-collecting. This closes the
+ * "phase label substitutes for reality" defect: a GC op's progress is recorded
+ * ONLY as gc-collecting (with a cursor) or complete, never as a create phase.
+ */
+export const CREATE_PHASES: ReadonlySet<ArchiveOperationPhase> = new Set([
+	"intent",
+	"pin-acquired",
+	"scratch-allocated",
+	"restored",
+	"building-created",
+	"shards-written",
+	"manifest-written",
+	"promoted",
+	"pointer-complete",
+	"catalog-complete",
+	"pin-released",
+	"scratch-removed",
+	"complete",
+	"aborted",
+])
+export const GC_PHASES: ReadonlySet<ArchiveOperationPhase> = new Set(["intent", "gc-collecting", "complete"])
 
 const phaseRequiresManifest = (phase: ArchiveOperationPhase): boolean =>
 	phase !== "aborted" && phaseAtLeast(phase, "manifest-written")
@@ -212,6 +238,14 @@ export const parseArchiveOperationIntent = (
 	const phase = requiredString(raw.phase, "phase") as ArchiveOperationPhase
 	if (!ARCHIVE_OPERATION_PHASES.includes(phase)) {
 		throw new Error(`invalid archive operation phase: ${phase}`)
+	}
+	// Kind-phase strictness: a phase label must be valid for the operation kind.
+	// A GC intent may only be intent / gc-collecting / complete; a create intent
+	// may only use create-eligible phases. This prevents a GC op from carrying a
+	// create-only phase (which would let a phase label substitute for reality).
+	const validPhases = kind === "create" ? CREATE_PHASES : GC_PHASES
+	if (!validPhases.has(phase)) {
+		throw new Error(`archive operation phase ${phase} is not valid for kind ${kind}`)
 	}
 	const recordedArchiveDir = resolve(requiredString(raw.archiveDir, "archiveDir"))
 	const recordedDataDir = resolve(requiredString(raw.dataDir, "dataDir"))
@@ -352,6 +386,31 @@ const parseGcIntent = (
 	if (completedTargetsRaw > targets.length) {
 		throw new Error(
 			`archive operation gc intent completedTargets ${completedTargetsRaw} exceeds targets ${targets.length}`,
+		)
+	}
+	// Duplicate-target detection: each (signal, range, generationId) must be unique.
+	// A duplicate would let collection double-count or confuse the resume cursor.
+	const seenKeys = new Set<string>()
+	for (const t of targets) {
+		const key = `${t.signal}/${t.rangeStart}/${t.generationId}`
+		if (seenKeys.has(key)) {
+			throw new Error(`archive operation gc intent has a duplicate target: ${key}`)
+		}
+		seenKeys.add(key)
+	}
+	// Phase/cursor consistency (the core fix for the premature-complete defect):
+	// - intent requires completedTargets === 0
+	// - gc-collecting allows 0 <= completedTargets <= targets.length
+	// - complete REQUIRES completedTargets === targets.length (the terminal state
+	//   is only reachable after every target is collected + catalogs repaired)
+	if (phase === "intent" && completedTargetsRaw !== 0) {
+		throw new Error(
+			`archive operation gc intent phase intent requires completedTargets 0, got ${completedTargetsRaw}`,
+		)
+	}
+	if (phase === "complete" && completedTargetsRaw !== targets.length) {
+		throw new Error(
+			`archive operation gc intent phase complete requires completedTargets === targets.length (${targets.length}), got ${completedTargetsRaw}`,
 		)
 	}
 	return {

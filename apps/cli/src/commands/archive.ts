@@ -5,7 +5,7 @@ import * as Argument from "effect/unstable/cli/Argument"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { existsSync, readdirSync, statSync } from "node:fs"
-import { createArchiveGeneration, reconcileArchiveGeneration } from "../server/archives/generation"
+import { createArchiveGeneration, runArchiveReconciliation } from "../server/archives/generation"
 import { listActiveGenerations, activeParquetPaths, rebuildCatalog } from "../server/archives/listing"
 import { runArchiveGc } from "../server/archives/gc"
 import { resolveArchiveTuning, type ArchiveTuningOverrides } from "../server/archives/config"
@@ -298,12 +298,27 @@ export const archiveReconcile = Command.make("reconcile", {
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
+			// Both dry-run and apply go through the locked runArchiveReconciliation
+			// entry point (blocker 2): dry-run returns the plan without mutating;
+			// apply acquires the maintenance lock, migrates any v2 intent, then
+			// reconciles — never racing create/GC planning or pointer/catalog repair.
+			const plan = yield* Effect.tryPromise({
+				try: () => runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: a.dryRun }),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
 			if (a.dryRun) {
 				yield* Effect.sync(() =>
 					process.stdout.write(
-						`${amber("◌")} dry-run reconcile: would converge an interrupted create or gc operation\n` +
-							`  ${dim("archive")}  ${prettyPath(archiveDir)}\n` +
-							`  ${dim("note")}    no archive state is modified\n`,
+						`${amber("◌")} dry-run reconcile: ${plan.summary}\n` +
+							(plan.operationId ? `  ${dim("operation")} ${plan.operationId}\n` : "") +
+							(plan.kind ? `  ${dim("kind")}       ${plan.kind}\n` : "") +
+							(plan.phase ? `  ${dim("phase")}      ${plan.phase}\n` : "") +
+							`  ${dim("archive")}   ${prettyPath(archiveDir)}\n` +
+							`  ${dim("note")}     no archive state is modified\n` +
+							(plan.blockers.length > 0
+								? plan.blockers.map((b) => `  ${dim("blocker")}   ${b}`).join("\n") + "\n"
+								: ""),
 					),
 				)
 				return
@@ -313,13 +328,13 @@ export const archiveReconcile = Command.make("reconcile", {
 					`${amber("⟳")} reconciling interrupted archive operation in ${prettyPath(archiveDir)}\n`,
 				),
 			)
-			yield* Effect.tryPromise({
-				try: () => reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
-				catch: (error) =>
-					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
-			})
 			yield* Effect.sync(() =>
-				process.stdout.write(`${green("✓")} reconcile complete (no active operation remains)\n`),
+				process.stdout.write(
+					`${green("✓")} reconcile complete: ${plan.summary}\n` +
+						(plan.blockers.length > 0
+							? `${red("!")} ${plan.blockers.length} blocker(s): ${plan.blockers.join("; ")}\n`
+							: ""),
+				),
 			)
 		}),
 	),

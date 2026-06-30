@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
 import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, parse, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
@@ -1085,4 +1085,136 @@ const releaseOwnedPin = async (dataDir: string, intent: CreateOperationIntent): 
 		)
 	}
 	await releaseCheckpointPin(dataDir, intent.checkpointId, expectedPinPath, intent.pinPurpose)
+}
+
+/**
+ * A read-only description of what reconciliation would do, shared by dry-run and
+ * apply (blocker 3: dry-run is not a separate approximation). Inspects create,
+ * GC, and legacy-v2 journals WITHOUT writing migrations or changing state —
+ * legacy migration is an apply action, reported here, not performed.
+ */
+export interface ReconciliationPlan {
+	readonly hasActiveOperation: boolean
+	readonly operationId: string | null
+	readonly kind: "create" | "gc" | null
+	readonly phase: string | null
+	readonly summary: string
+	readonly blockers: ReadonlyArray<string>
+}
+
+/**
+ * Plan reconciliation WITHOUT mutating: read the (at most one) active operation,
+ * describe its kind/phase + the convergence outcome + any blockers. Does NOT
+ * migrate v2 or change state — the caller (runArchiveReconciliation apply) does.
+ */
+export const planArchiveReconciliation = (
+	archiveDir: string,
+	dataDir: string,
+	scratchRoot: string,
+): ReconciliationPlan => {
+	void dataDir
+	void scratchRoot
+	const ids = listActiveOperationIdsSafe(archiveDir)
+	if (ids.length === 0) {
+		return {
+			hasActiveOperation: false,
+			operationId: null,
+			kind: null,
+			phase: null,
+			summary: "no active operation",
+			blockers: [],
+		}
+	}
+	if (ids.length > 1) {
+		return {
+			hasActiveOperation: true,
+			operationId: null,
+			kind: null,
+			phase: null,
+			summary: "multiple active operations require operator inspection",
+			blockers: [`${ids.length} active operations are ambiguous; manual inspection required`],
+		}
+	}
+	// Read the raw record to inspect kind/phase WITHOUT migrating (a v2 record
+	// has no kind; report it as a legacy create op that apply will migrate).
+	const operationId = ids[0]!
+	const intentPathFile = join(operationDir(archiveDir, operationId), "intent.json")
+	if (!existsSync(intentPathFile)) {
+		return {
+			hasActiveOperation: true,
+			operationId,
+			kind: null,
+			phase: null,
+			summary: "active operation missing its intent journal",
+			blockers: ["missing intent.json"],
+		}
+	}
+	let raw: Record<string, unknown>
+	try {
+		raw = JSON.parse(readFileSync(intentPathFile, "utf8")) as Record<string, unknown>
+	} catch {
+		return {
+			hasActiveOperation: true,
+			operationId,
+			kind: null,
+			phase: null,
+			summary: "active operation has an unreadable intent journal",
+			blockers: ["unreadable intent.json"],
+		}
+	}
+	const isV2 = raw.formatVersion === 2
+	const kind = (isV2 ? "create" : (raw.kind as string | undefined)) ?? null
+	const phase = (raw.phase as string | undefined) ?? null
+	const blockers: string[] = []
+	if (isV2) blockers.push("legacy v2 intent will be migrated to v3 before reconciliation")
+	return {
+		hasActiveOperation: true,
+		operationId,
+		kind: kind as "create" | "gc" | null,
+		phase,
+		summary: `converge interrupted ${kind ?? "unknown"} operation (phase ${phase ?? "unknown"})`,
+		blockers,
+	}
+}
+
+// listActiveOperationIds without the strict-fail-closed-on-debris behavior, for
+// planning (planning reports debris as a blocker rather than throwing).
+const listActiveOperationIdsSafe = (archiveDir: string): string[] => {
+	const root = join(archiveRoot(archiveDir), "operations", "active")
+	if (!existsSync(root)) return []
+	try {
+		const entries = readdirSync(root, { withFileTypes: true })
+		const ids: string[] = []
+		for (const entry of entries) {
+			if (entry.name.startsWith("archive-")) ids.push(entry.name.slice("archive-".length))
+		}
+		return ids
+	} catch {
+		return []
+	}
+}
+
+/**
+ * The authoritative locked reconciliation entry point (blocker 2). The
+ * `archive reconcile` CLI MUST call only this — it acquires the maintenance lock
+ * (so explicit reconciliation cannot race create/GC planning, v2 migration,
+ * pointer/catalog repair, or tombstone collection), migrates any legacy v2
+ * intent, then reconciles. `dryRun` returns the plan WITHOUT mutating (no
+ * migration, no reconciliation).
+ */
+export const runArchiveReconciliation = async (
+	dataDir: string,
+	archiveDir: string,
+	scratchRoot: string,
+	options: { readonly dryRun: boolean } = { dryRun: false },
+): Promise<ReconciliationPlan> => {
+	const plan = planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
+	if (options.dryRun || !plan.hasActiveOperation || plan.blockers.length > 0) return plan
+	// Apply: under the maintenance lock, migrate v2 then reconcile.
+	const operationId = randomUUID()
+	await withMaintenanceLock(dataDir, operationId, async () => {
+		await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
+		await reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot)
+	})
+	return plan
 }

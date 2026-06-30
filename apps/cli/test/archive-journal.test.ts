@@ -554,3 +554,87 @@ describe("archive operation journal v2 → v3 migration (Gate 3b)", () => {
 		})
 	})
 })
+
+describe("archive gc journal phase/cursor strictness (Gate 3b repair)", () => {
+	const gcTarget = (generationId: string) => ({
+		signal: "traces",
+		rangeStart: "2026-06-01",
+		generationId,
+		createdAt: "2026-06-02T00:00:00.000Z",
+		manifestSha256: "a".repeat(64),
+		bytes: 100,
+		shards: [{ name: "00.parquet", bytes: 100, sha256: "b".repeat(64) }],
+		recordedActiveGenerationId: randomUUID(),
+	})
+	const gcIntentBase = (overrides: Record<string, unknown> = {}) => ({
+		formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+		kind: "gc",
+		operationId: randomUUID(),
+		keep: 0,
+		targets: [gcTarget(randomUUID()), gcTarget(randomUUID())],
+		completedTargets: 0,
+		archiveDir: "/archive",
+		dataDir: "/data",
+		scratchRoot: "/scratch",
+		phase: "intent",
+		createdAt: "2026-06-01T00:00:00.000Z",
+		updatedAt: "2026-06-01T00:00:00.000Z",
+		...overrides,
+	})
+
+	it("rejects a GC intent with a create-only phase (pin-acquired)", async () => {
+		await rejects(
+			async () => parseArchiveOperationIntent("/archive", gcIntentBase({ phase: "pin-acquired" })),
+			/not valid for kind gc/,
+		)
+	})
+
+	it("rejects a GC intent with the aborted phase", async () => {
+		await rejects(
+			async () => parseArchiveOperationIntent("/archive", gcIntentBase({ phase: "aborted" })),
+			/not valid for kind gc/,
+		)
+	})
+
+	it("rejects a GC intent at complete with an incomplete cursor", async () => {
+		await rejects(
+			async () =>
+				parseArchiveOperationIntent(
+					"/archive",
+					gcIntentBase({ phase: "complete", completedTargets: 1 }),
+				),
+			/phase complete requires completedTargets === targets.length/,
+		)
+	})
+
+	it("rejects a GC intent at intent with a nonzero cursor", async () => {
+		await rejects(
+			async () =>
+				parseArchiveOperationIntent(
+					"/archive",
+					gcIntentBase({ phase: "intent", completedTargets: 1 }),
+				),
+			/phase intent requires completedTargets 0/,
+		)
+	})
+
+	it("accepts a GC intent at gc-collecting with a full cursor (legitimate post-final-deletion state)", async () => {
+		const parsed = parseArchiveOperationIntent(
+			"/archive",
+			gcIntentBase({ phase: "gc-collecting", completedTargets: 2 }),
+		)
+		strictEqual(parsed.kind, "gc")
+	})
+
+	it("rejects a GC intent with duplicate targets", async () => {
+		const dup = randomUUID()
+		await rejects(
+			async () =>
+				parseArchiveOperationIntent(
+					"/archive",
+					gcIntentBase({ targets: [gcTarget(dup), gcTarget(dup)] }),
+				),
+			/duplicate target/,
+		)
+	})
+})

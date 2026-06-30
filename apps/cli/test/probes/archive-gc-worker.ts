@@ -57,10 +57,11 @@ const BLOCK = (ms: number): Promise<void> =>
 
 const main = async (): Promise<void> => {
 	const args = parseArgs(process.argv.slice(2))
-	let firstTargetSeamed = false
+	let firstRenameSeamed = false
 	// Map the named boundary to the corresponding GC fault seam. Each seam, when
 	// it fires for the relevant boundary, writes the paused marker and blocks —
-	// modeling a real SIGKILL at that exact intra-boundary point.
+	// modeling a real SIGKILL at that exact intra-boundary point. The seams are
+	// AWAITED, so the worker blocks deterministically at the boundary.
 	const blockAtBoundary = async (boundary: string): Promise<void> => {
 		writeMarker(args.markerDir, boundary)
 		await BLOCK(args.blockMs)
@@ -71,13 +72,21 @@ const main = async (): Promise<void> => {
 			case "after-intent-durable":
 				return { afterIntentDurable: async () => blockAtBoundary("after-intent-durable") }
 			case "after-first-rename":
-			case "during-removal":
 				return {
 					afterFirstTargetRenamed: async () => {
-						if (!firstTargetSeamed) {
-							firstTargetSeamed = true
-							await blockAtBoundary(args.boundary)
+						if (!firstRenameSeamed) {
+							firstRenameSeamed = true
+							await blockAtBoundary("after-first-rename")
 						}
+					},
+				}
+			case "nonfinal-progress":
+				// The authoritative boundary that exposes the premature-complete
+				// defect: fire AFTER a NONFINAL target's durable gc-collecting
+				// progress write (index < total-1), while another target remains.
+				return {
+					afterTargetProgress: async (index: number, total: number) => {
+						if (index < total - 1) await blockAtBoundary("nonfinal-progress")
 					},
 				}
 			case "after-all-removals":

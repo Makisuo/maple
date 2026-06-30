@@ -104,6 +104,17 @@ build_superseded_store() {
 	local count
 	count=$(find "$gens_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
 	[ "$count" = "3" ] || { echo "FAIL: expected 3 generations, got $count" >&2; return 1; }
+	# Record the exact identities for post-reconcile verification. The two oldest
+	# (by createdAt) are the frozen GC targets (keep=0); the newest is the active
+	# generation the pointer selects. Parse them from the create outputs.
+	grep -m1 -oE 'generation   [0-9a-f-]+' "$ROOT/create1.out" | awk '{print $2}' >"$ROOT/gen1.id"
+	grep -m1 -oE 'generation   [0-9a-f-]+' "$ROOT/create2.out" | awk '{print $2}' >"$ROOT/gen2.id"
+	grep -m1 -oE 'generation   [0-9a-f-]+' "$ROOT/create3.out" | awk '{print $2}' >"$ROOT/gen3.id"
+	# FROZEN_TARGETS (the two superseded, keep=0 deletes both) and ACTIVE_GEN.
+	# create1 + create2 are superseded (gen3 is active). Order by createdAt for the
+	# frozen set; the harness verifies EXACTLY these are removed.
+	cat "$ROOT/gen1.id" "$ROOT/gen2.id" | sort >"$ROOT/frozen-targets.txt"
+	cat "$ROOT/gen3.id" >"$ROOT/active-gen.id"
 }
 
 # Spawn the gc worker paused after the first target, SIGKILL it.
@@ -128,20 +139,64 @@ spawn_and_kill_gc() {
 	echo "      killed gc-worker at $boundary (pid was $pid)"
 }
 
-# Verify post-reconcile state after the interrupted GC.
-# $1 = expected number of generations remaining (1 if collection proceeded; 3 if
-# the crash was before any collection, e.g. after-intent-durable).
+# Verify post-reconcile state after the interrupted GC. Asserts the EXACT
+# invariants (blocker 6): only the frozen target IDs removed; the active
+# generation retained with its EXACT pointer identity; the completed journal has
+# the expected phase/cursor; the catalog exactly matches manifests; DuckDB
+# queryable; no tombstone retains data; no active op.
 verify_after_reconcile() {
-	local expect_gens="${1:-1}"
 	local archive data errs=""
 	data="$(cat "$ROOT/data.path")"; archive="$ROOT/archive"
 	local gens_dir="$archive/$SIGNAL/$RANGE_DATE/generations"
+	# Exactly one generation remains (the active one); both frozen targets deleted.
 	local count
 	count=$(find "$gens_dir" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-	[ "$count" = "$expect_gens" ] || errs="$errs generations=$count(need $expect_gens)"
-	# No tombstone may still HOLD a generation dir (a tombstone with entries means a
-	# rename completed but removal didn't — an unreclaimed generation). An empty
-	# tombstones/ parent retained in a completed op journal is harmless metadata.
+	[ "$count" = "1" ] || errs="$errs generations=$count(need 1)"
+	# EXACT: the remaining generation is the recorded active gen; the frozen
+	# targets are absent.
+	local active_gen
+	active_gen="$(cat "$ROOT/active-gen.id" 2>/dev/null)"
+	if [ -n "$active_gen" ]; then
+		[ -d "$gens_dir/$active_gen" ] || errs="$errs active-gen-missing"
+		while read -r ft; do
+			[ -n "$ft" ] || continue
+			[ -d "$gens_dir/$ft" ] && errs="$errs frozen-target-$ft-still-present"
+		done <"$ROOT/frozen-targets.txt"
+	fi
+	# EXACT pointer identity: the active pointer selects exactly the active gen.
+	local pointer_gen
+	pointer_gen=$(jq -r '.generationId' "$archive/$SIGNAL/$RANGE_DATE/active.json" 2>/dev/null)
+	[ "$pointer_gen" = "$active_gen" ] || errs="$errs pointer=$pointer_gen(need $active_gen)"
+	# Catalog exactly matches authoritative manifests (rebuild is idempotent; a
+	# second rebuild must not change the file → the catalog is canonical).
+	local catalog="$archive/$SIGNAL/catalog.jsonl"
+	if [ -f "$catalog" ]; then
+		local before after
+		before=$(shasum -a 256 "$catalog" | awk '{print $1}')
+		"$MAPLE" archive rebuild "$SIGNAL" --archive-dir "$archive" >/dev/null 2>&1
+		after=$(shasum -a 256 "$catalog" | awk '{print $1}')
+		[ "$before" = "$after" ] || errs="$errs catalog-not-canonical"
+	fi
+	# Completed journal: phase=complete, completedTargets === frozen count, frozen
+	# set unchanged. Look in completed/ for the GC op's journal specifically (there
+	# may be prior create-op journals too; pick the one with kind: gc).
+	local frozen_n completed_dir journal_phase journal_cursor
+	frozen_n=$(wc -l <"$ROOT/frozen-targets.txt" | tr -d ' ')
+	completed_dir="$archive/operations/completed"
+	journal_phase=""; journal_cursor=""
+	if [ -d "$completed_dir" ]; then
+		local j
+		j=$(find "$completed_dir" -name intent.json 2>/dev/null | while read -r f; do
+			[ "$(jq -r '.kind // empty' "$f" 2>/dev/null)" = "gc" ] && { echo "$f"; break; }
+		done)
+		if [ -n "$j" ]; then
+			journal_phase=$(jq -r '.phase // empty' "$j" 2>/dev/null)
+			journal_cursor=$(jq -r '.completedTargets // empty' "$j" 2>/dev/null)
+		fi
+	fi
+	[ "$journal_phase" = "complete" ] || errs="$errs journal-phase=$journal_phase"
+	[ "$journal_cursor" = "$frozen_n" ] || errs="$errs journal-cursor=$journal_cursor(need $frozen_n)"
+	# No tombstone retains a generation dir.
 	local tombstone_gen
 	tombstone_gen=$(find "$archive/operations" -type d -name tombstones 2>/dev/null -exec sh -c 'for e in "$1"/*; do [ -e "$e" ] && echo x && break; done' _ {} \; | wc -l | tr -d ' ')
 	[ "$tombstone_gen" = "0" ] || errs="$errs tombstone-with-generations"
@@ -165,7 +220,7 @@ verify_after_reconcile() {
 		echo "      VERIFY FAIL:$errs" >&2
 		return 1
 	fi
-	echo "      verified (1 active gen, queryable, no tombstones/active-op)"
+	echo "      verified (exact active/pointer/frozen/journal/catalog)"
 }
 
 run_gc_crash() {
@@ -208,10 +263,12 @@ echo "=== Archive interrupted-GC crash-recovery probe (libchdb=$(basename "$LIBC
 echo "    real SIGKILL mid-collection → real reconcile CLI → verify convergence + idempotence + create-after"
 echo
 
-# All 5 SIGKILL boundaries. Reconcile ALWAYS completes the frozen target set
-# (it never re-expands it), so every boundary converges to: only the active
+# Five DISTINCT SIGKILL boundaries. Reconcile ALWAYS completes the frozen target
+# set (it never re-expands it), so every boundary converges to: only the active
 # generation remains, no tombstones, no active op, idempotent, create-after OK.
-for b in after-intent-durable after-first-rename during-removal after-all-removals after-catalog; do
+# `nonfinal-progress` is the faithful boundary that exposes the premature-
+# complete defect (replaces the duplicate `during-removal` label).
+for b in after-intent-durable after-first-rename nonfinal-progress after-all-removals after-catalog; do
 	run_gc_crash "$b"
 done
 
