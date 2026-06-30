@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, parse, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
@@ -45,18 +45,22 @@ import {
 	advancePhase,
 	archiveCompletedOperation,
 	assertPointerConsistent,
+	buildCreatePlan,
+	buildGcPlan,
+	inspectActiveOperation,
 	migrateActiveIntentIfLegacy,
-	migrateV2CreateIntent,
 	operationDir,
 	ownedPathsFor,
-	parseArchiveOperationIntent,
+	persistGcProgress,
 	phaseAtLeast,
 	readActiveOperation,
 	resolveBaseActiveGenerationId,
 	writeInitialIntent,
-	type ArchiveOperationIntent,
 	type ArchiveOperationPhase,
+	type CreateAction,
 	type CreateOperationIntent,
+	type ReconciliationPlan,
+	type ReconcileTopology,
 } from "./journal"
 import { assertCatalogExact, rebuildCatalog } from "./listing"
 
@@ -1090,207 +1094,53 @@ const releaseOwnedPin = async (dataDir: string, intent: CreateOperationIntent): 
 	await releaseCheckpointPin(dataDir, intent.checkpointId, expectedPinPath, intent.pinPurpose)
 }
 
-/**
- * A read-only description of what reconciliation would do, shared by dry-run and
- * apply (blocker 3: dry-run is not a separate approximation). Inspects create,
- * GC, and legacy-v2 journals WITHOUT writing migrations or changing state —
- * legacy migration is an apply action, reported here, not performed.
- */
-export interface ReconciliationPlan {
-	readonly hasActiveOperation: boolean
-	readonly operationId: string | null
-	readonly kind: "create" | "gc" | null
-	readonly phase: string | null
-	readonly summary: string
-	readonly blockers: ReadonlyArray<string>
-	readonly needsMigration: boolean
-	readonly failClosed: string | null
-}
-
-const noActivePlan = (): ReconciliationPlan => ({
-	hasActiveOperation: false,
-	operationId: null,
-	kind: null,
-	phase: null,
-	summary: "no active operation",
-	blockers: [],
-	needsMigration: false,
-	failClosed: null,
-})
+// ---------------------------------------------------------------------------
+// Reconciliation as one locked protocol with concrete actions (Gate 3b r4).
+// The plan is the decision model; apply executes it verbatim. No parallel
+// reader, no opaque "reconcile-create"/"reconcile-gc" steps.
+// ---------------------------------------------------------------------------
 
 /**
- * Plan reconciliation WITHOUT mutating, using the STRICT journal reader so the
- * plan apply consumes is the same validated plan dry-run reports. Surfacing:
- * - no active op → { hasActiveOperation: false }
- * - a valid v2 intent → { needsMigration: true } (an ACTION, not a blocker)
- * - a valid v3 intent → the kind/phase to converge
- * - multiple ops / missing intent / unreadable / strict-invalid / unknown debris
- *   → { failClosed: <reason> } (apply throws; never success)
- *
- * Unknown active-dir entries and read errors are surfaced (fail closed), NEVER
- * filtered into absence — the strict reader's behavior is preserved.
+ * Observe the create-kind topology the plan builder needs (promoted? building
+ * present? phase). Read-only; called under the maintenance lock.
  */
-export const planArchiveReconciliation = (
-	archiveDir: string,
-	dataDir: string,
-	scratchRoot: string,
-): ReconciliationPlan => {
-	let ids: string[]
-	try {
-		ids = listActiveOperationIdsStrict(archiveDir)
-	} catch (error) {
-		// Debris or an unreadable active root: surface as a fail-closed plan
-		// (apply throws; dry-run reports it) — never filtered into absence.
-		const reason = error instanceof Error ? error.message : String(error)
-		return {
-			hasActiveOperation: true,
-			operationId: null,
-			kind: null,
-			phase: null,
-			summary: `active operations directory is unsafe: ${reason}`,
-			blockers: [reason],
-			needsMigration: false,
-			failClosed: reason,
-		}
-	}
-	if (ids.length === 0) return noActivePlan()
-	if (ids.length > 1) {
-		const reason = `${ids.length} active operations are ambiguous; manual inspection required`
-		return {
-			hasActiveOperation: true,
-			operationId: null,
-			kind: null,
-			phase: null,
-			summary: reason,
-			blockers: [reason],
-			needsMigration: false,
-			failClosed: reason,
-		}
-	}
-	const operationId = ids[0]!
-	const intentPathFile = join(operationDir(archiveDir, operationId), "intent.json")
-	if (!existsSync(intentPathFile)) {
-		return {
-			hasActiveOperation: true,
-			operationId,
-			kind: null,
-			phase: null,
-			summary: "active operation missing its intent journal",
-			blockers: ["missing intent.json"],
-			needsMigration: false,
-			failClosed: "active operation is missing its intent.json",
-		}
-	}
-	let raw: Record<string, unknown>
-	try {
-		raw = JSON.parse(readFileSync(intentPathFile, "utf8")) as Record<string, unknown>
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error)
-		return {
-			hasActiveOperation: true,
-			operationId,
-			kind: null,
-			phase: null,
-			summary: "active operation has an unreadable intent journal",
-			blockers: [`unreadable intent.json: ${reason}`],
-			needsMigration: false,
-			failClosed: `active operation intent.json is unreadable: ${reason}`,
-		}
-	}
-	if (raw.formatVersion === 2) {
-		// A valid v2 create intent: an ACTION (migrate + reconcile), not a blocker.
-		// Validate it migrates cleanly by attempting migrateV2CreateIntent (pure,
-		// non-mutating — it parses the lifted record and discards the result).
-		try {
-			migrateV2CreateIntent(archiveDir, raw, dataDir, scratchRoot)
-		} catch (error) {
-			const reason = error instanceof Error ? error.message : String(error)
-			return {
-				hasActiveOperation: true,
-				operationId,
-				kind: null,
-				phase: null,
-				summary: "active operation has a corrupt v2 intent",
-				blockers: [`corrupt v2 intent: ${reason}`],
-				needsMigration: false,
-				failClosed: `active v2 intent is corrupt and will not migrate: ${reason}`,
-			}
-		}
-		const phase = (raw.phase as string | undefined) ?? null
-		return {
-			hasActiveOperation: true,
-			operationId,
-			kind: "create",
-			phase,
-			summary: `converge legacy v2 create operation (phase ${phase ?? "unknown"}); migrate to v3 then reconcile`,
-			blockers: [],
-			needsMigration: true,
-			failClosed: null,
-		}
-	}
-	// v3 (or anything else): STRICT parse via the authoritative reader. A
-	// malformed/strict-invalid record is fail-closed here, not deferred to apply.
-	let intent: ArchiveOperationIntent
-	try {
-		intent = parseArchiveOperationIntent(archiveDir, raw, dataDir, scratchRoot)
-	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error)
-		return {
-			hasActiveOperation: true,
-			operationId,
-			kind: null,
-			phase: null,
-			summary: "active operation has a strict-invalid intent",
-			blockers: [`strict-invalid intent: ${reason}`],
-			needsMigration: false,
-			failClosed: `active operation intent is strict-invalid: ${reason}`,
-		}
-	}
+const observeCreateTopology = (archiveDir: string, intent: CreateOperationIntent): ReconcileTopology => {
+	const { finalGeneration, building } = ownedPathsFor(intent)
 	return {
-		hasActiveOperation: true,
-		operationId,
-		kind: intent.kind,
+		promoted: existsSync(finalGeneration),
+		buildingPresent: existsSync(building),
 		phase: intent.phase,
-		summary: `converge interrupted ${intent.kind} operation (phase ${intent.phase})`,
-		blockers: [],
-		needsMigration: false,
-		failClosed: null,
 	}
-}
-
-// Strict enumeration of active operation IDs, mirroring the journal reader's
-// fail-closed-on-debris behavior: unknown entries (files, symlinks, non-archive-
-// prefixed dirs) and read errors THROW so the planner surfaces them as fail-
-// closed. NEVER silently filter debris into "no active op" (blocker: the old
-// "Safe" variant did, bypassing the strict reader).
-const listActiveOperationIdsStrict = (archiveDir: string): string[] => {
-	const root = join(archiveRoot(archiveDir), "operations", "active")
-	if (!existsSync(root)) return []
-	const entries = readdirSync(root, { withFileTypes: true })
-	const ids: string[] = []
-	for (const entry of entries) {
-		// Any non-conforming entry (file, symlink, socket, non-prefixed dir) is
-		// unrecognized debris → fail closed (surface, preserve). Matches the strict
-		// journal reader; never filtered into absence.
-		if (!entry.isDirectory() || entry.isSymbolicLink() || !entry.name.startsWith("archive-")) {
-			throw new Error(`unrecognized active operation debris: ${join(root, entry.name)}`)
-		}
-		ids.push(entry.name.slice("archive-".length))
-	}
-	return ids
 }
 
 /**
- * The authoritative locked reconciliation entry point (blocker 2). The
- * `archive reconcile` CLI MUST call only this. Apply ALWAYS acquires the
- * maintenance lock FIRST, then re-reads/validates state under it — it never
- * returns success for an unsafe state without locking. Valid v2 migration is an
- * ACTION (migrate + reconcile), not a blocker. Malformed/ambiguous/unreadable/
- * unknown active state FAILS CLOSED (throws) — never reported as success.
+ * Build the reconciliation plan from the ONE authoritative inspector. Makes the
+ * branch decision ONCE; the returned plan is the immutable decision model.
+ */
+const planFromInspection = (archiveDir: string, dataDir: string, scratchRoot: string): ReconciliationPlan => {
+	const inspection = inspectActiveOperation(archiveDir, dataDir, scratchRoot)
+	if (inspection === null) return { kind: "no-op" }
+	if (inspection.kind === "fail-closed") return { kind: "fail-closed", reason: inspection.reason }
+	if (inspection.kind === "v2")
+		return buildCreatePlan(inspection, { promoted: false, buildingPresent: false, phase: "intent" })
+	if (inspection.kind === "gc") return buildGcPlan(inspection)
+	// create-v3
+	const topology = observeCreateTopology(archiveDir, inspection.intent as CreateOperationIntent)
+	return buildCreatePlan(inspection, topology)
+}
+
+/**
+ * The authoritative locked reconciliation entry point. The `archive reconcile`
+ * CLI calls only this. BOTH dry-run and apply acquire the maintenance lock before
+ * inspection and retain it through planning (dry-run performs NO mutation; its
+ * lock lifecycle is transient for a stable snapshot).
  *
- * `dryRun` returns the same strict plan WITHOUT mutating (no lock mutation, no
- * migration). A dry-run plan with `needsMigration` reports it as an action; a
- * dry-run plan with a `failClosed` reason reports the blocker without acting.
+ * - dry-run renders the immutable plan; a `fail-closed` plan is returned and the
+ *   CLI maps it to a NONZERO exit.
+ * - apply executes ONLY the planned actions (revalidating each precondition
+ *   immediately before its mutation). v2 migration runs only after path-safety +
+ *   identity are proven (it is the first action). The terminal postcondition is
+ *   captured WHILE STILL HOLDING THE LOCK (no post-unlock re-plan → no TOCTOU).
  */
 export const runArchiveReconciliation = async (
 	dataDir: string,
@@ -1298,31 +1148,217 @@ export const runArchiveReconciliation = async (
 	scratchRoot: string,
 	options: { readonly dryRun: boolean } = { dryRun: false },
 ): Promise<ReconciliationPlan> => {
-	if (options.dryRun) {
-		// Dry-run: the same strict, nonmutating planner. It may surface fail-closed
-		// reasons or migration actions, but never mutates (no lock, no migration).
-		return planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
-	}
-	// Apply: ALWAYS acquire the maintenance lock FIRST, before deciding whether to
-	// act. A live lock owner is surfaced as a throw (dead-owner reclaim still
-	// works inside withMaintenanceLock). Then re-read/validate under the lock.
-	const operationId = randomUUID()
-	await withMaintenanceLock(dataDir, operationId, async () => {
-		// Re-plan under the lock so the decision reflects locked, current state.
-		const plan = planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
-		// No active op under the lock: nothing to do (not an error).
-		if (!plan.hasActiveOperation) return
-		// A fail-closed plan must NEVER be silently completed. Throw so the CLI
-		// exits nonzero and state is preserved.
-		if (plan.failClosed !== null) {
-			throw new Error(`refusing to reconcile unsafe archive state: ${plan.failClosed}`)
+	const lockOperationId = randomUUID()
+	return withMaintenanceLock(dataDir, lockOperationId, async () => {
+		const plan = planFromInspection(archiveDir, dataDir, scratchRoot)
+		if (options.dryRun || plan.kind === "no-op") return plan
+		// Apply: a fail-closed plan must NEVER be silently completed. Throw so the
+		// CLI exits nonzero and state is preserved (reporting FAIL CLOSED is not
+		// equivalent to failing closed).
+		if (plan.kind === "fail-closed") {
+			throw new Error(`refusing to reconcile unsafe archive state: ${plan.reason}`)
 		}
-		// Valid v2 migration is an ACTION: migrate (under the lock), then reconcile.
-		if (plan.needsMigration) {
-			await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
-		}
-		await reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot)
+		// Execute the planned actions verbatim.
+		await executeReconciliationPlan(dataDir, archiveDir, scratchRoot, plan)
+		// Capture the terminal postcondition WHILE STILL HOLDING THE LOCK (the lock
+		// releases in withMaintenanceLock's finally after this body resolves). A
+		// concurrent op beginning at/after release cannot alter this captured result.
+		return planFromInspection(archiveDir, dataDir, scratchRoot)
 	})
-	// Return a fresh plan reflecting the post-apply state (no active op).
-	return planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
+}
+
+/**
+ * Execute a reconciliation plan's concrete actions verbatim, revalidating each
+ * action's precondition immediately before its mutation. The plan is the
+ * decision model; this does NOT re-branch. Existing helpers execute individual
+ * actions (quarantine, pin release, CAS pointer, catalog rebuild, tombstone
+ * collection, phase advance, archival).
+ */
+const executeReconciliationPlan = async (
+	dataDir: string,
+	archiveDir: string,
+	scratchRoot: string,
+	plan: Extract<ReconciliationPlan, { kind: "create" | "gc" }>,
+): Promise<void> => {
+	if (plan.kind === "gc") {
+		await executeGcPlan(dataDir, archiveDir, plan)
+		return
+	}
+	await executeCreatePlan(dataDir, archiveDir, scratchRoot, plan)
+}
+
+const executeCreatePlan = async (
+	dataDir: string,
+	archiveDir: string,
+	scratchRoot: string,
+	plan: Extract<ReconciliationPlan, { kind: "create" }>,
+): Promise<void> => {
+	// v2 plan: migrate first (all pre-write checks run inside the inspector before
+	// the rewrite), then re-inspect (now v3) and execute the v3 plan under the
+	// same lock. The v2→v3 transition is the one re-plan; it is not opaque
+	// rediscovery — migration changes the journal, so a fresh concrete plan is
+	// required and is built from the same inspector.
+	if (plan.actions.some((a) => a.type === "migrate-v2")) {
+		await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
+		const reInspection = inspectActiveOperation(archiveDir, dataDir, scratchRoot)
+		if (reInspection === null || reInspection.kind === "fail-closed" || reInspection.kind === "v2") {
+			throw new Error(`archive operation did not become a valid v3 intent after migration`)
+		}
+		if (reInspection.kind === "gc")
+			throw new Error(`archive operation changed kind to gc after migration`)
+		const topology = observeCreateTopology(archiveDir, reInspection.intent as CreateOperationIntent)
+		const v3Plan = buildCreatePlan(reInspection, topology)
+		if (v3Plan.kind !== "create") throw new Error(`post-migration plan was not a create plan`)
+		await executeCreatePlan(dataDir, archiveDir, scratchRoot, v3Plan)
+		return
+	}
+	// v3 plan: execute each concrete action via its named helper, revalidating the
+	// action's precondition immediately before its mutation. The plan is the
+	// decision model; this dispatches per-action without re-branching.
+	const active = readActiveOperation(archiveDir, dataDir, scratchRoot)
+	if (active === null) return // nothing to do (already reconciled)
+	const intent = active.intent as CreateOperationIntent
+	for (const action of plan.actions) {
+		await executeCreateAction(dataDir, archiveDir, intent, action)
+	}
+}
+
+// Per-action executor: each case calls the named helper for THAT action,
+// revalidating its precondition before mutation. No branch rediscovery — the
+// plan already decided which actions run in what order.
+const executeCreateAction = async (
+	dataDir: string,
+	archiveDir: string,
+	intent: CreateOperationIntent,
+	action: CreateAction,
+): Promise<void> => {
+	switch (action.type) {
+		case "migrate-v2":
+			// Handled by executeCreatePlan's v2 branch; unreachable here.
+			return
+		case "quarantine-building": {
+			const { building } = ownedPathsFor(intent)
+			if (existsSync(building)) {
+				// quarantineBuilding is the rename step from reconcilePrePublication.
+				await quarantineBuildingStep(archiveDir, intent, building)
+			}
+			return
+		}
+		case "verify-building-absent": {
+			const { building } = ownedPathsFor(intent)
+			if (existsSync(building)) throw new Error(`expected building absent but it exists: ${building}`)
+			return
+		}
+		case "remove-owned-scratch":
+			await removeOwnedScratch(intent.scratchRoot, intent.scratchSubdir)
+			return
+		case "verify-scratch-absent":
+			assertOwnedScratchAbsent(intent)
+			return
+		case "release-owned-pin":
+			await releaseOwnedPin(dataDir, intent)
+			return
+		case "verify-pin-absent":
+			assertOwnedPinAbsent(dataDir, intent)
+			return
+		case "verify-published-generation":
+			await verifyPublishedGeneration(archiveDir, intent)
+			return
+		case "select-pointer":
+			await selectActiveGeneration(
+				archiveDir,
+				intent.signal,
+				intent.rangeStart,
+				intent.generationId,
+				intent.baseActiveGenerationId,
+			)
+			return
+		case "verify-pointer-selects-intended": {
+			const current = resolveBaseActiveGenerationId(archiveDir, intent.signal, intent.rangeStart)
+			if (current !== intent.generationId)
+				throw new Error(`pointer does not select intended generation: ${current}`)
+			return
+		}
+		case "rebuild-catalog":
+			await rebuildCatalog(archiveDir, archiveSignal(intent.signal).name)
+			return
+		case "verify-catalog-exact":
+			assertCatalogExact(archiveDir, archiveSignal(intent.signal).name)
+			return
+		case "advance-phase":
+			await advancePhase(archiveDir, intent.operationId, action.to)
+			return
+		case "verify-terminal-invariants": {
+			const { finalGeneration, building } = ownedPathsFor(intent)
+			await verifyCompletedOperationInvariants(dataDir, archiveDir, intent, finalGeneration, building)
+			return
+		}
+		case "archive-operation":
+			await archiveCompletedOperation(archiveDir, intent.operationId)
+			return
+	}
+}
+
+// The quarantine step from reconcilePrePublication, factored so the per-action
+// executor can call it directly.
+const quarantineBuildingStep = async (
+	archiveDir: string,
+	intent: CreateOperationIntent,
+	building: string,
+): Promise<void> => {
+	const quarantineBuilding = join(archiveRoot(archiveDir), "quarantine", `building-${intent.operationId}`)
+	await ensurePrivateDirectory(join(archiveRoot(archiveDir), "quarantine"), archiveRoot(archiveDir))
+	if (existsSync(quarantineBuilding)) {
+		throw new Error(
+			`archive operation has both building and quarantine state; refusing to retire authority: ${quarantineBuilding}`,
+		)
+	}
+	await durableRename(building, quarantineBuilding)
+	await syncDirectory(buildingRoot(archiveDir))
+}
+
+const executeGcPlan = async (
+	_dataDir: string,
+	archiveDir: string,
+	plan: Extract<ReconciliationPlan, { kind: "gc" }>,
+): Promise<void> => {
+	// Re-read the authoritative GC intent under the lock; execute each concrete
+	// action via its named helper. The plan is the decision model.
+	const { collectOneTargetForReconcile, verifyCompletedGcInvariants } = await import("./gc")
+	const active = readActiveOperation(archiveDir)
+	if (active === null) return
+	if (active.intent.kind !== "gc") throw new Error(`expected gc intent, got ${active.intent.kind}`)
+	const intent = active.intent
+	let cursor = intent.completedTargets
+	for (const action of plan.actions) {
+		switch (action.type) {
+			case "collect-target": {
+				const target = intent.targets[action.index]!
+				await collectOneTargetForReconcile(archiveDir, intent.operationId, target)
+				cursor = action.index + 1
+				break
+			}
+			case "persist-cursor":
+				await persistGcProgress(archiveDir, intent.operationId, action.completedTargets, action.to)
+				cursor = action.completedTargets
+				break
+			case "rebuild-catalog":
+				await rebuildCatalog(archiveDir, archiveSignal(intent.targets[0]?.signal ?? "traces").name)
+				break
+			case "verify-catalog-exact":
+				assertCatalogExact(archiveDir, archiveSignal(intent.targets[0]?.signal ?? "traces").name)
+				break
+			case "verify-terminal-invariants": {
+				const retired = readActiveOperation(archiveDir)
+				if (retired === null || retired.intent.kind !== "gc")
+					throw new Error("gc operation vanished before terminal verify")
+				await verifyCompletedGcInvariants(archiveDir, retired.intent)
+				break
+			}
+			case "archive-operation":
+				await archiveCompletedOperation(archiveDir, intent.operationId)
+				break
+		}
+	}
+	void cursor
 }

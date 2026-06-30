@@ -593,6 +593,14 @@ const removeTombstone = async (tomb: string): Promise<void> => {
 }
 
 /**
+ * Exported alias of {@link collectOneTarget} for the action-driven reconcile
+ * executor (Gate 3b r4): the plan decides WHICH targets to collect; this helper
+ * executes ONE target's topology switch (rename/remove/verify) with its source +
+ * pointer precondition revalidation.
+ */
+export const collectOneTargetForReconcile = collectOneTarget
+
+/**
  * Reconcile an interrupted GC operation. Drives the FROZEN target set to
  * completion idempotently — NEVER re-expands the set. A pointer change or source
  * divergence at any stage stops collection and preserves remaining state.

@@ -123,7 +123,7 @@ describe("archive operation journal", () => {
 			await writeInitialIntent({ ...baseIntent({ operationId: randomUUID() }), archiveDir })
 			await writeInitialIntent({ ...baseIntent({ operationId: randomUUID() }), archiveDir })
 			// Two active operation dirs -> ambiguous -> fail closed.
-			await rejects(async () => readActiveOperation(archiveDir), /multiple active/)
+			await rejects(async () => readActiveOperation(archiveDir), /ambiguous|multiple active/)
 		})
 	})
 

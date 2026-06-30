@@ -524,23 +524,27 @@ export const migrateActiveIntentIfLegacy = async (
 	expectedDataDir?: string,
 	expectedScratchRoot?: string,
 ): Promise<boolean> => {
-	const ids = listActiveOperationIds(archiveDir)
-	if (ids.length !== 1) return false
-	const operationId = ids[0]!
-	const path = intentPath(archiveDir, operationId)
-	if (!existsSync(path)) return false
-	let raw: unknown
-	try {
-		raw = JSON.parse(readFileSync(path, "utf8")) as unknown
-	} catch {
-		return false
+	// Consume the ONE authoritative inspector. All pre-write checks — no-symlink,
+	// real-file, directory/record identity binding, clean v2 lift — run INSIDE the
+	// inspector BEFORE this function rewrites anything. A symlinked intent, a
+	// mismatched ID, or a corrupt v2 record is detected (and surfaced fail-closed)
+	// before any durableJson write. Never reread through a weaker path.
+	const inspection = inspectActiveOperation(archiveDir, expectedDataDir, expectedScratchRoot)
+	if (inspection === null) return false
+	if (inspection.kind === "fail-closed") {
+		// Unsafe state: surface as an error (reconciliation must fail closed, not
+		// silently skip migration). The caller is inside the maintenance lock and
+		// will propagate this as a nonzero failure.
+		throw new Error(`refusing to migrate unsafe active operation: ${inspection.reason}`)
 	}
-	if (!isRecord(raw) || raw.formatVersion !== 2) return false
-	// Lift + validate. A corrupt v2 record throws here → reconcile fails closed.
-	const lifted = migrateV2CreateIntent(archiveDir, raw, expectedDataDir, expectedScratchRoot)
+	if (inspection.kind !== "v2") return false // v3 (or gc): nothing to migrate.
+	const path = intentPath(archiveDir, inspection.operationId)
+	// Re-derive the lifted record (the inspector validated it already; recompute
+	// rather than stash, to keep the inspector read-only).
+	const lifted = migrateV2CreateIntent(archiveDir, inspection.raw, expectedDataDir, expectedScratchRoot)
 	const { durableJson } = await import("../durable-files")
 	await durableJson(path, lifted)
-	await syncDirectory(operationDir(archiveDir, operationId))
+	await syncDirectory(operationDir(archiveDir, inspection.operationId))
 	return true
 }
 
@@ -759,29 +763,367 @@ export const readActiveOperation = (
 	expectedDataDir?: string,
 	expectedScratchRoot?: string,
 ): ActiveOperation | null => {
-	const ids = listActiveOperationIds(archiveDir)
+	const inspected = inspectActiveOperation(archiveDir, expectedDataDir, expectedScratchRoot)
+	if (inspected === null) return null
+	if (inspected.kind === "fail-closed") {
+		throw new Error(inspected.reason)
+	}
+	// inspectActiveOperation returns a v3 snapshot only (it fail-closes on v2,
+	// since v2 must be migrated before it can be a v3 ActiveOperation).
+	if (inspected.formatVersion !== 3) {
+		throw new Error(`unexpected inspection format version: ${inspected.formatVersion}`)
+	}
+	return { operationId: inspected.operationId, dir: inspected.dir, intent: inspected.intent }
+}
+
+/**
+ * A V2 active-operation snapshot: the record has been read through the guarded
+ * (no-symlink, real-file) path and its `operationId` bound to its directory, and
+ * it has been validated to lift cleanly to v3 — but it has NOT been rewritten.
+ * Migration consumes this and performs the single durable rewrite.
+ */
+export interface V2ActiveOperationSnapshot {
+	readonly kind: "v2"
+	readonly operationId: string
+	readonly dir: string
+	readonly formatVersion: 2
+	/** The raw v2 record (already validated to lift cleanly). */
+	readonly raw: Record<string, unknown>
+}
+
+/**
+ * A V3 active-operation snapshot: the strict v3 reader has accepted it and bound
+ * its `operationId` to its directory.
+ */
+export interface V3ActiveOperationSnapshot {
+	readonly kind: "create-v3" | "gc"
+	readonly operationId: string
+	readonly dir: string
+	readonly formatVersion: 3
+	readonly intent: ArchiveOperationIntent
+}
+
+/**
+ * A fail-closed inspection: the active state is unsafe (multiple ops, a
+ * missing/unreadable/strict-invalid intent, unknown debris, an unreadable root,
+ * or a directory/record identity mismatch). Reconciliation must surface this and
+ * preserve state — never act.
+ */
+export interface FailClosedInspection {
+	readonly kind: "fail-closed"
+	readonly reason: string
+}
+
+export type ActiveOperationInspection =
+	| null
+	| V2ActiveOperationSnapshot
+	| V3ActiveOperationSnapshot
+	| FailClosedInspection
+
+/**
+ * The ONE authoritative, symlink-safe V2/V3 inspector. Both dry-run and apply
+ * consume this; migration consumes it; nothing rereads through a weaker path.
+ *
+ * Reuses `listActiveOperationIds` (active-root containment + no-symlink + per-
+ * entry debris/prefix/`validateArchiveId`) and reads `intent.json` through the
+ * SAME guarded path as `readIntent` (`assertNoSymlinkSync` + `assertRealFileSync`
+ * before `readFileSync`). Binds the directory ID to the record's `operationId`.
+ *
+ * Returns:
+ * - `null` — no active operation;
+ * - `{ kind: "fail-closed", reason }` — unsafe active state (multiple ops, a
+ *   missing/unreadable/strict-invalid intent, unknown debris, an unreadable root,
+ *   or a directory/record identity mismatch);
+ * - `{ kind: "v2", ... }` — a valid v2 record (read safely + bound), validated
+ *   to lift cleanly, NOT rewritten (migration does the rewrite);
+ * - `{ kind: "create-v3" | "gc", ... }` — a valid v3 record, strictly parsed + bound.
+ */
+export const inspectActiveOperation = (
+	archiveDir: string,
+	expectedDataDir?: string,
+	expectedScratchRoot?: string,
+): ActiveOperationInspection => {
+	let ids: string[]
+	try {
+		ids = listActiveOperationIds(archiveDir)
+	} catch (error) {
+		// The authoritative enumerator throws on debris / unreadable root (rather
+		// than filtering to absence). Surface as fail-closed.
+		const reason = error instanceof Error ? error.message : String(error)
+		return { kind: "fail-closed", reason: `active operations directory is unsafe: ${reason}` }
+	}
 	if (ids.length === 0) return null
 	if (ids.length > 1) {
-		throw new Error(
-			`multiple active archive operations require operator inspection: ${ids
-				.map((id) => operationDir(archiveDir, id))
-				.join(", ")}`,
-		)
+		return {
+			kind: "fail-closed",
+			reason: `${ids.length} active operations are ambiguous; manual inspection required`,
+		}
 	}
 	const operationId = ids[0]!
 	const dir = operationDir(archiveDir, operationId)
-	const intentPathFile = intentPath(archiveDir, operationId)
-	if (!existsSync(intentPathFile)) {
-		throw new Error(`active operation missing its intent journal: ${dir}`)
+	const path = intentPath(archiveDir, operationId)
+	if (!existsSync(path)) {
+		return { kind: "fail-closed", reason: `active operation is missing its intent.json: ${dir}` }
 	}
-	const intent = readIntent(archiveDir, operationId, expectedDataDir, expectedScratchRoot)
-	// The intent's operationId must match its directory (identity binding).
-	if (intent.operationId !== operationId) {
-		throw new Error(
-			`archive operation identity mismatch (directory: ${operationId}; intent: ${intent.operationId})`,
+	// Read through the SAME guarded path as readIntent — no bare readFileSync.
+	// These assertions throw on a symlinked intent or a non-regular file.
+	let raw: unknown
+	try {
+		assertNoSymlinkSync(archiveDir, path, "archive operation intent")
+		assertRealFileSync(path, "archive operation intent")
+		raw = JSON.parse(readFileSync(path, "utf8")) as unknown
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error)
+		return { kind: "fail-closed", reason: `active operation intent is unreadable/unsafe: ${reason}` }
+	}
+	if (!isRecord(raw)) {
+		return { kind: "fail-closed", reason: `active operation intent is not a record: ${dir}` }
+	}
+	if (raw.formatVersion === 2) {
+		// V2: validate it lifts cleanly AND bind its operationId to the directory.
+		// migrateV2CreateIntent parses the lifted record (internal-field validation);
+		// it does NOT know the directory name, so bind it here.
+		let lifted: Record<string, unknown>
+		try {
+			lifted = migrateV2CreateIntent(archiveDir, raw, expectedDataDir, expectedScratchRoot)
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error)
+			return {
+				kind: "fail-closed",
+				reason: `active v2 intent is corrupt and will not migrate: ${reason}`,
+			}
+		}
+		// Bind the directory ID to the record's operationId (the check the old
+		// migration skipped). A v2 record for operation B inside directory A is
+		// fail-closed — never rewritten.
+		const recordedOperationId = lifted.operationId
+		if (typeof recordedOperationId !== "string" || recordedOperationId !== operationId) {
+			return {
+				kind: "fail-closed",
+				reason: `archive operation identity mismatch (directory: ${operationId}; intent: ${String(recordedOperationId)})`,
+			}
+		}
+		return { kind: "v2", operationId, dir, formatVersion: 2, raw }
+	}
+	if (raw.formatVersion === ARCHIVE_OPERATION_FORMAT_VERSION) {
+		// V3: strict parse + directory/record identity binding.
+		let intent: ArchiveOperationIntent
+		try {
+			intent = parseArchiveOperationIntent(archiveDir, raw, expectedDataDir, expectedScratchRoot)
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error)
+			return { kind: "fail-closed", reason: `active operation intent is strict-invalid: ${reason}` }
+		}
+		if (intent.operationId !== operationId) {
+			return {
+				kind: "fail-closed",
+				reason: `archive operation identity mismatch (directory: ${operationId}; intent: ${intent.operationId})`,
+			}
+		}
+		return {
+			kind: intent.kind === "create" ? "create-v3" : "gc",
+			operationId,
+			dir,
+			formatVersion: 3,
+			intent,
+		}
+	}
+	return {
+		kind: "fail-closed",
+		reason: `active operation intent has unsupported format version: ${String(raw.formatVersion)}`,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation plan: a discriminated union of CONCRETE ordered actions.
+// The plan is the decision model apply executes verbatim; it never rediscovers
+// the branch. Each action names an exact operation with its precondition; apply
+// revalidates the precondition immediately before the mutation (Gate 3b r4).
+// ---------------------------------------------------------------------------
+
+/** A SHA-256 of the intent record bytes, binding the plan to the exact journal observed at plan time. */
+export const journalDigest = (raw: Record<string, unknown>): string => {
+	const c = require("node:crypto") as typeof import("node:crypto")
+	return c.createHash("sha256").update(JSON.stringify(raw)).digest("hex")
+}
+
+/** Concrete create-reconciliation actions, in execution order. */
+export type CreateAction =
+	| { readonly type: "migrate-v2" }
+	| { readonly type: "quarantine-building" }
+	| { readonly type: "verify-building-absent" }
+	| { readonly type: "remove-owned-scratch" }
+	| { readonly type: "verify-scratch-absent" }
+	| { readonly type: "release-owned-pin" }
+	| { readonly type: "verify-pin-absent" }
+	| { readonly type: "verify-published-generation" }
+	| { readonly type: "select-pointer" }
+	| { readonly type: "verify-pointer-selects-intended" }
+	| { readonly type: "rebuild-catalog" }
+	| { readonly type: "verify-catalog-exact" }
+	| { readonly type: "advance-phase"; readonly to: ArchiveOperationPhase }
+	| { readonly type: "verify-terminal-invariants" }
+	| { readonly type: "archive-operation" }
+
+/** Concrete GC-reconciliation actions, in execution order. */
+export type GcAction =
+	| { readonly type: "collect-target"; readonly index: number }
+	| {
+			readonly type: "persist-cursor"
+			readonly completedTargets: number
+			readonly to: ArchiveOperationPhase
+	  }
+	| { readonly type: "rebuild-catalog" }
+	| { readonly type: "verify-catalog-exact" }
+	| { readonly type: "verify-terminal-invariants" }
+	| { readonly type: "archive-operation" }
+
+export type ReconciliationPlan =
+	| { readonly kind: "no-op" }
+	| { readonly kind: "fail-closed"; readonly reason: string }
+	| {
+			readonly kind: "create"
+			readonly operationId: string
+			readonly journalDigest: string
+			readonly actions: ReadonlyArray<CreateAction>
+	  }
+	| {
+			readonly kind: "gc"
+			readonly operationId: string
+			readonly journalDigest: string
+			readonly actions: ReadonlyArray<GcAction>
+	  }
+
+/** A topology observer the plan builder uses to decide the branch ONCE. */
+export interface ReconcileTopology {
+	readonly promoted: boolean
+	readonly buildingPresent: boolean
+	readonly phase: ArchiveOperationPhase
+}
+
+/**
+ * Build the immutable reconciliation plan from an inspection + the observed
+ * create-kind topology. Makes the branch decision ONCE (pre-publication-abort vs
+ * post-promotion-complete vs already-complete-verify) and emits the exact ordered
+ * concrete actions; apply executes them without re-branching.
+ */
+export const buildCreatePlan = (
+	inspection: V2ActiveOperationSnapshot | V3ActiveOperationSnapshot,
+	topology: ReconcileTopology,
+): ReconciliationPlan => {
+	// For a v2 snapshot, the only known-safe action is migrate then reconcile;
+	// the v2 phase is always "intent" (the only phase a v2 record can hold), so
+	// after migration the v3 reconciler will observe the post-migration topology.
+	// The plan therefore emits migrate-v2 as the first action, then defers the
+	// concrete post-migration steps to a re-plan under the lock at apply time
+	// (the topology can only be observed AFTER migration rewrites the record).
+	if (inspection.kind === "v2") {
+		return {
+			kind: "create",
+			operationId: inspection.operationId,
+			journalDigest: journalDigest(inspection.raw),
+			actions: [{ type: "migrate-v2" }, { type: "advance-phase", to: "intent" }],
+		}
+	}
+	const intent = inspection.intent as CreateOperationIntent
+	const actions: CreateAction[] = []
+	const phase = topology.phase
+	// Already complete: verify terminal invariants, then archive.
+	if (phaseAtLeast(phase, "complete")) {
+		actions.push({ type: "verify-terminal-invariants" }, { type: "archive-operation" })
+		return {
+			kind: "create",
+			operationId: inspection.operationId,
+			journalDigest: journalDigestOfIntent(intent),
+			actions,
+		}
+	}
+	// Already aborted in active/ is fail-closed (should have been quarantined).
+	if (phaseAtLeast(phase, "aborted")) {
+		return {
+			kind: "fail-closed",
+			reason: `aborted archive operation still in active dir: ${inspection.dir}`,
+		}
+	}
+	if (!topology.promoted) {
+		// Pre-publication: quarantine building (if present), remove scratch, release pin, abort, archive.
+		if (topology.buildingPresent) actions.push({ type: "quarantine-building" })
+		else actions.push({ type: "verify-building-absent" })
+		actions.push(
+			{ type: "remove-owned-scratch" },
+			{ type: "release-owned-pin" },
+			{ type: "advance-phase", to: "aborted" },
+			{ type: "archive-operation" },
+		)
+		return {
+			kind: "create",
+			operationId: inspection.operationId,
+			journalDigest: journalDigestOfIntent(intent),
+			actions,
+		}
+	}
+	// Post-promotion: verify published, finish pointer/catalog/pin/scratch, complete, archive.
+	actions.push({ type: "verify-published-generation" })
+	if (!phaseAtLeast(phase, "pointer-complete"))
+		actions.push({ type: "select-pointer" }, { type: "advance-phase", to: "pointer-complete" })
+	else actions.push({ type: "verify-pointer-selects-intended" })
+	actions.push({ type: "rebuild-catalog" }, { type: "verify-catalog-exact" })
+	if (!phaseAtLeast(phase, "catalog-complete"))
+		actions.push({ type: "advance-phase", to: "catalog-complete" })
+	if (!phaseAtLeast(phase, "pin-released"))
+		actions.push({ type: "release-owned-pin" }, { type: "advance-phase", to: "pin-released" })
+	else actions.push({ type: "verify-pin-absent" })
+	if (!phaseAtLeast(phase, "scratch-removed"))
+		actions.push({ type: "remove-owned-scratch" }, { type: "advance-phase", to: "scratch-removed" })
+	else actions.push({ type: "verify-scratch-absent" })
+	actions.push(
+		{ type: "advance-phase", to: "complete" },
+		{ type: "verify-terminal-invariants" },
+		{ type: "archive-operation" },
+	)
+	return {
+		kind: "create",
+		operationId: inspection.operationId,
+		journalDigest: journalDigestOfIntent(intent),
+		actions,
+	}
+}
+
+/**
+ * Build the GC plan: collect each remaining target (cursor..end), persist cursor
+ * per target (nonterminal gc-collecting), rebuild + verify affected catalogs,
+ * persist complete, verify terminal, archive.
+ */
+export const buildGcPlan = (inspection: V3ActiveOperationSnapshot): ReconciliationPlan => {
+	const intent = inspection.intent as GcOperationIntent
+	const actions: GcAction[] = []
+	for (let i = intent.completedTargets; i < intent.targets.length; i++) {
+		actions.push(
+			{ type: "collect-target", index: i },
+			{ type: "persist-cursor", completedTargets: i + 1, to: "gc-collecting" },
 		)
 	}
-	return { operationId, dir, intent }
+	// Affected-signal catalog rebuild + verify.
+	const signals = [...new Set(intent.targets.map((t) => t.signal))]
+	for (const _signal of signals) {
+		actions.push({ type: "rebuild-catalog" }, { type: "verify-catalog-exact" })
+	}
+	actions.push(
+		{ type: "persist-cursor", completedTargets: intent.targets.length, to: "complete" },
+		{ type: "verify-terminal-invariants" },
+		{ type: "archive-operation" },
+	)
+	return {
+		kind: "gc",
+		operationId: inspection.operationId,
+		journalDigest: journalDigestOfIntent(intent),
+		actions,
+	}
+}
+
+const journalDigestOfIntent = (intent: ArchiveOperationIntent): string => {
+	const c = require("node:crypto") as typeof import("node:crypto")
+	return c.createHash("sha256").update(JSON.stringify(intent)).digest("hex")
 }
 
 /**

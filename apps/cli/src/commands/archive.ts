@@ -307,40 +307,38 @@ export const archiveReconcile = Command.make("reconcile", {
 				catch: (error) =>
 					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
 			})
+			const renderPlan = (p: typeof plan): string => {
+				if (p.kind === "no-op") return `${green("✓")} reconcile: no active operation\n`
+				if (p.kind === "fail-closed") return `${red("!")} FAIL CLOSED: ${p.reason}\n`
+				const actionLines = ("actions" in p ? p.actions : [])
+					.map((a) => `  ${dim("action")}    ${"to" in a ? `${a.type} → ${a.to}` : a.type}`)
+					.join("\n")
+				return `${plan.kind === "fail-closed" ? red("!") : green("✓")} reconcile ${p.kind}: ${p.operationId}\n${actionLines}${actionLines ? "\n" : ""}`
+			}
 			if (a.dryRun) {
+				// dry-run renders the immutable plan. A fail-closed plan is printed AND
+				// surfaces as a nonzero ArchiveError (blocker 3: reporting FAIL CLOSED
+				// is not equivalent to failing closed).
+				if (plan.kind === "fail-closed") {
+					return yield* new ArchiveError({ message: renderPlan(plan).trim() })
+				}
 				yield* Effect.sync(() =>
 					process.stdout.write(
-						`${amber("◌")} dry-run reconcile: ${plan.summary}\n` +
-							(plan.operationId ? `  ${dim("operation")} ${plan.operationId}\n` : "") +
-							(plan.kind ? `  ${dim("kind")}       ${plan.kind}\n` : "") +
-							(plan.phase ? `  ${dim("phase")}      ${plan.phase}\n` : "") +
-							(plan.needsMigration
-								? `  ${dim("action")}    migrate legacy v2 intent to v3 then reconcile\n`
-								: "") +
-							`  ${dim("archive")}   ${prettyPath(archiveDir)}\n` +
-							`  ${dim("note")}     no archive state is modified\n` +
-							(plan.failClosed
-								? `  ${red("!")} FAIL CLOSED: ${plan.failClosed}\n`
-								: plan.blockers.length > 0
-									? plan.blockers.map((b) => `  ${dim("blocker")}   ${b}`).join("\n") + "\n"
-									: ""),
+						`${amber("◌")} dry-run reconcile\n${renderPlan(plan)}  ${dim("archive")}   ${prettyPath(archiveDir)}\n  ${dim("note")}     no archive state is modified\n`,
 					),
 				)
 				return
+			}
+			// apply: a fail-closed result is a nonzero error (state preserved).
+			if (plan.kind === "fail-closed") {
+				return yield* new ArchiveError({ message: renderPlan(plan).trim() })
 			}
 			yield* Effect.sync(() =>
 				process.stderr.write(
 					`${amber("⟳")} reconciling interrupted archive operation in ${prettyPath(archiveDir)}\n`,
 				),
 			)
-			yield* Effect.sync(() =>
-				process.stdout.write(
-					`${green("✓")} reconcile complete: ${plan.summary}\n` +
-						(plan.blockers.length > 0
-							? `${red("!")} ${plan.blockers.length} blocker(s): ${plan.blockers.join("; ")}\n`
-							: ""),
-				),
-			)
+			yield* Effect.sync(() => process.stdout.write(renderPlan(plan)))
 		}),
 	),
 )
