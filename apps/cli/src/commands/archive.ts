@@ -5,13 +5,14 @@ import * as Argument from "effect/unstable/cli/Argument"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { existsSync, readdirSync, statSync } from "node:fs"
-import { createArchiveGeneration } from "../server/archives/generation"
+import { createArchiveGeneration, reconcileArchiveGeneration } from "../server/archives/generation"
 import { listActiveGenerations, activeParquetPaths, rebuildCatalog } from "../server/archives/listing"
+import { runArchiveGc } from "../server/archives/gc"
 import { resolveArchiveTuning, type ArchiveTuningOverrides } from "../server/archives/config"
 import { ARCHIVE_SIGNALS, isArchiveSignalName, type ArchiveSignalName } from "../server/archives/signals"
 import { validateRangeDate } from "../server/archives/paths"
 import { calibrate, recommendationToTuning, writeCalibrationConfig } from "../server/archives/calibrate"
-import { amber, bold, dim, green } from "../lib/style"
+import { amber, bold, dim, green, red } from "../lib/style"
 
 /** An archive command failure. The message is shown to the user and the process
  *  exits non-zero, mirroring `ServerError` and `CheckpointError`. */
@@ -50,6 +51,18 @@ const checkpointIdFlag = Flag.optional(
 	Flag.string("checkpoint-id").pipe(
 		Flag.withDescription("Archive from one immutable checkpoint ID instead of the selected current"),
 	),
+)
+
+const dryRunFlag = Flag.boolean("dry-run").pipe(
+	Flag.withDescription("Report the exact planned actions without modifying any archive state"),
+	Flag.withDefault(false),
+)
+
+const keepFlag = Flag.integer("keep").pipe(
+	Flag.withDescription(
+		"Newest superseded generations to retain per signal/range (default 1; 0 reclaims all superseded)",
+	),
+	Flag.withDefault(1),
 )
 
 const memoryBudgetFlag = Flag.integer("memory-budget").pipe(
@@ -273,6 +286,108 @@ export const archiveRebuild = Command.make("rebuild", {
 	),
 )
 
+export const archiveReconcile = Command.make("reconcile", {
+	dataDir: dataDirFlag,
+	archiveDir: archiveDirFlag,
+	scratchRoot: scratchRootFlag,
+	dryRun: dryRunFlag,
+}).pipe(
+	Command.withDescription(
+		"Reconcile an interrupted archive create or gc operation to its intended state without a fresh export",
+	),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
+			if (a.dryRun) {
+				yield* Effect.sync(() =>
+					process.stdout.write(
+						`${amber("◌")} dry-run reconcile: would converge an interrupted create or gc operation\n` +
+							`  ${dim("archive")}  ${prettyPath(archiveDir)}\n` +
+							`  ${dim("note")}    no archive state is modified\n`,
+					),
+				)
+				return
+			}
+			yield* Effect.sync(() =>
+				process.stderr.write(
+					`${amber("⟳")} reconciling interrupted archive operation in ${prettyPath(archiveDir)}\n`,
+				),
+			)
+			yield* Effect.tryPromise({
+				try: () => reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			yield* Effect.sync(() =>
+				process.stdout.write(`${green("✓")} reconcile complete (no active operation remains)\n`),
+			)
+		}),
+	),
+)
+
+export const archiveGc = Command.make("gc", {
+	dataDir: dataDirFlag,
+	archiveDir: archiveDirFlag,
+	scratchRoot: scratchRootFlag,
+	keep: keepFlag,
+	dryRun: dryRunFlag,
+}).pipe(
+	Command.withDescription(
+		"Reclaim superseded archive generations, retaining the newest N per signal/range (default 1)",
+	),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			if (!Number.isSafeInteger(a.keep) || a.keep < 0) {
+				return yield* new ArchiveError({
+					message: `invalid --keep value: ${a.keep} (must be a non-negative integer)`,
+				})
+			}
+			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
+			const result = yield* Effect.tryPromise({
+				try: () => runArchiveGc({ dataDir, archiveDir, scratchRoot, keep: a.keep, dryRun: a.dryRun }),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			const { plan } = result
+			if (a.dryRun) {
+				yield* Effect.sync(() =>
+					process.stdout.write(
+						`${amber("◌")} dry-run gc: would delete ${plan.deleteSet.length} generation(s), ` +
+							`reclaim ${formatBytes(plan.reclaimableBytes)}\n` +
+							`  ${dim("keep")}        ${plan.keep} newest superseded per range\n` +
+							(plan.deleteSet.length === 0
+								? `  ${dim("note")}      nothing to reclaim\n`
+								: plan.deleteSet
+										.map(
+											(c) =>
+												`  ${dim("delete")}    ${c.signal}/${c.rangeStart}/${c.generationId} (${formatBytes(c.bytes)})`,
+										)
+										.join("\n") + "\n") +
+							(plan.excludedSignals.length + plan.excludedRanges.length === 0
+								? ""
+								: `${red("!")} ${plan.excludedSignals.length + plan.excludedRanges.length} range(s)/signal(s) excluded (over-retained)\n`),
+					),
+				)
+				return
+			}
+			yield* Effect.sync(() =>
+				process.stdout.write(
+					`${green("✓")} gc complete: deleted ${result.deleted.length} generation(s), ` +
+						`reclaimed ${formatBytes(plan.reclaimableBytes)}\n` +
+						`  ${dim("kept")}        ${plan.keep} newest superseded per range\n`,
+				),
+			)
+		}),
+	),
+)
+
+const formatBytes = (bytes: number): string => {
+	if (bytes < 1024) return `${bytes} B`
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`
+	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
+}
+
 export const archiveCalibrate = Command.make("calibrate", {
 	dataDir: dataDirFlag,
 	archiveDir: archiveDirFlag,
@@ -430,6 +545,8 @@ export const archive = Command.make("archive").pipe(
 		archiveCreate,
 		archiveList,
 		archiveRebuild,
+		archiveReconcile,
+		archiveGc,
 		archiveCalibrate,
 		archiveCalibrateRun,
 	]),
