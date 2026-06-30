@@ -200,14 +200,14 @@ Pin absence is success ONLY at a phase where release was already authorized.
 
 ### 9a. Reconciliation labels are claims, not evidence
 
-| Hostile topology                                                            | Required oracle                                                                 |
-| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| free-space preflight fails                                                   | no new active intent exists                                                      |
-| configured scratch root has a symlinked ancestor                             | fail closed; outside sentinel unchanged; active journal retained                 |
-| partial restored store contains an internal table symlink                    | unlink owned tree without following link; outside target survives; evidence kept |
-| pointer-complete/catalog-complete label but pointer or catalog is missing    | repair from recorded CAS topology and authoritative manifests                    |
-| pointer selects neither recorded base nor intended generation                | fail closed without clobbering pointer; active journal retained                  |
-| catalog-complete label but catalog is tampered, duplicated, or truncated     | rebuild exact canonical catalog from all authoritative manifests                 |
+| Hostile topology                                                              | Required oracle                                                                  |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| free-space preflight fails                                                    | no new active intent exists                                                      |
+| configured scratch root has a symlinked ancestor                              | fail closed; outside sentinel unchanged; active journal retained                 |
+| partial restored store contains an internal table symlink                     | unlink owned tree without following link; outside target survives; evidence kept |
+| pointer-complete/catalog-complete label but pointer or catalog is missing     | repair from recorded CAS topology and authoritative manifests                    |
+| pointer selects neither recorded base nor intended generation                 | fail closed without clobbering pointer; active journal retained                  |
+| catalog-complete label but catalog is tampered, duplicated, or truncated      | rebuild exact canonical catalog from all authoritative manifests                 |
 | complete label with manifest/shard/pointer/catalog/pin/scratch/building drift | fail closed without repair or journal retirement                                 |
 
 The `complete` phase is uniquely non-repairing: before its journal can move out
