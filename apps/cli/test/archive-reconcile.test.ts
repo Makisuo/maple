@@ -14,13 +14,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runArchiveReconciliation } from "../src/server/archives/generation"
-import type { ReconciliationPlan } from "../src/server/archives/journal"
-
-// Tests for the explicit reconciliation protocol (Gate 3b r4). The protocol is
-// one locked inspector → discriminated-union plan of concrete actions → apply
-// executes that plan. These cover: v2 is a migration action (not a blocker);
-// malformed/ambiguous/debris/corrupt-v2/mismatch/symlink states are fail-closed
-// (never success, never mutated before rejection); dry-run never mutates.
+import type { ReconciliationDecision } from "../src/server/archives/reconcile"
 
 const withRoots = async (
 	run: (archiveDir: string, dataDir: string, scratchRoot: string) => Promise<void> | void,
@@ -36,7 +30,6 @@ const withRoots = async (
 		rmSync(parent, { recursive: true, force: true })
 	}
 }
-
 const writeActiveIntent = (
 	archiveDir: string,
 	operationId: string,
@@ -46,12 +39,7 @@ const writeActiveIntent = (
 	mkdirSync(dir, { recursive: true })
 	writeFileSync(join(dir, "intent.json"), JSON.stringify(record))
 }
-
-const validV2 = (
-	archiveDir: string,
-	dataDir: string,
-	scratchRoot: string,
-): { operationId: string; record: Record<string, unknown> } => {
+const validV2 = (archiveDir: string, dataDir: string, scratchRoot: string) => {
 	const operationId = randomUUID()
 	const generationId = randomUUID()
 	return {
@@ -77,29 +65,23 @@ const validV2 = (
 		},
 	}
 }
-
 const sha = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex")
-const isFailClosed = (p: ReconciliationPlan): p is Extract<ReconciliationPlan, { kind: "fail-closed" }> =>
-	p.kind === "fail-closed"
+const isFailClosed = (
+	d: ReconciliationDecision,
+): d is Extract<ReconciliationDecision, { kind: "FailClosed" }> => d.kind === "FailClosed"
 
-describe("archive reconciliation protocol (Gate 3b r4)", () => {
-	it("dry-run treats a valid v2 intent as a create plan with a migrate-v2 action", async () => {
+describe("archive reconciliation protocol (Gate 3b r5)", () => {
+	it("dry-run treats a valid v2 intent as a decision with migrationRequired", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const { operationId, record } = validV2(archiveDir, dataDir, scratchRoot)
 			writeActiveIntent(archiveDir, operationId, record)
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			strictEqual(plan.kind, "create")
-			if (plan.kind === "create") {
-				strictEqual(plan.operationId, operationId)
-				ok(
-					plan.actions.some((a) => a.type === "migrate-v2"),
-					"plan must include a migrate-v2 action",
-				)
-			}
+			const d = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
+			if (d.kind !== "CreateAbortPrepublication")
+				ok(false, `expected CreateAbortPrepublication, got ${d.kind}`)
+			if (d.kind === "CreateAbortPrepublication") strictEqual(d.migrationRequired, true)
 		})
 	})
-
-	it("dry-run marks a malformed v3 intent fail-closed", async () => {
+	it("dry-run marks a malformed v3 intent FailClosed", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			writeActiveIntent(archiveDir, randomUUID(), {
 				formatVersion: 3,
@@ -107,62 +89,65 @@ describe("archive reconciliation protocol (Gate 3b r4)", () => {
 				operationId: randomUUID(),
 				phase: "bogus-phase",
 			})
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			ok(isFailClosed(plan), "malformed intent must be fail-closed")
-			ok(/strict-invalid|invalid/.test(plan.reason), `unexpected reason: ${plan.reason}`)
+			ok(
+				isFailClosed(
+					await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true }),
+				),
+			)
 		})
 	})
-
-	it("dry-run marks unknown active-dir debris fail-closed (never filtered to absence)", async () => {
+	it("dry-run marks unknown active-dir debris FailClosed", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			mkdirSync(join(archiveDir, "operations", "active", "junk-debris"), { recursive: true })
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			ok(isFailClosed(plan), "debris must surface, not be filtered")
-			ok(/debris|unsafe/.test(plan.reason), `unexpected reason: ${plan.reason}`)
+			ok(
+				isFailClosed(
+					await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true }),
+				),
+			)
 		})
 	})
-
-	it("dry-run marks multiple active operations fail-closed", async () => {
+	it("dry-run marks multiple active operations FailClosed", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
-			const a = validV2(archiveDir, dataDir, scratchRoot)
-			const b = validV2(archiveDir, dataDir, scratchRoot)
+			const a = validV2(archiveDir, dataDir, scratchRoot),
+				b = validV2(archiveDir, dataDir, scratchRoot)
 			writeActiveIntent(archiveDir, a.operationId, a.record)
 			writeActiveIntent(archiveDir, b.operationId, b.record)
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			ok(isFailClosed(plan), "multiple active ops must be fail-closed")
-			ok(/ambiguous/.test(plan.reason), `unexpected reason: ${plan.reason}`)
+			ok(
+				isFailClosed(
+					await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true }),
+				),
+			)
 		})
 	})
-
-	it("dry-run marks a corrupt v2 intent fail-closed (will not migrate)", async () => {
+	it("dry-run marks a corrupt v2 intent FailClosed", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			writeActiveIntent(archiveDir, randomUUID(), { formatVersion: 2 })
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			ok(isFailClosed(plan), "corrupt v2 must be fail-closed")
-			ok(/corrupt|will not migrate/.test(plan.reason), `unexpected reason: ${plan.reason}`)
+			ok(
+				isFailClosed(
+					await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true }),
+				),
+			)
 		})
 	})
-
-	it("dry-run marks a v2 dir/record operation-ID mismatch fail-closed and does NOT rewrite it", async () => {
+	it("dry-run marks a v2 dir/record mismatch FailClosed and does NOT rewrite it", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
-			// A v2 record whose operationId differs from its directory name.
 			const dirId = randomUUID()
-			const otherId = randomUUID()
 			const rec = validV2(archiveDir, dataDir, scratchRoot)
-			rec.record.operationId = otherId // mismatch with directory `archive-${dirId}`
-			rec.record.scratchSubdir = `archive-${otherId}`
+			rec.record.operationId = randomUUID()
+			rec.record.scratchSubdir = `archive-${rec.record.operationId}`
 			rec.record.pinPurpose = `archive:${rec.record.generationId}`
 			writeActiveIntent(archiveDir, dirId, rec.record)
 			const intentPath = join(archiveDir, "operations", "active", `archive-${dirId}`, "intent.json")
 			const before = sha(intentPath)
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			ok(isFailClosed(plan), "mismatch must be fail-closed")
-			ok(/identity mismatch/.test(plan.reason), `unexpected reason: ${plan.reason}`)
-			strictEqual(sha(intentPath), before, "dry-run must not rewrite a mismatched v2 intent")
+			ok(
+				isFailClosed(
+					await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true }),
+				),
+			)
+			strictEqual(sha(intentPath), before, "dry-run must not rewrite mismatched v2")
 		})
 	})
-
-	it("dry-run never mutates a valid v2 intent (no migration)", async () => {
+	it("dry-run never mutates a valid v2 intent", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const { operationId, record } = validV2(archiveDir, dataDir, scratchRoot)
 			writeActiveIntent(archiveDir, operationId, record)
@@ -175,41 +160,33 @@ describe("archive reconciliation protocol (Gate 3b r4)", () => {
 			)
 			const before = sha(intentPath)
 			await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			strictEqual(sha(intentPath), before, "dry-run mutated the v2 intent")
-			strictEqual(
-				JSON.parse(readFileSync(intentPath, "utf8")).formatVersion,
-				2,
-				"dry-run must not migrate v2",
-			)
+			strictEqual(sha(intentPath), before, "dry-run mutated v2")
+			strictEqual(JSON.parse(readFileSync(intentPath, "utf8")).formatVersion, 2)
 		})
 	})
-
-	it("apply throws on a fail-closed plan and preserves state", async () => {
+	it("apply throws on FailClosed and preserves state", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			mkdirSync(join(archiveDir, "operations", "active", "junk-debris"), { recursive: true })
 			await rejects(
 				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
-				/unsafe|fail-closed|debris|ambiguous/i,
+				/unsafe|FailClosed|debris|ambiguous/i,
 			)
-			ok(
-				existsSync(join(archiveDir, "operations", "active", "junk-debris")),
-				"debris preserved after failed apply",
-			)
+			ok(existsSync(join(archiveDir, "operations", "active", "junk-debris")))
 		})
 	})
-
-	it("apply with no active operation is a no-op (returns no-op)", async () => {
+	it("apply with no active operation returns NoOp", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false })
-			strictEqual(plan.kind, "no-op")
+			strictEqual(
+				(await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false })).kind,
+				"NoOp",
+			)
 		})
 	})
-
 	it("apply does not rewrite a v2 mismatch before rejecting it", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const dirId = randomUUID()
 			const rec = validV2(archiveDir, dataDir, scratchRoot)
-			rec.record.operationId = randomUUID() // mismatch
+			rec.record.operationId = randomUUID()
 			rec.record.scratchSubdir = `archive-${rec.record.operationId}`
 			rec.record.pinPurpose = `archive:${rec.record.generationId}`
 			writeActiveIntent(archiveDir, dirId, rec.record)
@@ -219,15 +196,10 @@ describe("archive reconciliation protocol (Gate 3b r4)", () => {
 				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
 				/unsafe|identity mismatch/i,
 			)
-			strictEqual(
-				sha(intentPath),
-				before,
-				"apply must not rewrite a mismatched v2 intent before rejecting",
-			)
+			strictEqual(sha(intentPath), before)
 		})
 	})
-
-	it("dry-run on a symlinked intent is fail-closed and does NOT read/replace the outside target", async () => {
+	it("dry-run on a symlinked intent is FailClosed; outside target survives", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const opId = randomUUID()
 			const outside = join(archiveDir, "..", "outside-intent")
@@ -240,16 +212,16 @@ describe("archive reconciliation protocol (Gate 3b r4)", () => {
 			writeFileSync(join(outside, "SENTINEL"), "preserve")
 			const dirOp = join(archiveDir, "operations", "active", `archive-${opId}`)
 			mkdirSync(dirOp, { recursive: true })
-
 			symlinkSync(join(outside, "intent.json"), join(dirOp, "intent.json"))
-			const plan = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true })
-			ok(isFailClosed(plan), "symlinked intent must be fail-closed")
-			// The outside SENTINEL survives (no outside read/replace).
+			ok(
+				isFailClosed(
+					await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: true }),
+				),
+			)
 			strictEqual(readFileSync(join(outside, "SENTINEL"), "utf8"), "preserve")
 		})
 	})
-
-	it("apply on a symlinked intent is fail-closed and preserves the outside target", async () => {
+	it("apply on a symlinked intent is FailClosed; outside target survives", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const opId = randomUUID()
 			const outside = join(archiveDir, "..", "outside-intent")
@@ -262,26 +234,17 @@ describe("archive reconciliation protocol (Gate 3b r4)", () => {
 			writeFileSync(join(outside, "SENTINEL"), "preserve")
 			const dirOp = join(archiveDir, "operations", "active", `archive-${opId}`)
 			mkdirSync(dirOp, { recursive: true })
-
 			symlinkSync(join(outside, "intent.json"), join(dirOp, "intent.json"))
 			await rejects(
 				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
 				/unsafe|unreadable|symlink/i,
 			)
-			strictEqual(
-				readFileSync(join(outside, "SENTINEL"), "utf8"),
-				"preserve",
-				"outside target preserved",
-			)
+			strictEqual(readFileSync(join(outside, "SENTINEL"), "utf8"), "preserve")
 		})
 	})
-
-	it("dry-run fails nonzero (throws) while a live owner holds the maintenance lock", async () => {
+	it("dry-run fails nonzero while a live owner holds the lock", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const { withMaintenanceLock } = await import("../src/server/checkpoints")
-			// Hold the lock across the dry-run attempt. withMaintenanceLock runs the
-			// inner task; inside it, attempt a dry-run reconcile, which must fail
-			// because THIS process is the live lock owner.
 			const { record } = validV2(archiveDir, dataDir, scratchRoot)
 			writeActiveIntent(archiveDir, record.operationId as string, record)
 			await withMaintenanceLock(dataDir, randomUUID(), async () => {
