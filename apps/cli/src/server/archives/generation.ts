@@ -48,11 +48,9 @@ import {
 	inspectActiveOperation,
 	migrateActiveIntentIfLegacy,
 	migrateV2CreateIntent,
-	operationDir,
 	ownedPathsFor,
 	parseArchiveOperationIntent,
 	phaseAtLeast,
-	readActiveOperation,
 	resolveBaseActiveGenerationId,
 	writeInitialIntent,
 	type ArchiveOperationIntent,
@@ -723,84 +721,56 @@ export const reconcileArchiveGeneration = async (
 	faults: ArchiveGenerationFaults = {},
 ): Promise<void> => {
 	void faults
-	await assertReconciliationRoots(dataDir, archiveDir, scratchRoot)
-	// Lift a legacy v2 (pre-kind) intent to v3 before reading. A v2 intent left by
-	// a Gate 3a binary would otherwise strand: the v3 parser rejects it and
-	// reconciliation fails closed, blocking all future archive work. This runs
-	// under the maintenance lock (reconcile is always called inside it).
-	await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
-	const active = readActiveOperation(archiveDir, dataDir, scratchRoot)
-	if (active === null) return
-	const { operationId, intent } = active
-
-	// Dispatch on operation kind. A create op reconciles via the create lifecycle
-	// below; a gc op reconciles via the GC tombstone collector (gc.ts). Both share
-	// the at-most-one active-operation slot, so a crashed op of EITHER kind must
-	// be reconcilable here or it blocks all future archive work.
-	if (intent.kind === "gc") {
-		const { reconcileGcOperation } = await import("./gc")
-		await reconcileGcOperation(dataDir, archiveDir, intent)
-		return
+	// The SINGLE decision-driven executor. inspect → decide → switch on the
+	// decision and execute ONLY that branch's helpers. The decision IS the
+	// operative state machine — no independent re-branching.
+	const inspection = await inspectReconciliationState(dataDir, archiveDir, scratchRoot)
+	const decision = decideReconciliation(inspection)
+	if (decision.kind === "NoOp") return
+	if (decision.kind === "FailClosed") {
+		throw new Error(`refusing to reconcile unsafe archive state: ${decision.reason}`)
 	}
-
-	// --- create-kind reconciliation below ---
-	const createIntent: CreateOperationIntent = intent
-	// Validate the recorded topology against reality before acting. The owned
-	// paths must be consistent with the archive root and identities.
-	const { finalGeneration, building } = ownedPathsFor(createIntent)
-	await validateReconciliationTopology(dataDir, archiveDir, createIntent, finalGeneration, building)
-	const promoted = existsSync(finalGeneration)
-	const finalManifestPath = generationManifestPath(
-		archiveDir,
-		createIntent.signal,
-		createIntent.rangeStart,
-		createIntent.generationId,
-	)
-	const manifestAtFinal = existsSync(finalManifestPath)
-
-	if (phaseAtLeast(createIntent.phase, "complete")) {
-		// A phase label is never proof of durable reality. A crash after the
-		// complete write but before journal archival is safe to retire only when
-		// every implied invariant is observed exactly and without repair.
-		await verifyCompletedOperationInvariants(dataDir, archiveDir, createIntent, finalGeneration, building)
-		await archiveCompletedOperation(archiveDir, operationId)
-		return
+	// v2 migration is the first action (if required). The inspector already
+	// validated the lifted record; write it now.
+	if ("migrationRequired" in decision && decision.migrationRequired) {
+		await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
 	}
-	if (phaseAtLeast(createIntent.phase, "aborted")) {
-		// Already aborted; the op dir should have been quarantined. If it's still
-		// in active/, fail closed (ambiguous).
-		throw new Error(
-			`aborted archive operation still in active dir: ${operationDir(archiveDir, operationId)}`,
-		)
+	// Switch on the computed decision — each branch executes ONLY its specific
+	// helpers, no re-branching.
+	switch (decision.kind) {
+		case "CreateVerifyComplete": {
+			const { finalGeneration, building } = ownedPathsFor(decision.intent)
+			await verifyCompletedOperationInvariants(
+				dataDir,
+				archiveDir,
+				decision.intent,
+				finalGeneration,
+				building,
+			)
+			await archiveCompletedOperation(archiveDir, decision.operationId)
+			return
+		}
+		case "CreateAbortPrepublication": {
+			const { building } = ownedPathsFor(decision.intent)
+			await reconcilePrePublication(dataDir, archiveDir, decision.intent, building, "aborted")
+			return
+		}
+		case "CreateFinishPublication": {
+			await verifyPublishedGeneration(archiveDir, decision.intent)
+			await reconcilePostPromotion(dataDir, archiveDir, decision.intent, decision.operationId)
+			return
+		}
+		case "GcVerifyComplete": {
+			const { reconcileGcOperation } = await import("./gc")
+			await reconcileGcOperation(dataDir, archiveDir, decision.intent)
+			return
+		}
+		case "GcResume": {
+			const { reconcileGcOperation } = await import("./gc")
+			await reconcileGcOperation(dataDir, archiveDir, decision.intent)
+			return
+		}
 	}
-
-	if (promoted && !manifestAtFinal) {
-		throw new Error(
-			`archive operation published a generation without a manifest; preserving journal and final state: ${finalGeneration}`,
-		)
-	}
-	if (promoted && !phaseAtLeast(createIntent.phase, "manifest-written")) {
-		throw new Error(
-			`archive operation final generation exists before manifest-written phase: ${finalGeneration}`,
-		)
-	}
-	if (!promoted && phaseAtLeast(createIntent.phase, "promoted")) {
-		throw new Error(
-			`archive operation phase ${createIntent.phase} requires its final generation: ${finalGeneration}`,
-		)
-	}
-
-	// Pre-publication: the generation was never promoted. Quarantine building
-	// output, remove owned scratch, release owned pin, mark aborted.
-	if (!promoted) {
-		await reconcilePrePublication(dataDir, archiveDir, createIntent, building, "aborted")
-		return
-	}
-
-	// Post-promotion: a complete generation + manifest was published. Finish the
-	// remaining steps idempotently.
-	await verifyPublishedGeneration(archiveDir, createIntent)
-	await reconcilePostPromotion(dataDir, archiveDir, createIntent, operationId)
 }
 
 const validateReconciliationTopology = async (
@@ -1136,15 +1106,38 @@ export const inspectReconciliationState = async (
 			return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
 		}
 		const { finalGeneration, building } = ownedPathsFor(intent)
+		const promoted = existsSync(finalGeneration)
 		const manifestAtFinal = existsSync(
 			generationManifestPath(archiveDir, intent.signal, intent.rangeStart, intent.generationId),
 		)
+		// Branch-significant read-only preconditions: run the same checks the
+		// executor's branch will run, so dry-run returns FailClosed for the same
+		// state apply would reject. BUT only for VALID topology (not impossible
+		// states — the decision function gates those from the snapshot fields).
+		try {
+			if (promoted && manifestAtFinal && intent.phase !== "aborted") {
+				// Post-promotion with a manifest: verify it (manifest SHA + shards).
+				await verifyPublishedGeneration(archiveDir, intent)
+			}
+			if (phaseAtLeast(intent.phase, "complete") && promoted) {
+				// Terminal: verify all complete invariants (no repair).
+				await verifyCompletedOperationInvariants(
+					dataDir,
+					archiveDir,
+					intent,
+					finalGeneration,
+					building,
+				)
+			}
+		} catch (error) {
+			return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
+		}
 		const snapshot: ReconciliationSnapshot = {
 			operationId: inspection.operationId,
 			journalDigest: digestOfIntent(intent),
 			migrationRequired,
 			intent,
-			promoted: existsSync(finalGeneration),
+			promoted,
 			manifestAtFinal,
 			buildingPresent: existsSync(building),
 			buildingAndFinalBothPresent: existsSync(building) && existsSync(finalGeneration),
@@ -1153,7 +1146,22 @@ export const inspectReconciliationState = async (
 		}
 		return { kind: "ValidSnapshot", snapshot }
 	}
+	// GC: run root safety + the same terminal/resume preconditions the executor checks.
+	try {
+		await assertReconciliationRoots(dataDir, archiveDir, scratchRoot)
+	} catch (error) {
+		return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
+	}
 	const gc = intent as GcOperationIntent
+	// For a complete GC op, verify terminal invariants (no repair).
+	if (gc.phase === "complete") {
+		try {
+			const { verifyCompletedGcInvariants } = await import("./gc")
+			await verifyCompletedGcInvariants(archiveDir, gc)
+		} catch (error) {
+			return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
+		}
+	}
 	const snapshot: ReconciliationSnapshot = {
 		operationId: inspection.operationId,
 		journalDigest: digestOfIntent(intent),
@@ -1170,9 +1178,11 @@ export const inspectReconciliationState = async (
 }
 
 /**
- * The ONE under-lock reconciliation function. inspect → decideReconciliation →
- * (dry-run: return the decision; apply: execute via the proven reconciler +
- * capture postcondition). The pure function is the sole branch logic.
+ * The ONE under-lock reconciliation function, shared by CLI, automatic create,
+ * and automatic GC. Dry-run: inspect → decide → return the decision (no
+ * mutation). Apply: call reconcileArchiveGeneration (which itself inspects →
+ * decides → executes the branch — the decision IS operative). Then capture the
+ * postcondition under the same lock.
  */
 export const reconcileArchiveGenerationUnderLock = async (
 	dataDir: string,
@@ -1180,19 +1190,21 @@ export const reconcileArchiveGenerationUnderLock = async (
 	scratchRoot: string,
 	options: { readonly dryRun: boolean } = { dryRun: false },
 ): Promise<ReconciliationDecision> => {
-	const inspection = await inspectReconciliationState(dataDir, archiveDir, scratchRoot)
-	const decision = decideReconciliation(inspection)
-	if (options.dryRun || decision.kind === "NoOp" || decision.kind === "FailClosed") return decision
-	if ("migrationRequired" in decision && decision.migrationRequired) {
-		await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
+	if (options.dryRun) {
+		const inspection = await inspectReconciliationState(dataDir, archiveDir, scratchRoot)
+		return decideReconciliation(inspection)
 	}
+	// Apply: reconcileArchiveGeneration is the decision-driven executor (it
+	// inspects, decides, and switches on the decision). All entry points call
+	// this same function.
 	await reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot)
+	// Capture the terminal postcondition under the lock.
 	return decideReconciliation(await inspectReconciliationState(dataDir, archiveDir, scratchRoot))
 }
 
 /**
  * The CLI entry point. Acquires the lock, then calls the under-lock function.
- * A FailClosed decision in apply mode throws (nonzero, preserve).
+ * A FailClosed decision in apply mode surfaces as a throw (nonzero, preserve).
  */
 export const runArchiveReconciliation = async (
 	dataDir: string,
