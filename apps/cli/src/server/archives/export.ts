@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto"
-import { existsSync, readFileSync, renameSync, rmSync, statSync } from "node:fs"
+import {
+	closeSync,
+	constants,
+	existsSync,
+	fsyncSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	statSync,
+} from "node:fs"
 import { basename, join } from "node:path"
 import type { Chdb } from "../chdb"
 import { type ArchiveSignal } from "./signals"
@@ -772,6 +782,21 @@ export const exportSignalShards = (
 				columns: validated.columns,
 				complexDigest: validated.complexDigest,
 			})
+			// The crash seam below is authoritative only after this individual
+			// shard and its directory entry are durable. syncTree after the whole
+			// export is still retained as the aggregate durability barrier.
+			const shardFd = openSync(finalPath, constants.O_RDONLY)
+			try {
+				fsyncSync(shardFd)
+			} finally {
+				closeSync(shardFd)
+			}
+			const shardsDirFd = openSync(shardsDir, constants.O_RDONLY)
+			try {
+				fsyncSync(shardsDirFd)
+			} finally {
+				closeSync(shardsDirFd)
+			}
 			settings.afterShardValidated?.(db, signal)
 		}
 		for (const hour of HOURS_IN_DAY) {

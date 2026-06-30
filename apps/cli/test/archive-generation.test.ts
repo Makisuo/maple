@@ -3,18 +3,27 @@ import { ok, rejects, strictEqual } from "node:assert"
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { statSync } from "node:fs"
 import {
 	activePointerPath,
 	buildingGenerationRoot,
 	catalogPath,
+	generationRoot,
 	generationManifestPath,
 	shardsRoot,
 } from "../src/server/archives/paths"
 import { parseArchiveActivePointer, type ArchiveGenerationManifest } from "../src/server/archives/manifest"
-import { appendCatalog, promoteGeneration, selectActiveGeneration } from "../src/server/archives/generation"
+import {
+	appendCatalog,
+	promoteGeneration,
+	reconcileArchiveGeneration,
+	selectActiveGeneration,
+} from "../src/server/archives/generation"
+import { advancePhase, operationDir, writeInitialIntent } from "../src/server/archives/journal"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
+import { checkpointPinsRoot } from "../src/server/checkpoints"
 
 // Filesystem-level tests for generation promotion, supersession, and catalog
 // append. These exercise the durable state machine without a restored chDB; the
@@ -83,6 +92,59 @@ const seedBuilding = (archiveDir: string, generationId: string): string => {
 }
 
 describe("archive generation promotion", () => {
+	it("makes the complete manifest durable in building before publishing the generation", async () => {
+		await withArchive(async (archiveDir) => {
+			const generationId = randomUUID()
+			const building = seedBuilding(archiveDir, generationId)
+			await rejects(
+				promoteGeneration(
+					archiveDir,
+					"traces",
+					"2026-06-01",
+					generationId,
+					manifest(generationId),
+					building,
+					{
+						beforeGenerationPromoted: () => {
+							throw new Error("stop before rename")
+						},
+					},
+				),
+				/stop before rename/,
+			)
+			ok(existsSync(join(building, "manifest.json")), "manifest is durable inside building")
+			ok(
+				!existsSync(generationManifestPath(archiveDir, "traces", "2026-06-01", generationId)),
+				"no final generation exists before the atomic directory rename",
+			)
+		})
+	})
+
+	it("does not publish a final generation when interrupted before manifest durability", async () => {
+		await withArchive(async (archiveDir) => {
+			const generationId = randomUUID()
+			const building = seedBuilding(archiveDir, generationId)
+			await rejects(
+				promoteGeneration(
+					archiveDir,
+					"traces",
+					"2026-06-01",
+					generationId,
+					manifest(generationId),
+					building,
+					{
+						beforeManifestDurable: () => {
+							throw new Error("stop before manifest")
+						},
+					},
+				),
+				/stop before manifest/,
+			)
+			ok(!existsSync(join(building, "manifest.json")))
+			ok(!existsSync(generationManifestPath(archiveDir, "traces", "2026-06-01", generationId)))
+		})
+	})
+
 	it("moves the building generation into place and selects it through the active pointer", async () => {
 		await withArchive(async (archiveDir) => {
 			const generationId = randomUUID()
@@ -210,6 +272,106 @@ describe("archive generation promotion", () => {
 				),
 				/already exists/,
 			)
+		})
+	})
+
+	it("reconciliation rejects a tampered published shard before pointer or catalog mutation", async () => {
+		await withArchive(async (archiveDir) => {
+			const parent = join(archiveDir, "..")
+			const dataDir = join(parent, "data")
+			const scratchRoot = join(parent, "scratch")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			const operationId = randomUUID()
+			const generationId = randomUUID()
+			const checkpointId = randomUUID()
+			const pinId = randomUUID()
+			const building = seedBuilding(archiveDir, generationId)
+			const shardPath = join(building, "shards", "00.parquet")
+			const shardBytes = statSync(shardPath).size
+			const shardSha256 = createHash("sha256").update(readFileSync(shardPath)).digest("hex")
+			const baseManifest = manifest(generationId)
+			const exactManifest: ArchiveGenerationManifest = {
+				...baseManifest,
+				checkpointId,
+				shards: [{ ...baseManifest.shards[0]!, bytes: shardBytes, sha256: shardSha256 }],
+			}
+			await writeInitialIntent({
+				archiveDir,
+				operationId,
+				generationId,
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				checkpointId,
+				dataDir,
+				scratchRoot,
+				pinId,
+				pinPurpose: `archive:${generationId}`,
+				scratchSubdir: `archive-${operationId}`,
+				baseActiveGenerationId: null,
+			})
+			await promoteGeneration(archiveDir, "traces", "2026-06-01", generationId, exactManifest, building)
+			const finalManifestPath = generationManifestPath(archiveDir, "traces", "2026-06-01", generationId)
+			const manifestSha256 = createHash("sha256").update(readFileSync(finalManifestPath)).digest("hex")
+			await advancePhase(archiveDir, operationId, "manifest-written", manifestSha256)
+			await advancePhase(archiveDir, operationId, "promoted")
+			const pinPath = join(checkpointPinsRoot(dataDir), checkpointId, `${pinId}.json`)
+			mkdirSync(join(pinPath, ".."), { recursive: true })
+			writeFileSync(
+				pinPath,
+				`${JSON.stringify({
+					formatVersion: 1,
+					pinId,
+					checkpointId,
+					purpose: `archive:${generationId}`,
+					createdAt: new Date().toISOString(),
+				})}\n`,
+			)
+			const finalShardPath = join(
+				shardsRoot(archiveDir, "traces", "2026-06-01", generationId),
+				"00.parquet",
+			)
+			writeFileSync(finalShardPath, "attacker bytes")
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/shard 00\.parquet (byte size|SHA-256) mismatch/,
+			)
+			ok(!existsSync(activePointerPath(archiveDir, "traces", "2026-06-01")))
+			ok(!existsSync(catalogPath(archiveDir, "traces")))
+		})
+	})
+
+	it("preserves authority over an impossible final generation without a manifest", async () => {
+		await withArchive(async (archiveDir) => {
+			const parent = join(archiveDir, "..")
+			const dataDir = join(parent, "data")
+			const scratchRoot = join(parent, "scratch")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			const operationId = randomUUID()
+			const generationId = randomUUID()
+			await writeInitialIntent({
+				archiveDir,
+				operationId,
+				generationId,
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				checkpointId: randomUUID(),
+				dataDir,
+				scratchRoot,
+				pinId: randomUUID(),
+				pinPurpose: `archive:${generationId}`,
+				scratchSubdir: `archive-${operationId}`,
+				baseActiveGenerationId: null,
+			})
+			const impossibleFinal = generationRoot(archiveDir, "traces", "2026-06-01", generationId)
+			mkdirSync(join(impossibleFinal, "shards"), { recursive: true })
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/published a generation without a manifest/,
+			)
+			ok(existsSync(impossibleFinal), "uncertain final state retained")
+			ok(existsSync(operationDir(archiveDir, operationId)), "journal authority retained")
 		})
 	})
 })

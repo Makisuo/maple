@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { randomUUID } from "node:crypto"
@@ -16,6 +16,8 @@ import {
 	writeInitialIntent,
 	type ArchiveOperationIntent,
 } from "../src/server/archives/journal"
+import { reconcileArchiveGeneration } from "../src/server/archives/generation"
+import { checkpointPinsRoot } from "../src/server/checkpoints"
 
 // Filesystem-level tests for the archive operation journal (Gate 3). These are
 // the fast in-process checks of the journal's fail-closed parsing, phase
@@ -35,20 +37,24 @@ const withArchive = async (run: (archiveDir: string) => Promise<void> | void): P
 	}
 }
 
-const baseIntent = (overrides: Partial<{ operationId: string; generationId: string }> = {}) => ({
-	archiveDir: "", // set by withArchive caller
-	operationId: overrides.operationId ?? randomUUID(),
-	generationId: overrides.generationId ?? randomUUID(),
-	signal: "traces",
-	rangeStart: "2026-06-01",
-	checkpointId: randomUUID(),
-	dataDir: "/data",
-	scratchRoot: "/scratch",
-	pinId: randomUUID(),
-	pinPurpose: "archive:gen",
-	scratchSubdir: `archive-${randomUUID()}`,
-	baseActiveGenerationId: null,
-})
+const baseIntent = (overrides: Partial<{ operationId: string; generationId: string }> = {}) => {
+	const operationId = overrides.operationId ?? randomUUID()
+	const generationId = overrides.generationId ?? randomUUID()
+	return {
+		archiveDir: "", // set by withArchive caller
+		operationId,
+		generationId,
+		signal: "traces",
+		rangeStart: "2026-06-01",
+		checkpointId: randomUUID(),
+		dataDir: "/data",
+		scratchRoot: "/scratch",
+		pinId: randomUUID(),
+		pinPurpose: `archive:${generationId}`,
+		scratchSubdir: `archive-${operationId}`,
+		baseActiveGenerationId: null,
+	}
+}
 
 describe("archive operation journal", () => {
 	it("writeInitialIntent persists a parseable intent at phase intent", async () => {
@@ -160,6 +166,7 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 			pinId: intent.pinId,
 			pinPurpose: intent.pinPurpose,
 			scratchSubdir: "../escape",
+			manifestSha256: null,
 			baseActiveGenerationId: null,
 			phase: "intent",
 			createdAt: "2026-06-01T00:00:00.000Z",
@@ -188,6 +195,152 @@ describe("archive operation journal strict parsing (fail-closed)", () => {
 			// Overwrite the intent with garbage.
 			writeFileSync(join(operationDir(archiveDir, op), "intent.json"), "{not json")
 			await rejects(async () => readActiveOperation(archiveDir))
+		})
+	})
+
+	it("reconciliation rejects altered configured roots without touching outside state", async () => {
+		await withArchive(async (archiveDir) => {
+			const root = join(archiveDir, "..")
+			const dataDir = join(root, "data")
+			const scratchRoot = join(root, "scratch")
+			const outside = join(root, "outside")
+			const marker = join(outside, "KEEP")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			mkdirSync(outside, { recursive: true })
+			writeFileSync(marker, "preserve")
+			const op = randomUUID()
+			await writeInitialIntent({
+				...baseIntent({ operationId: op }),
+				archiveDir,
+				dataDir,
+				scratchRoot,
+			})
+			const path = join(operationDir(archiveDir, op), "intent.json")
+			const raw = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>
+			writeFileSync(path, `${JSON.stringify({ ...raw, scratchRoot: outside })}\n`)
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/scratch root mismatch/,
+			)
+			strictEqual(readFileSync(marker, "utf8"), "preserve")
+			ok(existsSync(path), "active journal retained on root mismatch")
+		})
+	})
+
+	it("reconciliation refuses a symlinked owned scratch directory and preserves its target", async () => {
+		await withArchive(async (archiveDir) => {
+			const root = join(archiveDir, "..")
+			const dataDir = join(root, "data")
+			const scratchRoot = join(root, "scratch")
+			const outside = join(root, "outside")
+			const marker = join(outside, "KEEP")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			mkdirSync(outside, { recursive: true })
+			writeFileSync(marker, "preserve")
+			const op = randomUUID()
+			await writeInitialIntent({
+				...baseIntent({ operationId: op }),
+				archiveDir,
+				dataDir,
+				scratchRoot,
+			})
+			symlinkSync(outside, join(scratchRoot, `archive-${op}`))
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/refusing symlink in owned scratch/,
+			)
+			strictEqual(readFileSync(marker, "utf8"), "preserve")
+			ok(readActiveOperation(archiveDir) !== null, "active journal retained")
+		})
+	})
+
+	it("reconciliation refuses a symlinked configured root and preserves its target", async () => {
+		await withArchive(async (archiveDir) => {
+			const root = join(archiveDir, "..")
+			const dataDir = join(root, "data")
+			const realScratch = join(root, "real-scratch")
+			const scratchRoot = join(root, "scratch-link")
+			const marker = join(realScratch, "KEEP")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(realScratch, { recursive: true })
+			writeFileSync(marker, "preserve")
+			symlinkSync(realScratch, scratchRoot)
+			const op = randomUUID()
+			await writeInitialIntent({
+				...baseIntent({ operationId: op }),
+				archiveDir,
+				dataDir,
+				scratchRoot,
+			})
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/refusing symlink in scratch root/,
+			)
+			strictEqual(readFileSync(marker, "utf8"), "preserve")
+			ok(readActiveOperation(archiveDir) !== null)
+		})
+	})
+
+	it("strictly binds known signal and deterministic identities", async () => {
+		const base = baseIntent()
+		const raw = {
+			...base,
+			formatVersion: ARCHIVE_OPERATION_FORMAT_VERSION,
+			archiveDir: "/archive",
+			phase: "intent",
+			manifestSha256: null,
+			createdAt: "2026-06-01T00:00:00.000Z",
+			updatedAt: "2026-06-01T00:00:00.000Z",
+		}
+		await rejects(
+			async () => parseArchiveOperationIntent("/archive", { ...raw, signal: "unknown" }),
+			/unknown archive signal/,
+		)
+		await rejects(
+			async () => parseArchiveOperationIntent("/archive", { ...raw, pinPurpose: "archive:other" }),
+			/pin purpose/,
+		)
+		await rejects(
+			async () => parseArchiveOperationIntent("/archive", { ...raw, scratchSubdir: "archive-other" }),
+			/scratch subdir/,
+		)
+	})
+
+	it("reconciliation rejects a mismatched pin purpose and premature pin absence", async () => {
+		await withArchive(async (archiveDir) => {
+			const root = join(archiveDir, "..")
+			const dataDir = join(root, "data")
+			const scratchRoot = join(root, "scratch")
+			mkdirSync(dataDir, { recursive: true })
+			mkdirSync(scratchRoot, { recursive: true })
+			const op = randomUUID()
+			const initial = { ...baseIntent({ operationId: op }), archiveDir, dataDir, scratchRoot }
+			await writeInitialIntent(initial)
+			const pinPath = join(checkpointPinsRoot(dataDir), initial.checkpointId, `${initial.pinId}.json`)
+			mkdirSync(join(pinPath, ".."), { recursive: true })
+			writeFileSync(
+				pinPath,
+				`${JSON.stringify({
+					formatVersion: 1,
+					pinId: initial.pinId,
+					checkpointId: initial.checkpointId,
+					purpose: "archive:attacker",
+					createdAt: new Date().toISOString(),
+				})}\n`,
+			)
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/pin identity or purpose mismatch/,
+			)
+			rmSync(pinPath)
+			await advancePhase(archiveDir, op, "pin-acquired")
+			await rejects(
+				reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot),
+				/pin is missing before release was authorized/,
+			)
+			ok(readActiveOperation(archiveDir) !== null)
 		})
 	})
 })

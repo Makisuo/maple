@@ -1,13 +1,15 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs"
+import { join, resolve } from "node:path"
 import { durableJson, durableRename, durableRemove, syncDirectory } from "../durable-files"
 import {
 	activePointerPath,
 	archiveQuarantineRoot,
 	archiveRoot,
 	assertNoSymlink,
+	assertNoSymlinkSync,
 	assertRealDirectory,
 	assertRealFile,
+	assertRealFileSync,
 	ensurePrivateDirectory,
 	rangeRoot,
 	signalRoot,
@@ -15,6 +17,7 @@ import {
 	validateRangeDate,
 } from "./paths"
 import { parseArchiveActivePointer } from "./manifest"
+import { archiveSignal } from "./signals"
 
 // Archive generation operation journal and reconciliation (Gate 3).
 //
@@ -40,7 +43,7 @@ import { parseArchiveActivePointer } from "./manifest"
 // than one is found, the state is ambiguous and reconciliation fails closed.
 
 /** Versioned journal format. The parser accepts only this version (fail-closed). */
-export const ARCHIVE_OPERATION_FORMAT_VERSION = 1 as const
+export const ARCHIVE_OPERATION_FORMAT_VERSION = 2 as const
 
 /**
  * Phases record the last COMPLETED durable boundary. Advancement happens only
@@ -75,6 +78,9 @@ const PHASE_ORDER: Readonly<Record<ArchiveOperationPhase, number>> = Object.from
 export const phaseAtLeast = (a: ArchiveOperationPhase, b: ArchiveOperationPhase): boolean =>
 	PHASE_ORDER[a] >= PHASE_ORDER[b]
 
+const phaseRequiresManifest = (phase: ArchiveOperationPhase): boolean =>
+	phase !== "aborted" && phaseAtLeast(phase, "manifest-written")
+
 export interface ArchiveOperationIntent {
 	readonly formatVersion: typeof ARCHIVE_OPERATION_FORMAT_VERSION
 	readonly operationId: string
@@ -90,6 +96,8 @@ export interface ArchiveOperationIntent {
 	readonly pinId: string
 	readonly pinPurpose: string
 	readonly scratchSubdir: string
+	/** SHA-256 of the exact durable manifest bytes once phase >= manifest-written. */
+	readonly manifestSha256: string | null
 	/** The generation this operation supersedes, or null if none (CAS base). */
 	readonly baseActiveGenerationId: string | null
 	readonly phase: ArchiveOperationPhase
@@ -129,14 +137,19 @@ const requiredString = (value: unknown, field: string): string => {
  * archive IDs / range dates so a corrupted or hand-edited journal cannot direct
  * reconciliation at arbitrary paths.
  */
-export const parseArchiveOperationIntent = (archiveDir: string, raw: unknown): ArchiveOperationIntent => {
+export const parseArchiveOperationIntent = (
+	archiveDir: string,
+	raw: unknown,
+	expectedDataDir?: string,
+	expectedScratchRoot?: string,
+): ArchiveOperationIntent => {
 	if (!isRecord(raw)) throw new Error("archive operation intent is not a record")
 	if (raw.formatVersion !== ARCHIVE_OPERATION_FORMAT_VERSION) {
 		throw new Error(`unsupported archive operation format version: ${String(raw.formatVersion)}`)
 	}
 	const operationId = validateArchiveId(requiredString(raw.operationId, "operationId"), "operation")
 	const generationId = validateArchiveId(requiredString(raw.generationId, "generationId"), "generation")
-	const signal = requiredString(raw.signal, "signal")
+	const signal = archiveSignal(requiredString(raw.signal, "signal")).name
 	const rangeStart = validateRangeDate(requiredString(raw.rangeStart, "rangeStart"))
 	const checkpointId = validateArchiveId(requiredString(raw.checkpointId, "checkpointId"), "checkpoint")
 	const phase = requiredString(raw.phase, "phase") as ArchiveOperationPhase
@@ -144,10 +157,40 @@ export const parseArchiveOperationIntent = (archiveDir: string, raw: unknown): A
 		throw new Error(`invalid archive operation phase: ${phase}`)
 	}
 	const pinId = validateArchiveId(requiredString(raw.pinId, "pinId"), "pin")
-	const pinPurpose = requiredString(raw.pinPurpose, "pinPurpose")
 	const scratchSubdir = requiredString(raw.scratchSubdir, "scratchSubdir")
-	if (scratchSubdir.length === 0 || scratchSubdir.includes("/") || scratchSubdir.includes("\\")) {
+	if (scratchSubdir !== `archive-${operationId}`) {
 		throw new Error(`invalid scratch subdir in journal: ${scratchSubdir}`)
+	}
+	const pinPurpose = requiredString(raw.pinPurpose, "pinPurpose")
+	if (pinPurpose !== `archive:${generationId}`) {
+		throw new Error(`archive operation pin purpose does not match generation: ${pinPurpose}`)
+	}
+	const recordedArchiveDir = resolve(requiredString(raw.archiveDir, "archiveDir"))
+	const recordedDataDir = resolve(requiredString(raw.dataDir, "dataDir"))
+	const recordedScratchRoot = resolve(requiredString(raw.scratchRoot, "scratchRoot"))
+	if (recordedArchiveDir !== resolve(archiveDir)) {
+		throw new Error(
+			`archive operation root mismatch: journal ${recordedArchiveDir}, invocation ${resolve(archiveDir)}`,
+		)
+	}
+	if (expectedDataDir !== undefined && recordedDataDir !== resolve(expectedDataDir)) {
+		throw new Error(
+			`archive operation data root mismatch: journal ${recordedDataDir}, invocation ${resolve(expectedDataDir)}`,
+		)
+	}
+	if (expectedScratchRoot !== undefined && recordedScratchRoot !== resolve(expectedScratchRoot)) {
+		throw new Error(
+			`archive operation scratch root mismatch: journal ${recordedScratchRoot}, invocation ${resolve(expectedScratchRoot)}`,
+		)
+	}
+	const manifestSha256Raw = raw.manifestSha256
+	const manifestSha256 =
+		manifestSha256Raw === null ? null : requiredString(manifestSha256Raw, "manifestSha256").toLowerCase()
+	if (manifestSha256 !== null && !/^[0-9a-f]{64}$/.test(manifestSha256)) {
+		throw new Error("invalid archive operation manifestSha256")
+	}
+	if (phaseRequiresManifest(phase) !== (manifestSha256 !== null)) {
+		throw new Error(`archive operation manifest hash is inconsistent with phase ${phase}`)
 	}
 	const baseActiveGenerationIdRaw = raw.baseActiveGenerationId
 	const baseActiveGenerationId =
@@ -166,12 +209,13 @@ export const parseArchiveOperationIntent = (archiveDir: string, raw: unknown): A
 		signal,
 		rangeStart,
 		checkpointId,
-		archiveDir: requiredString(raw.archiveDir, "archiveDir"),
-		dataDir: requiredString(raw.dataDir, "dataDir"),
-		scratchRoot: requiredString(raw.scratchRoot, "scratchRoot"),
+		archiveDir: recordedArchiveDir,
+		dataDir: recordedDataDir,
+		scratchRoot: recordedScratchRoot,
 		pinId,
 		pinPurpose,
 		scratchSubdir,
+		manifestSha256,
 		baseActiveGenerationId,
 		phase,
 		createdAt: requiredString(raw.createdAt, "createdAt"),
@@ -182,10 +226,17 @@ export const parseArchiveOperationIntent = (archiveDir: string, raw: unknown): A
 }
 
 /** Read and strictly parse the intent for an operation dir. */
-const readIntent = (archiveDir: string, operationId: string): ArchiveOperationIntent => {
+const readIntent = (
+	archiveDir: string,
+	operationId: string,
+	expectedDataDir?: string,
+	expectedScratchRoot?: string,
+): ArchiveOperationIntent => {
 	const path = intentPath(archiveDir, operationId)
+	assertNoSymlinkSync(archiveDir, path, "archive operation intent")
+	assertRealFileSync(path, "archive operation intent")
 	const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown
-	return parseArchiveOperationIntent(archiveDir, parsed)
+	return parseArchiveOperationIntent(archiveDir, parsed, expectedDataDir, expectedScratchRoot)
 }
 
 /**
@@ -219,12 +270,13 @@ export const writeInitialIntent = async (intent: {
 		signal: intent.signal,
 		rangeStart: intent.rangeStart,
 		checkpointId: intent.checkpointId,
-		archiveDir: intent.archiveDir,
-		dataDir: intent.dataDir,
-		scratchRoot: intent.scratchRoot,
+		archiveDir: resolve(intent.archiveDir),
+		dataDir: resolve(intent.dataDir),
+		scratchRoot: resolve(intent.scratchRoot),
 		pinId: intent.pinId,
 		pinPurpose: intent.pinPurpose,
 		scratchSubdir: intent.scratchSubdir,
+		manifestSha256: null,
 		baseActiveGenerationId: intent.baseActiveGenerationId,
 		phase: "intent",
 		createdAt: now,
@@ -243,6 +295,7 @@ export const advancePhase = async (
 	archiveDir: string,
 	operationId: string,
 	next: ArchiveOperationPhase,
+	manifestSha256?: string,
 ): Promise<ArchiveOperationIntent> => {
 	const current = readIntent(archiveDir, operationId)
 	// Allow re-advancing to the same phase (idempotent reconciliation replay)
@@ -253,7 +306,14 @@ export const advancePhase = async (
 	const updated: ArchiveOperationIntent = {
 		...current,
 		phase: next,
+		manifestSha256: manifestSha256 ?? current.manifestSha256,
 		updatedAt: new Date().toISOString(),
+	}
+	if (
+		phaseRequiresManifest(next) &&
+		(updated.manifestSha256 === null || !/^[0-9a-f]{64}$/.test(updated.manifestSha256))
+	) {
+		throw new Error(`archive operation phase ${next} requires a manifest SHA-256`)
 	}
 	await durableJson(intentPath(archiveDir, operationId), updated)
 	await syncDirectory(operationDir(archiveDir, operationId))
@@ -271,6 +331,11 @@ export const advancePhase = async (
 export const listActiveOperationIds = (archiveDir: string): string[] => {
 	const root = activeOperationsRoot(archiveDir)
 	if (!existsSync(root)) return []
+	assertNoSymlinkSync(archiveDir, root, "archive active operations root")
+	const rootInfo = lstatSync(root)
+	if (!rootInfo.isDirectory()) {
+		throw new Error(`archive active operations root is not a real directory: ${root}`)
+	}
 	const entries = readdirSync(root, { withFileTypes: true })
 	const ids: string[] = []
 	for (const entry of entries) {
@@ -298,7 +363,11 @@ export interface ActiveOperation {
  * there is more than one active operation dir (ambiguous state; the maintenance
  * lock should prevent this, so its presence signals corruption or a bug).
  */
-export const readActiveOperation = (archiveDir: string): ActiveOperation | null => {
+export const readActiveOperation = (
+	archiveDir: string,
+	expectedDataDir?: string,
+	expectedScratchRoot?: string,
+): ActiveOperation | null => {
 	const ids = listActiveOperationIds(archiveDir)
 	if (ids.length === 0) return null
 	if (ids.length > 1) {
@@ -314,7 +383,7 @@ export const readActiveOperation = (archiveDir: string): ActiveOperation | null 
 	if (!existsSync(intentPathFile)) {
 		throw new Error(`active operation missing its intent journal: ${dir}`)
 	}
-	const intent = readIntent(archiveDir, operationId)
+	const intent = readIntent(archiveDir, operationId, expectedDataDir, expectedScratchRoot)
 	// The intent's operationId must match its directory (identity binding).
 	if (intent.operationId !== operationId) {
 		throw new Error(

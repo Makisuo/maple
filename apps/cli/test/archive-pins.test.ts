@@ -134,6 +134,20 @@ describe("checkpoint pin API", () => {
 		})
 	})
 
+	it("preserves an owned pin when its purpose does not match the journal expectation", async () => {
+		await withDataDir(async (dataDir) => {
+			const checkpointId = newCheckpointId()
+			writeSnapshot(dataDir, checkpointId)
+			writeState(dataDir, checkpointId)
+			const pinPath = await acquireCheckpointPin(dataDir, checkpointId, "archive:generation-a")
+			await rejects(
+				releaseCheckpointPin(dataDir, checkpointId, pinPath, "archive:generation-b"),
+				/identity mismatch/,
+			)
+			ok(existsSync(pinPath), "purpose-mismatched pin preserved")
+		})
+	})
+
 	it("fails closed and preserves a pin whose recorded identity does not match", async () => {
 		await withDataDir(async (dataDir) => {
 			const checkpointId = newCheckpointId()

@@ -1061,6 +1061,7 @@ export const releaseCheckpointPin = async (
 	dataDir: string,
 	checkpointId: string,
 	pinPath: string,
+	expectedPurpose?: string,
 ): Promise<void> => {
 	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
 	const pinsRoot = checkpointPinsRoot(dataDir)
@@ -1086,7 +1087,8 @@ export const releaseCheckpointPin = async (
 		!isRecord(parsed) ||
 		parsed.formatVersion !== 1 ||
 		validateId(requiredString(parsed, "pinId"), "pin") !== baseName ||
-		validateId(requiredString(parsed, "checkpointId"), "checkpoint") !== validatedCheckpointId
+		validateId(requiredString(parsed, "checkpointId"), "checkpoint") !== validatedCheckpointId ||
+		(expectedPurpose !== undefined && requiredString(parsed, "purpose") !== expectedPurpose)
 	) {
 		throw new Error(`checkpoint pin identity mismatch; refusing to remove: ${pinPath}`)
 	}

@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto"
-import { existsSync, readFileSync } from "node:fs"
-import { rm, statfs } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { lstat, readdir, rm, statfs } from "node:fs/promises"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
@@ -19,6 +19,7 @@ import {
 	type ArchiveShardRecord,
 	type ArchiveGenerationManifest,
 	parseArchiveActivePointer,
+	readArchiveGenerationManifest,
 } from "./manifest"
 import {
 	activePointerPath,
@@ -75,11 +76,14 @@ export interface ArchiveGenerationFaults {
 	readonly afterScratchRestored?: () => void | Promise<void>
 	readonly afterBuildingCreated?: () => void | Promise<void>
 	readonly afterShardsWritten?: () => void | Promise<void>
+	readonly afterFirstDurableShard?: () => void
+	readonly afterValidationComplete?: () => void | Promise<void>
 	readonly afterManifestWritten?: () => void | Promise<void>
+	readonly afterGenerationRenamed?: () => void | Promise<void>
 	readonly afterGenerationPromoted?: () => void | Promise<void>
 	readonly afterCatalogAppended?: () => void | Promise<void>
+	readonly afterPinRemovedBeforeJournal?: () => void | Promise<void>
 	readonly afterPinReleased?: () => void | Promise<void>
-	readonly afterBuildingRemoved?: () => void | Promise<void>
 	// Pre-boundary seams for crash-safety validation (Gate 3). The after-* hooks
 	// above fire AFTER a durable boundary completes; they cannot inject a crash
 	// DURING the boundary (e.g. between a durable write and the journal advance
@@ -110,6 +114,8 @@ export interface ArchiveGenerationResult {
 
 const checkpointFingerprint = (manifest: CheckpointManifest): string =>
 	`${manifest.checkpointId}:${manifest.createdAt}:${manifest.backupBytes}`
+
+const sha256File = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex")
 
 const toShardRecord = (shard: WrittenShard): ArchiveShardRecord => ({
 	name: shard.name,
@@ -209,6 +215,12 @@ export const createArchiveGeneration = async (
 ): Promise<ArchiveGenerationResult> => {
 	validateRangeDate(rangeDate)
 	assertArchiveRootSeparate(archiveDir, dataDir)
+	if (resolve(archiveDir) !== resolve(tuning.archiveDir)) {
+		throw new Error(
+			`archive directory mismatch: invocation ${resolve(archiveDir)} != configured ${resolve(tuning.archiveDir)}`,
+		)
+	}
+	await assertReconciliationRoots(dataDir, archiveDir, tuning.scratchRoot)
 	const signal = archiveSignal(signalName)
 	const estimatedWorkingBytes = tuning.targetChunkBytes
 	const generationId = newArchiveGenerationId()
@@ -221,7 +233,7 @@ export const createArchiveGeneration = async (
 	return withMaintenanceLock(dataDir, operationId, async () => {
 		// Step 1: reconcile any prior interrupted operation before allocating a
 		// new one. This is the crash-recovery entry point.
-		await reconcileArchiveGeneration(dataDir, archiveDir, faults)
+		await reconcileArchiveGeneration(dataDir, archiveDir, tuning.scratchRoot, faults)
 		// Step 2: resolve checkpoint; read the CAS base (current active pointer).
 		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
 		const baseActiveGenerationId = resolveBaseActiveGenerationId(archiveDir, signal.name, rangeDate)
@@ -293,6 +305,15 @@ export const createArchiveGeneration = async (
 						rowGroupRows: tuning.rowGroupRows,
 						maxShardRows: tuning.maxShardRows,
 						maxShardBytes: tuning.maxShardBytes,
+						afterShardValidated: (() => {
+							let seen = false
+							return () => {
+								if (!seen) {
+									seen = true
+									faults.afterFirstDurableShard?.()
+								}
+							}
+						})(),
 					})
 					await syncTree(shardsDir)
 					const archivedRowCount = writtenShards.reduce((sum, s) => sum + s.rowCount, 0)
@@ -304,6 +325,7 @@ export const createArchiveGeneration = async (
 					}
 					await advancePhase(archiveDir, operationId, "shards-written")
 					await faults.afterShardsWritten?.()
+					await faults.afterValidationComplete?.()
 
 					// Step 8: manifest (written inside building/ by promote).
 					const manifest: ArchiveGenerationManifest = {
@@ -332,7 +354,20 @@ export const createArchiveGeneration = async (
 						generationId,
 						manifest,
 						building,
-						faults,
+						{
+							...faults,
+							afterManifestWritten: async () => {
+								const manifestPath = join(building, "manifest.json")
+								const manifestSha256 = sha256File(manifestPath)
+								await advancePhase(
+									archiveDir,
+									operationId,
+									"manifest-written",
+									manifestSha256,
+								)
+								await faults.afterManifestWritten?.()
+							},
+						},
 					)
 					await advancePhase(archiveDir, operationId, "promoted")
 					// Step 10: CAS pointer update.
@@ -354,8 +389,9 @@ export const createArchiveGeneration = async (
 					// Steps 12–14: release the owned pin, remove owned scratch, then
 					// archive the completed journal. Each is a recorded durable boundary
 					// so a SIGKILL at any of them is reconcilable. These run on the happy
-					// path INSIDE the journal; the finally below only handles thrown errors.
-					await releaseCheckpointPin(dataDir, resolved.checkpointId, pinPath)
+					// path INSIDE the journal.
+					await releaseCheckpointPin(dataDir, resolved.checkpointId, pinPath, pinPurpose)
+					await faults.afterPinRemovedBeforeJournal?.()
 					await advancePhase(archiveDir, operationId, "pin-released")
 					await faults.afterPinReleased?.()
 					await faults.beforeScratchRemoved?.()
@@ -379,28 +415,9 @@ export const createArchiveGeneration = async (
 				},
 			)
 		} finally {
-			// THROWN-ERROR PATH ONLY. On a thrown error mid-operation the journal is
-			// left at its last recorded phase; the next run's reconcile drives it to
-			// a clean abort or completion. This finally releases the owned pin and
-			// removes owned building/scratch so the thrown-error path does not leave
-			// unowned debris — but it does NOT advance the journal, so reconcile is
-			// still authoritative. A pin-release failure over-retains safely (D-004).
-			// On the HAPPY path this finally also runs (finally always runs), but its
-			// cleanup is idempotent: the pin was already released (release throws
-			// "already released", caught below), and building/scratch are already gone.
-			try {
-				await releaseCheckpointPin(dataDir, resolved.checkpointId, pinPath)
-			} catch (error) {
-				const msg = error instanceof Error ? error.message : String(error)
-				if (!/already released|not found/i.test(msg)) {
-					process.stderr.write(
-						`warning: failed to release checkpoint pin ${pinPath} (${msg}); ` +
-							`the snapshot is over-retained safely but the pin should be inspected and removed manually\n`,
-					)
-				}
-			}
-			await removeOwnedBuilding(archiveDir, generationId, faults)
-			await removeOwnedScratch(tuning.scratchRoot, scratchSubdir)
+			// Deliberately no durable-state mutation here. Throw and SIGKILL must
+			// leave the same journal-described topology; reconciliation is the sole
+			// authority for pin release, quarantine, and scratch cleanup.
 		}
 	})
 }
@@ -511,18 +528,19 @@ export const promoteGeneration = async (
 	await assertNoSymlink(archiveDir, range, "archive range")
 	await ensurePrivateDirectory(generationsRootAbs, archiveRoot(archiveDir))
 	await assertNoSymlink(archiveDir, generationsRootAbs, "archive generations root")
-	// Move the entire owned building directory into its final location. The
-	// shards travel with it, so there is no separate shards rename and no window
-	// in which the final generation exists without its shards.
-	await faults.beforeGenerationPromoted?.()
-	await durableRename(building, finalGeneration)
-	await syncDirectory(dirname(finalGeneration))
-	const manifestPath = generationManifestPath(archiveDir, signal, rangeDate, generationId)
-	await assertNoSymlink(archiveDir, manifestPath, "archive manifest")
+	// The complete manifest becomes durable INSIDE building before publication.
+	// The subsequent directory rename therefore publishes shards + manifest as
+	// one atomic unit; no final generation can exist without its manifest.
+	const manifestPath = join(building, "manifest.json")
+	await assertNoSymlink(archiveDir, manifestPath, "archive building manifest")
 	await faults.beforeManifestDurable?.()
 	await durableJson(manifestPath, manifestValue)
 	await syncDirectory(dirname(manifestPath))
 	await faults.afterManifestWritten?.()
+	await faults.beforeGenerationPromoted?.()
+	await durableRename(building, finalGeneration)
+	await syncDirectory(dirname(finalGeneration))
+	await faults.afterGenerationRenamed?.()
 }
 
 /**
@@ -614,21 +632,6 @@ export const appendCatalog = async (
 	await faults.afterCatalogAppended?.()
 }
 
-const removeOwnedBuilding = async (
-	archiveDir: string,
-	generationId: string,
-	faults: ArchiveGenerationFaults,
-): Promise<void> => {
-	const building = buildingGenerationRoot(archiveDir, generationId)
-	if (existsSync(building)) {
-		// Only the owned, promoted building dir is removed; anything else is
-		// over-retained.
-		await rm(building, { recursive: true, force: true })
-		await syncDirectory(buildingRoot(archiveDir))
-	}
-	await faults.afterBuildingRemoved?.()
-}
-
 /**
  * Remove the owned deterministic scratch subdirectory the operation allocated.
  * Only the exact journal-named subdir beneath scratchRoot is removed; anything
@@ -636,6 +639,11 @@ const removeOwnedBuilding = async (
  */
 const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): Promise<void> => {
 	if (!existsSync(scratchRoot)) return
+	await assertFilesystemPathNoSymlinks(scratchRoot, "scratch root")
+	const scratchInfo = await lstat(resolve(scratchRoot))
+	if (scratchInfo.isSymbolicLink() || !scratchInfo.isDirectory()) {
+		throw new Error(`refusing unsafe scratch root: ${scratchRoot}`)
+	}
 	const owned = join(resolve(scratchRoot), scratchSubdir)
 	if (!existsSync(owned)) return
 	// Containment: the subdir must be a direct child of the scratch root.
@@ -643,8 +651,31 @@ const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): P
 	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || rel.includes(sep)) {
 		throw new Error(`refusing to remove scratch path outside its root: ${owned}`)
 	}
+	await assertFilesystemTreeNoSymlinks(owned, "owned scratch directory")
+	const ownedInfo = await lstat(owned)
+	if (ownedInfo.isSymbolicLink() || !ownedInfo.isDirectory()) {
+		throw new Error(`refusing unsafe owned scratch directory: ${owned}`)
+	}
 	await rm(owned, { recursive: true, force: true })
 	await syncDirectory(resolve(scratchRoot))
+}
+
+const assertFilesystemPathNoSymlinks = async (path: string, label: string): Promise<void> => {
+	const absolute = resolve(path)
+	if (!existsSync(absolute)) return
+	const info = await lstat(absolute)
+	if (info.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${absolute}`)
+}
+
+const assertFilesystemTreeNoSymlinks = async (path: string, label: string): Promise<void> => {
+	await assertFilesystemPathNoSymlinks(path, label)
+	const info = await lstat(path)
+	if (!info.isDirectory()) return
+	for (const entry of await readdir(path, { withFileTypes: true })) {
+		const child = join(path, entry.name)
+		if (entry.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${child}`)
+		if (entry.isDirectory()) await assertFilesystemTreeNoSymlinks(child, label)
+	}
 }
 
 /**
@@ -669,21 +700,27 @@ const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): P
 export const reconcileArchiveGeneration = async (
 	dataDir: string,
 	archiveDir: string,
+	scratchRoot: string,
 	faults: ArchiveGenerationFaults = {},
 ): Promise<void> => {
-	void dataDir
 	void faults
-	const active = readActiveOperation(archiveDir)
+	await assertReconciliationRoots(dataDir, archiveDir, scratchRoot)
+	const active = readActiveOperation(archiveDir, dataDir, scratchRoot)
 	if (active === null) return
 	const { operationId, intent } = active
 
 	// Validate the recorded topology against reality before acting. The owned
 	// paths must be consistent with the archive root and identities.
 	const { finalGeneration, building } = ownedPathsFor(intent)
+	await validateReconciliationTopology(dataDir, archiveDir, intent, finalGeneration, building)
 	const promoted = existsSync(finalGeneration)
-	const manifestAtFinal = existsSync(
-		generationManifestPath(archiveDir, intent.signal, intent.rangeStart, intent.generationId),
+	const finalManifestPath = generationManifestPath(
+		archiveDir,
+		intent.signal,
+		intent.rangeStart,
+		intent.generationId,
 	)
+	const manifestAtFinal = existsSync(finalManifestPath)
 
 	if (phaseAtLeast(intent.phase, "complete")) {
 		// Already complete; just ensure the journal is archived out of active/.
@@ -698,16 +735,158 @@ export const reconcileArchiveGeneration = async (
 		)
 	}
 
+	if (promoted && !manifestAtFinal) {
+		throw new Error(
+			`archive operation published a generation without a manifest; preserving journal and final state: ${finalGeneration}`,
+		)
+	}
+	if (promoted && !phaseAtLeast(intent.phase, "manifest-written")) {
+		throw new Error(
+			`archive operation final generation exists before manifest-written phase: ${finalGeneration}`,
+		)
+	}
+	if (!promoted && phaseAtLeast(intent.phase, "promoted")) {
+		throw new Error(
+			`archive operation phase ${intent.phase} requires its final generation: ${finalGeneration}`,
+		)
+	}
+
 	// Pre-publication: the generation was never promoted. Quarantine building
 	// output, remove owned scratch, release owned pin, mark aborted.
-	if (!promoted || !manifestAtFinal) {
+	if (!promoted) {
 		await reconcilePrePublication(dataDir, archiveDir, intent, building, "aborted")
 		return
 	}
 
 	// Post-promotion: a complete generation + manifest was published. Finish the
 	// remaining steps idempotently.
+	await verifyPublishedGeneration(archiveDir, intent)
 	await reconcilePostPromotion(dataDir, archiveDir, intent, operationId)
+}
+
+const validateReconciliationTopology = async (
+	dataDir: string,
+	archiveDir: string,
+	intent: ArchiveOperationIntent,
+	finalGeneration: string,
+	building: string,
+): Promise<void> => {
+	for (const [path, label] of [
+		[building, "archive building generation"],
+		[finalGeneration, "archive final generation"],
+	] as const) {
+		if (!existsSync(path)) continue
+		await assertNoSymlink(archiveDir, path, label)
+		await assertRealDirectory(path, label)
+	}
+	if (existsSync(building) && existsSync(finalGeneration)) {
+		throw new Error("archive operation has both building and final generation state")
+	}
+	const ownedScratch = join(resolve(intent.scratchRoot), intent.scratchSubdir)
+	if (existsSync(intent.scratchRoot)) {
+		await assertFilesystemPathNoSymlinks(intent.scratchRoot, "scratch root")
+	}
+	if (existsSync(ownedScratch)) {
+		await assertFilesystemTreeNoSymlinks(ownedScratch, "owned scratch directory")
+		const info = await lstat(ownedScratch)
+		if (!info.isDirectory()) throw new Error(`owned scratch path is not a directory: ${ownedScratch}`)
+	}
+	await validateOwnedPinState(dataDir, intent)
+}
+
+const validateOwnedPinState = async (dataDir: string, intent: ArchiveOperationIntent): Promise<void> => {
+	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
+	if (!existsSync(expectedPinPath)) {
+		const absenceAuthorized = intent.phase === "intent" || phaseAtLeast(intent.phase, "catalog-complete")
+		if (!absenceAuthorized) {
+			throw new Error(
+				`archive operation pin is missing before release was authorized: ${expectedPinPath} (phase ${intent.phase})`,
+			)
+		}
+		return
+	}
+	await assertFilesystemPathNoSymlinks(expectedPinPath, "archive operation pin")
+	await assertRealFile(expectedPinPath, "archive operation pin")
+	const raw = JSON.parse(readFileSync(expectedPinPath, "utf8")) as Record<string, unknown>
+	if (
+		raw.formatVersion !== 1 ||
+		raw.pinId !== intent.pinId ||
+		raw.checkpointId !== intent.checkpointId ||
+		raw.purpose !== intent.pinPurpose
+	) {
+		throw new Error(`archive operation pin identity or purpose mismatch: ${expectedPinPath}`)
+	}
+}
+
+const assertReconciliationRoots = async (
+	dataDir: string,
+	archiveDir: string,
+	scratchRoot: string,
+): Promise<void> => {
+	for (const [label, path] of [
+		["archive", resolve(archiveDir)],
+		["data", resolve(dataDir)],
+		["scratch", resolve(scratchRoot)],
+	] as const) {
+		if (!existsSync(path)) continue
+		await assertFilesystemPathNoSymlinks(path, `${label} root`)
+		const info = await lstat(path)
+		if (info.isSymbolicLink() || !info.isDirectory()) {
+			throw new Error(`refusing unsafe ${label} root: ${path}`)
+		}
+	}
+}
+
+const verifyPublishedGeneration = async (
+	archiveDir: string,
+	intent: ArchiveOperationIntent,
+): Promise<ArchiveGenerationManifest> => {
+	const finalGeneration = generationRoot(archiveDir, intent.signal, intent.rangeStart, intent.generationId)
+	await assertNoSymlink(archiveDir, finalGeneration, "archive final generation")
+	await assertRealDirectory(finalGeneration, "archive final generation")
+	const manifestPath = generationManifestPath(
+		archiveDir,
+		intent.signal,
+		intent.rangeStart,
+		intent.generationId,
+	)
+	await assertNoSymlink(archiveDir, manifestPath, "archive final manifest")
+	await assertRealFile(manifestPath, "archive final manifest")
+	const actualManifestSha256 = sha256File(manifestPath)
+	if (actualManifestSha256 !== intent.manifestSha256) {
+		throw new Error(
+			`archive final manifest SHA-256 mismatch: journal ${intent.manifestSha256}, actual ${actualManifestSha256}`,
+		)
+	}
+	const manifest = readArchiveGenerationManifest(
+		archiveDir,
+		intent.signal,
+		intent.rangeStart,
+		intent.generationId,
+	)
+	if (manifest.checkpointId !== intent.checkpointId) {
+		throw new Error(
+			`archive final manifest checkpoint mismatch: journal ${intent.checkpointId}, manifest ${manifest.checkpointId}`,
+		)
+	}
+	for (const shard of manifest.shards) {
+		const shardPath = join(finalGeneration, "shards", shard.name)
+		await assertNoSymlink(archiveDir, shardPath, `archive shard ${shard.name}`)
+		await assertRealFile(shardPath, `archive shard ${shard.name}`)
+		const actualBytes = statSync(shardPath).size
+		if (actualBytes !== shard.bytes) {
+			throw new Error(
+				`archive shard ${shard.name} byte size mismatch: manifest ${shard.bytes}, actual ${actualBytes}`,
+			)
+		}
+		const actualSha256 = sha256File(shardPath)
+		if (actualSha256 !== shard.sha256) {
+			throw new Error(
+				`archive shard ${shard.name} SHA-256 mismatch: manifest ${shard.sha256}, actual ${actualSha256}`,
+			)
+		}
+	}
+	return manifest
 }
 
 /**
@@ -734,9 +913,22 @@ const reconcilePrePublication = async (
 			`building-${intent.operationId}`,
 		)
 		await ensurePrivateDirectory(join(archiveRoot(archiveDir), "quarantine"), archiveRoot(archiveDir))
-		if (!existsSync(quarantineBuilding)) {
-			await durableRename(building, quarantineBuilding)
-			await syncDirectory(buildingRoot(archiveDir))
+		if (existsSync(quarantineBuilding)) {
+			throw new Error(
+				`archive operation has both building and quarantine state; refusing to retire authority: ${quarantineBuilding}`,
+			)
+		}
+		await durableRename(building, quarantineBuilding)
+		await syncDirectory(buildingRoot(archiveDir))
+	} else {
+		const quarantineBuilding = join(
+			archiveRoot(archiveDir),
+			"quarantine",
+			`building-${intent.operationId}`,
+		)
+		if (existsSync(quarantineBuilding)) {
+			await assertNoSymlink(archiveDir, quarantineBuilding, "archive building quarantine")
+			await assertRealDirectory(quarantineBuilding, "archive building quarantine")
 		}
 	}
 	// Remove owned scratch.
@@ -744,7 +936,7 @@ const reconcilePrePublication = async (
 	// Release the owned pin if it still exists. A pin absence before
 	// "pin-released" would be an error, but a pre-publication abort releasing its
 	// own pin is the intended recovery — so tolerate already-absent here.
-	await releaseOwnedPinTolerant(dataDir, intent)
+	await releaseOwnedPin(dataDir, intent)
 	await advancePhase(archiveDir, intent.operationId, endPhase)
 	// Archive the aborted operation journal to completed/ (retained for audit).
 	await archiveCompletedOperation(archiveDir, intent.operationId)
@@ -779,7 +971,7 @@ const reconcilePostPromotion = async (
 		await advancePhase(archiveDir, operationId, "catalog-complete")
 	}
 	if (!phaseAtLeast(intent.phase, "pin-released")) {
-		await releaseOwnedPinTolerant(dataDir, intent)
+		await releaseOwnedPin(dataDir, intent)
 		await advancePhase(archiveDir, operationId, "pin-released")
 	}
 	if (!phaseAtLeast(intent.phase, "scratch-removed")) {
@@ -798,14 +990,17 @@ const reconcilePostPromotion = async (
  * implements the plan rule: pin absence is success only where release was
  * already authorized.
  */
-const releaseOwnedPinTolerant = async (dataDir: string, intent: ArchiveOperationIntent): Promise<void> => {
+const releaseOwnedPin = async (dataDir: string, intent: ArchiveOperationIntent): Promise<void> => {
 	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
 	if (!existsSync(expectedPinPath)) {
-		// Pin already gone. Tolerate it only when release was authorized (phase
-		// at-or-past "pin-released") or during pre-publication abort recovery.
-		// A missing pin at a phase where it must still exist is surfaced by the
-		// caller's topology checks; here we treat absence as "already released".
-		return
+		const absenceAuthorized =
+			intent.phase === "intent" ||
+			phaseAtLeast(intent.phase, "catalog-complete") ||
+			phaseAtLeast(intent.phase, "pin-released")
+		if (absenceAuthorized) return
+		throw new Error(
+			`archive operation pin is missing before release was authorized: ${expectedPinPath} (phase ${intent.phase})`,
+		)
 	}
-	await releaseCheckpointPin(dataDir, intent.checkpointId, expectedPinPath)
+	await releaseCheckpointPin(dataDir, intent.checkpointId, expectedPinPath, intent.pinPurpose)
 }
