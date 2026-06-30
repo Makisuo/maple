@@ -45,14 +45,15 @@ import {
 	advancePhase,
 	archiveCompletedOperation,
 	assertPointerConsistent,
+	migrateActiveIntentIfLegacy,
 	operationDir,
 	ownedPathsFor,
 	phaseAtLeast,
 	readActiveOperation,
 	resolveBaseActiveGenerationId,
 	writeInitialIntent,
-	type ArchiveOperationIntent,
 	type ArchiveOperationPhase,
+	type CreateOperationIntent,
 } from "./journal"
 import { assertCatalogExact, rebuildCatalog } from "./listing"
 
@@ -711,32 +712,49 @@ export const reconcileArchiveGeneration = async (
 ): Promise<void> => {
 	void faults
 	await assertReconciliationRoots(dataDir, archiveDir, scratchRoot)
+	// Lift a legacy v2 (pre-kind) intent to v3 before reading. A v2 intent left by
+	// a Gate 3a binary would otherwise strand: the v3 parser rejects it and
+	// reconciliation fails closed, blocking all future archive work. This runs
+	// under the maintenance lock (reconcile is always called inside it).
+	await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
 	const active = readActiveOperation(archiveDir, dataDir, scratchRoot)
 	if (active === null) return
 	const { operationId, intent } = active
 
+	// Dispatch on operation kind. A create op reconciles via the create lifecycle
+	// below; a gc op reconciles via the GC tombstone collector (gc.ts). Both share
+	// the at-most-one active-operation slot, so a crashed op of EITHER kind must
+	// be reconcilable here or it blocks all future archive work.
+	if (intent.kind === "gc") {
+		const { reconcileGcOperation } = await import("./gc")
+		await reconcileGcOperation(dataDir, archiveDir, intent)
+		return
+	}
+
+	// --- create-kind reconciliation below ---
+	const createIntent: CreateOperationIntent = intent
 	// Validate the recorded topology against reality before acting. The owned
 	// paths must be consistent with the archive root and identities.
-	const { finalGeneration, building } = ownedPathsFor(intent)
-	await validateReconciliationTopology(dataDir, archiveDir, intent, finalGeneration, building)
+	const { finalGeneration, building } = ownedPathsFor(createIntent)
+	await validateReconciliationTopology(dataDir, archiveDir, createIntent, finalGeneration, building)
 	const promoted = existsSync(finalGeneration)
 	const finalManifestPath = generationManifestPath(
 		archiveDir,
-		intent.signal,
-		intent.rangeStart,
-		intent.generationId,
+		createIntent.signal,
+		createIntent.rangeStart,
+		createIntent.generationId,
 	)
 	const manifestAtFinal = existsSync(finalManifestPath)
 
-	if (phaseAtLeast(intent.phase, "complete")) {
+	if (phaseAtLeast(createIntent.phase, "complete")) {
 		// A phase label is never proof of durable reality. A crash after the
 		// complete write but before journal archival is safe to retire only when
 		// every implied invariant is observed exactly and without repair.
-		await verifyCompletedOperationInvariants(dataDir, archiveDir, intent, finalGeneration, building)
+		await verifyCompletedOperationInvariants(dataDir, archiveDir, createIntent, finalGeneration, building)
 		await archiveCompletedOperation(archiveDir, operationId)
 		return
 	}
-	if (phaseAtLeast(intent.phase, "aborted")) {
+	if (phaseAtLeast(createIntent.phase, "aborted")) {
 		// Already aborted; the op dir should have been quarantined. If it's still
 		// in active/, fail closed (ambiguous).
 		throw new Error(
@@ -749,34 +767,34 @@ export const reconcileArchiveGeneration = async (
 			`archive operation published a generation without a manifest; preserving journal and final state: ${finalGeneration}`,
 		)
 	}
-	if (promoted && !phaseAtLeast(intent.phase, "manifest-written")) {
+	if (promoted && !phaseAtLeast(createIntent.phase, "manifest-written")) {
 		throw new Error(
 			`archive operation final generation exists before manifest-written phase: ${finalGeneration}`,
 		)
 	}
-	if (!promoted && phaseAtLeast(intent.phase, "promoted")) {
+	if (!promoted && phaseAtLeast(createIntent.phase, "promoted")) {
 		throw new Error(
-			`archive operation phase ${intent.phase} requires its final generation: ${finalGeneration}`,
+			`archive operation phase ${createIntent.phase} requires its final generation: ${finalGeneration}`,
 		)
 	}
 
 	// Pre-publication: the generation was never promoted. Quarantine building
 	// output, remove owned scratch, release owned pin, mark aborted.
 	if (!promoted) {
-		await reconcilePrePublication(dataDir, archiveDir, intent, building, "aborted")
+		await reconcilePrePublication(dataDir, archiveDir, createIntent, building, "aborted")
 		return
 	}
 
 	// Post-promotion: a complete generation + manifest was published. Finish the
 	// remaining steps idempotently.
-	await verifyPublishedGeneration(archiveDir, intent)
-	await reconcilePostPromotion(dataDir, archiveDir, intent, operationId)
+	await verifyPublishedGeneration(archiveDir, createIntent)
+	await reconcilePostPromotion(dataDir, archiveDir, createIntent, operationId)
 }
 
 const validateReconciliationTopology = async (
 	dataDir: string,
 	archiveDir: string,
-	intent: ArchiveOperationIntent,
+	intent: CreateOperationIntent,
 	finalGeneration: string,
 	building: string,
 ): Promise<void> => {
@@ -803,7 +821,7 @@ const validateReconciliationTopology = async (
 	await validateOwnedPinState(dataDir, intent)
 }
 
-const validateOwnedPinState = async (dataDir: string, intent: ArchiveOperationIntent): Promise<void> => {
+const validateOwnedPinState = async (dataDir: string, intent: CreateOperationIntent): Promise<void> => {
 	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
 	if (!existsSync(expectedPinPath)) {
 		const absenceAuthorized = intent.phase === "intent" || phaseAtLeast(intent.phase, "catalog-complete")
@@ -852,7 +870,7 @@ const assertReconciliationRoots = async (
 
 const verifyPublishedGeneration = async (
 	archiveDir: string,
-	intent: ArchiveOperationIntent,
+	intent: CreateOperationIntent,
 ): Promise<ArchiveGenerationManifest> => {
 	const finalGeneration = generationRoot(archiveDir, intent.signal, intent.rangeStart, intent.generationId)
 	await assertNoSymlink(archiveDir, finalGeneration, "archive final generation")
@@ -912,7 +930,7 @@ const verifyPublishedGeneration = async (
 const reconcilePrePublication = async (
 	dataDir: string,
 	archiveDir: string,
-	intent: ArchiveOperationIntent,
+	intent: CreateOperationIntent,
 	building: string,
 	endPhase: ArchiveOperationPhase,
 ): Promise<void> => {
@@ -963,7 +981,7 @@ const reconcilePrePublication = async (
 const reconcilePostPromotion = async (
 	dataDir: string,
 	archiveDir: string,
-	intent: ArchiveOperationIntent,
+	intent: CreateOperationIntent,
 	operationId: string,
 ): Promise<void> => {
 	// Never trust pointer/catalog phase labels. Observe the pointer, require its
@@ -1003,7 +1021,7 @@ const reconcilePostPromotion = async (
 	await archiveCompletedOperation(archiveDir, operationId)
 }
 
-const assertOwnedPinAbsent = (dataDir: string, intent: ArchiveOperationIntent): void => {
+const assertOwnedPinAbsent = (dataDir: string, intent: CreateOperationIntent): void => {
 	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
 	if (existsSync(expectedPinPath)) {
 		throw new Error(
@@ -1012,7 +1030,7 @@ const assertOwnedPinAbsent = (dataDir: string, intent: ArchiveOperationIntent): 
 	}
 }
 
-const assertOwnedScratchAbsent = (intent: ArchiveOperationIntent): void => {
+const assertOwnedScratchAbsent = (intent: CreateOperationIntent): void => {
 	const ownedScratch = join(resolve(intent.scratchRoot), intent.scratchSubdir)
 	if (existsSync(ownedScratch)) {
 		throw new Error(
@@ -1024,7 +1042,7 @@ const assertOwnedScratchAbsent = (intent: ArchiveOperationIntent): void => {
 const verifyCompletedOperationInvariants = async (
 	dataDir: string,
 	archiveDir: string,
-	intent: ArchiveOperationIntent,
+	intent: CreateOperationIntent,
 	finalGeneration: string,
 	building: string,
 ): Promise<void> => {
@@ -1054,7 +1072,7 @@ const verifyCompletedOperationInvariants = async (
  * implements the plan rule: pin absence is success only where release was
  * already authorized.
  */
-const releaseOwnedPin = async (dataDir: string, intent: ArchiveOperationIntent): Promise<void> => {
+const releaseOwnedPin = async (dataDir: string, intent: CreateOperationIntent): Promise<void> => {
 	const expectedPinPath = join(checkpointPinsRoot(dataDir), intent.checkpointId, `${intent.pinId}.json`)
 	if (!existsSync(expectedPinPath)) {
 		const absenceAuthorized =
