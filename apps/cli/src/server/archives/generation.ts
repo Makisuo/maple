@@ -46,12 +46,15 @@ import {
 	archiveCompletedOperation,
 	assertPointerConsistent,
 	migrateActiveIntentIfLegacy,
+	migrateV2CreateIntent,
 	operationDir,
 	ownedPathsFor,
+	parseArchiveOperationIntent,
 	phaseAtLeast,
 	readActiveOperation,
 	resolveBaseActiveGenerationId,
 	writeInitialIntent,
+	type ArchiveOperationIntent,
 	type ArchiveOperationPhase,
 	type CreateOperationIntent,
 } from "./journal"
@@ -1100,43 +1103,70 @@ export interface ReconciliationPlan {
 	readonly phase: string | null
 	readonly summary: string
 	readonly blockers: ReadonlyArray<string>
+	readonly needsMigration: boolean
+	readonly failClosed: string | null
 }
 
+const noActivePlan = (): ReconciliationPlan => ({
+	hasActiveOperation: false,
+	operationId: null,
+	kind: null,
+	phase: null,
+	summary: "no active operation",
+	blockers: [],
+	needsMigration: false,
+	failClosed: null,
+})
+
 /**
- * Plan reconciliation WITHOUT mutating: read the (at most one) active operation,
- * describe its kind/phase + the convergence outcome + any blockers. Does NOT
- * migrate v2 or change state — the caller (runArchiveReconciliation apply) does.
+ * Plan reconciliation WITHOUT mutating, using the STRICT journal reader so the
+ * plan apply consumes is the same validated plan dry-run reports. Surfacing:
+ * - no active op → { hasActiveOperation: false }
+ * - a valid v2 intent → { needsMigration: true } (an ACTION, not a blocker)
+ * - a valid v3 intent → the kind/phase to converge
+ * - multiple ops / missing intent / unreadable / strict-invalid / unknown debris
+ *   → { failClosed: <reason> } (apply throws; never success)
+ *
+ * Unknown active-dir entries and read errors are surfaced (fail closed), NEVER
+ * filtered into absence — the strict reader's behavior is preserved.
  */
 export const planArchiveReconciliation = (
 	archiveDir: string,
 	dataDir: string,
 	scratchRoot: string,
 ): ReconciliationPlan => {
-	void dataDir
-	void scratchRoot
-	const ids = listActiveOperationIdsSafe(archiveDir)
-	if (ids.length === 0) {
-		return {
-			hasActiveOperation: false,
-			operationId: null,
-			kind: null,
-			phase: null,
-			summary: "no active operation",
-			blockers: [],
-		}
-	}
-	if (ids.length > 1) {
+	let ids: string[]
+	try {
+		ids = listActiveOperationIdsStrict(archiveDir)
+	} catch (error) {
+		// Debris or an unreadable active root: surface as a fail-closed plan
+		// (apply throws; dry-run reports it) — never filtered into absence.
+		const reason = error instanceof Error ? error.message : String(error)
 		return {
 			hasActiveOperation: true,
 			operationId: null,
 			kind: null,
 			phase: null,
-			summary: "multiple active operations require operator inspection",
-			blockers: [`${ids.length} active operations are ambiguous; manual inspection required`],
+			summary: `active operations directory is unsafe: ${reason}`,
+			blockers: [reason],
+			needsMigration: false,
+			failClosed: reason,
 		}
 	}
-	// Read the raw record to inspect kind/phase WITHOUT migrating (a v2 record
-	// has no kind; report it as a legacy create op that apply will migrate).
+	if (ids.length === 0) return noActivePlan()
+	if (ids.length > 1) {
+		const reason = `${ids.length} active operations are ambiguous; manual inspection required`
+		return {
+			hasActiveOperation: true,
+			operationId: null,
+			kind: null,
+			phase: null,
+			summary: reason,
+			blockers: [reason],
+			needsMigration: false,
+			failClosed: reason,
+		}
+	}
 	const operationId = ids[0]!
 	const intentPathFile = join(operationDir(archiveDir, operationId), "intent.json")
 	if (!existsSync(intentPathFile)) {
@@ -1147,60 +1177,120 @@ export const planArchiveReconciliation = (
 			phase: null,
 			summary: "active operation missing its intent journal",
 			blockers: ["missing intent.json"],
+			needsMigration: false,
+			failClosed: "active operation is missing its intent.json",
 		}
 	}
 	let raw: Record<string, unknown>
 	try {
 		raw = JSON.parse(readFileSync(intentPathFile, "utf8")) as Record<string, unknown>
-	} catch {
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error)
 		return {
 			hasActiveOperation: true,
 			operationId,
 			kind: null,
 			phase: null,
 			summary: "active operation has an unreadable intent journal",
-			blockers: ["unreadable intent.json"],
+			blockers: [`unreadable intent.json: ${reason}`],
+			needsMigration: false,
+			failClosed: `active operation intent.json is unreadable: ${reason}`,
 		}
 	}
-	const isV2 = raw.formatVersion === 2
-	const kind = (isV2 ? "create" : (raw.kind as string | undefined)) ?? null
-	const phase = (raw.phase as string | undefined) ?? null
-	const blockers: string[] = []
-	if (isV2) blockers.push("legacy v2 intent will be migrated to v3 before reconciliation")
+	if (raw.formatVersion === 2) {
+		// A valid v2 create intent: an ACTION (migrate + reconcile), not a blocker.
+		// Validate it migrates cleanly by attempting migrateV2CreateIntent (pure,
+		// non-mutating — it parses the lifted record and discards the result).
+		try {
+			migrateV2CreateIntent(archiveDir, raw, dataDir, scratchRoot)
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : String(error)
+			return {
+				hasActiveOperation: true,
+				operationId,
+				kind: null,
+				phase: null,
+				summary: "active operation has a corrupt v2 intent",
+				blockers: [`corrupt v2 intent: ${reason}`],
+				needsMigration: false,
+				failClosed: `active v2 intent is corrupt and will not migrate: ${reason}`,
+			}
+		}
+		const phase = (raw.phase as string | undefined) ?? null
+		return {
+			hasActiveOperation: true,
+			operationId,
+			kind: "create",
+			phase,
+			summary: `converge legacy v2 create operation (phase ${phase ?? "unknown"}); migrate to v3 then reconcile`,
+			blockers: [],
+			needsMigration: true,
+			failClosed: null,
+		}
+	}
+	// v3 (or anything else): STRICT parse via the authoritative reader. A
+	// malformed/strict-invalid record is fail-closed here, not deferred to apply.
+	let intent: ArchiveOperationIntent
+	try {
+		intent = parseArchiveOperationIntent(archiveDir, raw, dataDir, scratchRoot)
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error)
+		return {
+			hasActiveOperation: true,
+			operationId,
+			kind: null,
+			phase: null,
+			summary: "active operation has a strict-invalid intent",
+			blockers: [`strict-invalid intent: ${reason}`],
+			needsMigration: false,
+			failClosed: `active operation intent is strict-invalid: ${reason}`,
+		}
+	}
 	return {
 		hasActiveOperation: true,
 		operationId,
-		kind: kind as "create" | "gc" | null,
-		phase,
-		summary: `converge interrupted ${kind ?? "unknown"} operation (phase ${phase ?? "unknown"})`,
-		blockers,
+		kind: intent.kind,
+		phase: intent.phase,
+		summary: `converge interrupted ${intent.kind} operation (phase ${intent.phase})`,
+		blockers: [],
+		needsMigration: false,
+		failClosed: null,
 	}
 }
 
-// listActiveOperationIds without the strict-fail-closed-on-debris behavior, for
-// planning (planning reports debris as a blocker rather than throwing).
-const listActiveOperationIdsSafe = (archiveDir: string): string[] => {
+// Strict enumeration of active operation IDs, mirroring the journal reader's
+// fail-closed-on-debris behavior: unknown entries (files, symlinks, non-archive-
+// prefixed dirs) and read errors THROW so the planner surfaces them as fail-
+// closed. NEVER silently filter debris into "no active op" (blocker: the old
+// "Safe" variant did, bypassing the strict reader).
+const listActiveOperationIdsStrict = (archiveDir: string): string[] => {
 	const root = join(archiveRoot(archiveDir), "operations", "active")
 	if (!existsSync(root)) return []
-	try {
-		const entries = readdirSync(root, { withFileTypes: true })
-		const ids: string[] = []
-		for (const entry of entries) {
-			if (entry.name.startsWith("archive-")) ids.push(entry.name.slice("archive-".length))
+	const entries = readdirSync(root, { withFileTypes: true })
+	const ids: string[] = []
+	for (const entry of entries) {
+		// Any non-conforming entry (file, symlink, socket, non-prefixed dir) is
+		// unrecognized debris → fail closed (surface, preserve). Matches the strict
+		// journal reader; never filtered into absence.
+		if (!entry.isDirectory() || entry.isSymbolicLink() || !entry.name.startsWith("archive-")) {
+			throw new Error(`unrecognized active operation debris: ${join(root, entry.name)}`)
 		}
-		return ids
-	} catch {
-		return []
+		ids.push(entry.name.slice("archive-".length))
 	}
+	return ids
 }
 
 /**
  * The authoritative locked reconciliation entry point (blocker 2). The
- * `archive reconcile` CLI MUST call only this — it acquires the maintenance lock
- * (so explicit reconciliation cannot race create/GC planning, v2 migration,
- * pointer/catalog repair, or tombstone collection), migrates any legacy v2
- * intent, then reconciles. `dryRun` returns the plan WITHOUT mutating (no
- * migration, no reconciliation).
+ * `archive reconcile` CLI MUST call only this. Apply ALWAYS acquires the
+ * maintenance lock FIRST, then re-reads/validates state under it — it never
+ * returns success for an unsafe state without locking. Valid v2 migration is an
+ * ACTION (migrate + reconcile), not a blocker. Malformed/ambiguous/unreadable/
+ * unknown active state FAILS CLOSED (throws) — never reported as success.
+ *
+ * `dryRun` returns the same strict plan WITHOUT mutating (no lock mutation, no
+ * migration). A dry-run plan with `needsMigration` reports it as an action; a
+ * dry-run plan with a `failClosed` reason reports the blocker without acting.
  */
 export const runArchiveReconciliation = async (
 	dataDir: string,
@@ -1208,13 +1298,31 @@ export const runArchiveReconciliation = async (
 	scratchRoot: string,
 	options: { readonly dryRun: boolean } = { dryRun: false },
 ): Promise<ReconciliationPlan> => {
-	const plan = planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
-	if (options.dryRun || !plan.hasActiveOperation || plan.blockers.length > 0) return plan
-	// Apply: under the maintenance lock, migrate v2 then reconcile.
+	if (options.dryRun) {
+		// Dry-run: the same strict, nonmutating planner. It may surface fail-closed
+		// reasons or migration actions, but never mutates (no lock, no migration).
+		return planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
+	}
+	// Apply: ALWAYS acquire the maintenance lock FIRST, before deciding whether to
+	// act. A live lock owner is surfaced as a throw (dead-owner reclaim still
+	// works inside withMaintenanceLock). Then re-read/validate under the lock.
 	const operationId = randomUUID()
 	await withMaintenanceLock(dataDir, operationId, async () => {
-		await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
+		// Re-plan under the lock so the decision reflects locked, current state.
+		const plan = planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
+		// No active op under the lock: nothing to do (not an error).
+		if (!plan.hasActiveOperation) return
+		// A fail-closed plan must NEVER be silently completed. Throw so the CLI
+		// exits nonzero and state is preserved.
+		if (plan.failClosed !== null) {
+			throw new Error(`refusing to reconcile unsafe archive state: ${plan.failClosed}`)
+		}
+		// Valid v2 migration is an ACTION: migrate (under the lock), then reconcile.
+		if (plan.needsMigration) {
+			await migrateActiveIntentIfLegacy(archiveDir, dataDir, scratchRoot)
+		}
 		await reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot)
 	})
-	return plan
+	// Return a fresh plan reflecting the post-apply state (no active op).
+	return planArchiveReconciliation(archiveDir, dataDir, scratchRoot)
 }

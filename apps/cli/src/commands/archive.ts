@@ -314,11 +314,16 @@ export const archiveReconcile = Command.make("reconcile", {
 							(plan.operationId ? `  ${dim("operation")} ${plan.operationId}\n` : "") +
 							(plan.kind ? `  ${dim("kind")}       ${plan.kind}\n` : "") +
 							(plan.phase ? `  ${dim("phase")}      ${plan.phase}\n` : "") +
+							(plan.needsMigration
+								? `  ${dim("action")}    migrate legacy v2 intent to v3 then reconcile\n`
+								: "") +
 							`  ${dim("archive")}   ${prettyPath(archiveDir)}\n` +
 							`  ${dim("note")}     no archive state is modified\n` +
-							(plan.blockers.length > 0
-								? plan.blockers.map((b) => `  ${dim("blocker")}   ${b}`).join("\n") + "\n"
-								: ""),
+							(plan.failClosed
+								? `  ${red("!")} FAIL CLOSED: ${plan.failClosed}\n`
+								: plan.blockers.length > 0
+									? plan.blockers.map((b) => `  ${dim("blocker")}   ${b}`).join("\n") + "\n"
+									: ""),
 					),
 				)
 				return

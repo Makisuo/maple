@@ -167,9 +167,11 @@ verify_after_reconcile() {
 	local pointer_gen
 	pointer_gen=$(jq -r '.generationId' "$archive/$SIGNAL/$RANGE_DATE/active.json" 2>/dev/null)
 	[ "$pointer_gen" = "$active_gen" ] || errs="$errs pointer=$pointer_gen(need $active_gen)"
-	# Catalog exactly matches authoritative manifests (rebuild is idempotent; a
-	# second rebuild must not change the file → the catalog is canonical).
+	# Catalog MUST exist and exactly match authoritative manifests (rebuild is
+	# idempotent; a second rebuild must not change the file → the catalog is
+	# canonical). A MISSING catalog is a failure, not skipped (blocker 5).
 	local catalog="$archive/$SIGNAL/catalog.jsonl"
+	[ -f "$catalog" ] || errs="$errs catalog-missing"
 	if [ -f "$catalog" ]; then
 		local before after
 		before=$(shasum -a 256 "$catalog" | awk '{print $1}')
@@ -196,6 +198,14 @@ verify_after_reconcile() {
 	fi
 	[ "$journal_phase" = "complete" ] || errs="$errs journal-phase=$journal_phase"
 	[ "$journal_cursor" = "$frozen_n" ] || errs="$errs journal-cursor=$journal_cursor(need $frozen_n)"
+	# The completed journal's frozen target IDs must EXACTLY equal the pre-crash
+	# frozen set (blocker 5: never re-expanded). Compare sorted generationId lists.
+	if [ -n "${j:-}" ]; then
+		jq -r '.targets[].generationId' "$j" 2>/dev/null | sort >"$ROOT/journal-targets.txt"
+		if ! diff -q "$ROOT/frozen-targets.txt" "$ROOT/journal-targets.txt" >/dev/null 2>&1; then
+			errs="$errs journal-targets-differ-from-frozen"
+		fi
+	fi
 	# No tombstone retains a generation dir.
 	local tombstone_gen
 	tombstone_gen=$(find "$archive/operations" -type d -name tombstones 2>/dev/null -exec sh -c 'for e in "$1"/*; do [ -e "$e" ] && echo x && break; done' _ {} \; | wc -l | tr -d ' ')
