@@ -94,6 +94,18 @@ describe("archive operation journal", () => {
 		})
 	})
 
+	it("clears published-manifest authority when a prepublication operation aborts", async () => {
+		await withArchive(async (archiveDir) => {
+			const op = randomUUID()
+			await writeInitialIntent({ ...baseIntent({ operationId: op }), archiveDir })
+			await advancePhase(archiveDir, op, "manifest-written", "a".repeat(64))
+			await advancePhase(archiveDir, op, "aborted")
+			const active = readActiveOperation(archiveDir)
+			strictEqual(active!.intent.phase, "aborted")
+			strictEqual(active!.intent.manifestSha256, null)
+		})
+	})
+
 	it("readActiveOperation fails closed on more than one active operation", async () => {
 		await withArchive(async (archiveDir) => {
 			await writeInitialIntent({ ...baseIntent({ operationId: randomUUID() }), archiveDir })

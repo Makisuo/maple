@@ -132,7 +132,7 @@ spawn_and_kill() {
 # verify_post_crash <boundary> <expect-published>: assert the post-crash +
 # post-reconcile state is exactly correct.
 verify_post_crash() {
-	local boundary="$1" expect_published="$2" expect_quarantine="$3"
+	local boundary="$1" expect_published="$2" expect_quarantine="$3" quarantine_layout="$4"
 	local data archive
 	data="$(cat "$ROOT/data.path")"
 	archive="$ROOT/archive"
@@ -159,6 +159,8 @@ verify_post_crash() {
 	local pointer="$archive/$SIGNAL/$RANGE_DATE/active.json"
 	if [ "$expect_published" = "yes" ]; then
 		[ -f "$pointer" ] || errs="$errs no-pointer"
+		[ "$(jq -r '.signal' "$pointer" 2>/dev/null)" = "$SIGNAL" ] || errs="$errs pointer-signal"
+		[ "$(jq -r '.rangeStart' "$pointer" 2>/dev/null)" = "$RANGE_DATE" ] || errs="$errs pointer-range"
 	else
 		# Not published: the pointer should be ABSENT (the crashed op never flipped it).
 		# (If a prior unrelated generation existed it'd be unchanged; here none does.)
@@ -171,6 +173,31 @@ verify_post_crash() {
 	quarantine_count=$(find "$archive/quarantine" -mindepth 1 -maxdepth 1 -type d -name 'building-*' 2>/dev/null | wc -l | tr -d ' ')
 	if [ "$expect_quarantine" = "yes" ]; then
 		[ "$quarantine_count" -eq 1 ] || errs="$errs quarantine-count($quarantine_count)"
+		local completed_intent operation_id quarantine_path quarantine_shards
+		completed_intent=$(find "$archive/operations/completed" -mindepth 2 -maxdepth 2 -name intent.json 2>/dev/null | head -1)
+		operation_id=$(jq -er '.operationId' "$completed_intent" 2>/dev/null) || errs="$errs missing-completed-operation-id"
+		quarantine_path="$archive/quarantine/building-$operation_id"
+		[ -d "$quarantine_path" ] || errs="$errs wrong-quarantine-identity"
+		quarantine_shards=$(find "$quarantine_path/shards" -maxdepth 1 -type f -name '*.parquet' 2>/dev/null | wc -l | tr -d ' ')
+		case "$quarantine_layout" in
+			empty)
+				[ "$quarantine_shards" -eq 0 ] || errs="$errs quarantine-shards($quarantine_shards)"
+				[ ! -e "$quarantine_path/manifest.json" ] || errs="$errs unexpected-quarantine-manifest"
+				;;
+			one-shard)
+				[ "$quarantine_shards" -eq 1 ] || errs="$errs quarantine-shards($quarantine_shards)"
+				[ ! -e "$quarantine_path/manifest.json" ] || errs="$errs unexpected-quarantine-manifest"
+				;;
+			three-shards)
+				[ "$quarantine_shards" -eq 3 ] || errs="$errs quarantine-shards($quarantine_shards)"
+				[ ! -e "$quarantine_path/manifest.json" ] || errs="$errs unexpected-quarantine-manifest"
+				;;
+			manifest-three-shards)
+				[ "$quarantine_shards" -eq 3 ] || errs="$errs quarantine-shards($quarantine_shards)"
+				[ -f "$quarantine_path/manifest.json" ] || errs="$errs missing-quarantine-manifest"
+				;;
+			*) errs="$errs unknown-quarantine-layout($quarantine_layout)" ;;
+		esac
 	else
 		[ "$quarantine_count" -eq 0 ] || errs="$errs unexpected-quarantine($quarantine_count)"
 	fi
@@ -183,6 +210,7 @@ verify_post_crash() {
 	# recovered generation's Parquet is intact and queryable, not just present.
 	if [ "$expect_published" = "yes" ]; then
 		local shard_glob paths_csv count generation manifest manifest_generation catalog_lines catalog_generation
+		local catalog_record manifest_record shard_name shard_expected_sha shard_expected_bytes shard_actual_sha shard_actual_bytes
 		generation="$(jq -er '.generationId' "$pointer" 2>/dev/null)" || errs="$errs malformed-pointer"
 		manifest="$archive/$SIGNAL/$RANGE_DATE/generations/$generation/manifest.json"
 		[ -f "$manifest" ] || errs="$errs missing-manifest"
@@ -192,6 +220,18 @@ verify_post_crash() {
 		[ "$catalog_lines" -eq 1 ] || errs="$errs catalog-lines($catalog_lines)"
 		catalog_generation="$(jq -r '.generationId' "$archive/$SIGNAL/catalog.jsonl" 2>/dev/null)" || errs="$errs malformed-catalog"
 		[ "$catalog_generation" = "$generation" ] || errs="$errs catalog-generation-mismatch"
+		catalog_record="$(jq -S -c '{generationId,signal,rangeStart,checkpointId,archivedRowCount,shardCount,createdAt}' "$archive/$SIGNAL/catalog.jsonl" 2>/dev/null)" || errs="$errs malformed-catalog"
+		manifest_record="$(jq -S -c '{generationId,signal,rangeStart,checkpointId,archivedRowCount,shardCount:(.shards|length),createdAt}' "$manifest" 2>/dev/null)" || errs="$errs malformed-manifest"
+		[ "$catalog_record" = "$manifest_record" ] || errs="$errs catalog-manifest-mismatch"
+		while IFS=$'\t' read -r shard_name shard_expected_sha shard_expected_bytes; do
+			[ -n "$shard_name" ] || continue
+			local shard_path="$archive/$SIGNAL/$RANGE_DATE/generations/$generation/shards/$shard_name"
+			[ -f "$shard_path" ] || { errs="$errs missing-shard($shard_name)"; continue; }
+			shard_actual_sha="$(shasum -a 256 "$shard_path" | awk '{print $1}')"
+			shard_actual_bytes="$(wc -c <"$shard_path" | tr -d ' ')"
+			[ "$shard_actual_sha" = "$shard_expected_sha" ] || errs="$errs shard-sha($shard_name)"
+			[ "$shard_actual_bytes" = "$shard_expected_bytes" ] || errs="$errs shard-bytes($shard_name)"
+		done < <(jq -r '.shards[] | [.name,.sha256,(.bytes|tostring)] | @tsv' "$manifest")
 		shard_glob="$archive/$SIGNAL/$RANGE_DATE/generations/*/shards/*.parquet"
 		# Build a quoted, comma-separated path list for DuckDB's read_parquet([...]).
 		paths_csv=""
@@ -265,7 +305,7 @@ verify_live_store_unchanged() {
 
 # run_boundary <boundary> <expect-published>: full crash→reconcile→verify→idempotence.
 run_boundary() {
-	local boundary="$1" expect_published="$2" expect_quarantine="${3:-no}"
+	local boundary="$1" expect_published="$2" expect_quarantine="${3:-no}" quarantine_layout="${4:-none}"
 	echo "  [$boundary] expect-published=$expect_published"
 	build_store >/dev/null || { echo "  !! build_store failed" >&2; fail=$((fail+1)); FAILURES+=("$boundary"); return; }
 	# marker path uses ROOT, which build_store just set — assign AFTER build_store.
@@ -280,7 +320,7 @@ run_boundary() {
 		echo "  !! reconcile threw for $boundary:" >&2; tail -3 "$ROOT/reconcile-$boundary.out" >&2
 		fail=$((fail+1)); FAILURES+=("$boundary"); return
 	fi
-	verify_post_crash "$boundary" "$expect_published" "$expect_quarantine" || { fail=$((fail+1)); FAILURES+=("$boundary"); return; }
+	verify_post_crash "$boundary" "$expect_published" "$expect_quarantine" "$quarantine_layout" || { fail=$((fail+1)); FAILURES+=("$boundary"); return; }
 	# For published generations: the DuckDB oracle is already checked inside
 	# verify_post_crash. Additionally prove the LIVE store is unchanged by the
 	# archive operation + recovery (plan: archive creation must not alter the
@@ -291,7 +331,7 @@ run_boundary() {
 	if ! MAPLE_LIBCHDB="$LIBCHDB" "${BUN[@]}" "$RECONCILE" --data-dir "$data" --archive-dir "$archive" --scratch-root "$ROOT/scratch" >"$ROOT/reconcile2-$boundary.out" 2>&1; then
 		echo "  !! second reconcile (idempotence) threw for $boundary" >&2; fail=$((fail+1)); FAILURES+=("$boundary:idempotence"); return
 	fi
-	verify_post_crash "$boundary" "$expect_published" "$expect_quarantine" >/dev/null || { echo "  !! state drifted after second reconcile for $boundary" >&2; fail=$((fail+1)); FAILURES+=("$boundary:idempotence"); return; }
+	verify_post_crash "$boundary" "$expect_published" "$expect_quarantine" "$quarantine_layout" >/dev/null || { echo "  !! state drifted after second reconcile for $boundary" >&2; fail=$((fail+1)); FAILURES+=("$boundary:idempotence"); return; }
 	pass=$((pass+1))
 }
 
@@ -306,11 +346,11 @@ run_boundary "before-intent-durable" "no"
 run_boundary "before-pin-acquired" "no"
 run_boundary "before-restore" "no"
 run_boundary "after-restore" "no"
-run_boundary "after-building-created" "no" "yes"
-run_boundary "after-first-shard" "no" "yes"
-run_boundary "after-validation-complete" "no" "yes"
-run_boundary "before-manifest-durable" "no" "yes"
-run_boundary "after-manifest-durable" "no" "yes"
+run_boundary "after-building-created" "no" "yes" "empty"
+run_boundary "after-first-shard" "no" "yes" "one-shard"
+run_boundary "after-validation-complete" "no" "yes" "three-shards"
+run_boundary "before-manifest-durable" "no" "yes" "three-shards"
+run_boundary "after-manifest-durable" "no" "yes" "manifest-three-shards"
 run_boundary "after-promoted" "yes"
 run_boundary "before-pointer-update" "yes"
 run_boundary "after-pointer" "yes"

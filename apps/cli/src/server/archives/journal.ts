@@ -306,7 +306,7 @@ export const advancePhase = async (
 	const updated: ArchiveOperationIntent = {
 		...current,
 		phase: next,
-		manifestSha256: manifestSha256 ?? current.manifestSha256,
+		manifestSha256: next === "aborted" ? null : (manifestSha256 ?? current.manifestSha256),
 		updatedAt: new Date().toISOString(),
 	}
 	if (

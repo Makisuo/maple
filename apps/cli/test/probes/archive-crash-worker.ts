@@ -148,7 +148,7 @@ const main = async (): Promise<void> => {
 		// pause after shard 1 while later shards do not yet exist.
 		maxShardRows: 1,
 		maxShardBytes: 256 * 1024 * 1024,
-		rowGroupRows: 10_000,
+		rowGroupRows: 1,
 	})
 	const faults = buildFaults(args)
 	try {
