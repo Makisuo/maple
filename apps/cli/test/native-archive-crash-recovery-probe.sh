@@ -74,6 +74,9 @@ wait_health() {
 # build_store: start server, ingest one marker into $SIGNAL, checkpoint, stop.
 # Leaves a fresh dataDir/archive/scratch with exactly one sealed checkpoint.
 build_store() {
+	if [[ -n "${ROOT:-}" && -d "$ROOT" && "${KEEP_ROOT:-0}" != "1" ]]; then
+		rm -rf "$ROOT"
+	fi
 	ROOT="$(mktemp -d "${TMPDIR:-/tmp}/maple-crash.XXXXXX")"
 	local data="$ROOT/data" archive="$ROOT/archive" scratch="$ROOT/scratch"
 	local config="$ROOT/backups.xml"
@@ -82,9 +85,10 @@ build_store() {
 	"$MAPLE" start --port "$PORT" --data-dir "$data" --chdb-config-file "$config" --on-dirty-store fail --offline >"$ROOT/server.log" 2>&1 &
 	SERVER_PID=$!
 	wait_health
-	# One marker at fixed UTC noon inside RANGE_DATE.
+	# Three markers at fixed UTC noon inside RANGE_DATE. maxShardRows=1 in the
+	# worker therefore creates three shards and makes after-first-shard genuine.
 	local ts="${RANGE_DATE}T12:00:00"
-	query "INSERT INTO $SIGNAL (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'crash', toDateTime64('${ts}.000000000', 9, 'UTC'), 't1', 's1', '', '', 'm', 'Server', 'crash-probe', 'Ok', ''" >/dev/null
+	query "INSERT INTO $SIGNAL (OrgId, Timestamp, TraceId, SpanId, ParentSpanId, TraceState, SpanName, SpanKind, ServiceName, StatusCode, StatusMessage) SELECT 'crash', toDateTime64('${ts}.000000000', 9, 'UTC'), concat('t', toString(number)), concat('s', toString(number)), '', '', 'm', 'Server', 'crash-probe', 'Ok', '' FROM numbers(3)" >/dev/null
 	"$MAPLE" checkpoint --port "$PORT" --data-dir "$data" >"$ROOT/cp.out" 2>&1 || { cat "$ROOT/cp.out" >&2; return 1; }
 	"$MAPLE" stop --data-dir "$data" >/dev/null 2>&1 || true
 	wait "$SERVER_PID" 2>/dev/null || true
@@ -128,7 +132,7 @@ spawn_and_kill() {
 # verify_post_crash <boundary> <expect-published>: assert the post-crash +
 # post-reconcile state is exactly correct.
 verify_post_crash() {
-	local boundary="$1" expect_published="$2"
+	local boundary="$1" expect_published="$2" expect_quarantine="$3"
 	local data archive
 	data="$(cat "$ROOT/data.path")"
 	archive="$ROOT/archive"
@@ -159,6 +163,16 @@ verify_post_crash() {
 		# Not published: the pointer should be ABSENT (the crashed op never flipped it).
 		# (If a prior unrelated generation existed it'd be unchanged; here none does.)
 		[ -f "$pointer" ] && errs="$errs unexpected-pointer" || true
+		local final_count
+		final_count=$(find "$archive/$SIGNAL/$RANGE_DATE/generations" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
+		[ "$final_count" -eq 0 ] || errs="$errs unpublished-final-generation($final_count)"
+	fi
+	local quarantine_count
+	quarantine_count=$(find "$archive/quarantine" -mindepth 1 -maxdepth 1 -type d -name 'building-*' 2>/dev/null | wc -l | tr -d ' ')
+	if [ "$expect_quarantine" = "yes" ]; then
+		[ "$quarantine_count" -eq 1 ] || errs="$errs quarantine-count($quarantine_count)"
+	else
+		[ "$quarantine_count" -eq 0 ] || errs="$errs unexpected-quarantine($quarantine_count)"
 	fi
 	# Pin: the crashed op's owned pin must be gone after reconcile.
 	local pins
@@ -168,7 +182,16 @@ verify_post_crash() {
 	# active shards and must report the exact marker count (1). This proves the
 	# recovered generation's Parquet is intact and queryable, not just present.
 	if [ "$expect_published" = "yes" ]; then
-		local shard_glob paths_csv count
+		local shard_glob paths_csv count generation manifest manifest_generation catalog_lines catalog_generation
+		generation="$(jq -er '.generationId' "$pointer" 2>/dev/null)" || errs="$errs malformed-pointer"
+		manifest="$archive/$SIGNAL/$RANGE_DATE/generations/$generation/manifest.json"
+		[ -f "$manifest" ] || errs="$errs missing-manifest"
+		manifest_generation="$(jq -er '.generationId' "$manifest" 2>/dev/null)" || errs="$errs malformed-manifest"
+		[ "$manifest_generation" = "$generation" ] || errs="$errs manifest-generation-mismatch"
+		catalog_lines=$(wc -l <"$archive/$SIGNAL/catalog.jsonl" 2>/dev/null | tr -d ' ') || catalog_lines=0
+		[ "$catalog_lines" -eq 1 ] || errs="$errs catalog-lines($catalog_lines)"
+		catalog_generation="$(jq -r '.generationId' "$archive/$SIGNAL/catalog.jsonl" 2>/dev/null)" || errs="$errs malformed-catalog"
+		[ "$catalog_generation" = "$generation" ] || errs="$errs catalog-generation-mismatch"
 		shard_glob="$archive/$SIGNAL/$RANGE_DATE/generations/*/shards/*.parquet"
 		# Build a quoted, comma-separated path list for DuckDB's read_parquet([...]).
 		paths_csv=""
@@ -182,14 +205,16 @@ verify_post_crash() {
 		else
 			count="$(duckdb -csv -noheader -c "SELECT count() FROM read_parquet([$paths_csv], union_by_name=true) WHERE ServiceName='crash-probe'" 2>"$ROOT/duckdb-$boundary.err")" \
 				|| errs="$errs duckdb-fail($(head -c80 "$ROOT/duckdb-$boundary.err" | tr '\n' ' '))"
-			[ "$(echo "$count" | tr -d '[:space:]')" = "1" ] || errs="$errs duckdb-count=$count"
+			[ "$(echo "$count" | tr -d '[:space:]')" = "3" ] || errs="$errs duckdb-count=$count"
 		fi
+	else
+		[ ! -e "$archive/$SIGNAL/catalog.jsonl" ] || errs="$errs unexpected-catalog"
 	fi
 	if [ -n "$errs" ]; then
 		echo "      VERIFY FAIL [$boundary]:$errs" >&2
 		return 1
 	fi
-	echo "      verified [$boundary] (published=$expect_published)"
+		echo "      verified [$boundary] (published=$expect_published quarantine=$expect_quarantine)"
 	return 0
 }
 
@@ -230,8 +255,8 @@ verify_live_store_unchanged() {
 	"$MAPLE" stop --data-dir "$data" >/dev/null 2>&1 || true
 	wait "$SERVER_PID" 2>/dev/null || true
 	SERVER_PID=""
-	if [ "$count" != "1" ]; then
-		echo "      LIVE-STORE FAIL [$boundary]: marker count=$count (expected 1)" >&2
+	if [ "$count" != "3" ]; then
+		echo "      LIVE-STORE FAIL [$boundary]: marker count=$count (expected 3)" >&2
 		return 1
 	fi
 	echo "      live-store unchanged [$boundary] (marker count=$count)"
@@ -240,7 +265,7 @@ verify_live_store_unchanged() {
 
 # run_boundary <boundary> <expect-published>: full crash→reconcile→verify→idempotence.
 run_boundary() {
-	local boundary="$1" expect_published="$2"
+	local boundary="$1" expect_published="$2" expect_quarantine="${3:-no}"
 	echo "  [$boundary] expect-published=$expect_published"
 	build_store >/dev/null || { echo "  !! build_store failed" >&2; fail=$((fail+1)); FAILURES+=("$boundary"); return; }
 	# marker path uses ROOT, which build_store just set — assign AFTER build_store.
@@ -251,11 +276,11 @@ run_boundary() {
 	data="$(cat "$ROOT/data.path")"
 	archive="$ROOT/archive"
 	# Reconcile WITHOUT a fresh export.
-	if ! MAPLE_LIBCHDB="$LIBCHDB" "${BUN[@]}" "$RECONCILE" --data-dir "$data" --archive-dir "$archive" >"$ROOT/reconcile-$boundary.out" 2>&1; then
+	if ! MAPLE_LIBCHDB="$LIBCHDB" "${BUN[@]}" "$RECONCILE" --data-dir "$data" --archive-dir "$archive" --scratch-root "$ROOT/scratch" >"$ROOT/reconcile-$boundary.out" 2>&1; then
 		echo "  !! reconcile threw for $boundary:" >&2; tail -3 "$ROOT/reconcile-$boundary.out" >&2
 		fail=$((fail+1)); FAILURES+=("$boundary"); return
 	fi
-	verify_post_crash "$boundary" "$expect_published" || { fail=$((fail+1)); FAILURES+=("$boundary"); return; }
+	verify_post_crash "$boundary" "$expect_published" "$expect_quarantine" || { fail=$((fail+1)); FAILURES+=("$boundary"); return; }
 	# For published generations: the DuckDB oracle is already checked inside
 	# verify_post_crash. Additionally prove the LIVE store is unchanged by the
 	# archive operation + recovery (plan: archive creation must not alter the
@@ -263,10 +288,10 @@ run_boundary() {
 	# op must leave telemetry intact.
 	verify_live_store_unchanged "$boundary" || { fail=$((fail+1)); FAILURES+=("$boundary:live-store"); return; }
 	# Idempotence: reconcile AGAIN, expect the same converged state + exit 0.
-	if ! MAPLE_LIBCHDB="$LIBCHDB" "${BUN[@]}" "$RECONCILE" --data-dir "$data" --archive-dir "$archive" >"$ROOT/reconcile2-$boundary.out" 2>&1; then
+	if ! MAPLE_LIBCHDB="$LIBCHDB" "${BUN[@]}" "$RECONCILE" --data-dir "$data" --archive-dir "$archive" --scratch-root "$ROOT/scratch" >"$ROOT/reconcile2-$boundary.out" 2>&1; then
 		echo "  !! second reconcile (idempotence) threw for $boundary" >&2; fail=$((fail+1)); FAILURES+=("$boundary:idempotence"); return
 	fi
-	verify_post_crash "$boundary" "$expect_published" >/dev/null || { echo "  !! state drifted after second reconcile for $boundary" >&2; fail=$((fail+1)); FAILURES+=("$boundary:idempotence"); return; }
+	verify_post_crash "$boundary" "$expect_published" "$expect_quarantine" >/dev/null || { echo "  !! state drifted after second reconcile for $boundary" >&2; fail=$((fail+1)); FAILURES+=("$boundary:idempotence"); return; }
 	pass=$((pass+1))
 }
 
@@ -279,15 +304,18 @@ echo
 # Post-promotion boundaries leave a published generation (reconcile completes it).
 run_boundary "before-intent-durable" "no"
 run_boundary "before-pin-acquired" "no"
-run_boundary "during-restore" "no"
+run_boundary "before-restore" "no"
 run_boundary "after-restore" "no"
-run_boundary "after-building-created" "no"
-run_boundary "after-first-shard" "no"
-run_boundary "before-manifest-durable" "no"
+run_boundary "after-building-created" "no" "yes"
+run_boundary "after-first-shard" "no" "yes"
+run_boundary "after-validation-complete" "no" "yes"
+run_boundary "before-manifest-durable" "no" "yes"
+run_boundary "after-manifest-durable" "no" "yes"
 run_boundary "after-promoted" "yes"
 run_boundary "before-pointer-update" "yes"
 run_boundary "after-pointer" "yes"
 run_boundary "after-catalog" "yes"
+run_boundary "pin-removed-before-journal" "yes"
 run_boundary "after-pin-released" "yes"
 run_boundary "before-scratch-removed" "yes"
 run_boundary "before-operation-archived" "yes"

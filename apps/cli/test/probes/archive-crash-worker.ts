@@ -86,6 +86,12 @@ const buildFaults = (args: Args): ArchiveGenerationFaults => {
 		await BLOCK(blockMs)
 		throw new Error(`crash-worker block expired at boundary ${boundary} without SIGKILL`)
 	}
+	const blockSyncThenFail = (): void => {
+		at()
+		const waitBuffer = new Int32Array(new SharedArrayBuffer(4))
+		Atomics.wait(waitBuffer, 0, 0, blockMs)
+		throw new Error(`crash-worker block expired at boundary ${boundary} without SIGKILL`)
+	}
 	switch (boundary) {
 		// Pre-boundary seams: fire BEFORE the durable write, block (crash during).
 		case "before-intent-durable":
@@ -94,33 +100,33 @@ const buildFaults = (args: Args): ArchiveGenerationFaults => {
 			return { beforePinAcquired: blockThenFail }
 		case "before-scratch-allocated":
 			return { beforeScratchAllocated: blockThenFail }
-		case "during-restore":
-			// during-restore: the restore begins after scratch-allocated seam fires.
-			// Block at the scratch-allocated seam to model a kill during restore.
+		case "before-restore":
+			// This is the authoritative pre-restore boundary: scratch exists and
+			// the journal records it, but restore has not begun. There is no honest
+			// callback from inside chDB's synchronous RESTORE command.
 			return { beforeScratchAllocated: blockThenFail }
 		case "after-restore":
 			return { afterScratchRestored: blockThenFail }
 		case "after-building-created":
 			return { afterBuildingCreated: blockThenFail }
 		case "after-first-shard":
-			// The export writes shards sequentially; afterShardsWritten fires after
-			// ALL shards. To crash after the first durable shard of a multi-shard
-			// export, we configure a tiny maxShardRows and block at afterShardsWritten
-			// — but that is after all shards. A true mid-export crash needs an export-
-			// internal seam. For Gate 3a we model this with afterShardsWritten (all
-			// shards written, before validation) which is the closest boundary the
-			// current seams expose; a finer after-first-shard seam is a follow-up.
-			return { afterShardsWritten: blockThenFail }
+			return { afterFirstDurableShard: blockSyncThenFail }
+		case "after-validation-complete":
+			return { afterValidationComplete: blockThenFail }
 		case "before-manifest-durable":
 			return { beforeManifestDurable: blockThenFail }
-		case "after-promoted":
+		case "after-manifest-durable":
 			return { afterManifestWritten: blockThenFail }
+		case "after-promoted":
+			return { afterGenerationRenamed: blockThenFail }
 		case "before-pointer-update":
 			return { beforeActivePointerUpdated: blockThenFail }
 		case "after-pointer":
 			return { afterGenerationPromoted: blockThenFail }
 		case "after-catalog":
 			return { afterCatalogAppended: blockThenFail }
+		case "pin-removed-before-journal":
+			return { afterPinRemovedBeforeJournal: blockThenFail }
 		case "after-pin-released":
 			return { afterPinReleased: blockThenFail }
 		case "before-scratch-removed":
@@ -138,11 +144,9 @@ const main = async (): Promise<void> => {
 		archiveDir: args.archiveDir,
 		scratchRoot: args.scratchRoot,
 		dataDir: args.dataDir,
-		// One row per shard so the marker-row export yields exactly one shard and
-		// completes quickly. The "after-first-shard" boundary is modeled via the
-		// afterShardsWritten seam (all shards written, before validation), which is
-		// the finest mid-export boundary the current seams expose.
-		maxShardRows: 500_000,
+		// The harness inserts three rows and one row per shard forces a genuine
+		// pause after shard 1 while later shards do not yet exist.
+		maxShardRows: 1,
 		maxShardBytes: 256 * 1024 * 1024,
 		rowGroupRows: 10_000,
 	})

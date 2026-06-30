@@ -16,6 +16,8 @@
 //   0 = reconciliation converged (or no active operation existed)
 //   1 = reconciliation threw (ambiguous/corrupt state — surfaced to the harness)
 
+import { randomUUID } from "node:crypto"
+import { withMaintenanceLock } from "../../src/server/checkpoints"
 import { reconcileArchiveGeneration } from "../../src/server/archives/generation"
 
 const get = (name: string): string => {
@@ -30,8 +32,9 @@ const get = (name: string): string => {
 
 const dataDir = get("data-dir")
 const archiveDir = get("archive-dir")
+const scratchRoot = get("scratch-root")
 
-reconcileArchiveGeneration(dataDir, archiveDir)
+withMaintenanceLock(dataDir, randomUUID(), () => reconcileArchiveGeneration(dataDir, archiveDir, scratchRoot))
 	.then(() => {
 		console.log("reconcile: converged")
 		process.exit(0)
