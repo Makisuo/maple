@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
-import { lstat, readdir, rm, statfs } from "node:fs/promises"
+import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
@@ -651,11 +651,15 @@ const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): P
 	if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || rel.includes(sep)) {
 		throw new Error(`refusing to remove scratch path outside its root: ${owned}`)
 	}
-	await assertFilesystemTreeNoSymlinks(owned, "owned scratch directory")
+	await assertFilesystemPathNoSymlinks(owned, "owned scratch directory")
 	const ownedInfo = await lstat(owned)
 	if (ownedInfo.isSymbolicLink() || !ownedInfo.isDirectory()) {
 		throw new Error(`refusing unsafe owned scratch directory: ${owned}`)
 	}
+	// Restored ClickHouse stores legitimately contain internal table symlinks.
+	// fs.rm removes those links as directory entries; it does not traverse their
+	// targets. The security boundary is therefore the real configured root and
+	// exact real operation subdirectory checked above.
 	await rm(owned, { recursive: true, force: true })
 	await syncDirectory(resolve(scratchRoot))
 }
@@ -665,17 +669,6 @@ const assertFilesystemPathNoSymlinks = async (path: string, label: string): Prom
 	if (!existsSync(absolute)) return
 	const info = await lstat(absolute)
 	if (info.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${absolute}`)
-}
-
-const assertFilesystemTreeNoSymlinks = async (path: string, label: string): Promise<void> => {
-	await assertFilesystemPathNoSymlinks(path, label)
-	const info = await lstat(path)
-	if (!info.isDirectory()) return
-	for (const entry of await readdir(path, { withFileTypes: true })) {
-		const child = join(path, entry.name)
-		if (entry.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${child}`)
-		if (entry.isDirectory()) await assertFilesystemTreeNoSymlinks(child, label)
-	}
 }
 
 /**
@@ -787,7 +780,7 @@ const validateReconciliationTopology = async (
 		await assertFilesystemPathNoSymlinks(intent.scratchRoot, "scratch root")
 	}
 	if (existsSync(ownedScratch)) {
-		await assertFilesystemTreeNoSymlinks(ownedScratch, "owned scratch directory")
+		await assertFilesystemPathNoSymlinks(ownedScratch, "owned scratch directory")
 		const info = await lstat(ownedScratch)
 		if (!info.isDirectory()) throw new Error(`owned scratch path is not a directory: ${ownedScratch}`)
 	}
