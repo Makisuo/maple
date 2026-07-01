@@ -303,7 +303,7 @@ describe("dry-run/apply parity — hostile preflight fixtures", () => {
 			writeFileSync(join(finalGen, "shards", "00.parquet"), shardContents)
 			const shardSha = createHash("sha256").update(shardContents).digest("hex")
 			const manifest = {
-				formatVersion: 2,
+				formatVersion: 3,
 				generationId: gid,
 				signal: "traces",
 				rangeStart: "2026-06-01",
@@ -324,7 +324,7 @@ describe("dry-run/apply parity — hostile preflight fixtures", () => {
 					targetChunkBytes: 1073741824,
 					minFreeSpaceReserve: 536870912,
 				},
-				tuningConfigName: null,
+				tuningConfig: null,
 				shards: [
 					{
 						name: "00.parquet",
@@ -476,7 +476,7 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 		writeFileSync(join(genDir, "shards", "00.parquet"), shardContents)
 		const shardSha = createHash("sha256").update(shardContents).digest("hex")
 		const manifest = {
-			formatVersion: 2,
+			formatVersion: 3,
 			generationId,
 			signal,
 			rangeStart: rangeDate,
@@ -497,7 +497,7 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 				targetChunkBytes: 1073741824,
 				minFreeSpaceReserve: 536870912,
 			},
-			tuningConfigName: null,
+			tuningConfig: null,
 			shards: [
 				{
 					name: "00.parquet",
@@ -1031,7 +1031,7 @@ function seedGeneration2(
 	writeFileSync(join(genDir, "shards", "00.parquet"), shardContents)
 	const shardSha = createHash("sha256").update(shardContents).digest("hex")
 	const manifest = {
-		formatVersion: 2,
+		formatVersion: 3,
 		generationId,
 		signal,
 		rangeStart: rangeDate,
@@ -1052,7 +1052,7 @@ function seedGeneration2(
 			targetChunkBytes: 1073741824,
 			minFreeSpaceReserve: 536870912,
 		},
-		tuningConfigName: null,
+		tuningConfig: null,
 		shards: [
 			{
 				name: "00.parquet",

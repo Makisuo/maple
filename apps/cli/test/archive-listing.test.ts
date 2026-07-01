@@ -36,7 +36,7 @@ const manifest = (
 	shardSha = "a".repeat(64),
 	shardBytes = 4096,
 ): ArchiveGenerationManifest => ({
-	formatVersion: 2,
+	formatVersion: 3,
 	generationId,
 	signal,
 	rangeStart: rangeDate,
@@ -57,7 +57,7 @@ const manifest = (
 		targetChunkBytes: 1024 * 1024 * 1024,
 		minFreeSpaceReserve: 512 * 1024 * 1024,
 	},
-	tuningConfigName: null,
+	tuningConfig: null,
 	shards: [
 		{
 			name: "00-0000.parquet",

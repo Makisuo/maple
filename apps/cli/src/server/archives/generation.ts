@@ -224,6 +224,7 @@ export const createArchiveGeneration = async (
 	tuning: ArchiveTuning,
 	checkpointSelector: "current" | "previous" | string = "current",
 	faults: ArchiveGenerationFaults = {},
+	tuningConfigIdentity: { formatVersion: number; configName: string; sha256: string } | null = null,
 ): Promise<ArchiveGenerationResult> => {
 	validateRangeDate(rangeDate)
 	assertArchiveRootSeparate(archiveDir, dataDir)
@@ -342,7 +343,7 @@ export const createArchiveGeneration = async (
 
 					// Step 8: manifest (written inside building/ by promote).
 					const manifest: ArchiveGenerationManifest = {
-						formatVersion: 2,
+						formatVersion: 3,
 						generationId,
 						signal: signal.name,
 						rangeStart: rangeDate,
@@ -356,7 +357,7 @@ export const createArchiveGeneration = async (
 						sourceRowCount,
 						archivedRowCount,
 						tuning: tuningRecord(tuning),
-						tuningConfigName: null,
+						tuningConfig: tuningConfigIdentity,
 						shards: writtenShards.map(toShardRecord),
 					}
 					// Step 9: promote building → final generation + manifest.

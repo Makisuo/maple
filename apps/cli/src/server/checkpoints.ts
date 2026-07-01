@@ -1001,7 +1001,8 @@ export interface CheckpointPin {
 	readonly createdAt: string
 }
 
-const pinFilePath = (dataDir: string, checkpointId: string, pinId: string): string =>
+/** Derive the exact pin-file path from a data dir, checkpoint id, and pin id. */
+export const pinFilePath = (dataDir: string, checkpointId: string, pinId: string): string =>
 	join(checkpointPinsRoot(dataDir), checkpointId, `${validateId(pinId, "pin")}.json`)
 
 const PIN_PURPOSE = /^[A-Za-z0-9 _./:-]{0,128}$/

@@ -79,7 +79,7 @@ const seedPublishedGeneration = async (
 	// Event-time bounds must fall within the sealed UTC day [rangeStart, nextMidnight).
 	const noonNano = `${BigInt(Date.parse(`${rangeDate}T12:00:00.000Z`)) * 1_000_000n}`
 	const manifest: ArchiveGenerationManifest = {
-		formatVersion: 2,
+		formatVersion: 3,
 		generationId,
 		signal,
 		rangeStart: rangeDate,
@@ -100,7 +100,7 @@ const seedPublishedGeneration = async (
 			targetChunkBytes: 1024 * 1024 * 1024,
 			minFreeSpaceReserve: 512 * 1024 * 1024,
 		},
-		tuningConfigName: null,
+		tuningConfig: null,
 		shards: [
 			{
 				name: "00.parquet",

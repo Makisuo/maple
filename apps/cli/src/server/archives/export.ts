@@ -166,7 +166,7 @@ const hourPredicate = (signal: ArchiveSignal, rangeDate: string, hour: number): 
 // ---------------------------------------------------------------------------
 
 /** A source column's name and type, captured before export for round-trip comparison. */
-interface SourceColumn {
+export interface SourceColumn {
 	readonly name: string
 	readonly type: string
 }
@@ -176,7 +176,7 @@ interface SourceColumn {
  * shard's reopened schema is compared against this to prove the schema
  * round-tripped — not just that it has "some" columns.
  */
-const captureSourceSchema = (db: Chdb, signal: ArchiveSignal): ReadonlyArray<SourceColumn> => {
+export const captureSourceSchema = (db: Chdb, signal: ArchiveSignal): ReadonlyArray<SourceColumn> => {
 	const rows = readRows(db.query(`DESCRIBE ${signal.name} FORMAT JSONEachRow`, "JSONEachRow"))
 	const cols = rows.map((r) => ({ name: String(r.name), type: String(r.type) }))
 	if (cols.length === 0) throw new Error(`source table ${signal.name} has no columns`)
@@ -415,7 +415,7 @@ export const compareSchema = (
  * and the UTC date/hour predicate. The export query and the source re-query use
  * the IDENTICAL predicate, so the shard's rows and the source slice match.
  */
-interface PartRange {
+export interface PartRange {
 	readonly part: string
 	readonly offsetLo: number
 	readonly offsetHiExclusive: number
@@ -553,7 +553,10 @@ const validateShard = (
  * Returns { uncompressed, onDiskBytes }. Does NOT throw on overflow; the caller
  * decides whether to refine or (for a single-row range) fail distinctly.
  */
-const measureShardBytes = (db: Chdb, shardPath: string): { uncompressed: number; onDiskBytes: number } => {
+export const measureShardBytes = (
+	db: Chdb,
+	shardPath: string,
+): { uncompressed: number; onDiskBytes: number } => {
 	const lit = sqlLiteral(shardPath)
 	// ClickHouse's real interface is `file('<path>', ParquetMetadata)` exposing
 	// `total_uncompressed_size` — NOT DuckDB's `parquet_metadata()` function
@@ -578,7 +581,7 @@ const measureShardBytes = (db: Chdb, shardPath: string): { uncompressed: number;
  * ORDER BY). The byte bound is enforced authoritatively in the export loop by
  * measuring each candidate and bisecting if it overflows.
  */
-interface ShardPlan {
+export interface ShardPlan {
 	readonly hour: number
 	readonly range: PartRange
 	/** Matching source rows in this slice (from the actual predicate count). */
@@ -586,7 +589,7 @@ interface ShardPlan {
 }
 
 /** Count the source rows for one UTC hour of a sealed date. */
-const countHourRows = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number =>
+export const countHourRows = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour: number): number =>
 	parseCount(
 		db.query(
 			`SELECT count() FROM ${signal.name} WHERE ${hourPredicate(signal, rangeDate, hour)}`,
@@ -605,13 +608,13 @@ const countHourRows = (db: Chdb, signal: ArchiveSignal, rangeDate: string, hour:
  * excluded later by the predicate. We do NOT assume the matching rows are
  * contiguous within the domain.
  */
-interface PartDomain {
+export interface PartDomain {
 	readonly part: string
 	readonly offsetMin: number
 	readonly offsetMax: number
 	readonly matchingRows: number
 }
-const enumeratePartsForHour = (
+export const enumeratePartsForHour = (
 	db: Chdb,
 	signal: ArchiveSignal,
 	rangeDate: string,
@@ -673,7 +676,149 @@ export const planHourShards = (
 }
 
 /**
- * Export one signal for a sealed UTC day as bounded Parquet shards under
+ * Return the `_part_offset` of the `n`th (1-indexed) matching row at or after
+ * `offsetLo` in one part/hour, ordered ascending by `_part_offset`. Used to
+ * build EXACT physical windows: a window `[offsetLo, nthOffset + 1)` contains
+ * exactly `n` matching rows (the offset is the physical position, so the
+ * half-open range includes it). Returns `null` if fewer than `n` matching rows
+ * remain. Grounded in the same frozen-merge enumeration as the export.
+ *
+ * This is the row-exact bound that a SQL `LIMIT` cannot provide (ClickHouse
+ * `count()` ignores LIMIT on the aggregate, so the export and the validation
+ * re-count would diverge). Bounding via `_part_offset` keeps both on the
+ * identical predicate.
+ */
+const nthMatchingOffset = (
+	db: Chdb,
+	signal: ArchiveSignal,
+	rangeDate: string,
+	hour: number,
+	part: string,
+	offsetLo: number,
+	n: number,
+): number | null => {
+	const pred =
+		`${hourPredicate(signal, rangeDate, hour)} ` +
+		`AND _part = '${sqlLiteral(part)}' ` +
+		`AND _part_offset >= ${offsetLo}`
+	// The nth matching row ordered by _part_offset. LIMIT 1 OFFSET (n-1) selects
+	// exactly that row's offset. readRows yields one row with field "off".
+	const rows = readRows(
+		db.query(
+			`SELECT _part_offset AS off FROM ${signal.name} WHERE ${pred} ` +
+				`ORDER BY _part_offset ASC LIMIT 1 OFFSET ${n - 1} FORMAT JSONEachRow`,
+			"JSONEachRow",
+		),
+	)
+	if (rows.length === 0) return null
+	return Number(rows[0]!.off)
+}
+
+/**
+ * Count the matching rows at or after `offsetLo` in one part/hour. Used to know
+ * a part's remaining capacity when building windows.
+ */
+const countMatchingFrom = (
+	db: Chdb,
+	signal: ArchiveSignal,
+	rangeDate: string,
+	hour: number,
+	part: string,
+	offsetLo: number,
+): number => {
+	const pred =
+		`${hourPredicate(signal, rangeDate, hour)} ` +
+		`AND _part = '${sqlLiteral(part)}' ` +
+		`AND _part_offset >= ${offsetLo}`
+	return parseCount(db.query(`SELECT count() FROM ${signal.name} WHERE ${pred}`, "JSONEachRow"))
+}
+
+/**
+ * Build a deterministic, EXACT calibration sample plan covering exactly
+ * `sampleRows` matching rows starting at `startRow` (0-indexed) in the day's
+ * ordered (hour, part, `_part_offset`) sequence. Training uses `startRow=0`;
+ * held-out validation uses `startRow=sampleRows` for a provably disjoint window.
+ *
+ * Each emitted {@link ShardPlan.range} is a half-open `_part_offset` window
+ * whose matching-row count is determined AUTHORITATIVELY (via
+ * {@link nthMatchingOffset}), not estimated. The last window in a part is
+ * truncated at the exact offset of the final included row, so the writer's
+ * actual exported total equals the planned total exactly. A part with a single
+ * matching row is one window; a part never crosses its offset domain.
+ *
+ * The caller passes `expectedTotalRows` to {@link exportShardPlans}, which
+ * asserts `Σ validated.rowCount === expectedTotalRows` after export.
+ *
+ * Returns `{ plansByHour, totalRows }` where `totalRows` is the exact planned
+ * count (may be less than `sampleRows` if the day has fewer matching rows
+ * starting at `startRow`).
+ */
+export const planCalibrationShards = (
+	db: Chdb,
+	signal: ArchiveSignal,
+	rangeDate: string,
+	settings: ExportSettings,
+	sampleRows: number,
+	startRow = 0,
+): { plansByHour: Map<number, ShardPlan[]>; totalRows: number } => {
+	const rowsPerShard = Math.max(1, settings.maxShardRows)
+	const plansByHour = new Map<number, ShardPlan[]>()
+	// Skip `startRow` matching rows across the day, then collect `sampleRows`.
+	let toSkip = startRow
+	let budget = sampleRows
+	let cumulative = 0
+	for (const hour of HOURS_IN_DAY) {
+		if (budget <= 0) break
+		const parts = enumeratePartsForHour(db, signal, rangeDate, hour)
+		const hourPlans: ShardPlan[] = []
+		for (const p of parts) {
+			if (budget <= 0) break
+			// Advance past any rows to skip within this part. The part's matching
+			// rows may be fewer than the remaining skip; consume what we can.
+			let cursor = p.offsetMin
+			if (toSkip > 0) {
+				const partMatching = countMatchingFrom(db, signal, rangeDate, hour, p.part, cursor)
+				if (partMatching <= toSkip) {
+					// The entire part is skipped.
+					toSkip -= partMatching
+					continue
+				}
+				// Skip `toSkip` rows within this part: the window start is the offset
+				// AFTER the toSkip-th matching row.
+				const afterSkip = nthMatchingOffset(db, signal, rangeDate, hour, p.part, cursor, toSkip)
+				if (afterSkip === null) {
+					toSkip = 0
+				} else {
+					cursor = afterSkip + 1
+					toSkip = 0
+				}
+			}
+			// Now collect windows of up to rowsPerShard matching rows each, until the
+			// part or the budget is exhausted.
+			while (budget > 0) {
+				const remainingInPart = countMatchingFrom(db, signal, rangeDate, hour, p.part, cursor)
+				if (remainingInPart === 0) break
+				const take = Math.min(rowsPerShard, remainingInPart, budget)
+				// The exact offset of the `take`-th matching row at/after cursor.
+				const nthOff = nthMatchingOffset(db, signal, rangeDate, hour, p.part, cursor, take)
+				if (nthOff === null) break
+				const hiExclusive = nthOff + 1
+				hourPlans.push({
+					hour,
+					range: { part: p.part, offsetLo: cursor, offsetHiExclusive: hiExclusive },
+					matchingRows: take,
+				})
+				cumulative += take
+				budget -= take
+				cursor = hiExclusive
+				if (take < rowsPerShard) break // part boundary reached within this shard
+			}
+		}
+		if (hourPlans.length > 0) plansByHour.set(hour, hourPlans)
+	}
+	return { plansByHour, totalRows: cumulative }
+}
+
 /**
  * Export one signal for a sealed UTC day as bounded Parquet shards under
  * `shardsDir`. Flow:
@@ -704,115 +849,180 @@ export const exportSignalShards = (
 ): WrittenShard[] => {
 	assertSafePath(shardsDir)
 	db.exec(`SYSTEM STOP MERGES ${signal.name}`)
-	const shards: WrittenShard[] = []
-	/** Owned candidate files created during byte refinement, cleaned in finally. */
-	const candidates: string[] = []
 	try {
+		// captureSourceSchema runs INSIDE the try so a throw (e.g. an empty
+		// source table) always reaches the SYSTEM START MERGES finally. Placing
+		// it before the try would leave merges stopped on a schema-capture
+		// failure — a production regression caught in review.
 		const sourceSchema = captureSourceSchema(db, signal)
-		// A monotonic counter for owned candidate file names, so bisect recursion
-		// never collides. Final sequential shard names are assigned only after a
-		// candidate passes all validation.
-		let candidateSeq = 0
-		// Recursively export a physical range, refining by bisection when the byte
-		// bound is exceeded. Accepts validated shards into `shards` with their final
-		// HH-NNNN name; throws on the single-row-oversize impossibility.
-		const exportRange = (hour: number, range: PartRange, finalSeq: () => number): void => {
-			const pred = slicePredicate(signal, rangeDate, hour, range)
-			const matching = parseCount(
-				db.query(`SELECT count() FROM ${signal.name} WHERE ${pred}`, "JSONEachRow"),
-			)
-			if (matching === 0) return // empty half (no matching rows in this range) — skip
-			const width = range.offsetHiExclusive - range.offsetLo
-			const candidate = join(shardsDir, `.candidate-${candidateSeq++}.parquet`)
-			candidates.push(candidate)
-			rmSync(candidate, { force: true }) // INTO OUTFILE refuses to overwrite
-			assertSafePath(candidate)
-			db.query(
-				`SELECT * FROM ${signal.name} WHERE ${pred} ` +
-					`INTO OUTFILE '${sqlLiteral(candidate)}' FORMAT Parquet ` +
-					`SETTINGS max_threads = ${settings.writerThreads}, ` +
-					`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
-				"Null",
-			)
-			const { uncompressed, onDiskBytes } = measureShardBytes(db, candidate)
-			if (uncompressed > settings.maxShardBytes) {
-				// Refine: remove the proven-owned candidate, bisect the physical range.
-				rmSync(candidate)
-				if (width <= 1 || matching === 1) {
-					// A single matching row whose size alone exceeds the bound: the one
-					// genuinely impossible case. Fail distinctly, not "recalibrate".
-					throw new Error(
-						`archive single row exceeds maxShardBytes uncompressed (${uncompressed} > ${settings.maxShardBytes}) ` +
-							`in ${signal.name} hour ${hour} part ${range.part} offset ${range.offsetLo}; ` +
-							`raise maxShardBytes or recalibrate to a wider row budget`,
-					)
-				}
-				const mid = range.offsetLo + Math.floor(width / 2)
-				exportRange(
-					hour,
-					{ part: range.part, offsetLo: range.offsetLo, offsetHiExclusive: mid },
-					finalSeq,
-				)
-				exportRange(
-					hour,
-					{ part: range.part, offsetLo: mid, offsetHiExclusive: range.offsetHiExclusive },
-					finalSeq,
-				)
-				return
-			}
-			// Candidate passes the byte bound: validate it, then assign its final
-			// name. validateShard reopens and checks schema/count/digest/nanos.
-			const validated = validateShard(db, candidate, signal, rangeDate, hour, sourceSchema, range)
-			const name = shardName(hour, finalSeq())
-			const finalPath = join(shardsDir, name)
-			assertSafePath(finalPath)
-			if (existsSync(finalPath))
-				throw new Error(`archive shard already exists; refusing to overwrite: ${finalPath}`)
-			// Promote the candidate to its final name (rename is atomic on same fs).
-			renameSync(candidate, finalPath)
-			candidates[candidates.length - 1] = finalPath
-			shards.push({
-				name,
-				path: finalPath,
-				rowCount: validated.rowCount,
-				minEventTimeUnixNano: validated.minEventTimeUnixNano,
-				maxEventTimeUnixNano: validated.maxEventTimeUnixNano,
-				sha256: sha256File(finalPath),
-				bytes: onDiskBytes,
-				columns: validated.columns,
-				complexDigest: validated.complexDigest,
-			})
-			// The crash seam below is authoritative only after this individual
-			// shard and its directory entry are durable. syncTree after the whole
-			// export is still retained as the aggregate durability barrier.
-			const shardFd = openSync(finalPath, constants.O_RDONLY)
-			try {
-				fsyncSync(shardFd)
-			} finally {
-				closeSync(shardFd)
-			}
-			const shardsDirFd = openSync(shardsDir, constants.O_RDONLY)
-			try {
-				fsyncSync(shardsDirFd)
-			} finally {
-				closeSync(shardsDirFd)
-			}
-			settings.afterShardValidated?.(db, signal)
-		}
+		// Build the full-day shard plan: every UTC hour with rows, every active
+		// part, split into half-open ranges of width <= maxShardRows.
+		const plansByHour = new Map<number, ShardPlan[]>()
+		const hourRowCounts = new Map<number, number>()
 		for (const hour of HOURS_IN_DAY) {
 			const hourRows = countHourRows(db, signal, rangeDate, hour)
 			if (hourRows === 0) continue
 			const parts = enumeratePartsForHour(db, signal, rangeDate, hour)
-			const plans = planHourShards(hour, parts, settings)
+			plansByHour.set(hour, planHourShards(hour, parts, settings))
+			hourRowCounts.set(hour, hourRows)
+		}
+		const shards = exportShardPlans(db, signal, rangeDate, shardsDir, settings, sourceSchema, plansByHour)
+		// Per-hour re-count over the WHOLE hour: detects concurrent data loss/gain
+		// even though merges are frozen. This full-day guard lives only in the
+		// production path; calibration intentionally subsets hours.
+		for (const [hour, preExportRows] of hourRowCounts) {
+			const liveTotal = countHourRows(db, signal, rangeDate, hour)
+			if (liveTotal !== preExportRows) {
+				throw new Error(
+					`archive export hour ${hour} row count changed from ${preExportRows} to ${liveTotal} during export; aborting`,
+				)
+			}
+		}
+		return shards
+	} finally {
+		// Always restart merges, even on failure, so the scratch store is clean.
+		db.exec(`SYSTEM START MERGES ${signal.name}`)
+	}
+}
+
+/**
+ * The shared write→measure→refine→validate→name pipeline, parameterized by a
+ * pre-built per-hour shard plan. Production ({@link exportSignalShards}) builds
+ * the full-day plan; calibration ({@link planCalibrationShards}) builds a
+ * deterministic sample capped at `sampleRows`. Both execute the IDENTICAL
+ * pipeline, so `maxShardRows`/`maxShardBytes` bisection and reopen validation
+ * (count/schema/digest/UTC-time) apply identically. This is the single
+ * writer/validator: calibration does not duplicate it.
+ *
+ * `plansByHour` maps each UTC hour to its ordered shard plans. A per-hour
+ * sequential counter names that hour's shards `HH-NNNN.parquet`. The caller
+ * must have already issued `SYSTEM STOP MERGES` and captured `sourceSchema`.
+ */
+export const exportShardPlans = (
+	db: Chdb,
+	signal: ArchiveSignal,
+	rangeDate: string,
+	shardsDir: string,
+	settings: ExportSettings,
+	sourceSchema: ReadonlyArray<SourceColumn>,
+	plansByHour: ReadonlyMap<number, ReadonlyArray<ShardPlan>>,
+	expectedTotalRows?: number,
+): WrittenShard[] => {
+	assertSafePath(shardsDir)
+	const shards: WrittenShard[] = []
+	/** Owned candidate files created during byte refinement, cleaned in finally. */
+	const candidates: string[] = []
+	// A monotonic counter for owned candidate file names, so bisect recursion
+	// never collides. Final sequential shard names are assigned only after a
+	// candidate passes all validation.
+	let candidateSeq = 0
+	// Recursively export a physical range, refining by bisection when the byte
+	// bound is exceeded. Accepts validated shards into `shards` with their final
+	// HH-NNNN name; throws on the single-row-oversize impossibility.
+	const exportRange = (hour: number, range: PartRange, finalSeq: () => number): void => {
+		const pred = slicePredicate(signal, rangeDate, hour, range)
+		const matching = parseCount(
+			db.query(`SELECT count() FROM ${signal.name} WHERE ${pred}`, "JSONEachRow"),
+		)
+		if (matching === 0) return // empty half (no matching rows in this range) — skip
+		const width = range.offsetHiExclusive - range.offsetLo
+		const candidate = join(shardsDir, `.candidate-${candidateSeq++}.parquet`)
+		candidates.push(candidate)
+		rmSync(candidate, { force: true }) // INTO OUTFILE refuses to overwrite
+		assertSafePath(candidate)
+		db.query(
+			`SELECT * FROM ${signal.name} WHERE ${pred} ` +
+				`INTO OUTFILE '${sqlLiteral(candidate)}' FORMAT Parquet ` +
+				`SETTINGS max_threads = ${settings.writerThreads}, ` +
+				`output_format_parquet_row_group_size = ${settings.rowGroupRows}`,
+			"Null",
+		)
+		const { uncompressed, onDiskBytes } = measureShardBytes(db, candidate)
+		if (uncompressed > settings.maxShardBytes) {
+			// Refine: remove the proven-owned candidate, bisect the physical range.
+			rmSync(candidate)
+			if (width <= 1 || matching === 1) {
+				// A single matching row whose size alone exceeds the bound: the one
+				// genuinely impossible case. Fail distinctly, not "recalibrate".
+				throw new Error(
+					`archive single row exceeds maxShardBytes uncompressed (${uncompressed} > ${settings.maxShardBytes}) ` +
+						`in ${signal.name} hour ${hour} part ${range.part} offset ${range.offsetLo}; ` +
+						`raise maxShardBytes or recalibrate to a wider row budget`,
+				)
+			}
+			const mid = range.offsetLo + Math.floor(width / 2)
+			exportRange(
+				hour,
+				{ part: range.part, offsetLo: range.offsetLo, offsetHiExclusive: mid },
+				finalSeq,
+			)
+			exportRange(
+				hour,
+				{ part: range.part, offsetLo: mid, offsetHiExclusive: range.offsetHiExclusive },
+				finalSeq,
+			)
+			return
+		}
+		// Candidate passes the byte bound: validate it, then assign its final
+		// name. validateShard reopens and checks schema/count/digest/nanos.
+		const validated = validateShard(db, candidate, signal, rangeDate, hour, sourceSchema, range)
+		const name = shardName(hour, finalSeq())
+		const finalPath = join(shardsDir, name)
+		assertSafePath(finalPath)
+		if (existsSync(finalPath))
+			throw new Error(`archive shard already exists; refusing to overwrite: ${finalPath}`)
+		// Promote the candidate to its final name (rename is atomic on same fs).
+		renameSync(candidate, finalPath)
+		candidates[candidates.length - 1] = finalPath
+		shards.push({
+			name,
+			path: finalPath,
+			rowCount: validated.rowCount,
+			minEventTimeUnixNano: validated.minEventTimeUnixNano,
+			maxEventTimeUnixNano: validated.maxEventTimeUnixNano,
+			sha256: sha256File(finalPath),
+			bytes: onDiskBytes,
+			columns: validated.columns,
+			complexDigest: validated.complexDigest,
+		})
+		// The crash seam below is authoritative only after this individual
+		// shard and its directory entry are durable. syncTree after the whole
+		// export is still retained as the aggregate durability barrier.
+		const shardFd = openSync(finalPath, constants.O_RDONLY)
+		try {
+			fsyncSync(shardFd)
+		} finally {
+			closeSync(shardFd)
+		}
+		const shardsDirFd = openSync(shardsDir, constants.O_RDONLY)
+		try {
+			fsyncSync(shardsDirFd)
+		} finally {
+			closeSync(shardsDirFd)
+		}
+		settings.afterShardValidated?.(db, signal)
+	}
+	try {
+		for (const [, plans] of plansByHour) {
 			let seq = 0
 			const nextSeq = () => seq++
 			for (const plan of plans) {
 				exportRange(plan.hour, plan.range, nextSeq)
 			}
-			const liveTotal = countHourRows(db, signal, rangeDate, hour)
-			if (liveTotal !== hourRows) {
+		}
+		// The calibration planner builds EXACT physical windows whose cumulative
+		// matching rows equal `expectedTotalRows`. Byte bisection splits ranges
+		// but preserves the total row count (each bisected half's rows sum to the
+		// parent's), so the writer's actual exported total must equal the planned
+		// total exactly. Assert it so a planning/writer divergence fails closed
+		// rather than silently exporting the wrong number of rows.
+		if (expectedTotalRows !== undefined) {
+			const actualTotal = shards.reduce((sum, s) => sum + s.rowCount, 0)
+			if (actualTotal !== expectedTotalRows) {
 				throw new Error(
-					`archive export hour ${hour} row count changed from ${hourRows} to ${liveTotal} during export; aborting`,
+					`calibration export row-count mismatch: writer exported ${actualTotal} rows ` +
+						`but the planned exact window total was ${expectedTotalRows} ` +
+						`(signal ${signal.name} ${rangeDate}); the sampleRows bound was not honored`,
 				)
 			}
 		}
@@ -831,7 +1041,5 @@ export const exportSignalShards = (
 				}
 			}
 		}
-		// Always restart merges, even on failure, so the scratch store is clean.
-		db.exec(`SYSTEM START MERGES ${signal.name}`)
 	}
 }

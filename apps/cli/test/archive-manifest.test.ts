@@ -27,7 +27,7 @@ const withArchive = async (run: (archiveDir: string) => Promise<void> | void): P
 }
 
 const validGenerationManifest = (overrides: Record<string, unknown> = {}) => ({
-	formatVersion: 2,
+	formatVersion: 3,
 	generationId: randomUUID(),
 	signal: "traces",
 	rangeStart: "2026-06-01",
@@ -48,7 +48,7 @@ const validGenerationManifest = (overrides: Record<string, unknown> = {}) => ({
 		targetChunkBytes: 1024 * 1024 * 1024,
 		minFreeSpaceReserve: 512 * 1024 * 1024,
 	},
-	tuningConfigName: null,
+	tuningConfig: null,
 	shards: [
 		{
 			name: "00-0000.parquet",
@@ -78,17 +78,27 @@ describe("archive generation manifest parser", () => {
 
 	it("rejects an unknown (future) format version", () => {
 		throws(
-			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 3 }),
-			/unsupported archive manifest formatVersion/,
+			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 99 }),
+			/unsupported archive manifest formatVersion 99/,
 		)
 	})
 
 	it("rejects an older (v1) format version fail-closed (round 5)", () => {
 		// A round-4 v1 manifest carried timezone-dependent time evidence and a
-		// commutative digest; the round-5 reader must not silently re-interpret it.
+		// commutative digest; the reader must not silently re-interpret it.
 		throws(
 			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 1 }),
 			/unsupported archive manifest formatVersion 1/,
+		)
+	})
+
+	it("rejects a v2 manifest fail-closed (config-identity semantics changed)", () => {
+		// v3 introduced the structured, SHA-256-bound tuningConfig identity. A v2
+		// manifest (bare tuningConfigName) is incompatible; silently treating the
+		// missing field as null would lose the config identity. Re-export required.
+		throws(
+			() => parseArchiveGenerationManifest({ ...validGenerationManifest(), formatVersion: 2 }),
+			/unsupported archive manifest formatVersion 2.*v3 introduced the structured tuningConfig identity/,
 		)
 	})
 
@@ -175,7 +185,7 @@ describe("archive active pointer parser", () => {
 		throws(
 			() =>
 				parseArchiveActivePointer({
-					formatVersion: 2,
+					formatVersion: 3,
 					generationId: randomUUID(),
 					signal: "logs",
 					rangeStart: "2026-06-01",
@@ -209,5 +219,63 @@ describe("archive path model", () => {
 			const active = activePointerPath(archiveDir, "traces", "2026-06-01")
 			ok(active.endsWith(join("traces", "2026-06-01", "active.json")))
 		})
+	})
+})
+
+describe("archive manifest tuningConfig identity", () => {
+	it("parses a structured tuningConfig identity (configName + sha256 + formatVersion)", () => {
+		const generationId = randomUUID()
+		const manifest = validGenerationManifest({
+			generationId,
+			tuningConfig: { formatVersion: 1, configName: "calib-2026.json", sha256: "b".repeat(64) },
+		})
+		const parsed = parseArchiveGenerationManifest(manifest, "traces", "2026-06-01", generationId)
+		ok(parsed.tuningConfig !== null)
+		strictEqual(parsed.tuningConfig!.configName, "calib-2026.json")
+		strictEqual(parsed.tuningConfig!.sha256, "b".repeat(64))
+		strictEqual(parsed.tuningConfig!.formatVersion, 1)
+	})
+
+	it("accepts null tuningConfig (no config loaded)", () => {
+		const generationId = randomUUID()
+		const manifest = validGenerationManifest({ generationId, tuningConfig: null })
+		const parsed = parseArchiveGenerationManifest(manifest, "traces", "2026-06-01", generationId)
+		strictEqual(parsed.tuningConfig, null)
+	})
+
+	it("rejects a tuningConfig with a malformed sha256", () => {
+		const generationId = randomUUID()
+		const manifest = validGenerationManifest({
+			generationId,
+			tuningConfig: { formatVersion: 1, configName: "c.json", sha256: "tooshort" },
+		})
+		throws(
+			() => parseArchiveGenerationManifest(manifest, "traces", "2026-06-01", generationId),
+			/must be 64 hex chars/,
+		)
+	})
+
+	it("rejects an unknown tuningConfig subfield", () => {
+		const generationId = randomUUID()
+		const manifest = validGenerationManifest({
+			generationId,
+			tuningConfig: { formatVersion: 1, configName: "c.json", sha256: "b".repeat(64), rogue: "x" },
+		})
+		throws(
+			() => parseArchiveGenerationManifest(manifest, "traces", "2026-06-01", generationId),
+			/unknown archive manifest tuningConfig field: rogue/,
+		)
+	})
+
+	it("rejects an unsafe tuningConfig configName", () => {
+		const generationId = randomUUID()
+		const manifest = validGenerationManifest({
+			generationId,
+			tuningConfig: { formatVersion: 1, configName: "../evil", sha256: "b".repeat(64) },
+		})
+		throws(
+			() => parseArchiveGenerationManifest(manifest, "traces", "2026-06-01", generationId),
+			/unsafe name/,
+		)
 	})
 })

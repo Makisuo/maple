@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { type ArchiveTuningRecord } from "./config"
+import { type ArchiveTuningRecord, type TuningConfigIdentity, TUNING_CONFIG_FORMAT_VERSION } from "./config"
 import { KNOWN_COMPLEX_DIGEST_ALGORITHMS } from "./export"
 import {
 	assertNoSymlinkSync,
@@ -27,11 +27,14 @@ import { isArchiveSignalName } from "./signals"
 //       Date.parse (host-timezone-dependent); commutative per-column-sum digest.
 //   2 — round 5. Shard time evidence as UTC epoch-nanosecond DECIMAL STRINGS
 //       (parsed with BigInt, host-timezone-independent); multiset digest with an
-//       explicit algorithm field. An unknown or older (1) format fails closed
-//       while preserving its files, so an incompatible state is surfaced, not
-//       silently re-interpreted. (Older archives written by v1 are not migrated
-//       in place; they must be re-exported if they are to be re-validated.)
-const MANIFEST_FORMAT_VERSION = 2
+//       explicit algorithm field; bare `tuningConfigName` string.
+//   3 — config/calibration gate. `tuningConfigName` replaced by structured,
+//       SHA-256-bound `tuningConfig` identity ({ formatVersion, configName,
+//       sha256 } | null). A v2 manifest lacks this structured field; a v3
+//       reader rejects v2 (and v1) fail-closed, preserving files, because the
+//       config-identity semantics changed and a silent null would lose identity.
+//       (Older archives are not migrated in place; re-export to re-validate.)
+const MANIFEST_FORMAT_VERSION = 3
 const ACTIVE_POINTER_FORMAT_VERSION = 1
 
 export interface ArchiveShardRecord {
@@ -60,7 +63,7 @@ export interface ArchiveShardRecord {
 }
 
 export interface ArchiveGenerationManifest {
-	readonly formatVersion: 2
+	readonly formatVersion: 3
 	readonly generationId: string
 	readonly signal: string
 	readonly rangeStart: string
@@ -74,7 +77,13 @@ export interface ArchiveGenerationManifest {
 	readonly sourceRowCount: number
 	readonly archivedRowCount: number
 	readonly tuning: ArchiveTuningRecord
-	readonly tuningConfigName: string | null
+	/**
+	 * Structured identity of the calibration config that produced the effective
+	 * tuning, or `null` when defaults/CLI overrides were used. Versioned and
+	 * SHA-256-bound so a generation's exact config is reproducible. Replaces the
+	 * prior bare `tuningConfigName` string.
+	 */
+	readonly tuningConfig: TuningConfigIdentity | null
 	readonly shards: ReadonlyArray<ArchiveShardRecord>
 }
 
@@ -105,6 +114,49 @@ const requiredCount = (record: Record<string, unknown>, key: string): number => 
 }
 
 const SHA256_HEX = /^[0-9a-f]{64}$/
+
+/** A safe logical config name (no path separators, no traversal). */
+const SAFE_CONFIG_NAME = /^[A-Za-z0-9._-]+$/
+
+/**
+ * Strictly parse the structured `tuningConfig` identity field of a manifest.
+ * Accepts `null` (no config was loaded) or a record with exactly
+ * `{ formatVersion, configName, sha256 }`. Rejects unknown subfields, a bad
+ * SHA-256, an unsafe config name, or a formatVersion that is NOT exactly the
+ * supported {@link TUNING_CONFIG_FORMAT_VERSION} (fail-closed on any other
+ * version, not "any positive integer"). Part of manifest formatVersion 3.
+ */
+const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
+	if (value === null) return null
+	if (!isRecord(value)) {
+		throw new Error("invalid archive manifest field: tuningConfig (must be null or a record)")
+	}
+	const knownKeys = new Set(["formatVersion", "configName", "sha256"])
+	for (const key of Object.keys(value)) {
+		if (!knownKeys.has(key)) {
+			throw new Error(`unknown archive manifest tuningConfig field: ${key}`)
+		}
+	}
+	const formatVersion = value.formatVersion
+	if (
+		typeof formatVersion !== "number" ||
+		!Number.isSafeInteger(formatVersion) ||
+		formatVersion !== TUNING_CONFIG_FORMAT_VERSION
+	) {
+		throw new Error(
+			`invalid archive manifest tuningConfig.formatVersion (must be exactly ${TUNING_CONFIG_FORMAT_VERSION}): ${String(formatVersion)}`,
+		)
+	}
+	const configName = requiredString(value, "configName")
+	if (!SAFE_CONFIG_NAME.test(configName)) {
+		throw new Error(`invalid archive manifest tuningConfig.configName (unsafe name): ${configName}`)
+	}
+	const sha256 = requiredString(value, "sha256")
+	if (!SHA256_HEX.test(sha256)) {
+		throw new Error(`invalid archive manifest tuningConfig.sha256 (must be 64 hex chars): ${sha256}`)
+	}
+	return { formatVersion, configName, sha256 }
+}
 
 /**
  * A required ISO-8601 string for MANIFEST-LEVEL timestamps (createdAt,
@@ -209,13 +261,15 @@ export const parseArchiveGenerationManifest = (
 		throw new Error("malformed archive generation manifest (not a record)")
 	}
 	// Fail closed on an unknown OR older format version, preserving the files for
-	// inspection. A v1 manifest (round 4: timezone-dependent time evidence,
-	// commutative digest) is incompatible with the round-5 reader and must not be
-	// silently re-interpreted; surface it distinctly so the operator re-exports.
+	// inspection. v3 introduced the structured, SHA-256-bound `tuningConfig`
+	// identity; a v2 manifest (bare `tuningConfigName`) is incompatible with this
+	// reader because the config-identity semantics changed — silently treating
+	// the missing field as null would lose the config identity. Surface it
+	// distinctly so the operator re-exports.
 	if (value.formatVersion !== MANIFEST_FORMAT_VERSION) {
 		throw new Error(
 			`unsupported archive manifest formatVersion ${String(value.formatVersion)} (expected ${MANIFEST_FORMAT_VERSION}); ` +
-				`the manifest is preserved as-is. A v1 manifest is incompatible with this reader (round 5 changed time evidence and the digest); re-export the range to re-validate.`,
+				`the manifest is preserved as-is. v3 introduced the structured tuningConfig identity (v2 used a bare name and v1 used timezone-dependent time evidence); re-export the range to re-validate.`,
 		)
 	}
 	const signal = requiredString(value, "signal")
@@ -293,7 +347,11 @@ export const parseArchiveGenerationManifest = (
 			targetChunkBytes: requiredCount(tuningRecord, "targetChunkBytes"),
 			minFreeSpaceReserve: requiredCount(tuningRecord, "minFreeSpaceReserve"),
 		},
-		tuningConfigName: typeof value.tuningConfigName === "string" ? value.tuningConfigName : null,
+		// tuningConfig is the structured, SHA-256-bound identity. The legacy bare
+		// `tuningConfigName` string (written by earlier v2 code) carries no hash, so
+		// it is mapped to null (no verifiable identity) rather than trusted. Both
+		// fields absent → null.
+		tuningConfig: parseTuningConfig(value.tuningConfig ?? null),
 		shards,
 	}
 }

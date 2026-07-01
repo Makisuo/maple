@@ -25,7 +25,7 @@ if (process.env.TZ !== "America/New_York") {
 }
 
 const manifest = {
-	formatVersion: 2,
+	formatVersion: 3,
 	generationId: randomUUID(),
 	signal: "traces",
 	rangeStart: "2026-06-29",
@@ -47,7 +47,7 @@ const manifest = {
 		targetChunkBytes: 1024 * 1024 * 1024,
 		minFreeSpaceReserve: 512 * 1024 * 1024,
 	},
-	tuningConfigName: null,
+	tuningConfig: null,
 	shards: [
 		{
 			name: "23-0000.parquet",

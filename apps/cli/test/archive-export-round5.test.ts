@@ -125,7 +125,7 @@ const manifestWith = (
 	overrides: Record<string, unknown>,
 	shardOverrides: Record<string, unknown> = {},
 ): Record<string, unknown> => ({
-	formatVersion: 2,
+	formatVersion: 3,
 	generationId: randomUUID(),
 	signal: "traces",
 	rangeStart: "2026-06-29",
@@ -146,7 +146,7 @@ const manifestWith = (
 		targetChunkBytes: 1024 * 1024 * 1024,
 		minFreeSpaceReserve: 512 * 1024 * 1024,
 	},
-	tuningConfigName: null,
+	tuningConfig: null,
 	shards: [
 		{
 			name: "12-0000.parquet",
