@@ -14,7 +14,7 @@ import {
 	writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { runArchiveReconciliation } from "../src/server/archives/generation"
 import type { ReconciliationDecision } from "../src/server/archives/reconcile"
 
@@ -633,3 +633,344 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 		})
 	})
 })
+
+describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)", () => {
+	const fullSnapshot2 = (archiveDir: string, dataDir: string): string => {
+		try {
+			return require("node:child_process")
+				.execSync(
+					`find "${archiveDir}" "${dataDir}" -type f -o -type l 2>/dev/null | sort | xargs shasum -a 256 2>/dev/null | shasum -a 256`,
+					{ encoding: "utf8" },
+				)
+				.trim()
+		} catch {
+			return "snapshot-failed"
+		}
+	}
+
+	it("dangling source symlink is FailClosed (not treated as absent), zero mutation", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const gid1 = randomUUID(),
+				activeGid = randomUUID()
+			const ev1 = seedGeneration2(archiveDir, "traces", "2026-06-01", gid1, "PAR1-old")
+			seedGeneration2(archiveDir, "traces", "2026-06-01", activeGid, "PAR1-active")
+			const rangeDir = join(archiveDir, "traces", "2026-06-01")
+			mkdirSync(rangeDir, { recursive: true })
+			writeFileSync(
+				join(rangeDir, "active.json"),
+				JSON.stringify({
+					formatVersion: 1,
+					generationId: activeGid,
+					signal: "traces",
+					rangeStart: "2026-06-01",
+				}),
+			)
+			// Seed a GC operation targeting gid1.
+			seedGcOpWithEvidence(
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				[
+					{
+						gid: gid1,
+						signal: "traces",
+						rangeDate: "2026-06-01",
+						contents: "PAR1-old",
+						recordedActive: activeGid,
+					},
+				],
+				0,
+			)
+			// Replace gid1's generation dir with a dangling symlink.
+			const genDir = join(archiveDir, "traces", "2026-06-01", "generations", gid1)
+			rmSync(genDir, { recursive: true, force: true })
+			symlinkSync(join(archiveDir, "nonexistent-target"), genDir)
+			const before = fullSnapshot2(archiveDir, dataDir)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(
+				isFailClosed(dryDecision),
+				`dry-run should be FailClosed for dangling source symlink, got ${dryDecision.kind}`,
+			)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/symlink|unsafe|source/i,
+			)
+			strictEqual(
+				fullSnapshot2(archiveDir, dataDir),
+				before,
+				"zero mutation on dangling source symlink",
+			)
+			void ev1
+		})
+	})
+
+	it("dangling tombstone symlink is FailClosed (not treated as absent), zero mutation", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const gid1 = randomUUID(),
+				activeGid = randomUUID()
+			seedGeneration2(archiveDir, "traces", "2026-06-01", gid1, "PAR1-old")
+			seedGeneration2(archiveDir, "traces", "2026-06-01", activeGid, "PAR1-active")
+			const rangeDir = join(archiveDir, "traces", "2026-06-01")
+			mkdirSync(rangeDir, { recursive: true })
+			writeFileSync(
+				join(rangeDir, "active.json"),
+				JSON.stringify({
+					formatVersion: 1,
+					generationId: activeGid,
+					signal: "traces",
+					rangeStart: "2026-06-01",
+				}),
+			)
+			const { opId, manifestSha1, shardSha1 } = seedGcOp2(
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				gid1,
+				activeGid,
+			)
+			// Remove source, create a DANGLING tombstone symlink.
+			rmSync(join(archiveDir, "traces", "2026-06-01", "generations", gid1), {
+				recursive: true,
+				force: true,
+			})
+			const tombDir = join(archiveDir, "operations", "active", `archive-${opId}`, "tombstones", gid1)
+			mkdirSync(dirname(tombDir), { recursive: true })
+			symlinkSync(join(archiveDir, "nonexistent-tomb"), tombDir)
+			const before = fullSnapshot2(archiveDir, dataDir)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(
+				isFailClosed(dryDecision),
+				`dry-run should be FailClosed for dangling tombstone symlink, got ${dryDecision.kind}`,
+			)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/symlink|tombstone|unsafe/i,
+			)
+			strictEqual(
+				fullSnapshot2(archiveDir, dataDir),
+				before,
+				"zero mutation on dangling tombstone symlink",
+			)
+			void manifestSha1
+			void shardSha1
+		})
+	})
+
+	it("impossible suffix (target 2 absent while cursor=0): FailClosed, zero mutation", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const gid1 = randomUUID(),
+				gid2 = randomUUID(),
+				activeGid = randomUUID()
+			seedGeneration2(archiveDir, "traces", "2026-06-01", gid1, "PAR1-t1")
+			seedGeneration2(archiveDir, "traces", "2026-06-01", activeGid, "PAR1-active")
+			// gid2 is a suffix target but we DON'T create its generation — it's absent.
+			const rangeDir = join(archiveDir, "traces", "2026-06-01")
+			mkdirSync(rangeDir, { recursive: true })
+			writeFileSync(
+				join(rangeDir, "active.json"),
+				JSON.stringify({
+					formatVersion: 1,
+					generationId: activeGid,
+					signal: "traces",
+					rangeStart: "2026-06-01",
+				}),
+			)
+			// Seed GC op with 2 targets, cursor=0. Target 2 (gid2) is absent — impossible suffix.
+			seedGcOpWithEvidence(
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				[
+					{
+						gid: gid1,
+						signal: "traces",
+						rangeDate: "2026-06-01",
+						contents: "PAR1-t1",
+						recordedActive: activeGid,
+					},
+					{
+						gid: gid2,
+						signal: "traces",
+						rangeDate: "2026-06-01",
+						contents: "PAR1-t2",
+						recordedActive: activeGid,
+					},
+				],
+				0,
+			)
+			// Remove gid2's generation dir — it's absent as a suffix target (impossible).
+			rmSync(join(archiveDir, "traces", "2026-06-01", "generations", gid2), {
+				recursive: true,
+				force: true,
+			})
+			const before = fullSnapshot2(archiveDir, dataDir)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(
+				isFailClosed(dryDecision),
+				`dry-run should be FailClosed for impossible suffix, got ${dryDecision.kind}`,
+			)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/suffix.*absent|impossible|unsafe/i,
+			)
+			strictEqual(fullSnapshot2(archiveDir, dataDir), before, "zero mutation on impossible suffix")
+		})
+	})
+})
+
+// Shared test helpers for r9 parity tests.
+function seedGeneration2(
+	archiveDir: string,
+	signal: string,
+	rangeDate: string,
+	generationId: string,
+	shardContents: string,
+): { manifestSha: string; shardSha: string } {
+	const genDir = join(archiveDir, signal, rangeDate, "generations", generationId)
+	mkdirSync(join(genDir, "shards"), { recursive: true })
+	writeFileSync(join(genDir, "shards", "00.parquet"), shardContents)
+	const shardSha = createHash("sha256").update(shardContents).digest("hex")
+	const manifest = {
+		formatVersion: 2,
+		generationId,
+		signal,
+		rangeStart: rangeDate,
+		rangeEndExclusive: "2026-06-02T00:00:00.000Z",
+		checkpointId: randomUUID(),
+		checkpointManifestFingerprint: "cid",
+		createdAt: "2026-06-02T00:00:00.000Z",
+		mapleVersion: MAPLE_VERSION,
+		chdbVersion: CHDB_VERSION,
+		schemaFingerprint: SCHEMA_FINGERPRINT,
+		sourceRowCount: 1,
+		archivedRowCount: 1,
+		tuning: {
+			writerThreads: 1,
+			rowGroupRows: 10000,
+			maxShardRows: 500000,
+			maxShardBytes: 268435456,
+			targetChunkBytes: 1073741824,
+			minFreeSpaceReserve: 536870912,
+		},
+		tuningConfigName: null,
+		shards: [
+			{
+				name: "00.parquet",
+				rowCount: 1,
+				minEventTimeUnixNano: `${BigInt(Date.parse(`${rangeDate}T12:00:00.000Z`)) * 1000000n}`,
+				maxEventTimeUnixNano: `${BigInt(Date.parse(`${rangeDate}T12:00:00.000Z`)) * 1000000n}`,
+				sha256: shardSha,
+				bytes: shardContents.length,
+				columns: ["TimestampTime", "ServiceName"],
+				complexDigest: "0",
+				complexDigestAlgorithm: "cityhash64-multiset-v3",
+			},
+		],
+	}
+	const manifestJson = JSON.stringify(manifest)
+	const manifestSha = createHash("sha256").update(manifestJson).digest("hex")
+	writeFileSync(join(genDir, "manifest.json"), manifestJson)
+	return { manifestSha, shardSha }
+}
+
+function seedGcOp2(
+	archiveDir: string,
+	dataDir: string,
+	scratchRoot: string,
+	gid: string,
+	activeGid: string,
+): { opId: string; manifestSha1: string; shardSha1: string } {
+	const { manifestSha, shardSha } = seedGeneration2(archiveDir, "traces", "2026-06-01", gid, "PAR1-old")
+	const opId = randomUUID()
+	const opDir = join(archiveDir, "operations", "active", `archive-${opId}`)
+	mkdirSync(opDir, { recursive: true })
+	writeFileSync(
+		join(opDir, "intent.json"),
+		JSON.stringify({
+			formatVersion: 3,
+			kind: "gc",
+			operationId: opId,
+			keep: 0,
+			targets: [
+				{
+					signal: "traces",
+					rangeStart: "2026-06-01",
+					generationId: gid,
+					createdAt: "2026-06-02T00:00:00.000Z",
+					manifestSha256: manifestSha,
+					bytes: 7,
+					shards: [{ name: "00.parquet", bytes: 7, sha256: shardSha }],
+					recordedActiveGenerationId: activeGid,
+				},
+			],
+			completedTargets: 0,
+			archiveDir,
+			dataDir,
+			scratchRoot,
+			phase: "intent",
+			createdAt: "2026-06-01T00:00:00.000Z",
+			updatedAt: "2026-06-01T00:00:00.000Z",
+		}),
+	)
+	return { opId, manifestSha1: manifestSha, shardSha1: shardSha }
+}
+
+function seedGcOpWithEvidence(
+	archiveDir: string,
+	dataDir: string,
+	scratchRoot: string,
+	targets: Array<{
+		gid: string
+		signal: string
+		rangeDate: string
+		contents: string
+		recordedActive: string
+	}>,
+	completedTargets: number,
+): void {
+	const opId = randomUUID()
+	const opDir = join(archiveDir, "operations", "active", `archive-${opId}`)
+	mkdirSync(opDir, { recursive: true })
+	const gcTargets = targets.map((t) => {
+		const { manifestSha, shardSha } = seedGeneration2(
+			archiveDir,
+			t.signal,
+			t.rangeDate,
+			t.gid,
+			t.contents,
+		)
+		return {
+			signal: t.signal,
+			rangeStart: t.rangeDate,
+			generationId: t.gid,
+			createdAt: "2026-06-02T00:00:00.000Z",
+			manifestSha256: manifestSha,
+			bytes: t.contents.length,
+			shards: [{ name: "00.parquet", bytes: t.contents.length, sha256: shardSha }],
+			recordedActiveGenerationId: t.recordedActive,
+		}
+	})
+	writeFileSync(
+		join(opDir, "intent.json"),
+		JSON.stringify({
+			formatVersion: 3,
+			kind: "gc",
+			operationId: opId,
+			keep: 0,
+			targets: gcTargets,
+			completedTargets,
+			archiveDir,
+			dataDir,
+			scratchRoot,
+			phase: completedTargets > 0 ? "gc-collecting" : "intent",
+			createdAt: "2026-06-01T00:00:00.000Z",
+			updatedAt: "2026-06-01T00:00:00.000Z",
+		}),
+	)
+}

@@ -366,6 +366,34 @@ const tombstonePath = (
 	target: GcTarget | GcDeleteCandidate,
 ): string => join(operationDir(archiveDir, operationId), "tombstones", target.generationId)
 
+/**
+ * lstat-aware tri-state path classifier. `existsSync` returns false for a
+ * dangling symlink, incorrectly treating it as absent. This helper classifies
+ * a path as:
+ * - "absent" only on ENOENT;
+ * - "real-directory" for a non-symlink directory;
+ * - "real-file" for a non-symlink regular file;
+ * - throws on symlink, non-ENOENT error, or unexpected type.
+ *
+ * Used for every source/tombstone topology check so dangling symlinks are
+ * caught as unsafe rather than bypassing evidence validation.
+ */
+type PathTopology = "absent" | "real-directory" | "real-file"
+const classifyPath = (path: string, label: string): PathTopology => {
+	let info
+	try {
+		info = lstatSync(path)
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code
+		if (code === "ENOENT") return "absent"
+		throw new Error(`cannot classify ${label} at ${path}: ${code ?? error}`)
+	}
+	if (info.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${path}`)
+	if (info.isDirectory()) return "real-directory"
+	if (info.isFile()) return "real-file"
+	throw new Error(`unexpected entry type for ${label}: ${path}`)
+}
+
 const revalidateSource = (archiveDir: string, target: GcTarget | GcDeleteCandidate): void => {
 	const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 	if (!existsSync(sourcePath)) return // absent handled by topology switch
@@ -550,24 +578,23 @@ const collectOneTarget = async (
 ): Promise<void> => {
 	const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 	const tomb = tombstonePath(archiveDir, operationId, target)
-	const sourceExists = existsSync(sourcePath)
-	const tombExists = existsSync(tomb)
-	if (sourceExists && tombExists) {
-		// Both present — ambiguous topology; preserve everything.
+	const sourceTopology = classifyPath(sourcePath, "archive gc source")
+	const tombTopology = classifyPath(tomb, "archive gc tombstone")
+	if (sourceTopology !== "absent" && tombTopology !== "absent") {
 		throw new Error(`archive gc target has both source and tombstone: ${target.generationId}`)
 	}
-	if (!sourceExists && !tombExists) {
+	if (sourceTopology === "absent" && tombTopology === "absent") {
 		// Already completed (idempotent resume). Still CAS-check the pointer.
 		revalidatePointer(archiveDir, target)
 		return
 	}
-	if (!sourceExists && tombExists) {
+	if (sourceTopology === "absent" && tombTopology !== "absent") {
 		// Resume: source already renamed to tombstone; finish removing the tombstone.
 		revalidatePointer(archiveDir, target)
 		await removeTombstone(tomb)
 		return
 	}
-	// sourceExists && !tombExists: revalidate source + pointer, then rename.
+	// sourceTopology !== "absent" && tombTopology === "absent": revalidate + rename.
 	revalidateSource(archiveDir, target)
 	revalidatePointer(archiveDir, target)
 	await ensurePrivateDirectory(dirname(tomb), archiveRoot(archiveDir))
@@ -715,38 +742,50 @@ export const preflightGcTargets = async (archiveDir: string, intent: GcOperation
 		const target = intent.targets[i]!
 		const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 		const tomb = tombstonePath(archiveDir, intent.operationId, target)
-		const sourceExists = existsSync(sourcePath)
-		const tombExists = existsSync(tomb)
+		const sourceTopology = classifyPath(sourcePath, "archive gc source")
+		const tombTopology = classifyPath(tomb, "archive gc tombstone")
 
 		if (i < intent.completedTargets) {
 			// Prefix: already completed. Both source and tombstone must be absent.
-			if (sourceExists)
+			if (sourceTopology !== "absent")
 				throw new Error(`archive gc completed target still has source: ${target.generationId}`)
-			if (tombExists)
+			if (tombTopology !== "absent")
 				throw new Error(`archive gc completed target still has tombstone: ${target.generationId}`)
-			// Pointer CAS still holds.
 			revalidatePointer(archiveDir, target)
 			continue
 		}
 
-		// Current or suffix target: validate per crash topology.
-		if (sourceExists && tombExists) {
-			throw new Error(`archive gc target has both source and tombstone: ${target.generationId}`)
-		}
-		if (!sourceExists && !tombExists) {
-			// Already completed target (idempotent). Pointer CAS still holds.
+		if (i === intent.completedTargets) {
+			// Current target: the documented crash topologies are permitted.
+			if (sourceTopology !== "absent" && tombTopology !== "absent") {
+				throw new Error(`archive gc target has both source and tombstone: ${target.generationId}`)
+			}
+			if (sourceTopology === "absent" && tombTopology === "absent") {
+				revalidatePointer(archiveDir, target)
+				continue
+			}
+			if (sourceTopology !== "absent" && tombTopology === "absent") {
+				revalidateSource(archiveDir, target)
+				revalidatePointer(archiveDir, target)
+				continue
+			}
+			// Source absent, tombstone present: mid-removal crash topology.
+			revalidateTombstone(archiveDir, tomb, target)
 			revalidatePointer(archiveDir, target)
 			continue
 		}
-		if (sourceExists && !tombExists) {
-			// Normal: source present, tombstone absent. Validate source evidence + pointer CAS.
-			revalidateSource(archiveDir, target)
-			revalidatePointer(archiveDir, target)
-			continue
+
+		// Suffix (i > cursor): must be source-present + tombstone-absent.
+		// Only the current target may be ahead of the cursor (crash between
+		// rename and progress persistence). A suffix target that is already
+		// tombstoned or absent indicates impossible out-of-order mutation.
+		if (sourceTopology === "absent") {
+			throw new Error(`archive gc suffix target source absent (impossible): ${target.generationId}`)
 		}
-		// Source absent, tombstone present: mid-removal crash topology.
-		// Validate tombstone is real, non-symlinked, matches frozen evidence.
-		revalidateTombstone(archiveDir, tomb, target)
+		if (tombTopology !== "absent") {
+			throw new Error(`archive gc suffix target tombstone present (impossible): ${target.generationId}`)
+		}
+		revalidateSource(archiveDir, target)
 		revalidatePointer(archiveDir, target)
 	}
 }
@@ -785,12 +824,14 @@ export const verifyCompletedGcInvariants = async (
 	}
 	for (const target of intent.targets) {
 		const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
-		if (existsSync(sourcePath)) {
+		const sourceTopology = classifyPath(sourcePath, "archive gc complete source")
+		if (sourceTopology !== "absent") {
 			throw new Error(`archive gc complete but target source still exists: ${sourcePath}`)
 		}
 		// No operation tombstone may hold a generation dir.
 		const tomb = tombstonePath(archiveDir, intent.operationId, target)
-		if (existsSync(tomb)) {
+		const tombTopology = classifyPath(tomb, "archive gc complete tombstone")
+		if (tombTopology !== "absent") {
 			throw new Error(`archive gc complete but tombstone still exists: ${tomb}`)
 		}
 	}

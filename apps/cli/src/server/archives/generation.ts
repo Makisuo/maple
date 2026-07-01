@@ -679,14 +679,17 @@ const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): P
 /**
  * Check if a path exists, INCLUDING broken/dangling symlinks. `existsSync`
  * returns false for a symlink whose target is absent, so collision preflight
- * must use lstatSync to catch those uncertain entries.
+ * must use lstatSync to catch those uncertain entries. Returns false ONLY on
+ * ENOENT; every other error (permission, I/O, malformed) propagates as fail-
+ * closed rather than being silently treated as absence.
  */
 const pathExistsIncludingSymlinks = (path: string): boolean => {
 	try {
 		lstatSync(path)
 		return true
-	} catch {
-		return false
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
+		throw error
 	}
 }
 
