@@ -761,13 +761,13 @@ export const reconcileArchiveGeneration = async (
 			return
 		}
 		case "GcVerifyComplete": {
-			const { reconcileGcOperation } = await import("./gc")
-			await reconcileGcOperation(dataDir, archiveDir, decision.intent)
+			const { verifyCompleteAndArchiveGc } = await import("./gc")
+			await verifyCompleteAndArchiveGc(archiveDir, decision.intent)
 			return
 		}
 		case "GcResume": {
-			const { reconcileGcOperation } = await import("./gc")
-			await reconcileGcOperation(dataDir, archiveDir, decision.intent)
+			const { resumeFrozenTargetsAndCompleteGc } = await import("./gc")
+			await resumeFrozenTargetsAndCompleteGc(archiveDir, decision.intent)
 			return
 		}
 	}
@@ -1118,6 +1118,10 @@ export const inspectReconciliationState = async (
 			if (promoted && manifestAtFinal && intent.phase !== "aborted") {
 				// Post-promotion with a manifest: verify it (manifest SHA + shards).
 				await verifyPublishedGeneration(archiveDir, intent)
+				// Pointer CAS: the pointer must still match the recorded base or
+				// already select the intended generation. A conflicting pointer is
+				// branch-significant — apply's reconcilePostPromotion would fail here.
+				assertPointerConsistent(archiveDir, intent)
 			}
 			if (phaseAtLeast(intent.phase, "complete") && promoted) {
 				// Terminal: verify all complete invariants (no repair).
@@ -1128,6 +1132,30 @@ export const inspectReconciliationState = async (
 					finalGeneration,
 					building,
 				)
+			}
+			// Preflight destination collisions: if the completed-op destination or
+			// quarantine destination already exists, apply would mutate before
+			// failing. Check before the decision authorizes earlier actions.
+			const completedDest = join(
+				join(archiveRoot(archiveDir), "operations", "completed"),
+				`archive-${inspection.operationId}`,
+			)
+			if (existsSync(completedDest)) {
+				throw new Error(
+					`completed archive operation already exists; refusing to overwrite: ${completedDest}`,
+				)
+			}
+			if (!promoted && existsSync(building)) {
+				const quarantineDest = join(
+					archiveRoot(archiveDir),
+					"quarantine",
+					`building-${inspection.operationId}`,
+				)
+				if (existsSync(quarantineDest)) {
+					throw new Error(
+						`archive operation has both building and quarantine state; refusing to retire authority: ${quarantineDest}`,
+					)
+				}
 			}
 		} catch (error) {
 			return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
@@ -1153,14 +1181,32 @@ export const inspectReconciliationState = async (
 		return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
 	}
 	const gc = intent as GcOperationIntent
-	// For a complete GC op, verify terminal invariants (no repair).
-	if (gc.phase === "complete") {
-		try {
+	try {
+		// Preflight destination collision (same as create).
+		const completedDest = join(
+			join(archiveRoot(archiveDir), "operations", "completed"),
+			`archive-${inspection.operationId}`,
+		)
+		if (existsSync(completedDest)) {
+			throw new Error(
+				`completed archive operation already exists; refusing to overwrite: ${completedDest}`,
+			)
+		}
+		if (gc.phase === "complete") {
+			// Terminal GC: verify all invariants (no repair).
 			const { verifyCompletedGcInvariants } = await import("./gc")
 			await verifyCompletedGcInvariants(archiveDir, gc)
-		} catch (error) {
-			return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
+		} else {
+			// GC resume: preflight EVERY remaining target before the decision
+			// authorizes any mutation. Source/tombstone topology, evidence, pointer
+			// CAS, and both-present detection — all checked read-only here, so
+			// dry-run returns FailClosed for the same state apply would reject
+			// AFTER partially deleting earlier targets.
+			const { preflightGcTargets } = await import("./gc")
+			await preflightGcTargets(archiveDir, gc)
 		}
+	} catch (error) {
+		return { kind: "FailClosed", reason: error instanceof Error ? error.message : String(error) }
 	}
 	const snapshot: ReconciliationSnapshot = {
 		operationId: inspection.operationId,

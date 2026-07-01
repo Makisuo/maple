@@ -612,28 +612,36 @@ export const collectOneTargetForReconcile = collectOneTarget
  * - `complete`: prove all terminal invariants (verifyCompletedGcInvariants),
  *   then retire the journal. A phase label is NEVER proof — observe the reality.
  */
-export const reconcileGcOperation = async (
-	dataDir: string,
+/**
+ * Verify a complete GC operation's terminal invariants, then archive it.
+ * NO repair — a phase label is never proof. Called directly by the
+ * GcVerifyComplete decision branch (no phase re-branch).
+ */
+export const verifyCompleteAndArchiveGc = async (
 	archiveDir: string,
 	intent: GcOperationIntent,
 ): Promise<void> => {
-	void dataDir
-	if (intent.kind !== "gc") throw new Error(`reconcileGcOperation called on non-gc intent`)
-	if (intent.phase === "complete") {
-		// Terminal: prove invariants before archival. A failure preserves the
-		// active journal (fail closed) — never blindly archives.
-		await verifyCompletedGcInvariants(archiveDir, intent)
-		await archiveCompletedOperation(archiveDir, intent.operationId)
-		return
-	}
-	// gc-collecting (or intent, which is cursor 0): resume collection from the
-	// recorded cursor. collectOneTarget is idempotent per target.
+	if (intent.kind !== "gc") throw new Error(`verifyCompleteAndArchiveGc called on non-gc intent`)
+	await verifyCompletedGcInvariants(archiveDir, intent)
+	await archiveCompletedOperation(archiveDir, intent.operationId)
+}
+
+/**
+ * Resume collection of the frozen target set, rebuild affected catalogs,
+ * complete, verify, and archive. Called directly by the GcResume decision
+ * branch (no phase re-branch). collectOneTarget is idempotent per target.
+ */
+export const resumeFrozenTargetsAndCompleteGc = async (
+	archiveDir: string,
+	intent: GcOperationIntent,
+): Promise<void> => {
+	if (intent.kind !== "gc") throw new Error(`resumeFrozenTargetsAndCompleteGc called on non-gc intent`)
 	for (let i = intent.completedTargets; i < intent.targets.length; i++) {
 		const target = intent.targets[i]!
 		await collectOneTarget(archiveDir, intent.operationId, target)
 		await persistGcProgress(archiveDir, intent.operationId, i + 1, "gc-collecting")
 	}
-	// Recheck pointers + rebuild affected catalogs + assert exact.
+	// Rebuild ALL affected catalogs + assert exact.
 	const affectedSignals = new Set(intent.targets.map((t) => t.signal))
 	for (const signal of affectedSignals) {
 		const sigName = archiveSignal(signal).name as ArchiveSignalName
@@ -641,14 +649,48 @@ export const reconcileGcOperation = async (
 		assertCatalogExact(archiveDir, sigName)
 	}
 	await persistGcProgress(archiveDir, intent.operationId, intent.targets.length, "complete")
-	// Re-read the durable record to verify (a phase label is never proof; the
-	// in-memory intent has the stale resume cursor, not the persisted full cursor).
+	// Re-read the durable record to verify (a phase label is never proof).
 	const retired = readActiveOperation(archiveDir, intent.dataDir, intent.scratchRoot)
 	if (retired === null || retired.intent.kind !== "gc") {
 		throw new Error("archive gc operation vanished after completion")
 	}
 	await verifyCompletedGcInvariants(archiveDir, retired.intent)
 	await archiveCompletedOperation(archiveDir, intent.operationId)
+}
+
+/**
+ * Preflight EVERY remaining GC target read-only before the decision authorizes
+ * any mutation. Validates source/tombstone topology, source manifest/shard
+ * evidence, pointer CAS for every target, and both-present detection. Throws
+ * on any defect so the inspection returns FailClosed — preventing partial
+ * deletion where target 1 succeeds but target 2 fails.
+ */
+export const preflightGcTargets = async (archiveDir: string, intent: GcOperationIntent): Promise<void> => {
+	for (let i = intent.completedTargets; i < intent.targets.length; i++) {
+		const target = intent.targets[i]!
+		// The same revalidation collectOneTarget will run, but read-only here:
+		revalidateSource(archiveDir, target)
+		revalidatePointer(archiveDir, target)
+		// Detect both-present topology (ambiguous — fail closed).
+		const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
+		const tomb = tombstonePath(archiveDir, intent.operationId, target)
+		if (existsSync(sourcePath) && existsSync(tomb)) {
+			throw new Error(`archive gc target has both source and tombstone: ${target.generationId}`)
+		}
+	}
+}
+
+/** Legacy compatibility wrapper — delegates to the split helpers by phase. */
+export const reconcileGcOperation = async (
+	_dataDir: string,
+	archiveDir: string,
+	intent: GcOperationIntent,
+): Promise<void> => {
+	if (intent.phase === "complete") {
+		await verifyCompleteAndArchiveGc(archiveDir, intent)
+	} else {
+		await resumeFrozenTargetsAndCompleteGc(archiveDir, intent)
+	}
 }
 
 /**

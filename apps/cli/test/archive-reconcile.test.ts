@@ -1,6 +1,8 @@
 import { describe, it } from "@effect/vitest"
 import { ok, rejects, strictEqual } from "node:assert"
 import { createHash, randomUUID } from "node:crypto"
+import { MAPLE_VERSION, CHDB_VERSION } from "../src/version"
+import { SCHEMA_FINGERPRINT } from "../src/server/serve"
 import {
 	existsSync,
 	mkdirSync,
@@ -253,6 +255,133 @@ describe("archive reconciliation protocol (Gate 3b r5)", () => {
 					/active|lock/i,
 				)
 			})
+		})
+	})
+})
+
+describe("dry-run/apply parity — hostile preflight fixtures", () => {
+	it("create post-promotion with a conflicting pointer: dry-run FailClosed, apply nonzero, zero mutation", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			// Seed a v3 create intent at "promoted" with a published generation + manifest,
+			// but plant a pointer selecting a THIRD generation.
+			const gid = randomUUID(),
+				opId = randomUUID()
+			const opDir = join(archiveDir, "operations", "active", `archive-${opId}`)
+			mkdirSync(opDir, { recursive: true })
+			const finalGen = join(archiveDir, "traces", "2026-06-01", "generations", gid)
+			mkdirSync(join(finalGen, "shards"), { recursive: true })
+			// Minimal valid manifest+shard for verifyPublishedGeneration to pass,
+			// then assertPointerConsistent will fail (pointer selects a third gen).
+			const shardContents = "PAR1"
+			writeFileSync(join(finalGen, "shards", "00.parquet"), shardContents)
+			const shardSha = createHash("sha256").update(shardContents).digest("hex")
+			const manifest = {
+				formatVersion: 2,
+				generationId: gid,
+				signal: "traces",
+				rangeStart: "2026-06-01",
+				rangeEndExclusive: "2026-06-02T00:00:00.000Z",
+				checkpointId: randomUUID(),
+				checkpointManifestFingerprint: "cid",
+				createdAt: "2026-06-02T00:00:00.000Z",
+				mapleVersion: MAPLE_VERSION,
+				chdbVersion: CHDB_VERSION,
+				schemaFingerprint: SCHEMA_FINGERPRINT,
+				sourceRowCount: 1,
+				archivedRowCount: 1,
+				tuning: {
+					writerThreads: 1,
+					rowGroupRows: 10000,
+					maxShardRows: 500000,
+					maxShardBytes: 268435456,
+					targetChunkBytes: 1073741824,
+					minFreeSpaceReserve: 536870912,
+				},
+				tuningConfigName: null,
+				shards: [
+					{
+						name: "00.parquet",
+						rowCount: 1,
+						minEventTimeUnixNano: `${BigInt(Date.parse("2026-06-01T12:00:00.000Z")) * 1000000n}`,
+						maxEventTimeUnixNano: `${BigInt(Date.parse("2026-06-01T12:00:00.000Z")) * 1000000n}`,
+						sha256: shardSha,
+						bytes: shardContents.length,
+						columns: ["TimestampTime", "ServiceName"],
+						complexDigest: "0",
+						complexDigestAlgorithm: "cityhash64-multiset-v3",
+					},
+				],
+			}
+			const manifestJson = JSON.stringify(manifest)
+			const manifestSha = createHash("sha256").update(manifestJson).digest("hex")
+			writeFileSync(join(finalGen, "manifest.json"), manifestJson)
+			// Plant a pointer selecting a THIRD generation (not the base, not the intended).
+			const rangeDir = join(archiveDir, "traces", "2026-06-01")
+			mkdirSync(rangeDir, { recursive: true })
+			writeFileSync(
+				join(rangeDir, "active.json"),
+				JSON.stringify({
+					formatVersion: 1,
+					generationId: randomUUID(),
+					signal: "traces",
+					rangeStart: "2026-06-01",
+				}),
+			)
+			// Create a valid pin so pin validation passes; the pointer CAS is the failure.
+			const pinId = randomUUID(),
+				checkpointId = randomUUID()
+			const pinDir = join(dataDir, "backups", "pins", checkpointId)
+			mkdirSync(pinDir, { recursive: true })
+			writeFileSync(
+				join(pinDir, `${pinId}.json`),
+				JSON.stringify({
+					formatVersion: 1,
+					pinId,
+					checkpointId,
+					purpose: `archive:${gid}`,
+					createdAt: "2026-06-01T00:00:00.000Z",
+				}),
+			)
+			// Write a v3 intent at "promoted" with the manifest SHA.
+			writeFileSync(
+				join(opDir, "intent.json"),
+				JSON.stringify({
+					formatVersion: 3,
+					kind: "create",
+					operationId: opId,
+					generationId: gid,
+					signal: "traces",
+					rangeStart: "2026-06-01",
+					checkpointId,
+					archiveDir,
+					dataDir,
+					scratchRoot,
+					pinId,
+					pinPurpose: `archive:${gid}`,
+					scratchSubdir: `archive-${opId}`,
+					manifestSha256: manifestSha,
+					baseActiveGenerationId: null,
+					phase: "promoted",
+					createdAt: "2026-06-01T00:00:00.000Z",
+					updatedAt: "2026-06-01T00:00:00.000Z",
+				}),
+			)
+			// Dry-run: should return FailClosed (pointer CAS fails).
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(
+				isFailClosed(dryDecision),
+				`dry-run should be FailClosed for conflicting pointer, got ${dryDecision.kind}`,
+			)
+			// Apply: should throw (nonzero).
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/pointer|clobber|CAS|unsafe/i,
+			)
+			// State preserved (generation + journal still present).
+			ok(existsSync(finalGen), "generation preserved after failed apply")
+			ok(existsSync(opDir), "journal preserved after failed apply")
 		})
 	})
 })
