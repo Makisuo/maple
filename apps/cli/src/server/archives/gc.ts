@@ -10,6 +10,7 @@ import {
 	assertNoSymlinkSync,
 	assertRealFile,
 	assertRealFileSync,
+	classifyArchivePathSync,
 	ensurePrivateDirectory,
 	generationManifestPath,
 	generationRoot,
@@ -366,34 +367,6 @@ const tombstonePath = (
 	target: GcTarget | GcDeleteCandidate,
 ): string => join(operationDir(archiveDir, operationId), "tombstones", target.generationId)
 
-/**
- * lstat-aware tri-state path classifier. `existsSync` returns false for a
- * dangling symlink, incorrectly treating it as absent. This helper classifies
- * a path as:
- * - "absent" only on ENOENT;
- * - "real-directory" for a non-symlink directory;
- * - "real-file" for a non-symlink regular file;
- * - throws on symlink, non-ENOENT error, or unexpected type.
- *
- * Used for every source/tombstone topology check so dangling symlinks are
- * caught as unsafe rather than bypassing evidence validation.
- */
-type PathTopology = "absent" | "real-directory" | "real-file"
-const classifyPath = (path: string, label: string): PathTopology => {
-	let info
-	try {
-		info = lstatSync(path)
-	} catch (error) {
-		const code = (error as NodeJS.ErrnoException).code
-		if (code === "ENOENT") return "absent"
-		throw new Error(`cannot classify ${label} at ${path}: ${code ?? error}`)
-	}
-	if (info.isSymbolicLink()) throw new Error(`refusing symlink in ${label}: ${path}`)
-	if (info.isDirectory()) return "real-directory"
-	if (info.isFile()) return "real-file"
-	throw new Error(`unexpected entry type for ${label}: ${path}`)
-}
-
 const revalidateSource = (archiveDir: string, target: GcTarget | GcDeleteCandidate): void => {
 	const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 	if (!existsSync(sourcePath)) return // absent handled by topology switch
@@ -578,8 +551,8 @@ const collectOneTarget = async (
 ): Promise<void> => {
 	const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 	const tomb = tombstonePath(archiveDir, operationId, target)
-	const sourceTopology = classifyPath(sourcePath, "archive gc source")
-	const tombTopology = classifyPath(tomb, "archive gc tombstone")
+	const sourceTopology = classifyArchivePathSync(archiveDir, sourcePath, "archive gc source")
+	const tombTopology = classifyArchivePathSync(archiveDir, tomb, "archive gc tombstone")
 	if (sourceTopology !== "absent" && tombTopology !== "absent") {
 		throw new Error(`archive gc target has both source and tombstone: ${target.generationId}`)
 	}
@@ -727,11 +700,11 @@ const revalidateTombstone = (
  *
  * - prefix (index < completedTargets): source absent, tombstone absent, pointer
  *   still equals the recorded active generation.
- * - current + suffix (index >= completedTargets): the documented crash topologies
+ * - current (index === completedTargets): the documented crash topologies
  *   (source+no-tombstone, source-absent+tombstone-present, both-absent), each
- *   with evidence validation and pointer CAS. Source-absent+tombstone-present
- *   validates the tombstone is a real, non-symlinked directory matching frozen
- *   evidence.
+ *   with evidence validation and pointer CAS;
+ * - suffix (index > completedTargets): source present with exact frozen
+ *   evidence, tombstone absent, and pointer CAS.
  *
  * Throws on any defect so the inspection returns FailClosed — preventing partial
  * deletion where target 1 succeeds but a later target (or a corrupted prefix)
@@ -742,8 +715,8 @@ export const preflightGcTargets = async (archiveDir: string, intent: GcOperation
 		const target = intent.targets[i]!
 		const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 		const tomb = tombstonePath(archiveDir, intent.operationId, target)
-		const sourceTopology = classifyPath(sourcePath, "archive gc source")
-		const tombTopology = classifyPath(tomb, "archive gc tombstone")
+		const sourceTopology = classifyArchivePathSync(archiveDir, sourcePath, "archive gc source")
+		const tombTopology = classifyArchivePathSync(archiveDir, tomb, "archive gc tombstone")
 
 		if (i < intent.completedTargets) {
 			// Prefix: already completed. Both source and tombstone must be absent.
@@ -824,13 +797,13 @@ export const verifyCompletedGcInvariants = async (
 	}
 	for (const target of intent.targets) {
 		const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
-		const sourceTopology = classifyPath(sourcePath, "archive gc complete source")
+		const sourceTopology = classifyArchivePathSync(archiveDir, sourcePath, "archive gc complete source")
 		if (sourceTopology !== "absent") {
 			throw new Error(`archive gc complete but target source still exists: ${sourcePath}`)
 		}
 		// No operation tombstone may hold a generation dir.
 		const tomb = tombstonePath(archiveDir, intent.operationId, target)
-		const tombTopology = classifyPath(tomb, "archive gc complete tombstone")
+		const tombTopology = classifyArchivePathSync(archiveDir, tomb, "archive gc complete tombstone")
 		if (tombTopology !== "absent") {
 			throw new Error(`archive gc complete but tombstone still exists: ${tomb}`)
 		}

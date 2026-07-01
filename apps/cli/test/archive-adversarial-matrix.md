@@ -273,6 +273,8 @@ lock; dry-run consumes a shared nonmutating planner (never reconciles).
 | pointer re-selection (CAS)                                                     | `archive-gc.test.ts` + reconcile | if the pointer returns to a target, collection stops and preserves it; never deletes a re-selected generation |
 | source replaced/both-present topology                                          | `archive-gc.test.ts`             | source+tombstone both present, or identity differs → fail closed (preserve everything)                        |
 | malformed manifest / tampered shard / symlinked gen                            | `archive-gc.test.ts`             | range/signal excluded before any mutation; over-retained; reported                                            |
+| absent leaf below symlinked generation/tombstone ancestor                      | `archive-reconcile.test.ts`      | root-to-leaf classifier rejects before mutation; outside sentinel and complete structural snapshot unchanged  |
+| absent completed/quarantine destination below symlinked ancestor               | `archive-reconcile.test.ts`      | dry-run and apply both fail closed before collection/quarantine; journal and building state unchanged         |
 | missing active pointer (uncertain range)                                       | `archive-gc.test.ts`             | range excluded entirely; nothing targeted; no journal written; no invalid sentinel                            |
 | terminal invariant (complete journal)                                          | `archive-gc.test.ts`             | completedTargets===length, every source/tombstone absent, pointer unchanged, catalog exact — else fail closed |
 | legacy v2 create intent (pre-kind)                                             | `archive-journal.test.ts`        | `migrateV2CreateIntent` lifts to v3 under the lock; a stranded 3a intent reconciles; corrupt v2 fails closed  |
@@ -285,6 +287,11 @@ exactly matches authoritative manifests; no tombstone retains a generation; a
 second reconcile is a no-op; and a subsequent `archive create` succeeds (a crashed
 GC never blocks future work). Reconciliation NEVER expands the frozen set — a
 resumed GC deletes exactly what the original decided.
+
+Zero-mutation parity uses a fail-loud structural snapshot, not shell `find |
+shasum`: it records every relative path, entry type, symlink target, file size
+and hash, and empty directory. A dangling symlink is evidence and snapshot
+failure is a test failure, never a comparable sentinel value.
 
 **Working rule for this section:** _GC is the only path that deletes published
 evidence, so it must prove it owns and may delete each generation twice — once at

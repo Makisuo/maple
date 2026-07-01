@@ -182,6 +182,39 @@ export const assertNoSymlinkSync = (root: string, candidate: string, label: stri
 	}
 }
 
+export type ArchivePathTopology = "absent" | "real-directory" | "real-file"
+
+/**
+ * Classify a path beneath a trusted root without following symlinks.
+ *
+ * A final-path `lstatSync` alone is insufficient: an absent leaf beneath an
+ * existing symlinked ancestor also reports ENOENT. Walk and validate every
+ * existing component first, then classify the final entry. Only a genuinely
+ * missing component on a symlink-free path is reported as absent.
+ */
+export const classifyArchivePathSync = (
+	root: string,
+	candidate: string,
+	label: string,
+): ArchivePathTopology => {
+	const absoluteCandidate = assertContained(root, candidate, label)
+	assertNoSymlinkSync(root, absoluteCandidate, label)
+	try {
+		const info = lstatSync(absoluteCandidate)
+		if (info.isDirectory()) return "real-directory"
+		if (info.isFile()) return "real-file"
+		if (info.isSymbolicLink()) {
+			// assertNoSymlinkSync already rejects this. Keep the explicit branch
+			// as a fail-closed guard against a same-user race between checks.
+			throw new Error(`refusing symlink in ${label}: ${absoluteCandidate}`)
+		}
+		throw new Error(`unexpected entry type for ${label}: ${absoluteCandidate}`)
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent"
+		throw error
+	}
+}
+
 export const assertRealDirectory = async (path: string, label: string): Promise<void> => {
 	const info = await lstat(path)
 	if (info.isSymbolicLink() || !info.isDirectory()) {

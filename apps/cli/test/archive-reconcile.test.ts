@@ -5,9 +5,12 @@ import { MAPLE_VERSION, CHDB_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
+	readlinkSync,
 	realpathSync,
 	rmSync,
 	symlinkSync,
@@ -68,6 +71,30 @@ const validV2 = (archiveDir: string, dataDir: string, scratchRoot: string) => {
 	}
 }
 const sha = (path: string): string => createHash("sha256").update(readFileSync(path)).digest("hex")
+const durableStateSnapshot = (...roots: string[]): string => {
+	const records: string[] = []
+	const walk = (path: string, relativePath: string): void => {
+		const info = lstatSync(path)
+		if (info.isSymbolicLink()) {
+			records.push(`link\0${relativePath}\0${readlinkSync(path)}`)
+			return
+		}
+		if (info.isFile()) {
+			records.push(`file\0${relativePath}\0${info.size}\0${sha(path)}`)
+			return
+		}
+		if (!info.isDirectory()) {
+			throw new Error(`unsupported snapshot entry type: ${path}`)
+		}
+		// Record every directory so empty-directory creation/removal is visible.
+		records.push(`directory\0${relativePath}`)
+		for (const name of readdirSync(path).sort()) {
+			walk(join(path, name), `${relativePath}/${name}`)
+		}
+	}
+	for (const [index, root] of roots.entries()) walk(root, `root-${index}`)
+	return createHash("sha256").update(records.join("\n")).digest("hex")
+}
 const isFailClosed = (
 	d: ReconciliationDecision,
 ): d is Extract<ReconciliationDecision, { kind: "FailClosed" }> => d.kind === "FailClosed"
@@ -491,19 +518,6 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 		return { genDir, manifestSha, shardSha }
 	}
 
-	const fullSnapshot = (archiveDir: string, dataDir: string): string => {
-		try {
-			return require("node:child_process")
-				.execSync(
-					`find "${archiveDir}" "${dataDir}" -type f -o -type l 2>/dev/null | sort | xargs shasum -a 256 2>/dev/null | shasum -a 256`,
-					{ encoding: "utf8" },
-				)
-				.trim()
-		} catch {
-			return "snapshot-failed"
-		}
-	}
-
 	it("cursor-ahead (completedTargets=1 but target 0 source still exists): dry-run FailClosed, apply nonzero, zero mutation", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const gid1 = randomUUID(),
@@ -554,7 +568,7 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 				],
 				1,
 			)
-			const before = fullSnapshot(archiveDir, dataDir)
+			const before = durableStateSnapshot(archiveDir, dataDir)
 			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
 				dryRun: true,
 			})
@@ -566,7 +580,7 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
 				/completed target still has source|unsafe/i,
 			)
-			const after = fullSnapshot(archiveDir, dataDir)
+			const after = durableStateSnapshot(archiveDir, dataDir)
 			strictEqual(before, after, "zero mutation on cursor-ahead preflight failure")
 		})
 	})
@@ -635,19 +649,6 @@ describe("dry-run/apply parity — GC multi-target hostile preflight", () => {
 })
 
 describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)", () => {
-	const fullSnapshot2 = (archiveDir: string, dataDir: string): string => {
-		try {
-			return require("node:child_process")
-				.execSync(
-					`find "${archiveDir}" "${dataDir}" -type f -o -type l 2>/dev/null | sort | xargs shasum -a 256 2>/dev/null | shasum -a 256`,
-					{ encoding: "utf8" },
-				)
-				.trim()
-		} catch {
-			return "snapshot-failed"
-		}
-	}
-
 	it("dangling source symlink is FailClosed (not treated as absent), zero mutation", async () => {
 		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
 			const gid1 = randomUUID(),
@@ -685,7 +686,7 @@ describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)"
 			const genDir = join(archiveDir, "traces", "2026-06-01", "generations", gid1)
 			rmSync(genDir, { recursive: true, force: true })
 			symlinkSync(join(archiveDir, "nonexistent-target"), genDir)
-			const before = fullSnapshot2(archiveDir, dataDir)
+			const before = durableStateSnapshot(archiveDir, dataDir)
 			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
 				dryRun: true,
 			})
@@ -698,7 +699,7 @@ describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)"
 				/symlink|unsafe|source/i,
 			)
 			strictEqual(
-				fullSnapshot2(archiveDir, dataDir),
+				durableStateSnapshot(archiveDir, dataDir),
 				before,
 				"zero mutation on dangling source symlink",
 			)
@@ -738,7 +739,7 @@ describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)"
 			const tombDir = join(archiveDir, "operations", "active", `archive-${opId}`, "tombstones", gid1)
 			mkdirSync(dirname(tombDir), { recursive: true })
 			symlinkSync(join(archiveDir, "nonexistent-tomb"), tombDir)
-			const before = fullSnapshot2(archiveDir, dataDir)
+			const before = durableStateSnapshot(archiveDir, dataDir)
 			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
 				dryRun: true,
 			})
@@ -751,7 +752,7 @@ describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)"
 				/symlink|tombstone|unsafe/i,
 			)
 			strictEqual(
-				fullSnapshot2(archiveDir, dataDir),
+				durableStateSnapshot(archiveDir, dataDir),
 				before,
 				"zero mutation on dangling tombstone symlink",
 			)
@@ -807,7 +808,7 @@ describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)"
 				recursive: true,
 				force: true,
 			})
-			const before = fullSnapshot2(archiveDir, dataDir)
+			const before = durableStateSnapshot(archiveDir, dataDir)
 			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
 				dryRun: true,
 			})
@@ -819,7 +820,200 @@ describe("dry-run/apply parity — dangling symlinks and impossible suffix (r9)"
 				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
 				/suffix.*absent|impossible|unsafe/i,
 			)
-			strictEqual(fullSnapshot2(archiveDir, dataDir), before, "zero mutation on impossible suffix")
+			strictEqual(
+				durableStateSnapshot(archiveDir, dataDir),
+				before,
+				"zero mutation on impossible suffix",
+			)
+		})
+	})
+})
+
+describe("dry-run/apply parity — root-aware topology (r10)", () => {
+	const writePointer = (archiveDir: string, activeGid: string): void => {
+		const rangeDir = join(archiveDir, "traces", "2026-06-01")
+		mkdirSync(rangeDir, { recursive: true })
+		writeFileSync(
+			join(rangeDir, "active.json"),
+			JSON.stringify({
+				formatVersion: 1,
+				generationId: activeGid,
+				signal: "traces",
+				rangeStart: "2026-06-01",
+			}),
+		)
+	}
+
+	it("rejects an absent source leaf beneath a symlinked generations ancestor", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const targetGid = randomUUID()
+			const activeGid = randomUUID()
+			seedGeneration2(archiveDir, "traces", "2026-06-01", activeGid, "PAR1-active")
+			writePointer(archiveDir, activeGid)
+			seedGcOpWithEvidence(
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				[
+					{
+						gid: targetGid,
+						signal: "traces",
+						rangeDate: "2026-06-01",
+						contents: "PAR1-old",
+						recordedActive: activeGid,
+					},
+				],
+				0,
+			)
+			const generations = join(archiveDir, "traces", "2026-06-01", "generations")
+			const outside = join(dirname(archiveDir), "outside-generations")
+			rmSync(generations, { recursive: true, force: true })
+			mkdirSync(outside)
+			writeFileSync(join(outside, "sentinel"), "outside")
+			symlinkSync(outside, generations)
+
+			const before = durableStateSnapshot(archiveDir, dataDir, outside)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(isFailClosed(dryDecision), `expected FailClosed, got ${dryDecision.kind}`)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/symlink|source|unsafe/i,
+			)
+			strictEqual(durableStateSnapshot(archiveDir, dataDir, outside), before)
+		})
+	})
+
+	it("rejects an absent tombstone leaf beneath a symlinked ancestor at a full cursor", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const targetGid = randomUUID()
+			const activeGid = randomUUID()
+			seedGeneration2(archiveDir, "traces", "2026-06-01", activeGid, "PAR1-active")
+			writePointer(archiveDir, activeGid)
+			const { opDir } = seedGcOpWithEvidence(
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				[
+					{
+						gid: targetGid,
+						signal: "traces",
+						rangeDate: "2026-06-01",
+						contents: "PAR1-old",
+						recordedActive: activeGid,
+					},
+				],
+				1,
+			)
+			rmSync(join(archiveDir, "traces", "2026-06-01", "generations", targetGid), {
+				recursive: true,
+				force: true,
+			})
+			const outside = join(dirname(archiveDir), "outside-tombstones")
+			mkdirSync(outside)
+			writeFileSync(join(outside, "sentinel"), "outside")
+			symlinkSync(outside, join(opDir, "tombstones"))
+
+			const before = durableStateSnapshot(archiveDir, dataDir, outside)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(isFailClosed(dryDecision), `expected FailClosed, got ${dryDecision.kind}`)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/symlink|tombstone|unsafe/i,
+			)
+			strictEqual(durableStateSnapshot(archiveDir, dataDir, outside), before)
+		})
+	})
+
+	it("rejects a dangling completed-operations ancestor before GC mutation", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const targetGid = randomUUID()
+			const activeGid = randomUUID()
+			seedGeneration2(archiveDir, "traces", "2026-06-01", activeGid, "PAR1-active")
+			writePointer(archiveDir, activeGid)
+			seedGcOpWithEvidence(
+				archiveDir,
+				dataDir,
+				scratchRoot,
+				[
+					{
+						gid: targetGid,
+						signal: "traces",
+						rangeDate: "2026-06-01",
+						contents: "PAR1-old",
+						recordedActive: activeGid,
+					},
+				],
+				0,
+			)
+			const completed = join(archiveDir, "operations", "completed")
+			symlinkSync(join(dirname(archiveDir), "missing-completed-target"), completed)
+
+			const before = durableStateSnapshot(archiveDir, dataDir)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(isFailClosed(dryDecision), `expected FailClosed, got ${dryDecision.kind}`)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/symlink|completed|unsafe/i,
+			)
+			strictEqual(durableStateSnapshot(archiveDir, dataDir), before)
+		})
+	})
+
+	it("rejects a symlinked quarantine ancestor before moving building state", async () => {
+		await withRoots(async (archiveDir, dataDir, scratchRoot) => {
+			const operationId = randomUUID()
+			const generationId = randomUUID()
+			const checkpointId = randomUUID()
+			const pinId = randomUUID()
+			const opDir = join(archiveDir, "operations", "active", `archive-${operationId}`)
+			const building = join(archiveDir, "building", generationId)
+			mkdirSync(opDir, { recursive: true })
+			mkdirSync(building, { recursive: true })
+			writeFileSync(join(building, "partial"), "retain me")
+			writeFileSync(
+				join(opDir, "intent.json"),
+				JSON.stringify({
+					formatVersion: 3,
+					kind: "create",
+					operationId,
+					generationId,
+					signal: "traces",
+					rangeStart: "2026-06-01",
+					checkpointId,
+					archiveDir,
+					dataDir,
+					scratchRoot,
+					pinId,
+					pinPurpose: `archive:${generationId}`,
+					scratchSubdir: `archive-${operationId}`,
+					manifestSha256: null,
+					baseActiveGenerationId: null,
+					phase: "intent",
+					createdAt: "2026-06-01T00:00:00.000Z",
+					updatedAt: "2026-06-01T00:00:00.000Z",
+				}),
+			)
+			const outside = join(dirname(archiveDir), "outside-quarantine")
+			mkdirSync(outside)
+			writeFileSync(join(outside, "sentinel"), "outside")
+			symlinkSync(outside, join(archiveDir, "quarantine"))
+
+			const before = durableStateSnapshot(archiveDir, dataDir, outside)
+			const dryDecision = await runArchiveReconciliation(dataDir, archiveDir, scratchRoot, {
+				dryRun: true,
+			})
+			ok(isFailClosed(dryDecision), `expected FailClosed, got ${dryDecision.kind}`)
+			await rejects(
+				runArchiveReconciliation(dataDir, archiveDir, scratchRoot, { dryRun: false }),
+				/symlink|quarantine|unsafe/i,
+			)
+			strictEqual(durableStateSnapshot(archiveDir, dataDir, outside), before)
 		})
 	})
 })
@@ -933,7 +1127,7 @@ function seedGcOpWithEvidence(
 		recordedActive: string
 	}>,
 	completedTargets: number,
-): void {
+): { opId: string; opDir: string } {
 	const opId = randomUUID()
 	const opDir = join(archiveDir, "operations", "active", `archive-${opId}`)
 	mkdirSync(opDir, { recursive: true })
@@ -973,4 +1167,5 @@ function seedGcOpWithEvidence(
 			updatedAt: "2026-06-01T00:00:00.000Z",
 		}),
 	)
+	return { opId, opDir }
 }

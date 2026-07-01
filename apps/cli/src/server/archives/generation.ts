@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, lstatSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, parse, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
@@ -31,6 +31,7 @@ import {
 	buildingGenerationRoot,
 	buildingRoot,
 	catalogPath,
+	classifyArchivePathSync,
 	ensurePrivateDirectory,
 	generationManifestPath,
 	generationRoot,
@@ -676,22 +677,8 @@ const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): P
 	await syncDirectory(resolve(scratchRoot))
 }
 
-/**
- * Check if a path exists, INCLUDING broken/dangling symlinks. `existsSync`
- * returns false for a symlink whose target is absent, so collision preflight
- * must use lstatSync to catch those uncertain entries. Returns false ONLY on
- * ENOENT; every other error (permission, I/O, malformed) propagates as fail-
- * closed rather than being silently treated as absence.
- */
-const pathExistsIncludingSymlinks = (path: string): boolean => {
-	try {
-		lstatSync(path)
-		return true
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
-		throw error
-	}
-}
+const pathExistsIncludingSymlinks = (root: string, path: string, label: string): boolean =>
+	classifyArchivePathSync(root, path, label) !== "absent"
 
 const assertFilesystemPathNoSymlinks = async (path: string, label: string): Promise<void> => {
 	const absolute = resolve(path)
@@ -1158,7 +1145,13 @@ export const inspectReconciliationState = async (
 				join(archiveRoot(archiveDir), "operations", "completed"),
 				`archive-${inspection.operationId}`,
 			)
-			if (pathExistsIncludingSymlinks(completedDest)) {
+			if (
+				pathExistsIncludingSymlinks(
+					archiveDir,
+					completedDest,
+					"completed archive operation destination",
+				)
+			) {
 				throw new Error(
 					`completed archive operation already exists; refusing to overwrite: ${completedDest}`,
 				)
@@ -1169,7 +1162,13 @@ export const inspectReconciliationState = async (
 					"quarantine",
 					`building-${inspection.operationId}`,
 				)
-				if (pathExistsIncludingSymlinks(quarantineDest)) {
+				if (
+					pathExistsIncludingSymlinks(
+						archiveDir,
+						quarantineDest,
+						"archive building quarantine destination",
+					)
+				) {
 					throw new Error(
 						`archive operation has both building and quarantine state; refusing to retire authority: ${quarantineDest}`,
 					)
@@ -1205,7 +1204,9 @@ export const inspectReconciliationState = async (
 			join(archiveRoot(archiveDir), "operations", "completed"),
 			`archive-${inspection.operationId}`,
 		)
-		if (pathExistsIncludingSymlinks(completedDest)) {
+		if (
+			pathExistsIncludingSymlinks(archiveDir, completedDest, "completed archive operation destination")
+		) {
 			throw new Error(
 				`completed archive operation already exists; refusing to overwrite: ${completedDest}`,
 			)
