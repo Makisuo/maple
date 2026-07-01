@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, lstatSync, readFileSync, statSync } from "node:fs"
 import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, parse, relative, resolve, sep } from "node:path"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
@@ -676,6 +676,20 @@ const removeOwnedScratch = async (scratchRoot: string, scratchSubdir: string): P
 	await syncDirectory(resolve(scratchRoot))
 }
 
+/**
+ * Check if a path exists, INCLUDING broken/dangling symlinks. `existsSync`
+ * returns false for a symlink whose target is absent, so collision preflight
+ * must use lstatSync to catch those uncertain entries.
+ */
+const pathExistsIncludingSymlinks = (path: string): boolean => {
+	try {
+		lstatSync(path)
+		return true
+	} catch {
+		return false
+	}
+}
+
 const assertFilesystemPathNoSymlinks = async (path: string, label: string): Promise<void> => {
 	const absolute = resolve(path)
 	if (!existsSync(absolute)) return
@@ -1134,13 +1148,14 @@ export const inspectReconciliationState = async (
 				)
 			}
 			// Preflight destination collisions: if the completed-op destination or
-			// quarantine destination already exists, apply would mutate before
-			// failing. Check before the decision authorizes earlier actions.
+			// quarantine destination already exists (including as a broken symlink),
+			// apply would mutate before failing. Use lstatSync (catches dangling
+			// symlinks that existsSync misses) before the decision authorizes actions.
 			const completedDest = join(
 				join(archiveRoot(archiveDir), "operations", "completed"),
 				`archive-${inspection.operationId}`,
 			)
-			if (existsSync(completedDest)) {
+			if (pathExistsIncludingSymlinks(completedDest)) {
 				throw new Error(
 					`completed archive operation already exists; refusing to overwrite: ${completedDest}`,
 				)
@@ -1151,7 +1166,7 @@ export const inspectReconciliationState = async (
 					"quarantine",
 					`building-${inspection.operationId}`,
 				)
-				if (existsSync(quarantineDest)) {
+				if (pathExistsIncludingSymlinks(quarantineDest)) {
 					throw new Error(
 						`archive operation has both building and quarantine state; refusing to retire authority: ${quarantineDest}`,
 					)
@@ -1182,12 +1197,12 @@ export const inspectReconciliationState = async (
 	}
 	const gc = intent as GcOperationIntent
 	try {
-		// Preflight destination collision (same as create).
+		// Preflight destination collision (same as create, symlink-aware).
 		const completedDest = join(
 			join(archiveRoot(archiveDir), "operations", "completed"),
 			`archive-${inspection.operationId}`,
 		)
-		if (existsSync(completedDest)) {
+		if (pathExistsIncludingSymlinks(completedDest)) {
 			throw new Error(
 				`completed archive operation already exists; refusing to overwrite: ${completedDest}`,
 			)

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto"
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { lstat, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { durableRename, syncDirectory } from "../durable-files"
@@ -9,6 +9,7 @@ import {
 	assertNoSymlink,
 	assertNoSymlinkSync,
 	assertRealFile,
+	assertRealFileSync,
 	ensurePrivateDirectory,
 	generationManifestPath,
 	generationRoot,
@@ -659,24 +660,94 @@ export const resumeFrozenTargetsAndCompleteGc = async (
 }
 
 /**
- * Preflight EVERY remaining GC target read-only before the decision authorizes
- * any mutation. Validates source/tombstone topology, source manifest/shard
- * evidence, pointer CAS for every target, and both-present detection. Throws
- * on any defect so the inspection returns FailClosed — preventing partial
- * deletion where target 1 succeeds but target 2 fails.
+ * Validate a tombstone present at the owned path: real directory (not symlink),
+ * containing a generation matching the frozen manifest/shard evidence.
+ */
+const revalidateTombstone = (
+	archiveDir: string,
+	tomb: string,
+	target: GcTarget | GcDeleteCandidate,
+): void => {
+	assertNoSymlinkSync(archiveDir, tomb, "archive gc tombstone")
+	const info = lstatSync(tomb)
+	if (!info.isDirectory()) {
+		throw new Error(`archive gc tombstone is not a real directory: ${tomb}`)
+	}
+	// Verify the tombstone's manifest matches the frozen evidence.
+	const tombManifestPath = join(tomb, "manifest.json")
+	assertNoSymlinkSync(archiveDir, tombManifestPath, "archive gc tombstone manifest")
+	assertRealFileSync(tombManifestPath, "archive gc tombstone manifest")
+	const actualManifestSha = sha256File(tombManifestPath)
+	if (actualManifestSha !== target.manifestSha256) {
+		throw new Error(`archive gc tombstone manifest evidence mismatch: ${tomb}`)
+	}
+	// Verify each shard matches the frozen evidence.
+	for (const shardEv of target.shards) {
+		const shardPath = join(tomb, "shards", shardEv.name)
+		assertNoSymlinkSync(archiveDir, shardPath, `archive gc tombstone shard ${shardEv.name}`)
+		assertRealFileSync(shardPath, `archive gc tombstone shard ${shardEv.name}`)
+		const actualSha = sha256File(shardPath)
+		if (actualSha !== shardEv.sha256) {
+			throw new Error(`archive gc tombstone shard ${shardEv.name} evidence mismatch: ${tomb}`)
+		}
+	}
+}
+
+/**
+ * Preflight the ENTIRE frozen target set read-only before the decision authorizes
+ * any mutation. For every target — prefix (already completed), current (resume
+ * cursor), and suffix (not yet attempted):
+ *
+ * - prefix (index < completedTargets): source absent, tombstone absent, pointer
+ *   still equals the recorded active generation.
+ * - current + suffix (index >= completedTargets): the documented crash topologies
+ *   (source+no-tombstone, source-absent+tombstone-present, both-absent), each
+ *   with evidence validation and pointer CAS. Source-absent+tombstone-present
+ *   validates the tombstone is a real, non-symlinked directory matching frozen
+ *   evidence.
+ *
+ * Throws on any defect so the inspection returns FailClosed — preventing partial
+ * deletion where target 1 succeeds but a later target (or a corrupted prefix)
+ * fails.
  */
 export const preflightGcTargets = async (archiveDir: string, intent: GcOperationIntent): Promise<void> => {
-	for (let i = intent.completedTargets; i < intent.targets.length; i++) {
+	for (let i = 0; i < intent.targets.length; i++) {
 		const target = intent.targets[i]!
-		// The same revalidation collectOneTarget will run, but read-only here:
-		revalidateSource(archiveDir, target)
-		revalidatePointer(archiveDir, target)
-		// Detect both-present topology (ambiguous — fail closed).
 		const sourcePath = generationRoot(archiveDir, target.signal, target.rangeStart, target.generationId)
 		const tomb = tombstonePath(archiveDir, intent.operationId, target)
-		if (existsSync(sourcePath) && existsSync(tomb)) {
+		const sourceExists = existsSync(sourcePath)
+		const tombExists = existsSync(tomb)
+
+		if (i < intent.completedTargets) {
+			// Prefix: already completed. Both source and tombstone must be absent.
+			if (sourceExists)
+				throw new Error(`archive gc completed target still has source: ${target.generationId}`)
+			if (tombExists)
+				throw new Error(`archive gc completed target still has tombstone: ${target.generationId}`)
+			// Pointer CAS still holds.
+			revalidatePointer(archiveDir, target)
+			continue
+		}
+
+		// Current or suffix target: validate per crash topology.
+		if (sourceExists && tombExists) {
 			throw new Error(`archive gc target has both source and tombstone: ${target.generationId}`)
 		}
+		if (!sourceExists && !tombExists) {
+			// Already completed target (idempotent). Pointer CAS still holds.
+			revalidatePointer(archiveDir, target)
+			continue
+		}
+		if (sourceExists && !tombExists) {
+			// Normal: source present, tombstone absent. Validate source evidence + pointer CAS.
+			revalidateSource(archiveDir, target)
+			revalidatePointer(archiveDir, target)
+			continue
+		}
+		// Source absent, tombstone present: mid-removal crash topology.
+		// Validate tombstone is real, non-symlinked, matches frozen evidence.
+		revalidateTombstone(archiveDir, tomb, target)
+		revalidatePointer(archiveDir, target)
 	}
 }
 
