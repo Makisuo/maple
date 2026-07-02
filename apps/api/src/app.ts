@@ -45,6 +45,7 @@ import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
 import { InternalServiceAuthorizationLayer } from "./services/InternalServiceAuthorizationLayer"
+import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
 import { DemoService } from "./services/DemoService"
@@ -107,6 +108,12 @@ const CoreServicesLive = Layer.mergeAll(
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+// Serves the integration page's per-zone collection status; the poll loop itself
+// runs in the alerting worker's cron, not here.
+const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
 
 const DemoServiceLive = DemoService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
@@ -184,6 +191,7 @@ const VcsServicesLive = Layer.mergeAll(
 
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
+	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,

@@ -295,4 +295,47 @@ describe("where clause autocomplete", () => {
 
 		expect(result.suggestions.some((item) => item.insertText === "attr.")).toBe(true)
 	})
+
+	it("suggests dashboard variables first in value position", () => {
+		const expression = 'service.name = '
+		const result = getWhereClauseAutocomplete({
+			expression,
+			cursor: expression.length,
+			dataSource: "traces",
+			values: { services: ["api", "web"], variables: ["service", "env"] },
+		})
+
+		expect(result.context).toBe("value")
+		expect(result.suggestions[0]).toMatchObject({
+			label: "$service",
+			insertText: '"$service"',
+			description: "Dashboard variable",
+		})
+		expect(result.suggestions.some((item) => item.insertText === '"api"')).toBe(true)
+	})
+
+	it("matches variables when typing $", () => {
+		const expression = 'service.name = $en'
+		const result = getWhereClauseAutocomplete({
+			expression,
+			cursor: expression.length,
+			dataSource: "traces",
+			values: { variables: ["service", "env"] },
+		})
+
+		expect(result.suggestions.map((item) => item.label)).toContain("$env")
+		expect(result.suggestions.map((item) => item.label)).not.toContain("$service")
+	})
+
+	it("suggests no variables when none are defined", () => {
+		const expression = 'service.name = '
+		const result = getWhereClauseAutocomplete({
+			expression,
+			cursor: expression.length,
+			dataSource: "traces",
+			values: { services: ["api"] },
+		})
+
+		expect(result.suggestions.every((item) => item.description !== "Dashboard variable")).toBe(true)
+	})
 })

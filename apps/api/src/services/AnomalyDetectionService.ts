@@ -275,12 +275,16 @@ const make = Effect.gen(function* () {
 		knownOrgs: ReadonlyArray<OrgId>,
 		nowMs: number,
 	) {
+		yield* Effect.annotateCurrentSpan("knownOrgs", knownOrgs.length)
 		const byoRows = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgClickHouseSettings.orgId }).from(orgClickHouseSettings),
 		).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: string }>))
 		const byo = new Set<string>(byoRows.map((r) => r.orgId))
 
-		if (knownOrgs.length === 0) return byo as ReadonlySet<string>
+		if (knownOrgs.length === 0) {
+			yield* Effect.annotateCurrentSpan({ activeOrgs: byo.size, failedClosed: false })
+			return byo as ReadonlySet<string>
+		}
 
 		const startTime = toTinybirdDateTime(nowMs - ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS)
 		const routingTenant = systemTenant(knownOrgs[0])
@@ -307,6 +311,9 @@ const make = Effect.gen(function* () {
 				}
 				return active as ReadonlySet<string>
 			}),
+			Effect.tap((active) =>
+				Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: false }),
+			),
 			// Cache the freshly-discovered set for reuse on a later discovery failure.
 			Effect.tap((active) =>
 				edgeCache
@@ -318,21 +325,29 @@ const make = Effect.gen(function* () {
 					)
 					.pipe(Effect.ignore),
 			),
-			// Fail CLOSED: reuse the last-known active set (or just BYO if cold).
+			// Fail CLOSED on a genuine discovery failure: reuse the last-known active
+			// set. Interrupts (isolate teardown) are NOT failures — re-raise them so
+			// the tick cancels promptly instead of running the fallback.
 			Effect.catchCause((cause) =>
-				Effect.gen(function* () {
-					yield* Effect.logWarning(
-						"Anomaly active-org discovery failed; reusing last-known active set",
-					).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
-					const cached = yield* edgeCache
-						.rawGet<ReadonlyArray<string>>(ANOMALY_ACTIVE_ORGS_CACHE_BUCKET, ANOMALY_ACTIVE_ORGS_CACHE_KEY)
-						.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
-					const active = new Set<string>(byo)
-					for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
-						active.add(orgId)
-					}
-					return active as ReadonlySet<string>
-				}),
+				Cause.hasInterruptsOnly(cause)
+					? Effect.interrupt
+					: Effect.gen(function* () {
+							yield* Effect.logWarning(
+								"Anomaly active-org discovery failed; reusing last-known active set",
+							).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+							const cached = yield* edgeCache
+								.rawGet<ReadonlyArray<string>>(
+									ANOMALY_ACTIVE_ORGS_CACHE_BUCKET,
+									ANOMALY_ACTIVE_ORGS_CACHE_KEY,
+								)
+								.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
+							const active = new Set<string>(byo)
+							for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+								active.add(orgId)
+							}
+							yield* Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: true })
+							return active as ReadonlySet<string>
+						}),
 			),
 		)
 	})
@@ -1111,10 +1126,7 @@ const make = Effect.gen(function* () {
 		// inArray over a busy org's fingerprints fails the whole tick for it
 		// (same constraint as ErrorsService's D1_INARRAY_CHUNK_SIZE).
 		const fingerprints = [...new Set(spikes.observations.map((o) => o.fingerprintHash))]
-		const fingerprintChunks: string[][] = []
-		for (let i = 0; i < fingerprints.length; i += D1_INARRAY_CHUNK_SIZE) {
-			fingerprintChunks.push(fingerprints.slice(i, i + D1_INARRAY_CHUNK_SIZE))
-		}
+		const fingerprintChunks = Arr.chunksOf(fingerprints, D1_INARRAY_CHUNK_SIZE)
 		const issueRowChunks = yield* Effect.forEach(fingerprintChunks, (chunk) =>
 			dbExecute((db) =>
 				db
@@ -1833,14 +1845,20 @@ const make = Effect.gen(function* () {
 				orgsToProcess,
 				(org) =>
 					processOrg(org, nowMs, runRetention).pipe(
+						// Isolate genuine per-org failures/defects so one bad org can't fail
+						// the whole tick. Interrupts (isolate teardown) are NOT per-org
+						// failures — re-raise them so the tick cancels promptly instead of
+						// logging a phantom failure and marching through the remaining orgs.
 						Effect.catchCause((cause) =>
-							Effect.gen(function* () {
-								yield* Effect.logError("Anomaly tick failed for org").pipe(
-									Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
-								)
-								yield* Ref.update(orgFailures, (n) => n + 1)
-								return emptyStats
-							}),
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.gen(function* () {
+										yield* Effect.logError("Anomaly tick failed for org").pipe(
+											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+										)
+										yield* Ref.update(orgFailures, (n) => n + 1)
+										return emptyStats
+									}),
 						),
 					),
 				{ concurrency: 4 },

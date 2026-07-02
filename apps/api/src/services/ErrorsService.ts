@@ -431,12 +431,16 @@ const make: Effect.Effect<
 		knownOrgs: ReadonlyArray<string>,
 		nowMs: number,
 	) {
+		yield* Effect.annotateCurrentSpan("knownOrgs", knownOrgs.length)
 		const byoRows = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgClickHouseSettings.orgId }).from(orgClickHouseSettings),
 		).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: string }>))
 		const byo = new Set<string>(byoRows.map((r) => r.orgId))
 
-		if (knownOrgs.length === 0) return byo as ReadonlySet<string>
+		if (knownOrgs.length === 0) {
+			yield* Effect.annotateCurrentSpan({ activeOrgs: byo.size, failedClosed: false })
+			return byo as ReadonlySet<string>
+		}
 
 		const compiled = CH.compile(CH.activeOrgsByErrorEventsQuery(), {
 			startTime: toTinybirdDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
@@ -459,6 +463,9 @@ const make: Effect.Effect<
 					}
 					return active as ReadonlySet<string>
 				}),
+				Effect.tap((active) =>
+					Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: false }),
+				),
 				// Cache the freshly-discovered set so a later discovery failure can
 				// reuse it instead of fanning out to all known orgs. Best-effort.
 				Effect.tap((active) =>
@@ -466,21 +473,26 @@ const make: Effect.Effect<
 						.rawPut(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY, [...active], ACTIVE_ORGS_CACHE_TTL_S)
 						.pipe(Effect.ignore),
 				),
-				// Fail CLOSED: reuse the last-known active set (or just BYO if cold).
+				// Fail CLOSED on a genuine discovery failure: reuse the last-known active
+				// set. Interrupts (isolate teardown) are NOT failures — re-raise them so
+				// the tick cancels promptly instead of running the fallback.
 				Effect.catchCause((cause) =>
-					Effect.gen(function* () {
-						yield* Effect.logWarning(
-							"Error active-org discovery failed; reusing last-known active set",
-						).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
-						const cached = yield* edgeCache
-							.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
-							.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
-						const active = new Set<string>(byo)
-						for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
-							active.add(orgId)
-						}
-						return active as ReadonlySet<string>
-					}),
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.gen(function* () {
+								yield* Effect.logWarning(
+									"Error active-org discovery failed; reusing last-known active set",
+								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+								const cached = yield* edgeCache
+									.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
+									.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
+								const active = new Set<string>(byo)
+								for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+									active.add(orgId)
+								}
+								yield* Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: true })
+								return active as ReadonlySet<string>
+							}),
 				),
 			)
 	})
@@ -2622,17 +2634,23 @@ const make: Effect.Effect<
 			[...knownOrgs],
 			(org) =>
 				processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org)).pipe(
+					// Isolate genuine per-org failures/defects so one bad org can't fail the
+					// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
+					// re-raise them so the tick cancels promptly instead of logging a
+					// phantom failure and marching through the remaining orgs.
 					Effect.catchCause((cause) =>
-						Effect.gen(function* () {
-							yield* Effect.logError("Error tick failed for org").pipe(
-								Effect.annotateLogs({
-									orgId: org,
-									error: Cause.pretty(cause),
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.gen(function* () {
+									yield* Effect.logError("Error tick failed for org").pipe(
+										Effect.annotateLogs({
+											orgId: org,
+											error: Cause.pretty(cause),
+										}),
+									)
+									yield* Ref.update(orgFailures, (n) => n + 1)
+									return emptyResult
 								}),
-							)
-							yield* Ref.update(orgFailures, (n) => n + 1)
-							return emptyResult
-						}),
 					),
 				),
 			{ concurrency: 4 },

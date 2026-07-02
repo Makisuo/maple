@@ -4,6 +4,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { cn } from "@maple/ui/utils"
+import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { tokenizeSql } from "@/lib/sql-highlight"
 
@@ -39,9 +40,32 @@ export function RawSqlEditorPanel({
 }: RawSqlEditorPanelProps) {
 	const [collapsed, setCollapsed] = useState(false)
 	const preRef = useRef<HTMLPreElement>(null)
+	const textareaRef = useRef<HTMLTextAreaElement>(null)
 	const editorId = useId()
 	const bucketInputId = `${editorId}-bucket`
 	const missingOrgFilter = !draft.sql.includes("$__orgFilter")
+
+	const variablesContext = useDashboardVariablesOptional()
+	const variableNames = variablesContext?.variables.map((variable) => variable.name) ?? []
+
+	// Insert a token at the caret (replacing any selection) and keep editing —
+	// macro and variable chips are one-click inserts, not just documentation.
+	const insertToken = (token: string) => {
+		const textarea = textareaRef.current
+		if (!textarea) {
+			onDraftChange({ ...draft, sql: draft.sql + token })
+			return
+		}
+		const start = textarea.selectionStart ?? draft.sql.length
+		const end = textarea.selectionEnd ?? start
+		const sql = draft.sql.slice(0, start) + token + draft.sql.slice(end)
+		onDraftChange({ ...draft, sql })
+		requestAnimationFrame(() => {
+			textarea.focus()
+			const caret = start + token.length
+			textarea.setSelectionRange(caret, caret)
+		})
+	}
 
 	return (
 		<div className="space-y-3">
@@ -91,6 +115,7 @@ export function RawSqlEditorPanel({
 								</code>
 							</pre>
 							<textarea
+								ref={textareaRef}
 								aria-label="SQL query"
 								value={draft.sql}
 								onChange={(e) => onDraftChange({ ...draft, sql: e.target.value })}
@@ -108,13 +133,26 @@ export function RawSqlEditorPanel({
 						<div className="flex items-start gap-3 pt-1 border-t border-dashed">
 							<div className="flex flex-wrap gap-1.5 flex-1 pt-2">
 								{MACRO_HINTS.map((hint) => (
-									<span
+									<button
 										key={hint.token}
+										type="button"
 										title={hint.description}
-										className="px-2 py-0.5 text-[11px] rounded-sm bg-muted/40 text-muted-foreground font-mono cursor-help"
+										onClick={() => insertToken(hint.token)}
+										className="px-2 py-0.5 text-[11px] rounded-sm bg-muted/40 text-muted-foreground font-mono transition-colors hover:bg-muted hover:text-foreground"
 									>
 										{hint.token}
-									</span>
+									</button>
+								))}
+								{variableNames.map((name) => (
+									<button
+										key={`var-${name}`}
+										type="button"
+										title={`Dashboard variable — expands to the selected value, e.g. ServiceName IN ($${name}). "All" expands to every value.`}
+										onClick={() => insertToken(`$${name}`)}
+										className="px-2 py-0.5 text-[11px] rounded-sm bg-primary/10 text-primary font-mono transition-colors hover:bg-primary/20"
+									>
+										${name}
+									</button>
 								))}
 							</div>
 

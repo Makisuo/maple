@@ -3,7 +3,12 @@ import { Atom, Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
+import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
+import {
+	hasUnresolvedVariableRefs,
+	interpolateWidgetParams,
+} from "@/lib/dashboard-variables/interpolate"
 import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**
@@ -343,6 +348,7 @@ export function useWidgetDataSource(
 	const {
 		state: { resolvedTimeRange },
 	} = useDashboardTimeRange()
+	const variablesContext = useDashboardVariablesOptional()
 
 	const isStatic = dataSource?.endpoint === "markdown_static"
 	const hasServerFn = dataSource ? !!getServerFunction(dataSource.endpoint) : false
@@ -357,35 +363,50 @@ export function useWidgetDataSource(
 					? `Unknown data source endpoint: ${dataSource.endpoint}`
 					: null
 
-	const resolvedParams = useMemo(
+	// A params blob referencing a defined dashboard variable whose value hasn't
+	// resolved yet (query-variable options still loading, no default) must not
+	// fire — a literal `$service` would reach the API. Mirrors the
+	// `resolvedTimeRange` gate: the widget reads as "loading" until it settles.
+	const waitingOnVariables = useMemo(
 		() =>
-			resolvedTimeRange
-				? interpolateParams(
-						{
-							...dataSource?.params,
-							strategy: { enableEmptyRangeFallback: false },
-							startTime: resolvedTimeRange.startTime,
-							endTime: resolvedTimeRange.endTime,
-						},
-						resolvedTimeRange,
-					)
-				: {},
-		[resolvedTimeRange, dataSource?.params],
+			variablesContext !== null &&
+			hasUnresolvedVariableRefs(
+				dataSource?.params,
+				variablesContext.variables.map((variable) => variable.name),
+				variablesContext.values,
+			),
+		[dataSource?.params, variablesContext],
 	)
+
+	const variableValues = variablesContext?.values
+
+	const resolvedParams = useMemo(() => {
+		if (!resolvedTimeRange) return {}
+		const base = interpolateParams(
+			{
+				...dataSource?.params,
+				strategy: { enableEmptyRangeFallback: false },
+				startTime: resolvedTimeRange.startTime,
+				endTime: resolvedTimeRange.endTime,
+			},
+			resolvedTimeRange,
+		)
+		return variableValues ? interpolateWidgetParams(base, variableValues) : base
+	}, [resolvedTimeRange, dataSource?.params, variableValues])
 
 	// Stabilise the atom reference across renders. Atom.family already dedupes
 	// by encoded key, but giving React the same Atom instance avoids any path
 	// where useAtomValue / useAtomRefresh re-subscribe and drop an in-flight
 	// fetch (the user-visible symptom: widgets stuck on the loading skeleton).
 	const fetchAtom = useMemo(() => {
-		if (disableReason !== null || isStatic || !dataSource || !enabled) {
+		if (disableReason !== null || isStatic || !dataSource || !enabled || waitingOnVariables) {
 			return disabledResultAtom<unknown, WidgetFetchError>()
 		}
 		return widgetFetchAtom({
 			endpoint: dataSource.endpoint,
 			params: resolvedParams,
 		})
-	}, [disableReason, isStatic, dataSource, resolvedParams, enabled])
+	}, [disableReason, isStatic, dataSource, resolvedParams, enabled, waitingOnVariables])
 
 	const result = useRefreshableAtomValue(fetchAtom)
 
@@ -396,8 +417,9 @@ export function useWidgetDataSource(
 			return { status: "ready", data: null } as const
 		}
 		// Paused (off-screen) tiles read as "loading", not "error" — the query is
-		// simply deferred until the tile scrolls into view.
-		if (!enabled) {
+		// simply deferred until the tile scrolls into view. Same for tiles whose
+		// dashboard-variable references haven't resolved yet.
+		if (!enabled || waitingOnVariables) {
 			return { status: "loading" } as const
 		}
 		if (disableReason) {
@@ -418,7 +440,7 @@ export function useWidgetDataSource(
 			})
 			.onSuccess((rawData) => ({ status: "ready", data: applyTransform(rawData, transform) }) as const)
 			.orElse(() => ({ status: "error", message: "Unknown error" }) as const)
-	}, [result, transform, disableReason, isStatic, enabled])
+	}, [result, transform, disableReason, isStatic, enabled, waitingOnVariables])
 
 	return {
 		dataState,

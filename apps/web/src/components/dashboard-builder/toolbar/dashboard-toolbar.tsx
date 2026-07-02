@@ -1,3 +1,4 @@
+import { useState } from "react"
 import {
 	PlusIcon,
 	PencilIcon,
@@ -6,6 +7,7 @@ import {
 	DotsVerticalIcon,
 	DownloadIcon,
 	HistoryIcon,
+	BracketsCurlyIcon,
 } from "@/components/icons"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -18,9 +20,12 @@ import {
 } from "@maple/ui/components/ui/dropdown-menu"
 import { TimeRangePicker } from "@/components/time-range-picker/time-range-picker"
 import { ReloadControls } from "@/components/time-range-picker/reload-controls"
+import { VariableSelects } from "@/components/dashboard-builder/toolbar/variable-selects"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardActions } from "@/components/dashboard-builder/dashboard-actions-context"
 import { downloadPortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
+import { VariablesManagerDialog } from "@/components/dashboard-builder/config/variables-manager-dialog"
+import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import type { Dashboard } from "@/components/dashboard-builder/types"
 
 interface DashboardToolbarProps {
@@ -41,11 +46,16 @@ export function DashboardToolbar({
 		state: { timeRange, resolvedTimeRange },
 		actions: { setTimeRange },
 	} = useDashboardTimeRange()
+	const { updateDashboardVariables } = useDashboardStore()
+	const [variablesDialogOpen, setVariablesDialogOpen] = useState(false)
 
 	const isEdit = mode === "edit"
 
 	return (
 		<div className="flex items-center gap-3">
+			<VariableSelects
+				onManage={isEdit && !readOnly ? () => setVariablesDialogOpen(true) : undefined}
+			/>
 			<TimeRangePicker
 				hotkey
 				startTime={resolvedTimeRange?.startTime}
@@ -108,6 +118,16 @@ export function DashboardToolbar({
 								Auto Layout
 							</DropdownMenuItem>
 						)}
+						{isEdit && (
+							<DropdownMenuItem
+								onClick={() => setVariablesDialogOpen(true)}
+								disabled={readOnly}
+								className="whitespace-nowrap"
+							>
+								<BracketsCurlyIcon size={14} />
+								Variables
+							</DropdownMenuItem>
+						)}
 						{onOpenHistory && (
 							<DropdownMenuItem onClick={onOpenHistory} className="whitespace-nowrap">
 								<HistoryIcon size={14} />
@@ -125,6 +145,13 @@ export function DashboardToolbar({
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>
+
+			<VariablesManagerDialog
+				open={variablesDialogOpen}
+				onOpenChange={setVariablesDialogOpen}
+				variables={dashboard.variables ?? []}
+				onSave={(variables) => updateDashboardVariables(dashboard.id, variables)}
+			/>
 		</div>
 	)
 }

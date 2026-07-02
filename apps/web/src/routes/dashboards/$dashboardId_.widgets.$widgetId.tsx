@@ -8,6 +8,7 @@ import {
 } from "@/components/dashboard-builder/config/widget-query-builder-page"
 import { WidgetBuilderProvider } from "@/components/dashboard-builder/config/widget-builder-provider"
 import { DashboardTimeRangeWrapper } from "@/components/dashboard-builder/dashboard-providers"
+import { DashboardVariablesProvider } from "@/components/dashboard-builder/dashboard-variables-context"
 import type {
 	TimeRange,
 	VisualizationType,
@@ -91,6 +92,13 @@ function WidgetConfigurePage() {
 			initialTimeRange={timeRangeRef.current}
 			onTimeRangeChange={(timeRange) => updateDashboardTimeRange(activeDashboard.id, timeRange)}
 		>
+		{/* Variables resolve to their defaults here so previews of queries
+		    referencing `$name` run against real values while editing. */}
+		<DashboardVariablesProvider
+			variables={activeDashboard.variables}
+			urlValues={{}}
+			onValueChange={() => undefined}
+		>
 			<DashboardLayout
 				breadcrumbs={[
 					{ label: "Dashboards", href: "/dashboards" },
@@ -137,6 +145,7 @@ function WidgetConfigurePage() {
 					</div>
 				</div>
 			)}
+		</DashboardVariablesProvider>
 		</DashboardTimeRangeWrapper>
 	)
 }

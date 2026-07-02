@@ -12,6 +12,7 @@ import {
 	DashboardTimeRangeWrapper,
 	useDashboardTimeRange,
 } from "@/components/dashboard-builder/dashboard-providers"
+import { DashboardVariablesProvider } from "@/components/dashboard-builder/dashboard-variables-context"
 import {
 	DashboardActionsProvider,
 	useDashboardActions,
@@ -23,14 +24,52 @@ import { DashboardHistoryPanel, PreviewedCanvas } from "@/components/dashboard-b
 import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-history-atoms"
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
 import { Result } from "@/lib/effect-atom"
-import type { ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
 const chartPickerOpenAtom = Atom.make(false)
 
-const dashboardViewSearchSchema = Schema.Struct({
-	mode: Schema.optional(Schema.Literal("edit")),
-})
+// `var-<name>` keys carry dashboard-variable selections (Grafana-style), so
+// views are shareable/deep-linkable. Values are `Unknown` on purpose: TanStack
+// JSON-parses each search value, and a hand-edited URL must never crash the
+// route — non-string values are coerced or ignored when read.
+const dashboardViewSearchSchema = Schema.StructWithRest(
+	Schema.Struct({
+		mode: Schema.optional(Schema.Literal("edit")),
+	}),
+	[Schema.Record(Schema.TemplateLiteral(["var-", Schema.String]), Schema.Unknown)],
+)
+
+const VARIABLE_PARAM_PREFIX = "var-"
+
+type VariableSearchParams = Record<`${typeof VARIABLE_PARAM_PREFIX}${string}`, unknown>
+
+// The functional-search `prev` is typed as the union of every route's search
+// params, so spreading it wholesale doesn't satisfy this route's schema.
+// Rebuild the object from the parts this route owns: `var-*` keys (+ `mode`,
+// handled per call site).
+function pickVariableParams(search: Record<string, unknown>): VariableSearchParams {
+	const params: VariableSearchParams = {}
+	for (const [key, value] of Object.entries(search)) {
+		if (key.startsWith(VARIABLE_PARAM_PREFIX)) {
+			params[key as keyof VariableSearchParams] = value
+		}
+	}
+	return params
+}
+
+function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
+	const values: Record<string, string> = {}
+	for (const [key, value] of Object.entries(search)) {
+		if (!key.startsWith(VARIABLE_PARAM_PREFIX)) continue
+		if (typeof value === "string") {
+			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = value
+		} else if (typeof value === "number" || typeof value === "boolean") {
+			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = String(value)
+		}
+	}
+	return values
+}
 
 export const Route = effectRoute(createFileRoute("/dashboards/$dashboardId"))({
 	component: DashboardViewPage,
@@ -76,12 +115,31 @@ function DashboardViewPage() {
 	const isPreviewing = previewed !== null
 	const mode: WidgetMode = search.mode === "edit" && !readOnly && !isPreviewing ? "edit" : "view"
 
+	// Functional search updates so toggling edit mode never wipes `var-*` params.
 	const handleToggleEdit = () => {
 		if (isPreviewing) return
 		navigate({
 			to: "/dashboards/$dashboardId",
 			params: { dashboardId },
-			search: mode === "edit" ? {} : { mode: "edit" },
+			search: (prev) =>
+				mode === "edit"
+					? pickVariableParams(prev)
+					: { ...pickVariableParams(prev), mode: "edit" as const },
+		})
+	}
+
+	const urlVariableValues = useMemo(() => variableValuesFromSearch(search), [search])
+
+	const handleVariableChange = (name: string, value: string) => {
+		navigate({
+			to: "/dashboards/$dashboardId",
+			params: { dashboardId },
+			replace: true,
+			search: (prev) => ({
+				...pickVariableParams(prev),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				[`${VARIABLE_PARAM_PREFIX}${name}`]: value,
+			}),
 		})
 	}
 
@@ -128,6 +186,11 @@ function DashboardViewPage() {
 			initialTimeRange={activeDashboard.timeRange}
 			onTimeRangeChange={(timeRange) => updateDashboardTimeRange(activeDashboard.id, timeRange)}
 		>
+			<DashboardVariablesProvider
+				variables={activeDashboard.variables}
+				urlValues={urlVariableValues}
+				onValueChange={handleVariableChange}
+			>
 			<DashboardActionsProvider
 				dashboardId={dashboardId}
 				mode={mode}
@@ -210,7 +273,10 @@ function DashboardViewPage() {
 										navigate({
 											to: "/dashboards/$dashboardId",
 											params: { dashboardId },
-											search: { mode: "edit" },
+											search: (prev) => ({
+												...pickVariableParams(prev),
+												mode: "edit" as const,
+											}),
 										})
 										setChartPickerOpen(true)
 									}}
@@ -229,6 +295,7 @@ function DashboardViewPage() {
 					</DashboardLayout>
 				</DashboardRefreshBridge>
 			</DashboardActionsProvider>
+			</DashboardVariablesProvider>
 		</DashboardTimeRangeWrapper>
 	)
 }

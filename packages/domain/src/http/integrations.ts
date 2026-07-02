@@ -77,9 +77,31 @@ export class HazelDisconnectResponse extends Schema.Class<HazelDisconnectRespons
 
 // ---- Cloudflare (account OAuth + telemetry auto-provisioning) --------------
 
+/** Per-zone edge-analytics collection state (from the GraphQL Analytics poller). */
+export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyticsZoneStatus>(
+	"CloudflareAnalyticsZoneStatus",
+)({
+	id: Schema.String,
+	name: Schema.String,
+	enabled: Schema.Boolean,
+	lastSyncedAt: Schema.NullOr(Schema.Number),
+	lastError: Schema.NullOr(Schema.String),
+}) {}
+
+/** Account-level Workers invocation-metrics collection state. */
+export class CloudflareAnalyticsWorkersStatus extends Schema.Class<CloudflareAnalyticsWorkersStatus>(
+	"CloudflareAnalyticsWorkersStatus",
+)({
+	enabled: Schema.Boolean,
+	lastSyncedAt: Schema.NullOr(Schema.Number),
+	lastError: Schema.NullOr(Schema.String),
+}) {}
+
 /**
  * Connection state of the Cloudflare integration. `accountId`/`accountName` identify the single
  * Cloudflare account the OAuth token is scoped to (Maple enforces exactly one account per org).
+ * `analyticsCapable` is false when the stored grant predates the analytics scopes — the UI offers
+ * an "Update permissions" reconnect; `zones`/`workers` surface the poller's per-dataset state.
  */
 export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrationStatus>(
 	"CloudflareIntegrationStatus",
@@ -89,6 +111,9 @@ export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrat
 	accountName: Schema.NullOr(Schema.String),
 	connectedByUserId: Schema.NullOr(UserId),
 	scope: Schema.NullOr(Schema.String),
+	analyticsCapable: Schema.Boolean,
+	zones: Schema.Array(CloudflareAnalyticsZoneStatus),
+	workers: Schema.NullOr(CloudflareAnalyticsWorkersStatus),
 }) {}
 
 export class CloudflareStartConnectRequest extends Schema.Class<CloudflareStartConnectRequest>(

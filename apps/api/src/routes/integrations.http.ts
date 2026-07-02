@@ -1,6 +1,8 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
+	CloudflareAnalyticsWorkersStatus,
+	CloudflareAnalyticsZoneStatus,
 	CloudflareDisconnectResponse,
 	CloudflareIntegrationStatus,
 	CloudflareStartConnectResponse,
@@ -24,6 +26,7 @@ import {
 } from "@maple/domain/http"
 import { Effect, Option, Schema } from "effect"
 import { Env } from "../lib/Env"
+import { CloudflareAnalyticsService, hasAnalyticsScopes } from "../services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
 import { GithubConnectService } from "../services/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "../services/vcs/VcsCommitService"
@@ -78,6 +81,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const github = yield* GithubConnectService
 		const vcsCommits = yield* VcsCommitService
 		const cloudflare = yield* CloudflareOAuthService
+		const cloudflareAnalytics = yield* CloudflareAnalyticsService
 
 		return (
 			handlers
@@ -162,14 +166,23 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								accountName: null,
 								connectedByUserId: null,
 								scope: null,
+								analyticsCapable: false,
+								zones: [],
+								workers: null,
 							})
 						}
+						const analytics = yield* cloudflareAnalytics.getStatus(tenant.orgId)
 						return new CloudflareIntegrationStatus({
 							connected: true,
 							accountId: status.accountId,
 							accountName: status.accountName,
 							connectedByUserId: asUserId(status.connectedByUserId),
 							scope: status.scope,
+							analyticsCapable: hasAnalyticsScopes(status.scope),
+							zones: analytics.zones.map((zone) => new CloudflareAnalyticsZoneStatus(zone)),
+							workers: analytics.workers
+								? new CloudflareAnalyticsWorkersStatus(analytics.workers)
+								: null,
 						})
 					}),
 				)

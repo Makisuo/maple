@@ -13,10 +13,12 @@
  * already have a connection resolve a fresh token via `CloudflareOAuthService.getValidAccessToken`
  * and pass it in.
  */
+import { API, T, type DefaultErrors } from "@distilled.cloud/cloudflare"
 import * as Accounts from "@distilled.cloud/cloudflare/accounts"
 import { fromOAuth, type Credentials } from "@distilled.cloud/cloudflare/Credentials"
+import * as Zones from "@distilled.cloud/cloudflare/zones"
 import { IntegrationsRevokedError, IntegrationsUpstreamError } from "@maple/domain/http"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { FetchHttpClient, type HttpClient } from "effect/unstable/http"
 
 /** The Effect context a distilled operation requires: resolved credentials + an HTTP client. */
@@ -120,4 +122,118 @@ export const listAccounts = (
 				type: account.type,
 			})),
 		),
+	)
+
+export interface CloudflareZone {
+	readonly id: string
+	readonly name: string
+	readonly status: string | null
+}
+
+// Zone discovery is bounded: the analytics poller reconciles state rows per zone, so a
+// pathological account with thousands of zones must not fan out unbounded work.
+const MAX_ZONES = 200
+
+/**
+ * List the account's active zones. Used by the analytics poller for zone discovery — each active
+ * zone gets a poll-state row (and thus edge metrics under `cloudflare/{zoneName}`).
+ */
+export const listZones = (
+	accessToken: string,
+	accountId: string,
+	apiBaseUrl?: string,
+): Effect.Effect<ReadonlyArray<CloudflareZone>, CloudflareApiError, never> =>
+	runMapped(
+		accessToken,
+		Zones.listZones
+			.items({ account: { id: accountId }, status: "active", perPage: 50 })
+			.pipe(Stream.take(MAX_ZONES), Stream.runCollect),
+		apiBaseUrl,
+	).pipe(
+		Effect.map((zones) =>
+			zones.map((zone) => ({
+				id: zone.id,
+				name: zone.name,
+				status: zone.status ?? null,
+			})),
+		),
+	)
+
+// ---------------------------------------------------------------------------
+// GraphQL Analytics (the raw escape hatch the module doc-comment anticipates)
+// ---------------------------------------------------------------------------
+//
+// The GraphQL Analytics API is not among distilled's generated services, but the SDK exports its
+// operation factory, so we define the POST /graphql call as a first-class distilled operation:
+// it then shares the credentials layer, retry policy (incl. Retry-After handling for the
+// 300-queries-per-5-min limit), and error matching with every other call in this module.
+
+const GraphqlRequest = Schema.Struct({
+	query: Schema.String,
+	variables: Schema.optional(Schema.Unknown),
+}).pipe(T.Http({ method: "POST", path: "/graphql" }))
+
+const GraphqlErrorItem = Schema.Struct({
+	message: Schema.String,
+	// GraphQL error extensions carry Cloudflare's machine-readable code (e.g. "authz" for
+	// permission failures); path points at the offending selection. Both optional/loose —
+	// callers branch on message + code, never on the full shape.
+	extensions: Schema.optional(Schema.Unknown),
+	path: Schema.optional(Schema.Unknown),
+})
+
+const GraphqlResponse = Schema.Struct({
+	data: Schema.optional(Schema.Unknown),
+	errors: Schema.optional(Schema.Union([Schema.Array(GraphqlErrorItem), Schema.Null])),
+})
+
+type GraphqlRequestShape = typeof GraphqlRequest.Type
+type GraphqlResponseShape = typeof GraphqlResponse.Type
+
+const graphqlOperation: API.OperationMethod<
+	GraphqlRequestShape,
+	GraphqlResponseShape,
+	DefaultErrors,
+	Credentials | HttpClient.HttpClient
+> = API.make(() => ({
+	input: GraphqlRequest,
+	output: GraphqlResponse,
+	errors: [],
+}))
+
+export interface CloudflareGraphqlError {
+	readonly message: string
+	readonly extensions?: unknown
+	readonly path?: unknown
+}
+
+/**
+ * A GraphQL execution result. Transport/auth failures surface as {@link CloudflareApiError};
+ * GraphQL-level errors (HTTP 200 + `errors[]` — e.g. a dataset the plan doesn't include) are
+ * returned for the caller to interpret, since only it knows whether an error means "disable this
+ * dataset" or "reconnect the integration".
+ */
+export interface CloudflareGraphqlResult {
+	readonly data: unknown
+	readonly errors: ReadonlyArray<CloudflareGraphqlError>
+}
+
+/** Execute a GraphQL Analytics API query (`POST {apiBaseUrl}/graphql`). */
+export const graphqlQuery = (
+	accessToken: string,
+	request: { readonly query: string; readonly variables?: Record<string, unknown> },
+	apiBaseUrl?: string,
+): Effect.Effect<CloudflareGraphqlResult, CloudflareApiError, never> =>
+	runMapped(
+		accessToken,
+		graphqlOperation({
+			query: request.query,
+			...(request.variables === undefined ? {} : { variables: request.variables }),
+		}),
+		apiBaseUrl,
+	).pipe(
+		Effect.map((response) => ({
+			data: response.data ?? null,
+			errors: response.errors ?? [],
+		})),
 	)

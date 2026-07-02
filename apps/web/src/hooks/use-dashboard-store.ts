@@ -22,6 +22,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
 	Dashboard,
+	DashboardVariable,
 	DashboardWidget,
 	TimeRange,
 	VisualizationType,
@@ -120,16 +121,17 @@ function ensureDashboard(value: unknown): Dashboard | null {
 			...document,
 			tags: document.tags ? [...document.tags] : undefined,
 			widgets: [...document.widgets] as Dashboard["widgets"],
+			variables: document.variables ? ([...document.variables] as Dashboard["variables"]) : undefined,
 		}),
 	})
 }
 
 function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
-	// `description`/`tags` are `Schema.optionalKey` on `DashboardDocument`; the
-	// Schema.Class constructor rejects a present `undefined`. The web `Dashboard`
+	// `description`/`tags`/`variables` are `Schema.optionalKey` on `DashboardDocument`;
+	// the Schema.Class constructor rejects a present `undefined`. The web `Dashboard`
 	// carries them as optional and `ensureDashboard` stamps an explicit
 	// `tags: undefined`, so destructure them out of the spread and re-add only when set.
-	const { description, tags, ...rest } = dashboard
+	const { description, tags, variables, ...rest } = dashboard
 	return new DashboardDocument({
 		...rest,
 		id: asDashboardId(dashboard.id),
@@ -137,6 +139,7 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 		updatedAt: asIsoDateTimeString(dashboard.updatedAt),
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags }),
+		...(variables !== undefined && { variables }),
 		timeRange:
 			dashboard.timeRange.type === "absolute"
 				? {
@@ -149,13 +152,14 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 }
 
 function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDashboardDocument {
-	// See `toDashboardDocument`: omit the optionalKey `description`/`tags` rather than
-	// forwarding a present `undefined`, which the Schema.Class constructor rejects.
-	const { description, tags, ...rest } = dashboard
+	// See `toDashboardDocument`: omit the optionalKey `description`/`tags`/`variables`
+	// rather than forwarding a present `undefined`, which the Schema.Class constructor rejects.
+	const { description, tags, variables, ...rest } = dashboard
 	return new PortableDashboardDocument({
 		...rest,
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags: [...tags] }),
+		...(variables !== undefined && { variables: structuredClone(variables) }),
 		widgets: structuredClone(dashboard.widgets),
 		timeRange:
 			dashboard.timeRange.type === "absolute"
@@ -488,6 +492,17 @@ export function useDashboardStore() {
 		[mutateDashboard],
 	)
 
+	const updateDashboardVariables = useCallback(
+		(id: string, variables: DashboardVariable[]) => {
+			mutateDashboard(id, (dashboard) => ({
+				...dashboard,
+				variables,
+				updatedAt: new Date().toISOString(),
+			}))
+		},
+		[mutateDashboard],
+	)
+
 	const addWidget = useCallback(
 		(
 			dashboardId: string,
@@ -732,6 +747,7 @@ export function useDashboardStore() {
 		updateDashboard,
 		deleteDashboard,
 		updateDashboardTimeRange,
+		updateDashboardVariables,
 		addWidget,
 		cloneWidget,
 		removeWidget,

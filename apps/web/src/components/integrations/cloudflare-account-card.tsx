@@ -3,12 +3,45 @@ import { Exit } from "effect"
 import { CloudflareStartConnectRequest } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
 import { CloudflareIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { formatRelativeTime } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
+import { IntegrationEmptyState } from "./integration-empty-state"
+
+function CollectionStatusRow(props: {
+	name: string
+	enabled: boolean
+	lastSyncedAt: number | null
+	lastError: string | null
+}) {
+	const dotClass = !props.enabled
+		? "bg-muted-foreground/40"
+		: props.lastError
+			? "bg-destructive"
+			: props.lastSyncedAt
+				? "bg-emerald-500"
+				: "bg-amber-500"
+	const detail = !props.enabled
+		? "disabled"
+		: (props.lastError ??
+			(props.lastSyncedAt
+				? `synced ${formatRelativeTime(new Date(props.lastSyncedAt).toISOString())}`
+				: "waiting for first sync"))
+	return (
+		<div className="flex items-center gap-2" title={props.lastError ?? undefined}>
+			<span className={`size-1.5 shrink-0 rounded-full ${dotClass}`} />
+			<span className="truncate text-foreground">{props.name}</span>
+			<span className="ml-auto shrink-0 truncate text-muted-foreground" style={{ maxWidth: "55%" }}>
+				{detail}
+			</span>
+		</div>
+	)
+}
 
 /**
  * Account-level Cloudflare OAuth connection (Authorization Code + PKCE). Distinct from the
@@ -85,36 +118,29 @@ export function CloudflareAccountCard() {
 
 	const isConnected = status?.connected === true
 
+	// Guard the first fetch so a connected org doesn't flash the "Connect" empty state.
+	if (Result.isInitial(statusResult)) {
+		return <Skeleton className="h-40 w-full rounded-lg" />
+	}
+
 	if (!isConnected) {
 		return (
-			<div className="flex items-start gap-4 rounded-lg border border-border/60 bg-card p-4">
-				<IntegrationIconPlate icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT} />
-
-				<div className="flex flex-1 flex-col gap-2">
-					<div>
-						<div className="flex items-center gap-2">
-							<h3 className="text-sm font-semibold">Cloudflare account</h3>
-							<Badge variant="outline">Not connected</Badge>
-						</div>
-						<p className="mt-1 text-xs text-muted-foreground">
-							Authorize Maple against your Cloudflare account via OAuth. This is the foundation
-							for one-click telemetry setup — upcoming: auto-provisioned Workers traces & logs
-							and Logpush jobs, no manual dashboard configuration.
-						</p>
-					</div>
-
-					<div>
-						<Button onClick={handleConnect} disabled={busy !== null}>
-							{busy === "connect" ? (
-								<LoaderIcon size={16} className="animate-spin" />
-							) : (
-								<CloudflareIcon size={16} />
-							)}
-							Connect Cloudflare
-						</Button>
-					</div>
-				</div>
-			</div>
+			<IntegrationEmptyState
+				icon={CloudflareIcon}
+				accent={CLOUDFLARE_ACCENT}
+				title="Connect your Cloudflare account"
+				description="Authorize Maple with your Cloudflare account via OAuth — the foundation for one-click telemetry. Upcoming phases auto-provision Workers traces & logs and Logpush jobs, with no manual dashboard setup."
+				footer="You'll authorize Maple in a Cloudflare popup."
+			>
+				<Button onClick={handleConnect} disabled={busy !== null}>
+					{busy === "connect" ? (
+						<LoaderIcon size={16} className="animate-spin" />
+					) : (
+						<CloudflareIcon size={16} />
+					)}
+					Connect Cloudflare
+				</Button>
+			</IntegrationEmptyState>
 		)
 	}
 

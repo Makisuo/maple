@@ -71,16 +71,27 @@ const parsePayload = (payloadJson: unknown) =>
 // jsonb columns take the document object directly; this guard preserves the
 // pre-Postgres validation that the payload is JSON-serializable before write.
 const validatePayload = (dashboard: DashboardDocument) =>
-	Effect.try({
-		try: () => {
-			JSON.stringify(dashboard)
-			return dashboard
-		},
-		catch: () =>
-			new DashboardValidationError({
-				message: "Dashboard payload must be JSON serializable",
-				details: ["Dashboard contains non-serializable values"],
-			}),
+	Effect.gen(function* () {
+		const names = (dashboard.variables ?? []).map((variable) => variable.name)
+		const duplicates = names.filter((name, index) => names.indexOf(name) !== index)
+		if (duplicates.length > 0) {
+			return yield* new DashboardValidationError({
+				message: "Dashboard variable names must be unique",
+				details: [...new Set(duplicates)].map((name) => `Duplicate variable name: ${name}`),
+			})
+		}
+
+		return yield* Effect.try({
+			try: () => {
+				JSON.stringify(dashboard)
+				return dashboard
+			},
+			catch: () =>
+				new DashboardValidationError({
+					message: "Dashboard payload must be JSON serializable",
+					details: ["Dashboard contains non-serializable values"],
+				}),
+		})
 	})
 
 const createDashboardDocument = (portableDashboard: PortableDashboardDocument, nowMillis: number) => {
@@ -95,6 +106,7 @@ const createDashboardDocument = (portableDashboard: PortableDashboardDocument, n
 			description: portableDashboard.description,
 		}),
 		...(portableDashboard.tags !== undefined && { tags: portableDashboard.tags }),
+		...(portableDashboard.variables !== undefined && { variables: portableDashboard.variables }),
 		timeRange: portableDashboard.timeRange,
 		widgets: portableDashboard.widgets,
 		createdAt: decodeIsoDateTimeStringSync(now),

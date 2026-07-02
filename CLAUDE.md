@@ -228,3 +228,42 @@ The Maple API traces itself via `@effect/opentelemetry` → ingest gateway → c
 **`apps/ingest` self-instrumentation:**
 
 The Rust ingest gateway self-instruments via OTLP/HTTP, exporting to its own `INGEST_FORWARD_OTLP_ENDPOINT` (so its traces flow through the same downstream collector → Tinybird as customer traffic). It identifies itself with `service.name="ingest"` (canonical — replaces the legacy Prometheus-scrape `ingest-proxy` label), `service.version` (`CARGO_PKG_VERSION`), `service.instance.id` (per-process UUID), `deployment.environment.name` (resolved from `MAPLE_ENVIRONMENT` first — matches the alchemy convention from `resolveDeploymentEnvironment(stage)` — then `RAILWAY_ENVIRONMENT_NAME`, then `DEPLOYMENT_ENV`, defaulting to `development`; also dual-emitted as the legacy `deployment.environment` because every Tinybird MV (`service_overview_spans_mv` et al.) still pre-extracts the legacy key — drop only after those MVs migrate to coalesce both), and `maple_org_id="internal"` (override via `MAPLE_INTERNAL_ORG_ID` env). Every inbound OTLP-forward and Cloudflare-logpush request creates a `Server`-kind span (`POST /v1/{signal}`, `POST /v1/logpush/...`) with HTTP semconv attributes (`http.request.method`, `http.route`, `http.request.body.size`, `http.response.status_code`, `error.type`); custom fields use the `maple.*` vendor namespace (`maple.signal`, `maple.org_id`, `maple.ingest.payload_format`, `maple.ingest.item_count`, etc.). The downstream forward is a child `Client`-kind span with `url.full`, `server.address`, and `http.response.status_code`. Span status is set via `otel.status_code` following the OTEL HTTP semconv rule for SERVER spans: **only 5xx is `Error`; 4xx client rejections are `Ok`** (see `otel_status_for_rejection` in `apps/ingest/src/main.rs`). This keeps the error dashboards (which only count `StatusCode='Error'`) attributing genuine ingest/forward failures — including the auth-resolver-unavailable 503 — while NOT flooding them with expected 4xx rejections (missing/invalid ingest key 401, billing-limit 402, throttle 429, oversized/undecodable payload). Those 4xx rejections stay fully observable via `http.response.status_code`, `error.type`, and the request metrics. This is safe because the span is exported to the downstream collector, not back through the ingest service. A startup loopback guard refuses to set up the exporter if `INGEST_FORWARD_OTLP_ENDPOINT` resolves to the gateway's own bind port. At high QPS, set `OTEL_TRACES_SAMPLER=parentbased_traceidratio` + `OTEL_TRACES_SAMPLER_ARG=0.1`. The gateway's own operational metrics (request/forward/export counters and histograms, in-flight gauges, WAL telemetry — defined in `apps/ingest/src/metrics.rs`) are also exported via OTLP: a `PeriodicReader` pushes them every 30s to `INGEST_FORWARD_OTLP_ENDPOINT/v1/metrics`, so they flow through the same collector → Tinybird pipeline as traces and land in the `metrics_*` datasources scoped to the `internal` org. There is no longer a `/metrics` Prometheus endpoint — `init_metrics` shares the loopback/skip-dev guard and the per-process `service.instance.id` with `init_tracing`.
+
+## Picking the right models for workflows and subagents
+
+Rankings, higher = better. Cost reflects what I actually pay (OpenAI has really generous limits), not list price. Intelligence is how hard a problem you can hand the model unsupervised. Taste covers UI/UX, code quality, API design, and copy.
+
+| Model    | Cost | Intelligence | Taste |
+| -------- | ---- | ------------ | ----- |
+| gpt-5.5  | 9    | 8            | 5     |
+| sonnet-5 | 5    | 5            | 7     |
+| opus-4.8 | 4    | 7            | 8     |
+| fable-5  | 2    | 9            | 9     |
+
+How to apply:
+
+- These are defaults, not limits. You have standing permission to override them: if a cheaper model's output doesn't meet the bar, rerun or redo the work with a smarter model without asking. Judge the output, not the price tag. Escalating costs less than shipping mediocre work.
+- Cost is a tie-breaker only; when axes conflict for anything that ships, intelligence > taste > cost.
+- Bulk/mechanical work (clear-spec implementation, data analysis, migrations): gpt-5.5 — it's effectively free.
+- Anything user-facing (UI, copy, API design) needs taste ≥ 7.
+- Reviews of plans/implementations: fable-5 or opus-4.8, optionally gpt-5.5 as an extra independent perspective.
+- Never use Haiku model.
+- Mechanics: gpt-5.5 is only reachable through the Codex through the `codex:codex-rescue` subagent (Codex plugin for Claude Code), my `~/.codex/config.toml` defaults to gpt-5.5.
+- Use gpt-5.5 by `/codex:rescue` when you want Codex to:
+    - investigate a bug
+    - try a fix
+    - continue a previous Codex task
+    - take a faster or cheaper pass with a smaller model.
+    - It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
+- Use gpt-5.5 by `/codex:transfer` to Creates a persistent Codex thread from the current Claude Code session and prints a `codex resume <session-id>` command. Use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in Codex.
+- Use gpt-5.5 by `/codex:status` to see running and recent Codex jobs for the current repository. Use it to:
+    - check progress on background work
+    - see the latest completed job
+    - confirm whether a task is still running
+- Use gpt-5.5 by `/codex:result` to show the final stored Codex output for a finished job. When available, it also includes the Codex session ID so you can reopen that run directly in Codex with `codex resume <session-id>`.
+- Use gpt-5.5 by `/codex:cancel` to cancel an active background Codex job.
+- Claude models (sonnet-5, opus-4.8, fable-5) run via the Agent/Workflow model parameter.
+
+Using gpt-5.5 inside workflows and subagents by using Codex plugin for Claude Code (the model parameter only takes Claude models, so use a wrapper):
+
+- Spawn a thin Claude wrapper agent with `model: 'sonnet'`, `effort: "low"` whose prompt instructs it to write a self-contained codex prompt, run `codex exec` via Bash, and return the result.

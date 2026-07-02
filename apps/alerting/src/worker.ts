@@ -4,6 +4,8 @@ import {
 	AnomalyDetectionService,
 	BucketCacheService,
 	CacheBackendLive,
+	CloudflareAnalyticsService,
+	CloudflareOAuthService,
 	DatabasePgLive,
 	DigestService,
 	EdgeCacheService,
@@ -132,9 +134,16 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive)),
 	)
 
+	const CloudflareOAuthServiceLive = CloudflareOAuthService.layer.pipe(Layer.provide(BaseLive))
+
+	const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, CloudflareOAuthServiceLive)),
+	)
+
 	return Layer.mergeAll(
 		AlertsServiceLive,
 		AnomalyDetectionServiceLive,
+		CloudflareAnalyticsServiceLive,
 		DigestServiceLive,
 		OnboardingEmailServiceLive,
 		ErrorsServiceLive,
@@ -288,6 +297,21 @@ const anomalyTick = Effect.gen(function* () {
 	),
 )
 
+const cloudflareAnalyticsTick = Effect.gen(function* () {
+	const analytics = yield* CloudflareAnalyticsService
+	const result = yield* analytics.pollAllOrgs()
+	yield* Effect.logInfo("Cloudflare analytics tick complete").pipe(
+		Effect.annotateLogs({ orgs: result.orgs, rowsIngested: result.rowsIngested }),
+	)
+}).pipe(
+	Effect.withSpan("alerting.cloudflare_analytics_tick"),
+	Effect.catchCause((cause) =>
+		Effect.logError("Cloudflare analytics tick failed").pipe(
+			Effect.annotateLogs({ error: Cause.pretty(cause) }),
+		),
+	),
+)
+
 interface ScheduledEventLike {
 	readonly cron: string
 }
@@ -303,7 +327,9 @@ export default {
 		ctx: ExecutionContextLike,
 	): Promise<void> {
 		const program = Match.value(event.cron).pipe(
-			Match.when("*/5 * * * *", () => anomalyTick),
+			Match.when("*/5 * * * *", () =>
+				Effect.all([anomalyTick, cloudflareAnalyticsTick], { concurrency: 2, discard: true }),
+			),
 			Match.when("*/15 * * * *", () => digestTick),
 			Match.when("0 * * * *", () => serviceMapRollupTick),
 			Match.when("0 9 * * *", () => onboardingTick),
