@@ -100,6 +100,7 @@ export function listTemplateMetadata(): TemplateMetadata[] {
 		category: t.category,
 		tags: t.tags,
 		requirements: t.requirements,
+		requiredMetricPrefixes: t.requiredMetricPrefixes ?? [],
 		parameters: t.parameters,
 		preview: TEMPLATE_PREVIEWS.get(t.id) ?? [],
 	}))

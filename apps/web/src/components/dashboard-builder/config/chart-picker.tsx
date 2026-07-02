@@ -28,6 +28,7 @@ import {
 import { formatValue } from "@/components/dashboard-builder/widgets/stat-widget"
 import { formatCellValue } from "@/components/dashboard-builder/widgets/table-widget"
 import { createQueryDraft } from "@/lib/query-builder/model"
+import { deriveDefaultWidgetTitle } from "@/lib/query-builder/widget-builder-utils"
 
 type ChartCategory = "bar" | "area" | "line"
 
@@ -304,12 +305,13 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 	const [activeTab, setActiveTab] = useState<PickerTab>("all")
 
 	const handleSelectChart = (chartId: string) => {
+		const draft = createQueryDraft(0)
 		onSelect(
 			"chart",
 			{
 				endpoint: "custom_query_builder_timeseries",
 				params: {
-					queries: [createQueryDraft(0)],
+					queries: [draft],
 					formulas: [],
 					comparison: {
 						mode: "none",
@@ -318,7 +320,9 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 					debug: false,
 				},
 			},
-			{ chartId },
+			// Derived title ("Error rate by service.name") so freshly added
+			// charts never render as "Untitled".
+			{ chartId, title: deriveDefaultWidgetTitle([draft]) },
 		)
 		onOpenChange(false)
 	}

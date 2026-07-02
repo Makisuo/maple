@@ -10,13 +10,15 @@ import {
 } from "../helpers"
 import type { TemplateDefinition, WidgetDef } from "../types"
 
+// Host identity (`host.name`) lives on ResourceAttributes — the metrics
+// query-builder reaches it via the `resource.` prefix.
 function hostWhere(hostName?: string): string {
-	return hostName ? `host.name = "${hostName}"` : ""
+	return hostName ? `resource.host.name = "${hostName}"` : ""
 }
 
 function widgets(hostName?: string): WidgetDef[] {
 	const where = hostWhere(hostName)
-	const groupBy = ["host.name"]
+	const groupBy = ["resource.host.name"]
 	return [
 		{
 			id: "cpu",
@@ -116,6 +118,7 @@ export const hostMetricsTemplate: TemplateDefinition = {
 	category: "infrastructure",
 	tags: ["host", "infra"],
 	requirements: ["OpenTelemetry hostmetricsreceiver"],
+	requiredMetricPrefixes: ["system."],
 	parameters: [
 		{
 			key: paramKey("host_name"),

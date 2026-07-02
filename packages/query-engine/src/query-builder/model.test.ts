@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { QueryBuilderQueryDraftPayload } from "@maple/domain/http"
-import { buildTimeseriesQuerySpec } from "./model"
+import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "./model"
 
 // Minimal traces draft factory — only the fields the builder reads matter; the
 // rest satisfy the payload shape.
@@ -117,5 +117,137 @@ describe("buildTimeseriesQuerySpec series limit", () => {
 
 		expect(seriesLimitOf({ seriesLimit: "-3" }).seriesLimit).toBeUndefined()
 		expect(seriesLimitOf({ seriesLimit: "abc" }).seriesLimit).toBeUndefined()
+	})
+})
+
+describe("group-by token aliases (MAP-49)", () => {
+	const breakdownDraft = (overrides: Partial<QueryBuilderQueryDraftPayload> = {}) =>
+		tracesDraft({
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+			groupBy: ["service.name"],
+			...overrides,
+		})
+
+	it("accepts canonical and snake_case traces group-by tokens", () => {
+		for (const token of ["service.name", "service_name", "span_name", "status_code"]) {
+			const result = buildBreakdownQuerySpec(breakdownDraft({ groupBy: [token] }))
+			expect(result.query, `token ${token}`).not.toBeNull()
+			expect(result.warnings).toEqual([])
+		}
+	})
+
+	it("accepts snake_case logs group-by tokens", () => {
+		for (const token of ["severity", "severity_text", "service_name"]) {
+			const result = buildBreakdownQuerySpec(breakdownDraft({ dataSource: "logs", groupBy: [token] }))
+			expect(result.query, `token ${token}`).not.toBeNull()
+			expect(result.warnings).toEqual([])
+		}
+	})
+
+	it("still rejects unknown tokens", () => {
+		const result = buildBreakdownQuerySpec(breakdownDraft({ groupBy: ["not_a_column"] }))
+		expect(result.query).toBeNull()
+	})
+})
+
+describe("metrics resource.* support", () => {
+	function metricsDraft(
+		overrides: Partial<QueryBuilderQueryDraftPayload> = {},
+	): QueryBuilderQueryDraftPayload {
+		return tracesDraft({
+			dataSource: "metrics",
+			aggregation: "avg",
+			metricName: "system.cpu.utilization",
+			metricType: "gauge",
+			isMonotonic: false,
+			signalSource: "default",
+			...overrides,
+		} as Partial<QueryBuilderQueryDraftPayload>)
+	}
+
+	function metricsFiltersOf(overrides: Partial<QueryBuilderQueryDraftPayload>) {
+		const result = buildTimeseriesQuerySpec(metricsDraft(overrides))
+		return {
+			result,
+			warnings: result.warnings,
+			groupBy: (result.query as { groupBy?: string[] } | null)?.groupBy,
+			filters: (result.query as { filters?: Record<string, unknown> } | null)?.filters,
+		}
+	}
+
+	it("resource.<key> where clauses become resourceAttributeFilters", () => {
+		const { warnings, filters } = metricsFiltersOf({
+			whereClause: 'resource.host.name = "web-01" AND resource.k8s.cluster.name != "staging"',
+		})
+		expect(warnings).toEqual([])
+		expect(filters?.resourceAttributeFilters).toEqual([
+			{ key: "host.name", mode: "equals", value: "web-01" },
+			{ key: "k8s.cluster.name", mode: "equals", negated: true, value: "staging" },
+		])
+	})
+
+	it("omits resourceAttributeFilters entirely when no resource.* clause is present", () => {
+		const { filters } = metricsFiltersOf({ whereClause: 'service.name = "api"' })
+		expect(filters).not.toHaveProperty("resourceAttributeFilters")
+		expect(filters?.serviceName).toBe("api")
+	})
+
+	it("warns (blocking) when the 5 resource-filter cap is exceeded", () => {
+		const clause = ["a", "b", "c", "d", "e", "f"].map((k) => `resource.${k} = "1"`).join(" AND ")
+		const { warnings, filters } = metricsFiltersOf({ whereClause: clause })
+		expect(filters?.resourceAttributeFilters).toHaveLength(5)
+		expect(warnings.some((w) => w.includes("Maximum of 5 resource.* filters"))).toBe(true)
+	})
+
+	it("resource.<key> group-by resolves to resource_attribute + groupByResourceAttributeKey", () => {
+		const { warnings, groupBy, filters } = metricsFiltersOf({
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+			groupBy: ["resource.k8s.pod.name"],
+		})
+		expect(warnings).toEqual([])
+		expect(groupBy).toEqual(["resource_attribute"])
+		expect(filters?.groupByResourceAttributeKey).toBe("k8s.pod.name")
+	})
+
+	it("keeps the first dimension and warns when attr.* and resource.* group-bys are combined", () => {
+		const { warnings, groupBy, filters } = metricsFiltersOf({
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+			groupBy: ["attr.state", "resource.host.name"],
+		})
+		expect(warnings.some((w) => w.includes("single attribute group by"))).toBe(true)
+		expect(groupBy).toEqual(["attribute"])
+		expect(filters?.groupByAttributeKey).toBe("state")
+		expect(filters).not.toHaveProperty("groupByResourceAttributeKey")
+	})
+
+	it("resource.* group-by drives breakdown specs", () => {
+		const result = buildBreakdownQuerySpec(
+			metricsDraft({
+				addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+				groupBy: ["resource.host.name"],
+			}),
+		)
+		expect(result.error).toBeNull()
+		expect(result.warnings).toEqual([])
+		expect((result.query as { groupBy?: string } | null)?.groupBy).toBe("resource_attribute")
+	})
+})
+
+describe("has_error tri-state (MAP-49)", () => {
+	const errorsOnlyOf = (whereClause: string) => {
+		const result = buildTimeseriesQuerySpec(tracesDraft({ whereClause }))
+		return (result.query as { filters?: { errorsOnly?: boolean } } | null)?.filters?.errorsOnly
+	}
+
+	it("has_error = true → errorsOnly: true", () => {
+		expect(errorsOnlyOf("has_error = true")).toBe(true)
+	})
+
+	it("has_error = false survives as errorsOnly: false (not dropped)", () => {
+		expect(errorsOnlyOf("has_error = false")).toBe(false)
+	})
+
+	it("absent clause leaves errorsOnly unset", () => {
+		expect(errorsOnlyOf("")).toBeUndefined()
 	})
 })

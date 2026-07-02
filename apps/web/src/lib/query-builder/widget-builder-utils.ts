@@ -227,6 +227,45 @@ function isVisibleQuery(query: QueryBuilderQueryDraft): boolean {
 	return query.enabled !== false && !query.hidden
 }
 
+const TRACES_AGGREGATION_TITLES: Record<string, string> = {
+	count: "Count of traces",
+	avg_duration: "Avg duration",
+	p50_duration: "P50 duration",
+	p95_duration: "P95 duration",
+	p99_duration: "P99 duration",
+	error_rate: "Error rate",
+	apdex: "Apdex",
+}
+
+/**
+ * Human-readable fallback title derived from the first visible query, e.g.
+ * "Error rate by service.name" or "Count of logs by severity" — so widgets
+ * added from the chart picker never render as "Untitled" (MAP-49).
+ */
+export function deriveDefaultWidgetTitle(queries: readonly QueryBuilderQueryDraft[]): string {
+	const query = queries.find(isVisibleQuery) ?? queries[0]
+	if (!query) return "Untitled"
+
+	const groupBy = hasActiveGroupBy(query)
+		? query.groupBy
+				.map((g) => g.trim())
+				.filter((g) => g !== "" && g.toLowerCase() !== "none")
+				.join(", ")
+		: ""
+	const bySuffix = groupBy ? ` by ${groupBy}` : ""
+
+	if (query.dataSource === "metrics") {
+		const metric = query.metricName.trim()
+		if (!metric) return "Metric"
+		return `${query.aggregation} of ${metric}${bySuffix}`
+	}
+	if (query.dataSource === "logs") {
+		return `Count of logs${bySuffix}`
+	}
+	const base = TRACES_AGGREGATION_TITLES[query.aggregation] ?? `${query.aggregation} of traces`
+	return `${base}${bySuffix}`
+}
+
 function hasActiveGroupBy(query: QueryBuilderQueryDraft): boolean {
 	return (
 		query.addOns.groupBy &&
@@ -529,13 +568,18 @@ export function buildWidgetDataSource(
 		}
 	}
 
-	// Pie + histogram render a breakdown (one row per category) — they need the
-	// `breakdown` endpoint that returns `{name, value}[]`, not the timeseries
-	// endpoint that returns `{bucket, series}[]`. Without this, the preview tile
-	// silently calls the wrong endpoint and renders weighted pie/histogram bars
-	// from time-bucket counts (looks like uniform slices because every bucket
-	// has roughly the same count).
-	if (state.visualization === "pie" || state.visualization === "histogram") {
+	// Pie, histogram, funnel, and heatmap render a breakdown (one row per
+	// category) — they need the `breakdown` endpoint that returns
+	// `{name, value}[]`, not the timeseries endpoint that returns
+	// `{bucket, series}[]`. Without this, the widget silently calls the wrong
+	// endpoint and renders one row/slice per time bucket (uniform values,
+	// missing labels) instead of per group.
+	if (
+		state.visualization === "pie" ||
+		state.visualization === "histogram" ||
+		state.visualization === "funnel" ||
+		state.visualization === "heatmap"
+	) {
 		const visibleQueries = state.queries.filter(isVisibleQuery)
 		return {
 			endpoint: "custom_query_builder_breakdown",
@@ -595,7 +639,13 @@ export function buildWidgetDisplay(
 
 	const display: WidgetDisplayConfig = {
 		...widget.display,
-		title: state.title.trim() ? state.title.trim() : undefined,
+		// Query-driven widgets saved without a title get a derived one
+		// ("Error rate by service.name") instead of rendering as "Untitled".
+		title: state.title.trim()
+			? state.title.trim()
+			: state.visualization === "markdown"
+				? undefined
+				: deriveDefaultWidgetTitle(state.queries),
 		description: state.description.trim() || undefined,
 		chartPresentation: {
 			...widget.display.chartPresentation,

@@ -364,12 +364,29 @@ const validateMetricsAttributeFilters = Effect.fn(
 	// `groupBy` is an array for timeseries, a single literal for breakdown.
 	const groupBy = query.groupBy
 	const wantsAttribute = Array.isArray(groupBy) ? groupBy.includes("attribute") : groupBy === "attribute"
+	const wantsResourceAttribute = Array.isArray(groupBy)
+		? groupBy.includes("resource_attribute")
+		: groupBy === "resource_attribute"
 	if (wantsAttribute && !query.filters.groupByAttributeKey) {
 		// Mirror the traces guard: never silently downgrade an attribute grouping
 		// to a service grouping — the agent asked for a label breakdown.
 		return yield* new QueryEngineValidationError({
 			message: "Invalid metrics attribute grouping",
 			details: ["groupBy=attribute requires filters.groupByAttributeKey"],
+		})
+	}
+	if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
+		return yield* new QueryEngineValidationError({
+			message: "Invalid metrics attribute grouping",
+			details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
+		})
+	}
+	if (wantsAttribute && wantsResourceAttribute) {
+		// The metrics queries carry a single attributeValue group column — one
+		// attribute dimension per query.
+		return yield* new QueryEngineValidationError({
+			message: "Invalid metrics attribute grouping",
+			details: ["groupBy cannot combine attribute and resource_attribute"],
 		})
 	}
 })
@@ -1064,7 +1081,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const groupByAttributeKey = groupByAttribute
 				? request.query.filters.groupByAttributeKey
 				: undefined
+			const groupByResourceAttributeKey = request.query.groupBy?.includes("resource_attribute")
+				? request.query.filters.groupByResourceAttributeKey
+				: undefined
 			const attributeFilter = request.query.filters.attributeFilters?.[0]
+			const resourceAttributeFilters = request.query.filters.resourceAttributeFilters
 
 			const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
 
@@ -1076,8 +1097,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						bucketSeconds: bucketSeconds!,
 						serviceName: request.query.filters.serviceName,
 						groupByAttributeKey,
+						groupByResourceAttributeKey,
 						attributeKey: attributeFilter?.key,
 						attributeValue: attributeFilter?.value,
+						resourceAttributeFilters,
 					}),
 					{
 						orgId: tenant.orgId,
@@ -1101,7 +1124,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					rateResult,
 					(row) => Number(row[rateValueField]),
 					request.query.groupBy,
-					groupByAttributeKey,
+					groupByAttributeKey ?? groupByResourceAttributeKey,
 					fillOptions,
 				)
 
@@ -1121,8 +1144,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					metricType: request.query.filters.metricType,
 					serviceName: request.query.filters.serviceName,
 					groupByAttributeKey,
+					groupByResourceAttributeKey,
 					attributeKey: attributeFilter?.key,
 					attributeValue: attributeFilter?.value,
+					resourceAttributeFilters,
 				}),
 				{
 					orgId: tenant.orgId,
@@ -1157,7 +1182,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 							result,
 							(row) => Number(row[valueField]),
 							request.query.groupBy,
-							groupByAttributeKey,
+							groupByAttributeKey ?? groupByResourceAttributeKey,
 							fillOptions,
 						)
 
@@ -1241,6 +1266,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						request.query.filters.groupByAttributeKey && {
 							groupByAttributeKey: request.query.filters.groupByAttributeKey,
 						}),
+					...(request.query.groupBy === "resource_attribute" &&
+						request.query.filters.groupByResourceAttributeKey && {
+							groupByResourceAttributeKey: request.query.filters.groupByResourceAttributeKey,
+						}),
+					resourceAttributeFilters: request.query.filters.resourceAttributeFilters,
 					limit: request.query.limit,
 				}),
 				{
@@ -1592,7 +1622,9 @@ const composeMetricsGroupKey = (
 	const parts: string[] = []
 	for (const dim of groupBy) {
 		if (dim === "service") parts.push(serviceName || "")
-		else if (dim === "attribute") parts.push(attributeValue || "")
+		// Both attribute dimensions surface through the query's single
+		// attributeValue column (only one can be active per query).
+		else if (dim === "attribute" || dim === "resource_attribute") parts.push(attributeValue || "")
 	}
 	const filtered = parts.filter((p) => p.length > 0)
 	if (filtered.length === 0) return "all"
@@ -1696,6 +1728,9 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 	} else {
 		const groupByAttribute = query.groupBy?.includes("attribute")
 		const groupByAttributeKey = groupByAttribute ? query.filters.groupByAttributeKey : undefined
+		const groupByResourceAttributeKey = query.groupBy?.includes("resource_attribute")
+			? query.filters.groupByResourceAttributeKey
+			: undefined
 		const rows = yield* executeCHQuery(
 			warehouse,
 			tenant,
@@ -1703,6 +1738,8 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 				metricType: query.filters.metricType,
 				serviceName: query.filters.serviceName,
 				groupByAttributeKey,
+				groupByResourceAttributeKey,
+				resourceAttributeFilters: query.filters.resourceAttributeFilters,
 			}),
 			{
 				orgId: tenant.orgId,
@@ -1858,6 +1895,9 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 			const groupByAttributeKey = groupByAttribute
 				? metricsQuery.filters.groupByAttributeKey
 				: undefined
+			const groupByResourceAttributeKey = metricsQuery.groupBy?.includes("resource_attribute")
+				? metricsQuery.filters.groupByResourceAttributeKey
+				: undefined
 
 			const rows = yield* executeCHQuery(
 				warehouse,
@@ -1866,6 +1906,8 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 					metricType: metricsQuery.filters.metricType,
 					serviceName: metricsQuery.filters.serviceName,
 					groupByAttributeKey,
+					groupByResourceAttributeKey,
+					resourceAttributeFilters: metricsQuery.filters.resourceAttributeFilters,
 				}),
 				{
 					orgId: tenant.orgId,

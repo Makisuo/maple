@@ -114,6 +114,7 @@ export const postgresTemplate: TemplateDefinition = {
 	category: "database",
 	tags: ["postgres", "database"],
 	requirements: ["OpenTelemetry postgresreceiver"],
+	requiredMetricPrefixes: ["postgresql."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

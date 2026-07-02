@@ -548,8 +548,13 @@ function appendPercentChangeSeries(
 			const currentValue = typeof current === "number" && Number.isFinite(current) ? current : 0
 			const previousValue = typeof previous === "number" && Number.isFinite(previous) ? previous : 0
 
-			row[deltaSeriesName] =
-				previousValue === 0 ? 0 : ((currentValue - previousValue) / Math.abs(previousValue)) * 100
+			// prev=0 & cur=0 is genuinely "unchanged"; prev=0 & cur>0 has no
+			// meaningful percent — omit the point (gap) instead of fabricating 0%.
+			if (previousValue === 0) {
+				if (currentValue === 0) row[deltaSeriesName] = 0
+				continue
+			}
+			row[deltaSeriesName] = ((currentValue - previousValue) / Math.abs(previousValue)) * 100
 		}
 	}
 }

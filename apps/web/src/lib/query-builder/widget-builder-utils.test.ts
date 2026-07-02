@@ -3,6 +3,7 @@ import { createFormulaDraft, createQueryDraft } from "@/lib/query-builder/model"
 import {
 	buildWidgetDataSource,
 	buildWidgetDisplay,
+	deriveDefaultWidgetTitle,
 	inferDisplayUnitForQuery,
 	inferDefaultUnitForQueries,
 	type QueryBuilderWidgetState,
@@ -196,5 +197,64 @@ describe("widget-builder hidden series behavior", () => {
 			queries: state.queries,
 			formulas: state.formulas,
 		})
+	})
+})
+
+describe("funnel/heatmap endpoint routing (MAP-49)", () => {
+	it.each(["funnel", "heatmap", "pie", "histogram"] as const)(
+		"routes %s widgets to the breakdown endpoint",
+		(visualization) => {
+			const widget = makeWidget()
+			const state = { ...makeState(), visualization }
+			const dataSource = buildWidgetDataSource(widget, state, ["A", "B"])
+			expect(dataSource.endpoint).toBe("custom_query_builder_breakdown")
+		},
+	)
+
+	it("keeps charts on the timeseries endpoint", () => {
+		const widget = makeWidget()
+		const dataSource = buildWidgetDataSource(widget, makeState(), ["A", "B"])
+		expect(dataSource.endpoint).toBe("custom_query_builder_timeseries")
+	})
+})
+
+describe("deriveDefaultWidgetTitle (MAP-49)", () => {
+	it("derives from the default traces draft (error rate grouped by service)", () => {
+		expect(deriveDefaultWidgetTitle([createQueryDraft(0)])).toBe("Error rate by service.name")
+	})
+
+	it("describes counts and group-bys", () => {
+		const draft = { ...createQueryDraft(1), aggregation: "count" }
+		expect(deriveDefaultWidgetTitle([draft])).toBe("Count of traces by service.name")
+	})
+
+	it("handles logs and metrics sources", () => {
+		const logs = { ...createQueryDraft(0), dataSource: "logs" as const, groupBy: ["severity"] }
+		expect(deriveDefaultWidgetTitle([logs])).toBe("Count of logs by severity")
+
+		const base = createQueryDraft(0)
+		const metrics = {
+			...base,
+			dataSource: "metrics" as const,
+			signalSource: "default" as const,
+			metricName: "process.runtime.nodejs.handles",
+			metricType: "gauge" as const,
+			isMonotonic: false,
+			aggregation: "avg",
+			addOns: { ...base.addOns, groupBy: false },
+		}
+		expect(deriveDefaultWidgetTitle([metrics])).toBe("avg of process.runtime.nodejs.handles")
+	})
+
+	it("fills an empty saved title with the derived one", () => {
+		const widget = makeWidget()
+		const display = buildWidgetDisplay(widget, makeState())
+		expect(display.title).toBe("Error rate by service.name")
+	})
+
+	it("keeps an explicit title", () => {
+		const widget = makeWidget()
+		const display = buildWidgetDisplay(widget, { ...makeState(), title: "My chart" })
+		expect(display.title).toBe("My chart")
 	})
 })

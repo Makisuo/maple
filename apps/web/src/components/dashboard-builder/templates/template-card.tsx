@@ -1,6 +1,7 @@
 import type { DashboardTemplatePreviewWidget } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
+import { cn } from "@maple/ui/utils"
 import { ArrowRightIcon } from "@/components/icons"
 import { templateIcon } from "./template-icons"
 import { TemplatePreview } from "./template-preview"
@@ -30,6 +31,11 @@ interface TemplateCardProps {
 	requirements: readonly string[]
 	preview: ReadonlyArray<DashboardTemplatePreviewWidget>
 	disabled?: boolean
+	/**
+	 * The org has no data matching the template's required metrics — the card
+	 * is dimmed and badged but stays usable (informative, not blocking).
+	 */
+	noMatchingData?: boolean
 	onUse: () => void
 }
 
@@ -42,12 +48,18 @@ export function TemplateCard({
 	requirements,
 	preview,
 	disabled = false,
+	noMatchingData = false,
 	onUse,
 }: TemplateCardProps) {
 	const Icon = templateIcon(id, category)
 	const composition = compositionLabel(preview)
 	return (
-		<div className="group ring-1 ring-border hover:ring-border-active bg-card flex h-full flex-col overflow-hidden rounded-md transition-all">
+		<div
+			className={cn(
+				"group ring-1 ring-border hover:ring-border-active bg-card flex h-full flex-col overflow-hidden rounded-md transition-all",
+				noMatchingData && "opacity-60 hover:opacity-100",
+			)}
+		>
 			<div className="border-b border-border bg-sidebar/60">
 				<TemplatePreview templateId={id} preview={preview} className="h-28 w-full" />
 			</div>
@@ -55,6 +67,15 @@ export function TemplateCard({
 				<div className="flex items-center gap-2">
 					<Icon size={16} className="shrink-0 text-muted-foreground" aria-hidden="true" />
 					<span className="text-sm font-semibold text-foreground">{name}</span>
+					{noMatchingData && (
+						<Badge
+							variant="outline"
+							className="ml-auto shrink-0 text-[10px] px-1.5 py-0 h-4 font-medium text-muted-foreground"
+							title="This template queries metrics your org isn't sending yet — it would render empty."
+						>
+							No matching data yet
+						</Badge>
+					)}
 				</div>
 				<p className="text-xs text-dim leading-relaxed">{description}</p>
 				{composition.length > 0 && (

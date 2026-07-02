@@ -87,6 +87,22 @@ describe("metricsTimeseriesQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("'' AS attributeValue")
 	})
+
+	it("applies groupByResourceAttributeKey against ResourceAttributes", () => {
+		const q = metricsTimeseriesQuery({ metricType: "gauge", groupByResourceAttributeKey: "host.name" })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['host.name'] AS attributeValue")
+		expect(sql).toContain("GROUP BY bucket, serviceName, attributeValue")
+	})
+
+	it("applies resourceAttributeFilters", () => {
+		const q = metricsTimeseriesQuery({
+			metricType: "gauge",
+			resourceAttributeFilters: [{ key: "k8s.cluster.name", mode: "equals", value: "prod-us-east" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['k8s.cluster.name'] = 'prod-us-east'")
+	})
 })
 
 // ---------------------------------------------------------------------------
@@ -138,6 +154,42 @@ describe("metricsTimeseriesRateQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("Attributes['host']")
 		expect(sql).toContain("GROUP BY bucket, serviceName, attributeValue")
+	})
+
+	it("applies groupByResourceAttributeKey through the deltas CTE", () => {
+		const q = metricsTimeseriesRateQuery({ groupByResourceAttributeKey: "k8s.pod.name" })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['k8s.pod.name'] AS resourceAttributeValue")
+		expect(sql).toContain("resourceAttributeValue AS attributeValue")
+		expect(sql).toContain("GROUP BY bucket, serviceName, attributeValue")
+	})
+
+	it("applies resourceAttributeFilters in the CTE", () => {
+		const q = metricsTimeseriesRateQuery({
+			resourceAttributeFilters: [{ key: "host.name", mode: "equals", value: "web-01" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['host.name'] = 'web-01'")
+	})
+
+	it("falls back to raw metrics_sum when resource opts are present (hourly rollup lacks the map)", () => {
+		const withGroup = metricsTimeseriesRateQuery({
+			metricName: "span.metrics.calls",
+			bucketSeconds: 3600,
+			groupByResourceAttributeKey: "host.name",
+		})
+		expect(compileCH(withGroup, { ...baseParams, metricName: "span.metrics.calls" }).sql).toContain(
+			"FROM metrics_sum",
+		)
+
+		const withFilter = metricsTimeseriesRateQuery({
+			metricName: "span.metrics.calls",
+			bucketSeconds: 3600,
+			resourceAttributeFilters: [{ key: "host.name", mode: "equals", value: "web-01" }],
+		})
+		expect(compileCH(withFilter, { ...baseParams, metricName: "span.metrics.calls" }).sql).toContain(
+			"FROM metrics_sum",
+		)
 	})
 
 	it("uses the hourly SpanMetrics calls rollup for hourly calls increases", () => {
@@ -239,6 +291,23 @@ describe("metricsBreakdownQuery", () => {
 		const q = metricsBreakdownQuery({ metricType: "sum", limit: 25 })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("LIMIT 25")
+	})
+
+	it("breaks down by resource attribute when groupByResourceAttributeKey is set", () => {
+		const q = metricsBreakdownQuery({ metricType: "sum", groupByResourceAttributeKey: "host.name" })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['host.name'] AS name")
+		// Drops datapoints missing the resource label.
+		expect(sql).toContain("ResourceAttributes['host.name'] != ''")
+	})
+
+	it("applies resourceAttributeFilters", () => {
+		const q = metricsBreakdownQuery({
+			metricType: "sum",
+			resourceAttributeFilters: [{ key: "k8s.namespace.name", mode: "equals", value: "default" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("ResourceAttributes['k8s.namespace.name'] = 'default'")
 	})
 
 	it("breaks down by attribute label instead of service when groupByAttributeKey is set", () => {

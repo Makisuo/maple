@@ -107,14 +107,21 @@ export function QueryBuilderHistogramChart({
 					axisLine={false}
 					tickMargin={8}
 					interval="preserveStartEnd"
-					minTickGap={20}
+					minTickGap={32}
+					tick={{ fontSize: 10 }}
+					// Axis ticks show only the bucket's lower bound ("150" instead
+					// of "150-200") — halves label width so ticks stop overlapping;
+					// the full range stays in the tooltip.
+					tickFormatter={(value) => String(value).split("-")[0] || String(value)}
 				/>
 				<YAxis
 					tickLine={false}
 					axisLine={false}
-					tickMargin={8}
+					tickMargin={6}
+					width={48}
 					scale={useLogY ? "log" : "auto"}
 					domain={useLogY ? [1, "auto"] : ["auto", "auto"]}
+					allowDecimals={false}
 					allowDataOverflow={useLogY}
 					tickFormatter={(value) => formatNumber(asFiniteNumber(value))}
 				/>

@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react"
 import type { DashboardTemplateMetadata } from "@maple/domain/http"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { listMetricsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TemplateCard } from "./template-card"
 import { ParameterDialog, type TemplateParameterField } from "./parameter-dialog"
 
@@ -21,6 +23,28 @@ interface TemplatePickerProps {
 
 export function TemplatePicker({ templates, disabled = false, submitting, onUse }: TemplatePickerProps) {
 	const [pendingTemplate, setPendingTemplate] = useState<DashboardTemplateMetadata | null>(null)
+
+	// Org metric names, used to dim templates whose required metrics the org
+	// isn't sending (a metrics-only template renders entirely empty without
+	// them). Fail-open: while loading or on error, nothing is dimmed.
+	const metricsResult = useAtomValue(listMetricsResultAtom({ data: { limit: 1000 } }))
+	const metricNames = useMemo(
+		() =>
+			Result.builder(metricsResult)
+				.onSuccess((response) =>
+					(response as { data: Array<{ metricName: string }> }).data.map((m) => m.metricName),
+				)
+				.orElse(() => null),
+		[metricsResult],
+	)
+
+	const hasMatchingData = (template: DashboardTemplateMetadata): boolean => {
+		if (template.requiredMetricPrefixes.length === 0) return true
+		if (metricNames == null) return true // loading / error — fail open
+		return template.requiredMetricPrefixes.every((prefix) =>
+			metricNames.some((name) => name.startsWith(prefix)),
+		)
+	}
 
 	const grouped = useMemo(() => {
 		const byCategory = new Map<string, DashboardTemplateMetadata[]>()
@@ -75,6 +99,7 @@ export function TemplatePicker({ templates, disabled = false, submitting, onUse 
 									requirements={template.requirements}
 									preview={template.preview}
 									disabled={disabled || submitting}
+									noMatchingData={!hasMatchingData(template)}
 									onUse={() => handleUse(template)}
 								/>
 							))}
