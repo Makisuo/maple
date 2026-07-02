@@ -15,6 +15,7 @@ import {
 	CANDIDATE_MATRIX,
 	comparePredictedObserved,
 	HELD_OUT_TOLERANCES,
+	RECALIBRATION_TRIGGERS,
 } from "../src/server/archives/calibrate"
 import { ARCHIVE_SIGNALS } from "../src/server/archives/signals"
 
@@ -106,7 +107,7 @@ describe("loadTuningConfig", () => {
 			logicalBytes: 1000,
 			physicalBytes: 300,
 			compressionRatio: 0.3,
-			writeThroughputBytesPerSec: 100,
+			writeThroughputBytesPerSec: 200_000,
 			peakTempDiskBytes: 500,
 			peakRssBytes: 200,
 			wallMs: 5,
@@ -121,12 +122,33 @@ describe("loadTuningConfig", () => {
 			),
 			minFreeSpaceReserve: freeSpaceReserve,
 		}
+		const sampleRows = 1000
+		const heldOutRows = 2 * sampleRows
+		const trainingSample = (rowCount: number) => ({
+			checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+			checkpointManifestFingerprint: "checkpoint:fingerprint",
+			rangeDate: "2026-07-01",
+			role: "training" as const,
+			startRow: 0,
+			requestedRows: sampleRows,
+			rowCount,
+		})
+		const heldOutSample = (rowCount: number) => ({
+			checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+			checkpointManifestFingerprint: "checkpoint:fingerprint",
+			rangeDate: "2026-07-01",
+			role: "held-out" as const,
+			startRow: sampleRows,
+			requestedRows: heldOutRows,
+			rowCount,
+		})
 		const results = CANDIDATE_MATRIX.flatMap((matrixCandidate, candidateIndex) =>
 			ARCHIVE_SIGNALS.map((signal) => ({
 				candidate: matrixCandidate,
 				signal: signal.name,
 				metrics: { ...metrics, peakRssBytes: 200 + candidateIndex },
 				ok: true,
+				sample: trainingSample(1000),
 			})),
 		)
 		const selectedWorstCase = { ...metrics, peakRssBytes: 200 }
@@ -135,6 +157,7 @@ describe("loadTuningConfig", () => {
 			signal: signal.name,
 			metrics,
 			ok: true,
+			sample: heldOutSample(1000),
 		}))
 		return {
 			formatVersion: TUNING_CONFIG_FORMAT_VERSION,
@@ -192,13 +215,20 @@ describe("loadTuningConfig", () => {
 				archiveVolume: { fsid: "dev:1", type: 17, archiveDir: "/tmp/archive" },
 			},
 			effective,
+			samplePolicy: {
+				trainingRows: sampleRows,
+				heldOutMultiplier: 2,
+				heldOutRows,
+				trainingWindow: `[0, ${sampleRows})`,
+				heldOutWindow: `[${sampleRows}, ${sampleRows + heldOutRows})`,
+			},
 			derivation: {
 				minFreeSpaceReserve: "budget.freeSpaceReserve",
 				targetChunkBytes:
 					"max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)",
 			},
 			safetyMargin: 1.1,
-			recalibrationTriggers: ["Maple version change"],
+			recalibrationTriggers: RECALIBRATION_TRIGGERS,
 			results,
 			note: "test",
 		}
@@ -287,6 +317,38 @@ describe("loadTuningConfig", () => {
 					name: "wrong-checkpoint-shape",
 					mutate: (doc) => {
 						doc.checkpoint.manifestFingerprint = ""
+					},
+				},
+				{
+					name: "forged-training-scope-checkpoint",
+					mutate: (doc) => {
+						doc.results[0]!.sample!.checkpointId = "11111111-1111-4111-8111-111111111111"
+					},
+				},
+				{
+					name: "forged-training-scope-role",
+					mutate: (doc) => {
+						doc.results[0]!.sample!.role = "held-out"
+					},
+				},
+				{
+					name: "forged-held-out-scope-non-disjoint",
+					mutate: (doc) => {
+						doc.heldOut.results[0]!.sample!.startRow = 0
+					},
+				},
+				{
+					name: "forged-scope-rowcount-mismatch",
+					mutate: (doc) => {
+						doc.results[0]!.sample!.rowCount = 1
+					},
+				},
+				{
+					name: "forged-sample-policy-multiplier",
+					mutate: (doc) => {
+						doc.samplePolicy.heldOutMultiplier = 1
+						doc.samplePolicy.heldOutRows = 1000
+						doc.samplePolicy.heldOutWindow = "[1000, 2000)"
 					},
 				},
 			]

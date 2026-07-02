@@ -31,6 +31,8 @@ import {
 	writeCalibrationConfig,
 	type CalibrationRecommendation,
 	HELD_OUT_TOLERANCES,
+	isSameCalibrationCandidate,
+	heldOutSampleRows,
 	comparePredictedObserved,
 } from "../server/archives/calibrate"
 import {
@@ -656,6 +658,16 @@ interface ChildMetrics {
 	readonly peakRssBytes: number
 	readonly exportWallMs: number
 	readonly rowCount: number
+	/** The exact ordered-row sample scope this child exported (tamper-evidence). */
+	readonly sample: {
+		readonly checkpointId: string
+		readonly checkpointManifestFingerprint: string
+		readonly rangeDate: string
+		readonly role: "training" | "held-out"
+		readonly startRow: number
+		readonly requestedRows: number
+		readonly rowCount: number
+	}
 }
 
 /** `/usr/bin/time` argv: `-lp` on macOS/BSD, `-v` on GNU/Linux. */
@@ -696,6 +708,7 @@ const runCandidateChild = (
 	budget: CalibrationBudget,
 	operationId: string,
 	startRow: number,
+	sampleRows: number,
 	matrixStart: number,
 ): Promise<CandidateResult> => {
 	return new Promise((resolvePromise) => {
@@ -719,7 +732,7 @@ const runCandidateChild = (
 			"--start-row",
 			String(startRow),
 			"--sample-rows",
-			String(budget.sampleRows),
+			String(sampleRows),
 			"--max-temp-disk",
 			String(budget.maxTempDiskBytes),
 			"--free-space-reserve",
@@ -850,7 +863,33 @@ const runCandidateChild = (
 					wallMs: raw.exportWallMs,
 					rowCount: raw.rowCount,
 				}
-				resolvePromise({ candidate, signal, metrics, ok: true })
+				// Bind the child's authoritative sample scope. The recorded rowCount
+				// must equal the measured metrics rowCount (the writer asserted both).
+				const sample = raw.sample
+				if (
+					!sample ||
+					typeof sample.checkpointId !== "string" ||
+					sample.checkpointId !== checkpointId ||
+					typeof sample.checkpointManifestFingerprint !== "string" ||
+					sample.checkpointManifestFingerprint !== checkpointManifestFingerprint ||
+					typeof sample.rangeDate !== "string" ||
+					sample.rangeDate !== rangeDate ||
+					(sample.role !== "training" && sample.role !== "held-out") ||
+					typeof sample.startRow !== "number" ||
+					typeof sample.requestedRows !== "number" ||
+					typeof sample.rowCount !== "number" ||
+					sample.rowCount !== raw.rowCount
+				) {
+					resolvePromise({
+						candidate,
+						signal,
+						metrics: null,
+						ok: false,
+						error: `calibrate-run emitted an inconsistent sample scope`,
+					})
+					return
+				}
+				resolvePromise({ candidate, signal, metrics, ok: true, sample })
 			} catch (error) {
 				resolvePromise({
 					candidate,
@@ -882,6 +921,9 @@ const runCalibrationMatrix = async (
 	budget: CalibrationBudget,
 	faults: { pauseAtPhase?: string; markerDir?: string } = {},
 ): Promise<CalibrationRecommendation> => {
+	if (!Number.isSafeInteger(budget.freeSpaceReserve) || budget.freeSpaceReserve <= 0) {
+		throw new Error("calibration free-space reserve must be a positive integer")
+	}
 	const operationId = randomUUID()
 	const pinId = randomUUID()
 	const pinPurpose = calibrationPinPurpose(operationId)
@@ -980,6 +1022,7 @@ const runBoundCalibrationMatrix = async (
 				budget,
 				operationId,
 				0,
+				budget.sampleRows,
 				matrixStart,
 			)
 			allResults.push(result)
@@ -1011,6 +1054,10 @@ const runBoundCalibrationMatrix = async (
 			const heldOutResults: CandidateResult[] = []
 			for (const signal of ARCHIVE_SIGNALS) {
 				if (Date.now() - matrixStart > budget.timeBudget) break
+				// Held-out: a STRICTLY LARGER, disjoint window. Training covered
+				// ordered rows [0, sampleRows); held-out covers
+				// [sampleRows, sampleRows + heldOutRows) where heldOutRows is a
+				// fixed multiple of the training size (plan-required larger sample).
 				const result = await runCandidateChild(
 					bundlePath,
 					dataDir,
@@ -1024,6 +1071,7 @@ const runBoundCalibrationMatrix = async (
 					budget,
 					operationId,
 					budget.sampleRows,
+					heldOutSampleRows(budget.sampleRows),
 					matrixStart,
 				)
 				heldOutResults.push(result)
@@ -1085,7 +1133,7 @@ const runBoundCalibrationMatrix = async (
 		if (selected === null) return true // no false-high; selected null → low anyway
 		const bySignal = new Map<string, number>()
 		for (const r of allResults) {
-			if (r.candidate.writerThreads === selected.candidate.writerThreads && r.ok && r.metrics) {
+			if (isSameCalibrationCandidate(r.candidate, selected.candidate) && r.ok && r.metrics) {
 				bySignal.set(r.signal, Math.max(bySignal.get(r.signal) ?? 0, r.metrics.rowCount))
 			}
 		}
@@ -1414,7 +1462,7 @@ const runCalibrateSample = async (
 	// The maintenance lock serializes calibration against create/GC. Reconcile
 	// any prior interrupted run INSIDE the lock, matching generation.ts:246-283.
 	await withMaintenanceLock(dataDir, operationId, async () => {
-		const session = assertCalibrationSession(
+		const session = await assertCalibrationSession(
 			archiveDir,
 			{ dataDir, archiveDir, scratchRoot },
 			{
@@ -1496,6 +1544,18 @@ const runCalibrateSample = async (
 							peakRssBytes: process.memoryUsage().rss,
 							exportWallMs,
 							rowCount,
+							// The child is the authoritative source of its exact sample scope:
+							// it ran planCalibrationShards(startRow, sampleRows) against this
+							// exact checkpoint/range and the writer asserted rowCount === totalRows.
+							sample: {
+								checkpointId: checkpointSelector,
+								checkpointManifestFingerprint,
+								rangeDate,
+								role: a.startRow === 0 ? "training" : "held-out",
+								startRow: a.startRow,
+								requestedRows: a.sampleRows,
+								rowCount,
+							},
 						}
 					} finally {
 						db.exec(`SYSTEM START MERGES ${signal.name}`)

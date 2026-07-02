@@ -191,6 +191,46 @@ export interface TuningConfigIdentity {
 /** The calibration config document format version accepted by the loader. */
 export const TUNING_CONFIG_FORMAT_VERSION = 2
 
+/** Canonical held-out comparison policy for config format v2. */
+export const CALIBRATION_HELD_OUT_TOLERANCES = {
+	peakRssBytes: 0.5,
+	wallMs: 0.5,
+	writeThroughputBytesPerSec: 0.75,
+	compressionRatio: 0.5,
+	physicalBytes: 0.5,
+	peakTempDiskBytes: 0.5,
+} as const
+
+/** Exact operator-visible events that require recalibration. */
+export const CALIBRATION_RECALIBRATION_TRIGGERS = [
+	"Maple version change",
+	"chDB version change",
+	"Schema fingerprint change",
+	"Hardware change (CPU count, memory, storage speed)",
+	"Archive-volume replacement or filesystem change",
+	"Material telemetry-shape change (row width, cardinality, signal mix)",
+] as const
+
+/**
+ * The held-out window is strictly LARGER than training and disjoint from it:
+ * training covers ordered rows `[0, sampleRows)`; held-out covers
+ * `[sampleRows, sampleRows + heldOutSampleRows(sampleRows))`. Defined here
+ * (the low-level config module) so the loader and the calibrator share one
+ * source of truth without a circular import.
+ */
+export const HELD_OUT_SAMPLE_MULTIPLIER = 2
+
+export const heldOutSampleRows = (sampleRows: number): number => {
+	if (!Number.isSafeInteger(sampleRows) || sampleRows <= 0) {
+		throw new Error(`calibration sampleRows must be a positive safe integer: ${sampleRows}`)
+	}
+	const held = HELD_OUT_SAMPLE_MULTIPLIER * sampleRows
+	if (!Number.isSafeInteger(held) || held <= sampleRows) {
+		throw new Error(`calibration held-out sample derivation overflow: ${sampleRows}`)
+	}
+	return held
+}
+
 const SAFE_CONFIG_NAME = /^[A-Za-z0-9._-]+$/
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -277,6 +317,13 @@ export interface VerifiedCalibrationConfigDocument {
 		}
 	}
 	readonly effective: ArchiveTuningRecord
+	readonly samplePolicy: {
+		readonly trainingRows: number
+		readonly heldOutMultiplier: number
+		readonly heldOutRows: number
+		readonly trainingWindow: string
+		readonly heldOutWindow: string
+	}
 	readonly derivation: {
 		readonly minFreeSpaceReserve: "budget.freeSpaceReserve"
 		readonly targetChunkBytes: "max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)"
@@ -312,7 +359,7 @@ const EXPECTED_CANDIDATES = [
 const exactJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
 
 const resultMetrics = (value: unknown, label: string, path: string): Record<string, number> => {
-	validateMetricsRecord(value, label, path)
+	validateMeasuredMetricsRecord(value, label, path)
 	return value as Record<string, number>
 }
 
@@ -414,6 +461,87 @@ const validateMetricsRecord = (value: unknown, label: string, path: string): voi
 	}
 }
 
+/** Validate metrics emitted by one real child, including derived-value coherence. */
+const validateMeasuredMetricsRecord = (value: unknown, label: string, path: string): void => {
+	validateMetricsRecord(value, label, path)
+	const metrics = value as Record<string, number>
+	const expectedCompression = metrics.logicalBytes! > 0 ? metrics.physicalBytes! / metrics.logicalBytes! : 0
+	const expectedThroughput = metrics.wallMs! > 0 ? metrics.logicalBytes! / (metrics.wallMs! / 1000) : 0
+	if (metrics.compressionRatio !== expectedCompression) {
+		throw new Error(
+			`invalid calibration config ${label}.compressionRatio (not physicalBytes/logicalBytes): ${path}`,
+		)
+	}
+	if (metrics.writeThroughputBytesPerSec !== expectedThroughput) {
+		throw new Error(
+			`invalid calibration config ${label}.writeThroughputBytesPerSec (not logicalBytes/wallMs): ${path}`,
+		)
+	}
+}
+
+const SAMPLE_KEYS = new Set([
+	"checkpointId",
+	"checkpointManifestFingerprint",
+	"rangeDate",
+	"role",
+	"startRow",
+	"requestedRows",
+	"rowCount",
+])
+
+/**
+ * Validate one result's persisted sample scope. Every ok result must bind its
+ * measurement to one immutable checkpoint/range and an exact ordered-row window
+ * so the loader can prove training and held-out came from the same source on
+ * disjoint, correctly-sized windows. `expectedRowCount` is the metrics.rowCount
+ * the same result recorded (must equal sample.rowCount). Pure.
+ */
+const validateSampleScope = (
+	value: unknown,
+	label: string,
+	path: string,
+	expected: {
+		checkpointId: string
+		manifestFingerprint: string
+		rangeDate: string
+		role: "training" | "held-out"
+		startRow: number
+		requestedRows: number
+	},
+	expectedRowCount: number,
+): void => {
+	if (!isRecord(value)) throw new Error(`invalid calibration config ${label} (record required): ${path}`)
+	for (const key of Object.keys(value)) {
+		if (!SAMPLE_KEYS.has(key)) throw new Error(`unknown calibration config ${label}.${key}: ${path}`)
+	}
+	for (const key of SAMPLE_KEYS) {
+		if (!(key in value)) throw new Error(`invalid calibration config ${label}.${key} (required): ${path}`)
+	}
+	const scope = value as Record<string, unknown>
+	if (
+		typeof scope.checkpointId !== "string" ||
+		scope.checkpointId !== expected.checkpointId ||
+		typeof scope.checkpointManifestFingerprint !== "string" ||
+		scope.checkpointManifestFingerprint !== expected.manifestFingerprint ||
+		typeof scope.rangeDate !== "string" ||
+		scope.rangeDate !== expected.rangeDate ||
+		scope.role !== expected.role ||
+		typeof scope.startRow !== "number" ||
+		!Number.isSafeInteger(scope.startRow) ||
+		scope.startRow !== expected.startRow ||
+		typeof scope.requestedRows !== "number" ||
+		!Number.isSafeInteger(scope.requestedRows) ||
+		scope.requestedRows !== expected.requestedRows ||
+		typeof scope.rowCount !== "number" ||
+		!Number.isSafeInteger(scope.rowCount) ||
+		scope.rowCount !== expectedRowCount
+	) {
+		throw new Error(
+			`invalid calibration config ${label} (scope must bind the single checkpoint/range and exact ${expected.role} window): ${path}`,
+		)
+	}
+}
+
 /**
  * Validate the COMPLETE versioned config schema (S10): every required field must
  * be present and correctly typed, with nested unknown-field rejection. A
@@ -437,6 +565,7 @@ const validateCompleteConfigSchema = (
 		"checkpoint",
 		"candidateMatrix",
 		"requiredSignals",
+		"samplePolicy",
 		"derivation",
 		"budget",
 		"confidence",
@@ -477,15 +606,11 @@ const validateCompleteConfigSchema = (
 		throw new Error(`invalid calibration config note: ${path}`)
 	}
 	// recalibrationTriggers: required non-empty array of strings.
-	if (!Array.isArray(parsed.recalibrationTriggers) || parsed.recalibrationTriggers.length === 0) {
-		throw new Error(
-			`invalid calibration config recalibrationTriggers (non-empty array required): ${path}`,
-		)
-	}
-	for (const t of parsed.recalibrationTriggers) {
-		if (typeof t !== "string" || t.length === 0) {
-			throw new Error(`invalid calibration config recalibrationTriggers entry: ${path}`)
-		}
+	if (
+		!Array.isArray(parsed.recalibrationTriggers) ||
+		!exactJson(parsed.recalibrationTriggers, CALIBRATION_RECALIBRATION_TRIGGERS)
+	) {
+		throw new Error(`invalid calibration config recalibrationTriggers (exact policy required): ${path}`)
 	}
 	if (!Array.isArray(parsed.requiredSignals) || !exactJson(parsed.requiredSignals, EXPECTED_SIGNALS)) {
 		throw new Error(`invalid calibration config requiredSignals (exact six-signal set required): ${path}`)
@@ -506,6 +631,10 @@ const validateCompleteConfigSchema = (
 		parsed.checkpoint.manifestFingerprint.length === 0
 	) {
 		throw new Error(`invalid calibration config checkpoint identity: ${path}`)
+	}
+	const configCheckpoint = {
+		checkpointId: parsed.checkpoint.checkpointId,
+		manifestFingerprint: parsed.checkpoint.manifestFingerprint,
 	}
 	// environment: required record; deep-validate with unknown-field rejection.
 	if (!isRecord(parsed.environment)) {
@@ -612,9 +741,9 @@ const validateCompleteConfigSchema = (
 		"maxTempDiskBytes",
 		"freeSpaceReserve",
 	]) {
-		if (!Number.isSafeInteger(budget[f]) || (f !== "freeSpaceReserve" && budget[f] === 0)) {
+		if (!Number.isSafeInteger(budget[f]) || budget[f] === 0) {
 			throw new Error(
-				`invalid calibration config budget.${f} (safe integer${f === "freeSpaceReserve" ? "" : " > 0"} required): ${path}`,
+				`invalid calibration config budget.${f} (positive safe integer required): ${path}`,
 			)
 		}
 	}
@@ -624,6 +753,26 @@ const validateCompleteConfigSchema = (
 	}
 	if (parsed.safetyMargin !== budget.safetyMargin) {
 		throw new Error(`invalid calibration config safetyMargin != budget.safetyMargin: ${path}`)
+	}
+	// samplePolicy: the disjoint training/held-out window contract. Every result
+	// scope must match it exactly so the loader can prove the persisted evidence
+	// came from one source on disjoint, correctly-sized windows.
+	const trainingRows = budget.sampleRows as number
+	const expectedHeldOutRows = heldOutSampleRows(trainingRows)
+	const expectedSamplePolicy = {
+		trainingRows,
+		heldOutMultiplier: HELD_OUT_SAMPLE_MULTIPLIER,
+		heldOutRows: expectedHeldOutRows,
+		trainingWindow: `[0, ${trainingRows})`,
+		heldOutWindow: `[${trainingRows}, ${trainingRows + expectedHeldOutRows})`,
+	}
+	if (!isRecord(parsed.samplePolicy)) {
+		throw new Error(`invalid calibration config samplePolicy (record required): ${path}`)
+	}
+	if (!exactJson(parsed.samplePolicy, expectedSamplePolicy)) {
+		throw new Error(
+			`invalid calibration config samplePolicy (must bind the exact disjoint training/held-out window contract): ${path}`,
+		)
 	}
 	if (!isRecord(parsed.selected)) {
 		throw new Error(`invalid calibration config selected (record required): ${path}`)
@@ -643,12 +792,24 @@ const validateCompleteConfigSchema = (
 	}
 	const seenTraining = new Set<string>()
 	const resultsByCandidate = new Map<string, Record<string, unknown>[]>()
+	// Every training + held-out scope must bind to ONE rangeDate (one sealed day).
+	// Extract it from the first ok result's sample; all others must match.
+	let sharedRangeDate: string | null = null
+	for (const r of parsed.results) {
+		if (isRecord(r) && r.ok === true && isRecord(r.sample) && typeof r.sample.rangeDate === "string") {
+			sharedRangeDate = r.sample.rangeDate
+			break
+		}
+	}
+	if (sharedRangeDate === null) {
+		throw new Error(`invalid calibration config: no training result records a sample rangeDate: ${path}`)
+	}
 	for (let i = 0; i < parsed.results.length; i++) {
 		const r = parsed.results[i]
 		if (!isRecord(r)) {
 			throw new Error(`invalid calibration config results[${i}] (record required): ${path}`)
 		}
-		const knownResult = new Set(["candidate", "signal", "metrics", "ok", "error"])
+		const knownResult = new Set(["candidate", "signal", "metrics", "ok", "error", "sample"])
 		for (const key of Object.keys(r)) {
 			if (!knownResult.has(key)) {
 				throw new Error(`unknown calibration config results[${i}].${key}: ${path}`)
@@ -674,11 +835,33 @@ const validateCompleteConfigSchema = (
 			throw new Error(`invalid calibration config results[${i}].error: ${path}`)
 		}
 		if (r.ok) {
-			validateMetricsRecord(r.metrics, `results[${i}].metrics`, path)
-		} else if (r.metrics !== null) {
-			throw new Error(
-				`invalid calibration config results[${i}].metrics (failed result must be null): ${path}`,
+			validateMeasuredMetricsRecord(r.metrics, `results[${i}].metrics`, path)
+			const metricsRow = (r.metrics as Record<string, unknown>).rowCount
+			validateSampleScope(
+				r.sample,
+				`results[${i}].sample`,
+				path,
+				{
+					checkpointId: configCheckpoint.checkpointId,
+					manifestFingerprint: configCheckpoint.manifestFingerprint,
+					rangeDate: sharedRangeDate,
+					role: "training",
+					startRow: 0,
+					requestedRows: trainingRows,
+				},
+				metricsRow as number,
 			)
+		} else {
+			if (r.metrics !== null) {
+				throw new Error(
+					`invalid calibration config results[${i}].metrics (failed result must be null): ${path}`,
+				)
+			}
+			if (r.sample !== undefined) {
+				throw new Error(
+					`invalid calibration config results[${i}].sample (failed result must not record a scope): ${path}`,
+				)
+			}
 		}
 		const candidateResults = resultsByCandidate.get(candidateKey) ?? []
 		candidateResults.push(r)
@@ -736,7 +919,7 @@ const validateCompleteConfigSchema = (
 		if (!isRecord(result)) throw new Error(`invalid calibration config heldOut.results[${i}]: ${path}`)
 		assertExactKeys(
 			result,
-			new Set(["candidate", "signal", "metrics", "ok"]),
+			new Set(["candidate", "signal", "metrics", "ok", "sample"]),
 			`heldOut.results[${i}]`,
 			path,
 		)
@@ -754,6 +937,20 @@ const validateCompleteConfigSchema = (
 		if (!metricsMeetBudget(metrics, budget as Record<string, number>)) {
 			throw new Error(`invalid calibration config heldOut.results[${i}] exceeds budget: ${path}`)
 		}
+		validateSampleScope(
+			result.sample,
+			`heldOut.results[${i}].sample`,
+			path,
+			{
+				checkpointId: configCheckpoint.checkpointId,
+				manifestFingerprint: configCheckpoint.manifestFingerprint,
+				rangeDate: sharedRangeDate,
+				role: "held-out",
+				startRow: trainingRows,
+				requestedRows: expectedHeldOutRows,
+			},
+			metrics.rowCount!,
+		)
 	}
 	const heldWorst = worstCaseFromResults(held.results as Record<string, unknown>[], path)
 	validateMetricsRecord(held.worstCase, "heldOut.worstCase", path)
@@ -772,11 +969,8 @@ const validateCompleteConfigSchema = (
 		"peakTempDiskBytes",
 	])
 	assertExactKeys(held.tolerances, toleranceKeys, "heldOut.tolerances", path)
-	for (const key of toleranceKeys) {
-		const tolerance = held.tolerances[key]
-		if (typeof tolerance !== "number" || !Number.isFinite(tolerance) || tolerance < 0) {
-			throw new Error(`invalid calibration config heldOut.tolerances.${key}: ${path}`)
-		}
+	if (!exactJson(held.tolerances, CALIBRATION_HELD_OUT_TOLERANCES)) {
+		throw new Error(`invalid calibration config heldOut.tolerances (exact policy required): ${path}`)
 	}
 	const recomputedComparisons = expectedComparisons(
 		sel.worstCase as Record<string, number>,
@@ -821,7 +1015,7 @@ const validateCompleteConfigSchema = (
 				throw new Error(`invalid calibration config heldOutAttempts result: ${path}`)
 			}
 			for (const key of Object.keys(result)) {
-				if (!new Set(["candidate", "signal", "metrics", "ok", "error"]).has(key)) {
+				if (!new Set(["candidate", "signal", "metrics", "ok", "error", "sample"]).has(key)) {
 					throw new Error(`unknown calibration config heldOutAttempts result.${key}: ${path}`)
 				}
 			}
@@ -835,7 +1029,7 @@ const validateCompleteConfigSchema = (
 			}
 			attemptSignals.add(result.signal)
 			if (result.ok === true && isRecord(result.metrics)) {
-				validateMetricsRecord(result.metrics, "heldOutAttempts.metrics", path)
+				validateMeasuredMetricsRecord(result.metrics, "heldOutAttempts.metrics", path)
 				if (
 					!metricsMeetBudget(
 						result.metrics as Record<string, number>,
@@ -844,10 +1038,29 @@ const validateCompleteConfigSchema = (
 				) {
 					completeAndWithinBudget = false
 				}
+				validateSampleScope(
+					result.sample,
+					`heldOutAttempts[${attemptIndex}].results[${resultIndex}].sample`,
+					path,
+					{
+						checkpointId: configCheckpoint.checkpointId,
+						manifestFingerprint: configCheckpoint.manifestFingerprint,
+						rangeDate: sharedRangeDate,
+						role: "held-out",
+						startRow: trainingRows,
+						requestedRows: expectedHeldOutRows,
+					},
+					(result.metrics as Record<string, unknown>).rowCount as number,
+				)
 			} else {
 				completeAndWithinBudget = false
 				if (result.metrics !== null) {
 					throw new Error(`invalid calibration config heldOutAttempts failed metrics: ${path}`)
+				}
+				if (result.sample !== undefined) {
+					throw new Error(
+						`invalid calibration config heldOutAttempts failed result must not record a scope: ${path}`,
+					)
 				}
 			}
 		}

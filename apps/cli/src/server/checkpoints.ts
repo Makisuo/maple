@@ -1053,17 +1053,16 @@ export const acquireCheckpointPin = async (
 }
 
 /**
- * Release a pin acquired by {@link acquireCheckpointPin}. Only the exact owned
- * pin record at `pinPath` is removed. If the path is absent, belongs to a
- * different checkpoint, or does not match the recorded pin identity, nothing is
- * deleted and the call fails closed — over-retention is always preferred.
+ * Validate one exact pin record without removing it. This is shared by session
+ * consumers and pin release so a same-path regular-file substitution cannot be
+ * mistaken for a live pin.
  */
-export const releaseCheckpointPin = async (
+export const assertCheckpointPinIdentity = async (
 	dataDir: string,
 	checkpointId: string,
 	pinPath: string,
 	expectedPurpose?: string,
-): Promise<void> => {
+): Promise<CheckpointPin> => {
 	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
 	const pinsRoot = checkpointPinsRoot(dataDir)
 	const pinDir = join(pinsRoot, validatedCheckpointId)
@@ -1084,15 +1083,37 @@ export const releaseCheckpointPin = async (
 	await assertNoSymlink(pinDir, resolvedPinPath)
 	await assertRealFile(resolvedPinPath, "checkpoint pin")
 	const parsed = JSON.parse(await readFile(resolvedPinPath, "utf8")) as unknown
+	const expectedKeys = new Set(["formatVersion", "pinId", "checkpointId", "purpose", "createdAt"])
 	if (
 		!isRecord(parsed) ||
+		Object.keys(parsed).some((key) => !expectedKeys.has(key)) ||
+		[...expectedKeys].some((key) => !(key in parsed)) ||
 		parsed.formatVersion !== 1 ||
 		validateId(requiredString(parsed, "pinId"), "pin") !== baseName ||
 		validateId(requiredString(parsed, "checkpointId"), "checkpoint") !== validatedCheckpointId ||
-		(expectedPurpose !== undefined && requiredString(parsed, "purpose") !== expectedPurpose)
+		(expectedPurpose !== undefined && requiredString(parsed, "purpose") !== expectedPurpose) ||
+		!PIN_PURPOSE.test(requiredString(parsed, "purpose")) ||
+		!Number.isFinite(Date.parse(requiredString(parsed, "createdAt")))
 	) {
-		throw new Error(`checkpoint pin identity mismatch; refusing to remove: ${pinPath}`)
+		throw new Error(`checkpoint pin identity mismatch: ${pinPath}`)
 	}
+	return parsed as unknown as CheckpointPin
+}
+
+/**
+ * Release a pin acquired by {@link acquireCheckpointPin}. Only the exact owned
+ * pin record at `pinPath` is removed. If the path is absent, belongs to a
+ * different checkpoint, or does not match the recorded pin identity, nothing is
+ * deleted and the call fails closed — over-retention is always preferred.
+ */
+export const releaseCheckpointPin = async (
+	dataDir: string,
+	checkpointId: string,
+	pinPath: string,
+	expectedPurpose?: string,
+): Promise<void> => {
+	await assertCheckpointPinIdentity(dataDir, checkpointId, pinPath, expectedPurpose)
+	const resolvedPinPath = resolve(pinPath)
 	await durableRemove(resolvedPinPath)
 }
 

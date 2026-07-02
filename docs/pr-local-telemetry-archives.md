@@ -152,7 +152,10 @@ invariants before retiring the journal.
 
 The branch passed a full validation matrix at the head commit:
 
-- **Unit tests:** complete CLI suite passing (286/286).
+- **Unit tests:** complete CLI suite passing (306/306), including manifest-v3
+  strictness, semantic config validation (hostile-rewrite and forged-scope
+  rejection), strict parent-session pin identity, and the larger disjoint
+  held-out scope.
 - **Typecheck, lint (zero warnings), formatting, `git diff --check`:** clean.
 - **Native archive adversarial probes:** 17/17.
 - **Six-signal native archive smoke:** exact DuckDB counts against the source,
@@ -165,11 +168,12 @@ The branch passed a full validation matrix at the head commit:
   subsequent create).
 - **GC SIGKILL matrix:** 6/6 boundaries (prefix/current/suffix crash topology,
   tombstone evidence, zero-mutation parity).
-- **Calibration loop:** like-for-like six-metric comparison on a disjoint
-  held-out window through the shared writer; all tolerances non-vacuous (`< 1.0`).
-- **Calibration crash probe:** deterministic recovery at the `sampling` phase;
-  record/pin/scratch/sample existed before SIGKILL, owned state reconciled,
-  unrelated pin survived, reconciliation idempotent.
+- **Calibration loop:** like-for-like six-metric comparison on a larger, disjoint
+  held-out window through the shared writer, with every result's persisted
+  sample scope and the document's `samplePolicy` verified; tolerances are a fixed
+  canonical policy (each `< 1.0`) and cannot be redefined by the document.
+- **Calibration crash probe:** deterministic recovery of a SIGKILLed sampling
+  child and of an inert intent whose unpinned source was normally retired.
 - **`archive create --config`:** manifest records the exact immutable config SHA
   and effective tuning, with no calibration debris.
 

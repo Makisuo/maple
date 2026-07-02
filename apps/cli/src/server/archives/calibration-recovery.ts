@@ -28,6 +28,7 @@ import { rm, statfs } from "node:fs/promises"
 import { dirname, isAbsolute, resolve } from "node:path"
 import { durableJson, durableRemove } from "../durable-files"
 import {
+	assertCheckpointPinIdentity,
 	checkpointRoot,
 	checkpointSnapshotDir,
 	pinFilePath,
@@ -377,7 +378,7 @@ export const reconcileCalibration = async (
  * Children never resolve `current`, acquire a replacement pin, or release the
  * session pin; they consume only this exact durable checkpoint identity.
  */
-export const assertCalibrationSession = (
+export const assertCalibrationSession = async (
 	archiveDir: string,
 	expectedRoots: { dataDir: string; archiveDir: string; scratchRoot: string },
 	expected: {
@@ -385,7 +386,7 @@ export const assertCalibrationSession = (
 		checkpointId: string
 		checkpointManifestFingerprint: string
 	},
-): CalibrationRecoveryRecord => {
+): Promise<CalibrationRecoveryRecord> => {
 	const record = readPriorCalibrationRecord(archiveDir, expectedRoots)
 	if (
 		record === null ||
@@ -405,6 +406,14 @@ export const assertCalibrationSession = (
 	if (pinTopology !== "real-file") {
 		throw new Error(`calibration parent session pin is not live (${pinTopology}); refusing child`)
 	}
+	// Topology alone is not ownership: a same-path regular file could have been
+	// substituted. Bind the exact pin id, checkpoint, and operation purpose.
+	await assertCheckpointPinIdentity(
+		expectedRoots.dataDir,
+		record.checkpointId,
+		derivedPinPath(expectedRoots.dataDir, record.checkpointId, record.pinId),
+		record.pinPurpose,
+	)
 	return record
 }
 

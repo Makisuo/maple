@@ -362,26 +362,44 @@ above), so a generation is reproducible and deployment drift is visible.
 ### The calibration config document
 
 `maple archive calibrate --write-config <path>` writes a **versioned calibration
-config document** (`formatVersion: 1`, mode `0o600`) with strict, exact-key
-schema. It is a complete evidence record, not just the numbers. Top-level keys
-(all required; unknown keys rejected):
+config document** (`formatVersion: 2`, mode `0o600`) with strict, exact-key
+schema. It is a complete evidence record, not just the numbers, and the loader
+re-derives every aggregate from the recorded evidence rather than trusting it.
+Top-level keys (all required; unknown keys rejected):
 
 | Key                     | Contents                                                               |
 | ----------------------- | ---------------------------------------------------------------------- |
-| `formatVersion`         | `1`                                                                    |
-| `effective`             | The six effective tuning knobs (what `--config` applies)               |
-| `selected`              | `null`, or `{ candidate, worstCase }` for the chosen candidate         |
-| `confidence`            | `"high"` ⟺ `selected !== null`, else `"low"`                           |
+| `formatVersion`         | `2`                                                                    |
+| `checkpoint`            | `{ checkpointId, manifestFingerprint }` — the single source snapshot   |
+| `candidateMatrix`       | The exact four-candidate matrix evaluated                              |
+| `requiredSignals`       | The exact six-signal set                                               |
 | `budget`                | The full `CalibrationBudget` the run used (see below)                  |
+| `selected`              | `{ candidate, worstCase }` for the chosen candidate (always present)   |
+| `confidence`            | `"high"` (a loadable recommendation is always high-confidence)         |
+| `heldOut`               | The selected candidate's held-out evidence + six-metric comparison     |
+| `heldOutAttempts`       | Every held-out candidate attempted, including rejected ones            |
+| `samplePolicy`          | The disjoint training/held-out window contract (sizes + windows)       |
 | `environment`           | Maple/chDB version, schema fingerprint, CPU, memory, archive-volume id |
-| `results`               | Per-signal, per-candidate evidence (candidate, metrics, ok, error)     |
+| `results`               | Per-signal, per-candidate evidence, each with a `sample` scope         |
+| `effective`             | The six effective tuning knobs (what `--config` applies)               |
+| `derivation`            | How `minFreeSpaceReserve`/`targetChunkBytes` are derived               |
 | `safetyMargin`          | The margin applied inside each ceiling                                 |
 | `recalibrationTriggers` | The six events that should prompt recalibration                        |
 | `measuredAt`            | Canonical UTC ISO-8601 timestamp                                       |
 | `note`                  | Human-readable summary                                                 |
 
+Each `results` entry carries a `sample` scope — `{ checkpointId,
+checkpointManifestFingerprint, rangeDate, role, startRow, requestedRows,
+rowCount }` — binding that measurement to one immutable checkpoint/range and an
+exact ordered-row window. Every training sample is `role: "training"`,
+`startRow: 0`; every held-out sample is `role: "held-out"`, `startRow:
+sampleRows`. The loader proves all scopes share one checkpoint/range and that
+the two windows are disjoint and correctly sized.
+
 `environment.archiveVolume` records `{ fsid, type, archiveDir }` so a config is
-bound to the volume it was measured on. `recalibrationTriggers` is exactly:
+bound to the volume it was measured on, and `archive create --config` enforces
+that identity (plus the host environment) before exporting. `recalibrationTriggers`
+is exactly:
 
 1. Maple version change
 2. chDB version change
@@ -392,6 +410,10 @@ bound to the volume it was measured on. `recalibrationTriggers` is exactly:
 
 A document containing only `formatVersion` + `effective` is **rejected** — all
 evidence fields are required, so a config cannot be hand-edited into existence.
+The loader recomputes the worst cases, the held-out comparisons, the tuning
+derivation, and the sample scopes, and rejects any field that does not match
+(for example a forged tolerance, a redefined derivation, or a scope bound to the
+wrong checkpoint).
 
 ### How `--config` loads
 
@@ -410,11 +432,14 @@ TOCTOU:
 The result is a `TuningConfigIdentity` bound into the manifest:
 
 ```jsonc
-{ "formatVersion": 1, "configName": "maple-archive-config.json", "sha256": "<64 hex>" }
+{ "formatVersion": 2, "configName": "maple-archive-config.json", "sha256": "<64 hex>" }
 ```
 
 `configName` is the file basename (validated `^[A-Za-z0-9._-]+$`); `sha256` is
 the content hash. A generation thus records exactly which config produced it.
+(The manifest stores this as an opaque, hash-bound identity, so it can describe
+both legacy v1 and verified v2 config documents; only the loader refuses v1 for
+new writes.)
 
 ## Calibration
 
@@ -458,9 +483,15 @@ throughput, and temp disk.
 
 ### Held-out validation
 
-The selected candidate is re-measured on a **disjoint** row window
-`[sampleRows, 2*sampleRows)` (training used `[0, sampleRows)`) through the same
-shared writer, then compared on six metrics:
+The selected candidate is re-measured on a **larger, disjoint** row window
+through the same shared writer. Training covered ordered rows `[0, sampleRows)`;
+held-out covers `[sampleRows, sampleRows + 2*sampleRows)` — strictly larger than
+training and non-overlapping. Both windows are recorded in every result's
+`sample` scope and in the document's `samplePolicy`, so disjointness and sizing
+are auditable and re-verified by the loader. The held-out measurement is
+compared to the training prediction on six metrics, each against a fixed
+canonical tolerance (`< 1.0` for every metric; the loader rejects a document
+that supplies its own tolerances):
 
 | Metric                       | Direction        |
 | ---------------------------- | ---------------- |
@@ -472,23 +503,23 @@ shared writer, then compared on six metrics:
 | `peakTempDiskBytes`          | two-sided        |
 
 A candidate that fails held-out is **rejected** and the next eligible candidate
-is tried. A separate `CalibrationValidationReport` (`formatVersion: 1`) records
-the trial, the six per-metric comparisons (predicted, observed, tolerance,
-relative delta, within-tolerance), and the overall pass flag.
+is tried; every attempt (passing or rejected) is recorded in `heldOutAttempts`.
 
 ### When calibration does not recommend
 
 - **No candidate meets the ceilings across all six signals** → no
-  recommendation; the run fails with a clear note (no config written).
-- **Insufficient or unrepresentative data** (a signal's training row count below
-  `sampleRows`, or held-out fails for every eligible candidate) → `low`
-  confidence with `selected: null`; a config document may still be written but
-  records `selected: null` and the full evidence.
+  recommendation; the command exits non-zero with a clear note and **no config
+  is written**.
+- **No eligible candidate passes held-out**, or the data is
+  small/unrepresentative (a signal's training row count below `sampleRows`) →
+  the command exits non-zero with `selected: null` and **no config is written**.
+  The CLI throws before writing a config when there is no recommendation.
 - **An impossible resource budget** is not a special case: it composes from the
   above — every candidate is rejected and no config is written, with no change
   to existing configuration and no temporary data left behind.
 
-The calibrator never redefines the operator's goals to make a candidate pass.
+The calibrator never redefines the operator's goals to make a candidate pass,
+and a config cannot redefine its tolerances, derivation, or sample scope.
 
 ## Manifest, pointer, and catalog formats
 

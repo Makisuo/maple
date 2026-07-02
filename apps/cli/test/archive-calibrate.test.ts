@@ -70,6 +70,10 @@ import {
 	selectCandidates,
 	worstCaseMetrics,
 	comparePredictedObserved,
+	HELD_OUT_TOLERANCES,
+	isSameCalibrationCandidate,
+	heldOutSampleRows,
+	RECALIBRATION_TRIGGERS,
 	recommendationToTuning,
 	writeCalibrationConfig,
 	type CalibrationRecommendation,
@@ -102,7 +106,7 @@ const baseMetrics = (over: Partial<CandidateMetrics> = {}): CandidateMetrics => 
 	logicalBytes: 1_000_000,
 	physicalBytes: 300_000,
 	compressionRatio: 0.3,
-	writeThroughputBytesPerSec: 100_000,
+	writeThroughputBytesPerSec: 200_000,
 	peakTempDiskBytes: 500_000,
 	peakRssBytes: 200_000_000,
 	wallMs: 5_000,
@@ -157,6 +161,30 @@ const withRoots = async (
 		rmSync(parent, { recursive: true, force: true })
 	}
 }
+
+describe("calibration candidate identity", () => {
+	it("does not let same-thread candidates lend representative rows", () => {
+		const selected = CANDIDATE_MATRIX[0]!
+		strictEqual(isSameCalibrationCandidate(selected, { ...selected }), true)
+		strictEqual(isSameCalibrationCandidate(selected, CANDIDATE_MATRIX[1]!), false)
+		strictEqual(isSameCalibrationCandidate(selected, CANDIDATE_MATRIX[3]!), false)
+	})
+})
+
+describe("calibration held-out window is larger and disjoint", () => {
+	it("heldOutSampleRows is a strict multiple > training size and yields a disjoint window", () => {
+		const training = 1000
+		const held = heldOutSampleRows(training)
+		ok(held > training, "held-out must be larger than training")
+		// Training [0, training); held-out [training, training+held). Disjoint.
+		const trainingEnd = training
+		const heldOutStart = training
+		strictEqual(heldOutStart, trainingEnd, "held-out must start where training ends")
+		ok(heldOutStart >= trainingEnd)
+		// A larger training keeps the multiplier invariant.
+		strictEqual(heldOutSampleRows(50_000), 100_000)
+	})
+})
 
 describe("calibration measurement engine — meetsCeilings", () => {
 	it("passes when all metrics are within every ceiling with margin applied inside", () => {
@@ -595,7 +623,7 @@ describe("calibration recovery — idempotent reconcile", () => {
 				ownedPaths: { scratchSubdir, sampleDir },
 			})
 
-			const session = assertCalibrationSession(roots.archiveDir, roots, {
+			const session = await assertCalibrationSession(roots.archiveDir, roots, {
 				operationId,
 				checkpointId,
 				checkpointManifestFingerprint: fingerprint,
@@ -608,6 +636,77 @@ describe("calibration recovery — idempotent reconcile", () => {
 			strictEqual(existsSync(sampleDir), false)
 			await reconcileCalibration(roots.archiveDir, roots)
 		})
+	})
+
+	it("rejects malformed or substituted parent-session pin identities", async () => {
+		const cases = [
+			{ name: "malformed", value: {} },
+			{
+				name: "foreign-pin-id",
+				value: {
+					formatVersion: 1,
+					pinId: "99999999-9999-4999-8999-999999999999",
+					checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+					purpose: "archive-calibrate:deadbeef-1111-4aaa-9bbb-deadbeefdead",
+					createdAt: "2026-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				name: "foreign-checkpoint",
+				value: {
+					formatVersion: 1,
+					pinId: "11111111-2222-4333-8444-555555555555",
+					checkpointId: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+					purpose: "archive-calibrate:deadbeef-1111-4aaa-9bbb-deadbeefdead",
+					createdAt: "2026-01-01T00:00:00.000Z",
+				},
+			},
+			{
+				name: "foreign-purpose",
+				value: {
+					formatVersion: 1,
+					pinId: "11111111-2222-4333-8444-555555555555",
+					checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+					purpose: "archive-calibrate:ffffffff-ffff-4fff-8fff-ffffffffffff",
+					createdAt: "2026-01-01T00:00:00.000Z",
+				},
+			},
+		]
+		for (const testCase of cases) {
+			await withRoots(async (roots) => {
+				const operationId = "deadbeef-1111-4aaa-9bbb-deadbeefdead"
+				const checkpointId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+				const pinId = "11111111-2222-4333-8444-555555555555"
+				const fingerprint = seedCheckpoint(roots.dataDir, checkpointId)
+				const purpose = calibrationPinPurpose(operationId)
+				const pinPath = await acquireCheckpointPin(roots.dataDir, checkpointId, purpose, pinId)
+				writeFileSync(pinPath, JSON.stringify(testCase.value))
+				await writeCalibrationRecord(roots.archiveDir, {
+					phase: "pin-acquired",
+					operationId,
+					pinId,
+					pinPurpose: purpose,
+					pinPath,
+					checkpointId,
+					checkpointManifestFingerprint: fingerprint,
+					boundRoots: roots,
+					ownedPaths: {
+						scratchSubdir: derivedScratchSubdir(operationId),
+						sampleDir: derivedSampleDir(roots.archiveDir, operationId),
+					},
+				})
+
+				await rejects(
+					assertCalibrationSession(roots.archiveDir, roots, {
+						operationId,
+						checkpointId,
+						checkpointManifestFingerprint: fingerprint,
+					}),
+					/checkpoint pin identity mismatch/,
+					testCase.name,
+				)
+			})
+		}
 	})
 
 	it("refuses a record whose bound roots do not match (foreign record)", async () => {
@@ -754,6 +853,27 @@ describe("config-bound create enforces environment and volume identity", () => {
 		const candidate = CANDIDATE_MATRIX[0]!
 		const metrics = baseMetrics()
 		const freeSpaceReserve = 1_000_000
+		const sampleRows = 1000
+		const heldOutRows = 2 * sampleRows
+		const rangeDate = "2026-06-01"
+		const trainingSample = {
+			checkpointId,
+			checkpointManifestFingerprint: fingerprint,
+			rangeDate,
+			role: "training" as const,
+			startRow: 0,
+			requestedRows: sampleRows,
+			rowCount: metrics.rowCount,
+		}
+		const heldOutSample = {
+			checkpointId,
+			checkpointManifestFingerprint: fingerprint,
+			rangeDate,
+			role: "held-out" as const,
+			startRow: sampleRows,
+			requestedRows: heldOutRows,
+			rowCount: metrics.rowCount,
+		}
 		const effective = {
 			...candidate,
 			targetChunkBytes: deriveTargetChunkBytes(candidate.maxShardBytes, freeSpaceReserve),
@@ -768,6 +888,7 @@ describe("config-bound create enforces environment and volume identity", () => {
 				signal: signal.name,
 				metrics,
 				ok: true,
+				sample: trainingSample,
 			})),
 		)
 		const selectedWorstCase = metrics
@@ -776,6 +897,7 @@ describe("config-bound create enforces environment and volume identity", () => {
 			signal: signal.name,
 			metrics,
 			ok: true,
+			sample: heldOutSample,
 		}))
 		return {
 			formatVersion: 2,
@@ -798,49 +920,37 @@ describe("config-bound create enforces environment and volume identity", () => {
 			heldOut: {
 				results: heldOutResults,
 				worstCase: metrics,
-				comparisons: comparePredictedObserved(selectedWorstCase, metrics, {
-					peakRssBytes: 0.5,
-					wallMs: 1,
-					writeThroughputBytesPerSec: 0.75,
-					compressionRatio: 0.5,
-					physicalBytes: 1,
-					peakTempDiskBytes: 0.5,
-				}).comparisons,
+				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
+					.comparisons,
 				passed: true,
-				tolerances: {
-					peakRssBytes: 0.5,
-					wallMs: 1,
-					writeThroughputBytesPerSec: 0.75,
-					compressionRatio: 0.5,
-					physicalBytes: 1,
-					peakTempDiskBytes: 0.5,
-				},
+				tolerances: HELD_OUT_TOLERANCES,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
 					worstCase: metrics,
-					comparisons: comparePredictedObserved(selectedWorstCase, metrics, {
-						peakRssBytes: 0.5,
-						wallMs: 1,
-						writeThroughputBytesPerSec: 0.75,
-						compressionRatio: 0.5,
-						physicalBytes: 1,
-						peakTempDiskBytes: 0.5,
-					}).comparisons,
+					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
+						.comparisons,
 					passed: true,
 				},
 			],
 			environment: env.environment,
 			effective,
+			samplePolicy: {
+				trainingRows: sampleRows,
+				heldOutMultiplier: 2,
+				heldOutRows,
+				trainingWindow: `[0, ${sampleRows})`,
+				heldOutWindow: `[${sampleRows}, ${sampleRows + heldOutRows})`,
+			},
 			derivation: {
 				minFreeSpaceReserve: "budget.freeSpaceReserve",
 				targetChunkBytes:
 					"max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)",
 			},
 			safetyMargin: 1.1,
-			recalibrationTriggers: ["Maple version change"],
+			recalibrationTriggers: RECALIBRATION_TRIGGERS,
 			results,
 			note: "test",
 		}

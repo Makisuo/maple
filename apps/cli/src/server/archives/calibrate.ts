@@ -34,8 +34,17 @@
 import { writeFileSync } from "node:fs"
 import { userInfo, platform, arch, cpus, totalmem } from "node:os"
 import { resolve } from "node:path"
-import { type ArchiveTuning, resolveArchiveTuning, tuningRecord, type ArchiveTuningOverrides } from "./config"
-import { TUNING_CONFIG_FORMAT_VERSION } from "./config"
+import {
+	type ArchiveTuning,
+	CALIBRATION_HELD_OUT_TOLERANCES,
+	CALIBRATION_RECALIBRATION_TRIGGERS,
+	HELD_OUT_SAMPLE_MULTIPLIER as HELD_OUT_SAMPLE_MULTIPLIER_FROM_CONFIG,
+	heldOutSampleRows as heldOutSampleRowsFromConfig,
+	resolveArchiveTuning,
+	tuningRecord,
+	type ArchiveTuningOverrides,
+	TUNING_CONFIG_FORMAT_VERSION,
+} from "./config"
 
 /** A candidate writer/shard configuration evaluated by the calibrator. */
 export interface CalibrationCandidate {
@@ -44,6 +53,15 @@ export interface CalibrationCandidate {
 	readonly maxShardRows: number
 	readonly maxShardBytes: number
 }
+
+export const isSameCalibrationCandidate = (
+	left: CalibrationCandidate,
+	right: CalibrationCandidate,
+): boolean =>
+	left.writerThreads === right.writerThreads &&
+	left.rowGroupRows === right.rowGroupRows &&
+	left.maxShardRows === right.maxShardRows &&
+	left.maxShardBytes === right.maxShardBytes
 
 /**
  * The operator-declared performance ceilings. A candidate passes only if its
@@ -99,12 +117,42 @@ export interface CandidateMetrics {
 	readonly rowCount: number
 }
 
+/**
+ * The role of a calibration sample within the disjoint training/held-out split.
+ * Training covers ordered rows `[0, trainingRows)`; held-out covers the strictly
+ * larger, disjoint window `[trainingRows, trainingRows + heldOutRows)`.
+ */
+export type CalibrationSampleRole = "training" | "held-out"
+
+/**
+ * The exact ordered-row scope one sample covered, recorded in every result so
+ * the config loader can prove every training and held-out sample came from one
+ * immutable checkpoint/range and that the two windows are disjoint and correctly
+ * sized. `startRow`/`requestedRows` are the inputs to `planCalibrationShards`;
+ * `rowCount` is the exact matching-row count the writer exported (which the
+ * writer also asserts equals `metrics.rowCount`).
+ */
+export interface CalibrationSampleScope {
+	readonly checkpointId: string
+	readonly checkpointManifestFingerprint: string
+	readonly rangeDate: string
+	readonly role: CalibrationSampleRole
+	/** 0-indexed start in the day's ordered (hour, part, `_part_offset`) sequence. */
+	readonly startRow: number
+	/** The window size requested from `planCalibrationShards`. */
+	readonly requestedRows: number
+	/** The exact matching-row count the writer exported in this window. */
+	readonly rowCount: number
+}
+
 /** A candidate's measured result for one signal, or a failure. */
 export interface CandidateResult {
 	readonly candidate: CalibrationCandidate
 	readonly signal: string
 	readonly metrics: CandidateMetrics | null
 	readonly ok: boolean
+	/** The exact sample scope; present iff ok (failures export nothing). */
+	readonly sample?: CalibrationSampleScope
 	readonly error?: string
 }
 
@@ -379,14 +427,7 @@ export const captureEnvironment = (
  * Conditions under which recalibration is required. Recorded in every config
  * document so deployment drift is detectable and operators know when to repeat.
  */
-export const RECALIBRATION_TRIGGERS: ReadonlyArray<string> = [
-	"Maple version change",
-	"chDB version change",
-	"Schema fingerprint change",
-	"Hardware change (CPU count, memory, storage speed)",
-	"Archive-volume replacement or filesystem change",
-	"Material telemetry-shape change (row width, cardinality, signal mix)",
-] as const
+export const RECALIBRATION_TRIGGERS: ReadonlyArray<string> = CALIBRATION_RECALIBRATION_TRIGGERS
 
 export interface CalibrationRecommendation {
 	readonly formatVersion: typeof TUNING_CONFIG_FORMAT_VERSION
@@ -459,6 +500,9 @@ export const recommendationToTuning = (
 }
 
 export const deriveTargetChunkBytes = (maxShardBytes: number, freeSpaceReserve: number): number => {
+	if (!Number.isSafeInteger(freeSpaceReserve) || freeSpaceReserve <= 0) {
+		throw new Error(`calibration freeSpaceReserve must be a positive safe integer: ${freeSpaceReserve}`)
+	}
 	const fourShards = maxShardBytes * 4
 	const reservePlusShard = freeSpaceReserve + maxShardBytes
 	const derived = Math.max(fourShards, reservePlusShard)
@@ -470,14 +514,19 @@ export const deriveTargetChunkBytes = (maxShardBytes: number, freeSpaceReserve: 
 	return derived
 }
 
-export const HELD_OUT_TOLERANCES = {
-	peakRssBytes: 0.5,
-	wallMs: 1,
-	writeThroughputBytesPerSec: 0.75,
-	compressionRatio: 0.5,
-	physicalBytes: 1,
-	peakTempDiskBytes: 0.5,
-} as const
+export const HELD_OUT_TOLERANCES = CALIBRATION_HELD_OUT_TOLERANCES
+
+/**
+ * The held-out window is strictly LARGER than the training window and disjoint
+ * from it: training covers ordered rows `[0, sampleRows)` and held-out covers
+ * `[sampleRows, sampleRows + heldOutSampleRows)` where
+ * `heldOutSampleRows = HELD_OUT_SAMPLE_MULTIPLIER * sampleRows`. A larger
+ * held-out sample is required by the plan (the validation must not be weaker
+ * than the training measurement) and makes the recorded disjoint scope
+ * auditable. Pure. Defined in ./config (single source of truth, no cycle).
+ */
+export const HELD_OUT_SAMPLE_MULTIPLIER = HELD_OUT_SAMPLE_MULTIPLIER_FROM_CONFIG
+export const heldOutSampleRows = heldOutSampleRowsFromConfig
 
 /**
  * Write a versioned calibration config document to `path`. The document is
@@ -510,6 +559,13 @@ export const writeCalibrationConfig = (
 		selected: rec.selected,
 		heldOut: rec.heldOut,
 		heldOutAttempts: rec.heldOutAttempts,
+		samplePolicy: {
+			trainingRows: rec.budget.sampleRows,
+			heldOutMultiplier: HELD_OUT_SAMPLE_MULTIPLIER,
+			heldOutRows: heldOutSampleRows(rec.budget.sampleRows),
+			trainingWindow: `[0, ${rec.budget.sampleRows})`,
+			heldOutWindow: `[${rec.budget.sampleRows}, ${rec.budget.sampleRows + heldOutSampleRows(rec.budget.sampleRows)})`,
+		},
 		environment: rec.environment,
 		effective: tuningRecord(tuning),
 		derivation: {

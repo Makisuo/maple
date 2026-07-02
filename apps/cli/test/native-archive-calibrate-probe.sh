@@ -152,6 +152,25 @@ ROW_COUNT_SUM="$(jq '[.results[] | select(.ok) | .metrics.rowCount] | add // 0' 
 [[ "$ROW_COUNT_SUM" -gt 0 ]] || fail "config results all have rowCount 0 (metrics are dead)"
 echo "  selected writerThreads=$SELECTED_THREADS margin=$MARGIN results=$RESULT_COUNT rowSum=$ROW_COUNT_SUM"
 
+# --- Step 4b: assert every result carries a persisted, disjoint sample scope ---
+# Each training and held-out result must bind to the single checkpoint/range and
+# record its ordered-row window; the samplePolicy must declare a LARGER held-out
+# window disjoint from training.
+TRAINING_ROWS="$(jq -r '.samplePolicy.trainingRows' "$CFG")"
+HELD_OUT_ROWS="$(jq -r '.samplePolicy.heldOutRows' "$CFG")"
+[[ "$TRAINING_ROWS" =~ ^[0-9]+$ && "$HELD_OUT_ROWS" =~ ^[0-9]+$ ]] || fail "config samplePolicy missing numeric window sizes"
+[[ "$HELD_OUT_ROWS" -gt "$TRAINING_ROWS" ]] || fail "held-out window is not larger than training: $HELD_OUT_ROWS <= $TRAINING_ROWS"
+# Every ok training result has role training, startRow 0, requestedRows = training.
+BAD_TRAINING_SCOPE="$(jq -r '[.results[] | select(.ok) | select((.sample.role // "x") != "training" or (.sample.startRow // -1) != 0 or (.sample.requestedRows // -1) != '"$TRAINING_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount)] | length' "$CFG")"
+[[ "$BAD_TRAINING_SCOPE" -eq 0 ]] || fail "$BAD_TRAINING_SCOPE training result(s) have a missing/inconsistent sample scope"
+# Every held-out result has role held-out, startRow = training, requestedRows = held-out, disjoint.
+BAD_HELDOUT_SCOPE="$(jq -r '[.heldOut.results[] | select((.sample.role // "x") != "held-out" or (.sample.startRow // -1) != '"$TRAINING_ROWS"' or (.sample.requestedRows // -1) != '"$HELD_OUT_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount)] | length' "$CFG")"
+[[ "$BAD_HELDOUT_SCOPE" -eq 0 ]] || fail "$BAD_HELDOUT_SCOPE held-out result(s) have a missing/inconsistent/disjoint sample scope"
+# All scopes bind to one checkpoint + range.
+UNIQUE_SCOPES="$(jq -r '[.results[].sample | {checkpointId, checkpointManifestFingerprint, rangeDate}] | unique | length' "$CFG")"
+[[ "$UNIQUE_SCOPES" -eq 1 ]] || fail "training scopes bind to more than one checkpoint/range ($UNIQUE_SCOPES)"
+echo "  sample scopes verified: training=$TRAINING_ROWS held-out=$HELD_OUT_ROWS (larger, disjoint, single source)"
+
 # --- Step 5: run a LIKE-FOR-LIKE calibrate-run trial on held-out data ---
 # The trial runs the SAME export-sample operation the calibration measured
 # (through the same shared writer), on DISJOINT held-out rows (--start-row), with
