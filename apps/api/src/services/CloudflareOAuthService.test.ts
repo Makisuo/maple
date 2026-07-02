@@ -119,7 +119,7 @@ describe("CloudflareOAuthService", () => {
 			assert.strictEqual(url.searchParams.get("client_id"), "cf-client-id")
 			assert.strictEqual(url.searchParams.get("response_type"), "code")
 			assert.strictEqual(url.searchParams.get("state"), state)
-			assert.include(url.searchParams.get("scope") ?? "", "workers_observability:write")
+			assert.include(url.searchParams.get("scope") ?? "", "workers-observability.write")
 			// PKCE: the authorize URL carries an S256 challenge and the verifier is persisted.
 			assert.strictEqual(url.searchParams.get("code_challenge_method"), "S256")
 			const challenge = url.searchParams.get("code_challenge")

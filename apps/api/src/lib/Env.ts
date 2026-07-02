@@ -119,9 +119,14 @@ const envConfig = Config.all({
 	GITHUB_API_BASE_URL: stringWithDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
 	CLOUDFLARE_OAUTH_CLIENT_ID: optionalString("CLOUDFLARE_OAUTH_CLIENT_ID"),
 	CLOUDFLARE_OAUTH_CLIENT_SECRET: optionalRedacted("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+	// Cloudflare OAuth scope ids are DOT-delimited (mirroring API-token permission names;
+	// registry: GET /client/v4/oauth/scopes). The client may only request scopes it was
+	// created with — keep the OAuth client's granted set in sync with this list.
+	// `offline_access` is added/removed automatically by Cloudflare based on the client's
+	// grant types, so it must not be listed.
 	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
 		"CLOUDFLARE_OAUTH_SCOPES",
-		"account.settings:read workers_observability:write workers.scripts:read logs:write account_analytics:read offline_access",
+		"account-settings.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
 	),
 	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",
