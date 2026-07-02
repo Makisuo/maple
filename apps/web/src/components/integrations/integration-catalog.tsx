@@ -44,7 +44,7 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		id: "cloudflare",
 		name: "Cloudflare",
 		description:
-			"Connect your account via OAuth for one-click telemetry setup, or receive Logpush logs over HTTPS.",
+			"Connect your Cloudflare account via OAuth — the foundation for one-click Workers telemetry.",
 		icon: CloudflareIcon,
 		accent: CLOUDFLARE_ACCENT,
 	},
@@ -110,7 +110,6 @@ const NOT_CONNECTED: CardStatus = { label: "Not connected", variant: "outline" }
  * already use — no per-target check fan-out at catalog level.
  */
 export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStatus | null>> {
-	const cloudflareResult = useAtomValue(MapleApiAtomClient.query("cloudflareLogpush", "list", {}))
 	const cloudflareAccountResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
 			reactivityKeys: ["cloudflareIntegrationStatus"],
@@ -128,35 +127,12 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		}),
 	)
 
-	// Two independent halves: the account OAuth connection and the (older) manual
-	// Logpush connectors. Either one alone counts as connected.
-	const cloudflareAccountConnected = Result.builder(cloudflareAccountResult)
-		.onSuccess((status) => status.connected)
-		.orElse(() => false)
-
-	const cloudflare: CardStatus | null = Result.builder(cloudflareResult)
-		.onSuccess((response): CardStatus => {
-			const connectors = response.connectors
-			if (connectors.length === 0) {
-				return cloudflareAccountConnected
-					? { label: "Account connected", variant: "success" }
-					: NOT_CONNECTED
-			}
-			const enabled = connectors.filter((connector) => connector.enabled).length
-			const failing = connectors.some((connector) => connector.lastError)
-			const connectorLabel = `${connectors.length} connector${connectors.length === 1 ? "" : "s"} · ${enabled} enabled`
-			return {
-				label: cloudflareAccountConnected ? `Account · ${connectorLabel}` : connectorLabel,
-				variant: failing ? "warning" : "success",
-			}
-		})
-		.orElse((): CardStatus | null =>
-			Result.isInitial(cloudflareResult)
-				? null
-				: cloudflareAccountConnected
-					? { label: "Account connected", variant: "success" }
-					: NOT_CONNECTED,
+	const cloudflare: CardStatus | null = Result.builder(cloudflareAccountResult)
+		.onSuccess(
+			(status): CardStatus =>
+				status.connected ? { label: "Connected", variant: "success" } : NOT_CONNECTED,
 		)
+		.orElse(() => (Result.isInitial(cloudflareAccountResult) ? null : NOT_CONNECTED))
 
 	const scrapeStatus = (targetType: "prometheus" | "planetscale"): CardStatus | null =>
 		Result.builder(scrapeResult)

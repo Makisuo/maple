@@ -13,7 +13,6 @@ import {
 	useIntegrationStatuses,
 	type IntegrationId,
 } from "@/components/integrations/integration-catalog"
-import { CloudflareLogpushSection } from "@/components/settings/cloudflare-logpush-section"
 import { ScrapeTargetsSection } from "@/components/settings/scrape-targets-section"
 import { SettingsNav, useVisibleSettingsSections } from "@/components/settings/settings-nav"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
@@ -92,10 +91,7 @@ function IntegrationsPage() {
 					</Alert>
 				)}
 				{integration === "cloudflare" ? (
-					<>
-						<CloudflareAccountCard />
-						<CloudflareLogpushSection />
-					</>
+					<CloudflareAccountCard />
 				) : integration === "hazel" ? (
 					<HazelIntegrationCard />
 				) : integration === "github" ? (
