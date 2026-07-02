@@ -22,6 +22,7 @@ export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warps
  */
 export const GITHUB_ACCENT = "#181717"
 export const HAZEL_ACCENT = "#F46F0F"
+export const CLOUDFLARE_ACCENT = "#F38020"
 
 export interface CatalogEntry {
 	readonly id: IntegrationId
@@ -41,10 +42,11 @@ export interface CatalogEntry {
 const CATALOG: ReadonlyArray<CatalogEntry> = [
 	{
 		id: "cloudflare",
-		name: "Cloudflare Logpush",
-		description: "Receive Cloudflare HTTP request logs over HTTPS and map them into Maple logs.",
+		name: "Cloudflare",
+		description:
+			"Connect your account via OAuth for one-click telemetry setup, or receive Logpush logs over HTTPS.",
 		icon: CloudflareIcon,
-		accent: "#F38020",
+		accent: CLOUDFLARE_ACCENT,
 	},
 	{
 		id: "prometheus",
@@ -109,6 +111,11 @@ const NOT_CONNECTED: CardStatus = { label: "Not connected", variant: "outline" }
  */
 export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStatus | null>> {
 	const cloudflareResult = useAtomValue(MapleApiAtomClient.query("cloudflareLogpush", "list", {}))
+	const cloudflareAccountResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+			reactivityKeys: ["cloudflareIntegrationStatus"],
+		}),
+	)
 	const scrapeResult = useAtomValue(MapleApiAtomClient.query("scrapeTargets", "list", {}))
 	const hazelResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "hazelStatus", {
@@ -121,18 +128,35 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		}),
 	)
 
+	// Two independent halves: the account OAuth connection and the (older) manual
+	// Logpush connectors. Either one alone counts as connected.
+	const cloudflareAccountConnected = Result.builder(cloudflareAccountResult)
+		.onSuccess((status) => status.connected)
+		.orElse(() => false)
+
 	const cloudflare: CardStatus | null = Result.builder(cloudflareResult)
 		.onSuccess((response): CardStatus => {
 			const connectors = response.connectors
-			if (connectors.length === 0) return NOT_CONNECTED
+			if (connectors.length === 0) {
+				return cloudflareAccountConnected
+					? { label: "Account connected", variant: "success" }
+					: NOT_CONNECTED
+			}
 			const enabled = connectors.filter((connector) => connector.enabled).length
 			const failing = connectors.some((connector) => connector.lastError)
+			const connectorLabel = `${connectors.length} connector${connectors.length === 1 ? "" : "s"} · ${enabled} enabled`
 			return {
-				label: `${connectors.length} connector${connectors.length === 1 ? "" : "s"} · ${enabled} enabled`,
+				label: cloudflareAccountConnected ? `Account · ${connectorLabel}` : connectorLabel,
 				variant: failing ? "warning" : "success",
 			}
 		})
-		.orElse(() => (Result.isInitial(cloudflareResult) ? null : NOT_CONNECTED))
+		.orElse((): CardStatus | null =>
+			Result.isInitial(cloudflareResult)
+				? null
+				: cloudflareAccountConnected
+					? { label: "Account connected", variant: "success" }
+					: NOT_CONNECTED,
+		)
 
 	const scrapeStatus = (targetType: "prometheus" | "planetscale"): CardStatus | null =>
 		Result.builder(scrapeResult)

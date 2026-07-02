@@ -364,7 +364,10 @@ export class CloudflareOAuthService extends Context.Service<
 
 			// Resolve — and require exactly one — Cloudflare account. A token that spans multiple
 			// accounts is ambiguous for org→account scoping, so we refuse it (Superlog's rule).
-			const accounts = yield* listAccounts(tokenResponse.access_token)
+			const accounts = yield* listAccounts(
+				tokenResponse.access_token,
+				env.MAPLE_CLOUDFLARE_API_BASE_URL,
+			)
 			if (accounts.length === 0) {
 				return yield* Effect.fail(
 					new IntegrationsValidationError({

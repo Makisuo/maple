@@ -25,17 +25,20 @@ type CloudflareRequirements = Credentials | HttpClient.HttpClient
 /** Any failure a Cloudflare API call can surface to callers, mapped onto Maple's integration errors. */
 export type CloudflareApiError = IntegrationsUpstreamError | IntegrationsRevokedError
 
-const credentialsLayer = (accessToken: string): Layer.Layer<Credentials> =>
+const credentialsLayer = (accessToken: string, apiBaseUrl?: string): Layer.Layer<Credentials> =>
 	fromOAuth({
 		// The token is already validated/refreshed by CloudflareOAuthService before it reaches us, so
 		// `load` is a constant and `refresh` is a no-op passthrough — a single request never outlives the
 		// access-token TTL. If that assumption ever breaks, wire `refresh` to the token endpoint here.
 		load: Effect.succeed({ accessToken }),
 		refresh: (credentials) => Effect.succeed(credentials),
+		// Defaults to https://api.cloudflare.com/client/v4; overridable (CLOUDFLARE_API_BASE_URL) so
+		// local dev / tests can point the SDK at a mock.
+		...(apiBaseUrl ? { apiBaseUrl } : {}),
 	})
 
-const runtimeLayer = (accessToken: string): Layer.Layer<CloudflareRequirements> =>
-	Layer.mergeAll(credentialsLayer(accessToken), FetchHttpClient.layer)
+const runtimeLayer = (accessToken: string, apiBaseUrl?: string): Layer.Layer<CloudflareRequirements> =>
+	Layer.mergeAll(credentialsLayer(accessToken, apiBaseUrl), FetchHttpClient.layer)
 
 const readTag = (error: unknown): unknown =>
 	typeof error === "object" && error !== null && "_tag" in error
@@ -84,14 +87,16 @@ const mapCloudflareError = (error: unknown): CloudflareApiError => {
 const runWithToken = <A, E>(
 	accessToken: string,
 	effect: Effect.Effect<A, E, CloudflareRequirements>,
-): Effect.Effect<A, E, never> => effect.pipe(Effect.provide(runtimeLayer(accessToken)))
+	apiBaseUrl?: string,
+): Effect.Effect<A, E, never> => effect.pipe(Effect.provide(runtimeLayer(accessToken, apiBaseUrl)))
 
 /** Like {@link runWithToken} but collapses the distilled error union to a Maple domain error. */
 const runMapped = <A, E>(
 	accessToken: string,
 	effect: Effect.Effect<A, E, CloudflareRequirements>,
+	apiBaseUrl?: string,
 ): Effect.Effect<A, CloudflareApiError, never> =>
-	runWithToken(accessToken, effect).pipe(Effect.mapError(mapCloudflareError))
+	runWithToken(accessToken, effect, apiBaseUrl).pipe(Effect.mapError(mapCloudflareError))
 
 export interface CloudflareAccount {
 	readonly id: string
@@ -105,8 +110,9 @@ export interface CloudflareAccount {
  */
 export const listAccounts = (
 	accessToken: string,
+	apiBaseUrl?: string,
 ): Effect.Effect<ReadonlyArray<CloudflareAccount>, CloudflareApiError, never> =>
-	runMapped(accessToken, Accounts.listAccounts({ perPage: 50 })).pipe(
+	runMapped(accessToken, Accounts.listAccounts({ perPage: 50 }), apiBaseUrl).pipe(
 		Effect.map((response) =>
 			response.result.map((account) => ({
 				id: account.id,

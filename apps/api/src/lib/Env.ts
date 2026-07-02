@@ -48,7 +48,12 @@ export interface EnvShape {
 	readonly CLOUDFLARE_OAUTH_AUTHORIZE_URL: string
 	readonly CLOUDFLARE_OAUTH_TOKEN_URL: string
 	readonly CLOUDFLARE_OAUTH_REVOKE_URL: string
-	readonly CLOUDFLARE_API_BASE_URL: string
+	/**
+	 * Base URL for Cloudflare's REST API. Deliberately NOT named CLOUDFLARE_API_BASE_URL —
+	 * wrangler treats that env var as an override for its own API endpoint, so under
+	 * `wrangler dev --env-file` it would hijack wrangler's control-plane calls too.
+	 */
+	readonly MAPLE_CLOUDFLARE_API_BASE_URL: string
 }
 
 const stringWithDefault = (key: string, fallback: string) =>
@@ -130,8 +135,8 @@ const envConfig = Config.all({
 		"CLOUDFLARE_OAUTH_REVOKE_URL",
 		"https://dash.cloudflare.com/oauth2/revoke",
 	),
-	CLOUDFLARE_API_BASE_URL: stringWithDefault(
-		"CLOUDFLARE_API_BASE_URL",
+	MAPLE_CLOUDFLARE_API_BASE_URL: stringWithDefault(
+		"MAPLE_CLOUDFLARE_API_BASE_URL",
 		"https://api.cloudflare.com/client/v4",
 	),
 })
