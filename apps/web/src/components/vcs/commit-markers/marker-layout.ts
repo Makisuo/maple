@@ -100,9 +100,11 @@ function byRepresentative(a: MarkerCommit, b: MarkerCommit): number {
  * Derives deploy markers from the per-bucket release timeline.
  *
  *  - A commit's deploy = its FIRST-SEEN bucket (the earliest bucket it appears in).
- *  - EVERY distinct commit gets a marker. There is no baseline/earliest exclusion:
- *    a commit already running at the start of the window is still a deploy worth
- *    marking, and dropping it silently hides a real version from the timeline.
+ *  - BASELINE EXCLUSION: commits first seen in the window's earliest release bucket
+ *    get no marker. A version already serving traffic when the window opens was
+ *    (as far as the data can tell) deployed before it — marking it would draw a
+ *    "deploy" that may never have happened in view. Only a commit that appears
+ *    AFTER the baseline bucket is a deploy we actually witnessed.
  *  - Commits that share a first-seen bucket are grouped onto one dash. The
  *    representative (label + first card row) is the highest-span-count commit in
  *    that bucket; `count` is how many commits the bucket holds (`+N` = count − 1).
@@ -122,6 +124,15 @@ export function buildCommitMarkers(
 		if (Number.isNaN(ms)) continue
 		const prev = firstSeen.get(r.commitSha)
 		if (!prev || ms < prev.ms) firstSeen.set(r.commitSha, { ms, count: r.count })
+	}
+	if (firstSeen.size === 0) return []
+
+	// Baseline exclusion (see docstring): whatever was already running in the
+	// earliest release bucket predates the window as far as we can tell.
+	let baselineMs = Number.POSITIVE_INFINITY
+	for (const info of firstSeen.values()) baselineMs = Math.min(baselineMs, info.ms)
+	for (const [sha, info] of firstSeen) {
+		if (info.ms === baselineMs) firstSeen.delete(sha)
 	}
 	if (firstSeen.size === 0) return []
 

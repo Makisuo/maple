@@ -27,22 +27,18 @@ describe("buildCommitMarkers", () => {
 		expect(buildCommitMarkers([{ bucket: iso(0), commitSha: SHA_A, count: 1 }], [])).toEqual([])
 	})
 
-	it("marks the single version in the window (no baseline exclusion)", () => {
+	it("suppresses a single-version window entirely (baseline exclusion)", () => {
+		// One version serving the whole window: it was (as far as the data shows)
+		// deployed before the window opened, so there is no deploy to mark.
 		const releases: ReleasePoint[] = [
 			{ bucket: iso(0), commitSha: SHA_A, count: 100 },
 			{ bucket: iso(1), commitSha: SHA_A, count: 120 },
 			{ bucket: iso(2), commitSha: SHA_A, count: 90 },
 		]
-		const markers = buildCommitMarkers(releases, CHART)
-		expect(markers).toHaveLength(1)
-		expect(markers[0].bucket).toBe(iso(0)) // first-seen bucket, including the earliest
-		expect(markers[0].commits).toEqual([{ sha: SHA_A, count: 100 }])
-		// Default label is the SHORT sha for a 40-hex commit — the host overrides it
-		// with the resolved message; the full sha stays available in the hover card.
-		expect(markers[0].label).toBe(SHA_A.slice(0, 7))
+		expect(buildCommitMarkers(releases, CHART)).toEqual([])
 	})
 
-	it("marks EVERY distinct commit, including the one in the earliest bucket", () => {
+	it("excludes the baseline commit but marks the ones deployed after it", () => {
 		const releases: ReleasePoint[] = [
 			{ bucket: iso(0), commitSha: SHA_A, count: 100 },
 			{ bucket: iso(1), commitSha: SHA_A, count: 80 },
@@ -50,11 +46,26 @@ describe("buildCommitMarkers", () => {
 			{ bucket: iso(2), commitSha: SHA_B, count: 200 },
 		]
 		const markers = buildCommitMarkers(releases, CHART)
-		// Both A (earliest) and B get a marker — A is no longer silently dropped.
-		expect(markers).toHaveLength(2)
-		expect(markers.map((m) => m.bucket)).toEqual([iso(0), iso(1)])
-		expect(markers[0].commits).toEqual([{ sha: SHA_A, count: 100 }])
-		expect(markers[1].commits).toEqual([{ sha: SHA_B, count: 30 }])
+		// A was already running in the earliest bucket → excluded; B is a real deploy.
+		expect(markers).toHaveLength(1)
+		expect(markers[0].bucket).toBe(iso(1))
+		expect(markers[0].commits).toEqual([{ sha: SHA_B, count: 30 }])
+		// Default label is the SHORT sha for a 40-hex commit — the host overrides it
+		// with the resolved message; the full sha stays available in the hover card.
+		expect(markers[0].label).toBe(SHA_B.slice(0, 7))
+	})
+
+	it("excludes EVERY commit first seen in the baseline bucket, not just one", () => {
+		// Two versions already overlapping at window start (e.g. a rollout in flight):
+		// neither deploy was witnessed inside the window, so neither gets a dash.
+		const releases: ReleasePoint[] = [
+			{ bucket: iso(0), commitSha: SHA_A, count: 100 },
+			{ bucket: iso(0), commitSha: SHA_B, count: 40 },
+			{ bucket: iso(2), commitSha: SHA_C, count: 60 },
+		]
+		const markers = buildCommitMarkers(releases, CHART)
+		expect(markers).toHaveLength(1)
+		expect(markers[0].commits).toEqual([{ sha: SHA_C, count: 60 }])
 	})
 
 	it("groups multiple new commits in one bucket, representative (highest count) first", () => {
@@ -64,7 +75,7 @@ describe("buildCommitMarkers", () => {
 			{ bucket: iso(2), commitSha: SHA_D, count: 50 },
 		]
 		const markers = buildCommitMarkers(releases, CHART)
-		expect(markers).toHaveLength(2)
+		expect(markers).toHaveLength(1) // A is the baseline → only the iso(2) group
 		const grouped = markers.find((m) => m.bucket === iso(2))!
 		expect(grouped.commits).toEqual([
 			{ sha: SHA_D, count: 50 },
@@ -93,13 +104,14 @@ describe("buildCommitMarkers", () => {
 			{ bucket: tb(2), commitSha: SHA_B, count: 30 },
 		]
 		const markers = buildCommitMarkers(releases, CHART)
-		expect(markers.map((m) => m.bucket)).toEqual([iso(0), iso(2)]) // snapped to chart buckets
+		expect(markers.map((m) => m.bucket)).toEqual([iso(2)]) // snapped to a chart bucket
 	})
 
 	it("keeps a non-resolvable reference (short sha / tag) as its own marker + label", () => {
 		const releases: ReleasePoint[] = [
-			{ bucket: iso(0), commitSha: "v1.2.3", count: 100 },
-			{ bucket: iso(1), commitSha: "deadbeef", count: 40 },
+			{ bucket: iso(0), commitSha: SHA_A, count: 200 }, // baseline, excluded
+			{ bucket: iso(1), commitSha: "v1.2.3", count: 100 },
+			{ bucket: iso(2), commitSha: "deadbeef", count: 40 },
 		]
 		const markers = buildCommitMarkers(releases, CHART)
 		expect(markers).toHaveLength(2)
