@@ -30,7 +30,7 @@ import {
 } from "@maple/domain/http"
 import { cloudflareAnalyticsState, oauthConnections, type CloudflareAnalyticsStateRow } from "@maple/db"
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Result, Schema } from "effect"
+import { Cause, Clock, Context, Effect, Layer, Result, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import {
 	graphqlQuery,
@@ -893,11 +893,18 @@ export class CloudflareAnalyticsService extends Context.Service<
 								rowsIngested += summary.rowsIngested
 							}),
 						),
-						Effect.catch((error) =>
-							Effect.logWarning("cloudflare-analytics org poll failed", {
-								orgId: row.orgId,
-								error: error.message,
-							}),
+						// Isolate genuine per-org failures/defects so one bad org can't fail the
+						// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
+						// re-raise them so the tick cancels promptly instead of logging a phantom
+						// failure and marching through the remaining orgs. (Same pattern as
+						// AnomalyDetectionService / ErrorsService.)
+						Effect.catchCause((cause) =>
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.logWarning("cloudflare-analytics org poll failed", {
+										orgId: row.orgId,
+										error: Cause.pretty(cause),
+									}),
 						),
 					),
 				{ concurrency: ORG_CONCURRENCY, discard: true },
