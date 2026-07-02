@@ -920,19 +920,29 @@ describe("config-bound create enforces environment and volume identity", () => {
 			heldOut: {
 				results: heldOutResults,
 				worstCase: metrics,
-				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
-					.comparisons,
+				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
+					ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+					metrics: new Set(["wallMs", "physicalBytes"]),
+				}).comparisons,
 				passed: true,
 				tolerances: HELD_OUT_TOLERANCES,
+				scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+				trainingLogicalBytes: selectedWorstCase.logicalBytes,
+				heldOutLogicalBytes: metrics.logicalBytes,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
 					worstCase: metrics,
-					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
-						.comparisons,
+					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
+						ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+						metrics: new Set(["wallMs", "physicalBytes"]),
+					}).comparisons,
 					passed: true,
+					scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+					trainingLogicalBytes: selectedWorstCase.logicalBytes,
+					heldOutLogicalBytes: metrics.logicalBytes,
 				},
 			],
 			environment: env.environment,

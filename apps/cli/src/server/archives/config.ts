@@ -291,6 +291,9 @@ export interface VerifiedCalibrationConfigDocument {
 		readonly comparisons: ReadonlyArray<Record<string, unknown>>
 		readonly passed: true
 		readonly tolerances: Record<string, number>
+		readonly scaleRatio: number
+		readonly trainingLogicalBytes: number
+		readonly heldOutLogicalBytes: number
 	}
 	readonly heldOutAttempts: ReadonlyArray<{
 		readonly candidate: Record<string, number>
@@ -298,6 +301,9 @@ export interface VerifiedCalibrationConfigDocument {
 		readonly worstCase: Record<string, number> | null
 		readonly comparisons: ReadonlyArray<Record<string, unknown>>
 		readonly passed: boolean
+		readonly scaleRatio: number
+		readonly trainingLogicalBytes: number
+		readonly heldOutLogicalBytes: number
 	}>
 	readonly environment: {
 		readonly mapleVersion: string
@@ -398,7 +404,11 @@ const expectedComparisons = (
 	predicted: Record<string, number>,
 	observed: Record<string, number>,
 	tolerances: Record<string, number>,
+	sizeScaling?: { ratio: number; metrics: ReadonlySet<"wallMs" | "physicalBytes"> },
 ): ReadonlyArray<Record<string, unknown>> => {
+	const ratio = sizeScaling?.ratio ?? 1
+	const scale = (metric: "wallMs" | "physicalBytes", value: number): number =>
+		sizeScaling && sizeScaling.metrics.has(metric) && Number.isFinite(ratio) ? value * ratio : value
 	const metrics = [
 		"peakRssBytes",
 		"wallMs",
@@ -408,7 +418,15 @@ const expectedComparisons = (
 		"peakTempDiskBytes",
 	] as const
 	return metrics.map((metric) => {
-		const p = predicted[metric]!
+		// wallMs/physicalBytes use the size-scaled prediction (held-out is larger);
+		// throughput/compression are size-invariant; peaks are absolute.
+		const rawP = predicted[metric]!
+		const p =
+			metric === "wallMs"
+				? scale("wallMs", rawP)
+				: metric === "physicalBytes"
+					? scale("physicalBytes", rawP)
+					: rawP
 		const o = observed[metric]!
 		const tolerance = tolerances[metric]!
 		const throughput = metric === "writeThroughputBytesPerSec"
@@ -905,7 +923,16 @@ const validateCompleteConfigSchema = (
 	}
 	assertExactKeys(
 		parsed.heldOut,
-		new Set(["results", "worstCase", "comparisons", "passed", "tolerances"]),
+		new Set([
+			"results",
+			"worstCase",
+			"comparisons",
+			"passed",
+			"tolerances",
+			"scaleRatio",
+			"trainingLogicalBytes",
+			"heldOutLogicalBytes",
+		]),
 		"heldOut",
 		path,
 	)
@@ -972,10 +999,30 @@ const validateCompleteConfigSchema = (
 	if (!exactJson(held.tolerances, CALIBRATION_HELD_OUT_TOLERANCES)) {
 		throw new Error(`invalid calibration config heldOut.tolerances (exact policy required): ${path}`)
 	}
+	// Size-scaling: the held-out sample is larger, so wallMs/physicalBytes
+	// predictions are rescaled by heldOut.logicalBytes/training.logicalBytes.
+	const selWorst = sel.worstCase as Record<string, number>
+	const trainingLogicalBytes = selWorst.logicalBytes!
+	const heldOutLogicalBytes = heldWorst.logicalBytes!
+	const scaleRatio = trainingLogicalBytes > 0 ? heldOutLogicalBytes / trainingLogicalBytes : 1
+	if (
+		typeof held.scaleRatio !== "number" ||
+		!Number.isFinite(held.scaleRatio) ||
+		held.scaleRatio !== scaleRatio ||
+		typeof held.trainingLogicalBytes !== "number" ||
+		held.trainingLogicalBytes !== trainingLogicalBytes ||
+		typeof held.heldOutLogicalBytes !== "number" ||
+		held.heldOutLogicalBytes !== heldOutLogicalBytes
+	) {
+		throw new Error(
+			`invalid calibration config heldOut scaleRatio/logicalBytes were not recomputed: ${path}`,
+		)
+	}
 	const recomputedComparisons = expectedComparisons(
-		sel.worstCase as Record<string, number>,
+		selWorst,
 		heldWorst,
 		held.tolerances as Record<string, number>,
+		{ ratio: scaleRatio, metrics: new Set(["wallMs", "physicalBytes"]) },
 	)
 	if (!Array.isArray(held.comparisons) || !exactJson(recomputedComparisons, held.comparisons)) {
 		throw new Error(`invalid calibration config heldOut.comparisons were not recomputed: ${path}`)
@@ -996,7 +1043,16 @@ const validateCompleteConfigSchema = (
 		}
 		assertExactKeys(
 			attempt,
-			new Set(["candidate", "results", "worstCase", "comparisons", "passed"]),
+			new Set([
+				"candidate",
+				"results",
+				"worstCase",
+				"comparisons",
+				"passed",
+				"scaleRatio",
+				"trainingLogicalBytes",
+				"heldOutLogicalBytes",
+			]),
 			`heldOutAttempts[${attemptIndex}]`,
 			path,
 		)
@@ -1067,13 +1123,28 @@ const validateCompleteConfigSchema = (
 		const attemptWorst = completeAndWithinBudget
 			? worstCaseFromResults(attempt.results as Record<string, unknown>[], path)
 			: null
+		const eligibleWorst = eligible[attemptIndex]!.worstCase
+		// For a complete attempt, scale by heldOut.logicalBytes / training.logicalBytes.
+		// For an incomplete attempt (attemptWorst null), no comparison ran, so all
+		// three scale fields are 0 — matching what the calibrator records.
+		const attemptTrainingLogical = attemptWorst ? eligibleWorst.logicalBytes! : 0
+		const attemptHeldLogical = attemptWorst?.logicalBytes ?? 0
+		const attemptScale = attemptWorst
+			? attemptTrainingLogical > 0
+				? attemptHeldLogical / attemptTrainingLogical
+				: 1
+			: 0
 		const attemptComparisons =
 			attemptWorst === null
 				? []
 				: expectedComparisons(
-						eligible[attemptIndex]!.worstCase,
+						eligibleWorst,
 						attemptWorst,
 						held.tolerances as Record<string, number>,
+						{
+							ratio: attemptScale,
+							metrics: new Set(["wallMs", "physicalBytes"]),
+						},
 					)
 		const attemptPassed =
 			attemptWorst !== null &&
@@ -1081,7 +1152,13 @@ const validateCompleteConfigSchema = (
 		if (
 			!exactJson(attempt.worstCase, attemptWorst) ||
 			!exactJson(attempt.comparisons, attemptComparisons) ||
-			attempt.passed !== attemptPassed
+			attempt.passed !== attemptPassed ||
+			typeof attempt.scaleRatio !== "number" ||
+			attempt.scaleRatio !== attemptScale ||
+			typeof attempt.trainingLogicalBytes !== "number" ||
+			attempt.trainingLogicalBytes !== attemptTrainingLogical ||
+			typeof attempt.heldOutLogicalBytes !== "number" ||
+			attempt.heldOutLogicalBytes !== attemptHeldLogical
 		) {
 			throw new Error(`invalid calibration config heldOutAttempts semantic evidence: ${path}`)
 		}

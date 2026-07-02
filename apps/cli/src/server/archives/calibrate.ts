@@ -293,11 +293,20 @@ export interface MetricComparison {
 }
 
 /**
- * Compare predicted (from calibration) and observed (from a real archive trial)
- * metrics within documented per-metric tolerances. Returns one entry per metric
- * plus an overall pass/fail. Pure. Throughput is directional (higher is better),
- * so it passes when observed >= predicted * (1 - tolerance); all other metrics
- * pass when observed is within `tolerance` of predicted in either direction.
+ * Compare predicted (from calibration training) and observed (from a real or
+ * held-out trial) metrics within documented per-metric tolerances. Returns one
+ * entry per metric plus an overall pass/fail. Pure. Throughput is directional
+ * (higher is better), so it passes when observed >= predicted * (1 - tolerance);
+ * all other metrics pass when observed is within `tolerance` of predicted.
+ *
+ * When the held-out sample is larger than training, absolute size-proportional
+ * metrics (wallMs, physicalBytes) do not compare cleanly: a 2×-larger held-out
+ * naturally takes ~2× the wall time and bytes. `sizeScaling` rescales the
+ * training prediction for those metrics by `ratio` (= heldOut.logicalBytes /
+ * training.logicalBytes) before the two-sided check, while peak RSS and peak
+ * temp disk remain absolute peaks and throughput/compression are size-invariant
+ * rates compared directly. The recorded `predicted` is the adjusted value, and
+ * `scaleRatio` is returned so the document is fully auditable.
  */
 export const comparePredictedObserved = (
 	predicted: CandidateMetrics,
@@ -310,7 +319,11 @@ export const comparePredictedObserved = (
 		physicalBytes: number
 		peakTempDiskBytes: number
 	},
-): { comparisons: ReadonlyArray<MetricComparison>; passed: boolean } => {
+	sizeScaling?: { ratio: number; metrics: ReadonlySet<"wallMs" | "physicalBytes"> },
+): { comparisons: ReadonlyArray<MetricComparison>; passed: boolean; scaleRatio: number } => {
+	const ratio = sizeScaling?.ratio ?? 1
+	const scale = (metric: "wallMs" | "physicalBytes", value: number): number =>
+		sizeScaling && sizeScaling.metrics.has(metric) && Number.isFinite(ratio) ? value * ratio : value
 	const twoSided = (
 		metric: MetricComparison["metric"],
 		p: number,
@@ -346,7 +359,7 @@ export const comparePredictedObserved = (
 	}
 	const comparisons: MetricComparison[] = [
 		twoSided("peakRssBytes", predicted.peakRssBytes, observed.peakRssBytes, tolerance.peakRssBytes),
-		twoSided("wallMs", predicted.wallMs, observed.wallMs, tolerance.wallMs),
+		twoSided("wallMs", scale("wallMs", predicted.wallMs), observed.wallMs, tolerance.wallMs),
 		throughput(
 			"writeThroughputBytesPerSec",
 			predicted.writeThroughputBytesPerSec,
@@ -359,7 +372,12 @@ export const comparePredictedObserved = (
 			observed.compressionRatio,
 			tolerance.compressionRatio,
 		),
-		twoSided("physicalBytes", predicted.physicalBytes, observed.physicalBytes, tolerance.physicalBytes),
+		twoSided(
+			"physicalBytes",
+			scale("physicalBytes", predicted.physicalBytes),
+			observed.physicalBytes,
+			tolerance.physicalBytes,
+		),
 		twoSided(
 			"peakTempDiskBytes",
 			predicted.peakTempDiskBytes,
@@ -367,7 +385,7 @@ export const comparePredictedObserved = (
 			tolerance.peakTempDiskBytes,
 		),
 	]
-	return { comparisons, passed: comparisons.every((c) => c.withinTolerance) }
+	return { comparisons, passed: comparisons.every((c) => c.withinTolerance), scaleRatio: ratio }
 }
 
 /** The measured environment recorded in every calibration document. */
@@ -448,6 +466,10 @@ export interface CalibrationRecommendation {
 		readonly comparisons: ReturnType<typeof comparePredictedObserved>["comparisons"]
 		readonly passed: true
 		readonly tolerances: typeof HELD_OUT_TOLERANCES
+		/** The size-scaling ratio applied to wallMs/physicalBytes (heldOut.logicalBytes / training.logicalBytes). */
+		readonly scaleRatio: number
+		readonly trainingLogicalBytes: number
+		readonly heldOutLogicalBytes: number
 	} | null
 	/** Every held-out candidate attempted, including rejected attempts. */
 	readonly heldOutAttempts: ReadonlyArray<{
@@ -456,6 +478,9 @@ export interface CalibrationRecommendation {
 		readonly worstCase: CandidateMetrics | null
 		readonly comparisons: ReadonlyArray<MetricComparison>
 		readonly passed: boolean
+		readonly scaleRatio: number
+		readonly trainingLogicalBytes: number
+		readonly heldOutLogicalBytes: number
 	}>
 	readonly budget: CalibrationBudget
 	readonly environment: CalibrationEnvironment

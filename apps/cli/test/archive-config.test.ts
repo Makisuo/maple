@@ -186,19 +186,29 @@ describe("loadTuningConfig", () => {
 			heldOut: {
 				results: heldOutResults,
 				worstCase: metrics,
-				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
-					.comparisons,
+				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
+					ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+					metrics: new Set(["wallMs", "physicalBytes"]),
+				}).comparisons,
 				passed: true,
 				tolerances: HELD_OUT_TOLERANCES,
+				scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+				trainingLogicalBytes: selectedWorstCase.logicalBytes,
+				heldOutLogicalBytes: metrics.logicalBytes,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
 					worstCase: metrics,
-					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
-						.comparisons,
+					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
+						ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+						metrics: new Set(["wallMs", "physicalBytes"]),
+					}).comparisons,
 					passed: true,
+					scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+					trainingLogicalBytes: selectedWorstCase.logicalBytes,
+					heldOutLogicalBytes: metrics.logicalBytes,
 				},
 			],
 			environment: {
@@ -349,6 +359,12 @@ describe("loadTuningConfig", () => {
 						doc.samplePolicy.heldOutMultiplier = 1
 						doc.samplePolicy.heldOutRows = 1000
 						doc.samplePolicy.heldOutWindow = "[1000, 2000)"
+					},
+				},
+				{
+					name: "forged-scale-ratio",
+					mutate: (doc) => {
+						doc.heldOut.scaleRatio = 0.5
 					},
 				},
 			]

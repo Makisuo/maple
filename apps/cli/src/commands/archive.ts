@@ -1086,13 +1086,28 @@ const runBoundCalibrationMatrix = async (
 					budget,
 					requiredSignals,
 				)[0]!.worstCase
-				const comparison = comparePredictedObserved(cand.worstCase, heldWorst, HELD_OUT_TOLERANCES)
+				// The held-out sample is larger than training, so absolute
+				// size-proportional metrics (wallMs, physicalBytes) are rescaled
+				// by the logical-bytes ratio before the two-sided check; throughput
+				// and compressionRatio are size-invariant rates compared directly;
+				// peak RSS and peak temp disk are absolute peaks. Peaks are NOT
+				// scaled by row count.
+				const trainingLogicalBytes = cand.worstCase.logicalBytes
+				const heldOutLogicalBytes = heldWorst.logicalBytes
+				const scaleRatio = trainingLogicalBytes > 0 ? heldOutLogicalBytes / trainingLogicalBytes : 1
+				const comparison = comparePredictedObserved(cand.worstCase, heldWorst, HELD_OUT_TOLERANCES, {
+					ratio: scaleRatio,
+					metrics: new Set(["wallMs", "physicalBytes"]),
+				})
 				heldOutAttempts.push({
 					candidate: cand.candidate,
 					results: heldOutResults,
 					worstCase: heldWorst,
 					comparisons: comparison.comparisons,
 					passed: comparison.passed,
+					scaleRatio,
+					trainingLogicalBytes,
+					heldOutLogicalBytes,
 				})
 				if (!comparison.passed) continue
 				selected = cand
@@ -1102,6 +1117,9 @@ const runBoundCalibrationMatrix = async (
 					comparisons: comparison.comparisons,
 					passed: true,
 					tolerances: HELD_OUT_TOLERANCES,
+					scaleRatio,
+					trainingLogicalBytes,
+					heldOutLogicalBytes,
 				}
 				note =
 					`selected the lowest-worst-case-peak-RSS candidate that met every ceiling ` +
@@ -1114,6 +1132,10 @@ const runBoundCalibrationMatrix = async (
 				worstCase: null,
 				comparisons: [],
 				passed: false,
+				// No complete held-out measurement: no size-scaling was applied.
+				scaleRatio: 0,
+				trainingLogicalBytes: 0,
+				heldOutLogicalBytes: 0,
 			})
 		}
 		if (selected === null) {
