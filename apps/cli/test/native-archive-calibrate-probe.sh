@@ -134,6 +134,49 @@ if ! "$MAPLE" archive calibrate "$RANGE_DATE" \
 fi
 grep -q "config written" "$ROOT/calibrate.out" || fail "calibrate did not write a config: $(cat "$ROOT/calibrate.out")"
 
+# --- Step 3b: crash after session release, before config publication ---
+# D-026 deliberately permits releasing the source pin after all measurements
+# complete. A crash in the following gap must publish no recommendation and
+# leave no session pin, recovery record, or owned sample/scratch debris.
+echo "--- post-session-release/pre-config-write SIGKILL boundary ---"
+BOUNDARY_CFG="$ROOT/boundary-must-not-exist.json"
+BOUNDARY_MARKER="$ROOT/boundary-marker"
+rm -rf "$BOUNDARY_MARKER"
+mkdir -p "$BOUNDARY_MARKER"
+"$MAPLE" archive calibrate "$RANGE_DATE" \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--checkpoint-id "$C1" \
+	--memory-budget 1073741824 --time-budget 180000 --sample-rows 10 \
+	--write-config "$BOUNDARY_CFG" \
+	--pause-at-session-phase post-session-release --session-marker-dir "$BOUNDARY_MARKER" \
+	>"$ROOT/boundary-calibrate.out" 2>&1 &
+BOUNDARY_PID=$!
+for _ in $(seq 1 1800); do
+	[[ -f "$BOUNDARY_MARKER/paused" ]] && break
+	if ! kill -0 "$BOUNDARY_PID" 2>/dev/null; then
+		cat "$ROOT/boundary-calibrate.out" >&2
+		fail "boundary calibration exited before post-session-release"
+	fi
+	sleep 0.1
+done
+[[ -f "$BOUNDARY_MARKER/paused" ]] || fail "boundary calibration did not reach post-session-release"
+[[ ! -e "$BOUNDARY_CFG" ]] || fail "config was published before the post-release fault seam"
+[[ ! -e "$ARCHIVE/calibration/recovery.json" ]] || fail "session record survived post-release reconciliation"
+if find "$DATA/backups/pins" -type f -name '*.json' -exec jq -e 'select(.purpose | startswith("archive-calibrate:"))' {} \; 2>/dev/null | grep -q .; then
+	fail "calibration pin survived post-release reconciliation"
+fi
+if [[ -d "$ARCHIVE/calibration/samples" ]] && [[ -n "$(ls -A "$ARCHIVE/calibration/samples" 2>/dev/null)" ]]; then
+	fail "sample debris existed at post-session-release boundary"
+fi
+shopt -s nullglob 2>/dev/null || true
+BOUNDARY_SCRATCH=( "$SCRATCH"/calibrate-* )
+[[ ${#BOUNDARY_SCRATCH[@]} -eq 0 ]] || fail "scratch debris existed at post-session-release boundary"
+kill -9 "$BOUNDARY_PID" 2>/dev/null || true
+wait "$BOUNDARY_PID" 2>/dev/null || true
+[[ ! -e "$BOUNDARY_CFG" ]] || fail "SIGKILL published a boundary config"
+[[ ! -e "$ARCHIVE/calibration/recovery.json" ]] || fail "SIGKILL recreated a session record"
+echo "  no config, pin, recovery record, or owned debris; explicit rerun required"
+
 # --- Step 4: assert the config document has real metrics + identity + environment ---
 echo "--- verifying config document ---"
 [[ -s "$CFG" ]] || fail "config file missing or empty"
@@ -161,10 +204,10 @@ HELD_OUT_ROWS="$(jq -r '.samplePolicy.heldOutRows' "$CFG")"
 [[ "$TRAINING_ROWS" =~ ^[0-9]+$ && "$HELD_OUT_ROWS" =~ ^[0-9]+$ ]] || fail "config samplePolicy missing numeric window sizes"
 [[ "$HELD_OUT_ROWS" -gt "$TRAINING_ROWS" ]] || fail "held-out window is not larger than training: $HELD_OUT_ROWS <= $TRAINING_ROWS"
 # Every ok training result has role training, startRow 0, requestedRows = training.
-BAD_TRAINING_SCOPE="$(jq -r '[.results[] | select(.ok) | select((.sample.role // "x") != "training" or (.sample.startRow // -1) != 0 or (.sample.requestedRows // -1) != '"$TRAINING_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount)] | length' "$CFG")"
+BAD_TRAINING_SCOPE="$(jq -r '[.results[] | select(.ok) | select((.sample.role // "x") != "training" or (.sample.startRow // -1) != 0 or (.sample.requestedRows // -1) != '"$TRAINING_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount or .metrics.rowCount != '"$TRAINING_ROWS"')] | length' "$CFG")"
 [[ "$BAD_TRAINING_SCOPE" -eq 0 ]] || fail "$BAD_TRAINING_SCOPE training result(s) have a missing/inconsistent sample scope"
 # Every held-out result has role held-out, startRow = training, requestedRows = held-out, disjoint.
-BAD_HELDOUT_SCOPE="$(jq -r '[.heldOut.results[] | select((.sample.role // "x") != "held-out" or (.sample.startRow // -1) != '"$TRAINING_ROWS"' or (.sample.requestedRows // -1) != '"$HELD_OUT_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount)] | length' "$CFG")"
+BAD_HELDOUT_SCOPE="$(jq -r '[.heldOut.results[] | select((.sample.role // "x") != "held-out" or (.sample.startRow // -1) != '"$TRAINING_ROWS"' or (.sample.requestedRows // -1) != '"$HELD_OUT_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount or .metrics.rowCount != '"$HELD_OUT_ROWS"')] | length' "$CFG")"
 [[ "$BAD_HELDOUT_SCOPE" -eq 0 ]] || fail "$BAD_HELDOUT_SCOPE held-out result(s) have a missing/inconsistent/disjoint sample scope"
 # All scopes bind to one checkpoint + range.
 UNIQUE_SCOPES="$(jq -r '[.results[].sample | {checkpointId, checkpointManifestFingerprint, rangeDate}] | unique | length' "$CFG")"

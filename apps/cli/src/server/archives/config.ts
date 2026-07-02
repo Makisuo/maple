@@ -552,10 +552,11 @@ const validateSampleScope = (
 		scope.requestedRows !== expected.requestedRows ||
 		typeof scope.rowCount !== "number" ||
 		!Number.isSafeInteger(scope.rowCount) ||
-		scope.rowCount !== expectedRowCount
+		scope.rowCount !== expectedRowCount ||
+		scope.rowCount !== expected.requestedRows
 	) {
 		throw new Error(
-			`invalid calibration config ${label} (scope must bind the single checkpoint/range and exact ${expected.role} window): ${path}`,
+			`invalid calibration config ${label} (scope must bind and fully observe the exact ${expected.role} window): ${path}`,
 		)
 	}
 }

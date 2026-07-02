@@ -603,6 +603,29 @@ export const archiveCalibrate = Command.make("calibrate", {
 				catch: (error) =>
 					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
 			})
+			if (
+				Option.getOrUndefined(a.pauseAtSessionPhase) === "post-session-release" &&
+				Option.getOrUndefined(a.sessionMarkerDir)
+			) {
+				const markerDir = Option.getOrUndefined(a.sessionMarkerDir)!
+				yield* Effect.tryPromise({
+					try: async () => {
+						const { mkdirSync, writeFileSync } = await import("node:fs")
+						mkdirSync(markerDir, { recursive: true })
+						writeFileSync(
+							join(markerDir, "paused"),
+							`post-session-release\n${process.pid}\n${new Date().toISOString()}\n`,
+						)
+						await new Promise<void>(() => {
+							/* deterministic SIGKILL seam after reconcile, before config/no-config publication */
+						})
+					},
+					catch: (error) =>
+						new ArchiveError({
+							message: error instanceof Error ? error.message : String(error),
+						}),
+				})
+			}
 			const tuning = recommendationToTuning(rec, archiveDir, scratchRoot)
 			yield* Effect.sync(() => {
 				for (const r of rec.results) {
@@ -1079,7 +1102,11 @@ const runBoundCalibrationMatrix = async (
 			// Require complete six-signal held-out evidence (not an empty array).
 			const heldOutComplete =
 				heldOutResults.length === requiredSignals.length &&
-				heldOutResults.every((r) => meetsCeilings(r, budget))
+				heldOutResults.every(
+					(r) =>
+						meetsCeilings(r, budget) &&
+						r.metrics?.rowCount === heldOutSampleRows(budget.sampleRows),
+				)
 			if (heldOutComplete) {
 				const heldWorst = selectCandidates(
 					new Map([[cand.candidate, heldOutResults]]),
@@ -1159,7 +1186,7 @@ const runBoundCalibrationMatrix = async (
 				bySignal.set(r.signal, Math.max(bySignal.get(r.signal) ?? 0, r.metrics.rowCount))
 			}
 		}
-		return requiredSignals.every((s) => (bySignal.get(s) ?? 0) >= budget.sampleRows)
+		return requiredSignals.every((s) => bySignal.get(s) === budget.sampleRows)
 	})()
 	const confidence: "high" | "low" = selected !== null && perSignalRepresentative ? "high" : "low"
 	if (confidence === "low" && selected !== null) {

@@ -170,10 +170,17 @@ The branch passed a full validation matrix at the head commit:
   tombstone evidence, zero-mutation parity).
 - **Calibration loop:** like-for-like six-metric comparison on a larger, disjoint
   held-out window through the shared writer, with every result's persisted
-  sample scope and the document's `samplePolicy` verified; tolerances are a fixed
-  canonical policy (each `< 1.0`) and cannot be redefined by the document.
+  sample scope and the document's `samplePolicy` verified. Training observes
+  exactly `N` rows and held-out exactly `2N` rows from `[N,3N)`; short windows
+  cannot recommend. The persisted hybrid comparison scales wall/physical-byte
+  predictions by the recorded logical-byte ratio, compares throughput and
+  compression directly, and leaves RSS/temp-disk as absolute peaks. Tolerances
+  are a fixed canonical policy (each `< 1.0`) and cannot be redefined by the
+  document.
 - **Calibration crash probe:** deterministic recovery of a SIGKILLed sampling
-  child and of an inert intent whose unpinned source was normally retired.
+  child and an inert intent whose unpinned source was normally retired, plus a post-session-release/
+  pre-config-write SIGKILL oracle proving no recommendation, pin, recovery
+  record, sample, or scratch debris survives.
 - **`archive create --config`:** manifest records the exact immutable config SHA
   and effective tuning, with no calibration debris.
 

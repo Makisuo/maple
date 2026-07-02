@@ -137,9 +137,10 @@ released after the generation is durable. Calibration pins use the purpose
 ## Commands
 
 `maple archive` has six operator-facing subcommands (`create`, `list`,
-`rebuild`, `reconcile`, `gc`, `calibrate`) plus the internal `calibrate-run`
-worker spawned by `calibrate`. There are no short flags anywhere in this
-command tree. Root flags fall back to `~/.maple` defaults when omitted.
+`rebuild`, `reconcile`, `gc`, `calibrate`) plus the internal
+`calibrate-session` and `calibrate-run` commands used by calibration and its
+fault probes. There are no short flags anywhere in this command tree. Root
+flags fall back to `~/.maple` defaults when omitted.
 
 | Flag             | Default            |
 | ---------------- | ------------------ |
@@ -274,10 +275,23 @@ The calibrator spawns each candidate as a child process under `/usr/bin/time`
 wall-clock and temporary-disk watchdog. It selects the candidate with the lowest
 worst-case peak RSS (tie-broken by wall) that passes every signal's ceiling,
 then validates the selection on a **disjoint held-out window**
-`[sampleRows, 2*sampleRows)` through the same real writer. Confidence is `high`
-only when a candidate is selected and every signal's training row count reached
-`sampleRows`; otherwise it is `low` with `selected: null` and no config is
-written. See [Calibration](#calibration).
+`[sampleRows, 3*sampleRows)` through the same real writer: `N` training rows
+followed by `2N` held-out rows. Confidence is `high` only when a candidate is
+selected and every signal actually produced the complete requested training
+and held-out cardinality; otherwise it is `low` with `selected: null` and no
+config is written. See [Calibration](#calibration).
+
+`maple archive calibrate-session --action open|close` is an internal recovery
+and probe command. `open` reconciles an older session, resolves one checkpoint,
+acquires its operation-scoped pin, and prints the operation/checkpoint identity
+required by `calibrate-run`. `close` invokes the authoritative reconciler,
+removing only the derived sample/scratch paths and exact session pin. Ordinary
+operators should use `calibrate`, which owns this lifecycle automatically.
+After all measurements finish, `calibrate` reconciles the session and releases
+the source pin before publishing the config. A deterministic
+`post-session-release` crash probe proves that interruption in this gap writes
+no config and leaves no pin, recovery record, sample, or scratch debris; the
+operator must rerun calibration.
 
 ## The happy path: fresh checkpoint through DuckDB investigation
 
@@ -376,8 +390,8 @@ Top-level keys (all required; unknown keys rejected):
 | `budget`                | The full `CalibrationBudget` the run used (see below)                  |
 | `selected`              | `{ candidate, worstCase }` for the chosen candidate (always present)   |
 | `confidence`            | `"high"` (a loadable recommendation is always high-confidence)         |
-| `heldOut`               | The selected candidate's held-out evidence + six-metric comparison     |
-| `heldOutAttempts`       | Every held-out candidate attempted, including rejected ones            |
+| `heldOut`               | Selected held-out evidence, scaling inputs, and six comparisons        |
+| `heldOutAttempts`       | Every attempt, including rejected results and recomputed comparisons   |
 | `samplePolicy`          | The disjoint training/held-out window contract (sizes + windows)       |
 | `environment`           | Maple/chDB version, schema fingerprint, CPU, memory, archive-volume id |
 | `results`               | Per-signal, per-candidate evidence, each with a `sample` scope         |
@@ -393,8 +407,17 @@ checkpointManifestFingerprint, rangeDate, role, startRow, requestedRows,
 rowCount }` — binding that measurement to one immutable checkpoint/range and an
 exact ordered-row window. Every training sample is `role: "training"`,
 `startRow: 0`; every held-out sample is `role: "held-out"`, `startRow:
-sampleRows`. The loader proves all scopes share one checkpoint/range and that
-the two windows are disjoint and correctly sized.
+sampleRows`. The loader proves all scopes share one checkpoint/range, that the
+two windows are disjoint, and that actual `rowCount` equals `requestedRows`
+(`N` for training and `2N` for held-out). A short source window is
+unrepresentative and cannot produce a loadable recommendation.
+
+`heldOut` and every complete `heldOutAttempts` entry persist
+`trainingLogicalBytes`, `heldOutLogicalBytes`, `scaleRatio`, the raw worst-case
+metrics, and six comparison records. Each comparison records the adjusted
+prediction, observation, tolerance, relative delta, and pass/fail result. The
+loader recomputes these values; the document cannot choose its own ratio,
+prediction, or tolerance.
 
 `environment.archiveVolume` records `{ fsid, type, archiveDir }` so a config is
 bound to the volume it was measured on, and `archive create --config` enforces
@@ -485,22 +508,27 @@ throughput, and temp disk.
 
 The selected candidate is re-measured on a **larger, disjoint** row window
 through the same shared writer. Training covered ordered rows `[0, sampleRows)`;
-held-out covers `[sampleRows, sampleRows + 2*sampleRows)` — strictly larger than
-training and non-overlapping. Both windows are recorded in every result's
-`sample` scope and in the document's `samplePolicy`, so disjointness and sizing
-are auditable and re-verified by the loader. The held-out measurement is
-compared to the training prediction on six metrics, each against a fixed
-canonical tolerance (`< 1.0` for every metric; the loader rejects a document
-that supplies its own tolerances):
+held-out covers `[sampleRows, sampleRows + 2*sampleRows)`, equivalently
+`[N, 3N)` — strictly larger than training and non-overlapping. Both requested
+windows and observed cardinalities are recorded in every result's `sample`
+scope and in `samplePolicy`; the loader requires actual `N`/`2N` rows.
 
-| Metric                       | Direction        |
-| ---------------------------- | ---------------- |
-| `peakRssBytes`               | two-sided        |
-| `wallMs`                     | two-sided        |
-| `writeThroughputBytesPerSec` | higher is better |
-| `compressionRatio`           | two-sided        |
-| `physicalBytes`              | two-sided        |
-| `peakTempDiskBytes`          | two-sided        |
+The comparison persists raw logical-byte totals and
+`scaleRatio = heldOutLogicalBytes / trainingLogicalBytes`. It adjusts only the
+size-proportional predictions before applying the fixed canonical tolerances
+(`< 1.0` for every metric):
+
+| Metric                       | Comparison                                    |
+| ---------------------------- | --------------------------------------------- |
+| `peakRssBytes`               | absolute peak, two-sided                      |
+| `wallMs`                     | training prediction × `scaleRatio`, two-sided |
+| `writeThroughputBytesPerSec` | direct; higher observed is better             |
+| `compressionRatio`           | direct, two-sided                             |
+| `physicalBytes`              | training prediction × `scaleRatio`, two-sided |
+| `peakTempDiskBytes`          | absolute peak, two-sided                      |
+
+The loader rejects document-selected tolerances and independently recomputes
+the ratio, adjusted predictions, relative deltas, and pass result.
 
 A candidate that fails held-out is **rejected** and the next eligible candidate
 is tried; every attempt (passing or rejected) is recorded in `heldOutAttempts`.

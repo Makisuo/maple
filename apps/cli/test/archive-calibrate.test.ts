@@ -852,8 +852,14 @@ describe("config-bound create enforces environment and volume identity", () => {
 	) => {
 		const candidate = CANDIDATE_MATRIX[0]!
 		const metrics = baseMetrics()
+		const heldOutMetrics = baseMetrics({
+			logicalBytes: metrics.logicalBytes * 2,
+			physicalBytes: metrics.physicalBytes * 2,
+			wallMs: metrics.wallMs * 2,
+			rowCount: metrics.rowCount * 2,
+		})
 		const freeSpaceReserve = 1_000_000
-		const sampleRows = 1000
+		const sampleRows = metrics.rowCount
 		const heldOutRows = 2 * sampleRows
 		const rangeDate = "2026-06-01"
 		const trainingSample = {
@@ -872,7 +878,7 @@ describe("config-bound create enforces environment and volume identity", () => {
 			role: "held-out" as const,
 			startRow: sampleRows,
 			requestedRows: heldOutRows,
-			rowCount: metrics.rowCount,
+			rowCount: heldOutMetrics.rowCount,
 		}
 		const effective = {
 			...candidate,
@@ -895,7 +901,7 @@ describe("config-bound create enforces environment and volume identity", () => {
 		const heldOutResults = ARCHIVE_SIGNALS.map((signal) => ({
 			candidate,
 			signal: signal.name,
-			metrics,
+			metrics: heldOutMetrics,
 			ok: true,
 			sample: heldOutSample,
 		}))
@@ -909,7 +915,7 @@ describe("config-bound create enforces environment and volume identity", () => {
 			budget: {
 				memoryBudget: 1e9,
 				timeBudget: 60000,
-				sampleRows: 1000,
+				sampleRows,
 				maxCandidateWallMs: 30000,
 				minThroughputBytesPerSec: 0,
 				maxTempDiskBytes: 2e9,
@@ -919,30 +925,40 @@ describe("config-bound create enforces environment and volume identity", () => {
 			selected: { candidate, worstCase: selectedWorstCase },
 			heldOut: {
 				results: heldOutResults,
-				worstCase: metrics,
-				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
-					ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
-					metrics: new Set(["wallMs", "physicalBytes"]),
-				}).comparisons,
+				worstCase: heldOutMetrics,
+				comparisons: comparePredictedObserved(
+					selectedWorstCase,
+					heldOutMetrics,
+					HELD_OUT_TOLERANCES,
+					{
+						ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
+						metrics: new Set(["wallMs", "physicalBytes"]),
+					},
+				).comparisons,
 				passed: true,
 				tolerances: HELD_OUT_TOLERANCES,
-				scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+				scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
 				trainingLogicalBytes: selectedWorstCase.logicalBytes,
-				heldOutLogicalBytes: metrics.logicalBytes,
+				heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
-					worstCase: metrics,
-					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
-						ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
-						metrics: new Set(["wallMs", "physicalBytes"]),
-					}).comparisons,
+					worstCase: heldOutMetrics,
+					comparisons: comparePredictedObserved(
+						selectedWorstCase,
+						heldOutMetrics,
+						HELD_OUT_TOLERANCES,
+						{
+							ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
+							metrics: new Set(["wallMs", "physicalBytes"]),
+						},
+					).comparisons,
 					passed: true,
-					scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+					scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
 					trainingLogicalBytes: selectedWorstCase.logicalBytes,
-					heldOutLogicalBytes: metrics.logicalBytes,
+					heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 				},
 			],
 			environment: env.environment,

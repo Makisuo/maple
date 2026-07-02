@@ -113,6 +113,13 @@ describe("loadTuningConfig", () => {
 			wallMs: 5,
 			rowCount: 1000,
 		}
+		const heldOutMetrics = {
+			...metrics,
+			logicalBytes: 2000,
+			physicalBytes: 600,
+			wallMs: 10,
+			rowCount: 2000,
+		}
 		const freeSpaceReserve = 500_000_000
 		const effective = {
 			...candidate,
@@ -155,9 +162,9 @@ describe("loadTuningConfig", () => {
 		const heldOutResults = ARCHIVE_SIGNALS.map((signal) => ({
 			candidate,
 			signal: signal.name,
-			metrics,
+			metrics: heldOutMetrics,
 			ok: true,
-			sample: heldOutSample(1000),
+			sample: heldOutSample(2000),
 		}))
 		return {
 			formatVersion: TUNING_CONFIG_FORMAT_VERSION,
@@ -185,30 +192,40 @@ describe("loadTuningConfig", () => {
 			},
 			heldOut: {
 				results: heldOutResults,
-				worstCase: metrics,
-				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
-					ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
-					metrics: new Set(["wallMs", "physicalBytes"]),
-				}).comparisons,
+				worstCase: heldOutMetrics,
+				comparisons: comparePredictedObserved(
+					selectedWorstCase,
+					heldOutMetrics,
+					HELD_OUT_TOLERANCES,
+					{
+						ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
+						metrics: new Set(["wallMs", "physicalBytes"]),
+					},
+				).comparisons,
 				passed: true,
 				tolerances: HELD_OUT_TOLERANCES,
-				scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+				scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
 				trainingLogicalBytes: selectedWorstCase.logicalBytes,
-				heldOutLogicalBytes: metrics.logicalBytes,
+				heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
-					worstCase: metrics,
-					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES, {
-						ratio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
-						metrics: new Set(["wallMs", "physicalBytes"]),
-					}).comparisons,
+					worstCase: heldOutMetrics,
+					comparisons: comparePredictedObserved(
+						selectedWorstCase,
+						heldOutMetrics,
+						HELD_OUT_TOLERANCES,
+						{
+							ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
+							metrics: new Set(["wallMs", "physicalBytes"]),
+						},
+					).comparisons,
 					passed: true,
-					scaleRatio: metrics.logicalBytes / selectedWorstCase.logicalBytes,
+					scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
 					trainingLogicalBytes: selectedWorstCase.logicalBytes,
-					heldOutLogicalBytes: metrics.logicalBytes,
+					heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 				},
 			],
 			environment: {
@@ -365,6 +382,40 @@ describe("loadTuningConfig", () => {
 					name: "forged-scale-ratio",
 					mutate: (doc) => {
 						doc.heldOut.scaleRatio = 0.5
+					},
+				},
+				{
+					name: "short-observed-held-out-window",
+					mutate: (doc) => {
+						for (const result of doc.heldOut.results) {
+							result.metrics.rowCount = doc.budget.sampleRows
+							result.sample.rowCount = doc.budget.sampleRows
+						}
+					},
+				},
+				{
+					name: "forged-canonical-tolerances-with-recomputed-comparisons",
+					mutate: (doc) => {
+						const forged = {
+							peakRssBytes: 10_000,
+							wallMs: 10_000,
+							writeThroughputBytesPerSec: 10_000,
+							compressionRatio: 10_000,
+							physicalBytes: 10_000,
+							peakTempDiskBytes: 10_000,
+						}
+						doc.heldOut.tolerances = forged as typeof doc.heldOut.tolerances
+						const recomputed = comparePredictedObserved(
+							doc.selected.worstCase,
+							doc.heldOut.worstCase,
+							forged,
+							{
+								ratio: doc.heldOut.scaleRatio,
+								metrics: new Set(["wallMs", "physicalBytes"]),
+							},
+						).comparisons
+						doc.heldOut.comparisons = recomputed
+						doc.heldOutAttempts[0]!.comparisons = recomputed
 					},
 				},
 			]
