@@ -598,6 +598,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* cloudflare.completeConnect(code, state).pipe(
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("Cloudflare OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
 					Effect.map((result) =>
 						htmlResponse(
 							cloudflareCallbackPage({
@@ -631,12 +639,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 									400,
 								),
 							),
-						"@maple/http/errors/IntegrationsUpstreamError": () =>
+						// Upstream messages are our own sanitized strings (they embed Cloudflare's
+						// OAuth error text) — showing them turns "it failed" into something actionable.
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
 							Effect.succeed(
 								htmlResponse(
 									cloudflareCallbackPage({
 										status: "error",
-										message: "Failed to complete Cloudflare connection",
+										message: error.message,
 										returnTo: null,
 									}),
 									400,

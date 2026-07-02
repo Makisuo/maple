@@ -20,9 +20,16 @@ const jsonResponse = (body: unknown, status = 200) =>
  * `accounts` drives single-account enforcement.
  */
 const mockCloudflareFetch =
-	(accounts: ReadonlyArray<{ id: string; name: string; type: string }>): typeof globalThis.fetch =>
+	(
+		accounts: ReadonlyArray<{ id: string; name: string; type: string }>,
+		counters?: { revoked: number },
+	): typeof globalThis.fetch =>
 	(input) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+		if (url.includes("/oauth2/revoke")) {
+			if (counters) counters.revoked += 1
+			return Promise.resolve(new Response(null, { status: 200 }))
+		}
 		if (url.includes("/oauth2/token")) {
 			return Promise.resolve(
 				jsonResponse({
@@ -48,8 +55,10 @@ const mockCloudflareFetch =
 		return Promise.resolve(jsonResponse({ success: false, errors: [], messages: [], result: null }, 404))
 	}
 
-const withMockFetch = (accounts: ReadonlyArray<{ id: string; name: string; type: string }>) =>
-	Layer.succeed(FetchHttpClient.Fetch, mockCloudflareFetch(accounts))
+const withMockFetch = (
+	accounts: ReadonlyArray<{ id: string; name: string; type: string }>,
+	counters?: { revoked: number },
+) => Layer.succeed(FetchHttpClient.Fetch, mockCloudflareFetch(accounts, counters))
 
 const baseConfig = {
 	PORT: "3472",
@@ -194,12 +203,13 @@ describe("CloudflareOAuthService", () => {
 		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts))))
 	})
 
-	it.effect("completeConnect rejects a token that spans multiple accounts", () => {
+	it.effect("completeConnect rejects a token that spans multiple accounts and revokes it", () => {
 		const testDb = createTestDb(trackedDbs)
 		const accounts = [
 			{ id: "acc_1", name: "Acme Inc", type: "standard" },
 			{ id: "acc_2", name: "Beta LLC", type: "standard" },
 		]
+		const counters = { revoked: 0 }
 		return Effect.gen(function* () {
 			const service = yield* CloudflareOAuthService
 			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
@@ -210,7 +220,13 @@ describe("CloudflareOAuthService", () => {
 
 			const status = yield* service.getStatus(asOrgId("org_a"))
 			assert.strictEqual(status.connected, false)
-		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts))))
+			// The rejected token is never stored, so it must be revoked upstream right away.
+			assert.strictEqual(counters.revoked, 1)
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts, counters)),
+			),
+		)
 	})
 
 	it.effect("disconnect on a non-connected org reports nothing removed", () => {

@@ -364,11 +364,14 @@ export class CloudflareOAuthService extends Context.Service<
 
 			// Resolve — and require exactly one — Cloudflare account. A token that spans multiple
 			// accounts is ambiguous for org→account scoping, so we refuse it (Superlog's rule).
+			// On refusal, best-effort revoke the just-issued tokens: they are never persisted, so
+			// this is the only moment we can invalidate them upstream.
 			const accounts = yield* listAccounts(
 				tokenResponse.access_token,
 				env.MAPLE_CLOUDFLARE_API_BASE_URL,
 			)
 			if (accounts.length === 0) {
+				yield* revokeToken(config, tokenResponse.access_token)
 				return yield* Effect.fail(
 					new IntegrationsValidationError({
 						message: "The Cloudflare authorization granted access to no accounts",
@@ -376,6 +379,7 @@ export class CloudflareOAuthService extends Context.Service<
 				)
 			}
 			if (accounts.length > 1) {
+				yield* revokeToken(config, tokenResponse.access_token)
 				return yield* Effect.fail(
 					new IntegrationsValidationError({
 						message:
