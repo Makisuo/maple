@@ -10,7 +10,7 @@ import {
 } from "@maple/domain/http"
 import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema, Semaphore } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { listAccounts } from "../lib/CloudflareApi"
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
@@ -504,41 +504,89 @@ export class CloudflareOAuthService extends Context.Service<
 				return tokenResponse.access_token
 			})
 
+		const rowIsValid = (row: OAuthConnectionRow, currentTime: number) =>
+			row.expiresAt == null || row.expiresAt.getTime() - currentTime > REFRESH_LEEWAY_MS
+
+		const tokenFromRow = (row: OAuthConnectionRow) =>
+			decryptValue({
+				ciphertext: row.accessTokenCiphertext,
+				iv: row.accessTokenIv,
+				tag: row.accessTokenTag,
+			}).pipe(
+				Effect.map(
+					(accessToken) =>
+						({ accessToken, accountId: row.externalUserId }) satisfies CloudflareAccessToken,
+				),
+			)
+
+		// Cloudflare rotates refresh tokens on use, so two concurrent refreshes with the same
+		// stored token make the loser 400 — which would falsely surface as "revoked". Serialize
+		// refreshes within this isolate (refreshes are rare, one permit is fine) and re-check the
+		// row after acquiring: a fiber that waited usually finds the winner's fresh tokens.
+		const refreshSemaphore = Semaphore.makeUnsafe(1)
+
+		const refreshWithSingleFlight = (config: ResolvedCloudflareOAuthConfig, orgId: OrgId) =>
+			refreshSemaphore.withPermits(1)(
+				Effect.gen(function* () {
+					// Double-checked: another local fiber may have refreshed while we waited.
+					const row = yield* requireConnection(orgId)
+					if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
+						return yield* tokenFromRow(row)
+					}
+
+					if (!row.refreshTokenCiphertext || !row.refreshTokenIv || !row.refreshTokenTag) {
+						return yield* Effect.fail(
+							new IntegrationsRevokedError({
+								message:
+									"Cloudflare access token expired and no refresh token is stored — reconnect required",
+							}),
+						)
+					}
+
+					const refreshToken = yield* decryptValue({
+						ciphertext: row.refreshTokenCiphertext,
+						iv: row.refreshTokenIv,
+						tag: row.refreshTokenTag,
+					})
+					return yield* refreshAccessToken(config, refreshToken).pipe(
+						Effect.flatMap((refreshed) =>
+							persistRefreshedTokens(row, refreshed).pipe(
+								Effect.map(
+									(accessToken) =>
+										({
+											accessToken,
+											accountId: row.externalUserId,
+										}) satisfies CloudflareAccessToken,
+								),
+							),
+						),
+						// Cross-isolate race: a concurrent worker isolate may have consumed the rotated
+						// refresh token and persisted new tokens between our read and our refresh. Before
+						// declaring the connection revoked, re-read the row — if a newer, valid token
+						// landed, use it.
+						Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
+							Effect.gen(function* () {
+								const latest = yield* requireConnection(orgId)
+								const advanced = latest.updatedAt.getTime() > row.updatedAt.getTime()
+								if (advanced && rowIsValid(latest, yield* Clock.currentTimeMillis)) {
+									return yield* tokenFromRow(latest)
+								}
+								return yield* Effect.fail(error)
+							}),
+						),
+					)
+				}),
+			)
+
 		const getValidAccessToken = Effect.fn("CloudflareOAuthService.getValidAccessToken")(function* (
 			orgId: OrgId,
 		) {
 			const config = yield* resolveConfig(env)
 			const row = yield* requireConnection(orgId)
-			const isValid =
-				row.expiresAt == null ||
-				row.expiresAt.getTime() - (yield* Clock.currentTimeMillis) > REFRESH_LEEWAY_MS
-
-			if (isValid) {
-				const accessToken = yield* decryptValue({
-					ciphertext: row.accessTokenCiphertext,
-					iv: row.accessTokenIv,
-					tag: row.accessTokenTag,
-				})
-				return { accessToken, accountId: row.externalUserId } satisfies CloudflareAccessToken
+			if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
+				return yield* tokenFromRow(row)
 			}
-
-			if (!row.refreshTokenCiphertext || !row.refreshTokenIv || !row.refreshTokenTag) {
-				return yield* Effect.fail(
-					new IntegrationsRevokedError({
-						message:
-							"Cloudflare access token expired and no refresh token is stored — reconnect required",
-					}),
-				)
-			}
-
-			const refreshToken = yield* decryptValue({
-				ciphertext: row.refreshTokenCiphertext,
-				iv: row.refreshTokenIv,
-				tag: row.refreshTokenTag,
-			})
-			const refreshed = yield* refreshAccessToken(config, refreshToken)
-			const accessToken = yield* persistRefreshedTokens(row, refreshed)
-			return { accessToken, accountId: row.externalUserId } satisfies CloudflareAccessToken
+			return yield* refreshWithSingleFlight(config, orgId)
 		})
 
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {

@@ -229,6 +229,80 @@ describe("CloudflareOAuthService", () => {
 		)
 	})
 
+	it.effect("concurrent getValidAccessToken refreshes once (single-flight, no false revoke)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const counters = { refreshes: 0 }
+		// authorization_code → immediately-expiring token (forces refresh on first use);
+		// refresh_token → succeeds ONCE, then 400s (Cloudflare rotates refresh tokens on use).
+		const fetchImpl: typeof globalThis.fetch = async (input, init) => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+			if (url.includes("/oauth2/token")) {
+				// The body may arrive as a stream — normalize through Request to read it.
+				const text = await new Request(url, {
+					method: "POST",
+					body: init?.body,
+					// @ts-expect-error duplex is required for streaming bodies in undici/Bun
+					duplex: "half",
+				}).text()
+				const body = new URLSearchParams(text)
+				if (body.get("grant_type") === "refresh_token") {
+					counters.refreshes += 1
+					if (counters.refreshes > 1) {
+						return jsonResponse({ error: "invalid_grant" }, 400)
+					}
+					return jsonResponse({
+						access_token: "cf-access-token-refreshed",
+						refresh_token: "cf-refresh-token-rotated",
+						token_type: "bearer",
+						expires_in: 3600,
+					})
+				}
+				return jsonResponse({
+					access_token: "cf-access-token-initial",
+					refresh_token: "cf-refresh-token",
+					token_type: "bearer",
+					// Within the 60s refresh leeway → the very next getValidAccessToken refreshes.
+					expires_in: 1,
+				})
+			}
+			if (url.includes("/accounts")) {
+				return jsonResponse({
+					success: true,
+					errors: [],
+					messages: [],
+					result: [{ id: "acc_1", name: "Acme Inc", type: "standard" }],
+					result_info: { count: 1, page: 1, per_page: 50, total_count: 1 },
+				})
+			}
+			return jsonResponse({ success: false, errors: [], messages: [], result: null }, 404)
+		}
+
+		return Effect.gen(function* () {
+			const service = yield* CloudflareOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback",
+			})
+			yield* service.completeConnect("auth-code", state)
+
+			// Two racers on an expired token: without single-flight both refresh, the loser's
+			// rotated-token 400 falsely surfaces as IntegrationsRevokedError.
+			const [a, b] = yield* Effect.all(
+				[service.getValidAccessToken(asOrgId("org_a")), service.getValidAccessToken(asOrgId("org_a"))],
+				{ concurrency: 2 },
+			)
+			assert.strictEqual(a.accessToken, "cf-access-token-refreshed")
+			assert.strictEqual(b.accessToken, "cf-access-token-refreshed")
+			assert.strictEqual(counters.refreshes, 1)
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb, withOAuthApp),
+					Layer.succeed(FetchHttpClient.Fetch, fetchImpl),
+				),
+			),
+		)
+	})
+
 	it.effect("disconnect on a non-connected org reports nothing removed", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
