@@ -25,9 +25,9 @@ Parquet files, sealed once, that any DuckDB can read.
   `active.json` pointer.
 - A **calibration** workflow that measures export behavior on the deployment's
   hardware and emits a versioned, SHA-256-bound tuning config.
-- Crash-safe operation throughout: every mutation is journaled, every
-  interruption reconciles to its intended state without touching the live store,
-  and a single pure decision function owns all branch logic.
+- Crash-safe create and GC: their mutations are journaled, calibration uses
+  separate recovery records, and a single pure decision function owns
+  create/GC recovery branch logic.
 - A conservative **garbage collector** that reclaims superseded generations by
   tombstone-rename with terminal-invariant proofs.
 - Full operator/architecture documentation (`docs/local-telemetry-archives.md`).
@@ -85,9 +85,10 @@ duplicate checkpoint logic.
 ## Resource and adoption implications
 
 - **Disk:** the archive volume grows with retained historical ranges. The volume
-  must be separate from the live data directory. `minFreeSpaceReserve` enforces
-  headroom at operation time; `archive gc` bounds growth by reclaiming
-  superseded generations.
+  must be separate from the live data directory. Create requires
+  `minFreeSpaceReserve + targetChunkBytes`; calibration children require
+  `freeSpaceReserve + 4 * maxShardBytes`. `archive gc` bounds growth by
+  reclaiming superseded generations.
 - **Memory/CPU during export:** export restores a checkpoint into scratch, adding
   temporary scratch-restore capacity. Because checkpoint validation and archive
   export share **one** sacrificial chDB, export does not add a second concurrent
@@ -124,12 +125,13 @@ Every archive failure leaves the **live store untouched** — export reads only
 from restored scratch. The categories:
 
 - **No generation written:** unavailable or incompatible checkpoint, free-space
-  preflight failure, partial shard (exceeds bounds), or validation mismatch. The
-  owned building dir is removed; no active pointer changes.
-- **Recoverable debris (clears automatically):** interrupted building dirs
-  (owned, removed on retry) and stale pins (over-retained). The next `create`
-  reconciles as its first step; `archive reconcile` does it explicitly.
-- **Requires reconciliation:** an interrupted create *after* publication (pointer
+  preflight failure, a single matching row exceeding `maxShardBytes`, or a
+  validation mismatch. No active pointer changes.
+- **Recoverable or retained debris:** the next `create` or
+  `archive reconcile` releases exact create scratch/pin ownership and moves
+  pre-publication building output into retained quarantine. Unrelated stale
+  pins remain safely over-retained.
+- **Requires reconciliation:** an interrupted create _after_ publication (pointer
   re-selected, catalog rebuilt) and an interrupted GC (frozen target set resumed;
   a half-removed tombstone is finished, an already-absent target confirmed).
 - **Operator intervention:** a `FailClosed` reconciliation (impossible topology

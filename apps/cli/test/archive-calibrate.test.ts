@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest"
-import { ok, rejects, strictEqual } from "node:assert"
+import { ok, rejects, strictEqual, throws } from "node:assert"
 import {
 	writeFileSync as writeFileSyncSync,
 	mkdtempSync,
@@ -11,9 +11,14 @@ import {
 	writeFileSync,
 	existsSync,
 } from "node:fs"
-import { tmpdir } from "node:os"
+import { arch, cpus, platform, tmpdir, totalmem, userInfo } from "node:os"
 import { join } from "node:path"
-import { checkpointRoot, checkpointSnapshotDir, checkpointStatePath } from "../src/server/checkpoints"
+import {
+	acquireCheckpointPin,
+	checkpointRoot,
+	checkpointSnapshotDir,
+	checkpointStatePath,
+} from "../src/server/checkpoints"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
 
@@ -69,7 +74,9 @@ import {
 	writeCalibrationConfig,
 	type CalibrationRecommendation,
 	CANDIDATE_MATRIX,
+	deriveTargetChunkBytes,
 } from "../src/server/archives/calibrate"
+import { ARCHIVE_SIGNALS } from "../src/server/archives/signals"
 import {
 	reconcileCalibration,
 	writeCalibrationRecord,
@@ -79,7 +86,17 @@ import {
 	derivedSampleDir,
 	directoryTreeBytes,
 	preflightCalibrationFreeSpace,
+	assertCalibrationSession,
+	cleanupCalibrationSample,
+	archiveVolumeIdentity,
 } from "../src/server/archives/calibration-recovery"
+import { createArchiveGeneration } from "../src/server/archives/generation"
+import { listActiveOperationIds } from "../src/server/archives/journal"
+import {
+	loadTuningConfig,
+	resolveArchiveTuning,
+	type LoadedTuningConfig,
+} from "../src/server/archives/config"
 
 const baseMetrics = (over: Partial<CandidateMetrics> = {}): CandidateMetrics => ({
 	logicalBytes: 1_000_000,
@@ -122,6 +139,24 @@ const cand = (wt: number, rg: number): CalibrationCandidate => ({
 	maxShardRows: 500_000,
 	maxShardBytes: 256 * 1024 * 1024,
 })
+
+/** Create isolated data/archive/scratch roots under the real temp volume. */
+const withRoots = async (
+	run: (roots: { dataDir: string; archiveDir: string; scratchRoot: string }) => Promise<void>,
+): Promise<void> => {
+	const parent = realpathSync(mktmp(join(tmpdir(), "maple-calrec-")))
+	const dataDir = join(parent, "data")
+	const archiveDir = join(parent, "archive")
+	const scratchRoot = join(parent, "scratch")
+	mkdirSync(dataDir, { recursive: true })
+	mkdirSync(archiveDir, { recursive: true })
+	mkdirSync(scratchRoot, { recursive: true })
+	try {
+		await run({ dataDir, archiveDir, scratchRoot })
+	} finally {
+		rmSync(parent, { recursive: true, force: true })
+	}
+}
 
 describe("calibration measurement engine — meetsCeilings", () => {
 	it("passes when all metrics are within every ceiling with margin applied inside", () => {
@@ -331,15 +366,65 @@ describe("calibration measurement engine — comparePredictedObserved", () => {
 	})
 })
 
+describe("calibration tuning derivation and strict volume binding", () => {
+	it("derives both non-candidate knobs exactly and rejects overflow", () => {
+		strictEqual(deriveTargetChunkBytes(256 * 1024 * 1024, 512 * 1024 * 1024), 1024 * 1024 * 1024)
+		strictEqual(deriveTargetChunkBytes(100, 10_000), 10_100)
+		throws(() => deriveTargetChunkBytes(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER), /overflow/)
+	})
+
+	it("inspects only an existing canonical non-symlink archive root", async () => {
+		const parent = realpathSync(mkdtempSync(join(tmpdir(), "maple-bound-volume-")))
+		try {
+			const root = join(parent, "archive")
+			const link = join(parent, "archive-link")
+			mkdirSync(root)
+			symlinkSync(root, link)
+			const identity = await archiveVolumeIdentity(root)
+			ok(identity.fsid.startsWith("dev:"))
+			await rejects(archiveVolumeIdentity(link), /real non-symlink|canonical/)
+			await rejects(archiveVolumeIdentity(join(parent, "missing")), /ENOENT|existing/)
+		} finally {
+			rmSync(parent, { recursive: true, force: true })
+		}
+	})
+})
+
 describe("calibration config document — writeCalibrationConfig emits required fields", () => {
 	it("writes environment, evidence, safetyMargin, recalibrationTriggers, and schemaFingerprint", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-cfg-"))
 		try {
 			const path = join(dir, "cfg.json")
 			const rec: CalibrationRecommendation = {
-				formatVersion: 1,
+				formatVersion: 2,
+				checkpoint: {
+					checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+					manifestFingerprint: "checkpoint:fingerprint",
+				},
 				selected: { candidate: CANDIDATE_MATRIX[0]!, worstCase: baseMetrics() },
 				results: [okResult(CANDIDATE_MATRIX[0]!, "logs", baseMetrics())],
+				heldOut: {
+					results: [okResult(CANDIDATE_MATRIX[0]!, "logs", baseMetrics())],
+					worstCase: baseMetrics(),
+					comparisons: comparePredictedObserved(baseMetrics(), baseMetrics(), {
+						peakRssBytes: 0.5,
+						wallMs: 1,
+						writeThroughputBytesPerSec: 0.75,
+						compressionRatio: 0.5,
+						physicalBytes: 1,
+						peakTempDiskBytes: 0.5,
+					}).comparisons,
+					passed: true,
+					tolerances: {
+						peakRssBytes: 0.5,
+						wallMs: 1,
+						writeThroughputBytesPerSec: 0.75,
+						compressionRatio: 0.5,
+						physicalBytes: 1,
+						peakTempDiskBytes: 0.5,
+					},
+				},
+				heldOutAttempts: [],
 				budget: baseBudget(),
 				environment: {
 					mapleVersion: "test",
@@ -361,7 +446,7 @@ describe("calibration config document — writeCalibrationConfig emits required 
 			const tuning = recommendationToTuning(rec, "/tmp/archive", "/tmp/scratch")
 			writeCalibrationConfig(path, rec, tuning)
 			const doc = JSON.parse(require("node:fs").readFileSync(path, "utf8")) as Record<string, unknown>
-			strictEqual(doc.formatVersion, 1)
+			strictEqual(doc.formatVersion, 2)
 			ok(doc.environment !== undefined)
 			ok(Array.isArray(doc.results))
 			ok(doc.safetyMargin !== undefined)
@@ -375,23 +460,6 @@ describe("calibration config document — writeCalibrationConfig emits required 
 })
 
 describe("calibration recovery — idempotent reconcile", () => {
-	const withRoots = async (
-		run: (roots: { dataDir: string; archiveDir: string; scratchRoot: string }) => Promise<void>,
-	): Promise<void> => {
-		const parent = realpathSync(mktmp(join(tmpdir(), "maple-calrec-")))
-		const dataDir = join(parent, "data")
-		const archiveDir = join(parent, "archive")
-		const scratchRoot = join(parent, "scratch")
-		mkdirSync(dataDir, { recursive: true })
-		mkdirSync(archiveDir, { recursive: true })
-		mkdirSync(scratchRoot, { recursive: true })
-		try {
-			await run({ dataDir, archiveDir, scratchRoot })
-		} finally {
-			rmSync(parent, { recursive: true, force: true })
-		}
-	}
-
 	it("reconciling when no prior record exists is a no-op", async () => {
 		await withRoots(async (roots) => {
 			await reconcileCalibration(roots.archiveDir, roots)
@@ -432,11 +500,113 @@ describe("calibration recovery — idempotent reconcile", () => {
 		})
 	})
 
+	it("retires an inert intent after normal retention removes its still-unpinned source checkpoint", async () => {
+		await withRoots(async (roots) => {
+			const operationId = "deadbeef-1111-4aaa-9bbb-deadbeefdead"
+			const checkpointId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+			const replacementId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+			const pinId = "11111111-2222-4333-8444-555555555555"
+			const fingerprint = seedCheckpoint(roots.dataDir, checkpointId)
+			// A later checkpoint becomes current, then normal retention removes the
+			// unpinned source selected by the interrupted intent.
+			seedCheckpoint(roots.dataDir, replacementId)
+			rmSync(checkpointSnapshotDir(roots.dataDir, checkpointId), { recursive: true, force: true })
+			const sampleDir = derivedSampleDir(roots.archiveDir, operationId)
+			await writeCalibrationRecord(roots.archiveDir, {
+				phase: "intent",
+				operationId,
+				pinId,
+				pinPurpose: calibrationPinPurpose(operationId),
+				pinPath: null,
+				checkpointId,
+				checkpointManifestFingerprint: fingerprint,
+				boundRoots: roots,
+				ownedPaths: { scratchSubdir: derivedScratchSubdir(operationId), sampleDir },
+			})
+
+			await reconcileCalibration(roots.archiveDir, roots)
+
+			strictEqual(existsSync(calibrationRecoveryPath(roots.archiveDir)), false)
+			strictEqual(existsSync(checkpointSnapshotDir(roots.dataDir, replacementId)), true)
+		})
+	})
+
+	it("preserves a missing-checkpoint intent when an exact derived resource is still present", async () => {
+		await withRoots(async (roots) => {
+			const operationId = "deadbeef-1111-4aaa-9bbb-deadbeefdead"
+			const checkpointId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+			const replacementId = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+			const pinId = "11111111-2222-4333-8444-555555555555"
+			const fingerprint = seedCheckpoint(roots.dataDir, checkpointId)
+			seedCheckpoint(roots.dataDir, replacementId)
+			rmSync(checkpointSnapshotDir(roots.dataDir, checkpointId), { recursive: true, force: true })
+			const sampleDir = derivedSampleDir(roots.archiveDir, operationId)
+			mkdirSync(sampleDir, { recursive: true })
+			await writeCalibrationRecord(roots.archiveDir, {
+				phase: "intent",
+				operationId,
+				pinId,
+				pinPurpose: calibrationPinPurpose(operationId),
+				pinPath: null,
+				checkpointId,
+				checkpointManifestFingerprint: fingerprint,
+				boundRoots: roots,
+				ownedPaths: { scratchSubdir: derivedScratchSubdir(operationId), sampleDir },
+			})
+
+			await rejects(
+				reconcileCalibration(roots.archiveDir, roots),
+				/source checkpoint.*preserving record/i,
+			)
+			strictEqual(existsSync(calibrationRecoveryPath(roots.archiveDir)), true)
+			strictEqual(existsSync(sampleDir), true)
+		})
+	})
+
 	it("re-running reconcile after cleanup is a no-op (idempotent)", async () => {
 		await withRoots(async (roots) => {
 			await reconcileCalibration(roots.archiveDir, roots)
 			await reconcileCalibration(roots.archiveDir, roots)
 			strictEqual(existsSync(calibrationRecoveryPath(roots.archiveDir)), false)
+		})
+	})
+
+	it("cleans one child sample while retaining the parent session pin and durable identity", async () => {
+		await withRoots(async (roots) => {
+			const operationId = "deadbeef-1111-4aaa-9bbb-deadbeefdead"
+			const checkpointId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+			const pinId = "11111111-2222-4333-8444-555555555555"
+			const fingerprint = seedCheckpoint(roots.dataDir, checkpointId)
+			const purpose = calibrationPinPurpose(operationId)
+			const pinPath = await acquireCheckpointPin(roots.dataDir, checkpointId, purpose, pinId)
+			const sampleDir = derivedSampleDir(roots.archiveDir, operationId)
+			const scratchSubdir = derivedScratchSubdir(operationId)
+			mkdirSync(join(roots.scratchRoot, scratchSubdir), { recursive: true })
+			mkdirSync(sampleDir, { recursive: true })
+			await writeCalibrationRecord(roots.archiveDir, {
+				phase: "pin-acquired",
+				operationId,
+				pinId,
+				pinPurpose: purpose,
+				pinPath,
+				checkpointId,
+				checkpointManifestFingerprint: fingerprint,
+				boundRoots: roots,
+				ownedPaths: { scratchSubdir, sampleDir },
+			})
+
+			const session = assertCalibrationSession(roots.archiveDir, roots, {
+				operationId,
+				checkpointId,
+				checkpointManifestFingerprint: fingerprint,
+			})
+			await cleanupCalibrationSample(session)
+
+			strictEqual(existsSync(pinPath), true)
+			strictEqual(existsSync(calibrationRecoveryPath(roots.archiveDir)), true)
+			strictEqual(existsSync(join(roots.scratchRoot, scratchSubdir)), false)
+			strictEqual(existsSync(sampleDir), false)
+			await reconcileCalibration(roots.archiveDir, roots)
 		})
 	})
 
@@ -550,4 +720,207 @@ describe("calibration recovery — directoryTreeBytes and preflightFreeSpace", (
 			rmSync(dir, { recursive: true, force: true })
 		}
 	})
+})
+
+describe("config-bound create enforces environment and volume identity", () => {
+	/** Capture the live host's environment + the real archive-volume identity. */
+	const liveEnvironment = async (archiveDir: string) => {
+		const cpuList = cpus()
+		const vol = await archiveVolumeIdentity(archiveDir)
+		return {
+			environment: {
+				mapleVersion: MAPLE_VERSION,
+				chdbVersion: CHDB_VERSION,
+				schemaFingerprint: SCHEMA_FINGERPRINT,
+				executionUser: userInfo().username,
+				platform: platform(),
+				arch: arch(),
+				cpuModel: cpuList.length > 0 ? cpuList[0]!.model : "unknown",
+				cpuCount: cpuList.length,
+				totalMemoryBytes: totalmem(),
+				measurementTool: "/usr/bin/time",
+				archiveVolume: { ...vol, archiveDir },
+			},
+		}
+	}
+
+	/** A minimal internally-consistent v2 config document bound to a checkpoint + archive. */
+	const configDocumentFor = async (
+		archiveDir: string,
+		checkpointId: string,
+		fingerprint: string,
+		env: Awaited<ReturnType<typeof liveEnvironment>>,
+	) => {
+		const candidate = CANDIDATE_MATRIX[0]!
+		const metrics = baseMetrics()
+		const freeSpaceReserve = 1_000_000
+		const effective = {
+			...candidate,
+			targetChunkBytes: deriveTargetChunkBytes(candidate.maxShardBytes, freeSpaceReserve),
+			minFreeSpaceReserve: freeSpaceReserve,
+		}
+		// Every candidate/signal uses identical metrics so every recomputed worst
+		// case (training and held-out) equals `metrics`, keeping the document
+		// internally consistent for the loader's semantic re-derivation.
+		const results = CANDIDATE_MATRIX.flatMap((matrixCandidate) =>
+			ARCHIVE_SIGNALS.map((signal) => ({
+				candidate: matrixCandidate,
+				signal: signal.name,
+				metrics,
+				ok: true,
+			})),
+		)
+		const selectedWorstCase = metrics
+		const heldOutResults = ARCHIVE_SIGNALS.map((signal) => ({
+			candidate,
+			signal: signal.name,
+			metrics,
+			ok: true,
+		}))
+		return {
+			formatVersion: 2,
+			measuredAt: "2026-07-01T00:00:00.000Z",
+			confidence: "high" as const,
+			checkpoint: { checkpointId, manifestFingerprint: fingerprint },
+			candidateMatrix: CANDIDATE_MATRIX,
+			requiredSignals: ARCHIVE_SIGNALS.map((signal) => signal.name),
+			budget: {
+				memoryBudget: 1e9,
+				timeBudget: 60000,
+				sampleRows: 1000,
+				maxCandidateWallMs: 30000,
+				minThroughputBytesPerSec: 0,
+				maxTempDiskBytes: 2e9,
+				freeSpaceReserve,
+				safetyMargin: 1.1,
+			},
+			selected: { candidate, worstCase: selectedWorstCase },
+			heldOut: {
+				results: heldOutResults,
+				worstCase: metrics,
+				comparisons: comparePredictedObserved(selectedWorstCase, metrics, {
+					peakRssBytes: 0.5,
+					wallMs: 1,
+					writeThroughputBytesPerSec: 0.75,
+					compressionRatio: 0.5,
+					physicalBytes: 1,
+					peakTempDiskBytes: 0.5,
+				}).comparisons,
+				passed: true,
+				tolerances: {
+					peakRssBytes: 0.5,
+					wallMs: 1,
+					writeThroughputBytesPerSec: 0.75,
+					compressionRatio: 0.5,
+					physicalBytes: 1,
+					peakTempDiskBytes: 0.5,
+				},
+			},
+			heldOutAttempts: [
+				{
+					candidate,
+					results: heldOutResults,
+					worstCase: metrics,
+					comparisons: comparePredictedObserved(selectedWorstCase, metrics, {
+						peakRssBytes: 0.5,
+						wallMs: 1,
+						writeThroughputBytesPerSec: 0.75,
+						compressionRatio: 0.5,
+						physicalBytes: 1,
+						peakTempDiskBytes: 0.5,
+					}).comparisons,
+					passed: true,
+				},
+			],
+			environment: env.environment,
+			effective,
+			derivation: {
+				minFreeSpaceReserve: "budget.freeSpaceReserve",
+				targetChunkBytes:
+					"max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)",
+			},
+			safetyMargin: 1.1,
+			recalibrationTriggers: ["Maple version change"],
+			results,
+			note: "test",
+		}
+	}
+
+	/** Write a config doc + load it, returning a LoadedTuningConfig bound to the roots. */
+	const loadedConfigFor = async (
+		roots: { dataDir: string; archiveDir: string; scratchRoot: string },
+		checkpointId: string,
+		fingerprint: string,
+	): Promise<{ config: LoadedTuningConfig; dir: string }> => {
+		const env = await liveEnvironment(roots.archiveDir)
+		const doc = await configDocumentFor(roots.archiveDir, checkpointId, fingerprint, env)
+		const dir = mkdtempSync(join(tmpdir(), "maple-cfgenv-"))
+		const path = join(dir, "cfg.json")
+		writeFileSync(path, JSON.stringify(doc))
+		const config = loadTuningConfig(path)
+		return { config, dir }
+	}
+
+	it("rejects create before any mutation when the recorded environment mismatches the live host", async () => {
+		await withRoots(async (roots) => {
+			const checkpointId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+			const fingerprint = seedCheckpoint(roots.dataDir, checkpointId)
+			const { config, dir } = await loadedConfigFor(roots, checkpointId, fingerprint)
+			try {
+				// Forge a single environment field; the live host's schema differs.
+				;(config.document.environment as { schemaFingerprint: string }).schemaFingerprint += "-forged"
+				const tuning = resolveArchiveTuning({ ...config.overrides, ...roots })
+				await rejects(
+					createArchiveGeneration(
+						roots.dataDir,
+						roots.archiveDir,
+						"logs",
+						"2026-06-01",
+						tuning,
+						"current",
+						{},
+						config,
+					),
+					/calibration environment mismatch: schemaFingerprint/,
+				)
+				// No mutation: the env check precedes intent publication.
+				strictEqual(listActiveOperationIds(roots.archiveDir).length, 0)
+			} finally {
+				rmSync(dir, { recursive: true, force: true })
+			}
+		})
+	})
+
+	it("rejects create before any mutation when the recorded archive volume differs", async () => {
+		await withRoots(async (roots) => {
+			const checkpointId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+			const fingerprint = seedCheckpoint(roots.dataDir, checkpointId)
+			const { config, dir } = await loadedConfigFor(roots, checkpointId, fingerprint)
+			try {
+				// Forge the volume device id while keeping the canonical path.
+				;(config.document.environment.archiveVolume as { fsid: string }).fsid = "dev:deadbeef"
+				const tuning = resolveArchiveTuning({ ...config.overrides, ...roots })
+				await rejects(
+					createArchiveGeneration(
+						roots.dataDir,
+						roots.archiveDir,
+						"logs",
+						"2026-06-01",
+						tuning,
+						"current",
+						{},
+						config,
+					),
+					/calibration environment mismatch: archive volume/,
+				)
+				strictEqual(listActiveOperationIds(roots.archiveDir).length, 0)
+			} finally {
+				rmSync(dir, { recursive: true, force: true })
+			}
+		})
+	})
+
+	// NOTE: the publication-time volume re-check (beforePublicationVolumeRecheck)
+	// fires AFTER the full chDB export, so it is proven by the NATIVE calibrate
+	// probe's config-bound create step, not by this chDB-free unit harness.
 })

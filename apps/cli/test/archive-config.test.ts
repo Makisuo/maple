@@ -11,6 +11,12 @@ import {
 	loadTuningConfig,
 	TUNING_CONFIG_FORMAT_VERSION,
 } from "../src/server/archives/config"
+import {
+	CANDIDATE_MATRIX,
+	comparePredictedObserved,
+	HELD_OUT_TOLERANCES,
+} from "../src/server/archives/calibrate"
+import { ARCHIVE_SIGNALS } from "../src/server/archives/signals"
 
 const base = { archiveDir: "/tmp/archive", scratchRoot: "/tmp/scratch" }
 
@@ -94,79 +100,109 @@ describe("archive tuning config", () => {
 
 describe("loadTuningConfig", () => {
 	/** A minimal valid calibration config document for round-trip testing. */
-	const validConfigDoc = (
-		effective = {
-			writerThreads: 2,
-			rowGroupRows: 20_000,
-			maxShardRows: 500_000,
-			maxShardBytes: 256 * 1024 * 1024,
-			targetChunkBytes: 1024 * 1024 * 1024,
-			minFreeSpaceReserve: 512 * 1024 * 1024,
-		},
-	) => ({
-		formatVersion: TUNING_CONFIG_FORMAT_VERSION,
-		measuredAt: "2026-07-01T00:00:00.000Z",
-		confidence: "high",
-		budget: {
-			memoryBudget: 1e9,
-			timeBudget: 60000,
-			sampleRows: 1000,
-			maxCandidateWallMs: 30000,
-			minThroughputBytesPerSec: 0,
-			maxTempDiskBytes: 2e9,
-			freeSpaceReserve: 5e8,
-			safetyMargin: 1.1,
-		},
-		selected: {
-			candidate: {
-				writerThreads: effective.writerThreads,
-				rowGroupRows: effective.rowGroupRows,
-				maxShardRows: effective.maxShardRows,
-				maxShardBytes: effective.maxShardBytes,
+	const validConfigDoc = () => {
+		const candidate = CANDIDATE_MATRIX[0]!
+		const metrics = {
+			logicalBytes: 1000,
+			physicalBytes: 300,
+			compressionRatio: 0.3,
+			writeThroughputBytesPerSec: 100,
+			peakTempDiskBytes: 500,
+			peakRssBytes: 200,
+			wallMs: 5,
+			rowCount: 1000,
+		}
+		const freeSpaceReserve = 500_000_000
+		const effective = {
+			...candidate,
+			targetChunkBytes: Math.max(
+				4 * candidate.maxShardBytes,
+				freeSpaceReserve + candidate.maxShardBytes,
+			),
+			minFreeSpaceReserve: freeSpaceReserve,
+		}
+		const results = CANDIDATE_MATRIX.flatMap((matrixCandidate, candidateIndex) =>
+			ARCHIVE_SIGNALS.map((signal) => ({
+				candidate: matrixCandidate,
+				signal: signal.name,
+				metrics: { ...metrics, peakRssBytes: 200 + candidateIndex },
+				ok: true,
+			})),
+		)
+		const selectedWorstCase = { ...metrics, peakRssBytes: 200 }
+		const heldOutResults = ARCHIVE_SIGNALS.map((signal) => ({
+			candidate,
+			signal: signal.name,
+			metrics,
+			ok: true,
+		}))
+		return {
+			formatVersion: TUNING_CONFIG_FORMAT_VERSION,
+			measuredAt: "2026-07-01T00:00:00.000Z",
+			confidence: "high",
+			checkpoint: {
+				checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+				manifestFingerprint: "checkpoint:fingerprint",
 			},
-			worstCase: {
-				logicalBytes: 1000,
-				physicalBytes: 300,
-				compressionRatio: 0.3,
-				writeThroughputBytesPerSec: 100,
-				peakTempDiskBytes: 500,
-				peakRssBytes: 200,
-				wallMs: 5,
-				rowCount: 10,
+			candidateMatrix: CANDIDATE_MATRIX,
+			requiredSignals: ARCHIVE_SIGNALS.map((signal) => signal.name),
+			budget: {
+				memoryBudget: 1e9,
+				timeBudget: 60000,
+				sampleRows: 1000,
+				maxCandidateWallMs: 30000,
+				minThroughputBytesPerSec: 0,
+				maxTempDiskBytes: 2e9,
+				freeSpaceReserve,
+				safetyMargin: 1.1,
 			},
-		},
-		environment: {
-			mapleVersion: "x",
-			chdbVersion: "y",
-			schemaFingerprint: "z",
-			executionUser: "tester",
-			platform: "darwin",
-			arch: "arm64",
-			cpuModel: "test-cpu",
-			cpuCount: 8,
-			totalMemoryBytes: 16_000_000_000,
-			measurementTool: "/usr/bin/time",
-			archiveVolume: { fsid: "dev:1", type: 17, archiveDir: "/tmp/archive" },
-		},
-		effective,
-		safetyMargin: 1.1,
-		recalibrationTriggers: ["Maple version change"],
-		results: [
-			{
-				candidate: {
-					writerThreads: effective.writerThreads,
-					rowGroupRows: effective.rowGroupRows,
-					maxShardRows: effective.maxShardRows,
-					maxShardBytes: effective.maxShardBytes,
+			selected: {
+				candidate,
+				worstCase: selectedWorstCase,
+			},
+			heldOut: {
+				results: heldOutResults,
+				worstCase: metrics,
+				comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
+					.comparisons,
+				passed: true,
+				tolerances: HELD_OUT_TOLERANCES,
+			},
+			heldOutAttempts: [
+				{
+					candidate,
+					results: heldOutResults,
+					worstCase: metrics,
+					comparisons: comparePredictedObserved(selectedWorstCase, metrics, HELD_OUT_TOLERANCES)
+						.comparisons,
+					passed: true,
 				},
-				signal: "logs",
-				metrics: null,
-				ok: false,
-				error: "x",
+			],
+			environment: {
+				mapleVersion: "x",
+				chdbVersion: "y",
+				schemaFingerprint: "z",
+				executionUser: "tester",
+				platform: "darwin",
+				arch: "arm64",
+				cpuModel: "test-cpu",
+				cpuCount: 8,
+				totalMemoryBytes: 16_000_000_000,
+				measurementTool: "/usr/bin/time",
+				archiveVolume: { fsid: "dev:1", type: 17, archiveDir: "/tmp/archive" },
 			},
-		],
-		note: "test",
-	})
+			effective,
+			derivation: {
+				minFreeSpaceReserve: "budget.freeSpaceReserve",
+				targetChunkBytes:
+					"max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)",
+			},
+			safetyMargin: 1.1,
+			recalibrationTriggers: ["Maple version change"],
+			results,
+			note: "test",
+		}
+	}
 
 	it("round-trips a valid config: loads effective overrides + SHA-256 identity", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-"))
@@ -175,8 +211,8 @@ describe("loadTuningConfig", () => {
 			const doc = validConfigDoc()
 			writeFileSync(path, JSON.stringify(doc))
 			const { overrides, identity } = loadTuningConfig(path)
-			strictEqual(overrides.writerThreads, 2)
-			strictEqual(overrides.rowGroupRows, 20_000)
+			strictEqual(overrides.writerThreads, 1)
+			strictEqual(overrides.rowGroupRows, 10_000)
 			strictEqual(identity.formatVersion, TUNING_CONFIG_FORMAT_VERSION)
 			strictEqual(identity.configName, "cfg.json")
 			strictEqual(identity.sha256.length, 64)
@@ -204,9 +240,63 @@ describe("loadTuningConfig", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-"))
 		try {
 			const path = join(dir, "cfg.json")
-			const effective = { ...validConfigDoc().effective, bogus: 1 }
-			writeFileSync(path, JSON.stringify(validConfigDoc(effective)))
-			throws(() => loadTuningConfig(path), /unknown calibration config effective field 'bogus'/)
+			const doc = validConfigDoc()
+			;(doc.effective as typeof doc.effective & { bogus: number }).bogus = 1
+			writeFileSync(path, JSON.stringify(doc))
+			throws(() => loadTuningConfig(path), /unknown calibration config effective\.bogus/)
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects hostile semantic rewrites even when every field remains well typed", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-semantic-"))
+		try {
+			const cases: Array<{ name: string; mutate: (doc: ReturnType<typeof validConfigDoc>) => void }> = [
+				{
+					name: "forged-selected-worst-case",
+					mutate: (doc) => {
+						doc.selected.worstCase.peakRssBytes++
+					},
+				},
+				{
+					name: "missing-training-cell",
+					mutate: (doc) => {
+						doc.results.pop()
+					},
+				},
+				{
+					name: "forged-held-out-comparison",
+					mutate: (doc) => {
+						doc.heldOut.comparisons[0]!.withinTolerance = false
+					},
+				},
+				{
+					name: "forged-effective-reserve",
+					mutate: (doc) => {
+						doc.effective.minFreeSpaceReserve++
+					},
+				},
+				{
+					name: "forged-derivation",
+					mutate: (doc) => {
+						doc.derivation.targetChunkBytes = "selected.maxShardBytes" as never
+					},
+				},
+				{
+					name: "wrong-checkpoint-shape",
+					mutate: (doc) => {
+						doc.checkpoint.manifestFingerprint = ""
+					},
+				},
+			]
+			for (const testCase of cases) {
+				const doc = validConfigDoc()
+				testCase.mutate(doc)
+				const path = join(dir, `${testCase.name}.json`)
+				writeFileSync(path, JSON.stringify(doc))
+				throws(() => loadTuningConfig(path), /invalid|missing|recomputed|derivation/i)
+			}
 		} finally {
 			rmSync(dir, { recursive: true, force: true })
 		}

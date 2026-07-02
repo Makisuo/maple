@@ -156,6 +156,13 @@ describe("archive generation manifest parser", () => {
 		throws(() => parseArchiveGenerationManifest(bad), /tuning/)
 	})
 
+	it("rejects an unknown top-level key", () => {
+		throws(
+			() => parseArchiveGenerationManifest(validGenerationManifest({ rogue: true })),
+			/unknown archive manifest field: rogue/,
+		)
+	})
+
 	it("reads a manifest from disk bound to its location", async () => {
 		await withArchive(async (archiveDir) => {
 			const { readArchiveGenerationManifest } = await import("../src/server/archives/manifest")
@@ -243,6 +250,18 @@ describe("archive manifest tuningConfig identity", () => {
 		strictEqual(parsed.tuningConfig, null)
 	})
 
+	it("rejects a v3 manifest missing the tuningConfig key", () => {
+		const manifest = validGenerationManifest()
+		delete (manifest as Record<string, unknown>).tuningConfig
+		throws(() => parseArchiveGenerationManifest(manifest), /tuningConfig \(required in formatVersion 3\)/)
+	})
+
+	it("rejects a legacy-shaped v3 manifest with tuningConfigName but no tuningConfig key", () => {
+		const manifest = validGenerationManifest({ tuningConfigName: "calib-2026.json" })
+		delete (manifest as Record<string, unknown>).tuningConfig
+		throws(() => parseArchiveGenerationManifest(manifest), /tuningConfig \(required in formatVersion 3\)/)
+	})
+
 	it("rejects a tuningConfig with a malformed sha256", () => {
 		const generationId = randomUUID()
 		const manifest = validGenerationManifest({
@@ -276,6 +295,94 @@ describe("archive manifest tuningConfig identity", () => {
 		throws(
 			() => parseArchiveGenerationManifest(manifest, "traces", "2026-06-01", generationId),
 			/unsafe name/,
+		)
+	})
+})
+
+describe("archive manifest tuning", () => {
+	it("rejects all-zero tuning", () => {
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					validGenerationManifest({
+						tuning: {
+							writerThreads: 0,
+							rowGroupRows: 0,
+							maxShardRows: 0,
+							maxShardBytes: 0,
+							targetChunkBytes: 0,
+							minFreeSpaceReserve: 0,
+						},
+					}),
+				),
+			/tuning field: writerThreads \(must be a positive integer\)/,
+		)
+	})
+
+	it("rejects writerThreads greater than 32", () => {
+		const tuning = validGenerationManifest().tuning
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					validGenerationManifest({ tuning: { ...tuning, writerThreads: 33 } }),
+				),
+			/writerThreads must not exceed 32/,
+		)
+	})
+
+	it("rejects rowGroupRows greater than maxShardRows", () => {
+		const tuning = validGenerationManifest().tuning
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					validGenerationManifest({
+						tuning: { ...tuning, rowGroupRows: tuning.maxShardRows + 1 },
+					}),
+				),
+			/rowGroupRows must not exceed maxShardRows/,
+		)
+	})
+
+	it("rejects maxShardBytes smaller than rowGroupRows * 1024", () => {
+		const tuning = validGenerationManifest().tuning
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					validGenerationManifest({
+						tuning: {
+							...tuning,
+							maxShardBytes: tuning.rowGroupRows * 1024 - 1,
+						},
+					}),
+				),
+			/maxShardBytes .* is too small for rowGroupRows/,
+		)
+	})
+
+	it("rejects minFreeSpaceReserve greater than or equal to targetChunkBytes", () => {
+		const tuning = validGenerationManifest().tuning
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					validGenerationManifest({
+						tuning: {
+							...tuning,
+							minFreeSpaceReserve: tuning.targetChunkBytes,
+						},
+					}),
+				),
+			/minFreeSpaceReserve must be smaller than targetChunkBytes/,
+		)
+	})
+
+	it("rejects an unknown tuning key", () => {
+		const tuning = validGenerationManifest().tuning
+		throws(
+			() =>
+				parseArchiveGenerationManifest(
+					validGenerationManifest({ tuning: { ...tuning, rogue: true } }),
+				),
+			/unknown archive manifest tuning field: rogue/,
 		)
 	})
 })

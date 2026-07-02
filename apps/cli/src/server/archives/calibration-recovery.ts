@@ -23,11 +23,17 @@
 //    absent; a real release/removal failure PRESERVES the record for retry.
 //  - the checkpoint fingerprint is recorded and validated on reconcile.
 
-import { readFileSync, statSync } from "node:fs"
+import { lstatSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { rm, statfs } from "node:fs/promises"
 import { dirname, isAbsolute, resolve } from "node:path"
 import { durableJson, durableRemove } from "../durable-files"
-import { pinFilePath, releaseCheckpointPin, resolveCheckpoint } from "../checkpoints"
+import {
+	checkpointRoot,
+	checkpointSnapshotDir,
+	pinFilePath,
+	releaseCheckpointPin,
+	resolveCheckpoint,
+} from "../checkpoints"
 import { assertNoSymlinkSync, assertRealFileSync, classifyArchivePathSync } from "./paths"
 
 /** The calibration recovery record format version. */
@@ -253,6 +259,47 @@ const removeOwnedDir = async (root: string, dir: string, label: string): Promise
 }
 
 /**
+ * An intent is safe to retire without resolving its source checkpoint only when
+ * it is provably inert: the record predates pin acquisition, records no pin
+ * path, and every exact derived resource is absent. This closes the recovery
+ * wedge where normal checkpoint retention removes the still-unpinned source
+ * snapshot after a crash at `intent`.
+ *
+ * Every classification is symlink-aware and rooted. Any present resource,
+ * unsafe topology, later phase, or surviving source snapshot keeps the normal
+ * fingerprint-validation path fail-closed.
+ */
+const isInertIntentWithRetiredCheckpoint = (prior: CalibrationRecoveryRecord): boolean => {
+	if (prior.phase !== "intent" || prior.pinPath !== null) return false
+	const checkpointOwner = checkpointRoot(prior.boundRoots.dataDir)
+	const snapshot = checkpointSnapshotDir(prior.boundRoots.dataDir, prior.checkpointId)
+	if (classifyArchivePathSync(checkpointOwner, snapshot, "calibration source checkpoint") !== "absent") {
+		return false
+	}
+	const pinPath = derivedPinPath(prior.boundRoots.dataDir, prior.checkpointId, prior.pinId)
+	if (classifyArchivePathSync(checkpointOwner, pinPath, "calibration checkpoint pin") !== "absent") {
+		return false
+	}
+	const scratchOwned = resolve(prior.boundRoots.scratchRoot, prior.ownedPaths.scratchSubdir)
+	if (
+		classifyArchivePathSync(prior.boundRoots.scratchRoot, scratchOwned, "calibration scratch subdir") !==
+		"absent"
+	) {
+		return false
+	}
+	if (
+		classifyArchivePathSync(
+			prior.boundRoots.archiveDir,
+			prior.ownedPaths.sampleDir,
+			"calibration sample dir",
+		) !== "absent"
+	) {
+		return false
+	}
+	return true
+}
+
+/**
  * Reconcile a prior interrupted calibration run: release its exact DERIVED pin
  * and remove its exact DERIVED owned scratch subdir and sample directory, then
  * clear the record. The pin is derived from pinId so even an intent-phase crash
@@ -273,7 +320,23 @@ export const reconcileCalibration = async (
 	// Validate the checkpoint fingerprint against the LIVE checkpoint manifest, so
 	// the recorded identity actually binds the reconciled pin to the checkpoint it
 	// claims (C2). A stale/foreign fingerprint refuses to reconcile (preserve).
-	const resolved = await resolveCheckpoint(prior.boundRoots.dataDir, prior.checkpointId)
+	let resolved
+	try {
+		resolved = await resolveCheckpoint(prior.boundRoots.dataDir, prior.checkpointId)
+	} catch (error) {
+		// At intent, no allocation has been authorized yet. If normal checkpoint
+		// retention removed the still-unpinned source and every exact derived
+		// resource is provably absent, the recovery record itself is the only
+		// remaining state and may be retired safely. Any ambiguity preserves it.
+		if (isInertIntentWithRetiredCheckpoint(prior)) {
+			await durableRemove(calibrationRecoveryPath(archiveDir))
+			return
+		}
+		const message = error instanceof Error ? error.message : String(error)
+		throw new Error(
+			`calibration reconcile: source checkpoint could not be validated; preserving record: ${message}`,
+		)
+	}
 	const liveFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
 	if (liveFingerprint !== prior.checkpointManifestFingerprint) {
 		throw new Error(
@@ -307,6 +370,52 @@ export const reconcileCalibration = async (
 		throw new Error(`calibration reconcile: pin not confirmed released; preserving record`)
 	}
 	await durableRemove(calibrationRecoveryPath(archiveDir))
+}
+
+/**
+ * Validate that a child belongs to the live parent-owned calibration session.
+ * Children never resolve `current`, acquire a replacement pin, or release the
+ * session pin; they consume only this exact durable checkpoint identity.
+ */
+export const assertCalibrationSession = (
+	archiveDir: string,
+	expectedRoots: { dataDir: string; archiveDir: string; scratchRoot: string },
+	expected: {
+		operationId: string
+		checkpointId: string
+		checkpointManifestFingerprint: string
+	},
+): CalibrationRecoveryRecord => {
+	const record = readPriorCalibrationRecord(archiveDir, expectedRoots)
+	if (
+		record === null ||
+		record.operationId !== expected.operationId ||
+		record.phase !== "pin-acquired" ||
+		record.pinPath === null ||
+		record.checkpointId !== expected.checkpointId ||
+		record.checkpointManifestFingerprint !== expected.checkpointManifestFingerprint
+	) {
+		throw new Error("calibration child is not bound to the live parent session; refusing")
+	}
+	const pinTopology = classifyArchivePathSync(
+		checkpointRoot(expectedRoots.dataDir),
+		derivedPinPath(expectedRoots.dataDir, record.checkpointId, record.pinId),
+		"calibration session pin",
+	)
+	if (pinTopology !== "real-file") {
+		throw new Error(`calibration parent session pin is not live (${pinTopology}); refusing child`)
+	}
+	return record
+}
+
+/** Remove only the session's derived scratch/sample dirs while retaining its pin and record. */
+export const cleanupCalibrationSample = async (record: CalibrationRecoveryRecord): Promise<void> => {
+	await removeOwnedDir(
+		record.boundRoots.scratchRoot,
+		resolve(record.boundRoots.scratchRoot, record.ownedPaths.scratchSubdir),
+		"scratch subdir",
+	)
+	await removeOwnedDir(record.boundRoots.archiveDir, record.ownedPaths.sampleDir, "sample dir")
 }
 
 /**
@@ -439,11 +548,15 @@ export const directoryTreeBytes = async (dir: string): Promise<number> => {
  * device id from stat (cross-platform) plus the statfs filesystem type.
  */
 export const archiveVolumeIdentity = async (archiveDir: string): Promise<{ fsid: string; type: number }> => {
-	let statPath = resolve(archiveDir)
-	let climbs = 0
-	while (!existsSyncSafe(statPath) && climbs < 64) {
-		statPath = dirname(statPath)
-		climbs++
+	const statPath = resolve(archiveDir)
+	const link = lstatSync(statPath)
+	if (!link.isDirectory() || link.isSymbolicLink()) {
+		throw new Error(
+			`archive volume inspection requires an existing real non-symlink directory: ${statPath}`,
+		)
+	}
+	if (realpathSync(statPath) !== statPath) {
+		throw new Error(`archive volume inspection requires a canonical archive root: ${statPath}`)
 	}
 	const info = await statfs(statPath)
 	// Use the device id (cross-platform, from statSync) as the volume id, plus

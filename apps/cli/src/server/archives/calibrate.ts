@@ -390,6 +390,10 @@ export const RECALIBRATION_TRIGGERS: ReadonlyArray<string> = [
 
 export interface CalibrationRecommendation {
 	readonly formatVersion: typeof TUNING_CONFIG_FORMAT_VERSION
+	readonly checkpoint: {
+		readonly checkpointId: string
+		readonly manifestFingerprint: string
+	}
 	/** The selected candidate, or null if none met the goals on held-out validation. */
 	readonly selected: {
 		readonly candidate: CalibrationCandidate
@@ -397,6 +401,21 @@ export interface CalibrationRecommendation {
 	} | null
 	/** Full per-signal, per-candidate evidence. */
 	readonly results: ReadonlyArray<CandidateResult>
+	readonly heldOut: {
+		readonly results: ReadonlyArray<CandidateResult>
+		readonly worstCase: CandidateMetrics
+		readonly comparisons: ReturnType<typeof comparePredictedObserved>["comparisons"]
+		readonly passed: true
+		readonly tolerances: typeof HELD_OUT_TOLERANCES
+	} | null
+	/** Every held-out candidate attempted, including rejected attempts. */
+	readonly heldOutAttempts: ReadonlyArray<{
+		readonly candidate: CalibrationCandidate
+		readonly results: ReadonlyArray<CandidateResult>
+		readonly worstCase: CandidateMetrics | null
+		readonly comparisons: ReadonlyArray<MetricComparison>
+		readonly passed: boolean
+	}>
 	readonly budget: CalibrationBudget
 	readonly environment: CalibrationEnvironment
 	/**
@@ -427,12 +446,38 @@ export const recommendationToTuning = (
 					rowGroupRows: rec.selected.candidate.rowGroupRows,
 					maxShardRows: rec.selected.candidate.maxShardRows,
 					maxShardBytes: rec.selected.candidate.maxShardBytes,
+					minFreeSpaceReserve: rec.budget.freeSpaceReserve,
+					targetChunkBytes: deriveTargetChunkBytes(
+						rec.selected.candidate.maxShardBytes,
+						rec.budget.freeSpaceReserve,
+					),
 					archiveDir,
 					scratchRoot,
 				}
 			: { archiveDir, scratchRoot }
 	return resolveArchiveTuning(overrides)
 }
+
+export const deriveTargetChunkBytes = (maxShardBytes: number, freeSpaceReserve: number): number => {
+	const fourShards = maxShardBytes * 4
+	const reservePlusShard = freeSpaceReserve + maxShardBytes
+	const derived = Math.max(fourShards, reservePlusShard)
+	if (!Number.isSafeInteger(derived) || derived <= 0) {
+		throw new Error(
+			`calibration targetChunkBytes derivation overflow: maxShardBytes=${maxShardBytes}, reserve=${freeSpaceReserve}`,
+		)
+	}
+	return derived
+}
+
+export const HELD_OUT_TOLERANCES = {
+	peakRssBytes: 0.5,
+	wallMs: 1,
+	writeThroughputBytesPerSec: 0.75,
+	compressionRatio: 0.5,
+	physicalBytes: 1,
+	peakTempDiskBytes: 0.5,
+} as const
 
 /**
  * Write a versioned calibration config document to `path`. The document is
@@ -451,10 +496,27 @@ export const writeCalibrationConfig = (
 		formatVersion: TUNING_CONFIG_FORMAT_VERSION,
 		measuredAt: rec.measuredAt,
 		confidence: rec.confidence,
+		checkpoint: rec.checkpoint,
+		candidateMatrix: CANDIDATE_MATRIX,
+		requiredSignals: [
+			"logs",
+			"traces",
+			"metrics_sum",
+			"metrics_gauge",
+			"metrics_histogram",
+			"metrics_exponential_histogram",
+		],
 		budget: rec.budget,
 		selected: rec.selected,
+		heldOut: rec.heldOut,
+		heldOutAttempts: rec.heldOutAttempts,
 		environment: rec.environment,
 		effective: tuningRecord(tuning),
+		derivation: {
+			minFreeSpaceReserve: "budget.freeSpaceReserve",
+			targetChunkBytes:
+				"max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)",
+		},
 		safetyMargin: rec.budget.safetyMargin,
 		recalibrationTriggers: RECALIBRATION_TRIGGERS,
 		results: rec.results,

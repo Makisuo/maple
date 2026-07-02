@@ -14,6 +14,7 @@ import {
 	loadTuningConfig,
 	type ArchiveTuningOverrides,
 	type TuningConfigIdentity,
+	type LoadedTuningConfig,
 } from "../server/archives/config"
 import { ARCHIVE_SIGNALS, isArchiveSignalName, type ArchiveSignalName } from "../server/archives/signals"
 import { validateRangeDate } from "../server/archives/paths"
@@ -29,6 +30,8 @@ import {
 	selectCandidates,
 	writeCalibrationConfig,
 	type CalibrationRecommendation,
+	HELD_OUT_TOLERANCES,
+	comparePredictedObserved,
 } from "../server/archives/calibrate"
 import {
 	preflightCalibrationFreeSpace,
@@ -39,6 +42,8 @@ import {
 	derivedSampleDir,
 	derivedScratchSubdir,
 	calibrationPinPurpose,
+	assertCalibrationSession,
+	cleanupCalibrationSample,
 } from "../server/archives/calibration-recovery"
 import {
 	acquireCheckpointPin,
@@ -211,9 +216,9 @@ const resolveRoots = (
 	archiveDirOpt: Option.Option<string>,
 	scratchRootOpt: Option.Option<string>,
 ): { dataDir: string; archiveDir: string; scratchRoot: string } => ({
-	dataDir: Option.getOrUndefined(dataDirOpt) ?? defaultDataDir(),
-	archiveDir: Option.getOrUndefined(archiveDirOpt) ?? defaultArchiveDir(),
-	scratchRoot: Option.getOrUndefined(scratchRootOpt) ?? defaultScratchRoot(),
+	dataDir: resolve(Option.getOrUndefined(dataDirOpt) ?? defaultDataDir()),
+	archiveDir: resolve(Option.getOrUndefined(archiveDirOpt) ?? defaultArchiveDir()),
+	scratchRoot: resolve(Option.getOrUndefined(scratchRootOpt) ?? defaultScratchRoot()),
 })
 
 export const archiveCreate = Command.make("create", {
@@ -256,9 +261,11 @@ export const archiveCreate = Command.make("create", {
 			const configPath = Option.getOrUndefined(a.config)
 			let tuning
 			let tuningConfigIdentity: TuningConfigIdentity | null = null
+			let loadedTuningConfig: LoadedTuningConfig | null = null
 			try {
 				if (configPath) {
 					const loaded = loadTuningConfig(configPath)
+					loadedTuningConfig = loaded
 					tuningConfigIdentity = loaded.identity
 					tuning = resolveArchiveTuning({ ...loaded.overrides, archiveDir, scratchRoot })
 				} else {
@@ -287,7 +294,7 @@ export const archiveCreate = Command.make("create", {
 						tuning,
 						checkpointId ?? "current",
 						{},
-						tuningConfigIdentity,
+						loadedTuningConfig,
 					),
 				catch: (error) =>
 					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
@@ -510,6 +517,17 @@ const formatBytes = (bytes: number): string => {
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`
 }
 
+const pauseAtSessionPhaseFlag = Flag.optional(
+	Flag.string("pause-at-session-phase").pipe(
+		Flag.withDescription("TEST ONLY: pause after durable-writing the parent session phase"),
+	),
+)
+const sessionMarkerDirFlag = Flag.optional(
+	Flag.string("session-marker-dir").pipe(
+		Flag.withDescription("TEST ONLY: marker directory for parent-session pause"),
+	),
+)
+
 export const archiveCalibrate = Command.make("calibrate", {
 	dataDir: dataDirFlag,
 	archiveDir: archiveDirFlag,
@@ -525,6 +543,8 @@ export const archiveCalibrate = Command.make("calibrate", {
 	freeSpaceReserve: freeSpaceReserveFlag,
 	safetyMarginMilli: safetyMarginFlag,
 	writeConfig: writeConfigFlag,
+	pauseAtSessionPhase: pauseAtSessionPhaseFlag,
+	sessionMarkerDir: sessionMarkerDirFlag,
 }).pipe(
 	Command.withDescription(
 		"Calibrate archive tuning by running a candidate matrix against a pinned checkpoint across all six signals",
@@ -573,6 +593,10 @@ export const archiveCalibrate = Command.make("calibrate", {
 						scratchRoot,
 						archiveDir,
 						budget,
+						{
+							pauseAtPhase: Option.getOrUndefined(a.pauseAtSessionPhase),
+							markerDir: Option.getOrUndefined(a.sessionMarkerDir),
+						},
 					),
 				catch: (error) =>
 					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
@@ -662,7 +686,8 @@ const parsePeakRss = (stderr: string, platform: string): number | null => {
 const runCandidateChild = (
 	bundlePath: string,
 	dataDir: string,
-	checkpointSelector: string,
+	checkpointId: string,
+	checkpointManifestFingerprint: string,
 	rangeDate: string,
 	signal: string,
 	scratchRoot: string,
@@ -686,7 +711,9 @@ const runCandidateChild = (
 			"--scratch-root",
 			scratchRoot,
 			"--checkpoint-id",
-			checkpointSelector,
+			checkpointId,
+			"--checkpoint-fingerprint",
+			checkpointManifestFingerprint,
 			"--operation-id",
 			operationId,
 			"--start-row",
@@ -853,6 +880,84 @@ const runCalibrationMatrix = async (
 	scratchRoot: string,
 	archiveDir: string,
 	budget: CalibrationBudget,
+	faults: { pauseAtPhase?: string; markerDir?: string } = {},
+): Promise<CalibrationRecommendation> => {
+	const operationId = randomUUID()
+	const pinId = randomUUID()
+	const pinPurpose = calibrationPinPurpose(operationId)
+	const scratchSubdir = derivedScratchSubdir(operationId)
+	const sampleDir = derivedSampleDir(archiveDir, operationId)
+	const roots = { dataDir, archiveDir, scratchRoot }
+	const maybePauseSession = async (phase: string): Promise<void> => {
+		if (faults.pauseAtPhase !== phase || !faults.markerDir) return
+		const { mkdirSync, writeFileSync } = await import("node:fs")
+		mkdirSync(faults.markerDir, { recursive: true })
+		writeFileSync(
+			join(faults.markerDir, "paused"),
+			`${phase}\n${process.pid}\n${new Date().toISOString()}\n`,
+		)
+		await new Promise<void>(() => {
+			/* deterministic SIGKILL seam */
+		})
+	}
+	const session = await withMaintenanceLock(dataDir, operationId, async () => {
+		await reconcileCalibration(archiveDir, roots)
+		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+		const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
+		await writeCalibrationRecord(archiveDir, {
+			phase: "intent",
+			operationId,
+			pinId,
+			pinPurpose,
+			pinPath: null,
+			checkpointId: resolved.checkpointId,
+			checkpointManifestFingerprint: manifestFingerprint,
+			boundRoots: roots,
+			ownedPaths: { scratchSubdir, sampleDir },
+		})
+		await maybePauseSession("intent")
+		const pinPath = await acquireCheckpointPin(dataDir, resolved.checkpointId, pinPurpose, pinId)
+		await writeCalibrationRecord(archiveDir, {
+			phase: "pin-acquired",
+			operationId,
+			pinId,
+			pinPurpose,
+			pinPath,
+			checkpointId: resolved.checkpointId,
+			checkpointManifestFingerprint: manifestFingerprint,
+			boundRoots: roots,
+			ownedPaths: { scratchSubdir, sampleDir },
+		})
+		await maybePauseSession("pin-acquired")
+		return { checkpointId: resolved.checkpointId, manifestFingerprint }
+	})
+	try {
+		return await runBoundCalibrationMatrix(
+			bundlePath,
+			dataDir,
+			session.checkpointId,
+			session.manifestFingerprint,
+			operationId,
+			rangeDate,
+			scratchRoot,
+			archiveDir,
+			budget,
+		)
+	} finally {
+		await withMaintenanceLock(dataDir, operationId, () => reconcileCalibration(archiveDir, roots))
+	}
+}
+
+const runBoundCalibrationMatrix = async (
+	bundlePath: string,
+	dataDir: string,
+	checkpointId: string,
+	checkpointManifestFingerprint: string,
+	operationId: string,
+	rangeDate: string,
+	scratchRoot: string,
+	archiveDir: string,
+	budget: CalibrationBudget,
 ): Promise<CalibrationRecommendation> => {
 	const volId = await archiveVolumeIdentity(archiveDir)
 	const environment = captureEnvironment(MAPLE_VERSION, CHDB_VERSION, SCHEMA_FINGERPRINT, archiveDir, volId)
@@ -862,11 +967,11 @@ const runCalibrationMatrix = async (
 	for (const signal of ARCHIVE_SIGNALS) {
 		for (const candidate of CANDIDATE_MATRIX) {
 			if (Date.now() - matrixStart > budget.timeBudget) break
-			const operationId = randomUUID()
 			const result = await runCandidateChild(
 				bundlePath,
 				dataDir,
-				checkpointSelector,
+				checkpointId,
+				checkpointManifestFingerprint,
 				rangeDate,
 				signal.name,
 				scratchRoot,
@@ -888,6 +993,8 @@ const runCalibrationMatrix = async (
 	const requiredSignals = ARCHIVE_SIGNALS.map((s) => s.name)
 	const eligible = selectCandidates(perSignal, budget, requiredSignals)
 	let selected: { candidate: CalibrationCandidate; worstCase: CandidateMetrics } | null = null
+	let selectedHeldOut: CalibrationRecommendation["heldOut"] = null
+	const heldOutAttempts: CalibrationRecommendation["heldOutAttempts"][number][] = []
 	let note: string
 	if (eligible.length === 0) {
 		note =
@@ -904,11 +1011,11 @@ const runCalibrationMatrix = async (
 			const heldOutResults: CandidateResult[] = []
 			for (const signal of ARCHIVE_SIGNALS) {
 				if (Date.now() - matrixStart > budget.timeBudget) break
-				const operationId = randomUUID()
 				const result = await runCandidateChild(
 					bundlePath,
 					dataDir,
-					checkpointSelector,
+					checkpointId,
+					checkpointManifestFingerprint,
 					rangeDate,
 					signal.name,
 					scratchRoot,
@@ -926,12 +1033,40 @@ const runCalibrationMatrix = async (
 				heldOutResults.length === requiredSignals.length &&
 				heldOutResults.every((r) => meetsCeilings(r, budget))
 			if (heldOutComplete) {
+				const heldWorst = selectCandidates(
+					new Map([[cand.candidate, heldOutResults]]),
+					budget,
+					requiredSignals,
+				)[0]!.worstCase
+				const comparison = comparePredictedObserved(cand.worstCase, heldWorst, HELD_OUT_TOLERANCES)
+				heldOutAttempts.push({
+					candidate: cand.candidate,
+					results: heldOutResults,
+					worstCase: heldWorst,
+					comparisons: comparison.comparisons,
+					passed: comparison.passed,
+				})
+				if (!comparison.passed) continue
 				selected = cand
+				selectedHeldOut = {
+					results: heldOutResults,
+					worstCase: heldWorst,
+					comparisons: comparison.comparisons,
+					passed: true,
+					tolerances: HELD_OUT_TOLERANCES,
+				}
 				note =
 					`selected the lowest-worst-case-peak-RSS candidate that met every ceiling ` +
 					`on the disjoint held-out window across all six signals`
 				break
 			}
+			heldOutAttempts.push({
+				candidate: cand.candidate,
+				results: heldOutResults,
+				worstCase: null,
+				comparisons: [],
+				passed: false,
+			})
 		}
 		if (selected === null) {
 			note =
@@ -961,10 +1096,14 @@ const runCalibrationMatrix = async (
 		// Downgrade to no-config: low confidence ⟺ selected null.
 		note = `selected candidate's per-signal data is unrepresentative (below the ${budget.sampleRows}-row target); no configuration emitted`
 		selected = null
+		selectedHeldOut = null
 	}
 	return {
-		formatVersion: 1,
+		formatVersion: 2,
+		checkpoint: { checkpointId, manifestFingerprint: checkpointManifestFingerprint },
 		selected,
+		heldOut: selectedHeldOut,
+		heldOutAttempts,
 		results: allResults,
 		budget,
 		environment,
@@ -987,6 +1126,11 @@ const runCalibrationMatrix = async (
 const operationIdFlag = Flag.optional(
 	Flag.string("operation-id").pipe(
 		Flag.withDescription("Calibration operation id (parent-generated); derives owned paths"),
+	),
+)
+const checkpointFingerprintFlag = Flag.optional(
+	Flag.string("checkpoint-fingerprint").pipe(
+		Flag.withDescription("Exact parent-session checkpoint manifest fingerprint"),
 	),
 )
 const startRowFlag = Flag.integer("start-row").pipe(
@@ -1022,6 +1166,7 @@ export const archiveCalibrateRun = Command.make("calibrate-run", {
 	archiveDir: archiveDirFlag,
 	scratchRoot: scratchRootFlag,
 	checkpointId: checkpointIdFlag,
+	checkpointFingerprint: checkpointFingerprintFlag,
 	operationId: operationIdFlag,
 	startRow: startRowFlag,
 	sampleRows: sampleRowsFlag,
@@ -1063,6 +1208,127 @@ export const archiveCalibrateRun = Command.make("calibrate-run", {
 )
 
 /**
+ * Open or close the parent calibration session that owns the single source
+ * checkpoint pin and the durable recovery record. The matrix runner does this
+ * inline; this command makes the lifecycle explicit so a single child sample
+ * (or a SIGKILL probe) can run against an already-open session and so an
+ * operator can inspect/retire a wedged session. `open` resolves the checkpoint,
+ * reconciles any prior interrupted session, acquires the pin, and durably
+ * records `pin-acquired`; it prints the operation id, checkpoint id, and
+ * manifest fingerprint a child must bind to. `close` runs the authoritative
+ * reconciler (releasing the pin and clearing the record).
+ */
+const sessionActionFlag = Flag.optional(
+	Flag.string("action").pipe(
+		Flag.withDescription("open: acquire the session pin + record; close: reconcile + release"),
+	),
+)
+export const archiveCalibrateSession = Command.make("calibrate-session", {
+	dataDir: dataDirFlag,
+	archiveDir: archiveDirFlag,
+	scratchRoot: scratchRootFlag,
+	checkpointId: checkpointIdFlag,
+	action: sessionActionFlag,
+	pauseAtSessionPhase: pauseAtSessionPhaseFlag,
+	sessionMarkerDir: sessionMarkerDirFlag,
+}).pipe(
+	Command.withDescription(
+		"Internal: open or close the parent calibration session that owns the source pin",
+	),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
+			const action = Option.getOrUndefined(a.action) ?? "open"
+			const checkpointSelector = Option.getOrUndefined(a.checkpointId) ?? "current"
+			const roots = { dataDir, archiveDir, scratchRoot }
+			if (action === "close") {
+				yield* Effect.tryPromise({
+					try: () =>
+						withMaintenanceLock(dataDir, randomUUID(), () =>
+							reconcileCalibration(archiveDir, roots),
+						),
+					catch: (error) =>
+						new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+				})
+				process.stdout.write(`${green("✓")} calibration session closed\n`)
+				return
+			}
+			if (action !== "open") {
+				return yield* new ArchiveError({ message: `unknown calibrate-session action '${action}'` })
+			}
+			const operationId = randomUUID()
+			const pinId = randomUUID()
+			const pinPurpose = calibrationPinPurpose(operationId)
+			const scratchSubdir = derivedScratchSubdir(operationId)
+			const sampleDir = derivedSampleDir(archiveDir, operationId)
+			const result = yield* Effect.tryPromise({
+				try: () =>
+					withMaintenanceLock(dataDir, operationId, async () => {
+						await reconcileCalibration(archiveDir, roots)
+						const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+						const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
+						await writeCalibrationRecord(archiveDir, {
+							phase: "intent",
+							operationId,
+							pinId,
+							pinPurpose,
+							pinPath: null,
+							checkpointId: resolved.checkpointId,
+							checkpointManifestFingerprint: manifestFingerprint,
+							boundRoots: roots,
+							ownedPaths: { scratchSubdir, sampleDir },
+						})
+						// TEST seam: a SIGKILL here leaves a durable intent record with
+						// no pin, reproducing the intent-retention wedge.
+						const pausePhase: string | undefined = Option.getOrUndefined(a.pauseAtSessionPhase)
+						const markerDir: string | undefined = Option.getOrUndefined(a.sessionMarkerDir)
+						if (pausePhase === "intent" && markerDir) {
+							const { mkdirSync, writeFileSync } = await import("node:fs")
+							mkdirSync(markerDir, { recursive: true })
+							writeFileSync(
+								join(markerDir, "paused"),
+								`intent\n${process.pid}\n${new Date().toISOString()}\n`,
+							)
+							await new Promise<void>(() => {
+								/* deterministic SIGKILL seam */
+							})
+						}
+						const pinPath = await acquireCheckpointPin(
+							dataDir,
+							resolved.checkpointId,
+							pinPurpose,
+							pinId,
+						)
+						await writeCalibrationRecord(archiveDir, {
+							phase: "pin-acquired",
+							operationId,
+							pinId,
+							pinPurpose,
+							pinPath,
+							checkpointId: resolved.checkpointId,
+							checkpointManifestFingerprint: manifestFingerprint,
+							boundRoots: roots,
+							ownedPaths: { scratchSubdir, sampleDir },
+						})
+						return { checkpointId: resolved.checkpointId, manifestFingerprint, pinPath }
+					}),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			// Machine-readable: a child binds to operation-id + checkpoint-id + fingerprint.
+			process.stdout.write(
+				`${JSON.stringify({
+					operationId,
+					checkpointId: result.checkpointId,
+					manifestFingerprint: result.manifestFingerprint,
+					pinPath: result.pinPath,
+				})}\n`,
+			)
+		}),
+	),
+)
+
+/**
  * Run one calibration sample (child process). Reconciles any prior interrupted
  * run INSIDE the maintenance lock (so a concurrent run cannot reconcile a live
  * run's resources), then records ownership DERIVED from the operation id,
@@ -1085,6 +1351,7 @@ const runCalibrateSample = async (
 		maxShardBytes: number
 		pauseAtPhase: Option.Option<string>
 		markerDir: Option.Option<string>
+		checkpointFingerprint: Option.Option<string>
 	},
 	dataDir: string,
 	archiveDir: string,
@@ -1093,7 +1360,18 @@ const runCalibrateSample = async (
 	rangeDate: string,
 ): Promise<void> => {
 	// The parent generates the operation id; derive the exact owned paths from it.
-	const operationId = Option.getOrUndefined(a.operationId) ?? randomUUID()
+	const operationId = Option.getOrUndefined(a.operationId)
+	const checkpointManifestFingerprint = Option.getOrUndefined(a.checkpointFingerprint)
+	if (
+		!operationId ||
+		!checkpointManifestFingerprint ||
+		checkpointSelector === "current" ||
+		checkpointSelector === "previous"
+	) {
+		throw new Error(
+			"calibrate-run requires a parent session operation id, exact checkpoint id, and checkpoint fingerprint",
+		)
+	}
 	// TEST SEAM: if pauseAtPhase is set, write a marker and block after durable-
 	// writing the record at that phase. The crash probe waits for the marker,
 	// asserts the durable state, then SIGKILLs (C1).
@@ -1115,8 +1393,9 @@ const runCalibrateSample = async (
 			/* block forever */
 		})
 	}
-	const pinId = randomUUID()
-	const pinPurpose = calibrationPinPurpose(operationId)
+	// The parent session owns the pin and the durable checkpoint identity; the
+	// child only restores that pinned checkpoint into owned scratch and exports
+	// a sample. See assertCalibrationSession / cleanupCalibrationSample.
 	const scratchSubdir = derivedScratchSubdir(operationId)
 	const sampleDir = derivedSampleDir(archiveDir, operationId)
 	const settings: ExportSettings = {
@@ -1135,34 +1414,21 @@ const runCalibrateSample = async (
 	// The maintenance lock serializes calibration against create/GC. Reconcile
 	// any prior interrupted run INSIDE the lock, matching generation.ts:246-283.
 	await withMaintenanceLock(dataDir, operationId, async () => {
-		await reconcileCalibration(archiveDir, { dataDir, archiveDir, scratchRoot })
+		const session = assertCalibrationSession(
+			archiveDir,
+			{ dataDir, archiveDir, scratchRoot },
+			{
+				operationId,
+				checkpointId: checkpointSelector,
+				checkpointManifestFingerprint,
+			},
+		)
+		await cleanupCalibrationSample(session)
 		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
-		const checkpointId = resolved.checkpointId
-		const checkpointManifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
-		await writeCalibrationRecord(archiveDir, {
-			phase: "intent",
-			operationId,
-			pinId,
-			pinPurpose,
-			pinPath: null,
-			checkpointId,
-			checkpointManifestFingerprint,
-			boundRoots: { dataDir, archiveDir, scratchRoot },
-			ownedPaths: { scratchSubdir, sampleDir },
-		})
-		await maybePause("intent")
-		const pinPath = await acquireCheckpointPin(dataDir, checkpointId, pinPurpose, pinId)
-		await writeCalibrationRecord(archiveDir, {
-			phase: "pin-acquired",
-			operationId,
-			pinId,
-			pinPurpose,
-			pinPath,
-			checkpointId,
-			checkpointManifestFingerprint,
-			boundRoots: { dataDir, archiveDir, scratchRoot },
-			ownedPaths: { scratchSubdir, sampleDir },
-		})
+		const liveFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
+		if (liveFingerprint !== checkpointManifestFingerprint) {
+			throw new Error("calibration child checkpoint fingerprint changed; refusing")
+		}
 		await maybePause("pin-acquired")
 		try {
 			await withRestoredCheckpoint(
@@ -1172,32 +1438,10 @@ const runCalibrateSample = async (
 					scratchSubdir,
 					cleanup: "never",
 					beforeRestore: async () => {
-						await writeCalibrationRecord(archiveDir, {
-							phase: "scratch-allocated",
-							operationId,
-							pinId,
-							pinPurpose,
-							pinPath,
-							checkpointId,
-							checkpointManifestFingerprint,
-							boundRoots: { dataDir, archiveDir, scratchRoot },
-							ownedPaths: { scratchSubdir, sampleDir },
-						})
 						await maybePause("scratch-allocated")
 					},
 				},
 				async ({ db }) => {
-					await writeCalibrationRecord(archiveDir, {
-						phase: "sampling",
-						operationId,
-						pinId,
-						pinPurpose,
-						pinPath,
-						checkpointId,
-						checkpointManifestFingerprint,
-						boundRoots: { dataDir, archiveDir, scratchRoot },
-						ownedPaths: { scratchSubdir, sampleDir },
-					})
 					await ensurePrivateDirectory(sampleDir, archiveDir)
 					// The sampling seam is intentionally after both the durable phase
 					// record and the owned sample directory exist. Together with the
@@ -1264,7 +1508,7 @@ const runCalibrateSample = async (
 			// nonzero exit (NOT suppressed), so the parent marks the candidate
 			// failed and does not select a run that left a pin/record/debris. The
 			// record is PRESERVED for the next run by the reconciler itself.
-			await reconcileCalibration(archiveDir, { dataDir, archiveDir, scratchRoot })
+			await cleanupCalibrationSample(session)
 			// Emit the metrics JSON ONLY after successful cleanup.
 			if (pendingMetrics) {
 				process.stdout.write(`${JSON.stringify(pendingMetrics)}\n`)
@@ -1283,5 +1527,6 @@ export const archive = Command.make("archive").pipe(
 		archiveGc,
 		archiveCalibrate,
 		archiveCalibrateRun,
+		archiveCalibrateSession,
 	]),
 )

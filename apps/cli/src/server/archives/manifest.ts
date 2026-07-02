@@ -98,6 +98,46 @@ export interface ArchiveActivePointer {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value)
 
+const MANIFEST_KEYS = new Set([
+	"formatVersion",
+	"generationId",
+	"signal",
+	"rangeStart",
+	"rangeEndExclusive",
+	"checkpointId",
+	"checkpointManifestFingerprint",
+	"createdAt",
+	"mapleVersion",
+	"chdbVersion",
+	"schemaFingerprint",
+	"sourceRowCount",
+	"archivedRowCount",
+	"tuning",
+	"tuningConfig",
+	"shards",
+])
+
+const TUNING_KEYS = new Set([
+	"writerThreads",
+	"rowGroupRows",
+	"maxShardRows",
+	"maxShardBytes",
+	"targetChunkBytes",
+	"minFreeSpaceReserve",
+])
+
+const assertExactOwnKeys = (record: Record<string, unknown>, keys: ReadonlySet<string>, label = ""): void => {
+	const location = label.length > 0 ? `${label} ` : ""
+	for (const key of keys) {
+		if (!Object.prototype.hasOwnProperty.call(record, key)) {
+			throw new Error(`invalid archive manifest ${location}field: ${key} (required in formatVersion 3)`)
+		}
+	}
+	for (const key of Object.keys(record)) {
+		if (!keys.has(key)) throw new Error(`unknown archive manifest ${location}field: ${key}`)
+	}
+}
+
 const requiredString = (record: Record<string, unknown>, key: string): string => {
 	const value = record[key]
 	if (typeof value !== "string" || value.length === 0)
@@ -113,6 +153,14 @@ const requiredCount = (record: Record<string, unknown>, key: string): number => 
 	return value
 }
 
+const requiredPositiveInteger = (record: Record<string, unknown>, key: string): number => {
+	const value = record[key]
+	if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+		throw new Error(`invalid archive manifest tuning field: ${key} (must be a positive integer)`)
+	}
+	return value
+}
+
 const SHA256_HEX = /^[0-9a-f]{64}$/
 
 /** A safe logical config name (no path separators, no traversal). */
@@ -122,9 +170,10 @@ const SAFE_CONFIG_NAME = /^[A-Za-z0-9._-]+$/
  * Strictly parse the structured `tuningConfig` identity field of a manifest.
  * Accepts `null` (no config was loaded) or a record with exactly
  * `{ formatVersion, configName, sha256 }`. Rejects unknown subfields, a bad
- * SHA-256, an unsafe config name, or a formatVersion that is NOT exactly the
- * supported {@link TUNING_CONFIG_FORMAT_VERSION} (fail-closed on any other
- * version, not "any positive integer"). Part of manifest formatVersion 3.
+ * SHA-256, an unsafe config name, or a config formatVersion outside the two
+ * explicitly known identities. Manifest v3 stores an opaque, hash-bound config
+ * identity and can therefore safely describe both legacy v1 and verified v2;
+ * only the config loader refuses v1 for new writes.
  */
 const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
 	if (value === null) return null
@@ -141,10 +190,10 @@ const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
 	if (
 		typeof formatVersion !== "number" ||
 		!Number.isSafeInteger(formatVersion) ||
-		formatVersion !== TUNING_CONFIG_FORMAT_VERSION
+		(formatVersion !== 1 && formatVersion !== TUNING_CONFIG_FORMAT_VERSION)
 	) {
 		throw new Error(
-			`invalid archive manifest tuningConfig.formatVersion (must be exactly ${TUNING_CONFIG_FORMAT_VERSION}): ${String(formatVersion)}`,
+			`invalid archive manifest tuningConfig.formatVersion (known versions: 1, ${TUNING_CONFIG_FORMAT_VERSION}): ${String(formatVersion)}`,
 		)
 	}
 	const configName = requiredString(value, "configName")
@@ -156,6 +205,41 @@ const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
 		throw new Error(`invalid archive manifest tuningConfig.sha256 (must be 64 hex chars): ${sha256}`)
 	}
 	return { formatVersion, configName, sha256 }
+}
+
+/**
+ * Parse the path-independent portion of resolveArchiveTuning's effective
+ * values. A manifest records no roots, but must preserve the same numeric and
+ * cross-field invariants that governed its writer.
+ */
+const parseTuningRecord = (value: unknown): ArchiveTuningRecord => {
+	if (!isRecord(value)) throw new Error("invalid archive manifest field: tuning")
+	assertExactOwnKeys(value, TUNING_KEYS, "tuning")
+	const tuning = {
+		writerThreads: requiredPositiveInteger(value, "writerThreads"),
+		rowGroupRows: requiredPositiveInteger(value, "rowGroupRows"),
+		maxShardRows: requiredPositiveInteger(value, "maxShardRows"),
+		maxShardBytes: requiredPositiveInteger(value, "maxShardBytes"),
+		targetChunkBytes: requiredPositiveInteger(value, "targetChunkBytes"),
+		minFreeSpaceReserve: requiredPositiveInteger(value, "minFreeSpaceReserve"),
+	}
+	if (tuning.rowGroupRows > tuning.maxShardRows) {
+		throw new Error("archive tuning rowGroupRows must not exceed maxShardRows")
+	}
+	const minShardBytesForRowGroup = tuning.rowGroupRows * 1024
+	if (tuning.maxShardBytes < minShardBytesForRowGroup) {
+		throw new Error(
+			`archive tuning maxShardBytes (${tuning.maxShardBytes}) is too small for rowGroupRows ` +
+				`(${tuning.rowGroupRows}); raise maxShardBytes or lower rowGroupRows`,
+		)
+	}
+	if (tuning.minFreeSpaceReserve >= tuning.targetChunkBytes) {
+		throw new Error("archive tuning minFreeSpaceReserve must be smaller than targetChunkBytes")
+	}
+	if (tuning.writerThreads > 32) {
+		throw new Error("archive tuning writerThreads must not exceed 32")
+	}
+	return tuning
 }
 
 /**
@@ -272,6 +356,7 @@ export const parseArchiveGenerationManifest = (
 				`the manifest is preserved as-is. v3 introduced the structured tuningConfig identity (v2 used a bare name and v1 used timezone-dependent time evidence); re-export the range to re-validate.`,
 		)
 	}
+	assertExactOwnKeys(value, MANIFEST_KEYS)
 	const signal = requiredString(value, "signal")
 	if (!isArchiveSignalName(signal)) throw new Error(`unknown archive signal: ${signal}`)
 	if (expectedSignal && signal !== expectedSignal) {
@@ -323,8 +408,6 @@ export const parseArchiveGenerationManifest = (
 			`archive manifest sourceRowCount (${sourceRowCount}) != archivedRowCount (${archivedRowCount})`,
 		)
 	}
-	if (!isRecord(value.tuning)) throw new Error("invalid archive manifest field: tuning")
-	const tuningRecord = value.tuning as Record<string, unknown>
 	return {
 		formatVersion: MANIFEST_FORMAT_VERSION,
 		generationId,
@@ -339,19 +422,10 @@ export const parseArchiveGenerationManifest = (
 		schemaFingerprint: requiredString(value, "schemaFingerprint"),
 		sourceRowCount,
 		archivedRowCount,
-		tuning: {
-			writerThreads: requiredCount(tuningRecord, "writerThreads"),
-			rowGroupRows: requiredCount(tuningRecord, "rowGroupRows"),
-			maxShardRows: requiredCount(tuningRecord, "maxShardRows"),
-			maxShardBytes: requiredCount(tuningRecord, "maxShardBytes"),
-			targetChunkBytes: requiredCount(tuningRecord, "targetChunkBytes"),
-			minFreeSpaceReserve: requiredCount(tuningRecord, "minFreeSpaceReserve"),
-		},
-		// tuningConfig is the structured, SHA-256-bound identity. The legacy bare
-		// `tuningConfigName` string (written by earlier v2 code) carries no hash, so
-		// it is mapped to null (no verifiable identity) rather than trusted. Both
-		// fields absent → null.
-		tuningConfig: parseTuningConfig(value.tuningConfig ?? null),
+		tuning: parseTuningRecord(value.tuning),
+		// v3 requires its own explicit tuningConfig key. The value is either null
+		// or the strict, SHA-256-bound identity parsed above.
+		tuningConfig: parseTuningConfig(value.tuningConfig),
 		shards,
 	}
 }

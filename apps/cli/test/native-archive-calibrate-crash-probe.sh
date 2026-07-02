@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Native archive calibration SIGKILL cleanup probe (C1: deterministic boundary).
+# Native archive calibration session SIGKILL cleanup probes.
 #
-# Uses the calibrate-run --pause-at-phase fault seam to block at a NAMED phase
-# AFTER durable-writing the recovery record + acquiring the pin + allocating
-# scratch. The probe:
-#  1. waits for the `paused` marker (the child reached the boundary),
-#  2. asserts the recovery record, pin, scratch dir, and sample dir EXIST,
-#  3. seeds an UNRELATED pin and asserts it survives reconciliation,
-#  4. SIGKILLs the process group (so the Maple descendant is reaped),
-#  5. reconciles via a fresh calibration run,
-#  6. asserts the exact pin/scratch/sample are gone, the record is cleared, and
-#     the unrelated pin SURVIVES (over-retention safe).
+# The parent calibration session (calibrate-session open) owns the source pin
+# and the durable recovery record; a calibrate-run child binds to it. This probe
+# covers two SIGKILL boundaries:
+#  - sampling: open a session, run a child paused at the sampling seam (its
+#    sample/scratch exist; the parent record is at pin-acquired), SIGKILL the
+#    child, and prove session close reconciles the pin/record/debris while an
+#    unrelated pin survives; close is idempotent.
+#  - intent: open a session paused at the intent seam (record at intent, no
+#    pin), SIGKILL it, normally retire the unpinned source checkpoint, and prove
+#    a later session retires the inert record even though its source is gone.
 #
 # Usage: native-archive-calibrate-crash-probe.sh <bundle-dir> [port]
 set -euo pipefail
@@ -59,7 +59,7 @@ wait_health() {
 
 printf '%s\n' '<clickhouse>' '  <backups>' '    <allowed_disk>default</allowed_disk>' '    <allowed_path>backups</allowed_path>' '  </backups>' '</clickhouse>' >"$CONFIG"
 chmod 600 "$CONFIG"
-echo "native calibration crash probe root: $ROOT (boundary: sampling)"
+echo "native calibration crash probe root: $ROOT (boundaries: sampling, retired intent)"
 
 # --- Setup: ingest rows, checkpoint, stop ---
 "$MAPLE" start --port "$PORT" --data-dir "$DATA" --chdb-config-file "$CONFIG" \
@@ -88,12 +88,32 @@ jq -nc \
 chmod 600 "$UNRELATED_PIN"
 [[ -n "$UNRELATED_PIN" && -f "$UNRELATED_PIN" ]] || fail "unrelated pin was not created"
 
-# --- Crash boundary: launch calibrate-run paused at sampling ---
-CRASH_OP="$(uuidgen | tr 'A-Z' 'a-z')"
+# --- Open a parent calibration session that owns the pin + recovery record ---
+# In the session model the parent acquires the pin and writes the pin-acquired
+# record; a child binds to that session by operation-id + checkpoint id +
+# fingerprint. A SIGKILLed child leaves the parent's record at pin-acquired with
+# the child's sample/scratch debris owned by the same operation id.
+echo "--- opening calibration session ---"
+SESSION_JSON="$("$MAPLE" archive calibrate-session \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--checkpoint-id "$C1" --action open 2>"$ROOT/session-open.err")" \
+	|| { cat "$ROOT/session-open.err" >&2; fail "calibrate-session open failed"; }
+CRASH_OP="$(jq -r '.operationId' <<<"$SESSION_JSON")"
+SESSION_CKPT="$(jq -r '.checkpointId' <<<"$SESSION_JSON")"
+SESSION_FP="$(jq -r '.manifestFingerprint' <<<"$SESSION_JSON")"
+[[ "$CRASH_OP" != "null" && "$SESSION_CKPT" == "$C1" && "$SESSION_FP" != "null" ]] \
+	|| fail "calibrate-session open returned an incomplete session: $SESSION_JSON"
+ACTUAL_PIN_PATH="$(jq -r '.pinPath' <<<"$SESSION_JSON")"
+[[ -f "$ACTUAL_PIN_PATH" ]] || fail "session pin not live after open: $ACTUAL_PIN_PATH"
+[[ "$(jq -r '.phase' "$ARCHIVE/calibration/recovery.json")" == "pin-acquired" ]] \
+	|| fail "session record is not pin-acquired after open"
+
+# --- Crash boundary: launch a child paused at sampling, then SIGKILL it ---
 rm -rf "$MARKER"; mkdir -p "$MARKER"
 "$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
 	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
-	--checkpoint-id "$C1" --operation-id "$CRASH_OP" \
+	--checkpoint-id "$SESSION_CKPT" --checkpoint-fingerprint "$SESSION_FP" \
+	--operation-id "$CRASH_OP" \
 	--sample-rows 5 --max-temp-disk 2147483648 --free-space-reserve 536870912 \
 	--writer-threads 1 --row-group-rows 10000 --max-shard-rows 500000 --max-shard-bytes 268435456 \
 	--pause-at-phase sampling --marker-dir "$MARKER" \
@@ -102,7 +122,6 @@ CHILD_PID=$!
 
 # Wait for the marker (child reached the sampling boundary).
 echo "--- waiting for sampling boundary ---"
-KILLED=0
 for _ in $(seq 1 300); do
 	[[ -f "$MARKER/paused" ]] && break
 	if ! kill -0 "$CHILD_PID" 2>/dev/null; then
@@ -114,37 +133,29 @@ done
 
 # --- Assert the durable state exists at the boundary ---
 echo "--- asserting boundary state exists ---"
-[[ -f "$ARCHIVE/calibration/recovery.json" ]] || fail "recovery record does not exist at boundary"
-RECORD_PHASE="$(jq -r '.phase' "$ARCHIVE/calibration/recovery.json")"
-[[ "$RECORD_PHASE" == "sampling" ]] || fail "record phase is $RECORD_PHASE, expected sampling"
-ACTUAL_PIN_PATH="$(jq -r '.pinPath' "$ARCHIVE/calibration/recovery.json")"
-[[ -f "$ACTUAL_PIN_PATH" ]] || fail "pin file does not exist at boundary: $ACTUAL_PIN_PATH"
+# The record stays at pin-acquired (parent-owned); the child allocated sample
+# output and scratch before pausing at sampling.
+[[ "$(jq -r '.phase' "$ARCHIVE/calibration/recovery.json")" == "pin-acquired" ]] \
+	|| fail "record phase changed under the child"
 EXPECTED_SCRATCH="$SCRATCH/calibrate-$CRASH_OP"
 EXPECTED_SAMPLE="$ARCHIVE/calibration/samples/$CRASH_OP"
 [[ -d "$EXPECTED_SCRATCH" ]] || fail "scratch directory does not exist at boundary: $EXPECTED_SCRATCH"
 [[ -d "$EXPECTED_SAMPLE" ]] || fail "sample directory does not exist at boundary: $EXPECTED_SAMPLE"
-echo "  record=sampling pin=$ACTUAL_PIN_PATH scratch=$EXPECTED_SCRATCH sample=$EXPECTED_SAMPLE"
+echo "  record=pin-acquired pin=$ACTUAL_PIN_PATH scratch=$EXPECTED_SCRATCH sample=$EXPECTED_SAMPLE"
 
-# --- SIGKILL the process group ---
-echo "--- SIGKILL process group ---"
-# The child is the maple process (spawned directly); kill it and reap.
+# --- SIGKILL the child (the parent session is NOT a process here) ---
+echo "--- SIGKILL child ---"
 kill -9 "$CHILD_PID" 2>/dev/null || true
 wait "$CHILD_PID" 2>/dev/null || true
-KILLED=1
-[[ "$KILLED" -eq 1 ]] || fail "SIGKILL was not delivered"
 echo "  killed child $CHILD_PID at sampling boundary"
 
-# --- Reconcile via a fresh calibration run ---
-echo "--- reconciling via a fresh calibration run ---"
-RECON_OP="$(uuidgen | tr 'A-Z' 'a-z')"
-if ! "$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
+# --- Reconcile via session close (releases the pin + clears the record) ---
+echo "--- reconciling via calibrate-session close ---"
+if ! "$MAPLE" archive calibrate-session \
 	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
-	--checkpoint-id "$C1" --operation-id "$RECON_OP" \
-	--sample-rows 5 --max-temp-disk 2147483648 --free-space-reserve 536870912 \
-	--writer-threads 1 --row-group-rows 10000 --max-shard-rows 500000 --max-shard-bytes 268435456 \
-	>"$ROOT/reconcile-child.out" 2>&1; then
-	cat "$ROOT/reconcile-child.out" >&2
-	fail "post-crash reconcile calibrate-run failed"
+	--action close >"$ROOT/reconcile.out" 2>&1; then
+	cat "$ROOT/reconcile.out" >&2
+	fail "session close reconcile failed"
 fi
 
 # --- Assert: crashed run's resources are gone ---
@@ -158,16 +169,82 @@ echo "--- verifying reconciliation ---"
 [[ -f "$UNRELATED_PIN" ]] || fail "UNRELATED pin was deleted by reconciliation (over-deletion!): $UNRELATED_PIN"
 echo "  unrelated pin survived: $UNRELATED_PIN"
 
-# --- Idempotency: re-run reconcile (no-op) ---
+# --- Idempotency: close again is a no-op (record already clear) ---
 echo "--- idempotency ---"
-IDEM_OP="$(uuidgen | tr 'A-Z' 'a-z')"
-"$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
+"$MAPLE" archive calibrate-session \
 	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
-	--checkpoint-id "$C1" --operation-id "$IDEM_OP" \
-	--sample-rows 5 --max-temp-disk 2147483648 --free-space-reserve 536870912 \
-	--writer-threads 1 --row-group-rows 10000 --max-shard-rows 500000 --max-shard-bytes 268435456 \
-	>"$ROOT/idem-child.out" 2>&1 || { cat "$ROOT/idem-child.out" >&2; fail "idempotent run failed"; }
-[[ ! -e "$ARCHIVE/calibration/recovery.json" ]] || fail "record survived idempotent run"
+	--action close >"$ROOT/idem.out" 2>&1 || { cat "$ROOT/idem.out" >&2; fail "idempotent close failed"; }
+[[ ! -e "$ARCHIVE/calibration/recovery.json" ]] || fail "record survived idempotent close"
+
+# --- Retired-source boundary: a session opened to intent, SIGKILLed pre-pin ---
+echo "--- retired-source intent boundary ---"
+rm -rf "$MARKER"; mkdir -p "$MARKER"
+"$MAPLE" archive calibrate-session \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--checkpoint-id "$C1" --action open \
+	--pause-at-session-phase intent --session-marker-dir "$MARKER" \
+	>"$ROOT/intent-session.out" 2>&1 &
+INTENT_PID=$!
+for _ in $(seq 1 300); do
+	[[ -f "$MARKER/paused" ]] && break
+	if ! kill -0 "$INTENT_PID" 2>/dev/null; then
+		fail "intent session exited before reaching the intent boundary"
+	fi
+	sleep 0.1
+done
+[[ -f "$MARKER/paused" ]] || fail "session did not pause at intent within 30s"
+[[ "$(jq -r '.phase' "$ARCHIVE/calibration/recovery.json")" == "intent" ]] || fail "record is not at intent"
+[[ "$(jq -r '.pinPath' "$ARCHIVE/calibration/recovery.json")" == "null" ]] || fail "intent unexpectedly records a pin path"
+INTENT_OP="$(jq -r '.operationId' "$ARCHIVE/calibration/recovery.json")"
+INTENT_PIN_ID="$(jq -r '.pinId' "$ARCHIVE/calibration/recovery.json")"
+INTENT_PIN="$DATA/backups/pins/$C1/$INTENT_PIN_ID.json"
+INTENT_SCRATCH="$SCRATCH/calibrate-$INTENT_OP"
+INTENT_SAMPLE="$ARCHIVE/calibration/samples/$INTENT_OP"
+[[ ! -e "$INTENT_PIN" ]] || fail "intent unexpectedly acquired a pin"
+[[ ! -e "$INTENT_SCRATCH" ]] || fail "intent unexpectedly allocated scratch"
+[[ ! -e "$INTENT_SAMPLE" ]] || fail "intent unexpectedly allocated sample output"
+kill -9 "$INTENT_PID" 2>/dev/null || true
+wait "$INTENT_PID" 2>/dev/null || true
+
+# Remove only the probe's unrelated pin, then create two newer checkpoints.
+# Current/previous retention must retire the unpinned C1 snapshot.
+rm -f "$UNRELATED_PIN"
+"$MAPLE" start --port "$PORT" --data-dir "$DATA" --chdb-config-file "$CONFIG" \
+	--on-dirty-store fail --offline >"$ROOT/retention-server.log" 2>&1 &
+SERVER_PID=$!
+wait_health
+"$MAPLE" checkpoint --port "$PORT" --data-dir "$DATA" >"$ROOT/ck2.out" 2>&1 || {
+	cat "$ROOT/ck2.out" >&2
+	fail "second checkpoint failed"
+}
+"$MAPLE" checkpoint --port "$PORT" --data-dir "$DATA" >"$ROOT/ck3.out" 2>&1 || {
+	cat "$ROOT/ck3.out" >&2
+	fail "third checkpoint failed"
+}
+C3="$(jq -r '.current' "$DATA/backups/state.json")"
+"$MAPLE" stop --data-dir "$DATA" >/dev/null
+wait "$SERVER_PID" 2>/dev/null || true
+SERVER_PID=""
+[[ ! -e "$DATA/backups/snapshots/$C1" ]] || fail "normal retention did not retire unpinned C1"
+[[ -f "$ARCHIVE/calibration/recovery.json" ]] || fail "intent recovery record vanished before reconciliation"
+
+# A new session against the current checkpoint must first retire the inert
+# intent even though its recorded source checkpoint no longer exists.
+if ! "$MAPLE" archive calibrate-session \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--checkpoint-id "$C3" --action open >"$ROOT/retired-reconcile.out" 2>&1; then
+	cat "$ROOT/retired-reconcile.out" >&2
+	fail "retired-source intent reconciliation failed"
+fi
+# The new session opens (writing its own pin-acquired record); close it to
+# leave a clean slate for the debris assertion.
+"$MAPLE" archive calibrate-session \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--action close >"$ROOT/retired-close.out" 2>&1 || { cat "$ROOT/retired-close.out" >&2; fail "retired close failed"; }
+[[ ! -e "$ARCHIVE/calibration/recovery.json" ]] || fail "retired intent recovery record survived"
+[[ ! -e "$INTENT_PIN" ]] || fail "retired intent pin appeared during reconciliation"
+[[ ! -e "$INTENT_SCRATCH" ]] || fail "retired intent scratch appeared during reconciliation"
+[[ ! -e "$INTENT_SAMPLE" ]] || fail "retired intent sample appeared during reconciliation"
 
 # --- Assert: no owned debris from any run ---
 shopt -s nullglob 2>/dev/null || true
@@ -176,4 +253,4 @@ DEBRIS=( "$SCRATCH"/calibrate-* )
 DEBRIS_SAMPLES=( "$ARCHIVE"/calibration/samples/*/ )
 [[ ${#DEBRIS_SAMPLES[@]} -eq 0 ]] || fail "sample debris survived: ${DEBRIS_SAMPLES[*]}"
 
-echo "PASS: calibration SIGKILL at sampling boundary reconciled (exact pin/scratch/sample removed, unrelated pin survived, idempotent)"
+echo "PASS: calibration session SIGKILL recovery reconciled a crashed sampling child and an inert intent whose source was normally retired"

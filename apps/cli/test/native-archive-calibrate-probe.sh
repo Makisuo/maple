@@ -158,13 +158,21 @@ echo "  selected writerThreads=$SELECTED_THREADS margin=$MARGIN results=$RESULT_
 # the config's selected candidate tuning. The child emits a real metrics JSON
 # with true logical/physical bytes, export-section wall time, and peak temp disk.
 # Run under /usr/bin/time for the authoritative external peak RSS. This is
-# like-for-like (C4): not a heavier full-create, not proxy values.
+# like-for-like (C4): not a heavier full-create, not proxy values. The child
+# runs bound to a parent calibration session (calibrate-session open) that owns
+# the source pin; the session is closed after the trial.
 echo "--- like-for-like calibrate-run trial on held-out data (measured) ---"
-TRIAL_OP="$(uuidgen | tr 'A-Z' 'a-z')"
+TRIAL_SESSION_JSON="$("$MAPLE" archive calibrate-session \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--checkpoint-id "$C1" --action open 2>"$ROOT/trial-session.err")" \
+	|| { cat "$ROOT/trial-session.err" >&2; fail "trial calibrate-session open failed"; }
+TRIAL_OP="$(jq -r '.operationId' <<<"$TRIAL_SESSION_JSON")"
+TRIAL_CKPT="$(jq -r '.checkpointId' <<<"$TRIAL_SESSION_JSON")"
+TRIAL_FP="$(jq -r '.manifestFingerprint' <<<"$TRIAL_SESSION_JSON")"
 TIME_OUT="$ROOT/trial-time.txt"
 if ! /usr/bin/time -lp "$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
 	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
-	--checkpoint-id "$C1" --operation-id "$TRIAL_OP" \
+	--checkpoint-id "$TRIAL_CKPT" --checkpoint-fingerprint "$TRIAL_FP" --operation-id "$TRIAL_OP" \
 	--start-row 10 --sample-rows 10 \
 	--max-temp-disk 2147483648 --free-space-reserve 536870912 \
 	--writer-threads "$SELECTED_THREADS" \
@@ -173,6 +181,8 @@ if ! /usr/bin/time -lp "$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
 	--max-shard-bytes "$(jq -r '.selected.candidate.maxShardBytes' "$CFG")" \
 	>"$ROOT/trial.out" 2>"$TIME_OUT"; then
 	cat "$ROOT/trial.out" >&2
+	"$MAPLE" archive calibrate-session \
+		--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" --action close >/dev/null 2>&1
 	fail "like-for-like calibrate-run trial failed"
 fi
 # The child prints a metrics JSON as its last stdout line (after cleanup).
@@ -187,6 +197,11 @@ OBSERVED_ROWS="$(echo "$TRIAL_JSON" | jq -r '.rowCount')"
 OBSERVED_RSS="$(grep -i 'maximum resident set size' "$TIME_OUT" | awk '{print $1}')"
 [[ "$OBSERVED_RSS" =~ ^[0-9]+$ ]] || fail "could not parse observed peak RSS from /usr/bin/time"
 [[ "$OBSERVED_ROWS" -gt 0 ]] || fail "trial exported zero rows (held-out window empty — need more data)"
+# Close the trial session (release the pin + clear the record) now that the
+# child's metrics are captured.
+"$MAPLE" archive calibrate-session \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--action close >"$ROOT/trial-close.out" 2>&1 || { cat "$ROOT/trial-close.out" >&2; fail "trial session close failed"; }
 # Compute the derived metrics exactly as the parent calibrator does.
 OBSERVED_COMP="$(awk "BEGIN{ if($OBSERVED_LOGICAL>0) printf \"%.6f\", $OBSERVED_PHYSICAL/$OBSERVED_LOGICAL; else print 0 }")"
 OBSERVED_TPUT="$(awk "BEGIN{ if($OBSERVED_EXPORT_WALL>0) printf \"%.1f\", $OBSERVED_LOGICAL/($OBSERVED_EXPORT_WALL/1000); else print 0 }")"
@@ -244,6 +259,23 @@ MANIFEST_CONFIG_SHA="$(jq -r '.tuningConfig.sha256 // "MISSING"' "$MANIFEST")"
 [[ "$MANIFEST_CONFIG_NAME" == "calib-config.json" ]] || fail "manifest configName mismatch: $MANIFEST_CONFIG_NAME"
 [[ "$MANIFEST_CONFIG_SHA" == "$CONFIG_SHA" ]] || fail "manifest config SHA mismatch: manifest=$MANIFEST_CONFIG_SHA config=$CONFIG_SHA"
 echo "  manifest config identity verified: $MANIFEST_CONFIG_NAME ($MANIFEST_CONFIG_SHA)"
+
+# --- Step 5c: a config bound to a DIFFERENT archive volume is rejected ---
+# The volume identity (fsid/type + canonical path) is enforced by the same
+# assertCalibrationArchiveVolume the publication re-check uses. Forging the
+# recorded fsid proves a volume swap between calibration and create (or a
+# config copied across volumes) cannot publish a generation.
+FORGED_CFG="$ROOT/forged-volume.json"
+jq '.environment.archiveVolume.fsid = "dev:deadbeef"' "$CFG" > "$FORGED_CFG"
+if "$MAPLE" archive create "$RANGE_DATE" traces \
+	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
+	--checkpoint-id "$C1" --config "$FORGED_CFG" >"$ROOT/forged-create.out" 2>&1; then
+	cat "$ROOT/forged-create.out" >&2
+	fail "archive create --config with a forged volume identity unexpectedly succeeded"
+fi
+grep -q "calibration environment mismatch: archive volume" "$ROOT/forged-create.out" \
+	|| { cat "$ROOT/forged-create.out" >&2; fail "forged-volume create did not report an archive volume mismatch"; }
+echo "  forged-volume config rejected (volume identity enforced)"
 
 # --- Step 8: assert no temp debris under the archive volume ---
 echo "--- checking for temp debris ---"

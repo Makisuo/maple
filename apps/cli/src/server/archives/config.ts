@@ -189,7 +189,7 @@ export interface TuningConfigIdentity {
 }
 
 /** The calibration config document format version accepted by the loader. */
-export const TUNING_CONFIG_FORMAT_VERSION = 1
+export const TUNING_CONFIG_FORMAT_VERSION = 2
 
 const SAFE_CONFIG_NAME = /^[A-Za-z0-9._-]+$/
 
@@ -229,6 +229,157 @@ const METRIC_KEYS = new Set([
 	"wallMs",
 	"rowCount",
 ])
+
+export interface VerifiedCalibrationConfigDocument {
+	readonly formatVersion: typeof TUNING_CONFIG_FORMAT_VERSION
+	readonly measuredAt: string
+	readonly confidence: "high"
+	readonly checkpoint: {
+		readonly checkpointId: string
+		readonly manifestFingerprint: string
+	}
+	readonly candidateMatrix: ReadonlyArray<Record<string, number>>
+	readonly requiredSignals: ReadonlyArray<string>
+	readonly budget: Record<string, number>
+	readonly selected: {
+		readonly candidate: Record<string, number>
+		readonly worstCase: Record<string, number>
+	}
+	readonly heldOut: {
+		readonly results: ReadonlyArray<Record<string, unknown>>
+		readonly worstCase: Record<string, number>
+		readonly comparisons: ReadonlyArray<Record<string, unknown>>
+		readonly passed: true
+		readonly tolerances: Record<string, number>
+	}
+	readonly heldOutAttempts: ReadonlyArray<{
+		readonly candidate: Record<string, number>
+		readonly results: ReadonlyArray<Record<string, unknown>>
+		readonly worstCase: Record<string, number> | null
+		readonly comparisons: ReadonlyArray<Record<string, unknown>>
+		readonly passed: boolean
+	}>
+	readonly environment: {
+		readonly mapleVersion: string
+		readonly chdbVersion: string
+		readonly schemaFingerprint: string
+		readonly executionUser: string
+		readonly platform: string
+		readonly arch: string
+		readonly cpuModel: string
+		readonly cpuCount: number
+		readonly totalMemoryBytes: number
+		readonly measurementTool: string
+		readonly archiveVolume: {
+			readonly fsid: string
+			readonly type: number
+			readonly archiveDir: string
+		}
+	}
+	readonly effective: ArchiveTuningRecord
+	readonly derivation: {
+		readonly minFreeSpaceReserve: "budget.freeSpaceReserve"
+		readonly targetChunkBytes: "max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)"
+	}
+	readonly safetyMargin: number
+	readonly recalibrationTriggers: ReadonlyArray<string>
+	readonly results: ReadonlyArray<Record<string, unknown>>
+	readonly note: string
+}
+
+export interface LoadedTuningConfig {
+	readonly overrides: ArchiveTuningOverrides
+	readonly identity: TuningConfigIdentity
+	readonly document: VerifiedCalibrationConfigDocument
+}
+
+const EXPECTED_SIGNALS = [
+	"logs",
+	"traces",
+	"metrics_sum",
+	"metrics_gauge",
+	"metrics_histogram",
+	"metrics_exponential_histogram",
+] as const
+
+const EXPECTED_CANDIDATES = [
+	{ writerThreads: 1, rowGroupRows: 10_000, maxShardRows: 500_000, maxShardBytes: 256 * 1024 * 1024 },
+	{ writerThreads: 1, rowGroupRows: 5_000, maxShardRows: 250_000, maxShardBytes: 128 * 1024 * 1024 },
+	{ writerThreads: 2, rowGroupRows: 10_000, maxShardRows: 500_000, maxShardBytes: 256 * 1024 * 1024 },
+	{ writerThreads: 1, rowGroupRows: 20_000, maxShardRows: 1_000_000, maxShardBytes: 512 * 1024 * 1024 },
+] as const
+
+const exactJson = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b)
+
+const resultMetrics = (value: unknown, label: string, path: string): Record<string, number> => {
+	validateMetricsRecord(value, label, path)
+	return value as Record<string, number>
+}
+
+const worstCaseFromResults = (
+	results: ReadonlyArray<Record<string, unknown>>,
+	path: string,
+): Record<string, number> => {
+	if (results.length === 0) throw new Error(`calibration config has no results to aggregate: ${path}`)
+	const metrics = results.map((result, i) => resultMetrics(result.metrics, `aggregate[${i}].metrics`, path))
+	const max = (key: string): number => Math.max(...metrics.map((entry) => entry[key]!))
+	const min = (key: string): number => Math.min(...metrics.map((entry) => entry[key]!))
+	return {
+		logicalBytes: max("logicalBytes"),
+		physicalBytes: max("physicalBytes"),
+		compressionRatio: max("compressionRatio"),
+		writeThroughputBytesPerSec: min("writeThroughputBytesPerSec"),
+		peakTempDiskBytes: max("peakTempDiskBytes"),
+		peakRssBytes: max("peakRssBytes"),
+		wallMs: max("wallMs"),
+		rowCount: max("rowCount"),
+	}
+}
+
+const metricsMeetBudget = (metrics: Record<string, number>, budget: Record<string, number>): boolean => {
+	const margin = budget.safetyMargin!
+	return (
+		metrics.peakRssBytes! * margin <= budget.memoryBudget! &&
+		metrics.wallMs! <= budget.maxCandidateWallMs! &&
+		(budget.minThroughputBytesPerSec === 0 ||
+			metrics.writeThroughputBytesPerSec! / margin >= budget.minThroughputBytesPerSec!) &&
+		metrics.peakTempDiskBytes! * margin <= budget.maxTempDiskBytes!
+	)
+}
+
+const expectedComparisons = (
+	predicted: Record<string, number>,
+	observed: Record<string, number>,
+	tolerances: Record<string, number>,
+): ReadonlyArray<Record<string, unknown>> => {
+	const metrics = [
+		"peakRssBytes",
+		"wallMs",
+		"writeThroughputBytesPerSec",
+		"compressionRatio",
+		"physicalBytes",
+		"peakTempDiskBytes",
+	] as const
+	return metrics.map((metric) => {
+		const p = predicted[metric]!
+		const o = observed[metric]!
+		const tolerance = tolerances[metric]!
+		const throughput = metric === "writeThroughputBytesPerSec"
+		const relativeDelta = throughput
+			? p > 0
+				? Math.max(0, (p - o) / p)
+				: 0
+			: p > 0
+				? Math.abs(o - p) / p
+				: o === 0
+					? 0
+					: null
+		const withinTolerance = throughput
+			? o >= p * (1 - tolerance)
+			: relativeDelta !== null && relativeDelta <= tolerance
+		return { metric, predicted: p, observed: o, tolerance, withinTolerance, relativeDelta }
+	})
+}
 
 const validateCandidateRecord = (value: unknown, label: string, path: string): void => {
 	if (!isRecord(value)) throw new Error(`invalid calibration config ${label} (record required): ${path}`)
@@ -271,13 +422,22 @@ const validateMetricsRecord = (value: unknown, label: string, path: string): voi
  * recalibrationTriggers, measuredAt, note) are required. This is the strict
  * parser that the prior implementation lacked.
  */
-const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: string): void => {
+const validateCompleteConfigSchema = (
+	parsed: Record<string, unknown>,
+	path: string,
+): VerifiedCalibrationConfigDocument => {
 	const knownTopLevel = new Set([
 		"formatVersion",
 		"effective",
 		"environment",
 		"selected",
 		"results",
+		"heldOut",
+		"heldOutAttempts",
+		"checkpoint",
+		"candidateMatrix",
+		"requiredSignals",
+		"derivation",
 		"budget",
 		"confidence",
 		"safetyMargin",
@@ -290,17 +450,10 @@ const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: str
 			throw new Error(`unknown calibration config field '${key}'; refusing: ${path}`)
 		}
 	}
-	// confidence: required enum.
-	if (parsed.confidence !== "high" && parsed.confidence !== "low") {
-		throw new Error(`invalid calibration config confidence (must be 'high'|'low'): ${path}`)
-	}
-	// confidence/selected consistency: high ⟺ selected !== null.
-	const selectedNull = parsed.selected === null
-	if (parsed.confidence === "high" && selectedNull) {
-		throw new Error(`invalid calibration config: confidence 'high' requires selected !== null: ${path}`)
-	}
-	if (parsed.confidence === "low" && !selectedNull) {
-		throw new Error(`invalid calibration config: confidence 'low' requires selected === null: ${path}`)
+	if (parsed.confidence !== "high") {
+		throw new Error(
+			`invalid calibration config: a loadable recommendation requires confidence 'high': ${path}`,
+		)
 	}
 	// safetyMargin: required finite number > 0.
 	if (
@@ -333,6 +486,26 @@ const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: str
 		if (typeof t !== "string" || t.length === 0) {
 			throw new Error(`invalid calibration config recalibrationTriggers entry: ${path}`)
 		}
+	}
+	if (!Array.isArray(parsed.requiredSignals) || !exactJson(parsed.requiredSignals, EXPECTED_SIGNALS)) {
+		throw new Error(`invalid calibration config requiredSignals (exact six-signal set required): ${path}`)
+	}
+	if (!Array.isArray(parsed.candidateMatrix) || !exactJson(parsed.candidateMatrix, EXPECTED_CANDIDATES)) {
+		throw new Error(
+			`invalid calibration config candidateMatrix (exact supported matrix required): ${path}`,
+		)
+	}
+	if (!isRecord(parsed.checkpoint)) {
+		throw new Error(`invalid calibration config checkpoint (record required): ${path}`)
+	}
+	assertExactKeys(parsed.checkpoint, new Set(["checkpointId", "manifestFingerprint"]), "checkpoint", path)
+	if (
+		typeof parsed.checkpoint.checkpointId !== "string" ||
+		parsed.checkpoint.checkpointId.length === 0 ||
+		typeof parsed.checkpoint.manifestFingerprint !== "string" ||
+		parsed.checkpoint.manifestFingerprint.length === 0
+	) {
+		throw new Error(`invalid calibration config checkpoint identity: ${path}`)
 	}
 	// environment: required record; deep-validate with unknown-field rejection.
 	if (!isRecord(parsed.environment)) {
@@ -449,20 +622,27 @@ const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: str
 	if (typeof budgetSafetyMargin !== "number" || budgetSafetyMargin <= 0) {
 		throw new Error(`invalid calibration config budget.safetyMargin (must be > 0): ${path}`)
 	}
-	// selected: null OR a record with candidate + worstCase. Deep-validate if present.
-	if (parsed.selected !== null) {
-		if (!isRecord(parsed.selected)) {
-			throw new Error(`invalid calibration config selected (null or record required): ${path}`)
-		}
-		const sel = parsed.selected
-		assertExactKeys(sel, new Set(["candidate", "worstCase"]), "selected", path)
-		validateCandidateRecord(sel.candidate, "selected.candidate", path)
-		validateMetricsRecord(sel.worstCase, "selected.worstCase", path)
+	if (parsed.safetyMargin !== budget.safetyMargin) {
+		throw new Error(`invalid calibration config safetyMargin != budget.safetyMargin: ${path}`)
 	}
-	// results: required array; each entry validated as a CandidateResult-like shape.
+	if (!isRecord(parsed.selected)) {
+		throw new Error(`invalid calibration config selected (record required): ${path}`)
+	}
+	const sel = parsed.selected
+	assertExactKeys(sel, new Set(["candidate", "worstCase"]), "selected", path)
+	validateCandidateRecord(sel.candidate, "selected.candidate", path)
+	validateMetricsRecord(sel.worstCase, "selected.worstCase", path)
+
 	if (!Array.isArray(parsed.results)) {
 		throw new Error(`invalid calibration config results (array required): ${path}`)
 	}
+	if (parsed.results.length !== EXPECTED_CANDIDATES.length * EXPECTED_SIGNALS.length) {
+		throw new Error(
+			`invalid calibration config results (complete candidate x signal matrix required): ${path}`,
+		)
+	}
+	const seenTraining = new Set<string>()
+	const resultsByCandidate = new Map<string, Record<string, unknown>[]>()
 	for (let i = 0; i < parsed.results.length; i++) {
 		const r = parsed.results[i]
 		if (!isRecord(r)) {
@@ -478,6 +658,18 @@ const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: str
 			throw new Error(`invalid calibration config results[${i}] (signal/ok required): ${path}`)
 		}
 		validateCandidateRecord(r.candidate, `results[${i}].candidate`, path)
+		const candidateKey = JSON.stringify(r.candidate)
+		if (!EXPECTED_CANDIDATES.some((candidate) => exactJson(candidate, r.candidate))) {
+			throw new Error(`invalid calibration config results[${i}].candidate (outside matrix): ${path}`)
+		}
+		if (!EXPECTED_SIGNALS.includes(r.signal as (typeof EXPECTED_SIGNALS)[number])) {
+			throw new Error(`invalid calibration config results[${i}].signal (outside six signals): ${path}`)
+		}
+		const evidenceKey = `${candidateKey}\u0000${r.signal}`
+		if (seenTraining.has(evidenceKey)) {
+			throw new Error(`duplicate calibration config training evidence: ${path}`)
+		}
+		seenTraining.add(evidenceKey)
 		if (r.error !== undefined && typeof r.error !== "string") {
 			throw new Error(`invalid calibration config results[${i}].error: ${path}`)
 		}
@@ -488,7 +680,266 @@ const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: str
 				`invalid calibration config results[${i}].metrics (failed result must be null): ${path}`,
 			)
 		}
+		const candidateResults = resultsByCandidate.get(candidateKey) ?? []
+		candidateResults.push(r)
+		resultsByCandidate.set(candidateKey, candidateResults)
 	}
+	const eligible = EXPECTED_CANDIDATES.flatMap((candidate) => {
+		const evidence = resultsByCandidate.get(JSON.stringify(candidate)) ?? []
+		if (
+			evidence.length !== EXPECTED_SIGNALS.length ||
+			!evidence.every(
+				(result) =>
+					result.ok === true &&
+					isRecord(result.metrics) &&
+					metricsMeetBudget(
+						result.metrics as Record<string, number>,
+						budget as Record<string, number>,
+					),
+			)
+		) {
+			return []
+		}
+		return [{ candidate, worstCase: worstCaseFromResults(evidence, path) }]
+	}).sort(
+		(a, b) =>
+			a.worstCase.peakRssBytes! - b.worstCase.peakRssBytes! ||
+			a.worstCase.wallMs! - b.worstCase.wallMs!,
+	)
+	const selectedIndex = eligible.findIndex((entry) => exactJson(entry.candidate, sel.candidate))
+	if (selectedIndex < 0) {
+		throw new Error(
+			`invalid calibration config selected candidate did not pass training ceilings: ${path}`,
+		)
+	}
+	if (!exactJson(eligible[selectedIndex]!.worstCase, sel.worstCase)) {
+		throw new Error(
+			`invalid calibration config selected.worstCase was not recomputed from results: ${path}`,
+		)
+	}
+	if (!isRecord(parsed.heldOut)) {
+		throw new Error(`invalid calibration config heldOut (record required): ${path}`)
+	}
+	assertExactKeys(
+		parsed.heldOut,
+		new Set(["results", "worstCase", "comparisons", "passed", "tolerances"]),
+		"heldOut",
+		path,
+	)
+	const held = parsed.heldOut
+	if (!Array.isArray(held.results) || held.results.length !== EXPECTED_SIGNALS.length) {
+		throw new Error(`invalid calibration config heldOut.results (six entries required): ${path}`)
+	}
+	const heldSeen = new Set<string>()
+	for (let i = 0; i < held.results.length; i++) {
+		const result = held.results[i]
+		if (!isRecord(result)) throw new Error(`invalid calibration config heldOut.results[${i}]: ${path}`)
+		assertExactKeys(
+			result,
+			new Set(["candidate", "signal", "metrics", "ok"]),
+			`heldOut.results[${i}]`,
+			path,
+		)
+		if (
+			result.ok !== true ||
+			typeof result.signal !== "string" ||
+			heldSeen.has(result.signal) ||
+			!EXPECTED_SIGNALS.includes(result.signal as (typeof EXPECTED_SIGNALS)[number]) ||
+			!exactJson(result.candidate, sel.candidate)
+		) {
+			throw new Error(`invalid calibration config heldOut.results[${i}] identity: ${path}`)
+		}
+		heldSeen.add(result.signal)
+		const metrics = resultMetrics(result.metrics, `heldOut.results[${i}].metrics`, path)
+		if (!metricsMeetBudget(metrics, budget as Record<string, number>)) {
+			throw new Error(`invalid calibration config heldOut.results[${i}] exceeds budget: ${path}`)
+		}
+	}
+	const heldWorst = worstCaseFromResults(held.results as Record<string, unknown>[], path)
+	validateMetricsRecord(held.worstCase, "heldOut.worstCase", path)
+	if (!exactJson(heldWorst, held.worstCase)) {
+		throw new Error(`invalid calibration config heldOut.worstCase was not recomputed: ${path}`)
+	}
+	if (!isRecord(held.tolerances)) {
+		throw new Error(`invalid calibration config heldOut.tolerances: ${path}`)
+	}
+	const toleranceKeys = new Set([
+		"peakRssBytes",
+		"wallMs",
+		"writeThroughputBytesPerSec",
+		"compressionRatio",
+		"physicalBytes",
+		"peakTempDiskBytes",
+	])
+	assertExactKeys(held.tolerances, toleranceKeys, "heldOut.tolerances", path)
+	for (const key of toleranceKeys) {
+		const tolerance = held.tolerances[key]
+		if (typeof tolerance !== "number" || !Number.isFinite(tolerance) || tolerance < 0) {
+			throw new Error(`invalid calibration config heldOut.tolerances.${key}: ${path}`)
+		}
+	}
+	const recomputedComparisons = expectedComparisons(
+		sel.worstCase as Record<string, number>,
+		heldWorst,
+		held.tolerances as Record<string, number>,
+	)
+	if (!Array.isArray(held.comparisons) || !exactJson(recomputedComparisons, held.comparisons)) {
+		throw new Error(`invalid calibration config heldOut.comparisons were not recomputed: ${path}`)
+	}
+	if (
+		held.passed !== true ||
+		!recomputedComparisons.every((comparison) => comparison.withinTolerance === true)
+	) {
+		throw new Error(`invalid calibration config heldOut did not pass comparisons: ${path}`)
+	}
+	if (!Array.isArray(parsed.heldOutAttempts) || parsed.heldOutAttempts.length === 0) {
+		throw new Error(`invalid calibration config heldOutAttempts (non-empty evidence required): ${path}`)
+	}
+	for (let attemptIndex = 0; attemptIndex < parsed.heldOutAttempts.length; attemptIndex++) {
+		const attempt = parsed.heldOutAttempts[attemptIndex]
+		if (!isRecord(attempt)) {
+			throw new Error(`invalid calibration config heldOutAttempts[${attemptIndex}]: ${path}`)
+		}
+		assertExactKeys(
+			attempt,
+			new Set(["candidate", "results", "worstCase", "comparisons", "passed"]),
+			`heldOutAttempts[${attemptIndex}]`,
+			path,
+		)
+		if (
+			attemptIndex >= eligible.length ||
+			!exactJson(attempt.candidate, eligible[attemptIndex]!.candidate) ||
+			!Array.isArray(attempt.results)
+		) {
+			throw new Error(`invalid calibration config heldOutAttempts candidate order: ${path}`)
+		}
+		const attemptSignals = new Set<string>()
+		let completeAndWithinBudget = attempt.results.length === EXPECTED_SIGNALS.length
+		for (let resultIndex = 0; resultIndex < attempt.results.length; resultIndex++) {
+			const result = attempt.results[resultIndex]
+			if (!isRecord(result)) {
+				throw new Error(`invalid calibration config heldOutAttempts result: ${path}`)
+			}
+			for (const key of Object.keys(result)) {
+				if (!new Set(["candidate", "signal", "metrics", "ok", "error"]).has(key)) {
+					throw new Error(`unknown calibration config heldOutAttempts result.${key}: ${path}`)
+				}
+			}
+			if (
+				typeof result.signal !== "string" ||
+				attemptSignals.has(result.signal) ||
+				!EXPECTED_SIGNALS.includes(result.signal as (typeof EXPECTED_SIGNALS)[number]) ||
+				!exactJson(result.candidate, attempt.candidate)
+			) {
+				throw new Error(`invalid calibration config heldOutAttempts result identity: ${path}`)
+			}
+			attemptSignals.add(result.signal)
+			if (result.ok === true && isRecord(result.metrics)) {
+				validateMetricsRecord(result.metrics, "heldOutAttempts.metrics", path)
+				if (
+					!metricsMeetBudget(
+						result.metrics as Record<string, number>,
+						budget as Record<string, number>,
+					)
+				) {
+					completeAndWithinBudget = false
+				}
+			} else {
+				completeAndWithinBudget = false
+				if (result.metrics !== null) {
+					throw new Error(`invalid calibration config heldOutAttempts failed metrics: ${path}`)
+				}
+			}
+		}
+		const attemptWorst = completeAndWithinBudget
+			? worstCaseFromResults(attempt.results as Record<string, unknown>[], path)
+			: null
+		const attemptComparisons =
+			attemptWorst === null
+				? []
+				: expectedComparisons(
+						eligible[attemptIndex]!.worstCase,
+						attemptWorst,
+						held.tolerances as Record<string, number>,
+					)
+		const attemptPassed =
+			attemptWorst !== null &&
+			attemptComparisons.every((comparison) => comparison.withinTolerance === true)
+		if (
+			!exactJson(attempt.worstCase, attemptWorst) ||
+			!exactJson(attempt.comparisons, attemptComparisons) ||
+			attempt.passed !== attemptPassed
+		) {
+			throw new Error(`invalid calibration config heldOutAttempts semantic evidence: ${path}`)
+		}
+		if (attemptPassed && attemptIndex !== parsed.heldOutAttempts.length - 1) {
+			throw new Error(`invalid calibration config continued after a passing held-out attempt: ${path}`)
+		}
+	}
+	const finalAttempt = parsed.heldOutAttempts[parsed.heldOutAttempts.length - 1]!
+	if (
+		!isRecord(finalAttempt) ||
+		finalAttempt.passed !== true ||
+		!exactJson(finalAttempt.candidate, sel.candidate) ||
+		!exactJson(finalAttempt.results, held.results) ||
+		!exactJson(finalAttempt.worstCase, held.worstCase) ||
+		!exactJson(finalAttempt.comparisons, held.comparisons)
+	) {
+		throw new Error(
+			`invalid calibration config selected held-out evidence is not final passing attempt: ${path}`,
+		)
+	}
+	if (!isRecord(parsed.derivation)) {
+		throw new Error(`invalid calibration config derivation (record required): ${path}`)
+	}
+	assertExactKeys(
+		parsed.derivation,
+		new Set(["minFreeSpaceReserve", "targetChunkBytes"]),
+		"derivation",
+		path,
+	)
+	if (
+		parsed.derivation.minFreeSpaceReserve !== "budget.freeSpaceReserve" ||
+		parsed.derivation.targetChunkBytes !==
+			"max(4 * selected.candidate.maxShardBytes, budget.freeSpaceReserve + selected.candidate.maxShardBytes)"
+	) {
+		throw new Error(`invalid calibration config tuning derivation formula: ${path}`)
+	}
+	if (!isRecord(parsed.effective)) {
+		throw new Error(`calibration config missing 'effective' tuning block: ${path}`)
+	}
+	assertExactKeys(
+		parsed.effective,
+		new Set([
+			"writerThreads",
+			"rowGroupRows",
+			"maxShardRows",
+			"maxShardBytes",
+			"targetChunkBytes",
+			"minFreeSpaceReserve",
+		]),
+		"effective",
+		path,
+	)
+	const selectedCandidate = sel.candidate as Record<string, number>
+	const maxShardBytes = selectedCandidate.maxShardBytes!
+	const freeSpaceReserve = budget.freeSpaceReserve as number
+	const targetChunkBytes = Math.max(4 * maxShardBytes, freeSpaceReserve + maxShardBytes)
+	if (!Number.isSafeInteger(targetChunkBytes)) {
+		throw new Error(`calibration config derived targetChunkBytes overflows safe integer range: ${path}`)
+	}
+	const expectedEffective = {
+		writerThreads: selectedCandidate.writerThreads,
+		rowGroupRows: selectedCandidate.rowGroupRows,
+		maxShardRows: selectedCandidate.maxShardRows,
+		maxShardBytes,
+		targetChunkBytes,
+		minFreeSpaceReserve: budget.freeSpaceReserve,
+	}
+	if (!exactJson(parsed.effective, expectedEffective)) {
+		throw new Error(`invalid calibration config effective values do not match exact derivation: ${path}`)
+	}
+	return parsed as unknown as VerifiedCalibrationConfigDocument
 }
 
 /**
@@ -510,12 +961,7 @@ const validateCompleteConfigSchema = (parsed: Record<string, unknown>, path: str
  * precedence (CLI flags override config `effective` values override defaults),
  * rejecting conflicting root overrides explicitly.
  */
-export const loadTuningConfig = (
-	path: string,
-): {
-	overrides: ArchiveTuningOverrides
-	identity: TuningConfigIdentity
-} => {
+export const loadTuningConfig = (path: string): LoadedTuningConfig => {
 	// lstat BEFORE open so a symlink at `path` is refused. Then open with
 	// O_NOFOLLOW (kernel refuses a symlink at the final component too). Then
 	// compare the opened fd's dev/ino against the lstat identity so a swap
@@ -583,7 +1029,7 @@ export const loadTuningConfig = (
 		)
 	}
 	// Complete strict schema validation (S10): all evidence fields required.
-	validateCompleteConfigSchema(parsed, path)
+	const document = validateCompleteConfigSchema(parsed, path)
 	// effective: required, six numeric knobs, no unknown fields.
 	const effectiveRaw = parsed.effective
 	if (!isRecord(effectiveRaw)) {
@@ -619,5 +1065,6 @@ export const loadTuningConfig = (
 	return {
 		overrides,
 		identity: { formatVersion: TUNING_CONFIG_FORMAT_VERSION, configName, sha256 },
+		document,
 	}
 }

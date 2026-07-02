@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { lstat, rm, statfs } from "node:fs/promises"
 import { dirname, join, parse, relative, resolve, sep } from "node:path"
+import { arch, cpus, platform, totalmem, userInfo } from "node:os"
 import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
 import {
@@ -14,7 +15,8 @@ import {
 	type CheckpointManifest,
 } from "../checkpoints"
 import { durableJson, durableRename, durableWrite, syncDirectory, syncTree } from "../durable-files"
-import { type ArchiveTuning, tuningRecord } from "./config"
+import { type ArchiveTuning, tuningRecord, type LoadedTuningConfig } from "./config"
+import { archiveVolumeIdentity } from "./calibration-recovery"
 import {
 	type ArchiveShardRecord,
 	type ArchiveGenerationManifest,
@@ -90,6 +92,7 @@ export interface ArchiveGenerationFaults {
 	readonly afterShardsWritten?: () => void | Promise<void>
 	readonly afterFirstDurableShard?: () => void
 	readonly afterValidationComplete?: () => void | Promise<void>
+	readonly beforePublicationVolumeRecheck?: () => void | Promise<void>
 	readonly afterManifestWritten?: () => void | Promise<void>
 	readonly afterGenerationRenamed?: () => void | Promise<void>
 	readonly afterGenerationPromoted?: () => void | Promise<void>
@@ -186,6 +189,52 @@ const preflightFreeSpace = async (
 	}
 }
 
+const assertCalibrationArchiveVolume = async (
+	config: LoadedTuningConfig,
+	archiveDir: string,
+): Promise<void> => {
+	const expected = config.document.environment.archiveVolume
+	const canonicalArchiveDir = resolve(archiveDir)
+	if (expected.archiveDir !== canonicalArchiveDir) {
+		throw new Error(
+			`calibration environment mismatch: archive path ${canonicalArchiveDir} != ${expected.archiveDir}`,
+		)
+	}
+	const actual = await archiveVolumeIdentity(canonicalArchiveDir)
+	if (actual.fsid !== expected.fsid || actual.type !== expected.type) {
+		throw new Error(
+			`calibration environment mismatch: archive volume ${actual.fsid}/${actual.type} != ${expected.fsid}/${expected.type}`,
+		)
+	}
+}
+
+const assertCalibrationEnvironment = async (
+	config: LoadedTuningConfig,
+	archiveDir: string,
+): Promise<void> => {
+	const expected = config.document.environment
+	const cpuList = cpus()
+	const actual = {
+		mapleVersion: MAPLE_VERSION,
+		chdbVersion: CHDB_VERSION,
+		schemaFingerprint: SCHEMA_FINGERPRINT,
+		executionUser: userInfo().username,
+		platform: platform(),
+		arch: arch(),
+		cpuModel: cpuList.length > 0 ? cpuList[0]!.model : "unknown",
+		cpuCount: cpuList.length,
+		totalMemoryBytes: totalmem(),
+	}
+	for (const key of Object.keys(actual) as Array<keyof typeof actual>) {
+		if (actual[key] !== expected[key]) {
+			throw new Error(
+				`calibration environment mismatch: ${key} ${String(actual[key])} != ${String(expected[key])}; recalibrate`,
+			)
+		}
+	}
+	await assertCalibrationArchiveVolume(config, archiveDir)
+}
+
 /**
  * Seal one UTC day of one signal into a new archive generation.
  *
@@ -212,9 +261,9 @@ const preflightFreeSpace = async (
  *  13. remove owned scratch (phase "scratch-removed");
  *  14. archive the operation journal to operations/completed/ (phase "complete").
  *
- * A thrown error still runs a `finally` that releases the pin and removes owned
- * building/scratch ONLY when provably owned; a real SIGKILL does not run that
- * finally, which is exactly why the journal — not the finally — is authoritative.
+ * Thrown errors and SIGKILL deliberately leave the same journal-described
+ * topology. Reconciliation — not exception unwinding — owns pin release,
+ * building quarantine, and scratch removal.
  */
 export const createArchiveGeneration = async (
 	dataDir: string,
@@ -224,7 +273,7 @@ export const createArchiveGeneration = async (
 	tuning: ArchiveTuning,
 	checkpointSelector: "current" | "previous" | string = "current",
 	faults: ArchiveGenerationFaults = {},
-	tuningConfigIdentity: { formatVersion: number; configName: string; sha256: string } | null = null,
+	loadedTuningConfig: LoadedTuningConfig | null = null,
 ): Promise<ArchiveGenerationResult> => {
 	validateRangeDate(rangeDate)
 	assertArchiveRootSeparate(archiveDir, dataDir)
@@ -234,6 +283,9 @@ export const createArchiveGeneration = async (
 		)
 	}
 	await assertReconciliationRoots(dataDir, archiveDir, tuning.scratchRoot)
+	if (loadedTuningConfig !== null) {
+		await assertCalibrationEnvironment(loadedTuningConfig, archiveDir)
+	}
 	const signal = archiveSignal(signalName)
 	const estimatedWorkingBytes = tuning.targetChunkBytes
 	const generationId = newArchiveGenerationId()
@@ -340,6 +392,13 @@ export const createArchiveGeneration = async (
 					await advancePhase(archiveDir, operationId, "shards-written")
 					await faults.afterShardsWritten?.()
 					await faults.afterValidationComplete?.()
+					// The volume is checked once before any durable intent and again
+					// immediately before publication. A replacement/mount swap during
+					// export must never publish a config-bound generation.
+					if (loadedTuningConfig !== null) {
+						await faults.beforePublicationVolumeRecheck?.()
+						await assertCalibrationArchiveVolume(loadedTuningConfig, archiveDir)
+					}
 
 					// Step 8: manifest (written inside building/ by promote).
 					const manifest: ArchiveGenerationManifest = {
@@ -357,7 +416,7 @@ export const createArchiveGeneration = async (
 						sourceRowCount,
 						archivedRowCount,
 						tuning: tuningRecord(tuning),
-						tuningConfig: tuningConfigIdentity,
+						tuningConfig: loadedTuningConfig?.identity ?? null,
 						shards: writtenShards.map(toShardRecord),
 					}
 					// Step 9: promote building → final generation + manifest.
