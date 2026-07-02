@@ -109,6 +109,7 @@ export const redisTemplate: TemplateDefinition = {
 	category: "database",
 	tags: ["redis", "cache"],
 	requirements: ["OpenTelemetry redisreceiver"],
+	requiredMetricPrefixes: ["redis."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

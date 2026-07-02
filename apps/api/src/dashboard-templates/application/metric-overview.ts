@@ -119,6 +119,9 @@ export const metricOverviewTemplate: TemplateDefinition = {
 	category: "application",
 	tags: ["metrics"],
 	requirements: ["OpenTelemetry metrics"],
+	// Empty-string prefix matches any metric name — this template is usable
+	// as soon as the org has at least one metric of any kind.
+	requiredMetricPrefixes: [""],
 	parameters: [
 		{
 			key: paramKey("metric_name"),

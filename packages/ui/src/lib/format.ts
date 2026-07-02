@@ -26,16 +26,22 @@ export function formatDuration(ms: number): string {
 
 /**
  * Format a number with compact notation.
- * - >= 1M: displays as e.g. "1.2M"
- * - >= 1K: displays as e.g. "3.4K"
- * - < 1K: displays with locale formatting
+ * - |n| >= 1M: displays as e.g. "1.2M"
+ * - |n| >= 1K: displays as e.g. "3.4K"
+ * - 0 < |n| < 1: 3 significant digits (e.g. "0.08", "0.0267") — axis ticks for
+ *   rates/ratios must not collapse to "0" or trail "0.026666…"
+ * - otherwise: locale formatting
  */
 export function formatNumber(num: number): string {
-	if (num >= 1_000_000) {
+	const abs = Math.abs(num)
+	if (abs >= 1_000_000) {
 		return `${(num / 1_000_000).toFixed(1)}M`
 	}
-	if (num >= 1_000) {
+	if (abs >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
+	}
+	if (abs > 0 && abs < 1) {
+		return num.toLocaleString(undefined, { maximumSignificantDigits: 3 })
 	}
 	return num.toLocaleString()
 }

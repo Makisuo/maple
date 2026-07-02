@@ -62,4 +62,60 @@ describe("validateMetricsAttributeFilters", () => {
 			assert.isDefined(range)
 		}),
 	)
+
+	it.effect("rejects groupBy=resource_attribute when groupByResourceAttributeKey is missing", () =>
+		Effect.gen(function* () {
+			const exit = yield* validateEvaluate(
+				makeRequest({
+					kind: "timeseries",
+					source: "metrics",
+					metric: "avg",
+					groupBy: ["resource_attribute"],
+					filters: baseFilters,
+				}),
+			).pipe(Effect.exit)
+
+			assert.isTrue(exit._tag === "Failure")
+			assert.include(
+				JSON.stringify(exit),
+				"groupBy=resource_attribute requires filters.groupByResourceAttributeKey",
+			)
+		}),
+	)
+
+	it.effect("accepts groupBy=resource_attribute when groupByResourceAttributeKey is present", () =>
+		Effect.gen(function* () {
+			const range = yield* validateEvaluate(
+				makeRequest({
+					kind: "timeseries",
+					source: "metrics",
+					metric: "avg",
+					groupBy: ["resource_attribute"],
+					filters: { ...baseFilters, groupByResourceAttributeKey: "host.name" },
+				}),
+			)
+			assert.isDefined(range)
+		}),
+	)
+
+	it.effect("rejects combining attribute and resource_attribute group-bys", () =>
+		Effect.gen(function* () {
+			const exit = yield* validateEvaluate(
+				makeRequest({
+					kind: "timeseries",
+					source: "metrics",
+					metric: "avg",
+					groupBy: ["attribute", "resource_attribute"],
+					filters: {
+						...baseFilters,
+						groupByAttributeKey: "region",
+						groupByResourceAttributeKey: "host.name",
+					},
+				}),
+			).pipe(Effect.exit)
+
+			assert.isTrue(exit._tag === "Failure")
+			assert.include(JSON.stringify(exit), "groupBy cannot combine attribute and resource_attribute")
+		}),
+	)
 })

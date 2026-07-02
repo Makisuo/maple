@@ -459,14 +459,7 @@ export class DashboardTemplateParameter extends Schema.Class<DashboardTemplatePa
 	placeholder: Schema.optionalKey(Schema.String),
 }) {}
 
-export const DashboardTemplatePreviewKind = Schema.Literals([
-	"line",
-	"area",
-	"bar",
-	"stat",
-	"table",
-	"list",
-])
+export const DashboardTemplatePreviewKind = Schema.Literals(["line", "area", "bar", "stat", "table", "list"])
 export type DashboardTemplatePreviewKind = typeof DashboardTemplatePreviewKind.Type
 
 export class DashboardTemplatePreviewWidget extends Schema.Class<DashboardTemplatePreviewWidget>(
@@ -489,6 +482,12 @@ export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMet
 	category: DashboardTemplateCategory,
 	tags: Schema.Array(Schema.String),
 	requirements: Schema.Array(Schema.String),
+	/**
+	 * Metric-name prefixes the template's widgets query; the picker greys out
+	 * templates whose prefixes match none of the org's metrics. Empty array =
+	 * never gated. An empty-string prefix means "any metric".
+	 */
+	requiredMetricPrefixes: Schema.Array(Schema.String),
 	parameters: Schema.Array(DashboardTemplateParameter),
 	preview: Schema.Array(DashboardTemplatePreviewWidget),
 }) {}

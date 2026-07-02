@@ -288,6 +288,7 @@ function buildBreakdownQuery(
 		aggregation: string
 		groupBy: string[]
 		name?: string
+		legend?: string
 	},
 ): QueryBuilderQueryDraft {
 	const draft = createQueryDraft(index)
@@ -300,6 +301,7 @@ function buildBreakdownQuery(
 		groupBy: overrides.groupBy,
 		addOns: { groupBy: true, having: false, orderBy: false, limit: true, legend: false },
 		limit: "10",
+		legend: overrides.legend ?? draft.legend,
 	}
 	return overrides.dataSource === "logs"
 		? { ...base, dataSource: "logs" }
@@ -321,7 +323,7 @@ export const piePresets: WidgetPresetDefinition[] = [
 						dataSource: "traces",
 						whereClause: "has_error = true",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 				],
 				formulas: [],
@@ -350,7 +352,7 @@ export const piePresets: WidgetPresetDefinition[] = [
 						dataSource: "logs",
 						whereClause: "",
 						aggregation: "count",
-						groupBy: ["severity_text"],
+						groupBy: ["severity"],
 					}),
 				],
 				formulas: [],
@@ -379,7 +381,7 @@ export const piePresets: WidgetPresetDefinition[] = [
 						dataSource: "traces",
 						whereClause: "root_only = true",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 				],
 				formulas: [],
@@ -411,7 +413,7 @@ export const funnelPresets: WidgetPresetDefinition[] = [
 						dataSource: "traces",
 						whereClause: "root_only = true",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 				],
 				formulas: [],
@@ -440,7 +442,7 @@ export const funnelPresets: WidgetPresetDefinition[] = [
 						dataSource: "traces",
 						whereClause: "has_error = true",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 				],
 				formulas: [],
@@ -461,29 +463,51 @@ export const histogramPresets: WidgetPresetDefinition[] = [
 	{
 		id: "histogram-trace-duration",
 		name: "Trace Duration Distribution",
-		description: "Spread of root span durations across buckets",
+		description: "Distribution of recent root span durations",
 		icon: ChartBarIcon,
 		visualization: "histogram",
+		// A list of raw root-span durations, bucketized client-side by the
+		// histogram chart — a count-by-service breakdown is NOT a duration
+		// distribution (MAP-49).
 		dataSource: {
-			endpoint: "custom_query_builder_breakdown",
+			endpoint: "custom_query_builder_list",
 			params: {
 				queries: [
-					buildBreakdownQuery(0, {
+					{
+						id: "preset-histogram-durations",
+						name: "A",
+						enabled: true,
 						dataSource: "traces",
+						signalSource: "default",
+						metricName: "",
+						metricType: "sum",
+						isMonotonic: false,
 						whereClause: "root_only = true",
 						aggregation: "count",
-						groupBy: ["service_name"],
-					}),
+						stepInterval: "",
+						orderByDirection: "desc",
+						addOns: {
+							groupBy: false,
+							having: false,
+							orderBy: false,
+							limit: false,
+							legend: false,
+						},
+						groupBy: [],
+						having: "",
+						orderBy: "",
+						limit: "",
+						legend: "",
+					},
 				],
-				formulas: [],
-				comparison: { mode: "none", includePercentChange: false },
-				debug: false,
+				limit: 200,
+				columns: ["durationMs"],
 			},
 		},
 		display: {
 			title: "Trace Duration Distribution",
 			chartId: "query-builder-histogram",
-			unit: "number",
+			unit: "duration_ms",
 			histogram: { bucketCount: 30 },
 		},
 	},
@@ -501,7 +525,7 @@ export const histogramPresets: WidgetPresetDefinition[] = [
 						dataSource: "logs",
 						whereClause: "",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 				],
 				formulas: [],
@@ -531,17 +555,19 @@ export const heatmapPresets: WidgetPresetDefinition[] = [
 				queries: [
 					buildBreakdownQuery(0, {
 						name: "A",
+						legend: "Errors",
 						dataSource: "traces",
 						whereClause: "has_error = true",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 					buildBreakdownQuery(1, {
 						name: "B",
+						legend: "OK",
 						dataSource: "traces",
 						whereClause: "has_error = false",
 						aggregation: "count",
-						groupBy: ["service_name"],
+						groupBy: ["service.name"],
 					}),
 				],
 				formulas: [],

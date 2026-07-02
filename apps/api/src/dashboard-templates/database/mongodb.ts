@@ -98,6 +98,7 @@ export const mongodbTemplate: TemplateDefinition = {
 	category: "database",
 	tags: ["mongodb", "database"],
 	requirements: ["OpenTelemetry mongodbreceiver"],
+	requiredMetricPrefixes: ["mongodb."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

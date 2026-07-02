@@ -359,6 +359,30 @@ describe("query-builder timeseries strategy", () => {
 		expect(rows[0]["Errors: checkout (%Δ)"]).toBe(100)
 	})
 
+	it("prev=0 & cur=0 is 0% (genuinely unchanged); prev=0 & cur>0 leaves a gap, not a fake 0%", () => {
+		const rows: Array<Record<string, string | number>> = [
+			{
+				bucket: "2026-01-01T00:00:00.000Z",
+				"Errors: checkout": 0,
+				"Errors: checkout (prev)": 0,
+			},
+			{
+				bucket: "2026-01-01T01:00:00.000Z",
+				"Errors: checkout": 5,
+				"Errors: checkout (prev)": 0,
+			},
+		]
+
+		__testables.appendPercentChangeSeries(
+			rows,
+			new Map([["q-1::checkout", "Errors: checkout"]]),
+			new Map([["q-1::checkout", "Errors: checkout (prev)"]]),
+		)
+
+		expect(rows[0]["Errors: checkout (%Δ)"]).toBe(0)
+		expect(rows[1]).not.toHaveProperty("Errors: checkout (%Δ)")
+	})
+
 	it("does not rescale error_rate series — the engine's 0–1 ratio is canonical", () => {
 		// Regression guard: a ÷100 "normalize" survived from the Tinybird-pipe
 		// era (which returned percent points) long after the CH engine switched

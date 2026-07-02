@@ -9,6 +9,7 @@ import {
 	type LegendSeries,
 	QueryBuilderLegend,
 	computeSeriesStats,
+	sortZeroSeriesLast,
 	responsiveLegendHeight,
 } from "../_shared/query-builder-legend"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
@@ -22,6 +23,7 @@ import {
 	ChartTooltipContent,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+import { isSparseSeries, hasOnlyIntegerValues } from "../_shared/sparse-series"
 
 const fallbackData: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
@@ -172,14 +174,26 @@ export function QueryBuilderLineChart({
 		[processedData, valueKeys],
 	)
 
+	// Sparse data (isolated non-zero buckets between zeros) renders as barely
+	// visible spikes — auto-enable dots so single-bucket values stay readable.
+	const sparse = React.useMemo(() => isSparseSeries(processedData, valueKeys), [processedData, valueKeys])
+	const renderDots = showPoints || sparse
+	const integerOnlyData = React.useMemo(
+		() => hasOnlyIntegerValues(processedData, valueKeys),
+		[processedData, valueKeys],
+	)
+
 	const legendSeries = React.useMemo<LegendSeries[]>(
 		() =>
-			seriesDefinitions.map((definition) => ({
-				key: definition.chartKey,
-				label: definition.rawKey,
-				color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
-			})),
-		[seriesDefinitions, chartConfig],
+			sortZeroSeriesLast(
+				seriesDefinitions.map((definition) => ({
+					key: definition.chartKey,
+					label: definition.rawKey,
+					color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
+				})),
+				seriesStats,
+			),
+		[seriesDefinitions, chartConfig, seriesStats],
 	)
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
@@ -246,8 +260,9 @@ export function QueryBuilderLineChart({
 					<YAxis
 						tickLine={false}
 						axisLine={false}
-						tickMargin={8}
-						width={80}
+						tickMargin={6}
+						width={56}
+						allowDecimals={!integerOnlyData}
 						scale={logScale ? "log" : "auto"}
 						domain={[yDomainMin, yDomainMax]}
 						allowDataOverflow={
@@ -340,7 +355,11 @@ export function QueryBuilderLineChart({
 							dataKey={definition.chartKey}
 							stroke={`var(--color-${definition.chartKey})`}
 							strokeWidth={2}
-							dot={showPoints ? { r: 2 } : false}
+							dot={
+								renderDots
+									? { r: 2.5, strokeWidth: 0, fill: `var(--color-${definition.chartKey})` }
+									: false
+							}
 							hide={hiddenSeries.has(definition.chartKey)}
 							isAnimationActive={false}
 							activeDot={(props: { cx?: number; cy?: number }) => {

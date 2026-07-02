@@ -190,7 +190,7 @@ const Y_LABEL_MIN_PX = 36
 const Y_LABEL_MAX_PX = 96
 
 // Minimum vertical room each y-label needs to avoid stacking neighbours.
-const Y_LABEL_MIN_VERTICAL_PX = 13
+const Y_LABEL_MIN_VERTICAL_PX = 16
 
 interface HoverState {
 	x: string
@@ -252,7 +252,11 @@ function computeLayout(
 	const yTickStep = Math.max(1, Math.ceil(Y_LABEL_MIN_VERTICAL_PX / yStride))
 	const yTickIndices: number[] = []
 	for (let i = 0; i < yValues.length; i += yTickStep) yTickIndices.push(i)
-	if (yTickIndices[yTickIndices.length - 1] !== yValues.length - 1) {
+	// Always label the last row, but drop the previous pick if the two would
+	// land within one step of each other (they'd visually collide).
+	const lastPicked = yTickIndices[yTickIndices.length - 1]
+	if (lastPicked !== yValues.length - 1) {
+		if (yValues.length - 1 - lastPicked < yTickStep) yTickIndices.pop()
 		yTickIndices.push(yValues.length - 1)
 	}
 
@@ -356,8 +360,9 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 	const colCenterX = (xi: number) => xi * xStride + cellW / 2
 	const rowCenterY = (yi: number) => yi * yStride + cellH / 2
 
-	// Legend ticks: linear shows endpoints; log adds a geometric midpoint so
-	// the spacing reads as logarithmic.
+	// Legend ticks: both scales get a midpoint so the gradient reads as a
+	// scale, not just two endpoints; log uses a geometric midpoint so the
+	// spacing reads as logarithmic.
 	const legendTicks: Array<{ value: number; pct: number; anchor: "start" | "middle" | "end" }> =
 		span <= 0
 			? [{ value: min, pct: 0, anchor: "start" }]
@@ -373,6 +378,7 @@ export function QueryBuilderHeatmapChart({ data, className, tooltip, unit, heatm
 					]
 				: [
 						{ value: min, pct: 0, anchor: "start" },
+						{ value: min + span / 2, pct: 50, anchor: "middle" },
 						{ value: max, pct: 100, anchor: "end" },
 					]
 

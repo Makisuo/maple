@@ -5,7 +5,7 @@
 // a raw-SQL builder for counter rate/increase (which requires CTEs).
 // ---------------------------------------------------------------------------
 
-import type { MetricType } from "../../query-engine"
+import type { AttributeFilter, MetricType } from "../../query-engine"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { param } from "@maple-dev/clickhouse-builder"
@@ -14,6 +14,19 @@ import { table } from "@maple-dev/clickhouse-builder"
 import { MetricsSum, MetricCatalog, SpanMetricsCallsHourly } from "../tables"
 import { compileCH } from "@maple-dev/clickhouse-builder"
 import { resolveMetricTable, metricsSelectExprs } from "./query-helpers"
+import { buildAttrFilterCondition } from "../../traces-shared"
+
+/**
+ * WHERE conditions for `resourceAttributeFilters` — predicates on the
+ * ResourceAttributes map (host.name, k8s.pod.name, …), which carries
+ * host/pod/node identity on metrics rows (datapoint labels live on
+ * `Attributes` instead).
+ */
+function resourceFilterConditions(
+	filters: readonly AttributeFilter[] | undefined,
+): ReadonlyArray<CH.Condition> {
+	return (filters ?? []).map((rf) => buildAttrFilterCondition(rf, "ResourceAttributes"))
+}
 
 // ---------------------------------------------------------------------------
 // Shared options & output types
@@ -23,8 +36,11 @@ interface MetricsQueryOpts {
 	metricType: MetricType
 	serviceName?: string
 	groupByAttributeKey?: string
+	/** Group by a ResourceAttributes key instead of a datapoint Attributes key. */
+	groupByResourceAttributeKey?: string
 	attributeKey?: string
 	attributeValue?: string
+	resourceAttributeFilters?: readonly AttributeFilter[]
 }
 
 export interface MetricsTimeseriesOpts extends MetricsQueryOpts {}
@@ -51,9 +67,14 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,
-			attributeValue: opts.groupByAttributeKey
-				? $.Attributes.get(opts.groupByAttributeKey)
-				: CH.lit(""),
+			// A query groups by at most one attribute dimension (enforced by
+			// runtime validation); resource takes the shared attributeValue slot
+			// when requested.
+			attributeValue: opts.groupByResourceAttributeKey
+				? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
+				: opts.groupByAttributeKey
+					? $.Attributes.get(opts.groupByAttributeKey)
+					: CH.lit(""),
 			...metricsSelectExprs($, isHistogram),
 		}))
 		.where(($) => [
@@ -63,10 +84,11 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 			$.TimeUnix.lte(param.dateTime("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
+			...resourceFilterConditions(opts.resourceAttributeFilters),
 		])
 
 	return (
-		opts.groupByAttributeKey
+		opts.groupByAttributeKey || opts.groupByResourceAttributeKey
 			? q.groupBy("bucket", "serviceName", "attributeValue")
 			: q.groupBy("bucket", "serviceName")
 	)
@@ -87,8 +109,11 @@ export interface MetricsRateTimeseriesOpts {
 	bucketSeconds?: number
 	serviceName?: string
 	groupByAttributeKey?: string
+	/** Group by a ResourceAttributes key instead of a datapoint Attributes key. */
+	groupByResourceAttributeKey?: string
 	attributeKey?: string
 	attributeValue?: string
+	resourceAttributeFilters?: readonly AttributeFilter[]
 }
 
 export interface MetricsRateTimeseriesOutput {
@@ -115,7 +140,11 @@ function canUseSpanMetricsCallsHourly(opts: MetricsRateTimeseriesOpts): boolean 
 		opts.bucketSeconds % 3600 === 0 &&
 		(opts.attributeValue === undefined || opts.attributeKey !== undefined) &&
 		(opts.attributeKey === undefined || opts.attributeKey === "span.kind") &&
-		(opts.groupByAttributeKey === undefined || opts.groupByAttributeKey === "span.kind")
+		(opts.groupByAttributeKey === undefined || opts.groupByAttributeKey === "span.kind") &&
+		// The hourly MV folds ResourceAttributes into a fingerprint — it cannot
+		// serve resource-attribute filters or group-bys.
+		opts.groupByResourceAttributeKey === undefined &&
+		(opts.resourceAttributeFilters === undefined || opts.resourceAttributeFilters.length === 0)
 	)
 }
 
@@ -279,6 +308,12 @@ export function metricsTimeseriesRateQuery(
 					TimeUnix: $.TimeUnix,
 					ServiceName: $.ServiceName,
 					Attributes: $.Attributes,
+					// Project just the requested resource group value through the CTE —
+					// carrying the whole ResourceAttributes map per row would be pure
+					// overhead for the (common) non-resource-grouped case.
+					resourceAttributeValue: opts.groupByResourceAttributeKey
+						? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
+						: CH.lit(""),
 					Value: $.Value,
 					delta: $.Value.sub(previousValue),
 					time_delta: CH.toFloat64(
@@ -296,6 +331,7 @@ export function metricsTimeseriesRateQuery(
 				$.TimeUnix.lte(param.dateTime("endTime")),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.attributeKey, (k: string) => $.Attributes.get(k).eq(opts.attributeValue ?? "")),
+				...resourceFilterConditions(opts.resourceAttributeFilters),
 			]),
 		{},
 		{ skipFormat: true },
@@ -306,6 +342,7 @@ export function metricsTimeseriesRateQuery(
 		TimeUnix: T.dateTime64,
 		ServiceName: T.string,
 		Attributes: T.map(T.string, T.string),
+		resourceAttributeValue: T.string,
 		Value: T.float64,
 		delta: T.float64,
 		time_delta: T.float64,
@@ -316,9 +353,11 @@ export function metricsTimeseriesRateQuery(
 		.select(($) => ({
 			bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,
-			attributeValue: opts.groupByAttributeKey
-				? $.Attributes.get(opts.groupByAttributeKey)
-				: CH.lit(""),
+			attributeValue: opts.groupByResourceAttributeKey
+				? $.resourceAttributeValue
+				: opts.groupByAttributeKey
+					? $.Attributes.get(opts.groupByAttributeKey)
+					: CH.lit(""),
 			rateValue: CH.sumIf($.delta.div($.time_delta), $.delta.gte(0).and($.time_delta.gt(0))),
 			increaseValue: CH.sumIf($.delta, $.delta.gte(0)),
 			dataPointCount: CH.count(),
@@ -326,7 +365,7 @@ export function metricsTimeseriesRateQuery(
 		.where(($) => [$.TimeUnix.gte(param.dateTime("startTime"))])
 
 	return (
-		opts.groupByAttributeKey
+		opts.groupByAttributeKey || opts.groupByResourceAttributeKey
 			? q.groupBy("bucket", "serviceName", "attributeValue")
 			: q.groupBy("bucket", "serviceName")
 	)
@@ -341,6 +380,9 @@ export function metricsTimeseriesRateQuery(
 export interface MetricsBreakdownOpts {
 	metricType: MetricType
 	groupByAttributeKey?: string
+	/** Break down by a ResourceAttributes key instead of a datapoint Attributes key. */
+	groupByResourceAttributeKey?: string
+	resourceAttributeFilters?: readonly AttributeFilter[]
 	limit?: number
 }
 
@@ -355,13 +397,19 @@ export function metricsBreakdownQuery(opts: MetricsBreakdownOpts) {
 	const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
 	const limit = opts.limit ?? 10
 	const groupKey = opts.groupByAttributeKey
+	const resourceGroupKey = opts.groupByResourceAttributeKey
 
 	return from(tbl as typeof MetricsSum)
 		.select(($) => {
 			const exprs = metricsSelectExprs($, isHistogram)
 			return {
-				// Break down by a metric label value when requested, otherwise by service.
-				name: groupKey ? $.Attributes.get(groupKey) : $.ServiceName,
+				// Break down by a resource attribute or metric label value when
+				// requested, otherwise by service.
+				name: resourceGroupKey
+					? $.ResourceAttributes.get(resourceGroupKey)
+					: groupKey
+						? $.Attributes.get(groupKey)
+						: $.ServiceName,
 				avgValue: exprs.avgValue,
 				sumValue: exprs.sumValue,
 				count: exprs.dataPointCount,
@@ -374,6 +422,8 @@ export function metricsBreakdownQuery(opts: MetricsBreakdownOpts) {
 			$.TimeUnix.lte(param.dateTime("endTime")),
 			// Drop datapoints missing the label so an empty bucket doesn't dominate.
 			CH.when(groupKey, (k: string) => $.Attributes.get(k).neq("")),
+			CH.when(resourceGroupKey, (k: string) => $.ResourceAttributes.get(k).neq("")),
+			...resourceFilterConditions(opts.resourceAttributeFilters),
 		])
 		.groupBy("name")
 		.orderBy(["count", "desc"])
