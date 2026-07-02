@@ -175,6 +175,48 @@ export function CloudflareAccountCard() {
 					</div>
 				) : null}
 
+				{status && !status.analyticsCapable ? (
+					<div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px]">
+						<span className="text-amber-600 dark:text-amber-400">
+							Edge analytics needs additional permissions — update the connection to start
+							collecting cache hit rate, status codes, and latency.
+						</span>
+						<Button size="sm" onClick={handleConnect} disabled={busy !== null}>
+							{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+							Update permissions
+						</Button>
+					</div>
+				) : null}
+
+				{status && status.analyticsCapable && (status.zones.length > 0 || status.workers) ? (
+					<div className="flex flex-col gap-1.5 rounded-md bg-muted/40 px-3 py-2 text-[11px]">
+						<div className="font-medium text-muted-foreground">Edge analytics</div>
+						{status.zones.map((zone) => (
+							<CollectionStatusRow
+								key={zone.id}
+								name={zone.name}
+								enabled={zone.enabled}
+								lastSyncedAt={zone.lastSyncedAt}
+								lastError={zone.lastError}
+							/>
+						))}
+						{status.workers ? (
+							<CollectionStatusRow
+								name="Workers invocations"
+								enabled={status.workers.enabled}
+								lastSyncedAt={status.workers.lastSyncedAt}
+								lastError={status.workers.lastError}
+							/>
+						) : null}
+					</div>
+				) : null}
+				{status && status.analyticsCapable && status.zones.length === 0 && !status.workers ? (
+					<p className="text-[11px] text-muted-foreground">
+						Edge analytics collection starts within a few minutes — zones appear here once the
+						first sync runs.
+					</p>
+				) : null}
+
 				<div className="flex flex-wrap gap-2">
 					<Button size="sm" onClick={handleConnect} disabled={busy !== null} variant="outline">
 						{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
