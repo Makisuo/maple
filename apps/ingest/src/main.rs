@@ -1549,6 +1549,18 @@ async fn accept_grpc_decoded(
     decoded: DecodedPayload,
     resolved: &ResolvedIngestKey,
 ) -> Result<(), tonic::Status> {
+    // Billing suspension (dunning) — mirror the HTTP OTLP / logpush hard-stop so a
+    // suspended org can't keep ingesting by switching to gRPC. gRPC has no 402, so
+    // surface FailedPrecondition ("active subscription" precondition not met).
+    if resolved.ingest_suspended {
+        warn!(
+            org_id = %resolved.org_id,
+            "gRPC ingestion suspended: unpaid invoice overdue"
+        );
+        return Err(tonic::Status::failed_precondition(
+            "Ingestion suspended: unpaid invoice overdue",
+        ));
+    }
     let _org_inflight_permit = state
         .org_inflight_limiter
         .try_acquire(&resolved.org_id)
@@ -1680,6 +1692,19 @@ async fn resolve_replay_key(
         .await
         .map_err(|_| ApiError::service_unavailable("Ingest authentication unavailable"))?
         .ok_or_else(|| ApiError::unauthorized("Invalid ingest key"))?;
+    // Billing suspension (dunning) — same hard-stop as the OTLP/logpush paths, at
+    // the shared replay auth boundary so meta + events are both blocked for a
+    // suspended org before any row is accepted (or a browser session metered).
+    if resolved.ingest_suspended {
+        warn!(
+            org_id = %resolved.org_id,
+            "Session replay suspended: unpaid invoice overdue"
+        );
+        return Err(ApiError::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "Ingestion suspended: unpaid invoice overdue",
+        ));
+    }
     Ok(Some(resolved))
 }
 
