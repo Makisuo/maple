@@ -39,6 +39,17 @@ function fmtValue(value: number, unit?: string): string {
 }
 
 /**
+ * Donut-centre total: exact counts under 10k read better than compact
+ * notation ("1,500" instead of "1.5K"); larger totals stay compact.
+ */
+function fmtCenterTotal(value: number, unit?: string): string {
+	if (!unit && Number.isInteger(value) && Math.abs(value) < 10_000) {
+		return value.toLocaleString()
+	}
+	return fmtValue(value, unit)
+}
+
+/**
  * Cartesian point on a circle centred at (cx, cy) with radius r, at angle
  * `angle` measured clockwise from 12 o'clock (so 0 is top, π/2 is right).
  */
@@ -116,10 +127,17 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 	const valueField = React.useMemo(() => pickValueField(source), [source])
 
 	const { slices, total } = React.useMemo(() => {
-		const rows: Row[] = source.map((row) => ({
-			name: String(row.name ?? "—"),
-			value: asFiniteNumber(row[valueField]),
-		}))
+		const rows: Row[] = source
+			.map((row) => {
+				const raw = row.name == null ? "" : String(row.name).trim()
+				return {
+					name: raw === "" ? "(no value)" : raw,
+					value: asFiniteNumber(row[valueField]),
+				}
+			})
+			// Zero/negative rows render as invisible arcs but still occupy
+			// legend rows — drop them.
+			.filter((row) => row.value > 0)
 		// Collapse the long tail of small categories into a single "Other" slice
 		// (also sorts largest-first). Keeps both the pie and its 2-row legend
 		// legible when a group-by produces dozens of categories.
@@ -302,7 +320,7 @@ export function QueryBuilderPieChart({ data, className, legend, tooltip, unit, p
 								letterSpacing: "-0.02em",
 							}}
 						>
-							{fmtValue(total, unit)}
+							{fmtCenterTotal(total, unit)}
 						</text>
 						<text
 							x={cx}

@@ -36,6 +36,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { computeBucketSeconds, toIsoBucket } from "@/api/warehouse/timeseries-utils"
 import { OptionalStringArrayParam } from "@/lib/search-params"
+import { formatAgentDebugPrompt } from "@/components/errors/agent-debug-prompt"
 import type { ErrorByType, ErrorDetailTrace, ErrorsTimeseriesItem } from "@/api/warehouse/errors"
 
 const errorDetailSearchSchema = Schema.Struct({
@@ -188,16 +189,39 @@ function ErrorDetailContent() {
 						<pre className="text-sm font-mono whitespace-pre-wrap break-all">
 							{error.sampleMessage}
 						</pre>
-						<button
-							type="button"
-							className="mt-2 text-xs text-primary hover:underline"
-							onClick={() => {
-								navigator.clipboard.writeText(error.sampleMessage)
-								toast.success("Error message copied to clipboard")
-							}}
-						>
-							Copy error message
-						</button>
+						<div className="mt-2 flex items-center gap-4">
+							<button
+								type="button"
+								className="text-xs text-primary hover:underline"
+								onClick={() => {
+									navigator.clipboard.writeText(error.sampleMessage)
+									toast.success("Error message copied to clipboard")
+								}}
+							>
+								Copy error message
+							</button>
+							<button
+								type="button"
+								className="text-xs text-primary hover:underline"
+								onClick={() => {
+									navigator.clipboard.writeText(
+										formatAgentDebugPrompt({
+											fingerprintHash,
+											label: displayLabel,
+											serviceName: search.services?.length === 1 ? search.services[0] : null,
+											message: error.sampleMessage,
+											occurrenceCount: error.count,
+											affectedServicesCount: error.affectedServicesCount,
+											firstSeen: error.firstSeen.toISOString(),
+											lastSeen: error.lastSeen.toISOString(),
+										}),
+									)
+									toast.success("Copied agent prompt — paste it into your MCP agent")
+								}}
+							>
+								Copy agent prompt
+							</button>
+						</div>
 					</div>
 				</div>
 			)

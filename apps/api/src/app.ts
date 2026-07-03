@@ -137,7 +137,12 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(Layer.provi
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provideMerge(
-		Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, NotificationDispatcherLive),
+		Layer.mergeAll(
+			CoreServicesLive,
+			WarehouseQueryServiceLive,
+			EdgeCacheServiceLive,
+			NotificationDispatcherLive,
+		),
 	),
 )
 

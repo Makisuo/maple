@@ -1,5 +1,6 @@
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
+import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 import { runScheduledEffect, WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Context, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
@@ -44,6 +45,9 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
 	dropSpanNames: ["McpServer/Notifications."],
+	// Expected 4xx outcomes (validation, not-found, unauthorized, …) record as
+	// Ok spans instead of errors — see @maple/domain/anticipated-errors.
+	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
 })
 
 // `HttpMiddleware.tracer` ends the root server span on a deferred macrotask

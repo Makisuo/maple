@@ -75,12 +75,11 @@ describe("getCloudPlatform — cloudflare", () => {
 		expect(byLabel["Handler"]).toBe("queue")
 	})
 
-	it("returns null for a non-platform span", () => {
+	it("returns null for a non-platform span (no cloud, no db)", () => {
 		expect(
 			getCloudPlatform({
 				"http.method": "GET",
 				"http.route": "/v1/spans",
-				"db.system": "postgresql",
 			}),
 		).toBeNull()
 	})
@@ -97,6 +96,48 @@ describe("getCloudPlatform — cloudflare", () => {
 				"faas.invoked_region": "",
 				"http.route": "/checkout",
 			}),
+		).toBeNull()
+	})
+})
+
+describe("getCloudPlatform — database", () => {
+	it("normalizes a DB-client span and humanizes db.system.name", () => {
+		const info = getCloudPlatform({
+			"db.system.name": "postgresql",
+			"db.namespace": "app",
+			"db.collection.name": "users",
+			"db.operation.name": "SELECT",
+			"db.response.returned_rows": "42",
+			"server.address": "db.internal",
+			"server.port": "5432",
+		})
+		expect(info?.id).toBe("database")
+		expect(info?.label).toBe("PostgreSQL")
+		expect(info?.outcome).toBeNull()
+		const byLabel = Object.fromEntries(info!.fields.map((f) => [f.label, f.value]))
+		expect(byLabel["Operation"]).toBe("SELECT")
+		expect(byLabel["Namespace"]).toBe("app")
+		expect(byLabel["Table"]).toBe("users")
+		expect(byLabel["Rows returned"]).toBe("42")
+		expect(byLabel["Server"]).toBe("db.internal:5432")
+	})
+
+	it("falls back to the legacy db.system and title-cases unknown systems", () => {
+		expect(getCloudPlatform({ "db.system": "clickhouse" })?.label).toBe("ClickHouse")
+		expect(getCloudPlatform({ "db.system.name": "microsoft.sql_server" })?.label).toBe("SQL Server")
+		expect(getCloudPlatform({ "db.system.name": "cockroachdb" })?.label).toBe("CockroachDB")
+	})
+
+	it("flags error.type as a bad outcome", () => {
+		const info = getCloudPlatform({ "db.system.name": "mysql", "error.type": "timeout" })
+		expect(info?.outcome).toEqual({ value: "timeout", bad: true })
+	})
+
+	// Same projected-map regression as cloudflare: an empty db.system value must
+	// not flag every span as a database call.
+	it("returns null when db.system keys are present but empty (projected map)", () => {
+		expect(
+			getCloudPlatform({ "db.system.name": "", "db.system": "", "http.route": "/checkout" }),
 		).toBeNull()
 	})
 })

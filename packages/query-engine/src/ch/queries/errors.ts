@@ -151,6 +151,13 @@ const TREE_SPAN_ATTR_KEYS = [
 	"cache.name",
 	"cache.operation",
 	"cache.lookup_performed",
+	// Generic OpenTelemetry database-client spans — the `db.system.name` signal
+	// (with the legacy `db.system` fallback) lets the trace views detect a DB
+	// span and render its summary badge without waiting for the per-span lazy
+	// detail fetch. The full `db.*` field set (namespace, operation, rows,
+	// server, …) is loaded lazily by `spanDetailQuery` for the detail panel.
+	"db.system.name",
+	"db.system",
 	// Cloudflare Workers Observability — read by `getCloudflareInfo` to mark
 	// Worker spans and render the edge-location + outcome badges in the tree
 	// views. The full set (ray id, cpu/wall time, script version, geo city) is

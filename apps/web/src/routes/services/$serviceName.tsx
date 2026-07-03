@@ -1,5 +1,5 @@
 import { Link, useNavigate, createFileRoute } from "@tanstack/react-router"
-import { useCallback, useMemo } from "react"
+import { useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
@@ -10,7 +10,6 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
 import type {
 	ChartLegendMode,
-	ChartReferenceLine,
 	ChartTooltipMode,
 } from "@maple/ui/components/charts/_shared/chart-types"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
@@ -20,8 +19,8 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { mergeExactThroughput } from "@/api/warehouse/custom-charts"
 import type { ServiceDetailTimeSeriesPoint } from "@/api/warehouse/services"
-import { detectReleaseMarkers } from "@/lib/services/release-markers"
-import { CommitDeployMarker } from "@/components/vcs/commit-marker"
+import { useCommitMarkers } from "@/components/vcs/commit-markers/use-commit-markers"
+import type { ReleasePoint } from "@/components/vcs/commit-markers/marker-layout"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
@@ -30,6 +29,11 @@ import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
 import { OptionalStringArrayParam } from "@/lib/search-params"
+
+// A stable empty releases array for the non-success render branches. Minting a
+// fresh `[]` in the `.orElse` below would give `useCommitMarkers`' `useMemo` a new
+// dependency identity every render, busting the marker cache.
+const EMPTY_RELEASES: ReadonlyArray<ReleasePoint> = []
 
 const ServiceDetailTab = Schema.Literals(["overview", "dependencies"])
 type ServiceDetailTabValue = Schema.Schema.Type<typeof ServiceDetailTab>
@@ -235,9 +239,9 @@ interface OverviewTabProps {
 }
 
 function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, environments }: OverviewTabProps) {
-	// One fetch for the whole Overview tab — primary chart, releases timeline, and
-	// the environment switcher's options (the switcher reads this same atom key, so
-	// it shares this round-trip instead of issuing its own overview query).
+	// One fetch for the whole Overview tab — the primary chart and the environment
+	// switcher's options (the switcher reads this same atom key, so it shares this
+	// round-trip instead of issuing its own overview query).
 	const overviewResult = useRetainedRefreshableResultValue(
 		getServiceDetailOverviewResultAtom({
 			data: {
@@ -280,30 +284,6 @@ function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, enviro
 		return map
 	}, [throughputRefinement])
 
-	const releaseMarkers: ChartReferenceLine[] = useMemo(() => {
-		const timeline = Result.builder(overviewResult)
-			.onSuccess((r) => r.releases)
-			.orElse(() => [])
-		return detectReleaseMarkers(timeline).map((m) => ({
-			x: m.bucket,
-			label: m.label,
-			// Full SHA so the marker resolves the commit (for the flag's message and
-			// the hover card); `label` is the short-SHA fallback shown until it does.
-			sha: m.commitSha,
-			color: "var(--muted-foreground)",
-			strokeDasharray: "6 4",
-		}))
-	}, [overviewResult])
-
-	// Each deploy marker is a full-line hover hitbox with a flag at the top: the flag
-	// shows the release commit's message (resolved when the repo is connected/synced,
-	// falling back to the short SHA), and hovering the line previews the full commit.
-	// Shared across all four synced charts.
-	const renderReferenceMarker = useCallback(
-		(line: ChartReferenceLine) => <CommitDeployMarker line={line} />,
-		[],
-	)
-
 	const isWaiting = Result.isSuccess(overviewResult) && overviewResult.waiting
 
 	// Cold load (no retained data yet) → drive each chart's loading skeleton so
@@ -324,6 +304,15 @@ function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, enviro
 		return mergeExactThroughput(base, exactThroughputByBucket).map((point) => ({ ...point }))
 	}, [overviewResult, exactThroughputByBucket])
 
+	// Commit deploy markers (dashed verticals + labels) drawn over every chart.
+	// Derived from the overview's release timeline and snapped onto the chart's
+	// own bucket grid so each marker sits on an x-tick.
+	const releases = Result.builder(overviewResult)
+		.onSuccess((response) => response.releases)
+		.orElse(() => EMPTY_RELEASES)
+	const chartBuckets = useMemo(() => detailPoints.map((point) => String(point.bucket)), [detailPoints])
+	const commitMarkers = useCommitMarkers(releases, chartBuckets)
+
 	const widgetData: Record<string, Record<string, unknown>[]> = {
 		latency: detailPoints,
 		throughput: detailPoints,
@@ -340,10 +329,21 @@ function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, enviro
 		legend: chart.legend,
 		tooltip: chart.tooltip,
 		rateMode: chart.rateMode,
-		referenceLines: releaseMarkers,
-		renderReferenceMarker,
 		isLoading: isDetailLoading,
 	}))
 
-	return <MetricsGrid items={metrics} waiting={!!isWaiting} syncId={`service-${serviceName}`} />
+	return (
+		<MetricsGrid
+			items={metrics}
+			waiting={!!isWaiting}
+			syncId={`service-${serviceName}`}
+			overlay={commitMarkers}
+			// Pin every chart's y-axis to one width so their plot areas align — the
+			// synced cursor and the commit markers then line up and group identically
+			// across charts (otherwise each chart's own y-axis width shifts the plot,
+			// and the same commits group differently per chart). 72 fits the widest
+			// of these metrics' tick labels (latency ms).
+			yAxisWidth={72}
+		/>
+	)
 }

@@ -25,13 +25,16 @@ export class DemoService extends Context.Service<DemoService>()("@maple/api/serv
 			hours: number = DEMO_HOURS_DEFAULT,
 		) {
 			const safeHours = Math.max(1, Math.min(24, Math.floor(hours)))
-			const { traceRows, logRows } = generateDemoRows({
+			const { traceRows, logRows, metricGaugeRows, metricSumRows } = generateDemoRows({
 				orgId: tenant.orgId,
 				hours: safeHours,
 				ratePerHour: DEMO_RATE_PER_HOUR,
 			})
 
-			const ingestAll = (datasource: "traces" | "logs", rows: ReadonlyArray<unknown>) =>
+			const ingestAll = (
+				datasource: "traces" | "logs" | "metrics_gauge" | "metrics_sum",
+				rows: ReadonlyArray<unknown>,
+			) =>
 				Effect.forEach(
 					chunk(rows, INGEST_CHUNK),
 					(batch) =>
@@ -47,13 +50,17 @@ export class DemoService extends Context.Service<DemoService>()("@maple/api/serv
 			// before the user has picked a plan).
 			yield* ingestAll("traces", traceRows)
 			yield* ingestAll("logs", logRows)
+			// Runtime metrics so metric-based dashboard templates (Node.js
+			// Runtime, Metric Overview) have data to show.
+			yield* ingestAll("metrics_gauge", metricGaugeRows)
+			yield* ingestAll("metrics_sum", metricSumRows)
 
 			return new DemoSeedResponse({
 				seeded: true,
 				skippedReason: null,
 				spansSent: traceRows.length,
 				logsSent: logRows.length,
-				metricsSent: 0,
+				metricsSent: metricGaugeRows.length + metricSumRows.length,
 			})
 		})
 

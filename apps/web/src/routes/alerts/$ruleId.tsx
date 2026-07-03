@@ -13,8 +13,7 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { presetLabel, formatTimeRangeDisplay } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { AlertPreviewChart } from "@/components/alerts/alert-preview-chart"
-import { CheckHistorySparkline } from "@/components/alerts/check-history-sparkline"
+import { AlertSignalChart } from "@/components/alerts/alert-signal-chart"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
 import { AlertStatStrip } from "@/components/alerts/alert-stat-card"
@@ -45,7 +44,6 @@ import {
 	PencilIcon,
 	DotsVerticalIcon,
 	CircleWarningIcon,
-	SquareTerminalIcon,
 	ChevronDownIcon,
 	ChatBubbleSparkleIcon,
 } from "@/components/icons"
@@ -64,8 +62,10 @@ import {
 	DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
 import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
+import { tokenizeSql } from "@/lib/sql-highlight"
+import { formatSql } from "@/lib/sql-format"
 
-const tabValues = ["overview", "history", "checks"] as const
+const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
 
 const RuleDetailSearch = Schema.Struct({
@@ -355,7 +355,6 @@ function RuleDetailContent() {
 				<TabsList variant="underline">
 					<TabsTrigger value="overview">Overview</TabsTrigger>
 					<TabsTrigger value="history">History</TabsTrigger>
-					<TabsTrigger value="checks">Checks</TabsTrigger>
 				</TabsList>
 			</Tabs>
 		</div>
@@ -425,47 +424,21 @@ function RuleDetailContent() {
 						<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
 							{signalLabels[rule.signalType]}: {rangeLabel}
 						</h2>
-						{rule.signalType === "raw_query" ? (
-							// Raw SQL has no structured preview regardless of window, so the
-							// generic "widen the range" empty-state would mislead — mirror
-							// RuleLiveChartHero and show a raw-SQL hint instead.
-							<div className="flex h-[300px] w-full items-center justify-center rounded-md border border-dashed bg-muted/20 px-6 text-center">
-								<div className="max-w-sm space-y-2">
-									<div className="mx-auto flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
-										<SquareTerminalIcon size={16} />
-									</div>
-									<p className="font-medium text-sm">
-										Live preview unavailable for raw SQL
-									</p>
-									<p className="text-muted-foreground text-xs">
-										Raw SQL rules don't have a structured chart preview.
-									</p>
-								</div>
-							</div>
-						) : chartError != null ? (
-							<div className="flex h-[300px] w-full items-center justify-center rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-6 text-center">
-								<div className="max-w-md space-y-1">
-									<p className="font-medium text-destructive text-sm">
-										Preview query failed
-									</p>
-									<p className="line-clamp-3 text-muted-foreground text-xs">{chartError}</p>
-								</div>
-							</div>
-						) : !chartLoading && chartData.length === 0 ? (
-							<div className="flex h-[300px] w-full items-center justify-center rounded-md border border-dashed border-border/60 px-6 text-center">
-								<p className="max-w-md text-muted-foreground text-sm">
-									No data in this window. Try widening the range.
-								</p>
-							</div>
-						) : (
-							<AlertPreviewChart
-								data={chartData}
-								threshold={rule.threshold}
-								signalType={rule.signalType}
-								loading={chartLoading}
-								className="h-[300px] w-full"
-							/>
-						)}
+						<AlertSignalChart
+							data={chartData}
+							checks={checks}
+							incidents={ruleIncidents}
+							threshold={rule.threshold}
+							thresholdUpper={rule.thresholdUpper}
+							comparator={rule.comparator}
+							signalType={rule.signalType}
+							window={timelineRange}
+							loading={
+								chartLoading ||
+								(rule.signalType === "raw_query" && Result.isInitial(checksResult))
+							}
+							chartError={chartError}
+						/>
 					</div>
 
 					{overviewIncident ? (
@@ -575,11 +548,25 @@ function RuleDetailContent() {
 										</>
 									)}
 									{rule.signalType === "raw_query" && rule.rawQuerySql && (
-										<ConfigRow label="Raw SQL" wide>
-											<pre className="max-w-full overflow-x-auto whitespace-pre-wrap text-left font-mono text-xs">
-												{rule.rawQuerySql}
-											</pre>
-										</ConfigRow>
+										<div className="flex flex-col gap-1.5 sm:col-span-2">
+											<dt className="text-muted-foreground">Raw SQL</dt>
+											<dd>
+												<pre className="overflow-x-auto whitespace-pre rounded-md border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed">
+													<code>
+														{tokenizeSql(formatSql(rule.rawQuerySql)).map(
+															(token) => (
+																<span
+																	key={token.start}
+																	className={token.className}
+																>
+																	{token.text}
+																</span>
+															),
+														)}
+													</code>
+												</pre>
+											</dd>
+										</div>
 									)}
 									<ConfigRow label="Destinations">
 										<span className="font-medium">
@@ -596,6 +583,36 @@ function RuleDetailContent() {
 							</CardContent>
 						</Card>
 					</div>
+
+					{Result.builder(checksResult)
+						.onError((error) => (
+							<div className="space-y-4">
+								<h2 className="text-lg font-semibold">Checks</h2>
+								<Empty className="py-12">
+									<EmptyHeader>
+										<EmptyMedia variant="icon">
+											<CircleWarningIcon size={18} />
+										</EmptyMedia>
+										<EmptyTitle>Failed to load checks</EmptyTitle>
+										<EmptyDescription>
+											{error.message ?? "Try refreshing or check API logs."}
+										</EmptyDescription>
+									</EmptyHeader>
+									<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
+										Retry
+									</Button>
+								</Empty>
+							</div>
+						))
+						.orElse(() => (
+							<ChecksPanel
+								rule={rule}
+								checks={checks}
+								loading={Result.isInitial(checksResult)}
+								statusFilter={checkStatusFilter}
+								setStatusFilter={setCheckStatusFilter}
+							/>
+						))}
 				</div>
 			)}
 
@@ -864,34 +881,6 @@ function RuleDetailContent() {
 					))
 					.render()}
 
-			{activeTab === "checks" &&
-				Result.builder(checksResult)
-					.onError((error) => (
-						<Empty className="py-12">
-							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<CircleWarningIcon size={18} />
-								</EmptyMedia>
-								<EmptyTitle>Failed to load checks</EmptyTitle>
-								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
-								</EmptyDescription>
-							</EmptyHeader>
-							<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
-								Retry
-							</Button>
-						</Empty>
-					))
-					.orElse(() => (
-						<ChecksPanel
-							rule={rule}
-							checks={checks}
-							loading={Result.isInitial(checksResult)}
-							statusFilter={checkStatusFilter}
-							setStatusFilter={setCheckStatusFilter}
-						/>
-					))}
-
 			<AlertChatSheet open={chatOpen} onOpenChange={setChatOpen} alertContext={chatContext} />
 		</DashboardLayout>
 	)
@@ -966,7 +955,8 @@ function ChecksPanel({
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-4">
+			<h2 className="text-lg font-semibold">Checks</h2>
 			<AlertStatStrip
 				items={[
 					{ label: "Total checks", value: totals.total },
@@ -979,25 +969,6 @@ function ChecksPanel({
 					{ label: "Transitions", value: totals.transitions },
 				]}
 			/>
-
-			<div className="space-y-2">
-				<div className="flex items-center justify-between">
-					<h3 className="text-sm font-semibold">Observed values</h3>
-					<span className="text-xs text-muted-foreground">
-						{totals.total} checks · oldest → newest
-					</span>
-				</div>
-				<Card>
-					<CardContent className="p-5">
-						<CheckHistorySparkline
-							checks={checks}
-							threshold={rule.threshold}
-							signalType={rule.signalType}
-							className="h-[200px] w-full"
-						/>
-					</CardContent>
-				</Card>
-			</div>
 
 			<div className="space-y-3">
 				<div className="flex items-center justify-between">

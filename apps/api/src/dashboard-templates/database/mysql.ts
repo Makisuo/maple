@@ -111,6 +111,7 @@ export const mysqlTemplate: TemplateDefinition = {
 	category: "database",
 	tags: ["mysql", "database"],
 	requirements: ["OpenTelemetry mysqlreceiver"],
+	requiredMetricPrefixes: ["mysql."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

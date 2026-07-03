@@ -11,8 +11,10 @@ import {
 import type { TemplateDefinition, WidgetDef } from "../types"
 
 function widgets(namespace?: string): WidgetDef[] {
-	const where = combineWhere(namespace ? `k8s.namespace.name = "${namespace}"` : "")
-	const groupBy = ["k8s.pod.name"]
+	// Pod/namespace identity lives on ResourceAttributes — the metrics
+	// query-builder reaches it via the `resource.` prefix.
+	const where = combineWhere(namespace ? `resource.k8s.namespace.name = "${namespace}"` : "")
+	const groupBy = ["resource.k8s.pod.name"]
 	return [
 		{
 			id: "pod-cpu",
@@ -82,6 +84,7 @@ export const kubernetesPodTemplate: TemplateDefinition = {
 	category: "infrastructure",
 	tags: ["kubernetes", "k8s", "pods"],
 	requirements: ["OpenTelemetry kubeletstatsreceiver", "OpenTelemetry k8sclusterreceiver"],
+	requiredMetricPrefixes: ["k8s.pod."],
 	parameters: [
 		{
 			key: paramKey("namespace"),

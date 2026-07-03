@@ -26,6 +26,7 @@ import {
 } from "@maple/db"
 import { eq } from "drizzle-orm"
 import type { CompiledQuery } from "@maple/query-engine/ch"
+import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
 import { Database, DatabaseError } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
@@ -166,6 +167,64 @@ const makeErrorsLayer = (scanRows?: () => ReadonlyArray<Record<string, unknown>>
 				envLive,
 				databaseLive,
 				Layer.succeed(WarehouseQueryService, makeWarehouseStub(scanRows, onScan)),
+				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
+				dispatcherStub,
+			),
+		),
+		Layer.provideMerge(databaseLive),
+	)
+}
+
+/**
+ * Layer variant for active-org gating tests. Lets a test force discovery to
+ * FAIL (to exercise the fail-CLOSED path) and/or capture the cost `profile`
+ * each query context was issued with.
+ */
+const makeGatingLayer = (opts: {
+	failDiscovery?: boolean
+	scanRows?: () => ReadonlyArray<Record<string, unknown>>
+	scanned?: Set<string>
+	profiles?: Map<string, string | undefined>
+}) => {
+	const testDb = createTestDb(createdDbs)
+	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
+	const databaseLive = testDb.layer
+	const dispatcherStub = Layer.succeed(NotificationDispatcher, {
+		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
+	})
+	const scanRows = opts.scanRows ?? (() => [])
+	const warehouseStub: WarehouseQueryServiceShape = {
+		query: () => Effect.die(new Error("unexpected warehouse query")),
+		sqlQuery: () => Effect.succeed([]),
+		compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) => {
+			if (options?.context) opts.profiles?.set(options.context, options.profile)
+			if (options?.context === "errorActiveOrgsDiscovery") {
+				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
+				const orgId = (tenant as { orgId?: string }).orgId ?? ""
+				return Effect.sync(() => compiled.castRows(scanRows().length > 0 ? [{ orgId }] : []))
+			}
+			if (options?.context === "errorIssuesScan") {
+				const orgId = (tenant as { orgId?: string }).orgId ?? ""
+				return Effect.sync(() => {
+					opts.scanned?.add(orgId)
+					return compiled.castRows(scanRows())
+				})
+			}
+			return Effect.sync(() => compiled.castRows([]))
+		},
+		compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
+		ingest: () => Effect.void,
+		asExecutor: () => {
+			throw new Error("asExecutor is not supported by this test stub")
+		},
+	}
+	return ErrorsService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				envLive,
+				databaseLive,
+				Layer.succeed(WarehouseQueryService, warehouseStub),
+				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
 				dispatcherStub,
 			),
 		),
@@ -518,6 +577,41 @@ describe("ErrorsService.runTick", () => {
 				),
 			),
 		)
+	})
+
+	it.effect("discovery failure fails CLOSED — stateful orgs scanned, idle orgs skipped", () => {
+		const scanned = new Set<string>()
+		const IDLE = asOrgId("org_idle_ingest_only")
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* TestClock.setTime(TICK_MS)
+			// ORG becomes known + stateful via an issue; IDLE is known via an ingest
+			// key only (no issue, no incident state).
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* seedIngestKey(IDLE)
+
+			yield* errors.runTick()
+
+			// The stateful org is still scanned so resolution/aging keeps running…
+			assert.isTrue(scanned.has(ORG))
+			// …but the idle org is NOT scanned: no fan-out to every known org (the old
+			// fail-OPEN behaviour would have scanned it via activeOrgs="all").
+			assert.isFalse(scanned.has(IDLE))
+		}).pipe(Effect.provide(makeGatingLayer({ failDiscovery: true, scanned })))
+	})
+
+	it.effect("discovery uses the 5s discovery profile; the per-org scan uses the list profile", () => {
+		const profiles = new Map<string, string | undefined>()
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+
+			yield* errors.runTick()
+
+			assert.strictEqual(profiles.get("errorActiveOrgsDiscovery"), "discovery")
+			assert.strictEqual(profiles.get("errorIssuesScan"), "list")
+		}).pipe(Effect.provide(makeGatingLayer({ scanRows: () => [scanRow()], profiles })))
 	})
 
 	it.effect(

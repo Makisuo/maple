@@ -169,7 +169,11 @@ export function WidgetShell({
 					</CardAction>
 				)}
 			</CardHeader>
-			<CardContent className={contentClassName ?? "flex-1 min-h-0 p-2"}>
+			{/* Default containment: no chart may paint outside its card (MAP-49 —
+			    funnel rows spilled over the header). Widgets that scroll
+			    (list/table/markdown) override with overflow-auto, which wins the
+			    tailwind-merge conflict. */}
+			<CardContent className={cn("overflow-hidden", contentClassName ?? "flex-1 min-h-0 p-2")}>
 				<ChartLegendSlotContext.Provider value={legendSlot}>
 					{children}
 				</ChartLegendSlotContext.Provider>

@@ -1,5 +1,6 @@
 import type { MessageBatch } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
+import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer, Option } from "effect"
 import { DatabasePgLive } from "./lib/DatabasePgLive"
@@ -23,6 +24,7 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
+	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
 })
 
 export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {

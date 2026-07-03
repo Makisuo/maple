@@ -93,6 +93,12 @@ const LOG_BASELINE_CACHE_BUCKET = "anomaly-logbase"
 /** Active-org discovery window — covers the in-progress hour plus the prior one
  *  so an org that just started sending telemetry is picked up within a tick. */
 const ANOMALY_ACTIVE_DISCOVERY_WINDOW_MS = 2 * HOUR_MS
+/** Last-known active-org set. Lets discovery fail CLOSED (reuse the previous set)
+ *  instead of evaluating every known org — the old fallback that turned a
+ *  warehouse blip into a fan-out storm. See ErrorsService for the same pattern. */
+const ANOMALY_ACTIVE_ORGS_CACHE_BUCKET = "anomaly-active-orgs"
+const ANOMALY_ACTIVE_ORGS_CACHE_KEY = "active"
+const ANOMALY_ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
 /** D1 caps bound parameters per statement (~100); mirror ErrorsService's chunking. */
 const D1_INARRAY_CHUNK_SIZE = 90
 
@@ -260,8 +266,9 @@ const make = Effect.gen(function* () {
 	// CPU. Instead, run ONE cross-org scan of the recent hourly MVs (pinned to
 	// managed Tinybird) and only evaluate orgs that produced telemetry. Idle orgs
 	// have no series to evaluate. BYO-ClickHouse orgs are invisible to that scan
-	// and are always evaluated. Fails OPEN: if discovery errors, every known org
-	// is evaluated (the prior behaviour).
+	// and are always evaluated. Fails CLOSED: if discovery errors, reuse the
+	// last-known active set from cache (or just BYO if cold) rather than
+	// evaluating every known org — the old fan-out amplified warehouse stress.
 	// -----------------------------------------------------------------
 
 	const resolveActiveOrgs = Effect.fn("AnomalyDetectionService.resolveActiveOrgs")(function* (
@@ -282,12 +289,12 @@ const make = Effect.gen(function* () {
 				warehouse.compiledQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
-					{ pinToIngestConfig: true, profile: "list", context: "anomalyActiveOrgsTraces" },
+					{ pinToIngestConfig: true, profile: "discovery", context: "anomalyActiveOrgsTraces" },
 				),
 				warehouse.compiledQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByLogsQuery(), { startTime }),
-					{ pinToIngestConfig: true, profile: "list", context: "anomalyActiveOrgsLogs" },
+					{ pinToIngestConfig: true, profile: "discovery", context: "anomalyActiveOrgsLogs" },
 				),
 			],
 			{ concurrency: 2 },
@@ -300,11 +307,32 @@ const make = Effect.gen(function* () {
 				}
 				return active as ReadonlySet<string>
 			}),
+			// Cache the freshly-discovered set for reuse on a later discovery failure.
+			Effect.tap((active) =>
+				edgeCache
+					.rawPut(
+						ANOMALY_ACTIVE_ORGS_CACHE_BUCKET,
+						ANOMALY_ACTIVE_ORGS_CACHE_KEY,
+						[...active],
+						ANOMALY_ACTIVE_ORGS_CACHE_TTL_S,
+					)
+					.pipe(Effect.ignore),
+			),
+			// Fail CLOSED: reuse the last-known active set (or just BYO if cold).
 			Effect.catchCause((cause) =>
-				Effect.logWarning("Anomaly active-org discovery failed; evaluating all known orgs").pipe(
-					Effect.annotateLogs({ error: Cause.pretty(cause) }),
-					Effect.as("all" as const),
-				),
+				Effect.gen(function* () {
+					yield* Effect.logWarning(
+						"Anomaly active-org discovery failed; reusing last-known active set",
+					).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+					const cached = yield* edgeCache
+						.rawGet<ReadonlyArray<string>>(ANOMALY_ACTIVE_ORGS_CACHE_BUCKET, ANOMALY_ACTIVE_ORGS_CACHE_KEY)
+						.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
+					const active = new Set<string>(byo)
+					for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+						active.add(orgId)
+					}
+					return active as ReadonlySet<string>
+				}),
 			),
 		)
 	})
@@ -1789,7 +1817,7 @@ const make = Effect.gen(function* () {
 
 			const activeOrgs = yield* resolveActiveOrgs([...candidates], nowMs)
 			const orgsToProcess = [...candidates].filter(
-				(org) => activeOrgs === "all" || activeOrgs.has(org) || mustProcess.has(org),
+				(org) => activeOrgs.has(org) || mustProcess.has(org),
 			)
 
 			const orgFailures = yield* Ref.make(0)

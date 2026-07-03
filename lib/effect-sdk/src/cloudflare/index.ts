@@ -83,6 +83,13 @@ export interface Config {
 	 * (e.g. `"McpServer/Notifications."` for MCP notification spam).
 	 */
 	readonly dropSpanNames?: ReadonlyArray<string> | undefined
+	/**
+	 * `_tag`s of *anticipated* failures (expected 4xx business errors). A span
+	 * whose failure is caused entirely by these is exported with status `Ok` and
+	 * no `exception` event, so it stays visible as a trace but never counts as an
+	 * error. See `SpanBufferOptions.anticipatedErrorTags`.
+	 */
+	readonly anticipatedErrorTags?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
@@ -126,7 +133,11 @@ export const make = (config: Config = {}): Telemetry => {
 		dropPrefixes !== undefined && dropPrefixes.length > 0
 			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
 			: undefined
-	const spans: SpanBuffer = makeSpanBuffer({ dropSpan })
+	const anticipatedErrorTags =
+		config.anticipatedErrorTags !== undefined && config.anticipatedErrorTags.length > 0
+			? new Set(config.anticipatedErrorTags)
+			: undefined
+	const spans: SpanBuffer = makeSpanBuffer({ dropSpan, anticipatedErrorTags })
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 
 	let resolved: Resolved | undefined = undefined

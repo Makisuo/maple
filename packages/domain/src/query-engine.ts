@@ -104,7 +104,12 @@ export const MetricsFilters = Schema.Struct({
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
 	groupByAttributeKey: Schema.optional(Schema.String),
+	// Resource-attribute counterpart of `groupByAttributeKey` — groups by a
+	// ResourceAttributes key (host.name, k8s.pod.name, …) instead of a datapoint
+	// Attributes key. Required when groupBy includes "resource_attribute".
+	groupByResourceAttributeKey: Schema.optional(Schema.String),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
+	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
 })
 export type MetricsFilters = Schema.Schema.Type<typeof MetricsFilters>
 
@@ -145,7 +150,9 @@ export const MetricsTimeseriesQuery = Schema.Struct({
 	kind: Schema.Literal("timeseries"),
 	source: Schema.Literal("metrics"),
 	metric: MetricsMetric,
-	groupBy: Schema.optional(Schema.Array(Schema.Literals(["service", "attribute", "none"]))),
+	groupBy: Schema.optional(
+		Schema.Array(Schema.Literals(["service", "attribute", "resource_attribute", "none"])),
+	),
 	filters: MetricsFilters,
 	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
 })
@@ -180,7 +187,7 @@ export const MetricsBreakdownQuery = Schema.Struct({
 	kind: Schema.Literal("breakdown"),
 	source: Schema.Literal("metrics"),
 	metric: Schema.Literals(["avg", "sum", "count"]),
-	groupBy: Schema.Literals(["service", "attribute"]),
+	groupBy: Schema.Literals(["service", "attribute", "resource_attribute"]),
 	filters: MetricsFilters,
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),

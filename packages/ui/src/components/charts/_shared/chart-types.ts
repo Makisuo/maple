@@ -3,19 +3,6 @@ import type React from "react"
 export type ChartLegendMode = "visible" | "hidden" | "right"
 export type ChartTooltipMode = "visible" | "hidden"
 
-export interface ChartReferenceLine {
-	x: string
-	label?: string
-	color?: string
-	strokeDasharray?: string
-	/**
-	 * The full commit SHA this marker represents, when it stands for a release.
-	 * `label` is the short (display) form; this carries the resolvable handle the
-	 * host app needs to render a commit hover card via `renderReferenceMarker`.
-	 */
-	sha?: string
-}
-
 export interface ChartThreshold {
 	value: number
 	color: string
@@ -32,14 +19,6 @@ export interface BaseChartProps {
 	rateMode?: "per_second"
 	stacked?: boolean
 	curveType?: "linear" | "monotone"
-	referenceLines?: ChartReferenceLine[]
-	/**
-	 * Optional render-prop for an interactive marker at the top of each reference
-	 * line (a deploy/release flag). Kept as a callback so the design-system package
-	 * stays free of app-specific data fetching — the service detail page passes a
-	 * commit hover card here. When omitted, reference lines render as bare markers.
-	 */
-	renderReferenceMarker?: (line: ChartReferenceLine) => React.ReactNode
 	/**
 	 * Horizontal threshold lines drawn across the y-axis. Used to mark
 	 * "danger zone" values on time-series charts.
@@ -62,6 +41,22 @@ export interface BaseChartProps {
 	 * tooltip cursor lines up to the same time bucket on hover.
 	 */
 	syncId?: string
+	/**
+	 * Extra content rendered as a child INSIDE the recharts chart (time-series
+	 * charts only). Lets a host app inject an overlay that uses recharts' own
+	 * hooks (`useXAxisScale`, `usePlotArea`, `ZIndexLayer`) — e.g. the commit
+	 * deploy markers. The same element may be passed to several charts; each
+	 * renders its own instance against its own chart context.
+	 */
+	overlay?: React.ReactNode
+	/**
+	 * Forces the y-axis (and thus the plot's left edge) to a fixed pixel width. Pass the
+	 * SAME value to every chart in a synced grid so their plot areas line up exactly —
+	 * the synced cursor then aligns across charts, and a shared `overlay` (commit deploy
+	 * markers) groups identically on each instead of drifting with each chart's own
+	 * y-axis width. Omit to keep the chart's own content-sized width.
+	 */
+	yAxisWidth?: number
 	pie?: {
 		donut?: boolean
 		innerRadius?: number

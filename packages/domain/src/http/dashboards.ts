@@ -220,6 +220,70 @@ export const DashboardWidgetSchema = Schema.Struct({
 	layout: WidgetLayoutSchema,
 })
 
+// ---------------------------------------------------------------------------
+// Dashboard variables
+// ---------------------------------------------------------------------------
+
+// Must not start with an underscore so `$name` references can never collide
+// with the `$__` built-in macros ($__startTime, $__timeFilter, ...).
+export const DashboardVariableName = Schema.String.check(
+	Schema.isPattern(/^[A-Za-z][A-Za-z0-9_]*$/),
+).annotate({ identifier: "@maple/DashboardVariableName", title: "Dashboard Variable Name" })
+export type DashboardVariableName = Schema.Schema.Type<typeof DashboardVariableName>
+
+export const DashboardQueryVariableFacet = Schema.Literals([
+	"service",
+	"environment",
+	"span_name",
+	"http_method",
+	"http_status_code",
+	"log_severity",
+])
+export type DashboardQueryVariableFacet = typeof DashboardQueryVariableFacet.Type
+
+export const DashboardQueryVariableSourceSchema = Schema.Union([
+	Schema.Struct({
+		kind: Schema.Literal("facet"),
+		facet: DashboardQueryVariableFacet,
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("attribute"),
+		scope: Schema.Literals(["span", "resource"]),
+		attributeKey: Schema.String,
+	}),
+])
+export type DashboardQueryVariableSource = typeof DashboardQueryVariableSourceSchema.Type
+
+const dashboardVariableBaseFields = {
+	name: DashboardVariableName,
+	label: Schema.optionalKey(Schema.String),
+	includeAll: Schema.optionalKey(Schema.Boolean),
+	defaultValue: Schema.optionalKey(Schema.String),
+}
+
+export const DashboardVariableSchema = Schema.Union([
+	Schema.Struct({
+		...dashboardVariableBaseFields,
+		type: Schema.Literal("query"),
+		source: DashboardQueryVariableSourceSchema,
+	}),
+	Schema.Struct({
+		...dashboardVariableBaseFields,
+		type: Schema.Literal("custom"),
+		options: Schema.Array(
+			Schema.Struct({
+				value: Schema.String,
+				label: Schema.optionalKey(Schema.String),
+			}),
+		),
+	}),
+	Schema.Struct({
+		...dashboardVariableBaseFields,
+		type: Schema.Literal("textbox"),
+	}),
+])
+export type DashboardVariable = typeof DashboardVariableSchema.Type
+
 export class PortableDashboardDocument extends Schema.Class<PortableDashboardDocument>(
 	"PortableDashboardDocument",
 )({
@@ -228,6 +292,7 @@ export class PortableDashboardDocument extends Schema.Class<PortableDashboardDoc
 	tags: Schema.optionalKey(Schema.Array(Schema.String)),
 	timeRange: TimeRangeSchema,
 	widgets: Schema.Array(DashboardWidgetSchema),
+	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
 }) {}
 
 export class DashboardDocument extends Schema.Class<DashboardDocument>("DashboardDocument")({
@@ -237,6 +302,7 @@ export class DashboardDocument extends Schema.Class<DashboardDocument>("Dashboar
 	tags: Schema.optionalKey(Schema.Array(Schema.String)),
 	timeRange: TimeRangeSchema,
 	widgets: Schema.Array(DashboardWidgetSchema),
+	variables: Schema.optionalKey(Schema.Array(DashboardVariableSchema)),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
 }) {}
@@ -282,6 +348,7 @@ export const DashboardVersionChangeKind = Schema.Literals([
 	"description_changed",
 	"tags_changed",
 	"time_range_changed",
+	"variables_changed",
 	"widget_added",
 	"widget_removed",
 	"widget_updated",
@@ -392,6 +459,20 @@ export class DashboardTemplateParameter extends Schema.Class<DashboardTemplatePa
 	placeholder: Schema.optionalKey(Schema.String),
 }) {}
 
+export const DashboardTemplatePreviewKind = Schema.Literals(["line", "area", "bar", "stat", "table", "list"])
+export type DashboardTemplatePreviewKind = typeof DashboardTemplatePreviewKind.Type
+
+export class DashboardTemplatePreviewWidget extends Schema.Class<DashboardTemplatePreviewWidget>(
+	"DashboardTemplatePreviewWidget",
+)({
+	x: Schema.Number,
+	y: Schema.Number,
+	w: Schema.Number,
+	h: Schema.Number,
+	kind: DashboardTemplatePreviewKind,
+	title: Schema.String,
+}) {}
+
 export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMetadata>(
 	"DashboardTemplateMetadata",
 )({
@@ -401,7 +482,14 @@ export class DashboardTemplateMetadata extends Schema.Class<DashboardTemplateMet
 	category: DashboardTemplateCategory,
 	tags: Schema.Array(Schema.String),
 	requirements: Schema.Array(Schema.String),
+	/**
+	 * Metric-name prefixes the template's widgets query; the picker greys out
+	 * templates whose prefixes match none of the org's metrics. Empty array =
+	 * never gated. An empty-string prefix means "any metric".
+	 */
+	requiredMetricPrefixes: Schema.Array(Schema.String),
 	parameters: Schema.Array(DashboardTemplateParameter),
+	preview: Schema.Array(DashboardTemplatePreviewWidget),
 }) {}
 
 export class DashboardTemplatesListResponse extends Schema.Class<DashboardTemplatesListResponse>(

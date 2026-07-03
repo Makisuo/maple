@@ -41,6 +41,13 @@ static ORG_THROTTLED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static BACKPRESSURE_SHED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_backpressure_shed_total")
+        .with_description("Frames shed because a lane's bounded export channel was full")
+        .build()
+});
+
 static CLOUDFLARE_BATCHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_cloudflare_batches_total")
@@ -349,6 +356,20 @@ pub fn org_throttled(org_id: &str, reason: &'static str) {
         &[
             KeyValue::new("org_id", org_id.to_string()),
             KeyValue::new("reason", reason),
+        ],
+    );
+}
+
+/// A frame was shed because its export lane's bounded channel was full
+/// (backpressure) — typically a stalled destination that cannot drain fast
+/// enough. Counted per shed event, symmetric with `org_throttled`.
+pub fn backpressure_shed(org_id: &str, destination: &str, signal: &str) {
+    BACKPRESSURE_SHED_TOTAL.add(
+        1,
+        &[
+            KeyValue::new("org_id", org_id.to_string()),
+            KeyValue::new("destination", destination.to_string()),
+            KeyValue::new("signal", signal.to_string()),
         ],
     );
 }

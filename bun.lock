@@ -276,7 +276,6 @@
         "@tanstack/react-virtual": "^3.14.3",
         "@xyflow/react": "catalog:ui",
         "alchemy": "^0.93.12",
-        "autumn-js": "^1.2.29",
         "class-variance-authority": "catalog:ui",
         "clsx": "catalog:ui",
         "date-fns": "^4.4.0",

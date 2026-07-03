@@ -1,3 +1,4 @@
+export { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 export { AlertRuntime, AlertsService } from "./services/AlertsService"
 export { AnomalyDetectionService } from "./services/AnomalyDetectionService"
 export { BucketCacheService } from "@maple/query-engine/caching"

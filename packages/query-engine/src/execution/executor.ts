@@ -1,4 +1,4 @@
-import { Clock, Effect, Ref, Schedule } from "effect"
+import { Clock, Duration, Effect, Ref, Schedule } from "effect"
 import {
 	type WarehouseQueryRequest,
 	WarehouseQueryResponse,
@@ -9,7 +9,12 @@ import {
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { compilePipeQuery, type CompiledQuery } from "../ch"
 import type { ExecutorQueryOptions, WarehouseExecutorShape } from "../observability"
-import { appendSettings, resolveSettings, stripTinybirdRestrictedSettings } from "../profiles"
+import {
+	appendSettings,
+	type QueryProfileName,
+	resolveSettings,
+	stripTinybirdRestrictedSettings,
+} from "../profiles"
 import { mapWarehouseError, toWarehouseQueryError, type WarehouseSqlError } from "./errors"
 import {
 	SQL_LOG_MAX,
@@ -52,6 +57,30 @@ const TRANSIENT_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
 const isTransientUpstreamError = (error: WarehouseSqlError): boolean =>
 	error instanceof WarehouseUpstreamError
 
+// Client-side ceiling for a single query attempt. Tinybird's server-side
+// `max_execution_time` is not always honored — when its query queue is saturated
+// the request sits waiting, then rides the ambient ~30s Cloudflare Worker fetch
+// timeout (observed: a `list`-profile query with `max_execution_time=15` still
+// aborting at 30s). We enforce our own bound derived from the query's cost
+// profile: the server budget plus headroom for queue + network. Queries with no
+// declared budget fall back to a hard 30s cap (no worse than the ambient limit).
+// The `unbounded` profile is the explicit opt-out from cost limits, so it gets no
+// client cap either (documented for known-cheap queries; on Workers it still
+// rides the ambient ~30s limit). The timeout maps to a non-transient
+// WarehouseQueryError, so it fails fast instead of feeding the retry loop.
+const CLIENT_TIMEOUT_BUFFER_MS = 5_000
+const MANAGED_QUERY_HARD_TIMEOUT_MS = 30_000
+
+const clientTimeoutMs = (
+	profile: QueryProfileName | undefined,
+	maxExecutionTimeS: number | undefined,
+): number | undefined => {
+	if (profile === "unbounded") return undefined
+	return maxExecutionTimeS !== undefined
+		? maxExecutionTimeS * 1000 + CLIENT_TIMEOUT_BUFFER_MS
+		: MANAGED_QUERY_HARD_TIMEOUT_MS
+}
+
 /**
  * Build the managed-warehouse executor. Owns SQL execution, retry, error
  * mapping, the per-instance client cache, OrgId scoping enforcement, and span
@@ -80,7 +109,9 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		return client
 	}
 
-	const executeSql = Effect.fn("WarehouseQueryService.executeSql")(function* (
+	// Client-kind is load-bearing: the service-map DB-edge MV
+	// (service_map_db_edges_hourly_mv) only counts SpanKind IN ('Client','Producer').
+	const executeSql = Effect.fn("WarehouseQueryService.executeSql", { kind: "client" })(function* (
 		tenant: ExecutionTenant,
 		sql: string,
 		pipe: string,
@@ -143,11 +174,41 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 
 		const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
 		const client = getCachedOrCreateClient(cacheKey, resolved.config, yield* Clock.currentTimeMillis)
+		const attemptTimeoutMs = clientTimeoutMs(options?.profile, settings?.maxExecutionTime)
 		const retryAttempts = yield* Ref.make(0)
-		const result = yield* Effect.tryPromise({
+		const queryAttempt = Effect.tryPromise({
 			try: () => client.sql(finalSql),
 			catch: (error) => mapWarehouseError(pipe, error),
-		}).pipe(
+		})
+		// `db.duration_ms` measures warehouse execution only — captured here, after
+		// config resolution + settings/client-cache preamble, immediately before the
+		// query runs. `startedAtMs` (captured at span entry) feeds the separate
+		// `db.total_duration_ms`, covering the whole executeSql span including preamble.
+		const sqlStartedMs = yield* Clock.currentTimeMillis
+		const result = yield* (
+			// Bound each attempt: don't let a queued query ride the ambient ~30s
+			// Worker fetch limit past its declared budget. Non-transient, so it
+			// fails fast rather than retrying into a struggling warehouse. Skipped
+			// entirely for the `unbounded` profile (explicit opt-out).
+			attemptTimeoutMs === undefined
+				? queryAttempt
+				: queryAttempt.pipe(
+						Effect.timeoutOrElse({
+							duration: Duration.millis(attemptTimeoutMs),
+							orElse: () =>
+								// Constructed directly via `toWarehouseQueryError` (non-transient) — this
+								// timeout must never flow through `mapWarehouseError`, whose transient
+								// regex could reclassify a "timeout" message and feed it back into the
+								// retry loop, re-amplifying load on an already-struggling warehouse.
+								Effect.fail(
+									toWarehouseQueryError(
+										pipe,
+										new Error(`Warehouse query exceeded ${attemptTimeoutMs}ms client timeout`),
+									),
+								),
+						}),
+					)
+		).pipe(
 			Effect.tapError((error) =>
 				isTransientUpstreamError(error) ? Ref.update(retryAttempts, (n) => n + 1) : Effect.void,
 			),
@@ -157,9 +218,12 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			}),
 			Effect.tapError((error) =>
 				Effect.gen(function* () {
-					const elapsedMs = (yield* Clock.currentTimeMillis) - startedAtMs
+					const nowMs = yield* Clock.currentTimeMillis
+					const elapsedMs = nowMs - sqlStartedMs
+					const totalElapsedMs = nowMs - startedAtMs
 					const attempts = yield* Ref.get(retryAttempts)
 					yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
+					yield* Effect.annotateCurrentSpan("db.total_duration_ms", totalElapsedMs)
 					yield* Effect.annotateCurrentSpan("db.retry.attempts", attempts)
 					yield* Effect.logError("WarehouseQueryService.executeSql failed", {
 						pipe,
@@ -168,7 +232,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 						backend: resolved.config._tag,
 						durationMs: elapsedMs,
 						retryAttempts: attempts,
-						error: String(error),
+						errorTag: error._tag,
 						message: error.message,
 						sql: truncateSql(finalSql, SQL_LOG_MAX),
 						sqlLength,
@@ -180,7 +244,9 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		)
 
 		yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
-		yield* Effect.annotateCurrentSpan("db.duration_ms", (yield* Clock.currentTimeMillis) - startedAtMs)
+		const completedAtMs = yield* Clock.currentTimeMillis
+		yield* Effect.annotateCurrentSpan("db.duration_ms", completedAtMs - sqlStartedMs)
+		yield* Effect.annotateCurrentSpan("db.total_duration_ms", completedAtMs - startedAtMs)
 		yield* Effect.annotateCurrentSpan("db.retry.attempts", yield* Ref.get(retryAttempts))
 		return result.data
 	})
@@ -321,7 +387,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 					datasource,
 					rowCount: rows.length,
 					backend: resolved.config._tag,
-					error: String(error),
+					errorTag: error._tag,
 					message: error.message,
 				}),
 			),
@@ -338,20 +404,33 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			query(tenant, { pipeName: pipe, params }, { ...options, context: `pipe:${pipe}` }).pipe(
 				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
 				Effect.withSpan("WarehouseExecutor.query", {
-					attributes: { pipe, orgId: tenant.orgId, "query.profile": options?.profile },
+					attributes: {
+						pipe,
+						orgId: tenant.orgId,
+						"query.profile": options?.profile,
+						"query.context": `pipe:${pipe}`,
+					},
 				}),
 			),
 		sqlQuery: <T>(sql: string, options?: ExecutorQueryOptions) =>
 			sqlQuery(tenant, sql, { ...options, context: "warehouseExecutor.sqlQuery" }).pipe(
 				Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
 				Effect.withSpan("WarehouseExecutor.sqlQuery", {
-					attributes: { orgId: tenant.orgId, "query.profile": options?.profile },
+					attributes: {
+						orgId: tenant.orgId,
+						"query.profile": options?.profile,
+						"query.context": "warehouseExecutor.sqlQuery",
+					},
 				}),
 			),
 		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: ExecutorQueryOptions) =>
 			compiledQuery(tenant, compiled, { ...options, context: "warehouseExecutor.compiledQuery" }).pipe(
 				Effect.withSpan("WarehouseExecutor.compiledQuery", {
-					attributes: { orgId: tenant.orgId, "query.profile": options?.profile },
+					attributes: {
+						orgId: tenant.orgId,
+						"query.profile": options?.profile,
+						"query.context": "warehouseExecutor.compiledQuery",
+					},
 				}),
 			),
 		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: ExecutorQueryOptions) =>
@@ -360,7 +439,11 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 				context: "warehouseExecutor.compiledQueryFirst",
 			}).pipe(
 				Effect.withSpan("WarehouseExecutor.compiledQueryFirst", {
-					attributes: { orgId: tenant.orgId, "query.profile": options?.profile },
+					attributes: {
+						orgId: tenant.orgId,
+						"query.profile": options?.profile,
+						"query.context": "warehouseExecutor.compiledQueryFirst",
+					},
 				}),
 			),
 	})

@@ -26,8 +26,15 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1782846153383,
-      "tag": "0003_lowly_fantastic_four",
+      "when": 1782992101248,
+      "tag": "0003_backfill_github_commit_avatars",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783094487568,
+      "tag": "0004_useful_sunfire",
       "breakpoints": true
     }
   ]

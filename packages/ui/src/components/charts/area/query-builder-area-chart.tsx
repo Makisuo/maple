@@ -9,6 +9,7 @@ import {
 	type LegendSeries,
 	QueryBuilderLegend,
 	computeSeriesStats,
+	sortZeroSeriesLast,
 	responsiveLegendHeight,
 } from "../_shared/query-builder-legend"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
@@ -22,6 +23,7 @@ import {
 	ChartTooltipContent,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+import { isSparseSeries, hasOnlyIntegerValues } from "../_shared/sparse-series"
 
 const fallbackData: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
@@ -61,6 +63,7 @@ export function QueryBuilderAreaChart({
 	fitYAxisToData,
 	syncId,
 	thresholds,
+	showPoints,
 }: BaseChartProps) {
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
 		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
@@ -161,14 +164,29 @@ export function QueryBuilderAreaChart({
 		[processedData, valueKeys],
 	)
 
+	// Sparse data (isolated non-zero buckets between zeros) renders as barely
+	// visible spikes — auto-enable dots so single-bucket values stay readable.
+	const sparse = React.useMemo(() => isSparseSeries(processedData, valueKeys), [processedData, valueKeys])
+	const renderDots = showPoints || sparse
+
+	// Integer-only data (counts) shouldn't get fractional ticks (0.5/1.5); a
+	// unit or any fractional value keeps decimal ticks (rates, ratios).
+	const integerOnlyData = React.useMemo(
+		() => hasOnlyIntegerValues(processedData, valueKeys),
+		[processedData, valueKeys],
+	)
+
 	const legendSeries = React.useMemo<LegendSeries[]>(
 		() =>
-			seriesDefinitions.map((definition) => ({
-				key: definition.chartKey,
-				label: definition.rawKey,
-				color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
-			})),
-		[seriesDefinitions, chartConfig],
+			sortZeroSeriesLast(
+				seriesDefinitions.map((definition) => ({
+					key: definition.chartKey,
+					label: definition.rawKey,
+					color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
+				})),
+				seriesStats,
+			),
+		[seriesDefinitions, chartConfig, seriesStats],
 	)
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
@@ -282,10 +300,11 @@ export function QueryBuilderAreaChart({
 					<YAxis
 						tickLine={false}
 						axisLine={false}
-						tickMargin={8}
-						width={80}
+						tickMargin={6}
+						width={56}
 						scale={logScale ? "log" : "auto"}
 						domain={[yDomainMin, yDomainMax]}
+						allowDecimals={!integerOnlyData}
 						allowDataOverflow={
 							logScale || softMin != null || softMax != null || fitDomainMin != null
 						}
@@ -380,6 +399,15 @@ export function QueryBuilderAreaChart({
 							stroke={`var(--color-${definition.chartKey})`}
 							fill={`url(#fill-${definition.chartKey})`}
 							strokeWidth={2}
+							dot={
+								renderDots
+									? {
+											r: 2.5,
+											strokeWidth: 0,
+											fill: `var(--color-${definition.chartKey})`,
+										}
+									: false
+							}
 							hide={hiddenSeries.has(definition.chartKey)}
 							isAnimationActive={false}
 							activeDot={(props: { cx?: number; cy?: number }) => {

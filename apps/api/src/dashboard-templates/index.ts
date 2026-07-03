@@ -1,4 +1,4 @@
-import type { DashboardTemplateId } from "@maple/domain/http"
+import type { DashboardTemplateId, DashboardTemplatePreviewKind } from "@maple/domain/http"
 import { blankTemplate } from "./application/blank"
 import { errorTrackingTemplate } from "./application/error-tracking"
 import { grpcServiceTemplate } from "./application/grpc-service"
@@ -19,7 +19,7 @@ import { kubernetesPodTemplate } from "./infrastructure/kubernetes-pod"
 import { kafkaTemplate } from "./messaging/kafka"
 import { natsTemplate } from "./messaging/nats"
 import { rabbitmqTemplate } from "./messaging/rabbitmq"
-import type { TemplateDefinition, TemplateMetadata } from "./types"
+import type { TemplateDefinition, TemplateMetadata, TemplatePreviewWidget } from "./types"
 
 export const DASHBOARD_TEMPLATES: ReadonlyArray<TemplateDefinition> = [
 	// Application
@@ -58,6 +58,40 @@ export function getTemplateById(id: DashboardTemplateId): TemplateDefinition | u
 	return TEMPLATE_BY_ID.get(id)
 }
 
+function previewKindForWidget(visualization: string, chartId: unknown): DashboardTemplatePreviewKind {
+	switch (visualization) {
+		case "chart": {
+			if (typeof chartId === "string") {
+				if (chartId.endsWith("-area")) return "area"
+				if (chartId.endsWith("-bar")) return "bar"
+			}
+			return "line"
+		}
+		case "stat":
+			return "stat"
+		case "list":
+			return "list"
+		default:
+			return "table"
+	}
+}
+
+export function buildTemplatePreview(template: TemplateDefinition): TemplatePreviewWidget[] {
+	return template.build({}).widgets.map((w) => ({
+		x: w.layout.x,
+		y: w.layout.y,
+		w: w.layout.w,
+		h: w.layout.h,
+		kind: previewKindForWidget(w.visualization, w.display.chartId),
+		title: w.display.title ?? "",
+	}))
+}
+
+// Previews are derived from the (pure, deterministic) template builds; compute once.
+const TEMPLATE_PREVIEWS = new Map<string, TemplatePreviewWidget[]>(
+	DASHBOARD_TEMPLATES.map((t) => [t.id, buildTemplatePreview(t)]),
+)
+
 export function listTemplateMetadata(): TemplateMetadata[] {
 	return DASHBOARD_TEMPLATES.map((t) => ({
 		id: t.id,
@@ -66,8 +100,16 @@ export function listTemplateMetadata(): TemplateMetadata[] {
 		category: t.category,
 		tags: t.tags,
 		requirements: t.requirements,
+		requiredMetricPrefixes: t.requiredMetricPrefixes ?? [],
 		parameters: t.parameters,
+		preview: TEMPLATE_PREVIEWS.get(t.id) ?? [],
 	}))
 }
 
-export type { TemplateDefinition, TemplateMetadata, TemplateParameterValues, WidgetDef } from "./types"
+export type {
+	TemplateDefinition,
+	TemplateMetadata,
+	TemplateParameterValues,
+	TemplatePreviewWidget,
+	WidgetDef,
+} from "./types"

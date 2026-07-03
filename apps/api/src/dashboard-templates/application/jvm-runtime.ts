@@ -1,5 +1,4 @@
 import {
-	CHART_DISPLAY_AREA,
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	metricsBreakdown,
@@ -44,6 +43,9 @@ function widgets(serviceName?: string): WidgetDef[] {
 			layout: { x: 6, y: 0, w: 6, h: 4 },
 		},
 		{
+			// The query-builder metrics source supports avg/sum/min/max/count/rate/
+			// increase only — no percentiles over histogram buckets — so chart the
+			// worst pause per bucket (max over the histogram's Max column).
 			id: "gc-pause",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
@@ -51,11 +53,11 @@ function widgets(serviceName?: string): WidgetDef[] {
 				name: "GC Pause",
 				metricName: "jvm.gc.duration",
 				metricType: "histogram",
-				aggregation: "p95_duration",
+				aggregation: "max",
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "GC Pause Time (P95)", ...CHART_DISPLAY_AREA, unit: "duration_ms" },
+			display: { title: "GC Pause Time (Max)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
 			layout: { x: 0, y: 4, w: 6, h: 4 },
 		},
 		{
@@ -102,6 +104,7 @@ export const jvmRuntimeTemplate: TemplateDefinition = {
 	category: "application",
 	tags: ["jvm", "runtime"],
 	requirements: ["OpenTelemetry JVM instrumentation"],
+	requiredMetricPrefixes: ["jvm."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

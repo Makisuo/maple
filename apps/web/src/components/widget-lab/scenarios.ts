@@ -479,6 +479,32 @@ const allZeroSeries: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T03:00:00Z", a: 0, b: 0 },
 ]
 
+// Sparse rate-like series — 24 zero-filled buckets with a handful of isolated
+// non-zero points at 0.02-0.08 (the MAP-49 screenshot shape: low-volume demo
+// data bucketed at 30m over 12h). Isolated points must render as visible dots,
+// not invisible zero-width triangles.
+const sparseRateSeries: Record<string, unknown>[] = Array.from({ length: 24 }, (_, i) => {
+	const base = new Date("2026-01-01T00:00:00Z").getTime()
+	const row: Record<string, unknown> = {
+		bucket: new Date(base + i * 1_800_000).toISOString(),
+		"demo-api": 0,
+		"demo-frontend": 0,
+		"demo-worker": 0,
+	}
+	if (i === 4) row["demo-api"] = 0.05
+	if (i === 9) row["demo-frontend"] = 0.04
+	if (i === 10) row["demo-frontend"] = 0.07
+	if (i === 15) row["demo-worker"] = 0.07
+	if (i === 20) row["demo-api"] = 0.02
+	if (i === 21) row["demo-frontend"] = 0.045
+	return row
+})
+
+// Single-point series — one bucket only.
+const singlePointSeries: Record<string, unknown>[] = [
+	{ bucket: "2026-01-01T00:00:00Z", "demo-api": 42, "demo-worker": 17 },
+]
+
 export const stressScenarios: ChartScenario[] = [
 	{
 		label: "Line — 25 series (compact legend)",
@@ -627,6 +653,66 @@ export const stressScenarios: ChartScenario[] = [
 			{ name: "b", value: 0 },
 		]),
 		display: { title: "Empty distribution", chartId: "query-builder-pie", pie: {} },
+	},
+	{
+		label: "Area — sparse rate (isolated points)",
+		chartId: "query-builder-area",
+		chartName: "Query Builder Area",
+		category: "area",
+		dataState: ready(sparseRateSeries),
+		display: {
+			title: "Error rate by service (sparse)",
+			chartId: "query-builder-area",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
+	{
+		label: "Bar — sparse rate (isolated points)",
+		chartId: "query-builder-bar",
+		chartName: "Query Builder Bar",
+		category: "bar",
+		dataState: ready(sparseRateSeries),
+		display: {
+			title: "Error rate by service (sparse)",
+			chartId: "query-builder-bar",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
+	{
+		label: "Line — sparse rate (isolated points)",
+		chartId: "query-builder-line",
+		chartName: "Query Builder Line",
+		category: "line",
+		dataState: ready(sparseRateSeries),
+		display: {
+			title: "Error rate by service (sparse)",
+			chartId: "query-builder-line",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
+	{
+		label: "Area — single point",
+		chartId: "query-builder-area",
+		chartName: "Query Builder Area",
+		category: "area",
+		dataState: ready(singlePointSeries),
+		display: {
+			title: "Single bucket",
+			chartId: "query-builder-area",
+			chartPresentation: { legend: "visible", seriesStats: false },
+		},
+	},
+	{
+		label: "Bar — all-zero series",
+		chartId: "query-builder-bar",
+		chartName: "Query Builder Bar",
+		category: "bar",
+		dataState: ready(allZeroSeries),
+		display: {
+			title: "Flat at zero (bar)",
+			chartId: "query-builder-bar",
+			chartPresentation: { legend: "visible", seriesStats: true },
+		},
 	},
 ]
 
@@ -1004,6 +1090,42 @@ export const funnelScenarios: WidgetScenario[] = [
 		display: { title: "Single stage", unit: "number", funnel: {} },
 	},
 	{
+		// MAP-49: more stages than fit in the card — must cap rows inside the
+		// card (+N more), never spill above/below it.
+		label: "30 stages (overflow cap)",
+		dataState: ready(
+			Array.from({ length: 30 }, (_, i) => ({
+				name: `stage-${i + 1}`,
+				value: Math.max(0, Math.round(12840 / (i + 1))),
+			})),
+		),
+		display: { title: "Deep funnel", unit: "number", funnel: { showStepPercent: true } },
+	},
+	{
+		// MAP-49: mis-wired funnel receiving timeseries rows ({bucket, A}) — must
+		// aggregate per series instead of one "—" row per bucket.
+		label: "Timeseries-shaped input",
+		dataState: ready(
+			Array.from({ length: 12 }, (_, i) => ({
+				bucket: new Date(new Date("2026-01-01T00:00:00Z").getTime() + i * 3_600_000).toISOString(),
+				A: 125,
+			})),
+		),
+		display: { title: "Traces by service", unit: "number", funnel: { showStepPercent: true } },
+	},
+	{
+		// MAP-49: zero-value stages + missing labels — no "0 · 0% ↓ 0%" noise rows.
+		label: "Zero stages + missing labels",
+		dataState: ready([
+			{ name: "Visited", value: 4820 },
+			{ name: undefined, value: 940 },
+			{ name: "Converted", value: 0 },
+			{ name: "Ghost A", value: 0 },
+			{ name: "Ghost B", value: 0 },
+		]),
+		display: { title: "Noisy funnel", unit: "number", funnel: { showStepPercent: true } },
+	},
+	{
 		label: "Loading",
 		dataState: loadingState,
 		display: { title: "Signup conversion" },
@@ -1072,6 +1194,34 @@ export const histogramScenarios: WidgetScenario[] = [
 		display: { title: "Fine-grained" },
 	},
 	{
+		// MAP-49: long range labels must not overlap on the x axis.
+		label: "Long range labels (duration)",
+		dataState: ready(
+			Array.from({ length: 30 }, (_, i) => ({
+				name: `${(i * 1.2).toFixed(1)}ms-${((i + 1) * 1.2).toFixed(1)}ms`,
+				value: Math.round(Math.exp(-((i - 12) ** 2) / 40) * 180) + 2,
+			})),
+		),
+		display: { title: "Duration distribution", unit: "duration_ms" },
+	},
+	{
+		// MAP-49: raw numeric rows (trace-list durationMs) — chart must bucketize
+		// client-side into a real distribution.
+		label: "Raw durations (auto-bucketed)",
+		dataState: ready(
+			Array.from({ length: 200 }, (_, i) => ({
+				durationMs: Math.round(
+					30 + Math.abs((Math.sin(i * 12.9898) * 43758.5453) % 1) * 400 + (i % 17 === 0 ? 900 : 0),
+				),
+			})),
+		),
+		display: {
+			title: "Trace duration distribution",
+			unit: "duration_ms",
+			histogram: { bucketCount: 30 },
+		},
+	},
+	{
 		label: "Loading",
 		dataState: loadingState,
 		display: { title: "Trace duration" },
@@ -1128,6 +1278,21 @@ export const heatmapScenarios: WidgetScenario[] = [
 			title: "Log scale",
 			heatmap: { colorScale: "viridis", scaleType: "log" },
 		},
+	},
+	{
+		// MAP-49: many time rows on the y axis — labels must thin out without
+		// the last two colliding.
+		label: "24 time rows (y-label stride)",
+		dataState: ready(
+			Array.from({ length: 24 }, (_, hi) => hi).flatMap((hi) =>
+				["Errors", "OK"].map((x, xi) => ({
+					x,
+					y: `2026-01-01T${String(hi).padStart(2, "0")}:30:00Z`,
+					value: xi === 0 ? (hi % 7 === 0 ? 12 : 0) : 90 + Math.round(Math.sin(hi / 3) * 30),
+				})),
+			),
+		),
+		display: { title: "Errors vs OK over time", heatmap: { colorScale: "blues" } },
 	},
 	{
 		label: "Loading",

@@ -1,7 +1,7 @@
 import { createMaplePgClient } from "@maple/db/client"
 import { Hyperdrive } from "@maple/effect-cloudflare/hyperdrive-connection"
 import { Effect, Layer } from "effect"
-import { Database, type DatabaseClient, type DatabaseShape, toDatabaseError } from "./DatabaseLive"
+import { Database, type DatabaseClient, type DatabaseShape, executeWithSpan } from "./DatabaseLive"
 
 const MAPLE_DB = Hyperdrive("MAPLE_DB")
 
@@ -19,12 +19,16 @@ const makePgDatabase = Effect.gen(function* () {
 	}
 
 	const connectionString = binding.connectionString
+	const databaseName = binding.database
 
 	return Database.of({
 		execute: <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			Effect.tryPromise({
-				try: async () => {
-					const { db, end } = createMaplePgClient(connectionString, { maxConnections: 1 })
+			executeWithSpan(
+				async (collect) => {
+					const { db, end } = createMaplePgClient(connectionString, {
+						maxConnections: 1,
+						onQuery: collect,
+					})
 					try {
 						return await fn(db)
 					} finally {
@@ -33,8 +37,8 @@ const makePgDatabase = Effect.gen(function* () {
 						await end().catch(() => undefined)
 					}
 				},
-				catch: toDatabaseError,
-			}),
+				{ "db.namespace": databaseName },
+			),
 	} satisfies DatabaseShape)
 })
 

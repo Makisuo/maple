@@ -74,6 +74,7 @@ import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import { EdgeCacheService } from "@maple/query-engine/caching"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
@@ -100,6 +101,15 @@ const TICK_WINDOW_MS = 2 * 60_000
  *  with recent (but not last-2-min) errors still gets scanned, with slack for
  *  cron jitter and MV write lag. */
 const ERROR_ACTIVE_DISCOVERY_WINDOW_MS = 15 * 60_000
+// Last-known active-org set, cached so a discovery failure can fail CLOSED
+// (reuse the previous active set) instead of fanning out to every known org —
+// the latter melts the warehouse exactly when it is already struggling. Keyed
+// globally (discovery is cross-org, one set covers the whole managed workspace).
+// TTL generous enough to survive a multi-hour warehouse brown-out; a slightly
+// stale set only costs a few cheap empty scans of recently-idle orgs.
+const ACTIVE_ORGS_CACHE_BUCKET = "errors-active-orgs"
+const ACTIVE_ORGS_CACHE_KEY = "active"
+const ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
 const RESOLVED_RETENTION_DAYS = 14
 const ARCHIVED_RETENTION_DAYS = 90
 const RETENTION_PHASE_EVERY_N_TICKS = 30
@@ -352,10 +362,11 @@ export interface ErrorsServiceShape {
 const make: Effect.Effect<
 	ErrorsServiceShape,
 	never,
-	Database | WarehouseQueryService | Env | NotificationDispatcher
+	Database | WarehouseQueryService | EdgeCacheService | Env | NotificationDispatcher
 > = Effect.gen(function* () {
 	const database = yield* Database
 	const warehouse = yield* WarehouseQueryService
+	const edgeCache = yield* EdgeCacheService
 	const env = yield* Env
 	const dispatcher = yield* NotificationDispatcher
 	// Optional: present only inside a Worker isolate. Used to kick off the
@@ -408,8 +419,12 @@ const make: Effect.Effect<
 	// dominated Tinybird CPU. Instead, run ONE cross-org scan of recent error
 	// events (pinned to managed Tinybird) and only scan orgs that show up.
 	// BYO-ClickHouse orgs are invisible to that scan, so they are always treated
-	// as active. Fails OPEN: if discovery errors, every known org is scanned (the
-	// prior behaviour), never silently dropped.
+	// as active. Fails CLOSED: discovery fails precisely when the warehouse is
+	// stressed, so the old "scan every known org" fallback amplified the outage
+	// into a fan-out storm. Instead reuse the last-known active set from cache;
+	// if none, fall back to just the BYO set. Orgs with existing issue/incident
+	// state are still scanned by the caller (`withState`), so auto-resolution
+	// keeps working even when discovery is down.
 	// ---------------------------------------------------------------
 
 	const resolveActiveOrgs = Effect.fn("ErrorsService.resolveActiveOrgs")(function* (
@@ -429,6 +444,10 @@ const make: Effect.Effect<
 		return yield* warehouse
 			.compiledQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
 				pinToIngestConfig: true,
+				// Bound the one cross-org scan (no OrgId predicate ⇒ can't prune the
+				// primary key): abort server-side at 5s instead of riding the ~30s
+				// client timeout when the warehouse is slow.
+				profile: "discovery",
 				context: "errorActiveOrgsDiscovery",
 			})
 			.pipe(
@@ -440,11 +459,28 @@ const make: Effect.Effect<
 					}
 					return active as ReadonlySet<string>
 				}),
+				// Cache the freshly-discovered set so a later discovery failure can
+				// reuse it instead of fanning out to all known orgs. Best-effort.
+				Effect.tap((active) =>
+					edgeCache
+						.rawPut(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY, [...active], ACTIVE_ORGS_CACHE_TTL_S)
+						.pipe(Effect.ignore),
+				),
+				// Fail CLOSED: reuse the last-known active set (or just BYO if cold).
 				Effect.catchCause((cause) =>
-					Effect.logWarning("Error active-org discovery failed; scanning all known orgs").pipe(
-						Effect.annotateLogs({ error: Cause.pretty(cause) }),
-						Effect.as("all" as const),
-					),
+					Effect.gen(function* () {
+						yield* Effect.logWarning(
+							"Error active-org discovery failed; reusing last-known active set",
+						).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+						const cached = yield* edgeCache
+							.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
+							.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
+						const active = new Set<string>(byo)
+						for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+							active.add(orgId)
+						}
+						return active as ReadonlySet<string>
+					}),
 				),
 			)
 	})
@@ -2129,7 +2165,7 @@ const make: Effect.Effect<
 		})
 		const issuesRaw = isActive
 			? yield* warehouse
-					.compiledQuery(tenant, issuesCompiled, { context: "errorIssuesScan" })
+					.compiledQuery(tenant, issuesCompiled, { profile: "list", context: "errorIssuesScan" })
 					.pipe(Effect.mapError(makePersistenceError))
 			: []
 
@@ -2569,7 +2605,7 @@ const make: Effect.Effect<
 			...stateOrgs.map((r) => r.orgId),
 			...issueOrgs.map((r) => r.orgId),
 		])
-		const isActive = (org: string) => activeOrgs === "all" || activeOrgs.has(org) || withState.has(org)
+		const isActive = (org: string) => activeOrgs.has(org) || withState.has(org)
 
 		const emptyResult = {
 			issuesTouched: 0,
@@ -2617,7 +2653,7 @@ const make: Effect.Effect<
 
 		yield* Effect.annotateCurrentSpan({
 			orgsKnown: knownOrgs.size,
-			orgsScanned: activeOrgs === "all" ? knownOrgs.size : activeOrgs.size,
+			orgsScanned: activeOrgs.size,
 			orgFailures: yield* Ref.get(orgFailures),
 			...totals,
 		})

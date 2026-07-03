@@ -5,6 +5,7 @@ import {
 	DialogDescription,
 	DialogFooter,
 	DialogHeader,
+	DialogPanel,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
 import { Button } from "@maple/ui/components/ui/button"
@@ -47,6 +48,15 @@ export function ParameterDialog({
 	const missing = parameters.filter((p) => p.required && !values[p.key]?.trim()).map((p) => p.key)
 	const canSubmit = missing.length === 0 && !submitting
 
+	const handleSubmit = () => {
+		if (!canSubmit) return
+		const cleaned: Record<string, string> = {}
+		for (const [k, v] of Object.entries(values)) {
+			if (v.trim().length > 0) cleaned[k] = v.trim()
+		}
+		onSubmit(cleaned)
+	}
+
 	return (
 		<Dialog open={open} onOpenChange={(value) => !value && !submitting && onCancel()}>
 			<DialogContent className="sm:max-w-md">
@@ -56,18 +66,7 @@ export function ParameterDialog({
 						Provide values for the template parameters. Optional fields can be left blank.
 					</DialogDescription>
 				</DialogHeader>
-				<form
-					className="flex flex-col gap-4 py-2"
-					onSubmit={(e) => {
-						e.preventDefault()
-						if (!canSubmit) return
-						const cleaned: Record<string, string> = {}
-						for (const [k, v] of Object.entries(values)) {
-							if (v.trim().length > 0) cleaned[k] = v.trim()
-						}
-						onSubmit(cleaned)
-					}}
-				>
+				<DialogPanel className="flex flex-col gap-4">
 					{parameters.map((param) => (
 						<div key={param.key} className="flex flex-col gap-1.5">
 							<Label htmlFor={`tpl-param-${param.key}`} className="text-xs font-medium">
@@ -82,6 +81,9 @@ export function ParameterDialog({
 								onChange={(e) =>
 									setValues((prev) => ({ ...prev, [param.key]: e.target.value }))
 								}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") handleSubmit()
+								}}
 								disabled={submitting}
 							/>
 							{param.description && (
@@ -91,21 +93,15 @@ export function ParameterDialog({
 							)}
 						</div>
 					))}
-					<DialogFooter>
-						<Button
-							type="button"
-							variant="outline"
-							size="sm"
-							onClick={onCancel}
-							disabled={submitting}
-						>
-							Cancel
-						</Button>
-						<Button type="submit" size="sm" disabled={!canSubmit}>
-							{submitting ? "Creating..." : "Create dashboard"}
-						</Button>
-					</DialogFooter>
-				</form>
+				</DialogPanel>
+				<DialogFooter>
+					<Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={submitting}>
+						Cancel
+					</Button>
+					<Button type="button" size="sm" disabled={!canSubmit} onClick={handleSubmit}>
+						{submitting ? "Creating..." : "Create dashboard"}
+					</Button>
+				</DialogFooter>
 			</DialogContent>
 		</Dialog>
 	)

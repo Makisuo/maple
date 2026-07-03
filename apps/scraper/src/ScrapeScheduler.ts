@@ -1,4 +1,4 @@
-import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Ref, Schedule, Semaphore } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Ref, Result, Schedule, Semaphore } from "effect"
 import { ScrapeResultReport, type InternalScrapeTarget } from "@maple/domain/http"
 import { ApiClient, ApiRequestError } from "./ApiClient"
 import { convertFamiliesToOtlp } from "./prometheus/otlp"
@@ -25,6 +25,13 @@ export interface ScrapeSchedulerShape {
 const RESULTS_FLUSH_INTERVAL = Duration.seconds(10)
 /** Cap the result buffer so an unreachable API cannot grow memory unboundedly. */
 const MAX_BUFFERED_RESULTS = 10_000
+/**
+ * Max results per `scrape-results` POST. The buffer can hold up to
+ * `MAX_BUFFERED_RESULTS`; sending that as one body overwhelmed the API Worker
+ * (CPU/time → edge 503), so a flush sends in chunks and re-buffers the unsent
+ * remainder on the first failure.
+ */
+const RESULTS_FLUSH_CHUNK_SIZE = 1_000
 /** Upper bound on rate-limit backoff so a target keeps probing for recovery. */
 const MAX_BACKOFF_MS = Duration.toMillis(Duration.minutes(5))
 
@@ -111,6 +118,27 @@ interface TargetEntry {
 	readonly fingerprint: string
 	readonly fiber: Fiber.Fiber<unknown, unknown>
 }
+
+/**
+ * Send `results` to `send` in chunks of `chunkSize`, stopping at the first
+ * failed chunk. Returns the results that were NOT delivered (the failed chunk
+ * plus everything after it) so the caller can re-buffer just those; `unsent` is
+ * empty when the whole batch went through. Chunking keeps any single POST small
+ * enough that the API Worker doesn't choke on it.
+ */
+export const sendResultsInChunks = <E>(
+	results: ReadonlyArray<ScrapeResultReport>,
+	chunkSize: number,
+	send: (chunk: ReadonlyArray<ScrapeResultReport>) => Effect.Effect<void, E>,
+): Effect.Effect<{ readonly unsent: ReadonlyArray<ScrapeResultReport>; readonly error: E | null }> =>
+	Effect.gen(function* () {
+		for (let index = 0; index < results.length; index += chunkSize) {
+			const chunk = results.slice(index, index + chunkSize)
+			const outcome = yield* Effect.result(send(chunk))
+			if (Result.isFailure(outcome)) return { unsent: results.slice(index), error: outcome.failure }
+		}
+		return { unsent: [], error: null }
+	})
 
 export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSchedulerShape>()(
 	"@maple/scraper/ScrapeScheduler",
@@ -357,22 +385,24 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 			const flushResults = Effect.gen(function* () {
 				const results = yield* Ref.getAndSet(resultsRef, [])
 				if (results.length === 0) return
-				yield* api.reportResults(results).pipe(
-					Effect.catch((error) =>
-						Effect.gen(function* () {
-							// Put the batch back (in front) and retry on the next flush.
-							yield* Ref.update(resultsRef, (buffered) =>
-								[...results, ...buffered].slice(-MAX_BUFFERED_RESULTS),
-							)
-							yield* Effect.logWarning("Failed to report scrape results").pipe(
-								Effect.annotateLogs({
-									error: error.message,
-									bufferedResults: results.length,
-								}),
-							)
-						}),
-					),
+				// Send in chunks so one POST never overwhelms the API Worker; re-buffer
+				// only what didn't make it (in front) and retry on the next flush.
+				const { unsent, error } = yield* sendResultsInChunks(
+					results,
+					RESULTS_FLUSH_CHUNK_SIZE,
+					api.reportResults,
 				)
+				if (unsent.length > 0) {
+					yield* Ref.update(resultsRef, (buffered) =>
+						[...unsent, ...buffered].slice(-MAX_BUFFERED_RESULTS),
+					)
+					yield* Effect.logWarning("Failed to report scrape results").pipe(
+						Effect.annotateLogs({
+							error: error?.message ?? "unknown",
+							bufferedResults: unsent.length,
+						}),
+					)
+				}
 			}).pipe(Effect.withSpan("scraper.flush_results"))
 
 			const run = Effect.gen(function* () {

@@ -112,7 +112,11 @@ pub struct ClickHouseBreakerConfig {
 impl Default for ClickHouseBreakerConfig {
     fn default() -> Self {
         Self {
-            failure_threshold: 4,
+            // Trip after 2 consecutive failures (not 4) so a stalled BYO-ClickHouse
+            // target enters fast-shed quickly, keeping the single-threaded lane
+            // worker draining instead of holding batches through the retry budget
+            // (which backs the bounded channel up into accept-path 503s).
+            failure_threshold: 2,
             cooldown: Duration::from_secs(30),
         }
     }
@@ -224,9 +228,30 @@ pub enum TelemetrySignal {
     Traces,
     Logs,
     Metrics,
-    /// Session-replay metadata + rrweb event rows (NDJSON written directly by
+    /// Session-replay metadata + rrweb event chunks (NDJSON written directly by
     /// the ingest gateway, not derived from OTLP). Events land in ClickHouse.
     SessionReplays,
+    /// Distilled session-event rows (NDJSON written directly by the gateway).
+    /// Carried separately from `SessionReplays` so per-signal metrics label it
+    /// as `session_events` (matching its `maple.signal` span attribute).
+    SessionEvents,
+}
+
+impl TelemetrySignal {
+    /// Canonical lowercase label for metric/log dimensions, matching the HTTP
+    /// `Signal::path()` vocabulary ("traces"/"logs"/"metrics") and the
+    /// `maple.signal` span attribute ("session_replays"/"session_events") so
+    /// per-signal metrics correlate across the codebase. Prefer this over the
+    /// `Debug` derive, which yields PascalCase.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Traces => "traces",
+            Self::Logs => "logs",
+            Self::Metrics => "metrics",
+            Self::SessionReplays => "session_replays",
+            Self::SessionEvents => "session_events",
+        }
+    }
 }
 
 /// Datasource (ClickHouse/Tinybird table) names the OTLP→NDJSON encoders write
@@ -292,6 +317,12 @@ pub struct TinybirdConfig {
     pub batch_max_wait: Duration,
     pub export_concurrency_per_shard: usize,
     pub export_max_attempts: u32,
+    /// Per-attempt timeout for a direct ClickHouse export POST. Kept short and
+    /// separate from `forward_timeout` so a hanging BYO-ClickHouse target fails
+    /// fast and the breaker trips quickly — otherwise the single-threaded lane
+    /// worker holds the batch through the retry budget while new frames back the
+    /// bounded channel up into accept-path backpressure.
+    pub clickhouse_export_timeout: Duration,
     pub clickhouse_breaker: ClickHouseBreakerConfig,
     pub datasources: DatasourceNames,
     pub datasource_session_replays: String,
@@ -644,8 +675,9 @@ impl TelemetryPipeline {
         org_id: &str,
         datasource: String,
         rows: Vec<Vec<u8>>,
+        signal: TelemetrySignal,
     ) -> Result<AcceptStats, PipelineError> {
-        self.accept_rows_to(org_id, datasource, rows, ExportDestination::Tinybird)
+        self.accept_rows_to(org_id, datasource, rows, signal, ExportDestination::Tinybird)
             .await
     }
 
@@ -654,19 +686,14 @@ impl TelemetryPipeline {
         org_id: &str,
         datasource: String,
         rows: Vec<Vec<u8>>,
+        signal: TelemetrySignal,
         destination: ExportDestination,
     ) -> Result<AcceptStats, PipelineError> {
         let stats = AcceptStats {
             rows: rows.len(),
             dropped: 0,
         };
-        let frames = rows_to_frames(
-            org_id,
-            hash64(org_id),
-            TelemetrySignal::SessionReplays,
-            datasource,
-            rows,
-        );
+        let frames = rows_to_frames(org_id, hash64(org_id), signal, datasource, rows);
         self.commit_frames(frames, destination).await?;
         Ok(stats)
     }
@@ -687,9 +714,17 @@ impl TelemetryPipeline {
             // cannot fill the Tinybird channel for the same shard (and vice versa).
             let lane = lane_index(shard, destination);
             let sender = self.inner.lane_senders[lane].clone();
-            let permit = sender
-                .try_reserve_owned()
-                .map_err(|_| PipelineError::Backpressure("Telemetry queue is full"))?;
+            let permit = match sender.try_reserve_owned() {
+                Ok(permit) => permit,
+                Err(_) => {
+                    metrics::backpressure_shed(
+                        &frame.org_id,
+                        frame.destination.as_str(),
+                        frame.signal.as_str(),
+                    );
+                    return Err(PipelineError::Backpressure("Telemetry queue is full"));
+                }
+            };
             let queued_bytes = frame.payload.len() as u64;
             self.reserve_org_queue_bytes(&frame.org_id, queued_bytes)?;
             let (start, end) = self.inner.wal.append(lane, &frame).await.map_err(|error| {
@@ -1232,6 +1267,7 @@ fn signal_tag(signal: TelemetrySignal) -> u8 {
         TelemetrySignal::Logs => 2,
         TelemetrySignal::Metrics => 3,
         TelemetrySignal::SessionReplays => 4,
+        TelemetrySignal::SessionEvents => 5,
     }
 }
 
@@ -1241,6 +1277,7 @@ fn signal_from_tag(tag: u8) -> Option<TelemetrySignal> {
         2 => Some(TelemetrySignal::Logs),
         3 => Some(TelemetrySignal::Metrics),
         4 => Some(TelemetrySignal::SessionReplays),
+        5 => Some(TelemetrySignal::SessionEvents),
         _ => None,
     }
 }
@@ -1622,6 +1659,7 @@ impl ExportWorker {
             let mut request = self
                 .http
                 .post(request_url)
+                .timeout(self.cfg.clickhouse_export_timeout)
                 .header("X-ClickHouse-User", target.user.as_str())
                 .header("X-ClickHouse-Database", target.database.as_str())
                 .header(reqwest::header::CONTENT_TYPE, "application/x-ndjson")
@@ -2578,6 +2616,7 @@ mod tests {
             batch_max_wait: Duration::from_millis(10),
             export_concurrency_per_shard: 1,
             export_max_attempts: 20,
+            clickhouse_export_timeout: Duration::from_secs(5),
             clickhouse_breaker: ClickHouseBreakerConfig::default(),
             datasources: DatasourceNames::defaults(),
             datasource_session_replays: "session_replays".to_string(),
@@ -3527,6 +3566,42 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(queue_dir);
+    }
+
+    #[test]
+    fn telemetry_signal_as_str_is_canonical_lowercase() {
+        // Metric/log dimensions must match the lowercase `signal.path()` /
+        // `maple.signal` vocabulary so `ingest_backpressure_shed_total` correlates
+        // with other per-signal metrics (Debug derive would give PascalCase).
+        assert_eq!(TelemetrySignal::Traces.as_str(), "traces");
+        assert_eq!(TelemetrySignal::Logs.as_str(), "logs");
+        assert_eq!(TelemetrySignal::Metrics.as_str(), "metrics");
+        assert_eq!(TelemetrySignal::SessionReplays.as_str(), "session_replays");
+        assert_eq!(TelemetrySignal::SessionEvents.as_str(), "session_events");
+    }
+
+    #[test]
+    fn signal_tag_round_trips_all_variants() {
+        // WAL on-disk format: every signal must survive tag encode/decode so
+        // committed frames replay to the right signal after a restart.
+        for signal in [
+            TelemetrySignal::Traces,
+            TelemetrySignal::Logs,
+            TelemetrySignal::Metrics,
+            TelemetrySignal::SessionReplays,
+            TelemetrySignal::SessionEvents,
+        ] {
+            assert_eq!(signal_from_tag(signal_tag(signal)), Some(signal));
+        }
+    }
+
+    #[test]
+    fn breaker_default_failure_threshold_is_two() {
+        // Lowered from 4 → 2 so a stalled BYO-ClickHouse target enters fast-shed
+        // sooner, keeping the single-threaded lane worker draining instead of
+        // holding batches through the retry budget (which backs the bounded
+        // channel up into accept-path backpressure 503s).
+        assert_eq!(ClickHouseBreakerConfig::default().failure_threshold, 2);
     }
 
     #[test]

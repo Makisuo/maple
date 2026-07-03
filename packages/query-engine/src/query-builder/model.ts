@@ -133,6 +133,7 @@ export const GROUP_BY_OPTIONS: Record<QueryBuilderDataSource, Array<{ label: str
 	metrics: [
 		{ label: "service.name", value: "service.name" },
 		{ label: "attr.*", value: "attr." },
+		{ label: "resource.*", value: "resource." },
 		{ label: "none", value: "none" },
 	],
 }
@@ -439,12 +440,38 @@ function applyLogsClause(
 	)
 }
 
+interface MetricsFilterAccumulator {
+	metricName: string
+	metricType: QueryBuilderMetricType
+	serviceName?: string
+	groupByAttributeKey?: string
+	groupByResourceAttributeKey?: string
+	resourceAttributeFilters: AccumulatedAttributeFilter[]
+}
+
 function applyMetricsClause(
-	filters: { metricName: string; metricType: QueryBuilderMetricType; serviceName?: string },
-	clause: { key: string; value: string },
+	filters: MetricsFilterAccumulator,
+	clause: { key: string; operator: string; value: string },
 	warnings: string[],
-): { metricName: string; metricType: QueryBuilderMetricType; serviceName?: string } {
+): MetricsFilterAccumulator {
 	const key = normalizeKey(clause.key)
+
+	// Host/pod/node identity on metrics lives in the ResourceAttributes map —
+	// `resource.<key>` filters predicate on it (mirrors the traces handler).
+	if (key.startsWith("resource.")) {
+		const resourceKey = key.slice(9)
+		if (filters.resourceAttributeFilters.length >= 5) {
+			warnings.push(`Maximum of 5 resource.* filters supported; ignoring resource.${resourceKey}`)
+			return filters
+		}
+		return {
+			...filters,
+			resourceAttributeFilters: [
+				...filters.resourceAttributeFilters,
+				makeAttrFilter(resourceKey, clause.operator, clause.value),
+			],
+		}
+	}
 
 	return Match.value(key).pipe(
 		Match.when("service.name", () => ({ ...filters, serviceName: clause.value })),
@@ -475,9 +502,12 @@ function resolveTracesGroupByToken(
 	raw: string,
 ): TracesGroupByKey | null {
 	return Match.value(token).pipe(
-		Match.whenOr("service", "service.name", () => "service" as const),
-		Match.whenOr("span", "span.name", () => "span_name" as const),
-		Match.whenOr("status", "status.code", () => "status_code" as const),
+		// snake_case aliases match the warehouse column spellings — dashboard
+		// widget presets (and widgets persisted from them) use those, so
+		// dropping them silently broke every preset breakdown (MAP-49).
+		Match.whenOr("service", "service.name", "service_name", () => "service" as const),
+		Match.whenOr("span", "span.name", "span_name", () => "span_name" as const),
+		Match.whenOr("status", "status.code", "status_code", () => "status_code" as const),
 		Match.when("http.method", () => "http_method" as const),
 		Match.whenOr("none", "all", () => "none" as const),
 		Match.orElse((t) => {
@@ -501,8 +531,8 @@ type LogsGroupByKey = "service" | "severity" | "none"
 
 function resolveLogsGroupByToken(token: string, warnings: string[], raw: string): LogsGroupByKey | null {
 	return Match.value(token).pipe(
-		Match.whenOr("service", "service.name", () => "service" as const),
-		Match.when("severity", () => "severity" as const),
+		Match.whenOr("service", "service.name", "service_name", () => "service" as const),
+		Match.whenOr("severity", "severity_text", () => "severity" as const),
 		Match.whenOr("none", "all", () => "none" as const),
 		Match.orElse(() => {
 			warnings.push(`Unsupported logs group by ignored: ${raw}`)
@@ -511,7 +541,7 @@ function resolveLogsGroupByToken(token: string, warnings: string[], raw: string)
 	)
 }
 
-type MetricsGroupByKey = "service" | "attribute" | "none"
+type MetricsGroupByKey = "service" | "attribute" | "resource_attribute" | "none"
 
 function resolveMetricsGroupByToken(
 	token: string,
@@ -520,6 +550,7 @@ function resolveMetricsGroupByToken(
 		metricType: string
 		serviceName?: string
 		groupByAttributeKey?: string
+		groupByResourceAttributeKey?: string
 	},
 	warnings: string[],
 	raw: string,
@@ -536,6 +567,15 @@ function resolveMetricsGroupByToken(
 				}
 				metricsFilters.groupByAttributeKey = attributeKey
 				return "attribute" as const
+			}
+			if (t.startsWith("resource.")) {
+				const resourceKey = t.slice(9)
+				if (!resourceKey) {
+					warnings.push("Invalid resource.* group by ignored")
+					return null
+				}
+				metricsFilters.groupByResourceAttributeKey = resourceKey
+				return "resource_attribute" as const
 			}
 			warnings.push(`Unsupported metrics group by ignored: ${raw}`)
 			return null
@@ -554,6 +594,8 @@ export interface ResolvedGroupBy {
 	readonly tokens: ReadonlyArray<string>
 	/** Span/metric attribute keys referenced via `attr.<key>` group-by tokens. */
 	readonly attributeKeys: ReadonlyArray<string>
+	/** Resource attribute keys referenced via `resource.<key>` group-by tokens (metrics only). */
+	readonly resourceAttributeKeys: ReadonlyArray<string>
 	/** Warnings emitted while resolving (unsupported tokens, malformed input). */
 	readonly warnings: ReadonlyArray<string>
 }
@@ -564,9 +606,11 @@ export function resolveGroupBy(
 ): ResolvedGroupBy {
 	const tokens: string[] = []
 	const attributeKeys: string[] = []
+	const resourceAttributeKeys: string[] = []
 	const warnings: string[] = []
 	const seenTokens = new Set<string>()
 	const seenAttrKeys = new Set<string>()
+	const seenResourceKeys = new Set<string>()
 
 	for (const raw of rawTokens) {
 		const token = raw.trim().toLowerCase()
@@ -589,6 +633,28 @@ export function resolveGroupBy(
 			if (!seenTokens.has("attribute")) {
 				seenTokens.add("attribute")
 				tokens.push("attribute")
+			}
+			continue
+		}
+
+		if (token.startsWith("resource.")) {
+			const resourceKey = token.slice(9)
+			if (!resourceKey) {
+				warnings.push("Invalid resource.* group by ignored")
+				continue
+			}
+			// Only the metrics QuerySpec has a resource_attribute group dimension.
+			if (source !== "metrics") {
+				warnings.push(`${source} source does not support resource.* group by: ${raw}`)
+				continue
+			}
+			if (!seenResourceKeys.has(resourceKey)) {
+				seenResourceKeys.add(resourceKey)
+				resourceAttributeKeys.push(resourceKey)
+			}
+			if (!seenTokens.has("resource_attribute")) {
+				seenTokens.add("resource_attribute")
+				tokens.push("resource_attribute")
 			}
 			continue
 		}
@@ -631,7 +697,7 @@ export function resolveGroupBy(
 		}
 	}
 
-	return { tokens, attributeKeys, warnings }
+	return { tokens, attributeKeys, resourceAttributeKeys, warnings }
 }
 
 // ---------------------------------------------------------------------------
@@ -644,7 +710,9 @@ function buildTracesSpecFilters(acc: TracesFilterAccumulator): Record<string, un
 	if (acc.serviceName) filters.serviceName = acc.serviceName
 	if (acc.spanName) filters.spanName = acc.spanName
 	if (acc.rootSpansOnly) filters.rootSpansOnly = acc.rootSpansOnly
-	if (acc.errorsOnly) filters.errorsOnly = acc.errorsOnly
+	// Tri-state: `has_error = false` must survive as an explicit filter (only
+	// non-errored spans), not collapse into "no filter".
+	if (acc.errorsOnly != null) filters.errorsOnly = acc.errorsOnly
 	if (acc.environments?.length) filters.environments = acc.environments
 	if (acc.commitShas?.length) filters.commitShas = acc.commitShas
 	if (acc.groupByAttributeKeys?.length) filters.groupByAttributeKeys = acc.groupByAttributeKeys
@@ -858,15 +926,14 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 		}
 	}
 
-	const metricsFilters = clauses.reduce((acc, clause) => applyMetricsClause(acc, clause, warnings), {
-		metricName: query.metricName,
-		metricType: query.metricType ?? "gauge",
-	} as {
-		metricName: string
-		metricType: QueryBuilderMetricType
-		serviceName?: string
-		groupByAttributeKey?: string
-	})
+	const metricsFilters = clauses.reduce<MetricsFilterAccumulator>(
+		(acc, clause) => applyMetricsClause(acc, clause, warnings),
+		{
+			metricName: query.metricName,
+			metricType: query.metricType ?? "gauge",
+			resourceAttributeFilters: [],
+		},
+	)
 
 	const metricsGroupByKeys: MetricsGroupByKey[] = []
 	if (query.addOns?.groupBy && (query.groupBy?.length ?? 0) > 0) {
@@ -877,7 +944,33 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 			if (resolved) metricsGroupByKeys.push(resolved)
 		}
 	}
+
+	// The metrics queries carry a single attribute group column; when both an
+	// attr.* and a resource.* token are given, keep whichever came first and
+	// warn about the other (silently dropping either is the footgun this file
+	// exists to prevent).
+	const attrIdx = metricsGroupByKeys.indexOf("attribute")
+	const resourceIdx = metricsGroupByKeys.indexOf("resource_attribute")
+	if (attrIdx !== -1 && resourceIdx !== -1) {
+		const dropResource = attrIdx < resourceIdx
+		warnings.push(
+			`Metrics queries support a single attribute group by; ignoring ${
+				dropResource
+					? `resource.${metricsFilters.groupByResourceAttributeKey}`
+					: `attr.${metricsFilters.groupByAttributeKey}`
+			}`,
+		)
+		const dropped: MetricsGroupByKey = dropResource ? "resource_attribute" : "attribute"
+		for (let i = metricsGroupByKeys.length - 1; i >= 0; i--) {
+			if (metricsGroupByKeys[i] === dropped) metricsGroupByKeys.splice(i, 1)
+		}
+		if (dropResource) delete metricsFilters.groupByResourceAttributeKey
+		else delete metricsFilters.groupByAttributeKey
+	}
+
 	const groupBy = metricsGroupByKeys.length > 0 ? dedupeGroupByKeys(metricsGroupByKeys) : undefined
+
+	const { resourceAttributeFilters: metricsResourceFilters, ...metricsSpecFilters } = metricsFilters
 
 	return {
 		query: {
@@ -885,7 +978,12 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 			source: "metrics",
 			metric: query.aggregation as "avg" | "sum" | "min" | "max" | "count" | "rate" | "increase",
 			groupBy,
-			filters: metricsFilters,
+			filters: {
+				...metricsSpecFilters,
+				...(metricsResourceFilters.length > 0
+					? { resourceAttributeFilters: metricsResourceFilters }
+					: {}),
+			},
 			bucketSeconds,
 		} as QuerySpec,
 		warnings,

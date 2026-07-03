@@ -16,7 +16,6 @@ import {
 	ServiceOverviewResponse,
 	ServiceHealthBaselineResponse,
 	ServiceApdexResponse,
-	ServiceReleasesResponse,
 	ServiceDependenciesResponse,
 	ServiceDbEdgesResponse,
 	ServiceDbQuerySummaryResponse,
@@ -468,35 +467,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							satisfiedCount: Number(row.satisfiedCount),
 							toleratingCount: Number(row.toleratingCount),
 							apdexScore: Number(row.apdexScore),
-						})),
-					})
-				}),
-			)
-			.handle("serviceReleases", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceReleasesTimelineQuery({ serviceName: payload.serviceName }),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.bucketSeconds ?? 300,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "serviceReleases",
-						}),
-						"serviceReleases query failed",
-					)
-					const typedRows = rows
-					return new ServiceReleasesResponse({
-						data: typedRows.map((row) => ({
-							bucket: String(row.bucket),
-							commitSha: decodeCommitSha(row.commitSha),
-							count: Number(row.count),
 						})),
 					})
 				}),

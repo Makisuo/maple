@@ -66,7 +66,7 @@ function ServiceMapContent() {
 				/>
 			}
 		>
-			<div className="-mx-6 -mb-6 h-[calc(100vh-10rem)]">
+			<div className="-mx-4 -mb-4 h-[calc(100vh-10rem)]">
 				<ServiceMapView startTime={effectiveStartTime} endTime={effectiveEndTime} />
 			</div>
 		</DashboardLayout>
