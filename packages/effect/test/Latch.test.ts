@@ -18,4 +18,16 @@ describe("Latch", () => {
 
       assert.isDefined(waiter.pollUnsafe())
     }))
+
+  it.effect("isOpen reflects the state of the latch", () =>
+    Effect.gen(function*() {
+      const latch = yield* Latch.make(false)
+
+      assert.isFalse(latch.isOpen())
+
+      yield* latch.open
+      yield* Effect.yieldNow
+
+      assert.isTrue(latch.isOpen())
+    }))
 })

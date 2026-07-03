@@ -61,7 +61,7 @@ export interface HttpIncomingMessage<E = unknown> extends Inspectable.Inspectabl
  * @category schemas
  * @since 4.0.0
  */
-export const schemaBodyJson = <S extends Schema.Top>(schema: S, options?: ParseOptions | undefined) => {
+export const schemaBodyJson = <S extends Schema.Constraint>(schema: S, options?: ParseOptions | undefined) => {
   const decode = Schema.decodeEffect(Schema.toCodecJson(schema))
   return <E>(
     self: HttpIncomingMessage<E>

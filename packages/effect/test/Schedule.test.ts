@@ -1,5 +1,5 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Array, Duration, Effect, Fiber, Pull, Random, Schedule } from "effect"
+import { assert, describe, expect, it } from "@effect/vitest"
+import { Array, Duration, Effect, Fiber, Pull, Random, Result, Schedule } from "effect"
 import { constant, constUndefined } from "effect/Function"
 import { TestClock } from "effect/testing"
 
@@ -79,7 +79,7 @@ describe("Schedule", () => {
         ])
       }))
 
-    it.effect("andThenResult - executes schedules sequentially to completion", () =>
+    it.effect("andThenResult - sequences self then other when collecting delays", () =>
       Effect.gen(function*() {
         const left = Schedule.fixed("500 millis").pipe(
           Schedule.while(({ attempt }) => Effect.succeed(attempt <= 3))
@@ -98,7 +98,7 @@ describe("Schedule", () => {
         ])
       }))
 
-    it.effect("andThenResult - emits right completion when right schedule is finite", () =>
+    it.effect("andThenResult - includes finite other completion when collecting delays", () =>
       Effect.gen(function*() {
         const left = Schedule.fixed("500 millis").pipe(
           Schedule.while(({ attempt }) => Effect.succeed(attempt <= 2))
@@ -112,6 +112,23 @@ describe("Schedule", () => {
           Duration.millis(500),
           Duration.seconds(1),
           Duration.zero
+        ])
+      }))
+
+    it.effect("andThenResult - wraps self outputs as Failure and other outputs as Success", () =>
+      Effect.gen(function*() {
+        const left = Schedule.identity<string>().pipe(Schedule.take(2))
+        const right = Schedule.identity<string>()
+        const step = yield* Schedule.toStep(Schedule.andThenResult(left, right))
+
+        const first = yield* step(0, "left-1")
+        const second = yield* step(0, "left-2")
+        const third = yield* step(0, "right-1")
+
+        assert.deepStrictEqual([first, second, third], [
+          [Result.fail("left-1"), Duration.zero],
+          [Result.fail("left-2"), Duration.zero],
+          [Result.succeed("right-1"), Duration.zero]
         ])
       }))
   })

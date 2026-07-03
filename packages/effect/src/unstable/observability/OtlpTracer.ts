@@ -284,7 +284,9 @@ const makeOtlpSpan = (self: SpanImpl): OtlpSpan => {
       value: { boolValue: true }
     })
   } else {
-    const errors = Cause.prettyErrors(status.exit.cause)
+    const errors = Cause.prettyErrors(status.exit.cause, {
+      includeCauseInStack: true
+    })
     otelStatus = {
       code: StatusCode.Error
     }

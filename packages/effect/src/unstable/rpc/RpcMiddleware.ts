@@ -142,7 +142,7 @@ export interface ServiceClass<
   Self,
   Name extends string,
   Provides,
-  E extends Schema.Top,
+  E extends Schema.Constraint,
   ClientError,
   Requires,
   RequiredForClient extends boolean
@@ -193,7 +193,7 @@ export type ApplyServices<A, R> = Exclude<R, Provides<A>> | Requires<A>
  * @since 4.0.0
  */
 export type ErrorSchema<A> = A extends { readonly [TypeId]: { readonly error: infer E } }
-  ? E extends Schema.Top ? E : never
+  ? E extends Schema.Constraint ? E : never
   : never
 
 /**

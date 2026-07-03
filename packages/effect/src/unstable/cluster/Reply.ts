@@ -234,7 +234,7 @@ export class Chunk<R extends Rpc.Any> extends Data.TaggedClass("Chunk")<{
    *
    * @since 4.0.0
    */
-  static schemaFrom<Success extends Schema.Top>(
+  static schemaFrom<Success extends Schema.Constraint>(
     success: Success
   ): Schema.declareConstructor<Chunk<Rpc.Any>, Chunk<Rpc.Any>, readonly [Success]> {
     // TODO: extract to a helper function
@@ -336,7 +336,11 @@ export class WithExit<R extends Rpc.Any> extends Data.TaggedClass("WithExit")<{
    *
    * @since 4.0.0
    */
-  static schemaFrom<Success extends Schema.Top, Error extends Schema.Top, Defect extends Schema.Top>(
+  static schemaFrom<
+    Success extends Schema.Constraint,
+    Error extends Schema.Constraint,
+    Defect extends Schema.Constraint
+  >(
     exitSchema: Schema.Exit<Success, Error, Defect>
   ): Schema.declareConstructor<
     WithExit<Rpc.Any>,

@@ -30,6 +30,24 @@ describe("Union", () => {
     expect(schema.members).type.toBe<readonly [Schema.String, Schema.Number]>()
   })
 
+  it("schema views remain precise", () => {
+    const schema = Schema.Union([Schema.String, Schema.FiniteFromString])
+    const asSchema = <T>(schema: Schema.Schema<T>) => schema
+    const asCodec = <T, E, RD, RE>(schema: Schema.Codec<T, E, RD, RE>) => schema
+
+    expect(schema).type.toBeAssignableTo<Schema.Schema<string | number>>()
+    expect(schema).type.toBeAssignableTo<Schema.Codec<string | number, string, never, never>>()
+
+    const schemaView = asSchema(schema)
+    expect(schemaView.Type).type.toBe<string | number>()
+
+    const codecView = asCodec(schema)
+    expect(codecView.Type).type.toBe<string | number>()
+    expect(codecView.Encoded).type.toBe<string>()
+    expect(codecView.DecodingServices).type.toBe<never>()
+    expect(codecView.EncodingServices).type.toBe<never>()
+  })
+
   describe("mapMembers", () => {
     it("appendElement", () => {
       const schema = Schema.Union([Schema.String, Schema.Number]).mapMembers(Tuple.appendElement(Schema.Boolean))

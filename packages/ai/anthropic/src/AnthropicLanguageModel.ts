@@ -1620,7 +1620,7 @@ const makeResponse = Effect.fnUntraced(
             const callerInfo = Predicate.isNotNullish(caller)
               ? {
                 type: caller.type,
-                toolId: "tool_id" in caller ? caller.tool_id : undefined
+                toolId: "tool_id" in caller ? caller.tool_id : null
               }
               : undefined
 
@@ -3028,13 +3028,13 @@ const unsupportedSchemaError = (error: unknown, method: string): AiError.AiError
     })
   })
 
-const tryCodecTransform = <S extends Schema.Top>(schema: S, method: string) =>
+const tryCodecTransform = <S extends Schema.Constraint>(schema: S, method: string) =>
   Effect.try({
     try: () => toCodecAnthropic(schema),
     catch: (error) => unsupportedSchemaError(error, method)
   })
 
-const tryJsonSchema = <S extends Schema.Top>(schema: S, method: string) =>
+const tryJsonSchema = <S extends Schema.Constraint>(schema: S, method: string) =>
   Effect.try({
     try: () => Tool.getJsonSchemaFromSchema(schema, { transformer: toCodecAnthropic }),
     catch: (error) => unsupportedSchemaError(error, method)

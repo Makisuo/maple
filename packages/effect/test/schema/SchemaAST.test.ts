@@ -68,6 +68,36 @@ describe("SchemaAST", () => {
     strictEqual(SchemaAST.isStringTree(circular), false)
   })
 
+  describe("toType", () => {
+    it("promotes encodingChecks when contained type shape is preserved", () => {
+      const schema = Schema.Struct({ a: Schema.String }).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((o) => o.a.length > 1)),
+        Schema.flip
+      )
+
+      const ast = SchemaAST.toType(schema.ast)
+
+      strictEqual(SchemaAST.isObjects(ast), true)
+      strictEqual(ast.checks?.length, 1)
+      strictEqual(ast.encodingChecks, undefined)
+    })
+
+    it("drops encodingChecks when contained type shape changes", () => {
+      const schema = Schema.Struct({ a: Schema.FiniteFromString }).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((o) => o.a.length > 1)),
+        Schema.flip
+      )
+
+      const ast = SchemaAST.toType(schema.ast)
+
+      strictEqual(SchemaAST.isObjects(ast), true)
+      strictEqual(ast.checks, undefined)
+      strictEqual(ast.encodingChecks, undefined)
+    })
+  })
+
   describe("collectSentinels", () => {
     describe("Declaration", () => {
       it("~sentinels", () => {

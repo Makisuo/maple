@@ -1382,7 +1382,7 @@ export interface ToolCallPartMetadata extends ProviderMetadata {}
  * @category schemas
  * @since 4.0.0
  */
-export const ToolCallPart: <const Name extends string, Params extends Schema.Top>(
+export const ToolCallPart: <const Name extends string, Params extends Schema.Constraint>(
   name: Name,
   params: Params
 ) => Schema.Struct<
@@ -1397,7 +1397,7 @@ export const ToolCallPart: <const Name extends string, Params extends Schema.Top
       Schema.$Record<Schema.String, Schema.Codec<Schema.Json>>
     >
   }
-> = <const Name extends string, Params extends Schema.Top>(
+> = <const Name extends string, Params extends Schema.Constraint>(
   name: Name,
   params: Params
 ) =>
@@ -1595,7 +1595,11 @@ export interface ToolResultPartMetadata extends ProviderMetadata {}
  * @category schemas
  * @since 4.0.0
  */
-export const ToolResultPart: <const Name extends string, Success extends Schema.Top, Failure extends Schema.Top>(
+export const ToolResultPart: <
+  const Name extends string,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint
+>(
   name: Name,
   success: Success,
   failure: Failure
@@ -1633,8 +1637,8 @@ export const ToolResultPart: <const Name extends string, Success extends Schema.
   >
 > = <
   const Name extends string,
-  Success extends Schema.Top,
-  Failure extends Schema.Top
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint
 >(
   name: Name,
   success: Success,

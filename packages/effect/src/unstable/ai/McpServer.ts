@@ -782,7 +782,7 @@ export type ValidateCompletions<Completions, Keys extends string> =
  * @category models
  * @since 4.0.0
  */
-export type ResourceCompletions<Schemas extends ReadonlyArray<Schema.Top>> = {
+export type ResourceCompletions<Schemas extends ReadonlyArray<Schema.Constraint>> = {
   readonly [
     K in Extract<keyof Schemas, `${number}`> as Schemas[K] extends Param<infer Id, infer _S> ? Id
       : `param${K}`
@@ -818,7 +818,7 @@ export const registerResource: {
     >
     readonly annotations?: Context.Context<never> | undefined
   }): Effect.Effect<void, never, Exclude<R, McpServerClient> | McpServer>
-  <const Schemas extends ReadonlyArray<Schema.Top>>(segments: TemplateStringsArray, ...schemas: Schemas): <
+  <const Schemas extends ReadonlyArray<Schema.Constraint>>(segments: TemplateStringsArray, ...schemas: Schemas): <
     E,
     R,
     const Completions extends Partial<ResourceCompletions<Schemas>> = {}
@@ -979,7 +979,7 @@ export const resource: {
       R
     >
   }): Layer.Layer<never, never, Exclude<R, McpServerClient>>
-  <const Schemas extends ReadonlyArray<Schema.Top>>(segments: TemplateStringsArray, ...schemas: Schemas): <
+  <const Schemas extends ReadonlyArray<Schema.Constraint>>(segments: TemplateStringsArray, ...schemas: Schemas): <
     E,
     R,
     const Completions extends Partial<ResourceCompletions<Schemas>> = {}
@@ -1056,7 +1056,7 @@ export const registerPrompt = <
   }
 ): Effect.Effect<void, never, Exclude<Schema.Struct.DecodingServices<Params> | R, McpServerClient> | McpServer> => {
   const args = Arr.empty<typeof PromptArgument.Type>()
-  const props: Record<string, Schema.Top> = options.parameters ?? {}
+  const props: Record<string, Schema.Constraint> = options.parameters ?? {}
   for (const [name, prop] of Object.entries(props)) {
     args.push({
       name,
@@ -1180,14 +1180,14 @@ export const prompt = <
  * @category elicitation
  * @since 4.0.0
  */
-export const elicit: <S extends Schema.Encoder<Record<string, unknown>, unknown>>(options: {
+export const elicit: <S extends Schema.ConstraintEncoder<Record<string, unknown>, unknown>>(options: {
   readonly message: string
   readonly schema: S
 }) => Effect.Effect<
   S["Type"],
   ElicitationDeclined,
   McpServerClient | S["DecodingServices"]
-> = Effect.fnUntraced(function*<S extends Schema.Encoder<Record<string, unknown>, unknown>>(options: {
+> = Effect.fnUntraced(function*<S extends Schema.ConstraintEncoder<Record<string, unknown>, unknown>>(options: {
   readonly message: string
   readonly schema: S
 }) {
@@ -1241,7 +1241,7 @@ const makeUriMatcher = <A>() => {
   return { add, find } as const
 }
 
-const compileUriTemplate = (segments: TemplateStringsArray, ...schemas: ReadonlyArray<Schema.Top>) => {
+const compileUriTemplate = (segments: TemplateStringsArray, ...schemas: ReadonlyArray<Schema.Constraint>) => {
   let routerPath = segments[0].replace(":", "::")
   let uriPath = segments[0]
   const params: Record<string, Schema.Top> = {}

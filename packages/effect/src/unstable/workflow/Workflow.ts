@@ -511,8 +511,8 @@ export interface CompleteEncoded<A, E> {
  * @since 4.0.0
  */
 export interface CompleteSchema<
-  Success extends Schema.Top,
-  Error extends Schema.Top
+  Success extends Schema.Constraint,
+  Error extends Schema.Constraint
 > extends
   Schema.declareConstructor<
     Complete<Success["Type"], Error["Type"]>,
@@ -545,7 +545,7 @@ export class Complete<A, E> extends Data.TaggedClass("Complete")<{
    *
    * @since 4.0.0
    */
-  static Schema<Success extends Schema.Top, Error extends Schema.Top>(options: {
+  static Schema<Success extends Schema.Constraint, Error extends Schema.Constraint>(options: {
     readonly success: Success
     readonly error: Error
   }): CompleteSchema<Success, Error> {
@@ -624,8 +624,8 @@ export class Suspended extends Schema.Class<Suspended>(
  * @since 4.0.0
  */
 export const Result = <
-  Success extends Schema.Top,
-  Error extends Schema.Top
+  Success extends Schema.Constraint,
+  Error extends Schema.Constraint
 >(options: {
   readonly success: Success
   readonly error: Error

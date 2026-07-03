@@ -1,11 +1,5 @@
 import type * as Response from "effect/unstable/ai/Response"
 
-/** @internal */
-export const ProviderOptionsKey = "@effect/ai-openai/OpenAiLanguageModel/ProviderOptions"
-
-/** @internal */
-export const ProviderMetadataKey = "@effect/ai-openai/OpenAiLanguageModel/ProviderMetadata"
-
 const finishReasonMap: Record<string, Response.FinishReason> = {
   content_filter: "content-filter",
   function_call: "tool-calls",

@@ -404,9 +404,9 @@ export function make<
 export function make(options: {
   readonly tag: string
   readonly primaryKey: (payload: Schema.Schema.Type<Schema.Top>) => string
-  readonly payload?: Schema.Top | undefined
-  readonly success?: Schema.Top | undefined
-  readonly error?: Schema.Top | undefined
+  readonly payload?: Schema.Constraint | undefined
+  readonly success?: Schema.Constraint | undefined
+  readonly error?: Schema.Constraint | undefined
 }): Event<string, Schema.Top, Schema.Top, typeof Schema.Never> {
   const payload = options.payload ?? Schema.Void
   const success = options.success ?? Schema.Void

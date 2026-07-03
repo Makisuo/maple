@@ -1748,6 +1748,7 @@ export interface JSDocModel {
   readonly version: 2
   readonly generatedBy: "@effect/jsdocs"
   readonly generatedAt: string
+  readonly inputHash?: string
   readonly files: ReadonlyArray<JSDocModelFile>
   readonly apis: ReadonlyArray<JSDocApi>
 }
@@ -1761,6 +1762,65 @@ export interface JSDocConfig {
 
 export interface ExtractJSDocsOptions extends JSDocConfig {
   readonly cwd?: string
+}
+
+function addInputFile(files: Set<string>, filename: string) {
+  const normalized = path.resolve(filename)
+  if (fs.existsSync(normalized) && fs.statSync(normalized).isFile()) {
+    files.add(normalized)
+  }
+}
+
+export function computeJSDocInputHash(options: ExtractJSDocsOptions): string {
+  const cwd = path.resolve(options.cwd ?? process.cwd())
+  const hash = crypto.createHash("sha256")
+  const files = new Set<string>()
+
+  hash.update(JSON.stringify({
+    tsconfig: options.tsconfig,
+    include: options.include,
+    exclude: options.exclude ?? [],
+    output: options.output
+  }))
+
+  addInputFile(files, path.join(cwd, "jsdocs.config.json"))
+  addInputFile(files, path.resolve(cwd, options.tsconfig))
+
+  for (
+    const filename of globSync([...options.include], {
+      cwd,
+      absolute: true,
+      nodir: true,
+      ignore: ["**/node_modules/**"]
+    })
+  ) {
+    addInputFile(files, filename)
+  }
+
+  for (
+    const filename of globSync([
+      "package.json",
+      "packages/**/package.json",
+      "tsconfig*.json",
+      "packages/**/tsconfig*.json"
+    ], {
+      cwd,
+      absolute: true,
+      nodir: true,
+      ignore: ["**/node_modules/**"]
+    })
+  ) {
+    addInputFile(files, filename)
+  }
+
+  for (const filename of Array.from(files).sort()) {
+    hash.update("\0")
+    hash.update(normalizeFile(cwd, filename))
+    hash.update("\0")
+    hash.update(hashSource(fs.readFileSync(filename, "utf8")))
+  }
+
+  return hash.digest("hex")
 }
 
 function isIdentifierName(value: string): boolean {
@@ -3271,6 +3331,7 @@ export function extractJSDocsSync(options: ExtractJSDocsOptions): JSDocModel {
     version: 2,
     generatedBy: "@effect/jsdocs",
     generatedAt: new Date().toISOString(),
+    inputHash: computeJSDocInputHash(options),
     files: withPublicSeeDiagnostics.files,
     apis: withPublicSeeDiagnostics.apis
   }

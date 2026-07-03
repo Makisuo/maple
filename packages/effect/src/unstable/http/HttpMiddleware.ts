@@ -13,6 +13,7 @@
 import { Clock } from "../../Clock.ts"
 import * as Context from "../../Context.ts"
 import * as Effect from "../../Effect.ts"
+import * as Exit from "../../Exit.ts"
 import { constant, constFalse } from "../../Function.ts"
 import * as internalEffect from "../../internal/effect.ts"
 import * as Layer from "../../Layer.ts"
@@ -22,7 +23,7 @@ import type { ReadonlyRecord } from "../../Record.ts"
 import { TracerEnabled } from "../../References.ts"
 import { ParentSpan } from "../../Tracer.ts"
 import * as Headers from "./Headers.ts"
-import { causeResponseStripped, exitResponse } from "./HttpServerError.ts"
+import { causeResponseStripped } from "./HttpServerError.ts"
 import { HttpServerRequest } from "./HttpServerRequest.ts"
 import * as Request from "./HttpServerRequest.ts"
 import * as Response from "./HttpServerResponse.ts"
@@ -218,13 +219,21 @@ export const tracer: <E, R>(
         if (Option.isSome(request.remoteAddress)) {
           span.attribute("client.address", request.remoteAddress.value)
         }
-        const response = exitResponse(exit)
+        let response: HttpServerResponse
+        let spanExit = exit
+        if (Exit.isFailure(exit)) {
+          const [failureResponse, cause] = causeResponseStripped(exit.cause)
+          response = failureResponse
+          spanExit = Option.isSome(cause) ? Exit.failCause(cause.value) : Exit.succeed(response)
+        } else {
+          response = exit.value
+        }
         span.attribute("http.response.status_code", response.status)
         const responseHeaders = Headers.redact(response.headers, redactedHeaderNames)
         for (const name in responseHeaders) {
           span.attribute(`http.response.header.${name}`, String(responseHeaders[name]))
         }
-        span.end(endTime, exit)
+        span.end(endTime, spanExit)
       }, 0)
       return undefined
     }, true)

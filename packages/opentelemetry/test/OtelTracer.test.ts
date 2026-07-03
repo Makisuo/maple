@@ -1,11 +1,12 @@
 import * as NodeSdk from "@effect/opentelemetry/NodeSdk"
-import * as Tracer from "@effect/opentelemetry/Tracer"
+import * as OtelTracer from "@effect/opentelemetry/OtelTracer"
 import { assert, describe, it } from "@effect/vitest"
 import * as OtelApi from "@opentelemetry/api"
 import { AsyncHooksContextManager } from "@opentelemetry/context-async-hooks"
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as EffectTracer from "effect/Tracer"
 
 const TracingLive = NodeSdk.layer(Effect.sync(() => ({
   resource: {
@@ -23,7 +24,7 @@ describe("Tracer", () => {
     it.effect("withSpan", () =>
       Effect.gen(function*() {
         const span = yield* Effect.currentSpan
-        assert.instanceOf(span, Tracer.OtelSpan)
+        assert.instanceOf(span, OtelTracer.OtelSpan)
       }).pipe(
         Effect.withSpan("ok"),
         Effect.provide(TracingLive)
@@ -36,7 +37,7 @@ describe("Tracer", () => {
           Effect.withSpan("A"),
           Effect.linkSpans(linkedSpan)
         )
-        assert.instanceOf(span, Tracer.OtelSpan)
+        assert.instanceOf(span, OtelTracer.OtelSpan)
         assert.lengthOf(span.links, 1)
       }).pipe(
         Effect.scoped,
@@ -49,10 +50,10 @@ describe("Tracer", () => {
           Effect.withSpan("child"),
           Effect.withSpan("parent")
         )
-        assert.instanceOf(child, Tracer.OtelSpan)
+        assert.instanceOf(child, OtelTracer.OtelSpan)
         assert.strictEqual(child.name, "child")
         assert.isDefined(child.parent)
-        assert.strictEqual((child.parent.valueOrUndefined! as Tracer.OtelSpan).name, "parent")
+        assert.strictEqual((child.parent.valueOrUndefined! as OtelTracer.OtelSpan).name, "parent")
       }).pipe(
         Effect.provide(TracingLive)
       ))
@@ -79,10 +80,25 @@ describe("Tracer", () => {
     it.effect("currentOtelSpan", () =>
       Effect.gen(function*() {
         const span = yield* Effect.currentSpan
-        const otelSpan = yield* Tracer.currentOtelSpan
-        assert.strictEqual((span as Tracer.OtelSpan).span, otelSpan)
+        const otelSpan = yield* OtelTracer.currentOtelSpan
+        assert.strictEqual((span as OtelTracer.OtelSpan).span, otelSpan)
       }).pipe(
         Effect.withSpan("ok"),
+        Effect.provide(TracingLive)
+      ))
+
+    it.effect("preserves the sampling decision of generic external spans", () =>
+      Effect.gen(function*() {
+        const span = yield* Effect.currentSpan
+        assert.instanceOf(span, OtelTracer.OtelSpan)
+        assert.strictEqual(span.span.spanContext().traceFlags, OtelApi.TraceFlags.NONE)
+      }).pipe(
+        Effect.withSpan("child"),
+        Effect.withParentSpan(EffectTracer.externalSpan({
+          traceId: "1".repeat(32),
+          spanId: "2".repeat(16),
+          sampled: false
+        })),
         Effect.provide(TracingLive)
       ))
 
@@ -115,6 +131,35 @@ describe("Tracer", () => {
         assert.strictEqual(spanData.status.message, "first")
       }))
 
+    it.effect("renders nested error causes in the stacktrace", () =>
+      Effect.gen(function*() {
+        const exporter = new InMemorySpanExporter()
+        const spanProcessor = new SimpleSpanProcessor(exporter)
+        const error = new Error("outer failure", { cause: new Error("inner cause") })
+
+        yield* Effect.die(error).pipe(
+          Effect.withSpan("error-span"),
+          Effect.andThen(Effect.never), // keep the exporter alive
+          Effect.provide(NodeSdk.layer(() => ({
+            resource: {
+              serviceName: "test"
+            },
+            spanProcessor: [spanProcessor]
+          }))),
+          Effect.forkChild({ startImmediately: true })
+        )
+
+        const spanData = exporter.getFinishedSpans()[0]
+        if (spanData === undefined) {
+          return yield* Effect.die("Missing span data")
+        }
+        const exceptionEvent = spanData.events.find((event) => event.name === "exception")
+        assert(exceptionEvent !== undefined)
+        const stacktrace = exceptionEvent.attributes?.["exception.stacktrace"]
+        assert.isString(stacktrace)
+        assert.include(stacktrace as string, "[cause]: Error: inner cause")
+      }))
+
     it.effect("withSpanContext", () =>
       Effect.gen(function*() {
         const effect = Effect.gen(function*() {
@@ -135,7 +180,7 @@ describe("Tracer", () => {
           }, async (span) => {
             try {
               const parent = await effect.pipe(
-                Tracer.withSpanContext(span.spanContext()),
+                OtelTracer.withSpanContext(span.spanContext()),
                 Effect.provideContext(services),
                 Effect.runPromise
               )
@@ -159,7 +204,7 @@ describe("Tracer", () => {
     it.effect("withSpan", () =>
       Effect.gen(function*() {
         const span = yield* Effect.currentSpan
-        assert.notInstanceOf(span, Tracer.OtelSpan)
+        assert.notInstanceOf(span, OtelTracer.OtelSpan)
       }).pipe(
         Effect.withSpan("ok")
       ))

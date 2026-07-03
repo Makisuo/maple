@@ -262,17 +262,10 @@ export interface Class<
     readonly fields: Schema.Struct.Fields
   }
 > extends
-  Schema.Bottom<
-    Self,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+  Schema.BottomLazy<
     SchemaAST.Declaration,
     Schema.decodeTo<Schema.declareConstructor<Self, S["Encoded"], readonly [S], S["Iso"]>, S>,
-    S["~type.make.in"],
-    S["Iso"],
     readonly [S],
-    Self,
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -281,6 +274,14 @@ export interface Class<
   >,
   Struct<Struct_.Simplify<Fields>>
 {
+  readonly "Type": Self
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": Self
+  readonly "Iso": S["Iso"]
+
   new(
     props: S["~type.make.in"],
     options?: {
@@ -528,24 +529,25 @@ export const Override = <A>(value: A): A & Brand<"Override"> => value as any
  * @since 4.0.0
  */
 export interface Overrideable<S extends Schema.Top & Schema.WithoutConstructorDefault> extends
-  Schema.Bottom<
-    S["Type"] & Brand<"Override">,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+  Schema.BottomLazy<
     S["ast"],
     Overrideable<S>,
-    S["~type.make.in"],
-    (S["Type"] & Brand<"Override">) | undefined,
     S["~type.parameters"],
-    (S["Type"] & Brand<"Override">) | undefined,
     S["~type.mutability"],
     "required",
     "with-default",
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{}
+{
+  readonly "Type": S["Type"] & Brand<"Override">
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": (S["Type"] & Brand<"Override">) | undefined
+  readonly "Iso": (S["Type"] & Brand<"Override">) | undefined
+}
 
 /**
  * Wraps a schema with an effectful constructor default while allowing explicit

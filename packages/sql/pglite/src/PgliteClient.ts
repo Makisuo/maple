@@ -308,6 +308,16 @@ class PgliteConnection implements Connection {
       (result) => result.rows as ReadonlyArray<ReadonlyArray<any>>
     )
   }
+  executeValuesUnprepared(sql: string, params: ReadonlyArray<unknown>) {
+    return Effect.map(
+      Effect.tryPromise({
+        try: () => this.pglite.query<any>(sql, params as Array<any>, { rowMode: "array" }),
+        catch: (cause) =>
+          new SqlError({ reason: classifyError(cause, "Failed to execute statement", "executeValuesUnprepared") })
+      }),
+      (result) => result.rows as ReadonlyArray<ReadonlyArray<any>>
+    )
+  }
   executeUnprepared(
     sql: string,
     params: ReadonlyArray<unknown>,

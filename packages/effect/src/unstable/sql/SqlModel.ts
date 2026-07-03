@@ -77,7 +77,7 @@ export const makeRepository = <
 > =>
   Effect.gen(function*() {
     const sql = yield* SqlClient
-    const idSchema = Model.fields[options.idColumn] as Schema.Top
+    const idSchema = Model.fields[options.idColumn]
     const idColumn = options.idColumn as string
     const softDeleteColumn = options.softDeleteColumn as string | undefined
     const withSoftDeleteFilter = (where: any) =>
@@ -274,7 +274,7 @@ export const makeResolvers = <
 > =>
   Effect.gen(function*() {
     const sql = yield* SqlClient
-    const idSchema = Model.fields[options.idColumn] as Schema.Top
+    const idSchema = Model.fields[options.idColumn]
     const idColumn = options.idColumn as string
     const softDeleteColumn = options.softDeleteColumn as string | undefined
     const withSoftDeleteFilter = (where: any) =>

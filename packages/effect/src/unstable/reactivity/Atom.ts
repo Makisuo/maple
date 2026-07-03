@@ -2409,7 +2409,7 @@ export type SerializableTypeId = "~effect-atom/atom/Atom/Serializable"
  * @category Serializable
  * @since 4.0.0
  */
-export interface Serializable<S extends Schema.Top> {
+export interface Serializable<S extends Schema.Constraint> {
   readonly [SerializableTypeId]: {
     readonly key: string
     readonly encode: (value: S["Type"]) => S["Encoded"]

@@ -711,6 +711,9 @@ class ConnectionImpl implements Connection {
       )
     })
   }
+  executeValuesUnprepared(sql: string, params: ReadonlyArray<unknown>) {
+    return this.executeValues(sql, params)
+  }
   executeUnprepared(
     sql: string,
     params: ReadonlyArray<unknown>,

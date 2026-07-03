@@ -126,17 +126,21 @@ export const make = (
         db.run("PRAGMA journal_mode = WAL;")
       }
 
+      const prepare = (sql: string, useSafeIntegers: boolean) => {
+        const statement = db.query(sql)
+        // @ts-ignore bun-types missing safeIntegers method, fixed in https://github.com/oven-sh/bun/pull/26627
+        statement.safeIntegers(useSafeIntegers)
+        return statement
+      }
+
       const run = (
         sql: string,
         params: ReadonlyArray<unknown> = []
       ) =>
         Effect.withFiber<Array<any>, SqlError>((fiber) => {
-          const statement = db.query(sql)
           const useSafeIntegers = Context.get(fiber.context, Client.SafeIntegers)
-          // @ts-ignore bun-types missing safeIntegers method, fixed in https://github.com/oven-sh/bun/pull/26627
-          statement.safeIntegers(useSafeIntegers)
           try {
-            return Effect.succeed((statement.all(...(params as any)) ?? []) as Array<any>)
+            return Effect.succeed((prepare(sql, useSafeIntegers).all(...(params as any)) ?? []) as Array<any>)
           } catch (cause) {
             return Effect.fail(new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") }))
           }
@@ -147,14 +151,13 @@ export const make = (
         params: ReadonlyArray<unknown> = []
       ) =>
         Effect.withFiber<Array<any>, SqlError>((fiber) => {
-          const statement = db.query(sql)
           const useSafeIntegers = Context.get(fiber.context, Client.SafeIntegers)
-          // @ts-ignore bun-types missing safeIntegers method, fixed in https://github.com/oven-sh/bun/pull/26627
-          statement.safeIntegers(useSafeIntegers)
           try {
-            return Effect.succeed((statement.values(...(params as any)) ?? []) as Array<any>)
+            return Effect.succeed((prepare(sql, useSafeIntegers).values(...(params as any)) ?? []) as Array<any>)
           } catch (cause) {
-            return Effect.fail(new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") }))
+            return Effect.fail(
+              new SqlError({ reason: classifyError(cause, "Failed to execute statement", "executeValues") })
+            )
           }
         })
 
@@ -168,6 +171,9 @@ export const make = (
           return run(sql, params)
         },
         executeValues(sql, params) {
+          return runValues(sql, params)
+        },
+        executeValuesUnprepared(sql, params) {
           return runValues(sql, params)
         },
         executeUnprepared(sql, params, transformRows) {

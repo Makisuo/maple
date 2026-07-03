@@ -241,11 +241,11 @@ export const config: Config.Config<ShardingConfig["Service"]> = Config.all({
     Config.withDefault(defaults.runnerShardWeight)
     // Config.withDescription("A number that determines how many shards this runner will be assigned relative to other runners.")
   ),
-  availableShardGroups: Config.schema(Schema.Array(Schema.String), "availableShardGroups").pipe(
+  availableShardGroups: Config.schema(Config.Array(Schema.String), "availableShardGroups").pipe(
     Config.withDefault(["default"])
     // Config.withDescription("The shard groups available across all runners.")
   ),
-  assignedShardGroups: Config.schema(Schema.Array(Schema.String), "shardGroups").pipe(
+  assignedShardGroups: Config.schema(Config.Array(Schema.String), "shardGroups").pipe(
     Config.withDefault(["default"])
     // Config.withDescription("The shard groups that are assigned to this runner.")
   ),

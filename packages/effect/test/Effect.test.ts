@@ -175,6 +175,23 @@ describe("Effect", () => {
         Effect.tap((error) => Effect.sync(() => assert.ok(error instanceof Cause.NoSuchElementError))),
         Effect.runPromise
       ))
+
+    it.effect("from a none with a custom error", () =>
+      Effect.gen(function*() {
+        const error = new Error("Missing value")
+        const cause = yield* Effect.fromOption(Option.none(), () => error).pipe(Effect.flip)
+        assert.strictEqual(cause, error)
+      }))
+
+    it.effect("from a none with a custom error data-last", () =>
+      Effect.gen(function*() {
+        const error = new Error("Missing value")
+        const cause = yield* Option.none().pipe(
+          Effect.fromOption(() => error),
+          Effect.flip
+        )
+        assert.strictEqual(cause, error)
+      }))
   })
 
   describe("transposeOption", () => {
