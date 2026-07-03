@@ -369,9 +369,9 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 						versionOptions,
 					).pipe(
 						Effect.tapError((error) =>
-							Effect.logWarning(
-								"[DashboardPersistenceService] Failed to record dashboard version",
-							).pipe(Effect.annotateLogs({ error: String(error) })),
+							Effect.logWarning("Failed to record dashboard version").pipe(
+								Effect.annotateLogs({ dashboardId: dashboard.id, error: String(error) }),
+							),
 						),
 						Effect.ignore,
 					)
@@ -439,9 +439,9 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 
 					yield* recordVersion(orgId, userId, next, current.document, versionOptions).pipe(
 						Effect.tapError((error) =>
-							Effect.logWarning(
-								"[DashboardPersistenceService] Failed to record dashboard version",
-							).pipe(Effect.annotateLogs({ error: String(error) })),
+							Effect.logWarning("Failed to record dashboard version").pipe(
+								Effect.annotateLogs({ dashboardId, error: String(error) }),
+							),
 						),
 						Effect.ignore,
 					)

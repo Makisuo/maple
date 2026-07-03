@@ -1385,12 +1385,13 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				const opts = extractTracesFacetsOpts(
 					request.query.filters as Record<string, unknown> | undefined,
 				)
+				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
-					CH.tracesFacetsQuery(opts),
+					CH.tracesFacetsQuery({ ...opts, facet }),
 					baseParams,
-					"tracesFacets",
+					facet ? `tracesFacets:${facet}` : "tracesFacets",
 					"discovery",
 				)
 				return new QueryEngineExecuteResponse({
@@ -1408,18 +1409,22 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 			if (request.query.source === "logs") {
 				const filters = request.query.filters as Record<string, unknown> | undefined
+				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
-					CH.logsFacetsQuery({
-						serviceName: filters?.serviceName as string | undefined,
-						severity: filters?.severity as string | undefined,
-						environments: filters?.environments as readonly string[] | undefined,
-						namespaces: filters?.namespaces as readonly string[] | undefined,
-						matchModes: logsMatchModes(filters),
-					}),
+					CH.logsFacetsQuery(
+						{
+							serviceName: filters?.serviceName as string | undefined,
+							severity: filters?.severity as string | undefined,
+							environments: filters?.environments as readonly string[] | undefined,
+							namespaces: filters?.namespaces as readonly string[] | undefined,
+							matchModes: logsMatchModes(filters),
+						},
+						facet,
+					),
 					baseParams,
-					"logsFacets",
+					facet ? `logsFacets:${facet}` : "logsFacets",
 					"discovery",
 				)
 				return new QueryEngineExecuteResponse({

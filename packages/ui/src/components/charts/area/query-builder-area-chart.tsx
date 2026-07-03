@@ -5,13 +5,8 @@ import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
-import {
-	type LegendSeries,
-	QueryBuilderLegend,
-	computeSeriesStats,
-	sortZeroSeriesLast,
-	responsiveLegendHeight,
-} from "../_shared/query-builder-legend"
+import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
+import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
 import { findNearestSeriesKey } from "../_shared/nearest-series"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
@@ -23,7 +18,6 @@ import {
 	ChartTooltipContent,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
-import { isSparseSeries, hasOnlyIntegerValues } from "../_shared/sparse-series"
 
 const fallbackData: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
@@ -159,35 +153,13 @@ export function QueryBuilderAreaChart({
 		})
 	}, [])
 
-	const seriesStats = React.useMemo(
-		() => computeSeriesStats(processedData, valueKeys),
-		[processedData, valueKeys],
-	)
-
-	// Sparse data (isolated non-zero buckets between zeros) renders as barely
-	// visible spikes — auto-enable dots so single-bucket values stay readable.
-	const sparse = React.useMemo(() => isSparseSeries(processedData, valueKeys), [processedData, valueKeys])
-	const renderDots = showPoints || sparse
-
-	// Integer-only data (counts) shouldn't get fractional ticks (0.5/1.5); a
-	// unit or any fractional value keeps decimal ticks (rates, ratios).
-	const integerOnlyData = React.useMemo(
-		() => hasOnlyIntegerValues(processedData, valueKeys),
-		[processedData, valueKeys],
-	)
-
-	const legendSeries = React.useMemo<LegendSeries[]>(
-		() =>
-			sortZeroSeriesLast(
-				seriesDefinitions.map((definition) => ({
-					key: definition.chartKey,
-					label: definition.rawKey,
-					color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
-				})),
-				seriesStats,
-			),
-		[seriesDefinitions, chartConfig, seriesStats],
-	)
+	const { seriesStats, legendSeries, renderDots, integerOnlyData } = useTimeseriesSeriesPresentation({
+		data: processedData,
+		valueKeys,
+		seriesDefinitions,
+		chartConfig,
+		showPoints,
+	})
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const { height: containerHeight } = useContainerSize(containerRef)

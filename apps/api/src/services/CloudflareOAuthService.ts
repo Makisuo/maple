@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import {
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
@@ -8,19 +8,15 @@ import {
 	type OrgId,
 	type UserId,
 } from "@maple/domain/http"
-import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
-import { and, eq, lt } from "drizzle-orm"
-import { Clock, Context, Effect, Layer, Option, Redacted, Schema, Semaphore } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { oauthAuthStates } from "@maple/db"
+import { Clock, Context, Effect, Layer, Option, Redacted } from "effect"
 import { listAccounts } from "../lib/CloudflareApi"
-import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
-import { Database, type DatabaseClient } from "../lib/DatabaseLive"
+import { Database } from "../lib/DatabaseLive"
 import { Env, type EnvShape } from "../lib/Env"
 import { msToDate } from "../lib/time"
+import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS } from "./oauth/connection-helpers"
 
 const CLOUDFLARE_PROVIDER = "cloudflare"
-const STATE_TTL_MS = 10 * 60_000 // 10 minutes
-const REFRESH_LEEWAY_MS = 60_000 // refresh when the access token is within 1 minute of expiry
 
 /**
  * PKCE (RFC 7636). Cloudflare's OAuth requires PKCE (S256) for public clients — a multi-tenant SaaS
@@ -30,17 +26,6 @@ const REFRESH_LEEWAY_MS = 60_000 // refresh when the access token is within 1 mi
 const generateCodeVerifier = (): string => randomBytes(32).toString("base64url")
 const deriveCodeChallenge = (verifier: string): string =>
 	createHash("sha256").update(verifier).digest("base64url")
-
-/** Cloudflare's OAuth token endpoint returns a standard OAuth2 token payload. */
-const TokenResponseSchema = Schema.Struct({
-	access_token: Schema.String,
-	token_type: Schema.optionalKey(Schema.String),
-	expires_in: Schema.optionalKey(Schema.Number),
-	refresh_token: Schema.optionalKey(Schema.String),
-	scope: Schema.optionalKey(Schema.String),
-})
-
-const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponseSchema)
 
 interface ResolvedCloudflareOAuthConfig {
 	readonly clientId: string
@@ -81,21 +66,11 @@ const resolveConfig = (
 		}
 	})
 
-const toPersistenceError = (cause: unknown) =>
-	new IntegrationsPersistenceError({
-		message: cause instanceof Error ? cause.message : "Cloudflare integration database error",
-	})
-
-const toUpstreamError = (message: string, status?: number, cause?: unknown) =>
-	new IntegrationsUpstreamError({
-		message,
-		...(status === undefined ? {} : { status }),
-		...(cause === undefined ? {} : { cause }),
-	})
-
 interface CloudflareAccessToken {
 	readonly accessToken: string
 	readonly accountId: string
+	/** Granted OAuth scope — lets pollers gate on capability without a second row read. */
+	readonly scope: string
 }
 
 export interface CloudflareOAuthServiceShape {
@@ -150,133 +125,22 @@ export class CloudflareOAuthService extends Context.Service<
 	make: Effect.gen(function* () {
 		const database = yield* Database
 		const env = yield* Env
-		const encryptionKey = yield* parseBase64Aes256GcmKey(
-			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
-			(message) =>
-				new IntegrationsValidationError({
-					message:
-						message === "Expected a non-empty base64 encryption key"
-							? "MAPLE_INGEST_KEY_ENCRYPTION_KEY is required"
-							: message === "Expected base64 for exactly 32 bytes"
-								? "MAPLE_INGEST_KEY_ENCRYPTION_KEY must be base64 for exactly 32 bytes"
-								: message,
-				}),
-		)
-
-		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-			database.execute(fn).pipe(Effect.mapError(toPersistenceError))
-
-		const encryptValue = (plaintext: string) =>
-			encryptAes256Gcm(
-				plaintext,
-				encryptionKey,
-				(message) =>
-					new IntegrationsPersistenceError({
-						message: `Failed to encrypt Cloudflare token: ${message}`,
-					}),
-			)
-
-		const decryptValue = (encrypted: { ciphertext: string; iv: string; tag: string }) =>
-			decryptAes256Gcm(
-				encrypted,
-				encryptionKey,
-				() =>
-					new IntegrationsPersistenceError({
-						message: "Failed to decrypt stored Cloudflare token",
-					}),
-			)
-
-		const purgeExpiredStates = (currentTime: number) =>
-			dbExecute((db) =>
-				db.delete(oauthAuthStates).where(lt(oauthAuthStates.expiresAt, new Date(currentTime))),
-			)
-
-		/** POST an `application/x-www-form-urlencoded` body and return the raw status + text. */
-		const postForm = (url: string, params: Record<string, string>) =>
-			Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
-				const request = HttpClientRequest.post(url, {
-					headers: { accept: "application/json" },
-				}).pipe(HttpClientRequest.bodyUrlParams(params))
-				const response = yield* client.execute(request)
-				const text = yield* response.text
-				return { status: response.status, text }
-			}).pipe(
-				Effect.mapError((error) =>
-					toUpstreamError(
-						error instanceof Error ? error.message : "Cloudflare OAuth request failed",
-					),
-				),
-				Effect.provide(FetchHttpClient.layer),
-			)
-
-		const parseTokenPayload = (text: string) =>
-			Effect.try({
-				try: () => JSON.parse(text) as unknown,
-				catch: () => toUpstreamError("Cloudflare token endpoint returned a non-JSON response"),
-			}).pipe(
-				Effect.flatMap((json) =>
-					decodeTokenResponse(json).pipe(
-						Effect.mapError(() =>
-							toUpstreamError("Cloudflare token endpoint returned an unexpected payload"),
-						),
-					),
-				),
-			)
-
-		const exchangeAuthorizationCode = (
-			config: ResolvedCloudflareOAuthConfig,
-			code: string,
-			redirectUri: string,
-			codeVerifier: string,
-		) =>
-			Effect.gen(function* () {
-				const { status, text } = yield* postForm(config.tokenUrl, {
-					grant_type: "authorization_code",
-					code,
-					redirect_uri: redirectUri,
-					client_id: config.clientId,
-					code_verifier: codeVerifier,
-					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
-				})
-				if (status < 200 || status >= 300) {
-					return yield* Effect.fail(
-						toUpstreamError(`Token exchange failed: ${text || status}`, status),
-					)
-				}
-				return yield* parseTokenPayload(text)
-			})
-
-		const refreshAccessToken = (config: ResolvedCloudflareOAuthConfig, refreshToken: string) =>
-			Effect.gen(function* () {
-				const { status, text } = yield* postForm(config.tokenUrl, {
-					grant_type: "refresh_token",
-					refresh_token: refreshToken,
-					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
-				})
-				if (status === 400 || status === 401) {
-					return yield* Effect.fail(
-						new IntegrationsRevokedError({
-							message: "Cloudflare connection no longer authorized — reconnect required",
-						}),
-					)
-				}
-				if (status < 200 || status >= 300) {
-					return yield* Effect.fail(
-						toUpstreamError(`Token refresh failed with ${status}`, status),
-					)
-				}
-				return yield* parseTokenPayload(text)
-			})
+		const oauth = yield* makeOAuthConnectionHelpers({
+			provider: CLOUDFLARE_PROVIDER,
+			providerLabel: "Cloudflare",
+			database,
+			env,
+		})
 
 		/** Best-effort token revocation on disconnect — failures are logged, never surfaced. */
 		const revokeToken = (config: ResolvedCloudflareOAuthConfig, token: string) =>
-			postForm(config.revokeUrl, {
-				token,
-				client_id: config.clientId,
-				...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
-			}).pipe(Effect.ignore)
+			oauth
+				.postForm(config.revokeUrl, {
+					token,
+					client_id: config.clientId,
+					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+				})
+				.pipe(Effect.ignore)
 
 		const startConnect = Effect.fn("CloudflareOAuthService.startConnect")(function* (
 			orgId: OrgId,
@@ -288,8 +152,8 @@ export class CloudflareOAuthService extends Context.Service<
 			const codeVerifier = generateCodeVerifier()
 			const currentTime = yield* Clock.currentTimeMillis
 
-			yield* purgeExpiredStates(currentTime)
-			yield* dbExecute((db) =>
+			yield* oauth.purgeExpiredStates(currentTime)
+			yield* oauth.dbExecute((db) =>
 				db.insert(oauthAuthStates).values({
 					state,
 					orgId,
@@ -299,7 +163,7 @@ export class CloudflareOAuthService extends Context.Service<
 					returnTo: options.returnTo ?? null,
 					codeVerifier,
 					createdAt: new Date(currentTime),
-					expiresAt: new Date(currentTime + STATE_TTL_MS),
+					expiresAt: new Date(currentTime + OAUTH_STATE_TTL_MS),
 				}),
 			)
 
@@ -315,37 +179,13 @@ export class CloudflareOAuthService extends Context.Service<
 			return { redirectUrl: `${config.authorizeUrl}?${params.toString()}`, state }
 		})
 
-		const requireStateRow = (state: string) =>
-			Effect.gen(function* () {
-				const rows = yield* dbExecute((db) =>
-					db.select().from(oauthAuthStates).where(eq(oauthAuthStates.state, state)).limit(1),
-				)
-				const row = rows[0]
-				if (!row) {
-					return yield* Effect.fail(
-						new IntegrationsValidationError({
-							message: "OAuth state not recognized — restart the connect flow",
-						}),
-					)
-				}
-				if (row.expiresAt.getTime() < (yield* Clock.currentTimeMillis)) {
-					yield* dbExecute((db) => db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)))
-					return yield* Effect.fail(
-						new IntegrationsValidationError({
-							message: "OAuth state expired — restart the connect flow",
-						}),
-					)
-				}
-				return row satisfies OAuthAuthStateRow
-			})
-
 		const completeConnect = Effect.fn("CloudflareOAuthService.completeConnect")(function* (
 			code: string,
 			state: string,
 		) {
 			const config = yield* resolveConfig(env)
-			const stateRow = yield* requireStateRow(state)
-			yield* dbExecute((db) => db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)))
+			const stateRow = yield* oauth.requireStateRow(state)
+			yield* oauth.deleteAuthState(state)
 
 			if (!stateRow.codeVerifier) {
 				return yield* Effect.fail(
@@ -355,11 +195,11 @@ export class CloudflareOAuthService extends Context.Service<
 				)
 			}
 
-			const tokenResponse = yield* exchangeAuthorizationCode(
+			const tokenResponse = yield* oauth.exchangeAuthorizationCode(
 				config,
 				code,
 				stateRow.redirectUri,
-				stateRow.codeVerifier,
+				{ code_verifier: stateRow.codeVerifier },
 			)
 
 			// Resolve — and require exactly one — Cloudflare account. A token that spans multiple
@@ -389,29 +229,16 @@ export class CloudflareOAuthService extends Context.Service<
 			}
 			const account = accounts[0]!
 
-			const accessEnc = yield* encryptValue(tokenResponse.access_token)
+			const accessEnc = yield* oauth.encryptValue(tokenResponse.access_token)
 			const refreshEnc = tokenResponse.refresh_token
-				? yield* encryptValue(tokenResponse.refresh_token)
+				? yield* oauth.encryptValue(tokenResponse.refresh_token)
 				: null
 			const currentTime = yield* Clock.currentTimeMillis
 			const expiresAt =
 				tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
 			const orgId = stateRow.orgId as OrgId
 
-			const existing = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(oauthConnections)
-					.where(
-						and(
-							eq(oauthConnections.orgId, orgId),
-							eq(oauthConnections.provider, CLOUDFLARE_PROVIDER),
-						),
-					)
-					.limit(1),
-			)
-
-			const values = {
+			yield* oauth.upsertConnection(orgId, currentTime, {
 				externalUserId: account.id,
 				// Cloudflare has no user email in this flow; the account name is a display label.
 				externalUserEmail: null,
@@ -425,172 +252,25 @@ export class CloudflareOAuthService extends Context.Service<
 				refreshTokenIv: refreshEnc?.iv ?? null,
 				refreshTokenTag: refreshEnc?.tag ?? null,
 				expiresAt: msToDate(expiresAt),
-				updatedAt: new Date(currentTime),
-			}
-
-			if (existing[0]) {
-				yield* dbExecute((db) =>
-					db.update(oauthConnections).set(values).where(eq(oauthConnections.id, existing[0]!.id)),
-				)
-			} else {
-				yield* dbExecute((db) =>
-					db.insert(oauthConnections).values({
-						id: randomUUID(),
-						orgId,
-						provider: CLOUDFLARE_PROVIDER,
-						createdAt: new Date(currentTime),
-						...values,
-					}),
-				)
-			}
+			})
 
 			return { orgId, returnTo: stateRow.returnTo ?? null }
 		})
-
-		const loadConnection = (orgId: OrgId) =>
-			dbExecute((db) =>
-				db
-					.select()
-					.from(oauthConnections)
-					.where(
-						and(
-							eq(oauthConnections.orgId, orgId),
-							eq(oauthConnections.provider, CLOUDFLARE_PROVIDER),
-						),
-					)
-					.limit(1),
-			).pipe(Effect.map((rows) => rows[0] ?? null))
-
-		const requireConnection = (orgId: OrgId) =>
-			Effect.gen(function* () {
-				const row = yield* loadConnection(orgId)
-				if (!row) {
-					return yield* Effect.fail(
-						new IntegrationsNotConnectedError({
-							message: "Cloudflare is not connected for this organization",
-						}),
-					)
-				}
-				return row satisfies OAuthConnectionRow
-			})
-
-		const persistRefreshedTokens = (
-			row: OAuthConnectionRow,
-			tokenResponse: typeof TokenResponseSchema.Type,
-		) =>
-			Effect.gen(function* () {
-				const accessEnc = yield* encryptValue(tokenResponse.access_token)
-				const refreshEnc = tokenResponse.refresh_token
-					? yield* encryptValue(tokenResponse.refresh_token)
-					: null
-				const currentTime = yield* Clock.currentTimeMillis
-				const expiresAt =
-					tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
-				yield* dbExecute((db) =>
-					db
-						.update(oauthConnections)
-						.set({
-							accessTokenCiphertext: accessEnc.ciphertext,
-							accessTokenIv: accessEnc.iv,
-							accessTokenTag: accessEnc.tag,
-							refreshTokenCiphertext: refreshEnc?.ciphertext ?? row.refreshTokenCiphertext,
-							refreshTokenIv: refreshEnc?.iv ?? row.refreshTokenIv,
-							refreshTokenTag: refreshEnc?.tag ?? row.refreshTokenTag,
-							expiresAt: msToDate(expiresAt),
-							updatedAt: new Date(currentTime),
-						})
-						.where(eq(oauthConnections.id, row.id)),
-				)
-				return tokenResponse.access_token
-			})
-
-		const rowIsValid = (row: OAuthConnectionRow, currentTime: number) =>
-			row.expiresAt == null || row.expiresAt.getTime() - currentTime > REFRESH_LEEWAY_MS
-
-		const tokenFromRow = (row: OAuthConnectionRow) =>
-			decryptValue({
-				ciphertext: row.accessTokenCiphertext,
-				iv: row.accessTokenIv,
-				tag: row.accessTokenTag,
-			}).pipe(
-				Effect.map(
-					(accessToken) =>
-						({ accessToken, accountId: row.externalUserId }) satisfies CloudflareAccessToken,
-				),
-			)
-
-		// Cloudflare rotates refresh tokens on use, so two concurrent refreshes with the same
-		// stored token make the loser 400 — which would falsely surface as "revoked". Serialize
-		// refreshes within this isolate (refreshes are rare, one permit is fine) and re-check the
-		// row after acquiring: a fiber that waited usually finds the winner's fresh tokens.
-		const refreshSemaphore = Semaphore.makeUnsafe(1)
-
-		const refreshWithSingleFlight = (config: ResolvedCloudflareOAuthConfig, orgId: OrgId) =>
-			refreshSemaphore.withPermits(1)(
-				Effect.gen(function* () {
-					// Double-checked: another local fiber may have refreshed while we waited.
-					const row = yield* requireConnection(orgId)
-					if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
-						return yield* tokenFromRow(row)
-					}
-
-					if (!row.refreshTokenCiphertext || !row.refreshTokenIv || !row.refreshTokenTag) {
-						return yield* Effect.fail(
-							new IntegrationsRevokedError({
-								message:
-									"Cloudflare access token expired and no refresh token is stored — reconnect required",
-							}),
-						)
-					}
-
-					const refreshToken = yield* decryptValue({
-						ciphertext: row.refreshTokenCiphertext,
-						iv: row.refreshTokenIv,
-						tag: row.refreshTokenTag,
-					})
-					return yield* refreshAccessToken(config, refreshToken).pipe(
-						Effect.flatMap((refreshed) =>
-							persistRefreshedTokens(row, refreshed).pipe(
-								Effect.map(
-									(accessToken) =>
-										({
-											accessToken,
-											accountId: row.externalUserId,
-										}) satisfies CloudflareAccessToken,
-								),
-							),
-						),
-						// Cross-isolate race: a concurrent worker isolate may have consumed the rotated
-						// refresh token and persisted new tokens between our read and our refresh. Before
-						// declaring the connection revoked, re-read the row — if a newer, valid token
-						// landed, use it.
-						Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-							Effect.gen(function* () {
-								const latest = yield* requireConnection(orgId)
-								const advanced = latest.updatedAt.getTime() > row.updatedAt.getTime()
-								if (advanced && rowIsValid(latest, yield* Clock.currentTimeMillis)) {
-									return yield* tokenFromRow(latest)
-								}
-								return yield* Effect.fail(error)
-							}),
-						),
-					)
-				}),
-			)
 
 		const getValidAccessToken = Effect.fn("CloudflareOAuthService.getValidAccessToken")(function* (
 			orgId: OrgId,
 		) {
 			const config = yield* resolveConfig(env)
-			const row = yield* requireConnection(orgId)
-			if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
-				return yield* tokenFromRow(row)
-			}
-			return yield* refreshWithSingleFlight(config, orgId)
+			const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId)
+			return {
+				accessToken,
+				accountId: row.externalUserId,
+				scope: row.scope,
+			} satisfies CloudflareAccessToken
 		})
 
 		const getStatus = Effect.fn("CloudflareOAuthService.getStatus")(function* (orgId: OrgId) {
-			const row = yield* loadConnection(orgId)
+			const row = yield* oauth.loadConnection(orgId)
 			if (!row) {
 				return { connected: false } as const
 			}
@@ -606,30 +286,21 @@ export class CloudflareOAuthService extends Context.Service<
 		const disconnect = Effect.fn("CloudflareOAuthService.disconnect")(function* (orgId: OrgId) {
 			// Best-effort upstream token revocation before we drop the row. Never let a revoke
 			// failure block the disconnect — the deleted row is the real backstop.
-			const row = yield* loadConnection(orgId)
+			const row = yield* oauth.loadConnection(orgId)
 			if (row) {
 				const config = yield* resolveConfig(env).pipe(Effect.option)
-				const accessToken = yield* decryptValue({
-					ciphertext: row.accessTokenCiphertext,
-					iv: row.accessTokenIv,
-					tag: row.accessTokenTag,
-				}).pipe(Effect.option)
+				const accessToken = yield* oauth
+					.decryptValue({
+						ciphertext: row.accessTokenCiphertext,
+						iv: row.accessTokenIv,
+						tag: row.accessTokenTag,
+					})
+					.pipe(Effect.option)
 				if (Option.isSome(config) && Option.isSome(accessToken)) {
 					yield* revokeToken(config.value, accessToken.value)
 				}
 			}
-			const result = yield* dbExecute((db) =>
-				db
-					.delete(oauthConnections)
-					.where(
-						and(
-							eq(oauthConnections.orgId, orgId),
-							eq(oauthConnections.provider, CLOUDFLARE_PROVIDER),
-						),
-					)
-					.returning({ id: oauthConnections.id }),
-			)
-			return { disconnected: result.length > 0 }
+			return yield* oauth.deleteConnection(orgId)
 		})
 
 		return {

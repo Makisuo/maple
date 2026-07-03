@@ -13,6 +13,7 @@
  * - ABR sampling: true request count = `count × avg.sampleInterval`; `sum.*` fields are already
  *   sampling-adjusted by Cloudflare, so they pass through untouched.
  */
+import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "../../lib/metric-rows"
 import type {
 	HttpGroupShape,
 	HttpLatencyGroupShape,
@@ -33,46 +34,15 @@ export const METRIC_WORKER_ERRORS = "cloudflare.worker.errors"
 export const METRIC_WORKER_CPU_TIME = "cloudflare.worker.cpu_time"
 export const METRIC_WORKER_DURATION = "cloudflare.worker.duration"
 
-/** One row in the `metrics_gauge` datasource (collector Tinybird exporter shape). */
-export interface MetricGaugeRow {
-	timestamp: string
-	start_timestamp: string
-	metric_name: string
-	metric_description: string
-	metric_unit: string
-	metric_attributes: Attrs
-	service_name: string
-	resource_schema_url: string
-	resource_attributes: Attrs
-	scope_schema_url: string
-	scope_name: string
-	scope_version: string
-	scope_attributes: Attrs
-	value: number
-	flags: number
-	exemplars_trace_id: string[]
-	exemplars_span_id: string[]
-	exemplars_timestamp: string[]
-	exemplars_value: number[]
-	exemplars_filtered_attributes: Attrs[]
-}
-
-/** One row in the `metrics_sum` datasource. */
-export interface MetricSumRow extends MetricGaugeRow {
-	aggregation_temporality: number
-	is_monotonic: boolean
-}
+export type { MetricGaugeRow, MetricSumRow }
 
 export interface CloudflareMetricRows {
 	sumRows: MetricSumRow[]
 	gaugeRows: MetricGaugeRow[]
 }
 
-// ClickHouse DateTime64 wire format: "YYYY-MM-DD HH:MM:SS.mmm" in UTC.
-const fmtTs = (epochMs: number) => new Date(epochMs).toISOString().replace("T", " ").replace("Z", "")
-
 /** GraphQL buckets arrive as RFC 3339 datetimes ("2026-07-03T10:05:00Z"). */
-const bucketToTs = (bucket: string): string => fmtTs(Date.parse(bucket))
+const bucketToTs = (bucket: string): string => fmtMetricTs(Date.parse(bucket))
 
 const DELTA_TEMPORALITY = 1
 
@@ -151,49 +121,20 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 			"http.status_class": statusClass(group.dimensions.edgeResponseStatus),
 		}
 		const sampleInterval = group.avg?.sampleInterval ?? 1
-		const requests = Math.round(group.count * (sampleInterval > 0 ? sampleInterval : 1))
-		if (requests > 0) {
+		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
+			[
+				METRIC_HTTP_REQUESTS,
+				"Edge HTTP requests (ABR-adjusted estimate)",
+				"{requests}",
+				Math.round(group.count * (sampleInterval > 0 ? sampleInterval : 1)),
+			],
+			[METRIC_HTTP_BYTES, "Edge response bytes served", "By", group.sum?.edgeResponseBytes ?? 0],
+			[METRIC_HTTP_VISITS, "Edge visits (initial page loads)", "{visits}", group.sum?.visits ?? 0],
+		]
+		for (const [metricName, description, unit, value] of counters) {
+			if (value <= 0) continue
 			sumRows.push(
-				sumRow({
-					bucket,
-					metricName: METRIC_HTTP_REQUESTS,
-					description: "Edge HTTP requests (ABR-adjusted estimate)",
-					unit: "{requests}",
-					attributes,
-					serviceName,
-					resourceAttributes,
-					value: requests,
-				}),
-			)
-		}
-		const bytes = group.sum?.edgeResponseBytes ?? 0
-		if (bytes > 0) {
-			sumRows.push(
-				sumRow({
-					bucket,
-					metricName: METRIC_HTTP_BYTES,
-					description: "Edge response bytes served",
-					unit: "By",
-					attributes,
-					serviceName,
-					resourceAttributes,
-					value: bytes,
-				}),
-			)
-		}
-		const visits = group.sum?.visits ?? 0
-		if (visits > 0) {
-			sumRows.push(
-				sumRow({
-					bucket,
-					metricName: METRIC_HTTP_VISITS,
-					description: "Edge visits (initial page loads)",
-					unit: "{visits}",
-					attributes,
-					serviceName,
-					resourceAttributes,
-					value: visits,
-				}),
+				sumRow({ bucket, metricName, description, unit, attributes, serviceName, resourceAttributes, value }),
 			)
 		}
 	}
@@ -269,34 +210,14 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 		}
 		const attributes: Attrs = { "worker.status": group.dimensions.status ?? "unknown" }
 
-		const requests = group.sum?.requests ?? 0
-		if (requests > 0) {
+		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
+			[METRIC_WORKER_REQUESTS, "Worker invocations", "{requests}", group.sum?.requests ?? 0],
+			[METRIC_WORKER_ERRORS, "Worker invocation errors", "{errors}", group.sum?.errors ?? 0],
+		]
+		for (const [metricName, description, unit, value] of counters) {
+			if (value <= 0) continue
 			sumRows.push(
-				sumRow({
-					bucket,
-					metricName: METRIC_WORKER_REQUESTS,
-					description: "Worker invocations",
-					unit: "{requests}",
-					attributes,
-					serviceName,
-					resourceAttributes,
-					value: requests,
-				}),
-			)
-		}
-		const errors = group.sum?.errors ?? 0
-		if (errors > 0) {
-			sumRows.push(
-				sumRow({
-					bucket,
-					metricName: METRIC_WORKER_ERRORS,
-					description: "Worker invocation errors",
-					unit: "{errors}",
-					attributes,
-					serviceName,
-					resourceAttributes,
-					value: errors,
-				}),
+				sumRow({ bucket, metricName, description, unit, attributes, serviceName, resourceAttributes, value }),
 			)
 		}
 
@@ -304,10 +225,10 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 		if (!quantiles) continue
 		// cpuTime arrives in microseconds, duration in seconds — normalize both to ms.
 		const gauges: ReadonlyArray<readonly [string, string, string, number | null | undefined]> = [
-			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.5", divide(quantiles.cpuTimeP50, 1000)],
-			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.99", divide(quantiles.cpuTimeP99, 1000)],
-			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.5", multiply(quantiles.durationP50, 1000)],
-			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.99", multiply(quantiles.durationP99, 1000)],
+			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.5", scale(quantiles.cpuTimeP50, 1 / 1000)],
+			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.99", scale(quantiles.cpuTimeP99, 1 / 1000)],
+			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.5", scale(quantiles.durationP50, 1000)],
+			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.99", scale(quantiles.durationP99, 1000)],
 		]
 		for (const [metricName, description, quantile, value] of gauges) {
 			if (value == null) continue
@@ -329,8 +250,5 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 	return { sumRows, gaugeRows }
 }
 
-const divide = (value: number | null | undefined, by: number): number | null =>
-	value == null ? null : value / by
-
-const multiply = (value: number | null | undefined, by: number): number | null =>
-	value == null ? null : value * by
+const scale = (value: number | null | undefined, factor: number): number | null =>
+	value == null ? null : value * factor

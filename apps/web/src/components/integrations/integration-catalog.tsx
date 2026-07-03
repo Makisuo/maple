@@ -104,6 +104,9 @@ interface CardStatus {
 }
 
 const NOT_CONNECTED: CardStatus = { label: "Not connected", variant: "outline" }
+// Status query failed — distinct from "Not connected" so a fetch error doesn't
+// masquerade as a disconnected integration.
+const STATUS_UNAVAILABLE: CardStatus = { label: "Status unavailable", variant: "outline" }
 
 /**
  * Per-integration status derived purely from the list queries the drill-ins
@@ -132,7 +135,8 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 			(status): CardStatus =>
 				status.connected ? { label: "Connected", variant: "success" } : NOT_CONNECTED,
 		)
-		.orElse(() => (Result.isInitial(cloudflareAccountResult) ? null : NOT_CONNECTED))
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	const scrapeStatus = (targetType: "prometheus" | "planetscale"): CardStatus | null =>
 		Result.builder(scrapeResult)
@@ -147,14 +151,16 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 					variant: failing ? "warning" : "success",
 				}
 			})
-			.orElse(() => (Result.isInitial(scrapeResult) ? null : NOT_CONNECTED))
+			.onInitial(() => null)
+			.orElse(() => STATUS_UNAVAILABLE)
 
 	const hazel: CardStatus | null = Result.builder(hazelResult)
 		.onSuccess(
 			(status): CardStatus =>
 				status.connected ? { label: "Connected", variant: "success" } : NOT_CONNECTED,
 		)
-		.orElse(() => (Result.isInitial(hazelResult) ? null : NOT_CONNECTED))
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	const github: CardStatus | null = Result.builder(githubResult)
 		.onSuccess((status): CardStatus => {
@@ -171,7 +177,8 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 				variant: "success",
 			}
 		})
-		.orElse(() => (Result.isInitial(githubResult) ? null : NOT_CONNECTED))
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	return {
 		cloudflare,

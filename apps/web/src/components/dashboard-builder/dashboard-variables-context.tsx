@@ -15,10 +15,10 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import {
-	getLogsFacetsResultAtom,
+	getLogsFacetValuesResultAtom,
 	getResourceAttributeValuesResultAtom,
 	getSpanAttributeValuesResultAtom,
-	getTracesFacetsResultAtom,
+	getTracesFacetValuesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { ALL_VALUE, type VariableValues } from "@/lib/dashboard-variables/interpolate"
 import type { DashboardVariable } from "./types"
@@ -57,6 +57,15 @@ function fromFacetItems(items: ReadonlyArray<FacetItem> | undefined): VariableOp
 	return { options: (items ?? []).map((item) => item.name), loading: false }
 }
 
+// Variable facet id → traces facets dimension (the `facetType` the engine emits).
+const TRACES_FACET_BY_SOURCE = {
+	service: "service",
+	environment: "deploymentEnv",
+	span_name: "spanName",
+	http_method: "httpMethod",
+	http_status_code: "httpStatus",
+} as const
+
 // Reads the options for one variable inside the derived options atom. Query
 // variables subscribe to the underlying facet / attribute-value family atoms
 // (deduped by their encoded input key), so several variables sharing a source
@@ -92,31 +101,24 @@ function readVariableOptions(
 		}
 	}
 
+	// Facet variables fetch only their one dimension (the facets query compiles
+	// a single UNION branch server-side) — never the full multi-facet scan the
+	// traces/logs sidebars run.
 	if (source.facet === "log_severity") {
-		const result = get(getLogsFacetsResultAtom({ data: window }))
+		const result = get(getLogsFacetValuesResultAtom({ data: { ...window, facet: "severity" } }))
 		if (!Result.isSuccess(result)) {
 			return Result.isFailure(result) ? NO_OPTIONS : LOADING_OPTIONS
 		}
-		return fromFacetItems(result.value.data.severities)
+		return fromFacetItems(result.value.data)
 	}
 
-	const result = get(getTracesFacetsResultAtom({ data: window }))
+	const result = get(
+		getTracesFacetValuesResultAtom({ data: { ...window, facet: TRACES_FACET_BY_SOURCE[source.facet] } }),
+	)
 	if (!Result.isSuccess(result)) {
 		return Result.isFailure(result) ? NO_OPTIONS : LOADING_OPTIONS
 	}
-	const facets = result.value.data
-	switch (source.facet) {
-		case "service":
-			return fromFacetItems(facets.services)
-		case "environment":
-			return fromFacetItems(facets.deploymentEnvs)
-		case "span_name":
-			return fromFacetItems(facets.spanNames)
-		case "http_method":
-			return fromFacetItems(facets.httpMethods)
-		case "http_status_code":
-			return fromFacetItems(facets.httpStatusCodes)
-	}
+	return fromFacetItems(result.value.data)
 }
 
 // URL value → declared default → All (when enabled) → first loaded option.

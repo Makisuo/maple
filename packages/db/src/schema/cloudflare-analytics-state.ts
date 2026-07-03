@@ -26,6 +26,9 @@ export const cloudflareAnalyticsState = pgTable(
 		// False when the tenant's plan lacks the timing quantile fields (free plan) — the poller
 		// then omits the quantiles selection and only counters are emitted.
 		quantilesAvailable: boolean("quantiles_available").notNull().default(true),
+		// When zone discovery (REST listZones) last ran — set on the workers anchor row only.
+		// Discovery runs on an hourly TTL; poll ticks in between reuse the known zone rows.
+		discoveredAt: timestamp("discovered_at", { withTimezone: true, mode: "date" }),
 		lastSuccessAt: timestamp("last_success_at", { withTimezone: true, mode: "date" }),
 		lastError: text("last_error"),
 		lastErrorAt: timestamp("last_error_at", { withTimezone: true, mode: "date" }),

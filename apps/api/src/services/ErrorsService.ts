@@ -389,12 +389,18 @@ const make: Effect.Effect<
 				while: isBusyDatabaseError,
 			}),
 			Effect.tapError((error) =>
-				Effect.logError("ErrorsService dbExecute failed").pipe(
-					Effect.annotateLogs({
-						message: error.message,
-						cause: describeCause(error.cause) ?? "(none)",
-					}),
-				),
+				Effect.gen(function* () {
+					// Every service method runs inside an Effect.fn span — its name says
+					// which operation's query failed without threading a label through.
+					const span = yield* Effect.currentSpan.pipe(Effect.catch(() => Effect.succeed(null)))
+					yield* Effect.logError("ErrorsService dbExecute failed").pipe(
+						Effect.annotateLogs({
+							operation: span?.name ?? "(unknown)",
+							message: error.message,
+							cause: describeCause(error.cause) ?? "(none)",
+						}),
+					)
+				}),
 			),
 			Effect.mapError(makePersistenceError),
 		)

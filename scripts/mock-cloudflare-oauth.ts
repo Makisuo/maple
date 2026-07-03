@@ -94,8 +94,174 @@ Bun.serve({
 			})
 		}
 
+		// --- Cloudflare API: list zones (paginated; page 2+ is empty) ---
+		if (url.pathname === "/zones") {
+			const page = Number(url.searchParams.get("page") ?? "1")
+			const zones = page === 1 ? MOCK_ZONES : []
+			return json({
+				success: true,
+				errors: [],
+				messages: [],
+				result: zones,
+				result_info: { count: zones.length, page, per_page: 50, total_count: MOCK_ZONES.length },
+			})
+		}
+
+		// --- GraphQL Analytics: settings + httpRequestsAdaptiveGroups + workersInvocationsAdaptive ---
+		if (url.pathname === "/graphql" && req.method === "POST") {
+			const body = (await req.json()) as { query?: string; variables?: Record<string, unknown> }
+			const query = body.query ?? ""
+			if (query.includes("MapleCfDatasetSettings")) return json({ data: settingsData() })
+			if (query.includes("MapleCfHttpAnalytics")) {
+				return json({ data: httpAnalyticsData(body.variables) })
+			}
+			if (query.includes("MapleCfWorkersAnalytics")) {
+				return json({ data: workersAnalyticsData(body.variables) })
+			}
+			return json({ data: null, errors: [{ message: `unknown operation: ${query.slice(0, 60)}` }] })
+		}
+
 		return json({ success: false, errors: [{ code: 7003, message: "not found" }], result: null }, 404)
 	},
 })
+
+// ---------------------------------------------------------------------------
+// Analytics fixtures — deterministic-ish synthetic edge traffic so the poller
+// produces plausible cloudflare.* metrics locally.
+// ---------------------------------------------------------------------------
+
+const zoneFixture = (id: string, name: string) => ({
+	id,
+	name,
+	status: "active",
+	account: { id: "mock-account-1", name: "Maple Mock Account" },
+	activated_on: "2025-01-01T00:00:00Z",
+	created_on: "2025-01-01T00:00:00Z",
+	development_mode: 0,
+	meta: {},
+	modified_on: "2025-01-01T00:00:00Z",
+	name_servers: ["ns1.mock.example"],
+	original_dnshost: null,
+	original_name_servers: null,
+	original_registrar: null,
+	owner: { id: null, name: null, type: null },
+	plan: { id: "pro", name: "Pro" },
+	paused: false,
+	type: "full",
+})
+
+const MOCK_ZONES = [zoneFixture("mock-zone-1", "example.com"), zoneFixture("mock-zone-2", "assets.example.com")]
+
+const datasetSettings = () => ({
+	enabled: true,
+	notOlderThan: 2419200, // 28 days
+	maxDuration: 2678400,
+	availableFields: ["count", "edgeTimeToFirstByteMsP50", "cpuTimeP50"],
+})
+
+const settingsData = () => ({
+	viewer: {
+		zones: MOCK_ZONES.map((zone) => ({
+			zoneTag: zone.id,
+			settings: { httpRequestsAdaptiveGroups: datasetSettings() },
+		})),
+		accounts: [{ settings: { workersInvocationsAdaptive: datasetSettings() } }],
+	},
+})
+
+/** 5-minute bucket starts (ISO) covering [start, end) from the GraphQL variables. */
+const bucketsInWindow = (variables: Record<string, unknown> | undefined): string[] => {
+	const start = Date.parse(String(variables?.start ?? "")) || Date.now() - 30 * 60_000
+	const end = Date.parse(String(variables?.end ?? "")) || Date.now()
+	const out: string[] = []
+	for (let t = Math.ceil(start / 300_000) * 300_000; t < end; t += 300_000) {
+		out.push(new Date(t).toISOString().replace(".000Z", "Z"))
+	}
+	return out.slice(0, 288)
+}
+
+const jitter = (bucket: string, salt: number, max: number) => {
+	// Deterministic per (bucket, salt) so repeated polls of a window return identical data.
+	const h = createHash("sha256").update(`${bucket}:${salt}`).digest()
+	return (h[0]! * 256 + h[1]!) % max
+}
+
+const httpAnalyticsData = (variables: Record<string, unknown> | undefined) => {
+	const zoneTags = Array.isArray(variables?.zoneTags) ? (variables?.zoneTags as string[]) : []
+	const buckets = bucketsInWindow(variables)
+	return {
+		viewer: {
+			zones: zoneTags.map((zoneTag, zi) => ({
+				zoneTag,
+				groups: buckets.flatMap((bucket) => [
+					{
+						count: 40 + jitter(bucket, zi, 30),
+						avg: { sampleInterval: 10 },
+						sum: { edgeResponseBytes: 800_000 + jitter(bucket, zi + 10, 400_000), visits: 25 + jitter(bucket, zi + 20, 20) },
+						dimensions: { datetimeFiveMinutes: bucket, cacheStatus: "hit", edgeResponseStatus: 200 },
+					},
+					{
+						count: 12 + jitter(bucket, zi + 30, 10),
+						avg: { sampleInterval: 10 },
+						sum: { edgeResponseBytes: 300_000 + jitter(bucket, zi + 40, 150_000), visits: 8 + jitter(bucket, zi + 50, 6) },
+						dimensions: { datetimeFiveMinutes: bucket, cacheStatus: "miss", edgeResponseStatus: 200 },
+					},
+					{
+						count: 1 + jitter(bucket, zi + 60, 3),
+						avg: { sampleInterval: 10 },
+						sum: { edgeResponseBytes: 20_000, visits: 1 },
+						dimensions: { datetimeFiveMinutes: bucket, cacheStatus: "dynamic", edgeResponseStatus: 503 },
+					},
+				]),
+				latency: buckets.map((bucket) => ({
+					count: 50,
+					quantiles: {
+						edgeTimeToFirstByteMsP50: 35 + jitter(bucket, zi + 70, 20),
+						edgeTimeToFirstByteMsP95: 140 + jitter(bucket, zi + 80, 80),
+						edgeTimeToFirstByteMsP99: 380 + jitter(bucket, zi + 90, 200),
+						originResponseDurationMsP50: 18 + jitter(bucket, zi + 100, 12),
+						originResponseDurationMsP95: 95 + jitter(bucket, zi + 110, 60),
+						originResponseDurationMsP99: 260 + jitter(bucket, zi + 120, 150),
+					},
+					dimensions: { datetimeFiveMinutes: bucket },
+				})),
+			})),
+		},
+	}
+}
+
+const workersAnalyticsData = (variables: Record<string, unknown> | undefined) => {
+	const buckets = bucketsInWindow(variables)
+	return {
+		viewer: {
+			accounts: [
+				{
+					invocations: buckets.flatMap((bucket) => [
+						{
+							sum: { requests: 120 + jitter(bucket, 200, 60), errors: jitter(bucket, 210, 4), subrequests: 40 },
+							quantiles: {
+								cpuTimeP50: 1200 + jitter(bucket, 220, 800),
+								cpuTimeP99: 8000 + jitter(bucket, 230, 4000),
+								durationP50: 0.004,
+								durationP99: 0.06,
+							},
+							dimensions: { datetimeFiveMinutes: bucket, scriptName: "mock-api-worker", status: "success" },
+						},
+						{
+							sum: { requests: jitter(bucket, 240, 5), errors: jitter(bucket, 240, 5), subrequests: 0 },
+							quantiles: {
+								cpuTimeP50: 900,
+								cpuTimeP99: 5000,
+								durationP50: 0.003,
+								durationP99: 0.04,
+							},
+							dimensions: { datetimeFiveMinutes: bucket, scriptName: "mock-api-worker", status: "scriptThrewException" },
+						},
+					]),
+				},
+			],
+		},
+	}
+}
 
 console.log("[mock-cf] listening on http://127.0.0.1:9781")

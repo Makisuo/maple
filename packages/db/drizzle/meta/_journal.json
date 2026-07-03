@@ -43,6 +43,13 @@
       "when": 1783033130016,
       "tag": "0005_natural_marvel_apes",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783068761648,
+      "tag": "0006_slippery_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

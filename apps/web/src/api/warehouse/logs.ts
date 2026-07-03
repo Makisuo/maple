@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest } from "@maple/query-engine"
+import { LogsFacetDimension, QueryEngineExecuteRequest } from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
@@ -295,6 +295,47 @@ const getLogsFacetsEffect = Effect.fn("QueryEngine.getLogsFacets")(function* ({
 
 	return {
 		data: { services, severities, deploymentEnvs, namespaces },
+	}
+})
+
+// Single facet list for dashboard variables: compiles only the requested UNION
+// branch server-side instead of the full four-facet scan `getLogsFacets` runs
+// for the logs sidebar.
+const GetLogsFacetValuesInputSchema = Schema.Struct({
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+	facet: LogsFacetDimension,
+})
+
+export type GetLogsFacetValuesInput = (typeof GetLogsFacetValuesInputSchema)["Encoded"]
+
+export function getLogsFacetValues({ data }: { data: GetLogsFacetValuesInput }) {
+	return getLogsFacetValuesEffect({ data })
+}
+
+const getLogsFacetValuesEffect = Effect.fn("QueryEngine.getLogsFacetValues")(function* ({
+	data,
+}: {
+	data: GetLogsFacetValuesInput
+}) {
+	const input = yield* decodeInput(GetLogsFacetValuesInputSchema, data ?? {}, "getLogsFacetValues")
+
+	yield* Effect.annotateCurrentSpan("facet", input.facet)
+
+	const fallback = defaultLogsTimeRange(yield* Clock.currentTimeMillis)
+	const response = yield* executeQueryEngine(
+		"queryEngine.getLogsFacetValues",
+		new QueryEngineExecuteRequest({
+			startTime: input.startTime ?? fallback.startTime,
+			endTime: input.endTime ?? fallback.endTime,
+			query: { kind: "facets" as const, source: "logs" as const, facet: input.facet },
+		}),
+	)
+
+	return {
+		data: extractFacets(response)
+			.filter((row) => row.facetType === input.facet && row.name)
+			.map((row): FacetItem => ({ name: row.name, count: Number(row.count) })),
 	}
 })
 

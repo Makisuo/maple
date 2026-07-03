@@ -20,10 +20,12 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@maple/ui/components/ui/select"
+import { Schema } from "effect"
+import { DashboardVariableName } from "@maple/domain/http"
 import { ArrowDownIcon, ArrowUpIcon, PencilIcon, PlusIcon, TrashIcon } from "@/components/icons"
 import type { DashboardVariable } from "@/components/dashboard-builder/types"
 
-const NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*$/
+const isValidVariableName = Schema.is(DashboardVariableName)
 
 type QueryVariable = Extract<DashboardVariable, { type: "query" }>
 type QueryFacet = Extract<QueryVariable["source"], { kind: "facet" }>["facet"]
@@ -41,6 +43,12 @@ const TYPE_LABELS: Record<DashboardVariable["type"], string> = {
 	query: "Query",
 	custom: "Custom",
 	textbox: "Textbox",
+}
+
+const TYPE_OPTIONS: Record<DashboardVariable["type"], string> = {
+	query: "Query (from telemetry)",
+	custom: "Custom (static list)",
+	textbox: "Textbox (free text)",
 }
 
 function sourceSummary(variable: DashboardVariable): string {
@@ -87,7 +95,7 @@ function draftError(
 	if (draft.name === "") {
 		return "Name is required."
 	}
-	if (!NAME_PATTERN.test(draft.name)) {
+	if (!isValidVariableName(draft.name)) {
 		return "Names start with a letter, then letters, digits, or underscores."
 	}
 	if (drafts.some((other, i) => i !== index && other.name === draft.name)) {
@@ -352,11 +360,7 @@ function VariableForm({
 				<div className="flex flex-col gap-1.5">
 					<Label className="text-xs">Type</Label>
 					<Select
-						items={{
-							query: "Query (from telemetry)",
-							custom: "Custom (static list)",
-							textbox: "Textbox (free text)",
-						}}
+						items={TYPE_OPTIONS}
 						value={variable.type}
 						onValueChange={(type) => {
 							if (type === "query" || type === "custom" || type === "textbox") {
@@ -368,9 +372,11 @@ function VariableForm({
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="query">Query (from telemetry)</SelectItem>
-							<SelectItem value="custom">Custom (static list)</SelectItem>
-							<SelectItem value="textbox">Textbox (free text)</SelectItem>
+							{Object.entries(TYPE_OPTIONS).map(([value, label]) => (
+								<SelectItem key={value} value={value}>
+									{label}
+								</SelectItem>
+							))}
 						</SelectContent>
 					</Select>
 				</div>

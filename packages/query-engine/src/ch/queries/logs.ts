@@ -589,7 +589,12 @@ export interface LogsFacetsOutput {
 	readonly facetType: string
 }
 
-export function logsFacetsQuery(opts: LogsQueryOpts): CHUnionQuery<LogsFacetsOutput> {
+export type LogsFacetDimension = "severity" | "service" | "deploymentEnv" | "namespace"
+
+export function logsFacetsQuery(
+	opts: LogsQueryOpts,
+	facet?: LogsFacetDimension,
+): CHUnionQuery<LogsFacetsOutput> {
 	// Facets only filter on dimensions the hourly MV carries (service, severity,
 	// deployment env), so route to `logs_aggregates_hourly` and collapse three
 	// full raw-`logs` scans into three cheap pre-aggregated reads. The lone
@@ -597,12 +602,15 @@ export function logsFacetsQuery(opts: LogsQueryOpts): CHUnionQuery<LogsFacetsOut
 	// the raw map column — fall back to raw `logs` there (mirrors the
 	// `canUseLogsAggregatesHourly` guard used by the timeseries query).
 	if (opts.matchModes?.deploymentEnv === "contains" || opts.matchModes?.serviceNamespace === "contains") {
-		return logsFacetsQueryFromRaw(opts)
+		return logsFacetsQueryFromRaw(opts, facet)
 	}
-	return logsFacetsQueryFromMv(opts)
+	return logsFacetsQueryFromMv(opts, facet)
 }
 
-function logsFacetsQueryFromMv(opts: LogsQueryOpts): CHUnionQuery<LogsFacetsOutput> {
+function logsFacetsQueryFromMv(
+	opts: LogsQueryOpts,
+	facet?: LogsFacetDimension,
+): CHUnionQuery<LogsFacetsOutput> {
 	const baseWhere = (
 		$: ColumnAccessor<typeof LogsAggregatesHourly.columns>,
 	): Array<CH.Condition | undefined> => [
@@ -663,13 +671,23 @@ function logsFacetsQueryFromMv(opts: LogsQueryOpts): CHUnionQuery<LogsFacetsOutp
 		.where(($) => [...baseWhere($), $.ServiceNamespace.neq("")])
 		.groupBy("namespace")
 
-	return unionAll(severityQuery, serviceQuery, envQuery, namespaceQuery)
+	const byFacet = {
+		severity: severityQuery,
+		service: serviceQuery,
+		deploymentEnv: envQuery,
+		namespace: namespaceQuery,
+	}
+	const branches = facet ? [byFacet[facet]] : [severityQuery, serviceQuery, envQuery, namespaceQuery]
+	return unionAll(...branches)
 		.orderBy(["count", "desc"])
 		.limit(500)
 		.format("JSON")
 }
 
-function logsFacetsQueryFromRaw(opts: LogsQueryOpts): CHUnionQuery<LogsFacetsOutput> {
+function logsFacetsQueryFromRaw(
+	opts: LogsQueryOpts,
+	facet?: LogsFacetDimension,
+): CHUnionQuery<LogsFacetsOutput> {
 	const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
 		$.TimestampTime.gte(param.dateTime("startTime")),
@@ -730,7 +748,14 @@ function logsFacetsQueryFromRaw(opts: LogsQueryOpts): CHUnionQuery<LogsFacetsOut
 		.where(($) => [...baseWhere($), $.ResourceAttributes.get("service.namespace").neq("")])
 		.groupBy("namespace")
 
-	return unionAll(severityQuery, serviceQuery, envQuery, namespaceQuery)
+	const byFacet = {
+		severity: severityQuery,
+		service: serviceQuery,
+		deploymentEnv: envQuery,
+		namespace: namespaceQuery,
+	}
+	const branches = facet ? [byFacet[facet]] : [severityQuery, serviceQuery, envQuery, namespaceQuery]
+	return unionAll(...branches)
 		.orderBy(["count", "desc"])
 		.limit(500)
 		.format("JSON")

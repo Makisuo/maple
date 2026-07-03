@@ -466,6 +466,27 @@ describe("logsFacetsQuery", () => {
 		expect(sql).not.toContain("logs_aggregates_hourly")
 		expect(sql).toContain("positionCaseInsensitive(ResourceAttributes['deployment.environment'], 'prod')")
 	})
+
+	it("compiles only the requested branch when facet is set", () => {
+		const q = logsFacetsQuery({}, "severity")
+		const { sql } = compileUnion(q, baseParams)
+		expect(sql).not.toContain("UNION ALL")
+		expect(sql).toContain("FROM logs_aggregates_hourly")
+		expect(sql).toContain("'severity' AS facetType")
+		expect(sql).not.toContain("'service' AS facetType")
+		// Same outer shape as the full union: count-desc, limit 500.
+		expect(sql).toContain("ORDER BY count DESC")
+		expect(sql).toContain("LIMIT 500")
+	})
+
+	it("facet scoping follows the raw-`logs` fallback path", () => {
+		const q = logsFacetsQuery({ environments: ["prod"], matchModes: { deploymentEnv: "contains" } }, "severity")
+		const { sql } = compileUnion(q, baseParams)
+		expect(sql).not.toContain("UNION ALL")
+		expect(sql).toContain("FROM logs")
+		expect(sql).toContain("'severity' AS facetType")
+		expect(sql).not.toContain("'namespace' AS facetType")
+	})
 })
 
 // ---------------------------------------------------------------------------

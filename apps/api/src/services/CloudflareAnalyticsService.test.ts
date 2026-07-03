@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto"
+import { Retry } from "@distilled.cloud/cloudflare"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { OrgId } from "@maple/domain/http"
 import { cloudflareAnalyticsState, oauthConnections } from "@maple/db"
-import { ConfigProvider, Effect, Layer, Redacted, Schema } from "effect"
+import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
@@ -154,14 +155,24 @@ interface FetchOptions {
 	readonly graphqlErrors?: ReadonlyArray<{ message: string }>
 }
 
+/** Read the outbound request body regardless of how the HttpClient encodes it (string/bytes/stream). */
+const readRequestBody = async (
+	input: Parameters<typeof globalThis.fetch>[0],
+	init?: RequestInit,
+): Promise<string> => {
+	if (init?.body != null) {
+		if (typeof init.body === "string") return init.body
+		return await new Response(init.body as BodyInit).text()
+	}
+	return input instanceof Request ? await input.text() : "{}"
+}
+
 const mockCloudflareFetch =
 	(options: FetchOptions = {}): typeof globalThis.fetch =>
 	async (input, init) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
 		if (url.includes("/graphql")) {
-			const body = JSON.parse(String(init?.body ?? (input instanceof Request ? await input.text() : "{}"))) as {
-				query: string
-			}
+			const body = JSON.parse(await readRequestBody(input, init)) as { query: string }
 			if (options.graphqlErrors) {
 				return jsonResponse({ data: null, errors: options.graphqlErrors })
 			}
@@ -212,6 +223,9 @@ const makeLayer = (testDb: TestDb, captured: CapturedIngest[], fetchOptions: Fet
 		Layer.provideMerge(Env.layer),
 		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(baseConfig))),
 		Layer.provideMerge(Layer.succeed(FetchHttpClient.Fetch, mockCloudflareFetch(fetchOptions))),
+		// Disable the distilled retry policy: its backoff sleeps never resolve under the
+		// TestClock, so a retryable failure would hang the suite instead of failing the test.
+		Layer.provideMerge(Layer.succeed(Retry.Retry, { while: () => false })),
 	)
 
 /** Insert a connected Cloudflare org with a non-expiring encrypted access token. */

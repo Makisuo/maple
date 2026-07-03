@@ -187,6 +187,15 @@ describe("parseWhereClause", () => {
 		expect(result.clauses).toHaveLength(2)
 	})
 
+	it("does not split on AND inside quoted values", () => {
+		const result = parseWhereClause('span.name = "buy and sell" AND service.name = \'ship AND handle\'')
+		expect(result.clauses).toEqual([
+			{ key: "span.name", operator: "=", value: "buy and sell" },
+			{ key: "service.name", operator: "=", value: "ship AND handle" },
+		])
+		expect(result.warnings).toHaveLength(0)
+	})
+
 	it("produces warning for unparseable clauses", () => {
 		const result = parseWhereClause("not a valid clause")
 		expect(result.clauses).toEqual([])

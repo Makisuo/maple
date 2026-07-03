@@ -1,10 +1,7 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
-	CloudflareAnalyticsWorkersStatus,
-	CloudflareAnalyticsZoneStatus,
 	CloudflareDisconnectResponse,
-	CloudflareIntegrationStatus,
 	CloudflareStartConnectResponse,
 	CurrentTenant,
 	ExternalUserId,
@@ -26,7 +23,7 @@ import {
 } from "@maple/domain/http"
 import { Effect, Option, Schema } from "effect"
 import { Env } from "../lib/Env"
-import { CloudflareAnalyticsService, hasAnalyticsScopes } from "../services/CloudflareAnalyticsService"
+import { CloudflareAnalyticsService } from "../services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
 import { GithubConnectService } from "../services/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "../services/vcs/VcsCommitService"
@@ -158,32 +155,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 				.handle("cloudflareStatus", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const status = yield* cloudflare.getStatus(tenant.orgId)
-						if (!status.connected) {
-							return new CloudflareIntegrationStatus({
-								connected: false,
-								accountId: null,
-								accountName: null,
-								connectedByUserId: null,
-								scope: null,
-								analyticsCapable: false,
-								zones: [],
-								workers: null,
-							})
-						}
-						const analytics = yield* cloudflareAnalytics.getStatus(tenant.orgId)
-						return new CloudflareIntegrationStatus({
-							connected: true,
-							accountId: status.accountId,
-							accountName: status.accountName,
-							connectedByUserId: asUserId(status.connectedByUserId),
-							scope: status.scope,
-							analyticsCapable: hasAnalyticsScopes(status.scope),
-							zones: analytics.zones.map((zone) => new CloudflareAnalyticsZoneStatus(zone)),
-							workers: analytics.workers
-								? new CloudflareAnalyticsWorkersStatus(analytics.workers)
-								: null,
-						})
+						return yield* cloudflareAnalytics.getIntegrationStatus(tenant.orgId)
 					}),
 				)
 				.handle("cloudflareStart", ({ payload }) =>
@@ -664,6 +636,9 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 
 		yield* router.add("GET", "/api/integrations/github/callback", handleGithub)
 
+		const cloudflareErrorPage = (message: string) =>
+			htmlResponse(cloudflareCallbackPage({ status: "error", message, returnTo: null }), 400)
+
 		const handleCloudflare = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {
 				const url = new URL(req.url, "http://localhost")
@@ -673,25 +648,11 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
 
 				if (oauthError) {
-					return htmlResponse(
-						cloudflareCallbackPage({
-							status: "error",
-							message: oauthErrorDescription || "Cloudflare returned an error",
-							returnTo: null,
-						}),
-						400,
-					)
+					return cloudflareErrorPage(oauthErrorDescription || "Cloudflare returned an error")
 				}
 
 				if (!code || !state) {
-					return htmlResponse(
-						cloudflareCallbackPage({
-							status: "error",
-							message: "Missing code or state in callback",
-							returnTo: null,
-						}),
-						400,
-					)
+					return cloudflareErrorPage("Missing code or state in callback")
 				}
 
 				return yield* cloudflare.completeConnect(code, state).pipe(
@@ -712,54 +673,20 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							}),
 						),
 					),
-					Effect.catchTag("@maple/http/errors/IntegrationsValidationError", (error) =>
-						Effect.succeed(
-							htmlResponse(
-								cloudflareCallbackPage({
-									status: "error",
-									message: error.message,
-									returnTo: null,
-								}),
-								400,
-							),
-						),
-					),
 					Effect.catchTags({
+						// Validation/upstream messages are our own sanitized strings (they embed
+						// Cloudflare's OAuth error text) — showing them turns "it failed" into
+						// something actionable.
+						"@maple/http/errors/IntegrationsValidationError": (error) =>
+							Effect.succeed(cloudflareErrorPage(error.message)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.succeed(cloudflareErrorPage(error.message)),
 						"@maple/http/errors/IntegrationsRevokedError": () =>
 							Effect.succeed(
-								htmlResponse(
-									cloudflareCallbackPage({
-										status: "error",
-										message: "Cloudflare rejected the authorization — reconnect and try again",
-										returnTo: null,
-									}),
-									400,
-								),
-							),
-						// Upstream messages are our own sanitized strings (they embed Cloudflare's
-						// OAuth error text) — showing them turns "it failed" into something actionable.
-						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-							Effect.succeed(
-								htmlResponse(
-									cloudflareCallbackPage({
-										status: "error",
-										message: error.message,
-										returnTo: null,
-									}),
-									400,
-								),
+								cloudflareErrorPage("Cloudflare rejected the authorization — reconnect and try again"),
 							),
 						"@maple/http/errors/IntegrationsPersistenceError": () =>
-							Effect.succeed(
-								htmlResponse(
-									cloudflareCallbackPage({
-										status: "error",
-										message: "Failed to complete Cloudflare connection",
-										returnTo: null,
-									}),
-									400,
-								),
-							),
+							Effect.succeed(cloudflareErrorPage("Failed to complete Cloudflare connection")),
 					}),
 				)
 			})

@@ -118,9 +118,32 @@ export function CloudflareAccountCard() {
 
 	const isConnected = status?.connected === true
 
+	const connectButton = (label: string, variant?: "outline") => (
+		<Button size="sm" onClick={handleConnect} disabled={busy !== null} variant={variant}>
+			{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+			{label}
+		</Button>
+	)
+
 	// Guard the first fetch so a connected org doesn't flash the "Connect" empty state.
 	if (Result.isInitial(statusResult)) {
 		return <Skeleton className="h-40 w-full rounded-lg" />
+	}
+
+	// A failed status fetch is not "not connected" — don't offer the connect CTA
+	// over an account that may already be authorized.
+	if (Result.isFailure(statusResult)) {
+		return (
+			<div className="flex items-start gap-4 rounded-lg border border-border/60 bg-card p-4">
+				<IntegrationIconPlate icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT} />
+				<div className="flex flex-col gap-1">
+					<h3 className="text-sm font-semibold">Cloudflare account</h3>
+					<p className="text-xs text-muted-foreground">
+						Couldn't load the Cloudflare connection status — refresh the page to try again.
+					</p>
+				</div>
+			</div>
+		)
 	}
 
 	if (!isConnected) {
@@ -161,67 +184,60 @@ export function CloudflareAccountCard() {
 				</div>
 
 				{status ? (
-					<div className="flex flex-col gap-1 rounded-md bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
-						<div>
-							Account:{" "}
-							<span className="text-foreground">
-								{status.accountName ?? status.accountId}
-							</span>
-							{status.accountName && status.accountId ? (
-								<span className="ml-1 font-mono text-[10px]">({status.accountId})</span>
-							) : null}
+					<>
+						<div className="flex flex-col gap-1 rounded-md bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
+							<div>
+								Account:{" "}
+								<span className="text-foreground">
+									{status.accountName ?? status.accountId}
+								</span>
+								{status.accountName && status.accountId ? (
+									<span className="ml-1 font-mono text-[10px]">({status.accountId})</span>
+								) : null}
+							</div>
+							{status.scope ? <div>Scopes: {status.scope}</div> : null}
 						</div>
-						{status.scope ? <div>Scopes: {status.scope}</div> : null}
-					</div>
-				) : null}
 
-				{status && !status.analyticsCapable ? (
-					<div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px]">
-						<span className="text-amber-600 dark:text-amber-400">
-							Edge analytics needs additional permissions — update the connection to start
-							collecting cache hit rate, status codes, and latency.
-						</span>
-						<Button size="sm" onClick={handleConnect} disabled={busy !== null}>
-							{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
-							Update permissions
-						</Button>
-					</div>
-				) : null}
-
-				{status && status.analyticsCapable && (status.zones.length > 0 || status.workers) ? (
-					<div className="flex flex-col gap-1.5 rounded-md bg-muted/40 px-3 py-2 text-[11px]">
-						<div className="font-medium text-muted-foreground">Edge analytics</div>
-						{status.zones.map((zone) => (
-							<CollectionStatusRow
-								key={zone.id}
-								name={zone.name}
-								enabled={zone.enabled}
-								lastSyncedAt={zone.lastSyncedAt}
-								lastError={zone.lastError}
-							/>
-						))}
-						{status.workers ? (
-							<CollectionStatusRow
-								name="Workers invocations"
-								enabled={status.workers.enabled}
-								lastSyncedAt={status.workers.lastSyncedAt}
-								lastError={status.workers.lastError}
-							/>
-						) : null}
-					</div>
-				) : null}
-				{status && status.analyticsCapable && status.zones.length === 0 && !status.workers ? (
-					<p className="text-[11px] text-muted-foreground">
-						Edge analytics collection starts within a few minutes — zones appear here once the
-						first sync runs.
-					</p>
+						{!status.analyticsCapable ? (
+							<div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px]">
+								<span className="text-amber-600 dark:text-amber-400">
+									Edge analytics needs additional permissions — update the connection to start
+									collecting cache hit rate, status codes, and latency.
+								</span>
+								{connectButton("Update permissions")}
+							</div>
+						) : status.zones.length > 0 || status.workers ? (
+							<div className="flex flex-col gap-1.5 rounded-md bg-muted/40 px-3 py-2 text-[11px]">
+								<div className="font-medium text-muted-foreground">Edge analytics</div>
+								{status.zones.map((zone) => (
+									<CollectionStatusRow
+										key={zone.id}
+										name={zone.name}
+										enabled={zone.enabled}
+										lastSyncedAt={zone.lastSyncedAt}
+										lastError={zone.lastError}
+									/>
+								))}
+								{status.workers ? (
+									<CollectionStatusRow
+										name="Workers invocations"
+										enabled={status.workers.enabled}
+										lastSyncedAt={status.workers.lastSyncedAt}
+										lastError={status.workers.lastError}
+									/>
+								) : null}
+							</div>
+						) : (
+							<p className="text-[11px] text-muted-foreground">
+								Edge analytics collection starts within a few minutes — zones appear here once
+								the first sync runs.
+							</p>
+						)}
+					</>
 				) : null}
 
 				<div className="flex flex-wrap gap-2">
-					<Button size="sm" onClick={handleConnect} disabled={busy !== null} variant="outline">
-						{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
-						Reconnect
-					</Button>
+					{connectButton("Reconnect", "outline")}
 					<Button size="sm" onClick={handleDisconnect} disabled={busy !== null} variant="outline">
 						{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Disconnect

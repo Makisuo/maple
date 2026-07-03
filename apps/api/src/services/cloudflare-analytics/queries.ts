@@ -10,16 +10,18 @@ import { Schema } from "effect"
 
 export const HTTP_DATASET = "http_requests"
 export const WORKERS_DATASET = "workers_invocations"
-export type CloudflareAnalyticsDataset = typeof HTTP_DATASET | typeof WORKERS_DATASET
 
 /** Cloudflare caps zone-scoped GraphQL queries at 10 zones per call. */
 export const MAX_ZONES_PER_QUERY = 10
 
 /** Max rows Cloudflare returns per selection — window sizing must keep group counts below this. */
-export const GROUP_LIMIT = 5000
+const GROUP_LIMIT = 5000
 
-const nullableNumber = Schema.optional(Schema.Union([Schema.Number, Schema.Null]))
-const nullableString = Schema.optional(Schema.Union([Schema.String, Schema.Null]))
+/** Cloudflare GraphQL fields are plan-dependent — treat every one as absent-or-null-able. */
+const nullable = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.Union([schema, Schema.Null]))
+
+const nullableNumber = nullable(Schema.Number)
+const nullableString = nullable(Schema.String)
 
 // ---------------------------------------------------------------------------
 // Dataset settings (per-tenant limits discovery)
@@ -60,60 +62,44 @@ export const settingsQuery = (options: { readonly withZones: boolean }): string 
 }`
 }
 
-export const DatasetSettings = Schema.Struct({
-	enabled: Schema.optional(Schema.Union([Schema.Boolean, Schema.Null])),
+const DatasetSettings = Schema.Struct({
+	enabled: nullable(Schema.Boolean),
 	notOlderThan: nullableNumber,
 	maxDuration: nullableNumber,
-	availableFields: Schema.optional(Schema.Union([Schema.Array(Schema.String), Schema.Null])),
+	availableFields: nullable(Schema.Array(Schema.String)),
 })
 export type DatasetSettingsShape = typeof DatasetSettings.Type
 
 const SettingsResponse = Schema.Struct({
 	viewer: Schema.Struct({
-		zones: Schema.optional(
-			Schema.Union([
-				Schema.Array(
-					Schema.Struct({
-						zoneTag: Schema.String,
-						settings: Schema.optional(
-							Schema.Union([
-								Schema.Struct({
-									httpRequestsAdaptiveGroups: Schema.optional(
-										Schema.Union([DatasetSettings, Schema.Null]),
-									),
-								}),
-								Schema.Null,
-							]),
-						),
-					}),
-				),
-				Schema.Null,
-			]),
+		zones: nullable(
+			Schema.Array(
+				Schema.Struct({
+					zoneTag: Schema.String,
+					settings: nullable(
+						Schema.Struct({
+							httpRequestsAdaptiveGroups: nullable(DatasetSettings),
+						}),
+					),
+				}),
+			),
 		),
-		accounts: Schema.optional(
-			Schema.Union([
-				Schema.Array(
-					Schema.Struct({
-						settings: Schema.optional(
-							Schema.Union([
-								Schema.Struct({
-									workersInvocationsAdaptive: Schema.optional(
-										Schema.Union([DatasetSettings, Schema.Null]),
-									),
-								}),
-								Schema.Null,
-							]),
-						),
-					}),
-				),
-				Schema.Null,
-			]),
+		accounts: nullable(
+			Schema.Array(
+				Schema.Struct({
+					settings: nullable(
+						Schema.Struct({
+							workersInvocationsAdaptive: nullable(DatasetSettings),
+						}),
+					),
+				}),
+			),
 		),
 	}),
 })
+export type SettingsResponseShape = typeof SettingsResponse.Type
 
 export const decodeSettingsResponse = Schema.decodeUnknownEffect(SettingsResponse)
-export type SettingsResponseShape = typeof SettingsResponse.Type
 
 // ---------------------------------------------------------------------------
 // HTTP edge analytics (zone-scoped httpRequestsAdaptiveGroups)
@@ -167,15 +153,8 @@ export const httpAnalyticsQuery = (options: { readonly withQuantiles: boolean })
 
 const HttpGroup = Schema.Struct({
 	count: Schema.Number,
-	avg: Schema.optional(
-		Schema.Union([Schema.Struct({ sampleInterval: nullableNumber }), Schema.Null]),
-	),
-	sum: Schema.optional(
-		Schema.Union([
-			Schema.Struct({ edgeResponseBytes: nullableNumber, visits: nullableNumber }),
-			Schema.Null,
-		]),
-	),
+	avg: nullable(Schema.Struct({ sampleInterval: nullableNumber })),
+	sum: nullable(Schema.Struct({ edgeResponseBytes: nullableNumber, visits: nullableNumber })),
 	dimensions: Schema.Struct({
 		datetimeFiveMinutes: Schema.String,
 		cacheStatus: nullableString,
@@ -192,11 +171,10 @@ const HttpQuantiles = Schema.Struct({
 	originResponseDurationMsP95: nullableNumber,
 	originResponseDurationMsP99: nullableNumber,
 })
-export type HttpQuantilesShape = typeof HttpQuantiles.Type
 
 const HttpLatencyGroup = Schema.Struct({
 	count: Schema.Number,
-	quantiles: Schema.optional(Schema.Union([HttpQuantiles, Schema.Null])),
+	quantiles: nullable(HttpQuantiles),
 	dimensions: Schema.Struct({ datetimeFiveMinutes: Schema.String }),
 })
 export type HttpLatencyGroupShape = typeof HttpLatencyGroup.Type
@@ -206,11 +184,10 @@ const HttpZoneResult = Schema.Struct({
 	groups: Schema.Array(HttpGroup),
 	latency: Schema.Array(HttpLatencyGroup),
 })
-export type HttpZoneResultShape = typeof HttpZoneResult.Type
 
 const HttpAnalyticsResponse = Schema.Struct({
 	viewer: Schema.Struct({
-		zones: Schema.optional(Schema.Union([Schema.Array(HttpZoneResult), Schema.Null])),
+		zones: nullable(Schema.Array(HttpZoneResult)),
 	}),
 })
 
@@ -249,20 +226,16 @@ const WorkersQuantiles = Schema.Struct({
 	durationP50: nullableNumber,
 	durationP99: nullableNumber,
 })
-export type WorkersQuantilesShape = typeof WorkersQuantiles.Type
 
 const WorkersGroup = Schema.Struct({
-	sum: Schema.optional(
-		Schema.Union([
-			Schema.Struct({
-				requests: nullableNumber,
-				errors: nullableNumber,
-				subrequests: nullableNumber,
-			}),
-			Schema.Null,
-		]),
+	sum: nullable(
+		Schema.Struct({
+			requests: nullableNumber,
+			errors: nullableNumber,
+			subrequests: nullableNumber,
+		}),
 	),
-	quantiles: Schema.optional(Schema.Union([WorkersQuantiles, Schema.Null])),
+	quantiles: nullable(WorkersQuantiles),
 	dimensions: Schema.Struct({
 		datetimeFiveMinutes: Schema.String,
 		scriptName: Schema.String,
@@ -273,12 +246,7 @@ export type WorkersGroupShape = typeof WorkersGroup.Type
 
 const WorkersAnalyticsResponse = Schema.Struct({
 	viewer: Schema.Struct({
-		accounts: Schema.optional(
-			Schema.Union([
-				Schema.Array(Schema.Struct({ invocations: Schema.Array(WorkersGroup) })),
-				Schema.Null,
-			]),
-		),
+		accounts: nullable(Schema.Array(Schema.Struct({ invocations: Schema.Array(WorkersGroup) }))),
 	}),
 })
 

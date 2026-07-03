@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto"
+import { randomBytes } from "node:crypto"
 import {
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
@@ -10,26 +10,18 @@ import {
 	type OrgId,
 	type UserId,
 } from "@maple/domain/http"
-import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
-import { and, eq, lt } from "drizzle-orm"
+import { oauthAuthStates } from "@maple/db"
 import { Clock, Context, Effect, Layer, Option, Redacted, Ref, Schema } from "effect"
-import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
-import { Database, type DatabaseClient } from "../lib/DatabaseLive"
 import { Env, type EnvShape } from "../lib/Env"
+import { Database } from "../lib/DatabaseLive"
 import { msToDate } from "../lib/time"
+import {
+	makeOAuthConnectionHelpers,
+	OAUTH_STATE_TTL_MS,
+	toUpstreamError,
+} from "./oauth/connection-helpers"
 
 const HAZEL_PROVIDER = "hazel"
-const STATE_TTL_MS = 10 * 60_000 // 10 minutes
-const REFRESH_LEEWAY_MS = 60_000 // 1 minute
-
-const TokenResponseSchema = Schema.Struct({
-	access_token: Schema.String,
-	token_type: Schema.optionalKey(Schema.String),
-	expires_in: Schema.optionalKey(Schema.Number),
-	refresh_token: Schema.optionalKey(Schema.String),
-	scope: Schema.optionalKey(Schema.String),
-	id_token: Schema.optionalKey(Schema.String),
-})
 
 const UserInfoSchema = Schema.Struct({
 	sub: Schema.String,
@@ -75,7 +67,6 @@ const DiscoveryDocumentSchema = Schema.Struct({
 	userinfo_endpoint: Schema.optionalKey(Schema.String),
 })
 
-const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponseSchema)
 const decodeUserInfo = Schema.decodeUnknownEffect(UserInfoSchema)
 const decodeOrganizationsResponse = Schema.decodeUnknownEffect(HazelOrganizationsResponseSchema)
 const decodeChannelsResponse = Schema.decodeUnknownEffect(HazelChannelsResponseSchema)
@@ -123,18 +114,6 @@ const resolveEnv = (env: EnvShape): Effect.Effect<ResolvedHazelOAuthEnv, Integra
 			scopes: env.HAZEL_OAUTH_SCOPES,
 			apiBaseUrl: env.HAZEL_API_BASE_URL.replace(/\/$/, ""),
 		}
-	})
-
-const toPersistenceError = (cause: unknown) =>
-	new IntegrationsPersistenceError({
-		message: cause instanceof Error ? cause.message : "Hazel integration database error",
-	})
-
-const toUpstreamError = (message: string, status?: number, cause?: unknown) =>
-	new IntegrationsUpstreamError({
-		message,
-		...(status === undefined ? {} : { status }),
-		...(cause === undefined ? {} : { cause }),
 	})
 
 interface HazelOAuthAccessToken {
@@ -238,46 +217,12 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 		make: Effect.gen(function* () {
 			const database = yield* Database
 			const env = yield* Env
-			const encryptionKey = yield* parseBase64Aes256GcmKey(
-				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
-				(message) =>
-					new IntegrationsValidationError({
-						message:
-							message === "Expected a non-empty base64 encryption key"
-								? "MAPLE_INGEST_KEY_ENCRYPTION_KEY is required"
-								: message === "Expected base64 for exactly 32 bytes"
-									? "MAPLE_INGEST_KEY_ENCRYPTION_KEY must be base64 for exactly 32 bytes"
-									: message,
-					}),
-			)
-
-			const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
-				database.execute(fn).pipe(Effect.mapError(toPersistenceError))
-
-			const encryptValue = (plaintext: string) =>
-				encryptAes256Gcm(
-					plaintext,
-					encryptionKey,
-					(message) =>
-						new IntegrationsPersistenceError({
-							message: `Failed to encrypt Hazel token: ${message}`,
-						}),
-				)
-
-			const decryptValue = (encrypted: { ciphertext: string; iv: string; tag: string }) =>
-				decryptAes256Gcm(
-					encrypted,
-					encryptionKey,
-					() =>
-						new IntegrationsPersistenceError({
-							message: "Failed to decrypt stored Hazel token",
-						}),
-				)
-
-			const purgeExpiredStates = (currentTime: number) =>
-				dbExecute((db) =>
-					db.delete(oauthAuthStates).where(lt(oauthAuthStates.expiresAt, new Date(currentTime))),
-				)
+			const oauth = yield* makeOAuthConnectionHelpers({
+				provider: HAZEL_PROVIDER,
+				providerLabel: "Hazel",
+				database,
+				env,
+			})
 
 			const fetchDiscoveryDocument = (
 				discoveryUrl: string,
@@ -359,8 +304,8 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 				const currentTime = yield* Clock.currentTimeMillis
 				const callbackUrl = options.callbackUrl
 
-				yield* purgeExpiredStates(currentTime)
-				yield* dbExecute((db) =>
+				yield* oauth.purgeExpiredStates(currentTime)
+				yield* oauth.dbExecute((db) =>
 					db.insert(oauthAuthStates).values({
 						state,
 						orgId,
@@ -369,7 +314,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 						redirectUri: callbackUrl,
 						returnTo: options.returnTo ?? null,
 						createdAt: new Date(currentTime),
-						expiresAt: new Date(currentTime + STATE_TTL_MS),
+						expiresAt: new Date(currentTime + OAUTH_STATE_TTL_MS),
 					}),
 				)
 
@@ -385,140 +330,6 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 					state,
 				}
 			})
-
-			const requireStateRow = (state: string) =>
-				Effect.gen(function* () {
-					const rows = yield* dbExecute((db) =>
-						db.select().from(oauthAuthStates).where(eq(oauthAuthStates.state, state)).limit(1),
-					)
-					const row = rows[0]
-					if (!row) {
-						return yield* Effect.fail(
-							new IntegrationsValidationError({
-								message: "OAuth state not recognized — restart the connect flow",
-							}),
-						)
-					}
-					if (row.expiresAt.getTime() < (yield* Clock.currentTimeMillis)) {
-						yield* dbExecute((db) =>
-							db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)),
-						)
-						return yield* Effect.fail(
-							new IntegrationsValidationError({
-								message: "OAuth state expired — restart the connect flow",
-							}),
-						)
-					}
-					return row satisfies OAuthAuthStateRow
-				})
-
-			const exchangeAuthorizationCode = (
-				config: ResolvedHazelOAuthConfig,
-				code: string,
-				redirectUri: string,
-			) =>
-				Effect.gen(function* () {
-					const body = new URLSearchParams({
-						grant_type: "authorization_code",
-						code,
-						redirect_uri: redirectUri,
-						client_id: config.clientId,
-						client_secret: config.clientSecret,
-					})
-					const response = yield* Effect.tryPromise({
-						try: () =>
-							fetch(config.tokenUrl, {
-								method: "POST",
-								headers: {
-									"content-type": "application/x-www-form-urlencoded",
-									accept: "application/json",
-								},
-								body: body.toString(),
-							}),
-						catch: (cause) =>
-							toUpstreamError(
-								cause instanceof Error
-									? `Token exchange failed: ${cause.message}`
-									: "Token exchange failed",
-							),
-					})
-					if (!response.ok) {
-						const text = yield* Effect.tryPromise({
-							try: () => response.text(),
-							catch: (cause) =>
-								toUpstreamError("Token exchange failed", response.status, cause),
-						})
-						return yield* Effect.fail(
-							toUpstreamError(
-								`Token exchange failed: ${text || response.statusText}`,
-								response.status,
-							),
-						)
-					}
-					const json = yield* Effect.tryPromise({
-						try: () => response.json(),
-						catch: (cause) =>
-							toUpstreamError("Token exchange returned a non-JSON response", undefined, cause),
-					})
-					return yield* decodeTokenResponse(json).pipe(
-						Effect.mapError((cause) =>
-							toUpstreamError(
-								"Token exchange returned an unexpected payload",
-								undefined,
-								cause,
-							),
-						),
-					)
-				})
-
-			const refreshAccessToken = (config: ResolvedHazelOAuthConfig, refreshToken: string) =>
-				Effect.gen(function* () {
-					const body = new URLSearchParams({
-						grant_type: "refresh_token",
-						refresh_token: refreshToken,
-						client_id: config.clientId,
-						client_secret: config.clientSecret,
-					})
-					const response = yield* Effect.tryPromise({
-						try: () =>
-							fetch(config.tokenUrl, {
-								method: "POST",
-								headers: {
-									"content-type": "application/x-www-form-urlencoded",
-									accept: "application/json",
-								},
-								body: body.toString(),
-							}),
-						catch: (cause) =>
-							toUpstreamError(
-								cause instanceof Error
-									? `Token refresh failed: ${cause.message}`
-									: "Token refresh failed",
-							),
-					})
-					if (response.status === 400 || response.status === 401) {
-						return yield* Effect.fail(
-							new IntegrationsRevokedError({
-								message: "Hazel connection no longer authorized — reconnect required",
-							}),
-						)
-					}
-					if (!response.ok) {
-						return yield* Effect.fail(
-							toUpstreamError(`Token refresh failed with ${response.status}`, response.status),
-						)
-					}
-					const json = yield* Effect.tryPromise({
-						try: () => response.json(),
-						catch: (cause) =>
-							toUpstreamError("Token refresh returned a non-JSON response", undefined, cause),
-					})
-					return yield* decodeTokenResponse(json).pipe(
-						Effect.mapError((cause) =>
-							toUpstreamError("Token refresh returned an unexpected payload", undefined, cause),
-						),
-					)
-				})
 
 			const fetchUserInfo = (config: ResolvedHazelOAuthConfig, accessToken: string) =>
 				Effect.gen(function* () {
@@ -559,178 +370,47 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 				state: string,
 			) {
 				const config = yield* resolveConfig
-				const stateRow = yield* requireStateRow(state)
-				yield* dbExecute((db) => db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)))
+				const stateRow = yield* oauth.requireStateRow(state)
+				yield* oauth.deleteAuthState(state)
 
-				const tokenResponse = yield* exchangeAuthorizationCode(config, code, stateRow.redirectUri)
+				const tokenResponse = yield* oauth.exchangeAuthorizationCode(
+					config,
+					code,
+					stateRow.redirectUri,
+				)
 				const userInfo = yield* fetchUserInfo(config, tokenResponse.access_token)
 
-				const accessEnc = yield* encryptValue(tokenResponse.access_token)
+				const accessEnc = yield* oauth.encryptValue(tokenResponse.access_token)
 				const refreshEnc = tokenResponse.refresh_token
-					? yield* encryptValue(tokenResponse.refresh_token)
+					? yield* oauth.encryptValue(tokenResponse.refresh_token)
 					: null
-				const expiresAt =
-					tokenResponse.expires_in != null
-						? (yield* Clock.currentTimeMillis) + tokenResponse.expires_in * 1000
-						: null
 				const currentTime = yield* Clock.currentTimeMillis
+				const expiresAt =
+					tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
 				const orgId = stateRow.orgId as OrgId
 
-				const existing = yield* dbExecute((db) =>
-					db
-						.select()
-						.from(oauthConnections)
-						.where(
-							and(
-								eq(oauthConnections.orgId, orgId),
-								eq(oauthConnections.provider, HAZEL_PROVIDER),
-							),
-						)
-						.limit(1),
-				)
-
-				if (existing[0]) {
-					yield* dbExecute((db) =>
-						db
-							.update(oauthConnections)
-							.set({
-								externalUserId: userInfo.sub,
-								externalUserEmail: userInfo.email ?? null,
-								connectedByUserId: stateRow.initiatedByUserId,
-								scope: tokenResponse.scope ?? config.scopes,
-								accessTokenCiphertext: accessEnc.ciphertext,
-								accessTokenIv: accessEnc.iv,
-								accessTokenTag: accessEnc.tag,
-								refreshTokenCiphertext: refreshEnc?.ciphertext ?? null,
-								refreshTokenIv: refreshEnc?.iv ?? null,
-								refreshTokenTag: refreshEnc?.tag ?? null,
-								expiresAt: msToDate(expiresAt),
-								updatedAt: new Date(currentTime),
-							})
-							.where(eq(oauthConnections.id, existing[0]!.id)),
-					)
-				} else {
-					yield* dbExecute((db) =>
-						db.insert(oauthConnections).values({
-							id: randomUUID(),
-							orgId,
-							provider: HAZEL_PROVIDER,
-							externalUserId: userInfo.sub,
-							externalUserEmail: userInfo.email ?? null,
-							connectedByUserId: stateRow.initiatedByUserId,
-							scope: tokenResponse.scope ?? config.scopes,
-							accessTokenCiphertext: accessEnc.ciphertext,
-							accessTokenIv: accessEnc.iv,
-							accessTokenTag: accessEnc.tag,
-							refreshTokenCiphertext: refreshEnc?.ciphertext ?? null,
-							refreshTokenIv: refreshEnc?.iv ?? null,
-							refreshTokenTag: refreshEnc?.tag ?? null,
-							expiresAt: msToDate(expiresAt),
-							createdAt: new Date(currentTime),
-							updatedAt: new Date(currentTime),
-						}),
-					)
-				}
+				yield* oauth.upsertConnection(orgId, currentTime, {
+					externalUserId: userInfo.sub,
+					externalUserEmail: userInfo.email ?? null,
+					connectedByUserId: stateRow.initiatedByUserId,
+					scope: tokenResponse.scope ?? config.scopes,
+					accessTokenCiphertext: accessEnc.ciphertext,
+					accessTokenIv: accessEnc.iv,
+					accessTokenTag: accessEnc.tag,
+					refreshTokenCiphertext: refreshEnc?.ciphertext ?? null,
+					refreshTokenIv: refreshEnc?.iv ?? null,
+					refreshTokenTag: refreshEnc?.tag ?? null,
+					expiresAt: msToDate(expiresAt),
+				})
 
 				return { orgId, returnTo: stateRow.returnTo ?? null }
 			})
-
-			const loadConnection = (orgId: OrgId) =>
-				dbExecute((db) =>
-					db
-						.select()
-						.from(oauthConnections)
-						.where(
-							and(
-								eq(oauthConnections.orgId, orgId),
-								eq(oauthConnections.provider, HAZEL_PROVIDER),
-							),
-						)
-						.limit(1),
-				).pipe(Effect.map((rows) => rows[0] ?? null))
-
-			const requireConnection = (orgId: OrgId) =>
-				Effect.gen(function* () {
-					const row = yield* loadConnection(orgId)
-					if (!row) {
-						return yield* Effect.fail(
-							new IntegrationsNotConnectedError({
-								message: "Hazel is not connected for this organization",
-							}),
-						)
-					}
-					return row satisfies OAuthConnectionRow
-				})
-
-			const persistRefreshedTokens = (
-				row: OAuthConnectionRow,
-				tokenResponse: typeof TokenResponseSchema.Type,
-			) =>
-				Effect.gen(function* () {
-					const accessEnc = yield* encryptValue(tokenResponse.access_token)
-					const refreshEnc = tokenResponse.refresh_token
-						? yield* encryptValue(tokenResponse.refresh_token)
-						: null
-					const expiresAt =
-						tokenResponse.expires_in != null
-							? (yield* Clock.currentTimeMillis) + tokenResponse.expires_in * 1000
-							: null
-					const currentTime = yield* Clock.currentTimeMillis
-					yield* dbExecute((db) =>
-						db
-							.update(oauthConnections)
-							.set({
-								accessTokenCiphertext: accessEnc.ciphertext,
-								accessTokenIv: accessEnc.iv,
-								accessTokenTag: accessEnc.tag,
-								refreshTokenCiphertext: refreshEnc?.ciphertext ?? row.refreshTokenCiphertext,
-								refreshTokenIv: refreshEnc?.iv ?? row.refreshTokenIv,
-								refreshTokenTag: refreshEnc?.tag ?? row.refreshTokenTag,
-								expiresAt: msToDate(expiresAt),
-								updatedAt: new Date(currentTime),
-							})
-							.where(eq(oauthConnections.id, row.id)),
-					)
-					return tokenResponse.access_token
-				})
 
 			const getValidAccessToken = Effect.fn("HazelOAuthService.getValidAccessToken")(function* (
 				orgId: OrgId,
 			) {
 				const config = yield* resolveConfig
-				const row = yield* requireConnection(orgId)
-				const isValid =
-					row.expiresAt == null ||
-					row.expiresAt.getTime() - (yield* Clock.currentTimeMillis) > REFRESH_LEEWAY_MS
-
-				if (isValid) {
-					const accessToken = yield* decryptValue({
-						ciphertext: row.accessTokenCiphertext,
-						iv: row.accessTokenIv,
-						tag: row.accessTokenTag,
-					})
-					return {
-						accessToken,
-						externalUserId: row.externalUserId,
-					} satisfies HazelOAuthAccessToken
-				}
-
-				if (!row.refreshTokenCiphertext || !row.refreshTokenIv || !row.refreshTokenTag) {
-					return yield* Effect.fail(
-						new IntegrationsRevokedError({
-							message:
-								"Hazel access token expired and no refresh token is stored — reconnect required",
-						}),
-					)
-				}
-
-				const refreshToken = yield* decryptValue({
-					ciphertext: row.refreshTokenCiphertext,
-					iv: row.refreshTokenIv,
-					tag: row.refreshTokenTag,
-				})
-				const refreshed = yield* refreshAccessToken(config, refreshToken)
-				const accessToken = yield* persistRefreshedTokens(row, refreshed)
+				const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId)
 				return {
 					accessToken,
 					externalUserId: row.externalUserId,
@@ -738,7 +418,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 			})
 
 			const getStatus = Effect.fn("HazelOAuthService.getStatus")(function* (orgId: OrgId) {
-				const row = yield* loadConnection(orgId)
+				const row = yield* oauth.loadConnection(orgId)
 				if (!row) {
 					return { connected: false } as const
 				}
@@ -949,18 +629,7 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 			})
 
 			const disconnect = Effect.fn("HazelOAuthService.disconnect")(function* (orgId: OrgId) {
-				const result = yield* dbExecute((db) =>
-					db
-						.delete(oauthConnections)
-						.where(
-							and(
-								eq(oauthConnections.orgId, orgId),
-								eq(oauthConnections.provider, HAZEL_PROVIDER),
-							),
-						)
-						.returning({ id: oauthConnections.id }),
-				)
-				return { disconnected: result.length > 0 }
+				return yield* oauth.deleteConnection(orgId)
 			})
 
 			return {
