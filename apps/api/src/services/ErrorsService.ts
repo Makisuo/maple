@@ -70,6 +70,7 @@ import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage
 import { escalationDedupeKey, escalationReasonFor } from "../lib/issue-severity"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
+import { readTxid, txidColumn } from "../lib/electric-txid"
 import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
@@ -1206,12 +1207,14 @@ const make: Effect.Effect<
 			update.claimedAt = null
 		}
 
-		yield* dbExecute((db) =>
+		const transitioned = yield* dbExecute((db) =>
 			db
 				.update(errorIssues)
 				.set(update)
-				.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id))),
+				.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id)))
+				.returning(txidColumn),
 		)
+		const txid = readTxid(transitioned)
 
 		if (toState === "done") {
 			yield* dbExecute((db) =>
