@@ -61,7 +61,7 @@ export function ServicesPage() {
 					<TimeRangeHeaderControls
 						startTime={search.startTime ?? effectiveStartTime}
 						endTime={search.endTime ?? effectiveEndTime}
-						presetValue={search.timePreset ?? "12h"}
+						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
 						onTimeChange={handleTimeChange}
 					/>
 				}

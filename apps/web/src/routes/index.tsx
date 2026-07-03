@@ -402,7 +402,8 @@ function DashboardContent({
 					<TimeRangeHeaderControls
 						startTime={search.startTime ?? effectiveStartTime}
 						endTime={search.endTime ?? effectiveEndTime}
-						presetValue={search.timePreset ?? defaultPreset}
+						presetValue={search.timePreset ?? (search.startTime ? undefined : defaultPreset)}
+						defaultPreset={defaultPreset}
 						onTimeChange={handleTimeChange}
 					/>
 				</div>

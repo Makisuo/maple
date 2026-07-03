@@ -5,6 +5,7 @@ import { Input } from "@maple/ui/components/ui/input"
 import { format, parse, isValid, setHours, setMinutes } from "date-fns"
 import type { DateRange } from "react-day-picker"
 import { formatForTinybird } from "@/lib/time-utils"
+import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 interface CustomRangePickerProps {
 	startTime?: string
@@ -14,18 +15,20 @@ interface CustomRangePickerProps {
 }
 
 export function CustomRangePicker({ startTime, endTime, onApply, onCancel }: CustomRangePickerProps) {
+	// Stored times are tz-less UTC warehouse strings; normalize to explicit UTC
+	// before constructing Dates or the value shifts by the local offset.
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
-		const from = startTime ? new Date(startTime) : undefined
-		const to = endTime ? new Date(endTime) : undefined
+		const from = startTime ? new Date(normalizeTimestampInput(startTime)) : undefined
+		const to = endTime ? new Date(normalizeTimestampInput(endTime)) : undefined
 		return from || to ? { from, to } : undefined
 	})
 
 	const [startTimeInput, setStartTimeInput] = useState(() => {
-		return startTime ? format(new Date(startTime), "HH:mm") : "00:00"
+		return startTime ? format(new Date(normalizeTimestampInput(startTime)), "HH:mm") : "00:00"
 	})
 
 	const [endTimeInput, setEndTimeInput] = useState(() => {
-		return endTime ? format(new Date(endTime), "HH:mm") : "23:59"
+		return endTime ? format(new Date(normalizeTimestampInput(endTime)), "HH:mm") : "23:59"
 	})
 
 	const handleApply = () => {
