@@ -910,6 +910,50 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
+	it.effect("getUsage coerces ClickHouse string-encoded counts (BYO-CH raw-CH response)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		// Raw ClickHouse `FORMAT JSON` serializes count()/UInt64 as STRINGS (Tinybird
+		// returns numbers). A ready BYO-CH org reads its own CH, so `datapoints` (and
+		// defensively `requests`) arrive as strings — they must be coerced, not thrown
+		// inside the `CloudflareUsageBucket` Schema.Class (which would 500 with no body).
+		const queryStub: CompiledQueryStub = {
+			rows: [
+				{
+					serviceName: "cloudflare/example.com",
+					bucket: "2026-07-02T10:00:00.000Z",
+					requests: "100.2",
+					datapoints: "24",
+					lastTimeUnix: "2026-07-02T10:55:00.000Z",
+				},
+				{
+					serviceName: "cloudflare/example.com",
+					bucket: "2026-07-02T11:00:00.000Z",
+					requests: "50",
+					datapoints: "10",
+					lastTimeUnix: "2026-07-02T11:40:00.000Z",
+				},
+			],
+			calls: [],
+		}
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedByoClickHouse()
+			const service = yield* CloudflareAnalyticsService
+			const usage = yield* service.getUsage(ORG)
+
+			assert.strictEqual(usage.services.length, 1)
+			const zone = usage.services[0]!
+			assert.strictEqual(zone.totalRequests, 150)
+			assert.strictEqual(zone.totalDatapoints, 34)
+			assert.strictEqual(zone.buckets.length, 2)
+			assert.strictEqual(zone.buckets[0]?.datapoints, 24)
+			assert.strictEqual(zone.buckets[0]?.requests, 100)
+			assert.strictEqual(usage.totalRequests, 150)
+		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
+	})
+
 	it.effect("getUsage returns an empty window when not connected", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []

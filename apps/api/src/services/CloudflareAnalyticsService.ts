@@ -1474,16 +1474,23 @@ export class CloudflareAnalyticsService extends Context.Service<
 					totalDatapoints: 0,
 					lastDataAt: null,
 				}
-				const requests = Math.round(row.requests)
+				// ClickHouse's `FORMAT JSON` serializes 64-bit ints (here `count()` →
+				// `datapoints`, a UInt64) as JSON STRINGS, while Tinybird returns them as
+				// numbers. Coerce at this boundary so a BYO-CH org's raw-CH response can't
+				// throw a ParseError inside the `CloudflareUsageBucket` Schema.Class (which
+				// would surface as a bare, message-less 500). See the CH-UInt64-JSON-string
+				// convention: coerce `Number(row.x)` at the handler edge.
+				const requests = Math.round(Number(row.requests))
+				const datapoints = Number(row.datapoints)
 				agg.buckets.push(
 					new CloudflareUsageBucket({
 						bucketStart: Date.parse(row.bucket),
 						requests,
-						datapoints: row.datapoints,
+						datapoints,
 					}),
 				)
 				agg.totalRequests += requests
-				agg.totalDatapoints += row.datapoints
+				agg.totalDatapoints += datapoints
 				const lastMs = Date.parse(row.lastTimeUnix)
 				if (Number.isFinite(lastMs)) {
 					agg.lastDataAt = agg.lastDataAt == null ? lastMs : Math.max(agg.lastDataAt, lastMs)
