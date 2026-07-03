@@ -7,6 +7,7 @@ const KEY_BYTES = Buffer.alloc(24, 9)
 const SECRET = `whsec_${KEY_BYTES.toString("base64")}`
 const SVIX_ID = "msg_123"
 const SVIX_TS = "1700000000"
+const ON_TIME_MS = Number(SVIX_TS) * 1000 // same instant the message was stamped
 
 const sign = (body: string) =>
 	`v1,${createHmac("sha256", KEY_BYTES).update(`${SVIX_ID}.${SVIX_TS}.${body}`).digest("base64")}`
@@ -15,6 +16,7 @@ const verify = (input: {
 	secret?: string
 	body: string
 	signatureHeader: string
+	nowMs?: number
 }) =>
 	Effect.runPromise(
 		verifySvixSignature({
@@ -23,6 +25,7 @@ const verify = (input: {
 			svixTimestamp: SVIX_TS,
 			body: input.body,
 			signatureHeader: input.signatureHeader,
+			nowMs: input.nowMs ?? ON_TIME_MS,
 		}),
 	)
 
@@ -48,6 +51,28 @@ describe("verifySvixSignature", () => {
 		const body = JSON.stringify({ type: "billing.updated" })
 		const wrong = `v1,${createHmac("sha256", Buffer.alloc(24, 1)).update(`${SVIX_ID}.${SVIX_TS}.${body}`).digest("base64")}`
 		expect(await verify({ body, signatureHeader: wrong })).toBe(false)
+	})
+
+	it("rejects a replayed (stale) but validly-signed payload", async () => {
+		const body = JSON.stringify({ type: "billing.updated" })
+		// Same valid signature, but "now" is 10 minutes after the stamped time.
+		expect(
+			await verify({ body, signatureHeader: sign(body), nowMs: ON_TIME_MS + 10 * 60 * 1000 }),
+		).toBe(false)
+	})
+
+	it("rejects a timestamp too far in the future (clock skew / replay)", async () => {
+		const body = JSON.stringify({ type: "billing.updated" })
+		expect(
+			await verify({ body, signatureHeader: sign(body), nowMs: ON_TIME_MS - 10 * 60 * 1000 }),
+		).toBe(false)
+	})
+
+	it("accepts a timestamp within the tolerance window", async () => {
+		const body = JSON.stringify({ type: "billing.updated" })
+		expect(
+			await verify({ body, signatureHeader: sign(body), nowMs: ON_TIME_MS + 4 * 60 * 1000 }),
+		).toBe(true)
 	})
 })
 

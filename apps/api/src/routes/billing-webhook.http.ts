@@ -1,5 +1,5 @@
 import { HttpRouter, type HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Effect, Option, Redacted } from "effect"
+import { Clock, Effect, Option, Redacted } from "effect"
 import { BillingSuspensionService } from "../services/BillingSuspensionService"
 import { Env } from "../lib/Env"
 
@@ -25,18 +25,33 @@ const timingSafeEqual = (a: string, b: string): boolean => {
 	return mismatch === 0
 }
 
-// Verify a Svix signature: HMAC-SHA256 over `${id}.${timestamp}.${body}` keyed
-// by the base64-decoded secret (the part after the `whsec_` prefix), base64
-// compared against any `v1,<sig>` token in the space-separated header. Returns
-// false on any crypto failure rather than throwing.
+// Svix rejects deliveries whose timestamp is outside a tolerance window to
+// prevent replay of an intercepted (still validly-signed) webhook. 5 minutes
+// matches the Svix library default.
+const SVIX_TOLERANCE_SECONDS = 5 * 60
+
+// Verify a Svix signature: first reject a timestamp outside the tolerance window
+// (anti-replay), then HMAC-SHA256 over `${id}.${timestamp}.${body}` keyed by the
+// base64-decoded secret (the part after the `whsec_` prefix), base64 compared
+// against any `v1,<sig>` token in the space-separated header. Returns false on a
+// stale/malformed timestamp or any crypto failure rather than throwing.
 export const verifySvixSignature = (input: {
 	readonly secret: string
 	readonly svixId: string
 	readonly svixTimestamp: string
 	readonly body: string
 	readonly signatureHeader: string
+	readonly nowMs: number
+	readonly toleranceSeconds?: number
 }) =>
 	Effect.gen(function* () {
+		// Anti-replay: the timestamp is signed (tampering breaks the HMAC), so an
+		// attacker can only replay the original — reject once it's outside the window.
+		const timestampSeconds = Number(input.svixTimestamp)
+		if (!Number.isFinite(timestampSeconds)) return false
+		const toleranceMs = (input.toleranceSeconds ?? SVIX_TOLERANCE_SECONDS) * 1000
+		if (Math.abs(input.nowMs - timestampSeconds * 1000) > toleranceMs) return false
+
 		const rawSecret = input.secret.startsWith("whsec_")
 			? input.secret.slice("whsec_".length)
 			: input.secret
@@ -144,12 +159,14 @@ export const BillingWebhookRouter = HttpRouter.use((router) =>
 					return textResponse("Missing svix signature headers", 400)
 				}
 
+				const nowMs = yield* Clock.currentTimeMillis
 				const valid = yield* verifySvixSignature({
 					secret: Redacted.value(env.AUTUMN_WEBHOOK_SECRET.value),
 					svixId,
 					svixTimestamp,
 					body: bodyOpt.value,
 					signatureHeader: svixSignature,
+					nowMs,
 				})
 				if (!valid) {
 					yield* Effect.annotateCurrentSpan({
