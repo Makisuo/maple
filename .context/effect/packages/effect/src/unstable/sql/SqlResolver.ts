@@ -98,7 +98,7 @@ export const SqlRequest = <In, A, E, R>(payload: In): SqlRequest<In, A, E, R> =>
  * @category resolvers
  * @since 4.0.0
  */
-export const ordered = <Req extends Schema.Top, Res extends Schema.Top, _, E, R>(
+export const ordered = <Req extends Schema.Constraint, Res extends Schema.Constraint, _, E, R>(
   options: {
     readonly Request: Req
     readonly Result: Res
@@ -146,7 +146,7 @@ export const ordered = <Req extends Schema.Top, Res extends Schema.Top, _, E, R>
  * @category resolvers
  * @since 4.0.0
  */
-export const grouped = <Req extends Schema.Top, Res extends Schema.Top, K, Row, E, R>(
+export const grouped = <Req extends Schema.Constraint, Res extends Schema.Constraint, K, Row, E, R>(
   options: {
     readonly Request: Req
     readonly RequestGroupKey: (request: Req["Type"]) => K
@@ -215,7 +215,7 @@ export const grouped = <Req extends Schema.Top, Res extends Schema.Top, K, Row, 
  * @category resolvers
  * @since 4.0.0
  */
-export const findById = <Id extends Schema.Top, Res extends Schema.Top, Row, E, R>(
+export const findById = <Id extends Schema.Constraint, Res extends Schema.Constraint, Row, E, R>(
   options: {
     readonly Id: Id
     readonly Result: Res
@@ -272,7 +272,7 @@ export const findById = <Id extends Schema.Top, Res extends Schema.Top, Row, E, 
   })
 }
 
-const void_ = <Req extends Schema.Top, _, E, R>(
+const void_ = <Req extends Schema.Constraint, _, E, R>(
   options: {
     readonly Request: Req
     readonly execute: (
@@ -322,7 +322,7 @@ const constNoSuchElement = Exit.fail(new Cause.NoSuchElementError())
 
 const partitionRequests = function*<In, A, E, R, InE>(
   requests: Arr.NonEmptyArray<Request.Entry<SqlRequest<In, A, E, R>>>,
-  schema: Schema.Codec<In, InE, R, R>
+  schema: Schema.ConstraintCodec<In, InE, R, R>
 ) {
   const len = requests.length
   const inputs = Arr.empty<InE>()
@@ -347,7 +347,7 @@ const partitionRequests = function*<In, A, E, R, InE>(
 
 const partitionRequestsById = function*<In, A, E, R, InE>(
   requests: ReadonlyArray<Request.Entry<SqlRequest<In, A, E, R>>>,
-  schema: Schema.Codec<In, InE, R, R>
+  schema: Schema.ConstraintCodec<In, InE, R, R>
 ) {
   const len = requests.length
   const inputs = Arr.empty<InE>()

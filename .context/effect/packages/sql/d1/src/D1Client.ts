@@ -167,6 +167,21 @@ export const make = (
             })
         )
 
+      const runValuesUncached = (
+        sql: string,
+        params: ReadonlyArray<unknown>
+      ) =>
+        Effect.tryPromise({
+          try: () => {
+            return db.prepare(sql).bind(...params).raw() as Promise<
+              ReadonlyArray<
+                ReadonlyArray<unknown>
+              >
+            >
+          },
+          catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
+        })
+
       return identity<Connection>({
         execute(sql, params, transformRows) {
           return transformRows
@@ -178,6 +193,9 @@ export const make = (
         },
         executeValues(sql, params) {
           return runValues(sql, params)
+        },
+        executeValuesUnprepared(sql, params) {
+          return runValuesUncached(sql, params)
         },
         executeUnprepared(sql, params, transformRows) {
           return transformRows

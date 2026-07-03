@@ -1,0 +1,68 @@
+{
+  "struct-required": {
+    "maxDelta": 401
+  },
+  "struct-optional-only": {
+    "maxDelta": 647
+  },
+  "struct-mutable-only": {
+    "maxDelta": 659
+  },
+  "struct-mixed": {
+    "maxDelta": 953
+  },
+  "union": {
+    "maxDelta": 907
+  },
+  "tagged-union": {
+    "maxDelta": 924
+  },
+  "record": {
+    "maxDelta": 289
+  },
+  "struct-with-rest": {
+    "maxDelta": 634
+  },
+  "tuple": {
+    "maxDelta": 417
+  },
+  "tuple-with-rest": {
+    "maxDelta": 408
+  },
+  "array": {
+    "maxDelta": 199
+  },
+  "non-empty-array": {
+    "maxDelta": 199
+  },
+  "to-type": {
+    "maxDelta": 31
+  },
+  "to-encoded": {
+    "maxDelta": 29
+  },
+  "to-codec-json": {
+    "maxDelta": 117
+  },
+  "to-codec-string-tree": {
+    "maxDelta": 59
+  },
+  "to-codec-array-from-single": {
+    "maxDelta": 96
+  },
+  "brand": {
+    "maxDelta": 82
+  },
+  "decode-unknown-effect": {
+    "maxDelta": 2
+  },
+  "encode-unknown-effect": {
+    "maxDelta": 2
+  },
+  "to-standard-json-schema": {
+    "maxDelta": 128
+  },
+  "exit": {
+    "maxDelta": 359
+  }
+}

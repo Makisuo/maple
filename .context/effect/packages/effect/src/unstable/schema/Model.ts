@@ -298,7 +298,7 @@ export const Sensitive = <S extends Schema.Top>(schema: S): Sensitive<S> =>
  * @category optional
  * @since 4.0.0
  */
-export interface optionalOption<S extends Schema.Top>
+export interface optionalOption<S extends Schema.Constraint>
   extends Schema.decodeTo<Schema.Option<Schema.toType<S>>, Schema.optionalKey<Schema.NullOr<S>>>
 {}
 
@@ -309,7 +309,7 @@ export interface optionalOption<S extends Schema.Top>
  * @category optional
  * @since 4.0.0
  */
-export const optionalOption = <S extends Schema.Top>(schema: S): optionalOption<S> =>
+export const optionalOption = <S extends Schema.Constraint>(schema: S): optionalOption<S> =>
   Schema.optionalKey(Schema.NullOr(schema)).pipe(
     Schema.decodeTo(
       Schema.Option(Schema.toType(schema)),

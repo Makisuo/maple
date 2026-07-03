@@ -416,11 +416,11 @@ export const make = (
       : (request) => Effect.flatMap(httpClient.execute(request), withOptionalResponse)
   }
   const decodeSuccess =
-    <Schema extends Schema.Top>(schema: Schema) =>
+    <Schema extends Schema.Constraint>(schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       HttpClientResponse.schemaBodyJson(schema)(response)
   const decodeError =
-    <const Tag extends string, Schema extends Schema.Top>(tag: Tag, schema: Schema) =>
+    <const Tag extends string, Schema extends Schema.Constraint>(tag: Tag, schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       Effect.flatMap(
         HttpClientResponse.schemaBodyJson(schema)(response),
@@ -520,7 +520,8 @@ export const TestClientError = <Tag extends string, E>(
           `import * as Sse from "effect/unstable/encoding/Sse"`,
           `readonly "streamEventsSse": () => Stream.Stream<{ readonly event: string; readonly id: string | undefined; readonly data: typeof StreamEvents200Sse.Type }, HttpClientError.HttpClientError | SchemaError | Sse.Retry, typeof StreamEvents200Sse.DecodingServices>`,
           `"streamEventsSse": () => HttpClientRequest.get(\`/events\`).pipe(`,
-          `sseRequest(StreamEvents200Sse)`
+          `sseRequest(StreamEvents200Sse)`,
+          `schema: Schema.ConstraintDecoder<Type, DecodingServices>`
         ]
       ))
 

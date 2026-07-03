@@ -38,7 +38,7 @@ describe("toArbitrary", () => {
   it("passes recursion metadata in the arbitrary context", () => {
     Schema.String.annotate({
       toArbitrary: () => (fc, context) => {
-        expect(context.constraint).type.toBe<Schema.Annotations.ToArbitrary.Constraint | undefined>()
+        expect(context.constraint).type.toBe<Schema.Annotations.ToArbitrary.GenerationConstraint | undefined>()
         expect(context.recursion).type.toBe<Schema.Annotations.ToArbitrary.Recursion | undefined>()
         return fc.string()
       }

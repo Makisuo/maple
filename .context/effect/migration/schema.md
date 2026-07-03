@@ -100,6 +100,40 @@ Note: `positive`, `negative`, `nonNegative`, `nonPositive` have been removed in 
 
 ## Detailed migrations
 
+### Redacted
+
+**Migration: rename with behavior distinction**
+
+In v3, `Schema.Redacted(value)` decoded the raw encoded value and wrapped the decoded value in `Redacted`.
+
+In v4, that behavior is named `Schema.RedactedFromValue(value)`.
+
+v3
+
+```ts
+import { Schema } from "effect"
+
+const schema = Schema.Redacted(Schema.String)
+const decode = Schema.decodeSync(schema)
+
+decode("secret")
+```
+
+v4
+
+```ts
+import { Redacted, Schema } from "effect"
+
+const schema = Schema.RedactedFromValue(Schema.String)
+const decode = Schema.decodeSync(schema)
+
+const redacted = decode("secret")
+console.log(Redacted.value(redacted))
+// secret
+```
+
+`Schema.Redacted(value)` in v4 is the replacement for v3 `Schema.RedactedFromSelf(value)`: it expects the input to already be a `Redacted` value, so both `Type` and `Encoded` are `Redacted<...>`.
+
 ### asserts signature
 
 **Migration: semi-auto**

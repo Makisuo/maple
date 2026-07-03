@@ -37,7 +37,7 @@ export const symbol = "~effect/persistence/Persistable" as const
  * @category models
  * @since 4.0.0
  */
-export interface Persistable<A extends Schema.Top, E extends Schema.Top> extends PrimaryKey.PrimaryKey {
+export interface Persistable<A extends Schema.Constraint, E extends Schema.Constraint> extends PrimaryKey.PrimaryKey {
   readonly [symbol]: {
     readonly success: A
     readonly error: E
@@ -50,7 +50,7 @@ export interface Persistable<A extends Schema.Top, E extends Schema.Top> extends
  * @category models
  * @since 4.0.0
  */
-export type Any = Persistable<Schema.Top, Schema.Top>
+export type Any = Persistable<Schema.Constraint, Schema.Constraint>
 
 /**
  * Extracts the success schema from a persistable request.
@@ -147,8 +147,8 @@ export const Class = <
 >() =>
 <
   const Tag extends string,
-  A extends Schema.Top = Schema.Void,
-  E extends Schema.Top = Schema.Never
+  A extends Schema.Constraint = Schema.Void,
+  E extends Schema.Constraint = Schema.Never
 >(tag: Tag, options: {
   readonly primaryKey: (payload: Config["payload"]) => string
   readonly success?: A | undefined
@@ -205,7 +205,7 @@ export const Class = <
  * @category accessors
  * @since 4.0.0
  */
-export const exitSchema = <A extends Schema.Top, E extends Schema.Top>(
+export const exitSchema = <A extends Schema.Constraint, E extends Schema.Constraint>(
   self: Persistable<A, E>
 ): Schema.Exit<A, E, Schema.Defect> => {
   let schema = exitSchemaCache.get(self)
@@ -224,7 +224,7 @@ const exitSchemaCache = new WeakMap<Persistable<any, any>, Schema.Exit<any, any,
  * @category serialization
  * @since 4.0.0
  */
-export const serializeExit = <A extends Schema.Top, E extends Schema.Top>(
+export const serializeExit = <A extends Schema.Constraint, E extends Schema.Constraint>(
   self: Persistable<A, E>,
   exit: Exit.Exit<A["Type"], E["Type"]>
 ): Effect.Effect<unknown, Schema.SchemaError, A["EncodingServices"] | E["EncodingServices"]> => {
@@ -239,7 +239,7 @@ export const serializeExit = <A extends Schema.Top, E extends Schema.Top>(
  * @category serialization
  * @since 4.0.0
  */
-export const deserializeExit = <A extends Schema.Top, E extends Schema.Top>(
+export const deserializeExit = <A extends Schema.Constraint, E extends Schema.Constraint>(
   self: Persistable<A, E>,
   encoded: unknown
 ): Effect.Effect<

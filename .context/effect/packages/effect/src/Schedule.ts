@@ -743,31 +743,31 @@ export const andThenResult: {
 } = dual(2, <Output, Input, Error, Env, Output2, Input2, Error2, Env2>(
   self: Schedule<Output, Input, Error, Env>,
   other: Schedule<Output2, Input2, Error2, Env2>
-): Schedule<Result.Result<Output, Output2>, Input & Input2, Error | Error2, Env | Env2> =>
+): Schedule<Result.Result<Output2, Output>, Input & Input2, Error | Error2, Env | Env2> =>
   fromStep(effect.sync(() => {
     let currentSide = 0
     let currentStep:
       | undefined
       | ((now: number, input: Input & Input2) => Pull.Pull<
-        [Result.Result<Output, Output2>, Duration.Duration],
+        [Result.Result<Output2, Output>, Duration.Duration],
         Error | Error2,
-        Result.Result<Output, Output2>,
+        Result.Result<Output2, Output>,
         Env | Env2
       >)
-    const left = map(self, Result.succeed)
-    const right = map(other, Result.fail)
+    const left = map(self, Result.fail)
+    const right = map(other, Result.succeed)
     return function recur(
       now,
       input
     ): Pull.Pull<
-      [Result.Result<Output, Output2>, Duration.Duration],
+      [Result.Result<Output2, Output>, Duration.Duration],
       Error | Error2,
-      Result.Result<Output, Output2>,
+      Result.Result<Output2, Output>,
       Env | Env2
     > {
       if (currentStep) return currentStep(now, input)
       return toStep<
-        Result.Result<Output, Output2>,
+        Result.Result<Output2, Output>,
         Input & Input2,
         Error | Error2,
         Env | Env2

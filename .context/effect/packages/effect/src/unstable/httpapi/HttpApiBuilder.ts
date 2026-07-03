@@ -21,6 +21,7 @@ import * as Layer from "../../Layer.ts"
 import * as Option from "../../Option.ts"
 import type { Path } from "../../Path.ts"
 import { type Pipeable, pipeArguments } from "../../Pipeable.ts"
+import { hasProperty } from "../../Predicate.ts"
 import * as Redacted from "../../Redacted.ts"
 import * as Result from "../../Result.ts"
 import * as Schema from "../../Schema.ts"
@@ -603,13 +604,20 @@ function decodePayload(
       )
     }
     case "Json":
-      const json = Effect.orDie(Effect.flatMap(httpRequest.text, (text) => {
+      return Effect.flatMap(Effect.orDie(httpRequest.text), (text) => {
         if (text === "") {
-          return existing.nullOnEmpty ? Effect.succeed(null) : Effect.undefined
+          return decode(existing.nullOnEmpty ? null : undefined)
         }
-        return Effect.succeed(JSON.parse(text))
-      }))
-      return Effect.flatMap(json, decode)
+        try {
+          return decode(JSON.parse(text))
+        } catch (cause) {
+          return Effect.fail(
+            new Schema.SchemaError(
+              new SchemaIssue.InvalidValue(Option.some(text), { message: `Invalid JSON: ${cause}` })
+            )
+          )
+        }
+      })
     case "Text":
       return Effect.flatMap(Effect.orDie(httpRequest.text), decode)
     case "FormUrlEncoded": {
@@ -766,6 +774,7 @@ const makeSecurityMiddleware = (
     readonly group: HttpApiGroup.AnyWithProps
     readonly endpoint: HttpApiEndpoint.AnyWithProps
   }) {
+    handler = Effect.mapError(handler, (error) => new HandlerError(error))
     let lastResult: Result.Result<any, any> | undefined
     for (let i = 0; i < entries.length; i++) {
       const { decode, middleware } = entries[i]
@@ -776,6 +785,9 @@ const makeSecurityMiddleware = (
           group: options.group
         })))
       if (Result.isFailure(result)) {
+        if (isHandlerError(result.failure)) {
+          return yield* Effect.fail(result.failure.error)
+        }
         lastResult = result
         continue
       }
@@ -787,6 +799,16 @@ const makeSecurityMiddleware = (
   securityMiddlewareCache.set(service, middleware)
   return middleware
 }
+
+const HandlerErrorTypeId = "~effect/httpapi/HttpApiBuilder/HandlerError" as const
+class HandlerError {
+  readonly [HandlerErrorTypeId] = HandlerErrorTypeId
+  readonly error: unknown
+  constructor(error: unknown) {
+    this.error = error
+  }
+}
+const isHandlerError = (value: unknown): value is HandlerError => hasProperty(value, HandlerErrorTypeId)
 
 const $HttpServerResponse = Schema.declare(Response.isHttpServerResponse)
 
@@ -807,7 +829,9 @@ function makeStreamEncoder(endpoint: HttpApiEndpoint.AnyWithProps): StreamEncode
   if (HttpApiSchema.isStreamUint8Array(streamSchema)) {
     return (response, context) => {
       if (!Stream.isStream(response)) {
-        return hasBuffered ? undefined : expectedStreamResponse(response)
+        return hasBuffered ? undefined : new Schema.SchemaError(
+          new SchemaIssue.InvalidValue(Option.some(response), { message: "Expected a streaming response" })
+        )
       }
 
       return Effect.succeed(Response.stream(
@@ -824,7 +848,9 @@ function makeStreamEncoder(endpoint: HttpApiEndpoint.AnyWithProps): StreamEncode
 
   return (response, context) => {
     if (!Stream.isStream(response)) {
-      return hasBuffered ? undefined : expectedStreamResponse(response)
+      return hasBuffered ? undefined : new Schema.SchemaError(
+        new SchemaIssue.InvalidValue(Option.some(response), { message: "Expected a streaming response" })
+      )
     }
 
     return Effect.succeed(Response.stream(
@@ -852,16 +878,6 @@ function hasBufferedSuccess(endpoint: HttpApiEndpoint.AnyWithProps): boolean {
   return endpoint.success.size === 0
 }
 
-function expectedStreamResponse(response: unknown) {
-  return Effect.fail(
-    makeSchemaError(
-      new SchemaIssue.InvalidValue(Option.some(response), {
-        message: "Expected a streaming response"
-      })
-    )
-  )
-}
-
 interface SseStreamEncoder {
   readonly sseMode: HttpApiSchema.StreamSseMode
   readonly encodeEvents: (
@@ -870,7 +886,7 @@ interface SseStreamEncoder {
   readonly encodeCause: (input: unknown) => Effect.Effect<string, Schema.SchemaError, unknown>
 }
 
-function makeSseEncoder<Events extends Sse.EventCodec, Error extends Schema.Top>(
+function makeSseEncoder<Events extends Sse.EventCodec, Error extends Schema.Constraint>(
   streamSchema: HttpApiSchema.StreamSse<Events, Error, unknown>
 ): SseStreamEncoder {
   const CauseSchema = Schema.toCodecJson(Schema.Cause(streamSchema.error, Schema.Defect()))
@@ -922,19 +938,19 @@ function renderSseEvent(event: Sse.EventEncoded) {
   })
 }
 
-function makeSchemaError(issue: SchemaIssue.Issue): Schema.SchemaError {
-  return new Schema.SchemaError(issue)
-}
-
 const toResponseSuccessSchema = toResponseSchema(HttpApiSchema.getStatusSuccess)
 const toResponseErrorSchema = toResponseSchema(HttpApiSchema.getStatusError)
 
-function makeSuccessSchema(endpoint: HttpApiEndpoint.AnyWithProps): Schema.Encoder<HttpServerResponse, unknown> {
+function makeSuccessSchema(
+  endpoint: HttpApiEndpoint.AnyWithProps
+): Schema.ConstraintEncoder<HttpServerResponse, unknown> {
   const schemas = HttpApiEndpoint.getSuccessSchemas(endpoint).map(toResponseSuccessSchema)
   return schemas.length === 1 ? schemas[0] : Schema.Union(schemas)
 }
 
-function makeErrorSchema(endpoint: HttpApiEndpoint.AnyWithProps): Schema.Encoder<HttpServerResponse, unknown> {
+function makeErrorSchema(
+  endpoint: HttpApiEndpoint.AnyWithProps
+): Schema.ConstraintEncoder<HttpServerResponse, unknown> {
   const schemas = HttpApiEndpoint.getErrorSchemas(endpoint).map(toResponseErrorSchema)
   if (schemas.length === 0) return Schema.Never
   return schemas.length === 1 ? schemas[0] : Schema.Union(schemas)
@@ -943,7 +959,7 @@ function makeErrorSchema(endpoint: HttpApiEndpoint.AnyWithProps): Schema.Encoder
 function toResponseSchema(getStatus: (ast: SchemaAST.AST) => number) {
   const cache = new WeakMap<SchemaAST.AST, Schema.Top>()
 
-  return (schema: Schema.Top): Schema.Encoder<HttpServerResponse, unknown> => {
+  return (schema: Schema.Constraint): Schema.ConstraintEncoder<HttpServerResponse, unknown> => {
     const cached = cache.get(schema.ast)
     if (cached !== undefined) {
       return cached as any
@@ -958,7 +974,7 @@ function toResponseSchema(getStatus: (ast: SchemaAST.AST) => number) {
 
 function getResponseTransformation(
   getStatus: (ast: SchemaAST.AST) => number,
-  schema: Schema.Top
+  schema: Schema.Constraint
 ): SchemaTransformation.Transformation<unknown, Response.HttpServerResponse> {
   const ast = schema.ast
   const encode = getResponseEncode(

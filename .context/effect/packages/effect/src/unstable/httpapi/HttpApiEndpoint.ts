@@ -60,7 +60,7 @@ type SuccessType<S> = S extends HttpApiSchema.StreamSse<
   infer _Value
 > ? Stream.Stream<_Value, _Error["Type"], never>
   : S extends HttpApiSchema.StreamUint8Array ? Stream.Stream<Uint8Array, unknown, never>
-  : S extends Schema.Top ? S["Type"]
+  : S extends Schema.Constraint ? S["Type"]
   : never
 
 type SuccessEncodingServices<S> = S extends HttpApiSchema.StreamSse<
@@ -69,7 +69,7 @@ type SuccessEncodingServices<S> = S extends HttpApiSchema.StreamSse<
   infer _Value
 > ? _Events["EncodingServices"] | _Error["EncodingServices"]
   : S extends HttpApiSchema.StreamUint8Array ? never
-  : S extends Schema.Top ? S["EncodingServices"]
+  : S extends Schema.Constraint ? S["EncodingServices"]
   : never
 
 type SuccessDecodingServices<S> = S extends HttpApiSchema.StreamSse<
@@ -78,10 +78,10 @@ type SuccessDecodingServices<S> = S extends HttpApiSchema.StreamSse<
   infer _Value
 > ? _Events["DecodingServices"] | _Error["DecodingServices"]
   : S extends HttpApiSchema.StreamUint8Array ? never
-  : S extends Schema.Top ? S["DecodingServices"]
+  : S extends Schema.Constraint ? S["DecodingServices"]
   : never
 
-type ExtractSuccessOrArray<S extends SuccessConstraint> = S extends ReadonlyArray<Schema.Top> ? S[number] : S
+type ExtractSuccessOrArray<S extends SuccessConstraint> = S extends ReadonlyArray<Schema.Constraint> ? S[number] : S
 
 type ExtractBufferedSuccess<S extends SuccessConstraint> = Exclude<
   Extract<ExtractSuccessOrArray<S>, Schema.Top>,
@@ -262,8 +262,18 @@ export interface Any extends Pipeable {
  * @category models
  * @since 4.0.0
  */
-export interface AnyWithProps
-  extends HttpApiEndpoint<string, HttpMethod, string, Schema.Top, Schema.Top, Schema.Top, Schema.Top, any, any>
+export interface AnyWithProps extends
+  HttpApiEndpoint<
+    string,
+    HttpMethod,
+    string,
+    Schema.Top,
+    Schema.Top,
+    Schema.Top,
+    Schema.Top,
+    any,
+    any
+  >
 {}
 
 /**
@@ -578,10 +588,10 @@ export type RequestRaw<Endpoint extends Any> = Endpoint extends HttpApiEndpoint<
  * @since 4.0.0
  */
 export type ClientRequest<
-  Params extends Schema.Top,
-  Query extends Schema.Top,
-  Payload extends Schema.Top,
-  Headers extends Schema.Top,
+  Params extends Schema.Constraint,
+  Query extends Schema.Constraint,
+  Payload extends Schema.Constraint,
+  Headers extends Schema.Constraint,
   ResponseMode extends ClientResponseMode
 > = (
   & ([Params["Type"]] extends [never] ? {} : { readonly params: Params["Type"] })
@@ -1027,8 +1037,8 @@ function makeProto<
  * @since 4.0.0
  */
 export type ParamsConstraint =
-  | Record<string, Schema.Encoder<string | undefined, unknown>>
-  | Schema.Encoder<Record<string, string | undefined>, unknown>
+  | Record<string, Schema.Codec<unknown, string | undefined, unknown, unknown>>
+  | Schema.Codec<unknown, Record<string, string | undefined>, unknown, unknown>
 
 /**
  * Constraint for header schemas: each header must encode to `string | undefined`,
@@ -1038,8 +1048,8 @@ export type ParamsConstraint =
  * @since 4.0.0
  */
 export type HeadersConstraint =
-  | Record<string, Schema.Encoder<string | undefined, unknown>>
-  | Schema.Encoder<Record<string, string | undefined>, unknown>
+  | Record<string, Schema.Codec<unknown, string | undefined, unknown, unknown>>
+  | Schema.Codec<unknown, Record<string, string | undefined>, unknown, unknown>
 
 /**
  * Constraint for query schemas: each field must encode to `string`, an array of
@@ -1049,8 +1059,8 @@ export type HeadersConstraint =
  * @since 4.0.0
  */
 export type QueryConstraint =
-  | Record<string, Schema.Encoder<string | ReadonlyArray<string> | undefined, unknown>>
-  | Schema.Encoder<Record<string, string | ReadonlyArray<string> | undefined>, unknown>
+  | Record<string, Schema.Codec<unknown, string | ReadonlyArray<string> | undefined, unknown, unknown>>
+  | Schema.Codec<unknown, string | ReadonlyArray<string> | undefined, unknown, unknown>
 
 /**
  * Payload schema depends on the HTTP method:
@@ -1065,7 +1075,7 @@ export type QueryConstraint =
  */
 export type PayloadConstraint<Method extends HttpMethod> = Method extends HttpMethod.NoBody ? Record<
     string,
-    Schema.Encoder<string | ReadonlyArray<string> | undefined, unknown>
+    Schema.Codec<unknown, string | ReadonlyArray<string> | undefined, unknown, unknown>
   > :
   Schema.Top | ReadonlyArray<Schema.Top>
 
@@ -1101,7 +1111,7 @@ export type ErrorConstraint = Schema.Top | ReadonlyArray<Schema.Top>
 
 type ErrorNoStream<S extends ErrorConstraint> = [
   Extract<
-    S extends ReadonlyArray<Schema.Top> ? S[number] : S,
+    S extends ReadonlyArray<Schema.Constraint> ? S[number] : S,
     HttpApiSchema.StreamSchema
   >
 ] extends [never] ? S : never
@@ -1147,7 +1157,7 @@ export const make = <Method extends HttpMethod>(method: Method): {
       : StringTree<ExtractSchemaOrArray<Payload>>,
     StringTree<Headers extends Schema.Struct.Fields ? Schema.Struct<Headers> : Headers>,
     JsonSuccessOrArray<Success>,
-    Json<Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error>
+    Json<Error extends ReadonlyArray<Schema.Constraint> ? Error[number] : Error>
   >
   <
     const Name extends string,
@@ -1179,7 +1189,7 @@ export const make = <Method extends HttpMethod>(method: Method): {
     ExtractSchemaOrArray<Payload>,
     ExtractSchemaOrArray<Headers>,
     ExtractSuccessOrArray<Success>,
-    Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error
+    Error extends ReadonlyArray<Schema.Constraint> ? Error[number] : Error
   >
 } =>
 <
@@ -1210,11 +1220,11 @@ export const make = <Method extends HttpMethod>(method: Method): {
   Params extends Schema.Struct.Fields ? Schema.Struct<Params> : Params,
   Query extends Schema.Struct.Fields ? Schema.Struct<Query> : Query,
   Payload extends Schema.Struct.Fields ? Schema.Struct<Payload>
-    : Payload extends ReadonlyArray<Schema.Top> ? Payload[number]
+    : Payload extends ReadonlyArray<Schema.Constraint> ? Payload[number]
     : Payload,
   Headers extends Schema.Struct.Fields ? Schema.Struct<Headers> : Headers,
   ExtractSuccessOrArray<Success>,
-  Error extends ReadonlyArray<Schema.Top> ? Error[number] : Error
+  Error extends ReadonlyArray<Schema.Constraint> ? Error[number] : Error
 > => {
   const disableCodecs = options?.disableCodecs ?? false
   const transformStringTree = disableCodecs ? identity : Schema.toCodecStringTree
@@ -1233,10 +1243,10 @@ export const make = <Method extends HttpMethod>(method: Method): {
   })
 }
 
-type ExtractSchemaOrArray<S extends Schema.Struct.Fields | Schema.Top | ReadonlyArray<Schema.Top>> = S extends
-  Schema.Struct.Fields ? Schema.Struct<S>
-  : S extends ReadonlyArray<Schema.Top> ? S[number]
-  : S
+type ExtractSchemaOrArray<S extends Schema.Struct.Fields | Schema.Constraint | ReadonlyArray<Schema.Constraint>> =
+  S extends Schema.Struct.Fields ? Schema.Struct<S>
+    : S extends ReadonlyArray<Schema.Constraint> ? S[number]
+    : S
 
 /**
  * A schema codec that decodes and encodes the schema's value type through JSON
@@ -1245,7 +1255,7 @@ type ExtractSchemaOrArray<S extends Schema.Struct.Fields | Schema.Top | Readonly
  * @category Codecs
  * @since 4.0.0
  */
-export interface Json<S extends Schema.Top>
+export interface Json<S extends Schema.Constraint>
   extends Schema.Codec<S["Type"], Schema.Json, S["DecodingServices"], S["EncodingServices"]>
 {}
 
@@ -1256,7 +1266,7 @@ export interface Json<S extends Schema.Top>
  * @category Codecs
  * @since 4.0.0
  */
-export interface StringTree<S extends Schema.Top> extends
+export interface StringTree<S extends Schema.Constraint> extends
   Schema.Codec<
     S["Type"],
     Schema.StringTree,
@@ -1267,7 +1277,7 @@ export interface StringTree<S extends Schema.Top> extends
 
 function ensureStruct(
   params: Schema.Struct.Fields | Schema.Top | undefined,
-  transform: typeof Schema.toCodecJson | typeof Schema.toCodecStringTree
+  transform: (schema: Schema.Top) => Schema.Top
 ): Schema.Top | undefined {
   if (params === undefined) return undefined
   if (Schema.isSchema(params)) return transform(params)
@@ -1275,12 +1285,14 @@ function ensureStruct(
 }
 
 function getPayload(
-  payload: Schema.Top | ReadonlyArray<Schema.Top> | Schema.Struct.Fields | undefined,
+  payload: Schema.Constraint | ReadonlyArray<Schema.Constraint> | Schema.Struct.Fields | undefined,
   method: HttpMethod,
   disableCodecs: boolean
 ): PayloadMap {
-  const result: Map<string, { encoding: HttpApiSchema.PayloadEncoding; schemas: [Schema.Top, ...Array<Schema.Top>] }> =
-    new Map()
+  const result: Map<
+    string,
+    { encoding: HttpApiSchema.PayloadEncoding; schemas: [Schema.Top, ...Array<Schema.Top>] }
+  > = new Map()
   if (payload === undefined) return result
   const schemas: Array<Schema.Top> = Array.isArray(payload)
     ? payload
@@ -1338,7 +1350,7 @@ function getErrorResponse(
   return new Set(disableCodecs ? schemas : schemas.map(transformResponse))
 }
 
-function validateSuccessResponse(schemas: ReadonlyArray<Schema.Top>, method: HttpMethod) {
+function validateSuccessResponse(schemas: ReadonlyArray<Schema.Constraint>, method: HttpMethod) {
   const statuses = new Map<number, {
     readonly stream?: HttpApiSchema.StreamSchema | undefined
     bufferedContentTypes: Set<string>

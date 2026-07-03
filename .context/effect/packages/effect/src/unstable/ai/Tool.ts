@@ -139,7 +139,7 @@ export interface NeedsApprovalContext {
  * @category models
  * @since 4.0.0
  */
-export type NeedsApprovalFunction<Params extends Schema.Top> = (
+export type NeedsApprovalFunction<Params extends Schema.Constraint> = (
   params: Params["Type"],
   context: NeedsApprovalContext
 ) => boolean | Effect.Effect<boolean>
@@ -156,7 +156,7 @@ export type NeedsApprovalFunction<Params extends Schema.Top> = (
  * @category models
  * @since 4.0.0
  */
-export type NeedsApproval<Params extends Schema.Top> =
+export type NeedsApproval<Params extends Schema.Constraint> =
   | boolean
   | NeedsApprovalFunction<Params>
 
@@ -196,9 +196,9 @@ export type NeedsApproval<Params extends Schema.Top> =
 export interface Tool<
   out Name extends string,
   out Config extends {
-    readonly parameters: Schema.Top
-    readonly success: Schema.Top
-    readonly failure: Schema.Top
+    readonly parameters: Schema.Constraint
+    readonly success: Schema.Constraint
+    readonly failure: Schema.Constraint
     readonly failureMode: FailureMode
   },
   out Requirements = never
@@ -290,7 +290,7 @@ export interface Tool<
   /**
    * Set the schema to use to validate the result of a tool call when successful.
    */
-  setSuccess<SuccessSchema extends Schema.Top>(
+  setSuccess<SuccessSchema extends Schema.Constraint>(
     schema: SuccessSchema
   ): Tool<
     Name,
@@ -306,7 +306,7 @@ export interface Tool<
   /**
    * Set the schema to use to validate the result of a tool call when it fails.
    */
-  setFailure<FailureSchema extends Schema.Top>(
+  setFailure<FailureSchema extends Schema.Constraint>(
     schema: FailureSchema
   ): Tool<
     Name,
@@ -322,7 +322,7 @@ export interface Tool<
   /**
    * Set the schema to use to validate the parameters of a tool call.
    */
-  setParameters<ParametersSchema extends Schema.Top>(
+  setParameters<ParametersSchema extends Schema.Constraint>(
     schema: ParametersSchema
   ): Tool<
     Name,
@@ -387,10 +387,10 @@ export interface ProviderDefined<
   out Identifier extends `${string}.${string}`,
   out Name extends string,
   out Config extends {
-    readonly args: Schema.Top
-    readonly parameters: Schema.Top
-    readonly success: Schema.Top
-    readonly failure: Schema.Top
+    readonly args: Schema.Constraint
+    readonly parameters: Schema.Constraint
+    readonly success: Schema.Constraint
+    readonly failure: Schema.Constraint
     readonly failureMode: FailureMode
   },
   out RequiresHandler extends boolean = false
@@ -481,9 +481,9 @@ export interface ProviderDefined<
 export interface Dynamic<
   out Name extends string,
   out Config extends {
-    readonly parameters: Schema.Top | JsonSchema.JsonSchema
-    readonly success: Schema.Top
-    readonly failure: Schema.Top
+    readonly parameters: Schema.Constraint | JsonSchema.JsonSchema
+    readonly success: Schema.Constraint
+    readonly failure: Schema.Constraint
     readonly failureMode: FailureMode
   },
   out Requirements = never
@@ -491,7 +491,7 @@ export interface Dynamic<
   Tool<
     Name,
     {
-      readonly parameters: Config["parameters"] extends Schema.Top ? Config["parameters"] : typeof Schema.Unknown
+      readonly parameters: Config["parameters"] extends Schema.Constraint ? Config["parameters"] : typeof Schema.Unknown
       readonly success: Config["success"]
       readonly failure: Config["failure"]
       readonly failureMode: Config["failureMode"]
@@ -505,7 +505,7 @@ export interface Dynamic<
    * The raw JSON Schema for parameters. Present when `parameters` was provided
    * as a JSON Schema, `undefined` when an Effect Schema was used.
    */
-  readonly jsonSchema: Config["parameters"] extends Schema.Top ? undefined : JsonSchema.JsonSchema
+  readonly jsonSchema: Config["parameters"] extends Schema.Constraint ? undefined : JsonSchema.JsonSchema
 }
 
 // =============================================================================
@@ -1036,16 +1036,16 @@ const Proto = {
   addDependency(this: Any) {
     return userDefinedProto({ ...this })
   },
-  setParameters(this: Any, parametersSchema: Schema.Top) {
+  setParameters(this: Any, parametersSchema: Schema.Constraint) {
     return userDefinedProto({
       ...this,
       parametersSchema
     })
   },
-  setSuccess(this: Any, successSchema: Schema.Top) {
+  setSuccess(this: Any, successSchema: Schema.Constraint) {
     return userDefinedProto({ ...this, successSchema })
   },
-  setFailure(this: Any, failureSchema: Schema.Top) {
+  setFailure(this: Any, failureSchema: Schema.Constraint) {
     return userDefinedProto({ ...this, failureSchema })
   },
   annotate<I, S>(this: Any, tag: Context.Key<I, S>, value: S) {
@@ -1074,9 +1074,9 @@ const DynamicProto = {
 
 const userDefinedProto = <
   const Name extends string,
-  Parameters extends Schema.Top,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
+  Parameters extends Schema.Constraint,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint,
   Mode extends FailureMode
 >(options: {
   readonly name: Name
@@ -1104,10 +1104,10 @@ const userDefinedProto = <
 const providerDefinedProto = <
   const Identifier extends `${string}.${string}`,
   const Name extends string,
-  Args extends Schema.Top,
-  Parameters extends Schema.Top,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
+  Args extends Schema.Constraint,
+  Parameters extends Schema.Constraint,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint,
   RequiresHandler extends boolean,
   Mode extends FailureMode
 >(options: {
@@ -1136,9 +1136,9 @@ const providerDefinedProto = <
 
 const dynamicProto = <
   const Name extends string,
-  Parameters extends Schema.Top | JsonSchema.JsonSchema,
-  Success extends Schema.Top,
-  Failure extends Schema.Top,
+  Parameters extends Schema.Constraint | JsonSchema.JsonSchema,
+  Success extends Schema.Constraint,
+  Failure extends Schema.Constraint,
   Mode extends FailureMode
 >(options: {
   readonly name: Name
@@ -1194,9 +1194,9 @@ const dynamicProto = <
  */
 export const make = <
   const Name extends string,
-  Parameters extends Schema.Top = typeof EmptyParams,
-  Success extends Schema.Top = typeof Schema.Void,
-  Failure extends Schema.Top = typeof Schema.Never,
+  Parameters extends Schema.Constraint = typeof EmptyParams,
+  Success extends Schema.Constraint = typeof Schema.Void,
+  Failure extends Schema.Constraint = typeof Schema.Never,
   Mode extends FailureMode | undefined = undefined,
   Dependencies extends Array<Context.Key<any, any> | Context.Key<never, any>> = []
 >(name: Name, options?: {
@@ -1317,9 +1317,9 @@ export const dynamic: {
     const Name extends string,
     const Options extends {
       readonly description?: string | undefined
-      readonly parameters?: Schema.Top | JsonSchema.JsonSchema | undefined
-      readonly success?: Schema.Top | undefined
-      readonly failure?: Schema.Top | undefined
+      readonly parameters?: Schema.Constraint | JsonSchema.JsonSchema | undefined
+      readonly success?: Schema.Constraint | undefined
+      readonly failure?: Schema.Constraint | undefined
       readonly failureMode?: FailureMode | undefined
       readonly needsApproval?: NeedsApproval<any> | undefined
     }
@@ -1329,12 +1329,14 @@ export const dynamic: {
   ): Dynamic<
     Name,
     {
-      readonly parameters: Options extends { readonly parameters: infer P } ? P extends Schema.Top ? P
+      readonly parameters: Options extends { readonly parameters: infer P } ? P extends Schema.Constraint ? P
         : P extends JsonSchema.JsonSchema ? P
         : typeof Schema.Unknown
         : typeof Schema.Unknown
-      readonly success: Options extends { readonly success: infer S extends Schema.Top } ? S : typeof Schema.Unknown
-      readonly failure: Options extends { readonly failure: infer F extends Schema.Top } ? F : typeof Schema.Never
+      readonly success: Options extends { readonly success: infer S extends Schema.Constraint } ? S
+        : typeof Schema.Unknown
+      readonly failure: Options extends { readonly failure: infer F extends Schema.Constraint } ? F
+        : typeof Schema.Never
       readonly failureMode: Options extends { readonly failureMode: infer M extends FailureMode } ? M : "error"
     }
   >
@@ -1342,9 +1344,9 @@ export const dynamic: {
   const Name extends string,
   const Options extends {
     readonly description?: string | undefined
-    readonly parameters?: Schema.Top | JsonSchema.JsonSchema | undefined
-    readonly success?: Schema.Top | undefined
-    readonly failure?: Schema.Top | undefined
+    readonly parameters?: Schema.Constraint | JsonSchema.JsonSchema | undefined
+    readonly success?: Schema.Constraint | undefined
+    readonly failure?: Schema.Constraint | undefined
     readonly failureMode?: FailureMode | undefined
     readonly needsApproval?: NeedsApproval<any> | undefined
   }
@@ -1408,10 +1410,10 @@ export const dynamic: {
 export const providerDefined = <
   const Identifier extends `${string}.${string}`,
   const Name extends string,
-  Args extends Schema.Top = typeof Schema.Void,
-  Parameters extends Schema.Top = typeof Schema.Void,
-  Success extends Schema.Top = typeof Schema.Void,
-  Failure extends Schema.Top = typeof Schema.Never,
+  Args extends Schema.Constraint = typeof Schema.Void,
+  Parameters extends Schema.Constraint = typeof Schema.Void,
+  Success extends Schema.Constraint = typeof Schema.Void,
+  Failure extends Schema.Constraint = typeof Schema.Never,
   RequiresHandler extends boolean = false
 >(options: {
   /**
@@ -1664,7 +1666,7 @@ export const getJsonSchema = <Tool extends Any>(tool: Tool, options?: {
  * @category converting
  * @since 4.0.0
  */
-export const getJsonSchemaFromSchema = <S extends Schema.Top>(schema: S, options?: {
+export const getJsonSchemaFromSchema = <S extends Schema.Constraint>(schema: S, options?: {
   readonly transformer?: CodecTransformer
 }): JsonSchema.JsonSchema => {
   if (Predicate.isNotUndefined(options?.transformer)) {

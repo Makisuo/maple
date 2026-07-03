@@ -3,7 +3,7 @@ import { FastCheck, TestSchema } from "effect/testing"
 import { describe, it } from "vitest"
 import { assertInclude, assertInstanceOf, deepStrictEqual, strictEqual, throws } from "../utils/assert.ts"
 
-function assertUnsupportedSchema(schema: Schema.Top, message: string) {
+function assertUnsupportedSchema(schema: Schema.Constraint, message: string) {
   throws(() => Schema.toArbitrary(schema), message)
 }
 
@@ -18,11 +18,11 @@ function verifyGeneration<S extends Schema.Codec<unknown, unknown, never, unknow
 
 // Guard for "fast but wrong" regressions: samples the derived arbitrary and
 // asserts an output invariant (length/size/property-count bounds) over many runs.
-function assertInvariant(schema: Schema.Top, predicate: (value: any) => boolean, numRuns = 200) {
+function assertInvariant(schema: Schema.Constraint, predicate: (value: any) => boolean, numRuns = 200) {
   FastCheck.assert(FastCheck.property(Schema.toArbitrary(schema), predicate), { numRuns })
 }
 
-function assertRecursiveNoFiniteGenerationPath(schema: Schema.Top) {
+function assertRecursiveNoFiniteGenerationPath(schema: Schema.Constraint) {
   throws(
     () => Schema.toArbitrary(schema),
     (e) => {
@@ -46,7 +46,7 @@ function minSizeOne<A>(size: (a: A) => number) {
   })
 }
 
-function CustomArray<A extends Schema.Top>(
+function CustomArray<A extends Schema.Constraint>(
   value: A,
   toArbitrary: Schema.Annotations.ToArbitrary.Declaration<ReadonlyArray<A["Type"]>, readonly [A]>
 ) {
@@ -129,7 +129,7 @@ describe("Arbitrary generation", () => {
   })
 
   it("should pass the constraint to the override annotation", () => {
-    let constraint: Schema.Annotations.ToArbitrary.Constraint | undefined
+    let constraint: Schema.Annotations.ToArbitrary.GenerationConstraint | undefined
     const schema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })).annotate({
       toArbitrary: () => (fc, ctx) => {
         constraint = ctx.constraint
@@ -187,7 +187,7 @@ describe("Arbitrary generation", () => {
 
   describe("report and candidates", () => {
     it("should use filter candidates with the merged constraint context", () => {
-      let constraint: Schema.Annotations.ToArbitrary.Constraint | undefined
+      let constraint: Schema.Annotations.ToArbitrary.GenerationConstraint | undefined
       const schema = Schema.String.check(
         Schema.isMinLength(9),
         Schema.makeFilter((s: string) => s === "candidate", {

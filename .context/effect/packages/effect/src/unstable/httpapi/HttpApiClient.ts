@@ -80,7 +80,7 @@ type SuccessType<S> = S extends HttpApiSchema.StreamSse<
     never
   >
   : S extends HttpApiSchema.StreamUint8Array ? Stream.Stream<Uint8Array, HttpClientError.HttpClientError, never>
-  : S extends Schema.Top ? S["Type"]
+  : S extends Schema.Constraint ? S["Type"]
   : never
 
 type SuccessDecodingServices<S> = S extends HttpApiSchema.StreamSse<
@@ -91,7 +91,7 @@ type SuccessDecodingServices<S> = S extends HttpApiSchema.StreamSse<
     | _Events["DecodingServices"]
     | _Error["DecodingServices"]
   : S extends HttpApiSchema.StreamUint8Array ? never
-  : S extends Schema.Top ? S["DecodingServices"]
+  : S extends Schema.Constraint ? S["DecodingServices"]
   : never
 
 /**
@@ -636,10 +636,10 @@ export const urlBuilder = <Api extends HttpApi.Any>(api: Api, options?: {
       const makeUrl = compilePath(endpoint.path)
       const encodeParams = endpoint.params === undefined
         ? undefined
-        : Schema.encodeSync(endpoint.params as Schema.Encoder<unknown>)
+        : Schema.encodeSync(endpoint.params as Schema.Codec<unknown, unknown>)
       const encodeQuery = endpoint.query === undefined
         ? undefined
-        : Schema.encodeSync(endpoint.query as Schema.Encoder<unknown>)
+        : Schema.encodeSync(endpoint.query as Schema.Codec<unknown, unknown>)
 
       const endpointBuilder = (request?: {
         readonly params?: unknown
@@ -687,7 +687,7 @@ const compilePath = (path: string) => {
   }
 }
 
-function schemasToResponse(schemas: readonly [Schema.Top, ...Array<Schema.Top>]) {
+function schemasToResponse(schemas: readonly [Schema.Constraint, ...Array<Schema.Constraint>]) {
   const codec = toCodecArrayBuffer(schemas)
   const decode = Schema.decodeEffect(codec)
   return (response: HttpClientResponse.HttpClientResponse) => Effect.flatMap(response.arrayBuffer, decode)
@@ -795,7 +795,7 @@ function streamToResponse(streamSchema: HttpApiSchema.StreamSchema) {
 
 function decodeSseStream(
   stream: Stream.Stream<Uint8Array, HttpClientError.HttpClientError>,
-  declaration: HttpApiSchema.StreamSse<Sse.EventCodec, Schema.Top, unknown>
+  declaration: HttpApiSchema.StreamSse<Sse.EventCodec, Schema.Constraint, unknown>
 ): Stream.Stream<unknown, unknown, unknown> {
   const Event = Schema.Union([
     declaration.events,
@@ -893,10 +893,10 @@ const UnknownFromArrayBuffer = StringFromArrayBuffer.pipe(Schema.decodeTo(
   ])
 ))
 
-function toCodecArrayBuffer(schemas: readonly [Schema.Top, ...Array<Schema.Top>]): Schema.Top {
+function toCodecArrayBuffer(schemas: readonly [Schema.Constraint, ...Array<Schema.Constraint>]): Schema.Top {
   return Schema.Union(schemas.map(onSchema))
 
-  function onSchema(schema: Schema.Top) {
+  function onSchema(schema: Schema.Constraint) {
     const encoding = HttpApiSchema.getResponseEncoding(schema.ast)
     switch (encoding._tag) {
       case "Json": {
@@ -938,7 +938,7 @@ const statusOrElse = (response: HttpClientResponse.HttpClientResponse) =>
 const $HttpBody = Schema.declare(HttpBody.isHttpBody)
 
 function getEncodePayloadSchema(
-  schemas: readonly [Schema.Top, ...Array<Schema.Top>],
+  schemas: readonly [Schema.Constraint, ...Array<Schema.Constraint>],
   method: HttpMethod.HttpMethod
 ): Schema.Top {
   return Schema.Union(schemas.map((s) => getEncodePayloadSchemaFromBody(s, method)))
@@ -947,7 +947,7 @@ function getEncodePayloadSchema(
 const bodyFromPayloadCache = new WeakMap<SchemaAST.AST, Schema.Top>()
 
 function getEncodePayloadSchemaFromBody(
-  schema: Schema.Top,
+  schema: Schema.Constraint,
   method: HttpMethod.HttpMethod
 ): Schema.Top {
   const ast = schema.ast

@@ -1,0 +1,99 @@
+{
+  "suites": [
+    {
+      "name": "schema",
+      "baseline": "suites/schema/baseline.ts",
+      "thresholds": "suites/schema/thresholds.json",
+      "fixtures": [
+        {
+          "name": "struct-required",
+          "file": "suites/schema/fixtures/struct-required.ts"
+        },
+        {
+          "name": "struct-optional-only",
+          "file": "suites/schema/fixtures/struct-optional-only.ts"
+        },
+        {
+          "name": "struct-mutable-only",
+          "file": "suites/schema/fixtures/struct-mutable-only.ts"
+        },
+        {
+          "name": "struct-mixed",
+          "file": "suites/schema/fixtures/struct-mixed.ts"
+        },
+        {
+          "name": "union",
+          "file": "suites/schema/fixtures/union.ts"
+        },
+        {
+          "name": "tagged-union",
+          "file": "suites/schema/fixtures/tagged-union.ts"
+        },
+        {
+          "name": "record",
+          "file": "suites/schema/fixtures/record.ts"
+        },
+        {
+          "name": "struct-with-rest",
+          "file": "suites/schema/fixtures/struct-with-rest.ts"
+        },
+        {
+          "name": "tuple",
+          "file": "suites/schema/fixtures/tuple.ts"
+        },
+        {
+          "name": "tuple-with-rest",
+          "file": "suites/schema/fixtures/tuple-with-rest.ts"
+        },
+        {
+          "name": "array",
+          "file": "suites/schema/fixtures/array.ts"
+        },
+        {
+          "name": "non-empty-array",
+          "file": "suites/schema/fixtures/non-empty-array.ts"
+        },
+        {
+          "name": "to-type",
+          "file": "suites/schema/fixtures/to-type.ts"
+        },
+        {
+          "name": "to-encoded",
+          "file": "suites/schema/fixtures/to-encoded.ts"
+        },
+        {
+          "name": "to-codec-json",
+          "file": "suites/schema/fixtures/to-codec-json.ts"
+        },
+        {
+          "name": "to-codec-string-tree",
+          "file": "suites/schema/fixtures/to-codec-string-tree.ts"
+        },
+        {
+          "name": "to-codec-array-from-single",
+          "file": "suites/schema/fixtures/to-codec-array-from-single.ts"
+        },
+        {
+          "name": "brand",
+          "file": "suites/schema/fixtures/brand.ts"
+        },
+        {
+          "name": "decode-unknown-effect",
+          "file": "suites/schema/fixtures/decode-unknown-effect.ts"
+        },
+        {
+          "name": "encode-unknown-effect",
+          "file": "suites/schema/fixtures/encode-unknown-effect.ts"
+        },
+        {
+          "name": "to-standard-json-schema",
+          "file": "suites/schema/fixtures/to-standard-json-schema.ts"
+        },
+        {
+          "name": "exit",
+          "file": "suites/schema/fixtures/exit.ts"
+        }
+      ]
+    }
+  ]
+}

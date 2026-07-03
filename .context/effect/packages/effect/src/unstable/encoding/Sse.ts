@@ -137,7 +137,7 @@ export const decodeSchema = <
  * @since 4.0.0
  */
 export const decodeDataSchema = <Type, DecodingServices, IE, Done>(
-  schema: Schema.Decoder<Type, DecodingServices>
+  schema: Schema.ConstraintDecoder<Type, DecodingServices>
 ): Channel.Channel<
   NonEmptyReadonlyArray<{
     readonly event: string

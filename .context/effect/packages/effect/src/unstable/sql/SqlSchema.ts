@@ -30,7 +30,7 @@ import * as Schema from "../../Schema.ts"
  * @category constructors
  * @since 4.0.0
  */
-export const findAll = <Req extends Schema.Top, Res extends Schema.Top, E, R>(
+export const findAll = <Req extends Schema.Constraint, Res extends Schema.Constraint, E, R>(
   options: {
     readonly Request: Req
     readonly Result: Res
@@ -62,7 +62,7 @@ export const findAll = <Req extends Schema.Top, Res extends Schema.Top, E, R>(
  * @category constructors
  * @since 4.0.0
  */
-export const findNonEmpty = <Req extends Schema.Top, Res extends Schema.Top, E, R>(
+export const findNonEmpty = <Req extends Schema.Constraint, Res extends Schema.Constraint, E, R>(
   options: {
     readonly Request: Req
     readonly Result: Res
@@ -83,7 +83,7 @@ export const findNonEmpty = <Req extends Schema.Top, Res extends Schema.Top, E, 
         : Effect.fail(new Cause.NoSuchElementError()))
 }
 
-const void_ = <Req extends Schema.Top, E, R>(
+const void_ = <Req extends Schema.Constraint, E, R>(
   options: {
     readonly Request: Req
     readonly execute: (request: Req["Encoded"]) => Effect.Effect<unknown, E, R>
@@ -112,7 +112,7 @@ export {
  * @category constructors
  * @since 4.0.0
  */
-export const findOne = <Req extends Schema.Top, Res extends Schema.Top, E, R>(
+export const findOne = <Req extends Schema.Constraint, Res extends Schema.Constraint, E, R>(
   options: {
     readonly Request: Req
     readonly Result: Res
@@ -145,7 +145,7 @@ export const findOne = <Req extends Schema.Top, Res extends Schema.Top, E, R>(
  * @category constructors
  * @since 4.0.0
  */
-export const findOneOption = <Req extends Schema.Top, Res extends Schema.Top, E, R>(
+export const findOneOption = <Req extends Schema.Constraint, Res extends Schema.Constraint, E, R>(
   options: {
     readonly Request: Req
     readonly Result: Res

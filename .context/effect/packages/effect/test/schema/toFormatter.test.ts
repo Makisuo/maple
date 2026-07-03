@@ -558,7 +558,7 @@ describe("toFormatter", () => {
   })
 
   it("should allow for ast-level overrides", () => {
-    const toFormatter = <S extends Schema.Top>(schema: S) =>
+    const toFormatter = <S extends Schema.Constraint>(schema: S) =>
       Schema.toFormatter(schema, {
         onBefore: (ast) => {
           if (ast._tag === "Boolean") {

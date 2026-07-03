@@ -240,6 +240,9 @@ export const make = (
       executeValues(sql: string, params: ReadonlyArray<unknown>) {
         return Effect.map(this.run(sql, params), (rows) => rows.map((row) => Array.from(row) as Array<any>))
       }
+      executeValuesUnprepared(sql: string, params: ReadonlyArray<unknown>) {
+        return this.executeValues(sql, params)
+      }
       executeUnprepared(
         sql: string,
         params: ReadonlyArray<unknown>,

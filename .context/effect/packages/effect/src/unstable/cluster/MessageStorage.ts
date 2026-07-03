@@ -1061,7 +1061,7 @@ export const layerMemory: Layer.Layer<
 
 const EnvelopeWithReply: Schema.Struct<
   {
-    readonly envelope: Schema.Decoder<Envelope.PartialRequest | Envelope.AckChunk | Envelope.Interrupt>
+    readonly envelope: Schema.ConstraintDecoder<Envelope.PartialRequest | Envelope.AckChunk | Envelope.Interrupt>
     readonly lastSentReply: Schema.Option<Schema.Codec<Reply.Encoded>>
   }
 > = Schema.Struct({

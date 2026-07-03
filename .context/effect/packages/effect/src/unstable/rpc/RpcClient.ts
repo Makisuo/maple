@@ -43,7 +43,7 @@ import * as Rpc from "./Rpc.ts"
 import { RpcClientDefect, RpcClientError } from "./RpcClientError.ts"
 import type * as RpcGroup from "./RpcGroup.ts"
 import type { FromClient, FromClientEncoded, FromServer, FromServerEncoded, Request } from "./RpcMessage.ts"
-import { constPing, RequestId } from "./RpcMessage.ts"
+import { constPing, isTerminalResponse, RequestId } from "./RpcMessage.ts"
 import type * as RpcMiddleware from "./RpcMiddleware.ts"
 import * as RpcSchema from "./RpcSchema.ts"
 import * as RpcSerialization from "./RpcSerialization.ts"
@@ -887,6 +887,8 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
       })
     const emptyResponseError = (request: FromClientEncoded) =>
       protocolDefect("Received empty HTTP response from RPC server", request)
+    const incompleteResponseError = (request: FromClientEncoded) =>
+      protocolDefect("HTTP response ended before RPC request completed", request)
 
     const send = Effect.fnUntraced(function*(clientId: number, request: FromClientEncoded) {
       if (request._tag !== "Request") {
@@ -914,15 +916,27 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
         if (responses.length === 0) {
           return yield* emptyResponseError(request)
         }
+        let completed = false
         let i = 0
-        return yield* Effect.whileLoop({
+        yield* Effect.whileLoop({
           while: () => i < responses.length,
-          body: () => writeResponse(clientId, responses[i++]),
+          body: () => {
+            const response = responses[i++]
+            if (isTerminalResponse(response)) {
+              completed = true
+            }
+            return writeResponse(clientId, response)
+          },
           step: constVoid
         })
+        if (!completed) {
+          return yield* incompleteResponseError(request)
+        }
+        return
       }
 
       let hasResponse = false
+      let completed = false
       yield* Stream.runForEachArray(response.stream, (chunk) =>
         Effect.try({
           try: () => chunk.flatMap(parser.decode) as Array<FromServerEncoded>,
@@ -934,7 +948,13 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
             let i = 0
             return Effect.whileLoop({
               while: () => i < responses.length,
-              body: () => writeResponse(clientId, responses[i++]),
+              body: () => {
+                const response = responses[i++]
+                if (isTerminalResponse(response)) {
+                  completed = true
+                }
+                return writeResponse(clientId, response)
+              },
               step: constVoid
             })
           })
@@ -943,6 +963,8 @@ export const makeProtocolHttp = (client: HttpClient.HttpClient): Effect.Effect<
         )
       if (!hasResponse) {
         return yield* emptyResponseError(request)
+      } else if (!completed) {
+        return yield* incompleteResponseError(request)
       }
     })
 

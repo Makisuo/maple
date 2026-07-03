@@ -376,6 +376,60 @@ describe("Config", () => {
   at ["a"]`
         )
       })
+
+      it("array", async () => {
+        const config = Config.schema(Schema.Array(Schema.String), "a").pipe(Config.withDefault(["default"]))
+
+        await assertSuccess(config, ConfigProvider.fromEnv({ env: { a: "value" } }), ["value"])
+        await assertSuccess(config, ConfigProvider.fromEnv({ env: { a: "" } }), [])
+        await assertSuccess(config, ConfigProvider.fromEnv({ env: {} }), ["default"])
+      })
+
+      it("schema containers", async () => {
+        const provider = ConfigProvider.fromEnv({ env: {} })
+
+        await assertSuccess(
+          Config.schema(Schema.Struct({ value: Schema.String }), "a").pipe(Config.withDefault({ value: "default" })),
+          provider,
+          { value: "default" }
+        )
+        await assertSuccess(
+          Config.schema(Schema.Struct({ value: Schema.optionalKey(Schema.String) }), "a").pipe(
+            Config.withDefault({ value: "default" })
+          ),
+          provider,
+          { value: "default" }
+        )
+        await assertSuccess(
+          Config.schema(Schema.Struct({}), "a").pipe(Config.withDefault({ value: "default" })),
+          provider,
+          { value: "default" }
+        )
+        await assertSuccess(
+          Config.schema(Schema.Record(Schema.String, Schema.String), "a").pipe(
+            Config.withDefault({ value: "default" })
+          ),
+          provider,
+          { value: "default" }
+        )
+        await assertSuccess(
+          Config.schema(Schema.Tuple([Schema.String]), "a").pipe(Config.withDefault(["default"])),
+          provider,
+          ["default"]
+        )
+        await assertSuccess(
+          Config.schema(Schema.ReadonlySet(Schema.String), "a").pipe(Config.withDefault(new Set(["default"]))),
+          provider,
+          new Set(["default"])
+        )
+        await assertSuccess(
+          Config.schema(Schema.ReadonlyMap(Schema.String, Schema.String), "a").pipe(
+            Config.withDefault(new Map([["default", "value"]]))
+          ),
+          provider,
+          new Map([["default", "value"]])
+        )
+      })
     })
 
     describe("option", () => {
@@ -930,6 +984,12 @@ Expected "Infinity" | "-Infinity" | "NaN", got "abc"
         await assertSuccess(config, ConfigProvider.fromEnv({ env: { a_0: "1" } }), { a: [1] })
         await assertSuccess(config, ConfigProvider.fromEnv({ env: { a_0: "1", a_1: "2" } }), { a: [1, 2] })
         await assertSuccess(config, ConfigProvider.fromEnv({ env: { a: "1", a_0: "2" } }), { a: [1] })
+        await assertFailure(
+          config,
+          ConfigProvider.fromEnv({ env: {} }),
+          `Missing key
+  at ["a"]`
+        )
       })
     })
 

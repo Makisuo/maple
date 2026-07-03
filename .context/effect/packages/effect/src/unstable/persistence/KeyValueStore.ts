@@ -681,7 +681,7 @@ const SchemaStoreTypeId = "~effect/persistence/KeyValueStore/SchemaStore" as con
  * @category SchemaStore
  * @since 4.0.0
  */
-export interface SchemaStore<S extends Schema.Top> {
+export interface SchemaStore<S extends Schema.Constraint> {
   readonly [SchemaStoreTypeId]: typeof SchemaStoreTypeId
   /**
    * Returns the value of the specified key if it exists.
@@ -742,7 +742,7 @@ export interface SchemaStore<S extends Schema.Top> {
  * @category SchemaStore
  * @since 4.0.0
  */
-export const toSchemaStore = <S extends Schema.Top>(self: KeyValueStore, schema: S): SchemaStore<S> => {
+export const toSchemaStore = <S extends Schema.Constraint>(self: KeyValueStore, schema: S): SchemaStore<S> => {
   const serializer = Schema.toCodecJson(schema)
   const jsonSchema = Schema.fromJsonString(serializer)
   const decode = Schema.decodeEffect(jsonSchema)

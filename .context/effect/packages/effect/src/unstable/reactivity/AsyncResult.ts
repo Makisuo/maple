@@ -923,8 +923,8 @@ class BuilderImpl<Out, A, E> {
  * @since 4.0.0
  */
 export interface Schema<
-  Success extends Schema_.Top,
-  Error extends Schema_.Top
+  Success extends Schema_.Constraint,
+  Error extends Schema_.Constraint
 > extends
   Schema_.declareConstructor<
     AsyncResult<Success["Type"], Error["Type"]>,
@@ -943,8 +943,8 @@ export interface Schema<
  * @since 4.0.0
  */
 export const Schema = <
-  A extends Schema_.Top = Schema_.Never,
-  E extends Schema_.Top = Schema_.Never
+  A extends Schema_.Constraint = Schema_.Never,
+  E extends Schema_.Constraint = Schema_.Never
 >(
   options: {
     readonly success?: A | undefined

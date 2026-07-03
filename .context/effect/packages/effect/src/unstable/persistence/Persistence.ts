@@ -67,28 +67,28 @@ export class Persistence extends Context.Service<Persistence, {
  * @since 4.0.0
  */
 export interface PersistenceStore {
-  readonly get: <A extends Schema.Top, E extends Schema.Top>(
+  readonly get: <A extends Schema.Constraint, E extends Schema.Constraint>(
     key: Persistable.Persistable<A, E>
   ) => Effect.Effect<
     Exit.Exit<A["Type"], E["Type"]> | undefined,
     PersistenceError | Schema.SchemaError,
     A["DecodingServices"] | E["DecodingServices"]
   >
-  readonly getMany: <A extends Schema.Top, E extends Schema.Top>(
+  readonly getMany: <A extends Schema.Constraint, E extends Schema.Constraint>(
     keys: Iterable<Persistable.Persistable<A, E>>
   ) => Effect.Effect<
     Array<Exit.Exit<A["Type"], E["Type"]> | undefined>,
     PersistenceError | Schema.SchemaError,
     A["DecodingServices"] | E["DecodingServices"]
   >
-  readonly set: <A extends Schema.Top, E extends Schema.Top>(
+  readonly set: <A extends Schema.Constraint, E extends Schema.Constraint>(
     key: Persistable.Persistable<A, E>,
     value: Exit.Exit<A["Type"], E["Type"]>
   ) => Effect.Effect<void, PersistenceError | Schema.SchemaError, A["EncodingServices"] | E["EncodingServices"]>
-  readonly setMany: <A extends Schema.Top, E extends Schema.Top>(
+  readonly setMany: <A extends Schema.Constraint, E extends Schema.Constraint>(
     entries: Iterable<readonly [Persistable.Persistable<A, E>, Exit.Exit<A["Type"], E["Type"]>]>
   ) => Effect.Effect<void, PersistenceError | Schema.SchemaError, A["EncodingServices"] | E["EncodingServices"]>
-  readonly remove: <A extends Schema.Top, E extends Schema.Top>(
+  readonly remove: <A extends Schema.Constraint, E extends Schema.Constraint>(
     key: Persistable.Persistable<A, E>
   ) => Effect.Effect<void, PersistenceError>
   readonly clear: Effect.Effect<void, PersistenceError>

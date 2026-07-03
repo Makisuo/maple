@@ -13,7 +13,7 @@ import type { InstrumentDescriptor } from "@opentelemetry/sdk-metrics/build/src/
 import * as Arr from "effect/Array"
 import type * as Context from "effect/Context"
 import * as Metric from "effect/Metric"
-import type * as Metrics from "../Metrics.ts"
+import type * as Metrics from "../OtelMetrics.ts"
 
 const sdkName = "@effect/opentelemetry/Metrics"
 

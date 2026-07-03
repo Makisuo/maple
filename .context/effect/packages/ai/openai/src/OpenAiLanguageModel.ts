@@ -2890,13 +2890,13 @@ const unsupportedSchemaError = (error: unknown, method: string): AiError.AiError
     })
   })
 
-const tryCodecTransform = <S extends Schema.Top>(schema: S, method: string) =>
+const tryCodecTransform = <S extends Schema.Constraint>(schema: S, method: string) =>
   Effect.try({
     try: () => toCodecOpenAI(schema),
     catch: (error) => unsupportedSchemaError(error, method)
   })
 
-const tryJsonSchema = <S extends Schema.Top>(schema: S, method: string) =>
+const tryJsonSchema = <S extends Schema.Constraint>(schema: S, method: string) =>
   Effect.try({
     try: () => Tool.getJsonSchemaFromSchema(schema, { transformer: toCodecOpenAI }),
     catch: (error) => unsupportedSchemaError(error, method)
