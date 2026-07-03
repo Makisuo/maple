@@ -214,6 +214,19 @@ UNIQUE_SCOPES="$(jq -r '[.results[].sample | {checkpointId, checkpointManifestFi
 [[ "$UNIQUE_SCOPES" -eq 1 ]] || fail "training scopes bind to more than one checkpoint/range ($UNIQUE_SCOPES)"
 echo "  sample scopes verified: training=$TRAINING_ROWS held-out=$HELD_OUT_ROWS (larger, disjoint, single source)"
 
+# --- Step 4c: assert per-signal like-for-like held-out comparison evidence ---
+# heldOut.signalComparisons must have exactly six entries in canonical signal
+# order, each with its own scaleRatio and six metric comparisons, and every
+# signal must pass (the attempt was selected).
+SIGNAL_COUNT="$(jq '[.heldOut.signalComparisons[]] | length' "$CFG")"
+[[ "$SIGNAL_COUNT" -eq 6 ]] || fail "heldOut.signalComparisons has $SIGNAL_COUNT entries (expected 6)"
+SIGNAL_ORDER="$(jq -r '[.heldOut.signalComparisons[].signal] | join(",")' "$CFG")"
+[[ "$SIGNAL_ORDER" == "logs,traces,metrics_sum,metrics_gauge,metrics_histogram,metrics_exponential_histogram" ]] \
+	|| fail "heldOut.signalComparisons is not in canonical six-signal order: $SIGNAL_ORDER"
+BAD_SIGNAL_ENTRY="$(jq -r '[.heldOut.signalComparisons[] | select((.scaleRatio // 0) <= 0 or (.comparisons | length) != 6 or .passed != true)] | length' "$CFG")"
+[[ "$BAD_SIGNAL_ENTRY" -eq 0 ]] || fail "$BAD_SIGNAL_ENTRY heldOut.signalComparisons entry/entries have a bad ratio/comparison-count/passed"
+echo "  per-signal comparisons verified: $SIGNAL_COUNT signals, canonical order, each scaled by its own ratio"
+
 # --- Step 5: run a LIKE-FOR-LIKE calibrate-run trial on held-out data ---
 # The trial runs the SAME export-sample operation the calibration measured
 # (through the same shared writer), on DISJOINT held-out rows (--start-row), with

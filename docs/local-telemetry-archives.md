@@ -412,12 +412,14 @@ two windows are disjoint, and that actual `rowCount` equals `requestedRows`
 (`N` for training and `2N` for held-out). A short source window is
 unrepresentative and cannot produce a loadable recommendation.
 
-`heldOut` and every complete `heldOutAttempts` entry persist
-`trainingLogicalBytes`, `heldOutLogicalBytes`, `scaleRatio`, the raw worst-case
-metrics, and six comparison records. Each comparison records the adjusted
-prediction, observation, tolerance, relative delta, and pass/fail result. The
+`heldOut` and every complete `heldOutAttempts` entry persist a descriptive
+aggregate `worstCase` plus a `signalComparisons` array — one entry per signal in
+canonical order. Each entry carries its own `scaleRatio`, six metric comparison
+records (adjusted prediction, observation, tolerance, relative delta, pass/fail),
+and a per-signal `passed` flag; raw metrics are not duplicated (the loader
+re-derives them from the training/held-out results by candidate + signal). The
 loader recomputes these values; the document cannot choose its own ratio,
-prediction, or tolerance.
+prediction, tolerance, or signal pairing.
 
 `environment.archiveVolume` records `{ fsid, type, archiveDir }` so a config is
 bound to the volume it was measured on, and `archive create --config` enforces
@@ -513,10 +515,15 @@ held-out covers `[sampleRows, sampleRows + 2*sampleRows)`, equivalently
 windows and observed cardinalities are recorded in every result's `sample`
 scope and in `samplePolicy`; the loader requires actual `N`/`2N` rows.
 
-The comparison persists raw logical-byte totals and
-`scaleRatio = heldOutLogicalBytes / trainingLogicalBytes`. It adjusts only the
-size-proportional predictions before applying the fixed canonical tolerances
-(`< 1.0` for every metric):
+The comparison is **per-signal and like-for-like**: each signal's held-out
+result is paired with the same candidate's TRAINING result for that signal, and
+the comparison uses that signal's own
+`scaleRatio = heldOut.logicalBytes / training.logicalBytes`. Cross-signal
+aggregate extrema never decide acceptance (they are recorded only as a
+descriptive `worstCase` summary). Each signal's entry in `signalComparisons`
+records its own `scaleRatio`, its six metric comparisons, and a per-signal
+`passed` flag. The attempt passes only when **all six signals** pass. The fixed
+canonical tolerances (`< 1.0` for every metric) apply per metric, per signal:
 
 | Metric                       | Comparison                                    |
 | ---------------------------- | --------------------------------------------- |
@@ -528,10 +535,17 @@ size-proportional predictions before applying the fixed canonical tolerances
 | `peakTempDiskBytes`          | absolute peak, two-sided                      |
 
 The loader rejects document-selected tolerances and independently recomputes
-the ratio, adjusted predictions, relative deltas, and pass result.
+each signal's ratio, adjusted predictions, relative deltas, and per-signal pass
+result by re-pairing the recorded training and held-out results by exact
+candidate + signal identity. Training and held-out `logicalBytes` must both be
+strictly positive for every paired signal (an undefined ratio makes the attempt
+incomplete, never silently ratio 1).
 
-A candidate that fails held-out is **rejected** and the next eligible candidate
-is tried; every attempt (passing or rejected) is recorded in `heldOutAttempts`.
+A candidate that fails held-out (any signal fails) is **rejected** and the next
+eligible candidate is tried; every attempt is recorded in `heldOutAttempts`. A
+complete attempt records six `signalComparisons` entries (even when it fails);
+an incomplete or over-budget attempt records `signalComparisons: []`,
+`worstCase: null`, `passed: false`.
 
 ### When calibration does not recommend
 

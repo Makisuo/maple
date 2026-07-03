@@ -33,7 +33,7 @@ import {
 	HELD_OUT_TOLERANCES,
 	isSameCalibrationCandidate,
 	heldOutSampleRows,
-	comparePredictedObserved,
+	compareHeldOutPerSignal,
 } from "../server/archives/calibrate"
 import {
 	preflightCalibrationFreeSpace,
@@ -1099,7 +1099,9 @@ const runBoundCalibrationMatrix = async (
 				)
 				heldOutResults.push(result)
 			}
-			// Require complete six-signal held-out evidence (not an empty array).
+			// Require complete six-signal held-out evidence: every result within
+			// ceilings AND observing exactly heldOutSampleRows rows (a larger
+			// request is not a larger observed sample).
 			const heldOutComplete =
 				heldOutResults.length === requiredSignals.length &&
 				heldOutResults.every(
@@ -1113,56 +1115,57 @@ const runBoundCalibrationMatrix = async (
 					budget,
 					requiredSignals,
 				)[0]!.worstCase
-				// The held-out sample is larger than training, so absolute
-				// size-proportional metrics (wallMs, physicalBytes) are rescaled
-				// by the logical-bytes ratio before the two-sided check; throughput
-				// and compressionRatio are size-invariant rates compared directly;
-				// peak RSS and peak temp disk are absolute peaks. Peaks are NOT
-				// scaled by row count.
-				const trainingLogicalBytes = cand.worstCase.logicalBytes
-				const heldOutLogicalBytes = heldWorst.logicalBytes
-				const scaleRatio = trainingLogicalBytes > 0 ? heldOutLogicalBytes / trainingLogicalBytes : 1
-				const comparison = comparePredictedObserved(cand.worstCase, heldWorst, HELD_OUT_TOLERANCES, {
-					ratio: scaleRatio,
-					metrics: new Set(["wallMs", "physicalBytes"]),
-				})
+				// PER-SIGNAL, like-for-like hybrid comparison: each signal's held-out
+				// result is paired with the same candidate's TRAINING result for that
+				// signal, and wallMs/physicalBytes are scaled by THAT signal's own
+				// heldOut/training logical-byte ratio. Aggregate extrema never decide
+				// acceptance; heldWorst is a descriptive summary only.
+				const perSignal = compareHeldOutPerSignal(
+					allResults,
+					heldOutResults,
+					requiredSignals,
+					cand.candidate,
+					HELD_OUT_TOLERANCES,
+				)
+				if (perSignal === null) {
+					// Unpairable or non-positive logical bytes: treat as incomplete.
+					heldOutAttempts.push({
+						candidate: cand.candidate,
+						results: heldOutResults,
+						worstCase: null,
+						signalComparisons: [],
+						passed: false,
+					})
+					continue
+				}
 				heldOutAttempts.push({
 					candidate: cand.candidate,
 					results: heldOutResults,
 					worstCase: heldWorst,
-					comparisons: comparison.comparisons,
-					passed: comparison.passed,
-					scaleRatio,
-					trainingLogicalBytes,
-					heldOutLogicalBytes,
+					signalComparisons: perSignal.signalComparisons,
+					passed: perSignal.passed,
 				})
-				if (!comparison.passed) continue
+				if (!perSignal.passed) continue
 				selected = cand
 				selectedHeldOut = {
 					results: heldOutResults,
 					worstCase: heldWorst,
-					comparisons: comparison.comparisons,
+					signalComparisons: perSignal.signalComparisons,
 					passed: true,
 					tolerances: HELD_OUT_TOLERANCES,
-					scaleRatio,
-					trainingLogicalBytes,
-					heldOutLogicalBytes,
 				}
 				note =
 					`selected the lowest-worst-case-peak-RSS candidate that met every ceiling ` +
-					`on the disjoint held-out window across all six signals`
+					`on the disjoint held-out window across all six signals (per-signal comparison)`
 				break
 			}
 			heldOutAttempts.push({
 				candidate: cand.candidate,
 				results: heldOutResults,
 				worstCase: null,
-				comparisons: [],
+				// Incomplete/over-budget/short-window attempt: no comparisons ran.
+				signalComparisons: [],
 				passed: false,
-				// No complete held-out measurement: no size-scaling was applied.
-				scaleRatio: 0,
-				trainingLogicalBytes: 0,
-				heldOutLogicalBytes: 0,
 			})
 		}
 		if (selected === null) {

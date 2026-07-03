@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs"
 import {
 	comparePredictedObserved,
+	HELD_OUT_TOLERANCES,
 	type CandidateMetrics,
 	type CalibrationValidationReport,
 } from "../../src/server/archives/calibrate"
@@ -87,21 +88,18 @@ if (!predictedResult?.metrics) {
 	process.exit(2)
 }
 const predicted = predictedResult.metrics
-// Like-for-like tolerances: both predicted and observed are export-sample
-// measurements through the same writer. The observed trial runs on held-out
-// data (different rows) so byte metrics vary with row content; RSS and wall
-// vary with scheduling. Every tolerance is a relative delta below 1.0. In
-// particular, throughput's comparator uses `observed >= predicted * (1-t)`;
-// a tolerance >= 1 would make that check vacuous.
-const tolerance = {
-	peakRssBytes: 0.5,
-	wallMs: 0.75,
-	writeThroughputBytesPerSec: 0.67,
-	compressionRatio: 0.5,
-	physicalBytes: 0.75,
-	peakTempDiskBytes: 0.75,
-}
-const comparison = comparePredictedObserved(predicted, observed, tolerance)
+// Canonical held-out policy (the same constant the calibrator and loader use),
+// with hybrid size-scaling: the observed trial runs on a LARGER held-out window,
+// so wallMs/physicalBytes predictions are rescaled by the observed/predicted
+// logical-byte ratio for this signal; throughput/compression are size-invariant
+// rates compared directly; RSS/temp-disk are absolute peaks. Every tolerance is
+// a relative delta below 1.0; throughput's comparator uses
+// `observed >= predicted * (1-t)`, so a tolerance >= 1 would be vacuous.
+const scaleRatio = predicted.logicalBytes > 0 ? observed.logicalBytes / predicted.logicalBytes : 1
+const comparison = comparePredictedObserved(predicted, observed, HELD_OUT_TOLERANCES, {
+	ratio: scaleRatio,
+	metrics: new Set(["wallMs", "physicalBytes"]),
+})
 
 const report: CalibrationValidationReport = {
 	formatVersion: 1,

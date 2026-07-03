@@ -166,6 +166,21 @@ describe("loadTuningConfig", () => {
 			ok: true,
 			sample: heldOutSample(2000),
 		}))
+		// Per-signal like-for-like comparison: each signal pairs training metrics
+		// with held-out metrics, scaled by that signal's own logical-byte ratio.
+		const heldOutRatio = heldOutMetrics.logicalBytes / metrics.logicalBytes
+		const signalComparisons = ARCHIVE_SIGNALS.map((signal) => {
+			const comparison = comparePredictedObserved(metrics, heldOutMetrics, HELD_OUT_TOLERANCES, {
+				ratio: heldOutRatio,
+				metrics: new Set(["wallMs", "physicalBytes"]),
+			})
+			return {
+				signal: signal.name,
+				scaleRatio: heldOutRatio,
+				comparisons: comparison.comparisons,
+				passed: comparison.passed,
+			}
+		})
 		return {
 			formatVersion: TUNING_CONFIG_FORMAT_VERSION,
 			measuredAt: "2026-07-01T00:00:00.000Z",
@@ -193,39 +208,17 @@ describe("loadTuningConfig", () => {
 			heldOut: {
 				results: heldOutResults,
 				worstCase: heldOutMetrics,
-				comparisons: comparePredictedObserved(
-					selectedWorstCase,
-					heldOutMetrics,
-					HELD_OUT_TOLERANCES,
-					{
-						ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-						metrics: new Set(["wallMs", "physicalBytes"]),
-					},
-				).comparisons,
+				signalComparisons,
 				passed: true,
 				tolerances: HELD_OUT_TOLERANCES,
-				scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-				trainingLogicalBytes: selectedWorstCase.logicalBytes,
-				heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
 					worstCase: heldOutMetrics,
-					comparisons: comparePredictedObserved(
-						selectedWorstCase,
-						heldOutMetrics,
-						HELD_OUT_TOLERANCES,
-						{
-							ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-							metrics: new Set(["wallMs", "physicalBytes"]),
-						},
-					).comparisons,
+					signalComparisons,
 					passed: true,
-					scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-					trainingLogicalBytes: selectedWorstCase.logicalBytes,
-					heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 				},
 			],
 			environment: {
@@ -325,7 +318,7 @@ describe("loadTuningConfig", () => {
 				{
 					name: "forged-held-out-comparison",
 					mutate: (doc) => {
-						doc.heldOut.comparisons[0]!.withinTolerance = false
+						doc.heldOut.signalComparisons[0]!.comparisons[0]!.withinTolerance = false
 					},
 				},
 				{
@@ -381,7 +374,7 @@ describe("loadTuningConfig", () => {
 				{
 					name: "forged-scale-ratio",
 					mutate: (doc) => {
-						doc.heldOut.scaleRatio = 0.5
+						doc.heldOut.signalComparisons[0]!.scaleRatio = 0.5
 					},
 				},
 				{
@@ -396,6 +389,10 @@ describe("loadTuningConfig", () => {
 				{
 					name: "forged-canonical-tolerances-with-recomputed-comparisons",
 					mutate: (doc) => {
+						// The original 1000x hostile reproduction: redefine tolerances
+						// and recompute every per-signal comparison with them, so the
+						// document is internally consistent yet the loader must reject
+						// because the tolerance policy is not canonical.
 						const forged = {
 							peakRssBytes: 10_000,
 							wallMs: 10_000,
@@ -405,17 +402,25 @@ describe("loadTuningConfig", () => {
 							peakTempDiskBytes: 10_000,
 						}
 						doc.heldOut.tolerances = forged as typeof doc.heldOut.tolerances
-						const recomputed = comparePredictedObserved(
-							doc.selected.worstCase,
-							doc.heldOut.worstCase,
-							forged,
-							{
-								ratio: doc.heldOut.scaleRatio,
-								metrics: new Set(["wallMs", "physicalBytes"]),
-							},
-						).comparisons
-						doc.heldOut.comparisons = recomputed
-						doc.heldOutAttempts[0]!.comparisons = recomputed
+						const trainingMetrics = doc.results[0]!.metrics!
+						const heldOutMetrics = doc.heldOut.results[0]!.metrics!
+						const ratio = heldOutMetrics.logicalBytes / trainingMetrics.logicalBytes
+						const recomputed = ARCHIVE_SIGNALS.map((signal) => {
+							const comparison = comparePredictedObserved(
+								trainingMetrics,
+								heldOutMetrics,
+								forged,
+								{ ratio, metrics: new Set(["wallMs", "physicalBytes"]) },
+							)
+							return {
+								signal: signal.name,
+								scaleRatio: ratio,
+								comparisons: comparison.comparisons,
+								passed: comparison.passed,
+							}
+						})
+						doc.heldOut.signalComparisons = recomputed
+						doc.heldOutAttempts[0]!.signalComparisons = recomputed
 					},
 				},
 			]

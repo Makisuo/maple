@@ -293,6 +293,22 @@ export interface MetricComparison {
 }
 
 /**
+ * One signal's like-for-like held-out comparison. The paired raw metrics are NOT
+ * duplicated here — they live in the training and held-out results, and the
+ * loader re-derives them by exact candidate + signal identity. `scaleRatio` is
+ * that signal's own heldOut.logicalBytes / training.logicalBytes (used to rescale
+ * wallMs/physicalBytes, which are size-proportional); throughput and
+ * compressionRatio are compared directly; RSS and temp-disk peaks are absolute.
+ * `passed` requires all six metrics within tolerance for THIS signal.
+ */
+export interface SignalComparison {
+	readonly signal: string
+	readonly scaleRatio: number
+	readonly comparisons: ReadonlyArray<MetricComparison>
+	readonly passed: boolean
+}
+
+/**
  * Compare predicted (from calibration training) and observed (from a real or
  * held-out trial) metrics within documented per-metric tolerances. Returns one
  * entry per metric plus an overall pass/fail. Pure. Throughput is directional
@@ -388,6 +404,65 @@ export const comparePredictedObserved = (
 	return { comparisons, passed: comparisons.every((c) => c.withinTolerance), scaleRatio: ratio }
 }
 
+/**
+ * Like-for-like, PER-SIGNAL held-out comparison. For each signal (in canonical
+ * order), pair that signal's held-out result with the same candidate's training
+ * result, scale wallMs/physicalBytes by THAT signal's own
+ * heldOut.logicalBytes/training.logicalBytes ratio, compare throughput and
+ * compressionRatio directly, compare RSS/temp-disk peaks absolutely, and require
+ * all six metrics within tolerance for that signal. The attempt passes only when
+ * every signal passes — cross-signal aggregate extrema never decide acceptance.
+ *
+ * Returns `null` (incomplete) when a signal is unpaired, when either paired
+ * metric set is missing, or when training/held-out logicalBytes is not strictly
+ * positive (the ratio would be undefined; never silently substitute 1). Pure.
+ */
+export const compareHeldOutPerSignal = (
+	training: ReadonlyArray<CandidateResult>,
+	heldOut: ReadonlyArray<CandidateResult>,
+	requiredSignals: ReadonlyArray<string>,
+	candidate: CalibrationCandidate,
+	tolerances: typeof HELD_OUT_TOLERANCES,
+	scaledMetrics: ReadonlySet<"wallMs" | "physicalBytes"> = new Set(["wallMs", "physicalBytes"]),
+): { signalComparisons: ReadonlyArray<SignalComparison>; passed: boolean } | null => {
+	const signalComparisons: SignalComparison[] = []
+	for (const signal of requiredSignals) {
+		const trainResult = training.find(
+			(r) =>
+				r.signal === signal &&
+				r.ok &&
+				r.metrics &&
+				isSameCalibrationCandidate(r.candidate, candidate),
+		)
+		const heldResult = heldOut.find(
+			(r) =>
+				r.signal === signal &&
+				r.ok &&
+				r.metrics &&
+				isSameCalibrationCandidate(r.candidate, candidate),
+		)
+		if (!trainResult?.metrics || !heldResult?.metrics) return null
+		const trainingLogical = trainResult.metrics.logicalBytes
+		const heldOutLogical = heldResult.metrics.logicalBytes
+		if (!(trainingLogical > 0) || !(heldOutLogical > 0)) return null
+		const scaleRatio = heldOutLogical / trainingLogical
+		const comparison = comparePredictedObserved(trainResult.metrics, heldResult.metrics, tolerances, {
+			ratio: scaleRatio,
+			metrics: scaledMetrics,
+		})
+		signalComparisons.push({
+			signal,
+			scaleRatio,
+			comparisons: comparison.comparisons,
+			passed: comparison.passed,
+		})
+	}
+	return {
+		signalComparisons,
+		passed: signalComparisons.every((entry) => entry.passed),
+	}
+}
+
 /** The measured environment recorded in every calibration document. */
 export interface CalibrationEnvironment {
 	readonly mapleVersion: string
@@ -463,24 +538,19 @@ export interface CalibrationRecommendation {
 	readonly heldOut: {
 		readonly results: ReadonlyArray<CandidateResult>
 		readonly worstCase: CandidateMetrics
-		readonly comparisons: ReturnType<typeof comparePredictedObserved>["comparisons"]
+		/** One like-for-like entry per signal (canonical order); decides acceptance. */
+		readonly signalComparisons: ReadonlyArray<SignalComparison>
 		readonly passed: true
 		readonly tolerances: typeof HELD_OUT_TOLERANCES
-		/** The size-scaling ratio applied to wallMs/physicalBytes (heldOut.logicalBytes / training.logicalBytes). */
-		readonly scaleRatio: number
-		readonly trainingLogicalBytes: number
-		readonly heldOutLogicalBytes: number
 	} | null
 	/** Every held-out candidate attempted, including rejected attempts. */
 	readonly heldOutAttempts: ReadonlyArray<{
 		readonly candidate: CalibrationCandidate
 		readonly results: ReadonlyArray<CandidateResult>
 		readonly worstCase: CandidateMetrics | null
-		readonly comparisons: ReadonlyArray<MetricComparison>
+		/** Six entries when the attempt was complete (even if it failed); [] when incomplete. */
+		readonly signalComparisons: ReadonlyArray<SignalComparison>
 		readonly passed: boolean
-		readonly scaleRatio: number
-		readonly trainingLogicalBytes: number
-		readonly heldOutLogicalBytes: number
 	}>
 	readonly budget: CalibrationBudget
 	readonly environment: CalibrationEnvironment

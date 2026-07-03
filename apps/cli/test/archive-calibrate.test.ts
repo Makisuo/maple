@@ -70,6 +70,7 @@ import {
 	selectCandidates,
 	worstCaseMetrics,
 	comparePredictedObserved,
+	compareHeldOutPerSignal,
 	HELD_OUT_TOLERANCES,
 	isSameCalibrationCandidate,
 	heldOutSampleRows,
@@ -391,6 +392,75 @@ describe("calibration measurement engine — comparePredictedObserved", () => {
 		})
 		const tputCmp = result.comparisons.find((c) => c.metric === "writeThroughputBytesPerSec")!
 		ok(tputCmp.withinTolerance)
+	})
+})
+
+describe("per-signal held-out comparison rejects cross-signal aggregate masking", () => {
+	// The reviewer's executable counterexample: aggregate logical-byte ratio is 4,
+	// so aggregate wall prediction becomes 100*4=400 matching observed 400 (pass),
+	// but like-for-like signal A has ratio 2, adjusted prediction 200 vs observed
+	// 400 = delta 1.0, which exceeds the canonical 0.5 wall tolerance (fail).
+	// Per-signal comparison must reject what aggregate scaling would accept.
+	const candidate = CANDIDATE_MATRIX[0]!
+	const metrics = (over: Partial<CandidateMetrics>): CandidateMetrics => ({
+		logicalBytes: 1_000_000,
+		physicalBytes: 300_000,
+		compressionRatio: 0.3,
+		writeThroughputBytesPerSec: 100_000,
+		peakTempDiskBytes: 500_000,
+		peakRssBytes: 200_000_000,
+		wallMs: 5_000,
+		rowCount: 10_000,
+		...over,
+	})
+	const result = (signal: string, m: CandidateMetrics): CandidateResult => ({
+		candidate,
+		signal,
+		metrics: m,
+		ok: true,
+	})
+
+	it("fails when one signal regresses even though the aggregate ratio would pass", () => {
+		const training = [
+			result("logs", metrics({ logicalBytes: 1_000, wallMs: 100, physicalBytes: 300 })),
+			result("traces", metrics({ logicalBytes: 10_000, wallMs: 10, physicalBytes: 3_000 })),
+		]
+		const heldOut = [
+			result("logs", metrics({ logicalBytes: 2_000, wallMs: 400, physicalBytes: 600 })),
+			result("traces", metrics({ logicalBytes: 40_000, wallMs: 40, physicalBytes: 12_000 })),
+		]
+		const perSignal = compareHeldOutPerSignal(
+			training,
+			heldOut,
+			["logs", "traces"],
+			candidate,
+			HELD_OUT_TOLERANCES,
+		)
+		if (perSignal === null) throw new Error("per-signal comparison returned null unexpectedly")
+		const logsWall = perSignal.signalComparisons
+			.find((s) => s.signal === "logs")!
+			.comparisons.find((c) => c.metric === "wallMs")!
+		// Signal A: ratio 2, adjusted prediction 200, observed 400 → delta 1.0 > 0.5.
+		ok(!logsWall.withinTolerance, "signal A wall regression must fail the per-signal check")
+		strictEqual(perSignal.passed, false, "the attempt must not pass when any signal fails")
+	})
+
+	it("returns null when a signal cannot be paired (incomplete)", () => {
+		const training = [result("logs", metrics())]
+		const heldOut = [result("logs", metrics()), result("traces", metrics())]
+		strictEqual(
+			compareHeldOutPerSignal(training, heldOut, ["logs", "traces"], candidate, HELD_OUT_TOLERANCES),
+			null,
+		)
+	})
+
+	it("returns null when a paired signal has non-positive training logicalBytes", () => {
+		const training = [result("logs", metrics({ logicalBytes: 0 }))]
+		const heldOut = [result("logs", metrics())]
+		strictEqual(
+			compareHeldOutPerSignal(training, heldOut, ["logs"], candidate, HELD_OUT_TOLERANCES),
+			null,
+		)
 	})
 })
 
@@ -905,6 +975,19 @@ describe("config-bound create enforces environment and volume identity", () => {
 			ok: true,
 			sample: heldOutSample,
 		}))
+		const heldOutRatio = heldOutMetrics.logicalBytes / metrics.logicalBytes
+		const signalComparisons = ARCHIVE_SIGNALS.map((signal) => {
+			const comparison = comparePredictedObserved(metrics, heldOutMetrics, HELD_OUT_TOLERANCES, {
+				ratio: heldOutRatio,
+				metrics: new Set(["wallMs", "physicalBytes"]),
+			})
+			return {
+				signal: signal.name,
+				scaleRatio: heldOutRatio,
+				comparisons: comparison.comparisons,
+				passed: comparison.passed,
+			}
+		})
 		return {
 			formatVersion: 2,
 			measuredAt: "2026-07-01T00:00:00.000Z",
@@ -926,39 +1009,17 @@ describe("config-bound create enforces environment and volume identity", () => {
 			heldOut: {
 				results: heldOutResults,
 				worstCase: heldOutMetrics,
-				comparisons: comparePredictedObserved(
-					selectedWorstCase,
-					heldOutMetrics,
-					HELD_OUT_TOLERANCES,
-					{
-						ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-						metrics: new Set(["wallMs", "physicalBytes"]),
-					},
-				).comparisons,
+				signalComparisons,
 				passed: true,
 				tolerances: HELD_OUT_TOLERANCES,
-				scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-				trainingLogicalBytes: selectedWorstCase.logicalBytes,
-				heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 			},
 			heldOutAttempts: [
 				{
 					candidate,
 					results: heldOutResults,
 					worstCase: heldOutMetrics,
-					comparisons: comparePredictedObserved(
-						selectedWorstCase,
-						heldOutMetrics,
-						HELD_OUT_TOLERANCES,
-						{
-							ratio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-							metrics: new Set(["wallMs", "physicalBytes"]),
-						},
-					).comparisons,
+					signalComparisons,
 					passed: true,
-					scaleRatio: heldOutMetrics.logicalBytes / selectedWorstCase.logicalBytes,
-					trainingLogicalBytes: selectedWorstCase.logicalBytes,
-					heldOutLogicalBytes: heldOutMetrics.logicalBytes,
 				},
 			],
 			environment: env.environment,
