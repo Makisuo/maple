@@ -31,44 +31,43 @@ export const toDatabaseError = (cause: unknown): DatabaseError => {
  * `db.query.text`. The identity attributes live on the span declaration, not
  * the success path, so failed calls still produce map edges.
  */
-export const executeWithSpan = <T>(
+export const executeWithSpan = Effect.fn("Database.execute", {
+	kind: "client",
+	attributes: {
+		"db.system.name": "postgresql",
+		"peer.service": "postgresql",
+	},
+})(function* <T>(
 	run: (collect: (query: string) => void) => Promise<T>,
 	extraAttributes?: Record<string, unknown>,
-): Effect.Effect<T, DatabaseError> =>
-	Effect.gen(function* () {
-		const statements: Array<string> = []
-		const startedMs = yield* Clock.currentTimeMillis
-		// Shared by the success and error paths — tapError runs inside the span,
-		// so a failing statement still carries its SQL and timing.
-		const annotate = Effect.gen(function* () {
-			const sqlText = statements.join(";\n")
-			yield* Effect.annotateCurrentSpan({
-				"db.query.text": truncateSql(sqlText, SQL_TRACE_MAX),
-				"db.query.length": sqlText.length,
-				"db.query.truncated": sqlText.length > SQL_TRACE_MAX,
-				"db.query.fingerprint": fingerprintSql(sqlText),
-				"db.statement_count": statements.length,
-				"db.duration_ms": (yield* Clock.currentTimeMillis) - startedMs,
-			})
+) {
+	if (extraAttributes) {
+		yield* Effect.annotateCurrentSpan(extraAttributes)
+	}
+	const statements: Array<string> = []
+	const startedMs = yield* Clock.currentTimeMillis
+	// Shared by the success and error paths — tapError runs inside the span,
+	// so a failing statement still carries its SQL and timing.
+	const annotate = Effect.gen(function* () {
+		const sqlText = statements.join(";\n")
+		yield* Effect.annotateCurrentSpan({
+			"db.query.text": truncateSql(sqlText, SQL_TRACE_MAX),
+			"db.query.length": sqlText.length,
+			"db.query.truncated": sqlText.length > SQL_TRACE_MAX,
+			"db.query.fingerprint": fingerprintSql(sqlText),
+			"db.statement_count": statements.length,
+			"db.duration_ms": (yield* Clock.currentTimeMillis) - startedMs,
 		})
-		const result = yield* Effect.tryPromise({
-			try: () => run((query) => statements.push(query)),
-			catch: toDatabaseError,
-		}).pipe(Effect.tapError(() => annotate))
-		yield* annotate
-		if (Array.isArray(result)) {
-			yield* Effect.annotateCurrentSpan("result.rowCount", result.length)
-		}
-		return result
-	}).pipe(
-		Effect.withSpan("Database.execute", {
-			kind: "client",
-			attributes: {
-				"db.system.name": "postgresql",
-				"peer.service": "postgresql",
-				...extraAttributes,
-			},
-		}),
-	)
+	})
+	const result = yield* Effect.tryPromise({
+		try: () => run((query) => statements.push(query)),
+		catch: toDatabaseError,
+	}).pipe(Effect.tapError(() => annotate))
+	yield* annotate
+	if (Array.isArray(result)) {
+		yield* Effect.annotateCurrentSpan("result.rowCount", result.length)
+	}
+	return result
+})
 
 export class Database extends Context.Service<Database, DatabaseShape>()("@maple/api/services/Database") {}

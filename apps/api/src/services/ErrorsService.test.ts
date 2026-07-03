@@ -91,14 +91,33 @@ describe("isBusyDatabaseError", () => {
 		expect(isBusyDatabaseError(makeError("wrapper", cause))).toBe(true)
 	})
 
+	it("matches Postgres serialization_failure (SQLSTATE 40001) via the cause code", () => {
+		const cause = Object.assign(new Error("could not serialize access due to concurrent update"), {
+			code: "40001",
+		})
+		expect(isBusyDatabaseError(makeError("query failed", cause))).toBe(true)
+	})
+
+	it("matches Postgres deadlock_detected (SQLSTATE 40P01) via the cause code", () => {
+		const cause = Object.assign(new Error("deadlock detected"), { code: "40P01" })
+		expect(isBusyDatabaseError(makeError("query failed", cause))).toBe(true)
+	})
+
+	it("matches PG contention codes appearing in the message", () => {
+		expect(isBusyDatabaseError(makeError("SQLSTATE 40001: could not serialize access"))).toBe(true)
+		expect(isBusyDatabaseError(makeError("SQLSTATE 40P01: deadlock detected"))).toBe(true)
+	})
+
 	it("rejects unrelated database errors", () => {
 		expect(isBusyDatabaseError(makeError("UNIQUE constraint failed"))).toBe(false)
 		expect(isBusyDatabaseError(makeError("no such table"))).toBe(false)
+		const uniqueViolation = Object.assign(new Error("duplicate key value"), { code: "23505" })
+		expect(isBusyDatabaseError(makeError("query failed", uniqueViolation))).toBe(false)
 	})
 })
 
 // ---------------------------------------------------------------------------
-// libsql-backed integration harness (fresh temp DB per test)
+// PGlite-backed integration harness (fresh in-memory DB per test)
 // ---------------------------------------------------------------------------
 
 const createdDbs: TestDb[] = []

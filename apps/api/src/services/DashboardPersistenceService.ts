@@ -70,29 +70,28 @@ const parsePayload = (payloadJson: unknown) =>
 
 // jsonb columns take the document object directly; this guard preserves the
 // pre-Postgres validation that the payload is JSON-serializable before write.
-const validatePayload = (dashboard: DashboardDocument) =>
-	Effect.gen(function* () {
-		const names = (dashboard.variables ?? []).map((variable) => variable.name)
-		const duplicates = names.filter((name, index) => names.indexOf(name) !== index)
-		if (duplicates.length > 0) {
-			return yield* new DashboardValidationError({
-				message: "Dashboard variable names must be unique",
-				details: [...new Set(duplicates)].map((name) => `Duplicate variable name: ${name}`),
-			})
-		}
-
-		return yield* Effect.try({
-			try: () => {
-				JSON.stringify(dashboard)
-				return dashboard
-			},
-			catch: () =>
-				new DashboardValidationError({
-					message: "Dashboard payload must be JSON serializable",
-					details: ["Dashboard contains non-serializable values"],
-				}),
+const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocument) {
+	const names = (dashboard.variables ?? []).map((variable) => variable.name)
+	const duplicates = names.filter((name, index) => names.indexOf(name) !== index)
+	if (duplicates.length > 0) {
+		return yield* new DashboardValidationError({
+			message: "Dashboard variable names must be unique",
+			details: [...new Set(duplicates)].map((name) => `Duplicate variable name: ${name}`),
 		})
+	}
+
+	return yield* Effect.try({
+		try: () => {
+			JSON.stringify(dashboard)
+			return dashboard
+		},
+		catch: () =>
+			new DashboardValidationError({
+				message: "Dashboard payload must be JSON serializable",
+				details: ["Dashboard contains non-serializable values"],
+			}),
 	})
+})
 
 const createDashboardDocument = (portableDashboard: PortableDashboardDocument, nowMillis: number) => {
 	const now = new Date(nowMillis).toISOString()
@@ -132,14 +131,84 @@ type VersionOptions = {
 	readonly sourceVersionId?: DashboardVersionId | null
 }
 
-export class DashboardPersistenceService extends Context.Service<DashboardPersistenceService>()(
+export interface DashboardPersistenceServiceShape {
+	readonly create: (
+		orgId: OrgId,
+		userId: UserId,
+		dashboard: PortableDashboardDocument,
+	) => Effect.Effect<
+		DashboardDocument,
+		DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError
+	>
+	readonly list: (orgId: OrgId) => Effect.Effect<DashboardsListResponse, DashboardPersistenceError>
+	readonly upsert: (
+		orgId: OrgId,
+		userId: UserId,
+		dashboard: DashboardDocument,
+	) => Effect.Effect<
+		DashboardDocument,
+		DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError
+	>
+	readonly mutate: <E, R>(
+		orgId: OrgId,
+		userId: UserId,
+		dashboardId: DashboardId,
+		transform: (dashboard: DashboardDocument) => Effect.Effect<DashboardDocument, E, R>,
+		versionOptions?: VersionOptions,
+	) => Effect.Effect<
+		DashboardDocument,
+		| E
+		| DashboardNotFoundError
+		| DashboardValidationError
+		| DashboardConcurrencyError
+		| DashboardPersistenceError,
+		R
+	>
+	readonly delete: (
+		orgId: OrgId,
+		dashboardId: DashboardId,
+	) => Effect.Effect<DashboardDeleteResponse, DashboardPersistenceError | DashboardNotFoundError>
+	readonly listVersions: (
+		orgId: OrgId,
+		dashboardId: DashboardId,
+		options?: { readonly limit?: number; readonly before?: number },
+	) => Effect.Effect<DashboardVersionsListResponse, DashboardPersistenceError | DashboardNotFoundError>
+	readonly getVersion: (
+		orgId: OrgId,
+		dashboardId: DashboardId,
+		versionId: DashboardVersionId,
+	) => Effect.Effect<
+		DashboardVersionDetail,
+		DashboardPersistenceError | DashboardNotFoundError | DashboardVersionNotFoundError
+	>
+	readonly restoreVersion: (
+		orgId: OrgId,
+		userId: UserId,
+		dashboardId: DashboardId,
+		versionId: DashboardVersionId,
+	) => Effect.Effect<
+		DashboardDocument,
+		| DashboardPersistenceError
+		| DashboardNotFoundError
+		| DashboardVersionNotFoundError
+		| DashboardValidationError
+		| DashboardConcurrencyError
+	>
+}
+
+export class DashboardPersistenceService extends Context.Service<
+	DashboardPersistenceService,
+	DashboardPersistenceServiceShape
+>()(
 	"@maple/api/services/DashboardPersistenceService",
 	{
 		make: Effect.gen(function* () {
 			const database = yield* Database
 
-			const loadCurrent = (orgId: OrgId, dashboardId: DashboardId) =>
-				Effect.gen(function* () {
+			const loadCurrent = Effect.fn("DashboardPersistenceService.loadCurrent")(function* (
+				orgId: OrgId,
+				dashboardId: DashboardId,
+			) {
 					const rows: ReadonlyArray<{
 						readonly payloadJson: unknown
 						readonly version: number
@@ -161,14 +230,13 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 					return { document, version: row.version }
 				})
 
-			const recordVersion = (
+			const recordVersion = Effect.fn("DashboardPersistenceService.recordVersion")(function* (
 				orgId: OrgId,
 				userId: UserId,
 				dashboard: DashboardDocument,
 				previous: DashboardDocument | null,
 				options: VersionOptions = {},
-			) =>
-				Effect.gen(function* () {
+			) {
 					const summary = summarizeDashboardChange(previous, dashboard)
 					const kind = options.forceKind ?? summary.kind
 					const summaryText = options.forceSummary ?? summary.summary
@@ -265,15 +333,14 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 			// us). The history snapshot insert is best-effort and runs only
 			// after the CAS update succeeds, so a stale conflicting attempt
 			// never produces a phantom audit row.
-			const tryCasUpdate = (
+			const tryCasUpdate = Effect.fn("DashboardPersistenceService.tryCasUpdate")(function* (
 				orgId: OrgId,
 				userId: UserId,
 				dashboard: DashboardDocument,
 				expectedVersion: number,
 				updatedAt: number,
 				payloadJson: DashboardDocument,
-			) =>
-				Effect.gen(function* () {
+			) {
 					const updated: ReadonlyArray<{ readonly id: string }> = yield* database
 						.execute((db) =>
 							db
@@ -323,13 +390,12 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 					)
 					.pipe(Effect.mapError(toPersistenceError))
 
-			const upsertInternal = (
+			const upsertInternal = Effect.fn("DashboardPersistenceService.upsertInternal")(function* (
 				orgId: OrgId,
 				userId: UserId,
 				dashboard: DashboardDocument,
 				versionOptions: VersionOptions = {},
-			) =>
-				Effect.gen(function* () {
+			) {
 					const payloadJson = yield* validatePayload(dashboard)
 					const createdAt = yield* parseTimestamp("createdAt", dashboard.createdAt)
 					const updatedAt = yield* parseTimestamp("updatedAt", dashboard.updatedAt)
@@ -502,8 +568,8 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 				})
 			})
 
-			const ensureDashboardExists = (orgId: OrgId, dashboardId: DashboardId) =>
-				Effect.gen(function* () {
+			const ensureDashboardExists = Effect.fn("DashboardPersistenceService.ensureDashboardExists")(
+				function* (orgId: OrgId, dashboardId: DashboardId) {
 					const current = yield* loadCurrent(orgId, dashboardId)
 					if (current === null) {
 						return yield* Effect.fail(
@@ -634,7 +700,7 @@ export class DashboardPersistenceService extends Context.Service<DashboardPersis
 				listVersions,
 				getVersion,
 				restoreVersion,
-			}
+			} satisfies DashboardPersistenceServiceShape
 		}),
 	},
 ) {

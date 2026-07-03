@@ -461,9 +461,20 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				label: "Cloudflare",
 			})
 
-		const handle = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				const url = new URL(req.url, "http://localhost")
+		const handle = Effect.fn("integrations.hazelOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return htmlResponse(
+						hazelCallbackPage({
+							status: "error",
+							message: "Malformed callback URL",
+							returnTo: null,
+						}),
+						400,
+					)
+				}
+				const url = urlOption.value
 				const code = url.searchParams.get("code")
 				const state = url.searchParams.get("state")
 				const oauthError = url.searchParams.get("error")
@@ -492,6 +503,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* hazel.completeConnect(code, state).pipe(
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("Hazel OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
 					Effect.map((result) =>
 						htmlResponse(
 							hazelCallbackPage({
@@ -538,13 +557,25 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							),
 					}),
 				)
-			})
+			},
+		)
 
 		yield* router.add("GET", "/api/integrations/hazel/callback", handle)
 
-		const handleGithub = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				const url = new URL(req.url, "http://localhost")
+		const handleGithub = Effect.fn("integrations.githubOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return htmlResponse(
+						githubCallbackPage({
+							status: "error",
+							message: "Malformed callback URL",
+							returnTo: null,
+						}),
+						400,
+					)
+				}
+				const url = urlOption.value
 				const installationId = url.searchParams.get("installation_id")
 				const setupAction = url.searchParams.get("setup_action")
 				const state = url.searchParams.get("state")
@@ -593,6 +624,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* github.completeConnect(installationId, state, code).pipe(
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("GitHub OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
 					Effect.map((result) =>
 						htmlResponse(
 							githubCallbackPage({
@@ -638,16 +677,21 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							),
 					}),
 				)
-			})
+			},
+		)
 
 		yield* router.add("GET", "/api/integrations/github/callback", handleGithub)
 
 		const cloudflareErrorPage = (message: string) =>
 			htmlResponse(cloudflareCallbackPage({ status: "error", message, returnTo: null }), 400)
 
-		const handleCloudflare = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				const url = new URL(req.url, "http://localhost")
+		const handleCloudflare = Effect.fn("integrations.cloudflareOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return cloudflareErrorPage("Malformed callback URL")
+				}
+				const url = urlOption.value
 				const code = url.searchParams.get("code")
 				const state = url.searchParams.get("state")
 				const oauthError = url.searchParams.get("error")
@@ -695,7 +739,8 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							Effect.succeed(cloudflareErrorPage("Failed to complete Cloudflare connection")),
 					}),
 				)
-			})
+			},
+		)
 
 		yield* router.add("GET", "/api/integrations/cloudflare/callback", handleCloudflare)
 	}),

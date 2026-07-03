@@ -1,4 +1,4 @@
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Option, Schema } from "effect"
 import { LogsFacetDimension, QueryEngineExecuteRequest } from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
 import {
@@ -66,14 +66,18 @@ export interface LogsResponse {
 	}
 }
 
+const parseJson = Option.liftThrowable((value: string): unknown => JSON.parse(value))
+
 function parseAttributes(value: string | null | undefined): Record<string, string> {
 	if (!value) return {}
-	try {
-		const parsed = JSON.parse(value)
-		return parsed && typeof parsed === "object" ? (parsed as Record<string, string>) : {}
-	} catch {
-		return {}
-	}
+	return parseJson(value).pipe(
+		Option.flatMap((parsed) =>
+			parsed && typeof parsed === "object"
+				? Option.some(parsed as Record<string, string>)
+				: Option.none(),
+		),
+		Option.getOrElse((): Record<string, string> => ({})),
+	)
 }
 
 function transformLog(raw: Record<string, unknown>): Log {

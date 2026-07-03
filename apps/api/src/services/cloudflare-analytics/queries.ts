@@ -18,7 +18,7 @@ export const MAX_ZONES_PER_QUERY = 10
 const GROUP_LIMIT = 5000
 
 /** Cloudflare GraphQL fields are plan-dependent — treat every one as absent-or-null-able. */
-const nullable = <S extends Schema.Top>(schema: S) => Schema.optional(Schema.Union([schema, Schema.Null]))
+const nullable = <S extends Schema.Top>(schema: S) => Schema.optionalKey(Schema.Union([schema, Schema.Null]))
 
 const nullableNumber = nullable(Schema.Number)
 const nullableString = nullable(Schema.String)
@@ -62,7 +62,7 @@ export const settingsQuery = (options: { readonly withZones: boolean }): string 
 }`
 }
 
-const DatasetSettings = Schema.Struct({
+export const DatasetSettings = Schema.Struct({
 	enabled: nullable(Schema.Boolean),
 	notOlderThan: nullableNumber,
 	maxDuration: nullableNumber,

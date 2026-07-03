@@ -121,6 +121,25 @@ function readVariableOptions(
 	return fromFacetItems(result.value.data)
 }
 
+// Derived options atom per (definitions, time window). Keyed on the serialized
+// inputs so edits to variable definitions (same array identity is not
+// guaranteed by the store) rebuild it, while unrelated re-renders reuse the
+// same atom instance. The key carries everything the atom body reads, so it
+// never closes over component state.
+const variableOptionsAtomFamily = Atom.family((key: string) => {
+	const { definitions, time } = JSON.parse(key) as {
+		definitions: DashboardVariable[]
+		time: ResolvedTime | null
+	}
+	return Atom.make((get): Record<string, VariableOptionsState> => {
+		const byName: Record<string, VariableOptionsState> = {}
+		for (const variable of definitions) {
+			byName[variable.name] = readVariableOptions(get, variable, time)
+		}
+		return byName
+	})
+})
+
 // URL value → declared default → All (when enabled) → first loaded option.
 // Returns `undefined` while a query variable's options are still loading and
 // nothing else pins a value — consumers gate widget fetches on that.
@@ -165,21 +184,13 @@ export function DashboardVariablesProvider({
 		state: { resolvedTimeRange },
 	} = useDashboardTimeRange()
 
-	// Key the derived atom on serialized inputs so edits to variable definitions
-	// (same array identity is not guaranteed by the store) rebuild it, while
-	// unrelated re-renders reuse the same atom instance.
-	const definitionsKey = useMemo(() => JSON.stringify(definitions), [definitions])
-	const optionsAtom = useMemo(
-		() =>
-			Atom.make((get): Record<string, VariableOptionsState> => {
-				const byName: Record<string, VariableOptionsState> = {}
-				for (const variable of definitions) {
-					byName[variable.name] = readVariableOptions(get, variable, resolvedTimeRange ?? null)
-				}
-				return byName
-			}),
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[definitionsKey, resolvedTimeRange?.startTime, resolvedTimeRange?.endTime],
+	const optionsAtom = variableOptionsAtomFamily(
+		JSON.stringify({
+			definitions,
+			time: resolvedTimeRange
+				? { startTime: resolvedTimeRange.startTime, endTime: resolvedTimeRange.endTime }
+				: null,
+		}),
 	)
 	const optionsByName = useAtomValue(optionsAtom)
 

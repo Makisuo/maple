@@ -515,6 +515,41 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { graphqlErrors: [{ message: "quota exceeded" }] })))
 	})
 
+	it.effect("pollOrg records a zones-list auth failure, disables rows, and holds watermarks", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const otlpCalls: OtlpCall[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: ZONE_ID,
+				zoneName: ZONE_NAME,
+				watermarkAt: new Date(T0 - 30 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			// A 401 on the zones list means Cloudflare no longer honors the token: the tick
+			// aborts before any GraphQL/ingest work and flags the org for reconnect.
+			assert.strictEqual(summary.skipped, "zone discovery failed: @maple/http/errors/IntegrationsRevokedError")
+			assert.strictEqual(summary.callsMade, 0)
+			assert.strictEqual(summary.rowsIngested, 0)
+
+			const rows = yield* loadStateRows
+			const httpRow = rows.find((row) => row.dataset === "http_requests")
+			assert.isDefined(httpRow)
+			// Revocation records the error on every state row and disables them until reconnect…
+			assert.include(httpRow!.lastError ?? "", "reconnect")
+			assert.isFalse(httpRow!.enabled)
+			// …while the watermark holds, so a reconnect resumes from where polling stopped.
+			assert.strictEqual(httpRow!.watermarkAt?.getTime(), T0 - 30 * MIN)
+			assert.strictEqual(otlpCalls.length, 0)
+			assert.strictEqual(captured.length, 0)
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { otlpCalls, zonesStatus: 401 })))
+	})
+
 	it.effect("pollOrg emits OTLP sum/gauge metrics to the ingest gateway", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []

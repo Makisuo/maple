@@ -110,19 +110,20 @@ export interface CloudflareAccount {
  * List the Cloudflare accounts the token can access. Used by the OAuth `completeConnect` flow to resolve
  * (and enforce a single) account for the org.
  */
-export const listAccounts = (
+export const listAccounts: (
 	accessToken: string,
 	apiBaseUrl?: string,
-): Effect.Effect<ReadonlyArray<CloudflareAccount>, CloudflareApiError, never> =>
-	runMapped(accessToken, Accounts.listAccounts({ perPage: 50 }), apiBaseUrl).pipe(
-		Effect.map((response) =>
-			response.result.map((account) => ({
-				id: account.id,
-				name: account.name,
-				type: account.type,
-			})),
-		),
-	)
+) => Effect.Effect<ReadonlyArray<CloudflareAccount>, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.listAccounts",
+)(function* (accessToken: string, apiBaseUrl?: string) {
+	const response = yield* runMapped(accessToken, Accounts.listAccounts({ perPage: 50 }), apiBaseUrl)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_count", response.result.length)
+	return response.result.map((account) => ({
+		id: account.id,
+		name: account.name,
+		type: account.type,
+	}))
+})
 
 export interface CloudflareZone {
 	readonly id: string
@@ -138,26 +139,28 @@ const MAX_ZONES = 200
  * List the account's active zones. Used by the analytics poller for zone discovery — each active
  * zone gets a poll-state row (and thus edge metrics under `cloudflare/{zoneName}`).
  */
-export const listZones = (
+export const listZones: (
 	accessToken: string,
 	accountId: string,
 	apiBaseUrl?: string,
-): Effect.Effect<ReadonlyArray<CloudflareZone>, CloudflareApiError, never> =>
-	runMapped(
+) => Effect.Effect<ReadonlyArray<CloudflareZone>, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.listZones",
+)(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+	const zones = yield* runMapped(
 		accessToken,
 		Zones.listZones
 			.items({ account: { id: accountId }, status: "active", perPage: 50 })
 			.pipe(Stream.take(MAX_ZONES), Stream.runCollect),
 		apiBaseUrl,
-	).pipe(
-		Effect.map((zones) =>
-			zones.map((zone) => ({
-				id: zone.id,
-				name: zone.name,
-				status: zone.status ?? null,
-			})),
-		),
 	)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.zone_count", zones.length)
+	return zones.map((zone) => ({
+		id: zone.id,
+		name: zone.name,
+		status: zone.status ?? null,
+	}))
+})
 
 // ---------------------------------------------------------------------------
 // GraphQL Analytics (the raw escape hatch the module doc-comment anticipates)
@@ -178,13 +181,13 @@ const GraphqlErrorItem = Schema.Struct({
 	// GraphQL error extensions carry Cloudflare's machine-readable code (e.g. "authz" for
 	// permission failures); path points at the offending selection. Both optional/loose —
 	// callers branch on message + code, never on the full shape.
-	extensions: Schema.optional(Schema.Unknown),
-	path: Schema.optional(Schema.Unknown),
+	extensions: Schema.optionalKey(Schema.Unknown),
+	path: Schema.optionalKey(Schema.Unknown),
 })
 
 const GraphqlResponse = Schema.Struct({
-	data: Schema.optional(Schema.Unknown),
-	errors: Schema.optional(Schema.Union([Schema.Array(GraphqlErrorItem), Schema.Null])),
+	data: Schema.optionalKey(Schema.Unknown),
+	errors: Schema.optionalKey(Schema.Union([Schema.Array(GraphqlErrorItem), Schema.Null])),
 })
 
 type GraphqlRequestShape = typeof GraphqlRequest.Type
@@ -219,21 +222,29 @@ export interface CloudflareGraphqlResult {
 }
 
 /** Execute a GraphQL Analytics API query (`POST {apiBaseUrl}/graphql`). */
-export const graphqlQuery = (
+export const graphqlQuery: (
 	accessToken: string,
 	request: { readonly query: string; readonly variables?: Record<string, unknown> },
 	apiBaseUrl?: string,
-): Effect.Effect<CloudflareGraphqlResult, CloudflareApiError, never> =>
-	runMapped(
+) => Effect.Effect<CloudflareGraphqlResult, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.graphqlQuery",
+)(function* (
+	accessToken: string,
+	request: { readonly query: string; readonly variables?: Record<string, unknown> },
+	apiBaseUrl?: string,
+) {
+	const response = yield* runMapped(
 		accessToken,
 		graphqlOperation({
 			query: request.query,
 			...(request.variables === undefined ? {} : { variables: request.variables }),
 		}),
 		apiBaseUrl,
-	).pipe(
-		Effect.map((response) => ({
-			data: response.data ?? null,
-			errors: response.errors ?? [],
-		})),
 	)
+	const errors = response.errors ?? []
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.graphql_error_count", errors.length)
+	return {
+		data: response.data ?? null,
+		errors,
+	}
+})

@@ -5,11 +5,12 @@ import {
 	IntegrationsRevokedError,
 	IntegrationsUpstreamError,
 	IntegrationsValidationError,
-	type OrgId,
+	OrgId,
 	type UserId,
 } from "@maple/domain/http"
 import { oauthAuthStates } from "@maple/db"
-import { Clock, Context, Effect, Layer, Option, Redacted } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { listAccounts } from "../lib/CloudflareApi"
 import { Database } from "../lib/DatabaseLive"
 import { Env, type EnvShape } from "../lib/Env"
@@ -17,6 +18,8 @@ import { msToDate } from "../lib/time"
 import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS } from "./oauth/connection-helpers"
 
 const CLOUDFLARE_PROVIDER = "cloudflare"
+
+const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 
 /**
  * PKCE (RFC 7636). Cloudflare's OAuth requires PKCE (S256) for public clients — a multi-tenant SaaS
@@ -37,10 +40,8 @@ interface ResolvedCloudflareOAuthConfig {
 	readonly scopes: string
 }
 
-const resolveConfig = (
-	env: EnvShape,
-): Effect.Effect<ResolvedCloudflareOAuthConfig, IntegrationsValidationError> =>
-	Effect.gen(function* () {
+const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(
+	function* (env: EnvShape) {
 		// Only the client id is mandatory. Cloudflare public clients (any-user SaaS) authenticate the
 		// token exchange with PKCE alone and carry no secret; confidential clients add one via env.
 		const clientId = yield* Option.match(env.CLOUDFLARE_OAUTH_CLIENT_ID, {
@@ -64,7 +65,8 @@ const resolveConfig = (
 			revokeUrl: env.CLOUDFLARE_OAUTH_REVOKE_URL,
 			scopes: env.CLOUDFLARE_OAUTH_SCOPES,
 		}
-	})
+	},
+)
 
 interface CloudflareAccessToken {
 	readonly accessToken: string
@@ -147,6 +149,7 @@ export class CloudflareOAuthService extends Context.Service<
 			userId: UserId,
 			options: { readonly callbackUrl: string; readonly returnTo?: string },
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const config = yield* resolveConfig(env)
 			const state = randomBytes(24).toString("base64url")
 			const codeVerifier = generateCodeVerifier()
@@ -236,7 +239,8 @@ export class CloudflareOAuthService extends Context.Service<
 			const currentTime = yield* Clock.currentTimeMillis
 			const expiresAt =
 				tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
-			const orgId = stateRow.orgId as OrgId
+			const orgId = decodeOrgId(stateRow.orgId)
+			yield* Effect.annotateCurrentSpan({ orgId })
 
 			yield* oauth.upsertConnection(orgId, currentTime, {
 				externalUserId: account.id,
@@ -260,6 +264,7 @@ export class CloudflareOAuthService extends Context.Service<
 		const getValidAccessToken = Effect.fn("CloudflareOAuthService.getValidAccessToken")(function* (
 			orgId: OrgId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const config = yield* resolveConfig(env)
 			const { accessToken, row } = yield* oauth.getValidConnectionToken(config, orgId)
 			return {
@@ -284,6 +289,7 @@ export class CloudflareOAuthService extends Context.Service<
 		})
 
 		const disconnect = Effect.fn("CloudflareOAuthService.disconnect")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			// Best-effort upstream token revocation before we drop the row. Never let a revoke
 			// failure block the disconnect — the deleted row is the real backstop.
 			const row = yield* oauth.loadConnection(orgId)
@@ -312,5 +318,5 @@ export class CloudflareOAuthService extends Context.Service<
 		} satisfies CloudflareOAuthServiceShape
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

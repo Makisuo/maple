@@ -19,7 +19,7 @@ import {
 import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
 import { and, eq, lt } from "drizzle-orm"
 import { Clock, Effect, Redacted, Schema, Semaphore } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../../lib/Crypto"
 import type { DatabaseClient, DatabaseShape } from "../../lib/DatabaseLive"
 import type { EnvShape } from "../../lib/Env"
@@ -72,6 +72,7 @@ export interface MakeOAuthConnectionHelpersOptions {
 export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOptions) =>
 	Effect.gen(function* () {
 		const { provider, providerLabel, database, env } = options
+		const httpClient = yield* HttpClient.HttpClient
 
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -122,8 +123,8 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		const deleteAuthState = (state: string) =>
 			dbExecute((db) => db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)))
 
-		const requireStateRow = (state: string) =>
-			Effect.gen(function* () {
+		const requireStateRow = Effect.fn("OAuthConnectionHelpers.requireStateRow")(
+			function* (state: string) {
 				const rows = yield* dbExecute((db) =>
 					db.select().from(oauthAuthStates).where(eq(oauthAuthStates.state, state)).limit(1),
 				)
@@ -144,7 +145,8 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					)
 				}
 				return row satisfies OAuthAuthStateRow
-			})
+			},
+		)
 
 		const loadConnection = (orgId: OrgId) =>
 			dbExecute((db) =>
@@ -155,8 +157,8 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					.limit(1),
 			).pipe(Effect.map((rows) => rows[0] ?? null))
 
-		const requireConnection = (orgId: OrgId) =>
-			Effect.gen(function* () {
+		const requireConnection = Effect.fn("OAuthConnectionHelpers.requireConnection")(
+			function* (orgId: OrgId) {
 				const row = yield* loadConnection(orgId)
 				if (!row) {
 					return yield* Effect.fail(
@@ -166,7 +168,8 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					)
 				}
 				return row satisfies OAuthConnectionRow
-			})
+			},
+		)
 
 		/**
 		 * Write (or overwrite) the org's connection in one statement — the unique
@@ -207,23 +210,25 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			).pipe(Effect.map((result) => ({ disconnected: result.length > 0 })))
 
 		/** POST an `application/x-www-form-urlencoded` body and return the raw status + text. */
-		const postForm = (url: string, params: Record<string, string>) =>
-			Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
+		const postForm = Effect.fn("OAuthConnectionHelpers.postForm")(
+			function* (url: string, params: Record<string, string>) {
 				const request = HttpClientRequest.post(url, {
 					headers: { accept: "application/json" },
 				}).pipe(HttpClientRequest.bodyUrlParams(params))
-				const response = yield* client.execute(request)
+				const response = yield* httpClient.execute(request)
 				const text = yield* response.text
 				return { status: response.status, text }
-			}).pipe(
-				Effect.mapError((error) =>
+			},
+			Effect.catchTag("HttpClientError", (error) =>
+				Effect.fail(
 					toUpstreamError(
-						error instanceof Error ? error.message : `${providerLabel} OAuth request failed`,
+						`${providerLabel} OAuth request failed: ${error.message}`,
+						error.response?.status,
+						error.reason,
 					),
 				),
-				Effect.provide(FetchHttpClient.layer),
-			)
+			),
+		)
 
 		const parseTokenPayload = (text: string) =>
 			Effect.try({
@@ -239,13 +244,13 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 				),
 			)
 
-		const exchangeAuthorizationCode = (
-			config: OAuthTokenEndpointConfig,
-			code: string,
-			redirectUri: string,
-			extraParams: Record<string, string> = {},
-		) =>
-			Effect.gen(function* () {
+		const exchangeAuthorizationCode = Effect.fn("OAuthConnectionHelpers.exchangeAuthorizationCode")(
+			function* (
+				config: OAuthTokenEndpointConfig,
+				code: string,
+				redirectUri: string,
+				extraParams: Record<string, string> = {},
+			) {
 				const { status, text } = yield* postForm(config.tokenUrl, {
 					grant_type: "authorization_code",
 					code,
@@ -260,15 +265,16 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					)
 				}
 				return yield* parseTokenPayload(text)
-			})
+			},
+		)
 
 		/**
 		 * Refresh-grant call with the shared classification rule: a 400/401 means
 		 * the grant itself is gone (revoked / rotated away), not a transient
 		 * upstream failure.
 		 */
-		const refreshAccessToken = (config: OAuthTokenEndpointConfig, refreshToken: string) =>
-			Effect.gen(function* () {
+		const refreshAccessToken = Effect.fn("OAuthConnectionHelpers.refreshAccessToken")(
+			function* (config: OAuthTokenEndpointConfig, refreshToken: string) {
 				const { status, text } = yield* postForm(config.tokenUrl, {
 					grant_type: "refresh_token",
 					refresh_token: refreshToken,
@@ -286,10 +292,11 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					return yield* Effect.fail(toUpstreamError(`Token refresh failed with ${status}`, status))
 				}
 				return yield* parseTokenPayload(text)
-			})
+			},
+		)
 
-		const persistRefreshedTokens = (row: OAuthConnectionRow, tokenResponse: OAuthTokenResponse) =>
-			Effect.gen(function* () {
+		const persistRefreshedTokens = Effect.fn("OAuthConnectionHelpers.persistRefreshedTokens")(
+			function* (row: OAuthConnectionRow, tokenResponse: OAuthTokenResponse) {
 				const accessEnc = yield* encryptValue(tokenResponse.access_token)
 				const refreshEnc = tokenResponse.refresh_token
 					? yield* encryptValue(tokenResponse.refresh_token)
@@ -313,7 +320,8 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 						.where(eq(oauthConnections.id, row.id)),
 				)
 				return tokenResponse.access_token
-			})
+			},
+		)
 
 		const rowIsValid = (row: OAuthConnectionRow, currentTime: number) =>
 			row.expiresAt == null || row.expiresAt.getTime() - currentTime > OAUTH_REFRESH_LEEWAY_MS
@@ -382,14 +390,15 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		 * when it is within the expiry leeway. Returns the row alongside so callers
 		 * can project provider-specific fields (account id, scope, ...).
 		 */
-		const getValidConnectionToken = (config: OAuthTokenEndpointConfig, orgId: OrgId) =>
-			Effect.gen(function* () {
+		const getValidConnectionToken = Effect.fn("OAuthConnectionHelpers.getValidConnectionToken")(
+			function* (config: OAuthTokenEndpointConfig, orgId: OrgId) {
 				const row = yield* requireConnection(orgId)
 				if (rowIsValid(row, yield* Clock.currentTimeMillis)) {
 					return yield* accessTokenFromRow(row)
 				}
 				return yield* refreshWithSingleFlight(config, orgId)
-			})
+			},
+		)
 
 		return {
 			toPersistenceError,

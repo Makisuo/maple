@@ -144,9 +144,14 @@ export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
 }
 
 // Concurrent ticks against D1 (file-locked SQLite under the hood) occasionally surface
-// busy/locked errors. They're harmless to retry — the next attempt usually succeeds in
-// ms. Only this predicate's match retries; anything else fails fast.
-const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy/i
+// busy/locked errors, and Postgres surfaces the same contention as SQLSTATE 40001
+// (serialization_failure) / 40P01 (deadlock_detected). They're harmless to retry — the
+// next attempt usually succeeds in ms. Only this predicate's match retries; anything
+// else fails fast.
+const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy|40001|40P01/i
+
+/** Retryable Postgres contention SQLSTATEs (postgres.js errors carry them on `.code`). */
+const PG_CONTENTION_CODES: ReadonlySet<string> = new Set(["40001", "40P01"])
 
 const causeMessage = (cause: unknown): string | undefined => {
 	if (cause instanceof Error) return cause.message
@@ -154,8 +159,18 @@ const causeMessage = (cause: unknown): string | undefined => {
 	return undefined
 }
 
+const causeCode = (cause: unknown): string | undefined => {
+	if (typeof cause === "object" && cause !== null && "code" in cause) {
+		const code = (cause as { code?: unknown }).code
+		if (typeof code === "string") return code
+	}
+	return undefined
+}
+
 export const isBusyDatabaseError = (error: DatabaseError): boolean => {
 	if (BUSY_ERROR_PATTERN.test(error.message)) return true
+	const code = causeCode(error.cause)
+	if (code !== undefined && PG_CONTENTION_CODES.has(code)) return true
 	const inner = causeMessage(error.cause)
 	if (inner && BUSY_ERROR_PATTERN.test(inner)) return true
 	return false

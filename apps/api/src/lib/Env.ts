@@ -154,7 +154,7 @@ const envConfig = Config.all({
 })
 
 const makeEnv = Effect.gen(function* () {
-	const env = (yield* envConfig) as EnvShape
+	const env: EnvShape = yield* envConfig
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))

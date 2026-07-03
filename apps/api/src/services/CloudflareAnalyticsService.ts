@@ -33,9 +33,9 @@ import {
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
 	IntegrationsUpstreamError,
+	OrgId,
 	RoleName,
 	UserId as UserIdSchema,
-	type OrgId,
 } from "@maple/domain/http"
 import * as CH from "@maple/query-engine/ch"
 import {
@@ -45,7 +45,19 @@ import {
 	type CloudflareAnalyticsStateRow,
 } from "@maple/db"
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
-import { Array as Arr, Cause, Clock, Context, Effect, Layer, Result, Schema } from "effect"
+import {
+	Array as Arr,
+	Cause,
+	Clock,
+	Context,
+	Effect,
+	Layer,
+	Match,
+	Option,
+	Ref,
+	Result,
+	Schema,
+} from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { TenantContext } from "./AuthService"
 import {
@@ -60,13 +72,10 @@ import { dateToMs } from "../lib/time"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { CloudflareOAuthService } from "./CloudflareOAuthService"
 import { OrgIngestKeysService } from "./OrgIngestKeysService"
-import {
-	mapHttpGroups,
-	mapWorkersGroups,
-	type CloudflareMetricRows,
-} from "./cloudflare-analytics/mapping"
+import { mapHttpGroups, mapWorkersGroups, type CloudflareMetricRows } from "./cloudflare-analytics/mapping"
 import { metricRowsToOtlp } from "./cloudflare-analytics/otlp"
 import {
+	DatasetSettings,
 	decodeHttpAnalyticsResponse,
 	decodeSettingsResponse,
 	decodeWorkersAnalyticsResponse,
@@ -118,6 +127,7 @@ const floorToBucket = (ms: number) => ms - (ms % BUCKET_MS)
 
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
+const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 
 /** Synthetic actor stamped on rows the poller writes on the org's behalf (ingest keys, state). */
 const SYSTEM_USER_ID = decodeUserIdSync("system-cloudflare-analytics")
@@ -330,17 +340,17 @@ interface ParsedSettings {
 	readonly maxDurationMs: number | null
 }
 
+const decodeStoredSettings = Schema.decodeUnknownOption(Schema.fromJsonString(DatasetSettings))
+
 const parseStoredSettings = (settingsJson: string | null): ParsedSettings => {
 	if (!settingsJson) return { notOlderThanMs: null, maxDurationMs: null }
-	try {
-		const parsed = JSON.parse(settingsJson) as { notOlderThan?: number | null; maxDuration?: number | null }
-		return {
+	return Option.match(decodeStoredSettings(settingsJson), {
+		onNone: () => ({ notOlderThanMs: null, maxDurationMs: null }),
+		onSome: (parsed) => ({
 			notOlderThanMs: typeof parsed.notOlderThan === "number" ? parsed.notOlderThan * 1000 : null,
 			maxDurationMs: typeof parsed.maxDuration === "number" ? parsed.maxDuration * 1000 : null,
-		}
-	} catch {
-		return { notOlderThanMs: null, maxDurationMs: null }
-	}
+		}),
+	})
 }
 
 /** `availableFields` naming isn't pinned by docs — match on substring, defaulting to available. */
@@ -406,7 +416,12 @@ const buildWorkItems = (rows: ReadonlyArray<CloudflareAnalyticsStateRow>, now: n
 		const chunkSize = dataset.scope === "zone" ? MAX_ZONES_PER_QUERY : 1
 		for (const group of groups.values()) {
 			for (const chunkRows of Arr.chunksOf(group.rows, chunkSize)) {
-				items.push({ dataset, rows: chunkRows, window: group.window, withQuantiles: group.withQuantiles })
+				items.push({
+					dataset,
+					rows: chunkRows,
+					window: group.window,
+					withQuantiles: group.withQuantiles,
+				})
 			}
 		}
 	}
@@ -459,7 +474,9 @@ interface PollAllOrgsSummary {
 export interface CloudflareAnalyticsServiceShape {
 	readonly pollAllOrgs: () => Effect.Effect<PollAllOrgsSummary, IntegrationsPersistenceError>
 	readonly pollOrg: (orgId: OrgId) => Effect.Effect<PollOrgSummary, IntegrationsPersistenceError>
-	readonly getStatus: (orgId: OrgId) => Effect.Effect<CloudflareAnalyticsStatus, IntegrationsPersistenceError>
+	readonly getStatus: (
+		orgId: OrgId,
+	) => Effect.Effect<CloudflareAnalyticsStatus, IntegrationsPersistenceError>
 	readonly getIntegrationStatus: (
 		orgId: OrgId,
 	) => Effect.Effect<CloudflareIntegrationStatus, IntegrationsPersistenceError>
@@ -524,7 +541,12 @@ export class CloudflareAnalyticsService extends Context.Service<
 				updatedAt: new Date(now),
 			})
 
-		const recordOrgError = (orgId: OrgId, message: string, now: number, options?: { disable?: boolean }) =>
+		const recordOrgError = (
+			orgId: OrgId,
+			message: string,
+			now: number,
+			options?: { disable?: boolean },
+		) =>
 			dbExecute((db) =>
 				db
 					.update(cloudflareAnalyticsState)
@@ -606,69 +628,72 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * Reconcile discovered zones against http_requests state rows and stamp the discovery time
 		 * on the anchor row. Returns the org's resulting row set so the caller skips a re-SELECT.
 		 */
-		const reconcileZones = (
+		const reconcileZones = Effect.fn("CloudflareAnalyticsService.reconcileZones")(function* (
 			orgId: OrgId,
 			zones: ReadonlyArray<CloudflareZone>,
 			anchorId: string,
 			now: number,
-		) =>
-			Effect.gen(function* () {
-				const rows = yield* loadStateRows(orgId)
-				const byZoneId = new Map(
-					rows.filter((row) => row.dataset === HTTP_DATASET).map((row) => [row.zoneId, row]),
-				)
+		) {
+			const rows = yield* loadStateRows(orgId)
+			const byZoneId = new Map(
+				rows.filter((row) => row.dataset === HTTP_DATASET).map((row) => [row.zoneId, row]),
+			)
 
-				const newZones = zones.filter((zone) => !byZoneId.has(zone.id))
-				const inserted =
-					newZones.length === 0
-						? []
-						: yield* dbExecute((db) =>
-								db
-									.insert(cloudflareAnalyticsState)
-									.values(
-										newZones.map((zone) => ({
-											id: randomUUID(),
-											orgId,
-											dataset: HTTP_DATASET,
-											zoneId: zone.id,
-											zoneName: zone.name,
-											createdAt: new Date(now),
-											updatedAt: new Date(now),
-										})),
-									)
-									.onConflictDoNothing()
-									.returning(),
-							)
+			const newZones = zones.filter((zone) => !byZoneId.has(zone.id))
+			const inserted =
+				newZones.length === 0
+					? []
+					: yield* dbExecute((db) =>
+							db
+								.insert(cloudflareAnalyticsState)
+								.values(
+									newZones.map((zone) => ({
+										id: randomUUID(),
+										orgId,
+										dataset: HTTP_DATASET,
+										zoneId: zone.id,
+										zoneName: zone.name,
+										createdAt: new Date(now),
+										updatedAt: new Date(now),
+									})),
+								)
+								.onConflictDoNothing()
+								.returning(),
+						)
 
-				for (const zone of zones) {
-					const existing = byZoneId.get(zone.id)
-					if (!existing || (existing.zoneName === zone.name && existing.enabled)) continue
-					// Re-enable on reappearance; a dataset-level disable re-asserts itself on the
-					// next settings check, so this errs on the side of collecting again.
-					yield* updateRows([existing.id], { zoneName: zone.name, enabled: true, updatedAt: new Date(now) })
-					existing.zoneName = zone.name
-					existing.enabled = true
-				}
+			for (const zone of zones) {
+				const existing = byZoneId.get(zone.id)
+				if (!existing || (existing.zoneName === zone.name && existing.enabled)) continue
+				// Re-enable on reappearance; a dataset-level disable re-asserts itself on the
+				// next settings check, so this errs on the side of collecting again.
+				yield* updateRows([existing.id], {
+					zoneName: zone.name,
+					enabled: true,
+					updatedAt: new Date(now),
+				})
+				existing.zoneName = zone.name
+				existing.enabled = true
+			}
 
-				const seen = new Set(zones.map((zone) => zone.id))
-				const vanished = rows.filter(
-					(row) => row.dataset === HTTP_DATASET && row.enabled && !seen.has(row.zoneId),
-				)
-				yield* updateRows(
-					vanished.map((row) => row.id),
-					{
-						enabled: false,
-						lastError: "Zone no longer present on the Cloudflare account",
-						lastErrorAt: new Date(now),
-						updatedAt: new Date(now),
-					},
-				)
-				for (const row of vanished) row.enabled = false
+			const seen = new Set(zones.map((zone) => zone.id))
+			const vanished = rows.filter(
+				(row) => row.dataset === HTTP_DATASET && row.enabled && !seen.has(row.zoneId),
+			)
+			yield* updateRows(
+				vanished.map((row) => row.id),
+				{
+					enabled: false,
+					lastError: "Zone no longer present on the Cloudflare account",
+					lastErrorAt: new Date(now),
+					updatedAt: new Date(now),
+				},
+			)
+			for (const row of vanished) row.enabled = false
 
-				yield* updateRows([anchorId], { discoveredAt: new Date(now), updatedAt: new Date(now) })
+			yield* updateRows([anchorId], { discoveredAt: new Date(now), updatedAt: new Date(now) })
 
-				return [...rows, ...inserted]
-			})
+			return [...rows, ...inserted]
+		})
 
 		// ------------------------------------------------------------------
 		// Settings refresh (per-plan limits discovery)
@@ -678,106 +703,117 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * Refresh stale per-plan dataset settings. Returns true when anything was written — the
 		 * caller then reloads its row set (and skips the reload otherwise).
 		 */
-		const refreshSettings = (
+		const refreshSettings = Effect.fn("CloudflareAnalyticsService.refreshSettings")(function* (
 			accessToken: string,
 			accountId: string,
 			rows: ReadonlyArray<CloudflareAnalyticsStateRow>,
 			now: number,
 			budget: { calls: number },
-		) =>
-			Effect.gen(function* () {
-				let wrote = false
-				const stale = rows.filter(
-					(row) =>
-						row.enabled &&
-						(row.settingsFetchedAt == null || now - row.settingsFetchedAt.getTime() > SETTINGS_TTL_MS),
-				)
-				if (stale.length === 0) return wrote
+		) {
+			let wrote = false
+			const stale = rows.filter(
+				(row) =>
+					row.enabled &&
+					(row.settingsFetchedAt == null ||
+						now - row.settingsFetchedAt.getTime() > SETTINGS_TTL_MS),
+			)
+			if (stale.length === 0) return wrote
 
-				const staleHttp = stale.filter((row) => row.dataset === HTTP_DATASET)
-				const staleWorkers = stale.filter((row) => row.dataset === WORKERS_DATASET)
-				const zoneChunks = Arr.chunksOf(staleHttp, MAX_ZONES_PER_QUERY)
+			const staleHttp = stale.filter((row) => row.dataset === HTTP_DATASET)
+			const staleWorkers = stale.filter((row) => row.dataset === WORKERS_DATASET)
+			const zoneChunks = Arr.chunksOf(staleHttp, MAX_ZONES_PER_QUERY)
 
-				// The account (workers) settings ride along with the first zone chunk; with no zones
-				// we still need one account-only call for the workers row.
-				const plans: Array<{
-					zones: ReadonlyArray<CloudflareAnalyticsStateRow>
-					includeAccount: boolean
-				}> =
-					zoneChunks.length > 0
-						? zoneChunks.map((zones, index) => ({ zones, includeAccount: index === 0 && staleWorkers.length > 0 }))
-						: staleWorkers.length > 0
-							? [{ zones: [], includeAccount: true }]
-							: []
+			// The account (workers) settings ride along with the first zone chunk; with no zones
+			// we still need one account-only call for the workers row.
+			const plans: Array<{
+				zones: ReadonlyArray<CloudflareAnalyticsStateRow>
+				includeAccount: boolean
+			}> =
+				zoneChunks.length > 0
+					? zoneChunks.map((zones, index) => ({
+							zones,
+							includeAccount: index === 0 && staleWorkers.length > 0,
+						}))
+					: staleWorkers.length > 0
+						? [{ zones: [], includeAccount: true }]
+						: []
 
-				for (const plan of plans) {
-					if (budget.calls >= MAX_CALLS_PER_ORG_TICK) return wrote
-					budget.calls += 1
-					const result = yield* graphqlQuery(
-						accessToken,
-						{
-							query: settingsQuery({ withZones: plan.zones.length > 0 }),
-							variables: {
-								accountTag: accountId,
-								...(plan.zones.length > 0 ? { zoneTags: plan.zones.map((row) => row.zoneId) } : {}),
-							},
+			for (const plan of plans) {
+				if (budget.calls >= MAX_CALLS_PER_ORG_TICK) return wrote
+				budget.calls += 1
+				const result = yield* graphqlQuery(
+					accessToken,
+					{
+						query: settingsQuery({ withZones: plan.zones.length > 0 }),
+						variables: {
+							accountTag: accountId,
+							...(plan.zones.length > 0
+								? { zoneTags: plan.zones.map((row) => row.zoneId) }
+								: {}),
 						},
-						apiBaseUrl,
-					).pipe(
-						// Token died mid-refresh: stop burning settings calls — every further one
-						// would 401 too. The poll loop records the revoke on its first chunk.
-						Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-							Effect.logWarning("cloudflare-analytics settings query failed", {
-								errorTag: error._tag,
-								error: error.message,
-							}).pipe(Effect.as("revoked" as const)),
-						),
-						Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-							Effect.logWarning("cloudflare-analytics settings query failed", {
-								errorTag: error._tag,
-								error: error.message,
-							}).pipe(Effect.as(null)),
-						),
-					)
-					if (result === "revoked") return wrote
-					if (result == null || result.errors.length > 0) continue
+					},
+					apiBaseUrl,
+				).pipe(
+					// Token died mid-refresh: stop burning settings calls — every further one
+					// would 401 too. The poll loop records the revoke on its first chunk.
+					Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
+						Effect.logWarning("cloudflare-analytics settings query failed", {
+							errorTag: error._tag,
+							error: error.message,
+						}).pipe(Effect.as("revoked" as const)),
+					),
+					Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
+						Effect.logWarning("cloudflare-analytics settings query failed", {
+							errorTag: error._tag,
+							error: error.message,
+						}).pipe(Effect.as(null)),
+					),
+				)
+				if (result === "revoked") return wrote
+				if (result == null || result.errors.length > 0) continue
 
-					const decoded = yield* decodeSettingsResponse(result.data).pipe(
-						Effect.catch((error) =>
-							Effect.logWarning("cloudflare-analytics settings response decode failed", {
-								error: String(error),
-							}).pipe(Effect.as(null)),
-						),
-					)
-					if (decoded == null) continue
+				const decoded = yield* decodeSettingsResponse(result.data).pipe(
+					Effect.catch((error) =>
+						Effect.logWarning("cloudflare-analytics settings response decode failed", {
+							error: String(error),
+						}).pipe(Effect.as(null)),
+					),
+				)
+				if (decoded == null) continue
 
-					// Group rows by their resulting update payload — zones on the same Cloudflare
-					// plan (the common case) collapse into one UPDATE.
-					const updates = new Map<string, { ids: string[]; set: Partial<CloudflareAnalyticsStateInsert> }>()
-					for (const row of [...plan.zones, ...(plan.includeAccount ? staleWorkers : [])]) {
-						const dataset = DATASET_BY_ID.get(row.dataset)
-						if (!dataset) continue
-						const settings = dataset.settingsNode(decoded, row)
-						if (settings === undefined) continue
-						const set: Partial<CloudflareAnalyticsStateInsert> = {
-							settingsJson: settings == null ? null : JSON.stringify(settings),
-							settingsFetchedAt: new Date(now),
-							quantilesAvailable: quantilesFromAvailableFields(settings, dataset.availableFieldsNeedle),
-							...(settings?.enabled === false ? { enabled: false } : {}),
-							updatedAt: new Date(now),
-						}
-						const key = `${set.settingsJson}|${set.quantilesAvailable}|${set.enabled ?? ""}`
-						const group = updates.get(key)
-						if (group) group.ids.push(row.id)
-						else updates.set(key, { ids: [row.id], set })
+				// Group rows by their resulting update payload — zones on the same Cloudflare
+				// plan (the common case) collapse into one UPDATE.
+				const updates = new Map<
+					string,
+					{ ids: string[]; set: Partial<CloudflareAnalyticsStateInsert> }
+				>()
+				for (const row of [...plan.zones, ...(plan.includeAccount ? staleWorkers : [])]) {
+					const dataset = DATASET_BY_ID.get(row.dataset)
+					if (!dataset) continue
+					const settings = dataset.settingsNode(decoded, row)
+					if (settings === undefined) continue
+					const set: Partial<CloudflareAnalyticsStateInsert> = {
+						settingsJson: settings == null ? null : JSON.stringify(settings),
+						settingsFetchedAt: new Date(now),
+						quantilesAvailable: quantilesFromAvailableFields(
+							settings,
+							dataset.availableFieldsNeedle,
+						),
+						...(settings?.enabled === false ? { enabled: false } : {}),
+						updatedAt: new Date(now),
 					}
-					for (const group of updates.values()) {
-						yield* updateRows(group.ids, group.set)
-						wrote = true
-					}
+					const key = `${set.settingsJson}|${set.quantilesAvailable}|${set.enabled ?? ""}`
+					const group = updates.get(key)
+					if (group) group.ids.push(row.id)
+					else updates.set(key, { ids: [row.id], set })
 				}
-				return wrote
-			})
+				for (const group of updates.values()) {
+					yield* updateRows(group.ids, group.set)
+					wrote = true
+				}
+			}
+			return wrote
+		})
 
 		// ------------------------------------------------------------------
 		// Ingest — via the gateway, so per-org routing (managed Tinybird vs BYO
@@ -797,8 +833,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * transport failures surface as {@link IntegrationsUpstreamError} so the poll loop records
 		 * them and retries next tick (the watermark only advances on success). Returns the row count.
 		 */
-		const emitMetrics = (ingestKey: string, rows: CloudflareMetricRows) =>
-			Effect.gen(function* () {
+		const emitMetrics = Effect.fn("CloudflareAnalyticsService.emitMetrics")(
+			function* (ingestKey: string, rows: CloudflareMetricRows) {
 				const total = rows.sumRows.length + rows.gaugeRows.length
 				if (total === 0) return 0
 				const payload = metricRowsToOtlp(rows.sumRows, rows.gaugeRows)
@@ -817,17 +853,20 @@ export class CloudflareAnalyticsService extends Context.Service<
 					)
 				}
 				return total
-			}).pipe(
-				Effect.provide(FetchHttpClient.layer),
-				Effect.mapError((error) =>
-					error instanceof IntegrationsUpstreamError
-						? error
-						: new IntegrationsUpstreamError({
-								message: `Cloudflare metrics ingest request failed: ${error instanceof Error ? error.message : String(error)}`,
-								cause: error,
-							}),
+			},
+			(effect) =>
+				effect.pipe(
+					Effect.provide(FetchHttpClient.layer),
+					Effect.mapError((error) =>
+						error instanceof IntegrationsUpstreamError
+							? error
+							: new IntegrationsUpstreamError({
+									message: `Cloudflare metrics ingest request failed: ${error instanceof Error ? error.message : String(error)}`,
+									cause: error,
+								}),
+					),
 				),
-			)
+		)
 
 		// ------------------------------------------------------------------
 		// Generic dataset polling
@@ -837,7 +876,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * One poll step: query a dataset chunk's window, classify GraphQL-level errors (quantile
 		 * downgrade / dataset disabled / other), decode, map, ingest, advance the watermark.
 		 */
-		const pollDatasetChunk = (
+		const pollDatasetChunk = Effect.fn("CloudflareAnalyticsService.pollDatasetChunk")(function* (
 			item: WorkItem,
 			context: {
 				readonly orgId: OrgId
@@ -846,44 +885,43 @@ export class CloudflareAnalyticsService extends Context.Service<
 				readonly ingestKey: string
 			},
 			now: number,
-		) =>
-			Effect.gen(function* () {
-				const rowIds = item.rows.map((row) => row.id)
-				const result = yield* graphqlQuery(
-					context.accessToken,
-					item.dataset.buildQuery({
-						rows: item.rows,
-						accountId: context.accountId,
-						window: item.window,
-						withQuantiles: item.withQuantiles,
-					}),
-					apiBaseUrl,
-				)
-
-				if (result.errors.length > 0) {
-					const kind = classifyGraphqlErrors(result.errors, item.dataset.quantileNeedles)
-					if (kind === "quantiles-unavailable") {
-						yield* updateRows(rowIds, { quantilesAvailable: false, updatedAt: new Date(now) })
-						// The next round rebuilds the document without the quantile fields — retry.
-						return { kind: "quantiles-downgraded" } as const satisfies PollOutcome
-					}
-					yield* recordError(rowIds, graphqlErrorMessage(result.errors), now, {
-						disable: kind === "disabled",
-					})
-					if (kind === "disabled") return { kind: "disabled" } as const satisfies PollOutcome
-					return FAILED_OUTCOME
-				}
-
-				const mapped = yield* item.dataset.decodeRows(result.data, {
-					orgId: context.orgId,
-					accountId: context.accountId,
+		) {
+			const rowIds = item.rows.map((row) => row.id)
+			const result = yield* graphqlQuery(
+				context.accessToken,
+				item.dataset.buildQuery({
 					rows: item.rows,
+					accountId: context.accountId,
+					window: item.window,
+					withQuantiles: item.withQuantiles,
+				}),
+				apiBaseUrl,
+			)
+
+			if (result.errors.length > 0) {
+				const kind = classifyGraphqlErrors(result.errors, item.dataset.quantileNeedles)
+				if (kind === "quantiles-unavailable") {
+					yield* updateRows(rowIds, { quantilesAvailable: false, updatedAt: new Date(now) })
+					// The next round rebuilds the document without the quantile fields — retry.
+					return { kind: "quantiles-downgraded" } as const satisfies PollOutcome
+				}
+				yield* recordError(rowIds, graphqlErrorMessage(result.errors), now, {
+					disable: kind === "disabled",
 				})
-				const ingested = yield* emitMetrics(context.ingestKey, mapped)
-				// Watermark only advances after the gateway accepted the batch above.
-				yield* advanceWatermark(rowIds, item.window.end, now)
-				return { kind: "advanced", ingested } as const satisfies PollOutcome
+				if (kind === "disabled") return { kind: "disabled" } as const satisfies PollOutcome
+				return FAILED_OUTCOME
+			}
+
+			const mapped = yield* item.dataset.decodeRows(result.data, {
+				orgId: context.orgId,
+				accountId: context.accountId,
+				rows: item.rows,
 			})
+			const ingested = yield* emitMetrics(context.ingestKey, mapped)
+			// Watermark only advances after the gateway accepted the batch above.
+			yield* advanceWatermark(rowIds, item.window.end, now)
+			return { kind: "advanced", ingested } as const satisfies PollOutcome
+		})
 
 		// ------------------------------------------------------------------
 		// Per-org poll
@@ -891,13 +929,21 @@ export class CloudflareAnalyticsService extends Context.Service<
 
 		const pollOrg = Effect.fn("CloudflareAnalyticsService.pollOrg")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			const skip = (reason: string): PollOrgSummary => ({ orgId, skipped: reason, callsMade: 0, rowsIngested: 0 })
+			const skip = (reason: string): PollOrgSummary => ({
+				orgId,
+				skipped: reason,
+				callsMade: 0,
+				rowsIngested: 0,
+			})
 
 			const now = yield* Clock.currentTimeMillis
 
 			// One connection read resolves connected-ness, capability (scope), and a fresh token.
 			const tokenResult = yield* Effect.result(oauth.getValidAccessToken(orgId))
-			if (Result.isFailure(tokenResult) && tokenResult.failure instanceof IntegrationsNotConnectedError) {
+			if (
+				Result.isFailure(tokenResult) &&
+				tokenResult.failure instanceof IntegrationsNotConnectedError
+			) {
 				return skip("not connected")
 			}
 
@@ -951,31 +997,39 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// The org's public ingest key authenticates the gateway POSTs (minted on first use).
 				const keyResult = yield* Effect.result(getOrgIngestKey(orgId))
 				if (Result.isFailure(keyResult)) {
-					yield* recordOrgError(orgId, `Cloudflare ingest key unavailable: ${keyResult.failure.message}`, now)
+					yield* recordOrgError(
+						orgId,
+						`Cloudflare ingest key unavailable: ${keyResult.failure.message}`,
+						now,
+					)
 					return skip("ingest key unavailable")
 				}
 				const ingestKey = keyResult.success
 
-				let rowsIngested = 0
+				const rowsIngestedRef = yield* Ref.make(0)
 				// Set when Cloudflare rejects the token mid-loop — every further call would 401 too.
-				let revoked = false
+				const revokedRef = yield* Ref.make(false)
 
 				// Round-based catch-up: every round advances each behind zone/dataset by one window;
 				// loop until caught up or the call budget is spent (backfill resumes next tick).
-				while (!revoked && budget.calls < MAX_CALLS_PER_ORG_TICK) {
+				while (!(yield* Ref.get(revokedRef)) && budget.calls < MAX_CALLS_PER_ORG_TICK) {
 					const work = buildWorkItems(rows, now)
 					if (work.length === 0) break
 					let progressed = false
 
 					for (const item of work) {
-						if (budget.calls >= MAX_CALLS_PER_ORG_TICK || revoked) break
+						if (budget.calls >= MAX_CALLS_PER_ORG_TICK || (yield* Ref.get(revokedRef))) break
 						budget.calls += 1
-						const outcome = yield* pollDatasetChunk(item, { orgId, accountId, accessToken, ingestKey }, now).pipe(
+						const outcome = yield* pollDatasetChunk(
+							item,
+							{ orgId, accountId, accessToken, ingestKey },
+							now,
+						).pipe(
 							Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
-								Effect.sync(() => {
-									revoked = true
-								}).pipe(
-									Effect.andThen(recordOrgError(orgId, error.message, now, { disable: true })),
+								Ref.set(revokedRef, true).pipe(
+									Effect.andThen(
+										recordOrgError(orgId, error.message, now, { disable: true }),
+									),
 									Effect.as(FAILED_OUTCOME),
 								),
 							),
@@ -990,39 +1044,49 @@ export class CloudflareAnalyticsService extends Context.Service<
 
 						// Mirror the DB write onto the in-memory rows so the next round re-plans
 						// without a per-round SELECT.
-						switch (outcome.kind) {
-							case "advanced": {
-								rowsIngested += outcome.ingested
-								progressed = true
-								const watermark = new Date(item.window.end)
-								for (const row of item.rows) row.watermarkAt = watermark
-								break
-							}
-							case "quantiles-downgraded": {
-								progressed = true
-								for (const row of item.rows) row.quantilesAvailable = false
-								break
-							}
-							case "disabled": {
-								for (const row of item.rows) row.enabled = false
-								break
-							}
-							case "failed":
-								break
-						}
+						yield* Match.value(outcome).pipe(
+							Match.discriminatorsExhaustive("kind")({
+								advanced: ({ ingested }) =>
+									Ref.update(rowsIngestedRef, (count) => count + ingested).pipe(
+										Effect.map(() => {
+											progressed = true
+											const watermark = new Date(item.window.end)
+											for (const row of item.rows) row.watermarkAt = watermark
+										}),
+									),
+								"quantiles-downgraded": () =>
+									Effect.sync(() => {
+										progressed = true
+										for (const row of item.rows) row.quantilesAvailable = false
+									}),
+								disabled: () =>
+									Effect.sync(() => {
+										for (const row of item.rows) row.enabled = false
+									}),
+								failed: () => Effect.void,
+							}),
+						)
 					}
 
 					if (!progressed) break
 				}
 
+				const rowsIngested = yield* Ref.get(rowsIngestedRef)
 				// Metrics ship through the ingest gateway (see emitMetrics), so Autumn metering
 				// happens there — no self-report here.
-				yield* Effect.annotateCurrentSpan("cloudflare.calls", budget.calls)
-				yield* Effect.annotateCurrentSpan("cloudflare.rowsIngested", rowsIngested)
-				return { orgId, skipped: null, callsMade: budget.calls, rowsIngested } satisfies PollOrgSummary
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.calls", budget.calls)
+				yield* Effect.annotateCurrentSpan("maple.cloudflare.rows_ingested", rowsIngested)
+				return {
+					orgId,
+					skipped: null,
+					callsMade: budget.calls,
+					rowsIngested,
+				} satisfies PollOrgSummary
 			}).pipe(
 				Effect.ensuring(
-					Clock.currentTimeMillis.pipe(Effect.flatMap((end) => releaseLease(orgId, end).pipe(Effect.ignore))),
+					Clock.currentTimeMillis.pipe(
+						Effect.flatMap((end) => releaseLease(orgId, end).pipe(Effect.ignore)),
+					),
 				),
 			)
 		})
@@ -1042,15 +1106,14 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// already surfaces that (analyticsCapable: false), so skipping them here avoids
 			// rewriting the same scope error into their state rows every tick.
 			const capable = orgRows.filter((row) => hasAnalyticsScopes(row.scope))
-			let rowsIngested = 0
+			// Concurrent fan-out below — must be a Ref rather than a mutable closure variable.
+			const rowsIngestedRef = yield* Ref.make(0)
 			yield* Effect.forEach(
 				capable,
 				(row) =>
-					pollOrg(row.orgId as OrgId).pipe(
+					pollOrg(decodeOrgId(row.orgId)).pipe(
 						Effect.tap((summary) =>
-							Effect.sync(() => {
-								rowsIngested += summary.rowsIngested
-							}),
+							Ref.update(rowsIngestedRef, (count) => count + summary.rowsIngested),
 						),
 						// Isolate genuine per-org failures/defects so one bad org can't fail the
 						// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
@@ -1068,6 +1131,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					),
 				{ concurrency: ORG_CONCURRENCY, discard: true },
 			)
+			const rowsIngested = yield* Ref.get(rowsIngestedRef)
 			return { orgs: capable.length, rowsIngested } satisfies PollAllOrgsSummary
 		})
 
@@ -1090,9 +1154,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 				workers: workersRow
 					? {
 							enabled: workersRow.enabled,
-							lastSyncedAt: workersRow.lastSuccessAt == null ? null : dateToMs(workersRow.lastSuccessAt),
+							lastSyncedAt:
+								workersRow.lastSuccessAt == null ? null : dateToMs(workersRow.lastSuccessAt),
 							lastError: workersRow.lastError,
-							watermarkAt: workersRow.watermarkAt == null ? null : dateToMs(workersRow.watermarkAt),
+							watermarkAt:
+								workersRow.watermarkAt == null ? null : dateToMs(workersRow.watermarkAt),
 						}
 					: null,
 			} satisfies CloudflareAnalyticsStatus
@@ -1191,7 +1257,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 					})
 				})
 				.sort((a, b) =>
-					a.kind === b.kind ? a.displayName.localeCompare(b.displayName) : a.kind === "zone" ? -1 : 1,
+					a.kind === b.kind
+						? a.displayName.localeCompare(b.displayName)
+						: a.kind === "zone"
+							? -1
+							: 1,
 				)
 
 			return new CloudflareUsageResponse({

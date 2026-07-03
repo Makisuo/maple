@@ -294,38 +294,37 @@ const toWidgetDataAtomError = (error: unknown): WidgetFetchError => {
 	})
 }
 
-const fetchWidgetData = Effect.fnUntraced(function* (key: string) {
-	const parsed = yield* Effect.try({
-		try: () =>
-			JSON.parse(key) as {
-				endpoint: string
-				params: Record<string, unknown>
-			},
-		catch: toWidgetDataAtomError,
-	})
-
-	const serverFn = getServerFunction(parsed.endpoint)
-	if (!serverFn) {
-		return yield* new WidgetDataAtomError({
-			message: `Unknown endpoint: ${parsed.endpoint}`,
+const fetchWidgetData = Effect.fnUntraced(
+	function* (key: string) {
+		const parsed = yield* Effect.try({
+			try: () =>
+				JSON.parse(key) as {
+					endpoint: string
+					params: Record<string, unknown>
+				},
+			catch: toWidgetDataAtomError,
 		})
-	}
 
-	const response = yield* serverFn({ data: parsed.params })
-	return (response as { data?: unknown })?.data ?? response
-})
+		const serverFn = getServerFunction(parsed.endpoint)
+		if (!serverFn) {
+			return yield* new WidgetDataAtomError({
+				message: `Unknown endpoint: ${parsed.endpoint}`,
+			})
+		}
+
+		const response = yield* serverFn({ data: parsed.params })
+		return (response as { data?: unknown })?.data ?? response
+	},
+	Effect.mapError(toWidgetDataAtomError),
+	Effect.retry({
+		times: 2,
+		schedule: Schedule.exponential("500 millis"),
+		while: (error) => !isExpectedEmptyDataError(error),
+	}),
+)
 
 const widgetFetchFamily = Atom.family((key: string) =>
-	Atom.make(
-		fetchWidgetData(key).pipe(
-			Effect.mapError(toWidgetDataAtomError),
-			Effect.retry({
-				times: 2,
-				schedule: Schedule.exponential("500 millis"),
-				while: (error) => !isExpectedEmptyDataError(error),
-			}),
-		),
-	).pipe(Atom.setIdleTTL(120_000)),
+	Atom.make(fetchWidgetData(key)).pipe(Atom.setIdleTTL(120_000)),
 )
 
 const widgetFetchAtom = (input: { endpoint: string; params: Record<string, unknown> }) =>

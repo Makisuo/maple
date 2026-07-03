@@ -58,4 +58,7 @@ const makePgliteDatabase = Effect.gen(function* () {
 	return yield* makeFromInstance(pglite)
 })
 
-export const DatabasePgliteLive = Layer.effect(Database, makePgliteDatabase)
+export const layerPglite = Layer.effect(Database, makePgliteDatabase)
+
+/** @deprecated Use {@link layerPglite}. */
+export const DatabasePgliteLive = layerPglite

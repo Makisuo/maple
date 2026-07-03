@@ -42,4 +42,7 @@ const makePgDatabase = Effect.gen(function* () {
 	} satisfies DatabaseShape)
 })
 
-export const DatabasePgLive = Layer.effect(Database, makePgDatabase)
+export const layerPg = Layer.effect(Database, makePgDatabase)
+
+/** @deprecated Use {@link layerPg}. */
+export const DatabasePgLive = layerPg

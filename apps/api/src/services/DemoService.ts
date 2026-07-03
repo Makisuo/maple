@@ -16,7 +16,11 @@ const chunk = <T>(rows: ReadonlyArray<T>, size: number): T[][] => {
 	return out
 }
 
-export class DemoService extends Context.Service<DemoService>()("@maple/api/services/DemoService", {
+export interface DemoServiceShape {
+	readonly seed: (tenant: TenantContext, hours?: number) => Effect.Effect<DemoSeedResponse, DemoSeedError>
+}
+
+export class DemoService extends Context.Service<DemoService, DemoServiceShape>()("@maple/api/services/DemoService", {
 	make: Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
 
@@ -66,7 +70,7 @@ export class DemoService extends Context.Service<DemoService>()("@maple/api/serv
 			})
 		})
 
-		return { seed }
+		return { seed } satisfies DemoServiceShape
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)
