@@ -272,8 +272,6 @@
         "@streamdown/math": "^1.0.2",
         "@streamdown/mermaid": "^1.0.2",
         "@tailwindcss/vite": "catalog:tailwind",
-        "@tanstack/db": "0.6.13",
-        "@tanstack/electric-db-collection": "0.3.11",
         "@tanstack/react-db": "0.1.91",
         "@tanstack/react-hotkeys": "0.10.0",
         "@tanstack/react-router": "^1.170.16",
@@ -460,7 +458,6 @@
     "packages/effect-db": {
       "name": "@maple/effect-db",
       "dependencies": {
-        "@effect/atom-react": "catalog:effect",
         "@electric-sql/client": "1.5.22",
         "@standard-schema/spec": "^1.1.0",
         "@tanstack/db": "0.6.13",

@@ -11,7 +11,6 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@effect/atom-react": "catalog:effect",
 		"@electric-sql/client": "1.5.22",
 		"@standard-schema/spec": "^1.1.0",
 		"@tanstack/db": "0.6.13",
