@@ -3740,15 +3740,19 @@ impl PostgresKeyStore {
 
     /// Startup gate — runs the production lookup query with a stub hash so any
     /// auth/schema/network/TLS issue exits the process instead of 503'ing every
-    /// request.
+    /// request. Mirrors every table/column `fetch_ingest_key` touches — including
+    /// the `org_billing_suspensions` join — so a binary newer than the applied
+    /// schema fails fast here rather than erroring on the first real request.
     async fn probe(&self) -> Result<(), String> {
         let client = self.client().await?;
         client
             .query(
                 "SELECT k.org_id, \
-                        COALESCE(s.sync_status = 'connected', false) AS self_managed \
+                        COALESCE(s.sync_status = 'connected', false) AS self_managed, \
+                        (b.suspended_at IS NOT NULL) AS ingest_suspended \
                  FROM org_ingest_keys k \
                  LEFT JOIN org_clickhouse_settings s ON s.org_id = k.org_id \
+                 LEFT JOIN org_billing_suspensions b ON b.org_id = k.org_id \
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
