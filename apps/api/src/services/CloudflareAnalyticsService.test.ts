@@ -153,6 +153,8 @@ interface FetchOptions {
 	readonly zones?: ReadonlyArray<typeof zoneFixture>
 	readonly zonesStatus?: number
 	readonly graphqlErrors?: ReadonlyArray<{ message: string }>
+	/** When set, Autumn /v1/track request bodies are captured here. */
+	readonly trackCalls?: Array<Record<string, unknown>>
 }
 
 /** Read the outbound request body regardless of how the HttpClient encodes it (string/bytes/stream). */
@@ -171,6 +173,10 @@ const mockCloudflareFetch =
 	(options: FetchOptions = {}): typeof globalThis.fetch =>
 	async (input, init) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+		if (url.includes("useautumn") && url.includes("/v1/track")) {
+			options.trackCalls?.push(JSON.parse(await readRequestBody(input, init)) as Record<string, unknown>)
+			return jsonResponse({ code: "event_received" })
+		}
 		if (url.includes("/graphql")) {
 			const body = JSON.parse(await readRequestBody(input, init)) as { query: string }
 			if (options.graphqlErrors) {
@@ -215,13 +221,18 @@ const makeWarehouseStub = (captured: CapturedIngest[]): WarehouseQueryServiceSha
 			}),
 	}) as unknown as WarehouseQueryServiceShape
 
-const makeLayer = (testDb: TestDb, captured: CapturedIngest[], fetchOptions: FetchOptions = {}) =>
+const makeLayer = (
+	testDb: TestDb,
+	captured: CapturedIngest[],
+	fetchOptions: FetchOptions = {},
+	configOverrides: Record<string, string> = {},
+) =>
 	CloudflareAnalyticsService.layer.pipe(
 		Layer.provideMerge(CloudflareOAuthService.layer),
 		Layer.provideMerge(Layer.succeed(WarehouseQueryService, makeWarehouseStub(captured))),
 		Layer.provideMerge(testDb.layer),
 		Layer.provideMerge(Env.layer),
-		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown(baseConfig))),
+		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown({ ...baseConfig, ...configOverrides }))),
 		Layer.provideMerge(Layer.succeed(FetchHttpClient.Fetch, mockCloudflareFetch(fetchOptions))),
 		// Disable the distilled retry policy: its backoff sleeps never resolve under the
 		// TestClock, so a retryable failure would hang the suite instead of failing the test.
@@ -420,6 +431,43 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(httpRow!.watermarkAt?.getTime(), T0 - 30 * MIN)
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { graphqlErrors: [{ message: "quota exceeded" }] })))
+	})
+
+	it.effect("pollOrg reports ingested bytes to Autumn", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const trackCalls: Array<Record<string, unknown>> = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			assert.isAbove(summary.rowsIngested, 0)
+			assert.strictEqual(trackCalls.length, 1)
+			const body = trackCalls[0]!
+			assert.strictEqual(body.customer_id, ORG)
+			assert.strictEqual(body.feature_id, "metrics")
+			assert.isAbove(body.value as number, 0)
+			assert.include(String(body.idempotency_key), `cloudflare-analytics:${ORG}:`)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, { trackCalls }, { AUTUMN_SECRET_KEY: "autumn-test-key" }),
+			),
+		)
+	})
+
+	it.effect("pollOrg reports nothing to Autumn without an AUTUMN_SECRET_KEY", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const trackCalls: Array<Record<string, unknown>> = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			assert.isAbove(summary.rowsIngested, 0)
+			assert.strictEqual(trackCalls.length, 0)
+		}).pipe(Effect.provide(makeLayer(testDb, captured, { trackCalls })))
 	})
 
 	it.effect("getStatus reflects zone and workers state rows", () => {

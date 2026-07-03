@@ -47,7 +47,9 @@ export class DemoService extends Context.Service<DemoService>()("@maple/api/serv
 			// Write straight to the warehouse datasources, bypassing the
 			// billing-enforced ingest gateway (which 402s brand-new orgs that have
 			// no active subscription — the whole point of demo data is to work
-			// before the user has picked a plan).
+			// before the user has picked a plan). Also deliberately NOT metered to
+			// Autumn: these are Maple-injected samples, not billable customer
+			// telemetry (see lib/autumn-ingest-meter.ts).
 			yield* ingestAll("traces", traceRows)
 			yield* ingestAll("logs", logRows)
 			// Runtime metrics so metric-based dashboard templates (Node.js

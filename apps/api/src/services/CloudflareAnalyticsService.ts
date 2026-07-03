@@ -48,6 +48,7 @@ import {
 	type CloudflareGraphqlError,
 	type CloudflareZone,
 } from "../lib/CloudflareApi"
+import { ingestRowBytes, trackIngestUsage } from "../lib/autumn-ingest-meter"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { dateToMs } from "../lib/time"
@@ -395,7 +396,7 @@ const buildWorkItems = (rows: ReadonlyArray<CloudflareAnalyticsStateRow>, now: n
 }
 
 type PollOutcome =
-	| { readonly kind: "advanced"; readonly ingested: number }
+	| { readonly kind: "advanced"; readonly ingested: number; readonly bytes: number }
 	| { readonly kind: "quantiles-downgraded" }
 	| { readonly kind: "disabled" }
 	| { readonly kind: "failed" }
@@ -771,7 +772,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 					})
 				yield* ingestAll("metrics_sum", rows.sumRows)
 				yield* ingestAll("metrics_gauge", rows.gaugeRows)
-				return rows.sumRows.length + rows.gaugeRows.length
+				return {
+					rows: rows.sumRows.length + rows.gaugeRows.length,
+					bytes: ingestRowBytes(rows.sumRows) + ingestRowBytes(rows.gaugeRows),
+				}
 			})
 
 		// ------------------------------------------------------------------
@@ -829,7 +833,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				)
 				// Watermark only advances after the ingest above succeeded — exactly-once by construction.
 				yield* advanceWatermark(rowIds, item.window.end, now)
-				return { kind: "advanced", ingested } as const satisfies PollOutcome
+				return { kind: "advanced", ingested: ingested.rows, bytes: ingested.bytes } as const satisfies PollOutcome
 			})
 
 		// ------------------------------------------------------------------
@@ -896,6 +900,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				if (settingsWrote) rows = yield* loadStateRows(orgId)
 
 				let rowsIngested = 0
+				let bytesIngested = 0
 				// Set when Cloudflare rejects the token mid-loop — every further call would 401 too.
 				let revoked = false
 
@@ -932,6 +937,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						switch (outcome.kind) {
 							case "advanced": {
 								rowsIngested += outcome.ingested
+								bytesIngested += outcome.bytes
 								progressed = true
 								const watermark = new Date(item.window.end)
 								for (const row of item.rows) row.watermarkAt = watermark
@@ -954,8 +960,18 @@ export class CloudflareAnalyticsService extends Context.Service<
 					if (!progressed) break
 				}
 
+				// These rows bypass the ingest gateway (the usual Autumn metering point), so this
+				// is where they become billable usage — one report per org per tick.
+				yield* trackIngestUsage(env, {
+					orgId,
+					signal: "metrics",
+					bytes: bytesIngested,
+					idempotencyKey: `cloudflare-analytics:${orgId}:${now}`,
+				})
+
 				yield* Effect.annotateCurrentSpan("cloudflare.calls", budget.calls)
 				yield* Effect.annotateCurrentSpan("cloudflare.rowsIngested", rowsIngested)
+				yield* Effect.annotateCurrentSpan("cloudflare.bytesIngested", bytesIngested)
 				return { orgId, skipped: null, callsMade: budget.calls, rowsIngested } satisfies PollOrgSummary
 			}).pipe(
 				Effect.ensuring(
