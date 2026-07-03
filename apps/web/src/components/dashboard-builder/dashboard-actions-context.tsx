@@ -2,6 +2,7 @@ import * as React from "react"
 import type { ReactNode } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
+import { pickVariableParams } from "@/lib/dashboard-variables/search-params"
 
 import type {
 	DashboardWidget,
@@ -105,6 +106,9 @@ export function DashboardActionsProvider({
 				navigate({
 					to: "/dashboards/$dashboardId/widgets/$widgetId",
 					params: { dashboardId, widgetId },
+					// Carry the dashboard's `var-*` selections into the editor so returning
+					// from it restores them (the editor itself renders variables at defaults).
+					search: (prev) => pickVariableParams(prev),
 				})
 			},
 			updateWidgetDisplay: (widgetId, display) => {

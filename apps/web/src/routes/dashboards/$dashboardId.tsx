@@ -14,6 +14,11 @@ import {
 } from "@/components/dashboard-builder/dashboard-providers"
 import { DashboardVariablesProvider } from "@/components/dashboard-builder/dashboard-variables-context"
 import {
+	VARIABLE_PARAM_PREFIX,
+	pickVariableParams,
+	variableSearchRest,
+} from "@/lib/dashboard-variables/search-params"
+import {
 	DashboardActionsProvider,
 	useDashboardActions,
 } from "@/components/dashboard-builder/dashboard-actions-context"
@@ -37,26 +42,8 @@ const dashboardViewSearchSchema = Schema.StructWithRest(
 	Schema.Struct({
 		mode: Schema.optional(Schema.Literal("edit")),
 	}),
-	[Schema.Record(Schema.TemplateLiteral(["var-", Schema.String]), Schema.Unknown)],
+	[variableSearchRest],
 )
-
-const VARIABLE_PARAM_PREFIX = "var-"
-
-type VariableSearchParams = Record<`${typeof VARIABLE_PARAM_PREFIX}${string}`, unknown>
-
-// The functional-search `prev` is typed as the union of every route's search
-// params, so spreading it wholesale doesn't satisfy this route's schema.
-// Rebuild the object from the parts this route owns: `var-*` keys (+ `mode`,
-// handled per call site).
-function pickVariableParams(search: Record<string, unknown>): VariableSearchParams {
-	const params: VariableSearchParams = {}
-	for (const [key, value] of Object.entries(search)) {
-		if (key.startsWith(VARIABLE_PARAM_PREFIX)) {
-			params[key as keyof VariableSearchParams] = value
-		}
-	}
-	return params
-}
 
 function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
 	const values: Record<string, string> = {}

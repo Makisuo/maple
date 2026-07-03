@@ -1,5 +1,6 @@
 import * as React from "react"
 import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router"
+import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import {
@@ -16,10 +17,18 @@ import type {
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import {
+	pickVariableParams,
+	variableSearchRest,
+} from "@/lib/dashboard-variables/search-params"
 import { Button } from "@maple/ui/components/ui/button"
 
+// The editor carries the dashboard's `var-*` selections through its own search
+// (as opaque pass-through — it renders variables at defaults) so returning to the
+// dashboard restores them instead of falling back to first-option values.
 export const Route = createFileRoute("/dashboards/$dashboardId_/widgets/$widgetId")({
 	component: WidgetConfigurePage,
+	validateSearch: Schema.toStandardSchemaV1(variableSearchRest),
 })
 
 function WidgetConfigurePage() {
@@ -42,7 +51,8 @@ function WidgetConfigurePage() {
 		navigate({
 			to: "/dashboards/$dashboardId",
 			params: { dashboardId },
-			search: { mode: "edit" },
+			// Restore the `var-*` selections the editor round-tripped, back into edit mode.
+			search: (prev) => ({ ...pickVariableParams(prev), mode: "edit" as const }),
 		})
 	}
 
