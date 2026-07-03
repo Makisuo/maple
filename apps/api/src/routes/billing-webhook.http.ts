@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto"
 import { HttpRouter, type HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { Clock, Effect, Option, Redacted } from "effect"
 import { BillingSuspensionService } from "../services/BillingSuspensionService"
@@ -16,14 +17,11 @@ const ROUTE = "/api/billing/autumn/webhook"
 
 const textResponse = (body: string, status: number) => HttpServerResponse.text(body, { status })
 
-const timingSafeEqual = (a: string, b: string): boolean => {
-	const ba = Buffer.from(a)
-	const bb = Buffer.from(b)
-	if (ba.length !== bb.length) return false
-	let mismatch = 0
-	for (let i = 0; i < ba.length; i += 1) mismatch |= ba[i]! ^ bb[i]!
-	return mismatch === 0
-}
+// Constant-time equality of two byte buffers via the platform primitive. The
+// length check is on decoded digests (public, fixed 32-byte format) — not on any
+// secret — so it leaks nothing; node's timingSafeEqual throws on unequal lengths.
+const bytesEqual = (a: Buffer, b: Buffer): boolean =>
+	a.length === b.length && timingSafeEqual(a, b)
 
 // Svix rejects deliveries whose timestamp is outside a tolerance window to
 // prevent replay of an intercepted (still validly-signed) webhook. 5 minutes
@@ -72,13 +70,17 @@ export const verifySvixSignature = (input: {
 		}).pipe(Effect.option)
 		if (Option.isNone(mac)) return false
 
-		const expected = Buffer.from(mac.value).toString("base64")
+		const expectedBytes = Buffer.from(mac.value)
 		// Header: space-separated tokens like "v1,<base64sig> v1a,<base64sig>".
+		// Compare the decoded 32-byte digests (not base64 strings) in constant time.
 		const candidates = input.signatureHeader.split(" ").map((token) => {
 			const comma = token.indexOf(",")
 			return comma === -1 ? token : token.slice(comma + 1)
 		})
-		return candidates.some((candidate) => candidate.length > 0 && timingSafeEqual(expected, candidate))
+		return candidates.some(
+			(candidate) =>
+				candidate.length > 0 && bytesEqual(Buffer.from(candidate, "base64"), expectedBytes),
+		)
 	})
 
 // Pull the org (Autumn customer_id) out of a `billing.updated` payload. Autumn
