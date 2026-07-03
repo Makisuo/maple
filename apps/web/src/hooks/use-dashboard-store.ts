@@ -825,6 +825,14 @@ function useDashboardStoreCollection() {
 	}, [])
 
 	const mutateDashboard = useCallback(
+		// No per-dashboard FIFO queue (unlike the atom path): TanStack DB applies
+		// optimistic state synchronously inside `collection.update()` — it calls
+		// `recomputeOptimisticState` before returning — and `collection.get()` reads
+		// that optimistic state. So back-to-back edits to the same dashboard each
+		// read the previous edit's result; the whole read→update prefix below runs
+		// synchronously before the first `await`. The atom queue only existed to
+		// compensate for `dashboardsRef.current` (React state) lagging until the
+		// next render, which reading the collection directly avoids.
 		async (dashboardId: string, updater: (dashboard: Dashboard) => Dashboard): Promise<void> => {
 			const active = collectionRef.current
 			const row = active.get(dashboardId)
