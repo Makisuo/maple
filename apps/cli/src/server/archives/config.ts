@@ -1140,13 +1140,14 @@ const validateCompleteConfigSchema = (
 				}
 			}
 		}
-		const attemptWorst = completeAndWithinBudget
+		const completeWorst = completeAndWithinBudget
 			? worstCaseFromResults(attempt.results as Record<string, unknown>[], path)
 			: null
 		const attemptCandidate = eligible[attemptIndex]!.candidate as Record<string, number>
 		// Complete attempt: recompute per-signal comparisons against this
-		// candidate's training results. Incomplete attempt: no comparisons ran.
-		const attemptSignalComparisons = attemptWorst
+		// candidate's training results. A non-positive logical-byte pair makes
+		// the attempt incomplete under the same rule as the runner.
+		const completeSignalComparisons = completeWorst
 			? expectedSignalComparisons(
 					parsed.results as Record<string, unknown>[],
 					attempt.results as Record<string, unknown>[],
@@ -1154,16 +1155,14 @@ const validateCompleteConfigSchema = (
 					held.tolerances as Record<string, number>,
 				)
 			: []
-		if (attemptWorst !== null && attemptSignalComparisons === null) {
-			throw new Error(
-				`invalid calibration config heldOutAttempts[${attemptIndex}] could not pair every signal: ${path}`,
-			)
-		}
+		const attemptIncomplete = completeWorst === null || completeSignalComparisons === null
+		const attemptWorst = attemptIncomplete ? null : completeWorst
+		const attemptSignalComparisons = attemptIncomplete ? [] : completeSignalComparisons
 		const attemptPassed =
-			attemptWorst !== null && attemptSignalComparisons!.every((entry) => entry.passed === true)
+			attemptWorst !== null && attemptSignalComparisons.every((entry) => entry.passed === true)
 		if (
 			!exactJson(attempt.worstCase, attemptWorst) ||
-			!exactJson(attempt.signalComparisons, attemptSignalComparisons ?? []) ||
+			!exactJson(attempt.signalComparisons, attemptSignalComparisons) ||
 			attempt.passed !== attemptPassed
 		) {
 			throw new Error(`invalid calibration config heldOutAttempts semantic evidence: ${path}`)

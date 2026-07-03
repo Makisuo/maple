@@ -89,13 +89,22 @@ if (!predictedResult?.metrics) {
 }
 const predicted = predictedResult.metrics
 // Canonical held-out policy (the same constant the calibrator and loader use),
-// with hybrid size-scaling: the observed trial runs on a LARGER held-out window,
-// so wallMs/physicalBytes predictions are rescaled by the observed/predicted
-// logical-byte ratio for this signal; throughput/compression are size-invariant
-// rates compared directly; RSS/temp-disk are absolute peaks. Every tolerance is
-// a relative delta below 1.0; throughput's comparator uses
+// with hybrid size-scaling. This independent trial is disjoint from training
+// but the same size; its measured logical-byte ratio still accounts for row
+// shape differences. Throughput/compression are compared directly; RSS/temp-
+// disk are absolute peaks. Every tolerance is a relative delta below 1.0;
+// throughput's comparator uses
 // `observed >= predicted * (1-t)`, so a tolerance >= 1 would be vacuous.
-const scaleRatio = predicted.logicalBytes > 0 ? observed.logicalBytes / predicted.logicalBytes : 1
+if (
+	!Number.isFinite(predicted.logicalBytes) ||
+	predicted.logicalBytes <= 0 ||
+	!Number.isFinite(observed.logicalBytes) ||
+	observed.logicalBytes <= 0
+) {
+	console.error("training and observed logicalBytes must both be finite and positive")
+	process.exit(2)
+}
+const scaleRatio = observed.logicalBytes / predicted.logicalBytes
 const comparison = comparePredictedObserved(predicted, observed, HELD_OUT_TOLERANCES, {
 	ratio: scaleRatio,
 	metrics: new Set(["wallMs", "physicalBytes"]),

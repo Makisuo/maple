@@ -101,8 +101,8 @@ describe("archive tuning config", () => {
 
 describe("loadTuningConfig", () => {
 	/** A minimal valid calibration config document for round-trip testing. */
-	const validConfigDoc = () => {
-		const candidate = CANDIDATE_MATRIX[0]!
+	const validConfigDoc = (selectedCandidateIndex = 0, prependZeroLogicalAttempt = false) => {
+		const candidate = CANDIDATE_MATRIX[selectedCandidateIndex]!
 		const metrics = {
 			logicalBytes: 1000,
 			physicalBytes: 300,
@@ -158,7 +158,7 @@ describe("loadTuningConfig", () => {
 				sample: trainingSample(1000),
 			})),
 		)
-		const selectedWorstCase = { ...metrics, peakRssBytes: 200 }
+		const selectedWorstCase = { ...metrics, peakRssBytes: 200 + selectedCandidateIndex }
 		const heldOutResults = ARCHIVE_SIGNALS.map((signal) => ({
 			candidate,
 			signal: signal.name,
@@ -170,10 +170,15 @@ describe("loadTuningConfig", () => {
 		// with held-out metrics, scaled by that signal's own logical-byte ratio.
 		const heldOutRatio = heldOutMetrics.logicalBytes / metrics.logicalBytes
 		const signalComparisons = ARCHIVE_SIGNALS.map((signal) => {
-			const comparison = comparePredictedObserved(metrics, heldOutMetrics, HELD_OUT_TOLERANCES, {
-				ratio: heldOutRatio,
-				metrics: new Set(["wallMs", "physicalBytes"]),
-			})
+			const comparison = comparePredictedObserved(
+				selectedWorstCase,
+				heldOutMetrics,
+				HELD_OUT_TOLERANCES,
+				{
+					ratio: heldOutRatio,
+					metrics: new Set(["wallMs", "physicalBytes"]),
+				},
+			)
 			return {
 				signal: signal.name,
 				scaleRatio: heldOutRatio,
@@ -213,6 +218,29 @@ describe("loadTuningConfig", () => {
 				tolerances: HELD_OUT_TOLERANCES,
 			},
 			heldOutAttempts: [
+				...(prependZeroLogicalAttempt
+					? [
+							{
+								candidate: CANDIDATE_MATRIX[0]!,
+								results: ARCHIVE_SIGNALS.map((signal) => ({
+									candidate: CANDIDATE_MATRIX[0]!,
+									signal: signal.name,
+									metrics: {
+										...heldOutMetrics,
+										logicalBytes: 0,
+										physicalBytes: 0,
+										compressionRatio: 0,
+										writeThroughputBytesPerSec: 0,
+									},
+									ok: true,
+									sample: heldOutSample(2000),
+								})),
+								worstCase: null,
+								signalComparisons: [],
+								passed: false,
+							},
+						]
+					: []),
 				{
 					candidate,
 					results: heldOutResults,
@@ -253,6 +281,18 @@ describe("loadTuningConfig", () => {
 			note: "test",
 		}
 	}
+
+	it("round-trips an earlier non-positive-logical attempt before a later passing candidate", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-zero-logical-"))
+		try {
+			const path = join(dir, "config.json")
+			writeFileSync(path, JSON.stringify(validConfigDoc(1, true)))
+			const loaded = loadTuningConfig(path)
+			strictEqual(loaded.document.selected.candidate.writerThreads, CANDIDATE_MATRIX[1]!.writerThreads)
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
 
 	it("round-trips a valid config: loads effective overrides + SHA-256 identity", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-"))

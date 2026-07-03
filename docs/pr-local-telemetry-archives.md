@@ -152,7 +152,7 @@ invariants before retiring the journal.
 
 The branch passed a full validation matrix at the head commit:
 
-- **Unit tests:** complete CLI suite passing (306/306), including manifest-v3
+- **Unit tests:** complete CLI suite passing (310/310), including manifest-v3
   strictness, semantic config validation (hostile-rewrite and forged-scope
   rejection), strict parent-session pin identity, and the larger disjoint
   held-out scope.

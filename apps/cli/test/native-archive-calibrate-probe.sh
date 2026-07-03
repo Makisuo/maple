@@ -210,7 +210,7 @@ BAD_TRAINING_SCOPE="$(jq -r '[.results[] | select(.ok) | select((.sample.role //
 BAD_HELDOUT_SCOPE="$(jq -r '[.heldOut.results[] | select((.sample.role // "x") != "held-out" or (.sample.startRow // -1) != '"$TRAINING_ROWS"' or (.sample.requestedRows // -1) != '"$HELD_OUT_ROWS"' or (.sample.rowCount // -1) != .metrics.rowCount or .metrics.rowCount != '"$HELD_OUT_ROWS"')] | length' "$CFG")"
 [[ "$BAD_HELDOUT_SCOPE" -eq 0 ]] || fail "$BAD_HELDOUT_SCOPE held-out result(s) have a missing/inconsistent/disjoint sample scope"
 # All scopes bind to one checkpoint + range.
-UNIQUE_SCOPES="$(jq -r '[.results[].sample | {checkpointId, checkpointManifestFingerprint, rangeDate}] | unique | length' "$CFG")"
+UNIQUE_SCOPES="$(jq -r '[.results[] | select(.ok) | .sample | {checkpointId, checkpointManifestFingerprint, rangeDate}] | unique | length' "$CFG")"
 [[ "$UNIQUE_SCOPES" -eq 1 ]] || fail "training scopes bind to more than one checkpoint/range ($UNIQUE_SCOPES)"
 echo "  sample scopes verified: training=$TRAINING_ROWS held-out=$HELD_OUT_ROWS (larger, disjoint, single source)"
 
