@@ -14,7 +14,7 @@ export default defineConfig({
 	},
 	test: {
 		environment: "node",
-		include: ["src/**/*.test.ts"],
+		include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
 		// Generous timeouts: the DB-backed suites boot a fresh PGlite (WASM) per
 		// test and some retry tests run real exponential backoff. Under CI's
 		// parallel `turbo test`, CPU starvation stretches these past the 5s

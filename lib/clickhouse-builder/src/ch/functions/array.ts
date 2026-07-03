@@ -1,4 +1,5 @@
 import { makeExpr } from "../expr"
+import { defineCondFn } from "../define-fn"
 import { raw, str, compile } from "../../sql/sql-fragment"
 import type { Expr } from "../expr"
 
@@ -29,3 +30,10 @@ export function arrayStringConcat(
 export function arrayFilter(fn: string, arr: Expr<any>): Expr<any> {
 	return makeExpr<any>(raw(`arrayFilter(${fn}, ${compile(arr.toFragment())})`))
 }
+
+/**
+ * `has(arr, elem)` — true when `elem` is an element of `arr`. Used with a
+ * `bloom_filter` skip index over a concatenated `key=value` items expression so
+ * attribute-equality filters prune granules (ClickStack "Items" pattern).
+ */
+export const has = defineCondFn<[Expr<ReadonlyArray<string>>, Expr<string>]>("has")

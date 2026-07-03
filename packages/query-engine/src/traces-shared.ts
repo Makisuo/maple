@@ -43,6 +43,7 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
+import { attrItemsExpr } from "@maple/domain/tinybird/index-exprs"
 
 // ---------------------------------------------------------------------------
 // HTTP semconv coalescing
@@ -84,6 +85,23 @@ function anyMapContains(mapExpr: CH.Expr<Record<string, string>>, keys: readonly
 }
 
 /**
+ * ClickStack "Items" pre-filter: `has(<items>, 'k0=v') OR has(<items>, 'k1=v')`
+ * over the `bloom_filter`-indexed `arrayMap((k, v) -> concat(k, '=', v), …)`
+ * expression on `traces`. Implied by the exact map equality (`map[ki] = v` means
+ * the item `ki=v` is present), so AND-ing it never changes the result set — it
+ * only lets the index skip granules. The `attrItemsExpr` string MUST match the
+ * datasource index expression byte-for-byte (single source in @maple/domain).
+ */
+function attrItemsPrefilter(mapName: string, keys: readonly string[], value: string): CH.Condition {
+	const items = CH.rawExpr<ReadonlyArray<string>>(attrItemsExpr(mapName))
+	let cond = CH.has(items, CH.lit(`${keys[0]}=${value}`))
+	for (let i = 1; i < keys.length; i++) {
+		cond = cond.or(CH.has(items, CH.lit(`${keys[i]}=${value}`)))
+	}
+	return cond
+}
+
+/**
  * Rewrites an HTTP server span name to the display form used by the UI and by
  * `trace_list_mv.SpanName`: spanName `"http.server GET"` + route → `"GET /api/users"`.
  * Centralized so the MV, span-hierarchy query, and span-name filter stay in
@@ -111,6 +129,16 @@ export function httpDisplaySpanName(
 export function buildAttrFilterCondition(
 	af: AttributeFilter,
 	mapName: "SpanAttributes" | "ResourceAttributes",
+	opts?: {
+		/**
+		 * When true, an equality filter also emits a granule-prunable
+		 * `has(<items>, 'k=v')` pre-filter backed by the `idx_*_attr_items` bloom
+		 * index. Enable only for callers reading the raw `traces` table (which
+		 * carries those indexes); leave off for tables without them (e.g. metrics)
+		 * to avoid the per-row `arrayMap` cost with no index to pay it back.
+		 */
+		itemsIndex?: boolean
+	},
 ): CH.Condition {
 	const mapExpr = CH.dynamicColumn<Record<string, string>>(mapName)
 	// Span attributes renamed across OTel semconv versions match either spelling,
@@ -139,7 +167,14 @@ export function buildAttrFilterCondition(
 			return CH.toFloat64OrZero(colExpr).lte(Number(value))
 		}
 		// equals (default)
-		return colExpr.eq(value)
+		const eq = colExpr.eq(value)
+		// The items pre-filter can't represent "missing/empty" (an empty value
+		// has no `k=` entry) and adds no index benefit to a negated predicate, so
+		// gate it on a non-empty value and the positive branch only.
+		if (opts?.itemsIndex && value !== "" && !af.negated) {
+			return attrItemsPrefilter(mapName, keys, value).and(eq)
+		}
+		return eq
 	})()
 
 	return af.negated ? CH.not(positive) : positive

@@ -129,6 +129,65 @@ describe("tracesListQuery", () => {
 })
 
 // ---------------------------------------------------------------------------
+// tracesListQuery — ClickStack "Items" attribute-index pre-filter
+// ---------------------------------------------------------------------------
+
+const SPAN_ITEMS = "has(arrayMap((k, v) -> concat(k, '=', v), mapKeys(SpanAttributes), mapValues(SpanAttributes))"
+const RESOURCE_ITEMS =
+	"has(arrayMap((k, v) -> concat(k, '=', v), mapKeys(ResourceAttributes), mapValues(ResourceAttributes))"
+
+describe("tracesListQuery attribute items pre-filter", () => {
+	it("adds a has(items,'k=v') pre-filter alongside the exact map equality", () => {
+		const q = tracesListQuery({
+			attributeFilters: [{ key: "db.system", value: "postgres", mode: "equals" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain(`${SPAN_ITEMS}, 'db.system=postgres')`)
+		expect(sql).toContain("SpanAttributes['db.system'] = 'postgres'")
+	})
+
+	it("ORs the pre-filter across HTTP semconv alias spellings", () => {
+		const q = tracesListQuery({
+			attributeFilters: [{ key: "http.method", value: "GET", mode: "equals" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain(`${SPAN_ITEMS}, 'http.method=GET')`)
+		expect(sql).toContain(`${SPAN_ITEMS}, 'http.request.method=GET')`)
+	})
+
+	it("uses the resource items index for resource attribute equality", () => {
+		const q = tracesListQuery({
+			resourceAttributeFilters: [{ key: "deployment.environment", value: "prod", mode: "equals" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain(`${RESOURCE_ITEMS}, 'deployment.environment=prod')`)
+	})
+
+	it("does NOT emit the items pre-filter for contains, negated, or empty-value filters", () => {
+		const contains = compileCH(
+			tracesListQuery({ attributeFilters: [{ key: "db.system", value: "postgres", mode: "contains" }] }),
+			baseParams,
+		).sql
+		expect(contains).not.toContain("has(arrayMap")
+		expect(contains).toContain("positionCaseInsensitive")
+
+		const negated = compileCH(
+			tracesListQuery({
+				attributeFilters: [{ key: "db.system", value: "postgres", mode: "equals", negated: true }],
+			}),
+			baseParams,
+		).sql
+		expect(negated).not.toContain("has(arrayMap")
+
+		const emptyValue = compileCH(
+			tracesListQuery({ attributeFilters: [{ key: "db.system", value: "", mode: "equals" }] }),
+			baseParams,
+		).sql
+		expect(emptyValue).not.toContain("has(arrayMap")
+	})
+})
+
+// ---------------------------------------------------------------------------
 // tracesRootListQuery
 // ---------------------------------------------------------------------------
 
@@ -273,5 +332,19 @@ describe("spanSearchQuery", () => {
 		expect(sql).toContain("FROM traces")
 		expect(sql).not.toContain("FROM trace_detail_spans")
 		expect(sql).toContain("SpanName = 'GET /users'")
+	})
+
+	it("emits the items pre-filter on the raw table but not on trace_detail_spans", () => {
+		const filter = { attributeFilters: [{ key: "db.system", value: "postgres", mode: "equals" as const }] }
+
+		// Raw traces scan (no traceId) → has the items index → pre-filter emitted.
+		const raw = compileCH(spanSearchQuery(filter), baseParams).sql
+		expect(raw).toContain("has(arrayMap((k, v) -> concat(k, '=', v), mapKeys(SpanAttributes)")
+
+		// trace_detail_spans (traceId set) lacks the items index and is already
+		// pruned by its sort key → no pre-filter, just the exact equality.
+		const detail = compileCH(spanSearchQuery({ ...filter, traceId: "trace_123" }), baseParams).sql
+		expect(detail).not.toContain("has(arrayMap")
+		expect(detail).toContain("SpanAttributes['db.system'] = 'postgres'")
 	})
 })

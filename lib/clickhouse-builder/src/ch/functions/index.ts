@@ -27,6 +27,7 @@ export {
 	left_,
 	length_,
 	lower_,
+	hasToken,
 	replaceOne,
 	extract_,
 	concat,
@@ -58,7 +59,7 @@ export {
 
 export { if_, multiIf, coalesce, nullIf } from "./conditional"
 
-export { arrayOf, arrayStringConcat, arrayFilter } from "./array"
+export { arrayOf, arrayStringConcat, arrayFilter, has } from "./array"
 
 export { mapContains, mapGet, mapKeys, mapValues, mapLiteral } from "./map"
 

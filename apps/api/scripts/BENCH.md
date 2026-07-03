@@ -15,17 +15,64 @@ bun bench:fetch    [--context name] [--profile name] [--since 24h]
                    [--top 20] [--out path] [--org id]
                    # mine recent db.query.text spans from prod traces → JSON
 
+bun bench:suite    [--org id] [--since 24h] [--trace-id id] [--service name]
+                   [--search phrase] [--attr-key k] [--attr-value v]
+                   [--attr-scope span] [--table-map from=to,...] [--out path]
+                   # compile the committed DSL benchmark suite → JSON (same
+                   # shape as `fetch`, so `run`/`inspect`/`compare` replay it)
+
 bun bench:run      <file> [--runs 5] [--warmup 1] [--out path]
                    # replay each query N times and report aggregated stats
 
 bun bench:inspect  <file>
                    # run EXPLAIN and EXPLAIN PIPELINE for each query
 
-bun bench:compare  <a.json> <b.json>
-                   # diff two run outputs (p95 wall, read bytes, memory)
+bun bench:compare  <a.json> <b.json> [--max-regression-pct N]
+                   # diff two run outputs (p95 wall, read bytes, memory);
+                   # exits non-zero if any case's p95 regresses beyond N%
 ```
 
 Output JSONs land in `apps/api/scripts/.bench/` by default (gitignored).
+
+## Two ways to get a query set
+
+- **`fetch`** mines whatever prod actually ran for a context label — great for
+  chasing a specific slow query, but not repeatable (the fingerprints drift as
+  traffic changes).
+- **`suite`** compiles a **committed, repeatable** set of ~13 representative
+  cases (needle-in-haystack body search, trace point lookup, attribute
+  equality/contains filters, list scans, facets, autocomplete, plus canaries)
+  straight from the `@maple/query-engine` DSL, so the benchmark runs the exact
+  SQL production emits. Definitions live in
+  [scripts/bench/suite.ts](bench/suite.ts). Pass `--trace-id` / `--service` /
+  `--attr-key` / `--attr-value` that exist in the target window for
+  representative timing — the two lookup cases fall back to zero-row
+  placeholders (with a warning) otherwise.
+
+## A/B: schema-change spike (e.g. sort-key experiment)
+
+`suite --table-map` rewrites `FROM`/`JOIN` table names in the compiled SQL so
+you can benchmark the same queries against shadow tables without recompiling.
+Rules are whole-identifier and longest-first, so `traces=traces_t2` never
+touches `trace_detail_spans` or `traces_aggregates_hourly`.
+
+```
+# control vs candidate tables, same window/org
+bun bench:suite --org org_x --trace-id <id> --service <svc> \
+  --out .bench/suiteA.json
+bun bench:suite --org org_x --trace-id <id> --service <svc> \
+  --table-map "traces=traces_t2,logs=logs_l2" --out .bench/suiteB.json
+
+bun bench:run .bench/suiteA.json --out .bench/resA.json   # CLICKHOUSE_URL = dedicated CH
+bun bench:run .bench/suiteB.json --out .bench/resB.json
+bun bench:compare .bench/resA.json .bench/resB.json --max-regression-pct 25
+```
+
+Run A/B against a **dedicated ClickHouse** (docker/staging), not a Tinybird
+branch — Tinybird branches share prod compute, so wall-time is noisy (lean on
+`read rows`/`read bytes`, which are deterministic). The `inspect` command's
+`EXPLAIN PIPELINE` tells you whether `optimize_read_in_order` actually engaged
+for the candidate sort key.
 
 ## Implementation
 

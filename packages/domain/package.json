@@ -15,6 +15,7 @@
 		"./warehouse-queries": "./src/warehouse-queries.ts",
 		"./tinybird": "./src/tinybird/index.ts",
 		"./tinybird/db-query-shape-sql": "./src/tinybird/db-query-shape-sql.ts",
+		"./tinybird/index-exprs": "./src/tinybird/index-exprs.ts",
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./where-clause": "./src/where-clause.ts",
 		"./http/observability": "./src/http/observability.ts",

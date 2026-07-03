@@ -12,6 +12,7 @@ import type { ColumnDefs } from "@maple-dev/clickhouse-builder/types"
 import * as T from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { Logs, LogsAggregatesHourly } from "../tables"
+import { bodySearchConditions } from "./body-search"
 import { finalizeTimeseries } from "./series-cap"
 
 // ---------------------------------------------------------------------------
@@ -356,7 +357,7 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
 				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
-				CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+				...(opts.search ? bodySearchConditions($.Body, opts.search) : []),
 				environmentCondition($, opts),
 				namespaceCondition($, opts),
 			])
@@ -451,7 +452,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 		CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 		CH.when(opts.cursor, (v: string) => $.Timestamp.lt(v)),
-		CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
+		...(opts.search ? bodySearchConditions($.Body, opts.search) : []),
 		environmentCondition($, opts),
 		namespaceCondition($, opts),
 	]

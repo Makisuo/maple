@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { isBackfill, renderStatementFull, type BackfillSpec } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
+import { migration_0005_body_and_attr_indexes } from "./0005_body_and_attr_indexes"
 import { migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -14,9 +15,22 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 	.join("\n\n")
 
 describe("ClickHouse migrations", () => {
-	it("keeps service.namespace migration ordered after the previous deltas", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4])
-		expect(migrations.at(-1)).toBe(migration_0004_service_namespace_projections)
+	it("keeps migrations ordered with the body/attr-index delta last", () => {
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5])
+		expect(migrations.at(-1)).toBe(migration_0005_body_and_attr_indexes)
+	})
+
+	it("adds body + attribute skip indexes as new-parts-only ADD INDEX statements", () => {
+		const sql = migration_0005_body_and_attr_indexes.statements.join("\n")
+		expect(sql).toContain(
+			"ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_body_tokens lower(Body) TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1",
+		)
+		expect(sql).toContain(
+			"ALTER TABLE traces ADD INDEX IF NOT EXISTS idx_span_attr_items arrayMap((k, v) -> concat(k, '=', v), mapKeys(SpanAttributes), mapValues(SpanAttributes)) TYPE bloom_filter(0.01) GRANULARITY 1",
+		)
+		// Must NOT materialize — that would exceed the Worker subrequest budget on
+		// billion-row parts; indexes apply to new parts and backfill via TTL churn.
+		expect(sql).not.toContain("MATERIALIZE INDEX")
 	})
 
 	it("rebuilds namespace-aware log aggregates and recreates affected materialized views", () => {

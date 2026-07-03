@@ -1,4 +1,5 @@
 import { defineDatasource, t, engine, column, type InferRow } from "@tinybirdco/sdk"
+import { attrItemsExpr, BODY_TOKEN_INDEX_EXPR } from "./index-exprs"
 
 /**
  * OpenTelemetry logs datasource
@@ -45,6 +46,43 @@ export const logs = defineDatasource("logs", {
 		{
 			name: "idx_trace_id",
 			expr: "TraceId",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		// Full-text token index on the log body. `Body ILIKE '%term%'` otherwise
+		// scans whole partitions (guard-railed by `LOGS_BODY_SEARCH_SETTINGS`);
+		// the query engine AND-s a `hasToken(lower(Body), <token>)` pre-filter for
+		// interior tokens so this index prunes granules. tokenbf params match
+		// ClickStack: 32 KB filter, 3 hashes, seed 0.
+		{
+			name: "idx_body_tokens",
+			expr: BODY_TOKEN_INDEX_EXPR,
+			type: "tokenbf_v1(32768, 3, 0)",
+			granularity: 1,
+		},
+		// Attribute-map blooms, mirroring `traces`. Enable granule skipping for
+		// `LogAttributes['k'] = 'v'` / key-existence filters on the logs table.
+		{
+			name: "idx_log_attr_keys",
+			expr: "mapKeys(LogAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_attr_vals",
+			expr: "mapValues(LogAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_resource_attr_keys",
+			expr: "mapKeys(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_resource_attr_vals",
+			expr: "mapValues(ResourceAttributes)",
 			type: "bloom_filter(0.01)",
 			granularity: 1,
 		},
@@ -196,6 +234,23 @@ export const traces = defineDatasource("traces", {
 		{
 			name: "idx_resource_attr_vals",
 			expr: "mapValues(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		// ClickStack "Items" indexes: a bloom over concatenated `key=value` strings
+		// so an equality filter `SpanAttributes['k'] = 'v'` prunes granules via
+		// `has(<items>, 'k=v')`. The mapKeys/mapValues blooms above only skip on
+		// key OR value independently; the items index skips on the exact pair.
+		// The `expr` MUST match `attrItemsExpr(...)` used by the query engine.
+		{
+			name: "idx_span_attr_items",
+			expr: attrItemsExpr("SpanAttributes"),
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_resource_attr_items",
+			expr: attrItemsExpr("ResourceAttributes"),
 			type: "bloom_filter(0.01)",
 			granularity: 1,
 		},
