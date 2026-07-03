@@ -75,6 +75,15 @@ export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisW
 								title={item.title}
 								headerValue={item.headerValue}
 								footer={item.footer}
+								// Commit deploy markers draw their label chip ABOVE the plot, so it
+								// overflows the chart's top edge into the card's header gap (by design —
+								// the series keeps full height). The widget shell clips content by
+								// default (MAP-49, to stop funnel rows spilling), which would hide that
+								// chip. When an overlay is present, opt this card out of the clip so the
+								// label shows; `overflow-visible` wins the tailwind-merge over the
+								// shell's default `overflow-hidden`. Area/line charts don't otherwise
+								// spill, so nothing else escapes.
+								contentClassName={overlay ? "flex-1 min-h-0 p-2 overflow-visible" : undefined}
 							>
 								{item.isLoading ? (
 									<ChartSkeleton variant={entry.category} />

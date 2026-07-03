@@ -141,7 +141,13 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
 		Layer.provide(
-			Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, CloudflareOAuthServiceLive, OrgIngestKeysServiceLive),
+			Layer.mergeAll(
+				BaseLive,
+				WarehouseQueryServiceLive,
+				CloudflareOAuthServiceLive,
+				OrgIngestKeysServiceLive,
+				OrgClickHouseSettingsLive,
+			),
 		),
 	)
 

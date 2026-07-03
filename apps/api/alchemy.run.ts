@@ -212,6 +212,14 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalSecret("GITHUB_APP_CLIENT_SECRET"),
 			...optionalSecret("GITHUB_APP_WEBHOOK_SECRET"),
 			...optionalPlain("GITHUB_API_BASE_URL"),
+			// Cloudflare integration (account OAuth — Authorization Code + PKCE)
+			...optionalPlain("CLOUDFLARE_OAUTH_CLIENT_ID"),
+			...optionalSecret("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("CLOUDFLARE_OAUTH_SCOPES"),
+			...optionalPlain("CLOUDFLARE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
+			...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
 		},
 	})
 

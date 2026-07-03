@@ -17,6 +17,7 @@ import type * as Redacted from "../../Redacted.ts"
 import type * as Result from "../../Result.ts"
 import type * as Schema from "../../Schema.ts"
 import type * as CliError from "./CliError.ts"
+import type { Environment } from "./Command.ts"
 import * as Param from "./Param.ts"
 import type * as Primitive from "./Primitive.ts"
 
@@ -261,7 +262,7 @@ export const fileParse = (
  */
 export const fileSchema = <A>(
   name: string,
-  schema: Schema.Decoder<A>,
+  schema: Schema.ConstraintDecoder<A, Environment>,
   options?: Primitive.FileSchemaOptions | undefined
 ): Argument<A> => Param.fileSchema(Param.argumentKind, name, schema, options)
 
@@ -339,11 +340,11 @@ export const withDescription: {
  */
 export const withDefault: {
   <const B>(
-    defaultValue: B | Effect.Effect<B, CliError.CliError, Param.Environment>
+    defaultValue: B | Effect.Effect<B, CliError.CliError, Environment>
   ): <A>(self: Argument<A>) => Argument<A | B>
   <A, const B>(
     self: Argument<A>,
-    defaultValue: B | Effect.Effect<B, CliError.CliError, Param.Environment>
+    defaultValue: B | Effect.Effect<B, CliError.CliError, Environment>
   ): Argument<A | B>
 } = Param.withDefault
 
@@ -471,15 +472,15 @@ export const map: {
  */
 export const mapEffect: {
   <A, B>(
-    f: (a: A) => Effect.Effect<B, CliError.CliError, Param.Environment>
+    f: (a: A) => Effect.Effect<B, CliError.CliError, Environment>
   ): (self: Argument<A>) => Argument<B>
   <A, B>(
     self: Argument<A>,
-    f: (a: A) => Effect.Effect<B, CliError.CliError, Param.Environment>
+    f: (a: A) => Effect.Effect<B, CliError.CliError, Environment>
   ): Argument<B>
 } = dual(2, <A, B>(
   self: Argument<A>,
-  f: (a: A) => Effect.Effect<B, CliError.CliError, Param.Environment>
+  f: (a: A) => Effect.Effect<B, CliError.CliError, Environment>
 ) => Param.mapEffect(self, f))
 
 /**
@@ -589,8 +590,8 @@ export const between: {
  * @since 4.0.0
  */
 export const withSchema: {
-  <A, B>(schema: Schema.Codec<B, A>): (self: Argument<A>) => Argument<B>
-  <A, B>(self: Argument<A>, schema: Schema.Codec<B, A>): Argument<B>
+  <A, B>(schema: Schema.Codec<B, A, Environment, Environment>): (self: Argument<A>) => Argument<B>
+  <A, B>(self: Argument<A>, schema: Schema.Codec<B, A, Environment, Environment>): Argument<B>
 } = dual(2, <A, B>(self: Argument<A>, schema: Schema.Codec<B, A>) => Param.withSchema(self, schema))
 
 /**

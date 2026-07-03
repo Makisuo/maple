@@ -16,9 +16,16 @@ export const cloudflareAnalyticsState = pgTable(
 		zoneId: text("zone_id").notNull().default(""),
 		zoneName: text("zone_name"),
 		enabled: boolean("enabled").notNull().default(true),
-		// END of the last 5-minute bucket fully ingested; next poll resumes here. Null until the
-		// first successful poll (which triggers the bounded backfill).
+		// HEAD frontier: END of the newest 5-minute bucket ingested. The poll fetches the newest
+		// window first (live-first) so a freshly-connected integration shows near-now data within one
+		// tick; in steady state this is just the small [watermark, horizon] delta. Null until the
+		// first head poll.
 		watermarkAt: timestamp("watermark_at", { withTimezone: true, mode: "date" }),
+		// BACKFILL frontier: OLDEST bucket boundary the background history fill has reached, walking
+		// DOWN toward the 24h floor (further bounded by the plan's `notOlderThan`). Seeded to the first
+		// head window's start on the first head poll; backfill is complete once it reaches the floor.
+		// Split from watermarkAt so history fills in behind live data instead of delaying it.
+		backfillAt: timestamp("backfill_at", { withTimezone: true, mode: "date" }),
 		// Cached GraphQL dataset `settings` node (notOlderThan/maxDuration/availableFields) — the
 		// only authoritative per-plan limits source; refreshed ~daily.
 		settingsJson: text("settings_json"),

@@ -683,10 +683,6 @@ export const make: <Rpcs extends Rpc.Any>(
     switch (request._tag) {
       case "Request": {
         const tag = Predicate.hasProperty(request, "tag") ? (request.tag as string) : ""
-        const rpc = group.requests.get(tag)
-        if (!rpc) {
-          return sendDefect(client, `Unknown request tag: ${tag}`)
-        }
         let requestId: RequestId
         switch (typeof request.id) {
           case "bigint":
@@ -697,6 +693,10 @@ export const make: <Rpcs extends Rpc.Any>(
           default: {
             return sendDefect(client, `Invalid request id: ${request.id}`)
           }
+        }
+        const rpc = group.requests.get(tag)
+        if (!rpc) {
+          return sendRequestDefect(client, requestId, (defect) => Effect.succeed(defect), `Unknown request tag: ${tag}`)
         }
         const schemas = getSchemas(rpc as any)
         return Effect.matchEffect(

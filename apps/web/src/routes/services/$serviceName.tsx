@@ -195,7 +195,7 @@ function ServiceDetailContent() {
 						<TimeRangeHeaderControls
 							startTime={search.startTime}
 							endTime={search.endTime}
-							presetValue={search.timePreset ?? "12h"}
+							presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
 							onTimeChange={handleTimeChange}
 						/>
 						<Button

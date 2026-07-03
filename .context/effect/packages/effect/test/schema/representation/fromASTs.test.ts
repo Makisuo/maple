@@ -3,7 +3,7 @@ import { describe, it } from "vitest"
 import { deepStrictEqual } from "../../utils/assert.ts"
 
 describe("fromASTs", () => {
-  function assertFromASTs(schemas: readonly [Schema.Top, ...Array<Schema.Top>], expected: {
+  function assertFromASTs(schemas: readonly [Schema.Constraint, ...Array<Schema.Constraint>], expected: {
     readonly representations: readonly [
       SchemaRepresentation.Representation,
       ...Array<SchemaRepresentation.Representation>
@@ -58,7 +58,7 @@ describe("fromASTs", () => {
 })
 
 describe("fromAST", () => {
-  function assertFromAST(schema: Schema.Top, expected: {
+  function assertFromAST(schema: Schema.Constraint, expected: {
     readonly representation: SchemaRepresentation.Representation
     readonly references?: SchemaRepresentation.References
   }) {
@@ -243,6 +243,295 @@ describe("fromAST", () => {
           mode: "anyOf"
         }
       }
+    })
+  })
+
+  describe("node kinds", () => {
+    it("primitive nodes", () => {
+      assertFromAST(
+        Schema.Tuple([
+          Schema.Null,
+          Schema.Undefined,
+          Schema.Void,
+          Schema.Never,
+          Schema.Unknown,
+          Schema.Any,
+          Schema.Boolean,
+          Schema.BigInt,
+          Schema.Symbol,
+          Schema.ObjectKeyword
+        ]),
+        {
+          representation: {
+            _tag: "Arrays",
+            elements: [
+              { isOptional: false, type: { _tag: "Null" } },
+              { isOptional: false, type: { _tag: "Undefined" } },
+              { isOptional: false, type: { _tag: "Void" } },
+              { isOptional: false, type: { _tag: "Never" } },
+              { isOptional: false, type: { _tag: "Unknown" } },
+              { isOptional: false, type: { _tag: "Any" } },
+              { isOptional: false, type: { _tag: "Boolean" } },
+              { isOptional: false, type: { _tag: "BigInt", checks: [] } },
+              { isOptional: false, type: { _tag: "Symbol" } },
+              { isOptional: false, type: { _tag: "ObjectKeyword" } }
+            ],
+            rest: [],
+            checks: []
+          }
+        }
+      )
+    })
+
+    it("literal-like nodes", () => {
+      const symbol = Symbol.for("a")
+      assertFromAST(
+        Schema.Tuple([
+          Schema.Literal("a"),
+          Schema.UniqueSymbol(symbol),
+          Schema.Enum({ A: "a", B: "b", One: 1 }),
+          Schema.TemplateLiteral(["a", Schema.String, Schema.Number])
+        ]),
+        {
+          representation: {
+            _tag: "Arrays",
+            elements: [
+              { isOptional: false, type: { _tag: "Literal", literal: "a" } },
+              { isOptional: false, type: { _tag: "UniqueSymbol", symbol } },
+              {
+                isOptional: false,
+                type: {
+                  _tag: "Enum",
+                  enums: [["A", "a"], ["B", "b"], ["One", 1]]
+                }
+              },
+              {
+                isOptional: false,
+                type: {
+                  _tag: "TemplateLiteral",
+                  parts: [
+                    { _tag: "Literal", literal: "a" },
+                    { _tag: "String", checks: [] },
+                    { _tag: "Number", checks: [] }
+                  ]
+                }
+              }
+            ],
+            rest: [],
+            checks: []
+          }
+        }
+      )
+    })
+
+    it("string content schema", () => {
+      const document = SchemaRepresentation.fromAST(
+        Schema.fromJsonString(Schema.Struct({ a: Schema.String })).ast
+      )
+      const representation = document.representation as SchemaRepresentation.String
+      deepStrictEqual(representation.contentSchema, {
+        _tag: "Objects",
+        propertySignatures: [
+          {
+            name: "a",
+            type: { _tag: "String", checks: [] },
+            isOptional: false,
+            isMutable: false
+          }
+        ],
+        indexSignatures: [],
+        checks: []
+      })
+      deepStrictEqual(representation.annotations?.expected, "a string that will be decoded as JSON")
+      deepStrictEqual(representation.annotations?.contentMediaType, "application/json")
+    })
+
+    it("tuple rest and mutable properties", () => {
+      assertFromAST(
+        Schema.Tuple([
+          Schema.TupleWithRest(Schema.Tuple([Schema.String, Schema.optionalKey(Schema.Number)]), [Schema.Boolean]),
+          Schema.Struct({ a: Schema.mutableKey(Schema.String) })
+        ]),
+        {
+          representation: {
+            _tag: "Arrays",
+            elements: [
+              {
+                isOptional: false,
+                type: {
+                  _tag: "Arrays",
+                  elements: [
+                    { isOptional: false, type: { _tag: "String", checks: [] } },
+                    { isOptional: true, type: { _tag: "Number", checks: [] } }
+                  ],
+                  rest: [{ _tag: "Boolean" }],
+                  checks: []
+                }
+              },
+              {
+                isOptional: false,
+                type: {
+                  _tag: "Objects",
+                  propertySignatures: [
+                    {
+                      name: "a",
+                      type: { _tag: "String", checks: [] },
+                      isOptional: false,
+                      isMutable: true
+                    }
+                  ],
+                  indexSignatures: [],
+                  checks: []
+                }
+              }
+            ],
+            rest: [],
+            checks: []
+          }
+        }
+      )
+    })
+
+    it("declaration without an encoded schema", () => {
+      assertFromAST(
+        Schema.declare((u): u is string => typeof u === "string", { expected: "string declaration" }),
+        {
+          representation: {
+            _tag: "Declaration",
+            typeParameters: [],
+            encodedSchema: { _tag: "Null" },
+            checks: [],
+            annotations: { expected: "string declaration" }
+          }
+        }
+      )
+    })
+  })
+
+  describe("checks", () => {
+    it("array and object checks", () => {
+      assertFromAST(
+        Schema.Tuple([
+          Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isUnique()),
+          Schema.Record(Schema.String, Schema.Number).check(
+            Schema.isMinProperties(1),
+            Schema.isMaxProperties(2)
+          )
+        ]),
+        {
+          representation: {
+            _tag: "Arrays",
+            elements: [
+              {
+                isOptional: false,
+                type: {
+                  _tag: "Arrays",
+                  elements: [],
+                  rest: [{ _tag: "String", checks: [] }],
+                  checks: [
+                    {
+                      _tag: "Filter",
+                      meta: { _tag: "isMinLength", minLength: 1 },
+                      annotations: { expected: "a value with a length of at least 1" }
+                    },
+                    {
+                      _tag: "Filter",
+                      meta: { _tag: "isUnique" },
+                      annotations: { expected: "an array with unique items" }
+                    }
+                  ]
+                }
+              },
+              {
+                isOptional: false,
+                type: {
+                  _tag: "Objects",
+                  propertySignatures: [],
+                  indexSignatures: [
+                    {
+                      parameter: { _tag: "String", checks: [] },
+                      type: { _tag: "Number", checks: [] }
+                    }
+                  ],
+                  checks: [
+                    {
+                      _tag: "Filter",
+                      meta: { _tag: "isMinProperties", minProperties: 1 },
+                      annotations: { expected: "a value with at least 1 entry" }
+                    },
+                    {
+                      _tag: "Filter",
+                      meta: { _tag: "isMaxProperties", maxProperties: 2 },
+                      annotations: { expected: "a value with at most 2 entries" }
+                    }
+                  ]
+                }
+              }
+            ],
+            rest: [],
+            checks: []
+          }
+        }
+      )
+    })
+
+    it("filter groups", () => {
+      assertFromAST(
+        Schema.String.check(
+          Schema.makeFilterGroup([
+            Schema.isMinLength(1),
+            Schema.isMaxLength(2)
+          ], { description: "range" })
+        ),
+        {
+          representation: {
+            _tag: "String",
+            checks: [
+              {
+                _tag: "FilterGroup",
+                checks: [
+                  {
+                    _tag: "Filter",
+                    meta: { _tag: "isMinLength", minLength: 1 },
+                    annotations: { expected: "a value with a length of at least 1" }
+                  },
+                  {
+                    _tag: "Filter",
+                    meta: { _tag: "isMaxLength", maxLength: 2 },
+                    annotations: { expected: "a value with a length of at most 2" }
+                  }
+                ],
+                annotations: { description: "range" }
+              }
+            ]
+          }
+        }
+      )
+    })
+
+    it("drops checks without representation metadata", () => {
+      assertFromAST(
+        Schema.String.check(Schema.makeFilter((s) => s.length > 0, { expected: "custom" })),
+        {
+          representation: {
+            _tag: "String",
+            checks: []
+          }
+        }
+      )
+      assertFromAST(
+        Schema.String.check(
+          Schema.makeFilterGroup([
+            Schema.makeFilter((s) => s.length > 0, { expected: "custom" })
+          ], { description: "group" })
+        ),
+        {
+          representation: {
+            _tag: "String",
+            checks: []
+          }
+        }
+      )
     })
   })
 

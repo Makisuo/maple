@@ -1,12 +1,14 @@
 import { assert, it } from "@effect/vitest"
-import { Cause, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
+import { Cause, Effect, FileSystem, Layer, Path, Redacted, Schema, Stream } from "effect"
 import { Etag, HttpPlatform } from "effect/unstable/http"
 import {
   HttpApi,
   HttpApiBuilder,
   HttpApiEndpoint,
   HttpApiGroup,
+  HttpApiMiddleware,
   HttpApiSchema,
+  HttpApiSecurity,
   HttpApiTest
 } from "effect/unstable/httpapi"
 
@@ -182,5 +184,60 @@ it.layer(TestServices)("HttpApiBuilder streaming success responses", (it) => {
       assert.deepStrictEqual(Array.from(chunks, (chunk) => textDecoder.decode(chunk)), [
         `data: {"text":"hello"}\n\n`
       ])
+    }))
+
+  it.effect("does not try another security scheme after the handler fails", () =>
+    Effect.gen(function*() {
+      class HandlerFailure extends Schema.TaggedErrorClass<HandlerFailure>()("HandlerFailure", {
+        message: Schema.String
+      }, { httpApiStatus: 418 }) {}
+
+      class M extends HttpApiMiddleware.Service<M>()("Security/HandlerFailure", {
+        error: Schema.String.pipe(
+          HttpApiSchema.status(401),
+          HttpApiSchema.asText()
+        ),
+        security: {
+          first: HttpApiSecurity.apiKey({
+            in: "header",
+            key: "x-first"
+          }),
+          second: HttpApiSecurity.apiKey({
+            in: "header",
+            key: "x-second"
+          })
+        }
+      }) {}
+
+      const Api = HttpApi.make("Api").add(
+        HttpApiGroup.make("test").add(
+          HttpApiEndpoint.get("protected", "/protected", {
+            headers: {
+              "x-first": Schema.String
+            },
+            success: Schema.String,
+            error: HandlerFailure
+          }).middleware(M)
+        )
+      )
+      const GroupLive = HttpApiBuilder.group(
+        Api,
+        "test",
+        (handlers) => handlers.handle("protected", () => Effect.fail(new HandlerFailure({ message: "handler failed" })))
+      )
+      const MLive = Layer.succeed(M)({
+        first: (effect, { credential }) =>
+          Redacted.value(credential) === "ok" ? effect : Effect.fail("first unauthorized"),
+        second: (effect, { credential }) =>
+          Redacted.value(credential) === "ok" ? effect : Effect.fail("second unauthorized")
+      })
+
+      const client = yield* HttpApiTest.groups(Api, ["test"]).pipe(
+        Effect.provide(GroupLive),
+        Effect.provide(MLive)
+      )
+      const error = yield* Effect.flip(client.test.protected({ headers: { "x-first": "ok" } }))
+
+      assert.deepStrictEqual(error, new HandlerFailure({ message: "handler failed" }))
     }))
 })

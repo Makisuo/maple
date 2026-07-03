@@ -1,25 +1,5 @@
-diff --git a/dist/internal/effect.js b/dist/internal/effect.js
-index eb1cd7d128916a04abbcdfb3b613fc53dbe88620..7e9253352c50a9b620918b056f1b984c830996bf 100644
---- a/dist/internal/effect.js
-+++ b/dist/internal/effect.js
-@@ -2537,7 +2537,14 @@ const processOrPerformanceNow = /*#__PURE__*/function () {
-   if (!processHrtime) {
-     return performanceNowNanos;
-   }
--  const origin = /*#__PURE__*/performanceNowNanos() - /*#__PURE__*/processHrtime.bigint();
-+  // maple patch (workerd/miniflare clock fix): anchor the hrtime offset on Date.now()
-+  // instead of performanceNowNanos(). performanceNowNanos() is 0 at module-load scope in
-+  // `wrangler dev`/miniflare while process.hrtime is already live wall-clock, which poisons
-+  // this cached origin and makes Clock.currentTimeNanos (and span start times) ~1970.
-+  // Date.now() is consistent with hrtime's scale at load in every runtime (both 0 in
-+  // production workerd, both live in miniflare, wall-clock+monotonic in node) so origin is
-+  // correct everywhere. Deployed workerd is unaffected. See workers-sdk / effect-smol issues.
-+  const origin = BigInt(Date.now()) * BigInt(1_000_000) - processHrtime.bigint();
-   return () => origin + processHrtime.bigint();
- }();
- /** @internal */
 diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
-index a990324bedf77c24d6b195fac3abb62089ca5582..f453c6faa1b06bf67c15a94ee4c89653a63a623b 100644
+index 87a6f7acdd3d7f89b41fac68e575d80a09748f64..b523535a8123bb7e6bb0f8022ca597cb91e36f5f 100644
 --- a/dist/unstable/ai/McpServer.d.ts
 +++ b/dist/unstable/ai/McpServer.d.ts
 @@ -10,7 +10,7 @@ import type * as RpcGroup from "../rpc/RpcGroup.ts";

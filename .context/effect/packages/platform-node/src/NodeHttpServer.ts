@@ -441,8 +441,9 @@ export const layer = (
   )
 
 /**
- * Provides a Node `HttpServer` and HTTP support services, reading the listen
- * and shutdown options from a `Config` value.
+ * Provides a Node `HttpServer` together with the Node HTTP platform, ETag,
+ * and core Node platform services, reading the listen and shutdown options from
+ * a `Config` value.
  *
  * @category layers
  * @since 4.0.0
@@ -456,7 +457,7 @@ export const layerConfig = (
     }
   >
 ): Layer.Layer<
-  HttpServer.HttpServer | FileSystem.FileSystem | Path.Path | HttpPlatform.HttpPlatform | Etag.Generator,
+  HttpServer.HttpServer | NodeServices.NodeServices | HttpPlatform.HttpPlatform | Etag.Generator,
   ServeError | Config.ConfigError
 > =>
   Layer.mergeAll(

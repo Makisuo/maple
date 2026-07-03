@@ -261,7 +261,7 @@ export const MetricLabel = Schema.Struct({
  */
 export type MetricLabel = Schema.Schema.Type<typeof MetricLabel>
 
-const metric = <Type extends string, State extends Schema.Top>(type: Type, state: State) =>
+const metric = <Type extends string, State extends Schema.Constraint>(type: Type, state: State) =>
   Schema.Struct({
     id: Schema.String,
     type: Schema.tag(type),

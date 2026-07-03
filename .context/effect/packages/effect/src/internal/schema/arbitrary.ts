@@ -22,7 +22,7 @@ const emptyRecursionStack: RecursionStack = []
 type RecursionStack = ReadonlyArray<SchemaAST.Suspend>
 
 type Context = Schema.Annotations.ToArbitrary.Context
-type Constraint = Schema.Annotations.ToArbitrary.Constraint
+type Constraint = Schema.Annotations.ToArbitrary.GenerationConstraint
 type OrderedConstraint = Schema.Annotations.ToArbitrary.OrderedConstraint<any>
 type ArbitraryFilter = Schema.Annotations.ToArbitrary.Filter
 

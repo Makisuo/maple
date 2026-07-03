@@ -19,7 +19,7 @@ import * as Stream from "effect/Stream"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
-import * as UrlParams from "effect/unstable/http/UrlParams"
+import * as Url from "effect/unstable/http/Url"
 import { WorkerEnvironment } from "./worker-environment.ts"
 
 export interface ServiceBindingToken {
@@ -56,7 +56,7 @@ const doFetch = (
 	fetcher: runtime.Fetcher,
 	request: HttpClientRequest.HttpClientRequest,
 ): Effect.Effect<HttpClientResponse.HttpClientResponse, HttpClientError.RequestError> => {
-	const urlResult = UrlParams.makeUrl(
+	const urlResult = Url.make(
 		request.url,
 		request.urlParams,
 		request.hash.pipe(Option.getOrUndefined),

@@ -104,7 +104,7 @@ export interface PersistedQueue<in out A, out R = never> {
 export class PersistedQueueFactory extends Context.Service<
   PersistedQueueFactory,
   {
-    readonly make: <S extends Schema.Top>(options: {
+    readonly make: <S extends Schema.Constraint>(options: {
       readonly name: string
       readonly schema: S
     }) => Effect.Effect<PersistedQueue<S["Type"], S["EncodingServices"] | S["DecodingServices"]>>
@@ -118,7 +118,7 @@ export class PersistedQueueFactory extends Context.Service<
  * @category accessors
  * @since 4.0.0
  */
-export const make = <S extends Schema.Top>(options: {
+export const make = <S extends Schema.Constraint>(options: {
   readonly name: string
   readonly schema: S
 }): Effect.Effect<
@@ -143,7 +143,7 @@ export const makeFactory = Effect.gen(function*() {
   const store = yield* PersistedQueueStore
 
   return PersistedQueueFactory.of({
-    make<S extends Schema.Top>(options: {
+    make<S extends Schema.Constraint>(options: {
       readonly name: string
       readonly schema: S
     }) {

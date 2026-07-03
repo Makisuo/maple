@@ -275,6 +275,9 @@ export const make = (
       executeValues(sql: string, params: ReadonlyArray<unknown>) {
         return this.run(sql, params, true)
       }
+      executeValuesUnprepared(sql: string, params: ReadonlyArray<unknown>) {
+        return this.run(sql, params, true, "query")
+      }
       executeUnprepared(
         sql: string,
         params: ReadonlyArray<unknown>,

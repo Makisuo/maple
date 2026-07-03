@@ -329,7 +329,9 @@ const makeOtelSpan = (span: Tracer.Span, clock: Clock.Clock): Otel.Span => {
     recordException(exception, timeInput) {
       const time = convertOtelTimeInput(timeInput, clock)
       const cause = Cause.fail(exception)
-      const error = Cause.prettyErrors(cause)[0]
+      const error = Cause.prettyErrors(cause, {
+        includeCauseInStack: true
+      })[0]
       span.event(error.message, time, {
         "exception.type": error.name,
         "exception.message": error.message,
@@ -484,7 +486,9 @@ export class OtelSpan implements Tracer.Span {
         this.span.setAttribute("span.label", "⚠︎ Interrupted")
         this.span.setAttribute("status.interrupted", true)
       } else {
-        const errors = Cause.prettyErrors(exit.cause)
+        const errors = Cause.prettyErrors(exit.cause, {
+          includeCauseInStack: true
+        })
         if (errors.length > 0) {
           for (const error of errors) {
             this.span.recordException(error, hrTime)
@@ -555,7 +559,7 @@ const makeTraceFlags = (
       traceFlags = Context.getOrUndefined(span.annotations, OtelTraceFlags)
     }
   }
-  return traceFlags ?? Otel.TraceFlags.SAMPLED
+  return traceFlags ?? (span.sampled ? Otel.TraceFlags.SAMPLED : Otel.TraceFlags.NONE)
 }
 
 const makeTraceState = (

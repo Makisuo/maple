@@ -1,5 +1,5 @@
 {
-  "id": "df0e20b0-a52b-41a7-b00d-204371284bf1",
+  "id": "344e71a4-0780-4d1f-8402-b561ca6194d1",
   "prevId": "6ddf6987-d54b-48b5-9412-c4a0d5f8fc66",
   "version": "7",
   "dialect": "postgresql",
@@ -1974,6 +1974,12 @@
         },
         "watermark_at": {
           "name": "watermark_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "backfill_at": {
+          "name": "backfill_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
@@ -4291,68 +4297,6 @@
       "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.org_billing_suspensions": {
-      "name": "org_billing_suspensions",
-      "schema": "",
-      "columns": {
-        "org_id": {
-          "name": "org_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "overdue_since": {
-          "name": "overdue_since",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "suspended_at": {
-          "name": "suspended_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "overdue_invoice_id": {
-          "name": "overdue_invoice_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "org_billing_suspensions_org_id_pk": {
-          "name": "org_billing_suspensions_org_id_pk",
-          "columns": [
-            "org_id"
-          ]
-        }
-      },
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},

@@ -35,7 +35,7 @@ describe("toCodeDocument", () => {
   }
 
   function assertSchema(input: {
-    readonly schema: Schema.Top
+    readonly schema: Schema.Constraint
     readonly reviver?: SchemaRepresentation.Reviver<SchemaRepresentation.Code> | undefined
   }, expected: Expected) {
     const multiDocument = SchemaRepresentation.fromASTs([input.schema.ast])

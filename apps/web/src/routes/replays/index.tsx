@@ -116,7 +116,7 @@ function ReplaysPage() {
 		<TimeRangeHeaderControls
 			startTime={search.startTime ?? startTime}
 			endTime={search.endTime ?? endTime}
-			presetValue={search.timePreset ?? "24h"}
+			presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
 			defaultPreset="24h"
 			onTimeChange={handleTimeChange}
 		/>

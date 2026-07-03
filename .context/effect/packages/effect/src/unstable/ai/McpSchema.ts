@@ -35,7 +35,7 @@ import * as RpcMiddleware from "../rpc/RpcMiddleware.ts"
  * @category models
  * @since 4.0.0
  */
-export interface optionalWithDefault<S extends Schema.Top & Schema.WithoutConstructorDefault>
+export interface optionalWithDefault<S extends Schema.Constraint & Schema.WithoutConstructorDefault>
   extends Schema.withConstructorDefault<Schema.decodeTo<Schema.toType<Schema.optionalKey<S>>, Schema.optionalKey<S>>>
 {}
 
@@ -51,7 +51,7 @@ export interface optionalWithDefault<S extends Schema.Top & Schema.WithoutConstr
  * @category schemas
  * @since 4.0.0
  */
-export const optionalWithDefault = <S extends Schema.Top & Schema.WithoutConstructorDefault>(
+export const optionalWithDefault = <S extends Schema.Constraint & Schema.WithoutConstructorDefault>(
   schema: S,
   defaultValue: () => Schema.optionalKey<S>["Type"]
 ): optionalWithDefault<S> => {
@@ -78,7 +78,9 @@ export const optionalWithDefault = <S extends Schema.Top & Schema.WithoutConstru
  * @category schemas
  * @since 4.0.0
  */
-export const optional = <S extends Schema.Top>(schema: S): Schema.decodeTo<Schema.optional<S>, Schema.optionalKey<S>> =>
+export const optional = <S extends Schema.Constraint>(
+  schema: S
+): Schema.decodeTo<Schema.optional<S>, Schema.optionalKey<S>> =>
   Schema.optionalKey(schema).pipe(
     Schema.decodeTo(Schema.optional(schema), {
       decode: SchemaGetter.passthrough() as any,
@@ -2460,7 +2462,7 @@ const ParamSchemaTypeId = "~effect/ai/McpSchema/ParamSchema"
  * @category parameters
  * @since 4.0.0
  */
-export function isParam(schema: Schema.Top): schema is Param<string, Schema.Top> {
+export function isParam(schema: Schema.Constraint): schema is Param<string, Schema.Top> {
   return Predicate.hasProperty(schema, ParamSchemaTypeId)
 }
 
@@ -2475,18 +2477,11 @@ export function isParam(schema: Schema.Top): schema is Param<string, Schema.Top>
  * @category parameters
  * @since 4.0.0
  */
-export interface Param<Name extends string, S extends Schema.Top> extends
-  Schema.Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface Param<Name extends string, S extends Schema.Constraint> extends
+  Schema.BottomLazy<
     S["ast"],
     Param<Name, S>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -2494,7 +2489,14 @@ export interface Param<Name extends string, S extends Schema.Top> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
   readonly "Rebuild": Param<Name, S>
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly [ParamSchemaTypeId]: typeof ParamSchemaTypeId
   readonly name: Name
   readonly schema: S
@@ -2506,7 +2508,7 @@ export interface Param<Name extends string, S extends Schema.Top> extends
  * @category parameters
  * @since 4.0.0
  */
-export function param<const Name extends string, S extends Schema.Top>(
+export function param<const Name extends string, S extends Schema.Constraint>(
   name: Name,
   schema: S
 ): Param<Name, S> {

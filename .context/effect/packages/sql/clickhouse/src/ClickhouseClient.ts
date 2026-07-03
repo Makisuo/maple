@@ -290,6 +290,9 @@ export const make = (
       executeValues(sql: string, params: ReadonlyArray<unknown>) {
         return this.run(sql, params, "JSONCompact")
       }
+      executeValuesUnprepared(sql: string, params: ReadonlyArray<unknown>) {
+        return this.executeValues(sql, params)
+      }
       executeUnprepared(sql: string, params: ReadonlyArray<unknown>, transformRows?: any) {
         return this.execute(sql, params, transformRows)
       }

@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto"
 import { Retry } from "@distilled.cloud/cloudflare"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { OrgId } from "@maple/domain/http"
-import { cloudflareAnalyticsState, oauthConnections } from "@maple/db"
+import { clickHouseSchemaVersion } from "@maple/domain/clickhouse"
+import { cloudflareAnalyticsState, oauthConnections, orgClickHouseSettings } from "@maple/db"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -13,6 +14,7 @@ import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
 import { CloudflareAnalyticsService, hasAnalyticsScopes } from "./CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./CloudflareOAuthService"
+import { OrgClickHouseSettingsService } from "./OrgClickHouseSettingsService"
 import { OrgIngestKeysService } from "./OrgIngestKeysService"
 import type { MetricGaugeRow, MetricSumRow } from "./cloudflare-analytics/mapping"
 import type { OtlpMetricsPayload } from "./cloudflare-analytics/otlp"
@@ -30,7 +32,8 @@ const ZONE_NAME = "example.com"
 const T0 = Date.parse("2026-07-02T12:00:00Z")
 const MIN = 60_000
 
-const ANALYTICS_SCOPE = "account-settings.read account-analytics.read zone.read workers-scripts.read"
+const ANALYTICS_SCOPE =
+	"account-settings.read account-analytics.read analytics.read zone.read workers-scripts.read"
 
 const ENCRYPTION_KEY_B64 = Buffer.alloc(32, 7).toString("base64")
 
@@ -281,6 +284,7 @@ const makeLayer = (
 	CloudflareAnalyticsService.layer.pipe(
 		Layer.provideMerge(CloudflareOAuthService.layer),
 		Layer.provideMerge(OrgIngestKeysService.layer),
+		Layer.provideMerge(OrgClickHouseSettingsService.layer),
 		Layer.provideMerge(Layer.succeed(WarehouseQueryService, makeWarehouseStub(captured, queryStub))),
 		Layer.provideMerge(testDb.layer),
 		Layer.provideMerge(Env.layer),
@@ -312,6 +316,34 @@ const seedConnection = (scope: string = ANALYTICS_SCOPE) =>
 				expiresAt: null,
 				createdAt: new Date(T0 - 60 * MIN),
 				updatedAt: new Date(T0 - 60 * MIN),
+			}),
+		)
+	})
+
+/**
+ * Insert a BYO-ClickHouse settings row for ORG. `schemaVersion` defaults to the
+ * running `clickHouseSchemaVersion` and `syncStatus` to "connected" — i.e. a
+ * write-ready org whose gateway-written metrics land in its own CH. Override
+ * either to simulate schema drift / a disconnected cluster.
+ */
+const seedByoClickHouse = (
+	overrides: { syncStatus?: string; schemaVersion?: string | null } = {},
+) =>
+	Effect.gen(function* () {
+		const database = yield* Database
+		yield* database.execute((db) =>
+			db.insert(orgClickHouseSettings).values({
+				orgId: ORG,
+				chUrl: "https://ch.example.com",
+				chUser: "default",
+				chDatabase: "maple",
+				syncStatus: overrides.syncStatus ?? "connected",
+				schemaVersion:
+					overrides.schemaVersion === undefined ? clickHouseSchemaVersion : overrides.schemaVersion,
+				createdAt: new Date(T0 - 60 * MIN),
+				updatedAt: new Date(T0 - 60 * MIN),
+				createdBy: "user_1",
+				updatedBy: "user_1",
 			}),
 		)
 	})
@@ -369,6 +401,14 @@ describe("hasAnalyticsScopes", () => {
 		assert.isFalse(hasAnalyticsScopes("account-settings.read workers-scripts.read"))
 		assert.isFalse(hasAnalyticsScopes(""))
 	})
+
+	it("is not satisfied by zone.read alone — zone analytics needs analytics.read", () => {
+		// Regression: zone.read lists zones but does NOT authorize httpRequestsAdaptiveGroups, so a
+		// token with account+zone read but no analytics.read polled workers fine while every zone
+		// query was rejected "not authorized". Such a token must read as not analytics-capable.
+		assert.isFalse(hasAnalyticsScopes("account-analytics.read zone.read"))
+		assert.isTrue(hasAnalyticsScopes("account-analytics.read analytics.read zone.read"))
+	})
 })
 
 describe("CloudflareAnalyticsService", () => {
@@ -421,10 +461,15 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(httpRow!.zoneName, ZONE_NAME)
 			assert.isTrue(httpRow!.enabled)
 			assert.isNull(httpRow!.lastError)
-			// Caught up to the safety-lag horizon: watermark = floor(now - 10min, 5min) = 11:50.
+			// Head caught up to the safety-lag horizon: watermark = floor(now - 10min, 5min) = 11:50.
 			const horizon = Date.parse("2026-07-02T11:50:00Z")
 			assert.strictEqual(httpRow!.watermarkAt?.getTime(), horizon)
 			assert.strictEqual(workersRow!.watermarkAt?.getTime(), horizon)
+			// The backfill frontier filled in behind the head and, under the plan's 2h retention,
+			// reached its floor (floor(now-2h)+1bucket = 10:05) within the same tick.
+			const retentionFloor = Date.parse("2026-07-02T10:05:00Z")
+			assert.strictEqual(httpRow!.backfillAt?.getTime(), retentionFloor)
+			assert.strictEqual(workersRow!.backfillAt?.getTime(), retentionFloor)
 			// Settings were interrogated and cached.
 			assert.include(httpRow!.settingsJson ?? "", "notOlderThan")
 			// Lease released after the tick.
@@ -447,6 +492,88 @@ describe("CloudflareAnalyticsService", () => {
 			// Nothing bypassed the gateway via a direct warehouse ingest.
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { otlpCalls })))
+	})
+
+	// Seed a workers anchor (discovery + settings pre-stamped fresh so the whole call budget goes to
+	// polling) plus `zoneCount` http zone rows with null settingsJson ⇒ no retention cap ⇒ the full
+	// 24h backfill. >10 zones means the 24h history can't fit in one 50-call tick.
+	const seedManyZones = (zoneCount: number) =>
+		Effect.gen(function* () {
+			yield* seedStateRow({
+				dataset: "workers_invocations",
+				zoneId: "",
+				discoveredAt: new Date(T0 - 5 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			for (let i = 0; i < zoneCount; i++) {
+				yield* seedStateRow({
+					dataset: "http_requests",
+					zoneId: `zone-${i}`,
+					zoneName: `zone-${i}.example.com`,
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+		})
+
+	// floor(now - 10min - 24h) — the 24h backfill floor when the plan imposes no retention cap.
+	const BACKFILL_FLOOR = Date.parse("2026-07-01T11:50:00Z")
+	const HORIZON = Date.parse("2026-07-02T11:50:00Z")
+
+	it.effect(
+		"prioritizes live data: the head reaches the horizon in one tick while the 24h backfill stays in progress",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			return Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				yield* seedConnection()
+				yield* seedManyZones(12)
+
+				const service = yield* CloudflareAnalyticsService
+				const summary = yield* service.pollOrg(ORG)
+				assert.isNull(summary.skipped)
+
+				const httpRows = (yield* loadStateRows).filter((row) => row.dataset === "http_requests")
+				assert.strictEqual(httpRows.length, 12)
+				for (const row of httpRows) {
+					// Head is live within the FIRST tick — the newest window landed immediately, so the
+					// integration card reads "just now" instead of hours ago.
+					assert.strictEqual(row.watermarkAt?.getTime(), HORIZON)
+					// History is still filling in behind it: the backfill frontier started walking down
+					// from the seed but couldn't reach the 24h floor under the per-tick call budget.
+					assert.isNotNull(row.backfillAt)
+					assert.isAbove(row.backfillAt!.getTime(), BACKFILL_FLOOR)
+					assert.isBelow(row.backfillAt!.getTime(), HORIZON)
+				}
+				// Budget-bound tick (that's WHY history is incomplete) — the head still won the race.
+				assert.isAbove(summary.callsMade, 40)
+			}).pipe(Effect.provide(makeLayer(testDb, captured)))
+		},
+	)
+
+	it.effect("the backfill frontier walks down to the 24h floor over subsequent ticks, then stops", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedManyZones(12)
+
+			const service = yield* CloudflareAnalyticsService
+			// Same wall-clock across ticks: the head stays put at the horizon; each tick drains more
+			// history until the backfill frontier bottoms out at the 24h floor.
+			yield* Effect.forEach([1, 2, 3, 4, 5], () => service.pollOrg(ORG), { discard: true })
+
+			const httpRows = (yield* loadStateRows).filter((row) => row.dataset === "http_requests")
+			for (const row of httpRows) {
+				assert.strictEqual(row.watermarkAt?.getTime(), HORIZON)
+				assert.strictEqual(row.backfillAt?.getTime(), BACKFILL_FLOOR)
+			}
+			// One more tick is a no-op: caught up on both frontiers, nothing left to ingest.
+			const idle = yield* service.pollOrg(ORG)
+			assert.strictEqual(idle.rowsIngested, 0)
+			assert.strictEqual(idle.callsMade, 0)
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
 	it.effect("pollOrg disables state rows for vanished zones", () => {
@@ -507,12 +634,54 @@ describe("CloudflareAnalyticsService", () => {
 			const service = yield* CloudflareAnalyticsService
 			const summary = yield* service.pollOrg(ORG)
 			assert.strictEqual(summary.rowsIngested, 0)
+			// The failure is now a first-class value on the summary (the seam turns it into an
+			// exception event + ERROR log), not just a silent DB write.
+			assert.isAbove(summary.failures.length, 0)
+			assert.isTrue(summary.failures.some((failure) => failure.message.includes("quota exceeded")))
 			const rows = yield* loadStateRows
 			const httpRow = rows.find((row) => row.dataset === "http_requests")
 			assert.include(httpRow!.lastError ?? "", "quota exceeded")
 			assert.strictEqual(httpRow!.watermarkAt?.getTime(), T0 - 30 * MIN)
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { graphqlErrors: [{ message: "quota exceeded" }] })))
+	})
+
+	it.effect("pollOrg surfaces a zone authz failure as an observable failure, not just a DB write", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: ZONE_ID,
+				zoneName: ZONE_NAME,
+				watermarkAt: new Date(T0 - 30 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			// Regression for the invisible outage: a Cloudflare "not authorized" on the zone dataset
+			// used to be written ONLY to cloudflare_analytics_state.lastError with zero telemetry, so a
+			// fully-broken integration was invisible to find_errors/logs for hours. It must now be a
+			// classified, first-class failure on the summary (which the seam turns into an exception
+			// event + ERROR log through Maple's own error pipeline).
+			const authz = summary.failures.find((failure) => failure.kind === "authz")
+			assert.isDefined(authz)
+			assert.strictEqual(authz!.scope, "zone")
+			assert.strictEqual(authz!.datasetId, "http_requests")
+			assert.include(authz!.message, "not authorized")
+			assert.strictEqual(summary.rowsIngested, 0)
+			const rows = yield* loadStateRows
+			const httpRow = rows.find((row) => row.dataset === "http_requests")
+			assert.include(httpRow!.lastError ?? "", "not authorized")
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [{ message: "not authorized to access these fields" }],
+				}),
+			),
+		)
 	})
 
 	it.effect("pollOrg records a zones-list auth failure, disables rows, and holds watermarks", () => {
@@ -696,12 +865,48 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(worker.displayName, "my-worker")
 			assert.strictEqual(worker.totalRequests, 42)
 
-			// Metrics now flow through the ingest gateway per-org, so the usage read resolves via
-			// the default (per-org) config — BYO-CH orgs read their own warehouse, not a Tinybird pin.
+			// This org has no BYO-CH settings row (managed/Tinybird), so the gateway wrote its
+			// metrics to Tinybird — the usage read must pin to the ingest config to find them.
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.isUndefined(queryStub.calls[0]?.options?.pinToIngestConfig)
+			assert.strictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
 			assert.strictEqual(queryStub.calls[0]?.options?.profile, "aggregation")
 			assert.strictEqual(queryStub.calls[0]?.orgId, ORG)
+		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
+	})
+
+	it.effect("getUsage reads the org's own warehouse for a write-ready BYO-CH org", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const queryStub: CompiledQueryStub = { rows: [], calls: [] }
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// Connected + schema_version == running version → gateway routes metrics to the
+			// org's own ClickHouse, so the read must NOT pin to the ingest (Tinybird) config.
+			yield* seedByoClickHouse()
+			const service = yield* CloudflareAnalyticsService
+			yield* service.getUsage(ORG)
+
+			assert.strictEqual(queryStub.calls.length, 1)
+			assert.notStrictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
+	})
+
+	it.effect("getUsage pins to ingest config for a drifted (not-ready) BYO-CH org", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		const queryStub: CompiledQueryStub = { rows: [], calls: [] }
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// Stale schema_version → gateway falls back to Tinybird for this org's metrics,
+			// so the read must pin to the ingest config (its own CH would be empty).
+			yield* seedByoClickHouse({ schemaVersion: "stale-schema-version" })
+			const service = yield* CloudflareAnalyticsService
+			yield* service.getUsage(ORG)
+
+			assert.strictEqual(queryStub.calls.length, 1)
+			assert.strictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 

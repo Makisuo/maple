@@ -38,7 +38,7 @@ export interface McpToolResult {
 }
 
 export interface McpToolRegistrar {
-	tool<TSchema extends Schema.Decoder<unknown, never>>(
+	tool<TSchema extends Schema.Codec<unknown, unknown, never, unknown>>(
 		name: string,
 		description: string,
 		schema: TSchema,

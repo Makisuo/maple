@@ -511,8 +511,9 @@ export const mapInput: {
  *
  * **Details**
  *
- * Numeric segments are left unchanged. This is a specialization of
- * {@link mapInput}.
+ * Numeric segments are left unchanged. String segments use `String.configCase`
+ * so numeric word groups such as `v2` are preserved for environment variable
+ * names. This is a specialization of {@link mapInput}.
  *
  * **Example** (Resolving camelCase keys to env vars)
  *
@@ -532,7 +533,7 @@ export const mapInput: {
  * @since 2.0.0
  */
 export const constantCase: (self: ConfigProvider) => ConfigProvider = mapInput((path) =>
-  path.map((seg) => typeof seg === "number" ? seg : Str.constantCase(seg))
+  path.map((seg) => typeof seg === "number" ? seg : Str.configCase(seg))
 )
 
 /**

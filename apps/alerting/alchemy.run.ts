@@ -83,6 +83,17 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			...optionalSecret("CLERK_JWT_KEY"),
 			...optionalSecret("AUTUMN_SECRET_KEY"),
 			...optionalSecret("INTERNAL_SERVICE_TOKEN"),
+			// Cloudflare integration (account OAuth — Authorization Code + PKCE).
+			// The alerting worker runs the cloudflare analytics poller (cloudflareAnalyticsTick
+			// → CloudflareAnalyticsService.pollAllOrgs), which resolves + refreshes each org's
+			// OAuth token via CloudflareOAuthService and needs the same config as the api worker.
+			...optionalPlain("CLOUDFLARE_OAUTH_CLIENT_ID"),
+			...optionalSecret("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("CLOUDFLARE_OAUTH_SCOPES"),
+			...optionalPlain("CLOUDFLARE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
+			...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
 		},
 	})
 

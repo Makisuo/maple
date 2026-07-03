@@ -64,7 +64,8 @@ function QueryBuilderLabContent() {
 				<TimeRangeHeaderControls
 					startTime={search.startTime}
 					endTime={search.endTime}
-					presetValue={search.timePreset ?? "1h"}
+					presetValue={search.timePreset ?? (search.startTime ? undefined : "1h")}
+					defaultPreset="1h"
 					onTimeChange={handleTimeChange}
 				/>
 			}

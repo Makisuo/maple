@@ -343,7 +343,7 @@ type ResponseByMode<Success, ResponseMode extends HttpApiEndpoint.ClientResponse
   : Success
 
 type ErrorByMode<
-  Error extends Schema.Top,
+  Error extends Schema.Constraint,
   Middleware,
   ResponseMode extends HttpApiEndpoint.ClientResponseMode
 > =

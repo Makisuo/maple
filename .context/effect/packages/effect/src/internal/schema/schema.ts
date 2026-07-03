@@ -28,7 +28,7 @@ const SchemaProto = {
 }
 
 /** @internal */
-export function make<S extends Schema.Top>(ast: S["ast"], options?: object): S {
+export function make<S extends Schema.Constraint>(ast: S["ast"], options?: object): S {
   const self = Object.create(SchemaProto)
   if (options) {
     Object.assign(self, options)

@@ -51,7 +51,6 @@ export const isRpc = (u: unknown): u is Rpc<any, any, any> => Predicate.hasPrope
  * @since 4.0.0
  */
 export interface DefectSchema extends Schema.Top {
-  readonly Type: unknown
   make(input: null, options?: Schema.MakeOptions): unknown
   make(input: undefined, options?: Schema.MakeOptions): unknown
   make(input: {}, options?: Schema.MakeOptions): unknown
@@ -807,7 +806,7 @@ const Proto = {
       middlewares: this.middlewares
     })
   },
-  setPayload(this: AnyWithProps, payloadSchema: Schema.Struct<any> | Schema.Struct.Fields) {
+  setPayload(this: AnyWithProps, payloadSchema: Schema.Struct<Schema.Struct.Fields> | Schema.Struct.Fields) {
     return makeProto({
       _tag: this._tag,
       payloadSchema: Schema.isSchema(payloadSchema) ? payloadSchema as any : Schema.Struct(payloadSchema as any),
@@ -876,7 +875,7 @@ const makeProto = <
   readonly payloadSchema: Payload
   readonly successSchema: Success
   readonly errorSchema: Error
-  readonly defectSchema: Schema.Top
+  readonly defectSchema: Schema.Constraint
   readonly annotations: Context.Context<never>
   readonly middlewares: ReadonlySet<Middleware>
 }): Rpc<Tag, Payload, Success, Error, Middleware, Requires> => {
@@ -971,7 +970,7 @@ export const make = <
  * }
  *
  * // The type definition for the transformed success schema.
- * export interface Paginated<S extends Schema.Top> extends
+ * export interface Paginated<S extends Schema.Constraint> extends
  *   Schema.Struct<{
  *     readonly offset: Schema.Number
  *     readonly total: Schema.Number
@@ -1071,8 +1070,8 @@ export declare namespace Custom {
    * @since 4.0.0
    */
   export interface Out<
-    Success extends Schema.Top,
-    Error extends Schema.Top
+    Success extends Schema.Constraint,
+    Error extends Schema.Constraint
   > {
     readonly success: Success
     readonly error: Error
@@ -1097,8 +1096,8 @@ export declare namespace Custom {
    */
   export type Kind<
     Def extends Custom,
-    Success extends Schema.Top,
-    Error extends Schema.Top
+    Success extends Schema.Constraint,
+    Error extends Schema.Constraint
   > = (Def & {
     readonly success: Success
     readonly error: Error

@@ -11088,10 +11088,10 @@ export const make = (
       Stream.unwrap
     )
   const decodeSuccess =
-    <Schema extends Schema.Top>(schema: Schema) => (response: HttpClientResponse.HttpClientResponse) =>
+    <Schema extends Schema.Constraint>(schema: Schema) => (response: HttpClientResponse.HttpClientResponse) =>
       HttpClientResponse.schemaBodyJson(schema)(response)
   const decodeError =
-    <const Tag extends string, Schema extends Schema.Top>(tag: Tag, schema: Schema) =>
+    <const Tag extends string, Schema extends Schema.Constraint>(tag: Tag, schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       Effect.flatMap(
         HttpClientResponse.schemaBodyJson(schema)(response),

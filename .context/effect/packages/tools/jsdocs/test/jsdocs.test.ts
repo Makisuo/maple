@@ -1,4 +1,4 @@
-import { extractJSDocsSync, parseJSDoc } from "@effect/jsdocs"
+import { computeJSDocInputHash, extractJSDocsSync, parseJSDoc } from "@effect/jsdocs"
 import { assert, describe, it } from "@effect/vitest"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -118,6 +118,59 @@ export const makeValue = () => 1
       importDeclaration: "import { Foo } from \"@effect/sample\"",
       usage: "Foo.makeValue"
     })
+  })
+
+  it("stores a stable input hash for cache checks", () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "jsdocs-"))
+    fs.mkdirSync(path.join(cwd, "src"), { recursive: true })
+    fs.writeFileSync(
+      path.join(cwd, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext", target: "ES2022" },
+        include: ["src/**/*.ts"]
+      })
+    )
+    fs.writeFileSync(
+      path.join(cwd, "jsdocs.config.json"),
+      JSON.stringify({
+        tsconfig: "tsconfig.json",
+        include: ["src/**/*.ts"],
+        output: ".data/jsdocs.json"
+      })
+    )
+    fs.writeFileSync(
+      path.join(cwd, "package.json"),
+      JSON.stringify({
+        name: "@effect/sample",
+        type: "module",
+        exports: { ".": "./src/index.ts", "./*": "./src/*.ts" }
+      })
+    )
+    fs.writeFileSync(path.join(cwd, "src/index.ts"), `export * as Foo from "./Foo.ts"\n`)
+    fs.writeFileSync(
+      path.join(cwd, "src/Foo.ts"),
+      `/**
+ * Creates a value.
+ *
+ * @category constructors
+ * @since 1.0.0
+ */
+export const makeValue = () => 1
+`
+    )
+    const options = {
+      cwd,
+      tsconfig: "tsconfig.json",
+      include: ["src/**/*.ts"],
+      output: ".data/jsdocs.json"
+    }
+    const inputHash = computeJSDocInputHash(options)
+    const model = extractJSDocsSync(options)
+    assert.strictEqual(model.inputHash, inputHash)
+    assert.strictEqual(computeJSDocInputHash(options), inputHash)
+
+    fs.appendFileSync(path.join(cwd, "src/Foo.ts"), "\n")
+    assert.notStrictEqual(computeJSDocInputHash(options), inputHash)
   })
 
   it("extracts typechecker signatures for top-level functions", () => {

@@ -312,5 +312,5 @@ const extractResponseContent = (
  */
 export class AdditionalSchemas extends Context.Service<
   AdditionalSchemas,
-  ReadonlyArray<Schema.Top>
+  ReadonlyArray<Schema.Constraint>
 >()("effect/httpapi/HttpApi/AdditionalSchemas") {}

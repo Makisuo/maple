@@ -384,7 +384,7 @@ function RuleDetailContent() {
 					<TimeRangeHeaderControls
 						startTime={search.startTime}
 						endTime={search.endTime}
-						presetValue={search.timePreset ?? "24h"}
+						presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
 						defaultPreset="24h"
 						onTimeChange={(range) =>
 							navigate({ search: (prev) => applyTimeRangeSearch(prev, range) })

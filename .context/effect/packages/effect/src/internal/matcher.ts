@@ -521,11 +521,6 @@ export const instanceOf = <A extends abstract new(...args: any) => any>(
 ): SafeRefinement<InstanceType<A>, never> => ((u: unknown) => u instanceof constructor) as any
 
 /** @internal */
-export const instanceOfUnsafe: <A extends abstract new(...args: any) => any>(
-  constructor: A
-) => SafeRefinement<InstanceType<A>, InstanceType<A>> = instanceOf
-
-/** @internal */
 export const orElse =
   <RA, Ret, F extends (_: RA) => Ret>(f: F) =>
   <I, R, A, Pr>(self: Matcher<I, R, RA, A, Pr, Ret>): [Pr] extends [never] ? (input: I) => Unify<ReturnType<F> | A>

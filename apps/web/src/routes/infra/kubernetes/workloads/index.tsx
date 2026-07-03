@@ -154,7 +154,7 @@ function WorkloadsPageContent() {
 					<TimeRangeHeaderControls
 						startTime={search.startTime ?? startTime}
 						endTime={search.endTime ?? endTime}
-						presetValue={search.timePreset ?? "12h"}
+						presetValue={search.timePreset ?? (search.startTime ? undefined : "12h")}
 						onTimeChange={handleTimeChange}
 					/>
 				}
