@@ -157,6 +157,20 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	).pipe(Layer.provideMerge(telemetry.layer), Layer.provideMerge(ConfigLive))
 }
 
+/**
+ * Standard tick failure isolation. A broken tick must not fail the whole scheduled
+ * invocation (several ticks share one cron dispatch), so genuine failures are logged and
+ * swallowed — but interrupt-only causes (isolate teardown) are re-raised so they reach
+ * `runScheduledEffect`'s `onInterrupt: "graceful"` handling instead of logging a phantom
+ * tick failure. Mirrors the per-org guards inside the tick services.
+ */
+const catchTickFailure = (label: string) =>
+	Effect.catchCause((cause: Cause.Cause<unknown>) =>
+		Cause.hasInterruptsOnly(cause)
+			? Effect.interrupt
+			: Effect.logError(label).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
+	)
+
 const alertTick = Effect.gen(function* () {
 	const alerts = yield* AlertsService
 	const result = yield* alerts.runSchedulerTick()
@@ -170,11 +184,7 @@ const alertTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.scheduler_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Alerting worker tick failed").pipe(
-			Effect.annotateLogs({ error: Cause.pretty(cause) }),
-		),
-	),
+	catchTickFailure("Alerting worker tick failed"),
 )
 
 const errorTick = Effect.gen(function* () {
@@ -194,11 +204,7 @@ const errorTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.error_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Errors worker tick failed").pipe(
-			Effect.annotateLogs({ error: Cause.pretty(cause) }),
-		),
-	),
+	catchTickFailure("Errors worker tick failed"),
 )
 
 const escalationTick = Effect.gen(function* () {
@@ -217,9 +223,7 @@ const escalationTick = Effect.gen(function* () {
 	}
 }).pipe(
 	Effect.withSpan("alerting.escalation_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Escalation tick failed").pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
-	),
+	catchTickFailure("Escalation tick failed"),
 )
 
 const digestTick = Effect.gen(function* () {
@@ -234,9 +238,7 @@ const digestTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.digest_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Digest tick failed").pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
-	),
+	catchTickFailure("Digest tick failed"),
 )
 
 const onboardingTick = Effect.gen(function* () {
@@ -253,9 +255,7 @@ const onboardingTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.onboarding_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Onboarding tick failed").pipe(Effect.annotateLogs({ error: Cause.pretty(cause) })),
-	),
+	catchTickFailure("Onboarding tick failed"),
 )
 
 const serviceMapRollupTick = Effect.gen(function* () {
@@ -271,11 +271,7 @@ const serviceMapRollupTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.service_map_rollup_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Service map rollup tick failed").pipe(
-			Effect.annotateLogs({ error: Cause.pretty(cause) }),
-		),
-	),
+	catchTickFailure("Service map rollup tick failed"),
 )
 
 const anomalyTick = Effect.gen(function* () {
@@ -295,11 +291,7 @@ const anomalyTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.anomaly_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Anomaly detection tick failed").pipe(
-			Effect.annotateLogs({ error: Cause.pretty(cause) }),
-		),
-	),
+	catchTickFailure("Anomaly detection tick failed"),
 )
 
 const cloudflareAnalyticsTick = Effect.gen(function* () {
@@ -310,11 +302,7 @@ const cloudflareAnalyticsTick = Effect.gen(function* () {
 	)
 }).pipe(
 	Effect.withSpan("alerting.cloudflare_analytics_tick"),
-	Effect.catchCause((cause) =>
-		Effect.logError("Cloudflare analytics tick failed").pipe(
-			Effect.annotateLogs({ error: Cause.pretty(cause) }),
-		),
-	),
+	catchTickFailure("Cloudflare analytics tick failed"),
 )
 
 interface ScheduledEventLike {
