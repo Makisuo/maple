@@ -30,6 +30,13 @@ export interface EnvShape {
 	readonly AUTUMN_API_URL: string
 	readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
+	// ElectricSQL sync (read-path). ELECTRIC_URL is the base of the Electric HTTP
+	// API the shape proxy forwards to (docker `electric` locally, Electric Cloud
+	// in prod). SOURCE_ID + SECRET are Electric Cloud source credentials; unset
+	// when self-hosting. Absent ELECTRIC_URL disables sync (proxy 503s).
+	readonly ELECTRIC_URL: Option.Option<string>
+	readonly ELECTRIC_SOURCE_ID: Option.Option<string>
+	readonly ELECTRIC_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly EMAIL_FROM: string
 	readonly HAZEL_API_BASE_URL: string
 	readonly HAZEL_OAUTH_DISCOVERY_URL: string
@@ -100,6 +107,9 @@ const envConfig = Config.all({
 	AUTUMN_API_URL: stringWithDefault("AUTUMN_API_URL", "https://api.useautumn.com"),
 	SD_INTERNAL_TOKEN: optionalRedacted("SD_INTERNAL_TOKEN"),
 	INTERNAL_SERVICE_TOKEN: optionalRedacted("INTERNAL_SERVICE_TOKEN"),
+	ELECTRIC_URL: optionalString("ELECTRIC_URL"),
+	ELECTRIC_SOURCE_ID: optionalString("ELECTRIC_SOURCE_ID"),
+	ELECTRIC_SECRET: optionalRedacted("ELECTRIC_SECRET"),
 	EMAIL_FROM: stringWithDefault("EMAIL_FROM", "Maple <notifications@noreply.maple.dev>"),
 	HAZEL_API_BASE_URL: stringWithDefault("HAZEL_API_BASE_URL", "https://api.hazel.sh"),
 	HAZEL_OAUTH_DISCOVERY_URL: stringWithDefault(

@@ -197,6 +197,11 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalSecret("AUTUMN_SECRET_KEY"),
 			...optionalSecret("SD_INTERNAL_TOKEN"),
 			...optionalSecret("INTERNAL_SERVICE_TOKEN"),
+			// ElectricSQL sync: base URL of the Electric HTTP API (Electric Cloud in
+			// prod) + Cloud source credentials. The shape proxy 503s if URL is unset.
+			...optionalPlain("ELECTRIC_URL"),
+			...optionalPlain("ELECTRIC_SOURCE_ID"),
+			...optionalSecret("ELECTRIC_SECRET"),
 			...optionalPlain("HAZEL_API_BASE_URL"),
 			...optionalPlain("HAZEL_OAUTH_DISCOVERY_URL"),
 			...optionalPlain("HAZEL_OAUTH_CLIENT_ID"),

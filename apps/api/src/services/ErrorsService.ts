@@ -1176,7 +1176,7 @@ const make: Effect.Effect<
 		const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
 		const fromState = row.workflowState
 		if (fromState === toState) {
-			return row
+			return { row, txid: undefined as string | undefined }
 		}
 		yield* validateTransition(row.id, fromState, toState)
 
@@ -1254,7 +1254,7 @@ const make: Effect.Effect<
 		if (actorId) yield* touchActor(orgId, actorId, timestamp)
 
 		const next = yield* requireIssue(orgId, row.id)
-		return next
+		return { row: next, txid }
 	})
 
 	const transitionIssue: ErrorsServiceShape["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
