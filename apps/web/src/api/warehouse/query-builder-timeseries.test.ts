@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest"
+import { assert, describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { QuerySpec } from "@maple/query-engine"
 import { __testables } from "@/api/warehouse/query-builder-timeseries"
@@ -188,11 +188,11 @@ describe("query-builder timeseries strategy", () => {
 					}),
 			)
 
-			expect(seenBucketSeconds).toEqual([120, 3600, 14400])
-			expect(result.fallbackUsed).toBe(true)
-			expect(result.attempts).toHaveLength(3)
-			expect(result.attempts[1].error).toContain("too expensive")
-			expect(result.points).toEqual([
+			assert.deepStrictEqual(seenBucketSeconds, [120, 3600, 14400])
+			assert.isTrue(result.fallbackUsed)
+			assert.lengthOf(result.attempts, 3)
+			assert.include(result.attempts[1]?.error ?? "", "too expensive")
+			assert.deepStrictEqual(result.points, [
 				{
 					bucket: "2026-01-01T00:00:00.000Z",
 					series: { total: 5 },

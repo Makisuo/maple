@@ -31,9 +31,7 @@ export function TemplatePicker({ templates, disabled = false, submitting, onUse 
 	const metricNames = useMemo(
 		() =>
 			Result.builder(metricsResult)
-				.onSuccess((response) =>
-					(response as { data: Array<{ metricName: string }> }).data.map((m) => m.metricName),
-				)
+				.onSuccess((response) => response.data.map((m) => m.metricName))
 				.orElse(() => null),
 		[metricsResult],
 	)

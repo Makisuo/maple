@@ -55,7 +55,7 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 		compatibilityDate: "2026-04-08",
 		placement: CLOUDFLARE_WORKER_PLACEMENT,
 		adopt: true,
-		crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 9 * * *"],
+		crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 9 * * *"],
 		bindings: {
 			MAPLE_DB: mapleDb,
 			AI_TRIAGE_WORKFLOW: aiTriageWorkflow,

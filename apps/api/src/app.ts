@@ -12,7 +12,6 @@ import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
-import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http"
 import { HttpDashboardsLive } from "./routes/dashboards.http"
 import { HttpDemoLive } from "./routes/demo.http"
 import { HttpDigestLive } from "./routes/digest.http"
@@ -48,7 +47,8 @@ import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
 import { InternalServiceAuthorizationLayer } from "./services/InternalServiceAuthorizationLayer"
-import { CloudflareLogpushService } from "./services/CloudflareLogpushService"
+import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
+import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
 import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
@@ -95,7 +95,7 @@ const InfraLive = Env.layer
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
-	CloudflareLogpushService.layer,
+	CloudflareOAuthService.layer,
 	DashboardPersistenceService.layer,
 	HazelOAuthService.layer,
 	OnboardingService.layer,
@@ -111,6 +111,12 @@ const CoreServicesLive = Layer.mergeAll(
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+// Serves the integration page's per-zone collection status; the poll loop itself
+// runs in the alerting worker's cron, not here.
+const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
 
 const DemoServiceLive = DemoService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
@@ -150,6 +156,9 @@ const RecommendationIssueServiceLive = RecommendationIssueService.layer.pipe(
 	Layer.provideMerge(WarehouseQueryServiceLive),
 )
 
+// WorkerEnvironment is intentionally NOT wired here (unlike the alerting worker):
+// AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
+// gracefully when absent and is provided at worker scope where needed.
 const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, EdgeCacheServiceLive)),
 )
@@ -185,6 +194,7 @@ const VcsServicesLive = Layer.mergeAll(
 
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
+	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
@@ -216,7 +226,6 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
 	Layer.provide(HttpAlertsLive),
 	Layer.provide(HttpErrorsLive),
-	Layer.provide(HttpCloudflareLogpushLive),
 	Layer.provide(HttpDashboardsLive),
 	Layer.provide(HttpDemoLive),
 	Layer.provide(HttpDigestLive),

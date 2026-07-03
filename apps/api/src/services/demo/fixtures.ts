@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import { fmtMetricTs, type MetricGaugeRow, type MetricSumRow } from "../../lib/metric-rows"
 
 const SERVICES = ["demo-api", "demo-frontend", "demo-worker", "demo-db"] as const
 type DemoServiceName = (typeof SERVICES)[number]
@@ -87,39 +88,6 @@ interface LogRow {
 	log_attributes: Attrs
 }
 
-/**
- * One row in the `metrics_gauge` datasource (collector Tinybird exporter
- * shape — see metricsGauge in packages/domain/src/tinybird/datasources.ts).
- */
-interface MetricGaugeRow {
-	timestamp: string
-	start_timestamp: string
-	metric_name: string
-	metric_description: string
-	metric_unit: string
-	metric_attributes: Attrs
-	service_name: string
-	resource_schema_url: string
-	resource_attributes: Attrs
-	scope_schema_url: string
-	scope_name: string
-	scope_version: string
-	scope_attributes: Attrs
-	value: number
-	flags: number
-	exemplars_trace_id: string[]
-	exemplars_span_id: string[]
-	exemplars_timestamp: string[]
-	exemplars_value: number[]
-	exemplars_filtered_attributes: Attrs[]
-}
-
-/** One row in the `metrics_sum` datasource. */
-interface MetricSumRow extends MetricGaugeRow {
-	aggregation_temporality: number
-	is_monotonic: boolean
-}
-
 interface DemoTraceBatch {
 	traceRows: TraceRow[]
 	logRows: LogRow[]
@@ -156,8 +124,7 @@ function dbLatencyMs(): number {
 	return Math.max(1, gaussian(8, 5))
 }
 
-// ClickHouse DateTime64 wire format: "YYYY-MM-DD HH:MM:SS.mmm" in UTC.
-const fmtTs = (epochMs: number) => new Date(epochMs).toISOString().replace("T", " ").replace("Z", "")
+const fmtTs = fmtMetricTs
 
 const resourceAttrs = (service: DemoServiceName, orgId: string): Attrs => ({
 	maple_org_id: orgId,

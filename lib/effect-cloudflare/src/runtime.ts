@@ -1,5 +1,5 @@
 import type { Context, Effect } from "effect"
-import { ConfigProvider, Layer, ManagedRuntime } from "effect"
+import { Cause, ConfigProvider, Exit, Layer, ManagedRuntime } from "effect"
 
 /**
  * Minimal shape of CF `ExecutionContext.waitUntil`. Accept any structurally
@@ -100,19 +100,39 @@ export const withRequestRuntime = <R, Env extends Record<string, unknown>, Ctx e
  * Disposes the runtime after the program settles (success or failure),
  * draining the scheduler first and registering the whole thing with
  * `ctx.waitUntil`. Rethrows so the CF runtime reports the failure.
+ *
+ * `onInterrupt` decides what an interrupt-only exit (isolate teardown mid-run)
+ * looks like to the caller:
+ * - `"reject"` (default): rethrow, so the CF runtime reports the invocation as
+ *   failed. Right for queue consumers — an interrupted batch must NOT ack, so
+ *   the messages redeliver.
+ * - `"graceful"`: resolve `undefined` after a single log line. Right for cron
+ *   ticks — the schedule reruns anyway, and a teardown mid-tick is expected
+ *   lifecycle, not a failure worth alerting on.
  */
 export const runScheduledEffect = <A, E, R>(
 	layer: Layer.Layer<R, unknown, never>,
 	program: Effect.Effect<A, E, R>,
 	ctx: ExecutionContextLike,
-): Promise<A> => {
+	options?: { readonly onInterrupt?: "reject" | "graceful" },
+): Promise<A | undefined> => {
 	const runtime = ManagedRuntime.make(layer)
-	const done = runtime.runPromise(program).finally(async () => {
-		await drainScheduler()
-		await runtime.dispose().catch((err) => {
-			console.error("[effect-cloudflare] scheduled runtime dispose failed:", err)
+	const done = runtime
+		.runPromiseExit(program)
+		.then((exit): A | undefined => {
+			if (Exit.isSuccess(exit)) return exit.value
+			if (options?.onInterrupt === "graceful" && Cause.hasInterruptsOnly(exit.cause)) {
+				console.warn("[effect-cloudflare] scheduled run interrupted — cancelled gracefully")
+				return undefined
+			}
+			throw Cause.squash(exit.cause)
 		})
-	})
+		.finally(async () => {
+			await drainScheduler()
+			await runtime.dispose().catch((err) => {
+				console.error("[effect-cloudflare] scheduled runtime dispose failed:", err)
+			})
+		})
 	ctx.waitUntil(done.catch(() => undefined))
 	return done
 }

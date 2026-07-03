@@ -411,6 +411,14 @@ export function tracesDurationStatsQuery(opts: TracesDurationStatsOpts) {
 // Traces facets (UNION ALL — 6 facet dimensions on trace_list_mv)
 // ---------------------------------------------------------------------------
 
+export type TracesFacetDimension =
+	| "service"
+	| "spanName"
+	| "httpMethod"
+	| "httpStatus"
+	| "deploymentEnv"
+	| "serviceNamespace"
+
 export interface TracesFacetsOpts {
 	serviceName?: string
 	spanName?: string
@@ -433,6 +441,8 @@ export interface TracesFacetsOpts {
 	resourceFilterKey?: string
 	resourceFilterValue?: string
 	resourceFilterValueMatchMode?: "contains"
+	/** When set, compile only this dimension's UNION branch (single-list consumers). */
+	facet?: TracesFacetDimension
 }
 
 export interface TracesFacetsOutput {
@@ -553,13 +563,27 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 			.orderBy(["count", "desc"])
 			.limit(limit)
 
+	const facetBranches: Record<TracesFacetDimension, () => ReturnType<typeof makeFacetQuery>> = {
+		service: () => makeFacetQuery("ServiceName", "service"),
+		spanName: () => makeFacetQuery("SpanName", "spanName", ($) => $.SpanName.neq(""), 20),
+		httpMethod: () => makeFacetQuery("HttpMethod", "httpMethod", ($) => $.HttpMethod.neq(""), 20),
+		httpStatus: () => makeFacetQuery("HttpStatusCode", "httpStatus", ($) => $.HttpStatusCode.neq(""), 20),
+		deploymentEnv: () => makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
+		serviceNamespace: () =>
+			makeFacetQuery("ServiceNamespace", "serviceNamespace", ($) => $.ServiceNamespace.neq(""), 20),
+	}
+
+	if (opts.facet) {
+		return unionAll(facetBranches[opts.facet]()).format("JSON")
+	}
+
 	return unionAll(
-		makeFacetQuery("ServiceName", "service"),
-		makeFacetQuery("SpanName", "spanName", ($) => $.SpanName.neq(""), 20),
-		makeFacetQuery("HttpMethod", "httpMethod", ($) => $.HttpMethod.neq(""), 20),
-		makeFacetQuery("HttpStatusCode", "httpStatus", ($) => $.HttpStatusCode.neq(""), 20),
-		makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
-		makeFacetQuery("ServiceNamespace", "serviceNamespace", ($) => $.ServiceNamespace.neq(""), 20),
+		facetBranches.service(),
+		facetBranches.spanName(),
+		facetBranches.httpMethod(),
+		facetBranches.httpStatus(),
+		facetBranches.deploymentEnv(),
+		facetBranches.serviceNamespace(),
 		from(TraceListMv)
 			.select(() => ({
 				name: CH.lit("error"),

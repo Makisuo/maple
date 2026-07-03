@@ -1,6 +1,8 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
+	CloudflareDisconnectResponse,
+	CloudflareStartConnectResponse,
 	CurrentTenant,
 	ExternalUserId,
 	GithubDeleteRepositoryResponse,
@@ -21,6 +23,8 @@ import {
 } from "@maple/domain/http"
 import { Effect, Option, Schema } from "effect"
 import { Env } from "../lib/Env"
+import { CloudflareAnalyticsService } from "../services/CloudflareAnalyticsService"
+import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
 import { GithubConnectService } from "../services/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "../services/vcs/VcsCommitService"
 import { HazelOAuthService } from "../services/HazelOAuthService"
@@ -31,8 +35,10 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 
 const HAZEL_CALLBACK_PATH = "/api/integrations/hazel/callback"
 const GITHUB_CALLBACK_PATH = "/api/integrations/github/callback"
+const CLOUDFLARE_CALLBACK_PATH = "/api/integrations/cloudflare/callback"
 const HAZEL_MESSAGE_TYPE = "maple:integration:hazel"
 const GITHUB_MESSAGE_TYPE = "maple:integration:github"
+const CLOUDFLARE_MESSAGE_TYPE = "maple:integration:cloudflare"
 
 const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
@@ -57,6 +63,9 @@ const resolveCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
 const resolveGithubCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
 	`${resolveRequestOrigin(req)}${GITHUB_CALLBACK_PATH}`
 
+const resolveCloudflareCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
+	`${resolveRequestOrigin(req)}${CLOUDFLARE_CALLBACK_PATH}`
+
 const requireAdmin = (roles: ReadonlyArray<RoleName>) =>
 	requireAdminRole(
 		roles,
@@ -68,6 +77,8 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const hazel = yield* HazelOAuthService
 		const github = yield* GithubConnectService
 		const vcsCommits = yield* VcsCommitService
+		const cloudflare = yield* CloudflareOAuthService
+		const cloudflareAnalytics = yield* CloudflareAnalyticsService
 
 		return (
 			handlers
@@ -139,6 +150,38 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						yield* requireAdmin(tenant.roles)
 						const result = yield* hazel.disconnect(tenant.orgId)
 						return new HazelDisconnectResponse(result)
+					}),
+				)
+				.handle("cloudflareStatus", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						return yield* cloudflareAnalytics.getIntegrationStatus(tenant.orgId)
+					}),
+				)
+				.handle("cloudflareUsage", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						return yield* cloudflareAnalytics.getUsage(tenant.orgId)
+					}),
+				)
+				.handle("cloudflareStart", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						const req = yield* HttpServerRequest.HttpServerRequest
+						const result = yield* cloudflare.startConnect(tenant.orgId, tenant.userId, {
+							callbackUrl: resolveCloudflareCallbackUrl(req),
+							returnTo: payload.returnTo,
+						})
+						return new CloudflareStartConnectResponse(result)
+					}),
+				)
+				.handle("cloudflareDisconnect", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						const result = yield* cloudflare.disconnect(tenant.orgId)
+						return new CloudflareDisconnectResponse(result)
 					}),
 				)
 				.handle("githubStatus", () =>
@@ -261,6 +304,13 @@ const renderCallbackPage = (params: {
 	)
 	// Quote + escape it so the origin can't break out of the inline <script>.
 	const targetOrigin = escapeJsonInHtml(JSON.stringify(params.targetOrigin))
+	const isSuccess = params.status === "success"
+	const glyph = isSuccess
+		? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5l5 5 10-11" /></svg>`
+		: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>`
+	// Theme tokens mirror apps/web/src/styles.css. The dashboard's light/dark
+	// choice lives in localStorage on the web origin, which this API-origin
+	// popup can't read — prefers-color-scheme is the closest proxy.
 	return `<!doctype html>
 <html lang="en">
   <head>
@@ -268,18 +318,95 @@ const renderCallbackPage = (params: {
     <title>Maple — ${params.label} integration</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <style>
-      body { font-family: -apple-system, system-ui, sans-serif; padding: 2rem; max-width: 28rem; margin: 0 auto; color: #111; }
-      .ok { color: #047857; }
-      .err { color: #b91c1c; }
-      a.button { display: inline-block; margin-top: 1rem; background: #111; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; text-decoration: none; }
+      :root {
+        --background: oklch(1 0 0);
+        --card: oklch(1 0 0);
+        --foreground: oklch(0.141 0.005 285.823);
+        --muted-foreground: oklch(0.552 0.016 285.938);
+        --border: oklch(0.92 0.004 286.32);
+        --primary: oklch(0.66 0.16 59);
+        --primary-foreground: oklch(0.21 0.008 67);
+        --destructive: oklch(0.577 0.245 27.325);
+        --success: oklch(0.508 0.118 165.612);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: oklch(0.207 0.008 67);
+          --card: oklch(0.224 0.009 75);
+          --foreground: oklch(0.91 0.016 74);
+          --muted-foreground: oklch(0.603 0.023 72);
+          --border: oklch(0.268 0.012 67);
+          --primary: oklch(0.714 0.154 59);
+          --primary-foreground: oklch(0.207 0.008 67);
+          --destructive: oklch(0.654 0.176 30);
+          --success: oklch(0.765 0.177 163.223);
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 1.5rem;
+        background: var(--background);
+        color: var(--foreground);
+      }
+      .card {
+        width: 100%;
+        max-width: 28rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 2rem;
+        text-align: center;
+      }
+      .glyph {
+        width: 2.5rem;
+        height: 2.5rem;
+        margin: 0 auto 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        color: ${isSuccess ? "var(--success)" : "var(--destructive)"};
+        background: color-mix(in oklch, currentColor 12%, transparent);
+      }
+      .glyph svg { width: 1.25rem; height: 1.25rem; }
+      h1 { font-size: 1rem; font-weight: 600; margin: 0 0 0.5rem; }
+      p { font-size: 0.8125rem; line-height: 1.5; color: var(--muted-foreground); margin: 0; }
+      a.button {
+        display: inline-block;
+        margin-top: 1.25rem;
+        background: var(--primary);
+        color: var(--primary-foreground);
+        font: inherit;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        text-decoration: none;
+      }
+      .wordmark {
+        margin-top: 1.5rem;
+        font-size: 0.6875rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        opacity: 0.7;
+      }
     </style>
   </head>
   <body>
-    <h1 class="${params.status === "success" ? "ok" : "err"}">
-      ${params.status === "success" ? `${params.label} connected` : `${params.label} connection failed`}
-    </h1>
-    <p>${safeMessage}</p>
-    ${safeReturn ? `<p><a class="button" href="${safeReturn}">Return to Maple</a></p>` : ""}
+    <main class="card">
+      <div class="glyph">${glyph}</div>
+      <h1>${isSuccess ? `${params.label} connected` : `${params.label} connection failed`}</h1>
+      <p>${safeMessage}</p>
+      ${safeReturn ? `<a class="button" href="${safeReturn}">Return to Maple</a>` : ""}
+      <div class="wordmark">Maple</div>
+    </main>
     <script>
       try {
         if (window.opener) {
@@ -308,6 +435,7 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
 		const hazel = yield* HazelOAuthService
 		const github = yield* GithubConnectService
+		const cloudflare = yield* CloudflareOAuthService
 		const env = yield* Env
 
 		const dashboardTargetOrigin = resolveDashboardTargetOrigin(env.MAPLE_APP_BASE_URL)
@@ -325,10 +453,28 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				messageType: GITHUB_MESSAGE_TYPE,
 				label: "GitHub",
 			})
+		const cloudflareCallbackPage = (params: Omit<CallbackPageParams, "targetOrigin">) =>
+			renderCallbackPage({
+				...params,
+				targetOrigin: dashboardTargetOrigin,
+				messageType: CLOUDFLARE_MESSAGE_TYPE,
+				label: "Cloudflare",
+			})
 
-		const handle = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				const url = new URL(req.url, "http://localhost")
+		const handle = Effect.fn("integrations.hazelOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return htmlResponse(
+						hazelCallbackPage({
+							status: "error",
+							message: "Malformed callback URL",
+							returnTo: null,
+						}),
+						400,
+					)
+				}
+				const url = urlOption.value
 				const code = url.searchParams.get("code")
 				const state = url.searchParams.get("state")
 				const oauthError = url.searchParams.get("error")
@@ -357,6 +503,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* hazel.completeConnect(code, state).pipe(
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("Hazel OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
 					Effect.map((result) =>
 						htmlResponse(
 							hazelCallbackPage({
@@ -403,13 +557,25 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							),
 					}),
 				)
-			})
+			},
+		)
 
 		yield* router.add("GET", "/api/integrations/hazel/callback", handle)
 
-		const handleGithub = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				const url = new URL(req.url, "http://localhost")
+		const handleGithub = Effect.fn("integrations.githubOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return htmlResponse(
+						githubCallbackPage({
+							status: "error",
+							message: "Malformed callback URL",
+							returnTo: null,
+						}),
+						400,
+					)
+				}
+				const url = urlOption.value
 				const installationId = url.searchParams.get("installation_id")
 				const setupAction = url.searchParams.get("setup_action")
 				const state = url.searchParams.get("state")
@@ -458,6 +624,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* github.completeConnect(installationId, state, code).pipe(
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("GitHub OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
 					Effect.map((result) =>
 						htmlResponse(
 							githubCallbackPage({
@@ -503,8 +677,71 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							),
 					}),
 				)
-			})
+			},
+		)
 
 		yield* router.add("GET", "/api/integrations/github/callback", handleGithub)
+
+		const cloudflareErrorPage = (message: string) =>
+			htmlResponse(cloudflareCallbackPage({ status: "error", message, returnTo: null }), 400)
+
+		const handleCloudflare = Effect.fn("integrations.cloudflareOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return cloudflareErrorPage("Malformed callback URL")
+				}
+				const url = urlOption.value
+				const code = url.searchParams.get("code")
+				const state = url.searchParams.get("state")
+				const oauthError = url.searchParams.get("error")
+				const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
+
+				if (oauthError) {
+					return cloudflareErrorPage(oauthErrorDescription || "Cloudflare returned an error")
+				}
+
+				if (!code || !state) {
+					return cloudflareErrorPage("Missing code or state in callback")
+				}
+
+				return yield* cloudflare.completeConnect(code, state).pipe(
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("Cloudflare OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
+					Effect.map((result) =>
+						htmlResponse(
+							cloudflareCallbackPage({
+								status: "success",
+								message: "You can close this window and return to Maple.",
+								returnTo: result.returnTo,
+							}),
+						),
+					),
+					Effect.catchTags({
+						// Validation/upstream messages are our own sanitized strings (they embed
+						// Cloudflare's OAuth error text) — showing them turns "it failed" into
+						// something actionable.
+						"@maple/http/errors/IntegrationsValidationError": (error) =>
+							Effect.succeed(cloudflareErrorPage(error.message)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.succeed(cloudflareErrorPage(error.message)),
+						"@maple/http/errors/IntegrationsRevokedError": () =>
+							Effect.succeed(
+								cloudflareErrorPage("Cloudflare rejected the authorization — reconnect and try again"),
+							),
+						"@maple/http/errors/IntegrationsPersistenceError": () =>
+							Effect.succeed(cloudflareErrorPage("Failed to complete Cloudflare connection")),
+					}),
+				)
+			},
+		)
+
+		yield* router.add("GET", "/api/integrations/cloudflare/callback", handleCloudflare)
 	}),
 )

@@ -446,6 +446,7 @@ interface MetricsFilterAccumulator {
 	serviceName?: string
 	groupByAttributeKey?: string
 	groupByResourceAttributeKey?: string
+	attributeFilters: AccumulatedAttributeFilter[]
 	resourceAttributeFilters: AccumulatedAttributeFilter[]
 }
 
@@ -455,6 +456,30 @@ function applyMetricsClause(
 	warnings: string[],
 ): MetricsFilterAccumulator {
 	const key = normalizeKey(clause.key)
+
+	// Datapoint labels live in the Attributes map. The metrics CH path carries a
+	// single equality predicate on it (attributeKey/attributeValue), so exactly
+	// one `attr.<key> = value` clause is honored; anything else warns instead of
+	// being silently dropped.
+	if (key.startsWith("attr.")) {
+		const attributeKey = key.slice(5)
+		const { mode, negated } = operatorToAttrFilter(clause.operator)
+		if (mode !== "equals" || negated) {
+			warnings.push(`Metrics attr.* filters support only equality; ignoring attr.${attributeKey}`)
+			return filters
+		}
+		if (filters.attributeFilters.length >= 1) {
+			warnings.push(`Metrics queries support a single attr.* filter; ignoring attr.${attributeKey}`)
+			return filters
+		}
+		return {
+			...filters,
+			attributeFilters: [
+				...filters.attributeFilters,
+				makeAttrFilter(attributeKey, clause.operator, clause.value),
+			],
+		}
+	}
 
 	// Host/pod/node identity on metrics lives in the ResourceAttributes map —
 	// `resource.<key>` filters predicate on it (mirrors the traces handler).
@@ -931,6 +956,7 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 		{
 			metricName: query.metricName,
 			metricType: query.metricType ?? "gauge",
+			attributeFilters: [],
 			resourceAttributeFilters: [],
 		},
 	)
@@ -970,7 +996,11 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 
 	const groupBy = metricsGroupByKeys.length > 0 ? dedupeGroupByKeys(metricsGroupByKeys) : undefined
 
-	const { resourceAttributeFilters: metricsResourceFilters, ...metricsSpecFilters } = metricsFilters
+	const {
+		attributeFilters: metricsAttributeFilters,
+		resourceAttributeFilters: metricsResourceFilters,
+		...metricsSpecFilters
+	} = metricsFilters
 
 	return {
 		query: {
@@ -980,6 +1010,7 @@ export function buildTimeseriesQuerySpec(query: QueryBuilderQueryDraftPayload): 
 			groupBy,
 			filters: {
 				...metricsSpecFilters,
+				...(metricsAttributeFilters.length > 0 ? { attributeFilters: metricsAttributeFilters } : {}),
 				...(metricsResourceFilters.length > 0
 					? { resourceAttributeFilters: metricsResourceFilters }
 					: {}),

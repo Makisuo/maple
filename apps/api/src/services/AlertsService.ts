@@ -593,7 +593,11 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 	const resolveRuleGroupBy = (
 		source: "traces" | "logs" | "metrics",
 	): Effect.Effect<
-		{ tokens: ReadonlyArray<string>; attributeKeys: ReadonlyArray<string> } | null,
+		{
+			tokens: ReadonlyArray<string>
+			attributeKeys: ReadonlyArray<string>
+			resourceAttributeKeys: ReadonlyArray<string>
+		} | null,
 		AlertValidationError
 	> => {
 		if (rule.groupBy == null || rule.groupBy.length === 0) return Effect.succeed(null)
@@ -618,7 +622,32 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 				),
 			)
 		}
-		return Effect.succeed({ tokens: resolved.tokens, attributeKeys: resolved.attributeKeys })
+		if (source === "metrics" && resolved.resourceAttributeKeys.length > 1) {
+			return Effect.fail(
+				makeValidationError(
+					"Metrics alerts support at most one resource.* groupBy dimension",
+					resolved.resourceAttributeKeys.map(
+						(key) => `Unsupported additional metrics groupBy resource attribute: ${key}`,
+					),
+				),
+			)
+		}
+		if (
+			source === "metrics" &&
+			resolved.attributeKeys.length > 0 &&
+			resolved.resourceAttributeKeys.length > 0
+		) {
+			// The metrics queries carry a single attribute group column — the
+			// engine rejects combining both dimensions, so fail at compile time.
+			return Effect.fail(
+				makeValidationError("Metrics alerts cannot combine attr.* and resource.* groupBy dimensions"),
+			)
+		}
+		return Effect.succeed({
+			tokens: resolved.tokens,
+			attributeKeys: resolved.attributeKeys,
+			resourceAttributeKeys: resolved.resourceAttributeKeys,
+		})
 	}
 
 	let query: QuerySpec
@@ -656,6 +685,9 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 		if (groupResolved && groupResolved.attributeKeys.length > 0) {
 			// Metrics group-by-attribute is single-key today; pick the first.
 			filters.groupByAttributeKey = groupResolved.attributeKeys[0]
+		}
+		if (groupResolved && groupResolved.resourceAttributeKeys.length > 0) {
+			filters.groupByResourceAttributeKey = groupResolved.resourceAttributeKeys[0]
 		}
 		query = decodeQuerySpecSync({
 			kind: "timeseries",
@@ -3899,6 +3931,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					yield* Effect.forEach(
 						Array.from(byOrg.entries()),
 						([orgId, checks]) =>
+							// Not metered to Autumn: internal bookkeeping rows, not customer
+							// telemetry.
 							warehouse
 								.ingest(systemTenant(decodeOrgIdSync(orgId)), "alert_checks", checks)
 								.pipe(

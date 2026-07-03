@@ -18,7 +18,7 @@ import {
 	getErrorsSummary,
 	getErrorsTimeseries,
 } from "@/api/warehouse/errors"
-import { getLog, getLogAttributeKeys, getLogsFacets, listLogs } from "@/api/warehouse/logs"
+import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
 	getMetricTimeSeries,
@@ -60,6 +60,7 @@ import {
 	getSpanAttributeValues,
 	getSpanDetail,
 	getSpanHierarchy,
+	getTracesFacetValues,
 	getTracesFacets,
 	listTraces,
 } from "@/api/warehouse/traces"
@@ -175,6 +176,12 @@ export const getTracesFacetsResultAtom = makeQueryAtomFamily(getTracesFacets, {
 	staleTime: 30_000,
 })
 
+// Single-dimension facet list for dashboard variables — server compiles only
+// the requested UNION branch, so this never triggers the full facets scan.
+export const getTracesFacetValuesResultAtom = makeQueryAtomFamily(getTracesFacetValues, {
+	staleTime: 30_000,
+})
+
 export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy)
 
 export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
@@ -223,6 +230,10 @@ export const getLogResultAtom = makeQueryAtomFamily(getLog, {
 })
 
 export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
+	staleTime: 30_000,
+})
+
+export const getLogsFacetValuesResultAtom = makeQueryAtomFamily(getLogsFacetValues, {
 	staleTime: 30_000,
 })
 

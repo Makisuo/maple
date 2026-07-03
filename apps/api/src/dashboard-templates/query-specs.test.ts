@@ -47,8 +47,6 @@ function specBuilderFor(
 }
 
 describe("dashboard template query specs", () => {
-	let checkedQueries = 0
-
 	function checkTemplate(template: TemplateDefinition, params: TemplateParameterValues, variant: string) {
 		const built = template.build(params)
 		for (const widget of built.widgets) {
@@ -66,7 +64,6 @@ describe("dashboard template query specs", () => {
 				const label = `${template.id}/${widget.id}/${query.name} (${variant})`
 				expect(result.query, `${label}: ${result.error ?? ""}`).not.toBeNull()
 				expect(result.warnings, label).toEqual([])
-				checkedQueries++
 			}
 		}
 	}
@@ -84,8 +81,19 @@ describe("dashboard template query specs", () => {
 	}
 
 	// If the query-builder endpoints are ever renamed, the loop above would
-	// silently skip everything and the guard would pass vacuously.
+	// silently skip everything and the guard would pass vacuously. Recount here
+	// (template building is pure) instead of sharing a mutable counter across
+	// tests — that breaks under shuffle, sharding, and `it.only`.
 	it("exercises at least one query-builder widget across templates", () => {
-		expect(checkedQueries).toBeGreaterThan(0)
+		let queryBuilderQueries = 0
+		for (const template of DASHBOARD_TEMPLATES) {
+			const built = template.build(sampleParams(template))
+			for (const widget of built.widgets) {
+				if (!specBuilderFor(widget.dataSource.endpoint)) continue
+				const rawQueries = widget.dataSource.params?.queries
+				if (Array.isArray(rawQueries)) queryBuilderQueries += rawQueries.length
+			}
+		}
+		expect(queryBuilderQueries).toBeGreaterThan(0)
 	})
 })

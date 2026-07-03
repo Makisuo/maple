@@ -176,25 +176,21 @@ const snapSeconds = (dateStr: string): string => snapToWindow(dateStr, CACHE_SNA
  * concurrent dashboard widgets share cache entries.
  */
 export function snapWindowForQueryKind(kind: string): number {
-	switch (kind) {
-		case "attributeKeys":
-			return 300 // 5 min
-		case "attributeValues":
-			return 60 // 1 min
-		case "facets":
-			// 15 min — environments / commit SHAs / service names rarely change,
-			// and the dashboard route reuses this cache for demo-detection + the
-			// environment dropdown (was a heavy `serviceOverview` probe). This is
-			// the gate on the dashboard critical path, so a wider window cuts
-			// cold-miss frequency ~3× vs 5 min; a new service/env appearing up to
-			// 15 min late in the dropdown is fine. Wider snap also collapses
-			// near-simultaneous calls whose `startTime` ISO strings drift by
-			// milliseconds between renders (useEffectiveTimeRange recomputes
-			// `new Date()` per render).
-			return 900
-		default:
-			return CACHE_SNAP_S
-	}
+	return Match.value(kind).pipe(
+		Match.when("attributeKeys", () => 300), // 5 min
+		Match.when("attributeValues", () => 60), // 1 min
+		// 15 min — environments / commit SHAs / service names rarely change,
+		// and the dashboard route reuses this cache for demo-detection + the
+		// environment dropdown (was a heavy `serviceOverview` probe). This is
+		// the gate on the dashboard critical path, so a wider window cuts
+		// cold-miss frequency ~3× vs 5 min; a new service/env appearing up to
+		// 15 min late in the dropdown is fine. Wider snap also collapses
+		// near-simultaneous calls whose `startTime` ISO strings drift by
+		// milliseconds between renders (useEffectiveTimeRange recomputes
+		// `new Date()` per render).
+		Match.when("facets", () => 900),
+		Match.orElse(() => CACHE_SNAP_S),
+	)
 }
 
 /**
@@ -203,16 +199,12 @@ export function snapWindowForQueryKind(kind: string): number {
  * gradually as data ingests.
  */
 export function cacheTtlForQueryKind(kind: string): number {
-	switch (kind) {
-		case "attributeKeys":
-			return 300
-		case "attributeValues":
-			return 60
-		case "facets":
-			return 900 // matches snapWindowForQueryKind — see comment above
-		default:
-			return 15
-	}
+	return Match.value(kind).pipe(
+		Match.when("attributeKeys", () => 300),
+		Match.when("attributeValues", () => 60),
+		Match.when("facets", () => 900), // matches snapWindowForQueryKind — see comment above
+		Match.orElse(() => 15),
+	)
 }
 
 export function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): string {
@@ -1113,7 +1105,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				const rateResult = yield* annotateWarehouseError(
 					warehouse.compiledQuery(tenant, compiled, {
 						profile: "aggregation",
-						context: "metrics rate/increase query",
+						context: "metricsRateIncrease",
 					}),
 					"metricsRateIncrease",
 				)
@@ -1385,12 +1377,13 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				const opts = extractTracesFacetsOpts(
 					request.query.filters as Record<string, unknown> | undefined,
 				)
+				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
-					CH.tracesFacetsQuery(opts),
+					CH.tracesFacetsQuery({ ...opts, facet }),
 					baseParams,
-					"tracesFacets",
+					facet ? `tracesFacets:${facet}` : "tracesFacets",
 					"discovery",
 				)
 				return new QueryEngineExecuteResponse({
@@ -1408,18 +1401,22 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 			if (request.query.source === "logs") {
 				const filters = request.query.filters as Record<string, unknown> | undefined
+				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
-					CH.logsFacetsQuery({
-						serviceName: filters?.serviceName as string | undefined,
-						severity: filters?.severity as string | undefined,
-						environments: filters?.environments as readonly string[] | undefined,
-						namespaces: filters?.namespaces as readonly string[] | undefined,
-						matchModes: logsMatchModes(filters),
-					}),
+					CH.logsFacetsQuery(
+						{
+							serviceName: filters?.serviceName as string | undefined,
+							severity: filters?.severity as string | undefined,
+							environments: filters?.environments as readonly string[] | undefined,
+							namespaces: filters?.namespaces as readonly string[] | undefined,
+							matchModes: logsMatchModes(filters),
+						},
+						facet,
+					),
 					baseParams,
-					"logsFacets",
+					facet ? `logsFacets:${facet}` : "logsFacets",
 					"discovery",
 				)
 				return new QueryEngineExecuteResponse({

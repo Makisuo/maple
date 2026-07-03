@@ -5,13 +5,8 @@ import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
-import {
-	type LegendSeries,
-	QueryBuilderLegend,
-	computeSeriesStats,
-	sortZeroSeriesLast,
-	responsiveLegendHeight,
-} from "../_shared/query-builder-legend"
+import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
+import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
 import { bucketTimeseries, MAX_BAR_SERIES, OTHER_COLOR, OTHER_LABEL } from "../_shared/bucket-series"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
 import {
@@ -22,7 +17,6 @@ import {
 	ChartTooltipContent,
 } from "../../ui/chart"
 import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
-import { hasOnlyIntegerValues } from "../_shared/sparse-series"
 
 const fallbackData: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
@@ -100,6 +94,8 @@ export function QueryBuilderBarChart({
 		return { chartData, seriesDefinitions }
 	}, [data])
 
+	const valueKeys = React.useMemo(() => seriesDefinitions.map((d) => d.chartKey), [seriesDefinitions])
+
 	const bucketSeconds = React.useMemo(
 		() =>
 			inferBucketSeconds(
@@ -159,39 +155,16 @@ export function QueryBuilderBarChart({
 		})
 	}, [])
 
-	const seriesStats = React.useMemo(
-		() =>
-			computeSeriesStats(
-				displayData,
-				seriesDefinitions.map((d) => d.chartKey),
-			),
-		[displayData, seriesDefinitions],
-	)
-
-	const legendSeries = React.useMemo<LegendSeries[]>(
-		() =>
-			sortZeroSeriesLast(
-				seriesDefinitions.map((definition) => ({
-					key: definition.chartKey,
-					label: definition.rawKey,
-					color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
-				})),
-				seriesStats,
-			),
-		[seriesDefinitions, chartConfig, seriesStats],
-	)
+	// Bars never render point dots, so the hook's `renderDots` is unused here.
+	const { seriesStats, legendSeries, integerOnlyData } = useTimeseriesSeriesPresentation({
+		data: displayData,
+		valueKeys,
+		seriesDefinitions,
+		chartConfig,
+	})
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const { height: containerHeight } = useContainerSize(containerRef)
-
-	const integerOnlyData = React.useMemo(
-		() =>
-			hasOnlyIntegerValues(
-				displayData,
-				seriesDefinitions.map((d) => d.chartKey),
-			),
-		[displayData, seriesDefinitions],
-	)
 
 	const variant = showStats ? "stats" : "compact"
 	const showLegendBlock = legend === "visible" || legend === "right"

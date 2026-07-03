@@ -18,7 +18,7 @@ const baseFilters = { metricName: Schema.decodeUnknownSync(MetricName)("cpu.usag
 describe("validateMetricsAttributeFilters", () => {
 	it.effect("rejects groupBy=attribute when groupByAttributeKey is missing", () =>
 		Effect.gen(function* () {
-			const exit = yield* validateEvaluate(
+			const error = yield* validateEvaluate(
 				makeRequest({
 					kind: "timeseries",
 					source: "metrics",
@@ -26,10 +26,12 @@ describe("validateMetricsAttributeFilters", () => {
 					groupBy: ["attribute"],
 					filters: baseFilters,
 				}),
-			).pipe(Effect.exit)
+			).pipe(Effect.flip)
 
-			assert.isTrue(exit._tag === "Failure")
-			assert.include(JSON.stringify(exit), "groupBy=attribute requires filters.groupByAttributeKey")
+			assert.strictEqual(error._tag, "@maple/http/errors/QueryEngineValidationError")
+			if (error._tag === "@maple/http/errors/QueryEngineValidationError") {
+				assert.include(error.details.join("; "), "groupBy=attribute requires filters.groupByAttributeKey")
+			}
 		}),
 	)
 
@@ -65,7 +67,7 @@ describe("validateMetricsAttributeFilters", () => {
 
 	it.effect("rejects groupBy=resource_attribute when groupByResourceAttributeKey is missing", () =>
 		Effect.gen(function* () {
-			const exit = yield* validateEvaluate(
+			const error = yield* validateEvaluate(
 				makeRequest({
 					kind: "timeseries",
 					source: "metrics",
@@ -73,13 +75,15 @@ describe("validateMetricsAttributeFilters", () => {
 					groupBy: ["resource_attribute"],
 					filters: baseFilters,
 				}),
-			).pipe(Effect.exit)
+			).pipe(Effect.flip)
 
-			assert.isTrue(exit._tag === "Failure")
-			assert.include(
-				JSON.stringify(exit),
-				"groupBy=resource_attribute requires filters.groupByResourceAttributeKey",
-			)
+			assert.strictEqual(error._tag, "@maple/http/errors/QueryEngineValidationError")
+			if (error._tag === "@maple/http/errors/QueryEngineValidationError") {
+				assert.include(
+					error.details.join("; "),
+					"groupBy=resource_attribute requires filters.groupByResourceAttributeKey",
+				)
+			}
 		}),
 	)
 
@@ -100,7 +104,7 @@ describe("validateMetricsAttributeFilters", () => {
 
 	it.effect("rejects combining attribute and resource_attribute group-bys", () =>
 		Effect.gen(function* () {
-			const exit = yield* validateEvaluate(
+			const error = yield* validateEvaluate(
 				makeRequest({
 					kind: "timeseries",
 					source: "metrics",
@@ -112,10 +116,12 @@ describe("validateMetricsAttributeFilters", () => {
 						groupByResourceAttributeKey: "host.name",
 					},
 				}),
-			).pipe(Effect.exit)
+			).pipe(Effect.flip)
 
-			assert.isTrue(exit._tag === "Failure")
-			assert.include(JSON.stringify(exit), "groupBy cannot combine attribute and resource_attribute")
+			assert.strictEqual(error._tag, "@maple/http/errors/QueryEngineValidationError")
+			if (error._tag === "@maple/http/errors/QueryEngineValidationError") {
+				assert.include(error.details.join("; "), "groupBy cannot combine attribute and resource_attribute")
+			}
 		}),
 	)
 })

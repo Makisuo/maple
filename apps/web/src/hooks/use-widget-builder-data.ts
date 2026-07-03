@@ -7,6 +7,7 @@ import { listMetricsResultAtom } from "@/lib/services/atoms/warehouse-query-atom
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { useWidgetBuilder } from "@/hooks/use-widget-builder"
 import { toNames } from "@/lib/query-builder/autocomplete-utils"
+import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 
 interface MetricSelectionOption {
 	value: string
@@ -65,6 +66,15 @@ export function useWidgetBuilderData() {
 		return options
 	}, [metricRows])
 
+	// Dashboard variables ($service, ...) are suggested in every where-clause
+	// value position. Present only when editing inside a dashboard that
+	// defines variables; other builder surfaces (alerts) see none.
+	const variablesContext = useDashboardVariablesOptional()
+	const variableNames = React.useMemo(
+		() => variablesContext?.variables.map((variable) => variable.name) ?? [],
+		[variablesContext?.variables],
+	)
+
 	// Augment base autocomplete values with metric-specific services
 	const autocompleteValues = React.useMemo(() => {
 		const metricServices = toNames(
@@ -72,14 +82,15 @@ export function useWidgetBuilderData() {
 		)
 
 		return {
-			traces: baseAutocompleteValues.traces,
-			logs: baseAutocompleteValues.logs,
+			traces: { ...baseAutocompleteValues.traces, variables: variableNames },
+			logs: { ...baseAutocompleteValues.logs, variables: variableNames },
 			metrics: {
 				...baseAutocompleteValues.metrics,
 				services: metricServices,
+				variables: variableNames,
 			},
 		}
-	}, [baseAutocompleteValues, metricRows])
+	}, [baseAutocompleteValues, metricRows, variableNames])
 
 	// Apply default metric selection when metric options first become available
 	const appliedMetricDefaultRef = React.useRef(false)

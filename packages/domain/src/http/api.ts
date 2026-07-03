@@ -6,7 +6,6 @@ import { AlertsApiGroup } from "./alerts"
 import { AuthApiGroup, AuthPublicApiGroup } from "./auth"
 import { BillingApiGroup, BillingPublicApiGroup } from "./billing"
 import { ChatApiGroup } from "./chat"
-import { CloudflareLogpushApiGroup } from "./cloudflare-logpush"
 import { DashboardsApiGroup } from "./dashboards"
 import { DemoApiGroup } from "./demo"
 import { DigestApiGroup } from "./digest"
@@ -34,7 +33,6 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(BillingApiGroup)
 	.add(BillingPublicApiGroup)
 	.add(ChatApiGroup)
-	.add(CloudflareLogpushApiGroup)
 	.add(DashboardsApiGroup)
 	.add(DemoApiGroup)
 	.add(DigestApiGroup)

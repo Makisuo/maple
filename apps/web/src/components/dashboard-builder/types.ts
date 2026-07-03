@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type {
+	DashboardVariableSchema,
 	DashboardWidgetSchema,
 	WidgetDataSourceSchema,
 	WidgetDisplayConfigSchema,
@@ -114,6 +115,10 @@ export type DashboardWidget = Omit<DeepMutable<typeof DashboardWidgetSchema.Type
 	dataSource: WidgetDataSource
 }
 
+// --- Dashboard Variables ---
+
+export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
+
 // --- Dashboard ---
 
 export interface Dashboard {
@@ -123,6 +128,7 @@ export interface Dashboard {
 	tags?: string[]
 	timeRange: TimeRange
 	widgets: DashboardWidget[]
+	variables?: DashboardVariable[]
 	createdAt: string
 	updatedAt: string
 }

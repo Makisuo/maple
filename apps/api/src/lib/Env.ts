@@ -28,6 +28,7 @@ export interface EnvShape {
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
 	readonly AUTUMN_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly AUTUMN_WEBHOOK_SECRET: Option.Option<Redacted.Redacted<string>>
+	readonly AUTUMN_API_URL: string
 	readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly EMAIL_FROM: string
@@ -43,6 +44,18 @@ export interface EnvShape {
 	readonly GITHUB_APP_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_WEBHOOK_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_API_BASE_URL: string
+	readonly CLOUDFLARE_OAUTH_CLIENT_ID: Option.Option<string>
+	readonly CLOUDFLARE_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
+	readonly CLOUDFLARE_OAUTH_SCOPES: string
+	readonly CLOUDFLARE_OAUTH_AUTHORIZE_URL: string
+	readonly CLOUDFLARE_OAUTH_TOKEN_URL: string
+	readonly CLOUDFLARE_OAUTH_REVOKE_URL: string
+	/**
+	 * Base URL for Cloudflare's REST API. Deliberately NOT named CLOUDFLARE_API_BASE_URL —
+	 * wrangler treats that env var as an override for its own API endpoint, so under
+	 * `wrangler dev --env-file` it would hijack wrangler's control-plane calls too.
+	 */
+	readonly MAPLE_CLOUDFLARE_API_BASE_URL: string
 }
 
 const stringWithDefault = (key: string, fallback: string) =>
@@ -86,6 +99,7 @@ const envConfig = Config.all({
 	MAPLE_ORG_ID_OVERRIDE: optionalString("MAPLE_ORG_ID_OVERRIDE"),
 	AUTUMN_SECRET_KEY: optionalRedacted("AUTUMN_SECRET_KEY"),
 	AUTUMN_WEBHOOK_SECRET: optionalRedacted("AUTUMN_WEBHOOK_SECRET"),
+	AUTUMN_API_URL: stringWithDefault("AUTUMN_API_URL", "https://api.useautumn.com"),
 	SD_INTERNAL_TOKEN: optionalRedacted("SD_INTERNAL_TOKEN"),
 	INTERNAL_SERVICE_TOKEN: optionalRedacted("INTERNAL_SERVICE_TOKEN"),
 	EMAIL_FROM: stringWithDefault("EMAIL_FROM", "Maple <notifications@noreply.maple.dev>"),
@@ -107,10 +121,42 @@ const envConfig = Config.all({
 	GITHUB_APP_CLIENT_SECRET: optionalRedacted("GITHUB_APP_CLIENT_SECRET"),
 	GITHUB_APP_WEBHOOK_SECRET: optionalRedacted("GITHUB_APP_WEBHOOK_SECRET"),
 	GITHUB_API_BASE_URL: stringWithDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
+	CLOUDFLARE_OAUTH_CLIENT_ID: optionalString("CLOUDFLARE_OAUTH_CLIENT_ID"),
+	CLOUDFLARE_OAUTH_CLIENT_SECRET: optionalRedacted("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+	// Cloudflare OAuth scope ids are DOT-delimited (mirroring API-token permission names;
+	// registry: GET /client/v4/oauth/scopes). The client may only request scopes it was
+	// created with — keep the OAuth client's granted set in sync with this list.
+	// `offline_access` is added/removed automatically by Cloudflare based on the client's
+	// grant types, so it must not be listed.
+	// The analytics scopes (account-analytics.read = GraphQL Analytics, zone.read = zone
+	// discovery) power the edge-metrics poller. Every id below was verified verbatim against
+	// the live scope registry (GET /client/v4/oauth/scopes, 2026-07-03). The remaining ops
+	// requirement is on the CLIENT side: the registered OAuth client must have all of these
+	// granted, or connects fail with invalid_scope.
+	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
+		"CLOUDFLARE_OAUTH_SCOPES",
+		"account-settings.read account-analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
+	),
+	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
+		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",
+		"https://dash.cloudflare.com/oauth2/auth",
+	),
+	CLOUDFLARE_OAUTH_TOKEN_URL: stringWithDefault(
+		"CLOUDFLARE_OAUTH_TOKEN_URL",
+		"https://dash.cloudflare.com/oauth2/token",
+	),
+	CLOUDFLARE_OAUTH_REVOKE_URL: stringWithDefault(
+		"CLOUDFLARE_OAUTH_REVOKE_URL",
+		"https://dash.cloudflare.com/oauth2/revoke",
+	),
+	MAPLE_CLOUDFLARE_API_BASE_URL: stringWithDefault(
+		"MAPLE_CLOUDFLARE_API_BASE_URL",
+		"https://api.cloudflare.com/client/v4",
+	),
 })
 
 const makeEnv = Effect.gen(function* () {
-	const env = (yield* envConfig) as EnvShape
+	const env: EnvShape = yield* envConfig
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))

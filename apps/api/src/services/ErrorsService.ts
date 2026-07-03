@@ -144,9 +144,14 @@ export const makePersistenceError = (error: unknown): ErrorPersistenceError => {
 }
 
 // Concurrent ticks against D1 (file-locked SQLite under the hood) occasionally surface
-// busy/locked errors. They're harmless to retry — the next attempt usually succeeds in
-// ms. Only this predicate's match retries; anything else fails fast.
-const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy/i
+// busy/locked errors, and Postgres surfaces the same contention as SQLSTATE 40001
+// (serialization_failure) / 40P01 (deadlock_detected). They're harmless to retry — the
+// next attempt usually succeeds in ms. Only this predicate's match retries; anything
+// else fails fast.
+const BUSY_ERROR_PATTERN = /SQLITE_BUSY|database is locked|D1_BUSY|busy|40001|40P01/i
+
+/** Retryable Postgres contention SQLSTATEs (postgres.js errors carry them on `.code`). */
+const PG_CONTENTION_CODES: ReadonlySet<string> = new Set(["40001", "40P01"])
 
 const causeMessage = (cause: unknown): string | undefined => {
 	if (cause instanceof Error) return cause.message
@@ -154,8 +159,18 @@ const causeMessage = (cause: unknown): string | undefined => {
 	return undefined
 }
 
+const causeCode = (cause: unknown): string | undefined => {
+	if (typeof cause === "object" && cause !== null && "code" in cause) {
+		const code = (cause as { code?: unknown }).code
+		if (typeof code === "string") return code
+	}
+	return undefined
+}
+
 export const isBusyDatabaseError = (error: DatabaseError): boolean => {
 	if (BUSY_ERROR_PATTERN.test(error.message)) return true
+	const code = causeCode(error.cause)
+	if (code !== undefined && PG_CONTENTION_CODES.has(code)) return true
 	const inner = causeMessage(error.cause)
 	if (inner && BUSY_ERROR_PATTERN.test(inner)) return true
 	return false
@@ -389,12 +404,18 @@ const make: Effect.Effect<
 				while: isBusyDatabaseError,
 			}),
 			Effect.tapError((error) =>
-				Effect.logError("ErrorsService dbExecute failed").pipe(
-					Effect.annotateLogs({
-						message: error.message,
-						cause: describeCause(error.cause) ?? "(none)",
-					}),
-				),
+				Effect.gen(function* () {
+					// Every service method runs inside an Effect.fn span — its name says
+					// which operation's query failed without threading a label through.
+					const span = yield* Effect.currentSpan.pipe(Effect.catch(() => Effect.succeed(null)))
+					yield* Effect.logError("ErrorsService dbExecute failed").pipe(
+						Effect.annotateLogs({
+							operation: span?.name ?? "(unknown)",
+							message: error.message,
+							cause: describeCause(error.cause) ?? "(none)",
+						}),
+					)
+				}),
 			),
 			Effect.mapError(makePersistenceError),
 		)
@@ -431,12 +452,16 @@ const make: Effect.Effect<
 		knownOrgs: ReadonlyArray<string>,
 		nowMs: number,
 	) {
+		yield* Effect.annotateCurrentSpan("knownOrgs", knownOrgs.length)
 		const byoRows = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgClickHouseSettings.orgId }).from(orgClickHouseSettings),
 		).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<{ orgId: string }>))
 		const byo = new Set<string>(byoRows.map((r) => r.orgId))
 
-		if (knownOrgs.length === 0) return byo as ReadonlySet<string>
+		if (knownOrgs.length === 0) {
+			yield* Effect.annotateCurrentSpan({ activeOrgs: byo.size, failedClosed: false })
+			return byo as ReadonlySet<string>
+		}
 
 		const compiled = CH.compile(CH.activeOrgsByErrorEventsQuery(), {
 			startTime: toTinybirdDateTime(nowMs - ERROR_ACTIVE_DISCOVERY_WINDOW_MS),
@@ -459,6 +484,9 @@ const make: Effect.Effect<
 					}
 					return active as ReadonlySet<string>
 				}),
+				Effect.tap((active) =>
+					Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: false }),
+				),
 				// Cache the freshly-discovered set so a later discovery failure can
 				// reuse it instead of fanning out to all known orgs. Best-effort.
 				Effect.tap((active) =>
@@ -466,21 +494,26 @@ const make: Effect.Effect<
 						.rawPut(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY, [...active], ACTIVE_ORGS_CACHE_TTL_S)
 						.pipe(Effect.ignore),
 				),
-				// Fail CLOSED: reuse the last-known active set (or just BYO if cold).
+				// Fail CLOSED on a genuine discovery failure: reuse the last-known active
+				// set. Interrupts (isolate teardown) are NOT failures — re-raise them so
+				// the tick cancels promptly instead of running the fallback.
 				Effect.catchCause((cause) =>
-					Effect.gen(function* () {
-						yield* Effect.logWarning(
-							"Error active-org discovery failed; reusing last-known active set",
-						).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
-						const cached = yield* edgeCache
-							.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
-							.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
-						const active = new Set<string>(byo)
-						for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
-							active.add(orgId)
-						}
-						return active as ReadonlySet<string>
-					}),
+					Cause.hasInterruptsOnly(cause)
+						? Effect.interrupt
+						: Effect.gen(function* () {
+								yield* Effect.logWarning(
+									"Error active-org discovery failed; reusing last-known active set",
+								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
+								const cached = yield* edgeCache
+									.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
+									.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
+								const active = new Set<string>(byo)
+								for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+									active.add(orgId)
+								}
+								yield* Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: true })
+								return active as ReadonlySet<string>
+							}),
 				),
 			)
 	})
@@ -2622,17 +2655,23 @@ const make: Effect.Effect<
 			[...knownOrgs],
 			(org) =>
 				processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org)).pipe(
+					// Isolate genuine per-org failures/defects so one bad org can't fail the
+					// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
+					// re-raise them so the tick cancels promptly instead of logging a
+					// phantom failure and marching through the remaining orgs.
 					Effect.catchCause((cause) =>
-						Effect.gen(function* () {
-							yield* Effect.logError("Error tick failed for org").pipe(
-								Effect.annotateLogs({
-									orgId: org,
-									error: Cause.pretty(cause),
+						Cause.hasInterruptsOnly(cause)
+							? Effect.interrupt
+							: Effect.gen(function* () {
+									yield* Effect.logError("Error tick failed for org").pipe(
+										Effect.annotateLogs({
+											orgId: org,
+											error: Cause.pretty(cause),
+										}),
+									)
+									yield* Ref.update(orgFailures, (n) => n + 1)
+									return emptyResult
 								}),
-							)
-							yield* Ref.update(orgFailures, (n) => n + 1)
-							return emptyResult
-						}),
 					),
 				),
 			{ concurrency: 4 },

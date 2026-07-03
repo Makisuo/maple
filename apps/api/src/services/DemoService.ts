@@ -16,7 +16,11 @@ const chunk = <T>(rows: ReadonlyArray<T>, size: number): T[][] => {
 	return out
 }
 
-export class DemoService extends Context.Service<DemoService>()("@maple/api/services/DemoService", {
+export interface DemoServiceShape {
+	readonly seed: (tenant: TenantContext, hours?: number) => Effect.Effect<DemoSeedResponse, DemoSeedError>
+}
+
+export class DemoService extends Context.Service<DemoService, DemoServiceShape>()("@maple/api/services/DemoService", {
 	make: Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
 
@@ -47,7 +51,9 @@ export class DemoService extends Context.Service<DemoService>()("@maple/api/serv
 			// Write straight to the warehouse datasources, bypassing the
 			// billing-enforced ingest gateway (which 402s brand-new orgs that have
 			// no active subscription — the whole point of demo data is to work
-			// before the user has picked a plan).
+			// before the user has picked a plan). Also deliberately NOT metered to
+			// Autumn: these are Maple-injected samples, not billable customer
+			// telemetry.
 			yield* ingestAll("traces", traceRows)
 			yield* ingestAll("logs", logRows)
 			// Runtime metrics so metric-based dashboard templates (Node.js
@@ -64,7 +70,7 @@ export class DemoService extends Context.Service<DemoService>()("@maple/api/serv
 			})
 		})
 
-		return { seed }
+		return { seed } satisfies DemoServiceShape
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

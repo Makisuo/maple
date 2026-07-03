@@ -33,8 +33,36 @@
     {
       "idx": 4,
       "version": "7",
-      "when": 1783094487568,
-      "tag": "0004_useful_sunfire",
+      "when": 1783200000000,
+      "tag": "0004_premium_korg",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783200001000,
+      "tag": "0005_loud_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783200002000,
+      "tag": "0006_natural_marvel_apes",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783200003000,
+      "tag": "0007_slippery_winter_soldier",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783101172742,
+      "tag": "0008_high_landau",
       "breakpoints": true
     }
   ]

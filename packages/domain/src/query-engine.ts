@@ -235,10 +235,26 @@ export const AttributeKeysQuery = Schema.Struct({
 })
 export type AttributeKeysQuery = Schema.Schema.Type<typeof AttributeKeysQuery>
 
+// Scopes a facets query to a single dimension so only that UNION branch runs
+// (dashboard variables need one dropdown list, not the full facet sidebar).
+export const TracesFacetDimension = Schema.Literals([
+	"service",
+	"spanName",
+	"httpMethod",
+	"httpStatus",
+	"deploymentEnv",
+	"serviceNamespace",
+])
+export type TracesFacetDimension = typeof TracesFacetDimension.Type
+
+export const LogsFacetDimension = Schema.Literals(["severity", "service", "deploymentEnv", "namespace"])
+export type LogsFacetDimension = typeof LogsFacetDimension.Type
+
 export const TracesFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("traces"),
 	filters: Schema.optional(TracesFilters),
+	facet: Schema.optional(TracesFacetDimension),
 })
 export type TracesFacetsQuery = Schema.Schema.Type<typeof TracesFacetsQuery>
 
@@ -246,6 +262,7 @@ export const LogsFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("logs"),
 	filters: Schema.optional(LogsFilters),
+	facet: Schema.optional(LogsFacetDimension),
 })
 export type LogsFacetsQuery = Schema.Schema.Type<typeof LogsFacetsQuery>
 
