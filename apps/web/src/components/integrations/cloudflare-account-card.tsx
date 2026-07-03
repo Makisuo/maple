@@ -97,8 +97,8 @@ function CollectionStatusRow(props: {
 				: props.usageLoaded && props.lastSyncedAt
 					? "no data in last 24h"
 					: props.lastSyncedAt
-						? `synced ${relativeFromMs(props.lastSyncedAt)}`
-						: "waiting for first sync"))
+						? `checked ${relativeFromMs(props.lastSyncedAt)}`
+						: "waiting for first data"))
 	const detailClass =
 		props.enabled && !props.lastError && !hasData && props.usageLoaded && props.lastSyncedAt
 			? "text-amber-600 dark:text-amber-400"
@@ -108,7 +108,7 @@ function CollectionStatusRow(props: {
 		props.lastError,
 		props.usage?.lastDataAt != null ? `Last data: ${new Date(props.usage.lastDataAt).toLocaleString()}` : null,
 		props.watermarkAt != null ? `Ingested up to: ${new Date(props.watermarkAt).toLocaleString()}` : null,
-		props.lastSyncedAt != null ? `Poller synced: ${new Date(props.lastSyncedAt).toLocaleString()}` : null,
+		props.lastSyncedAt != null ? `Last checked: ${new Date(props.lastSyncedAt).toLocaleString()}` : null,
 	]
 		.filter(Boolean)
 		.join("\n")
@@ -337,7 +337,7 @@ export function CloudflareAccountCard() {
 				icon={CloudflareIcon}
 				accent={CLOUDFLARE_ACCENT}
 				title="Connect your Cloudflare account"
-				description="Authorize Maple with your Cloudflare account via OAuth — the foundation for one-click telemetry. Upcoming phases auto-provision Workers traces & logs and Logpush jobs, with no manual dashboard setup."
+				description="See traffic and Workers analytics from your Cloudflare account in Maple — connect once, nothing to configure in the Cloudflare dashboard."
 				footer="You'll authorize Maple in a Cloudflare popup."
 			>
 				<Button onClick={handleConnect} disabled={busy !== null}>
@@ -363,33 +363,31 @@ export function CloudflareAccountCard() {
 						<Badge variant="success">Connected</Badge>
 					</div>
 					<p className="mt-1 text-xs text-muted-foreground">
-						Maple is authorized against this Cloudflare account. Upcoming phases use it to
-						auto-provision Workers traces & logs and Logpush jobs.
+						{status?.accountName ? (
+							<>
+								Connected to{" "}
+								<span
+									className="font-medium text-foreground"
+									title={status.accountId ?? undefined}
+								>
+									{status.accountName}
+								</span>{" "}
+								— traffic from your zones and Workers streams into Maple.
+							</>
+						) : (
+							"Connected — traffic from your zones and Workers streams into Maple."
+						)}
 					</p>
 				</div>
 
 				{status ? (
 					<>
-						<div className="flex flex-col gap-1 rounded-md bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
-							<div>
-								Account:{" "}
-								<span className="text-foreground">
-									{status.accountName ?? status.accountId}
-								</span>
-								{status.accountName && status.accountId ? (
-									<span className="ml-1 font-mono text-[10px]">({status.accountId})</span>
-								) : null}
-							</div>
-							{status.scope ? <div>Scopes: {status.scope}</div> : null}
-						</div>
-
 						{!status.analyticsCapable ? (
 							<div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px]">
 								<span className="text-amber-600 dark:text-amber-400">
-									Edge analytics needs additional permissions — update the connection to start
-									collecting cache hit rate, status codes, and latency.
+									Maple needs updated access to collect traffic analytics from this account.
 								</span>
-								{connectButton("Update permissions")}
+								{connectButton("Update access")}
 							</div>
 						) : status.zones.length > 0 ||
 						  status.workers ||
@@ -399,7 +397,7 @@ export function CloudflareAccountCard() {
 								{usage && usage.totalRequests > 0 ? (
 									<>
 										<span className="col-span-2 truncate font-medium text-muted-foreground">
-											Edge analytics
+											Traffic
 										</span>
 										<span className="h-5 w-24">
 											{totalPoints ? (
@@ -417,7 +415,7 @@ export function CloudflareAccountCard() {
 									</>
 								) : (
 									<span className="col-span-5 truncate font-medium text-muted-foreground">
-										Edge analytics
+										Traffic
 									</span>
 								)}
 								{activeZones.map((entry) => (
@@ -460,7 +458,7 @@ export function CloudflareAccountCard() {
 								{status.workers || workerServices.length > 0 ? (
 									<>
 										<CollectionStatusRow
-											name="Workers invocations"
+											name="Workers"
 											enabled={status.workers?.enabled ?? true}
 											lastSyncedAt={status.workers?.lastSyncedAt ?? null}
 											lastError={status.workers?.lastError ?? null}
@@ -489,8 +487,7 @@ export function CloudflareAccountCard() {
 							</div>
 						) : (
 							<p className="text-[11px] text-muted-foreground">
-								Edge analytics collection starts within a few minutes — zones appear here once
-								the first sync runs.
+								Traffic data starts arriving within a few minutes — your zones will appear here.
 							</p>
 						)}
 					</>
