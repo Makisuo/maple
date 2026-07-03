@@ -105,7 +105,7 @@ export class ServiceMapRollupService extends Context.Service<
 						})
 						if (rows.length > 0) {
 							// Not metered to Autumn: derived from spans that were already billed
-							// on arrival at the ingest gateway (see lib/autumn-ingest-meter.ts).
+							// on arrival at the ingest gateway.
 							yield* warehouse.ingest(tenant, "service_map_edges_hourly", rows)
 							edgesWritten += rows.length
 						}

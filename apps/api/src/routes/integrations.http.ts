@@ -158,6 +158,12 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						return yield* cloudflareAnalytics.getIntegrationStatus(tenant.orgId)
 					}),
 				)
+				.handle("cloudflareUsage", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						return yield* cloudflareAnalytics.getUsage(tenant.orgId)
+					}),
+				)
 				.handle("cloudflareStart", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context

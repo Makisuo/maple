@@ -282,6 +282,13 @@ export {
 	type ListRuleChecksOutput,
 } from "./queries/alert-checks"
 
+// Queries — Cloudflare integration usage (integrations-page ingest proof)
+export {
+	CLOUDFLARE_USAGE_METRIC_NAMES,
+	cloudflareUsageQuery,
+	type CloudflareUsageOutput,
+} from "./queries/cloudflare-usage"
+
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {
 	dbStatementSamplesQuery,

@@ -86,6 +86,8 @@ export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyt
 	enabled: Schema.Boolean,
 	lastSyncedAt: Schema.NullOr(Schema.Number),
 	lastError: Schema.NullOr(Schema.String),
+	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
+	watermarkAt: Schema.NullOr(Schema.Number),
 }) {}
 
 /** Account-level Workers invocation-metrics collection state. */
@@ -95,6 +97,8 @@ export class CloudflareAnalyticsWorkersStatus extends Schema.Class<CloudflareAna
 	enabled: Schema.Boolean,
 	lastSyncedAt: Schema.NullOr(Schema.Number),
 	lastError: Schema.NullOr(Schema.String),
+	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
+	watermarkAt: Schema.NullOr(Schema.Number),
 }) {}
 
 /**
@@ -114,6 +118,48 @@ export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrat
 	analyticsCapable: Schema.Boolean,
 	zones: Schema.Array(CloudflareAnalyticsZoneStatus),
 	workers: Schema.NullOr(CloudflareAnalyticsWorkersStatus),
+}) {}
+
+/**
+ * One hourly bucket of ingested Cloudflare edge data. Buckets are sparse —
+ * hours with no ingested rows are omitted; the client zero-fills the window.
+ */
+export class CloudflareUsageBucket extends Schema.Class<CloudflareUsageBucket>("CloudflareUsageBucket")({
+	/** Start of the hour, epoch ms. */
+	bucketStart: Schema.Number,
+	/** Sum of the request-count metric values in the bucket. */
+	requests: Schema.Number,
+	/** Raw metric datapoints ingested in the bucket. */
+	datapoints: Schema.Number,
+}) {}
+
+/**
+ * Ingest proof for one Cloudflare-derived service (a zone or a Worker script) over the
+ * usage window — computed from the warehouse, not the poller's bookkeeping, so it shows
+ * the data actually queryable in dashboards.
+ */
+export class CloudflareServiceUsage extends Schema.Class<CloudflareServiceUsage>("CloudflareServiceUsage")({
+	/** Warehouse ServiceName: `cloudflare/{zone}` or `cloudflare-worker/{script}`. */
+	serviceName: Schema.String,
+	kind: Schema.Literals(["zone", "worker"]),
+	/** Zone or Worker script name with the ServiceName prefix stripped. */
+	displayName: Schema.String,
+	totalRequests: Schema.Number,
+	totalDatapoints: Schema.Number,
+	/** Most recent metric timestamp in the warehouse (epoch ms) — end-to-end delivery proof. */
+	lastDataAt: Schema.NullOr(Schema.Number),
+	buckets: Schema.Array(CloudflareUsageBucket),
+}) {}
+
+/** Warehouse-derived Cloudflare ingest usage for the org, fixed at the last 24h hourly. */
+export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageResponse>(
+	"CloudflareUsageResponse",
+)({
+	windowStart: Schema.Number,
+	windowEnd: Schema.Number,
+	bucketSeconds: Schema.Number,
+	totalRequests: Schema.Number,
+	services: Schema.Array(CloudflareServiceUsage),
 }) {}
 
 export class CloudflareStartConnectRequest extends Schema.Class<CloudflareStartConnectRequest>(
@@ -365,6 +411,12 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.get("cloudflareStatus", "/cloudflare/status", {
 			success: CloudflareIntegrationStatus,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("cloudflareUsage", "/cloudflare/usage", {
+			success: CloudflareUsageResponse,
 			error: IntegrationsPersistenceError,
 		}),
 	)

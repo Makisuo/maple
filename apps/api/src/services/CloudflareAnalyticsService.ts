@@ -26,13 +26,18 @@ import {
 	CloudflareAnalyticsWorkersStatus,
 	CloudflareAnalyticsZoneStatus,
 	CloudflareIntegrationStatus,
+	CloudflareServiceUsage,
+	CloudflareUsageBucket,
+	CloudflareUsageResponse,
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
 	IntegrationsRevokedError,
+	IntegrationsUpstreamError,
 	RoleName,
 	UserId as UserIdSchema,
 	type OrgId,
 } from "@maple/domain/http"
+import * as CH from "@maple/query-engine/ch"
 import {
 	cloudflareAnalyticsState,
 	oauthConnections,
@@ -41,6 +46,7 @@ import {
 } from "@maple/db"
 import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Result, Schema } from "effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import type { TenantContext } from "./AuthService"
 import {
 	graphqlQuery,
@@ -48,19 +54,18 @@ import {
 	type CloudflareGraphqlError,
 	type CloudflareZone,
 } from "../lib/CloudflareApi"
-import { ingestRowBytes, trackIngestUsage } from "../lib/autumn-ingest-meter"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { dateToMs } from "../lib/time"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { CloudflareOAuthService } from "./CloudflareOAuthService"
+import { OrgIngestKeysService } from "./OrgIngestKeysService"
 import {
 	mapHttpGroups,
 	mapWorkersGroups,
 	type CloudflareMetricRows,
-	type MetricGaugeRow,
-	type MetricSumRow,
 } from "./cloudflare-analytics/mapping"
+import { metricRowsToOtlp } from "./cloudflare-analytics/otlp"
 import {
 	decodeHttpAnalyticsResponse,
 	decodeSettingsResponse,
@@ -104,9 +109,6 @@ const LEASE_MS = 4 * 60_000
 const SETTINGS_TTL_MS = 24 * 60 * 60_000
 /** Zone discovery (REST pagination) runs hourly; poll ticks in between reuse the state rows. */
 const DISCOVERY_TTL_MS = 60 * 60_000
-const INGEST_CHUNK = 500
-/** Chunk-level ingest fan-out — safe because the watermark only advances after all chunks. */
-const INGEST_CONCURRENCY = 3
 const ORG_CONCURRENCY = 3
 
 const MISSING_SCOPES_ERROR =
@@ -117,10 +119,26 @@ const floorToBucket = (ms: number) => ms - (ms % BUCKET_MS)
 const decodeUserIdSync = Schema.decodeUnknownSync(UserIdSchema)
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 
+/** Synthetic actor stamped on rows the poller writes on the org's behalf (ingest keys, state). */
+const SYSTEM_USER_ID = decodeUserIdSync("system-cloudflare-analytics")
+
 const toPersistenceError = (cause: unknown) =>
 	new IntegrationsPersistenceError({
 		message: cause instanceof Error ? cause.message : "Cloudflare analytics database error",
 	})
+
+/** Integrations-page usage window: last 24h in hourly buckets. */
+const USAGE_WINDOW_MS = 24 * 60 * 60_000
+const USAGE_BUCKET_SECONDS = 3600
+const WORKER_SERVICE_PREFIX = "cloudflare-worker/"
+const ZONE_SERVICE_PREFIX = "cloudflare/"
+
+/** Epoch ms → warehouse DateTime64 literal (`YYYY-MM-DD HH:MM:SS.mmm`, UTC). */
+const toWarehouseDateTime64 = (ms: number) => {
+	const d = new Date(ms)
+	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
+	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
+}
 
 // ---------------------------------------------------------------------------
 // Dataset registry — everything dataset-specific lives here; the poll pipeline is generic.
@@ -396,7 +414,7 @@ const buildWorkItems = (rows: ReadonlyArray<CloudflareAnalyticsStateRow>, now: n
 }
 
 type PollOutcome =
-	| { readonly kind: "advanced"; readonly ingested: number; readonly bytes: number }
+	| { readonly kind: "advanced"; readonly ingested: number }
 	| { readonly kind: "quantiles-downgraded" }
 	| { readonly kind: "disabled" }
 	| { readonly kind: "failed" }
@@ -413,6 +431,7 @@ interface CloudflareAnalyticsZoneStatusShape {
 	readonly enabled: boolean
 	readonly lastSyncedAt: number | null
 	readonly lastError: string | null
+	readonly watermarkAt: number | null
 }
 
 interface CloudflareAnalyticsStatus {
@@ -421,6 +440,7 @@ interface CloudflareAnalyticsStatus {
 		readonly enabled: boolean
 		readonly lastSyncedAt: number | null
 		readonly lastError: string | null
+		readonly watermarkAt: number | null
 	} | null
 }
 
@@ -443,6 +463,7 @@ export interface CloudflareAnalyticsServiceShape {
 	readonly getIntegrationStatus: (
 		orgId: OrgId,
 	) => Effect.Effect<CloudflareIntegrationStatus, IntegrationsPersistenceError>
+	readonly getUsage: (orgId: OrgId) => Effect.Effect<CloudflareUsageResponse, IntegrationsPersistenceError>
 }
 
 export class CloudflareAnalyticsService extends Context.Service<
@@ -454,15 +475,18 @@ export class CloudflareAnalyticsService extends Context.Service<
 		const env = yield* Env
 		const warehouse = yield* WarehouseQueryService
 		const oauth = yield* CloudflareOAuthService
+		const ingestKeys = yield* OrgIngestKeysService
 
 		const apiBaseUrl = env.MAPLE_CLOUDFLARE_API_BASE_URL
+		/** The ingest gateway's OTLP metrics endpoint — poller metrics flow through it like all telemetry. */
+		const ingestMetricsUrl = `${env.MAPLE_INGEST_PUBLIC_URL.replace(/\/+$/, "")}/v1/metrics`
 
 		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
 			database.execute(fn).pipe(Effect.mapError(toPersistenceError))
 
 		const systemTenant = (orgId: OrgId): TenantContext => ({
 			orgId,
-			userId: decodeUserIdSync("system-cloudflare-analytics"),
+			userId: SYSTEM_USER_ID,
 			roles: [decodeRoleNameSync("root")],
 			authMode: "self_hosted",
 		})
@@ -756,27 +780,54 @@ export class CloudflareAnalyticsService extends Context.Service<
 			})
 
 		// ------------------------------------------------------------------
-		// Ingest
+		// Ingest — via the gateway, so per-org routing (managed Tinybird vs BYO
+		// ClickHouse), schema-version gating, WAL durability, and Autumn metering
+		// all apply exactly as they do for the org's own telemetry.
 		// ------------------------------------------------------------------
 
-		const ingestRows = (orgId: OrgId, rows: CloudflareMetricRows) =>
+		/**
+		 * The org's public ingest key (`maple_pk_*`), minted on first use. The gateway resolves the
+		 * owning org from it and routes accordingly — that key is the only org attribution needed.
+		 */
+		const getOrgIngestKey = (orgId: OrgId) =>
+			ingestKeys.getOrCreate(orgId, SYSTEM_USER_ID).pipe(Effect.map((keys) => keys.publicKey))
+
+		/**
+		 * Ship a chunk's metric rows to the ingest gateway as one OTLP/JSON request. Non-2xx and
+		 * transport failures surface as {@link IntegrationsUpstreamError} so the poll loop records
+		 * them and retries next tick (the watermark only advances on success). Returns the row count.
+		 */
+		const emitMetrics = (ingestKey: string, rows: CloudflareMetricRows) =>
 			Effect.gen(function* () {
-				const tenant = systemTenant(orgId)
-				const ingestAll = (
-					datasource: "metrics_sum" | "metrics_gauge",
-					batch: ReadonlyArray<MetricSumRow | MetricGaugeRow>,
-				) =>
-					Effect.forEach(Arr.chunksOf(batch, INGEST_CHUNK), (part) => warehouse.ingest(tenant, datasource, part), {
-						concurrency: INGEST_CONCURRENCY,
-						discard: true,
-					})
-				yield* ingestAll("metrics_sum", rows.sumRows)
-				yield* ingestAll("metrics_gauge", rows.gaugeRows)
-				return {
-					rows: rows.sumRows.length + rows.gaugeRows.length,
-					bytes: ingestRowBytes(rows.sumRows) + ingestRowBytes(rows.gaugeRows),
+				const total = rows.sumRows.length + rows.gaugeRows.length
+				if (total === 0) return 0
+				const payload = metricRowsToOtlp(rows.sumRows, rows.gaugeRows)
+				const client = yield* HttpClient.HttpClient
+				const request = HttpClientRequest.post(ingestMetricsUrl, {
+					headers: { authorization: `Bearer ${ingestKey}`, "content-type": "application/json" },
+				}).pipe(HttpClientRequest.bodyJsonUnsafe(payload))
+				const response = yield* client.execute(request)
+				if (response.status >= 300) {
+					const body = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
+					return yield* Effect.fail(
+						new IntegrationsUpstreamError({
+							message: `Cloudflare metrics ingest returned ${response.status}: ${body.slice(0, 300)}`,
+							status: response.status,
+						}),
+					)
 				}
-			})
+				return total
+			}).pipe(
+				Effect.provide(FetchHttpClient.layer),
+				Effect.mapError((error) =>
+					error instanceof IntegrationsUpstreamError
+						? error
+						: new IntegrationsUpstreamError({
+								message: `Cloudflare metrics ingest request failed: ${error instanceof Error ? error.message : String(error)}`,
+								cause: error,
+							}),
+				),
+			)
 
 		// ------------------------------------------------------------------
 		// Generic dataset polling
@@ -788,7 +839,12 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 */
 		const pollDatasetChunk = (
 			item: WorkItem,
-			context: { readonly orgId: OrgId; readonly accountId: string; readonly accessToken: string },
+			context: {
+				readonly orgId: OrgId
+				readonly accountId: string
+				readonly accessToken: string
+				readonly ingestKey: string
+			},
 			now: number,
 		) =>
 			Effect.gen(function* () {
@@ -823,17 +879,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 					accountId: context.accountId,
 					rows: item.rows,
 				})
-				const ingested = yield* ingestRows(context.orgId, mapped).pipe(
-					Effect.mapError(
-						(error) =>
-							new IntegrationsPersistenceError({
-								message: `Cloudflare analytics ingest failed: ${error.message}`,
-							}),
-					),
-				)
-				// Watermark only advances after the ingest above succeeded — exactly-once by construction.
+				const ingested = yield* emitMetrics(context.ingestKey, mapped)
+				// Watermark only advances after the gateway accepted the batch above.
 				yield* advanceWatermark(rowIds, item.window.end, now)
-				return { kind: "advanced", ingested: ingested.rows, bytes: ingested.bytes } as const satisfies PollOutcome
+				return { kind: "advanced", ingested } as const satisfies PollOutcome
 			})
 
 		// ------------------------------------------------------------------
@@ -899,8 +948,15 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const settingsWrote = yield* refreshSettings(accessToken, accountId, rows, now, budget)
 				if (settingsWrote) rows = yield* loadStateRows(orgId)
 
+				// The org's public ingest key authenticates the gateway POSTs (minted on first use).
+				const keyResult = yield* Effect.result(getOrgIngestKey(orgId))
+				if (Result.isFailure(keyResult)) {
+					yield* recordOrgError(orgId, `Cloudflare ingest key unavailable: ${keyResult.failure.message}`, now)
+					return skip("ingest key unavailable")
+				}
+				const ingestKey = keyResult.success
+
 				let rowsIngested = 0
-				let bytesIngested = 0
 				// Set when Cloudflare rejects the token mid-loop — every further call would 401 too.
 				let revoked = false
 
@@ -914,7 +970,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					for (const item of work) {
 						if (budget.calls >= MAX_CALLS_PER_ORG_TICK || revoked) break
 						budget.calls += 1
-						const outcome = yield* pollDatasetChunk(item, { orgId, accountId, accessToken }, now).pipe(
+						const outcome = yield* pollDatasetChunk(item, { orgId, accountId, accessToken, ingestKey }, now).pipe(
 							Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
 								Effect.sync(() => {
 									revoked = true
@@ -937,7 +993,6 @@ export class CloudflareAnalyticsService extends Context.Service<
 						switch (outcome.kind) {
 							case "advanced": {
 								rowsIngested += outcome.ingested
-								bytesIngested += outcome.bytes
 								progressed = true
 								const watermark = new Date(item.window.end)
 								for (const row of item.rows) row.watermarkAt = watermark
@@ -960,18 +1015,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 					if (!progressed) break
 				}
 
-				// These rows bypass the ingest gateway (the usual Autumn metering point), so this
-				// is where they become billable usage — one report per org per tick.
-				yield* trackIngestUsage(env, {
-					orgId,
-					signal: "metrics",
-					bytes: bytesIngested,
-					idempotencyKey: `cloudflare-analytics:${orgId}:${now}`,
-				})
-
+				// Metrics ship through the ingest gateway (see emitMetrics), so Autumn metering
+				// happens there — no self-report here.
 				yield* Effect.annotateCurrentSpan("cloudflare.calls", budget.calls)
 				yield* Effect.annotateCurrentSpan("cloudflare.rowsIngested", rowsIngested)
-				yield* Effect.annotateCurrentSpan("cloudflare.bytesIngested", bytesIngested)
 				return { orgId, skipped: null, callsMade: budget.calls, rowsIngested } satisfies PollOrgSummary
 			}).pipe(
 				Effect.ensuring(
@@ -1034,6 +1081,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					enabled: row.enabled,
 					lastSyncedAt: row.lastSuccessAt == null ? null : dateToMs(row.lastSuccessAt),
 					lastError: row.lastError,
+					watermarkAt: row.watermarkAt == null ? null : dateToMs(row.watermarkAt),
 				}))
 				.sort((a, b) => a.name.localeCompare(b.name))
 			const workersRow = rows.find((row) => row.dataset === WORKERS_DATASET)
@@ -1044,9 +1092,115 @@ export class CloudflareAnalyticsService extends Context.Service<
 							enabled: workersRow.enabled,
 							lastSyncedAt: workersRow.lastSuccessAt == null ? null : dateToMs(workersRow.lastSuccessAt),
 							lastError: workersRow.lastError,
+							watermarkAt: workersRow.watermarkAt == null ? null : dateToMs(workersRow.watermarkAt),
 						}
 					: null,
 			} satisfies CloudflareAnalyticsStatus
+		})
+
+		/**
+		 * Warehouse-derived ingest usage for the integrations page: hourly request volume,
+		 * datapoint counts, and the most recent metric timestamp per zone/Worker service.
+		 * Proves end-to-end delivery (data is queryable) rather than poller bookkeeping.
+		 */
+		const getUsage = Effect.fn("CloudflareAnalyticsService.getUsage")(function* (orgId: OrgId) {
+			const now = yield* Clock.currentTimeMillis
+			const windowStart = now - USAGE_WINDOW_MS
+
+			const connection = yield* oauth.getStatus(orgId)
+			if (!connection.connected) {
+				return new CloudflareUsageResponse({
+					windowStart,
+					windowEnd: now,
+					bucketSeconds: USAGE_BUCKET_SECONDS,
+					totalRequests: 0,
+					services: [],
+				})
+			}
+
+			const compiled = CH.compile(CH.cloudflareUsageQuery(), {
+				orgId,
+				bucketSeconds: USAGE_BUCKET_SECONDS,
+				startTime: toWarehouseDateTime64(windowStart),
+				endTime: toWarehouseDateTime64(now),
+			})
+			const rows = yield* warehouse
+				// Metrics now flow through the ingest gateway, which routes each org to its own
+				// warehouse (managed Tinybird or BYO ClickHouse). Read from that same warehouse
+				// via the default resolver — no ingest pin — so BYO-CH orgs see their own data.
+				.compiledQuery(systemTenant(orgId), compiled, {
+					profile: "aggregation",
+					context: "cloudflareUsage",
+				})
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							new IntegrationsPersistenceError({
+								message: `Failed to load Cloudflare usage: ${error.message}`,
+							}),
+					),
+				)
+
+			interface ServiceAgg {
+				buckets: Array<CloudflareUsageBucket>
+				totalRequests: number
+				totalDatapoints: number
+				lastDataAt: number | null
+			}
+			const byService = new Map<string, ServiceAgg>()
+			for (const row of rows) {
+				const agg = byService.get(row.serviceName) ?? {
+					buckets: [],
+					totalRequests: 0,
+					totalDatapoints: 0,
+					lastDataAt: null,
+				}
+				const requests = Math.round(row.requests)
+				agg.buckets.push(
+					new CloudflareUsageBucket({
+						bucketStart: Date.parse(row.bucket),
+						requests,
+						datapoints: row.datapoints,
+					}),
+				)
+				agg.totalRequests += requests
+				agg.totalDatapoints += row.datapoints
+				const lastMs = Date.parse(row.lastTimeUnix)
+				if (Number.isFinite(lastMs)) {
+					agg.lastDataAt = agg.lastDataAt == null ? lastMs : Math.max(agg.lastDataAt, lastMs)
+				}
+				byService.set(row.serviceName, agg)
+			}
+
+			const services = [...byService.entries()]
+				.map(([serviceName, agg]) => {
+					const isWorker = serviceName.startsWith(WORKER_SERVICE_PREFIX)
+					const displayName = isWorker
+						? serviceName.slice(WORKER_SERVICE_PREFIX.length)
+						: serviceName.startsWith(ZONE_SERVICE_PREFIX)
+							? serviceName.slice(ZONE_SERVICE_PREFIX.length)
+							: serviceName
+					return new CloudflareServiceUsage({
+						serviceName,
+						kind: isWorker ? ("worker" as const) : ("zone" as const),
+						displayName,
+						totalRequests: agg.totalRequests,
+						totalDatapoints: agg.totalDatapoints,
+						lastDataAt: agg.lastDataAt,
+						buckets: agg.buckets,
+					})
+				})
+				.sort((a, b) =>
+					a.kind === b.kind ? a.displayName.localeCompare(b.displayName) : a.kind === "zone" ? -1 : 1,
+				)
+
+			return new CloudflareUsageResponse({
+				windowStart,
+				windowEnd: now,
+				bucketSeconds: USAGE_BUCKET_SECONDS,
+				totalRequests: services.reduce((sum, s) => sum + s.totalRequests, 0),
+				services,
+			})
 		})
 
 		/** The full HTTP-facing integration status (connection + analytics collection state). */
@@ -1079,7 +1233,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 			})
 		})
 
-		return { pollAllOrgs, pollOrg, getStatus, getIntegrationStatus } satisfies CloudflareAnalyticsServiceShape
+		return {
+			pollAllOrgs,
+			pollOrg,
+			getStatus,
+			getIntegrationStatus,
+			getUsage,
+		} satisfies CloudflareAnalyticsServiceShape
 	}),
 }) {
 	static readonly layer = Layer.effect(this, this.make)

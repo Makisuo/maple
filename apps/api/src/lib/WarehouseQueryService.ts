@@ -181,9 +181,10 @@ export class WarehouseQueryService extends Context.Service<
 		 * ALWAYS go to the Tinybird ingest pipeline (Events API) — never ClickHouse.
 		 *
 		 * BILLING: this path bypasses the ingest gateway, which is where Autumn usage
-		 * metering normally happens. Any caller writing net-new customer telemetry must
-		 * report its bytes via `trackIngestUsage` (lib/autumn-ingest-meter.ts, which also
-		 * documents which writers are deliberately unmetered) or the data ships for free.
+		 * metering happens. Today's only `ingest` callers — demo seed, service-map
+		 * rollups, alert checks — are all derived/internal/demo data and deliberately
+		 * unmetered. Net-new *customer* telemetry must go through the ingest gateway
+		 * (as the Cloudflare edge-metrics poller does) so it is metered, not direct `ingest`.
 		 *
 		 * This is deliberately NOT `resolveManagedConfig()`: when `CLICKHOUSE_URL` is
 		 * set, the *managed* backend is a READ-ONLY ClickHouse query gateway that

@@ -3932,7 +3932,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						Array.from(byOrg.entries()),
 						([orgId, checks]) =>
 							// Not metered to Autumn: internal bookkeeping rows, not customer
-							// telemetry (see lib/autumn-ingest-meter.ts).
+							// telemetry.
 							warehouse
 								.ingest(systemTenant(decodeOrgIdSync(orgId)), "alert_checks", checks)
 								.pipe(

@@ -18,6 +18,7 @@ import {
 	OnboardingEmailService,
 	OnboardingService,
 	OrgClickHouseSettingsService,
+	OrgIngestKeysService,
 	QueryEngineService,
 	ServiceMapRollupService,
 	WarehouseQueryService,
@@ -136,8 +137,12 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const CloudflareOAuthServiceLive = CloudflareOAuthService.layer.pipe(Layer.provide(BaseLive))
 
+	const OrgIngestKeysServiceLive = OrgIngestKeysService.layer.pipe(Layer.provide(BaseLive))
+
 	const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, CloudflareOAuthServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, CloudflareOAuthServiceLive, OrgIngestKeysServiceLive),
+		),
 	)
 
 	return Layer.mergeAll(
