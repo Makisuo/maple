@@ -125,9 +125,10 @@ const envConfig = Config.all({
 	// `offline_access` is added/removed automatically by Cloudflare based on the client's
 	// grant types, so it must not be listed.
 	// The analytics scopes (account-analytics.read = GraphQL Analytics, zone.read = zone
-	// discovery) power the edge-metrics poller; TODO(cf-analytics): verify the exact ids
-	// against the live scope registry and update the registered OAuth client's grant set
-	// BEFORE this default ships, or every connect fails with invalid_scope.
+	// discovery) power the edge-metrics poller. Every id below was verified verbatim against
+	// the live scope registry (GET /client/v4/oauth/scopes, 2026-07-03). The remaining ops
+	// requirement is on the CLIENT side: the registered OAuth client must have all of these
+	// granted, or connects fail with invalid_scope.
 	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
 		"CLOUDFLARE_OAUTH_SCOPES",
 		"account-settings.read account-analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",

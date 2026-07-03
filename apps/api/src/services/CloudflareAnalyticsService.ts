@@ -78,7 +78,7 @@ import {
 /**
  * OAuth scopes the poller needs (space-delimited ids in `oauth_connections.scope`). Kept next to
  * the service so the HTTP status route and the poll gating share one source of truth.
- * TODO(cf-analytics): verify against GET /client/v4/oauth/scopes before shipping.
+ * Both ids verified verbatim against the live registry (GET /client/v4/oauth/scopes, 2026-07-03).
  */
 const CLOUDFLARE_ANALYTICS_SCOPES = ["account-analytics.read", "zone.read"] as const
 
