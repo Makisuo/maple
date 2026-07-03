@@ -8,7 +8,7 @@ import {
 	getServiceOverviewResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
-import { listIncidentsAtom, listRulesAtom } from "@/lib/services/atoms/alerts-atoms"
+import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { AlertFiringHero } from "@/components/alerts/alert-stat-card"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
@@ -110,8 +110,8 @@ function useServiceHealthData({ startTime, endTime, environments, canFetch }: Se
 		[baselineResult],
 	)
 
-	const incidentsResult = useAtomValue(listIncidentsAtom)
-	const rulesResult = useAtomValue(listRulesAtom)
+	const { result: incidentsResult } = useAlertIncidentsList()
+	const { result: rulesResult } = useAlertRulesList()
 
 	const openIncidents = useMemo(
 		() =>

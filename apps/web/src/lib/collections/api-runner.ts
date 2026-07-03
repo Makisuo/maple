@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { mapleApiClientLayer } from "@/lib/registry"
+import { mapleRuntime } from "@/lib/registry"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
 /**
@@ -20,13 +20,16 @@ export type MapleApiClient = Effect.Success<typeof MapleApiAtomClient>
  * handler needs the decoded response synchronously to return `{ txid }`; the
  * live query on the collection is what replaces the old reactivity-key
  * invalidation of the list.
+ *
+ * Runs on the shared {@link mapleRuntime} (built once from `mapleApiClientLayer`)
+ * rather than rebuilding the layer per call.
  */
 export const runMapleApi = <A, E, R>(
 	use: (client: MapleApiClient) => Effect.Effect<A, E, R>,
 ): Promise<A> =>
-	Effect.runPromise(
+	mapleRuntime.runPromise(
 		Effect.gen(function* () {
 			const client = yield* MapleApiAtomClient
 			return yield* use(client)
-		}).pipe(Effect.provide(mapleApiClientLayer)) as Effect.Effect<A, E>,
+		}) as Effect.Effect<A, E, MapleApiAtomClient>,
 	)

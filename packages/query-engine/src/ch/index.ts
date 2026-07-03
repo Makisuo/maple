@@ -19,6 +19,9 @@ export { compilePipeQuery, type PipeCompiledQuery } from "./pipe-dispatch"
 // Tables
 export * as tables from "./tables"
 
+// Shared row-schema codecs (ClickHouse `FORMAT JSON` 64-bit-int-as-string coercion).
+export { CHNumber } from "./schema"
+
 // Queries — Traces
 export {
 	tracesTimeseriesQuery,
@@ -286,6 +289,7 @@ export {
 export {
 	CLOUDFLARE_USAGE_METRIC_NAMES,
 	cloudflareUsageQuery,
+	cloudflareUsageRowSchema,
 	type CloudflareUsageOutput,
 } from "./queries/cloudflare-usage"
 

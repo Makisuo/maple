@@ -1,9 +1,9 @@
-import { createCollection } from "@tanstack/db"
-import { electricCollectionOptions } from "@tanstack/electric-db-collection"
-import { Schema } from "effect"
+import { createEffectCollection } from "@maple/effect-db/electric"
 import { DashboardDocument, DashboardId, DashboardUpsertRequest } from "@maple/domain/http"
+import { Effect, Schema } from "effect"
 import type { Dashboard } from "@/components/dashboard-builder/types"
-import { runMapleApi } from "./api-runner"
+import { mapleRuntime } from "@/lib/registry"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { mapleShapeFetch, shapeProxyUrl } from "./shape-fetch"
 
 /**
@@ -12,18 +12,25 @@ import { mapleShapeFetch, shapeProxyUrl } from "./shape-fetch"
  * server CAS token. Collections hold raw rows and map to domain types in
  * selectors — Electric has no row-mapping hook and a transforming schema would
  * split the optimistic write's input/output types.
+ *
+ * The schema is *identity* (Type === Encoded, no camelCase transform): it exists
+ * only to validate the shape stream's row shape so a post-deploy column drift
+ * surfaces as a `SchemaValidationError` (→ the collection factory's self-heal),
+ * not to reshape the data. Its fields mirror the `dashboards` pgTable exactly.
  */
-export type DashboardRow = {
-	readonly org_id: string
-	readonly id: string
-	readonly name: string
-	readonly payload_json: unknown
-	readonly created_at: string
-	readonly updated_at: string
-	readonly created_by: string
-	readonly updated_by: string
-	readonly version: number
-}
+export const DashboardRowSchema = Schema.Struct({
+	org_id: Schema.String,
+	id: Schema.String,
+	name: Schema.String,
+	payload_json: Schema.Unknown,
+	created_at: Schema.String,
+	updated_at: Schema.String,
+	created_by: Schema.String,
+	updated_by: Schema.String,
+	version: Schema.Number,
+})
+
+export type DashboardRow = typeof DashboardRowSchema.Type
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
 const decodeDashboardDocumentUnknown = Schema.decodeUnknownSync(DashboardDocument)
@@ -76,48 +83,46 @@ export const rowToDashboard = (row: DashboardRow): Dashboard | null => {
 const rowToUpsertRequest = (row: DashboardRow): DashboardUpsertRequest =>
 	new DashboardUpsertRequest({ dashboard: decodeDashboardDocument(row.payload_json) })
 
-const readTxid = (value: { readonly txid?: string }): number | undefined =>
-	value.txid !== undefined ? Number(value.txid) : undefined
-
 /**
- * Creates the per-org dashboards collection. The id embeds the org so a switch
- * mints a fresh collection (discarding the previous org's shape handle/offset)
- * rather than colliding. Writes go through the existing HTTP API and return the
- * Postgres txid, which TanStack DB awaits on the shape stream before dropping
- * optimistic state.
+ * Creates the per-org dashboards collection via `@maple/effect-db`'s
+ * `createEffectCollection`: an identity {@link DashboardRowSchema} validates the
+ * shape stream, and the write handlers are Effect programs run on the shared
+ * {@link mapleRuntime} (traced + backoff + stale-cache self-heal). The id embeds
+ * the org so a switch mints a fresh collection (discarding the previous org's
+ * shape handle/offset) rather than colliding. Writes go through the existing HTTP
+ * API and return the Postgres txid, which TanStack DB awaits on the shape stream
+ * before dropping optimistic state.
  */
 export const createDashboardsCollection = (orgId: string) =>
-	createCollection(
-		electricCollectionOptions<DashboardRow>({
-			id: `dashboards:${orgId}`,
-			shapeOptions: {
-				url: shapeProxyUrl,
-				params: { shape: "dashboards" },
-				fetchClient: mapleShapeFetch,
-			},
-			getKey: (row) => row.id,
-			onUpdate: async ({ transaction }) => {
+	createEffectCollection({
+		id: `dashboards:${orgId}`,
+		runtime: mapleRuntime,
+		schema: DashboardRowSchema,
+		shapeOptions: {
+			url: shapeProxyUrl,
+			params: { shape: "dashboards" },
+			fetchClient: mapleShapeFetch,
+		},
+		getKey: (row) => row.id,
+		onUpdate: ({ transaction }) =>
+			Effect.gen(function* () {
+				const client = yield* MapleApiAtomClient
 				const { modified } = transaction.mutations[0]
-				const result = await runMapleApi((client) =>
-					client.dashboards.upsert({
-						params: { dashboardId: asDashboardId(modified.id) },
-						payload: rowToUpsertRequest(modified),
-					}),
-				)
-				const txid = readTxid(result)
-				return txid === undefined ? undefined : { txid }
-			},
-			onDelete: async ({ transaction }) => {
+				const result = yield* client.dashboards.upsert({
+					params: { dashboardId: asDashboardId(modified.id) },
+					payload: rowToUpsertRequest(modified),
+				})
+				return { txid: Number(result.txid) }
+			}),
+		onDelete: ({ transaction }) =>
+			Effect.gen(function* () {
+				const client = yield* MapleApiAtomClient
 				const { original } = transaction.mutations[0]
-				const result = await runMapleApi((client) =>
-					client.dashboards.delete({
-						params: { dashboardId: asDashboardId(original.id) },
-					}),
-				)
-				const txid = readTxid(result)
-				return txid === undefined ? undefined : { txid }
-			},
-		}),
-	)
+				const result = yield* client.dashboards.delete({
+					params: { dashboardId: asDashboardId(original.id) },
+				})
+				return { txid: Number(result.txid) }
+			}),
+	})
 
 export type DashboardsCollection = ReturnType<typeof createDashboardsCollection>

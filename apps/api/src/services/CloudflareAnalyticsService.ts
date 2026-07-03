@@ -1425,12 +1425,20 @@ export class CloudflareAnalyticsService extends Context.Service<
 				})
 			}
 
-			const compiled = CH.compile(CH.cloudflareUsageQuery(), {
-				orgId,
-				bucketSeconds: USAGE_BUCKET_SECONDS,
-				startTime: toWarehouseDateTime64(windowStart),
-				endTime: toWarehouseDateTime64(now),
-			})
+			const compiled = CH.compile(
+				CH.cloudflareUsageQuery(),
+				{
+					orgId,
+					bucketSeconds: USAGE_BUCKET_SECONDS,
+					startTime: toWarehouseDateTime64(windowStart),
+					endTime: toWarehouseDateTime64(now),
+				},
+				// Decode rows through the schema: `requests`/`datapoints` arrive as JSON
+				// strings from a BYO-CH org's raw ClickHouse (`FORMAT JSON` quotes 64-bit
+				// ints), and `CHNumber` coerces them centrally in `decodeRows`. Without it
+				// the string trips a `ParseError` inside `CloudflareUsageBucket` → bare 500.
+				{ rowSchema: CH.cloudflareUsageRowSchema },
+			)
 			// Metrics flow through the ingest gateway, which routes each org to the SAME
 			// warehouse the gateway wrote to: a BYO-CH org's own ClickHouse when it is
 			// write-ready, otherwise managed Tinybird (the gateway's fallback). Mirror
@@ -1474,16 +1482,20 @@ export class CloudflareAnalyticsService extends Context.Service<
 					totalDatapoints: 0,
 					lastDataAt: null,
 				}
+				// `requests`/`datapoints` are already decoded to numbers by
+				// `cloudflareUsageRowSchema` (`CHNumber` coerces ClickHouse's
+				// string-quoted 64-bit ints). Round requests since counts are integers.
 				const requests = Math.round(row.requests)
+				const datapoints = row.datapoints
 				agg.buckets.push(
 					new CloudflareUsageBucket({
 						bucketStart: Date.parse(row.bucket),
 						requests,
-						datapoints: row.datapoints,
+						datapoints,
 					}),
 				)
 				agg.totalRequests += requests
-				agg.totalDatapoints += row.datapoints
+				agg.totalDatapoints += datapoints
 				const lastMs = Date.parse(row.lastTimeUnix)
 				if (Number.isFinite(lastMs)) {
 					agg.lastDataAt = agg.lastDataAt == null ? lastMs : Math.max(agg.lastDataAt, lastMs)

@@ -26,6 +26,7 @@
 		"@maple-dev/browser": "workspace:*",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/domain": "workspace:*",
+		"@maple/effect-db": "workspace:*",
 		"@maple/infra": "workspace:*",
 		"@maple/query-engine": "workspace:*",
 		"@maple/ui": "workspace:*",
