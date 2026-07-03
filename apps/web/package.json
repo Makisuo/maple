@@ -36,7 +36,6 @@
 		"@streamdown/math": "^1.0.2",
 		"@streamdown/mermaid": "^1.0.2",
 		"@tailwindcss/vite": "catalog:tailwind",
-		"@electric-sql/client": "1.5.22",
 		"@tanstack/db": "0.6.13",
 		"@tanstack/electric-db-collection": "0.3.11",
 		"@tanstack/react-db": "0.1.91",

@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from "react"
+import { useSyncExternalStore } from "react"
 import { getActiveOrgId, subscribeActiveOrgId } from "@/lib/services/common/auth-headers"
 import { createDashboardsCollection, type DashboardsCollection } from "./dashboards"
 
@@ -17,6 +17,9 @@ export type OrgCollections = {
 // switch is exactly the desired lifecycle.
 let current: OrgCollections | null = null
 
+// Signing out sets the active org to "pending" (via setActiveOrgId(null)), so
+// the next getOrgCollections call swaps and tears down the prior org's streams —
+// no separate teardown entry point is needed.
 export const getOrgCollections = (orgId: string): OrgCollections => {
 	if (current && current.orgId === orgId) return current
 	const previous = current
@@ -27,22 +30,6 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 	return current
 }
 
-export const clearOrgCollections = (): void => {
-	if (!current) return
-	void current.dashboards.cleanup()
-	current = null
-}
-
 /** Reactive active-org id (null when signed out / org-less). Mode-agnostic — both Clerk and self-hosted auth publish via setActiveOrgId. */
 export const useActiveOrgId = (): string | null =>
-	useSyncExternalStore(
-		subscribeActiveOrgId,
-		getActiveOrgId,
-		() => null,
-	)
-
-/** The current org's collections, recreated on org switch. Null before an org is known. */
-export const useOrgCollections = (): OrgCollections | null => {
-	const orgId = useActiveOrgId()
-	return useMemo(() => (orgId ? getOrgCollections(orgId) : null), [orgId])
-}
+	useSyncExternalStore(subscribeActiveOrgId, getActiveOrgId, () => null)

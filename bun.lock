@@ -252,7 +252,6 @@
         "@clerk/themes": "^2.4.57",
         "@effect-router/core": "workspace:*",
         "@effect/atom-react": "catalog:effect",
-        "@electric-sql/client": "1.5.22",
         "@flue/react": "1.0.0-beta.1",
         "@flue/sdk": "1.0.0-beta.1",
         "@fontsource-variable/geist": "^5.2.9",
