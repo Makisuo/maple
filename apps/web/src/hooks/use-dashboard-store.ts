@@ -19,6 +19,11 @@ import {
 	PortableDashboardDocument,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useLiveQuery } from "@tanstack/react-db"
+import { ELECTRIC_SYNC_ENABLED } from "@/lib/collections/config"
+import { runMapleApi } from "@/lib/collections/api-runner"
+import { rowToDashboard } from "@/lib/collections/dashboards"
+import { getOrgCollections, useActiveOrgId } from "@/lib/collections/org-collections"
 import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
 	Dashboard,
@@ -209,7 +214,10 @@ function reconcileDashboards(previous: readonly Dashboard[], next: Dashboard[]):
 	return allMatched ? (previous as Dashboard[]) : reconciled
 }
 
-export function useDashboardStore() {
+// The original effect-atom implementation (list query + hand-rolled optimistic
+// FIFO queue). Remains the default; `useDashboardStore` dispatches here unless
+// the ElectricSQL sync path is enabled at build time.
+function useDashboardStoreAtoms() {
 	const [dashboards, setDashboards] = useAtom(dashboardsAtom)
 	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
 
@@ -757,4 +765,414 @@ export function useDashboardStore() {
 		updateWidget,
 		autoLayoutWidgets,
 	}
+}
+
+// ElectricSQL-backed implementation. Reads the dashboards list from a live query
+// over the org's synced collection and routes writes through the collection's
+// optimistic mutations (TanStack DB owns the optimistic apply + rollback that
+// `useDashboardStoreAtoms` hand-rolls). Same public surface as the atom version.
+function useDashboardStoreCollection() {
+	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
+
+	// Always resolve a collection (fallback key before the org is known — the
+	// server still scopes by the auth token, so the key only isolates the local
+	// cache across org switches). The dashboards route is auth-gated, so a token
+	// is present in practice.
+	const orgKey = useActiveOrgId() ?? "pending"
+	const collection = useMemo(() => getOrgCollections(orgKey).dashboards, [orgKey])
+
+	const { data: rows, isLoading: liveLoading } = useLiveQuery(
+		(q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
+		[collection],
+	)
+
+	const dashboards = useMemo(
+		() => (rows ?? []).map(rowToDashboard).filter((d): d is Dashboard => d !== null),
+		[rows],
+	)
+
+	const readOnly = persistenceError !== null
+	const isLoading = liveLoading && dashboards.length === 0
+
+	const collectionRef = useRef(collection)
+	collectionRef.current = collection
+	const setPersistenceErrorRef = useRef(setPersistenceError)
+	setPersistenceErrorRef.current = setPersistenceError
+
+	const applyMutationError = useCallback((error: unknown) => {
+		// TanStack DB has already rolled the optimistic state back by the time the
+		// transaction rejects; surface the reason.
+		const concurrency =
+			error instanceof DashboardConcurrencyError ||
+			(isExitLike(error) && isConcurrencyConflict(error))
+		if (concurrency) {
+			setPersistenceErrorRef.current(
+				"Another editor saved changes to this dashboard. The latest version is loading — re-apply your edit if needed.",
+			)
+		} else {
+			setPersistenceErrorRef.current(getErrorMessage(error))
+		}
+	}, [])
+
+	const mutateDashboard = useCallback(
+		async (dashboardId: string, updater: (dashboard: Dashboard) => Dashboard): Promise<void> => {
+			const active = collectionRef.current
+			const row = active.get(dashboardId)
+			if (!row) return
+			const current = rowToDashboard(row)
+			if (!current) return
+
+			const updated = updater(current)
+			if (updated === current) return // no-op
+
+			// Store a plain (structurally-cloned) document so Immer's draft proxy
+			// never wraps a Schema.Class instance; onUpdate re-decodes it.
+			const nextDoc = toDashboardDocument(updated)
+			const plainDoc = JSON.parse(JSON.stringify(nextDoc)) as unknown
+
+			const tx = active.update(dashboardId, (draft) => {
+				draft.payload_json = plainDoc
+				draft.name = updated.name
+				draft.updated_at = updated.updatedAt
+			})
+
+			try {
+				await tx.isPersisted.promise
+			} catch (error) {
+				applyMutationError(error)
+			}
+		},
+		[applyMutationError],
+	)
+
+	const importDashboard = useCallback(
+		async (imported: PortableDashboard): Promise<Dashboard> => {
+			if (readOnly) throw new Error("Dashboards are read-only")
+			const result = await runMapleApi((client) =>
+				client.dashboards.create({
+					payload: new DashboardCreateRequest({
+						dashboard: toPortableDashboardDocument(imported),
+					}),
+				}),
+			).catch((error) => {
+				setPersistenceError(getErrorMessage(error))
+				throw new Error(getErrorMessage(error))
+			})
+
+			const dashboard = ensureDashboard(result)
+			if (dashboard === null) throw new Error("Created dashboard payload is invalid")
+			if (result.txid !== undefined) {
+				await collectionRef.current.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
+			}
+			return dashboard
+		},
+		[readOnly, setPersistenceError],
+	)
+
+	const importPersesDashboard = useCallback(
+		async (
+			persesDashboard: Record<string, unknown>,
+		): Promise<{ dashboard: Dashboard; warnings: string[] }> => {
+			if (readOnly) throw new Error("Dashboards are read-only")
+			const result = await runMapleApi((client) =>
+				client.dashboards.importPerses({
+					payload: new DashboardPersesImportRequest({ dashboard: persesDashboard }),
+				}),
+			).catch((error) => {
+				setPersistenceError(getErrorMessage(error))
+				throw new Error(getErrorMessage(error))
+			})
+
+			const dashboard = ensureDashboard(result.dashboard)
+			if (dashboard === null) throw new Error("Imported Perses dashboard payload is invalid")
+			if (result.txid !== undefined) {
+				await collectionRef.current.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
+			}
+			return { dashboard, warnings: [...result.warnings] }
+		},
+		[readOnly, setPersistenceError],
+	)
+
+	const createDashboard = useCallback(
+		async (name: string): Promise<Dashboard> => {
+			return importDashboard({
+				name,
+				timeRange: { type: "relative", value: "12h" },
+				widgets: [],
+			} as PortableDashboard)
+		},
+		[importDashboard],
+	)
+
+	const updateDashboard = useCallback(
+		(id: string, updates: Partial<Pick<Dashboard, "name" | "description" | "tags">>) => {
+			void mutateDashboard(id, (dashboard) => ({
+				...dashboard,
+				...updates,
+				updatedAt: new Date().toISOString(),
+			}))
+		},
+		[mutateDashboard],
+	)
+
+	const deleteDashboard = useCallback(
+		(id: string) => {
+			if (readOnly) return
+			const active = collectionRef.current
+			if (!active.get(id)) return
+			const tx = active.delete(id)
+			void tx.isPersisted.promise.catch((error: unknown) => applyMutationError(error))
+		},
+		[readOnly, applyMutationError],
+	)
+
+	const updateDashboardTimeRange = useCallback(
+		(id: string, timeRange: TimeRange) => {
+			void mutateDashboard(id, (dashboard) => ({
+				...dashboard,
+				timeRange,
+				updatedAt: new Date().toISOString(),
+			}))
+		},
+		[mutateDashboard],
+	)
+
+	const updateDashboardVariables = useCallback(
+		(id: string, variables: DashboardVariable[]) => {
+			void mutateDashboard(id, (dashboard) => ({
+				...dashboard,
+				variables,
+				updatedAt: new Date().toISOString(),
+			}))
+		},
+		[mutateDashboard],
+	)
+
+	const addWidget = useCallback(
+		(
+			dashboardId: string,
+			visualization: VisualizationType,
+			dataSource: WidgetDataSource,
+			display: WidgetDisplayConfig,
+		): DashboardWidget => {
+			if (readOnly) throw new Error("Dashboards are read-only")
+
+			const layoutDefaults =
+				visualization === "stat"
+					? { w: 3, h: 4, minW: 2, minH: 2 }
+					: visualization === "table" || visualization === "list"
+						? { w: 6, h: 5, minW: 3, minH: 3 }
+						: { w: 4, h: 5, minW: 2, minH: 2 }
+
+			const widgetId = generateId()
+			let widgetRef: DashboardWidget | null = null
+
+			void mutateDashboard(dashboardId, (dashboard) => {
+				const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
+				const widget: DashboardWidget = {
+					id: widgetId,
+					visualization,
+					dataSource,
+					display,
+					layout: { ...position, ...layoutDefaults },
+				}
+				widgetRef = widget
+				return {
+					...dashboard,
+					widgets: [...dashboard.widgets, widget],
+					updatedAt: new Date().toISOString(),
+				}
+			})
+
+			return widgetRef!
+		},
+		[mutateDashboard, readOnly],
+	)
+
+	const cloneWidget = useCallback(
+		(dashboardId: string, widgetId: string) => {
+			if (readOnly) return
+			void mutateDashboard(dashboardId, (dashboard) => {
+				const source = dashboard.widgets.find((w) => w.id === widgetId)
+				if (!source) return dashboard
+				const layoutDefaults = {
+					w: source.layout.w,
+					h: source.layout.h,
+					minW: source.layout.minW ?? 2,
+					minH: source.layout.minH ?? 2,
+				}
+				const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
+				const clone: DashboardWidget = {
+					id: generateId(),
+					visualization: source.visualization,
+					dataSource: structuredClone(source.dataSource),
+					display: structuredClone(source.display),
+					layout: { ...position, ...layoutDefaults },
+				}
+				return {
+					...dashboard,
+					widgets: [...dashboard.widgets, clone],
+					updatedAt: new Date().toISOString(),
+				}
+			})
+		},
+		[mutateDashboard, readOnly],
+	)
+
+	const removeWidget = useCallback(
+		(dashboardId: string, widgetId: string): DashboardWidget | undefined => {
+			const removed = collectionRef.current.get(dashboardId)
+			const removedWidget = removed
+				? rowToDashboard(removed)?.widgets.find((w) => w.id === widgetId)
+				: undefined
+
+			void mutateDashboard(dashboardId, (dashboard) => ({
+				...dashboard,
+				widgets: dashboard.widgets.filter((widget) => widget.id !== widgetId),
+				updatedAt: new Date().toISOString(),
+			}))
+
+			return removedWidget
+		},
+		[mutateDashboard],
+	)
+
+	const restoreWidget = useCallback(
+		(dashboardId: string, widget: DashboardWidget) => {
+			if (readOnly) return
+			void mutateDashboard(dashboardId, (dashboard) => {
+				if (dashboard.widgets.some((w) => w.id === widget.id)) return dashboard
+				return {
+					...dashboard,
+					widgets: [...dashboard.widgets, widget],
+					updatedAt: new Date().toISOString(),
+				}
+			})
+		},
+		[mutateDashboard, readOnly],
+	)
+
+	const updateWidgetDisplay = useCallback(
+		(dashboardId: string, widgetId: string, display: Partial<WidgetDisplayConfig>) => {
+			void mutateDashboard(dashboardId, (dashboard) => ({
+				...dashboard,
+				widgets: dashboard.widgets.map((widget) =>
+					widget.id === widgetId ? { ...widget, display: { ...widget.display, ...display } } : widget,
+				),
+				updatedAt: new Date().toISOString(),
+			}))
+		},
+		[mutateDashboard],
+	)
+
+	const updateWidgetLayouts = useCallback(
+		(dashboardId: string, layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>) => {
+			void mutateDashboard(dashboardId, (dashboard) => {
+				let changed = false
+				const widgets = dashboard.widgets.map((widget) => {
+					const layout = layouts.find((item) => item.i === widget.id)
+					if (!layout) return widget
+					if (
+						widget.layout.x === layout.x &&
+						widget.layout.y === layout.y &&
+						widget.layout.w === layout.w &&
+						widget.layout.h === layout.h
+					)
+						return widget
+					changed = true
+					return {
+						...widget,
+						layout: { ...widget.layout, x: layout.x, y: layout.y, w: layout.w, h: layout.h },
+					}
+				})
+				if (!changed) return dashboard
+				const sorted = widgets.toSorted((a, b) => {
+					if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
+					return a.layout.x - b.layout.x
+				})
+				return { ...dashboard, widgets: sorted, updatedAt: new Date().toISOString() }
+			})
+		},
+		[mutateDashboard],
+	)
+
+	const updateWidget = useCallback(
+		(
+			dashboardId: string,
+			widgetId: string,
+			updates: Partial<Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout">>,
+		) => {
+			return mutateDashboard(dashboardId, (dashboard) => ({
+				...dashboard,
+				widgets: dashboard.widgets.map((widget) =>
+					widget.id === widgetId ? { ...widget, ...updates } : widget,
+				),
+				updatedAt: new Date().toISOString(),
+			}))
+		},
+		[mutateDashboard],
+	)
+
+	const autoLayoutWidgets = useCallback(
+		(dashboardId: string) => {
+			void mutateDashboard(dashboardId, (dashboard) => {
+				if (dashboard.widgets.length === 0) return dashboard
+				const sorted = dashboard.widgets.toSorted((a, b) => {
+					if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
+					return a.layout.x - b.layout.x
+				})
+				let currentX = 0
+				let currentY = 0
+				let rowHeight = 0
+				const relaid = sorted.map((widget) => {
+					const w = widget.layout.w
+					const h = widget.layout.h
+					if (currentX + w > GRID_COLS) {
+						currentX = 0
+						currentY += rowHeight
+						rowHeight = 0
+					}
+					const newLayout = { ...widget.layout, x: currentX, y: currentY }
+					currentX += w
+					rowHeight = Math.max(rowHeight, h)
+					return { ...widget, layout: newLayout }
+				})
+				return { ...dashboard, widgets: relaid, updatedAt: new Date().toISOString() }
+			})
+		},
+		[mutateDashboard],
+	)
+
+	return {
+		dashboards,
+		isLoading,
+		readOnly,
+		persistenceError,
+		createDashboard,
+		importDashboard,
+		importPersesDashboard,
+		updateDashboard,
+		deleteDashboard,
+		updateDashboardTimeRange,
+		updateDashboardVariables,
+		addWidget,
+		cloneWidget,
+		removeWidget,
+		restoreWidget,
+		updateWidgetDisplay,
+		updateWidgetLayouts,
+		updateWidget,
+		autoLayoutWidgets,
+	}
+}
+
+// Build-time dispatch. `ELECTRIC_SYNC_ENABLED` is a compile-time constant, so
+// exactly one branch survives bundling and hook order is stable per build.
+export function useDashboardStore() {
+	if (ELECTRIC_SYNC_ENABLED) {
+		// eslint-disable-next-line react-hooks/rules-of-hooks
+		return useDashboardStoreCollection()
+	}
+	// eslint-disable-next-line react-hooks/rules-of-hooks
+	return useDashboardStoreAtoms()
 }

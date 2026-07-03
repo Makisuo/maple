@@ -1176,7 +1176,7 @@ const make: Effect.Effect<
 		const timestamp = opts.timestamp ?? (yield* Clock.currentTimeMillis)
 		const fromState = row.workflowState
 		if (fromState === toState) {
-			return { row, txid: undefined as string | undefined }
+			return row
 		}
 		yield* validateTransition(row.id, fromState, toState)
 
@@ -1207,14 +1207,12 @@ const make: Effect.Effect<
 			update.claimedAt = null
 		}
 
-		const transitioned = yield* dbExecute((db) =>
+		yield* dbExecute((db) =>
 			db
 				.update(errorIssues)
 				.set(update)
-				.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id)))
-				.returning(txidColumn),
+				.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, row.id))),
 		)
-		const txid = readTxid(transitioned)
 
 		if (toState === "done") {
 			yield* dbExecute((db) =>
@@ -1253,8 +1251,7 @@ const make: Effect.Effect<
 
 		if (actorId) yield* touchActor(orgId, actorId, timestamp)
 
-		const next = yield* requireIssue(orgId, row.id)
-		return { row: next, txid }
+		return yield* requireIssue(orgId, row.id)
 	})
 
 	const transitionIssue: ErrorsServiceShape["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
@@ -1407,7 +1404,7 @@ const make: Effect.Effect<
 				previous - (dateToMs(current.claimedAt) ?? previous),
 			)
 			const leaseExpiresAt = timestamp + leaseMs
-			yield* dbExecute((db) =>
+			const heartbeatRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
 					.set({ leaseExpiresAt: new Date(leaseExpiresAt), updatedAt: new Date(timestamp) })
@@ -1417,11 +1414,14 @@ const make: Effect.Effect<
 							eq(errorIssues.id, issueId),
 							eq(errorIssues.leaseHolderActorId, actorId),
 						),
-					),
+					)
+					.returning(txidColumn),
 			)
 			yield* touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
-			return yield* hydrateIssue(orgId, next)
+			const doc = yield* hydrateIssue(orgId, next)
+			const txid = readTxid(heartbeatRows)
+			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		},
 	)
 
@@ -1482,11 +1482,12 @@ const make: Effect.Effect<
 					)
 				}
 			}
-			yield* dbExecute((db) =>
+			const assignedRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
 					.set({ assignedActorId: toActorId, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId))),
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
+					.returning(txidColumn),
 			)
 			yield* recordEvent(orgId, issueId, byActorId, "assignment", {
 				payload: {
@@ -1497,7 +1498,9 @@ const make: Effect.Effect<
 			})
 			yield* touchActor(orgId, byActorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
-			return yield* hydrateIssue(orgId, next)
+			const doc = yield* hydrateIssue(orgId, next)
+			const txid = readTxid(assignedRows)
+			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		},
 	)
 
@@ -1556,11 +1559,12 @@ const make: Effect.Effect<
 				return yield* hydrateIssue(orgId, current)
 			}
 
-			yield* dbExecute((db) =>
+			const severityRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
 					.set({ severity, severitySource: nextSource, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId))),
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
+					.returning(txidColumn),
 			)
 
 			if (current.severity !== severity) {
@@ -1582,7 +1586,9 @@ const make: Effect.Effect<
 
 			yield* touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
-			return yield* hydrateIssue(orgId, next)
+			const doc = yield* hydrateIssue(orgId, next)
+			const txid = readTxid(severityRows)
+			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		},
 	)
 

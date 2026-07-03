@@ -26,7 +26,13 @@ export type DashboardRow = {
 }
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
-const decodeDashboardDocument = Schema.decodeUnknownSync(DashboardDocument)
+const decodeDashboardDocumentUnknown = Schema.decodeUnknownSync(DashboardDocument)
+
+// The @electric-sql/client default parser JSON.parses jsonb columns, so
+// `payload_json` normally arrives as an object. Normalize defensively (a raw
+// string can appear if a non-default parser is ever configured) before decoding.
+const decodeDashboardDocument = (payloadJson: unknown) =>
+	decodeDashboardDocumentUnknown(typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson)
 
 // Memoize the payload decode so a re-render (or a live-query re-run) over an
 // unchanged row doesn't re-parse its jsonb. Keyed on the row's payload_json
