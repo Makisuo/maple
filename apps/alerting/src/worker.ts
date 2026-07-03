@@ -341,7 +341,10 @@ export default {
 			),
 		)
 		try {
-			await runScheduledEffect(buildLayer(env), program, ctx)
+			// Cron ticks cancel gracefully on isolate teardown — the schedule reruns
+			// anyway, and re-raised interrupts (see the per-org catchCause guards in the
+			// tick services) must not surface as failed invocations.
+			await runScheduledEffect(buildLayer(env), program, ctx, { onInterrupt: "graceful" })
 		} finally {
 			ctx.waitUntil(telemetry.flush(env))
 		}

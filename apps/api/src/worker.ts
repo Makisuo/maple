@@ -246,7 +246,12 @@ const handleQueue = async (
 const handleScheduled = async (env: Record<string, unknown>, ctx: ExecutionContext): Promise<void> => {
 	const { buildVcsScheduledLayer, runScheduledSync, flushVcsTelemetry } = await import("./vcs-sync-runtime")
 	try {
-		await runScheduledEffect(buildVcsScheduledLayer(env), runScheduledSync, ctx)
+		// Graceful on interrupt: a teardown mid-cron is expected lifecycle, and the
+		// schedule reruns — only the queue consumer above must keep rejecting so an
+		// interrupted batch redelivers instead of acking.
+		await runScheduledEffect(buildVcsScheduledLayer(env), runScheduledSync, ctx, {
+			onInterrupt: "graceful",
+		})
 	} finally {
 		ctx.waitUntil(flushVcsTelemetry(env))
 	}
