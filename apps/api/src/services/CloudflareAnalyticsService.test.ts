@@ -30,7 +30,8 @@ const ZONE_NAME = "example.com"
 const T0 = Date.parse("2026-07-02T12:00:00Z")
 const MIN = 60_000
 
-const ANALYTICS_SCOPE = "account-settings.read account-analytics.read zone.read workers-scripts.read"
+const ANALYTICS_SCOPE =
+	"account-settings.read account-analytics.read analytics.read zone.read workers-scripts.read"
 
 const ENCRYPTION_KEY_B64 = Buffer.alloc(32, 7).toString("base64")
 
@@ -368,6 +369,14 @@ describe("hasAnalyticsScopes", () => {
 		assert.isTrue(hasAnalyticsScopes(ANALYTICS_SCOPE))
 		assert.isFalse(hasAnalyticsScopes("account-settings.read workers-scripts.read"))
 		assert.isFalse(hasAnalyticsScopes(""))
+	})
+
+	it("is not satisfied by zone.read alone — zone analytics needs analytics.read", () => {
+		// Regression: zone.read lists zones but does NOT authorize httpRequestsAdaptiveGroups, so a
+		// token with account+zone read but no analytics.read polled workers fine while every zone
+		// query was rejected "not authorized". Such a token must read as not analytics-capable.
+		assert.isFalse(hasAnalyticsScopes("account-analytics.read zone.read"))
+		assert.isTrue(hasAnalyticsScopes("account-analytics.read analytics.read zone.read"))
 	})
 })
 

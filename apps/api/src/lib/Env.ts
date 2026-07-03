@@ -126,14 +126,21 @@ const envConfig = Config.all({
 	// created with — keep the OAuth client's granted set in sync with this list.
 	// `offline_access` is added/removed automatically by Cloudflare based on the client's
 	// grant types, so it must not be listed.
-	// The analytics scopes (account-analytics.read = GraphQL Analytics, zone.read = zone
-	// discovery) power the edge-metrics poller. Every id below was verified verbatim against
-	// the live scope registry (GET /client/v4/oauth/scopes, 2026-07-03). The remaining ops
-	// requirement is on the CLIENT side: the registered OAuth client must have all of these
-	// granted, or connects fail with invalid_scope.
+	// The analytics scopes power the edge-metrics poller. There are THREE distinct ones and they
+	// are NOT interchangeable (Cloudflare authorizes account- vs zone-scoped GraphQL datasets
+	// separately):
+	//   - account-analytics.read → account-scoped datasets (workersInvocationsAdaptive = Workers)
+	//   - analytics.read          → zone-scoped datasets (httpRequestsAdaptiveGroups = HTTP/zone traffic)
+	//   - zone.read               → zone discovery only (REST /zones listing); does NOT grant analytics
+	// zone.read is enough to LIST zones but NOT to read their analytics — the zone GraphQL query
+	// returns "not authorized" without analytics.read (that was the original bug: workers ingested
+	// fine while every zone query was rejected). Every id below is verified verbatim against the
+	// live scope registry (GET /client/v4/oauth/scopes). The registered OAuth client must have all
+	// of these granted, or connects fail with invalid_scope — and existing users must reconnect to
+	// pick up a newly-added scope.
 	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
 		"CLOUDFLARE_OAUTH_SCOPES",
-		"account-settings.read account-analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
+		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
 	),
 	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",

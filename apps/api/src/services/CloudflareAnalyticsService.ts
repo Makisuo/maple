@@ -93,9 +93,15 @@ import {
 /**
  * OAuth scopes the poller needs (space-delimited ids in `oauth_connections.scope`). Kept next to
  * the service so the HTTP status route and the poll gating share one source of truth.
- * Both ids verified verbatim against the live registry (GET /client/v4/oauth/scopes, 2026-07-03).
+ *   - account-analytics.read → account-scoped datasets (workersInvocationsAdaptive)
+ *   - analytics.read         → zone-scoped datasets (httpRequestsAdaptiveGroups) — WITHOUT this the
+ *                              zone GraphQL query is rejected "not authorized" even though zones list
+ *   - zone.read              → zone discovery (REST /zones); grants config read, NOT analytics
+ * A connection missing any of these is treated as not analytics-capable so the UI prompts a
+ * reconnect (existing tokens predating a scope addition won't carry it). Ids verified verbatim
+ * against the live registry (GET /client/v4/oauth/scopes).
  */
-const CLOUDFLARE_ANALYTICS_SCOPES = ["account-analytics.read", "zone.read"] as const
+const CLOUDFLARE_ANALYTICS_SCOPES = ["account-analytics.read", "analytics.read", "zone.read"] as const
 
 export const hasAnalyticsScopes = (scope: string): boolean => {
 	const granted = new Set(scope.split(/[\s,]+/).filter((s) => s.length > 0))
