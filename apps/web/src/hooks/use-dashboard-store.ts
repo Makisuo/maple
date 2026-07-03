@@ -798,6 +798,16 @@ function useDashboardStoreCollection() {
 	collectionRef.current = collection
 	const setPersistenceErrorRef = useRef(setPersistenceError)
 	setPersistenceErrorRef.current = setPersistenceError
+	const persistenceErrorRef = useRef(persistenceError)
+	persistenceErrorRef.current = persistenceError
+
+	// A successful write proves persistence is healthy again — clear a stale
+	// banner so the UI leaves read-only without a page reload. Mirrors the atom
+	// path, which clears the error on a successful list refetch. Guarded so a
+	// steady stream of successful edits doesn't churn state when nothing is set.
+	const clearPersistenceError = useCallback(() => {
+		if (persistenceErrorRef.current !== null) setPersistenceErrorRef.current(null)
+	}, [])
 
 	const applyMutationError = useCallback((error: unknown) => {
 		// TanStack DB has already rolled the optimistic state back by the time the
@@ -838,11 +848,12 @@ function useDashboardStoreCollection() {
 
 			try {
 				await tx.isPersisted.promise
+				clearPersistenceError()
 			} catch (error) {
 				applyMutationError(error)
 			}
 		},
-		[applyMutationError],
+		[applyMutationError, clearPersistenceError],
 	)
 
 	const importDashboard = useCallback(
