@@ -1,4 +1,4 @@
-CREATE TABLE "cloudflare_analytics_state" (
+CREATE TABLE IF NOT EXISTS "cloudflare_analytics_state" (
 	"id" text PRIMARY KEY NOT NULL,
 	"org_id" text NOT NULL,
 	"dataset" text NOT NULL,
@@ -17,5 +17,5 @@ CREATE TABLE "cloudflare_analytics_state" (
 	"updated_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX "cf_analytics_state_org_dataset_zone_idx" ON "cloudflare_analytics_state" USING btree ("org_id","dataset","zone_id");--> statement-breakpoint
-CREATE INDEX "cf_analytics_state_org_idx" ON "cloudflare_analytics_state" USING btree ("org_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "cf_analytics_state_org_dataset_zone_idx" ON "cloudflare_analytics_state" USING btree ("org_id","dataset","zone_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "cf_analytics_state_org_idx" ON "cloudflare_analytics_state" USING btree ("org_id");

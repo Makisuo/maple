@@ -1,6 +1,6 @@
 {
-  "id": "421a2536-5822-41c6-a2c5-f322ab8b0fba",
-  "prevId": "137e0050-a264-4a2e-bf0a-e2f8433e9ef7",
+  "id": "137e0050-a264-4a2e-bf0a-e2f8433e9ef7",
+  "prevId": "85baabb9-e723-47c7-b52e-7a67d2d7d8b0",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3914,12 +3914,6 @@
         },
         "external_user_email": {
           "name": "external_user_email",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "external_account_name": {
-          "name": "external_account_name",
           "type": "text",
           "primaryKey": false,
           "notNull": false

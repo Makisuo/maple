@@ -239,25 +239,6 @@ export class ServiceApdexResponse extends Schema.Class<ServiceApdexResponse>("Se
 	),
 }) {}
 
-export class ServiceReleasesRequest extends Schema.Class<ServiceReleasesRequest>("ServiceReleasesRequest")({
-	startTime: TinybirdDateTime,
-	endTime: TinybirdDateTime,
-	serviceName: ServiceName,
-	bucketSeconds: Schema.optional(Schema.Number),
-}) {}
-
-export class ServiceReleasesResponse extends Schema.Class<ServiceReleasesResponse>("ServiceReleasesResponse")(
-	{
-		data: Schema.Array(
-			Schema.Struct({
-				bucket: Schema.String,
-				commitSha: CommitSha,
-				count: Schema.Number,
-			}),
-		),
-	},
-) {}
-
 export class ServiceDependenciesRequest extends Schema.Class<ServiceDependenciesRequest>(
 	"ServiceDependenciesRequest",
 )({
@@ -1290,13 +1271,6 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceApdex", "/service-apdex", {
 			payload: ServiceApdexRequest,
 			success: ServiceApdexResponse,
-			error: queryEngineEndpointErrors,
-		}),
-	)
-	.add(
-		HttpApiEndpoint.post("serviceReleases", "/service-releases", {
-			payload: ServiceReleasesRequest,
-			success: ServiceReleasesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

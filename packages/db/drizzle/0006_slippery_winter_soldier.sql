@@ -1,1 +1,0 @@
-ALTER TABLE "cloudflare_analytics_state" ADD COLUMN "discovered_at" timestamp with time zone;

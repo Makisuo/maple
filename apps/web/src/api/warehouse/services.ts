@@ -8,7 +8,6 @@ import {
 	ServiceNamespace,
 	ServiceHealthBaselineRequest,
 	ServiceOverviewRequest,
-	ServiceReleasesRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
@@ -416,43 +415,6 @@ const getServicesFacetsEffect = Effect.fn("QueryEngine.getServicesFacets")(funct
 
 	return {
 		data: { environments, namespaces, commitShas, services },
-	}
-})
-
-// Service releases timeline
-export function getServiceReleasesTimeline({ data }: { data: GetServiceDetailInput }) {
-	return getServiceReleasesTimelineEffect({ data })
-}
-
-const getServiceReleasesTimelineEffect = Effect.fn("QueryEngine.getServiceReleasesTimeline")(function* ({
-	data,
-}: {
-	data: GetServiceDetailInput
-}) {
-	const input = yield* decodeInput(GetServiceDetailInput, data, "getServiceReleasesTimeline")
-	const fallback = defaultServicesTimeRange(yield* Clock.currentTimeMillis)
-	const bucketSeconds = computeBucketSeconds(input.startTime, input.endTime)
-
-	const result = yield* runWarehouseQuery("serviceReleases", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.serviceReleases({
-				payload: new ServiceReleasesRequest({
-					serviceName: input.serviceName,
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					bucketSeconds,
-				}),
-			})
-		}),
-	)
-
-	return {
-		data: result.data.map((row) => ({
-			bucket: toIsoBucket(row.bucket),
-			commitSha: row.commitSha,
-			count: Number(row.count),
-		})),
 	}
 })
 

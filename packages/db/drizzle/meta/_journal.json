@@ -26,29 +26,36 @@
     {
       "idx": 3,
       "version": "7",
-      "when": 1782944140616,
-      "tag": "0003_premium_korg",
+      "when": 1782992101248,
+      "tag": "0003_backfill_github_commit_avatars",
       "breakpoints": true
     },
     {
       "idx": 4,
       "version": "7",
-      "when": 1782985591733,
-      "tag": "0004_loud_pyro",
+      "when": 1783200000000,
+      "tag": "0004_premium_korg",
       "breakpoints": true
     },
     {
       "idx": 5,
       "version": "7",
-      "when": 1783033130016,
-      "tag": "0005_natural_marvel_apes",
+      "when": 1783200001000,
+      "tag": "0005_loud_pyro",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1783068761648,
-      "tag": "0006_slippery_winter_soldier",
+      "when": 1783200002000,
+      "tag": "0006_natural_marvel_apes",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783200003000,
+      "tag": "0007_slippery_winter_soldier",
       "breakpoints": true
     }
   ]

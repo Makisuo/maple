@@ -200,6 +200,71 @@ describe("GithubProvider.webhookToJobs", () => {
 			assert.strictEqual(job.commits.length, 1)
 			assert.strictEqual(job.commits[0]!.sha, SHA)
 			assert.strictEqual(job.commits[0]!.authorLogin, "octocat")
+			// Push payloads carry no avatar URL — the provider derives one from the
+			// committer login against the commit's own host (here github.com), so the
+			// dashboard never has to patch a null avatar.
+			assert.strictEqual(
+				job.commits[0]!.authorAvatarUrl,
+				"https://github.com/octocat.png?size=64",
+			)
+		}).pipe(Effect.provide(providerLayer())),
+	)
+
+	it.effect("derives a push commit's avatar against its own host (GitHub Enterprise)", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const body = JSON.stringify({
+				ref: "refs/heads/main",
+				repository: { id: 7, owner: { login: "octo" } },
+				installation: { id: 42 },
+				commits: [
+					{
+						id: SHA,
+						message: "enterprise commit",
+						timestamp: "2026-01-01T00:00:00Z",
+						url: `https://github.acme.com/octo/repo/commit/${SHA}`,
+						author: { name: "Octo Cat", email: "octo@x.io", username: "octocat" },
+					},
+				],
+			})
+			const jobs = yield* provider.webhookToJobs({
+				headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
+				rawBody: body,
+			})
+			const job = jobs[0]!
+			if (job.kind !== "push") return assert.fail("expected a push job")
+			assert.strictEqual(
+				job.commits[0]!.authorAvatarUrl,
+				"https://github.acme.com/octocat.png?size=64",
+			)
+		}).pipe(Effect.provide(providerLayer())),
+	)
+
+	it.effect("leaves a push commit's avatar null when the committer has no login", () =>
+		Effect.gen(function* () {
+			const provider = yield* GithubProvider
+			const body = JSON.stringify({
+				ref: "refs/heads/main",
+				repository: { id: 7, owner: { login: "octo" } },
+				installation: { id: 42 },
+				commits: [
+					{
+						id: SHA,
+						message: "no linked account",
+						timestamp: "2026-01-01T00:00:00Z",
+						url: `https://github.com/octo/repo/commit/${SHA}`,
+						author: { name: "Octo Cat", email: "octo@x.io" },
+					},
+				],
+			})
+			const jobs = yield* provider.webhookToJobs({
+				headers: { "x-github-event": "push", "x-hub-signature-256": sign(body) },
+				rawBody: body,
+			})
+			const job = jobs[0]!
+			if (job.kind !== "push") return assert.fail("expected a push job")
+			assert.strictEqual(job.commits[0]!.authorLogin, null)
+			assert.strictEqual(job.commits[0]!.authorAvatarUrl, null)
 		}).pipe(Effect.provide(providerLayer())),
 	)
 

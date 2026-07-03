@@ -1,6 +1,6 @@
 {
-  "id": "6ddf6987-d54b-48b5-9412-c4a0d5f8fc66",
-  "prevId": "cb5366dd-6209-4c49-bada-eb7535a928ad",
+  "id": "cb5366dd-6209-4c49-bada-eb7535a928ad",
+  "prevId": "421a2536-5822-41c6-a2c5-f322ab8b0fba",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1996,12 +1996,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
-        },
-        "discovered_at": {
-          "name": "discovered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         },
         "last_success_at": {
           "name": "last_success_at",
