@@ -107,6 +107,7 @@ import {
 	type EncryptedValue,
 } from "../lib/Crypto"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
+import { readTxid, txidColumn } from "../lib/electric-txid"
 import {
 	buildAlertChatUrl,
 	dispatchDelivery as dispatchDeliveryImpl,
@@ -2294,28 +2295,33 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					updatedBy: userId,
 				} as const
 
-				if (existingId == null) {
-					yield* dbExecute((db) =>
-						db.insert(alertRules).values({
-							id: ruleId,
-							orgId,
-							...ruleFields,
-							createdAt: new Date(timestamp),
-							createdBy: userId,
-						}),
-					)
-				} else {
-					yield* dbExecute((db) =>
-						db
-							.update(alertRules)
-							.set(ruleFields)
-							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId))),
-					)
-				}
+				const writeRows =
+					existingId == null
+						? yield* dbExecute((db) =>
+								db
+									.insert(alertRules)
+									.values({
+										id: ruleId,
+										orgId,
+										...ruleFields,
+										createdAt: new Date(timestamp),
+										createdBy: userId,
+									})
+									.returning(txidColumn),
+							)
+						: yield* dbExecute((db) =>
+								db
+									.update(alertRules)
+									.set(ruleFields)
+									.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)))
+									.returning(txidColumn),
+							)
+				const txid = readTxid(writeRows)
 
 				const row = yield* requireRuleRow(orgId, ruleId)
 				const destinationIds = safeParseStringArray(row.destinationIdsJson)
-				return rowToRuleDocument(row, destinationIds)
+				const document = rowToRuleDocument(row, destinationIds)
+				return txid === undefined ? document : new AlertRuleDocument({ ...document, txid })
 			})
 
 			const listRules = Effect.fn("AlertsService.listRules")(function* (orgId: OrgId) {
@@ -2415,7 +2421,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			) {
 				yield* requireAdmin(roles)
 				yield* requireRuleRow(orgId, ruleId)
-				yield* dbExecute((db) =>
+				// All deletes run in one transaction, so a single txid (captured on the
+				// alert_rules delete — the only synced table here) covers the whole
+				// change for the Electric alert_rules collection.
+				const deleted = yield* dbExecute((db) =>
 					db.transaction(async (tx) => {
 						await tx
 							.delete(alertDeliveryEvents)
@@ -2431,12 +2440,17 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						await tx
 							.delete(alertRuleStates)
 							.where(and(eq(alertRuleStates.orgId, orgId), eq(alertRuleStates.ruleId, ruleId)))
-						await tx
+						return tx
 							.delete(alertRules)
 							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
+							.returning(txidColumn)
 					}),
 				)
-				return new AlertRuleDeleteResponse({ id: ruleId })
+				const txid = readTxid(deleted)
+				return new AlertRuleDeleteResponse({
+					id: ruleId,
+					...(txid !== undefined && { txid }),
+				})
 			})
 
 			const testRule = Effect.fn("AlertsService.testRule")(function* (

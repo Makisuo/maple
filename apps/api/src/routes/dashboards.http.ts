@@ -45,6 +45,7 @@ export const HttpDashboardsLive = HttpApiBuilder.group(MapleApi, "dashboards", (
 					return new DashboardPersesImportResponse({
 						dashboard,
 						warnings: [...converted.warnings],
+						...(dashboard.txid !== undefined && { txid: dashboard.txid }),
 					})
 				}),
 			)
