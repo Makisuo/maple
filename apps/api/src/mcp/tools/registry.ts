@@ -62,7 +62,7 @@ import { registerUpdateDashboardWidgetTool } from "./update-dashboard-widget"
 export interface MapleToolDefinition {
 	readonly name: string
 	readonly description: string
-	readonly schema: Schema.Decoder<unknown, never>
+	readonly schema: Schema.Codec<unknown, unknown, never, unknown>
 	readonly handler: (params: unknown) => Effect.Effect<McpToolResult, McpToolError, any>
 }
 

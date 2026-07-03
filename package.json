@@ -38,7 +38,7 @@
 	"dependencies": {},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
-		"@effect/vitest": "4.0.0-beta.85",
+		"@effect/vitest": "4.0.0-beta.93",
 		"@maple/infra": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"@types/node": "catalog:tooling",
@@ -60,10 +60,10 @@
 			"@clickhouse/client-web": "^1.21.0"
 		},
 		"effect": {
-			"@effect/atom-react": "4.0.0-beta.85",
+			"@effect/atom-react": "4.0.0-beta.93",
 			"@effect/language-service": "^0.86.2",
-			"@effect/platform-bun": "4.0.0-beta.85",
-			"effect": "4.0.0-beta.85"
+			"@effect/platform-bun": "4.0.0-beta.93",
+			"effect": "4.0.0-beta.93"
 		},
 		"react": {
 			"@types/react": "^19.2.14",
@@ -93,6 +93,6 @@
 		}
 	},
 	"patchedDependencies": {
-		"effect@4.0.0-beta.85": "patches/effect@4.0.0-beta.85.patch"
+		"effect@4.0.0-beta.93": "patches/effect@4.0.0-beta.93.patch"
 	}
 }
