@@ -61,7 +61,9 @@ function useAlertRulesListCollection(): AlertRulesListHook {
 	)
 
 	const { data: ruleRows, isLoading: rulesLoading } = useLiveQuery(
-		(q) => q.from({ r: rulesCollection }).orderBy(({ r }) => r.created_at, "desc"),
+		// Match the server's `listRules` ordering (desc updatedAt) so recently
+		// edited rules stay at the top, as the atom path does.
+		(q) => q.from({ r: rulesCollection }).orderBy(({ r }) => r.updated_at, "desc"),
 		[rulesCollection],
 	)
 	const { data: stateRows } = useLiveQuery((q) => q.from({ s: statesCollection }), [statesCollection])
