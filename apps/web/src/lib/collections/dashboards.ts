@@ -83,6 +83,17 @@ export const rowToDashboard = (row: DashboardRow): Dashboard | null => {
 const rowToUpsertRequest = (row: DashboardRow): DashboardUpsertRequest =>
 	new DashboardUpsertRequest({ dashboard: decodeDashboardDocument(row.payload_json) })
 
+// The API attaches a txid on every successful dashboard write (readTxid over the
+// mutating statement), but `txid` is `Schema.optionalKey` on the response types,
+// so it's typed `string | undefined`. `@maple/effect-db`'s handler requires a
+// truthy txid and rejects otherwise, and `Number(undefined)` is `NaN` — which
+// would roll back a write that actually succeeded. Fail explicitly on the missing
+// case (never observed for dashboards) instead of silently producing NaN.
+const requireTxid = (txid: string | undefined): Effect.Effect<number> =>
+	txid === undefined
+		? Effect.die(new Error("Dashboard write succeeded but the server returned no txid"))
+		: Effect.succeed(Number(txid))
+
 /**
  * Creates the per-org dashboards collection via `@maple/effect-db`'s
  * `createEffectCollection`: an identity {@link DashboardRowSchema} validates the
@@ -112,7 +123,7 @@ export const createDashboardsCollection = (orgId: string) =>
 					params: { dashboardId: asDashboardId(modified.id) },
 					payload: rowToUpsertRequest(modified),
 				})
-				return { txid: Number(result.txid) }
+				return { txid: yield* requireTxid(result.txid) }
 			}),
 		onDelete: ({ transaction }) =>
 			Effect.gen(function* () {
@@ -121,7 +132,7 @@ export const createDashboardsCollection = (orgId: string) =>
 				const result = yield* client.dashboards.delete({
 					params: { dashboardId: asDashboardId(original.id) },
 				})
-				return { txid: Number(result.txid) }
+				return { txid: yield* requireTxid(result.txid) }
 			}),
 	})
 
