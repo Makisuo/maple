@@ -23,7 +23,7 @@ import { useLiveQuery } from "@tanstack/react-db"
 import { ELECTRIC_SYNC_ENABLED } from "@/lib/collections/config"
 import { runMapleApi } from "@/lib/collections/api-runner"
 import { rowToDashboard } from "@/lib/collections/dashboards"
-import { getOrgCollections, useActiveOrgId } from "@/lib/collections/org-collections"
+import { getOrgCollections, useActiveOrgId, useCollectionsGeneration } from "@/lib/collections/org-collections"
 import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
 	Dashboard,
@@ -779,7 +779,11 @@ function useDashboardStoreCollection() {
 	// cache across org switches). The dashboards route is auth-gated, so a token
 	// is present in practice.
 	const orgKey = useActiveOrgId() ?? "pending"
-	const collection = useMemo(() => getOrgCollections(orgKey).dashboards, [orgKey])
+	// Re-resolve on a self-heal generation bump (post-deploy schema drift) as well
+	// as an org switch, matching the alerts/errors collection hooks — otherwise
+	// this memo keeps the stale, cleaned-up collection after a schema-error reset.
+	const generation = useCollectionsGeneration()
+	const collection = useMemo(() => getOrgCollections(orgKey).dashboards, [orgKey, generation])
 
 	const { data: rows, isLoading: liveLoading } = useLiveQuery(
 		(q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
