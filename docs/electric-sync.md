@@ -31,12 +31,14 @@ Ported and adapted from the hazel repo's two libraries to effect `4.0.0-beta.93`
 ```
 Browser (apps/web)
   TanStack DB collections, one set per active org
-    read:  ShapeStream → GET {api}/api/sync/shape?shape=<name>&offset=…&handle=…
+    read:  ShapeStream → GET {VITE_ELECTRIC_SYNC_URL}/api/sync/shape?shape=<name>&offset=…&handle=…
            (mapleShapeFetch injects the Clerk / self-hosted bearer)
-    write: existing typed HTTP endpoints (Electric is read-path only)
+    write: existing typed HTTP endpoints on apps/api (Electric is read-path only)
 
-apps/api Worker — /api/sync/shape  (electric-sync.http.ts, a raw HttpRouter)
-  auth: API key, else Clerk/self-hosted tenant resolution (same as ApiAuthorizationLayer)
+apps/electric-sync Worker — /api/sync/shape  (src/routes/shape.http.ts, a raw HttpRouter)
+  a standalone, DB-free worker (deploys independently of apps/api)
+  auth: Clerk/self-hosted tenant resolution ONLY (makeResolveTenant, shared from
+        @maple/api/electric-sync) — no API-key path, since it has no database
   pins: table + `"org_id" = $1` (+ per-shape extra WHERE), params[1]=orgId, source_id/secret
   forwards ONLY offset/handle/live/cursor from the client
   streams Electric's response back (buffers the long-poll body)
@@ -50,7 +52,7 @@ writes: endpoint captures the Postgres txid on the mutating statement
   state once that transaction arrives on the shape stream.
 ```
 
-### Shapes (server-pinned whitelist, `electric-sync.http.ts`)
+### Shapes (server-pinned whitelist, `apps/electric-sync/src/routes/shape.http.ts`)
 
 | shape | table | extra WHERE (besides org scope) |
 |---|---|---|
@@ -73,11 +75,16 @@ full re-sync for every client. If you must change one, version the shape name
    If your Postgres volume predates the `wal_level` change, recreate it:
    `docker compose -f docker-compose.development.yml up -d --force-recreate postgres electric`.
 2. `bun db:migrate:local` applies migrations, including `0009_electric_publication`.
-3. `.env.local`: `ELECTRIC_URL=http://localhost:3473` (already in `.env.example`).
+3. `.env.local`: `ELECTRIC_URL=http://localhost:3473` and
+   `VITE_ELECTRIC_SYNC_URL=http://localhost:3476` (both already in `.env.example`).
+   `ELECTRIC_URL` is now read by the `apps/electric-sync` worker (default port 3476);
+   `VITE_ELECTRIC_SYNC_URL` points the web app's ShapeStreams at it.
 4. Run the app (`bun dev`) with `VITE_ELECTRIC_SYNC=1` to exercise the sync path.
+   `bun dev` starts the `electric-sync` worker alongside the others via portless.
 
-Smoke-test the shape endpoint directly (no proxy):
-`curl -g 'http://localhost:3473/v1/shape?table=dashboards&offset=-1'`.
+Smoke-test the proxy directly (through the standalone worker; needs a bearer):
+`curl -g 'http://localhost:3476/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
+or hit Electric with no proxy: `curl -g 'http://localhost:3473/v1/shape?table=dashboards&offset=-1'`.
 
 ## Production runbook (PlanetScale + Electric Cloud)
 
@@ -93,8 +100,11 @@ Smoke-test the shape endpoint directly (no proxy):
 4. **Electric Cloud source:** point it at the **direct** connection string
    (port 5432 — not PSBouncer/6432, not Hyperdrive), `ELECTRIC_MANUAL_TABLE_PUBLISHING=true`.
    Record `source_id` / `secret`.
-5. **Env:** set `ELECTRIC_URL`, `ELECTRIC_SOURCE_ID`, `ELECTRIC_SECRET`
-   (wired in `apps/api/alchemy.run.ts` + `Env.ts`), then `alchemy deploy`.
+5. **Env:** set `ELECTRIC_URL`, `ELECTRIC_SOURCE_ID`, `ELECTRIC_SECRET` — now wired
+   into the standalone sync worker (`apps/electric-sync/alchemy.run.ts` +
+   `src/config.ts`), which also needs the auth env (`MAPLE_AUTH_MODE`,
+   `MAPLE_ROOT_PASSWORD` or `CLERK_*`). The root `alchemy.run.ts` bakes the worker's
+   public origin into the web build as `VITE_ELECTRIC_SYNC_URL`. Then `alchemy deploy`.
    With `ELECTRIC_URL` unset the proxy returns 503 and the app stays on effect-atom.
 6. Validate initial per-org snapshot sizes before flipping `VITE_ELECTRIC_SYNC=1`
    on the web deploy.
@@ -104,7 +114,7 @@ Smoke-test the shape endpoint directly (no proxy):
 1. New guarded Drizzle migration: `ALTER PUBLICATION electric_publication_default ADD TABLE "<t>";`
    plus `ALTER TABLE "<t>" REPLICA IDENTITY FULL;` (wrap in the same
    `DO $$ … EXCEPTION … END $$` guard as `0009` so PGlite tests don't abort).
-2. Add the shape to the whitelist in `electric-sync.http.ts`.
+2. Add the shape to the whitelist in `apps/electric-sync/src/routes/shape.http.ts`.
 3. Add a collection under `apps/web/src/lib/collections/` via
    `createEffectCollection` (model on `dashboards.ts` for a write vertical, or
    `alerts.ts`/`errors.ts` for a read-only one — an identity `Schema.Struct` row
@@ -118,9 +128,9 @@ Smoke-test the shape endpoint directly (no proxy):
 - Infra: docker `electric` + `wal_level=logical`; `0009_electric_publication`
   (applies via both `drizzle-kit migrate` and the PGlite test path — see
   `packages/db/src/migrations.test.ts`).
-- Shape proxy with org-scoping + client-param pinning
-  (`apps/api/src/routes/electric-sync.http.ts`; the security-critical pinning is
-  unit-tested in `electric-sync.test.ts`).
+- Shape proxy with org-scoping + client-param pinning, extracted into the
+  standalone `apps/electric-sync` worker (`src/routes/shape.http.ts`; the
+  security-critical pinning is unit-tested in `src/routes/shape.test.ts`).
 - txid capture: dashboards (all writes), alert rules (create/update/delete), and
   error issues `heartbeat`/`assign`/`setSeverity`.
 - **`@maple/effect-db`** package (typecheck-clean) + **dashboards** collection

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { buildUpstreamShapeUrl, isShapeName } from "./electric-sync.http"
+import { buildUpstreamShapeUrl, isShapeName } from "./shape.http"
 
 const parse = (raw: string) => {
 	const url = new URL(raw)

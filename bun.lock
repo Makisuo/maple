@@ -117,6 +117,25 @@
         "vitest": "catalog:",
       },
     },
+    "apps/electric-sync": {
+      "name": "@maple/electric-sync",
+      "dependencies": {
+        "@maple-dev/effect-sdk": "workspace:*",
+        "@maple/api": "workspace:*",
+        "@maple/domain": "workspace:*",
+        "@maple/effect-cloudflare": "workspace:*",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "4.20260603.1",
+        "@effect/language-service": "catalog:effect",
+        "@effect/vitest": "4.0.0-beta.93",
+        "@types/node": "catalog:tooling",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
+        "wrangler": "^4.41.0",
+      },
+    },
     "apps/ingest": {
       "name": "@maple/ingest",
     },
@@ -1427,6 +1446,8 @@
     "@maple/effect-cloudflare": ["@maple/effect-cloudflare@workspace:lib/effect-cloudflare"],
 
     "@maple/effect-db": ["@maple/effect-db@workspace:packages/effect-db"],
+
+    "@maple/electric-sync": ["@maple/electric-sync@workspace:apps/electric-sync"],
 
     "@maple/email": ["@maple/email@workspace:packages/email"],
 

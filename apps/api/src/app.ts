@@ -24,7 +24,6 @@ import { HttpOnboardingLive } from "./routes/onboarding.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
-import { ElectricSyncRouter } from "./routes/electric-sync.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -247,7 +246,6 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
-	ElectricSyncRouter,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
 	PrometheusScrapeProxyRouter,
@@ -263,16 +261,9 @@ export const AllRoutes = Layer.mergeAll(
 			allowedOrigins: ["*"],
 			allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 			allowedHeaders: ["*"],
-			// electric-* headers must be readable cross-origin so @electric-sql/client
-			// can advance the shape cursor (handle/offset/up-to-date) through the proxy.
-			exposedHeaders: [
-				"Mcp-Session-Id",
-				"electric-handle",
-				"electric-offset",
-				"electric-schema",
-				"electric-cursor",
-				"electric-up-to-date",
-			],
+			// The ElectricSQL shape proxy (and its electric-* exposed headers) moved
+			// to the standalone `apps/electric-sync` worker.
+			exposedHeaders: ["Mcp-Session-Id"],
 		}),
 	),
 )

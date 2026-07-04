@@ -1,21 +1,25 @@
-import { FetchHttpClient, HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { makeResolveTenant } from "@maple/api/electric-sync"
 import { Effect, Layer, Option, Redacted } from "effect"
-import { Env } from "../lib/Env"
-import { ApiKeysService } from "../services/ApiKeysService"
-import { makeResolveTenant } from "../services/AuthService"
+import { FetchHttpClient, HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { SyncConfig } from "../config"
 
 /**
- * ElectricSQL shape proxy.
+ * ElectricSQL shape proxy — the standalone `apps/electric-sync` worker.
  *
  * Electric serves per-table "shapes" over HTTP but has no auth of its own — the
- * documented pattern is to proxy shape requests through your own API, which pins
- * the shape definition (table, WHERE, columns) server-side so a client can only
- * sub-filter within it. This route is that proxy: it authenticates with the same
- * primitives as {@link ApiAuthorizationLayer} (API key, else Clerk/self-hosted
- * tenant resolution), injects the org-scoping `"org_id" = $1` predicate that
- * mirrors the warehouse OrgId enforcement, and forwards only Electric's reserved
- * cursor params from the client. The client sends `?shape=<name>` (a Maple param)
- * plus offset/handle/live/cursor; it never sees or sets the table or WHERE.
+ * documented pattern is to proxy shape requests through your own service, which
+ * pins the shape definition (table, WHERE, columns) server-side so a client can
+ * only sub-filter within it. This route is that proxy: it authenticates the
+ * caller from the Clerk / self-hosted session bearer (`makeResolveTenant`,
+ * shared with `@maple/api`), injects the org-scoping `"org_id" = $1` predicate
+ * that mirrors the warehouse OrgId enforcement, and forwards only Electric's
+ * reserved cursor params from the client. The client sends `?shape=<name>` (a
+ * Maple param) plus offset/handle/live/cursor; it never sees or sets the table
+ * or WHERE.
+ *
+ * Unlike the old in-API route, there is NO API-key auth path here: this service
+ * has no database, and the browser's shape-fetch only ever sends the session
+ * bearer, so tenant resolution is the sole auth mechanism.
  */
 
 // Server-pinned shape whitelist. Every shape is additionally org-scoped below;
@@ -86,14 +90,6 @@ export const buildUpstreamShapeUrl = (args: {
 	return url.toString()
 }
 
-const getBearerToken = (headers: Record<string, string | undefined>): string | undefined => {
-	const header = headers["authorization"] ?? headers["Authorization"]
-	if (!header) return undefined
-	const [scheme, token] = header.split(" ")
-	if (!scheme || !token || scheme.toLowerCase() !== "bearer") return undefined
-	return token
-}
-
 const errorText = (message: string, status: number) =>
 	HttpServerResponse.text(message, {
 		status,
@@ -102,14 +98,13 @@ const errorText = (message: string, status: number) =>
 
 export const ElectricSyncRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
-		const env = yield* Env
-		const apiKeys = yield* ApiKeysService
+		const config = yield* SyncConfig
 		const client = yield* HttpClient.HttpClient
-		const resolveTenant = makeResolveTenant(env)
+		const resolveTenant = makeResolveTenant(config)
 
-		const electricUrl = Option.getOrUndefined(env.ELECTRIC_URL)
-		const sourceId = Option.getOrUndefined(env.ELECTRIC_SOURCE_ID)
-		const secret = Option.match(env.ELECTRIC_SECRET, {
+		const electricUrl = Option.getOrUndefined(config.ELECTRIC_URL)
+		const sourceId = Option.getOrUndefined(config.ELECTRIC_SOURCE_ID)
+		const secret = Option.match(config.ELECTRIC_SECRET, {
 			onNone: () => undefined,
 			onSome: Redacted.value,
 		})
@@ -125,21 +120,10 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 				const shapeParam = requestUrl.searchParams.get("shape")
 				if (!isShapeName(shapeParam)) return errorText("Unknown or missing shape", 400)
 
-				// Auth: API key first (mirrors ApiAuthorizationLayer), then tenant
-				// resolution which covers both Clerk and self-hosted modes.
-				const token = getBearerToken(req.headers)
-				const apiKeyResolved = yield* apiKeys
-					.resolveByBearer(token)
-					.pipe(Effect.orElseSucceed(() => Option.none()))
-
-				let orgId: string
-				if (Option.isSome(apiKeyResolved)) {
-					orgId = apiKeyResolved.value.orgId
-				} else {
-					const tenant = yield* resolveTenant(req.headers).pipe(Effect.option)
-					if (Option.isNone(tenant)) return errorText("Unauthorized", 401)
-					orgId = tenant.value.orgId
-				}
+				// Auth: Clerk / self-hosted tenant resolution (covers both modes).
+				const tenant = yield* resolveTenant(req.headers).pipe(Effect.option)
+				if (Option.isNone(tenant)) return errorText("Unauthorized", 401)
+				const orgId = tenant.value.orgId
 
 				const upstreamUrl = buildUpstreamShapeUrl({
 					electricUrl,

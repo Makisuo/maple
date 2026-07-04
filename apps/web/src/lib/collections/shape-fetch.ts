@@ -1,13 +1,13 @@
-import { apiBaseUrl } from "@/lib/services/common/api-base-url"
+import { electricSyncBaseUrl } from "@/lib/services/common/electric-sync-url"
 import { getMapleAuthHeaders } from "@/lib/services/common/auth-headers"
 
 /**
- * URL of the apps/api ElectricSQL shape proxy. Every collection points its
- * ShapeStream here with `?shape=<name>`; the proxy authenticates, injects the
- * org scope, and forwards to Electric. Never point a ShapeStream at Electric
- * directly — it has no auth.
+ * URL of the standalone `apps/electric-sync` ElectricSQL shape proxy. Every
+ * collection points its ShapeStream here with `?shape=<name>`; the proxy
+ * authenticates, injects the org scope, and forwards to Electric. Never point a
+ * ShapeStream at Electric directly — it has no auth.
  */
-export const shapeProxyUrl = `${apiBaseUrl}/api/sync/shape`
+export const shapeProxyUrl = `${electricSyncBaseUrl}/api/sync/shape`
 
 /**
  * `fetchClient` for every ShapeStream. Mirrors `mapleFetch` in http-client.ts
