@@ -267,30 +267,28 @@ function makeWidgetMutators(deps: {
 					? { w: 6, h: 5, minW: 3, minH: 3 }
 					: { w: 4, h: 5, minW: 2, minH: 2 }
 
-		const widgetId = generateId()
-		let widgetRef: DashboardWidget | null = null
+		// Build the widget synchronously from the current dashboard so we can
+		// return it to the caller. `mutateDashboard`'s updater runs asynchronously
+		// in the atom path (queued in a promise chain), so a `widgetRef` assigned
+		// inside it would still be null at return — the old `widgetRef!` masked a
+		// runtime null. `readDashboard` reads the current dashboard in both paths;
+		// the grid compactor resolves any position drift between build and apply.
+		const position = findNextPosition(readDashboard(dashboardId)?.widgets ?? [], layoutDefaults.w)
+		const widget: DashboardWidget = {
+			id: generateId(),
+			visualization,
+			dataSource,
+			display,
+			layout: { ...position, ...layoutDefaults },
+		}
 
-		void mutateDashboard(dashboardId, (dashboard) => {
-			const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
+		void mutateDashboard(dashboardId, (dashboard) => ({
+			...dashboard,
+			widgets: [...dashboard.widgets, widget],
+			updatedAt: new Date().toISOString(),
+		}))
 
-			const widget: DashboardWidget = {
-				id: widgetId,
-				visualization,
-				dataSource,
-				display,
-				layout: { ...position, ...layoutDefaults },
-			}
-
-			widgetRef = widget
-
-			return {
-				...dashboard,
-				widgets: [...dashboard.widgets, widget],
-				updatedAt: new Date().toISOString(),
-			}
-		})
-
-		return widgetRef!
+		return widget
 	}
 
 	const cloneWidget = (dashboardId: string, widgetId: string) => {
