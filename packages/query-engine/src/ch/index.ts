@@ -293,6 +293,14 @@ export {
 	type CloudflareUsageOutput,
 } from "./queries/cloudflare-usage"
 
+// Queries — Cloudflare service-map stats (per-zone / per-Worker node rollups)
+export {
+	cloudflareServiceCountersSQL,
+	cloudflareServiceLatencySQL,
+	type CloudflareServiceCountersOutput,
+	type CloudflareServiceLatencyOutput,
+} from "./queries/cloudflare-map"
+
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {
 	dbStatementSamplesQuery,
