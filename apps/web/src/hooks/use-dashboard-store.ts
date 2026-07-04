@@ -22,7 +22,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useLiveQuery } from "@tanstack/react-db"
 import { ELECTRIC_SYNC_ENABLED } from "@/lib/collections/config"
 import { runMapleApi } from "@/lib/collections/api-runner"
-import { rowToDashboard } from "@/lib/collections/dashboards"
+import { documentToDashboard, rowToDashboard } from "@/lib/collections/dashboards"
 import { getOrgCollections, useActiveOrgId, useCollectionsGeneration } from "@/lib/collections/org-collections"
 import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
@@ -122,12 +122,7 @@ const decodeDashboardDocument = Schema.decodeUnknownOption(DashboardDocument)
 function ensureDashboard(value: unknown): Dashboard | null {
 	return Option.match(decodeDashboardDocument(value), {
 		onNone: () => null,
-		onSome: (document) => ({
-			...document,
-			tags: document.tags ? [...document.tags] : undefined,
-			widgets: [...document.widgets] as Dashboard["widgets"],
-			variables: document.variables ? ([...document.variables] as Dashboard["variables"]) : undefined,
-		}),
+		onSome: documentToDashboard,
 	})
 }
 
@@ -212,6 +207,264 @@ function reconcileDashboards(previous: readonly Dashboard[], next: Dashboard[]):
 	}
 
 	return allMatched ? (previous as Dashboard[]) : reconciled
+}
+
+// The dashboard/widget mutators that are byte-for-byte identical between the atom
+// and Electric store paths: each is a pure `(Dashboard) => Dashboard` transform
+// pushed through the injected `mutateDashboard`. Only the functions that genuinely
+// differ between paths (`mutateDashboard`, `create`/`import*`, `delete`) stay in
+// the hooks. `readDashboard` supplies the current dashboard for the two mutators
+// that read it (atom: from the state ref; Electric: from the collection). The
+// updater bodies are path-agnostic, so they survive the eventual atom-path removal.
+function makeWidgetMutators(deps: {
+	mutateDashboard: (id: string, updater: (dashboard: Dashboard) => Dashboard) => Promise<void>
+	readOnly: boolean
+	readDashboard: (id: string) => Dashboard | undefined
+}) {
+	const { mutateDashboard, readOnly, readDashboard } = deps
+
+	const updateDashboard = (
+		id: string,
+		updates: Partial<Pick<Dashboard, "name" | "description" | "tags">>,
+	) => {
+		void mutateDashboard(id, (dashboard) => ({
+			...dashboard,
+			...updates,
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
+	const updateDashboardTimeRange = (id: string, timeRange: TimeRange) => {
+		void mutateDashboard(id, (dashboard) => ({
+			...dashboard,
+			timeRange,
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
+	const updateDashboardVariables = (id: string, variables: DashboardVariable[]) => {
+		void mutateDashboard(id, (dashboard) => ({
+			...dashboard,
+			variables,
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
+	const addWidget = (
+		dashboardId: string,
+		visualization: VisualizationType,
+		dataSource: WidgetDataSource,
+		display: WidgetDisplayConfig,
+	): DashboardWidget => {
+		if (readOnly) {
+			throw new Error("Dashboards are read-only")
+		}
+
+		const layoutDefaults =
+			visualization === "stat"
+				? { w: 3, h: 4, minW: 2, minH: 2 }
+				: visualization === "table" || visualization === "list"
+					? { w: 6, h: 5, minW: 3, minH: 3 }
+					: { w: 4, h: 5, minW: 2, minH: 2 }
+
+		const widgetId = generateId()
+		let widgetRef: DashboardWidget | null = null
+
+		void mutateDashboard(dashboardId, (dashboard) => {
+			const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
+
+			const widget: DashboardWidget = {
+				id: widgetId,
+				visualization,
+				dataSource,
+				display,
+				layout: { ...position, ...layoutDefaults },
+			}
+
+			widgetRef = widget
+
+			return {
+				...dashboard,
+				widgets: [...dashboard.widgets, widget],
+				updatedAt: new Date().toISOString(),
+			}
+		})
+
+		return widgetRef!
+	}
+
+	const cloneWidget = (dashboardId: string, widgetId: string) => {
+		if (readOnly) return
+		void mutateDashboard(dashboardId, (dashboard) => {
+			const source = dashboard.widgets.find((w) => w.id === widgetId)
+			if (!source) return dashboard
+
+			const layoutDefaults = {
+				w: source.layout.w,
+				h: source.layout.h,
+				minW: source.layout.minW ?? 2,
+				minH: source.layout.minH ?? 2,
+			}
+
+			const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
+			const clone: DashboardWidget = {
+				id: generateId(),
+				visualization: source.visualization,
+				dataSource: structuredClone(source.dataSource),
+				display: structuredClone(source.display),
+				layout: { ...position, ...layoutDefaults },
+			}
+
+			return {
+				...dashboard,
+				widgets: [...dashboard.widgets, clone],
+				updatedAt: new Date().toISOString(),
+			}
+		})
+	}
+
+	const removeWidget = (dashboardId: string, widgetId: string): DashboardWidget | undefined => {
+		// Capture the widget from the current state synchronously so the caller can
+		// offer an undo; mutateDashboard runs through a FIFO queue, so snapshotting
+		// here matches what the async write will actually delete.
+		const removed = readDashboard(dashboardId)?.widgets.find((w) => w.id === widgetId)
+
+		void mutateDashboard(dashboardId, (dashboard) => ({
+			...dashboard,
+			widgets: dashboard.widgets.filter((widget) => widget.id !== widgetId),
+			updatedAt: new Date().toISOString(),
+		}))
+
+		return removed
+	}
+
+	const restoreWidget = (dashboardId: string, widget: DashboardWidget) => {
+		if (readOnly) return
+		void mutateDashboard(dashboardId, (dashboard) => {
+			// Idempotent: a server refetch may have already reinstated the widget.
+			if (dashboard.widgets.some((w) => w.id === widget.id)) return dashboard
+			return {
+				...dashboard,
+				widgets: [...dashboard.widgets, widget],
+				updatedAt: new Date().toISOString(),
+			}
+		})
+	}
+
+	const updateWidgetDisplay = (
+		dashboardId: string,
+		widgetId: string,
+		display: Partial<WidgetDisplayConfig>,
+	) => {
+		void mutateDashboard(dashboardId, (dashboard) => ({
+			...dashboard,
+			widgets: dashboard.widgets.map((widget) =>
+				widget.id === widgetId ? { ...widget, display: { ...widget.display, ...display } } : widget,
+			),
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
+	const updateWidgetLayouts = (
+		dashboardId: string,
+		layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>,
+	) => {
+		void mutateDashboard(dashboardId, (dashboard) => {
+			let changed = false
+			const widgets = dashboard.widgets.map((widget) => {
+				const layout = layouts.find((item) => item.i === widget.id)
+				if (!layout) return widget
+				if (
+					widget.layout.x === layout.x &&
+					widget.layout.y === layout.y &&
+					widget.layout.w === layout.w &&
+					widget.layout.h === layout.h
+				)
+					return widget
+
+				changed = true
+				return {
+					...widget,
+					layout: { ...widget.layout, x: layout.x, y: layout.y, w: layout.w, h: layout.h },
+				}
+			})
+
+			// Return same reference if nothing changed — mutateDashboard skips no-ops
+			if (!changed) return dashboard
+
+			// Sort by (y, x) so the array order matches visual order. The grid
+			// compactor uses array order as a tiebreaker when items share a row,
+			// so a stale order causes drag-to-swap to snap back.
+			const sorted = widgets.toSorted((a, b) => {
+				if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
+				return a.layout.x - b.layout.x
+			})
+
+			return { ...dashboard, widgets: sorted, updatedAt: new Date().toISOString() }
+		})
+	}
+
+	const updateWidget = (
+		dashboardId: string,
+		widgetId: string,
+		updates: Partial<Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout">>,
+	) => {
+		return mutateDashboard(dashboardId, (dashboard) => ({
+			...dashboard,
+			widgets: dashboard.widgets.map((widget) =>
+				widget.id === widgetId ? { ...widget, ...updates } : widget,
+			),
+			updatedAt: new Date().toISOString(),
+		}))
+	}
+
+	const autoLayoutWidgets = (dashboardId: string) => {
+		void mutateDashboard(dashboardId, (dashboard) => {
+			if (dashboard.widgets.length === 0) return dashboard
+
+			const sorted = dashboard.widgets.toSorted((a, b) => {
+				if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
+				return a.layout.x - b.layout.x
+			})
+
+			let currentX = 0
+			let currentY = 0
+			let rowHeight = 0
+
+			const relaid = sorted.map((widget) => {
+				const w = widget.layout.w
+				const h = widget.layout.h
+
+				if (currentX + w > GRID_COLS) {
+					currentX = 0
+					currentY += rowHeight
+					rowHeight = 0
+				}
+
+				const newLayout = { ...widget.layout, x: currentX, y: currentY }
+				currentX += w
+				rowHeight = Math.max(rowHeight, h)
+
+				return { ...widget, layout: newLayout }
+			})
+
+			return { ...dashboard, widgets: relaid, updatedAt: new Date().toISOString() }
+		})
+	}
+
+	return {
+		updateDashboard,
+		updateDashboardTimeRange,
+		updateDashboardVariables,
+		addWidget,
+		cloneWidget,
+		removeWidget,
+		restoreWidget,
+		updateWidgetDisplay,
+		updateWidgetLayouts,
+		updateWidget,
+		autoLayoutWidgets,
+	}
 }
 
 // The original effect-atom implementation (list query + hand-rolled optimistic
@@ -456,15 +709,14 @@ function useDashboardStoreAtoms() {
 		[createMutation, readOnly, setDashboards, setPersistenceError],
 	)
 
-	const updateDashboard = useCallback(
-		(id: string, updates: Partial<Pick<Dashboard, "name" | "description" | "tags">>) => {
-			mutateDashboard(id, (dashboard) => ({
-				...dashboard,
-				...updates,
-				updatedAt: new Date().toISOString(),
-			}))
-		},
-		[mutateDashboard],
+	const readDashboard = useCallback(
+		(id: string) => dashboardsRef.current.find((d) => d.id === id),
+		[],
+	)
+
+	const widgetMutators = useMemo(
+		() => makeWidgetMutators({ mutateDashboard, readOnly, readDashboard }),
+		[mutateDashboard, readOnly, readDashboard],
 	)
 
 	const deleteDashboard = useCallback(
@@ -489,261 +741,6 @@ function useDashboardStoreAtoms() {
 		[readOnly],
 	)
 
-	const updateDashboardTimeRange = useCallback(
-		(id: string, timeRange: TimeRange) => {
-			mutateDashboard(id, (dashboard) => ({
-				...dashboard,
-				timeRange,
-				updatedAt: new Date().toISOString(),
-			}))
-		},
-		[mutateDashboard],
-	)
-
-	const updateDashboardVariables = useCallback(
-		(id: string, variables: DashboardVariable[]) => {
-			mutateDashboard(id, (dashboard) => ({
-				...dashboard,
-				variables,
-				updatedAt: new Date().toISOString(),
-			}))
-		},
-		[mutateDashboard],
-	)
-
-	const addWidget = useCallback(
-		(
-			dashboardId: string,
-			visualization: VisualizationType,
-			dataSource: WidgetDataSource,
-			display: WidgetDisplayConfig,
-		): DashboardWidget => {
-			if (readOnly) {
-				throw new Error("Dashboards are read-only")
-			}
-
-			const layoutDefaults =
-				visualization === "stat"
-					? { w: 3, h: 4, minW: 2, minH: 2 }
-					: visualization === "table" || visualization === "list"
-						? { w: 6, h: 5, minW: 3, minH: 3 }
-						: { w: 4, h: 5, minW: 2, minH: 2 }
-
-			const widgetId = generateId()
-			let widgetRef: DashboardWidget | null = null
-
-			mutateDashboard(dashboardId, (dashboard) => {
-				const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
-
-				const widget: DashboardWidget = {
-					id: widgetId,
-					visualization,
-					dataSource,
-					display,
-					layout: { ...position, ...layoutDefaults },
-				}
-
-				widgetRef = widget
-
-				return {
-					...dashboard,
-					widgets: [...dashboard.widgets, widget],
-					updatedAt: new Date().toISOString(),
-				}
-			})
-
-			return widgetRef!
-		},
-		[mutateDashboard, readOnly],
-	)
-
-	const cloneWidget = useCallback(
-		(dashboardId: string, widgetId: string) => {
-			if (readOnly) return
-			mutateDashboard(dashboardId, (dashboard) => {
-				const source = dashboard.widgets.find((w) => w.id === widgetId)
-				if (!source) return dashboard
-
-				const layoutDefaults = {
-					w: source.layout.w,
-					h: source.layout.h,
-					minW: source.layout.minW ?? 2,
-					minH: source.layout.minH ?? 2,
-				}
-
-				const position = findNextPosition(dashboard.widgets, layoutDefaults.w)
-				const clone: DashboardWidget = {
-					id: generateId(),
-					visualization: source.visualization,
-					dataSource: structuredClone(source.dataSource),
-					display: structuredClone(source.display),
-					layout: { ...position, ...layoutDefaults },
-				}
-
-				return {
-					...dashboard,
-					widgets: [...dashboard.widgets, clone],
-					updatedAt: new Date().toISOString(),
-				}
-			})
-		},
-		[mutateDashboard, readOnly],
-	)
-
-	const removeWidget = useCallback(
-		(dashboardId: string, widgetId: string): DashboardWidget | undefined => {
-			// Capture the widget from the current ref synchronously so the caller
-			// can offer an undo. mutateDashboard runs through a FIFO queue, so
-			// snapshotting here matches what the async write will actually delete.
-			const removed = dashboardsRef.current
-				.find((d) => d.id === dashboardId)
-				?.widgets.find((w) => w.id === widgetId)
-
-			mutateDashboard(dashboardId, (dashboard) => ({
-				...dashboard,
-				widgets: dashboard.widgets.filter((widget) => widget.id !== widgetId),
-				updatedAt: new Date().toISOString(),
-			}))
-
-			return removed
-		},
-		[mutateDashboard],
-	)
-
-	const restoreWidget = useCallback(
-		(dashboardId: string, widget: DashboardWidget) => {
-			if (readOnly) return
-			mutateDashboard(dashboardId, (dashboard) => {
-				// Idempotent: a server refetch may have already reinstated the widget.
-				if (dashboard.widgets.some((w) => w.id === widget.id)) return dashboard
-				return {
-					...dashboard,
-					widgets: [...dashboard.widgets, widget],
-					updatedAt: new Date().toISOString(),
-				}
-			})
-		},
-		[mutateDashboard, readOnly],
-	)
-
-	const updateWidgetDisplay = useCallback(
-		(dashboardId: string, widgetId: string, display: Partial<WidgetDisplayConfig>) => {
-			mutateDashboard(dashboardId, (dashboard) => ({
-				...dashboard,
-				widgets: dashboard.widgets.map((widget) =>
-					widget.id === widgetId
-						? { ...widget, display: { ...widget.display, ...display } }
-						: widget,
-				),
-				updatedAt: new Date().toISOString(),
-			}))
-		},
-		[mutateDashboard],
-	)
-
-	const updateWidgetLayouts = useCallback(
-		(dashboardId: string, layouts: Array<{ i: string; x: number; y: number; w: number; h: number }>) => {
-			mutateDashboard(dashboardId, (dashboard) => {
-				let changed = false
-				const widgets = dashboard.widgets.map((widget) => {
-					const layout = layouts.find((item) => item.i === widget.id)
-					if (!layout) return widget
-					if (
-						widget.layout.x === layout.x &&
-						widget.layout.y === layout.y &&
-						widget.layout.w === layout.w &&
-						widget.layout.h === layout.h
-					)
-						return widget
-
-					changed = true
-					return {
-						...widget,
-						layout: {
-							...widget.layout,
-							x: layout.x,
-							y: layout.y,
-							w: layout.w,
-							h: layout.h,
-						},
-					}
-				})
-
-				// Return same reference if nothing changed — mutateDashboard skips no-ops
-				if (!changed) return dashboard
-
-				// Sort by (y, x) so the array order matches visual order. The grid
-				// compactor uses array order as a tiebreaker when items share a row,
-				// so a stale order causes drag-to-swap to snap back.
-				const sorted = widgets.toSorted((a, b) => {
-					if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
-					return a.layout.x - b.layout.x
-				})
-
-				return { ...dashboard, widgets: sorted, updatedAt: new Date().toISOString() }
-			})
-		},
-		[mutateDashboard],
-	)
-
-	const updateWidget = useCallback(
-		(
-			dashboardId: string,
-			widgetId: string,
-			updates: Partial<Pick<DashboardWidget, "visualization" | "dataSource" | "display" | "layout">>,
-		) => {
-			return mutateDashboard(dashboardId, (dashboard) => ({
-				...dashboard,
-				widgets: dashboard.widgets.map((widget) =>
-					widget.id === widgetId ? { ...widget, ...updates } : widget,
-				),
-				updatedAt: new Date().toISOString(),
-			}))
-		},
-		[mutateDashboard],
-	)
-
-	const autoLayoutWidgets = useCallback(
-		(dashboardId: string) => {
-			mutateDashboard(dashboardId, (dashboard) => {
-				if (dashboard.widgets.length === 0) return dashboard
-
-				const sorted = dashboard.widgets.toSorted((a, b) => {
-					if (a.layout.y !== b.layout.y) return a.layout.y - b.layout.y
-					return a.layout.x - b.layout.x
-				})
-
-				let currentX = 0
-				let currentY = 0
-				let rowHeight = 0
-
-				const relaid = sorted.map((widget) => {
-					const w = widget.layout.w
-					const h = widget.layout.h
-
-					if (currentX + w > GRID_COLS) {
-						currentX = 0
-						currentY += rowHeight
-						rowHeight = 0
-					}
-
-					const newLayout = { ...widget.layout, x: currentX, y: currentY }
-					currentX += w
-					rowHeight = Math.max(rowHeight, h)
-
-					return { ...widget, layout: newLayout }
-				})
-
-				return {
-					...dashboard,
-					widgets: relaid,
-					updatedAt: new Date().toISOString(),
-				}
-			})
-		},
-		[mutateDashboard],
-	)
-
 	return {
 		dashboards,
 		isLoading,
@@ -752,18 +749,8 @@ function useDashboardStoreAtoms() {
 		createDashboard,
 		importDashboard,
 		importPersesDashboard,
-		updateDashboard,
 		deleteDashboard,
-		updateDashboardTimeRange,
-		updateDashboardVariables,
-		addWidget,
-		cloneWidget,
-		removeWidget,
-		restoreWidget,
-		updateWidgetDisplay,
-		updateWidgetLayouts,
-		updateWidget,
-		autoLayoutWidgets,
+		...widgetMutators,
 	}
 }
 
@@ -927,15 +914,14 @@ function useDashboardStoreCollection() {
 		[importDashboard],
 	)
 
-	const updateDashboard = useCallback(
-		(id: string, updates: Partial<Pick<Dashboard, "name" | "description" | "tags">>) => {
-			void mutateDashboard(id, (dashboard) => ({
-				...dashboard,
-				...updates,
-				updatedAt: new Date().toISOString(),
-			}))
-		},
-		[mutateDashboard],
+	const readDashboard = useCallback((id: string) => {
+		const row = collectionRef.current.get(id)
+		return row ? (rowToDashboard(row) ?? undefined) : undefined
+	}, [])
+
+	const widgetMutators = useMemo(
+		() => makeWidgetMutators({ mutateDashboard, readOnly, readDashboard }),
+		[mutateDashboard, readOnly, readDashboard],
 	)
 
 	const deleteDashboard = useCallback(

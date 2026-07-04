@@ -14,7 +14,7 @@ export const isCfNodeId = (id: string) => id.startsWith(CF_NODE_PREFIX)
 
 export type CloudflareNodeKind = "cloudflare-zone" | "cloudflare-worker"
 
-/** Cloudflare brand orange (matches `PLATFORM_COLORS.cloudflare` in service-map-utils). */
+/** Cloudflare brand orange — canonical source for `PLATFORM_COLORS.cloudflare` and the detail-panel icon. */
 export const CLOUDFLARE_COLOR = "oklch(0.7 0.16 50)"
 
 export interface CloudflareDescriptor {

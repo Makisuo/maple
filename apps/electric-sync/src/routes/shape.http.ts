@@ -1,4 +1,4 @@
-import { makeResolveTenant } from "@maple/api/electric-sync"
+import { makeResolveTenant } from "@maple/auth"
 import { Effect, Layer, Option, Redacted } from "effect"
 import { FetchHttpClient, HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { SyncConfig } from "../config"

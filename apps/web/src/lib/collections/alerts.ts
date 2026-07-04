@@ -1,4 +1,3 @@
-import { createEffectCollection } from "@maple/effect-db/electric"
 import {
 	AlertComparator,
 	AlertDestinationId,
@@ -20,13 +19,7 @@ import {
 } from "@maple/domain/http"
 import { QueryEngineAlertReducer } from "@maple/domain/query-engine"
 import { Option, Schema } from "effect"
-import { mapleRuntime } from "@/lib/registry"
-import { mapleShapeFetch, shapeProxyUrl } from "./shape-fetch"
-
-// Every timestamptz column arrives from Electric as a raw Postgres string; the
-// parser normalizes it to ISO so the row-schema String fields decode straight to
-// the domain Document's branded IsoDateTimeString via `decodeIso`.
-const timestamptzParser = { timestamptz: (v: string) => new Date(v).toISOString() }
+import { createSyncedCollection, timestamptzParser } from "./shape-fetch"
 
 const decodeIso = Schema.decodeUnknownSync(IsoDateTimeString)
 const asAlertRuleId = Schema.decodeUnknownSync(AlertRuleId)
@@ -270,45 +263,30 @@ export const rowToAlertIncidentDocument = (row: AlertIncidentRow): AlertIncident
 // ---------------------------------------------------------------------------
 
 export const createAlertRulesCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `alert_rules:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "alert_rules",
+		orgId,
 		schema: AlertRuleRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "alert_rules" },
-			fetchClient: mapleShapeFetch,
-			parser: timestamptzParser,
-		},
+		parser: timestamptzParser,
 		getKey: (row) => row.id,
 	})
 
 export const createAlertRuleStatesCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `alert_rule_states:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "alert_rule_states",
+		orgId,
 		schema: AlertRuleStateRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "alert_rule_states" },
-			fetchClient: mapleShapeFetch,
-			parser: timestamptzParser,
-		},
+		parser: timestamptzParser,
 		// Composite key (org_id, rule_id, group_key) → a stable derived string.
 		getKey: (row) => `${row.rule_id}:${row.group_key}`,
 	})
 
 export const createAlertIncidentsCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `alert_incidents:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "alert_incidents",
+		orgId,
 		schema: AlertIncidentRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "alert_incidents" },
-			fetchClient: mapleShapeFetch,
-			parser: timestamptzParser,
-		},
+		parser: timestamptzParser,
 		getKey: (row) => row.id,
 	})
 

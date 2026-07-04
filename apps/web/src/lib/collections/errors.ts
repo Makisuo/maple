@@ -1,4 +1,3 @@
-import { createEffectCollection } from "@maple/effect-db/electric"
 import {
 	ActorDocument,
 	ActorId,
@@ -17,10 +16,7 @@ import {
 	WorkflowState,
 } from "@maple/domain/http"
 import { Option, Schema } from "effect"
-import { mapleRuntime } from "@/lib/registry"
-import { mapleShapeFetch, shapeProxyUrl } from "./shape-fetch"
-
-const timestamptzParser = { timestamptz: (v: string) => new Date(v).toISOString() }
+import { createSyncedCollection, timestamptzParser } from "./shape-fetch"
 
 const decodeIso = Schema.decodeUnknownSync(IsoDateTimeString)
 const asActorId = Schema.decodeUnknownSync(ActorId)
@@ -192,44 +188,29 @@ export const rowToErrorIncident = (row: ErrorIncidentRow): ErrorIncidentDocument
 // ---------------------------------------------------------------------------
 
 export const createErrorIssuesCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `error_issues:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "error_issues",
+		orgId,
 		schema: ErrorIssueRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "error_issues" },
-			fetchClient: mapleShapeFetch,
-			parser: timestamptzParser,
-		},
+		parser: timestamptzParser,
 		getKey: (row) => row.id,
 	})
 
 export const createActorsCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `actors:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "actors",
+		orgId,
 		schema: ActorRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "actors" },
-			fetchClient: mapleShapeFetch,
-			parser: timestamptzParser,
-		},
+		parser: timestamptzParser,
 		getKey: (row) => row.id,
 	})
 
 export const createOpenErrorIncidentsCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `open_error_incidents:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "open_error_incidents",
+		orgId,
 		schema: ErrorIncidentRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "open_error_incidents" },
-			fetchClient: mapleShapeFetch,
-			parser: timestamptzParser,
-		},
+		parser: timestamptzParser,
 		getKey: (row) => row.id,
 	})
 

@@ -1,4 +1,5 @@
-// Re-export useful types from electric-db-collection
+// Re-export useful types from the underlying clients
+export type { Row } from "@electric-sql/client"
 export type { Txid } from "@tanstack/electric-db-collection"
 // Core collection creation
 export {

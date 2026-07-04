@@ -1,10 +1,8 @@
-import { createEffectCollection } from "@maple/effect-db/electric"
 import { DashboardDocument, DashboardId, DashboardUpsertRequest } from "@maple/domain/http"
 import { Effect, Schema } from "effect"
 import type { Dashboard } from "@/components/dashboard-builder/types"
-import { mapleRuntime } from "@/lib/registry"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { mapleShapeFetch, shapeProxyUrl } from "./shape-fetch"
+import { createSyncedCollection } from "./shape-fetch"
 
 /**
  * Raw ElectricSQL row for `dashboards` (snake_case, as it arrives on the shape
@@ -41,6 +39,19 @@ const decodeDashboardDocumentUnknown = Schema.decodeUnknownSync(DashboardDocumen
 const decodeDashboardDocument = (payloadJson: unknown) =>
 	decodeDashboardDocumentUnknown(typeof payloadJson === "string" ? JSON.parse(payloadJson) : payloadJson)
 
+/**
+ * Widens a decoded domain {@link DashboardDocument} into the mutable web
+ * {@link Dashboard} shape, copying its readonly `tags`/`widgets`/`variables`
+ * arrays. Shared by `rowToDashboard` (Electric path) and `ensureDashboard`
+ * (use-dashboard-store) — they decode from different sources but widen identically.
+ */
+export const documentToDashboard = (document: DashboardDocument): Dashboard => ({
+	...document,
+	tags: document.tags ? [...document.tags] : undefined,
+	widgets: [...document.widgets] as Dashboard["widgets"],
+	variables: document.variables ? ([...document.variables] as Dashboard["variables"]) : undefined,
+})
+
 // Memoize the payload decode so a re-render (or a live-query re-run) over an
 // unchanged row doesn't re-parse its jsonb. Keyed on the row's payload_json
 // object identity — Electric hands us a fresh object only when the row changes.
@@ -58,15 +69,7 @@ export const rowToDashboard = (row: DashboardRow): Dashboard | null => {
 		if (cached) return cached
 	}
 	try {
-		const document = decodeDashboardDocument(row.payload_json)
-		const dashboard: Dashboard = {
-			...document,
-			tags: document.tags ? [...document.tags] : undefined,
-			widgets: [...document.widgets] as Dashboard["widgets"],
-			variables: document.variables
-				? ([...document.variables] as Dashboard["variables"])
-				: undefined,
-		}
+		const dashboard = documentToDashboard(decodeDashboardDocument(row.payload_json))
 		if (typeof row.payload_json === "object" && row.payload_json !== null) {
 			dashboardCache.set(row.payload_json, dashboard)
 		}
@@ -105,15 +108,10 @@ const requireTxid = (txid: string | undefined): Effect.Effect<number> =>
  * before dropping optimistic state.
  */
 export const createDashboardsCollection = (orgId: string) =>
-	createEffectCollection({
-		id: `dashboards:${orgId}`,
-		runtime: mapleRuntime,
+	createSyncedCollection({
+		shape: "dashboards",
+		orgId,
 		schema: DashboardRowSchema,
-		shapeOptions: {
-			url: shapeProxyUrl,
-			params: { shape: "dashboards" },
-			fetchClient: mapleShapeFetch,
-		},
 		getKey: (row) => row.id,
 		onUpdate: ({ transaction }) =>
 			Effect.gen(function* () {

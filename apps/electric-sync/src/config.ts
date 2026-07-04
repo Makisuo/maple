@@ -1,4 +1,9 @@
-import type { AuthEnv } from "@maple/api/electric-sync"
+import type { AuthEnv } from "@maple/auth"
+import {
+	optionalRedacted,
+	optionalString,
+	stringWithDefault,
+} from "@maple/effect-cloudflare/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted } from "effect"
 
 /**
@@ -18,23 +23,6 @@ export interface SyncConfigShape extends AuthEnv {
 	readonly ELECTRIC_SOURCE_ID: Option.Option<string>
 	readonly ELECTRIC_SECRET: Option.Option<Redacted.Redacted<string>>
 }
-
-const stringWithDefault = (key: string, fallback: string) =>
-	Config.string(key).pipe(Config.withDefault(fallback))
-
-const optionalString = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(s) : Option.none())),
-		),
-	)
-
-const optionalRedacted = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(Redacted.make(s)) : Option.none())),
-		),
-	)
 
 const syncConfig = Config.all({
 	// Electric upstream: base URL of the Electric HTTP API (docker `electric`
