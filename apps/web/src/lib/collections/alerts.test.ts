@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest"
+import { assert, describe, it } from "@effect/vitest"
+import { vi } from "vitest"
 
 // The mappers are pure; stub the registry so importing the collection module
 // doesn't spin up the ManagedRuntime / atom-registry side effects.
@@ -74,12 +75,12 @@ describe("buildRuleStatesByRuleId", () => {
 	it("prefers the state row carrying a non-null last_error", () => {
 		const withError: AlertRuleStateRow = { ...base, group_key: "svc:a", last_error: "boom" }
 		const map = buildRuleStatesByRuleId([base, withError])
-		expect(map.get(RULE_ID)?.last_error).toBe("boom")
+		assert.strictEqual(map.get(RULE_ID)?.last_error, "boom")
 	})
 
 	it("keeps the first-seen state when none carry an error", () => {
 		const map = buildRuleStatesByRuleId([base, { ...base, group_key: "svc:a" }])
-		expect(map.get(RULE_ID)?.group_key).toBe("__total__")
+		assert.strictEqual(map.get(RULE_ID)?.group_key, "__total__")
 	})
 })
 
@@ -101,32 +102,32 @@ describe("rowToAlertRuleDocument", () => {
 			},
 		])
 		const doc = rowToAlertRuleDocument(ruleRow, states)
-		expect(doc.id).toBe(RULE_ID)
-		expect(doc.name).toBe("High error rate")
-		expect(doc.enabled).toBe(true)
-		expect(doc.severity).toBe("warning")
-		expect(doc.signalType).toBe("error_rate")
-		expect(doc.comparator).toBe("gt")
-		expect(doc.threshold).toBe(0.05)
-		expect(doc.windowMinutes).toBe(5)
-		expect(doc.serviceNames).toEqual(["checkout", "api"])
-		expect(doc.excludeServiceNames).toEqual([])
-		expect(doc.tags).toEqual(["prod"])
-		expect(doc.destinationIds).toEqual([DEST_ID])
-		expect(doc.groupBy).toBeNull()
-		expect(doc.rawQueryReducer).toBeNull() // signal_type !== "raw_query"
-		expect(doc.notificationTemplate).toBeNull()
-		expect(doc.createdBy).toBe("user_1")
-		expect(doc.updatedBy).toBe("user_2")
-		expect(doc.createdAt).toBe("2026-06-01T00:00:00.000Z")
-		expect(doc.lastEvaluationError).toBe("evaluation failed")
-		expect(doc.lastEvaluatedAt).toBe("2026-07-04T01:00:00.000Z")
+		assert.strictEqual(doc.id, RULE_ID)
+		assert.strictEqual(doc.name, "High error rate")
+		assert.strictEqual(doc.enabled, true)
+		assert.strictEqual(doc.severity, "warning")
+		assert.strictEqual(doc.signalType, "error_rate")
+		assert.strictEqual(doc.comparator, "gt")
+		assert.strictEqual(doc.threshold, 0.05)
+		assert.strictEqual(doc.windowMinutes, 5)
+		assert.deepStrictEqual(doc.serviceNames, ["checkout", "api"])
+		assert.deepStrictEqual(doc.excludeServiceNames, [])
+		assert.deepStrictEqual(doc.tags, ["prod"])
+		assert.deepStrictEqual(doc.destinationIds.map(String), [DEST_ID])
+		assert.strictEqual(doc.groupBy, null)
+		assert.strictEqual(doc.rawQueryReducer, null) // signal_type !== "raw_query"
+		assert.strictEqual(doc.notificationTemplate, null)
+		assert.strictEqual(doc.createdBy, "user_1")
+		assert.strictEqual(doc.updatedBy, "user_2")
+		assert.strictEqual(doc.createdAt, "2026-06-01T00:00:00.000Z")
+		assert.strictEqual(doc.lastEvaluationError, "evaluation failed")
+		assert.strictEqual(doc.lastEvaluatedAt, "2026-07-04T01:00:00.000Z")
 	})
 
 	it("leaves evaluation fields null when the rule has no state row", () => {
 		const doc = rowToAlertRuleDocument(ruleRow, new Map())
-		expect(doc.lastEvaluationError).toBeNull()
-		expect(doc.lastEvaluatedAt).toBeNull()
+		assert.strictEqual(doc.lastEvaluationError, null)
+		assert.strictEqual(doc.lastEvaluatedAt, null)
 	})
 
 	it("decodes the raw_query reducer only for raw_query rules", () => {
@@ -134,8 +135,8 @@ describe("rowToAlertRuleDocument", () => {
 			{ ...ruleRow, signal_type: "raw_query", reducer: "sum" },
 			new Map(),
 		)
-		expect(doc.signalType).toBe("raw_query")
-		expect(doc.rawQueryReducer).toBe("sum")
+		assert.strictEqual(doc.signalType, "raw_query")
+		assert.strictEqual(doc.rawQueryReducer, "sum")
 	})
 })
 
@@ -168,13 +169,13 @@ describe("rowToAlertIncidentDocument", () => {
 			updated_at: "2026-07-04T01:00:00.000Z",
 		}
 		const doc = rowToAlertIncidentDocument(row)
-		expect(doc.id).toBe(INCIDENT_ID)
-		expect(doc.ruleId).toBe(RULE_ID)
-		expect(doc.status).toBe("open")
-		expect(doc.severity).toBe("critical")
-		expect(doc.lastDeliveredEventType).toBe("trigger")
-		expect(doc.resolvedAt).toBeNull()
-		expect(doc.errorIssueId).toBeNull()
-		expect(doc.firstTriggeredAt).toBe("2026-07-04T00:00:00.000Z")
+		assert.strictEqual(doc.id, INCIDENT_ID)
+		assert.strictEqual(doc.ruleId, RULE_ID)
+		assert.strictEqual(doc.status, "open")
+		assert.strictEqual(doc.severity, "critical")
+		assert.strictEqual(doc.lastDeliveredEventType, "trigger")
+		assert.strictEqual(doc.resolvedAt, null)
+		assert.strictEqual(doc.errorIssueId, null)
+		assert.strictEqual(doc.firstTriggeredAt, "2026-07-04T00:00:00.000Z")
 	})
 })

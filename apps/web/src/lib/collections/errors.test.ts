@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest"
+import { assert, describe, it } from "@effect/vitest"
+import { vi } from "vitest"
 
 // The mappers are pure; stub the registry so importing the collection module
 // doesn't spin up the ManagedRuntime / atom-registry side effects.
@@ -35,17 +36,17 @@ const actorRow: ActorRow = {
 describe("rowToActor", () => {
 	it("maps a raw actors row into an ActorDocument", () => {
 		const doc = rowToActor(actorRow)
-		expect(doc.id).toBe(ACTOR_ID)
-		expect(doc.type).toBe("user")
-		expect(doc.userId).toBe("user_42")
-		expect(doc.agentName).toBeNull()
-		expect(doc.capabilities).toEqual(["read", "write"])
-		expect(doc.lastActiveAt).toBe("2026-07-02T00:00:00.000Z")
+		assert.strictEqual(doc.id, ACTOR_ID)
+		assert.strictEqual(doc.type, "user")
+		assert.strictEqual(doc.userId, "user_42")
+		assert.strictEqual(doc.agentName, null)
+		assert.deepStrictEqual(doc.capabilities, ["read", "write"])
+		assert.strictEqual(doc.lastActiveAt, "2026-07-02T00:00:00.000Z")
 	})
 
 	it("defaults capabilities to [] when the json column is not a string array", () => {
-		expect(rowToActor({ ...actorRow, capabilities_json: null }).capabilities).toEqual([])
-		expect(rowToActor({ ...actorRow, capabilities_json: "oops" }).capabilities).toEqual([])
+		assert.deepStrictEqual(rowToActor({ ...actorRow, capabilities_json: null }).capabilities, [])
+		assert.deepStrictEqual(rowToActor({ ...actorRow, capabilities_json: "oops" }).capabilities, [])
 	})
 })
 
@@ -90,20 +91,20 @@ describe("rowToIssue", () => {
 
 	it("maps snake_case columns + joins actors + carries hasOpenIncident", () => {
 		const doc = rowToIssue(issueRow, true, actorMap)
-		expect(doc.id).toBe(ISSUE_ID)
-		expect(doc.kind).toBe("error")
-		expect(doc.serviceName).toBe("checkout")
-		expect(doc.exceptionType).toBe("TypeError")
-		expect(doc.workflowState).toBe("triage")
-		expect(doc.severity).toBe("high")
-		expect(doc.severitySource).toBe("manual")
-		expect(doc.sourceRef).toEqual({ alertRuleId: "r1" })
-		expect(doc.assignedActor?.id).toBe(ACTOR_ID)
-		expect(doc.leaseHolder?.id).toBe(LEASE_ACTOR_ID)
-		expect(doc.leaseExpiresAt).toBe("2026-07-03T00:00:00.000Z")
-		expect(doc.firstSeenAt).toBe("2026-06-01T00:00:00.000Z")
-		expect(doc.occurrenceCount).toBe(17)
-		expect(doc.hasOpenIncident).toBe(true)
+		assert.strictEqual(doc.id, ISSUE_ID)
+		assert.strictEqual(doc.kind, "error")
+		assert.strictEqual(doc.serviceName, "checkout")
+		assert.strictEqual(doc.exceptionType, "TypeError")
+		assert.strictEqual(doc.workflowState, "triage")
+		assert.strictEqual(doc.severity, "high")
+		assert.strictEqual(doc.severitySource, "manual")
+		assert.deepStrictEqual(doc.sourceRef, { alertRuleId: "r1" })
+		assert.strictEqual(doc.assignedActor?.id, ACTOR_ID)
+		assert.strictEqual(doc.leaseHolder?.id, LEASE_ACTOR_ID)
+		assert.strictEqual(doc.leaseExpiresAt, "2026-07-03T00:00:00.000Z")
+		assert.strictEqual(doc.firstSeenAt, "2026-06-01T00:00:00.000Z")
+		assert.strictEqual(doc.occurrenceCount, 17)
+		assert.strictEqual(doc.hasOpenIncident, true)
 	})
 
 	it("nulls actor joins + severity when the ids/columns are null", () => {
@@ -112,15 +113,15 @@ describe("rowToIssue", () => {
 			false,
 			actorMap,
 		)
-		expect(doc.assignedActor).toBeNull()
-		expect(doc.leaseHolder).toBeNull()
-		expect(doc.severity).toBeNull()
-		expect(doc.severitySource).toBeNull()
-		expect(doc.hasOpenIncident).toBe(false)
+		assert.strictEqual(doc.assignedActor, null)
+		assert.strictEqual(doc.leaseHolder, null)
+		assert.strictEqual(doc.severity, null)
+		assert.strictEqual(doc.severitySource, null)
+		assert.strictEqual(doc.hasOpenIncident, false)
 	})
 
 	it("nulls an actor join when the id is present but the actor is missing from the map", () => {
-		expect(rowToIssue(issueRow, false, new Map()).assignedActor).toBeNull()
+		assert.strictEqual(rowToIssue(issueRow, false, new Map()).assignedActor, null)
 	})
 })
 
@@ -140,11 +141,11 @@ describe("rowToErrorIncident", () => {
 			updated_at: "2026-07-04T00:00:00.000Z",
 		}
 		const doc = rowToErrorIncident(row)
-		expect(doc.id).toBe(INCIDENT_ID)
-		expect(doc.issueId).toBe(ISSUE_ID)
-		expect(doc.status).toBe("open")
-		expect(doc.reason).toBe("first_seen")
-		expect(doc.resolvedAt).toBeNull()
-		expect(doc.occurrenceCount).toBe(5)
+		assert.strictEqual(doc.id, INCIDENT_ID)
+		assert.strictEqual(doc.issueId, ISSUE_ID)
+		assert.strictEqual(doc.status, "open")
+		assert.strictEqual(doc.reason, "first_seen")
+		assert.strictEqual(doc.resolvedAt, null)
+		assert.strictEqual(doc.occurrenceCount, 5)
 	})
 })

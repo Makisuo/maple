@@ -1,7 +1,7 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
-import { Context, FileSystem, Layer, Path } from "effect"
+import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
@@ -113,9 +113,20 @@ const handle = async (
 		ctx.waitUntil(flushTelemetry(env))
 		return response
 	} catch (err) {
-		console.error("[electric-sync] handler failed:", err)
-		ctx.waitUntil(flushTelemetry(env))
 		const message = err instanceof Error ? err.message : String(err)
+		// Route the fatal-handler error through the OTLP logger installed by
+		// `telemetry.layer` (drained by `flushTelemetry` below) rather than a raw
+		// `console.error` the exporter can't see. This runs outside the handler's
+		// runtime (the `toWebHandler` promise already rejected), so provide the
+		// telemetry layer to a one-shot fiber; its log record lands in the same
+		// in-isolate buffer the flush drains.
+		Effect.runFork(
+			Effect.logError("electric-sync handler failed").pipe(
+				Effect.annotateLogs({ error: message }),
+				Effect.provide(telemetry.layer),
+			),
+		)
+		ctx.waitUntil(flushTelemetry(env))
 		return new Response(`worker handler error: ${message}`, { status: 504 })
 	}
 }

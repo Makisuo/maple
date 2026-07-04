@@ -339,7 +339,11 @@ export function effectElectricCollectionOptions(
 			},
 		}).pipe(
 			Effect.withSpan("EffectElectricCollection.awaitTxId", {
-				attributes: { collectionId: config.id ?? "unknown", txid, timeout },
+				attributes: {
+					"maple.collection.id": config.id ?? "unknown",
+					"maple.electric.txid": txid,
+					"maple.electric.timeout_ms": timeout,
+				},
 			}),
 		)
 	}

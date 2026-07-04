@@ -119,11 +119,13 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 				const requestUrl = new URL(req.url, "http://internal")
 				const shapeParam = requestUrl.searchParams.get("shape")
 				if (!isShapeName(shapeParam)) return errorText("Unknown or missing shape", 400)
+				yield* Effect.annotateCurrentSpan("maple.sync.shape", shapeParam)
 
 				// Auth: Clerk / self-hosted tenant resolution (covers both modes).
 				const tenant = yield* resolveTenant(req.headers).pipe(Effect.option)
 				if (Option.isNone(tenant)) return errorText("Unauthorized", 401)
 				const orgId = tenant.value.orgId
+				yield* Effect.annotateCurrentSpan("maple.org_id", orgId)
 
 				const upstreamUrl = buildUpstreamShapeUrl({
 					electricUrl,
@@ -160,7 +162,7 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 					status: response.status,
 					headers,
 				})
-			})
+			}).pipe(Effect.withSpan("ElectricSync.shape"))
 
 		yield* router.add("GET", "/api/sync/shape", handle)
 	}),

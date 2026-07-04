@@ -32,7 +32,7 @@ export function convertInsertHandler<
 
 	return async (params: InsertMutationFnParams<T, TKey, TUtils>) => {
 		const effect = handler(params).pipe(
-			Effect.catchEager((error: E | unknown) =>
+			Effect.catchEager((error: E) =>
 				Effect.fail(
 					new InsertError({
 						message: `Insert operation failed`,
@@ -98,7 +98,7 @@ export function convertUpdateHandler<
 
 	return async (params: UpdateMutationFnParams<T, TKey, TUtils>) => {
 		const effect = handler(params).pipe(
-			Effect.catchEager((error: E | unknown) =>
+			Effect.catchEager((error: E) =>
 				Effect.fail(
 					new UpdateError({
 						message: `Update operation failed`,
@@ -164,7 +164,7 @@ export function convertDeleteHandler<
 
 	return async (params: DeleteMutationFnParams<T, TKey, TUtils>) => {
 		const effect = handler(params).pipe(
-			Effect.catchEager((error: E | unknown) =>
+			Effect.catchEager((error: E) =>
 				Effect.fail(
 					new DeleteError({
 						message: `Delete operation failed`,
