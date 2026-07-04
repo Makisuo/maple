@@ -712,8 +712,8 @@ export function buildRuleToggleRequest(rule: AlertRuleDocument): AlertRuleUpsert
 	return new AlertRuleUpsertRequest({
 		...rule,
 		enabled: !rule.enabled,
-		serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : undefined,
-		excludeServiceNames: rule.excludeServiceNames?.length > 0 ? [...rule.excludeServiceNames] : undefined,
+		serviceNames: [...rule.serviceNames],
+		excludeServiceNames: [...rule.excludeServiceNames],
 		metricName: rule.metricName ?? null,
 		metricType: rule.metricType ?? null,
 		metricAggregation: rule.metricAggregation ?? null,
