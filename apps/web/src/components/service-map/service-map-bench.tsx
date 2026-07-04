@@ -350,6 +350,8 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 				<ServiceMapCanvas
 					edges={graph.edges}
 					dbEdges={graph.dbEdges}
+					cloudflareServices={[]}
+					faasNames={new Map()}
 					platforms={graph.platforms}
 					runtimes={graph.runtimes}
 					overviews={graph.overviews}

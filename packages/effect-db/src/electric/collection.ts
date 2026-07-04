@@ -50,8 +50,11 @@ function dispatchErrorStateChanged(collectionId: string | undefined, isError: bo
 }
 
 /**
- * Run a fire-and-forget Effect via the provided runtime, falling back to a
- * console-equivalent when no runtime is supplied.
+ * Run a fire-and-forget structured log Effect. Prefers the caller's runtime so
+ * logs flow through Maple's tracer/log pipeline; when the `runtime`-less
+ * `createEffectCollection` overload is used, falls back to Effect's default
+ * runtime (`Effect.runFork`) rather than a raw `console.*` so the log stays a
+ * structured, exportable Effect log instead of an untraced console write.
  */
 function logVia(
 	runtime: ManagedRuntime.ManagedRuntime<unknown, unknown> | undefined,
@@ -59,18 +62,18 @@ function logVia(
 	message: string,
 	annotations: Record<string, unknown>,
 ): void {
+	const log = (
+		level === "warning"
+			? Effect.logWarning(message)
+			: level === "error"
+				? Effect.logError(message)
+				: Effect.logDebug(message)
+	).pipe(Effect.annotateLogs(annotations))
 	if (runtime) {
-		const log =
-			level === "warning"
-				? Effect.logWarning(message)
-				: level === "error"
-					? Effect.logError(message)
-					: Effect.logDebug(message)
-		runtime.runFork(log.pipe(Effect.annotateLogs(annotations)))
+		runtime.runFork(log)
 		return
 	}
-	const consoleFn = level === "error" ? console.error : level === "warning" ? console.warn : console.debug
-	consoleFn(message, annotations)
+	Effect.runFork(log)
 }
 
 /**

@@ -12,6 +12,7 @@ export type {
 	InferCollectionResult,
 	QueryFn,
 	QueryOptions,
+	TanStackDBErrorReason,
 	UnsubscribeFn,
 } from "./types"
 export { TanStackDBError } from "./types"

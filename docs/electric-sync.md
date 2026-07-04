@@ -6,8 +6,25 @@ real time using [ElectricSQL](https://electric.ax) shapes fronted by
 (traces, logs, metrics via `@maple/query-engine`) is **not** synced — it stays on
 the effect-atom + `WarehouseQueryService` path.
 
-The feature is **off by default** (`VITE_ELECTRIC_SYNC` unset). The dashboards
-vertical is fully implemented and is the reference for the remaining consumers.
+The feature is **off by default** (`VITE_ELECTRIC_SYNC` unset). The dashboards,
+alerts, and error-issue verticals are all implemented behind the flag.
+
+The reusable machinery lives in the **`@maple/effect-db`** workspace package
+(source-only, consumed by `apps/web`'s Vite and, later, the mobile app):
+
+- `@maple/effect-db/electric` — `createEffectCollection` (an Effect-native wrapper
+  over `@tanstack/electric-db-collection`: Effect Schema rows + `Effect` write
+  handlers run on a `ManagedRuntime` + exponential backoff + typed `awaitTxIdEffect`),
+  and `optimisticAction` (declare collections → optimistic apply → `Effect` server
+  call returning a txid → automatic `awaitTxId` across all declared collections →
+  typed errors). The backoff `onError` also dispatches the `auth:session-expired`
+  (401) and `collection:schema-error` (post-deploy schema drift) window events.
+- `@maple/effect-db/atom` — `makeQuery`/`makeQueryUnsafe`/`makeCollectionAtom`,
+  bridging a TanStack DB live query to an effect-atom `Atom<AsyncResult<…>>`.
+
+Ported and adapted from the hazel repo's two libraries to effect `4.0.0-beta.93`
+(`Effect.catch` → `Effect.catchEager`; the electric collection utils slimmed to
+`{ awaitTxId, awaitMatch }`).
 
 ## How it fits together
 
@@ -88,8 +105,12 @@ Smoke-test the shape endpoint directly (no proxy):
    plus `ALTER TABLE "<t>" REPLICA IDENTITY FULL;` (wrap in the same
    `DO $$ … EXCEPTION … END $$` guard as `0009` so PGlite tests don't abort).
 2. Add the shape to the whitelist in `electric-sync.http.ts`.
-3. Add a collection under `apps/web/src/lib/collections/` (model on `dashboards.ts`)
-   and register it in `org-collections.ts`.
+3. Add a collection under `apps/web/src/lib/collections/` via
+   `createEffectCollection` (model on `dashboards.ts` for a write vertical, or
+   `alerts.ts`/`errors.ts` for a read-only one — an identity `Schema.Struct` row
+   schema that mirrors the table columns, plus a `timestamptz` parser normalizing
+   to ISO), register it in `org-collections.ts` (constructor + `cleanup()`), and
+   swap the consumer read behind `ELECTRIC_SYNC_ENABLED`.
 
 ## Status / remaining work
 
@@ -102,20 +123,31 @@ Smoke-test the shape endpoint directly (no proxy):
   unit-tested in `electric-sync.test.ts`).
 - txid capture: dashboards (all writes), alert rules (create/update/delete), and
   error issues `heartbeat`/`assign`/`setSeverity`.
-- **Dashboards** collection + `useDashboardStore` collection path (behind the flag),
-  full end-to-end: proven against a live Electric 1.6.2 instance locally.
+- **`@maple/effect-db`** package (typecheck-clean) + **dashboards** collection
+  refactored onto `createEffectCollection` + `useDashboardStore` collection path
+  (behind the flag), proven against a live Electric 1.6.2 instance locally.
+- **Alerts + error-issue read consumers (Phase 6):** `collections/alerts.ts` +
+  `collections/errors.ts` (read-only collections; client-side live-query joins
+  `alert_rules ⟕ alert_rule_states` and `error_issues ⟕ actors ⟕ open_error_incidents`);
+  `useAlertRulesList` / `useAlertIncidentsList` / `useErrorIssuesList` hooks swap the
+  reads behind `ELECTRIC_SYNC_ENABLED` (writes stay on the typed endpoints — the
+  shape stream delivers results). The row→document mappers mirror the server's
+  `rowToRuleDocument`/`rowToIssue`/`rowToActor` and are unit-tested
+  (`collections/alerts.test.ts`, `collections/errors.test.ts`).
+- **Self-heal:** a `collection:schema-error` listener in `org-collections.ts`
+  recreates the org's collections (generation bump) so a post-deploy shape-schema
+  drift re-fetches instead of getting stuck.
 
 **Remaining (follow-ups)**
-- **Alerts + error-issue read consumers (Phase 6):** build `collections/alerts.ts`
-  and `collections/errors.ts` (single-table shapes → client-side live-query joins:
-  `alert_rules ⟕ alert_rule_states`; `error_issues ⟕ actors ⟕ open_error_incidents`),
-  then swap `listRulesAtom` / `listIncidentsAtom` / the issues-page `listIssues`
-  atom for live queries — following the dashboards template.
+- **Live smoke of alerts + errors:** the mappers/joins/timestamps typecheck and
+  unit-test green, but the end-to-end sync for these two verticals still needs the
+  docker-Electric smoke (flip `VITE_ELECTRIC_SYNC=1`, verify each list streams in
+  scoped to the org and updates live after a write) — same validation dashboards
+  already passed.
 - **txid on the transition-composed error mutations** (`transitionIssue`,
   `claimIssue`, `releaseIssue`): these compose `applyTransition` (multiple
   `error_issues` writes), so they currently return no `txid` and clients drop
-  optimistic state on the next synced update instead of on the exact txn. Capture
-  the last write's txid when finalizing Phase 6.
+  optimistic state on the next synced update instead of on the exact txn.
 - **Row-volume check** before enabling error-issue/alert-incident sync: confirm
   per-org non-archived `error_issues` and `alert_incidents` counts are bounded; if
   not, add an archival tick or keep terminal-state tabs on paged effect-atom reads.

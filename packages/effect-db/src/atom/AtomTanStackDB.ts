@@ -17,6 +17,7 @@ import { constUndefined } from "effect/Function"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import type { CollectionStatus, ConditionalQueryFn, QueryFn, QueryOptions } from "./types"
+import { TanStackDBError } from "./types"
 
 /**
  * Creates an Atom from a TanStack DB collection.
@@ -24,7 +25,7 @@ import type { CollectionStatus, ConditionalQueryFn, QueryFn, QueryOptions } from
  */
 export const makeCollectionAtom = <T extends object, TKey extends string | number>(
 	collection: Collection<T, TKey, any> & NonSingleResult,
-): Atom.Atom<AsyncResult.AsyncResult<Array<T>, Error>> => {
+): Atom.Atom<AsyncResult.AsyncResult<Array<T>, TanStackDBError>> => {
 	return Atom.readable((get) => {
 		// Start sync if not already started
 		collection.startSyncImmediate()
@@ -35,7 +36,7 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 			const status: CollectionStatus = collection.status
 
 			if (status === "error") {
-				get.setSelf(AsyncResult.fail(new Error("Collection failed to load")))
+				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" })))
 				return
 			}
 
@@ -45,7 +46,7 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 			}
 
 			if (status === "cleaned-up") {
-				get.setSelf(AsyncResult.fail(new Error("Collection has been cleaned up")))
+				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" })))
 				return
 			}
 
@@ -62,7 +63,7 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
-			return AsyncResult.fail(new Error("Collection failed to load"))
+			return AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }))
 		}
 
 		if (status === "loading" || status === "idle") {
@@ -70,7 +71,7 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 		}
 
 		if (status === "cleaned-up") {
-			return AsyncResult.fail(new Error("Collection has been cleaned up"))
+			return AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" }))
 		}
 
 		// Get current data
@@ -86,7 +87,7 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
  */
 export const makeSingleCollectionAtom = <T extends object, TKey extends string | number>(
 	collection: Collection<T, TKey, any> & SingleResult,
-): Atom.Atom<AsyncResult.AsyncResult<T | undefined, Error>> => {
+): Atom.Atom<AsyncResult.AsyncResult<T | undefined, TanStackDBError>> => {
 	return Atom.readable((get) => {
 		// Start sync if not already started
 		collection.startSyncImmediate()
@@ -97,7 +98,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			const status: CollectionStatus = collection.status
 
 			if (status === "error") {
-				get.setSelf(AsyncResult.fail(new Error("Collection failed to load")))
+				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" })))
 				return
 			}
 
@@ -107,7 +108,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			}
 
 			if (status === "cleaned-up") {
-				get.setSelf(AsyncResult.fail(new Error("Collection has been cleaned up")))
+				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" })))
 				return
 			}
 
@@ -125,7 +126,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
-			return AsyncResult.fail(new Error("Collection failed to load"))
+			return AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }))
 		}
 
 		if (status === "loading" || status === "idle") {
@@ -133,7 +134,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 		}
 
 		if (status === "cleaned-up") {
-			return AsyncResult.fail(new Error("Collection has been cleaned up"))
+			return AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" }))
 		}
 
 		// Get current data (single result)
@@ -151,7 +152,7 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 export const makeQuery = <TContext extends Context>(
 	queryFn: QueryFn<TContext>,
 	options?: QueryOptions,
-): Atom.Atom<AsyncResult.AsyncResult<InferResultType<TContext>, Error>> => {
+): Atom.Atom<AsyncResult.AsyncResult<InferResultType<TContext>, TanStackDBError>> => {
 	return Atom.readable((get) => {
 		// Create live query collection
 		const collection = createLiveQueryCollection({
@@ -166,7 +167,7 @@ export const makeQuery = <TContext extends Context>(
 			const status: CollectionStatus = collection.status
 
 			if (status === "error") {
-				get.setSelf(AsyncResult.fail(new Error("Query failed to load")))
+				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Query failed to load", reason: "load-failed" })))
 				return
 			}
 
@@ -176,7 +177,7 @@ export const makeQuery = <TContext extends Context>(
 			}
 
 			if (status === "cleaned-up") {
-				get.setSelf(AsyncResult.fail(new Error("Query collection has been cleaned up")))
+				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Query collection has been cleaned up", reason: "cleaned-up" })))
 				return
 			}
 
@@ -196,7 +197,7 @@ export const makeQuery = <TContext extends Context>(
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
-			return AsyncResult.fail(new Error("Query failed to load"))
+			return AsyncResult.fail(new TanStackDBError({ message: "Query failed to load", reason: "load-failed" }))
 		}
 
 		if (status === "loading" || status === "idle") {
@@ -204,7 +205,7 @@ export const makeQuery = <TContext extends Context>(
 		}
 
 		if (status === "cleaned-up") {
-			return AsyncResult.fail(new Error("Query collection has been cleaned up"))
+			return AsyncResult.fail(new TanStackDBError({ message: "Query collection has been cleaned up", reason: "cleaned-up" }))
 		}
 
 		// Get current data - handle both single and array results
@@ -237,7 +238,7 @@ export const makeQueryUnsafe = <TContext extends Context>(
 export const makeQueryConditional = <TContext extends Context>(
 	queryFn: ConditionalQueryFn<TContext>,
 	options?: QueryOptions,
-): Atom.Atom<AsyncResult.AsyncResult<InferResultType<TContext>, Error> | undefined> => {
+): Atom.Atom<AsyncResult.AsyncResult<InferResultType<TContext>, TanStackDBError> | undefined> => {
 	return Atom.readable((get) => {
 		// Create a proxy query builder to detect if the query function returns null/undefined
 		// without actually executing any query methods

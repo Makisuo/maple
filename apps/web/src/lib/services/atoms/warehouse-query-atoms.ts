@@ -47,6 +47,7 @@ import { getServiceUsage } from "@/api/warehouse/service-usage"
 import {
 	getServiceDependenciesBundle,
 	getServiceMap,
+	getServiceMapCloudflare,
 	getServiceMapDbEdges,
 	getServiceDbQuerySummary,
 	getServicePlatforms,
@@ -380,6 +381,10 @@ export const getServiceDependenciesBundleResultAtom = makeQueryAtomFamily(getSer
 })
 
 export const getServiceMapDbEdgesResultAtom = makeQueryAtomFamily(getServiceMapDbEdges, {
+	staleTime: 15_000,
+})
+
+export const getServiceMapCloudflareResultAtom = makeQueryAtomFamily(getServiceMapCloudflare, {
 	staleTime: 15_000,
 })
 

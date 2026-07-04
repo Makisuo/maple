@@ -601,7 +601,7 @@ function AlertsPage() {
 		mode: "promiseExit",
 	})
 
-	const activeTab: AlertsTab = tabValues.includes(search.tab as AlertsTab)
+	const activeTab: AlertsTab = (tabValues as readonly string[]).includes(search.tab ?? "")
 		? (search.tab as AlertsTab)
 		: "monitor"
 

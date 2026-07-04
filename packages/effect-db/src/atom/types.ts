@@ -3,6 +3,7 @@
  * @since 1.0.0
  */
 
+import { Schema } from "effect"
 import type { Context, GetResult, InitialQueryBuilder, QueryBuilder, SingleResult } from "@tanstack/db"
 
 /**
@@ -58,12 +59,21 @@ export type UnsubscribeFn = () => void
 export type CollectionStatus = "idle" | "loading" | "ready" | "error" | "cleaned-up"
 
 /**
- * Error type for TanStack DB operations
+ * Why a TanStack DB collection/query atom failed.
+ *
+ * - `load-failed` — the underlying collection reported `status === "error"`.
+ * - `cleaned-up` — the collection was garbage-collected / disposed while an
+ *   atom still held a subscription to it.
  */
-export class TanStackDBError extends Error {
-	readonly _tag = "TanStackDBError"
-	constructor(message: string) {
-		super(message)
-		this.name = "TanStackDBError"
-	}
-}
+export type TanStackDBErrorReason = "load-failed" | "cleaned-up"
+
+/**
+ * Error surfaced on the `AsyncResult` error channel of the collection/query
+ * atoms. Carries a `reason` so a consumer can discriminate a load failure from
+ * a cleaned-up collection by tag/field rather than by parsing the message.
+ */
+export class TanStackDBError extends Schema.TaggedErrorClass<TanStackDBError>()("TanStackDBError", {
+	message: Schema.String,
+	reason: Schema.Literals(["load-failed", "cleaned-up"]),
+	cause: Schema.optional(Schema.Unknown),
+}) {}
