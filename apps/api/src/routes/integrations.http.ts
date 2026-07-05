@@ -21,7 +21,7 @@ import {
 	UserId,
 	VcsCommitDetailResponse,
 } from "@maple/domain/http"
-import { Effect, Option, Schema } from "effect"
+import { Cause, Effect, Option, Schema } from "effect"
 import { Env } from "../lib/Env"
 import { CloudflareAnalyticsService } from "../services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
@@ -436,6 +436,7 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 		const hazel = yield* HazelOAuthService
 		const github = yield* GithubConnectService
 		const cloudflare = yield* CloudflareOAuthService
+		const cloudflareAnalytics = yield* CloudflareAnalyticsService
 		const env = yield* Env
 
 		const dashboardTargetOrigin = resolveDashboardTargetOrigin(env.MAPLE_APP_BASE_URL)
@@ -713,6 +714,21 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 							tag: error._tag,
 							message: error.message,
 						}),
+					),
+					// Reconnect writes fresh tokens, but rows a prior revoked-token error disabled
+					// (`recordOrgError(..., { disable: true })`) have no other re-enable path for the
+					// account-scoped workers anchor row — clear that state now so polling resumes
+					// immediately instead of staying dead until something else touches the rows. This
+					// must never fail the callback page: the connection itself already succeeded.
+					Effect.tap((result) =>
+						cloudflareAnalytics.resetOrgState(result.orgId).pipe(
+							Effect.catchCause((cause) =>
+								Effect.logWarning("cloudflare post-connect state reset failed", {
+									orgId: result.orgId,
+									error: Cause.pretty(cause),
+								}),
+							),
+						),
 					),
 					Effect.map((result) =>
 						htmlResponse(

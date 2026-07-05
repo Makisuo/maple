@@ -623,6 +623,77 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
+	it.effect("pollOrg reclaims a far-future (corrupt) lease instead of skipping forever", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// A live lease is always bounded by now+LEASE_MS (4min); anything beyond 2x that (8min)
+			// can't come from normal operation — e.g. a crashed writer left a bogus far-future value
+			// — so it must be treated as corrupt and reclaimed rather than wedging the org forever.
+			yield* seedStateRow({ dataset: "workers_invocations", leaseUntil: new Date(T0 + 60 * MIN) })
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			assert.isNull(summary.skipped)
+			assert.isAbove(summary.rowsIngested, 0)
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("pollAllOrgs rollup reports skip counts and per-org reasons", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// Reuse the lease-held skip scenario: a live 3min lease means this tick's pollOrg call
+			// skips instead of polling.
+			yield* seedStateRow({ dataset: "workers_invocations", leaseUntil: new Date(T0 + 3 * MIN) })
+			const service = yield* CloudflareAnalyticsService
+			const result = yield* service.pollAllOrgs()
+			assert.strictEqual(result.rowsIngested, 0)
+			assert.strictEqual(result.skipped, 1)
+			assert.strictEqual(result.perOrg.length, 1)
+			assert.strictEqual(result.perOrg[0]!.skipped, "lease held by another tick")
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("resetOrgState re-enables disabled rows and clears error/discovery state", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "workers_invocations",
+				enabled: false,
+				lastError: "token revoked",
+				lastErrorAt: new Date(T0 - 10 * MIN),
+				discoveredAt: new Date(T0 - 10 * MIN),
+			})
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: ZONE_ID,
+				zoneName: ZONE_NAME,
+				enabled: false,
+				lastError: "token revoked",
+				lastErrorAt: new Date(T0 - 10 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			yield* service.resetOrgState(ORG)
+
+			const rows = yield* loadStateRows
+			assert.strictEqual(rows.length, 2)
+			for (const row of rows) {
+				assert.isTrue(row.enabled)
+				assert.isNull(row.lastError)
+				assert.isNull(row.lastErrorAt)
+			}
+			const anchor = rows.find((row) => row.dataset === "workers_invocations")
+			assert.isNull(anchor!.discoveredAt)
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
 	it.effect("pollOrg records GraphQL errors without advancing watermarks", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
