@@ -153,6 +153,33 @@ constant, so a Vite restart is needed after changing it.
 6. Validate initial per-org snapshot sizes before flipping `VITE_ELECTRIC_SYNC=1`
    on the web deploy.
 
+## PR previews (per-PR Electric Cloud environment)
+
+PR previews provision an ephemeral Electric Cloud **environment** `pr-<n>` + a
+Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
+`scripts/electric-pr-branch.ts` (`up`/`down <pr-number>`, driven from
+`.github/workflows/deploy-pr-preview.yml`) uses `@electric-sql/cli`
+(`ELECTRIC_API_TOKEN` auth) to, on open/synchronize: reset any existing `pr-<n>`
+environment, create a fresh one under `ELECTRIC_PROJECT_ID`, create a `postgres`
+source pointed at the PR branch's `MAPLE_PG_URL` (direct 5432), and export
+`ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` to `$GITHUB_ENV` (bound to
+the electric-sync worker by alchemy). On close it deletes the environment
+(cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay
+green (and the worker 503s) until the token lands in Infisical.
+
+- The web build already defaults `VITE_ELECTRIC_SYNC=1` for deploys
+  (`apps/web/alchemy.run.ts`), so no client flag change is needed — provisioning
+  the source is what makes the already-on sync path work in previews.
+- **Publication:** the migrate step runs `0009` (creates
+  `electric_publication_default`) before the source is created. Prod uses manual
+  publishing against that publication; confirm the `electric services create
+  postgres` flag (`electric services create postgres --help`) and set
+  `ELECTRIC_PUBLICATION` (and/or `ELECTRIC_SERVICE_EXTRA_ARGS`) accordingly. The CI
+  role inherits `postgres`, so auto-managed publishing may also work — validate on
+  one PR branch before relying on it.
+- **Caps:** each source counts against the Electric plan's max-databases limit and
+  holds a PlanetScale replication slot; teardown on close is mandatory.
+
 ## Adding a synced table later
 
 1. New guarded Drizzle migration: `ALTER PUBLICATION electric_publication_default ADD TABLE "<t>";`

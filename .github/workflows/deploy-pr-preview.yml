@@ -95,6 +95,20 @@ jobs:
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
+            # Create/refresh an Electric Cloud environment `pr-<n>` + a Postgres
+            # source pointed at this PR's PlanetScale branch (MAPLE_PG_URL), and
+            # export ELECTRIC_URL/ELECTRIC_SOURCE_ID/ELECTRIC_SECRET to GITHUB_ENV so
+            # the Alchemy deploy below binds the electric-sync worker to it. Runs
+            # after migrations so `0009_electric_publication` exists. Gated on
+            # ELECTRIC_API_TOKEN: until the `dev` Infisical environment carries the
+            # Electric CLI token (+ ELECTRIC_PROJECT_ID), previews SKIP cleanly —
+            # the electric-sync worker deploys unconfigured (503) and the web app
+            # stays on its effect-atom fetches. Adding the token activates per-PR
+            # sync automatically.
+            - name: Create/refresh Electric Cloud PR source
+              if: ${{ github.event.action != 'closed' && env.ELECTRIC_API_TOKEN != '' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              run: bun scripts/electric-pr-branch.ts up "$PR_NUMBER"
+
             - name: Deploy PR preview stack with Alchemy
               id: deploy
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
@@ -109,6 +123,13 @@ jobs:
             - name: Remove PlanetScale PR branch
               if: ${{ github.event.action == 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: bun scripts/planetscale-pr-branch.ts down "$PR_NUMBER"
+
+            # Delete the Electric Cloud environment `pr-<n>` (cascades its source).
+            # Each source holds a PlanetScale replication slot and a plan
+            # max-databases slot, so teardown on close is mandatory.
+            - name: Remove Electric Cloud PR source
+              if: ${{ github.event.action == 'closed' && env.ELECTRIC_API_TOKEN != '' }}
+              run: bun scripts/electric-pr-branch.ts down "$PR_NUMBER"
 
             # Tear the branch down after the stack — branches share compute with
             # production, so this must run on every PR close.
