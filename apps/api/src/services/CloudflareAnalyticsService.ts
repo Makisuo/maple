@@ -1402,7 +1402,23 @@ export class CloudflareAnalyticsService extends Context.Service<
 								: Effect.logWarning("cloudflare-analytics org poll failed", {
 										orgId: row.orgId,
 										error: Cause.pretty(cause),
-									}),
+									}).pipe(
+										// A crashed org must still appear in the rollup — otherwise perOrg
+										// silently omits it, `skipped` undercounts, and the zero-rows warning
+										// below can't see a crash-storm at all.
+										Effect.andThen(
+											Ref.update(summariesRef, (list) => [
+												...list,
+												{
+													orgId: decodeOrgId(row.orgId),
+													skipped: "org poll failed — see the warning log for the cause",
+													callsMade: 0,
+													rowsIngested: 0,
+													failures: [],
+												} satisfies PollOrgSummary,
+											]),
+										),
+									),
 						),
 					),
 				{ concurrency: ORG_CONCURRENCY, discard: true },
@@ -1429,7 +1445,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// The outage that motivated this: every capable org skipped every tick, so rowsIngested
 			// stayed 0 with no failures either — a tick that "completed" while doing nothing at all.
 			// Surface that shape explicitly instead of relying on someone noticing a flat graph.
-			if (capable.length > 0 && rowsIngested === 0) {
+			// Gated on `skipped > 0` so a genuinely idle tick (orgs caught up / zero traffic —
+			// zero rows with zero skips) stays quiet; crashed orgs count as skipped via the
+			// synthetic summary above, and pure dataset failures already warn just before this.
+			if (capable.length > 0 && rowsIngested === 0 && skipped > 0) {
 				yield* Effect.logWarning("cloudflare-analytics tick ingested zero rows", {
 					orgs: capable.length,
 					skipped,
