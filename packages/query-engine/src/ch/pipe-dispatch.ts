@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------------------
 
 import * as CH from "./index"
-import type { TracesMetric, AttributeFilter } from "../query-engine"
+import type { TracesMetric, AttributeFilter, MetricType } from "../query-engine"
 import type { OrgId } from "@maple/domain"
 import { unsafeCompiledQuery, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import { Array as A, Match, Result } from "effect"
@@ -29,6 +29,12 @@ type PipeParams = Record<string, unknown> & { org_id: OrgId }
 /** Erase the specific output type for the generic pipe dispatcher. */
 function eraseType<T>(compiled: CompiledQuery<T>): PipeCompiledQuery {
 	return compiled as CompiledQuery<unknown>
+}
+
+const METRIC_TYPES: ReadonlySet<string> = new Set(["sum", "gauge", "histogram", "exponential_histogram"])
+
+function parseMetricType(value: string | undefined): MetricType | undefined {
+	return value != null && METRIC_TYPES.has(value) ? (value as MetricType) : undefined
 }
 
 /**
@@ -475,15 +481,29 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 					}),
 				),
 			),
-			Match.when("metric_attribute_keys", () =>
-				eraseType(
+			Match.when("metric_attribute_keys", () => {
+				// Optional per-metric scoping: reads the raw metric table (the hourly
+				// rollup carries no MetricName column).
+				const metricName = str("metric_name")
+				const metricType = parseMetricType(str("metric_type"))
+				if (metricName && metricType) {
+					return eraseType(
+						CH.compile(CH.metricScopedAttributeKeysQuery({ metricType, limit: int("limit", 200) }), {
+							orgId,
+							startTime,
+							endTime,
+							metricName,
+						}),
+					)
+				}
+				return eraseType(
 					CH.compile(CH.attributeKeysQuery({ scope: "metric", limit: int("limit", 200) }), {
 						orgId,
 						startTime,
 						endTime,
 					}),
-				),
-			),
+				)
+			}),
 			Match.when("span_attribute_values", () =>
 				eraseType(
 					CH.compile(
@@ -506,8 +526,22 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 					),
 				),
 			),
-			Match.when("metric_attribute_values", () =>
-				eraseType(
+			Match.when("metric_attribute_values", () => {
+				const metricName = str("metric_name")
+				const metricType = parseMetricType(str("metric_type"))
+				if (metricName && metricType) {
+					return eraseType(
+						CH.compile(
+							CH.metricScopedAttributeValuesQuery({
+								metricType,
+								attributeKey: String(params.attribute_key),
+								limit: int("limit", 50),
+							}),
+							{ orgId, startTime, endTime, metricName },
+						),
+					)
+				}
+				return eraseType(
 					CH.compile(
 						CH.metricAttributeValuesQuery({
 							attributeKey: String(params.attribute_key),
@@ -515,8 +549,8 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 						}),
 						{ orgId, startTime, endTime },
 					),
-				),
-			),
+				)
+			}),
 			// ----- Custom charts -----
 			Match.when("custom_traces_timeseries", () => {
 				const tsOpts = pipeParamsToTracesTimeseriesOpts(params)

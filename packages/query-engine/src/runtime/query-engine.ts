@@ -1341,19 +1341,32 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		if (request.query.kind === "attributeKeys") {
 			const scope = resolveAttributeScope(request.query.source, request.query.scope)
+			// Per-metric scoping reads the raw metric table (the hourly rollup has no
+			// MetricName column). Requires both metricName and metricType; otherwise
+			// fall back to the org-wide rollup.
+			const metricScoped =
+				request.query.source === "metrics" && request.query.metricName && request.query.metricType
+					? { metricName: request.query.metricName, metricType: request.query.metricType }
+					: undefined
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.attributeKeysQuery({
-					scope,
-					limit: request.query.limit,
-				}),
+				metricScoped
+					? CH.metricScopedAttributeKeysQuery({
+							metricType: metricScoped.metricType,
+							limit: request.query.limit,
+						})
+					: CH.attributeKeysQuery({
+							scope,
+							limit: request.query.limit,
+						}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
 					endTime: request.endTime,
+					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
 				},
-				"attributeKeys",
+				metricScoped ? "attributeKeys:metric" : "attributeKeys",
 				"discovery",
 			)
 
@@ -1524,6 +1537,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		// ---- Attribute Values ----
 		if (request.query.kind === "attributeValues") {
+			// Per-metric scoping reads the raw metric table (see attributeKeys above).
+			const metricScoped =
+				request.query.source === "metrics" && request.query.metricName && request.query.metricType
+					? { metricName: request.query.metricName, metricType: request.query.metricType }
+					: undefined
 			const queryFn = Match.value(request.query.scope).pipe(
 				Match.when("resource", () => CH.resourceAttributeValuesQuery),
 				Match.when("log", () => CH.logAttributeValuesQuery),
@@ -1533,9 +1551,20 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
-				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
-				`attributeValues:${request.query.scope}`,
+				metricScoped
+					? CH.metricScopedAttributeValuesQuery({
+							metricType: metricScoped.metricType,
+							attributeKey: request.query.attributeKey,
+							limit: request.query.limit,
+						})
+					: queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
+				{
+					orgId: tenant.orgId,
+					startTime: request.startTime,
+					endTime: request.endTime,
+					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
+				},
+				metricScoped ? "attributeValues:metric-scoped" : `attributeValues:${request.query.scope}`,
 				"discovery",
 			)
 			return new QueryEngineExecuteResponse({
