@@ -1,6 +1,9 @@
+import { AlertRuleDocument } from "@maple/domain/http"
+import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
 	buildRuleRequest,
+	buildRuleToggleRequest,
 	defaultRuleForm,
 	deriveRuleQueryIssues,
 	domainThresholdToForm,
@@ -205,5 +208,74 @@ describe("raw SQL alert query validation", () => {
 				rawQuerySql: sql,
 			}),
 		).toEqual(["SQL value column"])
+	})
+})
+
+// Decode a plain object into a branded `AlertRuleDocument` (as `listRules` would),
+// so fixtures pass plain strings/UUIDs and Schema does the branding — no casts.
+const decodeRuleDoc = Schema.decodeUnknownSync(AlertRuleDocument)
+
+function makeRuleDoc(
+	overrides: Partial<{ enabled: boolean; serviceNames: string[]; excludeServiceNames: string[] }> = {},
+): AlertRuleDocument {
+	return decodeRuleDoc({
+		id: "00000000-0000-4000-8000-000000000000",
+		name: "My rule",
+		notes: null,
+		notificationTemplate: null,
+		enabled: true,
+		severity: "warning",
+		serviceNames: [],
+		excludeServiceNames: [],
+		tags: [],
+		groupBy: null,
+		signalType: "error_rate",
+		comparator: "gt",
+		threshold: 0.05,
+		thresholdUpper: null,
+		windowMinutes: 5,
+		minimumSampleCount: 0,
+		consecutiveBreachesRequired: 2,
+		consecutiveHealthyRequired: 2,
+		renotifyIntervalMinutes: 30,
+		metricName: null,
+		metricType: null,
+		metricAggregation: null,
+		apdexThresholdMs: null,
+		queryBuilderDraft: null,
+		rawQuerySql: null,
+		rawQueryReducer: null,
+		destinationIds: [],
+		lastEvaluationError: null,
+		lastEvaluatedAt: null,
+		createdAt: "2026-01-01T00:00:00.000Z",
+		updatedAt: "2026-01-01T00:00:00.000Z",
+		createdBy: "user_test",
+		updatedBy: "user_test",
+		...overrides,
+	})
+}
+
+describe("buildRuleToggleRequest", () => {
+	// Regression: `optionalKey(Array)` rejects an explicit `undefined`, so coercing
+	// empty service arrays to `undefined` made `new AlertRuleUpsertRequest({...})`
+	// throw synchronously — the toggle silently no-op'd and the Switch never moved.
+	it("does not throw when serviceNames/excludeServiceNames are empty", () => {
+		const rule = makeRuleDoc({ enabled: true, serviceNames: [], excludeServiceNames: [] })
+		const request = buildRuleToggleRequest(rule)
+		expect(request.enabled).toBe(false)
+		expect(request.serviceNames).toEqual([])
+		expect(request.excludeServiceNames).toEqual([])
+	})
+
+	it("flips enabled in both directions", () => {
+		expect(buildRuleToggleRequest(makeRuleDoc({ enabled: false })).enabled).toBe(true)
+		expect(buildRuleToggleRequest(makeRuleDoc({ enabled: true })).enabled).toBe(false)
+	})
+
+	it("preserves the rule's service scoping", () => {
+		const rule = makeRuleDoc({ serviceNames: ["svc-a", "svc-b"], excludeServiceNames: [] })
+		const request = buildRuleToggleRequest(rule)
+		expect(request.serviceNames).toEqual(["svc-a", "svc-b"])
 	})
 })

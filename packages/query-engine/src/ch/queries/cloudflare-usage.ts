@@ -7,8 +7,10 @@
 // poller, so sum(Value) per bucket is the true request count.
 // ---------------------------------------------------------------------------
 
+import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, param } from "@maple-dev/clickhouse-builder"
+import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { CHNumber } from "../schema"
 import { MetricsSum } from "../tables"
 
 const ISO_Z_FORMAT = "%Y-%m-%dT%H:%i:%S.%fZ"
@@ -31,6 +33,21 @@ export interface CloudflareUsageOutput {
 	/** Most recent datapoint timestamp within the bucket, ISO-8601 UTC. */
 	readonly lastTimeUnix: string
 }
+
+/**
+ * Row schema for {@link cloudflareUsageQuery}. `requests` (`sum`) and
+ * `datapoints` (`count`, a `UInt64`) use {@link CHNumber} so a BYO-ClickHouse
+ * org's string-encoded aggregates decode identically to Tinybird's numbers —
+ * pass it as the `rowSchema` to `CH.compile` so `decodeRows` coerces centrally
+ * instead of a `ParseError` surfacing downstream.
+ */
+export const cloudflareUsageRowSchema: CompiledQueryRowSchema<CloudflareUsageOutput> = Schema.Struct({
+	serviceName: Schema.String,
+	bucket: Schema.String,
+	requests: CHNumber,
+	datapoints: CHNumber,
+	lastTimeUnix: Schema.String,
+})
 
 export function cloudflareUsageQuery() {
 	return from(MetricsSum)

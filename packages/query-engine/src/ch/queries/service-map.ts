@@ -37,13 +37,13 @@ import {
 	Traces,
 } from "../tables"
 import { unionAll } from "@maple-dev/clickhouse-builder"
+import { CHNumber } from "../schema"
 
 // Local CH function declarations used by the live topology-join branch's
 // sample-weighting math. Kept here (not promoted to ch/functions/) because
 // they're niche and only this builder uses them; promote later if reused.
 const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64")
 const _matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
-const CHNumber = Schema.Union([Schema.Finite, Schema.FiniteFromString])
 
 // ---------------------------------------------------------------------------
 // Service dependencies

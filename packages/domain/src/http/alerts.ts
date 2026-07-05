@@ -426,6 +426,10 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	updatedAt: IsoDateTimeString,
 	createdBy: UserId,
 	updatedBy: UserId,
+	// Postgres txid of the write, present only on create/update responses so the
+	// web's ElectricSQL alert_rules collection can resolve optimistic state on the
+	// exact synced transaction. Absent on list/read responses.
+	txid: Schema.optionalKey(Schema.String),
 }) {}
 
 export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>("AlertRuleUpsertRequest")({
@@ -464,6 +468,8 @@ export class AlertRulesListResponse extends Schema.Class<AlertRulesListResponse>
 export class AlertRuleDeleteResponse extends Schema.Class<AlertRuleDeleteResponse>("AlertRuleDeleteResponse")(
 	{
 		id: AlertRuleId,
+		// Txid of the delete, for the Electric alert_rules collection's onDelete.
+		txid: Schema.optionalKey(Schema.String),
 	},
 ) {}
 

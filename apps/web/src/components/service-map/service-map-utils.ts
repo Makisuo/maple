@@ -1,18 +1,38 @@
 import type { Node, Edge } from "@xyflow/react"
-import type { ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
+import type { CloudflareService, ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { getServiceLegendColor } from "@maple/ui/colors"
 import { getDbColor } from "./service-map-db"
+import { cfNodeId, CLOUDFLARE_COLOR, getCfColor, type CloudflareNodeKind } from "./service-map-cloudflare"
 
 interface ServiceNodeInfra {
 	podCount: number
 	workloadCount: number
 }
 
-type ServiceNodeKind = "service" | "database"
+type ServiceNodeKind = "service" | "database" | CloudflareNodeKind
 
 export type ServiceMapColorMode = "service" | "health" | "platform"
+
+/**
+ * Cloudflare direct-integration analytics attached to a node — either a
+ * standalone CF node (zone / un-instrumented Worker) or overlaid onto an
+ * instrumented Worker node whose script we matched.
+ */
+export interface CloudflareNodeMetrics {
+	kind: "zone" | "worker"
+	requests: number
+	errorRate: number
+	/** Zones only. */
+	cacheHitRate?: number
+	/** Zones: edge TTFB p95. Workers: wall-time duration p99. */
+	latencyP95Ms: number
+	/** Zones only: origin response duration p95. */
+	originP95Ms?: number
+	/** Workers only: CPU time p99. */
+	cpuP99Ms?: number
+}
 
 export interface ServiceNodeData {
 	label: string
@@ -30,6 +50,8 @@ export interface ServiceNodeData {
 	platform?: ServicePlatform
 	runtime?: string
 	dbSystem?: string
+	/** Set on standalone CF nodes and overlaid onto matched instrumented Workers. */
+	cloudflare?: CloudflareNodeMetrics
 	colorMode?: ServiceMapColorMode
 	/** OTel `service.namespace`, when defined. Drives namespace-cluster layout + dotted boxes. */
 	namespace?: string
@@ -38,7 +60,7 @@ export interface ServiceNodeData {
 
 const PLATFORM_COLORS: Record<ServicePlatform | "unknown", string> = {
 	kubernetes: "oklch(0.62 0.16 250)",
-	cloudflare: "oklch(0.7 0.16 50)",
+	cloudflare: CLOUDFLARE_COLOR,
 	lambda: "oklch(0.7 0.18 60)",
 	web: "oklch(0.65 0.15 145)",
 	unknown: "oklch(0.55 0.02 270)",
@@ -66,6 +88,8 @@ export function getServiceMapNodeColor(
 	mode: ServiceMapColorMode,
 ): string {
 	if (data.kind === "database") return getDbColor(data.dbSystem)
+	// CF nodes always use the brand color regardless of color-mode (same rule as databases).
+	if (data.kind === "cloudflare-zone" || data.kind === "cloudflare-worker") return getCfColor()
 	switch (mode) {
 		case "health":
 			return getHealthColor(data.errorRate)
@@ -147,6 +171,10 @@ export interface BuildFlowElementsInput {
 	serviceWorkloads?: ServiceWorkload[]
 	platforms?: Map<string, ServicePlatform>
 	runtimes?: Map<string, string>
+	/** Cloudflare direct-integration zones + Workers (new nodes / instrumented-Worker overlay). */
+	cloudflareServices?: CloudflareService[]
+	/** service.name → faas.name, so a `cloudflare-worker/{script}` can match its instrumented node. */
+	faasNames?: Map<string, string>
 }
 
 /**
@@ -164,6 +192,8 @@ export function buildFlowElements({
 	serviceWorkloads = [],
 	platforms,
 	runtimes,
+	cloudflareServices = [],
+	faasNames,
 }: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
@@ -256,6 +286,61 @@ export function buildFlowElements({
 				services,
 				selected: false,
 				dbSystem,
+			},
+		})
+	}
+
+	// Cloudflare direct-integration nodes. Workers whose script matches an
+	// instrumented service (by faas.name or service name) are OVERLAID onto that
+	// node's detail; everything else (zones, un-instrumented Workers) becomes a
+	// standalone CF node. Phase 1 draws no CF edges — the layout places edgeless
+	// CF nodes as isolates.
+	const nodeById = new Map(flowNodes.map((n) => [n.id, n]))
+	const serviceNameSet = new Set(services)
+	const scriptToInstrumented = new Map<string, string>()
+	if (faasNames) {
+		for (const [serviceName, faasName] of faasNames) {
+			if (faasName) scriptToInstrumented.set(faasName, serviceName)
+		}
+	}
+	const matchInstrumented = (script: string): string | undefined =>
+		serviceNameSet.has(script) ? script : scriptToInstrumented.get(script)
+
+	for (const cf of cloudflareServices) {
+		const metrics: CloudflareNodeMetrics = {
+			kind: cf.kind,
+			requests: cf.requests,
+			errorRate: cf.errorRate,
+			cacheHitRate: cf.cacheHitRate,
+			latencyP95Ms: cf.latencyP95Ms,
+			originP95Ms: cf.originP95Ms,
+			cpuP99Ms: cf.cpuP99Ms,
+		}
+		const matchedService = cf.kind === "worker" ? matchInstrumented(cf.displayName) : undefined
+		const overlayTarget = matchedService ? nodeById.get(matchedService) : undefined
+		if (overlayTarget) {
+			// Overlay onto the instrumented Worker node — no duplicate node.
+			overlayTarget.data.cloudflare = metrics
+			continue
+		}
+		const nodeKind: CloudflareNodeKind = cf.kind === "worker" ? "cloudflare-worker" : "cloudflare-zone"
+		flowNodes.push({
+			id: cfNodeId(cf.serviceName),
+			type: "serviceNode",
+			position: { x: 0, y: 0 },
+			data: {
+				label: cf.displayName,
+				kind: nodeKind,
+				throughput: cf.throughput,
+				tracedThroughput: cf.throughput,
+				hasSampling: false,
+				samplingWeight: 1,
+				errorRate: cf.errorRate,
+				avgLatencyMs: cf.latencyP95Ms,
+				p95LatencyMs: cf.latencyP95Ms,
+				services,
+				selected: false,
+				cloudflare: metrics,
 			},
 		})
 	}

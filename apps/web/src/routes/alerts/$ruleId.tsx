@@ -36,6 +36,7 @@ import {
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
+import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
 import { AlertChatSheet } from "@/components/alerts/alert-chat-sheet"
 import { toAlertContext, type AlertContext } from "@/components/chat/alert-context"
@@ -112,16 +113,8 @@ function RuleDetailContent() {
 		[endTime],
 	)
 
-	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", {
-		reactivityKeys: ["alertRules"],
-	})
-	const rulesResult = useAtomValue(rulesQueryAtom)
-	const refreshRules = useAtomRefresh(rulesQueryAtom)
-	const incidentsQueryAtom = MapleApiAtomClient.query("alerts", "listIncidents", {
-		reactivityKeys: ["alertIncidents"],
-	})
-	const incidentsResult = useAtomValue(incidentsQueryAtom)
-	const refreshIncidents = useAtomRefresh(incidentsQueryAtom)
+	const { result: rulesResult, refresh: refreshRules } = useAlertRulesList()
+	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
 	const checksQueryAtom = MapleApiAtomClient.query("alerts", "listRuleChecks", {
 		params: { ruleId: ruleId as AlertRuleId },
 		query: { since, until },

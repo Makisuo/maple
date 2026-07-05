@@ -47,6 +47,7 @@ import { formatBucketLabel } from "@/lib/format"
 import {
 	ArrowRightIcon,
 	ArrowRotateAnticlockwiseIcon,
+	CloudflareIcon,
 	CubeIcon,
 	ExternalLinkIcon,
 	NetworkNodesIcon,
@@ -54,6 +55,7 @@ import {
 } from "@/components/icons"
 import {
 	getServiceDbQuerySummaryResultAtom,
+	getServiceMapCloudflareResultAtom,
 	getServiceMapDbEdgesResultAtom,
 	getServiceMapResultAtom,
 	getServiceOverviewResultAtom,
@@ -61,6 +63,7 @@ import {
 	getServiceWorkloadsResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import type {
+	CloudflareService,
 	GetServiceMapInput,
 	ServiceDbEdge,
 	ServiceDbQuerySummaryResponse,
@@ -82,6 +85,7 @@ import {
 	type ParticleRegistry,
 } from "./service-map-particles"
 import { getDbDescriptor } from "./service-map-db"
+import { CF_NODE_PREFIX, CLOUDFLARE_COLOR, getCloudflareDescriptor, isCfNodeId } from "./service-map-cloudflare"
 import {
 	buildFlowElements,
 	computeNodePositions,
@@ -93,6 +97,7 @@ import {
 	NS_LABEL_HEIGHT,
 	NS_PADDING_X,
 	NS_PADDING_Y,
+	type CloudflareNodeMetrics,
 	type LayoutConfig,
 	type ServiceEdgeData,
 	type ServiceMapColorMode,
@@ -170,6 +175,8 @@ interface ServiceDetailPanelProps {
 	showInfraTab: boolean
 	platforms: Map<string, ServicePlatform>
 	colorMode: ServiceMapColorMode
+	/** Cloudflare direct-integration analytics overlaid onto this instrumented Worker, if matched. */
+	cloudflare?: CloudflareNodeMetrics
 	onClose: () => void
 }
 
@@ -183,6 +190,7 @@ function ServiceDetailPanel({
 	showInfraTab,
 	platforms,
 	colorMode,
+	cloudflare,
 	onClose,
 }: ServiceDetailPanelProps) {
 	const overview = overviews.find((o) => o.serviceName === serviceId)
@@ -312,6 +320,57 @@ function ServiceDetailPanel({
 									</div>
 								</div>
 							</div>
+
+							{/* Cloudflare edge (direct integration overlay) */}
+							{cloudflare && (
+								<div className="space-y-3">
+									<div className="h-px bg-border" />
+									<div className="flex items-center gap-1.5">
+										<CloudflareIcon size={12} style={{ color: CLOUDFLARE_COLOR }} />
+										<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+											Cloudflare edge
+										</h4>
+									</div>
+									<div className="grid grid-cols-2 gap-x-6 gap-y-4">
+										<div className="space-y-0.5">
+											<span className="text-[10px] text-muted-foreground">Requests</span>
+											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+												{formatCompactCount(cloudflare.requests)}
+											</p>
+											<span className="text-[10px] text-muted-foreground">
+												edge-reported (unsampled)
+											</span>
+										</div>
+										<div className="space-y-0.5">
+											<span className="text-[10px] text-muted-foreground">Error Rate</span>
+											<p
+												className={cn(
+													"text-xl font-semibold tabular-nums font-mono",
+													cloudflare.errorRate > 0.05
+														? "text-severity-error"
+														: cloudflare.errorRate > 0.01
+															? "text-severity-warn"
+															: "text-foreground",
+												)}
+											>
+												{(cloudflare.errorRate * 100).toFixed(1)}%
+											</p>
+										</div>
+										<div className="space-y-0.5">
+											<span className="text-[10px] text-muted-foreground">CPU p99</span>
+											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+												{formatLatency(cloudflare.cpuP99Ms ?? 0)}
+											</p>
+										</div>
+										<div className="space-y-0.5">
+											<span className="text-[10px] text-muted-foreground">Duration p99</span>
+											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+												{formatLatency(cloudflare.latencyP95Ms)}
+											</p>
+										</div>
+									</div>
+								</div>
+							)}
 
 							{/* Dependencies */}
 							{dependencies.length > 0 && (
@@ -1129,6 +1188,130 @@ function DatabaseDetailPanel({
 	)
 }
 
+interface CloudflareDetailPanelProps {
+	service: CloudflareService
+	onClose: () => void
+}
+
+/**
+ * Detail panel for a standalone Cloudflare node (zone / un-instrumented
+ * Worker) sourced from the direct integration. Mirrors DatabaseDetailPanel's
+ * header + KPI grid; the KPIs differ for zones (cache + edge/origin latency)
+ * vs Workers (CPU + duration).
+ */
+function CloudflareDetailPanel({ service, onClose }: CloudflareDetailPanelProps) {
+	const isWorker = service.kind === "worker"
+	const descriptor = getCloudflareDescriptor(isWorker ? "cloudflare-worker" : "cloudflare-zone")
+	const color = descriptor.color
+	const errorRate = service.errorRate
+
+	return (
+		<div className="flex flex-col h-full bg-background overflow-hidden">
+			{/* Header */}
+			<div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+				<div className="flex items-center gap-2 min-w-0">
+					<div className="w-[3px] h-[18px] rounded-sm shrink-0" style={{ backgroundColor: color }} />
+					<CloudflareIcon size={14} className="shrink-0" style={{ color }} />
+					<span className="text-sm font-semibold text-foreground truncate">{service.displayName}</span>
+					<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase shrink-0">
+						{descriptor.category}
+					</span>
+				</div>
+				<Button variant="ghost" size="icon-xs" onClick={onClose}>
+					<XmarkIcon size={14} />
+				</Button>
+			</div>
+
+			<ScrollArea className="flex-1 min-h-0">
+				<div className="p-4 space-y-5">
+					<div className="space-y-3">
+						<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+							Metrics
+						</h4>
+						<div className="grid grid-cols-2 gap-x-6 gap-y-4">
+							<div className="space-y-0.5">
+								<span className="text-[10px] text-muted-foreground">Requests</span>
+								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+									{formatCompactCount(service.requests)}
+								</p>
+							</div>
+							<div className="space-y-0.5">
+								<span className="text-[10px] text-muted-foreground">
+									{isWorker ? "Error Rate" : "5xx Error Rate"}
+								</span>
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										errorRate > 0.05
+											? "text-severity-error"
+											: errorRate > 0.01
+												? "text-severity-warn"
+												: "text-foreground",
+									)}
+								>
+									{(errorRate * 100).toFixed(1)}%
+								</p>
+							</div>
+							{isWorker ? (
+								<>
+									<div className="space-y-0.5">
+										<span className="text-[10px] text-muted-foreground">CPU p99</span>
+										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											{formatLatency(service.cpuP99Ms ?? 0)}
+										</p>
+									</div>
+									<div className="space-y-0.5">
+										<span className="text-[10px] text-muted-foreground">Duration p99</span>
+										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											{formatLatency(service.latencyP95Ms)}
+										</p>
+									</div>
+								</>
+							) : (
+								<>
+									<div className="space-y-0.5">
+										<span className="text-[10px] text-muted-foreground">Cache Hit Rate</span>
+										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											{((service.cacheHitRate ?? 0) * 100).toFixed(1)}%
+										</p>
+									</div>
+									<div className="space-y-0.5">
+										<span className="text-[10px] text-muted-foreground">Edge TTFB p95</span>
+										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											{formatLatency(service.latencyP95Ms)}
+										</p>
+									</div>
+									<div className="space-y-0.5">
+										<span className="text-[10px] text-muted-foreground">Origin p95</span>
+										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											{formatLatency(service.originP95Ms ?? 0)}
+										</p>
+									</div>
+								</>
+							)}
+						</div>
+					</div>
+
+					<div className="space-y-3">
+						<div className="h-px bg-border" />
+						<p className="text-[11px] text-muted-foreground leading-relaxed">
+							Edge analytics from the Cloudflare direct integration. This{" "}
+							{isWorker ? "Worker" : "zone"} has no spans in the trace graph, so it appears as a
+							standalone node.
+						</p>
+						<Link
+							to="/integrations"
+							className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
+						>
+							Manage Cloudflare integration <ArrowRightIcon size={10} />
+						</Link>
+					</div>
+				</div>
+			</ScrollArea>
+		</div>
+	)
+}
+
 // --- Main Canvas ---
 
 interface ServiceMapViewProps {
@@ -1258,6 +1441,8 @@ function useElkLayout(
 export function ServiceMapCanvas({
 	edges: serviceEdges,
 	dbEdges,
+	cloudflareServices,
+	faasNames,
 	platforms,
 	runtimes,
 	overviews,
@@ -1270,6 +1455,8 @@ export function ServiceMapCanvas({
 }: {
 	edges: ServiceEdge[]
 	dbEdges: ServiceDbEdge[]
+	cloudflareServices: CloudflareService[]
+	faasNames: Map<string, string>
 	platforms: Map<string, ServicePlatform>
 	runtimes: Map<string, string>
 	overviews: ServiceOverview[]
@@ -1305,13 +1492,32 @@ export function ServiceMapCanvas({
 			serviceWorkloads: workloads,
 			platforms,
 			runtimes,
+			cloudflareServices,
+			faasNames,
 		})
-		// Service legend should only include real services, not synthetic db: nodes
+		// Service legend should only include real services, not synthetic db: / cf: nodes
 		const allServices = Array.from(
-			new Set(nodes.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
+			new Set(
+				nodes
+					.filter((n) => !n.id.startsWith(DB_NODE_PREFIX) && !isCfNodeId(n.id))
+					.map((n) => n.id),
+			),
 		).toSorted()
 		return { rawNodes: nodes, flowEdges: edges, services: allServices }
-	}, [serviceEdges, dbEdges, platforms, runtimes, overviews, workloads, durationSeconds])
+	}, [serviceEdges, dbEdges, cloudflareServices, faasNames, platforms, runtimes, overviews, workloads, durationSeconds])
+
+	// CF panel lookup (standalone nodes) + overlay lookup (instrumented Workers).
+	const cloudflareByService = useMemo(
+		() => new Map(cloudflareServices.map((s) => [s.serviceName, s])),
+		[cloudflareServices],
+	)
+	const cloudflareOverlayByService = useMemo(() => {
+		const m = new Map<string, CloudflareNodeMetrics>()
+		for (const n of rawNodes) {
+			if (!isCfNodeId(n.id) && n.data.cloudflare) m.set(n.id, n.data.cloudflare)
+		}
+		return m
+	}, [rawNodes])
 
 	// Positions depend ONLY on topology + layout config. Memoize the expensive
 	// hierarchical layout on a topology key so metric refreshes (new array
@@ -1769,42 +1975,51 @@ export function ServiceMapCanvas({
 				</ResizablePanel>
 
 				{selectedServiceId &&
-					(selectedServiceId.startsWith(DB_NODE_PREFIX) ? (
-						<>
-							<ResizableHandle withHandle />
-							<ResizablePanel defaultSize={35} minSize={25}>
-								<DatabaseDetailPanel
-									dbSystem={decodeURIComponent(
-										selectedServiceId.slice(DB_NODE_PREFIX.length),
-									)}
-									dbEdges={dbEdges}
-									services={services}
-									durationSeconds={durationSeconds}
-									startTime={startTime}
-									endTime={endTime}
-									onClose={() => setSelectedServiceId(null)}
-								/>
-							</ResizablePanel>
-						</>
-					) : (
-						<>
-							<ResizableHandle withHandle />
-							<ResizablePanel defaultSize={35} minSize={25}>
-								<ServiceDetailPanel
-									serviceId={selectedServiceId}
-									services={services}
-									edges={serviceEdges}
-									overviews={overviews}
-									workloads={workloads}
-									showInfraTab={showInfraTab}
-									platforms={platforms}
-									colorMode={colorMode}
-									durationSeconds={durationSeconds}
-									onClose={() => setSelectedServiceId(null)}
-								/>
-							</ResizablePanel>
-						</>
-					))}
+					(() => {
+						const cfService = isCfNodeId(selectedServiceId)
+							? cloudflareByService.get(
+									decodeURIComponent(selectedServiceId.slice(CF_NODE_PREFIX.length)),
+								)
+							: undefined
+						const panel = selectedServiceId.startsWith(DB_NODE_PREFIX) ? (
+							<DatabaseDetailPanel
+								dbSystem={decodeURIComponent(selectedServiceId.slice(DB_NODE_PREFIX.length))}
+								dbEdges={dbEdges}
+								services={services}
+								durationSeconds={durationSeconds}
+								startTime={startTime}
+								endTime={endTime}
+								onClose={() => setSelectedServiceId(null)}
+							/>
+						) : cfService ? (
+							<CloudflareDetailPanel
+								service={cfService}
+								onClose={() => setSelectedServiceId(null)}
+							/>
+						) : (
+							<ServiceDetailPanel
+								serviceId={selectedServiceId}
+								services={services}
+								edges={serviceEdges}
+								overviews={overviews}
+								workloads={workloads}
+								showInfraTab={showInfraTab}
+								platforms={platforms}
+								colorMode={colorMode}
+								cloudflare={cloudflareOverlayByService.get(selectedServiceId)}
+								durationSeconds={durationSeconds}
+								onClose={() => setSelectedServiceId(null)}
+							/>
+						)
+						return (
+							<>
+								<ResizableHandle withHandle />
+								<ResizablePanel defaultSize={35} minSize={25}>
+									{panel}
+								</ResizablePanel>
+							</>
+						)
+					})()}
 			</ResizablePanelGroup>
 		</div>
 	)
@@ -1831,11 +2046,13 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 	const mapResult = useRefreshableAtomValue(getServiceMapResultAtom(mapInput))
 	const overviewResult = useRefreshableAtomValue(getServiceOverviewResultAtom(overviewInput))
 	const dbEdgesResult = useRefreshableAtomValue(getServiceMapDbEdgesResultAtom(mapInput))
+	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(mapInput))
 	const platformsResult = useRefreshableAtomValue(getServicePlatformsResultAtom(mapInput))
 
 	// Render map as soon as edges arrive — don't wait for overview metrics
 	const overviews = Result.isSuccess(overviewResult) ? overviewResult.value.data : []
 	const dbEdges = Result.isSuccess(dbEdgesResult) ? dbEdgesResult.value.edges : []
+	const cloudflareServices = Result.isSuccess(cloudflareResult) ? cloudflareResult.value.services : []
 	const platforms = useMemo(() => {
 		const map = new Map<string, ServicePlatform>()
 		if (Result.isSuccess(platformsResult)) {
@@ -1850,6 +2067,17 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 		if (Result.isSuccess(platformsResult)) {
 			for (const p of platformsResult.value.platforms) {
 				if (p.runtime) map.set(p.serviceName, p.runtime)
+			}
+		}
+		return map
+	}, [platformsResult])
+	// service.name → faas.name, so a `cloudflare-worker/{script}` from the direct
+	// integration can be matched to (and overlaid onto) its instrumented node.
+	const faasNames = useMemo(() => {
+		const map = new Map<string, string>()
+		if (Result.isSuccess(platformsResult)) {
+			for (const p of platformsResult.value.platforms) {
+				if (p.faasName) map.set(p.serviceName, p.faasName)
 			}
 		}
 		return map
@@ -1894,6 +2122,8 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 			<ServiceMapCanvas
 				edges={mapResponse.edges}
 				dbEdges={dbEdges}
+				cloudflareServices={cloudflareServices}
+				faasNames={faasNames}
 				platforms={platforms}
 				runtimes={runtimes}
 				overviews={overviews}

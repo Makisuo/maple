@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
@@ -12,7 +12,7 @@ import { IssuesToolbar } from "@/components/errors/issues-toolbar"
 import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
 import type { SelectToggleEvent } from "@/components/errors/issue-row"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useErrorIssuesList } from "@/hooks/use-error-issues-list"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -57,8 +57,6 @@ const GROUP_ORDER: ReadonlyArray<WorkflowState> = [
 	"wontfix",
 ]
 
-const ISSUES_PAGE_LIMIT = 100
-
 const SEVERITY_FILTER_VALUES = ["all", "critical", "high", "medium", "low", "unset"] as const
 type SeverityFilterValue = (typeof SEVERITY_FILTER_VALUES)[number]
 
@@ -100,16 +98,11 @@ function IssuesPage() {
 	const severityFilter: SeverityFilterValue = search.severity ?? "all"
 	const kindFilter = search.kind ?? "all"
 
-	const issuesQueryAtom = MapleApiAtomClient.query("errors", "listIssues", {
-		query: {
-			...(activeFilter === "all" ? {} : { workflowState: activeFilter }),
-			...(severityFilter === "all" ? {} : { severity: severityFilter }),
-			...(kindFilter === "all" ? {} : { kind: kindFilter }),
-			limit: ISSUES_PAGE_LIMIT,
-		},
-		reactivityKeys: ["errorIssues"],
+	const issuesResult = useErrorIssuesList({
+		workflowState: activeFilter === "all" ? undefined : activeFilter,
+		severity: severityFilter === "all" ? undefined : severityFilter,
+		kind: kindFilter === "all" ? undefined : kindFilter,
 	})
-	const issuesResult = useAtomValue(issuesQueryAtom)
 	const mutations = useIssueMutations()
 
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())

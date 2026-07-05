@@ -13,6 +13,8 @@ export interface MapleDomains {
 	api?: string
 	ingest?: string
 	chat?: string
+	/** Standalone ElectricSQL shape-proxy worker (`apps/electric-sync`). */
+	sync?: string
 	/** Auto-updating local-mode dashboard SPA (the `maple` binary points users here by default). */
 	local?: string
 }
@@ -24,6 +26,7 @@ const PRD_DOMAINS: MapleDomains = {
 	api: "api.maple.dev",
 	ingest: "ingest.maple.dev",
 	chat: "chat.maple.dev",
+	sync: "sync.maple.dev",
 	landing: "maple.dev",
 	local: "local.maple.dev",
 }
@@ -33,6 +36,7 @@ const STG_DOMAINS: MapleDomains = {
 	api: "api-staging.maple.dev",
 	ingest: "ingest-staging.maple.dev",
 	chat: "chat-staging.maple.dev",
+	sync: "sync-staging.maple.dev",
 	landing: "staging-landing.maple.dev",
 	local: "local-staging.maple.dev",
 }

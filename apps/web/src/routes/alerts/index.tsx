@@ -72,6 +72,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
+import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 
 const tabValues = ["monitor", "rules", "settings"] as const
 type AlertsTab = (typeof tabValues)[number]
@@ -574,17 +575,13 @@ function AlertsPage() {
 	const destinationsQueryAtom = MapleApiAtomClient.query("alerts", "listDestinations", {
 		reactivityKeys: ["alertDestinations"],
 	})
-	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", { reactivityKeys: ["alertRules"] })
-	const incidentsQueryAtom = MapleApiAtomClient.query("alerts", "listIncidents", {
-		reactivityKeys: ["alertIncidents"],
-	})
 	const deliveryEventsQueryAtom = MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
 		reactivityKeys: ["alertDeliveryEvents"],
 	})
 
 	const destinationsResult = useAtomValue(destinationsQueryAtom)
-	const rulesResult = useAtomValue(rulesQueryAtom)
-	const incidentsResult = useAtomValue(incidentsQueryAtom)
+	const { result: rulesResult } = useAlertRulesList()
+	const { result: incidentsResult } = useAlertIncidentsList()
 	const deliveryEventsResult = useAtomValue(deliveryEventsQueryAtom)
 
 	const createDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "createDestination"), {
@@ -604,7 +601,7 @@ function AlertsPage() {
 		mode: "promiseExit",
 	})
 
-	const activeTab: AlertsTab = tabValues.includes(search.tab as AlertsTab)
+	const activeTab: AlertsTab = (tabValues as readonly string[]).includes(search.tab ?? "")
 		? (search.tab as AlertsTab)
 		: "monitor"
 

@@ -1,6 +1,7 @@
 import { Clock, Effect, Schema } from "effect"
 import {
 	DeploymentEnvironment,
+	ServiceCloudflareStatsRequest,
 	ServiceDbEdgesForServiceRequest,
 	ServiceDbEdgesRequest,
 	ServiceDbQuerySummaryRequest,
@@ -294,6 +295,90 @@ export const getServiceMapDbEdges = Effect.fn("QueryEngine.getServiceMapDbEdges"
 
 	return {
 		edges: result.data.map((row) => transformDbEdge(row, durationSeconds)),
+	}
+})
+
+// ---------------------------------------------------------------------------
+// Cloudflare direct-integration nodes
+//
+// The analytics poller writes zone / Worker metrics under synthetic service
+// names (`cloudflare/{zone}`, `cloudflare-worker/{script}`) with no spans, so
+// they never appear on the trace-derived map. This surfaces them as
+// first-class CF nodes.
+// ---------------------------------------------------------------------------
+
+const ZONE_SERVICE_PREFIX = "cloudflare/"
+const WORKER_SERVICE_PREFIX = "cloudflare-worker/"
+
+export interface CloudflareService {
+	serviceName: string
+	kind: "zone" | "worker"
+	displayName: string
+	requests: number
+	throughput: number
+	errorRate: number
+	/** Zones only. */
+	cacheHitRate?: number
+	/** Zones: edge TTFB p95. Workers: wall-time duration p99. */
+	latencyP95Ms: number
+	/** Zones only: origin response duration p95. */
+	originP95Ms?: number
+	/** Workers only: CPU time p99. */
+	cpuP99Ms?: number
+}
+
+function transformCloudflareService(row: Record<string, unknown>, durationSeconds: number): CloudflareService {
+	const serviceName = String(row.serviceName ?? "")
+	const isWorker = serviceName.startsWith(WORKER_SERVICE_PREFIX)
+	const displayName = isWorker
+		? serviceName.slice(WORKER_SERVICE_PREFIX.length)
+		: serviceName.startsWith(ZONE_SERVICE_PREFIX)
+			? serviceName.slice(ZONE_SERVICE_PREFIX.length)
+			: serviceName
+	const requests = Number(row.requests ?? 0)
+	const errorCount = Number(row.errorCount ?? 0)
+	const cacheHitCount = Number(row.cacheHitCount ?? 0)
+	const safeDuration = Math.max(durationSeconds, 1)
+	return {
+		serviceName,
+		kind: isWorker ? "worker" : "zone",
+		displayName,
+		requests,
+		throughput: requests / safeDuration,
+		errorRate: requests > 0 ? errorCount / requests : 0,
+		cacheHitRate: isWorker ? undefined : requests > 0 ? cacheHitCount / requests : 0,
+		latencyP95Ms: Number(row.latencyP95Ms ?? 0),
+		originP95Ms: isWorker ? undefined : Number(row.originP95Ms ?? 0),
+		cpuP99Ms: isWorker ? Number(row.cpuP99Ms ?? 0) : undefined,
+	}
+}
+
+export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloudflare")(function* ({
+	data,
+}: {
+	data: GetServiceMapInput
+}) {
+	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMapCloudflare")
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+
+	const result = yield* runWarehouseQuery("serviceCloudflareStats", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.serviceCloudflareStats({
+				payload: new ServiceCloudflareStatsRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+				}),
+			})
+		}),
+	)
+
+	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
+	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
+	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
+
+	return {
+		services: result.data.map((row) => transformCloudflareService(row, durationSeconds)),
 	}
 })
 

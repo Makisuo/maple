@@ -1,0 +1,25 @@
+{
+	"name": "@maple/auth",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@clerk/backend": "^2.30.1",
+		"@maple/domain": "workspace:*",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@effect/vitest": "4.0.0-beta.93",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
+}

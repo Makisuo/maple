@@ -29,8 +29,9 @@ import {
 } from "@/lib/alerts/form-utils"
 import { applyTemplate } from "@/lib/alerts/templates"
 import type { WidgetAlertPrefillNotice } from "@/lib/alerts/widget-prefill"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomSet } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useAlertRulesList } from "@/hooks/use-alerts-list"
 
 export function AlertCreateFormSurface({
 	initialForm,
@@ -86,9 +87,7 @@ export function AlertCreateFormSurface({
 
 	// Tags already in use across the org's rules, offered as autocomplete so
 	// teams converge on a shared vocabulary instead of typo-forking groups.
-	const rulesResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listRules", { reactivityKeys: ["alertRules"] }),
-	)
+	const { result: rulesResult } = useAlertRulesList()
 	const tagSuggestions = useMemo(
 		() =>
 			Result.builder(rulesResult)

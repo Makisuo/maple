@@ -132,7 +132,7 @@ export function compileCH<
 >(
 	query: CHQuery<Cols, Output, Joins>,
 	params: Params,
-	options?: { skipFormat?: boolean },
+	options?: { skipFormat?: boolean; rowSchema?: CompiledQueryRowSchema<Output> },
 ): CompiledQuery<Output> {
 	const state = query._state
 
@@ -231,7 +231,7 @@ export function compileCH<
 	}
 
 	return {
-		...makeCompiledQuery<Output>(sql),
+		...makeCompiledQuery<Output>(sql, options?.rowSchema),
 	}
 }
 

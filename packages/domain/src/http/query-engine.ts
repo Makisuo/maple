@@ -263,6 +263,24 @@ export class ServiceDbEdgesResponse extends Schema.Class<ServiceDbEdgesResponse>
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+// Cloudflare direct-integration edge / Workers analytics, one row per CF
+// pseudo-service (`cloudflare/{zone}` | `cloudflare-worker/{script}`), for the
+// service map. No `deploymentEnv` — the analytics poller's metrics carry no
+// deployment.environment dimension. Response merges the counter + percentile
+// rollups server-side; generic record shape mirrors ServiceDbEdgesResponse.
+export class ServiceCloudflareStatsRequest extends Schema.Class<ServiceCloudflareStatsRequest>(
+	"ServiceCloudflareStatsRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+}) {}
+
+export class ServiceCloudflareStatsResponse extends Schema.Class<ServiceCloudflareStatsResponse>(
+	"ServiceCloudflareStatsResponse",
+)({
+	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
 export class ServiceExternalEdgesRequest extends Schema.Class<ServiceExternalEdgesRequest>(
 	"ServiceExternalEdgesRequest",
 )({
@@ -1299,6 +1317,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceDbEdgesForService", "/service-db-edges-for-service", {
 			payload: ServiceDbEdgesForServiceRequest,
 			success: ServiceDbEdgesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceCloudflareStats", "/service-cloudflare-stats", {
+			payload: ServiceCloudflareStatsRequest,
+			success: ServiceCloudflareStatsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

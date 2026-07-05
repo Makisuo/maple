@@ -18,6 +18,7 @@ import {
 	ServiceApdexResponse,
 	ServiceDependenciesResponse,
 	ServiceDbEdgesResponse,
+	ServiceCloudflareStatsResponse,
 	ServiceDbQuerySummaryResponse,
 	ServiceExternalEdgesResponse,
 	ServiceDetailOverviewResponse,
@@ -551,6 +552,61 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceDbEdgesForService query failed",
 					)
 					return new ServiceDbEdgesResponse({ data: rows })
+				}),
+			)
+			.handle("serviceCloudflareStats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					// Counters (metrics_sum) + percentiles (metrics_gauge) run
+					// concurrently, then merge by ServiceName. Routed through the org's
+					// configured warehouse exactly like the metric explorer reads these
+					// same `cloudflare.*` metrics — no special ingest pin needed.
+					const countersCompiled = CH.compile(CH.cloudflareServiceCountersSQL(), params, {
+						rowSchema: CH.cloudflareServiceCountersRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareServiceLatencySQL(), params, {
+						rowSchema: CH.cloudflareServiceLatencyRowSchema,
+					})
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, countersCompiled, {
+									profile: "aggregation",
+									context: "cloudflareServiceCounters",
+								}),
+								"cloudflareServiceCounters query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, latencyCompiled, {
+									profile: "aggregation",
+									context: "cloudflareServiceLatency",
+								}),
+								"cloudflareServiceLatency query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(
+						latencyRows.map((row) => [row.serviceName, row]),
+					)
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errorCount: row.errorCount,
+							cacheHitCount: row.cacheHitCount,
+							latencyP95Ms: latency?.latencyP95Ms ?? 0,
+							originP95Ms: latency?.originP95Ms ?? 0,
+							cpuP99Ms: latency?.cpuP99Ms ?? 0,
+						}
+					})
+					return new ServiceCloudflareStatsResponse({ data })
 				}),
 			)
 			.handle("serviceDetailOverview", ({ payload }) =>

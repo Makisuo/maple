@@ -1,0 +1,8 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "maple-electric-sync",
+	"main": "src/worker.ts",
+	"compatibility_date": "2026-04-08",
+	"compatibility_flags": ["nodejs_compat"],
+	"workers_dev": false,
+}
