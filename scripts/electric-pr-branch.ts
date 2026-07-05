@@ -88,10 +88,20 @@ const cliInvocation = (): [string, string[]] => {
 	return [program as string, prefix]
 }
 
+// Flags whose VALUE is a credential and must never be echoed. `--database-url`
+// carries MAPLE_PG_URL (postgres://user:password@host/db); GitHub `::add-mask::`
+// on the raw password alone is unreliable (the URL-encoded form won't match — see
+// planetscale-pr-branch.ts), so we redact the value from the command echo outright.
+const SECRET_ARG_FLAGS = new Set(["--database-url"])
+
+const redactArgsForLog = (args: ReadonlyArray<string>): string =>
+	args.map((arg, i) => (i > 0 && SECRET_ARG_FLAGS.has(args[i - 1] as string) ? "***" : arg)).join(" ")
+
 /**
  * Run an `electric` CLI command. Returns the captured output; never throws
  * (callers decide how to treat failures). `secret` suppresses stdout logging —
- * JSON credential output must never reach the CI log.
+ * JSON credential output must never reach the CI log. The command echo redacts
+ * credential-bearing arg values (e.g. `--database-url`) unconditionally.
  */
 const runElectric = (args: string[], opts?: { secret?: boolean }): CliResult => {
 	const [program, prefix] = cliInvocation()
@@ -101,7 +111,7 @@ const runElectric = (args: string[], opts?: { secret?: boolean }): CliResult => 
 	}
 	const stdout = (proc.stdout ?? "").trim()
 	const stderr = (proc.stderr ?? "").trim()
-	console.log(`$ electric ${args.join(" ")}`)
+	console.log(`$ electric ${redactArgsForLog(args)}`)
 	if (!opts?.secret) {
 		if (stdout) console.log(stdout)
 		if (stderr) console.error(stderr)
@@ -181,9 +191,15 @@ const waitUntilEnvironmentGone = async (projectId: string, environmentName: stri
 	fail(`Timed out waiting for environment ${environmentName} to delete`)
 }
 
+// Register a value with GitHub Actions' log masker. Only emitted in CI — locally
+// (no GITHUB_ENV) it would just print the secret to the developer's terminal.
+const maskSecret = (value: string): void => {
+	if (value && process.env.GITHUB_ENV?.trim()) console.log(`::add-mask::${value}`)
+}
+
 const maskAndExport = (entries: Record<string, string>, secrets: ReadonlyArray<string>): void => {
 	for (const secret of secrets) {
-		if (secret) console.log(`::add-mask::${secret}`)
+		maskSecret(secret)
 	}
 	const githubEnv = process.env.GITHUB_ENV?.trim()
 	const lines = Object.entries(entries).map(([key, value]) => `${key}=${value}`)
@@ -201,6 +217,9 @@ const up = async (environmentName: string): Promise<void> => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
 	const databaseUrl = requireEnv("MAPLE_PG_URL")
+	// Defense-in-depth: mask the connection string so any incidental echo (CLI
+	// output, error text) is scrubbed in CI. The command echo already redacts it.
+	maskSecret(databaseUrl)
 	const electricUrl = process.env.ELECTRIC_URL?.trim() || DEFAULT_ELECTRIC_URL
 	const region = process.env.ELECTRIC_REGION?.trim() || DEFAULT_REGION
 
