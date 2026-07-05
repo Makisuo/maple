@@ -30,7 +30,9 @@
  *   ELECTRIC_API_TOKEN            CLI auth token (required; also the workflow gate)
  *   ELECTRIC_PROJECT_ID           parent project id for the per-PR environment (required)
  *   MAPLE_PG_URL                  PR branch direct connection string (required on `up`)
- *   ELECTRIC_URL                  shape API base to export (default https://api.electric-sql.cloud)
+ *   ELECTRIC_CLOUD_URL            Cloud shape API base to export as ELECTRIC_URL (default
+ *                                 https://api.electric-sql.cloud); deliberately NOT the
+ *                                 local-dev `ELECTRIC_URL` (docker), which would be wrong here
  *   ELECTRIC_REGION              source region (default us-east-1)
  *   ELECTRIC_PUBLICATION         if set, passed as `--publication <name>` to `services create`
  *                                 (prod uses `electric_publication_default` in manual-publishing mode)
@@ -220,7 +222,12 @@ const up = async (environmentName: string): Promise<void> => {
 	// Defense-in-depth: mask the connection string so any incidental echo (CLI
 	// output, error text) is scrubbed in CI. The command echo already redacts it.
 	maskSecret(databaseUrl)
-	const electricUrl = process.env.ELECTRIC_URL?.trim() || DEFAULT_ELECTRIC_URL
+	// The exported endpoint must be the Electric Cloud API base (where the source
+	// we just provisioned lives) — NOT the plain `ELECTRIC_URL`, which is the
+	// local-dev docker value (`http://localhost:3473` in .env.example) and would
+	// be wrong if Infisical `dev` happens to carry it. Read a dedicated
+	// `ELECTRIC_CLOUD_URL` override, defaulting to the Cloud base.
+	const electricUrl = process.env.ELECTRIC_CLOUD_URL?.trim() || DEFAULT_ELECTRIC_URL
 	const region = process.env.ELECTRIC_REGION?.trim() || DEFAULT_REGION
 
 	// 1. Reset: delete any existing `pr-<n>` environment first. Its source points
