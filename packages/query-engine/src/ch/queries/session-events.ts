@@ -19,19 +19,6 @@ function count(): CH.Expr<number> {
 	return compileFnCall<number>("count")
 }
 
-function minExpr<T>(value: CH.Expr<T>): CH.Expr<T> {
-	return compileFnCall<T>("min", value)
-}
-
-function maxExpr<T>(value: CH.Expr<T>): CH.Expr<T> {
-	return compileFnCall<T>("max", value)
-}
-
-/** `argMin(value, ordering)` — the value of `value` at the row with the smallest `ordering`. */
-function argMinExpr<T>(value: CH.Expr<T>, ordering: CH.Expr<unknown>): CH.Expr<T> {
-	return compileFnCall<T>("argMin", value, ordering)
-}
-
 // ---------------------------------------------------------------------------
 // Transcript: every event for one session, in order
 //
@@ -114,15 +101,19 @@ export function sessionTranscriptQuery(opts: SessionTranscriptOpts = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Search: sessions containing events that match the given predicates
+// Event-match semi-join: sessions whose distilled events match the predicates
 //
 // Row-level filters are ANDed, so callers pass a coherent predicate set (e.g.
 // type="network" + minStatus=500, or messageSearch="…"). Returns one row per
-// session with a match, plus the match count and time bounds, ordered by most
-// recent. The MCP / UI layer joins these session ids back to session metadata.
+// matching session with the match count — an UNFORMATTED grouped builder used as
+// an INNER JOIN by `sessionReplaysListQuery` to refine the (session_replays)
+// session list by what happened inside each session. Binds the same
+// orgId/startTime/endTime params as the list query (same pattern as
+// `sessionActivityAggregateQuery`), so they resolve to one window when compiled
+// together. No limit/offset/format — those belong to the outer list query.
 // ---------------------------------------------------------------------------
 
-export interface SearchSessionsByEventOpts {
+export interface SessionEventMatchOpts {
 	type?: string
 	level?: string
 	/** Network status >= this (e.g. 500 for server errors). */
@@ -132,29 +123,13 @@ export interface SearchSessionsByEventOpts {
 	/** Substring match on console/error message text. */
 	messageSearch?: string
 	traceId?: string
-	limit?: number
-	offset?: number
 }
 
-export interface SearchSessionsByEventOutput {
-	readonly sessionId: string
-	readonly matchCount: number
-	readonly firstTimestamp: string
-	readonly lastTimestamp: string
-	/** Page URL of the earliest matching event — helps an agent pick which session to read. */
-	readonly firstUrl: string
-}
-
-export function searchSessionsByEventQuery(opts: SearchSessionsByEventOpts) {
-	const limit = opts.limit ?? 50
-
+export function sessionEventMatchQuery(opts: SessionEventMatchOpts) {
 	return from(SessionEvents)
 		.select(($) => ({
 			sessionId: $.SessionId,
 			matchCount: count(),
-			firstTimestamp: minExpr($.Timestamp),
-			lastTimestamp: maxExpr($.Timestamp),
-			firstUrl: argMinExpr($.Url, $.Timestamp),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -168,10 +143,6 @@ export function searchSessionsByEventQuery(opts: SearchSessionsByEventOpts) {
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 		])
 		.groupBy("sessionId")
-		.orderBy(["lastTimestamp", "desc"])
-		.limit(limit)
-		.offset(opts.offset ?? 0)
-		.format("JSON")
 }
 
 // ---------------------------------------------------------------------------

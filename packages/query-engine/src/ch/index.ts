@@ -121,13 +121,12 @@ export {
 // Queries — Session Events (distilled stream)
 export {
 	sessionTranscriptQuery,
-	searchSessionsByEventQuery,
+	sessionEventMatchQuery,
 	sessionActivityQuery,
 	sessionActivityAggregateQuery,
 	IDLE_GAP_THRESHOLD_MS,
 	type SessionTranscriptOutput,
-	type SearchSessionsByEventOpts,
-	type SearchSessionsByEventOutput,
+	type SessionEventMatchOpts,
 	type SessionActivityOpts,
 	type SessionActivityOutput,
 } from "./queries/session-events"

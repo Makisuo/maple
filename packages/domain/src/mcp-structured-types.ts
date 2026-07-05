@@ -785,10 +785,25 @@ export interface SearchSessionsData {
 	timeRange: { start: string; end: string }
 	sessions: ReadonlyArray<{
 		sessionId: string
-		matchCount: number
-		firstTimestamp: string
-		lastTimestamp: string
-		firstUrl: string
+		/** The session's end-user id, or "" for an anonymous session. */
+		userId: string
+		startTime: string
+		durationMs: number | null
+		status: string
+		browserName: string
+		osName: string
+		deviceType: string
+		country: string
+		serviceName: string
+		pageViews: number
+		clickCount: number
+		errorCount: number
+		traceCount: number
+		urlInitial: string
+		/** Count of in-session events matching the event predicates. Present only when
+		 *  an event filter (event_type / level / http_status_min / url / message /
+		 *  trace_id) was applied. */
+		matchCount?: number
 	}>
 }
 
