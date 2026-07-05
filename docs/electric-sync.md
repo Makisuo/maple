@@ -86,6 +86,50 @@ Smoke-test the proxy directly (through the standalone worker; needs a bearer):
 `curl -g 'http://localhost:3476/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
 or hit Electric with no proxy: `curl -g 'http://localhost:3473/v1/shape?table=dashboards&offset=-1'`.
 
+### Troubleshooting
+
+**`Electric sync is not configured` (HTTP 503)** — the worker's 503 body when it has
+no upstream `ELECTRIC_URL`. Two causes:
+
+1. `ELECTRIC_URL` isn't set in `.env.local`. Set `ELECTRIC_URL=http://localhost:3473`,
+   then **restart** the worker — `--env-file` is read once at wrangler startup, so a
+   hot source reload won't pick it up (`bun dev`, or just the `electric-sync` task).
+2. The docker `electric` service isn't running on `:3473`. `bun db:up` starts it now;
+   confirm with `docker compose ps` (expect `maple-electric-1`).
+
+**Shapes 404 / Electric can't find the publication** — the shape stream errors even
+though the worker is configured. The `0009_electric_publication` migration wraps its
+`CREATE PUBLICATION` in a `DO $$ … EXCEPTION WHEN OTHERS THEN RAISE NOTICE … END $$`
+guard (so the PGlite test path doesn't abort on `CREATE PUBLICATION`, which PGlite
+can't run). The downside: on real Postgres a genuine failure inside that block is
+**silently swallowed** as a NOTICE and drizzle still records 0009 as applied — so
+`bun db:migrate:local` will **not** re-run it. Verify and self-heal:
+
+```bash
+docker exec maple-postgres-1 psql -U maple -d maple -c "SELECT pubname FROM pg_publication;"
+```
+
+If `electric_publication_default` is absent, apply the publication + `REPLICA IDENTITY
+FULL` directly (this is the body of `0009`; drizzle won't re-run it for you):
+
+```bash
+docker exec -i maple-postgres-1 psql -U maple -d maple <<'SQL'
+ALTER TABLE "dashboards"        REPLICA IDENTITY FULL;
+ALTER TABLE "alert_rules"       REPLICA IDENTITY FULL;
+ALTER TABLE "alert_rule_states" REPLICA IDENTITY FULL;
+ALTER TABLE "alert_incidents"   REPLICA IDENTITY FULL;
+ALTER TABLE "error_issues"      REPLICA IDENTITY FULL;
+ALTER TABLE "actors"            REPLICA IDENTITY FULL;
+ALTER TABLE "error_incidents"   REPLICA IDENTITY FULL;
+CREATE PUBLICATION electric_publication_default FOR TABLE
+  "dashboards","alert_rules","alert_rule_states","alert_incidents","error_issues","actors","error_incidents";
+SQL
+```
+
+**Nothing syncs but no error** — check `VITE_ELECTRIC_SYNC=1` is actually in the build.
+It's off by default and only opts in via `.env.local` (`bun dev`). It's a build-time
+constant, so a Vite restart is needed after changing it.
+
 ## Production runbook (PlanetScale + Electric Cloud)
 
 1. **PlanetScale cluster params:** `wal_level=logical`, `max_replication_slots>=10`,
