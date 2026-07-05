@@ -51,15 +51,17 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 			const off = clampOffset(params.offset, { max: 10_000 })
 
 			// Whether any in-session event predicate is active — drives the Matches
-			// column and the "narrowed by event" note.
-			const hasEventFilter = Boolean(
-				params.event_type ||
-					params.level ||
-					params.http_status_min ||
-					params.url_contains ||
-					params.message_contains ||
-					params.trace_id,
-			)
+			// column and the "narrowed by event" note. Uses `!= null` (not truthiness)
+			// to match the query layer's `needsEventFilter` in session-replays.ts:
+			// otherwise a zero-valued predicate like `http_status_min=0` would apply the
+			// INNER JOIN in SQL while the display silently dropped the Matches column.
+			const hasEventFilter =
+				params.event_type != null ||
+				params.level != null ||
+				params.http_status_min != null ||
+				params.url_contains != null ||
+				params.message_contains != null ||
+				params.trace_id != null
 
 			const tenant = yield* resolveTenant
 			yield* Effect.annotateCurrentSpan({
