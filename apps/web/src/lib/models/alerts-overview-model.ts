@@ -216,6 +216,12 @@ const makeOrgCollectionsKey: Effect.Effect<Store.Store<string>, never, Registry>
 })
 
 export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("maple/alerts/overview")({
+	// Not the singleton default (keepAlive): the instance — 3 shape-stream
+	// subscriptions, the delivery-events query, and the clock tick — should not
+	// stay live for the whole app session once the user leaves /alerts. The idle
+	// TTL keeps state warm across quick tab switches and back-navigation, then
+	// drains everything after the last View unmounts.
+	lifetime: { idleTimeToLive: "5 minutes" },
 	make: () =>
 		Effect.gen(function* () {
 			const orgKey = yield* makeOrgCollectionsKey
