@@ -15,13 +15,14 @@ import type {
 	AlertIncidentDocument,
 	AlertRuleDocument,
 } from "@maple/domain/http"
-import { Model, Query, Registry, Store } from "@maple/unitflow"
+import { Event, Model, Query, Registry, Store } from "@maple/unitflow"
 import * as Db from "@maple/unitflow/db"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import { Reactivity } from "effect/unstable/reactivity/Reactivity"
 
 import { deriveRuleStatus, type DerivedRuleStatus, needsAttention } from "@/lib/alerts/rule-status"
 import {
@@ -210,7 +211,16 @@ const makeOrgCollectionsKey: Effect.Effect<Store.Store<string>, never, Registry>
 						for (const unsubscribe of unsubscribes) unsubscribe()
 					}),
 			),
-		).pipe(Stream.mapEffect((key) => Store.set(store, key))),
+		).pipe(
+			// The acquire re-offers the current key to close the subscribe race, and
+			// Store.set does not dedupe — dropping unchanged keys here keeps that
+			// re-offer (and any same-key publish) from reloading dependent queries.
+			Stream.mapEffect((key) =>
+				Effect.gen(function* () {
+					if ((yield* Store.get(store)) !== key) yield* Store.set(store, key)
+				}),
+			),
+		),
 	)
 	return store
 })
@@ -245,6 +255,19 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 						return yield* client.alerts.listDeliveryEvents()
 					}),
 			})
+
+			// Atom mutations invalidate `reactivityKeys: ["alertDeliveryEvents"]`
+			// (test-notification flows). The runtime shares the atom world's
+			// Reactivity instance (see models/runtime.ts), so those invalidations
+			// re-trigger this query exactly like the old atom-based fetch did.
+			const reactivity = yield* Reactivity
+			yield* Registry.run(
+				reactivity.stream(["alertDeliveryEvents"], Effect.void).pipe(
+					// The stream emits once on subscribe; only invalidations refetch.
+					Stream.drop(1),
+					Stream.mapEffect(() => Event.emit(deliveryEvents.refresh)),
+				),
+			)
 
 			// The staleness derivation compares against wall clock; advance it on a
 			// coarse tick so a rule can go stale without any source emitting.

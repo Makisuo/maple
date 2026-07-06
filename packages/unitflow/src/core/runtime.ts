@@ -68,8 +68,16 @@ const notify = (listeners: Set<() => void>): void => {
   for (const listener of listeners) listener();
 };
 
-export const make = <R, ER>(layer: Layer.Layer<R, ER, Registry>): UnitflowRuntime<R, ER> => {
-  const runtime = ManagedRuntime.make(layer.pipe(Layer.provideMerge(Registry.layer)));
+export const make = <R, ER>(
+  layer: Layer.Layer<R, ER, Registry>,
+  options?: {
+    /** Share a `Layer.MemoMap` with another runtime (e.g. an atom runtime) so
+     * layers common to both build once and resolve the same service
+     * instances. */
+    readonly memoMap?: Layer.MemoMap | undefined;
+  },
+): UnitflowRuntime<R, ER> => {
+  const runtime = ManagedRuntime.make(layer.pipe(Layer.provideMerge(Registry.layer)), options);
   const storeEntries = new Map<string, StoreEntry>();
   // Structural keying, mirroring the registry's own instance map.
   const modelEntries = MutableHashMap.empty<InstanceKey, ModelEntry>();

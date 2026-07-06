@@ -4,13 +4,25 @@
  * `mapleRuntime` uses, so model queries carry auth + OTel like every other
  * call). One runtime for all models — mounted by the `<Unitflow>` root at the
  * routes that use models.
+ *
+ * The runtime shares `Atom.runtime`'s layer memo map. That is load-bearing:
+ * layers both worlds use — notably `Reactivity.layer` — build ONCE and resolve
+ * the same instance, so `reactivityKeys` invalidations fired by atom mutations
+ * (e.g. `useAtomSet(...mutation..., { reactivityKeys })`) are observable from
+ * inside models. Without the shared memo map each runtime would construct its
+ * own `Reactivity` and the two would be deaf to each other.
  */
 
 import { UnitflowRuntime } from "@maple/unitflow"
 import { Layer } from "effect"
+import * as Reactivity from "effect/unstable/reactivity/Reactivity"
+import { Atom } from "@/lib/effect-atom"
 import { mapleApiClientLayer } from "@/lib/registry"
 import { AlertsOverviewModel } from "./alerts-overview-model"
 
 export const unitflowRuntime = UnitflowRuntime.make(
-	AlertsOverviewModel.layer.pipe(Layer.provideMerge(mapleApiClientLayer)),
+	AlertsOverviewModel.layer.pipe(
+		Layer.provideMerge(Layer.mergeAll(mapleApiClientLayer, Reactivity.layer)),
+	),
+	{ memoMap: Atom.runtime.memoMap },
 )
