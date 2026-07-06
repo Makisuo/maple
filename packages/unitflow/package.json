@@ -1,0 +1,35 @@
+{
+	"name": "@maple/unitflow",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		".": "./src/core/index.ts",
+		"./event": "./src/core/event.ts",
+		"./model": "./src/core/model.ts",
+		"./mutation": "./src/core/mutation.ts",
+		"./query": "./src/core/query.ts",
+		"./registry": "./src/core/registry.ts",
+		"./runtime": "./src/core/runtime.ts",
+		"./store": "./src/core/store.ts",
+		"./react": "./src/react/index.ts",
+		"./db": "./src/db/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@tanstack/db": "0.6.13",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@effect/vitest": "4.0.0-beta.93",
+		"@types/react": "catalog:react",
+		"typescript": "catalog:tooling",
+		"vitest": "^4.1.9"
+	},
+	"peerDependencies": {
+		"react": "^19.0.0"
+	}
+}
