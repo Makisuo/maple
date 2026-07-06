@@ -1,4 +1,4 @@
-import type { AlertComparator } from "@maple/domain/http"
+import type { AlertComparator, AlertRulePreviewResponse } from "@maple/domain/http"
 
 /**
  * Lightweight back-of-the-envelope estimate of how the rule would have behaved
@@ -133,6 +133,35 @@ export function computeBreachStats(
 		bucketCount: chartData.length,
 		breachCount,
 		longestRunBuckets,
+		longestRunMs,
+	}
+}
+
+/**
+ * Breach stats from an evaluator-faithful `previewRule` response. Unlike
+ * {@link computeBreachStats} (a per-bucket threshold heuristic over raw chart
+ * rows), this counts the simulated `wouldFire` spans — which already account
+ * for consecutive-breach requirements and no-data behavior — so the callout
+ * says how often the rule *actually* would have fired.
+ */
+export function breachStatsFromPreview(preview: AlertRulePreviewResponse | null): BreachStats {
+	if (preview == null) return EMPTY
+	const bucketCount = preview.series.reduce((max, s) => Math.max(max, s.points.length), 0)
+	if (preview.wouldFire.length === 0) return { ...EMPTY, bucketCount }
+	const windowMs = preview.windowMinutes * 60_000
+	let longestRunMs: number | null = null
+	for (const span of preview.wouldFire) {
+		const start = Date.parse(span.start)
+		const end = Date.parse(span.end)
+		if (!Number.isFinite(start) || !Number.isFinite(end)) continue
+		const duration = end - start
+		if (longestRunMs === null || duration > longestRunMs) longestRunMs = duration
+	}
+	return {
+		bucketCount,
+		breachCount: preview.wouldFire.length,
+		longestRunBuckets:
+			longestRunMs != null && windowMs > 0 ? Math.max(1, Math.round(longestRunMs / windowMs)) : 1,
 		longestRunMs,
 	}
 }

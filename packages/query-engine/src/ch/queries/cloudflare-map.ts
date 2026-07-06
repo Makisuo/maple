@@ -17,8 +17,10 @@
 // for the non-applicable kind — one column per concern serves both.
 // ---------------------------------------------------------------------------
 
+import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import { from, param } from "@maple-dev/clickhouse-builder"
+import { from, param, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
+import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
 
 /** Counter metrics the poller emits (all in `metrics_sum`). */
@@ -55,6 +57,34 @@ export interface CloudflareServiceLatencyOutput {
 	/** Workers only: CPU time p99 (0 for zones). */
 	readonly cpuP99Ms: number
 }
+
+/**
+ * Row schema for {@link cloudflareServiceCountersSQL}. The `sumIf` aggregates
+ * use {@link CHNumber} so a BYO-ClickHouse org's string-encoded numeric
+ * aggregates decode identically to Tinybird's numbers — pass it as the
+ * `rowSchema` to `CH.compile` so `decodeRows` coerces centrally instead of a
+ * `ParseError` (or a string leaking over the wire) surfacing downstream. Mirror
+ * of `cloudflareUsageRowSchema`.
+ */
+export const cloudflareServiceCountersRowSchema: CompiledQueryRowSchema<CloudflareServiceCountersOutput> =
+	Schema.Struct({
+		serviceName: Schema.String,
+		requests: CHNumber,
+		errorCount: CHNumber,
+		cacheHitCount: CHNumber,
+	})
+
+/**
+ * Row schema for {@link cloudflareServiceLatencySQL}. Same {@link CHNumber}
+ * coercion as the counters schema for the percentile columns.
+ */
+export const cloudflareServiceLatencyRowSchema: CompiledQueryRowSchema<CloudflareServiceLatencyOutput> =
+	Schema.Struct({
+		serviceName: Schema.String,
+		latencyP95Ms: CHNumber,
+		originP95Ms: CHNumber,
+		cpuP99Ms: CHNumber,
+	})
 
 /**
  * Counter rollup over `metrics_sum`, one row per Cloudflare pseudo-service.

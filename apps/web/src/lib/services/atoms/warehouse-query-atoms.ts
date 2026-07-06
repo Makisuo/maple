@@ -21,6 +21,7 @@ import {
 import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
+	getMetricAttributeValues,
 	getMetricTimeSeries,
 	getMetricsSummary,
 	listMetrics,
@@ -271,6 +272,10 @@ export const getMetricTimeSeriesResultAtom = makeQueryAtomFamily(getMetricTimeSe
 })
 
 export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAttributeKeys, {
+	staleTime: 60_000,
+})
+
+export const getMetricAttributeValuesResultAtom = makeQueryAtomFamily(getMetricAttributeValues, {
 	staleTime: 60_000,
 })
 

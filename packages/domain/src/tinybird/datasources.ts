@@ -1222,6 +1222,11 @@ export const alertChecks = defineDatasource("alert_checks", {
 		IncidentId: t.string().nullable(),
 		IncidentTransition: t.string().lowCardinality(),
 		EvaluationDurationMs: t.uint32(),
+		// Populated on Status='error' rows (failed evaluations). ErrorCategory uses
+		// empty string (not NULL) for non-error rows — LowCardinality(Nullable) is
+		// awkward in ClickHouse.
+		ErrorMessage: t.string().nullable(),
+		ErrorCategory: t.string().lowCardinality(),
 	},
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",

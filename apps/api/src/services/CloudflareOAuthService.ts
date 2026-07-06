@@ -242,6 +242,17 @@ export class CloudflareOAuthService extends Context.Service<
 			const orgId = decodeOrgId(stateRow.orgId)
 			yield* Effect.annotateCurrentSpan({ orgId })
 
+			// This is exactly the condition that caused a 31h silent outage: without a refresh
+			// token, the connection can only ever renew by the access token still being valid, so
+			// once it expires every poll tick starts skipping with no other signal. The registered
+			// OAuth client must have the refresh-token grant enabled on the Cloudflare side.
+			if (!tokenResponse.refresh_token) {
+				yield* Effect.logWarning(
+					"Cloudflare OAuth token exchange returned no refresh token — connection will expire without renewal",
+					{ orgId, expiresAt },
+				)
+			}
+
 			yield* oauth.upsertConnection(orgId, currentTime, {
 				externalUserId: account.id,
 				// Cloudflare has no user email in this flow; the account name is a display label.

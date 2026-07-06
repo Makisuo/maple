@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { isBackfill, renderStatementFull, type BackfillSpec } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
+import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_error_columns"
 import { migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -14,9 +15,15 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 	.join("\n\n")
 
 describe("ClickHouse migrations", () => {
-	it("keeps service.namespace migration ordered after the previous deltas", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4])
-		expect(migrations.at(-1)).toBe(migration_0004_service_namespace_projections)
+	it("keeps migrations ordered by version", () => {
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5])
+		expect(migrations.at(-1)).toBe(migration_0005_alert_checks_error_columns)
+	})
+
+	it("adds alert_checks error columns as idempotent ALTERs", () => {
+		for (const statement of migration_0005_alert_checks_error_columns.statements) {
+			expect(statement).toContain("ALTER TABLE alert_checks ADD COLUMN IF NOT EXISTS")
+		}
 	})
 
 	it("rebuilds namespace-aware log aggregates and recreates affected materialized views", () => {

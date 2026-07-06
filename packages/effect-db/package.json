@@ -1,0 +1,28 @@
+{
+	"name": "@maple/effect-db",
+	"private": true,
+	"type": "module",
+	"sideEffects": false,
+	"exports": {
+		"./atom": "./src/atom/index.ts",
+		"./electric": "./src/electric/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@electric-sql/client": "1.5.22",
+		"@standard-schema/spec": "^1.1.0",
+		"@tanstack/db": "0.6.13",
+		"@tanstack/electric-db-collection": "0.3.11",
+		"@tanstack/react-db": "0.1.91",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@types/react": "catalog:react",
+		"typescript": "catalog:tooling"
+	},
+	"peerDependencies": {
+		"react": "^19.0.0"
+	}
+}

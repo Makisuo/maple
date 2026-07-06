@@ -6,7 +6,7 @@ import {
 	makeLoginSelfHosted,
 	makeResolveMcpTenant,
 	makeResolveTenant,
-} from "./AuthService"
+} from "./index"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asUserId = Schema.decodeUnknownSync(UserId)

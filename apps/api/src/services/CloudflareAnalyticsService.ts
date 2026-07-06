@@ -44,7 +44,7 @@ import {
 	type CloudflareAnalyticsStateInsert,
 	type CloudflareAnalyticsStateRow,
 } from "@maple/db"
-import { and, eq, inArray, isNull, lt, or } from "drizzle-orm"
+import { and, eq, gt, inArray, isNull, lt, or } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -599,6 +599,14 @@ interface PollAllOrgsSummary {
 	readonly orgs: number
 	readonly rowsIngested: number
 	readonly failures: number
+	readonly skipped: number
+	readonly perOrg: ReadonlyArray<{
+		readonly orgId: OrgId
+		readonly skipped: string | null
+		readonly callsMade: number
+		readonly rowsIngested: number
+		readonly failures: number
+	}>
 }
 
 export interface CloudflareAnalyticsServiceShape {
@@ -611,6 +619,8 @@ export interface CloudflareAnalyticsServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<CloudflareIntegrationStatus, IntegrationsPersistenceError>
 	readonly getUsage: (orgId: OrgId) => Effect.Effect<CloudflareUsageResponse, IntegrationsPersistenceError>
+	/** Recovery hook for reconnect — see the implementation below for why this exists. */
+	readonly resetOrgState: (orgId: OrgId) => Effect.Effect<void, IntegrationsPersistenceError>
 }
 
 export class CloudflareAnalyticsService extends Context.Service<
@@ -771,6 +781,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 							or(
 								isNull(cloudflareAnalyticsState.leaseUntil),
 								lt(cloudflareAnalyticsState.leaseUntil, new Date(now)),
+								// Corrupt-lease escape hatch: a live lease is always bounded by now+LEASE_MS,
+								// so anything beyond 2x that is impossible under normal operation (e.g. a
+								// clock jump or a crashed writer that left a bogus far-future value) and is
+								// safe to reclaim rather than let it wedge the org forever.
+								gt(cloudflareAnalyticsState.leaseUntil, new Date(now + 2 * LEASE_MS)),
 							),
 						),
 					)
@@ -1110,13 +1125,23 @@ export class CloudflareAnalyticsService extends Context.Service<
 
 		const pollOrg = Effect.fn("CloudflareAnalyticsService.pollOrg")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			const skip = (reason: string): PollOrgSummary => ({
-				orgId,
-				skipped: reason,
-				callsMade: 0,
-				rowsIngested: 0,
-				failures: [],
-			})
+			// A skip used to be silent — the reason only ever landed in the returned summary, which
+			// nothing read for a plain tick. Annotating pollOrg's own span means every skip is now
+			// visible on the trace even when the tick rollup below doesn't (yet) escalate it.
+			const skip = (reason: string) =>
+				Effect.annotateCurrentSpan({
+					"maple.cloudflare.skip_reason": reason,
+					"maple.cloudflare.calls": 0,
+					"maple.cloudflare.rows_ingested": 0,
+				}).pipe(
+					Effect.as({
+						orgId,
+						skipped: reason,
+						callsMade: 0,
+						rowsIngested: 0,
+						failures: [],
+					} satisfies PollOrgSummary),
+				)
 
 			const now = yield* Clock.currentTimeMillis
 
@@ -1126,7 +1151,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				Result.isFailure(tokenResult) &&
 				tokenResult.failure instanceof IntegrationsNotConnectedError
 			) {
-				return skip("not connected")
+				return yield* skip("not connected")
 			}
 
 			// Claim the tick lease; the anchor row is created lazily the first time an org is polled.
@@ -1135,7 +1160,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				yield* ensureWorkersRow(orgId, now)
 				claimed = yield* claimLease(orgId, now)
 			}
-			if (claimed == null) return skip("lease held by another tick")
+			if (claimed == null) return yield* skip("lease held by another tick")
 			const anchor = claimed
 
 			return yield* Effect.gen(function* () {
@@ -1146,13 +1171,13 @@ export class CloudflareAnalyticsService extends Context.Service<
 					yield* recordOrgError(orgId, error.message, now, {
 						disable: error instanceof IntegrationsRevokedError,
 					})
-					return skip(`token unavailable: ${error._tag}`)
+					return yield* skip(`token unavailable: ${error._tag}`)
 				}
 				const { accessToken, accountId, scope } = tokenResult.success
 
 				if (!hasAnalyticsScopes(scope)) {
 					yield* recordOrgError(orgId, MISSING_SCOPES_ERROR, now)
-					return skip("missing analytics scopes")
+					return yield* skip("missing analytics scopes")
 				}
 
 				// Zone discovery (REST pagination) is hourly-TTL'd on the anchor row; ticks in
@@ -1165,7 +1190,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						yield* recordOrgError(orgId, error.message, now, {
 							disable: error instanceof IntegrationsRevokedError,
 						})
-						return skip(`zone discovery failed: ${error._tag}`)
+						return yield* skip(`zone discovery failed: ${error._tag}`)
 					}
 					rows = yield* reconcileZones(orgId, zonesResult.success, anchor.id, now)
 				} else {
@@ -1184,7 +1209,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 						`Cloudflare ingest key unavailable: ${keyResult.failure.message}`,
 						now,
 					)
-					return skip("ingest key unavailable")
+					return yield* skip("ingest key unavailable")
 				}
 				const ingestKey = keyResult.success
 
@@ -1310,7 +1335,20 @@ export class CloudflareAnalyticsService extends Context.Service<
 			}).pipe(
 				Effect.ensuring(
 					Clock.currentTimeMillis.pipe(
-						Effect.flatMap((end) => releaseLease(orgId, end).pipe(Effect.ignore)),
+						Effect.flatMap((end) =>
+							releaseLease(orgId, end).pipe(
+								// The ensuring must never fail (that would mask whatever this tick actually
+								// did), but a lease release failure is not nothing — it silently wedges the
+								// org behind a lease until the corrupt-lease escape hatch reclaims it, so log
+								// loudly instead of swallowing it via Effect.ignore.
+								Effect.catchCause((cause) =>
+									Effect.logWarning("cloudflare-analytics lease release failed", {
+										orgId,
+										error: Cause.pretty(cause),
+									}),
+								),
+							),
+						),
 					),
 				),
 			)
@@ -1334,6 +1372,11 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// Concurrent fan-out below — must be a Ref rather than a mutable closure variable.
 			const rowsIngestedRef = yield* Ref.make(0)
 			const failuresRef = yield* Ref.make(0)
+			// Every org's full summary, including skips — the outage that motivated this had 100%
+			// of ticks skip silently for 31 hours because nothing outside pollOrg ever looked at
+			// `summary.skipped`. Keeping the whole summary (not just counters) lets the rollup below
+			// name which orgs are stuck and why.
+			const summariesRef = yield* Ref.make<Array<PollOrgSummary>>([])
 			yield* Effect.forEach(
 				capable,
 				(row) =>
@@ -1343,6 +1386,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 								[
 									Ref.update(rowsIngestedRef, (count) => count + summary.rowsIngested),
 									Ref.update(failuresRef, (count) => count + summary.failures.length),
+									Ref.update(summariesRef, (list) => [...list, summary]),
 								],
 								{ discard: true },
 							),
@@ -1358,13 +1402,38 @@ export class CloudflareAnalyticsService extends Context.Service<
 								: Effect.logWarning("cloudflare-analytics org poll failed", {
 										orgId: row.orgId,
 										error: Cause.pretty(cause),
-									}),
+									}).pipe(
+										// A crashed org must still appear in the rollup — otherwise perOrg
+										// silently omits it, `skipped` undercounts, and the zero-rows warning
+										// below can't see a crash-storm at all.
+										Effect.andThen(
+											Ref.update(summariesRef, (list) => [
+												...list,
+												{
+													orgId: decodeOrgId(row.orgId),
+													skipped: "org poll failed — see the warning log for the cause",
+													callsMade: 0,
+													rowsIngested: 0,
+													failures: [],
+												} satisfies PollOrgSummary,
+											]),
+										),
+									),
 						),
 					),
 				{ concurrency: ORG_CONCURRENCY, discard: true },
 			)
 			const rowsIngested = yield* Ref.get(rowsIngestedRef)
 			const failures = yield* Ref.get(failuresRef)
+			const summaries = yield* Ref.get(summariesRef)
+			const skipped = summaries.filter((summary) => summary.skipped != null).length
+			const perOrg = summaries.map((summary) => ({
+				orgId: summary.orgId,
+				skipped: summary.skipped,
+				callsMade: summary.callsMade,
+				rowsIngested: summary.rowsIngested,
+				failures: summary.failures.length,
+			}))
 			// Per-failure exception events + ERROR logs already fired in the seam; this is the
 			// at-a-glance rollup so a failing tick doesn't read as a healthy "complete".
 			if (failures > 0) {
@@ -1373,7 +1442,28 @@ export class CloudflareAnalyticsService extends Context.Service<
 					orgs: capable.length,
 				})
 			}
-			return { orgs: capable.length, rowsIngested, failures } satisfies PollAllOrgsSummary
+			// The outage that motivated this: every capable org skipped every tick, so rowsIngested
+			// stayed 0 with no failures either — a tick that "completed" while doing nothing at all.
+			// Surface that shape explicitly instead of relying on someone noticing a flat graph.
+			// Gated on `skipped > 0` so a genuinely idle tick (orgs caught up / zero traffic —
+			// zero rows with zero skips) stays quiet; crashed orgs count as skipped via the
+			// synthetic summary above, and pure dataset failures already warn just before this.
+			if (capable.length > 0 && rowsIngested === 0 && skipped > 0) {
+				yield* Effect.logWarning("cloudflare-analytics tick ingested zero rows", {
+					orgs: capable.length,
+					skipped,
+					reasons: summaries
+						.filter((summary) => summary.skipped != null)
+						.map((summary) => ({ orgId: summary.orgId, reason: summary.skipped })),
+				})
+			}
+			return {
+				orgs: capable.length,
+				rowsIngested,
+				failures,
+				skipped,
+				perOrg,
+			} satisfies PollAllOrgsSummary
 		})
 
 		const getStatus = Effect.fn("CloudflareAnalyticsService.getStatus")(function* (orgId: OrgId) {
@@ -1568,12 +1658,40 @@ export class CloudflareAnalyticsService extends Context.Service<
 			})
 		})
 
+		/**
+		 * Recovery hook for reconnect: clears the disabled/error state a revoked-token error left
+		 * behind and forces zone re-discovery on the next tick (so any zone that vanished while
+		 * disconnected is immediately re-disabled again by the reconcile, rather than reappearing
+		 * as falsely healthy). Reconnecting writes fresh tokens, but rows disabled by
+		 * `recordOrgError(..., { disable: true })` would otherwise stay dead forever — zone rows
+		 * recover via the discovery reconcile once polling resumes, but the account-scoped workers
+		 * anchor row has no other re-enable path.
+		 */
+		const resetOrgState = Effect.fn("CloudflareAnalyticsService.resetOrgState")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
+			const now = yield* Clock.currentTimeMillis
+			yield* dbExecute((db) =>
+				db
+					.update(cloudflareAnalyticsState)
+					.set({
+						enabled: true,
+						lastError: null,
+						lastErrorAt: null,
+						discoveredAt: null,
+						leaseUntil: null,
+						updatedAt: new Date(now),
+					})
+					.where(eq(cloudflareAnalyticsState.orgId, orgId)),
+			)
+		})
+
 		return {
 			pollAllOrgs,
 			pollOrg,
 			getStatus,
 			getIntegrationStatus,
 			getUsage,
+			resetOrgState,
 		} satisfies CloudflareAnalyticsServiceShape
 	}),
 }) {

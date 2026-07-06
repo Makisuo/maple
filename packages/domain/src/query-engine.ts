@@ -229,6 +229,10 @@ export const AttributeKeysQuery = Schema.Struct({
 	kind: Schema.Literal("attributeKeys"),
 	source: Schema.Literals(["traces", "logs", "metrics"]),
 	scope: Schema.optional(Schema.Literals(["span", "resource"])),
+	// Scope metrics-source discovery to a single metric (reads the raw metric
+	// table instead of the org-wide hourly rollup). Both fields must be set.
+	metricName: Schema.optional(Schema.String),
+	metricType: Schema.optional(MetricType),
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
 	),
@@ -291,6 +295,9 @@ export const AttributeValuesQuery = Schema.Struct({
 	source: Schema.Literals(["traces", "logs", "metrics"]),
 	scope: Schema.Literals(["span", "resource", "log", "metric"]),
 	attributeKey: Schema.String,
+	// Scope metrics-source discovery to a single metric (see AttributeKeysQuery).
+	metricName: Schema.optional(Schema.String),
+	metricType: Schema.optional(MetricType),
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
 	),

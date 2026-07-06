@@ -29,3 +29,7 @@ export function arrayStringConcat(
 export function arrayFilter(fn: string, arr: Expr<any>): Expr<any> {
 	return makeExpr<any>(raw(`arrayFilter(${fn}, ${compile(arr.toFragment())})`))
 }
+
+export function arrayJoin<T>(arr: Expr<ReadonlyArray<T>>): Expr<T> {
+	return makeExpr<T>(raw(`arrayJoin(${compile(arr.toFragment())})`))
+}

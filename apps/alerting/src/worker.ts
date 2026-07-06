@@ -304,7 +304,13 @@ const cloudflareAnalyticsTick = Effect.gen(function* () {
 	const analytics = yield* CloudflareAnalyticsService
 	const result = yield* analytics.pollAllOrgs()
 	yield* Effect.logInfo("Cloudflare analytics tick complete").pipe(
-		Effect.annotateLogs({ orgs: result.orgs, rowsIngested: result.rowsIngested }),
+		Effect.annotateLogs({
+			orgs: result.orgs,
+			rowsIngested: result.rowsIngested,
+			skipped: result.skipped,
+			failures: result.failures,
+			perOrg: result.perOrg,
+		}),
 	)
 }).pipe(
 	Effect.withSpan("alerting.cloudflare_analytics_tick"),

@@ -1,3 +1,4 @@
+import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
@@ -56,23 +57,6 @@ export interface EnvShape {
 	 */
 	readonly MAPLE_CLOUDFLARE_API_BASE_URL: string
 }
-
-const stringWithDefault = (key: string, fallback: string) =>
-	Config.string(key).pipe(Config.withDefault(fallback))
-
-const optionalString = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(s) : Option.none())),
-		),
-	)
-
-const optionalRedacted = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(Redacted.make(s)) : Option.none())),
-		),
-	)
 
 const portConfig = Config.number("PORT").pipe(Config.withDefault(3472))
 

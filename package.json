@@ -12,7 +12,7 @@
 		"dev": "turbo dev",
 		"docker:build": "COMPOSE_PARALLEL_LIMIT=1 docker compose build",
 		"docker:up": "COMPOSE_PARALLEL_LIMIT=1 docker compose up --build",
-		"db:up": "docker compose up -d postgres",
+		"db:up": "docker compose up -d postgres electric",
 		"db:migrate:local": "DATABASE_URL=postgres://maple:maple@localhost:5499/maple bun run --cwd packages/db db:migrate",
 		"migrate:prod": "bun run --cwd packages/db ps:apply-schema main",
 		"dev:alerting": "bun --filter=@maple/alerting dev",

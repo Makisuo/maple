@@ -85,7 +85,7 @@ import {
 	type ParticleRegistry,
 } from "./service-map-particles"
 import { getDbDescriptor } from "./service-map-db"
-import { CF_NODE_PREFIX, getCloudflareDescriptor, isCfNodeId } from "./service-map-cloudflare"
+import { CF_NODE_PREFIX, CLOUDFLARE_COLOR, getCloudflareDescriptor, isCfNodeId } from "./service-map-cloudflare"
 import {
 	buildFlowElements,
 	computeNodePositions,
@@ -326,7 +326,7 @@ function ServiceDetailPanel({
 								<div className="space-y-3">
 									<div className="h-px bg-border" />
 									<div className="flex items-center gap-1.5">
-										<CloudflareIcon size={12} style={{ color: "oklch(0.7 0.16 50)" }} />
+										<CloudflareIcon size={12} style={{ color: CLOUDFLARE_COLOR }} />
 										<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
 											Cloudflare edge
 										</h4>

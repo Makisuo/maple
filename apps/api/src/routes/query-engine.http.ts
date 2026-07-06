@@ -566,8 +566,12 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					// concurrently, then merge by ServiceName. Routed through the org's
 					// configured warehouse exactly like the metric explorer reads these
 					// same `cloudflare.*` metrics — no special ingest pin needed.
-					const countersCompiled = CH.compile(CH.cloudflareServiceCountersSQL(), params)
-					const latencyCompiled = CH.compile(CH.cloudflareServiceLatencySQL(), params)
+					const countersCompiled = CH.compile(CH.cloudflareServiceCountersSQL(), params, {
+						rowSchema: CH.cloudflareServiceCountersRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareServiceLatencySQL(), params, {
+						rowSchema: CH.cloudflareServiceLatencyRowSchema,
+					})
 					const [counterRows, latencyRows] = yield* Effect.all(
 						[
 							mapExecError(

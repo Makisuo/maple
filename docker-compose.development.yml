@@ -4,6 +4,9 @@ services:
   # Postgres. vitest does NOT need this — tests run embedded PGlite.
   postgres:
     image: postgres:17-alpine
+    # wal_level=logical is a runtime GUC (not initdb-time), so flipping it on an
+    # existing volume needs no reset. Electric tails the WAL for shape sync.
+    command: ["postgres", "-c", "wal_level=logical"]
     ports:
       - "5499:5432"
     environment:
@@ -17,6 +20,22 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  # ElectricSQL sync service for `wrangler dev`. The apps/api shape proxy
+  # (/api/sync/shape) points at http://localhost:3473 and is the only thing that
+  # talks to it. ELECTRIC_MANUAL_TABLE_PUBLISHING mirrors prod: the publication
+  # is owned by a Drizzle migration, not by Electric.
+  electric:
+    image: electricsql/electric:latest
+    ports:
+      - "3473:3000"
+    environment:
+      DATABASE_URL: postgresql://maple:maple@postgres:5432/maple?sslmode=disable
+      ELECTRIC_INSECURE: "true"
+      ELECTRIC_MANUAL_TABLE_PUBLISHING: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.8

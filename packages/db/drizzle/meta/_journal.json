@@ -64,6 +64,13 @@
       "when": 1783200004000,
       "tag": "0008_elite_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783200005000,
+      "tag": "0009_electric_publication",
+      "breakpoints": true
     }
   ]
 }

@@ -22,6 +22,7 @@ import { and, desc, eq, lt } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Schema, Context } from "effect"
 import { randomUUID } from "node:crypto"
 import { Database } from "../lib/DatabaseLive"
+import { readTxid, txidColumn } from "../lib/electric-txid"
 import { summarizeDashboardChange } from "./dashboard-changes"
 
 const decodeDashboardIdSync = Schema.decodeUnknownSync(DashboardId)
@@ -83,7 +84,13 @@ const validatePayload = Effect.fnUntraced(function* (dashboard: DashboardDocumen
 	return yield* Effect.try({
 		try: () => {
 			JSON.stringify(dashboard)
-			return dashboard
+			// `txid` is a transport-only field carried on mutation responses; it must
+			// never be persisted into `payload_json` (nor a version snapshot). Strip
+			// it here — the single choke point for every jsonb write — so a client
+			// that echoes it back in an upsert payload can't leak it into storage.
+			if (dashboard.txid === undefined) return dashboard
+			const { txid: _txid, ...rest } = dashboard
+			return new DashboardDocument({ ...rest })
 		},
 		catch: () =>
 			new DashboardValidationError({
@@ -341,29 +348,30 @@ export class DashboardPersistenceService extends Context.Service<
 				updatedAt: number,
 				payloadJson: DashboardDocument,
 			) {
-					const updated: ReadonlyArray<{ readonly id: string }> = yield* database
-						.execute((db) =>
-							db
-								.update(dashboards)
-								.set({
-									name: dashboard.name,
-									payloadJson,
-									updatedAt: new Date(updatedAt),
-									updatedBy: userId,
-									version: expectedVersion + 1,
-								})
-								.where(
-									and(
-										eq(dashboards.orgId, orgId),
-										eq(dashboards.id, dashboard.id),
-										eq(dashboards.version, expectedVersion),
-									),
-								)
-								.returning({ id: dashboards.id }),
-						)
-						.pipe(Effect.mapError(toPersistenceError))
+					const updated: ReadonlyArray<{ readonly id: string; readonly txid: string }> =
+						yield* database
+							.execute((db) =>
+								db
+									.update(dashboards)
+									.set({
+										name: dashboard.name,
+										payloadJson,
+										updatedAt: new Date(updatedAt),
+										updatedBy: userId,
+										version: expectedVersion + 1,
+									})
+									.where(
+										and(
+											eq(dashboards.orgId, orgId),
+											eq(dashboards.id, dashboard.id),
+											eq(dashboards.version, expectedVersion),
+										),
+									)
+									.returning({ id: dashboards.id, ...txidColumn }),
+							)
+							.pipe(Effect.mapError(toPersistenceError))
 
-					return updated.length > 0
+					return { won: updated.length > 0, txid: readTxid(updated) }
 				})
 
 			const insertNew = (
@@ -376,19 +384,25 @@ export class DashboardPersistenceService extends Context.Service<
 			) =>
 				database
 					.execute((db) =>
-						db.insert(dashboards).values({
-							orgId,
-							id: dashboard.id,
-							name: dashboard.name,
-							payloadJson,
-							createdAt: new Date(createdAt),
-							updatedAt: new Date(updatedAt),
-							createdBy: userId,
-							updatedBy: userId,
-							version: 1,
-						}),
+						db
+							.insert(dashboards)
+							.values({
+								orgId,
+								id: dashboard.id,
+								name: dashboard.name,
+								payloadJson,
+								createdAt: new Date(createdAt),
+								updatedAt: new Date(updatedAt),
+								createdBy: userId,
+								updatedBy: userId,
+								version: 1,
+							})
+							.returning(txidColumn),
 					)
-					.pipe(Effect.mapError(toPersistenceError))
+					.pipe(
+						Effect.mapError(toPersistenceError),
+						Effect.map(readTxid),
+					)
 
 			const upsertInternal = Effect.fn("DashboardPersistenceService.upsertInternal")(function* (
 				orgId: OrgId,
@@ -402,10 +416,11 @@ export class DashboardPersistenceService extends Context.Service<
 
 					const current = yield* loadCurrent(orgId, dashboard.id)
 
+					let txid: string | undefined
 					if (current === null) {
-						yield* insertNew(orgId, userId, dashboard, createdAt, updatedAt, payloadJson)
+						txid = yield* insertNew(orgId, userId, dashboard, createdAt, updatedAt, payloadJson)
 					} else {
-						const won = yield* tryCasUpdate(
+						const result = yield* tryCasUpdate(
 							orgId,
 							userId,
 							dashboard,
@@ -413,7 +428,7 @@ export class DashboardPersistenceService extends Context.Service<
 							updatedAt,
 							payloadJson,
 						)
-						if (!won) {
+						if (!result.won) {
 							return yield* Effect.fail(
 								new DashboardConcurrencyError({
 									dashboardId: dashboard.id,
@@ -422,6 +437,7 @@ export class DashboardPersistenceService extends Context.Service<
 								}),
 							)
 						}
+						txid = result.txid
 					}
 
 					// History recording is best-effort: a failure here must not roll
@@ -442,7 +458,10 @@ export class DashboardPersistenceService extends Context.Service<
 						Effect.ignore,
 					)
 
-					return dashboard
+					// Attach the write's txid only to the returned document — never to
+					// the stored payload or version snapshot, which were computed above
+					// from the txid-free input.
+					return txid === undefined ? dashboard : new DashboardDocument({ ...dashboard, txid })
 				})
 
 			const upsert = Effect.fn("DashboardPersistenceService.upsert")(function* (
@@ -493,7 +512,7 @@ export class DashboardPersistenceService extends Context.Service<
 					const payloadJson = yield* validatePayload(next)
 					const updatedAt = yield* parseTimestamp("updatedAt", next.updatedAt)
 
-					const won = yield* tryCasUpdate(
+					const result = yield* tryCasUpdate(
 						orgId,
 						userId,
 						next,
@@ -501,7 +520,7 @@ export class DashboardPersistenceService extends Context.Service<
 						updatedAt,
 						payloadJson,
 					)
-					if (!won) continue
+					if (!result.won) continue
 
 					yield* recordVersion(orgId, userId, next, current.document, versionOptions).pipe(
 						Effect.tapError((error) =>
@@ -512,7 +531,7 @@ export class DashboardPersistenceService extends Context.Service<
 						Effect.ignore,
 					)
 
-					return next
+					return result.txid === undefined ? next : new DashboardDocument({ ...next, txid: result.txid })
 				}
 
 				return yield* Effect.fail(
@@ -533,7 +552,7 @@ export class DashboardPersistenceService extends Context.Service<
 						db
 							.delete(dashboards)
 							.where(and(eq(dashboards.orgId, orgId), eq(dashboards.id, dashboardId)))
-							.returning({ id: dashboards.id }),
+							.returning({ id: dashboards.id, ...txidColumn }),
 					)
 					.pipe(Effect.mapError(toPersistenceError))
 
@@ -565,6 +584,7 @@ export class DashboardPersistenceService extends Context.Service<
 
 				return new DashboardDeleteResponse({
 					id: decodeDashboardIdSync(deleted.value.id),
+					...(deleted.value.txid !== undefined && { txid: deleted.value.txid }),
 				})
 			})
 

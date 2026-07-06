@@ -12,10 +12,23 @@ let authHeadersProvider: MapleAuthHeadersProvider | undefined
 // caches key on it. Reset to null on sign-out / org-less states.
 let activeOrgId: string | null = null
 
+const activeOrgSubscribers = new Set<() => void>()
+
 export const getActiveOrgId = (): string | null => activeOrgId
 
 export const setActiveOrgId = (orgId: string | null | undefined) => {
-	activeOrgId = orgId && orgId.length > 0 ? orgId : null
+	const next = orgId && orgId.length > 0 ? orgId : null
+	if (next === activeOrgId) return
+	activeOrgId = next
+	// Notify reactive consumers (e.g. useActiveOrgId → the per-org ElectricSQL
+	// collection lifecycle) so an org switch recreates org-scoped state.
+	for (const notify of activeOrgSubscribers) notify()
+}
+
+/** Subscribe to active-org changes. Returns an unsubscribe fn (useSyncExternalStore-shaped). */
+export const subscribeActiveOrgId = (notify: () => void): (() => void) => {
+	activeOrgSubscribers.add(notify)
+	return () => activeOrgSubscribers.delete(notify)
 }
 
 export const getMapleAuthHeaders = async (): Promise<MapleAuthHeaders> => {

@@ -153,6 +153,10 @@ export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>("ErrorI
 	snoozeUntil: Schema.NullOr(IsoDateTimeString),
 	archivedAt: Schema.NullOr(IsoDateTimeString),
 	hasOpenIncident: Schema.Boolean,
+	// Postgres txid of the write, present only on mutation responses so the web's
+	// ElectricSQL error_issues collection can resolve optimistic state on the exact
+	// synced transaction. Absent on list/read responses.
+	txid: Schema.optionalKey(Schema.String),
 }) {}
 
 export class ErrorIssuesListResponse extends Schema.Class<ErrorIssuesListResponse>("ErrorIssuesListResponse")(

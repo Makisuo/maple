@@ -51,6 +51,10 @@ export {
 	resourceAttributeValuesQuery,
 	logAttributeValuesQuery,
 	metricAttributeValuesQuery,
+	metricScopedAttributeKeysQuery,
+	metricScopedAttributeValuesQuery,
+	type MetricScopedAttributeKeysOpts,
+	type MetricScopedAttributeValuesOpts,
 	type AttributeKeysQueryOpts,
 	type AttributeKeysOutput,
 	type AttributeValuesOpts,
@@ -121,13 +125,12 @@ export {
 // Queries — Session Events (distilled stream)
 export {
 	sessionTranscriptQuery,
-	searchSessionsByEventQuery,
+	sessionEventMatchQuery,
 	sessionActivityQuery,
 	sessionActivityAggregateQuery,
 	IDLE_GAP_THRESHOLD_MS,
 	type SessionTranscriptOutput,
-	type SearchSessionsByEventOpts,
-	type SearchSessionsByEventOutput,
+	type SessionEventMatchOpts,
 	type SessionActivityOpts,
 	type SessionActivityOutput,
 } from "./queries/session-events"
@@ -295,7 +298,9 @@ export {
 
 // Queries — Cloudflare service-map stats (per-zone / per-Worker node rollups)
 export {
+	cloudflareServiceCountersRowSchema,
 	cloudflareServiceCountersSQL,
+	cloudflareServiceLatencyRowSchema,
 	cloudflareServiceLatencySQL,
 	type CloudflareServiceCountersOutput,
 	type CloudflareServiceLatencyOutput,
