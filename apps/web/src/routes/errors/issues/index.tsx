@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
-import { type Model, Unitflow, useStore } from "@maple/unitflow/react"
+import { Unitflow, View } from "@maple/unitflow/react"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
@@ -242,8 +242,7 @@ function IssuesPage() {
 	)
 }
 
-interface IssuesModelBodyProps {
-	unit: Model.PortsOf<typeof ErrorIssuesModel>
+interface IssuesBodyProps {
 	toolbar: (totalCount?: number) => React.ReactNode
 	activeFilter: FilterValue
 	severityFilter: SeverityFilterValue
@@ -254,14 +253,15 @@ interface IssuesModelBodyProps {
 	anchorRef: React.MutableRefObject<string | null>
 }
 
-function IssuesModelBody({ unit, ...props }: IssuesModelBodyProps) {
-	const data = useStore(unit.ui.overview)
-	if (data.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
-	if (data.phase === "error") return <IssuesLoadError toolbar={props.toolbar()} message={data.message} />
-	return <IssuesReadyBody allIssues={data.issues} {...props} />
-}
+const IssuesModelBody = View.make(ErrorIssuesModel, ({ overview }, props: IssuesBodyProps) => {
+	if (overview.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
+	if (overview.phase === "error") {
+		return <IssuesLoadError toolbar={props.toolbar()} message={overview.message} />
+	}
+	return <IssuesReadyBody allIssues={overview.issues} {...props} />
+})
 
-interface IssuesReadyBodyProps extends Omit<IssuesModelBodyProps, "unit"> {
+interface IssuesReadyBodyProps extends IssuesBodyProps {
 	allIssues: ReadonlyArray<ErrorIssueDocument>
 }
 

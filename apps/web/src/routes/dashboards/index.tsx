@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 
-import { type Model, Unitflow, useStore } from "@maple/unitflow/react"
+import { Unitflow, View } from "@maple/unitflow/react"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 
@@ -186,15 +186,11 @@ interface ListActionProps {
 	readonly onDelete: (id: string) => void
 }
 
-function ModelListBody({
-	unit,
-	...actions
-}: { unit: Model.PortsOf<typeof DashboardsListModel> } & ListActionProps) {
-	const list = useStore(unit.ui.list)
+const ModelListBody = View.make(DashboardsListModel, ({ list }, actions: ListActionProps) => {
 	if (list.phase === "loading") return <ListLoading />
 	if (list.phase === "error") return <ListLoadError />
 	return <DashboardListContent dashboards={list.dashboards} {...actions} />
-}
+})
 
 /**
  * Pure presentation over the derived list: the localStorage-backed preferences

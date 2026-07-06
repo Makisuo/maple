@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
-import { type Model, Unitflow, useStore } from "@maple/unitflow/react"
+import { Unitflow, View } from "@maple/unitflow/react"
 
 import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select"
 import { AlertStatStrip } from "@/components/alerts/alert-stat-card"
@@ -61,7 +61,7 @@ export function AlertsOverviewTab() {
 			building={<OverviewSkeleton />}
 			failed={() => <OverviewLoadError />}
 		>
-			{(unit) => <ModelOverviewBody unit={unit} />}
+			{(unit) => <OverviewBody unit={unit} />}
 		</Unitflow>
 	)
 }
@@ -90,12 +90,11 @@ function OverviewLoadError() {
 	)
 }
 
-function ModelOverviewBody({ unit }: { unit: Model.PortsOf<typeof AlertsOverviewModel> }) {
-	const overview = useStore(unit.ui.overview)
+const OverviewBody = View.make(AlertsOverviewModel, ({ overview }) => {
 	if (overview.phase === "loading") return <OverviewSkeleton />
 	if (overview.phase === "error") return <OverviewLoadError />
 	return <AlertsOverviewContent data={overview} />
-}
+})
 
 /* ── Presentation ─────────────────────────────────────────────────────────── */
 
