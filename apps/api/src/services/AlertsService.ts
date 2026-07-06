@@ -441,10 +441,11 @@ const makePersistenceError = (error: unknown) => {
 const makeValidationError = (message: string, details: ReadonlyArray<string> = [], cause?: unknown) =>
 	new AlertValidationError({ message, details, ...(cause === undefined ? {} : { cause }) })
 
-const makeDeliveryError = (message: string, destinationType?: AlertDestinationType) =>
+const makeDeliveryError = (message: string, destinationType?: AlertDestinationType, cause?: unknown) =>
 	new AlertDeliveryError({
 		message,
 		destinationType,
+		...(cause === undefined ? {} : { cause }),
 	})
 
 const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRoles.includes(role))
@@ -452,7 +453,7 @@ const isAdmin = (roles: ReadonlyArray<RoleName>) => roles.some((role) => adminRo
 const validateDestinationUrl = (rawUrl: string, field: string): Effect.Effect<string, AlertValidationError> =>
 	validateExternalUrl(rawUrl).pipe(
 		Effect.as(rawUrl.trim()),
-		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`)),
+		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`, [], error)),
 	)
 
 const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, AlertValidationError> =>
@@ -552,7 +553,12 @@ const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationP
 		}),
 	)
 
-const buildSecretConfig = (request: AlertDestinationCreateRequest): DestinationSecretConfig =>
+// Hazel-OAuth requires provisioning a channel webhook on Hazel first, so its
+// secret config is built inline after that side effect — the type excludes it
+// here so this stays a pure, total function over the remaining variants.
+const buildSecretConfig = (
+	request: Exclude<AlertDestinationCreateRequest, { readonly type: "hazel-oauth" }>,
+): DestinationSecretConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
 			slack: (r) => ({
@@ -573,13 +579,6 @@ const buildSecretConfig = (request: AlertDestinationCreateRequest): DestinationS
 				webhookUrl: r.webhookUrl.trim(),
 				signingSecret: normalizeOptionalString(r.signingSecret),
 			}),
-			// Hazel-OAuth requires provisioning a channel webhook on Hazel; we build
-			// the secret config inline after that side effect, not here.
-			"hazel-oauth": () => {
-				throw new Error(
-					"Hazel-OAuth secret config must be built via the channel-webhook provisioning path",
-				)
-			},
 			discord: (r) => ({
 				type: "discord" as const,
 				webhookUrl: r.webhookUrl.trim(),
@@ -1424,9 +1423,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						"@maple/http/errors/QueryEngineValidationError": (e) =>
 							Effect.fail(makeValidationError(e.message, e.details)),
 						"@maple/http/errors/QueryEngineExecutionError": (e) =>
-							Effect.fail(makeDeliveryError(e.message)),
+							Effect.fail(makeDeliveryError(e.message, undefined, e)),
 						"@maple/http/errors/QueryEngineTimeoutError": (e) =>
-							Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out")),
+							Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e)),
 					}),
 				)
 
@@ -2688,6 +2687,22 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					bucketStarts.push(t)
 				}
 
+				// The trailing in-progress window [endMs, requestedEndMs) — evaluated as a
+				// provisional bucket keyed at endMs so the chart reaches "now" instead of
+				// dropping up to a full window of the freshest data. Its rows land in the
+				// epoch-aligned bucket starting at endMs, so the series query just extends.
+				const hasPartialBucket = requestedEndMs - endMs >= 60_000
+				const queryEndMs = hasPartialBucket ? requestedEndMs : endMs
+				const pointBuckets = hasPartialBucket ? Arr.append(bucketStarts, endMs) : bucketStarts
+
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"alert.plan_kind": plan.kind,
+					"alert.window_minutes": normalized.windowMinutes,
+					"alert.preview.buckets": pointBuckets.length,
+					"alert.preview.has_partial_bucket": hasPartialBucket,
+				})
+
 				// Raw per-(group, bucket) observations; buckets missing here are
 				// no-data windows and get filled from the grid below.
 				interface PreviewObs {
@@ -2728,7 +2743,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									const observations = yield* queryEngine
 										.evaluateSeries(systemTenant(orgId), {
 											startTime: toTinybirdDateTime(startMs),
-											endTime: toTinybirdDateTime(endMs),
+											endTime: toTinybirdDateTime(queryEndMs),
 											query: perServicePlan.query,
 											reducer: perServicePlan.reducer,
 											sampleCountStrategy: perServicePlan.sampleCountStrategy,
@@ -2748,7 +2763,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						const observations = yield* queryEngine
 							.evaluateSeries(systemTenant(orgId), {
 								startTime: toTinybirdDateTime(startMs),
-								endTime: toTinybirdDateTime(endMs),
+								endTime: toTinybirdDateTime(queryEndMs),
 								query: plan.query,
 								reducer: plan.reducer,
 								sampleCountStrategy: plan.sampleCountStrategy,
@@ -2766,15 +2781,16 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 				} else {
 					// Raw SQL: the reducer runs INSIDE one evaluation window, so replay
-					// the evaluator over each historical window. Bounded by
-					// MAX_RAW_PREVIEW_WINDOWS via the range clamp above.
+					// the evaluator over each historical window (plus the trailing
+					// in-progress one). Bounded by MAX_RAW_PREVIEW_WINDOWS via the range
+					// clamp above.
 					yield* Effect.forEach(
-						bucketStarts,
+						pointBuckets,
 						(bucketMs) =>
 							queryEngine
 								.evaluateRawSql(systemTenant(orgId), {
 									startTime: toTinybirdDateTime(bucketMs),
-									endTime: toTinybirdDateTime(bucketMs + windowMs),
+									endTime: toTinybirdDateTime(Math.min(bucketMs + windowMs, queryEndMs)),
 									sql: plan.rawSql ?? "",
 									reducer: plan.reducer,
 									windowMinutes: normalized.windowMinutes,
@@ -2817,17 +2833,22 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					let breaches = 0
 					let healthy = 0
 					let openStart: number | null = null
-					for (const bucketMs of bucketStarts) {
+					for (const bucketMs of pointBuckets) {
 						const obs = buckets.get(bucketMs) ?? NO_DATA
 						const evaluation = applyEvaluationLogic(normalized, obs)
+						const provisional = hasPartialBucket && bucketMs === endMs
 						points.push(
 							new AlertRulePreviewPoint({
 								bucket: iso(bucketMs),
 								value: evaluation.value,
 								sampleCount: obs.sampleCount,
 								status: evaluation.status,
+								...(provisional ? { provisional } : {}),
 							}),
 						)
+						// The in-progress window charts but doesn't feed the incident
+						// simulation — the scheduler hasn't evaluated it yet.
+						if (provisional) continue
 						if (evaluation.status === "breached") {
 							breaches = Math.min(breaches + 1, normalized.consecutiveBreachesRequired)
 							healthy = 0
@@ -2856,6 +2877,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 					series.push(new AlertRulePreviewSeries({ groupKey, points }))
 				}
+
+				yield* Effect.annotateCurrentSpan({
+					"result.seriesCount": series.length,
+					"result.wouldFireCount": wouldFire.length,
+				})
 
 				return new AlertRulePreviewResponse({
 					bucketSeconds: windowMs / 1000,

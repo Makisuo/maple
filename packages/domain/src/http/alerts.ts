@@ -520,6 +520,11 @@ export class AlertRulePreviewPoint extends Schema.Class<AlertRulePreviewPoint>("
 	value: Schema.NullOr(Schema.Number),
 	sampleCount: Schema.Number,
 	status: AlertEvaluationStatus,
+	/**
+	 * The trailing in-progress window: evaluated over less than a full
+	 * `windowMinutes`, so its value may still move as data arrives.
+	 */
+	provisional: Schema.optionalKey(Schema.Boolean),
 }) {}
 
 export class AlertRulePreviewSeries extends Schema.Class<AlertRulePreviewSeries>("AlertRulePreviewSeries")({
@@ -661,6 +666,7 @@ export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryErr
 	{
 		message: Schema.String,
 		destinationType: Schema.optionalKey(AlertDestinationType),
+		cause: Schema.optionalKey(Schema.Defect()),
 	},
 	{ httpApiStatus: 502 },
 ) {}
@@ -713,10 +719,10 @@ export class AlertChecksListResponse extends Schema.Class<AlertChecksListRespons
 ) {}
 
 export const ListRuleChecksQuery = Schema.Struct({
-	groupKey: Schema.optional(Schema.String),
-	since: Schema.optional(IsoDateTimeString),
-	until: Schema.optional(IsoDateTimeString),
-	limit: Schema.optional(
+	groupKey: Schema.optionalKey(Schema.String),
+	since: Schema.optionalKey(IsoDateTimeString),
+	until: Schema.optionalKey(IsoDateTimeString),
+	limit: Schema.optionalKey(
 		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 2000 })),
 	),
 })

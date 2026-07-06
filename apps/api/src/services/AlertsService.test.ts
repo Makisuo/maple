@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing"
 import {
 	AlertDestinationInUseError,
 	AlertForbiddenError,
+	AlertValidationError,
 	type AlertDestinationId,
 	AlertRulePreviewRequest,
 	AlertRuleUpsertRequest,
@@ -52,7 +53,7 @@ const makeConfig = () =>
 		}),
 	)
 
-const emptyWarehouseRows = [] as ReadonlyArray<Record<string, unknown>>
+const emptyWarehouseRows: ReadonlyArray<Record<string, unknown>> = []
 
 function makeWarehouseStub(state: {
 	tracesAggregateRows?: ReadonlyArray<Record<string, unknown>>
@@ -61,7 +62,7 @@ function makeWarehouseStub(state: {
 	logsAggregateByServiceRows?: ReadonlyArray<Record<string, unknown>>
 	rawQueryRows?: ReadonlyArray<Record<string, unknown>>
 }): WarehouseQueryServiceShape {
-	const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) => Effect.succeed(rows as never)
+	const succeedRows = (rows: ReadonlyArray<Record<string, unknown>>) => Effect.succeed(rows)
 
 	// All alert queries now go through sqlQuery (raw SQL via CH query engine).
 	// Route the response based on what data is configured in the test state.
@@ -76,7 +77,7 @@ function makeWarehouseStub(state: {
 	}
 
 	return {
-		query: (_tenant, payload) => Effect.fail(new Error(`Unexpected pipe ${payload.pipeName}`)) as never,
+		query: (_tenant, payload) => Effect.die(new Error(`Unexpected pipe ${payload.pipeName}`)),
 		sqlQuery: sqlQueryStub,
 		compiledQuery: (_tenant, compiled) =>
 			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
@@ -138,7 +139,7 @@ const makeLayer = (
 				hazelOAuthLive,
 			),
 		),
-	) as Layer.Layer<AlertsService, never, never>
+	)
 }
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -1372,10 +1373,8 @@ describe("AlertsService", () => {
 			const failure = getError(exit)
 
 			assert.isTrue(Exit.isFailure(exit))
-			assert.strictEqual(
-				(failure as { message: string }).message,
-				"Metrics alerts support at most one attr.* groupBy dimension",
-			)
+			assert.instanceOf(failure, AlertValidationError)
+			assert.strictEqual(failure.message, "Metrics alerts support at most one attr.* groupBy dimension")
 		})
 	})
 
@@ -1410,7 +1409,9 @@ describe("AlertsService", () => {
 				.pipe(Effect.exit)
 
 			assert.isTrue(Exit.isFailure(exit))
-			assert.include((getError(exit) as { message: string }).message, "32-character Events API v2 routing key")
+			const failure = getError(exit)
+			assert.instanceOf(failure, AlertValidationError)
+			assert.include(failure.message, "32-character Events API v2 routing key")
 			// Format check short-circuits before any network call.
 			assert.lengthOf(requests, 0)
 		})
@@ -1451,7 +1452,9 @@ describe("AlertsService", () => {
 				.pipe(Effect.exit)
 
 			assert.isTrue(Exit.isFailure(exit))
-			assert.include((getError(exit) as { message: string }).message, "Invalid routing key")
+			const failure = getError(exit)
+			assert.instanceOf(failure, AlertValidationError)
+			assert.include(failure.message, "Invalid routing key")
 			assert.lengthOf(requests, 1)
 			assert.strictEqual(requests[0]?.url, "https://events.pagerduty.com/v2/enqueue")
 			// Validation uses a no-op resolve so it never creates an incident.
@@ -2176,13 +2179,12 @@ describe("AlertsService", () => {
 			estimatedSpanCount: 200,
 		}
 
-		const alertRows = [breachingRow, healthyRow] as ReadonlyArray<Record<string, unknown>>
+		const alertRows: ReadonlyArray<Record<string, unknown>> = [breachingRow, healthyRow]
 		const stub: WarehouseQueryServiceShape = {
 			...makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
-			sqlQuery: () => Effect.succeed(alertRows) as never,
-			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie) as never,
-			compiledQueryFirst: (_tenant, compiled) =>
-				compiled.decodeFirstRow(alertRows).pipe(Effect.orDie) as never,
+			sqlQuery: () => Effect.succeed(alertRows),
+			compiledQuery: (_tenant, compiled) => compiled.decodeRows(alertRows).pipe(Effect.orDie),
+			compiledQueryFirst: (_tenant, compiled) => compiled.decodeFirstRow(alertRows).pipe(Effect.orDie),
 		}
 
 		return Effect.gen(function* () {
@@ -2233,15 +2235,15 @@ describe("AlertsService evaluation error persistence", () => {
 	}): WarehouseQueryServiceShape => {
 		const sqlQueryStub = () =>
 			state.failing
-				? (Effect.fail(
+				? Effect.fail(
 						new WarehouseQueryError({
 							message: "Unknown column FooBar in traces",
 							pipeName: "tracesAlertEval",
 						}),
-					) as never)
-				: (Effect.succeed(state.rows as never) as never)
+					)
+				: Effect.succeed(state.rows)
 		return {
-			query: () => Effect.fail(new Error("Unexpected pipe query")) as never,
+			query: () => Effect.die(new Error("Unexpected pipe query")),
 			sqlQuery: sqlQueryStub,
 			compiledQuery: (_tenant, compiled) =>
 				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
@@ -2408,6 +2410,63 @@ describe("AlertsService.previewRule", () => {
 			// (which freezes counters), so no close within the window either way.
 			assert.lengthOf(response.wouldFire, 1)
 			assert.strictEqual(response.wouldFire[0]?.start, "2026-01-01T00:00:00.000Z")
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
+	})
+
+	it.effect("adds a provisional point for the trailing partial window", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = {
+			tracesAggregateRows: [
+				bucketRow("2026-01-01 00:00:00", 10),
+				bucketRow("2026-01-01 00:05:00", 12),
+				bucketRow("2026-01-01 00:30:00", 8),
+			],
+		}
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_preview_partial")
+
+			const request = decodePreviewRequest({
+				rule: {
+					name: "Preview rule",
+					severity: "critical",
+					enabled: true,
+					serviceNames: ["checkout"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					minimumSampleCount: 10,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [],
+				},
+				startTime: "2026-01-01T00:00:00.000Z",
+				// 2.5 minutes past the last complete 5-minute boundary.
+				endTime: "2026-01-01T00:32:30.000Z",
+			})
+
+			const response = yield* alerts.previewRule(orgId, request)
+
+			assert.lengthOf(response.series, 1)
+			const points = response.series[0]!.points
+			// 6 complete windows plus the in-progress [00:30, 00:32:30) one.
+			assert.lengthOf(points, 7)
+			assert.isUndefined(points[5]?.provisional)
+			const last = points[6]!
+			assert.strictEqual(last.bucket, "2026-01-01T00:30:00.000Z")
+			assert.strictEqual(last.provisional, true)
+			assert.strictEqual(last.status, "breached")
+			assert.strictEqual(last.value, 8)
+
+			// The provisional window charts but must not extend the would-fire
+			// simulation: the span from the two opening breaches stays the only one,
+			// closed at the last complete boundary.
+			assert.lengthOf(response.wouldFire, 1)
+			assert.strictEqual(response.wouldFire[0]?.start, "2026-01-01T00:00:00.000Z")
+			assert.strictEqual(response.wouldFire[0]?.end, "2026-01-01T00:30:00.000Z")
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
