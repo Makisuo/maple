@@ -79,6 +79,7 @@ const signalsNavItems: SignalsNavItem[] = [
 			{ title: "K8s Pods", href: "/infra/kubernetes/pods" },
 			{ title: "K8s Nodes", href: "/infra/kubernetes/nodes" },
 			{ title: "K8s Workloads", href: "/infra/kubernetes/workloads" },
+			{ title: "Cloudflare", href: "/infra/cloudflare" },
 		],
 	},
 ]

@@ -49,6 +49,7 @@ import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards/$
 import { Route as AnomaliesIncidentIdRouteImport } from './routes/anomalies/$incidentId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
+import { Route as InfraCloudflareIndexRouteImport } from './routes/infra/cloudflare/index'
 import { Route as ErrorsIssuesIndexRouteImport } from './routes/errors/issues/index'
 import { Route as ErrorsIssuesIssueIdRouteImport } from './routes/errors/issues/$issueId'
 import { Route as AlertsIncidentsIncidentIdRouteImport } from './routes/alerts/incidents/$incidentId'
@@ -261,6 +262,11 @@ const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
   path: '/alerts/$ruleId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InfraCloudflareIndexRoute = InfraCloudflareIndexRouteImport.update({
+  id: '/infra/cloudflare/',
+  path: '/infra/cloudflare/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ErrorsIssuesIndexRoute = ErrorsIssuesIndexRouteImport.update({
   id: '/errors/issues/',
   path: '/errors/issues/',
@@ -364,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
+  '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
@@ -416,6 +423,7 @@ export interface FileRoutesByTo {
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/errors/issues': typeof ErrorsIssuesIndexRoute
+  '/infra/cloudflare': typeof InfraCloudflareIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
@@ -469,6 +477,7 @@ export interface FileRoutesById {
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
+  '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
   '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
@@ -523,6 +532,7 @@ export interface FileRouteTypes {
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/errors/issues/'
+    | '/infra/cloudflare/'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
@@ -575,6 +585,7 @@ export interface FileRouteTypes {
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/errors/issues'
+    | '/infra/cloudflare'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
@@ -627,6 +638,7 @@ export interface FileRouteTypes {
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/errors/issues/'
+    | '/infra/cloudflare/'
     | '/dashboards/$dashboardId_/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
@@ -680,6 +692,7 @@ export interface RootRouteChildren {
   AlertsIncidentsIncidentIdRoute: typeof AlertsIncidentsIncidentIdRoute
   ErrorsIssuesIssueIdRoute: typeof ErrorsIssuesIssueIdRoute
   ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
+  InfraCloudflareIndexRoute: typeof InfraCloudflareIndexRoute
   DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
   InfraKubernetesPodsPodNameRoute: typeof InfraKubernetesPodsPodNameRoute
@@ -971,6 +984,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AlertsRuleIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/infra/cloudflare/': {
+      id: '/infra/cloudflare/'
+      path: '/infra/cloudflare'
+      fullPath: '/infra/cloudflare/'
+      preLoaderRoute: typeof InfraCloudflareIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/errors/issues/': {
       id: '/errors/issues/'
       path: '/errors/issues'
@@ -1088,6 +1108,7 @@ const rootRouteChildren: RootRouteChildren = {
   AlertsIncidentsIncidentIdRoute: AlertsIncidentsIncidentIdRoute,
   ErrorsIssuesIssueIdRoute: ErrorsIssuesIssueIdRoute,
   ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
+  InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
   DashboardsDashboardIdWidgetsWidgetIdRoute:
     DashboardsDashboardIdWidgetsWidgetIdRoute,
   InfraKubernetesNodesNodeNameRoute: InfraKubernetesNodesNodeNameRoute,

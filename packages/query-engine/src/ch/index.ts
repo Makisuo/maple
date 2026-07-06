@@ -306,6 +306,28 @@ export {
 	type CloudflareServiceLatencyOutput,
 } from "./queries/cloudflare-map"
 
+// Queries — Cloudflare infrastructure page (per-zone HTTP + per-Worker rollups & timeseries)
+export {
+	cloudflareZoneCountersRowSchema,
+	cloudflareZoneCountersSQL,
+	cloudflareZoneLatencyRowSchema,
+	cloudflareZoneLatencySQL,
+	cloudflareZoneTimeseriesRowSchema,
+	cloudflareZoneTimeseriesSQL,
+	cloudflareWorkerCountersRowSchema,
+	cloudflareWorkerCountersSQL,
+	cloudflareWorkerLatencyRowSchema,
+	cloudflareWorkerLatencySQL,
+	cloudflareWorkerTimeseriesRowSchema,
+	cloudflareWorkerTimeseriesSQL,
+	type CloudflareZoneCountersOutput,
+	type CloudflareZoneLatencyOutput,
+	type CloudflareZoneTimeseriesOutput,
+	type CloudflareWorkerCountersOutput,
+	type CloudflareWorkerLatencyOutput,
+	type CloudflareWorkerTimeseriesOutput,
+} from "./queries/cloudflare-infra"
+
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {
 	dbStatementSamplesQuery,
