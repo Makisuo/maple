@@ -104,7 +104,18 @@ export const investigateNavItems: NavItem[] = [
 	},
 ]
 
-/** Signals items with org feature gates applied (matches the sidebar's filtering). */
+/**
+ * Signals items with org feature gates applied (matches the sidebar's
+ * filtering). `infra_monitoring` gates the host/k8s agent pages only —
+ * Cloudflare analytics come from the integration, not the infra agent, so
+ * when infra is off the Infrastructure entry collapses to just Cloudflare
+ * (whose page gates itself on the integration's connection status).
+ */
 export function visibleSignalsNavItems(flags: { infraEnabled: boolean }) {
-	return signalsNavItems.filter((item) => flags.infraEnabled || item.href !== "/infra")
+	if (flags.infraEnabled) return signalsNavItems
+	return signalsNavItems.map((item) => {
+		if (item.href !== "/infra") return item
+		const subItems = item.subItems?.filter((sub) => sub.href.startsWith("/infra/cloudflare"))
+		return { ...item, href: "/infra/cloudflare", subItems }
+	})
 }
