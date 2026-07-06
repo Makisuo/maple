@@ -39,7 +39,7 @@ export interface CloudflareServiceCountersOutput {
 export interface CloudflareServiceLatencyOutput {
 	readonly serviceName: string
 	/** Wall-time duration p99. */
-	readonly latencyP95Ms: number
+	readonly latencyP99Ms: number
 	/** CPU time p99. */
 	readonly cpuP99Ms: number
 }
@@ -66,7 +66,7 @@ export const cloudflareServiceCountersRowSchema: CompiledQueryRowSchema<Cloudfla
 export const cloudflareServiceLatencyRowSchema: CompiledQueryRowSchema<CloudflareServiceLatencyOutput> =
 	Schema.Struct({
 		serviceName: Schema.String,
-		latencyP95Ms: CHNumber,
+		latencyP99Ms: CHNumber,
 		cpuP99Ms: CHNumber,
 	})
 
@@ -105,7 +105,7 @@ export function cloudflareServiceLatencySQL() {
 	return from(MetricsGauge)
 		.select(($) => ({
 			serviceName: $.ServiceName,
-			latencyP95Ms: avgWhere(
+			latencyP99Ms: avgWhere(
 				$.Value,
 				$.MetricName.eq("cloudflare.worker.duration").and($.Attributes.get("quantile").eq("0.99")),
 			),

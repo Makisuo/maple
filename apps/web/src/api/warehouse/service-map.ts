@@ -317,7 +317,7 @@ export interface CloudflareService {
 	throughput: number
 	errorRate: number
 	/** Wall-time duration p99. */
-	latencyP95Ms: number
+	latencyP99Ms: number
 	/** CPU time p99. */
 	cpuP99Ms?: number
 }
@@ -337,7 +337,7 @@ function transformCloudflareService(row: Record<string, unknown>, durationSecond
 		requests,
 		throughput: requests / safeDuration,
 		errorRate: requests > 0 ? errorCount / requests : 0,
-		latencyP95Ms: Number(row.latencyP95Ms ?? 0),
+		latencyP99Ms: Number(row.latencyP99Ms ?? 0),
 		cpuP99Ms: Number(row.cpuP99Ms ?? 0),
 	}
 }

@@ -26,7 +26,7 @@ export interface CloudflareNodeMetrics {
 	requests: number
 	errorRate: number
 	/** Wall-time duration p99. */
-	latencyP95Ms: number
+	latencyP99Ms: number
 	/** CPU time p99. */
 	cpuP99Ms?: number
 }
@@ -308,7 +308,7 @@ export function buildFlowElements({
 			kind: cf.kind,
 			requests: cf.requests,
 			errorRate: cf.errorRate,
-			latencyP95Ms: cf.latencyP95Ms,
+			latencyP99Ms: cf.latencyP99Ms,
 			cpuP99Ms: cf.cpuP99Ms,
 		}
 	}

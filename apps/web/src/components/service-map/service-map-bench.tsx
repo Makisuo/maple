@@ -360,7 +360,7 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 							requests: 120_000,
 							throughput: 120_000 / DURATION_SECONDS,
 							errorRate: 0.004,
-							latencyP95Ms: 38,
+							latencyP99Ms: 38,
 							cpuP99Ms: 9,
 						},
 						{
@@ -370,7 +370,7 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 							requests: 5_000,
 							throughput: 5_000 / DURATION_SECONDS,
 							errorRate: 0.2,
-							latencyP95Ms: 55,
+							latencyP99Ms: 55,
 							cpuP99Ms: 12,
 						},
 					]}

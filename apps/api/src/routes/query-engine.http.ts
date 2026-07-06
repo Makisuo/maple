@@ -600,7 +600,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							serviceName: row.serviceName,
 							requests: row.requests,
 							errorCount: row.errorCount,
-							latencyP95Ms: latency?.latencyP95Ms ?? 0,
+							latencyP99Ms: latency?.latencyP99Ms ?? 0,
 							cpuP99Ms: latency?.cpuP99Ms ?? 0,
 						}
 					})

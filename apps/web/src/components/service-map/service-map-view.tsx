@@ -365,7 +365,7 @@ function ServiceDetailPanel({
 										<div className="space-y-0.5">
 											<span className="text-[10px] text-muted-foreground">Duration p99</span>
 											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-												{formatLatency(cloudflare.latencyP95Ms)}
+												{formatLatency(cloudflare.latencyP99Ms)}
 											</p>
 										</div>
 									</div>
