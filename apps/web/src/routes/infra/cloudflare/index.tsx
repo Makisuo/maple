@@ -132,6 +132,34 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 		.onSuccess((_, holder) => Boolean(holder.waiting))
 		.orElse(() => false)
 
+	// Zones (HTTP edge analytics) and Workers (invocation analytics) are
+	// independent datasets — an org can have either without the other. The
+	// page-level "no traffic" empty state only applies when BOTH are settled
+	// and empty; otherwise each section shows its own lightweight empty.
+	const zonesEmpty = Result.builder(zonesResult)
+		.onSuccess((r, holder) => r.zones.length === 0 && !holder.waiting)
+		.orElse(() => false)
+	const workersEmpty = Result.builder(workersResult)
+		.onSuccess((r, holder) => r.workers.length === 0 && !holder.waiting)
+		.orElse(() => false)
+
+	if (zonesEmpty && workersEmpty) {
+		return (
+			<Empty className="py-16">
+				<EmptyHeader>
+					<EmptyMedia variant="icon">
+						<CloudflareIcon size={16} />
+					</EmptyMedia>
+					<EmptyTitle>No Cloudflare traffic in this window</EmptyTitle>
+					<EmptyDescription>
+						Analytics ingest in 5-minute batches shortly after the integration connects. Widen
+						the time range or check back in a few minutes.
+					</EmptyDescription>
+				</EmptyHeader>
+			</Empty>
+		)
+	}
+
 	return (
 		<div className="space-y-6">
 			{Result.builder(zonesResult)
@@ -143,26 +171,12 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 				))
 				.onError((err) => <QueryErrorState error={err} />)
 				.onSuccess((response, result) => {
-					if (response.zones.length === 0 && !result.waiting) {
-						return (
-							<Empty className="py-16">
-								<EmptyHeader>
-									<EmptyMedia variant="icon">
-										<CloudflareIcon size={16} />
-									</EmptyMedia>
-									<EmptyTitle>No Cloudflare traffic in this window</EmptyTitle>
-									<EmptyDescription>
-										Analytics ingest in 5-minute batches shortly after the integration
-										connects. Widen the time range or check back in a few minutes.
-									</EmptyDescription>
-								</EmptyHeader>
-							</Empty>
-						)
-					}
 					return (
 						<div className={`space-y-6 transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
-							<CloudflareKpiCards zones={response.zones} buckets={timeseries?.buckets} />
-							{timeseries && timeseries.buckets.length > 0 && (
+							{response.zones.length > 0 && (
+								<CloudflareKpiCards zones={response.zones} buckets={timeseries?.buckets} />
+							)}
+							{response.zones.length > 0 && timeseries && timeseries.buckets.length > 0 && (
 								<div className="grid gap-4 lg:grid-cols-2">
 									<CloudflareZoneChart
 										buckets={timeseries.buckets}
