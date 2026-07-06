@@ -17,9 +17,7 @@ import type {
 } from "@maple/domain/http"
 import { Event, Model, Query, Registry, Store } from "@maple/unitflow"
 import * as Db from "@maple/unitflow/db"
-import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
-import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { Reactivity } from "effect/unstable/reactivity/Reactivity"
@@ -33,13 +31,9 @@ import {
 	rowToAlertIncidentDocument,
 	rowToAlertRuleDocument,
 } from "@/lib/collections/alerts"
-import {
-	getCollectionsGeneration,
-	getOrgCollections,
-	subscribeCollectionsGeneration,
-} from "@/lib/collections/org-collections"
+import { getOrgCollections } from "@/lib/collections/org-collections"
+import { collectionFailureMessage, makeOrgCollectionsKey, orgIdOf } from "@/lib/models/org-collections-key"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { getActiveOrgId, subscribeActiveOrgId } from "@/lib/services/common/auth-headers"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -153,14 +147,6 @@ interface OverviewSources {
 	readonly now: number
 }
 
-const collectionFailureMessage = <T>(state: Db.CollectionState<T>): string | null => {
-	if (!AsyncResult.isFailure(state)) return null
-	for (const reason of state.cause.reasons) {
-		if (Cause.isFailReason(reason)) return reason.error.message
-	}
-	return "Collection failed to load"
-}
-
 /** Row-level combine body: phase handling + row→document, then {@link deriveOverview}. */
 const buildOverview = (sources: OverviewSources): AlertsOverviewData => {
 	const message =
@@ -184,46 +170,6 @@ const buildOverview = (sources: OverviewSources): AlertsOverviewData => {
 		now: sources.now,
 	})
 }
-
-const orgIdOf = (key: string): string => key.slice(0, key.lastIndexOf(":"))
-
-/**
- * `${orgId}:${generation}` — the composite the hook path encoded in its
- * useMemo deps. An org switch or a schema-self-heal generation bump changes
- * the key; `Db.fromCollectionByKey` then switches to the freshly minted
- * collections and the old subscriptions drain (`cleanupCollectionWhenIdle`
- * tears the superseded shape streams down once subscriberCount hits 0).
- */
-const makeOrgCollectionsKey: Effect.Effect<Store.Store<string>, never, Registry> = Effect.gen(function* () {
-	const currentKey = () => `${getActiveOrgId() ?? "pending"}:${getCollectionsGeneration()}`
-	const store = Store.make(currentKey())
-	yield* Registry.run(
-		Stream.callback<string>((queue) =>
-			Effect.acquireRelease(
-				Effect.sync(() => {
-					const push = () => Queue.offerUnsafe(queue, currentKey())
-					const unsubscribes = [subscribeActiveOrgId(push), subscribeCollectionsGeneration(push)]
-					push()
-					return unsubscribes
-				}),
-				(unsubscribes) =>
-					Effect.sync(() => {
-						for (const unsubscribe of unsubscribes) unsubscribe()
-					}),
-			),
-		).pipe(
-			// The acquire re-offers the current key to close the subscribe race, and
-			// Store.set does not dedupe — dropping unchanged keys here keeps that
-			// re-offer (and any same-key publish) from reloading dependent queries.
-			Stream.mapEffect((key) =>
-				Effect.gen(function* () {
-					if ((yield* Store.get(store)) !== key) yield* Store.set(store, key)
-				}),
-			),
-		),
-	)
-	return store
-})
 
 export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("maple/alerts/overview")({
 	// Not the singleton default (keepAlive): the instance — 3 shape-stream

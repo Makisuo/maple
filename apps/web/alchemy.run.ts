@@ -41,15 +41,6 @@ export const createMapleWeb = async ({
 	process.env.VITE_FLUE_CHAT_URL = flueChatUrl
 	process.env.VITE_ELECTRIC_SYNC_URL = electricSyncUrl
 
-	// Turn on the ElectricSQL sync path for deployed web builds. VITE_ELECTRIC_SYNC
-	// is a build-time constant that defaults OFF (local `bun dev` opts in
-	// manually); default it ON here so previews/deploys exercise the sync path. An
-	// explicit VITE_ELECTRIC_SYNC in the deploy env still wins, so a stage can opt
-	// out with VITE_ELECTRIC_SYNC=0.
-	if (!process.env.VITE_ELECTRIC_SYNC) {
-		process.env.VITE_ELECTRIC_SYNC = "1"
-	}
-
 	const website = await Vite("app", {
 		name: resolveWorkerName("web", stage),
 		adopt: true,

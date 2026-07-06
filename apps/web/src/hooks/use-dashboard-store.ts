@@ -1,11 +1,4 @@
-import {
-	Result,
-	useAtom,
-	useAtomRefresh,
-	useAtomSet,
-	useAtomSubscribe,
-	useAtomValue,
-} from "@/lib/effect-atom"
+import { useAtom } from "@/lib/effect-atom"
 import { useCallback, useMemo, useRef } from "react"
 import { Cause, Exit, Option, Schema } from "effect"
 import {
@@ -14,13 +7,10 @@ import {
 	DashboardDocument,
 	DashboardId,
 	DashboardPersesImportRequest,
-	DashboardUpsertRequest,
 	IsoDateTimeString,
 	PortableDashboardDocument,
 } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { useLiveQuery } from "@tanstack/react-db"
-import { ELECTRIC_SYNC_ENABLED } from "@/lib/collections/config"
 import { runMapleApi } from "@/lib/collections/api-runner"
 import { documentToDashboard, rowToDashboard } from "@/lib/collections/dashboards"
 import { getOrgCollections, useActiveOrgId, useCollectionsGeneration } from "@/lib/collections/org-collections"
@@ -34,7 +24,7 @@ import type {
 	WidgetDataSource,
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
-import { dashboardsAtom, persistenceErrorAtom } from "@/atoms/dashboard-store-atoms"
+import { persistenceErrorAtom } from "@/atoms/dashboard-store-atoms"
 
 const GRID_COLS = 12
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
@@ -172,50 +162,10 @@ function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDash
 	})
 }
 
-function parseDashboards(raw: readonly unknown[]): Dashboard[] {
-	return raw.map((d) => ensureDashboard(d)).filter((d): d is Dashboard => d !== null)
-}
-
-// Returns the previous array unchanged if every dashboard's id+updatedAt
-// matches a previous entry. Preserving identity here breaks the cascade
-// where every list-query refetch invalidates every memoised widget render.
-//
-// Also guards against stale-refetch overwrite: if the local optimistic copy
-// has a strictly newer updatedAt than the candidate, the candidate is from a
-// list refetch that started before our last mutation landed. Keep the local
-// copy; the next post-mutation refetch will settle the state. Without this,
-// an optimistic delete can be silently reverted when an in-flight GET
-// /api/dashboards lands after our PUT.
-function reconcileDashboards(previous: readonly Dashboard[], next: Dashboard[]): Dashboard[] {
-	if (previous.length !== next.length) return next
-
-	const previousById = new Map(previous.map((d) => [d.id, d]))
-	const reconciled: Dashboard[] = []
-	let allMatched = true
-
-	for (const candidate of next) {
-		const prior = previousById.get(candidate.id)
-		if (prior && prior.updatedAt === candidate.updatedAt) {
-			reconciled.push(prior)
-		} else if (prior && prior.updatedAt > candidate.updatedAt) {
-			reconciled.push(prior)
-			allMatched = false
-		} else {
-			reconciled.push(candidate)
-			allMatched = false
-		}
-	}
-
-	return allMatched ? (previous as Dashboard[]) : reconciled
-}
-
-// The dashboard/widget mutators that are byte-for-byte identical between the atom
-// and Electric store paths: each is a pure `(Dashboard) => Dashboard` transform
-// pushed through the injected `mutateDashboard`. Only the functions that genuinely
-// differ between paths (`mutateDashboard`, `create`/`import*`, `delete`) stay in
-// the hooks. `readDashboard` supplies the current dashboard for the two mutators
-// that read it (atom: from the state ref; Electric: from the collection). The
-// updater bodies are path-agnostic, so they survive the eventual atom-path removal.
+// The dashboard/widget mutators: each is a pure `(Dashboard) => Dashboard`
+// transform pushed through the injected `mutateDashboard`. `readDashboard`
+// supplies the current dashboard (from the collection) for the two mutators
+// that read it.
 function makeWidgetMutators(deps: {
 	mutateDashboard: (id: string, updater: (dashboard: Dashboard) => Dashboard) => Promise<void>
 	readOnly: boolean
@@ -465,310 +415,25 @@ function makeWidgetMutators(deps: {
 	}
 }
 
-// The original effect-atom implementation (list query + hand-rolled optimistic
-// FIFO queue). Remains the default; `useDashboardStore` dispatches here unless
-// the ElectricSQL sync path is enabled at build time.
-function useDashboardStoreAtoms() {
-	const [dashboards, setDashboards] = useAtom(dashboardsAtom)
-	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
-
-	// Hoist the list query atom so `useAtomRefresh` and `useAtomValue` operate
-	// on the same instance — without the memo, each render builds a fresh atom
-	// and the refresh handle ends up pointing at a stale, garbage-collected
-	// query.
-	const listQueryAtom = useMemo(
-		() => MapleApiAtomClient.query("dashboards", "list", { reactivityKeys: ["dashboards"] }),
-		[],
-	)
-	const listResult = useAtomValue(listQueryAtom)
-	const refetchDashboards = useAtomRefresh(listQueryAtom)
-	const createMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "create"), {
-		mode: "promiseExit",
-	})
-	const importPersesMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "importPerses"), {
-		mode: "promiseExit",
-	})
-	const upsertMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "upsert"), {
-		mode: "promiseExit",
-	})
-	const deleteMutation = useAtomSet(MapleApiAtomClient.mutation("dashboards", "delete"), {
-		mode: "promiseExit",
-	})
-
-	const readOnly = persistenceError !== null
-
-	// Sync server data → local atom. Only apply when listResult actually changes
-	// (from a refetch), not on re-mount with the same stale result. Without this guard,
-	// navigating between routes re-applies the old listResult and overwrites optimistic updates.
-	const lastSyncedListResult = useRef(listResult)
-	const syncListResult = useCallback(
-		(nextListResult: typeof listResult) => {
-			if (nextListResult === lastSyncedListResult.current) return
-			lastSyncedListResult.current = nextListResult
-			if (Result.isSuccess(nextListResult)) {
-				const parsed = parseDashboards(nextListResult.value.dashboards)
-				setDashboards((previous) => reconcileDashboards(previous, parsed))
-				setPersistenceError(null)
-			} else if (Result.isFailure(nextListResult)) {
-				setPersistenceError(getErrorMessage(nextListResult))
-			}
-		},
-		[setDashboards, setPersistenceError],
-	)
-	useAtomSubscribe(listQueryAtom, syncListResult)
-
-	const isLoading = dashboards.length === 0 && !Result.isSuccess(listResult)
-
-	const dashboardsRef = useRef(dashboards)
-	dashboardsRef.current = dashboards
-	const upsertRef = useRef(upsertMutation)
-	upsertRef.current = upsertMutation
-	const deleteRef = useRef(deleteMutation)
-	deleteRef.current = deleteMutation
-	const setDashboardsRef = useRef(setDashboards)
-	setDashboardsRef.current = setDashboards
-	const setPersistenceErrorRef = useRef(setPersistenceError)
-	setPersistenceErrorRef.current = setPersistenceError
-	const refetchDashboardsRef = useRef(refetchDashboards)
-	refetchDashboardsRef.current = refetchDashboards
-
-	// Per-dashboard FIFO queue. Each mutation chains off the tail so two quick
-	// `mutateDashboard` calls against the same id can't race each other —
-	// otherwise both would capture the same `dashboardsRef.current` snapshot
-	// before the first re-render lands and the second would clobber the first.
-	const mutationQueuesRef = useRef<Map<string, Promise<void>>>(new Map())
-
-	const mutateDashboard = useCallback(
-		async (dashboardId: string, updater: (dashboard: Dashboard) => Dashboard): Promise<void> => {
-			const previousTail = mutationQueuesRef.current.get(dashboardId) ?? Promise.resolve()
-
-			const next = previousTail
-				.catch(() => undefined)
-				.then(async () => {
-					// Capture snapshot AFTER any previous tail's optimistic state
-					// has been written back to `dashboardsRef.current` — this is
-					// what makes the queue safe for back-to-back edits.
-					const snapshot = [...dashboardsRef.current]
-					const index = snapshot.findIndex((d) => d.id === dashboardId)
-					if (index < 0) return
-
-					const updated = updater(snapshot[index])
-
-					// Skip no-op mutations (e.g. layout change on mount with same values)
-					if (updated === snapshot[index]) return
-
-					const nextDashboards = [...snapshot]
-					nextDashboards[index] = updated
-
-					// Optimistic update
-					setDashboardsRef.current(nextDashboards)
-
-					const result = await upsertRef.current({
-						params: { dashboardId: asDashboardId(updated.id) },
-						payload: new DashboardUpsertRequest({
-							dashboard: toDashboardDocument(updated),
-						}),
-						reactivityKeys: ["dashboards", `dashboard:${updated.id}:versions`],
-					})
-
-					if (Exit.isFailure(result)) {
-						// Always roll back the optimistic update before deciding
-						// what to do about the error.
-						setDashboardsRef.current(snapshot)
-
-						if (isConcurrencyConflict(result)) {
-							// Someone else wrote the same dashboard between our
-							// read and our write. Refetch so the user picks up
-							// the latest server state and can re-apply their
-							// edit on top of it. Surface a transient banner so
-							// the user knows their last save did not land.
-							setPersistenceErrorRef.current(
-								"Another editor saved changes to this dashboard. Refetching the latest version — re-apply your edit if needed.",
-							)
-							refetchDashboardsRef.current()
-						} else {
-							setPersistenceErrorRef.current(getErrorMessage(result))
-						}
-					}
-				})
-
-			mutationQueuesRef.current.set(dashboardId, next)
-
-			// Drop the entry once it settles so the map doesn't grow unbounded.
-			next.finally(() => {
-				if (mutationQueuesRef.current.get(dashboardId) === next) {
-					mutationQueuesRef.current.delete(dashboardId)
-				}
-			})
-
-			await next
-		},
-		[],
-	)
-
-	const importDashboard = useCallback(
-		async (imported: PortableDashboard): Promise<Dashboard> => {
-			if (readOnly) {
-				throw new Error("Dashboards are read-only")
-			}
-
-			const result = await createMutation({
-				payload: new DashboardCreateRequest({
-					dashboard: toPortableDashboardDocument(imported),
-				}),
-				reactivityKeys: ["dashboards"],
-			})
-
-			if (Exit.isFailure(result)) {
-				setPersistenceError(getErrorMessage(result))
-				throw new Error(getErrorMessage(result))
-			}
-
-			const dashboard = ensureDashboard(result.value)
-
-			if (dashboard === null) {
-				throw new Error("Created dashboard payload is invalid")
-			}
-
-			setDashboards((previous) => [dashboard, ...previous.filter((item) => item.id !== dashboard.id)])
-
-			return dashboard
-		},
-		[createMutation, readOnly, setDashboards, setPersistenceError],
-	)
-
-	const importPersesDashboard = useCallback(
-		async (
-			persesDashboard: Record<string, unknown>,
-		): Promise<{ dashboard: Dashboard; warnings: string[] }> => {
-			if (readOnly) {
-				throw new Error("Dashboards are read-only")
-			}
-
-			const result = await importPersesMutation({
-				payload: new DashboardPersesImportRequest({
-					dashboard: persesDashboard,
-				}),
-				reactivityKeys: ["dashboards"],
-			})
-
-			if (Exit.isFailure(result)) {
-				setPersistenceError(getErrorMessage(result))
-				throw new Error(getErrorMessage(result))
-			}
-
-			const dashboard = ensureDashboard(result.value.dashboard)
-			if (dashboard === null) {
-				throw new Error("Imported Perses dashboard payload is invalid")
-			}
-
-			setDashboards((previous) => [dashboard, ...previous.filter((item) => item.id !== dashboard.id)])
-
-			return {
-				dashboard,
-				warnings: [...result.value.warnings],
-			}
-		},
-		[importPersesMutation, readOnly, setDashboards, setPersistenceError],
-	)
-
-	const createDashboard = useCallback(
-		async (name: string): Promise<Dashboard> => {
-			if (readOnly) {
-				throw new Error("Dashboards are read-only")
-			}
-
-			const result = await createMutation({
-				payload: new DashboardCreateRequest({
-					dashboard: toPortableDashboardDocument({
-						name,
-						timeRange: { type: "relative", value: "12h" },
-						widgets: [],
-					}),
-				}),
-				reactivityKeys: ["dashboards"],
-			})
-
-			if (Exit.isFailure(result)) {
-				setPersistenceError(getErrorMessage(result))
-				throw new Error(getErrorMessage(result))
-			}
-
-			const dashboard = ensureDashboard(result.value)
-
-			if (dashboard === null) {
-				throw new Error("Created dashboard payload is invalid")
-			}
-
-			setDashboards((previous) => [dashboard, ...previous.filter((item) => item.id !== dashboard.id)])
-
-			return dashboard
-		},
-		[createMutation, readOnly, setDashboards, setPersistenceError],
-	)
-
-	const readDashboard = useCallback(
-		(id: string) => dashboardsRef.current.find((d) => d.id === id),
-		[],
-	)
-
-	const widgetMutators = useMemo(
-		() => makeWidgetMutators({ mutateDashboard, readOnly, readDashboard }),
-		[mutateDashboard, readOnly, readDashboard],
-	)
-
-	const deleteDashboard = useCallback(
-		(id: string) => {
-			if (readOnly) return
-
-			const snapshot = [...dashboardsRef.current]
-			const next = snapshot.filter((dashboard) => dashboard.id !== id)
-			if (next.length === snapshot.length) return
-
-			setDashboardsRef.current(next)
-
-			void deleteRef
-				.current({ params: { dashboardId: asDashboardId(id) }, reactivityKeys: ["dashboards"] })
-				.then((result) => {
-					if (Exit.isFailure(result)) {
-						setDashboardsRef.current(snapshot)
-						setPersistenceErrorRef.current(getErrorMessage(result))
-					}
-				})
-		},
-		[readOnly],
-	)
-
-	return {
-		dashboards,
-		isLoading,
-		readOnly,
-		persistenceError,
-		createDashboard,
-		importDashboard,
-		importPersesDashboard,
-		deleteDashboard,
-		...widgetMutators,
-	}
+// Always resolve a collection (fallback key before the org is known — the
+// server still scopes by the auth token, so the key only isolates the local
+// cache across org switches). The dashboards routes are auth-gated, so a token
+// is present in practice. Re-resolves on a self-heal generation bump
+// (post-deploy schema drift) as well as an org switch, matching the
+// alerts/errors collection hooks — otherwise the memo keeps the stale,
+// cleaned-up collection after a schema-error reset.
+function useDashboardsCollection() {
+	const orgKey = useActiveOrgId() ?? "pending"
+	const generation = useCollectionsGeneration()
+	return useMemo(() => getOrgCollections(orgKey).dashboards, [orgKey, generation])
 }
 
-// ElectricSQL-backed implementation. Reads the dashboards list from a live query
-// over the org's synced collection and routes writes through the collection's
-// optimistic mutations (TanStack DB owns the optimistic apply + rollback that
-// `useDashboardStoreAtoms` hand-rolls). Same public surface as the atom version.
-function useDashboardStoreCollection() {
-	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
-
-	// Always resolve a collection (fallback key before the org is known — the
-	// server still scopes by the auth token, so the key only isolates the local
-	// cache across org switches). The dashboards route is auth-gated, so a token
-	// is present in practice.
-	const orgKey = useActiveOrgId() ?? "pending"
-	// Re-resolve on a self-heal generation bump (post-deploy schema drift) as well
-	// as an org switch, matching the alerts/errors collection hooks — otherwise
-	// this memo keeps the stale, cleaned-up collection after a schema-error reset.
-	const generation = useCollectionsGeneration()
-	const collection = useMemo(() => getOrgCollections(orgKey).dashboards, [orgKey, generation])
+// The read half of the ElectricSQL-backed dashboard store: a live query over
+// the org's synced collection, mapped to the web `Dashboard` shape. Global
+// chrome (sidebar, command palette) uses this directly — it needs the list but
+// none of the mutators.
+export function useDashboardsRead() {
+	const collection = useDashboardsCollection()
 
 	const { data: rows, isLoading: liveLoading } = useLiveQuery(
 		(q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
@@ -780,8 +445,22 @@ function useDashboardStoreCollection() {
 		[rows],
 	)
 
-	const readOnly = persistenceError !== null
 	const isLoading = liveLoading && dashboards.length === 0
+
+	return { dashboards, isLoading }
+}
+
+// The write half: create/import/delete plus the per-dashboard widget mutators,
+// all routed through the collection's optimistic mutations (TanStack DB owns
+// the optimistic apply + rollback). Resolves the collection itself but runs NO
+// live query — mounting this hook adds no read subscription, so action-only
+// consumers (the dashboards list route) don't double-subscribe the shape
+// stream alongside their model/read hook.
+export function useDashboardMutations() {
+	const [persistenceError, setPersistenceError] = useAtom(persistenceErrorAtom)
+	const collection = useDashboardsCollection()
+
+	const readOnly = persistenceError !== null
 
 	const collectionRef = useRef(collection)
 	collectionRef.current = collection
@@ -934,8 +613,6 @@ function useDashboardStoreCollection() {
 	)
 
 	return {
-		dashboards,
-		isLoading,
 		readOnly,
 		persistenceError,
 		createDashboard,
@@ -946,13 +623,9 @@ function useDashboardStoreCollection() {
 	}
 }
 
-// Build-time dispatch. `ELECTRIC_SYNC_ENABLED` is a compile-time constant, so
-// exactly one branch survives bundling and hook order is stable per build.
+// The full store — read + mutations — for consumers that need both (the
+// dashboard detail route, the widget route, the toolbar). `persistenceErrorAtom`
+// is module-level shared state, so the split halves stay coherent.
 export function useDashboardStore() {
-	if (ELECTRIC_SYNC_ENABLED) {
-		// eslint-disable-next-line react-hooks/rules-of-hooks
-		return useDashboardStoreCollection()
-	}
-	// eslint-disable-next-line react-hooks/rules-of-hooks
-	return useDashboardStoreAtoms()
+	return { ...useDashboardsRead(), ...useDashboardMutations() }
 }

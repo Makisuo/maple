@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Result } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
+
+import { type Model, Unitflow, useStore } from "@maple/unitflow/react"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
@@ -12,7 +13,8 @@ import { IssuesToolbar } from "@/components/errors/issues-toolbar"
 import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
 import type { SelectToggleEvent } from "@/components/errors/issue-row"
-import { useErrorIssuesList } from "@/hooks/use-error-issues-list"
+import { ErrorIssuesModel, filterIssues } from "@/lib/models/error-issues-model"
+import { unitflowRuntime } from "@/lib/models/runtime"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -91,6 +93,51 @@ export const Route = effectRoute(createFileRoute("/errors/issues/"))({
 	validateSearch: Schema.toStandardSchemaV1(searchSchema),
 })
 
+/** The page chrome every phase renders: breadcrumbs + title + toolbar. */
+function IssuesPageFrame({ toolbar, children }: { toolbar: React.ReactNode; children: React.ReactNode }) {
+	return (
+		<DashboardLayout
+			breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
+			title="Issues"
+			description="Errors grouped into triage, in-progress, and resolved work."
+		>
+			<div>
+				{toolbar}
+				{children}
+			</div>
+		</DashboardLayout>
+	)
+}
+
+function IssuesSkeleton({ toolbar }: { toolbar: React.ReactNode }) {
+	return (
+		<IssuesPageFrame toolbar={toolbar}>
+			<div className="space-y-px p-2">
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+			</div>
+		</IssuesPageFrame>
+	)
+}
+
+function IssuesLoadError({ toolbar, message }: { toolbar: React.ReactNode; message?: string }) {
+	return (
+		<IssuesPageFrame toolbar={toolbar}>
+			<div className="p-4">
+				<Empty>
+					<EmptyHeader>
+						<EmptyTitle>Failed to load issues</EmptyTitle>
+						<EmptyDescription>{message ?? "Try refreshing or check API logs."}</EmptyDescription>
+					</EmptyHeader>
+				</Empty>
+			</div>
+		</IssuesPageFrame>
+	)
+}
+
 function IssuesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
@@ -98,19 +145,12 @@ function IssuesPage() {
 	const severityFilter: SeverityFilterValue = search.severity ?? "all"
 	const kindFilter = search.kind ?? "all"
 
-	const issuesResult = useErrorIssuesList({
-		workflowState: activeFilter === "all" ? undefined : activeFilter,
-		severity: severityFilter === "all" ? undefined : severityFilter,
-		kind: kindFilter === "all" ? undefined : kindFilter,
-	})
 	const mutations = useIssueMutations()
 
 	const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
 	const anchorRef = useRef<string | null>(null)
 
-	const totalCount = Result.isSuccess(issuesResult) ? issuesResult.value.issues.length : undefined
-
-	const toolbar = (
+	const toolbar = (totalCount?: number) => (
 		<IssuesToolbar
 			tabs={TOOLBAR_TABS}
 			active={activeFilter}
@@ -178,78 +218,79 @@ function IssuesPage() {
 		/>
 	)
 
-	return Result.builder(issuesResult)
-		.onInitial(() => (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-				title="Issues"
-				description="Errors grouped into triage, in-progress, and resolved work."
-			>
-				<div>
-					{toolbar}
-					<div className="space-y-px p-2">
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-					</div>
-				</div>
-			</DashboardLayout>
-		))
-		.onError((error) => (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-				title="Issues"
-				description="Errors grouped into triage, in-progress, and resolved work."
-			>
-				<div>
-					{toolbar}
-					<div className="p-4">
-						<Empty>
-							<EmptyHeader>
-								<EmptyTitle>Failed to load issues</EmptyTitle>
-								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
-								</EmptyDescription>
-							</EmptyHeader>
-						</Empty>
-					</div>
-				</div>
-			</DashboardLayout>
-		))
-		.onSuccess((response) => {
-			const issues = response.issues
-			return (
-				<IssuesPageBody
-					issues={issues}
-					isRefreshing={issuesResult.waiting}
+	return (
+		<Unitflow
+			runtime={unitflowRuntime}
+			rootModel={ErrorIssuesModel}
+			building={<IssuesSkeleton toolbar={toolbar()} />}
+			failed={() => <IssuesLoadError toolbar={toolbar()} />}
+		>
+			{(unit) => (
+				<IssuesModelBody
+					unit={unit}
+					toolbar={toolbar}
 					activeFilter={activeFilter}
+					severityFilter={severityFilter}
+					kindFilter={kindFilter}
 					mutations={mutations}
 					selectedIds={selectedIds}
 					setSelectedIds={setSelectedIds}
 					anchorRef={anchorRef}
-					toolbar={toolbar}
 				/>
-			)
-		})
-		.render()
+			)}
+		</Unitflow>
+	)
+}
+
+interface IssuesModelBodyProps {
+	unit: Model.PortsOf<typeof ErrorIssuesModel>
+	toolbar: (totalCount?: number) => React.ReactNode
+	activeFilter: FilterValue
+	severityFilter: SeverityFilterValue
+	kindFilter: "all" | "error" | "alert"
+	mutations: ReturnType<typeof useIssueMutations>
+	selectedIds: Set<string>
+	setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
+	anchorRef: React.MutableRefObject<string | null>
+}
+
+function IssuesModelBody({ unit, ...props }: IssuesModelBodyProps) {
+	const data = useStore(unit.ui.overview)
+	if (data.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
+	if (data.phase === "error") return <IssuesLoadError toolbar={props.toolbar()} message={data.message} />
+	return <IssuesReadyBody allIssues={data.issues} {...props} />
+}
+
+interface IssuesReadyBodyProps extends Omit<IssuesModelBodyProps, "unit"> {
+	allIssues: ReadonlyArray<ErrorIssueDocument>
+}
+
+function IssuesReadyBody({ allIssues, activeFilter, severityFilter, kindFilter, ...props }: IssuesReadyBodyProps) {
+	const issues = useMemo(
+		() =>
+			filterIssues(allIssues, {
+				workflowState: activeFilter === "all" ? undefined : activeFilter,
+				severity: severityFilter === "all" ? undefined : severityFilter,
+				kind: kindFilter === "all" ? undefined : kindFilter,
+			}),
+		[allIssues, activeFilter, severityFilter, kindFilter],
+	)
+
+	return <IssuesPageBody issues={issues} activeFilter={activeFilter} {...props} />
 }
 
 interface IssuesPageBodyProps {
 	issues: ReadonlyArray<ErrorIssueDocument>
-	isRefreshing: boolean
 	activeFilter: FilterValue
 	mutations: ReturnType<typeof useIssueMutations>
 	selectedIds: Set<string>
 	setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
 	anchorRef: React.MutableRefObject<string | null>
-	toolbar: React.ReactNode
+	toolbar: (totalCount?: number) => React.ReactNode
 }
 
 function IssuesPageBody({
 	issues,
-	isRefreshing,
 	activeFilter,
 	mutations,
 	selectedIds,
@@ -362,11 +403,8 @@ function IssuesPageBody({
 			title="Issues"
 			description="Errors grouped into triage, in-progress, and resolved work."
 		>
-			<div
-				className={isRefreshing ? "opacity-60 transition-opacity" : undefined}
-				aria-busy={isRefreshing}
-			>
-				{toolbar}
+			<div>
+				{toolbar(issues.length)}
 				{issues.length === 0 ? (
 					<div className="p-4">
 						<Empty>
