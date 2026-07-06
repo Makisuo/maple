@@ -336,7 +336,9 @@ export function buildFlowElements({
 				hasSampling: false,
 				samplingWeight: 1,
 				errorRate: cf.errorRate,
-				avgLatencyMs: cf.latencyP95Ms,
+				// The poller only reports percentiles — no average exists, and the
+				// CloudflareNode renderer shows its own labeled p95/p99 cells.
+				avgLatencyMs: 0,
 				p95LatencyMs: cf.latencyP95Ms,
 				services,
 				selected: false,
