@@ -299,57 +299,46 @@ export const getServiceMapDbEdges = Effect.fn("QueryEngine.getServiceMapDbEdges"
 })
 
 // ---------------------------------------------------------------------------
-// Cloudflare direct-integration nodes
+// Cloudflare direct-integration Worker analytics
 //
-// The analytics poller writes zone / Worker metrics under synthetic service
-// names (`cloudflare/{zone}`, `cloudflare-worker/{script}`) with no spans, so
-// they never appear on the trace-derived map. This surfaces them as
-// first-class CF nodes.
+// The analytics poller writes Worker metrics under the synthetic service name
+// `cloudflare-worker/{script}` with no spans. The map overlays these onto the
+// matching instrumented service node (by service name or faas.name); scripts
+// with no matching real service are dropped — CF data never creates nodes.
 // ---------------------------------------------------------------------------
 
-const ZONE_SERVICE_PREFIX = "cloudflare/"
 const WORKER_SERVICE_PREFIX = "cloudflare-worker/"
 
 export interface CloudflareService {
 	serviceName: string
-	kind: "zone" | "worker"
+	kind: "worker"
 	displayName: string
 	requests: number
 	throughput: number
 	errorRate: number
-	/** Zones only. */
-	cacheHitRate?: number
-	/** Zones: edge TTFB p95. Workers: wall-time duration p99. */
+	/** Wall-time duration p99. */
 	latencyP95Ms: number
-	/** Zones only: origin response duration p95. */
-	originP95Ms?: number
-	/** Workers only: CPU time p99. */
+	/** CPU time p99. */
 	cpuP99Ms?: number
 }
 
 function transformCloudflareService(row: Record<string, unknown>, durationSeconds: number): CloudflareService {
 	const serviceName = String(row.serviceName ?? "")
-	const isWorker = serviceName.startsWith(WORKER_SERVICE_PREFIX)
-	const displayName = isWorker
+	const displayName = serviceName.startsWith(WORKER_SERVICE_PREFIX)
 		? serviceName.slice(WORKER_SERVICE_PREFIX.length)
-		: serviceName.startsWith(ZONE_SERVICE_PREFIX)
-			? serviceName.slice(ZONE_SERVICE_PREFIX.length)
-			: serviceName
+		: serviceName
 	const requests = Number(row.requests ?? 0)
 	const errorCount = Number(row.errorCount ?? 0)
-	const cacheHitCount = Number(row.cacheHitCount ?? 0)
 	const safeDuration = Math.max(durationSeconds, 1)
 	return {
 		serviceName,
-		kind: isWorker ? "worker" : "zone",
+		kind: "worker",
 		displayName,
 		requests,
 		throughput: requests / safeDuration,
 		errorRate: requests > 0 ? errorCount / requests : 0,
-		cacheHitRate: isWorker ? undefined : requests > 0 ? cacheHitCount / requests : 0,
 		latencyP95Ms: Number(row.latencyP95Ms ?? 0),
-		originP95Ms: isWorker ? undefined : Number(row.originP95Ms ?? 0),
-		cpuP99Ms: isWorker ? Number(row.cpuP99Ms ?? 0) : undefined,
+		cpuP99Ms: Number(row.cpuP99Ms ?? 0),
 	}
 }
 

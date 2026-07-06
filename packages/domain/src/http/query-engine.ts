@@ -263,11 +263,12 @@ export class ServiceDbEdgesResponse extends Schema.Class<ServiceDbEdgesResponse>
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
-// Cloudflare direct-integration edge / Workers analytics, one row per CF
-// pseudo-service (`cloudflare/{zone}` | `cloudflare-worker/{script}`), for the
-// service map. No `deploymentEnv` — the analytics poller's metrics carry no
-// deployment.environment dimension. Response merges the counter + percentile
-// rollups server-side; generic record shape mirrors ServiceDbEdgesResponse.
+// Cloudflare direct-integration Workers analytics, one row per Worker
+// pseudo-service (`cloudflare-worker/{script}`), overlaid onto matching
+// instrumented service-map nodes. No `deploymentEnv` — the analytics poller's
+// metrics carry no deployment.environment dimension. Response merges the
+// counter + percentile rollups server-side; generic record shape mirrors
+// ServiceDbEdgesResponse.
 export class ServiceCloudflareStatsRequest extends Schema.Class<ServiceCloudflareStatsRequest>(
 	"ServiceCloudflareStatsRequest",
 )({

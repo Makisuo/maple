@@ -13,7 +13,6 @@ import {
 } from "@/components/icons"
 import type { ServicePlatform } from "@/api/warehouse/service-map"
 import { getDbDescriptor, withAlpha } from "./service-map-db"
-import { getCloudflareDescriptor, type CloudflareNodeKind } from "./service-map-cloudflare"
 import { getServiceMapNodeColor, type ServiceNodeData } from "./service-map-utils"
 
 function getPlatformIcon(platform: ServicePlatform | undefined): {
@@ -194,88 +193,6 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 	)
 }
 
-function formatPercent(value: number): string {
-	return `${(value * 100).toFixed(1)}%`
-}
-
-/**
- * Cloudflare direct-integration nodes (zones / Workers) sourced from the
- * analytics poller. Rendered like a database node — brand-colored card with the
- * Cloudflare icon tile — but with an edge-analytics metrics row that differs
- * for zones (cache hit + edge TTFB) vs Workers (CPU + duration).
- */
-function CloudflareNode({ data }: { data: ServiceNodeData }) {
-	const { label, kind, throughput, selected, cloudflare } = data
-	const descriptor = getCloudflareDescriptor(kind as CloudflareNodeKind)
-	const { category, Icon, label: systemLabel, color } = descriptor
-	const isWorker = kind === "cloudflare-worker"
-	const errorRate = cloudflare?.errorRate ?? data.errorRate
-	const latencyP95Ms = cloudflare?.latencyP95Ms ?? 0
-
-	return (
-		<>
-			<Handles />
-			<div
-				className="flex w-[220px] cursor-pointer overflow-hidden rounded-r-lg border bg-card transition-[border-color,box-shadow] duration-150"
-				style={{
-					backgroundImage: `linear-gradient(${withAlpha(color, 0.12)}, ${withAlpha(color, 0.12)})`,
-					borderColor: selected ? color : withAlpha(color, 0.4),
-					boxShadow: selected ? `0 0 0 3px ${withAlpha(color, 0.16)}` : undefined,
-				}}
-			>
-				{/* Left accent stripe */}
-				<div className="w-[3px] shrink-0" style={{ backgroundColor: color }} />
-
-				<div className="flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5">
-					{/* Header — health dot + branded icon + name + category */}
-					<div className="flex items-center gap-1.5">
-						<div className={cn("h-1.5 w-1.5 shrink-0 rounded-full", getHealthDotClass(errorRate))} />
-						<Tooltip>
-							<TooltipTrigger>
-								<Icon size={12} className="shrink-0" style={{ color }} />
-							</TooltipTrigger>
-							<TooltipContent side="bottom">
-								<p>{systemLabel}</p>
-							</TooltipContent>
-						</Tooltip>
-						<span className="truncate text-xs font-medium text-foreground">{label}</span>
-						<span
-							className="ml-auto shrink-0 text-[9px] font-semibold uppercase tracking-wide"
-							style={{ color }}
-						>
-							{category}
-						</span>
-					</div>
-
-					{/* Metrics row — zones: cache + edge TTFB ; workers: CPU + duration */}
-					<div className="flex gap-4">
-						<MetricCell label="req/s" value={formatRate(throughput)} />
-						<MetricCell
-							label="err%"
-							value={formatPercent(errorRate)}
-							valueClassName={errorRateClass(errorRate)}
-						/>
-						{isWorker ? (
-							<>
-								<MetricCell label="cpu p99" value={formatLatency(cloudflare?.cpuP99Ms ?? 0)} />
-								<MetricCell label="dur p99" value={formatLatency(latencyP95Ms)} />
-							</>
-						) : (
-							<>
-								<MetricCell
-									label="cache"
-									value={formatPercent(cloudflare?.cacheHitRate ?? 0)}
-								/>
-								<MetricCell label="ttfb p95" value={formatLatency(latencyP95Ms)} />
-							</>
-						)}
-					</div>
-				</div>
-			</div>
-		</>
-	)
-}
-
 function ServiceNode({ data }: { data: ServiceNodeData }) {
 	const {
 		label,
@@ -410,7 +327,5 @@ interface ServiceMapNodeProps {
 
 export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapNodeProps) {
 	if (data.kind === "database") return <DatabaseNode data={data} />
-	if (data.kind === "cloudflare-zone" || data.kind === "cloudflare-worker")
-		return <CloudflareNode data={data} />
 	return <ServiceNode data={data} />
 })

@@ -9,22 +9,16 @@ const baseParams = {
 }
 
 describe("cloudflareServiceCountersSQL", () => {
-	it("aggregates requests / errors / cache hits per CF service over metrics_sum", () => {
+	it("aggregates Worker requests / errors per script over metrics_sum", () => {
 		const { sql } = compileCH(cloudflareServiceCountersSQL(), baseParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
-		expect(sql).toContain(
-			"MetricName IN ('cloudflare.http.requests', 'cloudflare.worker.requests', 'cloudflare.worker.errors')",
-		)
-		// requests = http.requests OR worker.requests
-		expect(sql).toContain(
-			"sumIf(Value, (MetricName = 'cloudflare.http.requests' OR MetricName = 'cloudflare.worker.requests'))",
-		)
-		// errors = (http.requests AND 5xx) OR worker.errors
-		expect(sql).toContain("http.status_class'] = '5xx'")
-		expect(sql).toContain("MetricName = 'cloudflare.worker.errors'")
-		// cache hits
-		expect(sql).toContain("cache.status'] = 'hit'")
+		expect(sql).toContain("MetricName IN ('cloudflare.worker.requests', 'cloudflare.worker.errors')")
+		expect(sql).toContain("sumIf(Value, MetricName = 'cloudflare.worker.requests')")
+		expect(sql).toContain("sumIf(Value, MetricName = 'cloudflare.worker.errors')")
+		// Zone analytics are intentionally excluded — CF data only overlays onto
+		// instrumented services, and zones never match one.
+		expect(sql).not.toContain("cloudflare.http.requests")
 		expect(sql).toContain("TimeUnix >= '2026-07-02 00:00:00.000'")
 		expect(sql).toContain("TimeUnix <= '2026-07-03 00:00:00.000'")
 		expect(sql).toContain("GROUP BY serviceName")
@@ -42,14 +36,10 @@ describe("cloudflareServiceLatencySQL", () => {
 		const { sql } = compileCH(cloudflareServiceLatencySQL(), baseParams)
 		expect(sql).toContain("FROM metrics_gauge")
 		expect(sql).toContain("OrgId = 'org_1'")
-		expect(sql).toContain(
-			"MetricName IN ('cloudflare.http.edge.ttfb', 'cloudflare.http.origin.duration', 'cloudflare.worker.duration', 'cloudflare.worker.cpu_time')",
-		)
-		// zone TTFB p95 OR worker duration p99, guarded by countIf > 0
-		expect(sql).toContain("cloudflare.http.edge.ttfb")
-		expect(sql).toContain("quantile'] = '0.95'")
+		expect(sql).toContain("MetricName IN ('cloudflare.worker.duration', 'cloudflare.worker.cpu_time')")
 		expect(sql).toContain("quantile'] = '0.99'")
 		expect(sql).toContain("if(countIf(")
+		expect(sql).not.toContain("cloudflare.http.edge.ttfb")
 		expect(sql).toContain("GROUP BY serviceName")
 		expect(sql).toContain("FORMAT JSON")
 	})
