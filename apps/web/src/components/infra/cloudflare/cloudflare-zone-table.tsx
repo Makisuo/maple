@@ -1,8 +1,10 @@
+import { Link } from "@tanstack/react-router"
+
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 import type { CloudflareZoneRow } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@/lib/format"
-import { ColumnHead, TableShell, TableSkeleton, useTableSort } from "../primitives/data-table"
+import { ColumnHead, ROW_LINK_CLASS, TableShell, TableSkeleton, useTableSort } from "../primitives/data-table"
 import { formatPercent } from "../format"
 import { formatBytes } from "./format"
 
@@ -26,9 +28,6 @@ interface CloudflareZoneTableProps {
 	zones: ReadonlyArray<CloudflareZoneRow>
 	waiting?: boolean
 }
-
-const ROW_CLASS =
-	"flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0 hover:bg-muted/40"
 
 export function CloudflareZoneTableLoading() {
 	return (
@@ -173,8 +172,13 @@ export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps
 			}
 		>
 			{sorted.map((zone) => (
-				<div key={zone.serviceName} className={ROW_CLASS}>
-					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground">
+				<Link
+					key={zone.serviceName}
+					to="/infra/cloudflare/$zoneName"
+					params={{ zoneName: zone.zoneName }}
+					className={ROW_LINK_CLASS}
+				>
+					<div className="min-w-[220px] flex-1 truncate font-mono text-[13px] font-medium text-foreground transition-colors group-hover:text-primary">
 						{zone.zoneName}
 					</div>
 					{numCell(formatNumber(zone.requests))}
@@ -201,7 +205,7 @@ export function CloudflareZoneTable({ zones, waiting }: CloudflareZoneTableProps
 					<div className="hidden w-[90px] text-right font-mono text-[12px] tabular-nums text-foreground/80 lg:block">
 						{formatOptionalLatency(zone.originP99Ms)}
 					</div>
-				</div>
+				</Link>
 			))}
 		</TableShell>
 	)

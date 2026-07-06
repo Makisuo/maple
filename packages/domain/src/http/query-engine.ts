@@ -314,6 +314,26 @@ export class CloudflareInfraZoneTimeseriesResponse extends Schema.Class<Cloudfla
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+// Zone detail page: bucketed breakdowns by HTTP status class and cache
+// status plus a latency-percentile timeseries, all scoped to one zone
+// pseudo-service (`cloudflare/{zoneName}`). One round-trip for the page.
+export class CloudflareInfraZoneDetailRequest extends Schema.Class<CloudflareInfraZoneDetailRequest>(
+	"CloudflareInfraZoneDetailRequest",
+)({
+	serviceName: Schema.String,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	bucketSeconds: Schema.Number,
+}) {}
+
+export class CloudflareInfraZoneDetailResponse extends Schema.Class<CloudflareInfraZoneDetailResponse>(
+	"CloudflareInfraZoneDetailResponse",
+)({
+	statusBuckets: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	cacheBuckets: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+	latencyBuckets: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
 export class CloudflareInfraWorkersRequest extends Schema.Class<CloudflareInfraWorkersRequest>(
 	"CloudflareInfraWorkersRequest",
 )({
@@ -1398,6 +1418,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("cloudflareInfraZoneTimeseries", "/cloudflare-infra-zone-timeseries", {
 			payload: CloudflareInfraZoneTimeseriesRequest,
 			success: CloudflareInfraZoneTimeseriesResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("cloudflareInfraZoneDetail", "/cloudflare-infra-zone-detail", {
+			payload: CloudflareInfraZoneDetailRequest,
+			success: CloudflareInfraZoneDetailResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

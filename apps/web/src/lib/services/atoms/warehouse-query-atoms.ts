@@ -57,6 +57,7 @@ import { getServiceWorkloads } from "@/api/warehouse/service-infra"
 import {
 	getCloudflareWorkers,
 	getCloudflareWorkerTimeseries,
+	getCloudflareZoneDetail,
 	getCloudflareZones,
 	getCloudflareZoneTimeseries,
 } from "@/api/warehouse/cloudflare-infra"
@@ -356,6 +357,10 @@ export const cloudflareZonesResultAtom = makeQueryAtomFamily(getCloudflareZones,
 })
 
 export const cloudflareZoneTimeseriesResultAtom = makeQueryAtomFamily(getCloudflareZoneTimeseries, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneDetailResultAtom = makeQueryAtomFamily(getCloudflareZoneDetail, {
 	staleTime: 30_000,
 })
 

@@ -21,6 +21,7 @@ import {
 	ServiceCloudflareStatsResponse,
 	CloudflareInfraZonesResponse,
 	CloudflareInfraZoneTimeseriesResponse,
+	CloudflareInfraZoneDetailResponse,
 	CloudflareInfraWorkersResponse,
 	CloudflareInfraWorkerTimeseriesResponse,
 	ServiceDbQuerySummaryResponse,
@@ -689,6 +690,58 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"cloudflareInfraZoneTimeseries query failed",
 					)
 					return new CloudflareInfraZoneTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
+				}),
+			)
+			.handle("cloudflareInfraZoneDetail", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						serviceName: payload.serviceName,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+						bucketSeconds: payload.bucketSeconds,
+					}
+					const statusCompiled = CH.compile(CH.cloudflareZoneStatusTimeseriesSQL(), params, {
+						rowSchema: CH.cloudflareZoneStatusTimeseriesRowSchema,
+					})
+					const cacheCompiled = CH.compile(CH.cloudflareZoneCacheTimeseriesSQL(), params, {
+						rowSchema: CH.cloudflareZoneCacheTimeseriesRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencyTimeseriesSQL(), params, {
+						rowSchema: CH.cloudflareZoneLatencyTimeseriesRowSchema,
+					})
+					const [statusRows, cacheRows, latencyRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, statusCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDetailStatus",
+								}),
+								"cloudflareInfraZoneDetailStatus query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, cacheCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDetailCache",
+								}),
+								"cloudflareInfraZoneDetailCache query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, latencyCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDetailLatency",
+								}),
+								"cloudflareInfraZoneDetailLatency query failed",
+							),
+						],
+						{ concurrency: 3 },
+					)
+					return new CloudflareInfraZoneDetailResponse({
+						statusBuckets: statusRows.map((row) => ({ ...row })),
+						cacheBuckets: cacheRows.map((row) => ({ ...row })),
+						latencyBuckets: latencyRows.map((row) => ({ ...row })),
+					})
 				}),
 			)
 			.handle("cloudflareInfraWorkers", ({ payload }) =>

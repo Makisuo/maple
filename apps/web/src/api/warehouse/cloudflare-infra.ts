@@ -11,6 +11,7 @@ import { Effect, Schema } from "effect"
 import {
 	CloudflareInfraWorkersRequest,
 	CloudflareInfraWorkerTimeseriesRequest,
+	CloudflareInfraZoneDetailRequest,
 	CloudflareInfraZonesRequest,
 	CloudflareInfraZoneTimeseriesRequest,
 } from "@maple/domain/http"
@@ -171,6 +172,87 @@ export const getCloudflareZoneTimeseries = Effect.fn("QueryEngine.getCloudflareZ
 		}
 	},
 )
+
+export interface CloudflareZoneStatusBucket {
+	bucket: string
+	/** `"2xx"`-style class, `"unknown"` for out-of-range statuses. */
+	statusClass: string
+	requests: number
+}
+
+export interface CloudflareZoneCacheBucket {
+	bucket: string
+	/** Cloudflare's raw lowercase cacheStatus (`hit`, `miss`, `dynamic`, …). */
+	cacheStatus: string
+	requests: number
+}
+
+export interface CloudflareZoneLatencyBucket {
+	bucket: string
+	ttfbP50Ms: number
+	ttfbP95Ms: number
+	ttfbP99Ms: number
+	originP50Ms: number
+	originP95Ms: number
+	originP99Ms: number
+}
+
+const ZoneDetailInputSchema = Schema.Struct({
+	serviceName: Schema.String,
+	startTime: WarehouseDateTimeString,
+	endTime: WarehouseDateTimeString,
+	bucketSeconds: Schema.Number,
+})
+
+export type CloudflareZoneDetailInput = (typeof ZoneDetailInputSchema)["Encoded"]
+
+export const getCloudflareZoneDetail = Effect.fn("QueryEngine.getCloudflareZoneDetail")(function* ({
+	data,
+}: {
+	data: CloudflareZoneDetailInput
+}) {
+	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneDetail")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneDetail", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneDetail({
+				payload: new CloudflareInfraZoneDetailRequest({
+					serviceName: input.serviceName,
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+				}),
+			})
+		}),
+	)
+	return {
+		statusBuckets: result.statusBuckets.map(
+			(row): CloudflareZoneStatusBucket => ({
+				bucket: String(row.bucket ?? ""),
+				statusClass: String(row.statusClass ?? "unknown"),
+				requests: Number(row.requests ?? 0),
+			}),
+		),
+		cacheBuckets: result.cacheBuckets.map(
+			(row): CloudflareZoneCacheBucket => ({
+				bucket: String(row.bucket ?? ""),
+				cacheStatus: String(row.cacheStatus ?? "unknown"),
+				requests: Number(row.requests ?? 0),
+			}),
+		),
+		latencyBuckets: result.latencyBuckets.map(
+			(row): CloudflareZoneLatencyBucket => ({
+				bucket: String(row.bucket ?? ""),
+				ttfbP50Ms: Number(row.ttfbP50Ms ?? 0),
+				ttfbP95Ms: Number(row.ttfbP95Ms ?? 0),
+				ttfbP99Ms: Number(row.ttfbP99Ms ?? 0),
+				originP50Ms: Number(row.originP50Ms ?? 0),
+				originP95Ms: Number(row.originP95Ms ?? 0),
+				originP99Ms: Number(row.originP99Ms ?? 0),
+			}),
+		),
+	}
+})
 
 export const getCloudflareWorkers = Effect.fn("QueryEngine.getCloudflareWorkers")(function* ({
 	data,

@@ -230,6 +230,147 @@ export function cloudflareZoneTimeseriesSQL() {
 }
 
 // ---------------------------------------------------------------------------
+// Zone detail (single zone, scoped by ServiceName)
+//
+// The poller stores `http.status_class` and `cache.status` on every
+// `cloudflare.http.requests` row, so a single zone supports bucketed
+// breakdowns by either dimension plus a latency-percentile timeseries.
+// ---------------------------------------------------------------------------
+
+export interface CloudflareZoneStatusTimeseriesOutput {
+	/** Bucket start, ISO-8601 UTC. */
+	readonly bucket: string
+	/** `"2xx"`-style class, `"unknown"` for out-of-range statuses. */
+	readonly statusClass: string
+	readonly requests: number
+}
+
+export interface CloudflareZoneCacheTimeseriesOutput {
+	readonly bucket: string
+	/** Cloudflare's raw lowercase cacheStatus (`hit`, `miss`, `dynamic`, …). */
+	readonly cacheStatus: string
+	readonly requests: number
+}
+
+export interface CloudflareZoneLatencyTimeseriesOutput {
+	readonly bucket: string
+	readonly ttfbP50Ms: number
+	readonly ttfbP95Ms: number
+	readonly ttfbP99Ms: number
+	readonly originP50Ms: number
+	readonly originP95Ms: number
+	readonly originP99Ms: number
+}
+
+/** Row schema for {@link cloudflareZoneStatusTimeseriesSQL}. Same {@link CHNumber} coercion. */
+export const cloudflareZoneStatusTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneStatusTimeseriesOutput> =
+	Schema.Struct({
+		bucket: Schema.String,
+		statusClass: Schema.String,
+		requests: CHNumber,
+	})
+
+/** Row schema for {@link cloudflareZoneCacheTimeseriesSQL}. Same {@link CHNumber} coercion. */
+export const cloudflareZoneCacheTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneCacheTimeseriesOutput> =
+	Schema.Struct({
+		bucket: Schema.String,
+		cacheStatus: Schema.String,
+		requests: CHNumber,
+	})
+
+/** Row schema for {@link cloudflareZoneLatencyTimeseriesSQL}. Same {@link CHNumber} coercion. */
+export const cloudflareZoneLatencyTimeseriesRowSchema: CompiledQueryRowSchema<CloudflareZoneLatencyTimeseriesOutput> =
+	Schema.Struct({
+		bucket: Schema.String,
+		ttfbP50Ms: CHNumber,
+		ttfbP95Ms: CHNumber,
+		ttfbP99Ms: CHNumber,
+		originP50Ms: CHNumber,
+		originP95Ms: CHNumber,
+		originP99Ms: CHNumber,
+	})
+
+/** Bucketed request counts by HTTP status class for one zone pseudo-service. */
+export function cloudflareZoneStatusTimeseriesSQL() {
+	return from(MetricsSum)
+		.select(($) => ({
+			bucket: CH.formatDateTime(
+				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+				ISO_Z_FORMAT,
+			),
+			statusClass: $.Attributes.get("http.status_class"),
+			requests: CH.sum($.Value),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.ServiceName.eq(param.string("serviceName")),
+			$.MetricName.eq("cloudflare.http.requests"),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.groupBy("bucket", "statusClass")
+		.orderBy(["bucket", "asc"], ["statusClass", "asc"])
+		.format("JSON")
+}
+
+/** Bucketed request counts by raw Cloudflare cache status for one zone pseudo-service. */
+export function cloudflareZoneCacheTimeseriesSQL() {
+	return from(MetricsSum)
+		.select(($) => ({
+			bucket: CH.formatDateTime(
+				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+				ISO_Z_FORMAT,
+			),
+			cacheStatus: $.Attributes.get("cache.status"),
+			requests: CH.sum($.Value),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.ServiceName.eq(param.string("serviceName")),
+			$.MetricName.eq("cloudflare.http.requests"),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.groupBy("bucket", "cacheStatus")
+		.orderBy(["bucket", "asc"], ["cacheStatus", "asc"])
+		.format("JSON")
+}
+
+/**
+ * Bucketed latency percentiles for one zone pseudo-service. Plan-dependent:
+ * zones without quantiles return zero rows, and the detail page hides the
+ * latency panel entirely.
+ */
+export function cloudflareZoneLatencyTimeseriesSQL() {
+	const quantileAvg =
+		(metricName: string, quantile: string) => ($: ColumnAccessor<typeof MetricsGauge.columns>) =>
+			avgWhere($.Value, $.MetricName.eq(metricName).and($.Attributes.get("quantile").eq(quantile)))
+	return from(MetricsGauge)
+		.select(($) => ({
+			bucket: CH.formatDateTime(
+				CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+				ISO_Z_FORMAT,
+			),
+			ttfbP50Ms: quantileAvg("cloudflare.http.edge.ttfb", "0.5")($),
+			ttfbP95Ms: quantileAvg("cloudflare.http.edge.ttfb", "0.95")($),
+			ttfbP99Ms: quantileAvg("cloudflare.http.edge.ttfb", "0.99")($),
+			originP50Ms: quantileAvg("cloudflare.http.origin.duration", "0.5")($),
+			originP95Ms: quantileAvg("cloudflare.http.origin.duration", "0.95")($),
+			originP99Ms: quantileAvg("cloudflare.http.origin.duration", "0.99")($),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.ServiceName.eq(param.string("serviceName")),
+			$.MetricName.in_(...ZONE_GAUGE_METRIC_NAMES),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.groupBy("bucket")
+		.orderBy(["bucket", "asc"])
+		.format("JSON")
+}
+
+// ---------------------------------------------------------------------------
 // Workers
 // ---------------------------------------------------------------------------
 
