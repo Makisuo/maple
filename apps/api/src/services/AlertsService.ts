@@ -84,7 +84,7 @@ import {
 	type AlertRuleRow,
 	alertRuleStates,
 } from "@maple/db"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -315,6 +315,25 @@ const parseStoredGroupBy = (raw: string | null): AlertGroupBy | null =>
 
 const isServiceGroupBy = (groupBy: AlertGroupBy | null): boolean =>
 	groupBy != null && groupBy.length === 1 && groupBy[0] === "service.name"
+
+/**
+ * The compiled plan is the single authority on whether a rule evaluates
+ * grouped. Rule-level `groupBy` and a builder draft's `groupBy` both funnel
+ * into the compiled spec's tokens (`["none"]` when ungrouped), so evaluation
+ * code must never consult those source representations — a builder_query rule
+ * stores its grouping only in the draft and keeps rule-level `groupBy` null.
+ */
+const planGroupingTokens = (
+	plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>,
+): ReadonlyArray<string> | null => {
+	if (plan.kind !== "spec" || plan.query == null || plan.query.kind !== "timeseries") return null
+	const groupBy = plan.query.groupBy
+	if (groupBy == null || groupBy.length === 0 || groupBy.includes("none")) return null
+	return groupBy
+}
+
+const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
+	planGroupingTokens(plan) != null
 
 const resolveServiceLinkName = (
 	rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
@@ -2501,22 +2520,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 
 				let evaluation: EvaluatedRule
-				if (normalized.groupBy != null && normalized.serviceNames.length === 0) {
-					const allResults = yield* evaluateRule(orgId, normalized)
-					const excludeSet = new Set(normalized.excludeServiceNames)
-					const results = allResults.filter((r) => !excludeSet.has(r.groupKey))
-					const breached = results.find((r) => r.evaluation.status === "breached")
-					evaluation = breached?.evaluation ??
-						results[0]?.evaluation ?? {
-							status: "skipped" as const,
-							value: null,
-							sampleCount: 0,
-							threshold: normalized.threshold,
-							thresholdUpper: normalized.thresholdUpper,
-							comparator: normalized.comparator,
-							reason: "No groups found",
-						}
-				} else if (normalized.serviceNames.length > 1) {
+				if (normalized.serviceNames.length > 1) {
 					const results = yield* Effect.forEach(
 						normalized.serviceNames,
 						(svcName) =>
@@ -2555,16 +2559,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							reason: "No data",
 						}
 				} else {
-					const observations = yield* evaluateRule(orgId, normalized)
-					evaluation = observations[0]?.evaluation ?? {
-						status: "skipped" as const,
-						value: null,
-						sampleCount: 0,
-						threshold: normalized.threshold,
-						thresholdUpper: normalized.thresholdUpper,
-						comparator: normalized.comparator,
-						reason: "No data",
-					}
+					// Uniform grouped/ungrouped path — mirrors runSchedulerTick: the
+					// compiled plan decides groupedness, and a breaching group (if any)
+					// wins so the test reflects what the scheduler would fire on.
+					const allResults = yield* evaluateRule(orgId, normalized)
+					const excludeSet = new Set(normalized.excludeServiceNames)
+					const results = isGroupedPlan(normalized.compiledPlan)
+						? allResults.filter((r) => !excludeSet.has(r.groupKey))
+						: allResults
+					const breached = results.find((r) => r.evaluation.status === "breached")
+					evaluation = breached?.evaluation ??
+						results[0]?.evaluation ?? {
+							status: "skipped" as const,
+							value: null,
+							sampleCount: 0,
+							threshold: normalized.threshold,
+							thresholdUpper: normalized.thresholdUpper,
+							comparator: normalized.comparator,
+							reason: "No data",
+						}
 				}
 
 				if (sendNotification) {
@@ -2786,7 +2799,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// a series even when the whole range is empty.
 				if (
 					obsByGroup.size === 0 &&
-					normalized.groupBy == null &&
+					!isGroupedPlan(normalized.compiledPlan) &&
 					normalized.serviceNames.length <= 1
 				) {
 					obsByGroup.set("all", new Map())
@@ -3773,7 +3786,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				return HashSet.union(removedServices, newlyExcluded)
 			}
 
-			const groupByEqual = (a: AlertGroupBy | null, b: AlertGroupBy | null): boolean => {
+			const groupByEqual = (
+				a: ReadonlyArray<string> | null,
+				b: ReadonlyArray<string> | null,
+			): boolean => {
 				if (a == null || b == null) return a == null && b == null
 				if (a.length !== b.length) return false
 				for (let i = 0; i < a.length; i++) {
@@ -3782,11 +3798,32 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				return true
 			}
 
+			/**
+			 * The user-facing grouping keys a rule evaluates by — rule-level groupBy,
+			 * or the builder draft's groupBy for builder_query rules (which always
+			 * persist rule-level groupBy as null). Compared at key level because
+			 * different attribute keys (attr.http.route vs attr.http.method) compile
+			 * to the same spec token ("attribute").
+			 */
+			const effectiveGroupByKeys = (rule: NormalizedRule): ReadonlyArray<string> | null => {
+				if (rule.groupBy != null && rule.groupBy.length > 0) return rule.groupBy
+				const draft = rule.queryBuilderDraft
+				if (
+					rule.signalType === "builder_query" &&
+					draft?.addOns?.groupBy === true &&
+					draft.groupBy != null &&
+					draft.groupBy.length > 0
+				) {
+					return draft.groupBy
+				}
+				return null
+			}
+
 			const ruleStructureChanged = (oldRule: NormalizedRule, newRule: NormalizedRule): boolean => {
-				if (!groupByEqual(oldRule.groupBy, newRule.groupBy)) return true
+				if (!groupByEqual(effectiveGroupByKeys(oldRule), effectiveGroupByKeys(newRule))) return true
 				if (oldRule.signalType !== newRule.signalType) return true
 				const mode = (r: NormalizedRule) =>
-					r.groupBy != null ? "grouped" : r.serviceNames.length > 1 ? "multi" : "single"
+					isGroupedPlan(r.compiledPlan) ? "grouped" : r.serviceNames.length > 1 ? "multi" : "single"
 				return mode(oldRule) !== mode(newRule)
 			}
 
@@ -4170,46 +4207,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								const ruleStart = yield* now
 								const normalized = yield* normalizeRuleRow(row)
 
-								if (normalized.groupBy != null && normalized.serviceNames.length === 0) {
-									const results = yield* evaluateRule(row.orgId, normalized)
-									const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
-									const eligible = Arr.filter(
-										results,
-										(r) => !HashSet.has(excludeSet, r.groupKey),
-									)
-
-									yield* Effect.forEach(eligible, ({ evaluation, groupKey }) =>
-										Effect.gen(function* () {
-											yield* recordEvaluationStatus(evaluation)
-											yield* processEvaluation(
-												row,
-												normalized,
-												evaluation,
-												groupKey,
-												timestamp,
-												pendingChecks,
-												issueBudget,
-											)
-										}),
-									)
-
-									const evaluatedGroups = HashSet.fromIterable(
-										Arr.map(eligible, (r) => r.groupKey),
-									)
-									yield* resolveOrphanedGroupIncidents(
-										row.orgId,
-										normalized.id,
-										normalized,
-										evaluatedGroups,
-										timestamp,
-									)
-									yield* Metric.update(
-										AlertingMetrics.ruleEvaluationDurationMs,
-										(yield* now) - ruleStart,
-									)
-									return
-								}
-
 								if (normalized.serviceNames.length > 1) {
 									yield* Effect.forEach(normalized.serviceNames, (svcName) =>
 										Effect.gen(function* () {
@@ -4252,20 +4249,64 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									return
 								}
 
-								const observations = yield* evaluateRule(row.orgId, normalized)
-								const evaluation = observations[0]?.evaluation
-								if (evaluation != null) {
-									yield* recordEvaluationStatus(evaluation)
-									yield* processEvaluation(
-										row,
-										normalized,
-										evaluation,
-										"__total__",
-										timestamp,
-										pendingChecks,
-										issueBudget,
-									)
-								}
+								// Uniform grouped/ungrouped path. The engine always returns one
+								// observation per group — a single "all" observation (with a
+								// no-data fallback) when the compiled plan is ungrouped — so both
+								// shapes flow through the same loop; ungrouped rules keep their
+								// historical "__total__" storage key at this boundary.
+								const grouped = isGroupedPlan(normalized.compiledPlan)
+								const results = yield* evaluateRule(row.orgId, normalized)
+								const excludeSet = HashSet.fromIterable(normalized.excludeServiceNames)
+								const eligible = grouped
+									? Arr.filter(results, (r) => !HashSet.has(excludeSet, r.groupKey))
+									: results
+
+								yield* Effect.forEach(eligible, ({ evaluation, groupKey }) =>
+									Effect.gen(function* () {
+										yield* recordEvaluationStatus(evaluation)
+										yield* processEvaluation(
+											row,
+											normalized,
+											evaluation,
+											grouped ? groupKey : "__total__",
+											timestamp,
+											pendingChecks,
+											issueBudget,
+										)
+									}),
+								)
+
+								const evaluatedGroups = grouped
+									? HashSet.fromIterable(Arr.map(eligible, (r) => r.groupKey))
+									: HashSet.fromIterable(["__total__"])
+								yield* resolveOrphanedGroupIncidents(
+									row.orgId,
+									normalized.id,
+									normalized,
+									evaluatedGroups,
+									timestamp,
+								)
+
+								// Self-heal state rows whose key shape contradicts the rule's
+								// groupedness: a grouped rule can never legitimately own a
+								// "__total__" row (left behind when this rule evaluated ungrouped,
+								// or by recordEvaluationFailure), and vice versa. Orphan resolution
+								// above only deletes incident-backed rows. Zero rows touched in
+								// steady state, so the Electric shape stays quiet.
+								yield* dbExecute((db) =>
+									db
+										.delete(alertRuleStates)
+										.where(
+											and(
+												eq(alertRuleStates.orgId, row.orgId),
+												eq(alertRuleStates.ruleId, row.id),
+												grouped
+													? eq(alertRuleStates.groupKey, "__total__")
+													: ne(alertRuleStates.groupKey, "__total__"),
+											),
+										),
+								)
+
 								yield* Metric.update(
 									AlertingMetrics.ruleEvaluationDurationMs,
 									(yield* now) - ruleStart,

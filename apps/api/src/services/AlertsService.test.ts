@@ -1607,6 +1607,301 @@ describe("AlertsService", () => {
 		)
 	})
 
+	// Regression: the web form persists rule-level groupBy as null for
+	// builder_query rules — the grouping lives only in the draft. The scheduler
+	// must derive groupedness from the compiled plan, not rule.groupBy, or it
+	// evaluates only the first group under "__total__".
+	it.effect("fans out per group for builder_query rules grouped only via the draft", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		const groupedLogsDraft = (groupBy: string[]) => ({
+			id: "q",
+			name: "A",
+			dataSource: "logs" as const,
+			aggregation: "count" as const,
+			whereClause: 'severity = "error"',
+			groupBy,
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+		})
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_draft_grouped")
+			const userId = asUserId("user_draft_grouped")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+			const rule = yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Error logs by service (draft grouping)",
+					severity: "critical",
+					enabled: true,
+					signalType: "builder_query",
+					queryBuilderDraft: groupedLogsDraft(["service.name"]),
+					// Deliberately NO rule-level groupBy — matches what the web form sends.
+					comparator: "gt",
+					threshold: 10,
+					windowMinutes: 5,
+					minimumSampleCount: 1,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			// Simulate the prod failure mode: a stale "__total__" state row left
+			// behind from when this rule evaluated ungrouped.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`insert into alert_rule_states (org_id, rule_id, group_key, consecutive_breaches, consecutive_healthy, last_status, updated_at)
+					 values ($1, $2, '__total__', 0, 2, 'healthy', now())`,
+					[orgId, rule.id],
+				),
+			)
+
+			yield* alerts.runSchedulerTick()
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+
+			// The breaching group fires even though the healthy group sorts first.
+			const incidents = yield* alerts.listIncidents(orgId)
+			assert.lengthOf(incidents.incidents, 1)
+			assert.strictEqual(incidents.incidents[0]?.groupKey, "zzz-breach")
+			assert.strictEqual(incidents.incidents[0]?.status, "open")
+
+			// Per-group state rows exist; the stale "__total__" row self-healed away.
+			const stateCounts = yield* Effect.promise(() =>
+				queryFirstRow<{ total_rows: number; grouped_rows: number }>(
+					testDb,
+					`select
+						count(*) filter (where group_key = '__total__')::int as total_rows,
+						count(*) filter (where group_key <> '__total__')::int as grouped_rows
+					 from alert_rule_states where rule_id = $1`,
+					[rule.id],
+				),
+			)
+			assert.strictEqual(stateCounts?.total_rows, 0)
+			assert.strictEqual(stateCounts?.grouped_rows, 2)
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					testDb,
+					makeWarehouseStub({
+						logsAggregateByServiceRows: [
+							{ bucket: "2026-01-01 00:00:00", groupName: "aaa-healthy", count: 3 },
+							{ bucket: "2026-01-01 00:00:00", groupName: "zzz-breach", count: 14 },
+						],
+					}),
+					{ fetch: okFetch },
+				),
+			),
+		)
+	})
+
+	it.effect("deletes stale per-group state rows once a rule evaluates ungrouped", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_ungrouped_heal")
+			const userId = asUserId("user_ungrouped_heal")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+
+			// Leftover from a previous grouped configuration.
+			yield* Effect.promise(() =>
+				executeSql(
+					testDb,
+					`insert into alert_rule_states (org_id, rule_id, group_key, consecutive_breaches, consecutive_healthy, last_status, updated_at)
+					 values ($1, $2, 'svc-stale', 1, 0, 'breached', now())`,
+					[orgId, rule.id],
+				),
+			)
+
+			yield* alerts.runSchedulerTick()
+
+			const staleCount = yield* Effect.promise(() =>
+				queryFirstRow<{ stale: number }>(
+					testDb,
+					`select count(*)::int as stale from alert_rule_states where rule_id = $1 and group_key <> '__total__'`,
+					[rule.id],
+				),
+			)
+			assert.strictEqual(staleCount?.stale, 0)
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					testDb,
+					makeWarehouseStub({
+						tracesAggregateRows: [
+							{
+								count: 200,
+								avgDuration: 20,
+								p50Duration: 10,
+								p95Duration: 80,
+								p99Duration: 160,
+								errorRate: 1,
+								satisfiedCount: 195,
+								toleratingCount: 3,
+								apdexScore: 0.9825,
+							},
+						],
+					}),
+					{ fetch: okFetch },
+				),
+			),
+		)
+	})
+
+	it.effect("treats a draft-only grouping change as structural and resets state", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		const draft = (groupBy: string[]) => ({
+			id: "q",
+			name: "A",
+			dataSource: "logs" as const,
+			aggregation: "count" as const,
+			whereClause: 'severity = "error"',
+			groupBy,
+			addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+		})
+		const request = (overrides: Partial<{ threshold: number; groupBy: string[] }>) =>
+			new AlertRuleUpsertRequest({
+				name: "Error logs grouping change",
+				severity: "critical",
+				enabled: true,
+				signalType: "builder_query",
+				queryBuilderDraft: draft(overrides.groupBy ?? ["service.name"]),
+				comparator: "gt",
+				threshold: overrides.threshold ?? 10,
+				windowMinutes: 5,
+				minimumSampleCount: 1,
+				consecutiveBreachesRequired: 2,
+				consecutiveHealthyRequired: 2,
+				renotifyIntervalMinutes: 30,
+				destinationIds: [],
+			})
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_draft_group_change")
+			const userId = asUserId("user_draft_group_change")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const withDestination = (overrides: Partial<{ threshold: number; groupBy: string[] }>) =>
+				new AlertRuleUpsertRequest({ ...request(overrides), destinationIds: [destination.id] })
+
+			const rule = yield* alerts.createRule(orgId, userId, adminRoles, withDestination({}))
+
+			yield* alerts.runSchedulerTick()
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+
+			const open = yield* alerts.listIncidents(orgId)
+			assert.strictEqual(open.incidents[0]?.status, "open")
+
+			// A non-structural edit (threshold) keeps the incident open.
+			yield* alerts.updateRule(orgId, userId, adminRoles, rule.id, withDestination({ threshold: 12 }))
+			const afterThreshold = yield* alerts.listIncidents(orgId)
+			assert.strictEqual(afterThreshold.incidents[0]?.status, "open")
+
+			// Changing only the draft's grouping is structural: incidents resolve
+			// and all state rows reset.
+			yield* alerts.updateRule(
+				orgId,
+				userId,
+				adminRoles,
+				rule.id,
+				withDestination({ threshold: 12, groupBy: ["severity"] }),
+			)
+			const afterGrouping = yield* alerts.listIncidents(orgId)
+			assert.strictEqual(afterGrouping.incidents[0]?.status, "resolved")
+			const stateCount = yield* Effect.promise(() =>
+				queryFirstRow<{ remaining: number }>(
+					testDb,
+					`select count(*)::int as remaining from alert_rule_states where rule_id = $1`,
+					[rule.id],
+				),
+			)
+			assert.strictEqual(stateCount?.remaining, 0)
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					testDb,
+					makeWarehouseStub({
+						logsAggregateByServiceRows: [
+							{ bucket: "2026-01-01 00:00:00", groupName: "zzz-breach", count: 14 },
+						],
+					}),
+					{ fetch: okFetch },
+				),
+			),
+		)
+	})
+
+	it.effect("testRule surfaces a breaching non-first group for draft-grouped rules", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const result = yield* Effect.gen(function* () {
+				const alerts = yield* AlertsService
+				const orgId = asOrgId("org_test_draft_grouped")
+				const userId = asUserId("user_test_draft_grouped")
+				const destination = yield* createWebhookDestination(alerts, orgId, userId)
+
+				return yield* alerts.testRule(
+					orgId,
+					userId,
+					adminRoles,
+					new AlertRuleUpsertRequest({
+						name: "Grouped test rule",
+						severity: "critical",
+						enabled: true,
+						signalType: "builder_query",
+						queryBuilderDraft: {
+							id: "q",
+							name: "A",
+							dataSource: "logs",
+							aggregation: "count",
+							whereClause: 'severity = "error"',
+							groupBy: ["service.name"],
+							addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+						},
+						comparator: "gt",
+						threshold: 10,
+						windowMinutes: 5,
+						minimumSampleCount: 1,
+						consecutiveBreachesRequired: 2,
+						consecutiveHealthyRequired: 2,
+						renotifyIntervalMinutes: 30,
+						destinationIds: [destination.id],
+					}),
+				)
+			}).pipe(
+				Effect.provide(
+					makeLayer(
+						testDb,
+						makeWarehouseStub({
+							logsAggregateByServiceRows: [
+								{ bucket: "2026-01-01 00:00:00", groupName: "aaa-healthy", count: 3 },
+								{ bucket: "2026-01-01 00:00:00", groupName: "zzz-breach", count: 14 },
+							],
+						}),
+					),
+				),
+			)
+
+			assert.strictEqual(result.status, "breached")
+			assert.strictEqual(result.value, 14)
+		})
+	})
+
 	it.effect("blocks destination deletion when rules still reference it", () => {
 		const testDb = createTestDb(trackedDbs)
 
