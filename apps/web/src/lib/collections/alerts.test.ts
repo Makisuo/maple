@@ -49,7 +49,7 @@ const ruleRow: AlertRuleRow = {
 	destination_ids_json: [DEST_ID],
 	query_spec_json: null,
 	sample_count_strategy: null,
-	no_data_behavior: "ignore",
+	no_data_behavior: "skip",
 	last_scheduled_at: null,
 	created_at: "2026-06-01T00:00:00.000Z",
 	updated_at: "2026-07-04T00:00:00.000Z",

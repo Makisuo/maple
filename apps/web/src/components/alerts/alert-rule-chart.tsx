@@ -15,6 +15,7 @@ import type {
 	AlertCheckDocument,
 	AlertComparator,
 	AlertIncidentDocument,
+	AlertRulePreviewResponse,
 	AlertSignalType,
 } from "@maple/domain/http"
 import { formatSignalValue } from "@/lib/alerts/form-utils"
@@ -27,17 +28,27 @@ import {
 } from "@maple/ui/components/ui/chart"
 import { formatBucketLabel } from "@maple/ui/lib/format"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { SquareTerminalIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 import { SERIES_COLORS } from "./chart-colors"
 
-interface AlertSignalChartProps {
-	/** Warehouse signal buckets from `useAlertRuleChart` (`{ bucket, <series> }`). */
-	data?: Record<string, unknown>[]
-	/** The alert engine's recorded evaluations — drives the rail (and the chart for raw SQL). */
-	checks: ReadonlyArray<AlertCheckDocument>
+/**
+ * THE alert rule chart — shared by the create form's live hero and the rule
+ * detail page, so what you see while building a rule is exactly what you see
+ * while tracking it. The series comes from the `previewRule` endpoint (the
+ * evaluator's own query at the evaluator's own bucketing: one point per
+ * evaluation window). The detail page additionally overlays real incidents and
+ * the recorded-checks rail; the create form overlays the simulated
+ * "would have fired" spans instead.
+ */
+interface AlertRuleChartProps {
+	/** Evaluator-faithful series + would-fire spans from `previewRule`. */
+	preview: AlertRulePreviewResponse | null
+	/** The alert engine's recorded evaluations — drives the rail and the fallback series. */
+	checks?: ReadonlyArray<AlertCheckDocument>
 	/** Incidents for this rule — shaded as firing windows across the chart. */
-	incidents: ReadonlyArray<AlertIncidentDocument>
+	incidents?: ReadonlyArray<AlertIncidentDocument>
+	/** Shade `preview.wouldFire` spans (create form — incidents don't exist yet). */
+	showWouldFire?: boolean
 	threshold: number
 	thresholdUpper?: number | null
 	comparator: AlertComparator
@@ -46,7 +57,7 @@ interface AlertSignalChartProps {
 	window: { min: number; max: number }
 	loading?: boolean
 	/** Preview-query failure; non-fatal when recorded checks can still draw the chart. */
-	chartError?: string | null
+	error?: string | null
 	className?: string
 }
 
@@ -54,15 +65,16 @@ const SINGLE_KEY = "value"
 const CHART_HEIGHT = 240
 
 type ChartPoint = { t: number } & Record<string, number | null>
-type SignalSource = "warehouse" | "checks" | "none"
+type SignalSource = "preview" | "checks" | "none"
 const Y_AXIS_WIDTH = 62
 const PLOT_RIGHT = 8
 const RAIL_CELLS = 60
 
-type RailStatus = "breached" | "skipped" | "healthy" | "empty"
+type RailStatus = "breached" | "error" | "skipped" | "healthy" | "empty"
 
 const RAIL_COLOR: Record<RailStatus, string> = {
 	breached: "bg-destructive",
+	error: "bg-warning",
 	skipped: "bg-muted-foreground/30",
 	healthy: "bg-chart-apdex/70",
 	empty: "bg-muted/50",
@@ -73,91 +85,121 @@ function num(value: unknown): number {
 	return Number.isFinite(parsed) ? parsed : 0
 }
 
-function toMs(value: unknown): number {
-	if (typeof value !== "string") return Number.NaN
-	return new Date(normalizeTimestampInput(value)).getTime()
-}
-
 function clamp01(value: number): number {
 	return value < 0 ? 0 : value > 1 ? 1 : value
 }
 
-export function AlertSignalChart({
-	data,
-	checks,
-	incidents,
+const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
+const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
+
+export function AlertRuleChart({
+	preview,
+	checks = NO_CHECKS,
+	incidents = NO_INCIDENTS,
+	showWouldFire = false,
 	threshold,
 	thresholdUpper,
 	comparator,
 	signalType,
 	window: domain,
 	loading,
-	chartError,
+	error,
 	className,
-}: AlertSignalChartProps) {
-	const isRaw = signalType === "raw_query"
+}: AlertRuleChartProps) {
+	// The preview series is the preferred source; when it's empty/unavailable the
+	// recorded checks become the series instead, so a rule whose preview fails
+	// still gets a chart from its evaluation history.
+	const { chartData, seriesKeys, isMultiSeries, source, sampleCounts, statuses } =
+		React.useMemo((): {
+			chartData: ChartPoint[]
+			seriesKeys: string[]
+			isMultiSeries: boolean
+			source: SignalSource
+			/** t → total samples across groups (tooltip). */
+			sampleCounts: Map<number, number>
+			/** t → worst per-bucket status across groups (tooltip). */
+			statuses: Map<number, string>
+		} => {
+			const sampleCounts = new Map<number, number>()
+			const statuses = new Map<number, string>()
+			const previewSeries = preview?.series ?? []
+			const hasPreviewPoints = previewSeries.some((s) => s.points.length > 0)
 
-	// The warehouse signal is the preferred source; when it's empty (raw SQL, or a
-	// failed/empty preview) the recorded checks become the series instead, so even
-	// raw-SQL rules get a chart. `source` lets us caption the fallback.
-	const { chartData, seriesKeys, isMultiSeries, source } = React.useMemo((): {
-		chartData: ChartPoint[]
-		seriesKeys: string[]
-		isMultiSeries: boolean
-		source: SignalSource
-	} => {
-		if (Array.isArray(data) && data.length > 0) {
-			const keySet = new Set<string>()
-			for (const row of data) {
-				for (const key of Object.keys(row)) if (key !== "bucket") keySet.add(key)
+			if (hasPreviewPoints) {
+				const keys = previewSeries.map((s) => s.groupKey)
+				const single = keys.length === 1
+				const byT = new Map<number, ChartPoint>()
+				const statusRank: Record<string, number> = { healthy: 0, skipped: 1, breached: 2 }
+				for (const series of previewSeries) {
+					const key = single ? SINGLE_KEY : series.groupKey
+					for (const point of series.points) {
+						const t = Date.parse(point.bucket)
+						if (!Number.isFinite(t)) continue
+						let row = byT.get(t)
+						if (!row) {
+							row = { t }
+							byT.set(t, row)
+						}
+						row[key] = point.value
+						sampleCounts.set(t, (sampleCounts.get(t) ?? 0) + point.sampleCount)
+						const prev = statuses.get(t)
+						if (prev == null || (statusRank[point.status] ?? 0) > (statusRank[prev] ?? 0)) {
+							statuses.set(t, point.status)
+						}
+					}
+				}
+				const rows = Array.from(byT.values()).sort((a, b) => a.t - b.t)
+				return {
+					chartData: rows,
+					seriesKeys: single ? [SINGLE_KEY] : keys,
+					isMultiSeries: !single,
+					source: "preview",
+					sampleCounts,
+					statuses,
+				}
 			}
-			const allKeys = Array.from(keySet)
-			if (allKeys.length === 1) {
-				const label = allKeys[0]!
-				const rows: ChartPoint[] = data
-					.map((row) => ({ t: toMs(row.bucket), [SINGLE_KEY]: num(row[label]) }))
+
+			if (checks.length > 0) {
+				const rows: ChartPoint[] = checks
+					.map((check) => ({
+						t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
+						[SINGLE_KEY]: check.observedValue,
+					}))
 					.filter((row) => Number.isFinite(row.t))
 					.sort((a, b) => a.t - b.t)
-				return { chartData: rows, seriesKeys: [SINGLE_KEY], isMultiSeries: false, source: "warehouse" }
+				return {
+					chartData: rows,
+					seriesKeys: [SINGLE_KEY],
+					isMultiSeries: false,
+					source: "checks",
+					sampleCounts,
+					statuses,
+				}
 			}
-			if (allKeys.length > 1) {
-				const rows: ChartPoint[] = data
-					.map((row) => {
-						const point: ChartPoint = { t: toMs(row.bucket) }
-						for (const key of allKeys) point[key] = num(row[key])
-						return point
-					})
-					.filter((row) => Number.isFinite(row.t))
-					.sort((a, b) => a.t - b.t)
-				return { chartData: rows, seriesKeys: allKeys, isMultiSeries: true, source: "warehouse" }
+
+			return {
+				chartData: [],
+				seriesKeys: [SINGLE_KEY],
+				isMultiSeries: false,
+				source: "none",
+				sampleCounts,
+				statuses,
 			}
-		}
-
-		if (checks.length > 0) {
-			const rows: ChartPoint[] = checks
-				.map((check) => ({
-					t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
-					[SINGLE_KEY]: check.observedValue,
-				}))
-				.filter((row) => Number.isFinite(row.t))
-				.sort((a, b) => a.t - b.t)
-			return { chartData: rows, seriesKeys: [SINGLE_KEY], isMultiSeries: false, source: "checks" }
-		}
-
-		return { chartData: [], seriesKeys: [SINGLE_KEY], isMultiSeries: false, source: "none" }
-	}, [data, checks])
+		}, [preview, checks])
 
 	const hasSignal = chartData.length > 0
 
 	// Adaptive time-axis labels reuse the warehouse formatter via an ISO round-trip.
-	// `rangeMs` follows the drawn axis domain (not the data span) so the include-date
-	// decision matches the width the ticks actually cover; `bucketSeconds` stays
-	// data-derived for tick granularity.
 	const axisContext = React.useMemo(() => {
 		const rangeMs = domain.max - domain.min
-		if (chartData.length < 2) return { rangeMs, bucketSeconds: undefined }
-		return { rangeMs, bucketSeconds: (chartData[1]!.t - chartData[0]!.t) / 1000 }
-	}, [chartData, domain])
+		const bucketSeconds =
+			preview != null
+				? preview.bucketSeconds
+				: chartData.length >= 2
+					? (chartData[1]!.t - chartData[0]!.t) / 1000
+					: undefined
+		return { rangeMs, bucketSeconds }
+	}, [chartData, domain, preview])
 
 	const formatTime = React.useCallback(
 		(value: number, mode: "tick" | "tooltip") =>
@@ -210,13 +252,37 @@ export function AlertSignalChart({
 		[incidents, domain],
 	)
 
+	const wouldFireBands = React.useMemo(() => {
+		if (!showWouldFire || preview == null) return []
+		return preview.wouldFire
+			.map((span) => ({
+				x1: Date.parse(span.start),
+				x2: Date.parse(span.end),
+				groupKey: span.groupKey,
+			}))
+			.filter(
+				(band) =>
+					Number.isFinite(band.x1) &&
+					Number.isFinite(band.x2) &&
+					band.x2 >= domain.min &&
+					band.x1 <= domain.max,
+			)
+			.map((band) => ({
+				...band,
+				x1: Math.max(band.x1, domain.min),
+				x2: Math.min(band.x2, domain.max),
+			}))
+	}, [showWouldFire, preview, domain])
+
 	const railCells = React.useMemo(() => {
 		const range = Math.max(1, domain.max - domain.min)
 		const buckets = Array.from({ length: RAIL_CELLS }, () => ({
 			breached: 0,
 			healthy: 0,
 			skipped: 0,
+			errored: 0,
 			opened: false,
+			errorMessage: null as string | null,
 		}))
 		for (const check of checks) {
 			const t = new Date(normalizeTimestampInput(check.timestamp)).getTime()
@@ -226,22 +292,31 @@ export function AlertSignalChart({
 			const bucket = buckets[idx]!
 			if (check.status === "breached") bucket.breached += 1
 			else if (check.status === "healthy") bucket.healthy += 1
-			else bucket.skipped += 1
+			else if (check.status === "error") {
+				bucket.errored += 1
+				if (bucket.errorMessage == null && check.errorMessage != null) {
+					bucket.errorMessage = check.errorMessage
+				}
+			} else bucket.skipped += 1
 			if (check.incidentTransition === "opened") bucket.opened = true
 		}
 		return buckets.map((bucket, i) => {
-			const total = bucket.breached + bucket.healthy + bucket.skipped
+			const total = bucket.breached + bucket.healthy + bucket.skipped + bucket.errored
+			// Errors outrank breaches: a failing query is the more urgent signal.
 			const status: RailStatus =
 				total === 0
 					? "empty"
-					: bucket.breached > 0
-						? "breached"
-						: bucket.healthy > 0
-							? "healthy"
-							: "skipped"
+					: bucket.errored > 0
+						? "error"
+						: bucket.breached > 0
+							? "breached"
+							: bucket.healthy > 0
+								? "healthy"
+								: "skipped"
 			const start = domain.min + (i / RAIL_CELLS) * range
 			const end = domain.min + ((i + 1) / RAIL_CELLS) * range
 			const counts = [
+				bucket.errored > 0 ? `${bucket.errored} failed` : null,
 				bucket.breached > 0 ? `${bucket.breached} breached` : null,
 				bucket.healthy > 0 ? `${bucket.healthy} healthy` : null,
 				bucket.skipped > 0 ? `${bucket.skipped} skipped` : null,
@@ -252,10 +327,12 @@ export function AlertSignalChart({
 			const title =
 				total === 0
 					? `${window} · no checks`
-					: `${window} · ${counts}${bucket.opened ? " · incident opened" : ""}`
+					: `${window} · ${counts}${bucket.opened ? " · incident opened" : ""}${bucket.errorMessage != null ? ` · ${bucket.errorMessage}` : ""}`
 			return { status, opened: bucket.opened, title }
 		})
 	}, [checks, domain, formatTime])
+
+	const hasErrorChecks = React.useMemo(() => checks.some((c) => c.status === "error"), [checks])
 
 	const chartArea = hasSignal ? (
 		<ChartContainer config={chartConfig} className="aspect-auto w-full" style={{ height: CHART_HEIGHT }}>
@@ -298,6 +375,20 @@ export function AlertSignalChart({
 					/>
 				))}
 
+				{wouldFireBands.map((band, i) => (
+					<ReferenceArea
+						key={`would-fire-${i}`}
+						x1={band.x1}
+						x2={band.x2}
+						fill="var(--destructive)"
+						fillOpacity={0.08}
+						stroke="var(--destructive)"
+						strokeOpacity={0.4}
+						strokeDasharray="4 3"
+						ifOverflow="hidden"
+					/>
+				))}
+
 				<XAxis
 					dataKey="t"
 					type="number"
@@ -324,7 +415,15 @@ export function AlertSignalChart({
 						<ChartTooltipContent
 							labelFormatter={(_, payload) => {
 								const t = payload?.[0]?.payload?.t
-								return typeof t === "number" ? formatTime(t, "tooltip") : ""
+								if (typeof t !== "number") return ""
+								const label = formatTime(t, "tooltip")
+								const samples = sampleCounts.get(t)
+								const status = statuses.get(t)
+								const extras = [
+									samples != null ? `${samples} samples` : null,
+									status === "skipped" ? "skipped" : null,
+								].filter(Boolean)
+								return extras.length > 0 ? `${label} · ${extras.join(" · ")}` : label
 							}}
 							formatter={(value, name) => (
 								<span className="flex items-center gap-2">
@@ -391,7 +490,9 @@ export function AlertSignalChart({
 							stroke={SERIES_COLORS[i % SERIES_COLORS.length]}
 							strokeWidth={1.5}
 							dot={false}
-							connectNulls
+							// Skipped/no-data windows stay visible as gaps — connecting
+							// across them would fabricate a signal the evaluator never saw.
+							connectNulls={source !== "preview"}
 							isAnimationActive={false}
 						/>
 					))
@@ -402,7 +503,7 @@ export function AlertSignalChart({
 						stroke={SERIES_COLORS[0]}
 						strokeWidth={2}
 						fill="url(#alert-signal-fill)"
-						connectNulls
+						connectNulls={source !== "preview"}
 						isAnimationActive={false}
 					/>
 				)}
@@ -410,17 +511,10 @@ export function AlertSignalChart({
 		</ChartContainer>
 	) : loading ? (
 		<Skeleton className="w-full" style={{ height: CHART_HEIGHT }} />
-	) : isRaw ? (
-		<Placeholder icon>
-			<p className="font-medium text-sm">Chart builds from recorded checks</p>
-			<p className="text-muted-foreground text-xs">
-				Raw SQL has no live preview. Once the scheduler records evaluations they'll plot here.
-			</p>
-		</Placeholder>
-	) : chartError != null ? (
+	) : error != null ? (
 		<Placeholder tone="destructive">
 			<p className="font-medium text-destructive text-sm">Preview query failed</p>
-			<p className="line-clamp-3 text-muted-foreground text-xs">{chartError}</p>
+			<p className="line-clamp-3 text-muted-foreground text-xs">{error}</p>
 		</Placeholder>
 	) : (
 		<Placeholder>
@@ -432,9 +526,22 @@ export function AlertSignalChart({
 		<div className={cn("space-y-2", className)}>
 			{chartArea}
 
-			{hasSignal && chartError != null && source === "checks" && (
+			{hasSignal && error != null && source === "checks" && (
 				<p className="text-[11px] text-muted-foreground">
 					Live signal preview unavailable — showing recorded checks.
+				</p>
+			)}
+
+			{showWouldFire && wouldFireBands.length > 0 && (
+				<p className="text-[11px] text-muted-foreground">
+					Shaded: rule would have fired (approximate — the live scheduler evaluates every
+					minute).
+				</p>
+			)}
+			{preview?.truncatedToStart != null && (
+				<p className="text-[11px] text-muted-foreground">
+					Preview truncated to {formatTime(Date.parse(preview.truncatedToStart), "tooltip")} —
+					shorten the window or the range for full coverage.
 				</p>
 			)}
 
@@ -442,7 +549,7 @@ export function AlertSignalChart({
 				<div className="space-y-1" style={{ paddingLeft: Y_AXIS_WIDTH, paddingRight: PLOT_RIGHT }}>
 					<div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
 						<span className="font-medium uppercase tracking-wider">Evaluations</span>
-						<RailLegend hasIncidents={incidentBands.length > 0} />
+						<RailLegend hasIncidents={incidentBands.length > 0} hasErrors={hasErrorChecks} />
 					</div>
 					<div className="flex h-2.5 gap-px">
 						{railCells.map((cell, i) => (
@@ -467,11 +574,9 @@ export function AlertSignalChart({
 function Placeholder({
 	children,
 	tone,
-	icon,
 }: {
 	children: React.ReactNode
 	tone?: "destructive"
-	icon?: boolean
 }) {
 	return (
 		<div
@@ -481,24 +586,18 @@ function Placeholder({
 			)}
 			style={{ height: CHART_HEIGHT }}
 		>
-			<div className="max-w-sm space-y-2">
-				{icon && (
-					<div className="mx-auto flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
-						<SquareTerminalIcon size={16} />
-					</div>
-				)}
-				{children}
-			</div>
+			<div className="max-w-sm space-y-2">{children}</div>
 		</div>
 	)
 }
 
-function RailLegend({ hasIncidents }: { hasIncidents: boolean }) {
+function RailLegend({ hasIncidents, hasErrors }: { hasIncidents: boolean; hasErrors: boolean }) {
 	return (
 		<div className="flex items-center gap-3">
 			<LegendChip className="bg-destructive">Breached</LegendChip>
 			<LegendChip className="bg-chart-apdex/70">Healthy</LegendChip>
 			<LegendChip className="bg-muted-foreground/30">Skipped</LegendChip>
+			{hasErrors && <LegendChip className="bg-warning">Failed</LegendChip>}
 			{hasIncidents && (
 				<LegendChip className="bg-destructive/15 ring-1 ring-inset ring-destructive/40">Incident</LegendChip>
 			)}

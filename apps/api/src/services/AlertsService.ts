@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto"
 import {
 	CompiledAlertQueryPlan,
 	QueryEngineAlertReducer,
-	type QueryEngineNoDataBehavior,
+	QueryEngineNoDataBehavior,
 	type QueryEngineSampleCountStrategy,
 	QuerySpec,
 } from "@maple/query-engine"
@@ -25,6 +25,7 @@ import {
 	AlertGroupBy as AlertGroupBySchema,
 	AlertCheckDocument,
 	AlertChecksListResponse,
+	AlertCheckStatus as AlertCheckStatusSchema,
 	AlertEvaluationStatus as AlertEvaluationStatusSchema,
 	AlertIncidentDocument,
 	AlertIncidentsListResponse,
@@ -36,6 +37,11 @@ import {
 	AlertPersistenceError,
 	AlertRuleDeleteResponse,
 	AlertRuleDocument,
+	AlertRulePreviewFiringSpan,
+	AlertRulePreviewPoint,
+	AlertRulePreviewResponse,
+	AlertRulePreviewSeries,
+	type AlertRulePreviewRequest,
 	AlertRulesListResponse,
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
@@ -292,6 +298,7 @@ const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
 const decodeAlertEvaluationStatusSync = Schema.decodeUnknownSync(AlertEvaluationStatusSchema)
+const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
 const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
 const decodeAlertMetricAggregationSync = Schema.decodeUnknownSync(AlertMetricAggregationSchema)
@@ -320,6 +327,7 @@ const resolveServiceLinkName = (
 	return null
 }
 const decodeQueryEngineAlertReducerSync = Schema.decodeUnknownSync(QueryEngineAlertReducer)
+const decodeNoDataBehaviorSync = Schema.decodeUnknownSync(QueryEngineNoDataBehavior)
 
 /** Parse the stored query-builder draft value; returns null when absent/invalid. */
 const parseStoredQueryBuilderDraft = (raw: unknown): QueryBuilderQueryDraftPayload | null => {
@@ -360,6 +368,20 @@ export class AlertRuntime extends Context.Reference<AlertRuntimeShape>("@maple/a
 
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
+
+// Caps on how many evaluation windows a rule preview replays. Spec plans cost
+// one CH query regardless of bucket count; raw-SQL plans run one query per
+// window, so they get a tighter cap.
+const MAX_PREVIEW_BUCKETS = 200
+const MAX_RAW_PREVIEW_WINDOWS = 60
+
+// Tinybird DateTime64(3) wire format for alert_checks ingest:
+// "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
+const toIngestDateTime64 = (epochMs: number) => {
+	const d = new Date(epochMs)
+	const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
+	return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
+}
 
 const toTinybirdDateTime = (epochMs: number) => new Date(epochMs).toISOString().slice(0, 19).replace("T", " ")
 
@@ -869,11 +891,13 @@ const rowToRuleDocument = (
 		rawQueryReducer:
 			row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
 		destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
+		noDataBehavior: decodeNoDataBehaviorSync(row.noDataBehavior),
 		lastEvaluationError: evaluationState?.error ?? null,
 		lastEvaluatedAt:
 			evaluationState?.evaluatedAt != null
 				? decodeIsoDateTimeStringSync(new Date(evaluationState.evaluatedAt).toISOString())
 				: null,
+		lastScheduledAt: toIso(row.lastScheduledAt),
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
 		createdBy: decodeUserIdSync(row.createdBy),
@@ -993,6 +1017,13 @@ export interface AlertsServiceShape {
 		| AlertNotFoundError
 		| AlertDeliveryError
 		| WarehouseError
+	>
+	readonly previewRule: (
+		orgId: OrgId,
+		request: AlertRulePreviewRequest,
+	) => Effect.Effect<
+		AlertRulePreviewResponse,
+		AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
 	>
 	readonly listIncidents: (orgId: OrgId) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
 	readonly listRuleChecks: (
@@ -1193,6 +1224,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 			const normalizeRule = Effect.fn("AlertsService.normalizeRule")(function* (
 				request: AlertRuleUpsertRequest,
+				options?: {
+					// Preview evaluates a form draft that may not have a name or
+					// destinations yet — neither affects what the chart shows.
+					readonly forPreview?: boolean
+				},
 			): Effect.fn.Return<NormalizedRule, AlertValidationError> {
 				const name = request.name.trim()
 				const serviceNames =
@@ -1211,8 +1247,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const destinationIds = [...new Set(request.destinationIds)]
 
 				const details: string[] = []
-				if (name.length === 0) details.push("name is required")
-				if (destinationIds.length === 0) {
+				if (name.length === 0 && !options?.forPreview) details.push("name is required")
+				if (destinationIds.length === 0 && !options?.forPreview) {
 					details.push("at least one destination must be selected")
 				}
 				if (request.threshold == null || !Number.isFinite(request.threshold)) {
@@ -2583,6 +2619,243 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				return new AlertEvaluationResult(evaluation)
 			})
 
+			/**
+			 * Evaluator-faithful preview of a rule over a time range. Runs the exact
+			 * compiled plan the scheduler runs, at the evaluator's tumbling
+			 * `windowMinutes` buckets, and simulates the consecutive-breach state
+			 * machine to report when the rule would have fired. One bucket == one
+			 * evaluation window, so what this returns is what the tracking chart
+			 * shows once the rule is live.
+			 *
+			 * Fidelity caveat: the live scheduler slides its window every tick
+			 * (~1 min) while the preview uses tumbling windows, so `wouldFire` spans
+			 * are approximate between bucket boundaries.
+			 */
+			const previewRule = Effect.fn("AlertsService.previewRule")(function* (
+				orgId: OrgId,
+				request: AlertRulePreviewRequest,
+			): Effect.fn.Return<
+				AlertRulePreviewResponse,
+				AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
+			> {
+				const normalized = yield* normalizeRule(request.rule, { forPreview: true })
+				const plan = normalized.compiledPlan
+
+				const windowMs = normalized.windowMinutes * 60_000
+				const requestedStartMs = Date.parse(request.startTime)
+				const requestedEndMs = Date.parse(request.endTime)
+				if (
+					!Number.isFinite(requestedStartMs) ||
+					!Number.isFinite(requestedEndMs) ||
+					requestedEndMs <= requestedStartMs
+				) {
+					return yield* Effect.fail(makeValidationError("Invalid preview time range"))
+				}
+
+				// Tumbling windows aligned to the epoch — the same alignment the CH
+				// timeseries bucketing (toStartOfInterval) uses, so the preview grid
+				// lines up with the rows evaluateSeries returns.
+				const endMs = Math.floor(requestedEndMs / windowMs) * windowMs
+				const alignedStartMs = Math.floor(requestedStartMs / windowMs) * windowMs
+				const maxBuckets = plan.kind === "raw_sql" ? MAX_RAW_PREVIEW_WINDOWS : MAX_PREVIEW_BUCKETS
+				const minStartMs = endMs - maxBuckets * windowMs
+				const startMs = Math.max(alignedStartMs, minStartMs)
+				if (endMs - startMs < windowMs) {
+					return yield* Effect.fail(
+						makeValidationError("Preview range must span at least one evaluation window"),
+					)
+				}
+				const truncatedToStart =
+					alignedStartMs < minStartMs
+						? decodeIsoDateTimeStringSync(new Date(startMs).toISOString())
+						: null
+
+				const bucketStarts: number[] = []
+				for (let t = startMs; t + windowMs <= endMs; t += windowMs) {
+					bucketStarts.push(t)
+				}
+
+				// Raw per-(group, bucket) observations; buckets missing here are
+				// no-data windows and get filled from the grid below.
+				interface PreviewObs {
+					readonly value: number | null
+					readonly sampleCount: number
+					readonly hasData: boolean
+				}
+				const obsByGroup = new Map<string, Map<number, PreviewObs>>()
+				const record = (groupKey: string, bucketMs: number, obs: PreviewObs) => {
+					let buckets = obsByGroup.get(groupKey)
+					if (!buckets) {
+						buckets = new Map()
+						obsByGroup.set(groupKey, buckets)
+					}
+					buckets.set(bucketMs, obs)
+				}
+
+				if (plan.kind === "spec") {
+					if (plan.query == null || plan.sampleCountStrategy == null) {
+						return yield* Effect.fail(
+							makeValidationError("Compiled alert plan is missing its query spec"),
+						)
+					}
+					if (normalized.serviceNames.length > 1) {
+						// Mirror the scheduler's multi-service mode: independent per-service
+						// plans, groupKey = service name.
+						yield* Effect.forEach(
+							normalized.serviceNames,
+							(svcName) =>
+								Effect.gen(function* () {
+									const perServicePlan = yield* compileRulePlan({
+										...normalized,
+										serviceName: svcName,
+									})
+									if (perServicePlan.query == null || perServicePlan.sampleCountStrategy == null) {
+										return
+									}
+									const observations = yield* queryEngine
+										.evaluateSeries(systemTenant(orgId), {
+											startTime: toTinybirdDateTime(startMs),
+											endTime: toTinybirdDateTime(endMs),
+											query: perServicePlan.query,
+											reducer: perServicePlan.reducer,
+											sampleCountStrategy: perServicePlan.sampleCountStrategy,
+										})
+										.pipe(catchQueryEngineErrors)
+									for (const obs of observations) {
+										record(svcName, Date.parse(obs.bucket), {
+											value: obs.value,
+											sampleCount: obs.sampleCount,
+											hasData: obs.sampleCount > 0,
+										})
+									}
+								}),
+							{ concurrency: 5 },
+						)
+					} else {
+						const observations = yield* queryEngine
+							.evaluateSeries(systemTenant(orgId), {
+								startTime: toTinybirdDateTime(startMs),
+								endTime: toTinybirdDateTime(endMs),
+								query: plan.query,
+								reducer: plan.reducer,
+								sampleCountStrategy: plan.sampleCountStrategy,
+							})
+							.pipe(catchQueryEngineErrors)
+						const excludeSet = new Set(normalized.excludeServiceNames)
+						for (const obs of observations) {
+							if (excludeSet.has(obs.groupKey)) continue
+							record(obs.groupKey, Date.parse(obs.bucket), {
+								value: obs.value,
+								sampleCount: obs.sampleCount,
+								hasData: obs.sampleCount > 0,
+							})
+						}
+					}
+				} else {
+					// Raw SQL: the reducer runs INSIDE one evaluation window, so replay
+					// the evaluator over each historical window. Bounded by
+					// MAX_RAW_PREVIEW_WINDOWS via the range clamp above.
+					yield* Effect.forEach(
+						bucketStarts,
+						(bucketMs) =>
+							queryEngine
+								.evaluateRawSql(systemTenant(orgId), {
+									startTime: toTinybirdDateTime(bucketMs),
+									endTime: toTinybirdDateTime(bucketMs + windowMs),
+									sql: plan.rawSql ?? "",
+									reducer: plan.reducer,
+									windowMinutes: normalized.windowMinutes,
+								})
+								.pipe(
+									catchQueryEngineErrors,
+									Effect.map((groups) => {
+										for (const group of groups) {
+											record(group.groupKey, bucketMs, {
+												value: group.value,
+												sampleCount: group.sampleCount,
+												hasData: group.hasData,
+											})
+										}
+									}),
+								),
+						{ concurrency: 4 },
+					)
+				}
+
+				// Ungrouped rules always observe *something* per tick ("all"), so chart
+				// a series even when the whole range is empty.
+				if (
+					obsByGroup.size === 0 &&
+					normalized.groupBy == null &&
+					normalized.serviceNames.length <= 1
+				) {
+					obsByGroup.set("all", new Map())
+				}
+
+				const NO_DATA: PreviewObs = { value: null, sampleCount: 0, hasData: false }
+				const iso = (ms: number) => decodeIsoDateTimeStringSync(new Date(ms).toISOString())
+
+				const series: AlertRulePreviewSeries[] = []
+				const wouldFire: AlertRulePreviewFiringSpan[] = []
+				for (const [groupKey, buckets] of obsByGroup) {
+					const points: AlertRulePreviewPoint[] = []
+					// Simulate the scheduler's saturating counters (skipped freezes both —
+					// same as processEvaluation).
+					let breaches = 0
+					let healthy = 0
+					let openStart: number | null = null
+					for (const bucketMs of bucketStarts) {
+						const obs = buckets.get(bucketMs) ?? NO_DATA
+						const evaluation = applyEvaluationLogic(normalized, obs)
+						points.push(
+							new AlertRulePreviewPoint({
+								bucket: iso(bucketMs),
+								value: evaluation.value,
+								sampleCount: obs.sampleCount,
+								status: evaluation.status,
+							}),
+						)
+						if (evaluation.status === "breached") {
+							breaches = Math.min(breaches + 1, normalized.consecutiveBreachesRequired)
+							healthy = 0
+						} else if (evaluation.status === "healthy") {
+							healthy = Math.min(healthy + 1, normalized.consecutiveHealthyRequired)
+							breaches = 0
+						}
+						if (openStart == null && breaches >= normalized.consecutiveBreachesRequired) {
+							// Shade from the start of the run's first breached window.
+							openStart = bucketMs - (normalized.consecutiveBreachesRequired - 1) * windowMs
+						} else if (openStart != null && healthy >= normalized.consecutiveHealthyRequired) {
+							wouldFire.push(
+								new AlertRulePreviewFiringSpan({
+									groupKey,
+									start: iso(openStart),
+									end: iso(bucketMs + windowMs),
+								}),
+							)
+							openStart = null
+						}
+					}
+					if (openStart != null) {
+						wouldFire.push(
+							new AlertRulePreviewFiringSpan({ groupKey, start: iso(openStart), end: iso(endMs) }),
+						)
+					}
+					series.push(new AlertRulePreviewSeries({ groupKey, points }))
+				}
+
+				return new AlertRulePreviewResponse({
+					bucketSeconds: windowMs / 1000,
+					windowMinutes: normalized.windowMinutes,
+					threshold: normalized.threshold,
+					thresholdUpper: normalized.thresholdUpper,
+					comparator: normalized.comparator,
+					truncatedToStart,
+					series,
+					wouldFire,
+				})
+			})
+
 			const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (orgId: OrgId) {
 				const rows = yield* dbExecute((db) =>
 					db
@@ -2685,7 +2958,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							return new AlertCheckDocument({
 								timestamp: decodeIsoDateTimeStringSync(String(r.timestamp)),
 								groupKey: String(r.groupKey ?? ""),
-								status: decodeAlertEvaluationStatusSync(String(r.status)),
+								status: decodeAlertCheckStatusSync(String(r.status)),
 								signalType: decodeAlertSignalTypeSync(String(r.signalType)),
 								comparator: decodeAlertComparatorSync(String(r.comparator)),
 								threshold: Number(r.threshold),
@@ -2706,6 +2979,14 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										: decodeAlertIncidentIdSync(String(r.incidentId)),
 								incidentTransition: decodeAlertIncidentTransitionSync(rawTransition),
 								evaluationDurationMs: Number(r.evaluationDurationMs ?? 0),
+								errorMessage:
+									r.errorMessage == null || r.errorMessage === ""
+										? null
+										: String(r.errorMessage),
+								errorCategory:
+									r.errorCategory == null || r.errorCategory === ""
+										? null
+										: String(r.errorCategory),
 							})
 						}),
 					catch: (error) =>
@@ -3441,12 +3722,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				}
 
 				// Record one audit row per evaluation to the Tinybird alert_checks datasource.
-				// Tinybird DateTime64(3) wire format: "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
-				const toIngestDateTime64 = (epochMs: number) => {
-					const d = new Date(epochMs)
-					const pad = (n: number, w = 2) => n.toString().padStart(w, "0")
-					return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}.${pad(d.getUTCMilliseconds(), 3)}`
-				}
 				const evaluationEndMs = yield* now
 				const checkRow: AlertChecksRow = {
 					OrgId: row.orgId,
@@ -3467,6 +3742,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					IncidentId: outcome.incidentId,
 					IncidentTransition: outcome.transition,
 					EvaluationDurationMs: Math.max(0, evaluationEndMs - timestamp),
+					ErrorMessage: null,
+					ErrorCategory: "",
 				}
 				// Buffer instead of POSTing per-evaluation; the scheduler tick flushes
 				// all rows once at the end (one POST per orgId). Awaited flush keeps
@@ -3781,6 +4058,104 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							pipe: fields?.pipe,
 						}),
 					)
+
+					const failedAt = yield* now
+					const message = error.message.slice(0, 500)
+
+					// Audit row: a failed evaluation is a check that produced no
+					// observation — record it so the check history has no silent gaps.
+					yield* Ref.update(pendingChecks, (checks) => {
+						checks.push({
+							OrgId: row.orgId,
+							RuleId: row.id,
+							GroupKey: "__total__",
+							Timestamp: toIngestDateTime64(failedAt),
+							Status: "error",
+							SignalType: row.signalType,
+							Comparator: row.comparator,
+							Threshold: row.threshold,
+							ObservedValue: null,
+							SampleCount: 0,
+							WindowMinutes: row.windowMinutes,
+							WindowStart: toIngestDateTime64(failedAt - row.windowMinutes * 60_000),
+							WindowEnd: toIngestDateTime64(failedAt),
+							ConsecutiveBreaches: 0,
+							ConsecutiveHealthy: 0,
+							IncidentId: null,
+							IncidentTransition: "none",
+							EvaluationDurationMs: 0,
+							ErrorMessage: message,
+							ErrorCategory: failureCategory,
+						})
+						return checks
+					})
+
+					// Persist the failure to alert_rule_states so listRules/Electric can
+					// surface it. Churn-gated (the states shape is Electric-synced): skip
+					// when the same message was written within the heartbeat window, and
+					// never clobber the state-machine counters in the conflict set.
+					// Best-effort: recording a failure must not itself fail the tick.
+					yield* Effect.gen(function* () {
+						const state =
+							(yield* dbExecute((db) =>
+								db
+									.select({
+										lastError: alertRuleStates.lastError,
+										lastEvaluatedAt: alertRuleStates.lastEvaluatedAt,
+									})
+									.from(alertRuleStates)
+									.where(
+										and(
+											eq(alertRuleStates.orgId, row.orgId),
+											eq(alertRuleStates.ruleId, row.id),
+											eq(alertRuleStates.groupKey, "__total__"),
+										),
+									)
+									.limit(1),
+							))[0] ?? null
+						const unchanged =
+							state != null &&
+							state.lastError === message &&
+							state.lastEvaluatedAt != null &&
+							failedAt - state.lastEvaluatedAt.getTime() < STATE_HEARTBEAT_MS
+						if (unchanged) return
+						yield* dbExecute((db) =>
+							db
+								.insert(alertRuleStates)
+								.values({
+									orgId: row.orgId,
+									ruleId: row.id,
+									groupKey: "__total__",
+									consecutiveBreaches: 0,
+									consecutiveHealthy: 0,
+									lastStatus: null,
+									lastValue: null,
+									lastSampleCount: null,
+									lastEvaluatedAt: new Date(failedAt),
+									lastError: message,
+									updatedAt: new Date(failedAt),
+								})
+								.onConflictDoUpdate({
+									target: [
+										alertRuleStates.orgId,
+										alertRuleStates.ruleId,
+										alertRuleStates.groupKey,
+									],
+									set: {
+										lastError: message,
+										lastEvaluatedAt: new Date(failedAt),
+										updatedAt: new Date(failedAt),
+									},
+								}),
+						)
+					}).pipe(
+						Effect.tapError((persistError) =>
+							Effect.logWarning("Failed to persist alert evaluation error").pipe(
+								Effect.annotateLogs({ ruleId: row.id, message: persistError.message }),
+							),
+						),
+						Effect.ignore,
+					)
 				})
 
 				yield* Effect.forEach(
@@ -3896,6 +4271,25 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									(yield* now) - ruleStart,
 								)
 							}).pipe(
+								// The rule evaluated cleanly — clear any stored evaluation error.
+								// Conditional on lastError IS NOT NULL so healthy steady-state
+								// ticks touch zero rows (no Electric shape churn). This also
+								// covers grouped/multi-service rules, whose "__total__" error row
+								// is never revisited by upsertState.
+								Effect.tap(() =>
+									dbExecute((db) =>
+										db
+											.update(alertRuleStates)
+											.set({ lastError: null, updatedAt: new Date(timestamp) })
+											.where(
+												and(
+													eq(alertRuleStates.orgId, row.orgId),
+													eq(alertRuleStates.ruleId, row.id),
+													isNotNull(alertRuleStates.lastError),
+												),
+											),
+									).pipe(Effect.ignore),
+								),
 								Effect.catchTags({
 									"@maple/http/errors/AlertValidationError": (error) =>
 										recordEvaluationFailure(row, error, "validation"),
@@ -4024,6 +4418,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				updateRule,
 				deleteRule,
 				testRule,
+				previewRule,
 				listIncidents,
 				listRuleChecks,
 				listDeliveryEvents,

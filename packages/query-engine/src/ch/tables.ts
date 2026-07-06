@@ -401,6 +401,8 @@ export const AlertChecks = table("alert_checks", {
 	IncidentId: T.nullable(T.string),
 	IncidentTransition: T.string,
 	EvaluationDurationMs: T.uint32,
+	ErrorMessage: T.nullable(T.string),
+	ErrorCategory: T.string,
 })
 
 export const SessionReplays = table("session_replays", {

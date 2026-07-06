@@ -378,6 +378,8 @@ export interface AlertCheckRow {
 	incidentId: string | null
 	incidentTransition: string
 	evaluationDurationMs: number
+	errorMessage: string | null
+	errorCategory: string | null
 }
 
 export interface ListAlertChecksData {
@@ -386,6 +388,7 @@ export interface ListAlertChecksData {
 	breached: number
 	healthy: number
 	skipped: number
+	errored: number
 	transitions: number
 	checks: AlertCheckRow[]
 }

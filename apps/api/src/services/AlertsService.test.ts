@@ -5,8 +5,10 @@ import {
 	AlertDestinationInUseError,
 	AlertForbiddenError,
 	type AlertDestinationId,
+	AlertRulePreviewRequest,
 	AlertRuleUpsertRequest,
 	OrgId,
+	WarehouseQueryError,
 	RoleName,
 	UserId,
 } from "@maple/domain/http"
@@ -1925,5 +1927,231 @@ describe("AlertsService", () => {
 			assert.strictEqual(incidents.incidents[0]?.groupKey, "svc-breach")
 			assert.strictEqual(incidents.incidents[0]?.status, "open")
 		}).pipe(Effect.provide(makeLayer(testDb, stub, { fetch: okFetch })))
+	})
+})
+
+describe("AlertsService evaluation error persistence", () => {
+	const failingWarehouseStub = (state: {
+		failing: boolean
+		rows: ReadonlyArray<Record<string, unknown>>
+		ingested: Array<Record<string, unknown>>
+	}): WarehouseQueryServiceShape => {
+		const sqlQueryStub = () =>
+			state.failing
+				? (Effect.fail(
+						new WarehouseQueryError({
+							message: "Unknown column FooBar in traces",
+							pipeName: "tracesAlertEval",
+						}),
+					) as never)
+				: (Effect.succeed(state.rows as never) as never)
+		return {
+			query: () => Effect.fail(new Error("Unexpected pipe query")) as never,
+			sqlQuery: sqlQueryStub,
+			compiledQuery: (_tenant, compiled) =>
+				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
+			compiledQueryFirst: (_tenant, compiled) =>
+				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie))),
+			ingest: (_tenant, _datasource, rows) =>
+				Effect.sync(() => {
+					state.ingested.push(...(rows as Array<Record<string, unknown>>))
+				}),
+			asExecutor: () => {
+				throw new Error("asExecutor is not supported by this test stub")
+			},
+		}
+	}
+
+	it.effect("persists scheduler failures to lastError + audit log, gated, and clears on recovery", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = {
+			failing: true,
+			rows: [
+				{
+					count: 200,
+					avgDuration: 40,
+					p50Duration: 20,
+					p95Duration: 120,
+					p99Duration: 240,
+					errorRate: 1,
+					satisfiedCount: 180,
+					toleratingCount: 10,
+					apdexScore: 0.925,
+				},
+			],
+			ingested: [] as Array<Record<string, unknown>>,
+		}
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_alert_errors")
+			const userId = asUserId("user_alert_errors")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+
+			// Failing tick: the error must land in alert_rule_states.lastError, be
+			// surfaced on listRules, and produce an "error" audit check row.
+			yield* alerts.runSchedulerTick()
+
+			const rulesWhileFailing = yield* alerts.listRules(orgId)
+			assert.strictEqual(
+				rulesWhileFailing.rules[0]?.lastEvaluationError,
+				"Unknown column FooBar in traces",
+			)
+			const errorChecks = state.ingested.filter((row) => row.Status === "error")
+			assert.lengthOf(errorChecks, 1)
+			assert.strictEqual(errorChecks[0]?.ErrorMessage, "Unknown column FooBar in traces")
+			assert.strictEqual(errorChecks[0]?.ErrorCategory, "tinybird_query")
+			assert.strictEqual(errorChecks[0]?.GroupKey, "__total__")
+
+			const stateAfterFirstFailure = yield* Effect.promise(() =>
+				queryFirstRow<{ updated_at: Date }>(
+					testDb,
+					"select updated_at from alert_rule_states where rule_id = $1 and group_key = '__total__'",
+					[rule.id],
+				),
+			)
+			assert.isDefined(stateAfterFirstFailure)
+
+			// Second failing tick with the SAME message inside the heartbeat window:
+			// churn-gated, so the Electric-synced state row must NOT be rewritten.
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+			const stateAfterSecondFailure = yield* Effect.promise(() =>
+				queryFirstRow<{ updated_at: Date }>(
+					testDb,
+					"select updated_at from alert_rule_states where rule_id = $1 and group_key = '__total__'",
+					[rule.id],
+				),
+			)
+			assert.strictEqual(
+				stateAfterSecondFailure?.updated_at.getTime(),
+				stateAfterFirstFailure?.updated_at.getTime(),
+			)
+
+			// Recovery: a clean evaluation clears the stored error.
+			state.failing = false
+			yield* TestClock.adjust(Duration.minutes(1))
+			yield* alerts.runSchedulerTick()
+			const rulesAfterRecovery = yield* alerts.listRules(orgId)
+			assert.isNull(rulesAfterRecovery.rules[0]?.lastEvaluationError)
+		}).pipe(Effect.provide(makeLayer(testDb, failingWarehouseStub(state), { fetch: okFetch })))
+	})
+})
+
+describe("AlertsService.previewRule", () => {
+	const decodePreviewRequest = Schema.decodeUnknownSync(AlertRulePreviewRequest)
+
+	const bucketRow = (bucket: string, errorRate: number) => ({
+		bucket,
+		groupName: "all",
+		count: 200,
+		avgDuration: 40,
+		p50Duration: 20,
+		p95Duration: 120,
+		p99Duration: 240,
+		errorRate,
+		satisfiedCount: 180,
+		toleratingCount: 10,
+		apdexScore: 0.925,
+	})
+
+	it.effect("returns evaluator-bucketed points and would-fire spans for a spec rule", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = {
+			tracesAggregateRows: [
+				bucketRow("2026-01-01 00:00:00", 10),
+				bucketRow("2026-01-01 00:05:00", 12),
+				bucketRow("2026-01-01 00:10:00", 1),
+			],
+		}
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_preview")
+
+			// No destinations picked yet — preview must not require them.
+			const request = decodePreviewRequest({
+				rule: {
+					name: "Preview rule",
+					severity: "critical",
+					enabled: true,
+					serviceNames: ["checkout"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					minimumSampleCount: 10,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [],
+				},
+				startTime: "2026-01-01T00:00:00.000Z",
+				endTime: "2026-01-01T00:30:00.000Z",
+			})
+
+			const response = yield* alerts.previewRule(orgId, request)
+
+			assert.strictEqual(response.bucketSeconds, 300)
+			assert.strictEqual(response.windowMinutes, 5)
+			assert.lengthOf(response.series, 1)
+			const points = response.series[0]!.points
+			// 30-minute range at 5-minute windows = 6 evaluation buckets, with the
+			// three data-less windows filled in as skipped.
+			assert.lengthOf(points, 6)
+			assert.strictEqual(points[0]?.status, "breached")
+			assert.strictEqual(points[1]?.status, "breached")
+			assert.strictEqual(points[2]?.status, "healthy")
+			assert.strictEqual(points[3]?.status, "skipped")
+			assert.strictEqual(points[0]?.value, 10)
+			assert.strictEqual(points[0]?.sampleCount, 200)
+
+			// 2 consecutive breaches required → fires across the first two windows,
+			// resolved after 2 consecutive healthy... only 1 healthy then skipped
+			// (which freezes counters), so no close within the window either way.
+			assert.lengthOf(response.wouldFire, 1)
+			assert.strictEqual(response.wouldFire[0]?.start, "2026-01-01T00:00:00.000Z")
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
+	})
+
+	it.effect("replays raw-SQL rules per evaluation window", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = { rawQueryRows: [{ value: 42, samples: 20 }] }
+
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_preview_raw")
+
+			const request = decodePreviewRequest({
+				rule: {
+					name: "Raw preview",
+					severity: "warning",
+					enabled: true,
+					signalType: "raw_query",
+					rawQuerySql: "SELECT count() AS value FROM traces WHERE $__orgFilter",
+					rawQueryReducer: "max",
+					comparator: "gt",
+					threshold: 10,
+					windowMinutes: 5,
+					minimumSampleCount: 0,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 30,
+					destinationIds: [],
+				},
+				startTime: "2026-01-01T00:00:00.000Z",
+				endTime: "2026-01-01T00:30:00.000Z",
+			})
+
+			const response = yield* alerts.previewRule(orgId, request)
+
+			assert.lengthOf(response.series, 1)
+			const points = response.series[0]!.points
+			assert.lengthOf(points, 6)
+			assert.isTrue(points.every((point) => point.value === 42 && point.status === "breached"))
+			assert.lengthOf(response.wouldFire, 1)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 })

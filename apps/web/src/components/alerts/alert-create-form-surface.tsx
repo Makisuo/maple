@@ -15,7 +15,7 @@ import { ScopeSection } from "@/components/alerts/scope-section"
 import { SignalAndThresholdSection } from "@/components/alerts/signal-and-threshold-section"
 import { WidgetPrefillNoticeBanner } from "@/components/alerts/widget-prefill-notice-banner"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
+import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import {
 	buildRuleRequest,
@@ -76,7 +76,7 @@ export function AlertCreateFormSurface({
 	// entry with no pre-fills.
 	const [templatesOpen, setTemplatesOpen] = useState(() => showTemplatesInitially)
 
-	const { chartData, chartLoading, chartError } = useAlertRuleChart(ruleForm)
+	const { preview, previewLoading, previewError } = useAlertRulePreview(ruleForm)
 
 	const validationIssues = useMemo(
 		() => deriveValidationIssues(ruleForm, destinations),
@@ -109,7 +109,7 @@ export function AlertCreateFormSurface({
 
 		if (Exit.isSuccess(result)) {
 			toast.success(editingRule ? "Rule updated" : "Rule created")
-			navigate({ to: "/alerts", search: { tab: "rules" } })
+			navigate({ to: "/alerts" })
 		} else {
 			toast.error(getExitErrorMessage(result, "Failed to save rule"))
 		}
@@ -142,7 +142,7 @@ export function AlertCreateFormSurface({
 	return (
 		<DashboardLayout
 			breadcrumbs={[
-				{ label: "Alert Rules", href: "/alerts?tab=rules" },
+				{ label: "Alerts", href: "/alerts" },
 				{ label: editingRule ? "Edit Rule" : "New Rule" },
 			]}
 			titleContent={
@@ -157,9 +157,9 @@ export function AlertCreateFormSurface({
 				<WidgetPrefillNoticeBanner notices={prefillNotices} />
 				<RuleLiveChartHero
 					form={ruleForm}
-					chartData={chartData}
-					chartLoading={chartLoading}
-					chartError={chartError}
+					preview={preview}
+					previewLoading={previewLoading}
+					previewError={previewError}
 					onTestRule={() => runTest(false)}
 					testing={previewingRule}
 					previewResult={previewResult}
@@ -200,14 +200,14 @@ export function AlertCreateFormSurface({
 				editing={!!editingRule}
 				saving={savingRule}
 				validationIssues={validationIssues}
-				onCancel={() => navigate({ to: "/alerts", search: { tab: "rules" } })}
+				onCancel={() => navigate({ to: "/alerts" })}
 				onSave={handleSave}
 				onShowTemplates={editingRule ? undefined : () => setTemplatesOpen(true)}
 				cancelSlot={
 					<Button
 						type="button"
 						variant="outline"
-						render={<Link to="/alerts" search={{ tab: "rules" }} />}
+						render={<Link to="/alerts" />}
 					>
 						Cancel
 					</Button>

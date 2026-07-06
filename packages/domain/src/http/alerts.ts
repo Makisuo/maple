@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { QueryEngineAlertReducer } from "../query-engine"
+import { QueryEngineAlertReducer, QueryEngineNoDataBehavior } from "../query-engine"
 import {
 	AlertDeliveryEventId,
 	AlertDestinationId,
@@ -128,6 +128,18 @@ export const AlertEvaluationStatus = Schema.Literals(["breached", "healthy", "sk
 	title: "Alert Evaluation Status",
 })
 export type AlertEvaluationStatus = Schema.Schema.Type<typeof AlertEvaluationStatus>
+
+/**
+ * Status of a recorded check row in the audit trail. Superset of
+ * {@link AlertEvaluationStatus}: `"error"` marks a scheduler tick whose query
+ * failed outright — no observation was produced, only an error message.
+ * Kept separate so the evaluation state machine stays a closed 3-state union.
+ */
+export const AlertCheckStatus = Schema.Literals(["breached", "healthy", "skipped", "error"]).annotate({
+	identifier: "@maple/AlertCheckStatus",
+	title: "Alert Check Status",
+})
+export type AlertCheckStatus = Schema.Schema.Type<typeof AlertCheckStatus>
 
 const ChannelLabel = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 
@@ -419,9 +431,13 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	rawQuerySql: Schema.NullOr(Schema.String),
 	rawQueryReducer: Schema.NullOr(QueryEngineAlertReducer),
 	destinationIds: Schema.Array(AlertDestinationId),
+	/** What the evaluator does when the window has no data: skip the check or treat it as zero. */
+	noDataBehavior: QueryEngineNoDataBehavior,
 	/** Most recent evaluation error for this rule, surfaced from `alertRuleStates.lastError`. */
 	lastEvaluationError: Schema.NullOr(Schema.String),
 	lastEvaluatedAt: Schema.NullOr(IsoDateTimeString),
+	/** Last time the scheduler picked this rule up for evaluation. */
+	lastScheduledAt: Schema.NullOr(IsoDateTimeString),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
 	createdBy: UserId,
@@ -486,6 +502,58 @@ export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>("
 	thresholdUpper: Schema.NullOr(Schema.Number),
 	comparator: AlertComparator,
 	reason: Schema.String,
+}) {}
+
+export class AlertRulePreviewRequest extends Schema.Class<AlertRulePreviewRequest>("AlertRulePreviewRequest")({
+	rule: AlertRuleUpsertRequest,
+	startTime: IsoDateTimeString,
+	endTime: IsoDateTimeString,
+}) {}
+
+/**
+ * One evaluator-faithful data point: what the scheduler would have observed for
+ * this group in the window ending at `bucket`, and the verdict
+ * `applyEvaluationLogic` would have produced (before consecutive-breach counting).
+ */
+export class AlertRulePreviewPoint extends Schema.Class<AlertRulePreviewPoint>("AlertRulePreviewPoint")({
+	bucket: IsoDateTimeString,
+	value: Schema.NullOr(Schema.Number),
+	sampleCount: Schema.Number,
+	status: AlertEvaluationStatus,
+}) {}
+
+export class AlertRulePreviewSeries extends Schema.Class<AlertRulePreviewSeries>("AlertRulePreviewSeries")({
+	groupKey: Schema.String,
+	points: Schema.Array(AlertRulePreviewPoint),
+}) {}
+
+/** A span during which the rule's state machine would have held an open incident. */
+export class AlertRulePreviewFiringSpan extends Schema.Class<AlertRulePreviewFiringSpan>(
+	"AlertRulePreviewFiringSpan",
+)({
+	groupKey: Schema.String,
+	start: IsoDateTimeString,
+	end: IsoDateTimeString,
+}) {}
+
+/**
+ * Evaluator-faithful preview of an alert rule over a time range: the exact
+ * per-window observations the scheduler computes (tumbling `windowMinutes`
+ * buckets — the live scheduler slides every tick, so `wouldFire` spans are an
+ * approximation between bucket boundaries).
+ */
+export class AlertRulePreviewResponse extends Schema.Class<AlertRulePreviewResponse>(
+	"AlertRulePreviewResponse",
+)({
+	bucketSeconds: Schema.Number,
+	windowMinutes: Schema.Number,
+	threshold: Schema.Number,
+	thresholdUpper: Schema.NullOr(Schema.Number),
+	comparator: AlertComparator,
+	/** Set when the requested range was clamped to the preview bucket cap. */
+	truncatedToStart: Schema.NullOr(IsoDateTimeString),
+	series: Schema.Array(AlertRulePreviewSeries),
+	wouldFire: Schema.Array(AlertRulePreviewFiringSpan),
 }) {}
 
 export class AlertIncidentDocument extends Schema.Class<AlertIncidentDocument>("AlertIncidentDocument")({
@@ -617,7 +685,7 @@ export type AlertIncidentTransition = Schema.Schema.Type<typeof AlertIncidentTra
 export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertCheckDocument")({
 	timestamp: IsoDateTimeString,
 	groupKey: Schema.String,
-	status: AlertEvaluationStatus,
+	status: AlertCheckStatus,
 	signalType: AlertSignalType,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
@@ -632,6 +700,10 @@ export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertC
 	incidentId: Schema.NullOr(AlertIncidentId),
 	incidentTransition: AlertIncidentTransition,
 	evaluationDurationMs: Schema.Number,
+	/** Populated on `status: "error"` rows — why the evaluation failed. */
+	errorMessage: Schema.NullOr(Schema.String),
+	/** Failure category (e.g. "validation", "tinybird_quota") on `status: "error"` rows. */
+	errorCategory: Schema.NullOr(Schema.String),
 }) {}
 
 export class AlertChecksListResponse extends Schema.Class<AlertChecksListResponse>("AlertChecksListResponse")(
@@ -740,6 +812,21 @@ export class AlertsApiGroup extends HttpApiGroup.make("alerts")
 			success: AlertEvaluationResult,
 			error: [
 				AlertForbiddenError,
+				AlertValidationError,
+				AlertPersistenceError,
+				AlertNotFoundError,
+				AlertDeliveryError,
+				...warehouseHttpErrors,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("previewRule", "/rules/preview", {
+			payload: AlertRulePreviewRequest,
+			success: AlertRulePreviewResponse,
+			// No AlertForbiddenError: preview is read-only (unlike testRule, which can
+			// send notifications), so it is not admin-gated.
+			error: [
 				AlertValidationError,
 				AlertPersistenceError,
 				AlertNotFoundError,
