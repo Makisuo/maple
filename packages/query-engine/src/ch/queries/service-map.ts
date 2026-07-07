@@ -510,7 +510,11 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
+			// Scoped to a service (implies non-empty) or, org-wide, require a named
+			// service — the hourly MV already filters `ServiceName != ''` at write
+			// time, so this keeps the raw in-progress-hour branch consistent and
+			// avoids phantom edges from unnamed spans.
+			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : $.ServiceName.neq(""),
 			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
 			$.Timestamp.lte(param.dateTime("endTime")),
 			$.SpanKind.in_("Client", "Producer"),

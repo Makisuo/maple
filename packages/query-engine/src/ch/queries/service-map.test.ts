@@ -358,6 +358,13 @@ describe("serviceDbEdgesForServiceQuery", () => {
 		expect(matches?.length).toBe(3)
 	})
 
+	it("guards the org-wide raw branch against unnamed spans (ServiceName != '')", () => {
+		// Org-wide (no serviceName) still needs the empty-service guard on the raw
+		// in-progress-hour branch — the hourly MV already applies it at write time.
+		const { sql } = serviceDbEdgesSQL({}, baseParams)
+		expect(sql).toContain("ServiceName != ''")
+	})
+
 	it("filters ServiceName on both branches (hourly MV + raw traces)", () => {
 		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
 		const matches = sql.match(/ServiceName = 'artifacts-api'/g)
