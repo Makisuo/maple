@@ -28,7 +28,7 @@ const CHART_HEIGHT = 200
 const FALLBACK_SERIES_COLOR = "var(--chart-5)"
 
 /** Card frame shared by every detail chart: title on the left, legend on the right. */
-function ChartCard({
+export function ChartCard({
 	title,
 	legend,
 	children,
@@ -50,7 +50,7 @@ function ChartCard({
 	)
 }
 
-interface StackedBreakdownChartProps {
+export interface StackedBreakdownChartProps {
 	title: string
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>
 	colors: Record<string, string>
@@ -59,7 +59,7 @@ interface StackedBreakdownChartProps {
 	syncId?: string
 }
 
-function StackedBreakdownChart({ title, rows, colors, order, syncId }: StackedBreakdownChartProps) {
+export function StackedBreakdownChart({ title, rows, colors, order, syncId }: StackedBreakdownChartProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
 	const { data, series } = useMemo(() => {
 		const transformed = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket)))

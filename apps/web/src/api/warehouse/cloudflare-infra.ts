@@ -9,11 +9,16 @@
 
 import { Effect, Schema } from "effect"
 import {
+	CloudflareInfraPlatformResourcesRequest,
 	CloudflareInfraWorkersRequest,
 	CloudflareInfraWorkerTimeseriesRequest,
 	CloudflareInfraZoneDetailRequest,
+	CloudflareInfraZoneDnsRequest,
+	CloudflareInfraZoneHostsRequest,
 	CloudflareInfraZonesRequest,
+	CloudflareInfraZoneSecurityRequest,
 	CloudflareInfraZoneTimeseriesRequest,
+	CloudflareTopTrafficRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
@@ -289,6 +294,300 @@ export const getCloudflareWorkers = Effect.fn("QueryEngine.getCloudflareWorkers"
 				durationP99Ms: Number(row.durationP99Ms ?? 0),
 			}
 		}),
+	}
+})
+
+// ---------------------------------------------------------------------------
+// Zone detail: extended sections (hosts, security, DNS) + live top traffic
+// ---------------------------------------------------------------------------
+
+export interface CloudflareZoneHostTotal {
+	/** Hostname (poller-capped top N; the tail shows as "other", pre-host rows as ""). */
+	host: string
+	requests: number
+	errors5xx: number
+	/** 5xx error ratio, 0–1. */
+	errorRate: number
+	cacheHits: number
+	/** Served-by-cache ratio, 0–1. */
+	cacheHitRate: number
+	bytes: number
+}
+
+export interface CloudflareZoneHostBucket {
+	bucket: string
+	host: string
+	requests: number
+}
+
+export const getCloudflareZoneHosts = Effect.fn("QueryEngine.getCloudflareZoneHosts")(function* ({
+	data,
+}: {
+	data: CloudflareZoneDetailInput
+}) {
+	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneHosts")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneHosts", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneHosts({
+				payload: new CloudflareInfraZoneHostsRequest({
+					serviceName: input.serviceName,
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+				}),
+			})
+		}),
+	)
+	return {
+		totals: result.totals.map((row): CloudflareZoneHostTotal => {
+			const requests = Number(row.requests ?? 0)
+			const errors5xx = Number(row.errors5xx ?? 0)
+			const cacheHits = Number(row.cacheHits ?? 0)
+			return {
+				host: String(row.host ?? ""),
+				requests,
+				errors5xx,
+				errorRate: ratio(errors5xx, requests),
+				cacheHits,
+				cacheHitRate: ratio(cacheHits, requests),
+				bytes: Number(row.bytes ?? 0),
+			}
+		}),
+		buckets: result.buckets.map(
+			(row): CloudflareZoneHostBucket => ({
+				bucket: String(row.bucket ?? ""),
+				host: String(row.host ?? ""),
+				requests: Number(row.requests ?? 0),
+			}),
+		),
+	}
+})
+
+export interface CloudflareZoneFirewallBucket {
+	bucket: string
+	/** Cloudflare action: block / challenge / managed_challenge / skip / log / …. */
+	action: string
+	events: number
+}
+
+export interface CloudflareZoneFirewallTopRow {
+	source: string
+	action: string
+	ruleId: string
+	host: string
+	events: number
+}
+
+export const getCloudflareZoneSecurity = Effect.fn("QueryEngine.getCloudflareZoneSecurity")(function* ({
+	data,
+}: {
+	data: CloudflareZoneDetailInput
+}) {
+	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneSecurity")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneSecurity", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneSecurity({
+				payload: new CloudflareInfraZoneSecurityRequest({
+					serviceName: input.serviceName,
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+				}),
+			})
+		}),
+	)
+	return {
+		buckets: result.buckets.map(
+			(row): CloudflareZoneFirewallBucket => ({
+				bucket: String(row.bucket ?? ""),
+				action: String(row.action ?? "unknown"),
+				events: Number(row.events ?? 0),
+			}),
+		),
+		top: result.top.map(
+			(row): CloudflareZoneFirewallTopRow => ({
+				source: String(row.source ?? "unknown"),
+				action: String(row.action ?? "unknown"),
+				ruleId: String(row.ruleId ?? "unknown"),
+				host: String(row.host ?? "unknown"),
+				events: Number(row.events ?? 0),
+			}),
+		),
+	}
+})
+
+export interface CloudflareZoneDnsBucket {
+	bucket: string
+	/** DNS RCODE name (NOERROR / NXDOMAIN / SERVFAIL / …). */
+	responseCode: string
+	queries: number
+}
+
+export interface CloudflareZoneDnsName {
+	queryName: string
+	queries: number
+	nxdomain: number
+}
+
+export const getCloudflareZoneDns = Effect.fn("QueryEngine.getCloudflareZoneDns")(function* ({
+	data,
+}: {
+	data: CloudflareZoneDetailInput
+}) {
+	const input = yield* decodeInput(ZoneDetailInputSchema, data, "getCloudflareZoneDns")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneDns", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneDns({
+				payload: new CloudflareInfraZoneDnsRequest({
+					serviceName: input.serviceName,
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+				}),
+			})
+		}),
+	)
+	return {
+		buckets: result.buckets.map(
+			(row): CloudflareZoneDnsBucket => ({
+				bucket: String(row.bucket ?? ""),
+				responseCode: String(row.responseCode ?? "unknown"),
+				queries: Number(row.queries ?? 0),
+			}),
+		),
+		names: result.names.map(
+			(row): CloudflareZoneDnsName => ({
+				queryName: String(row.queryName ?? "unknown"),
+				queries: Number(row.queries ?? 0),
+				nxdomain: Number(row.nxdomain ?? 0),
+			}),
+		),
+	}
+})
+
+export interface CloudflareQueueRow {
+	serviceName: string
+	/** Queue id with the `cloudflare-queue/` prefix stripped. */
+	queueName: string
+	backlogMessages: number
+	backlogMessagesMax: number
+	backlogBytes: number
+	consumerConcurrency: number
+}
+
+export interface CloudflareDurableObjectRow {
+	serviceName: string
+	/** Implementing Worker script name. */
+	scriptName: string
+	requests: number
+	errors: number
+	/** DO error ratio, 0–1. */
+	errorRate: number
+}
+
+const QUEUE_SERVICE_PREFIX = "cloudflare-queue/"
+
+export const getCloudflarePlatformResources = Effect.fn(
+	"QueryEngine.getCloudflarePlatformResources",
+)(function* ({ data }: { data: CloudflareInfraTimeRangeInput }) {
+	const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflarePlatformResources")
+	const result = yield* runWarehouseQuery("cloudflareInfraPlatformResources", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraPlatformResources({
+				payload: new CloudflareInfraPlatformResourcesRequest({
+					startTime: input.startTime,
+					endTime: input.endTime,
+				}),
+			})
+		}),
+	)
+	return {
+		queues: result.queues.map((row): CloudflareQueueRow => {
+			const serviceName = String(row.serviceName ?? "")
+			return {
+				serviceName,
+				queueName: stripPrefix(serviceName, QUEUE_SERVICE_PREFIX),
+				backlogMessages: Number(row.backlogMessages ?? 0),
+				backlogMessagesMax: Number(row.backlogMessagesMax ?? 0),
+				backlogBytes: Number(row.backlogBytes ?? 0),
+				consumerConcurrency: Number(row.consumerConcurrency ?? 0),
+			}
+		}),
+		durableObjects: result.durableObjects.map((row): CloudflareDurableObjectRow => {
+			const serviceName = String(row.serviceName ?? "")
+			const requests = Number(row.requests ?? 0)
+			const errors = Number(row.errors ?? 0)
+			return {
+				serviceName,
+				scriptName: stripPrefix(serviceName, WORKER_SERVICE_PREFIX),
+				requests,
+				errors,
+				errorRate: ratio(errors, requests),
+			}
+		}),
+	}
+})
+
+const TopTrafficInputSchema = Schema.Struct({
+	zoneName: Schema.String,
+	dimension: Schema.Literals(["host", "path"]),
+	/** Epoch ms window bounds. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	limit: Schema.optional(Schema.Number),
+})
+
+export type CloudflareTopTrafficInput = (typeof TopTrafficInputSchema)["Encoded"]
+
+export interface CloudflareTopTrafficEntry {
+	key: string
+	requests: number
+	bytes: number
+	errors5xx: number
+	/** 5xx error ratio, 0–1. */
+	errorRate: number
+}
+
+/**
+ * Live top hosts/paths straight from Cloudflare's GraphQL API (proxied +
+ * briefly edge-cached by our API) — path cardinality is never stored as
+ * metrics, so this is the only path-level view.
+ */
+export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopTraffic")(function* ({
+	data,
+}: {
+	data: CloudflareTopTrafficInput
+}) {
+	const input = yield* decodeInput(TopTrafficInputSchema, data, "getCloudflareTopTraffic")
+	const result = yield* runWarehouseQuery("cloudflareTopTraffic", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.integrations.cloudflareTopTraffic({
+				payload: new CloudflareTopTrafficRequest({
+					zoneName: input.zoneName,
+					dimension: input.dimension,
+					startTime: input.startTime,
+					endTime: input.endTime,
+					...(input.limit === undefined ? {} : { limit: input.limit }),
+				}),
+			})
+		}),
+	)
+	return {
+		unavailableReason: result.unavailableReason,
+		rows: result.rows.map(
+			(row): CloudflareTopTrafficEntry => ({
+				key: row.key,
+				requests: row.requests,
+				bytes: row.bytes,
+				errors5xx: row.errors5xx,
+				errorRate: ratio(row.errors5xx, row.requests),
+			}),
+		),
 	}
 })
 

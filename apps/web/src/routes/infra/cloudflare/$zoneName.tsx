@@ -19,6 +19,10 @@ import {
 	CloudflareZoneLatencyChart,
 	CloudflareZoneStatusChart,
 } from "@/components/infra/cloudflare/cloudflare-zone-detail-charts"
+import { CloudflareTopTrafficCard } from "@/components/infra/cloudflare/cloudflare-top-traffic-card"
+import { CloudflareZoneDnsSection } from "@/components/infra/cloudflare/cloudflare-zone-dns"
+import { CloudflareZoneHostsSection } from "@/components/infra/cloudflare/cloudflare-zone-hosts"
+import { CloudflareZoneSecuritySection } from "@/components/infra/cloudflare/cloudflare-zone-security"
 import { chartBucketSeconds, errorRateTone } from "@/components/infra/cloudflare/constants"
 import {
 	cloudflareZoneDetailResultAtom,
@@ -181,6 +185,30 @@ function ZoneDetailContent({
 						<CloudflareZoneCacheChart buckets={detail.cacheBuckets} syncId="cf-zone-detail" />
 					</div>
 					<CloudflareZoneLatencyChart buckets={detail.latencyBuckets} syncId="cf-zone-detail" />
+					{/* Extended sections load independently and hide themselves when their
+					    dataset is absent for this zone (plan/config-dependent). */}
+					<CloudflareZoneHostsSection
+						serviceName={serviceName}
+						startTime={startTime}
+						endTime={endTime}
+						bucketSeconds={bucketSeconds}
+						syncId="cf-zone-detail"
+					/>
+					<CloudflareTopTrafficCard zoneName={zoneName} startTime={startTime} endTime={endTime} />
+					<CloudflareZoneSecuritySection
+						serviceName={serviceName}
+						startTime={startTime}
+						endTime={endTime}
+						bucketSeconds={bucketSeconds}
+						syncId="cf-zone-detail"
+					/>
+					<CloudflareZoneDnsSection
+						serviceName={serviceName}
+						startTime={startTime}
+						endTime={endTime}
+						bucketSeconds={bucketSeconds}
+						syncId="cf-zone-detail"
+					/>
 				</div>
 			)
 		})

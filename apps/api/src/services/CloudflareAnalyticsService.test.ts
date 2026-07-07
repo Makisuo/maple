@@ -162,7 +162,9 @@ interface OtlpCall {
 interface FetchOptions {
 	readonly zones?: ReadonlyArray<typeof zoneFixture>
 	readonly zonesStatus?: number
-	readonly graphqlErrors?: ReadonlyArray<{ message: string }>
+	readonly graphqlErrors?: ReadonlyArray<{ message: string; path?: ReadonlyArray<string | number> }>
+	/** Live Worker scripts the REST enumeration returns (default: my-worker). */
+	readonly workerScripts?: ReadonlyArray<{ id: string }>
 	/** When set, OTLP metrics POSTs to the ingest gateway (`/v1/metrics`) are captured here. */
 	readonly otlpCalls?: Array<OtlpCall>
 	/** HTTP status the mock gateway returns for `/v1/metrics` (default 200). */
@@ -215,9 +217,20 @@ const mockCloudflareFetch =
 				return jsonResponse({ data: null, errors: options.graphqlErrors })
 			}
 			if (body.query.includes("MapleCfDatasetSettings")) return jsonResponse({ data: settingsData })
-			if (body.query.includes("MapleCfHttpAnalytics")) return jsonResponse({ data: httpData })
-			if (body.query.includes("MapleCfWorkersAnalytics")) return jsonResponse({ data: workersData })
+			if (body.query.includes("MapleCfZoneAnalytics")) return jsonResponse({ data: httpData })
+			if (body.query.includes("MapleCfAccountAnalytics")) return jsonResponse({ data: workersData })
 			return jsonResponse({ data: null, errors: [{ message: "unknown query" }] })
+		}
+		if (url.includes("/workers/scripts")) {
+			const page = Number(new URL(url).searchParams.get("page") ?? "1")
+			const scripts = page === 1 ? (options.workerScripts ?? [{ id: "my-worker" }]) : []
+			return jsonResponse({
+				success: true,
+				errors: [],
+				messages: [],
+				result: scripts,
+				result_info: { count: scripts.length, page, per_page: 100, total_count: scripts.length },
+			})
 		}
 		if (url.includes("/zones")) {
 			if (options.zonesStatus) {
@@ -443,8 +456,9 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(summary.skipped, "missing analytics scopes")
 			assert.strictEqual(summary.callsMade, 0)
 			const rows = yield* loadStateRows
-			assert.strictEqual(rows.length, 1)
-			assert.include(rows[0]!.lastError ?? "", "scopes")
+			// One row per account-scoped dataset (workers + queues×2 + durable objects).
+			assert.strictEqual(rows.length, 4)
+			for (const row of rows) assert.include(row.lastError ?? "", "scopes")
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
