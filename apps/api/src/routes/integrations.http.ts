@@ -264,6 +264,16 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 								})
 							}
 							const decoded = yield* decodeTopTrafficResponse(result.data).pipe(
+								// The card reduces failures to short human copy — keep the real ParseError
+								// in the server log so we can see which field of the upstream shape
+								// mismatched, matching the OAuth-callback logging pattern above.
+								Effect.tapError((error) =>
+									Effect.logError("Cloudflare top-traffic response failed to decode", {
+										zoneName: payload.zoneName,
+										dimension: payload.dimension,
+										error: error.message,
+									}),
+								),
 								Effect.mapError(
 									() =>
 										new IntegrationsUpstreamError({

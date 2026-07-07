@@ -728,9 +728,9 @@ class CloudflareAnalyticsPollError extends Schema.TaggedErrorClass<CloudflareAna
 	"@maple/cloudflare/AnalyticsPollError",
 	{
 		message: Schema.String,
-		orgId: Schema.String,
+		orgId: OrgId,
 		dataset: Schema.String,
-		kind: Schema.String,
+		kind: Schema.Literals(["authz", "upstream", "revoked", "other"]),
 	},
 ) {}
 

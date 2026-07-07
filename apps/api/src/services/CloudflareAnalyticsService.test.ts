@@ -975,6 +975,72 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
+	it.effect("getIntegrationStatus returns a disconnected status and ignores state rows when not connected", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			// A leftover state row must not leak into the response once the OAuth connection is gone —
+			// getIntegrationStatus short-circuits before reading analytics state.
+			yield* seedStateRow({ dataset: "http_requests", zoneId: ZONE_ID, zoneName: ZONE_NAME })
+			const service = yield* CloudflareAnalyticsService
+			const status = yield* service.getIntegrationStatus(ORG)
+			assert.isFalse(status.connected)
+			assert.strictEqual(status.accountId, null)
+			assert.strictEqual(status.accountName, null)
+			assert.strictEqual(status.connectedByUserId, null)
+			assert.strictEqual(status.scope, null)
+			assert.isFalse(status.analyticsCapable)
+			assert.deepStrictEqual(status.zones, [])
+			assert.strictEqual(status.workers, null)
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("getIntegrationStatus merges the OAuth connection with analytics state for a connected org", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: ZONE_ID,
+				zoneName: ZONE_NAME,
+				lastSuccessAt: new Date(T0 - 5 * MIN),
+				watermarkAt: new Date(T0 - 15 * MIN),
+			})
+			yield* seedStateRow({ dataset: "workers_invocations", lastError: "boom", lastErrorAt: new Date(T0) })
+			const service = yield* CloudflareAnalyticsService
+			const status = yield* service.getIntegrationStatus(ORG)
+			assert.isTrue(status.connected)
+			assert.strictEqual(status.accountId, ACCOUNT_ID)
+			assert.strictEqual(status.accountName, "Test Account")
+			assert.strictEqual(status.connectedByUserId, "user_1")
+			assert.strictEqual(status.scope, ANALYTICS_SCOPE)
+			// Full analytics scope → the card unlocks the analytics UI.
+			assert.isTrue(status.analyticsCapable)
+			assert.strictEqual(status.zones.length, 1)
+			assert.strictEqual(status.zones[0]?.id, ZONE_ID)
+			assert.strictEqual(status.zones[0]?.name, ZONE_NAME)
+			assert.strictEqual(status.zones[0]?.lastSyncedAt, T0 - 5 * MIN)
+			assert.strictEqual(status.workers?.lastError, "boom")
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("getIntegrationStatus reports analyticsCapable=false and null workers for a scope-limited token", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			// Connected, but the token lacks analytics.read — connected yet not analytics-capable,
+			// and with no workers state row the workers block maps to null.
+			yield* seedConnection("account-settings.read workers-scripts.read")
+			const service = yield* CloudflareAnalyticsService
+			const status = yield* service.getIntegrationStatus(ORG)
+			assert.isTrue(status.connected)
+			assert.isFalse(status.analyticsCapable)
+			assert.deepStrictEqual(status.zones, [])
+			assert.strictEqual(status.workers, null)
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
 	it.effect("getUsage folds warehouse rows into per-service usage", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
