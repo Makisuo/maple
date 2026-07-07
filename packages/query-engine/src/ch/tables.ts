@@ -353,6 +353,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	Hour: T.dateTime,
 	ServiceName: T.string,
 	DbSystem: T.string,
+	DbNamespace: T.string,
 	DeploymentEnv: T.string,
 	CallCount: T.uint64,
 	ErrorCount: T.uint64,

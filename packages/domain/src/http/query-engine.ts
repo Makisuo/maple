@@ -456,6 +456,9 @@ export class ServiceDbQuerySummaryRequest extends Schema.Class<ServiceDbQuerySum
 	"ServiceDbQuerySummaryRequest",
 )({
 	dbSystem: Schema.String,
+	// Scope to one database identity; omitted = all databases of the system,
+	// "" = the legacy/unknown node (see ServiceDbQuerySummaryParams).
+	dbNamespace: Schema.optional(Schema.String),
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
 	sourceService: Schema.optional(ServiceName),

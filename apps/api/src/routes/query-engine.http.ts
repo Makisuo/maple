@@ -950,6 +950,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const params = {
 						orgId: tenant.orgId,
 						dbSystem: payload.dbSystem,
+						dbNamespace: payload.dbNamespace,
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 						sourceService: payload.sourceService,

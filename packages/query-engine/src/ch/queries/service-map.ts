@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import {
+	DB_NAMESPACE_ATTR_SQL,
 	DB_QUERY_KEY_SQL,
 	DB_QUERY_LABEL_SQL,
 	DB_STATEMENT_SQL,
@@ -411,6 +412,7 @@ export interface ServiceDbEdgesOpts {
 export interface ServiceDbEdgesOutput {
 	readonly sourceService: string
 	readonly dbSystem: string
+	readonly dbNamespace: string
 	readonly callCount: number
 	readonly errorCount: number
 	readonly avgDurationMs: number
@@ -421,6 +423,7 @@ export interface ServiceDbEdgesOutput {
 const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> = Schema.Struct({
 	sourceService: Schema.String,
 	dbSystem: Schema.String,
+	dbNamespace: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
 	avgDurationMs: CHNumber,
@@ -447,6 +450,7 @@ export function serviceDbEdgesSQL(
 	const hourlyEdges = `SELECT
       ServiceName AS sourceService,
       DbSystem AS dbSystem,
+      DbNamespace AS dbNamespace,
       sum(CallCount) AS bucketCallCount,
       sum(ErrorCount) AS bucketErrorCount,
       sum(DurationSumMs) AS bucketDurationSumMs,
@@ -458,15 +462,17 @@ export function serviceDbEdgesSQL(
       AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
       AND DbSystem != ''
       ${envFilterMv}
-    GROUP BY sourceService, dbSystem`
+    GROUP BY sourceService, dbSystem, dbNamespace`
 
 	// Raw fallback for the in-progress hour only (the MV branch stops at
 	// `toStartOfHour(endTime)`). Reads per-row `SampleRate` directly so no
 	// inline weight math is needed. Carries `bucketDurationSumMs` separately
-	// so the outer can do a properly-weighted average.
+	// so the outer can do a properly-weighted average. DbSystem/DbNamespace use
+	// the same shared coalesce fragments as the MV so the two branches merge.
 	const recentEdges = `SELECT
       ServiceName AS sourceService,
-      SpanAttributes['db.system.name'] AS dbSystem,
+      ${DB_SYSTEM_ATTR_SQL} AS dbSystem,
+      ${DB_NAMESPACE_ATTR_SQL} AS dbNamespace,
       count() AS bucketCallCount,
       countIf(StatusCode = 'Error') AS bucketErrorCount,
       sum(Duration / 1000000) AS bucketDurationSumMs,
@@ -477,14 +483,15 @@ export function serviceDbEdgesSQL(
       AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
       AND Timestamp <= '${esc(params.endTime)}'
       AND SpanKind IN ('Client', 'Producer')
-      AND SpanAttributes['db.system.name'] != ''
+      AND ${DB_SYSTEM_ATTR_SQL} != ''
       AND ServiceName != ''
       ${envFilterRaw}
-    GROUP BY sourceService, dbSystem`
+    GROUP BY sourceService, dbSystem, dbNamespace`
 
 	const sql = `SELECT
   sourceService,
   dbSystem,
+  dbNamespace,
   sum(bucketCallCount) AS callCount,
   sum(bucketErrorCount) AS errorCount,
   sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
@@ -495,7 +502,7 @@ FROM (
   UNION ALL
   ${recentEdges}
 )
-GROUP BY sourceService, dbSystem
+GROUP BY sourceService, dbSystem, dbNamespace
 ORDER BY callCount DESC
 LIMIT 200
 FORMAT JSON`
@@ -538,6 +545,7 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 		.select(($) => ({
 			sourceService: $.ServiceName,
 			dbSystem: $.DbSystem,
+			dbNamespace: $.DbNamespace,
 			bucketCallCount: CH.sum($.CallCount),
 			bucketErrorCount: CH.sum($.ErrorCount),
 			bucketDurationSumMs: CH.sum($.DurationSumMs),
@@ -554,16 +562,31 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 			$.DbSystem.neq(""),
 			envFilterMv($.DeploymentEnv),
 		])
-		.groupBy("sourceService", "dbSystem")
+		.groupBy("sourceService", "dbSystem", "dbNamespace")
 
 	// Raw fallback for the in-progress hour only. `Traces.SampleRate` is a
 	// per-row materialized column (no inline weight math needed), and the
 	// untyped Output cast below mirrors the column types on the hourly
-	// branch so the union's `Output` shape stays consistent.
+	// branch so the union's `Output` shape stays consistent. DbSystem and
+	// DbNamespace mirror `DB_SYSTEM_ATTR_SQL` / `DB_NAMESPACE_ATTR_SQL` (the
+	// MV's write-side fragments) so the two branches merge on the same keys.
+	const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+		CH.coalesce(
+			CH.nullIf($.SpanAttributes.get("db.system.name"), ""),
+			$.SpanAttributes.get("db.system"),
+		)
+	const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+		CH.coalesce(
+			CH.nullIf($.SpanAttributes.get("db.namespace"), ""),
+			CH.nullIf($.SpanAttributes.get("db.name"), ""),
+			CH.nullIf($.SpanAttributes.get("server.address"), ""),
+			$.SpanAttributes.get("net.peer.name"),
+		)
 	const recentBranch = from(Traces)
 		.select(($) => ({
 			sourceService: $.ServiceName,
-			dbSystem: $.SpanAttributes.get("db.system.name"),
+			dbSystem: dbSystemExpr($),
+			dbNamespace: dbNamespaceExpr($),
 			bucketCallCount: CH.count(),
 			bucketErrorCount: CH.countIf($.StatusCode.eq("Error")),
 			bucketDurationSumMs: CH.sum($.Duration.div(1000000)),
@@ -576,22 +599,23 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
 			$.Timestamp.lte(param.dateTime("endTime")),
 			$.SpanKind.in_("Client", "Producer"),
-			$.SpanAttributes.get("db.system.name").neq(""),
+			dbSystemExpr($).neq(""),
 			envFilterRaw($.ResourceAttributes),
 		])
-		.groupBy("sourceService", "dbSystem")
+		.groupBy("sourceService", "dbSystem", "dbNamespace")
 
 	return fromUnion(unionAll(hourlyBranch, recentBranch), "edges")
 		.select(($) => ({
 			sourceService: $.sourceService,
 			dbSystem: $.dbSystem,
+			dbNamespace: $.dbNamespace,
 			callCount: CH.sum($.bucketCallCount),
 			errorCount: CH.sum($.bucketErrorCount),
 			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
 			p95DurationMs: CH.max_($.bucketMaxDurationMs),
 			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
 		}))
-		.groupBy("sourceService", "dbSystem")
+		.groupBy("sourceService", "dbSystem", "dbNamespace")
 		.orderBy(["callCount", "desc"])
 		.limit(200)
 		.format("JSON")
@@ -613,6 +637,12 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 export interface ServiceDbQuerySummaryParams {
 	readonly orgId: string
 	readonly dbSystem: string
+	/**
+	 * Scope to one database identity (`DbNamespace`). `undefined` = unscoped
+	 * (all databases of the system); `""` = the legacy/unknown node (spans that
+	 * carry no identifying attribute + pre-migration rollup rows).
+	 */
+	readonly dbNamespace?: string
 	readonly startTime: string
 	readonly endTime: string
 	readonly sourceService?: string
@@ -728,11 +758,15 @@ function shapesHourlyWhere(params: ServiceDbQuerySummaryParams): string {
 	const esc = escapeClickHouseString
 	const sourceServiceFilter = params.sourceService ? `AND ServiceName = '${esc(params.sourceService)}'` : ""
 	const envFilter = params.deploymentEnv ? `AND DeploymentEnv = '${esc(params.deploymentEnv)}'` : ""
+	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
+	const namespaceFilter =
+		params.dbNamespace !== undefined ? `AND DbNamespace = '${esc(params.dbNamespace)}'` : ""
 
 	return `OrgId = '${esc(params.orgId)}'
       AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
       AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
       AND DbSystem = '${esc(params.dbSystem)}'
+      ${namespaceFilter}
       ${sourceServiceFilter}
       ${envFilter}`
 }
@@ -752,6 +786,12 @@ function serviceDbRawWhere(params: ServiceDbQuerySummaryParams, scope: "currentH
 		scope === "currentHour"
 			? `Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))`
 			: `Timestamp >= toDateTime('${esc(params.startTime)}')`
+	// Same undefined-vs-'' semantics as `shapesHourlyWhere`; the raw branch
+	// derives the identity via the shared write-side fragment.
+	const namespaceFilter =
+		params.dbNamespace !== undefined
+			? `AND ${DB_NAMESPACE_ATTR_SQL} = '${esc(params.dbNamespace)}'`
+			: ""
 
 	return `OrgId = '${esc(params.orgId)}'
       AND ${since}
@@ -759,6 +799,7 @@ function serviceDbRawWhere(params: ServiceDbQuerySummaryParams, scope: "currentH
       AND SpanKind IN ('Client', 'Producer')
       AND ServiceName != ''
       AND ${DB_SYSTEM_ATTR_SQL} = '${esc(params.dbSystem)}'
+      ${namespaceFilter}
       ${sourceServiceFilter}
       ${envFilter}`
 }

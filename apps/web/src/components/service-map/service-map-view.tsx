@@ -90,6 +90,7 @@ import {
 	CLOUDFLARE_COLOR,
 	computeNodePositions,
 	DB_NODE_PREFIX,
+	parseDbNodeId,
 	getPlatformColor,
 	getServiceMapNodeColor,
 	topologyKey,
@@ -747,6 +748,8 @@ function ServiceMapEmptyState() {
 
 interface DatabaseDetailPanelProps {
 	dbSystem: string
+	/** "" = the generic/legacy node (edges with no identified database). */
+	dbNamespace: string
 	dbEdges: ServiceDbEdge[]
 	services: string[]
 	durationSeconds: number
@@ -925,6 +928,7 @@ function DbQueryActivityChart({
 
 function DatabaseDetailPanel({
 	dbSystem,
+	dbNamespace,
 	dbEdges,
 	services,
 	durationSeconds,
@@ -932,7 +936,7 @@ function DatabaseDetailPanel({
 	endTime,
 	onClose,
 }: DatabaseDetailPanelProps) {
-	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem)
+	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem && e.dbNamespace === dbNamespace)
 	const totalCalls = callers.reduce((sum, e) => sum + e.callCount, 0)
 	const totalErrors = callers.reduce((sum, e) => sum + e.errorCount, 0)
 	const errorRate = totalCalls > 0 ? totalErrors / totalCalls : 0
@@ -944,6 +948,7 @@ function DatabaseDetailPanel({
 		getServiceDbQuerySummaryResultAtom({
 			data: {
 				dbSystem,
+				dbNamespace,
 				startTime,
 				endTime,
 				bucketSeconds,
@@ -980,9 +985,11 @@ function DatabaseDetailPanel({
 						className="shrink-0"
 						style={dbBranded ? undefined : { color: dbColor }}
 					/>
-					<span className="text-sm font-semibold text-foreground truncate">{dbSystem}</span>
+					<span className="text-sm font-semibold text-foreground truncate">
+						{dbNamespace || dbSystem}
+					</span>
 					<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase shrink-0">
-						{category}
+						{dbNamespace ? dbSystem : category}
 					</span>
 				</div>
 				<Button variant="ghost" size="icon-xs" onClick={onClose}>
@@ -1846,7 +1853,7 @@ export function ServiceMapCanvas({
 					(() => {
 						const panel = selectedServiceId.startsWith(DB_NODE_PREFIX) ? (
 							<DatabaseDetailPanel
-								dbSystem={decodeURIComponent(selectedServiceId.slice(DB_NODE_PREFIX.length))}
+								{...parseDbNodeId(selectedServiceId)}
 								dbEdges={dbEdges}
 								services={services}
 								durationSeconds={durationSeconds}

@@ -32,6 +32,8 @@ export interface ServiceEdge {
 export interface ServiceDbEdge {
 	sourceService: string
 	dbSystem: string
+	/** Database identity (db.namespace → db.name → server.address → net.peer.name); "" = unknown. */
+	dbNamespace: string
 	callCount: number
 	estimatedCallCount: number
 	errorCount: number
@@ -108,6 +110,7 @@ export type GetServiceMapForServiceInput = (typeof GetServiceMapForServiceInputS
 
 const GetServiceDbQuerySummaryInputSchema = Schema.Struct({
 	dbSystem: Schema.String,
+	dbNamespace: Schema.optional(Schema.String),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	sourceService: Schema.optional(ServiceName),
@@ -257,6 +260,7 @@ function transformDbEdge(row: Record<string, unknown>, durationSeconds: number):
 	return {
 		sourceService: String(row.sourceService ?? ""),
 		dbSystem: String(row.dbSystem ?? ""),
+		dbNamespace: String(row.dbNamespace ?? ""),
 		callCount,
 		estimatedCallCount,
 		errorCount,
@@ -421,6 +425,7 @@ export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuery
 			return yield* client.queryEngine.serviceDbQuerySummary({
 				payload: new ServiceDbQuerySummaryRequest({
 					dbSystem: input.dbSystem,
+					dbNamespace: input.dbNamespace,
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
 					sourceService: input.sourceService,
