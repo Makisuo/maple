@@ -194,11 +194,16 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 							)
 						}
 						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 15), 1), 50)
-						// Minute-floor the window so repeated dashboard refreshes within the TTL share
-						// a cache entry instead of each minting a unique key.
+						// Minute-align the window so repeated dashboard refreshes within the TTL share
+						// a cache entry instead of each minting a unique key. Floor the start but CEIL
+						// the end (with a one-minute floor on the width): flooring both would collapse
+						// a sub-minute window to zero width and cache the resulting empty result.
 						const MINUTE = 60_000
 						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
-						const endMs = Math.floor(payload.endTime / MINUTE) * MINUTE
+						const endMs = Math.max(
+							Math.ceil(payload.endTime / MINUTE) * MINUTE,
+							startMs + MINUTE,
+						)
 						const compute = Effect.gen(function* () {
 							const { accessToken } = yield* cloudflare.getValidAccessToken(tenant.orgId)
 							const zoneRows = yield* database

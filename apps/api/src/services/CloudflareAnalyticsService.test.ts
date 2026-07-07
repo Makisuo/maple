@@ -779,6 +779,78 @@ describe("CloudflareAnalyticsService", () => {
 		)
 	})
 
+	it.effect("an unattributed 'disabled' error does not cascade across a batched document", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			// Two zone datasets sharing one window → one batched document with two parts.
+			for (const dataset of ["http_requests", "firewall_events"]) {
+				yield* seedStateRow({
+					dataset,
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					watermarkAt: new Date(T0 - 30 * MIN),
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			// The pathless "not enabled" error can't be attributed to either selection —
+			// disabling both healthy datasets on that ambiguity would be destructive, so it
+			// must degrade to a retryable failure instead.
+			assert.isAbove(summary.failures.length, 0)
+			const rows = yield* loadStateRows
+			for (const dataset of ["http_requests", "firewall_events"]) {
+				const row = rows.find((r) => r.dataset === dataset && r.zoneId === ZONE_ID)
+				assert.isTrue(row!.enabled, `${dataset} must stay enabled`)
+			}
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [{ message: "this dataset is not enabled for your zone" }],
+				}),
+			),
+		)
+	})
+
+	it.effect("a path-attributed 'disabled' error disables only the owning dataset", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			for (const dataset of ["http_requests", "firewall_events"]) {
+				yield* seedStateRow({
+					dataset,
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					watermarkAt: new Date(T0 - 30 * MIN),
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+			const service = yield* CloudflareAnalyticsService
+			yield* service.pollOrg(ORG)
+			const rows = yield* loadStateRows
+			const firewall = rows.find((r) => r.dataset === "firewall_events" && r.zoneId === ZONE_ID)
+			const http = rows.find((r) => r.dataset === "http_requests" && r.zoneId === ZONE_ID)
+			assert.isFalse(firewall!.enabled)
+			assert.isTrue(http!.enabled)
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [
+						{
+							message: "firewallEventsAdaptiveGroups is not enabled for this zone",
+							path: ["viewer", "zones", 0, "firewall"],
+						},
+					],
+				}),
+			),
+		)
+	})
+
 	it.effect("pollOrg records a zones-list auth failure, disables rows, and holds watermarks", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []

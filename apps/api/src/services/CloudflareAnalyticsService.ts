@@ -1379,11 +1379,22 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// that owns the failing selection.
 			const failedParts = new Set<WorkPart>()
 			for (const part of item.parts) {
-				const partErrors = [...(errorsByPart.get(part) ?? []), ...unattributed]
+				const attributed = errorsByPart.get(part) ?? []
+				const partErrors = [...attributed, ...unattributed]
 				if (partErrors.length === 0) continue
 				failedParts.add(part)
 				const rowIds = part.rows.map((row) => row.id)
-				const kind = classifyGraphqlErrors(partErrors, part.dataset.quantileNeedles)
+				let kind = classifyGraphqlErrors(partErrors, part.dataset.quantileNeedles)
+				// Disabling is destructive (the dataset stops polling until settings/reconnect
+				// re-enable it), so a "disabled"-shaped error that ISN'T attributable to this
+				// part's own selection must not cascade across a batched document — one ambiguous
+				// error would silently kill every healthy sibling dataset. With a single part the
+				// attribution is unambiguous (exactly the old single-dataset behavior); otherwise
+				// degrade to a retryable failure and let a properly-attributed error (or the
+				// settings probe) do the disabling.
+				if (kind === "disabled" && attributed.length === 0 && item.parts.length > 1) {
+					kind = "other"
+				}
 				if (kind === "quantiles-unavailable") {
 					yield* updateRows(rowIds, { quantilesAvailable: false, updatedAt: new Date(now) })
 					// The next round rebuilds the document without the quantile fields — retry.
