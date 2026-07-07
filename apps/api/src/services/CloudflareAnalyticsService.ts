@@ -62,6 +62,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import type { TenantContext } from "./AuthService"
 import {
 	graphqlQuery,
+	listWorkerScripts,
 	listZones,
 	type CloudflareGraphqlError,
 	type CloudflareZone,
@@ -73,20 +74,49 @@ import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { CloudflareOAuthService } from "./CloudflareOAuthService"
 import { OrgClickHouseSettingsService } from "./OrgClickHouseSettingsService"
 import { OrgIngestKeysService } from "./OrgIngestKeysService"
-import { mapHttpGroups, mapWorkersGroups, type CloudflareMetricRows } from "./cloudflare-analytics/mapping"
+import {
+	mapDnsGroups,
+	mapDurableObjectsGroups,
+	mapFirewallGroups,
+	mapHttpGroups,
+	mapQueueBacklogGroups,
+	mapQueueConsumersGroups,
+	mapWorkersGroups,
+	type CloudflareMetricRows,
+} from "./cloudflare-analytics/mapping"
 import { metricRowsToOtlp } from "./cloudflare-analytics/otlp"
 import {
+	accountAnalyticsDocument,
 	DatasetSettings,
-	decodeHttpAnalyticsResponse,
+	decodeAccountAnalyticsEnvelope,
+	decodeDnsZoneNode,
+	decodeDurableObjectsAccountNode,
+	decodeFirewallZoneNode,
+	decodeHttpZoneNode,
+	decodeQueueBacklogAccountNode,
+	decodeQueueConsumersAccountNode,
 	decodeSettingsResponse,
-	decodeWorkersAnalyticsResponse,
-	httpAnalyticsQuery,
+	decodeWorkersAccountNode,
+	decodeZoneAnalyticsEnvelope,
+	decodeZoneTagOption,
+	DNS_DATASET,
+	dnsSelection,
+	DO_DATASET,
+	durableObjectsSelection,
+	FIREWALL_DATASET,
+	firewallSelection,
 	HTTP_DATASET,
+	httpSelection,
 	MAX_ZONES_PER_QUERY,
+	QUEUE_BACKLOG_DATASET,
+	QUEUE_CONSUMERS_DATASET,
+	queueBacklogSelection,
+	queueConsumersSelection,
 	settingsQuery,
 	toGraphqlTime,
 	WORKERS_DATASET,
-	workersAnalyticsQuery,
+	workersSelection,
+	zoneAnalyticsDocument,
 	type DatasetSettingsShape,
 	type SettingsResponseShape,
 } from "./cloudflare-analytics/queries"
@@ -148,6 +178,7 @@ const toPersistenceError = (cause: unknown) =>
 const USAGE_WINDOW_MS = 24 * 60 * 60_000
 const USAGE_BUCKET_SECONDS = 3600
 const WORKER_SERVICE_PREFIX = "cloudflare-worker/"
+const QUEUE_SERVICE_PREFIX = "cloudflare-queue/"
 const ZONE_SERVICE_PREFIX = "cloudflare/"
 
 /** Epoch ms → warehouse DateTime64 literal (`YYYY-MM-DD HH:MM:SS.mmm`, UTC). */
@@ -166,10 +197,14 @@ interface PollWindow {
 	readonly end: number
 }
 
-interface DatasetPollTarget {
+/** Context for mapping one zone/account node's decoded groups to metric rows. */
+interface DatasetMapTarget {
 	readonly orgId: OrgId
 	readonly accountId: string
-	readonly rows: ReadonlyArray<CloudflareAnalyticsStateRow>
+	/** The state row the node belongs to (zone datasets: that zone's row; account: the anchor row). */
+	readonly row: CloudflareAnalyticsStateRow
+	/** Live Worker script names (REST enumeration); null when unavailable → no filtering. */
+	readonly liveScripts: ReadonlySet<string> | null
 }
 
 interface DatasetDef {
@@ -179,16 +214,17 @@ interface DatasetDef {
 	readonly quantileNeedles: ReadonlyArray<string>
 	/** Needle for the settings `availableFields` probe (see {@link quantilesFromAvailableFields}). */
 	readonly availableFieldsNeedle: string
-	readonly buildQuery: (options: {
-		readonly rows: ReadonlyArray<CloudflareAnalyticsStateRow>
-		readonly accountId: string
-		readonly window: PollWindow
-		readonly withQuantiles: boolean
-	}) => { readonly query: string; readonly variables: Record<string, unknown> }
-	/** Decode a poll response and map it to metric rows for the polled state rows. */
-	readonly decodeRows: (
-		data: unknown,
-		target: DatasetPollTarget,
+	/**
+	 * Aliases this dataset's selections use inside the shared `zones`/`accounts` node. Used to
+	 * attribute a GraphQL error `path` back to the owning dataset in a batched document.
+	 */
+	readonly aliases: ReadonlyArray<string>
+	/** Selection fragment(s) rendered inside the shared zone/account node of a batched document. */
+	readonly selection: (options: { readonly withQuantiles: boolean }) => string
+	/** Decode this dataset's aliases out of one zone/account node and map them to metric rows. */
+	readonly mapNode: (
+		node: unknown,
+		target: DatasetMapTarget,
 	) => Effect.Effect<CloudflareMetricRows, IntegrationsPersistenceError>
 	/**
 	 * Extract this dataset's settings node from a decoded settings response; `undefined` → the
@@ -200,45 +236,30 @@ interface DatasetDef {
 	) => DatasetSettingsShape | null | undefined
 }
 
+const decodeError = (dataset: string) =>
+	new IntegrationsPersistenceError({
+		message: `Cloudflare GraphQL ${dataset} analytics response had an unexpected shape`,
+	})
+
 const httpDataset: DatasetDef = {
 	id: HTTP_DATASET,
 	scope: "zone",
 	quantileNeedles: ["edgetimetofirstbytems", "quantiles"],
 	availableFieldsNeedle: "edgetimetofirstbytems",
-	buildQuery: ({ rows, window, withQuantiles }) => ({
-		query: httpAnalyticsQuery({ withQuantiles }),
-		variables: {
-			zoneTags: rows.map((row) => row.zoneId),
-			start: toGraphqlTime(window.start),
-			end: toGraphqlTime(window.end),
-		},
-	}),
-	decodeRows: (data, target) =>
-		decodeHttpAnalyticsResponse(data).pipe(
-			Effect.mapError(
-				() =>
-					new IntegrationsPersistenceError({
-						message: "Cloudflare GraphQL HTTP analytics response had an unexpected shape",
-					}),
+	aliases: ["groups", "latency"],
+	selection: httpSelection,
+	mapNode: (node, target) =>
+		decodeHttpZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("HTTP")),
+			Effect.map((decoded) =>
+				mapHttpGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					groups: decoded.groups ?? [],
+					latency: decoded.latency ?? [],
+				}),
 			),
-			Effect.map((decoded) => {
-				const zoneResults = new Map((decoded.viewer.zones ?? []).map((zone) => [zone.zoneTag, zone]))
-				const combined: CloudflareMetricRows = { sumRows: [], gaugeRows: [] }
-				for (const row of target.rows) {
-					const zoneResult = zoneResults.get(row.zoneId)
-					if (!zoneResult) continue
-					const mapped = mapHttpGroups({
-						orgId: target.orgId,
-						zoneId: row.zoneId,
-						zoneName: row.zoneName ?? row.zoneId,
-						groups: zoneResult.groups,
-						latency: zoneResult.latency,
-					})
-					combined.sumRows.push(...mapped.sumRows)
-					combined.gaugeRows.push(...mapped.gaugeRows)
-				}
-				return combined
-			}),
 		),
 	settingsNode: (decoded, row) => {
 		const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
@@ -251,35 +272,154 @@ const workersDataset: DatasetDef = {
 	scope: "account",
 	quantileNeedles: ["cputime", "quantiles"],
 	availableFieldsNeedle: "cputime",
-	buildQuery: ({ accountId, window, withQuantiles }) => ({
-		query: workersAnalyticsQuery({ withQuantiles }),
-		variables: {
-			accountTag: accountId,
-			start: toGraphqlTime(window.start),
-			end: toGraphqlTime(window.end),
-		},
-	}),
-	decodeRows: (data, target) =>
-		decodeWorkersAnalyticsResponse(data).pipe(
-			Effect.mapError(
-				() =>
-					new IntegrationsPersistenceError({
-						message: "Cloudflare GraphQL workers analytics response had an unexpected shape",
-					}),
-			),
+	aliases: ["invocations"],
+	selection: workersSelection,
+	mapNode: (node, target) =>
+		decodeWorkersAccountNode(node).pipe(
+			Effect.mapError(() => decodeError("workers")),
 			Effect.map((decoded) =>
 				mapWorkersGroups({
 					orgId: target.orgId,
 					accountId: target.accountId,
-					groups: decoded.viewer.accounts?.[0]?.invocations ?? [],
+					groups: decoded.invocations ?? [],
+					liveScripts: target.liveScripts,
 				}),
 			),
 		),
 	settingsNode: (decoded) => decoded.viewer.accounts?.[0]?.settings?.workersInvocationsAdaptive ?? null,
 }
 
-const DATASETS: ReadonlyArray<DatasetDef> = [httpDataset, workersDataset]
+const firewallDataset: DatasetDef = {
+	id: FIREWALL_DATASET,
+	scope: "zone",
+	quantileNeedles: [],
+	// No quantile fields exist on this dataset; the empty needle keeps `quantilesAvailable` true
+	// so its rows batch into the same document group as the HTTP rows.
+	availableFieldsNeedle: "",
+	aliases: ["firewall"],
+	selection: firewallSelection,
+	mapNode: (node, target) =>
+		decodeFirewallZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("firewall")),
+			Effect.map((decoded) =>
+				mapFirewallGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					groups: decoded.firewall ?? [],
+				}),
+			),
+		),
+	settingsNode: (decoded, row) => {
+		const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
+		return zone === undefined ? undefined : (zone.settings?.firewallEventsAdaptiveGroups ?? null)
+	},
+}
+
+const dnsDataset: DatasetDef = {
+	id: DNS_DATASET,
+	scope: "zone",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["dns"],
+	selection: dnsSelection,
+	mapNode: (node, target) =>
+		decodeDnsZoneNode(node).pipe(
+			Effect.mapError(() => decodeError("DNS")),
+			Effect.map((decoded) =>
+				mapDnsGroups({
+					orgId: target.orgId,
+					zoneId: target.row.zoneId,
+					zoneName: target.row.zoneName ?? target.row.zoneId,
+					groups: decoded.dns ?? [],
+				}),
+			),
+		),
+	settingsNode: (decoded, row) => {
+		const zone = (decoded.viewer.zones ?? []).find((entry) => entry.zoneTag === row.zoneId)
+		return zone === undefined ? undefined : (zone.settings?.dnsAnalyticsAdaptiveGroups ?? null)
+	},
+}
+
+const queueBacklogDataset: DatasetDef = {
+	id: QUEUE_BACKLOG_DATASET,
+	scope: "account",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["queueBacklog"],
+	selection: queueBacklogSelection,
+	mapNode: (node, target) =>
+		decodeQueueBacklogAccountNode(node).pipe(
+			Effect.mapError(() => decodeError("queue backlog")),
+			Effect.map((decoded) =>
+				mapQueueBacklogGroups({
+					orgId: target.orgId,
+					accountId: target.accountId,
+					groups: decoded.queueBacklog ?? [],
+				}),
+			),
+		),
+	settingsNode: (decoded) =>
+		decoded.viewer.accounts?.[0]?.settings?.queueBacklogAdaptiveGroups ?? null,
+}
+
+const queueConsumersDataset: DatasetDef = {
+	id: QUEUE_CONSUMERS_DATASET,
+	scope: "account",
+	quantileNeedles: [],
+	availableFieldsNeedle: "",
+	aliases: ["queueConsumers"],
+	selection: queueConsumersSelection,
+	mapNode: (node, target) =>
+		decodeQueueConsumersAccountNode(node).pipe(
+			Effect.mapError(() => decodeError("queue consumers")),
+			Effect.map((decoded) =>
+				mapQueueConsumersGroups({
+					orgId: target.orgId,
+					accountId: target.accountId,
+					groups: decoded.queueConsumers ?? [],
+				}),
+			),
+		),
+	settingsNode: (decoded) =>
+		decoded.viewer.accounts?.[0]?.settings?.queueConsumerMetricsAdaptiveGroups ?? null,
+}
+
+const durableObjectsDataset: DatasetDef = {
+	id: DO_DATASET,
+	scope: "account",
+	quantileNeedles: ["walltime"],
+	availableFieldsNeedle: "walltime",
+	aliases: ["durableObjects"],
+	selection: durableObjectsSelection,
+	mapNode: (node, target) =>
+		decodeDurableObjectsAccountNode(node).pipe(
+			Effect.mapError(() => decodeError("durable objects")),
+			Effect.map((decoded) =>
+				mapDurableObjectsGroups({
+					orgId: target.orgId,
+					accountId: target.accountId,
+					groups: decoded.durableObjects ?? [],
+					liveScripts: target.liveScripts,
+				}),
+			),
+		),
+	settingsNode: (decoded) =>
+		decoded.viewer.accounts?.[0]?.settings?.durableObjectsInvocationsAdaptiveGroups ?? null,
+}
+
+const DATASETS: ReadonlyArray<DatasetDef> = [
+	httpDataset,
+	firewallDataset,
+	dnsDataset,
+	workersDataset,
+	queueBacklogDataset,
+	queueConsumersDataset,
+	durableObjectsDataset,
+]
 const DATASET_BY_ID = new Map(DATASETS.map((dataset) => [dataset.id, dataset]))
+const ZONE_DATASETS = DATASETS.filter((dataset) => dataset.scope === "zone")
+const ACCOUNT_DATASETS = DATASETS.filter((dataset) => dataset.scope === "account")
 
 // ---------------------------------------------------------------------------
 // GraphQL error classification
@@ -348,6 +488,17 @@ interface ParsedSettings {
 }
 
 const decodeStoredSettings = Schema.decodeUnknownOption(Schema.fromJsonString(DatasetSettings))
+
+const decodeLiveScripts = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Array(Schema.String)))
+
+/** Cached live-script enumeration from the workers anchor row; null → unavailable → no filtering. */
+const parseLiveScripts = (liveScriptsJson: string | null): ReadonlySet<string> | null =>
+	liveScriptsJson == null
+		? null
+		: Option.match(decodeLiveScripts(liveScriptsJson), {
+				onNone: () => null,
+				onSome: (scripts) => new Set(scripts),
+			})
 
 const parseStoredSettings = (settingsJson: string | null): ParsedSettings => {
 	if (!settingsJson) return { notOlderThanMs: null, maxDurationMs: null }
@@ -423,9 +574,16 @@ const backfillWindow = (row: CloudflareAnalyticsStateRow, now: number): PollWind
 // Round planning
 // ---------------------------------------------------------------------------
 
-interface WorkItem {
+/** One dataset's slice of a batched GraphQL document. */
+interface WorkPart {
 	readonly dataset: DatasetDef
 	readonly rows: CloudflareAnalyticsStateRow[]
+}
+
+interface WorkItem {
+	readonly scope: "zone" | "account"
+	/** Datasets sharing this document, in registry order (stable document shape). */
+	readonly parts: ReadonlyArray<WorkPart>
 	readonly window: PollWindow
 	readonly withQuantiles: boolean
 	/** Which frontier this window advances — head items are planned (and thus polled) before backfill. */
@@ -435,9 +593,12 @@ interface WorkItem {
 /**
  * Plan one poll round. The HEAD pass (newest windows) is emitted before the BACKFILL pass so the
  * caller spends its per-tick call budget on live data first and history second. Within each pass,
- * rows sharing an identical window (the steady state) batch into one GraphQL call; quantile
- * availability also splits the batch since it changes the document. Zone-scoped batches are capped
- * at Cloudflare's 10-zones-per-query limit.
+ * all rows sharing an identical (window, quantile-flag) — the steady state — merge into ONE
+ * GraphQL document per scope, with each dataset contributing aliased selections: GROUP_LIMIT is
+ * per selection, so batching datasets costs nothing on the row cap and keeps the steady-state
+ * call count at one zone document per 10-zone chunk plus one account document. A newly-added
+ * dataset backfills through its own (differing-window) documents until it converges. Zone-scoped
+ * documents are capped at Cloudflare's 10-zones-per-query limit.
  */
 const buildWorkItems = (rows: ReadonlyArray<CloudflareAnalyticsStateRow>, now: number): WorkItem[] => {
 	const planPass = (
@@ -445,36 +606,96 @@ const buildWorkItems = (rows: ReadonlyArray<CloudflareAnalyticsStateRow>, now: n
 		selectWindow: (row: CloudflareAnalyticsStateRow, now: number) => PollWindow | null,
 	): WorkItem[] => {
 		const items: WorkItem[] = []
-		for (const dataset of DATASETS) {
+		for (const scope of ["zone", "account"] as const) {
 			const groups = new Map<
 				string,
-				{ rows: CloudflareAnalyticsStateRow[]; window: PollWindow; withQuantiles: boolean }
+				{
+					byDataset: Map<string, CloudflareAnalyticsStateRow[]>
+					window: PollWindow
+					withQuantiles: boolean
+				}
 			>()
 			for (const row of rows) {
-				if (row.dataset !== dataset.id || !row.enabled) continue
+				const dataset = DATASET_BY_ID.get(row.dataset)
+				if (!dataset || dataset.scope !== scope || !row.enabled) continue
 				const window = selectWindow(row, now)
 				if (window == null) continue
 				const key = `${window.start}:${window.end}:${row.quantilesAvailable}`
-				const group = groups.get(key)
-				if (group) group.rows.push(row)
-				else groups.set(key, { rows: [row], window, withQuantiles: row.quantilesAvailable })
+				let group = groups.get(key)
+				if (!group) {
+					group = { byDataset: new Map(), window, withQuantiles: row.quantilesAvailable }
+					groups.set(key, group)
+				}
+				const list = group.byDataset.get(dataset.id)
+				if (list) list.push(row)
+				else group.byDataset.set(dataset.id, [row])
 			}
-			const chunkSize = dataset.scope === "zone" ? MAX_ZONES_PER_QUERY : 1
+			const scopeDatasets = scope === "zone" ? ZONE_DATASETS : ACCOUNT_DATASETS
 			for (const group of groups.values()) {
-				for (const chunkRows of Arr.chunksOf(group.rows, chunkSize)) {
-					items.push({
-						dataset,
-						rows: chunkRows,
-						window: group.window,
-						withQuantiles: group.withQuantiles,
-						phase,
+				if (scope === "account") {
+					const parts = scopeDatasets.flatMap((dataset) => {
+						const datasetRows = group.byDataset.get(dataset.id)
+						return datasetRows ? [{ dataset, rows: datasetRows }] : []
 					})
+					if (parts.length > 0) {
+						items.push({
+							scope,
+							parts,
+							window: group.window,
+							withQuantiles: group.withQuantiles,
+							phase,
+						})
+					}
+					continue
+				}
+				const zoneIds = [
+					...new Set([...group.byDataset.values()].flat().map((row) => row.zoneId)),
+				].sort()
+				for (const chunk of Arr.chunksOf(zoneIds, MAX_ZONES_PER_QUERY)) {
+					const chunkSet = new Set(chunk)
+					const parts = scopeDatasets.flatMap((dataset) => {
+						const datasetRows = (group.byDataset.get(dataset.id) ?? []).filter((row) =>
+							chunkSet.has(row.zoneId),
+						)
+						return datasetRows.length > 0 ? [{ dataset, rows: datasetRows }] : []
+					})
+					if (parts.length > 0) {
+						items.push({
+							scope,
+							parts,
+							window: group.window,
+							withQuantiles: group.withQuantiles,
+							phase,
+						})
+					}
 				}
 			}
 		}
 		return items
 	}
 	return [...planPass("head", headWindow), ...planPass("backfill", backfillWindow)]
+}
+
+/**
+ * Attribute a GraphQL error to the document part that owns it. Execution errors carry a `path`
+ * whose string segments include the failing selection's alias; validation errors (e.g. a plan
+ * lacking a quantile field rejects the whole document) carry no path, so fall back to matching
+ * the dataset's quantile needles against the message. Null → unattributable, applies to every part.
+ */
+const partForError = (error: CloudflareGraphqlError, parts: ReadonlyArray<WorkPart>): WorkPart | null => {
+	if (Array.isArray(error.path)) {
+		for (const segment of error.path) {
+			if (typeof segment !== "string") continue
+			const part = parts.find((candidate) => candidate.dataset.aliases.includes(segment))
+			if (part) return part
+		}
+	}
+	const message = error.message.toLowerCase()
+	return (
+		parts.find((candidate) =>
+			candidate.dataset.quantileNeedles.some((needle) => message.includes(needle)),
+		) ?? null
+	)
 }
 
 /**
@@ -507,9 +728,9 @@ class CloudflareAnalyticsPollError extends Schema.TaggedErrorClass<CloudflareAna
 	"@maple/cloudflare/AnalyticsPollError",
 	{
 		message: Schema.String,
-		orgId: Schema.String,
+		orgId: OrgId,
 		dataset: Schema.String,
-		kind: Schema.String,
+		kind: Schema.Literals(["authz", "upstream", "revoked", "other"]),
 	},
 ) {}
 
@@ -521,6 +742,31 @@ type PollOutcome =
 
 /** Typed constructor so each failure site returns `PollOutcome` (widens the failure off `as const`). */
 const failedOutcome = (failure: DatasetPollFailure): PollOutcome => ({ kind: "failed", failure })
+
+/** One dataset's outcome from a batched document poll. */
+interface PartResult {
+	readonly part: WorkPart
+	readonly outcome: PollOutcome
+}
+
+/** Every part of a document fails the same way (transport-level errors: revoked/upstream). */
+const allPartsFailed = (
+	item: WorkItem,
+	kind: DatasetPollFailure["kind"],
+	message: string,
+	options?: { readonly orgWide?: boolean; readonly disable?: boolean },
+): Array<PartResult> =>
+	item.parts.map((part) => ({
+		part,
+		outcome: failedOutcome({
+			scope: part.dataset.scope,
+			datasetId: part.dataset.id,
+			kind,
+			message,
+			rowIds: part.rows.map((row) => row.id),
+			...options,
+		}),
+	}))
 
 /**
  * The single seam that turns a poll failure into signal: record health to Postgres (as before) AND
@@ -746,21 +992,24 @@ export class CloudflareAnalyticsService extends Context.Service<
 			})
 
 		/**
-		 * Ensure the account-scoped workers row exists — it anchors the org lease and gives scope
-		 * errors somewhere to land even before zone discovery has ever succeeded.
+		 * Ensure one state row per account-scoped dataset exists (zoneId = ""). The workers row
+		 * stays the org's lease anchor and gives scope errors somewhere to land even before zone
+		 * discovery has ever succeeded; sibling account datasets ride along here.
 		 */
-		const ensureWorkersRow = (orgId: OrgId, now: number) =>
+		const ensureAccountRows = (orgId: OrgId, now: number) =>
 			dbExecute((db) =>
 				db
 					.insert(cloudflareAnalyticsState)
-					.values({
-						id: randomUUID(),
-						orgId,
-						dataset: WORKERS_DATASET,
-						zoneId: "",
-						createdAt: new Date(now),
-						updatedAt: new Date(now),
-					})
+					.values(
+						ACCOUNT_DATASETS.map((dataset) => ({
+							id: randomUUID(),
+							orgId,
+							dataset: dataset.id,
+							zoneId: "",
+							createdAt: new Date(now),
+							updatedAt: new Date(now),
+						})),
+					)
 					.onConflictDoNothing(),
 			)
 
@@ -817,49 +1066,60 @@ export class CloudflareAnalyticsService extends Context.Service<
 			now: number,
 		) {
 			const rows = yield* loadStateRows(orgId)
-			const byZoneId = new Map(
-				rows.filter((row) => row.dataset === HTTP_DATASET).map((row) => [row.zoneId, row]),
-			)
+			// Every zone-scoped dataset gets one state row per discovered zone — reconcile them all.
+			const byDatasetZone = new Map<string, CloudflareAnalyticsStateRow>()
+			for (const row of rows) {
+				if (DATASET_BY_ID.get(row.dataset)?.scope === "zone") {
+					byDatasetZone.set(`${row.dataset}:${row.zoneId}`, row)
+				}
+			}
 
-			const newZones = zones.filter((zone) => !byZoneId.has(zone.id))
+			const missing = ZONE_DATASETS.flatMap((dataset) =>
+				zones
+					.filter((zone) => !byDatasetZone.has(`${dataset.id}:${zone.id}`))
+					.map((zone) => ({
+						id: randomUUID(),
+						orgId,
+						dataset: dataset.id,
+						zoneId: zone.id,
+						zoneName: zone.name,
+						createdAt: new Date(now),
+						updatedAt: new Date(now),
+					})),
+			)
 			const inserted =
-				newZones.length === 0
+				missing.length === 0
 					? []
 					: yield* dbExecute((db) =>
 							db
 								.insert(cloudflareAnalyticsState)
-								.values(
-									newZones.map((zone) => ({
-										id: randomUUID(),
-										orgId,
-										dataset: HTTP_DATASET,
-										zoneId: zone.id,
-										zoneName: zone.name,
-										createdAt: new Date(now),
-										updatedAt: new Date(now),
-									})),
-								)
+								.values(missing)
 								.onConflictDoNothing()
 								.returning(),
 						)
 
-			for (const zone of zones) {
-				const existing = byZoneId.get(zone.id)
-				if (!existing || (existing.zoneName === zone.name && existing.enabled)) continue
-				// Re-enable on reappearance; a dataset-level disable re-asserts itself on the
-				// next settings check, so this errs on the side of collecting again.
-				yield* updateRows([existing.id], {
-					zoneName: zone.name,
-					enabled: true,
-					updatedAt: new Date(now),
-				})
-				existing.zoneName = zone.name
-				existing.enabled = true
+			for (const dataset of ZONE_DATASETS) {
+				for (const zone of zones) {
+					const existing = byDatasetZone.get(`${dataset.id}:${zone.id}`)
+					if (!existing || (existing.zoneName === zone.name && existing.enabled)) continue
+					// Re-enable on reappearance; a dataset-level disable re-asserts itself on the
+					// next settings check, so this errs on the side of collecting again.
+					yield* updateRows([existing.id], {
+						zoneName: zone.name,
+						enabled: true,
+						updatedAt: new Date(now),
+					})
+					existing.zoneName = zone.name
+					existing.enabled = true
+				}
 			}
 
 			const seen = new Set(zones.map((zone) => zone.id))
 			const vanished = rows.filter(
-				(row) => row.dataset === HTTP_DATASET && row.enabled && !seen.has(row.zoneId),
+				(row) =>
+					DATASET_BY_ID.get(row.dataset)?.scope === "zone" &&
+					row.enabled &&
+					!seen.has(row.zoneId),
 			)
 			yield* updateRows(
 				vanished.map((row) => row.id),
@@ -901,23 +1161,31 @@ export class CloudflareAnalyticsService extends Context.Service<
 			)
 			if (stale.length === 0) return wrote
 
-			const staleHttp = stale.filter((row) => row.dataset === HTTP_DATASET)
-			const staleWorkers = stale.filter((row) => row.dataset === WORKERS_DATASET)
-			const zoneChunks = Arr.chunksOf(staleHttp, MAX_ZONES_PER_QUERY)
+			const staleZone = stale.filter((row) => DATASET_BY_ID.get(row.dataset)?.scope === "zone")
+			const staleAccount = stale.filter((row) => DATASET_BY_ID.get(row.dataset)?.scope === "account")
+			// Multiple zone datasets share a zone's settings node — chunk by DISTINCT zoneId so a
+			// zone with several stale dataset rows costs one settings slot, not one per dataset.
+			const staleZoneIds = [...new Set(staleZone.map((row) => row.zoneId))].sort()
+			const zoneIdChunks = Arr.chunksOf(staleZoneIds, MAX_ZONES_PER_QUERY)
 
-			// The account (workers) settings ride along with the first zone chunk; with no zones
-			// we still need one account-only call for the workers row.
+			// The account settings ride along with the first zone chunk; with no zones we still
+			// need one account-only call for the account-scoped rows.
 			const plans: Array<{
 				zones: ReadonlyArray<CloudflareAnalyticsStateRow>
+				zoneIds: ReadonlyArray<string>
 				includeAccount: boolean
 			}> =
-				zoneChunks.length > 0
-					? zoneChunks.map((zones, index) => ({
-							zones,
-							includeAccount: index === 0 && staleWorkers.length > 0,
-						}))
-					: staleWorkers.length > 0
-						? [{ zones: [], includeAccount: true }]
+				zoneIdChunks.length > 0
+					? zoneIdChunks.map((zoneIds, index) => {
+							const idSet = new Set(zoneIds)
+							return {
+								zones: staleZone.filter((row) => idSet.has(row.zoneId)),
+								zoneIds,
+								includeAccount: index === 0 && staleAccount.length > 0,
+							}
+						})
+					: staleAccount.length > 0
+						? [{ zones: [], zoneIds: [], includeAccount: true }]
 						: []
 
 			for (const plan of plans) {
@@ -926,12 +1194,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const result = yield* graphqlQuery(
 					accessToken,
 					{
-						query: settingsQuery({ withZones: plan.zones.length > 0 }),
+						query: settingsQuery({ withZones: plan.zoneIds.length > 0 }),
 						variables: {
 							accountTag: accountId,
-							...(plan.zones.length > 0
-								? { zoneTags: plan.zones.map((row) => row.zoneId) }
-								: {}),
+							...(plan.zoneIds.length > 0 ? { zoneTags: plan.zoneIds } : {}),
 						},
 					},
 					apiBaseUrl,
@@ -969,7 +1235,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 					string,
 					{ ids: string[]; set: Partial<CloudflareAnalyticsStateInsert> }
 				>()
-				for (const row of [...plan.zones, ...(plan.includeAccount ? staleWorkers : [])]) {
+				for (const row of [...plan.zones, ...(plan.includeAccount ? staleAccount : [])]) {
 					const dataset = DATASET_BY_ID.get(row.dataset)
 					if (!dataset) continue
 					const settings = dataset.settingsNode(decoded, row)
@@ -1055,8 +1321,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 		// ------------------------------------------------------------------
 
 		/**
-		 * One poll step: query a dataset chunk's window, classify GraphQL-level errors (quantile
-		 * downgrade / dataset disabled / other), decode, map, ingest, advance the watermark.
+		 * One poll step: query a batched document's window, attribute GraphQL-level errors to their
+		 * owning selections (quantile downgrade / dataset disabled / failure per part), decode and
+		 * map the clean parts, ingest them as one gateway batch, advance each clean part's frontier.
+		 * With a single part this is exactly the old single-dataset behavior.
 		 */
 		const pollDatasetChunk = Effect.fn("CloudflareAnalyticsService.pollDatasetChunk")(function* (
 			item: WorkItem,
@@ -1065,58 +1333,182 @@ export class CloudflareAnalyticsService extends Context.Service<
 				readonly accountId: string
 				readonly accessToken: string
 				readonly ingestKey: string
+				readonly liveScripts: ReadonlySet<string> | null
 			},
 			now: number,
 		) {
-			const rowIds = item.rows.map((row) => row.id)
+			const selections = item.parts.map((part) =>
+				part.dataset.selection({ withQuantiles: item.withQuantiles }),
+			)
+			const zoneTags =
+				item.scope === "zone"
+					? [...new Set(item.parts.flatMap((part) => part.rows.map((row) => row.zoneId)))].sort()
+					: null
 			const result = yield* graphqlQuery(
 				context.accessToken,
-				item.dataset.buildQuery({
-					rows: item.rows,
-					accountId: context.accountId,
-					window: item.window,
-					withQuantiles: item.withQuantiles,
-				}),
+				{
+					query:
+						item.scope === "zone"
+							? zoneAnalyticsDocument(selections)
+							: accountAnalyticsDocument(selections),
+					variables: {
+						...(zoneTags == null ? { accountTag: context.accountId } : { zoneTags }),
+						start: toGraphqlTime(item.window.start),
+						end: toGraphqlTime(item.window.end),
+					},
+				},
 				apiBaseUrl,
 			)
 
-			if (result.errors.length > 0) {
-				const kind = classifyGraphqlErrors(result.errors, item.dataset.quantileNeedles)
+			const results: Array<PartResult> = []
+			const errorsByPart = new Map<WorkPart, CloudflareGraphqlError[]>()
+			const unattributed: CloudflareGraphqlError[] = []
+			for (const error of result.errors) {
+				const part = partForError(error, item.parts)
+				if (part == null) {
+					unattributed.push(error)
+					continue
+				}
+				const list = errorsByPart.get(part)
+				if (list) list.push(error)
+				else errorsByPart.set(part, [error])
+			}
+
+			// Unattributable errors apply to EVERY part; each part classifies its error set with its
+			// own quantile needles, so a per-plan degradation only downgrades/disables the dataset
+			// that owns the failing selection.
+			const failedParts = new Set<WorkPart>()
+			for (const part of item.parts) {
+				const attributed = errorsByPart.get(part) ?? []
+				const partErrors = [...attributed, ...unattributed]
+				if (partErrors.length === 0) continue
+				failedParts.add(part)
+				const rowIds = part.rows.map((row) => row.id)
+				let kind = classifyGraphqlErrors(partErrors, part.dataset.quantileNeedles)
+				// Disabling is destructive (the dataset stops polling until settings/reconnect
+				// re-enable it), so a "disabled"-shaped error that ISN'T attributable to this
+				// part's own selection must not cascade across a batched document — one ambiguous
+				// error would silently kill every healthy sibling dataset. With a single part the
+				// attribution is unambiguous (exactly the old single-dataset behavior); otherwise
+				// degrade to a retryable failure and let a properly-attributed error (or the
+				// settings probe) do the disabling.
+				if (kind === "disabled" && attributed.length === 0 && item.parts.length > 1) {
+					kind = "other"
+				}
 				if (kind === "quantiles-unavailable") {
 					yield* updateRows(rowIds, { quantilesAvailable: false, updatedAt: new Date(now) })
 					// The next round rebuilds the document without the quantile fields — retry.
-					return { kind: "quantiles-downgraded" } as const satisfies PollOutcome
+					results.push({ part, outcome: { kind: "quantiles-downgraded" } })
+				} else if (kind === "disabled") {
+					// `disabled` is an expected per-plan degradation (the dataset isn't available on
+					// this tenant's plan), not an incident — record health quietly and stop polling it.
+					yield* recordError(rowIds, graphqlErrorMessage(partErrors), now, { disable: true })
+					results.push({ part, outcome: { kind: "disabled" } })
+				} else {
+					// authz / other → a genuine failure. Hand it to the org-loop seam, which records
+					// health AND emits telemetry.
+					results.push({
+						part,
+						outcome: failedOutcome({
+							scope: part.dataset.scope,
+							datasetId: part.dataset.id,
+							kind,
+							message: graphqlErrorMessage(partErrors),
+							rowIds,
+						}),
+					})
 				}
-				// `disabled` is an expected per-plan degradation (the dataset isn't available on this
-				// tenant's plan), not an incident — record health quietly and stop polling it.
-				if (kind === "disabled") {
-					yield* recordError(rowIds, graphqlErrorMessage(result.errors), now, { disable: true })
-					return { kind: "disabled" } as const satisfies PollOutcome
-				}
-				// authz / other → a genuine failure. Hand it to the org-loop seam, which records health
-				// AND emits telemetry — this branch no longer writes silently to the DB.
-				return failedOutcome({
-					scope: item.dataset.scope,
-					datasetId: item.dataset.id,
-					kind,
-					message: graphqlErrorMessage(result.errors),
-					rowIds,
-				})
 			}
 
-			const mapped = yield* item.dataset.decodeRows(result.data, {
-				orgId: context.orgId,
-				accountId: context.accountId,
-				rows: item.rows,
-			})
-			const ingested = yield* emitMetrics(context.ingestKey, mapped)
-			// Frontier only advances after the gateway accepted the batch above.
-			if (item.phase === "head") {
-				yield* advanceHead(rowIds, item.window.end, item.window.start, now)
-			} else {
-				yield* advanceBackfill(rowIds, item.window.start, now)
+			const cleanParts = item.parts.filter((part) => !failedParts.has(part))
+			if (cleanParts.length === 0) return results
+			if (result.data == null) {
+				// Errors typically null the whole `data` — clean parts simply didn't advance; retry
+				// next round. A null data with NO errors is an upstream contract break.
+				if (result.errors.length === 0) {
+					return yield* Effect.fail(decodeError("batched"))
+				}
+				for (const part of cleanParts) {
+					results.push({
+						part,
+						outcome: failedOutcome({
+							scope: part.dataset.scope,
+							datasetId: part.dataset.id,
+							kind: "other",
+							message: `GraphQL response carried no data: ${graphqlErrorMessage(result.errors)}`,
+							rowIds: part.rows.map((row) => row.id),
+						}),
+					})
+				}
+				return results
 			}
-			return { kind: "advanced", ingested } as const satisfies PollOutcome
+
+			const combined: CloudflareMetricRows = { sumRows: [], gaugeRows: [] }
+			const countsByPart = new Map<WorkPart, number>()
+			const collect = (part: WorkPart, mapped: CloudflareMetricRows) => {
+				combined.sumRows.push(...mapped.sumRows)
+				combined.gaugeRows.push(...mapped.gaugeRows)
+				countsByPart.set(
+					part,
+					(countsByPart.get(part) ?? 0) + mapped.sumRows.length + mapped.gaugeRows.length,
+				)
+			}
+			if (item.scope === "zone") {
+				const envelope = yield* decodeZoneAnalyticsEnvelope(result.data).pipe(
+					Effect.mapError(() => decodeError("zone")),
+				)
+				const nodeByTag = new Map<string, unknown>()
+				for (const node of envelope.viewer.zones ?? []) {
+					const tag = decodeZoneTagOption(node)
+					if (Option.isSome(tag)) nodeByTag.set(tag.value.zoneTag, node)
+				}
+				for (const part of cleanParts) {
+					for (const row of part.rows) {
+						const node = nodeByTag.get(row.zoneId)
+						if (node === undefined) continue
+						collect(
+							part,
+							yield* part.dataset.mapNode(node, {
+								orgId: context.orgId,
+								accountId: context.accountId,
+								row,
+								liveScripts: context.liveScripts,
+							}),
+						)
+					}
+				}
+			} else {
+				const envelope = yield* decodeAccountAnalyticsEnvelope(result.data).pipe(
+					Effect.mapError(() => decodeError("account")),
+				)
+				const node = envelope.viewer.accounts?.[0]
+				for (const part of cleanParts) {
+					const row = part.rows[0]
+					if (node === undefined || row === undefined) continue
+					collect(
+						part,
+						yield* part.dataset.mapNode(node, {
+							orgId: context.orgId,
+							accountId: context.accountId,
+							row,
+							liveScripts: context.liveScripts,
+						}),
+					)
+				}
+			}
+
+			yield* emitMetrics(context.ingestKey, combined)
+			// Frontiers only advance after the gateway accepted the batch above.
+			for (const part of cleanParts) {
+				const rowIds = part.rows.map((row) => row.id)
+				if (item.phase === "head") {
+					yield* advanceHead(rowIds, item.window.end, item.window.start, now)
+				} else {
+					yield* advanceBackfill(rowIds, item.window.start, now)
+				}
+				results.push({ part, outcome: { kind: "advanced", ingested: countsByPart.get(part) ?? 0 } })
+			}
+			return results
 		})
 
 		// ------------------------------------------------------------------
@@ -1157,7 +1549,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			// Claim the tick lease; the anchor row is created lazily the first time an org is polled.
 			let claimed = yield* claimLease(orgId, now)
 			if (claimed == null) {
-				yield* ensureWorkersRow(orgId, now)
+				yield* ensureAccountRows(orgId, now)
 				claimed = yield* claimLease(orgId, now)
 			}
 			if (claimed == null) return yield* skip("lease held by another tick")
@@ -1183,6 +1575,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// Zone discovery (REST pagination) is hourly-TTL'd on the anchor row; ticks in
 				// between reuse the reconciled state rows.
 				let rows: CloudflareAnalyticsStateRow[]
+				let liveScripts = parseLiveScripts(anchor.liveScriptsJson)
 				if (anchor.discoveredAt == null || now - anchor.discoveredAt.getTime() > DISCOVERY_TTL_MS) {
 					const zonesResult = yield* Effect.result(listZones(accessToken, accountId, apiBaseUrl))
 					if (Result.isFailure(zonesResult)) {
@@ -1192,7 +1585,29 @@ export class CloudflareAnalyticsService extends Context.Service<
 						})
 						return yield* skip(`zone discovery failed: ${error._tag}`)
 					}
+					// Newly-registered account datasets get their rows on the discovery cadence —
+					// before reconcileZones, whose loadStateRows picks them up for this tick.
+					yield* ensureAccountRows(orgId, now)
 					rows = yield* reconcileZones(orgId, zonesResult.success, anchor.id, now)
+					// Script enumeration rides the same discovery TTL. It filters deleted scripts out of
+					// the workers dataset; a failure (typically a pre-workers-scripts.read grant) degrades
+					// open — emit everything rather than wedge the org, and keep the last known set.
+					const scriptsResult = yield* Effect.result(
+						listWorkerScripts(accessToken, accountId, apiBaseUrl),
+					)
+					if (Result.isFailure(scriptsResult)) {
+						yield* Effect.logWarning("cloudflare-analytics script enumeration failed", {
+							orgId,
+							errorTag: scriptsResult.failure._tag,
+							error: scriptsResult.failure.message,
+						})
+					} else {
+						liveScripts = new Set(scriptsResult.success)
+						yield* updateRows([anchor.id], {
+							liveScriptsJson: JSON.stringify(scriptsResult.success),
+							updatedAt: new Date(now),
+						})
+					}
 				} else {
 					rows = yield* loadStateRows(orgId)
 				}
@@ -1230,21 +1645,16 @@ export class CloudflareAnalyticsService extends Context.Service<
 					for (const item of work) {
 						if (budget.calls >= MAX_CALLS_PER_ORG_TICK || (yield* Ref.get(revokedRef))) break
 						budget.calls += 1
-						const outcome = yield* pollDatasetChunk(
+						const partResults = yield* pollDatasetChunk(
 							item,
-							{ orgId, accountId, accessToken, ingestKey },
+							{ orgId, accountId, accessToken, ingestKey, liveScripts },
 							now,
 						).pipe(
 							Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
 								// Stop this org's loop; the seam disables + records health org-wide.
 								Ref.set(revokedRef, true).pipe(
 									Effect.as(
-										failedOutcome({
-											scope: item.dataset.scope,
-											datasetId: item.dataset.id,
-											kind: "revoked",
-											message: error.message,
-											rowIds: item.rows.map((row) => row.id),
+										allPartsFailed(item, "revoked", error.message, {
 											orgWide: true,
 											disable: true,
 										}),
@@ -1252,68 +1662,62 @@ export class CloudflareAnalyticsService extends Context.Service<
 								),
 							),
 							Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-								Effect.succeed(
-									failedOutcome({
-										scope: item.dataset.scope,
-										datasetId: item.dataset.id,
-										kind: "upstream",
-										message: error.message,
-										rowIds: item.rows.map((row) => row.id),
-									}),
-								),
+								Effect.succeed(allPartsFailed(item, "upstream", error.message)),
 							),
 						)
 
-						// Mirror the DB write onto the in-memory rows so the next round re-plans
+						// Mirror the DB writes onto the in-memory rows so the next round re-plans
 						// without a per-round SELECT.
-						yield* Match.value(outcome).pipe(
-							Match.discriminatorsExhaustive("kind")({
-								advanced: ({ ingested }) =>
-									Ref.update(rowsIngestedRef, (count) => count + ingested).pipe(
-										Effect.map(() => {
-											progressed = true
-											if (item.phase === "head") {
-												const watermark = new Date(item.window.end)
-												const seed = new Date(item.window.start)
-												for (const row of item.rows) {
-													row.watermarkAt = watermark
-													// Seed the backfill frontier once (mirrors advanceHead's
-													// isNull guard) so this tick's later rounds plan history.
-													if (row.backfillAt == null) row.backfillAt = seed
+						for (const { part, outcome } of partResults) {
+							yield* Match.value(outcome).pipe(
+								Match.discriminatorsExhaustive("kind")({
+									advanced: ({ ingested }) =>
+										Ref.update(rowsIngestedRef, (count) => count + ingested).pipe(
+											Effect.map(() => {
+												progressed = true
+												if (item.phase === "head") {
+													const watermark = new Date(item.window.end)
+													const seed = new Date(item.window.start)
+													for (const row of part.rows) {
+														row.watermarkAt = watermark
+														// Seed the backfill frontier once (mirrors advanceHead's
+														// isNull guard) so this tick's later rounds plan history.
+														if (row.backfillAt == null) row.backfillAt = seed
+													}
+												} else {
+													const frontier = new Date(item.window.start)
+													for (const row of part.rows) row.backfillAt = frontier
 												}
-											} else {
-												const frontier = new Date(item.window.start)
-												for (const row of item.rows) row.backfillAt = frontier
-											}
+											}),
+										),
+									"quantiles-downgraded": () =>
+										Effect.sync(() => {
+											progressed = true
+											for (const row of part.rows) row.quantilesAvailable = false
 										}),
-									),
-								"quantiles-downgraded": () =>
-									Effect.sync(() => {
-										progressed = true
-										for (const row of item.rows) row.quantilesAvailable = false
-									}),
-								disabled: () =>
-									Effect.sync(() => {
-										for (const row of item.rows) row.enabled = false
-									}),
-								// The one seam: record health to Postgres AND emit an observable signal.
-								failed: ({ failure }) =>
-									Effect.gen(function* () {
-										if (failure.orgWide) {
-											yield* recordOrgError(orgId, failure.message, now, {
-												disable: failure.disable,
-											})
-											for (const row of rows) if (failure.disable) row.enabled = false
-										} else {
-											yield* recordError(failure.rowIds, failure.message, now, {
-												disable: failure.disable,
-											})
-										}
-										yield* observeDatasetFailure(orgId, failure)
-										datasetFailures.push(failure)
-									}),
-							}),
-						)
+									disabled: () =>
+										Effect.sync(() => {
+											for (const row of part.rows) row.enabled = false
+										}),
+									// The one seam: record health to Postgres AND emit an observable signal.
+									failed: ({ failure }) =>
+										Effect.gen(function* () {
+											if (failure.orgWide) {
+												yield* recordOrgError(orgId, failure.message, now, {
+													disable: failure.disable,
+												})
+												for (const row of rows) if (failure.disable) row.enabled = false
+											} else {
+												yield* recordError(failure.rowIds, failure.message, now, {
+													disable: failure.disable,
+												})
+											}
+											yield* observeDatasetFailure(orgId, failure)
+											datasetFailures.push(failure)
+										}),
+								}),
+							)
+						}
 					}
 
 					if (!progressed) break
@@ -1593,18 +1997,19 @@ export class CloudflareAnalyticsService extends Context.Service<
 				byService.set(row.serviceName, agg)
 			}
 
+			const SERVICE_KINDS: ReadonlyArray<readonly ["worker" | "queue" | "zone", string]> = [
+				["worker", WORKER_SERVICE_PREFIX],
+				["queue", QUEUE_SERVICE_PREFIX],
+				["zone", ZONE_SERVICE_PREFIX],
+			]
+			const KIND_ORDER: Record<"zone" | "worker" | "queue", number> = { zone: 0, worker: 1, queue: 2 }
 			const services = [...byService.entries()]
 				.map(([serviceName, agg]) => {
-					const isWorker = serviceName.startsWith(WORKER_SERVICE_PREFIX)
-					const displayName = isWorker
-						? serviceName.slice(WORKER_SERVICE_PREFIX.length)
-						: serviceName.startsWith(ZONE_SERVICE_PREFIX)
-							? serviceName.slice(ZONE_SERVICE_PREFIX.length)
-							: serviceName
+					const match = SERVICE_KINDS.find(([, prefix]) => serviceName.startsWith(prefix))
 					return new CloudflareServiceUsage({
 						serviceName,
-						kind: isWorker ? ("worker" as const) : ("zone" as const),
-						displayName,
+						kind: match?.[0] ?? ("zone" as const),
+						displayName: match ? serviceName.slice(match[1].length) : serviceName,
 						totalRequests: agg.totalRequests,
 						totalDatapoints: agg.totalDatapoints,
 						lastDataAt: agg.lastDataAt,
@@ -1614,9 +2019,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				.sort((a, b) =>
 					a.kind === b.kind
 						? a.displayName.localeCompare(b.displayName)
-						: a.kind === "zone"
-							? -1
-							: 1,
+						: KIND_ORDER[a.kind] - KIND_ORDER[b.kind],
 				)
 
 			return new CloudflareUsageResponse({

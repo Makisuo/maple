@@ -2,13 +2,13 @@ import { memo, useEffect, useId } from "react"
 import { getSmoothStepPath, type EdgeProps } from "@xyflow/react"
 import { getServiceLegendColor } from "@maple/ui/colors"
 import { getDbColor } from "./service-map-db"
-import { DB_NODE_PREFIX, isDbNodeId, type ServiceEdgeData } from "./service-map-utils"
+import { isDbNodeId, parseDbNodeId, type ServiceEdgeData } from "./service-map-utils"
 import { useParticleRegistry } from "./service-map-particles"
 
-// `getServiceLegendColor` cannot produce a stable color from `db:<system>` ids
-// that aren't in the services list, so resolve db endpoints to their brand color.
-const dbEndpointColor = (nodeId: string): string =>
-	getDbColor(decodeURIComponent(nodeId.slice(DB_NODE_PREFIX.length)))
+// `getServiceLegendColor` cannot produce a stable color from `db:<system>:<namespace>`
+// ids that aren't in the services list, so resolve db endpoints to their brand color
+// (per system — all namespaces of one system share the brand color).
+const dbEndpointColor = (nodeId: string): string => getDbColor(parseDbNodeId(nodeId).dbSystem)
 
 function getStrokeWidth(callCount: number): number {
 	if (callCount <= 0) return 2

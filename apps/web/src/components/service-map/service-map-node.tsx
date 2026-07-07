@@ -132,8 +132,11 @@ const Handles = () => (
  * infrastructure dependencies stand out from application services on the map.
  */
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
-	const { label, throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, selected } = data
+	const { label, throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, dbNamespace, selected } = data
 	const { category, Icon, label: systemLabel, color, branded } = getDbDescriptor(dbSystem)
+	// Named databases show their identity as the title; the system name takes
+	// over the small badge slot (the generic node keeps the coarse category).
+	const badge = dbNamespace ? systemLabel : category
 
 	return (
 		<>
@@ -172,7 +175,7 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 							className="ml-auto shrink-0 text-[9px] font-semibold uppercase tracking-wide"
 							style={{ color }}
 						>
-							{category}
+							{badge}
 						</span>
 					</div>
 

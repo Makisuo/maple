@@ -36,6 +36,10 @@ export const cloudflareAnalyticsState = pgTable(
 		// When zone discovery (REST listZones) last ran — set on the workers anchor row only.
 		// Discovery runs on an hourly TTL; poll ticks in between reuse the known zone rows.
 		discoveredAt: timestamp("discovered_at", { withTimezone: true, mode: "date" }),
+		// JSON array of live Worker script names (REST listScripts), cached on the workers anchor
+		// row alongside discoveredAt. Used to drop invocation groups for deleted scripts; null means
+		// enumeration is unavailable (e.g. token lacks workers-scripts.read) → no filtering.
+		liveScriptsJson: text("live_scripts_json"),
 		lastSuccessAt: timestamp("last_success_at", { withTimezone: true, mode: "date" }),
 		lastError: text("last_error"),
 		lastErrorAt: timestamp("last_error_at", { withTimezone: true, mode: "date" }),

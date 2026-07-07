@@ -13,6 +13,7 @@ import { CloudflareIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { CloudflareKpiCards, CloudflareKpiCardsLoading } from "@/components/infra/cloudflare/cloudflare-kpi-cards"
 import { CloudflareNotConnected } from "@/components/infra/cloudflare/cloudflare-not-connected"
+import { CloudflarePlatformSection } from "@/components/infra/cloudflare/cloudflare-platform-table"
 import { CloudflareWorkerTable, CloudflareWorkerTableLoading } from "@/components/infra/cloudflare/cloudflare-worker-table"
 import { CloudflareZoneChart } from "@/components/infra/cloudflare/cloudflare-zone-chart"
 import { CloudflareZoneTable, CloudflareZoneTableLoading } from "@/components/infra/cloudflare/cloudflare-zone-table"
@@ -284,6 +285,7 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 					))
 					.render()}
 			</section>
+			<CloudflarePlatformSection startTime={startTime} endTime={endTime} />
 		</div>
 	)
 }

@@ -170,11 +170,16 @@ export class CloudflareOAuthService extends Context.Service<
 				}),
 			)
 
+			// Cloudflare issues a refresh token only when `offline_access` is REQUESTED here — the
+			// client's Refresh Token grant merely makes it available. It is not a data scope, so it
+			// stays out of CLOUDFLARE_OAUTH_SCOPES (capability gating/storage) and is appended only to
+			// the authorize request. Omitting it silently yields access-token-only connections that
+			// die at the ~16h expiry (the 31h outage).
 			const params = new URLSearchParams({
 				client_id: config.clientId,
 				redirect_uri: options.callbackUrl,
 				response_type: "code",
-				scope: config.scopes,
+				scope: `${config.scopes} offline_access`,
 				state,
 				code_challenge: deriveCodeChallenge(codeVerifier),
 				code_challenge_method: "S256",
@@ -242,14 +247,22 @@ export class CloudflareOAuthService extends Context.Service<
 			const orgId = decodeOrgId(stateRow.orgId)
 			yield* Effect.annotateCurrentSpan({ orgId })
 
-			// This is exactly the condition that caused a 31h silent outage: without a refresh
-			// token, the connection can only ever renew by the access token still being valid, so
-			// once it expires every poll tick starts skipping with no other signal. The registered
-			// OAuth client must have the refresh-token grant enabled on the Cloudflare side.
+			// A background poller must renew indefinitely; a connection with no refresh token silently
+			// dies at the ~16h access-token expiry and disables every state row (the 31h outage).
+			// Refuse it loudly at connect time instead of storing a doomed connection. Best-effort
+			// revoke the just-issued access token first — it is never persisted, so this is the only
+			// moment we can invalidate it upstream (mirrors the multi-account refusal above).
 			if (!tokenResponse.refresh_token) {
 				yield* Effect.logWarning(
-					"Cloudflare OAuth token exchange returned no refresh token — connection will expire without renewal",
+					"Cloudflare OAuth token exchange returned no refresh token — refusing connection",
 					{ orgId, expiresAt },
+				)
+				yield* revokeToken(config, tokenResponse.access_token)
+				return yield* Effect.fail(
+					new IntegrationsValidationError({
+						message:
+							"Cloudflare returned no refresh token, so this connection would stop working within a day. Confirm the OAuth app grants ‘offline_access’, then reconnect.",
+					}),
 				)
 			}
 

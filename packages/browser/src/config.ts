@@ -81,13 +81,3 @@ export function resolveConfig(config: MapleBrowserConfig): ResolvedConfig {
 		maskAllText: config.privacy?.maskAllText ?? false,
 	}
 }
-
-/** ClickHouse-style `YYYY-MM-DD HH:MM:SS.mmm` in UTC (matches the ingest gateway). */
-export function formatCHDateTime(date: Date): string {
-	const pad = (n: number, width = 2) => String(n).padStart(width, "0")
-	return (
-		`${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())} ` +
-		`${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}.` +
-		`${pad(date.getUTCMilliseconds(), 3)}`
-	)
-}

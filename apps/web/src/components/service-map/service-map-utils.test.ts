@@ -7,6 +7,7 @@ import {
 	getHealthColor,
 	getPlatformColor,
 	getServiceMapNodeColor,
+	parseDbNodeId,
 	topologyKey,
 	type ServiceNodeData,
 } from "./service-map-utils"
@@ -30,6 +31,7 @@ const baseEdge = (overrides: Partial<ServiceEdge> = {}): ServiceEdge => ({
 const baseDbEdge = (overrides: Partial<ServiceDbEdge> = {}): ServiceDbEdge => ({
 	sourceService: "api",
 	dbSystem: "clickhouse",
+	dbNamespace: "",
 	callCount: 50,
 	estimatedCallCount: 50,
 	errorCount: 0,
@@ -68,7 +70,7 @@ describe("buildFlowElements", () => {
 			durationSeconds: 60,
 		})
 
-		const dbNode = result.nodes.find((n) => n.id === dbNodeId("clickhouse"))
+		const dbNode = result.nodes.find((n) => n.id === dbNodeId("clickhouse", ""))
 		expect(dbNode).toBeDefined()
 		const data = dbNode!.data as ServiceNodeData
 		expect(data.kind).toBe("database")
@@ -77,7 +79,7 @@ describe("buildFlowElements", () => {
 		expect(data.throughput).toBeCloseTo(50 / 60)
 		expect(data.avgLatencyMs).toBe(8)
 
-		const dbEdge = result.edges.find((e) => e.target === dbNodeId("clickhouse"))
+		const dbEdge = result.edges.find((e) => e.target === dbNodeId("clickhouse", ""))
 		expect(dbEdge).toBeDefined()
 		expect(dbEdge!.source).toBe("api")
 	})
@@ -117,8 +119,45 @@ describe("buildFlowElements", () => {
 		const data = dbNodes[0].data as ServiceNodeData
 		expect(data.errorRate).toBeCloseTo(3 / 80)
 
-		const dbEdges = result.edges.filter((e) => e.target === dbNodeId("clickhouse"))
+		const dbEdges = result.edges.filter((e) => e.target === dbNodeId("clickhouse", ""))
 		expect(dbEdges).toHaveLength(2)
+	})
+
+	it("splits databases of the same system by namespace", () => {
+		const result = buildFlowElements({
+			edges: [],
+			dbEdges: [
+				baseDbEdge({ sourceService: "api", dbSystem: "postgresql", dbNamespace: "orders" }),
+				baseDbEdge({ sourceService: "api", dbSystem: "postgresql", dbNamespace: "billing" }),
+				baseDbEdge({ sourceService: "worker", dbSystem: "postgresql", dbNamespace: "orders" }),
+			],
+			serviceOverviews: [],
+			durationSeconds: 60,
+		})
+
+		const dbNodes = result.nodes.filter((n) => n.id.startsWith("db:"))
+		expect(dbNodes.map((n) => n.id).sort()).toEqual([
+			dbNodeId("postgresql", "billing"),
+			dbNodeId("postgresql", "orders"),
+		])
+		const orders = result.nodes.find((n) => n.id === dbNodeId("postgresql", "orders"))
+		const data = orders!.data as ServiceNodeData
+		// Named databases show the namespace as the node label…
+		expect(data.label).toBe("orders")
+		expect(data.dbSystem).toBe("postgresql")
+		expect(data.dbNamespace).toBe("orders")
+		// …and both callers of "orders" target the same node.
+		const orderEdges = result.edges.filter((e) => e.target === dbNodeId("postgresql", "orders"))
+		expect(orderEdges.map((e) => e.source).sort()).toEqual(["api", "worker"])
+	})
+
+	it("round-trips db node ids through parseDbNodeId, including ':' in components", () => {
+		const id = dbNodeId("postgre:sql", "orders:main")
+		expect(parseDbNodeId(id)).toEqual({ dbSystem: "postgre:sql", dbNamespace: "orders:main" })
+		expect(parseDbNodeId(dbNodeId("clickhouse", ""))).toEqual({
+			dbSystem: "clickhouse",
+			dbNamespace: "",
+		})
 	})
 })
 
@@ -131,7 +170,7 @@ describe("buildFlowElements namespace", () => {
 			durationSeconds: 60,
 		})
 		const apiNode = result.nodes.find((n) => n.id === "api")
-		const dbNode = result.nodes.find((n) => n.id === dbNodeId("postgresql"))
+		const dbNode = result.nodes.find((n) => n.id === dbNodeId("postgresql", ""))
 		expect((apiNode!.data as ServiceNodeData).namespace).toBe("backend")
 		expect((dbNode!.data as ServiceNodeData).namespace).toBeUndefined()
 	})
@@ -194,7 +233,7 @@ describe("computeNodePositions namespace clustering", () => {
 			durationSeconds: 3600,
 		})
 		const pos = computeNodePositions(nodes, edges)
-		const dbY = pos.get(dbNodeId("postgresql"))!.y
+		const dbY = pos.get(dbNodeId("postgresql", ""))!.y
 		const maxServiceY = Math.max(pos.get("api")!.y, pos.get("auth")!.y)
 		expect(dbY).toBeGreaterThan(maxServiceY)
 	})

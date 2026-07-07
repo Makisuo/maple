@@ -2,6 +2,7 @@
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*"],
 	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**", "**/sst-env.d.ts"],
+	"ignoreExportsUsedInFile": true,
 	"workspaces": {
 		".": {
 			"entry": ["alchemy.run.ts", "scripts/**/*.ts"],
@@ -51,7 +52,10 @@
 			"ignoreDependencies": ["cloudflare"]
 		},
 		"packages/query-engine": {
-			"entry": ["src/ch/expr.ts", "src/drain/index.ts"]
+			"entry": ["src/drain/index.ts"]
+		},
+		"packages/browser": {
+			"ignoreDependencies": ["rrweb"]
 		}
 	},
 	"rules": {

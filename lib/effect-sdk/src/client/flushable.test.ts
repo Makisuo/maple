@@ -178,6 +178,50 @@ describe("MapleFlush.make (client)", () => {
 		expect(sessionAttr?.value.stringValue).toBe("sess-123")
 	})
 
+	it("stamps session.id from the self-managed session when no sink is published", async () => {
+		const { calls, restore: rf } = setupFetch()
+		// Standalone: no @maple-dev/browser sink, just a browser-like window with
+		// sessionStorage. The bundled @maple/browser-session core must mint a
+		// session and stamp its id on every span.
+		const store = new Map<string, string>()
+		vi.stubGlobal("window", {
+			sessionStorage: {
+				getItem: (k: string) => store.get(k) ?? null,
+				setItem: (k: string, v: string) => void store.set(k, v),
+			},
+		})
+		restore = () => {
+			rf()
+			vi.unstubAllGlobals()
+		}
+		const telemetry = make(baseConfig)
+
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("op-a"), Effect.provide(telemetry.layer)),
+		)
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("op-b"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush()
+
+		const stored = JSON.parse(store.get("maple.session")!) as { id: string }
+		const traceCall = calls.find((c) => c.url.endsWith("/v1/traces"))!
+		const spans = (
+			traceCall.body as {
+				resourceSpans: Array<{
+					scopeSpans: Array<{
+						spans: Array<{ attributes: Array<{ key: string; value: { stringValue?: string } }> }>
+					}>
+				}>
+			}
+		).resourceSpans.flatMap((r) => r.scopeSpans.flatMap((s) => s.spans))
+		expect(spans.length).toBeGreaterThanOrEqual(2)
+		for (const span of spans) {
+			const sessionAttr = span.attributes.find((a) => a.key === "session.id")
+			expect(sessionAttr?.value.stringValue).toBe(stored.id)
+		}
+	})
+
 	it("flushes on pagehide and dispose() removes the unload listeners", async () => {
 		const { calls, restore: rf } = setupFetch()
 		const dom = setupDom()

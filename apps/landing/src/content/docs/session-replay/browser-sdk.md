@@ -12,6 +12,8 @@ order: 1
     <span class="text-[10px] uppercase tracking-wider px-2 py-1 border border-border text-fg-muted">Beta</span>
 </div>
 
+> **Using Effect?** `@maple-dev/effect-sdk`'s browser entry point has the same replay engine built in — spans, sessions, and recordings from one package, with rrweb in a lazy code-split chunk. See [Session Replay & Sessions](/docs/sdks/effect-client#session-replay--sessions). Run replay from one SDK, not both.
+
 ## Install
 
 ```bash

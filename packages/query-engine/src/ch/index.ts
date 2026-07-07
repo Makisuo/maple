@@ -337,6 +337,34 @@ export {
 	type CloudflareWorkerTimeseriesOutput,
 } from "./queries/cloudflare-infra"
 
+// Queries — Cloudflare infrastructure page, extended datasets (hosts, firewall, DNS, platform)
+export {
+	cloudflareZoneHostBreakdownRowSchema,
+	cloudflareZoneHostBreakdownSQL,
+	cloudflareZoneHostTimeseriesRowSchema,
+	cloudflareZoneHostTimeseriesSQL,
+	cloudflareZoneFirewallTimeseriesRowSchema,
+	cloudflareZoneFirewallTimeseriesSQL,
+	cloudflareZoneFirewallTopRowSchema,
+	cloudflareZoneFirewallTopSQL,
+	cloudflareZoneDnsTimeseriesRowSchema,
+	cloudflareZoneDnsTimeseriesSQL,
+	cloudflareZoneDnsBreakdownRowSchema,
+	cloudflareZoneDnsBreakdownSQL,
+	cloudflareQueueGaugesRowSchema,
+	cloudflareQueueGaugesSQL,
+	cloudflareDurableObjectCountersRowSchema,
+	cloudflareDurableObjectCountersSQL,
+	type CloudflareZoneHostBreakdownOutput,
+	type CloudflareZoneHostTimeseriesOutput,
+	type CloudflareZoneFirewallTimeseriesOutput,
+	type CloudflareZoneFirewallTopOutput,
+	type CloudflareZoneDnsTimeseriesOutput,
+	type CloudflareZoneDnsBreakdownOutput,
+	type CloudflareQueueGaugesOutput,
+	type CloudflareDurableObjectCountersOutput,
+} from "./queries/cloudflare-infra-extended"
+
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {
 	dbStatementSamplesQuery,

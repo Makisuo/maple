@@ -55,10 +55,14 @@ import {
 } from "@/api/warehouse/service-map"
 import { getServiceWorkloads } from "@/api/warehouse/service-infra"
 import {
+	getCloudflarePlatformResources,
+	getCloudflareTopTraffic,
 	getCloudflareWorkers,
-	getCloudflareWorkerTimeseries,
 	getCloudflareZoneDetail,
+	getCloudflareZoneDns,
+	getCloudflareZoneHosts,
 	getCloudflareZones,
+	getCloudflareZoneSecurity,
 	getCloudflareZoneTimeseries,
 } from "@/api/warehouse/cloudflare-infra"
 import { getServiceHealthBaseline, getServiceOverview, getServicesFacets } from "@/api/warehouse/services"
@@ -368,8 +372,25 @@ export const cloudflareWorkersResultAtom = makeQueryAtomFamily(getCloudflareWork
 	staleTime: 30_000,
 })
 
-export const cloudflareWorkerTimeseriesResultAtom = makeQueryAtomFamily(getCloudflareWorkerTimeseries, {
+export const cloudflareZoneHostsResultAtom = makeQueryAtomFamily(getCloudflareZoneHosts, {
 	staleTime: 30_000,
+})
+
+export const cloudflareZoneSecurityResultAtom = makeQueryAtomFamily(getCloudflareZoneSecurity, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneDnsResultAtom = makeQueryAtomFamily(getCloudflareZoneDns, {
+	staleTime: 30_000,
+})
+
+export const cloudflarePlatformResourcesResultAtom = makeQueryAtomFamily(getCloudflarePlatformResources, {
+	staleTime: 30_000,
+})
+
+// Live Cloudflare GraphQL proxy — server edge-caches ~60s, so match that here.
+export const cloudflareTopTrafficResultAtom = makeQueryAtomFamily(getCloudflareTopTraffic, {
+	staleTime: 60_000,
 })
 
 // Service-detail Overview tab bundle: primary chart + releases timeline +

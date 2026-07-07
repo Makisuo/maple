@@ -108,8 +108,12 @@ const envConfig = Config.all({
 	// Cloudflare OAuth scope ids are DOT-delimited (mirroring API-token permission names;
 	// registry: GET /client/v4/oauth/scopes). The client may only request scopes it was
 	// created with — keep the OAuth client's granted set in sync with this list.
-	// `offline_access` is added/removed automatically by Cloudflare based on the client's
-	// grant types, so it must not be listed.
+	// `offline_access` is deliberately NOT in this list: it is not a data scope (nothing gates or
+	// stores on it), it is the request flag that makes Cloudflare issue a refresh token. The
+	// client's Refresh Token grant only makes it *available*; it must still be *requested*, so
+	// `startConnect` appends it to the authorize request instead of carrying it here. (Enabling the
+	// grant without requesting the scope was the 31h-outage root cause: access-token-only
+	// connections that die at the ~16h expiry.)
 	// The analytics scopes power the edge-metrics poller. There are THREE distinct ones and they
 	// are NOT interchangeable (Cloudflare authorizes account- vs zone-scoped GraphQL datasets
 	// separately):

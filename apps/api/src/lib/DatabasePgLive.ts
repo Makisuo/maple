@@ -43,6 +43,3 @@ const makePgDatabase = Effect.gen(function* () {
 })
 
 export const layerPg = Layer.effect(Database, makePgDatabase)
-
-/** @deprecated Use {@link layerPg}. */
-export const DatabasePgLive = layerPg

@@ -71,6 +71,13 @@
       "when": 1783200005000,
       "tag": "0009_electric_publication",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783377967610,
+      "tag": "0010_huge_dexter_bennett",
+      "breakpoints": true
     }
   ]
 }

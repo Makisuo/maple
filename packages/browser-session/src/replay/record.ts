@@ -1,6 +1,6 @@
 import { record } from "rrweb"
-import type { ResolvedConfig } from "../config"
 import { markActivity, nextChunkSeq } from "../session"
+import type { ReplayEngineConfig } from "./transport"
 import { gzip, postSessionBlob, type ChunkMeta } from "./transport"
 import { approximateSize } from "./util"
 
@@ -28,7 +28,7 @@ export interface Recorder {
 	getClickCount: () => number
 }
 
-export function startRecording(config: ResolvedConfig, sessionId: string): Recorder {
+export function startRecording(config: ReplayEngineConfig, sessionId: string): Recorder {
 	let buffer: RrwebEvent[] = []
 	let bufferBytes = 0
 	let bufferHasCheckpoint = false

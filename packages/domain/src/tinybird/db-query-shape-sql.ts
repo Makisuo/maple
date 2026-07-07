@@ -27,6 +27,15 @@
 export const DB_SYSTEM_ATTR_SQL =
 	"coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system'])"
 
+/**
+ * Best-available database identity disambiguator, by the semconv target-identity
+ * order (`db.namespace` → `server.address`), each with its legacy spelling as
+ * fallback (`db.name`, `net.peer.name`). Empty when the instrumentation emits
+ * none of them — those spans keep collapsing into the per-system generic node.
+ */
+export const DB_NAMESPACE_ATTR_SQL =
+	"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name'])"
+
 /** Full query text: `db.query.text` (stable semconv) with `db.statement` (legacy) fallback. */
 export const DB_STATEMENT_SQL =
 	"coalesce(nullIf(SpanAttributes['db.query.text'], ''), SpanAttributes['db.statement'])"

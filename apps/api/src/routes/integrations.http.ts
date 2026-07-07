@@ -3,6 +3,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CloudflareDisconnectResponse,
 	CloudflareStartConnectResponse,
+	CloudflareTopTrafficResponse,
+	CloudflareTopTrafficRow,
 	CurrentTenant,
 	ExternalUserId,
 	GithubDeleteRepositoryResponse,
@@ -16,15 +18,31 @@ import {
 	HazelOrganizationsListResponse,
 	HazelStartConnectResponse,
 	IntegrationsForbiddenError,
+	IntegrationsPersistenceError,
+	IntegrationsUpstreamError,
+	IntegrationsValidationError,
 	MapleApi,
 	RoleName,
 	UserId,
 	VcsCommitDetailResponse,
 } from "@maple/domain/http"
+import { cloudflareAnalyticsState } from "@maple/db"
+import { EdgeCacheService } from "@maple/query-engine/caching"
+import { and, eq } from "drizzle-orm"
 import { Cause, Effect, Option, Schema } from "effect"
+import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
+import { graphqlQuery } from "../lib/CloudflareApi"
 import { CloudflareAnalyticsService } from "../services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
+import { abrCount } from "../services/cloudflare-analytics/mapping"
+import {
+	decodeTopTrafficResponse,
+	HTTP_DATASET,
+	toGraphqlTime,
+	topTrafficQuery,
+	type TopTrafficGroupShape,
+} from "../services/cloudflare-analytics/queries"
 import { GithubConnectService } from "../services/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "../services/vcs/VcsCommitService"
 import { HazelOAuthService } from "../services/HazelOAuthService"
@@ -79,6 +97,9 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const vcsCommits = yield* VcsCommitService
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
+		const database = yield* Database
+		const edgeCache = yield* EdgeCacheService
+		const env = yield* Env
 
 		return (
 			handlers
@@ -162,6 +183,151 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						return yield* cloudflareAnalytics.getUsage(tenant.orgId)
+					}),
+				)
+				.handle("cloudflareTopTraffic", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						if (payload.endTime <= payload.startTime) {
+							return yield* Effect.fail(
+								new IntegrationsValidationError({ message: "endTime must be after startTime" }),
+							)
+						}
+						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 15), 1), 50)
+						// Minute-align the window so repeated dashboard refreshes within the TTL share
+						// a cache entry instead of each minting a unique key. Floor the start but CEIL
+						// the end (with a one-minute floor on the width): flooring both would collapse
+						// a sub-minute window to zero width and cache the resulting empty result.
+						const MINUTE = 60_000
+						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
+						const endMs = Math.max(
+							Math.ceil(payload.endTime / MINUTE) * MINUTE,
+							startMs + MINUTE,
+						)
+						const compute = Effect.gen(function* () {
+							const { accessToken } = yield* cloudflare.getValidAccessToken(tenant.orgId)
+							const zoneRows = yield* database
+								.execute((db) =>
+									db
+										.select({ zoneId: cloudflareAnalyticsState.zoneId })
+										.from(cloudflareAnalyticsState)
+										.where(
+											and(
+												eq(cloudflareAnalyticsState.orgId, tenant.orgId),
+												eq(cloudflareAnalyticsState.dataset, HTTP_DATASET),
+												eq(cloudflareAnalyticsState.zoneName, payload.zoneName),
+											),
+										)
+										.limit(1),
+								)
+								.pipe(
+									Effect.mapError(
+										(cause) =>
+											new IntegrationsPersistenceError({
+												message:
+													cause instanceof Error
+														? cause.message
+														: "Cloudflare zone lookup failed",
+											}),
+									),
+								)
+							const zoneId = zoneRows[0]?.zoneId
+							if (zoneId == null) {
+								return yield* Effect.fail(
+									new IntegrationsValidationError({
+										message: `Unknown Cloudflare zone: ${payload.zoneName}`,
+									}),
+								)
+							}
+							const result = yield* graphqlQuery(
+								accessToken,
+								{
+									query: topTrafficQuery({ dimension: payload.dimension, limit }),
+									variables: {
+										zoneTags: [zoneId],
+										start: toGraphqlTime(startMs),
+										end: toGraphqlTime(endMs),
+									},
+								},
+								env.MAPLE_CLOUDFLARE_API_BASE_URL,
+							)
+							// GraphQL-level errors here are plan/authz shaped ("dataset not available",
+							// window beyond retention) — soft-fail so the card shows an empty state
+							// instead of a 5xx toast.
+							if (result.errors.length > 0) {
+								return new CloudflareTopTrafficResponse({
+									rows: [],
+									unavailableReason: result.errors
+										.map((error) => error.message)
+										.join("; ")
+										.slice(0, 300),
+								})
+							}
+							const decoded = yield* decodeTopTrafficResponse(result.data).pipe(
+								// The card reduces failures to short human copy — keep the real ParseError
+								// in the server log so we can see which field of the upstream shape
+								// mismatched, matching the OAuth-callback logging pattern above.
+								Effect.tapError((error) =>
+									Effect.logError("Cloudflare top-traffic response failed to decode", {
+										zoneName: payload.zoneName,
+										dimension: payload.dimension,
+										error: error.message,
+									}),
+								),
+								Effect.mapError(
+									() =>
+										new IntegrationsUpstreamError({
+											message:
+												"Cloudflare GraphQL top-traffic response had an unexpected shape",
+										}),
+								),
+							)
+							const zone = decoded.viewer.zones?.[0]
+							const keyOf = (group: TopTrafficGroupShape) =>
+								(payload.dimension === "host"
+									? group.dimensions.clientRequestHTTPHost
+									: group.dimensions.clientRequestPath) ?? "unknown"
+							const byKey = new Map<
+								string,
+								{ requests: number; bytes: number; errors5xx: number }
+							>()
+							for (const group of zone?.top ?? []) {
+								const key = keyOf(group)
+								const entry = byKey.get(key) ?? { requests: 0, bytes: 0, errors5xx: 0 }
+								entry.requests += abrCount(group.count, group.avg?.sampleInterval)
+								entry.bytes += group.sum?.edgeResponseBytes ?? 0
+								byKey.set(key, entry)
+							}
+							for (const group of zone?.errors ?? []) {
+								const key = keyOf(group)
+								const entry = byKey.get(key) ?? { requests: 0, bytes: 0, errors5xx: 0 }
+								entry.errors5xx += abrCount(group.count, group.avg?.sampleInterval)
+								byKey.set(key, entry)
+							}
+							const rows = [...byKey.entries()]
+								.map(
+									([key, entry]) =>
+										new CloudflareTopTrafficRow({
+											key,
+											requests: entry.requests,
+											bytes: entry.bytes,
+											errors5xx: entry.errors5xx,
+										}),
+								)
+								.sort((a, b) => b.requests - a.requests)
+								.slice(0, limit)
+							return new CloudflareTopTrafficResponse({ rows, unavailableReason: null })
+						})
+						const cached = yield* edgeCache.getOrCompute(
+							{
+								bucket: "cf-top-traffic",
+								key: `${tenant.orgId}:${payload.zoneName}:${payload.dimension}:${startMs}:${endMs}:${limit}`,
+								ttlSeconds: 60,
+								schema: CloudflareTopTrafficResponse,
+							},
+							compute,
+						)
+						return cached.value
 					}),
 				)
 				.handle("cloudflareStart", ({ payload }) =>
