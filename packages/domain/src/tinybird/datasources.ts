@@ -387,7 +387,7 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
     OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
     CallCount, ErrorCount, DurationSumMs, MaxDurationMs,
     SampledSpanCount, UnsampledSpanCount, SampleRateSum,
-    defaultValueOfTypeName('String') AS DbNamespace`,
+    defaultValueOfTypeName('LowCardinality(String)') AS DbNamespace`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		// DbNamespace is a grouping dimension, so it must live in the sorting key —
@@ -466,7 +466,7 @@ export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_qu
     QueryKey, QueryLabel, SampleStatement,
     CallCount, ErrorCount, EstimatedCount, EstimatedErrorCount,
     WeightedDurationSumMs, DurationQuantiles,
-    defaultValueOfTypeName('String') AS DbNamespace`,
+    defaultValueOfTypeName('LowCardinality(String)') AS DbNamespace`,
 })
 
 export type ServiceMapDbQueryShapesHourlyRow = InferRow<typeof serviceMapDbQueryShapesHourly>
