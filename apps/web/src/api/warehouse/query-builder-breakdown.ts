@@ -35,10 +35,6 @@ interface BreakdownQueryResult {
 	data: Array<{ name: string; value: number }>
 }
 
-export interface QueryBuilderBreakdownResponse {
-	data: Array<Record<string, string | number>>
-}
-
 const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(function* (
 	startTime: string,
 	endTime: string,

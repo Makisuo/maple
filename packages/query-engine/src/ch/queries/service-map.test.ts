@@ -321,6 +321,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 				{
 					sourceService: "artifacts-api",
 					dbSystem: "postgresql",
+					dbNamespace: "orders",
 					callCount: "42",
 					errorCount: "3",
 					avgDurationMs: "14.25",
@@ -333,6 +334,7 @@ describe("serviceDbEdgesForServiceQuery", () => {
 				{
 					sourceService: "artifacts-api",
 					dbSystem: "postgresql",
+					dbNamespace: "orders",
 					callCount: 42,
 					errorCount: 3,
 					avgDurationMs: 14.25,
@@ -342,6 +344,26 @@ describe("serviceDbEdgesForServiceQuery", () => {
 			])
 		}),
 	)
+
+	it("splits database nodes by namespace on both branches (org-wide SQL)", () => {
+		const { sql } = serviceDbEdgesSQL({}, baseParams)
+		// hourly branch reads the rollup's stored dimension…
+		expect(sql).toContain("DbNamespace AS dbNamespace")
+		// …the raw branch derives the SAME identity via the shared fragment
+		expect(sql).toContain(
+			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) AS dbNamespace",
+		)
+		// …and every GROUP BY carries it so distinct databases stay distinct rows
+		const matches = sql.match(/GROUP BY sourceService, dbSystem, dbNamespace/g)
+		expect(matches?.length).toBe(3)
+	})
+
+	it("guards the org-wide raw branch against unnamed spans (ServiceName != '')", () => {
+		// Org-wide (no serviceName) still needs the empty-service guard on the raw
+		// in-progress-hour branch — the hourly MV already applies it at write time.
+		const { sql } = serviceDbEdgesSQL({}, baseParams)
+		expect(sql).toContain("ServiceName != ''")
+	})
 
 	it("filters ServiceName on both branches (hourly MV + raw traces)", () => {
 		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
@@ -358,10 +380,24 @@ describe("serviceDbEdgesForServiceQuery", () => {
 		expect(sql).toContain("Timestamp >= toStartOfHour(toDateTime('2024-01-02 00:00:00'))")
 	})
 
-	it("restricts the raw branch to Client/Producer spans with db.system.name set", () => {
+	it("restricts the raw branch to Client/Producer spans with a db system set (stable + legacy)", () => {
 		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
 		expect(sql).toContain("SpanKind IN ('Client', 'Producer')")
-		expect(sql).toContain("SpanAttributes['db.system.name'] != ''")
+		// Same stable→legacy coalesce as the MV write side (DB_SYSTEM_ATTR_SQL).
+		expect(sql).toContain(
+			"coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system']) != ''",
+		)
+	})
+
+	it("carries dbNamespace on both branches so distinct databases split", () => {
+		const { sql } = compileCH(serviceDbEdgesForServiceQuery({ serviceName: "artifacts-api" }), baseParams)
+		// hourly branch reads the rollup's stored dimension
+		expect(sql).toContain("DbNamespace")
+		// raw branch derives the identity via the shared coalesce order
+		expect(sql).toContain("SpanAttributes['db.namespace']")
+		expect(sql).toContain("SpanAttributes['db.name']")
+		expect(sql).toContain("SpanAttributes['server.address']")
+		expect(sql).toContain("SpanAttributes['net.peer.name']")
 	})
 
 	it("threads deploymentEnv through both branches", () => {
@@ -494,6 +530,47 @@ describe("service-map database query summaries", () => {
 		const topQueries = serviceDbTopQueriesSQL({ ...params, topN: 500 }).sql
 		expect(timeseries).toContain("INTERVAL 60 SECOND")
 		expect(topQueries).toContain("LIMIT 50")
+	})
+
+	it("scopes to one database identity when dbNamespace is set (rollup + raw branches)", () => {
+		const { sql } = serviceDbQuerySummarySQL({ ...params, dbNamespace: "orders" })
+		// sealed rollup branch filters the stored dimension…
+		expect(sql).toContain("DbNamespace = 'orders'")
+		// …the raw branch filters via the shared identity fragment
+		expect(sql).toContain(
+			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'",
+		)
+	})
+
+	it("treats dbNamespace='' as the legacy/unknown node and undefined as unscoped", () => {
+		const scoped = serviceDbQuerySummarySQL({ ...params, dbNamespace: "" }).sql
+		expect(scoped).toContain("DbNamespace = ''")
+		const unscoped = serviceDbQuerySummarySQL(params).sql
+		expect(unscoped).not.toContain("DbNamespace = ")
+	})
+
+	it("scopes hour-aligned timeseries and top-queries to dbNamespace on both branches", () => {
+		// Both sibling builders must thread the same filter as the summary — a
+		// regression here silently widens the panel to every database of the system.
+		// (Sub-hour timeseries is raw-only, covered separately below.)
+		const namespaceCoalesce =
+			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'"
+		const timeseries = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 3600 }).sql
+		const topQueries = serviceDbTopQueriesSQL({ ...params, dbNamespace: "orders" }).sql
+		for (const sql of [timeseries, topQueries]) {
+			expect(sql).toContain("DbNamespace = 'orders'") // sealed rollup branch
+			expect(sql).toContain(namespaceCoalesce) // raw in-progress-hour branch
+		}
+	})
+
+	it("scopes sub-hour timeseries to dbNamespace via the raw identity fragment", () => {
+		// The <1h path reads raw traces only (rollup can't serve sub-hour buckets),
+		// so it filters on the coalesced identity, not the stored DbNamespace column.
+		const { sql } = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 300 })
+		expect(sql).not.toContain("service_map_db_query_shapes_hourly")
+		expect(sql).toContain(
+			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'",
+		)
 	})
 
 	it("escapes raw params in summary SQL", () => {

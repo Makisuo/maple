@@ -21,6 +21,7 @@ import {
 	spanMetricsCallsHourly,
 } from "./datasources"
 import {
+	DB_NAMESPACE_ATTR_SQL,
 	DB_QUERY_KEY_SQL,
 	DB_QUERY_LABEL_SQL,
 	DB_STATEMENT_SQL,
@@ -355,7 +356,10 @@ export const serviceMapChildrenMv = defineMaterializedView("service_map_children
  *
  * `DbSystem` uses the `db.system.name` → `db.system` coalesce (`DB_SYSTEM_ATTR_SQL`),
  * matching `service_map_db_query_shapes_hourly_mv`, so spans that emit only the
- * legacy `db.system` attribute are captured here too.
+ * legacy `db.system` attribute are captured here too. `DbNamespace`
+ * (`DB_NAMESPACE_ATTR_SQL`: `db.namespace` → `db.name` → `server.address` →
+ * `net.peer.name`) splits distinct databases of the same system into distinct
+ * service-map nodes; '' when the instrumentation identifies none.
  */
 export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_edges_hourly_mv", {
 	description:
@@ -370,6 +374,7 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
           ${DB_SYSTEM_ATTR_SQL} AS DbSystem,
+          ${DB_NAMESPACE_ATTR_SQL} AS DbNamespace,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv,
           count() AS CallCount,
           countIf(StatusCode = 'Error') AS ErrorCount,
@@ -382,7 +387,7 @@ export const serviceMapDbEdgesHourlyMv = defineMaterializedView("service_map_db_
         WHERE SpanKind IN ('Client', 'Producer')
           AND ${DB_SYSTEM_ATTR_SQL} != ''
           AND ServiceName != ''
-        GROUP BY OrgId, Hour, ServiceName, DbSystem, DeploymentEnv
+        GROUP BY OrgId, Hour, ServiceName, DbSystem, DbNamespace, DeploymentEnv
       `,
 		}),
 	],
@@ -414,6 +419,7 @@ export const serviceMapDbQueryShapesHourlyMv = defineMaterializedView(
           toStartOfHour(toDateTime(Timestamp)) AS Hour,
           ServiceName,
           ${DB_SYSTEM_ATTR_SQL} AS DbSystem,
+          ${DB_NAMESPACE_ATTR_SQL} AS DbNamespace,
           ResourceAttributes['deployment.environment'] AS DeploymentEnv,
           ${DB_QUERY_KEY_SQL} AS QueryKey,
           any(substring(${DB_QUERY_LABEL_SQL}, 1, 220)) AS QueryLabel,
@@ -428,7 +434,7 @@ export const serviceMapDbQueryShapesHourlyMv = defineMaterializedView(
         WHERE SpanKind IN ('Client', 'Producer')
           AND ${DB_SYSTEM_ATTR_SQL} != ''
           AND ServiceName != ''
-        GROUP BY OrgId, Hour, ServiceName, DbSystem, DeploymentEnv, QueryKey
+        GROUP BY OrgId, Hour, ServiceName, DbSystem, DbNamespace, DeploymentEnv, QueryKey
       `,
 			}),
 		],

@@ -143,6 +143,7 @@ function generateBenchGraph(params: BenchParams): BenchGraph {
 		dbEdges.push({
 			sourceService: name,
 			dbSystem: DB_SYSTEMS[Math.floor(rng() * DB_SYSTEMS.length)],
+			dbNamespace: `bench_db_${Math.floor(rng() * 3)}`,
 			callCount,
 			estimatedCallCount: callCount,
 			errorCount: Math.round(callCount * errorRate),

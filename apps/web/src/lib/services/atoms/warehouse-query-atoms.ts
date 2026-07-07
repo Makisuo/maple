@@ -58,7 +58,6 @@ import {
 	getCloudflarePlatformResources,
 	getCloudflareTopTraffic,
 	getCloudflareWorkers,
-	getCloudflareWorkerTimeseries,
 	getCloudflareZoneDetail,
 	getCloudflareZoneDns,
 	getCloudflareZoneHosts,
@@ -370,10 +369,6 @@ export const cloudflareZoneDetailResultAtom = makeQueryAtomFamily(getCloudflareZ
 })
 
 export const cloudflareWorkersResultAtom = makeQueryAtomFamily(getCloudflareWorkers, {
-	staleTime: 30_000,
-})
-
-export const cloudflareWorkerTimeseriesResultAtom = makeQueryAtomFamily(getCloudflareWorkerTimeseries, {
 	staleTime: 30_000,
 })
 

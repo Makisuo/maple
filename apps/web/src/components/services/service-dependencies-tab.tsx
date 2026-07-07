@@ -21,6 +21,7 @@ interface RawEdge {
 	sourceService?: string
 	targetService?: string
 	dbSystem?: string
+	dbNamespace?: string
 	targetType?: "http" | "messaging" | "rpc"
 	targetSystem?: string
 	targetName?: string
@@ -115,10 +116,16 @@ export function ServiceDependenciesTab({
 			const callCount = Number(edge.callCount ?? 0)
 			const estimated = Number(edge.estimatedCallCount ?? callCount)
 			const target = String(edge.dbSystem)
+			// Edges are per database identity (db.namespace et al.) — surface it as
+			// the row name so two databases of the same system stay distinguishable.
+			// The drill-down stays scoped by system only: the identity can originate
+			// from any of four span attributes, so an exact-attribute predicate here
+			// could silently match nothing.
+			const namespace = String(edge.dbNamespace ?? "")
 			out.push({
-				id: `database:${target}`,
+				id: `database:${target}:${namespace}`,
 				kind: "database",
-				name: target,
+				name: namespace ? `${target} · ${namespace}` : target,
 				callsPerSec: estimated / durationSeconds,
 				tracedCallsPerSec: callCount / durationSeconds,
 				totalCalls: callCount,

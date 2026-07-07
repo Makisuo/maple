@@ -353,6 +353,7 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	Hour: T.dateTime,
 	ServiceName: T.string,
 	DbSystem: T.string,
+	DbNamespace: T.string,
 	DeploymentEnv: T.string,
 	CallCount: T.uint64,
 	ErrorCount: T.uint64,
@@ -361,6 +362,26 @@ export const ServiceMapDbEdgesHourly = table("service_map_db_edges_hourly", {
 	SampledSpanCount: T.uint64,
 	UnsampledSpanCount: T.uint64,
 	SampleRateSum: T.float64,
+})
+
+export const ServiceMapDbQueryShapesHourly = table("service_map_db_query_shapes_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DbSystem: T.string,
+	DbNamespace: T.string,
+	DeploymentEnv: T.string,
+	QueryKey: T.string,
+	QueryLabel: T.string,
+	SampleStatement: T.string,
+	CallCount: T.uint64,
+	ErrorCount: T.uint64,
+	EstimatedCount: T.float64,
+	EstimatedErrorCount: T.float64,
+	WeightedDurationSumMs: T.float64,
+	// AggregateFunction(quantilesTDigestWeighted(0.5, 0.95), UInt64, UInt32) —
+	// opaque state, only ever touched via raw `...MergeState`/`...Merge` exprs.
+	DurationQuantiles: T.string,
 })
 
 export const ServicePlatformsHourly = table("service_platforms_hourly", {

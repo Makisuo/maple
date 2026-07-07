@@ -1,4 +1,13 @@
-import type { ResolvedConfig } from "../config"
+/**
+ * The slice of configuration the replay engine needs. Both SDKs adapt their
+ * own config shapes onto this.
+ */
+export interface ReplayEngineConfig {
+	readonly endpoint: string
+	readonly ingestKey: string
+	readonly maskAllInputs: boolean
+	readonly maskAllText: boolean
+}
 
 // Replay POSTs are best-effort and must never throw into the host app, but a
 // fully broken ingest endpoint should not be *silent*. Warn at most once every
@@ -23,7 +32,7 @@ export async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
 
 /** POST session metadata (NDJSON, single row). `keepalive` for the final unload write. */
 export async function postSessionMeta(
-	config: ResolvedConfig,
+	config: ReplayEngineConfig,
 	row: Record<string, unknown>,
 	keepalive = false,
 ): Promise<void> {
@@ -44,7 +53,7 @@ export async function postSessionMeta(
 
 /** POST distilled session events (NDJSON, one row per event). Best-effort. */
 export async function postSessionEvents(
-	config: ResolvedConfig,
+	config: ReplayEngineConfig,
 	rows: ReadonlyArray<Record<string, unknown>>,
 	keepalive = false,
 ): Promise<void> {
@@ -73,7 +82,7 @@ export interface ChunkMeta {
 
 /** PUT a gzipped rrweb event chunk. */
 export async function postSessionBlob(
-	config: ResolvedConfig,
+	config: ReplayEngineConfig,
 	meta: ChunkMeta,
 	gzipped: Uint8Array,
 	keepalive = false,

@@ -350,12 +350,14 @@ export type ServiceMapEdgesHourlyRow = InferRow<typeof serviceMapEdgesHourly>
  * Aggregates Client/Producer spans with `db.system.name` set at write time so
  * the service map's database-node query reads ~hundreds of rows per window instead
  * of millions of individual spans. Mirrors `service_map_edges_hourly` in
- * structure; one row per (OrgId, Hour, ServiceName, DbSystem, DeploymentEnv).
- * Populated by materialized view, not direct ingestion.
+ * structure; one row per (OrgId, Hour, ServiceName, DbSystem, DbNamespace,
+ * DeploymentEnv), where `DbNamespace` is the best-available database identity
+ * (see `DB_NAMESPACE_ATTR_SQL`) so distinct databases of the same system get
+ * distinct service-map nodes. Populated by materialized view, not direct ingestion.
  */
 export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_hourly", {
 	description:
-		"Pre-aggregated hourly service-to-database edges (one row per service/db.system.name) for the service map's database-node query. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
+		"Pre-aggregated hourly service-to-database edges (one row per service/db.system.name/db.namespace) for the service map's database-node query. Uses AggregatingMergeTree for incremental aggregation. Populated by materialized view.",
 	jsonPaths: false,
 	schema: {
 		OrgId: t.string().lowCardinality(),
@@ -370,16 +372,27 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
 		SampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 		UnsampledSpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
+		DbNamespace: t.string().lowCardinality(),
 	},
 	// The 90d rollup TTL outlives the 30d `traces` source, so a deploy that
 	// re-points the MV can't reconstruct the full window from `traces`. Carry
 	// existing rows forward (non-destructive) instead — same pattern as the other
 	// hourly rollups (`service_map_db_query_shapes_hourly`, `logs_aggregates_hourly`,
-	// `service_platforms_hourly`).
-	forwardQuery: `SELECT *`,
+	// `service_platforms_hourly`). DbNamespace is being added to a datasource that
+	// already holds data, so this add-deploy defaults it to '' for existing rows
+	// (they render as the per-system generic node for historical windows); once
+	// the deploy lands, a follow-up commit must switch this to carry the column
+	// through unchanged (see the ServiceNamespace note on `logs_aggregates_hourly`).
+	forwardQuery: `SELECT
+    OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
+    CallCount, ErrorCount, DurationSumMs, MaxDurationMs,
+    SampledSpanCount, UnsampledSpanCount, SampleRateSum,
+    defaultValueOfTypeName('LowCardinality(String)') AS DbNamespace`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
-		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem"],
+		// DbNamespace is a grouping dimension, so it must live in the sorting key —
+		// AggregatingMergeTree collapses non-key, non-aggregate columns on merge.
+		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem", "DbNamespace"],
 		ttl: "toDate(Hour) + INTERVAL 90 DAY",
 	}),
 })
@@ -389,7 +402,7 @@ export type ServiceMapDbEdgesHourlyRow = InferRow<typeof serviceMapDbEdgesHourly
 /**
  * Pre-aggregated hourly database *query shapes* for the service map's database
  * detail panel ("Query Activity" + "Top Query Shapes"). One row per
- * (OrgId, Hour, ServiceName, DbSystem, DeploymentEnv, QueryKey) where `QueryKey`
+ * (OrgId, Hour, ServiceName, DbSystem, DbNamespace, DeploymentEnv, QueryKey) where `QueryKey`
  * is the normalized query-shape signature (see `db-query-shape-sql.ts`). Lets the
  * panel read pre-aggregated rows instead of scanning raw span attributes +
  * computing per-row fingerprints over the whole window.
@@ -431,17 +444,29 @@ export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_qu
 		// traces_aggregates_hourly.DurationQuantiles — weight type UInt32 passed
 		// explicitly). Quantiles returned in nanoseconds; divide by 1e6 for ms.
 		DurationQuantiles: t.aggregateFunction("quantilesTDigestWeighted(0.5, 0.95), UInt64", t.uint32()),
+		DbNamespace: t.string().lowCardinality(),
 	},
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
-		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem", "QueryKey"],
+		// DbNamespace sits before QueryKey: the detail panel filters by
+		// (ServiceName, DbSystem, DbNamespace) and aggregates over QueryKey.
+		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem", "DbNamespace", "QueryKey"],
 		ttl: "toDate(Hour) + INTERVAL 90 DAY",
 	}),
 	// The 90d rollup TTL outlives the 30d `traces` source, so a backfill from
 	// `traces` can't reconstruct the full window. Carry existing rows forward
 	// (non-destructive deploy) instead — same pattern as the other hourly
-	// rollups (`logs_aggregates_hourly`, `service_usage_hourly`).
-	forwardQuery: `SELECT *`,
+	// rollups (`logs_aggregates_hourly`, `service_usage_hourly`). DbNamespace is
+	// being added to a datasource that already holds data, so this add-deploy
+	// defaults it to '' for existing rows; once the deploy lands, a follow-up
+	// commit must switch this to carry the column through unchanged (see the
+	// ServiceNamespace note on `logs_aggregates_hourly`).
+	forwardQuery: `SELECT
+    OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
+    QueryKey, QueryLabel, SampleStatement,
+    CallCount, ErrorCount, EstimatedCount, EstimatedErrorCount,
+    WeightedDurationSumMs, DurationQuantiles,
+    defaultValueOfTypeName('LowCardinality(String)') AS DbNamespace`,
 })
 
 export type ServiceMapDbQueryShapesHourlyRow = InferRow<typeof serviceMapDbQueryShapesHourly>

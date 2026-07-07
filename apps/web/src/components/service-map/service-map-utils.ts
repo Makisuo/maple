@@ -47,6 +47,8 @@ export interface ServiceNodeData {
 	platform?: ServicePlatform
 	runtime?: string
 	dbSystem?: string
+	/** Database identity (db.namespace et al.); "" for the generic per-system node. */
+	dbNamespace?: string
 	/** Overlaid onto matched instrumented Workers from the direct integration. */
 	cloudflare?: CloudflareNodeMetrics
 	colorMode?: ServiceMapColorMode
@@ -114,11 +116,27 @@ const EDGE_ID_PREFIX = "edge:"
 
 const encodeIdComponent = (raw: string): string => encodeURIComponent(raw)
 
-export const dbNodeId = (system: string) => `${DB_NODE_PREFIX}${encodeIdComponent(system)}`
+export const dbNodeId = (system: string, namespace: string) =>
+	`${DB_NODE_PREFIX}${encodeIdComponent(system)}:${encodeIdComponent(namespace)}`
 const edgeIdFor = (source: string, target: string) =>
 	`${EDGE_ID_PREFIX}${encodeIdComponent(source)}:${encodeIdComponent(target)}`
 
 export const isDbNodeId = (id: string) => id.startsWith(DB_NODE_PREFIX)
+
+/**
+ * Inverse of {@link dbNodeId}. Both components are URI-encoded, so the first
+ * `:` after the prefix is the separator. Legacy single-component ids (from a
+ * stale layout snapshot) decode with `dbNamespace: ""` — the generic node.
+ */
+export const parseDbNodeId = (id: string): { dbSystem: string; dbNamespace: string } => {
+	const rest = id.slice(DB_NODE_PREFIX.length)
+	const sep = rest.indexOf(":")
+	if (sep === -1) return { dbSystem: decodeURIComponent(rest), dbNamespace: "" }
+	return {
+		dbSystem: decodeURIComponent(rest.slice(0, sep)),
+		dbNamespace: decodeURIComponent(rest.slice(sep + 1)),
+	}
+}
 
 // Layout constants (defaults)
 export const DEFAULT_LAYOUT_CONFIG = {
@@ -214,15 +232,28 @@ export function buildFlowElements({
 		infraMap.set(wl.serviceName, existing)
 	}
 
-	// Aggregate by `db.system` so multiple services calling the same database
-	// land on a single node. Sum of call/error counts; weighted-average latency.
+	// Aggregate by database identity — (db.system, db.namespace) — so services
+	// calling the SAME database share a node while distinct databases of the
+	// same system stay separate. Namespace-less edges ("" — legacy rows or
+	// unidentified instrumentation) collapse into one generic per-system node.
+	// Sum of call/error counts; weighted-average latency.
 	const dbAgg = new Map<
 		string,
-		{ callCount: number; errorCount: number; durationSumMs: number; maxP95: number }
+		{
+			dbSystem: string
+			dbNamespace: string
+			callCount: number
+			errorCount: number
+			durationSumMs: number
+			maxP95: number
+		}
 	>()
 	for (const e of dbEdges) {
 		if (!e.dbSystem) continue
-		const existing = dbAgg.get(e.dbSystem) ?? {
+		const nodeId = dbNodeId(e.dbSystem, e.dbNamespace)
+		const existing = dbAgg.get(nodeId) ?? {
+			dbSystem: e.dbSystem,
+			dbNamespace: e.dbNamespace,
 			callCount: 0,
 			errorCount: 0,
 			durationSumMs: 0,
@@ -232,7 +263,7 @@ export function buildFlowElements({
 		existing.errorCount += e.errorCount
 		existing.durationSumMs += e.avgDurationMs * e.callCount
 		existing.maxP95 = Math.max(existing.maxP95, e.p95DurationMs)
-		dbAgg.set(e.dbSystem, existing)
+		dbAgg.set(nodeId, existing)
 	}
 
 	const safeDuration = Math.max(durationSeconds, 1)
@@ -263,13 +294,14 @@ export function buildFlowElements({
 		}
 	})
 
-	for (const [dbSystem, agg] of dbAgg) {
+	for (const [nodeId, agg] of dbAgg) {
 		flowNodes.push({
-			id: dbNodeId(dbSystem),
+			id: nodeId,
 			type: "serviceNode",
 			position: { x: 0, y: 0 },
 			data: {
-				label: dbSystem,
+				// Named databases show their identity; the generic node keeps the system.
+				label: agg.dbNamespace || agg.dbSystem,
 				kind: "database",
 				throughput: agg.callCount / safeDuration,
 				tracedThroughput: agg.callCount / safeDuration,
@@ -280,7 +312,8 @@ export function buildFlowElements({
 				p95LatencyMs: agg.maxP95,
 				services,
 				selected: false,
-				dbSystem,
+				dbSystem: agg.dbSystem,
+				dbNamespace: agg.dbNamespace,
 			},
 		})
 	}
@@ -334,9 +367,9 @@ export function buildFlowElements({
 	for (const e of dbEdges) {
 		if (!e.dbSystem || !e.sourceService) continue
 		flowEdges.push({
-			id: edgeIdFor(e.sourceService, dbNodeId(e.dbSystem)),
+			id: edgeIdFor(e.sourceService, dbNodeId(e.dbSystem, e.dbNamespace)),
 			source: e.sourceService,
-			target: dbNodeId(e.dbSystem),
+			target: dbNodeId(e.dbSystem, e.dbNamespace),
 			type: "serviceEdge",
 			data: {
 				callCount: e.callCount,

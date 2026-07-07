@@ -11,7 +11,6 @@ import { Effect, Schema } from "effect"
 import {
 	CloudflareInfraPlatformResourcesRequest,
 	CloudflareInfraWorkersRequest,
-	CloudflareInfraWorkerTimeseriesRequest,
 	CloudflareInfraZoneDetailRequest,
 	CloudflareInfraZoneDnsRequest,
 	CloudflareInfraZoneHostsRequest,
@@ -77,14 +76,6 @@ export interface CloudflareWorkerRow {
 	cpuP99Ms: number
 	durationP50Ms: number
 	durationP99Ms: number
-}
-
-export interface CloudflareWorkerTimeseriesRow {
-	serviceName: string
-	scriptName: string
-	bucket: string
-	requests: number
-	errors: number
 }
 
 const TimeRangeInputSchema = Schema.Struct({
@@ -591,32 +582,3 @@ export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopT
 	}
 })
 
-export const getCloudflareWorkerTimeseries = Effect.fn("QueryEngine.getCloudflareWorkerTimeseries")(
-	function* ({ data }: { data: CloudflareInfraTimeseriesInput }) {
-		const input = yield* decodeInput(TimeseriesInputSchema, data, "getCloudflareWorkerTimeseries")
-		const result = yield* runWarehouseQuery("cloudflareInfraWorkerTimeseries", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
-				return yield* client.queryEngine.cloudflareInfraWorkerTimeseries({
-					payload: new CloudflareInfraWorkerTimeseriesRequest({
-						startTime: input.startTime,
-						endTime: input.endTime,
-						bucketSeconds: input.bucketSeconds,
-					}),
-				})
-			}),
-		)
-		return {
-			buckets: result.data.map((row): CloudflareWorkerTimeseriesRow => {
-				const serviceName = String(row.serviceName ?? "")
-				return {
-					serviceName,
-					scriptName: stripPrefix(serviceName, WORKER_SERVICE_PREFIX),
-					bucket: String(row.bucket ?? ""),
-					requests: Number(row.requests ?? 0),
-					errors: Number(row.errors ?? 0),
-				}
-			}),
-		}
-	},
-)

@@ -13,7 +13,6 @@ import {
 	DB_QUERY_KEY_SQL,
 	DB_QUERY_LABEL_SQL,
 	DB_STATEMENT_SQL,
-	DB_SYSTEM_ATTR_SQL,
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { Schema } from "effect"
@@ -31,6 +30,7 @@ import { from, fromQuery, fromUnion } from "@maple-dev/clickhouse-builder"
 import {
 	ServiceMapChildren,
 	ServiceMapDbEdgesHourly,
+	ServiceMapDbQueryShapesHourly,
 	ServiceMapEdgesHourly,
 	ServiceMapSpans,
 	ServicePlatformsHourly,
@@ -411,6 +411,7 @@ export interface ServiceDbEdgesOpts {
 export interface ServiceDbEdgesOutput {
 	readonly sourceService: string
 	readonly dbSystem: string
+	readonly dbNamespace: string
 	readonly callCount: number
 	readonly errorCount: number
 	readonly avgDurationMs: number
@@ -421,6 +422,7 @@ export interface ServiceDbEdgesOutput {
 const ServiceDbEdgesOutputSchema: CompiledQueryRowSchema<ServiceDbEdgesOutput> = Schema.Struct({
 	sourceService: Schema.String,
 	dbSystem: Schema.String,
+	dbNamespace: Schema.String,
 	callCount: CHNumber,
 	errorCount: CHNumber,
 	avgDurationMs: CHNumber,
@@ -432,78 +434,112 @@ export function serviceDbEdgesSQL(
 	opts: ServiceDbEdgesOpts,
 	params: { orgId: string; startTime: string; endTime: string },
 ): CompiledQuery<ServiceDbEdgesOutput> {
-	const esc = escapeClickHouseString
-	const envFilterMv = opts.deploymentEnv ? `AND DeploymentEnv = '${esc(opts.deploymentEnv)}'` : ""
-	const envFilterRaw = opts.deploymentEnv
-		? `AND ResourceAttributes['deployment.environment'] = '${esc(opts.deploymentEnv)}'`
-		: ""
+	return compileCH(serviceDbEdgesQueryBase(opts), params, {
+		rowSchema: ServiceDbEdgesOutputSchema,
+	})
+}
 
-	// Inner branches expose `bucket*` aliases so the outer `sum(...) AS callCount`
-	// can't collide with an inner `sum(CallCount) AS callCount` — same fix as
-	// `serviceDependenciesSQL` for the same nested-aggregate optimizer error.
-	// Historical buckets that pre-date the SampleRateSum column have it set to
-	// 0, so we fall back to CallCount per-row (treats those buckets as
-	// unsampled — degraded but safe).
-	const hourlyEdges = `SELECT
-      ServiceName AS sourceService,
-      DbSystem AS dbSystem,
-      sum(CallCount) AS bucketCallCount,
-      sum(ErrorCount) AS bucketErrorCount,
-      sum(DurationSumMs) AS bucketDurationSumMs,
-      max(MaxDurationMs) AS bucketMaxDurationMs,
-      sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
-    FROM service_map_db_edges_hourly
-    WHERE OrgId = '${esc(params.orgId)}'
-      AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
-      AND DbSystem != ''
-      ${envFilterMv}
-    GROUP BY sourceService, dbSystem`
+// Shared DSL expressions for identifying the database a Client/Producer span
+// talks to, mirroring the write-side `DB_SYSTEM_ATTR_SQL` /
+// `DB_NAMESPACE_ATTR_SQL` fragments so raw-branch keys merge with the MV's.
+const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+	CH.coalesce(
+		CH.nullIf($.SpanAttributes.get("db.system.name"), ""),
+		$.SpanAttributes.get("db.system"),
+	)
+const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+	CH.coalesce(
+		CH.nullIf($.SpanAttributes.get("db.namespace"), ""),
+		CH.nullIf($.SpanAttributes.get("db.name"), ""),
+		CH.nullIf($.SpanAttributes.get("server.address"), ""),
+		$.SpanAttributes.get("net.peer.name"),
+	)
+
+/**
+ * Shared builder behind `serviceDbEdgesSQL` (org-wide) and
+ * `serviceDbEdgesForServiceQuery` (service-scoped) — identical dual-source
+ * shape, the scoped variant just adds a `ServiceName = ?` filter to both
+ * branches.
+ *
+ * Inner branches expose `bucket*` aliases so the outer `sum(...) AS callCount`
+ * can't collide with an inner `sum(CallCount) AS callCount` — same fix as
+ * `serviceDependenciesSQL` for the same nested-aggregate optimizer error.
+ * Historical buckets that pre-date the SampleRateSum column have it set to
+ * 0, so we fall back to CallCount per-row (treats those buckets as
+ * unsampled — degraded but safe).
+ */
+function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: string }) {
+	// Hourly branch — sealed buckets from service_map_db_edges_hourly_mv.
+	const hourlyBranch = from(ServiceMapDbEdgesHourly)
+		.select(($) => ({
+			sourceService: $.ServiceName,
+			dbSystem: $.DbSystem,
+			dbNamespace: $.DbNamespace,
+			bucketCallCount: CH.sum($.CallCount),
+			bucketErrorCount: CH.sum($.ErrorCount),
+			bucketDurationSumMs: CH.sum($.DurationSumMs),
+			bucketMaxDurationMs: CH.max_($.MaxDurationMs),
+			bucketEstimatedSpanCount: CH.sum(
+				CH.if_($.SampleRateSum.gt(0), $.SampleRateSum, _toFloat64($.CallCount)),
+			),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
+			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
+			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+			$.DbSystem.neq(""),
+			opts.deploymentEnv ? $.DeploymentEnv.eq(opts.deploymentEnv) : undefined,
+		])
+		.groupBy("sourceService", "dbSystem", "dbNamespace")
 
 	// Raw fallback for the in-progress hour only (the MV branch stops at
 	// `toStartOfHour(endTime)`). Reads per-row `SampleRate` directly so no
-	// inline weight math is needed. Carries `bucketDurationSumMs` separately
-	// so the outer can do a properly-weighted average.
-	const recentEdges = `SELECT
-      ServiceName AS sourceService,
-      SpanAttributes['db.system.name'] AS dbSystem,
-      count() AS bucketCallCount,
-      countIf(StatusCode = 'Error') AS bucketErrorCount,
-      sum(Duration / 1000000) AS bucketDurationSumMs,
-      max(Duration / 1000000) AS bucketMaxDurationMs,
-      sum(SampleRate) AS bucketEstimatedSpanCount
-    FROM traces
-    WHERE OrgId = '${esc(params.orgId)}'
-      AND Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))
-      AND Timestamp <= '${esc(params.endTime)}'
-      AND SpanKind IN ('Client', 'Producer')
-      AND SpanAttributes['db.system.name'] != ''
-      AND ServiceName != ''
-      ${envFilterRaw}
-    GROUP BY sourceService, dbSystem`
+	// inline weight math is needed, and carries `bucketDurationSumMs`
+	// separately so the outer can do a properly-weighted average.
+	const recentBranch = from(Traces)
+		.select(($) => ({
+			sourceService: $.ServiceName,
+			dbSystem: dbSystemExpr($),
+			dbNamespace: dbNamespaceExpr($),
+			bucketCallCount: CH.count(),
+			bucketErrorCount: CH.countIf($.StatusCode.eq("Error")),
+			bucketDurationSumMs: CH.sum($.Duration.div(1000000)),
+			bucketMaxDurationMs: CH.max_($.Duration.div(1000000)),
+			bucketEstimatedSpanCount: CH.sum($.SampleRate),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			// Scoped to a service (implies non-empty) or, org-wide, require a named
+			// service — the hourly MV already filters `ServiceName != ''` at write
+			// time, so this keeps the raw in-progress-hour branch consistent and
+			// avoids phantom edges from unnamed spans.
+			opts.serviceName ? $.ServiceName.eq(opts.serviceName) : $.ServiceName.neq(""),
+			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			$.SpanKind.in_("Client", "Producer"),
+			dbSystemExpr($).neq(""),
+			opts.deploymentEnv
+				? $.ResourceAttributes.get("deployment.environment").eq(opts.deploymentEnv)
+				: undefined,
+		])
+		.groupBy("sourceService", "dbSystem", "dbNamespace")
 
-	const sql = `SELECT
-  sourceService,
-  dbSystem,
-  sum(bucketCallCount) AS callCount,
-  sum(bucketErrorCount) AS errorCount,
-  sum(bucketDurationSumMs) / nullIf(sum(bucketCallCount), 0) AS avgDurationMs,
-  max(bucketMaxDurationMs) AS p95DurationMs,
-  sum(bucketEstimatedSpanCount) AS estimatedSpanCount
-FROM (
-  ${hourlyEdges}
-  UNION ALL
-  ${recentEdges}
-)
-GROUP BY sourceService, dbSystem
-ORDER BY callCount DESC
-LIMIT 200
-FORMAT JSON`
-
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceDbEdgesOutputSchema,
-	})
+	return fromUnion(unionAll(hourlyBranch, recentBranch), "edges")
+		.select(($) => ({
+			sourceService: $.sourceService,
+			dbSystem: $.dbSystem,
+			dbNamespace: $.dbNamespace,
+			callCount: CH.sum($.bucketCallCount),
+			errorCount: CH.sum($.bucketErrorCount),
+			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
+			p95DurationMs: CH.max_($.bucketMaxDurationMs),
+			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
+		}))
+		.groupBy("sourceService", "dbSystem", "dbNamespace")
+		.orderBy(["callCount", "desc"])
+		.limit(200)
+		.format("JSON")
 }
 
 // ---------------------------------------------------------------------------
@@ -526,75 +562,7 @@ export interface ServiceDbEdgesForServiceOpts {
  * already on the parent span as `db.system.name`).
  */
 export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts) {
-	const envFilterMv = (deploymentEnv: CH.Expr<string>) =>
-		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
-	const envFilterRaw = (resourceAttributes: CH.ColumnRef<"ResourceAttributes", any>) =>
-		opts.deploymentEnv
-			? resourceAttributes.get("deployment.environment").eq(opts.deploymentEnv)
-			: undefined
-
-	// Hourly branch — sealed buckets from service_map_db_edges_hourly_mv.
-	const hourlyBranch = from(ServiceMapDbEdgesHourly)
-		.select(($) => ({
-			sourceService: $.ServiceName,
-			dbSystem: $.DbSystem,
-			bucketCallCount: CH.sum($.CallCount),
-			bucketErrorCount: CH.sum($.ErrorCount),
-			bucketDurationSumMs: CH.sum($.DurationSumMs),
-			bucketMaxDurationMs: CH.max_($.MaxDurationMs),
-			bucketEstimatedSpanCount: CH.sum(
-				CH.if_($.SampleRateSum.gt(0), $.SampleRateSum, _toFloat64($.CallCount)),
-			),
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.ServiceName.eq(opts.serviceName),
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
-			$.DbSystem.neq(""),
-			envFilterMv($.DeploymentEnv),
-		])
-		.groupBy("sourceService", "dbSystem")
-
-	// Raw fallback for the in-progress hour only. `Traces.SampleRate` is a
-	// per-row materialized column (no inline weight math needed), and the
-	// untyped Output cast below mirrors the column types on the hourly
-	// branch so the union's `Output` shape stays consistent.
-	const recentBranch = from(Traces)
-		.select(($) => ({
-			sourceService: $.ServiceName,
-			dbSystem: $.SpanAttributes.get("db.system.name"),
-			bucketCallCount: CH.count(),
-			bucketErrorCount: CH.countIf($.StatusCode.eq("Error")),
-			bucketDurationSumMs: CH.sum($.Duration.div(1000000)),
-			bucketMaxDurationMs: CH.max_($.Duration.div(1000000)),
-			bucketEstimatedSpanCount: CH.sum($.SampleRate),
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.ServiceName.eq(opts.serviceName),
-			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
-			$.Timestamp.lte(param.dateTime("endTime")),
-			$.SpanKind.in_("Client", "Producer"),
-			$.SpanAttributes.get("db.system.name").neq(""),
-			envFilterRaw($.ResourceAttributes),
-		])
-		.groupBy("sourceService", "dbSystem")
-
-	return fromUnion(unionAll(hourlyBranch, recentBranch), "edges")
-		.select(($) => ({
-			sourceService: $.sourceService,
-			dbSystem: $.dbSystem,
-			callCount: CH.sum($.bucketCallCount),
-			errorCount: CH.sum($.bucketErrorCount),
-			avgDurationMs: CH.sum($.bucketDurationSumMs).div(CH.nullIf(CH.sum($.bucketCallCount), CH.lit(0))),
-			p95DurationMs: CH.max_($.bucketMaxDurationMs),
-			estimatedSpanCount: CH.sum($.bucketEstimatedSpanCount),
-		}))
-		.groupBy("sourceService", "dbSystem")
-		.orderBy(["callCount", "desc"])
-		.limit(200)
-		.format("JSON")
+	return serviceDbEdgesQueryBase(opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -613,6 +581,12 @@ export function serviceDbEdgesForServiceQuery(opts: ServiceDbEdgesForServiceOpts
 export interface ServiceDbQuerySummaryParams {
 	readonly orgId: string
 	readonly dbSystem: string
+	/**
+	 * Scope to one database identity (`DbNamespace`). `undefined` = unscoped
+	 * (all databases of the system); `""` = the legacy/unknown node (spans that
+	 * carry no identifying attribute + pre-migration rollup rows).
+	 */
+	readonly dbNamespace?: string
 	readonly startTime: string
 	readonly endTime: string
 	readonly sourceService?: string
@@ -721,94 +695,119 @@ const clampTopN = (value: number | undefined): number => {
 	return Math.min(50, Math.max(1, rounded))
 }
 
-// WHERE for the sealed hourly-rollup branch (service_map_db_query_shapes_hourly).
+// Filters for the sealed hourly-rollup branch (service_map_db_query_shapes_hourly).
 // Covers only complete hours: [startHour, endHour) — the in-progress hour comes
 // from the raw branch below.
-function shapesHourlyWhere(params: ServiceDbQuerySummaryParams): string {
-	const esc = escapeClickHouseString
-	const sourceServiceFilter = params.sourceService ? `AND ServiceName = '${esc(params.sourceService)}'` : ""
-	const envFilter = params.deploymentEnv ? `AND DeploymentEnv = '${esc(params.deploymentEnv)}'` : ""
+const shapesHourlyFilters = (
+	$: {
+		OrgId: CH.Expr<string>
+		Hour: CH.Expr<string>
+		DbSystem: CH.Expr<string>
+		DbNamespace: CH.Expr<string>
+		ServiceName: CH.Expr<string>
+		DeploymentEnv: CH.Expr<string>
+	},
+	params: ServiceDbQuerySummaryParams,
+) => [
+	$.OrgId.eq(param.string("orgId")),
+	$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
+	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+	$.DbSystem.eq(params.dbSystem),
+	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
+	params.dbNamespace !== undefined ? $.DbNamespace.eq(params.dbNamespace) : undefined,
+	params.sourceService ? $.ServiceName.eq(params.sourceService) : undefined,
+	params.deploymentEnv ? $.DeploymentEnv.eq(params.deploymentEnv) : undefined,
+]
 
-	return `OrgId = '${esc(params.orgId)}'
-      AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
-      AND DbSystem = '${esc(params.dbSystem)}'
-      ${sourceServiceFilter}
-      ${envFilter}`
-}
-
-// WHERE for the raw `traces` branch. `scope` selects the time window:
+// Filters for the raw `traces` branch. `scope` selects the time window:
 //  - "currentHour": only the in-progress hour the rollup hasn't sealed yet
 //    (UNION-ed with the sealed rollup branch)
 //  - "fullWindow":  the whole [start, end] window (sub-hour timeseries, which
 //    the hourly rollup can't express)
-function serviceDbRawWhere(params: ServiceDbQuerySummaryParams, scope: "currentHour" | "fullWindow"): string {
-	const esc = escapeClickHouseString
-	const sourceServiceFilter = params.sourceService ? `AND ServiceName = '${esc(params.sourceService)}'` : ""
-	const envFilter = params.deploymentEnv
-		? `AND ResourceAttributes['deployment.environment'] = '${esc(params.deploymentEnv)}'`
-		: ""
-	const since =
-		scope === "currentHour"
-			? `Timestamp >= toStartOfHour(toDateTime('${esc(params.endTime)}'))`
-			: `Timestamp >= toDateTime('${esc(params.startTime)}')`
+// DbSystem/DbNamespace equality goes through the shared write-side coalesce
+// expressions so raw-hour rows land on the same identity as sealed ones.
+const serviceDbRawFilters = (
+	$: {
+		OrgId: CH.Expr<string>
+		Timestamp: CH.Expr<string>
+		SpanKind: CH.Expr<string>
+		ServiceName: CH.Expr<string>
+		SpanAttributes: CH.ColumnRef<"SpanAttributes", any>
+		ResourceAttributes: CH.ColumnRef<"ResourceAttributes", any>
+	},
+	params: ServiceDbQuerySummaryParams,
+	scope: "currentHour" | "fullWindow",
+) => [
+	$.OrgId.eq(param.string("orgId")),
+	scope === "currentHour"
+		? $.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime"))))
+		: $.Timestamp.gte(CH.toDateTime(param.dateTime("startTime"))),
+	$.Timestamp.lte(CH.toDateTime(param.dateTime("endTime"))),
+	$.SpanKind.in_("Client", "Producer"),
+	$.ServiceName.neq(""),
+	dbSystemExpr($).eq(params.dbSystem),
+	// Same undefined-vs-'' semantics as `shapesHourlyFilters`.
+	params.dbNamespace !== undefined ? dbNamespaceExpr($).eq(params.dbNamespace) : undefined,
+	params.sourceService ? $.ServiceName.eq(params.sourceService) : undefined,
+	params.deploymentEnv
+		? $.ResourceAttributes.get("deployment.environment").eq(params.deploymentEnv)
+		: undefined,
+]
 
-	return `OrgId = '${esc(params.orgId)}'
-      AND ${since}
-      AND Timestamp <= toDateTime('${esc(params.endTime)}')
-      AND SpanKind IN ('Client', 'Producer')
-      AND ServiceName != ''
-      AND ${DB_SYSTEM_ATTR_SQL} = '${esc(params.dbSystem)}'
-      ${sourceServiceFilter}
-      ${envFilter}`
-}
+// Aggregate-state expressions shared by the summary/timeseries/top-queries
+// builders. These stay raw: the DSL has no notion of ClickHouse `-State` /
+// `-Merge` combinators, and the strings must match the rollup's stored state
+// type exactly.
+const UNIQ_SERVICE_STATE_EXPR = "uniqState(toString(ServiceName))"
+const TDIGEST_MERGE_STATE_EXPR = "quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles)"
+const mergedQuantileExpr = (index: 1 | 2) =>
+	CH.rawExpr<number>(
+		`if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), ${index}) / 1000000, 0)`,
+	)
 
 export function serviceDbQuerySummarySQL(
 	params: ServiceDbQuerySummaryParams,
 ): CompiledQuery<ServiceDbQuerySummaryOutput> {
 	// Sealed hours from the rollup; ServiceName/DurationQuantiles re-aggregated at
 	// read time (the table is queried without FINAL).
-	const sealed = `SELECT
-      sum(CallCount) AS bCount,
-      sum(EstimatedCount) AS bEst,
-      sum(ErrorCount) AS bErr,
-      sum(EstimatedErrorCount) AS bEstErr,
-      sum(WeightedDurationSumMs) AS bWDur,
-      uniqState(toString(ServiceName)) AS bSvc,
-      quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ
-    FROM service_map_db_query_shapes_hourly
-    WHERE ${shapesHourlyWhere(params)}`
-	const recent = `SELECT
-      count() AS bCount,
-      sum(SampleRate) AS bEst,
-      countIf(StatusCode = 'Error') AS bErr,
-      sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
-      sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
-      uniqState(toString(ServiceName)) AS bSvc,
-      ${DB_DURATION_TDIGEST_STATE_EXPR} AS bQ
-    FROM traces
-    WHERE ${serviceDbRawWhere(params, "currentHour")}`
-	const sql = `SELECT
-  sum(bCount) AS queryCount,
-  sum(bEst) AS estimatedQueryCount,
-  sum(bErr) AS errorCount,
-  sum(bEstErr) AS estimatedErrorCount,
-  if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
-  if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
-  if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
-  if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs,
-  uniqMerge(bSvc) AS activeServiceCount
-FROM (
-  ${sealed}
-  UNION ALL
-  ${recent}
-)
-FORMAT JSON`
+	const sealed = from(ServiceMapDbQueryShapesHourly)
+		.select(($) => ({
+			bCount: CH.sum($.CallCount),
+			bEst: CH.sum($.EstimatedCount),
+			bErr: CH.sum($.ErrorCount),
+			bEstErr: CH.sum($.EstimatedErrorCount),
+			bWDur: CH.sum($.WeightedDurationSumMs),
+			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+		}))
+		.where(($) => shapesHourlyFilters($, params))
+	const recent = from(Traces)
+		.select(($) => ({
+			bCount: CH.count(),
+			bEst: CH.sum($.SampleRate),
+			bErr: CH.countIf($.StatusCode.eq("Error")),
+			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
+			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
+			bSvc: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+		}))
+		.where(($) => serviceDbRawFilters($, params, "currentHour"))
 
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceDbQuerySummaryOutputSchema,
-	})
+	const query = fromUnion(unionAll(sealed, recent), "branches")
+		.select(($) => ({
+			queryCount: CH.sum($.bCount),
+			estimatedQueryCount: CH.sum($.bEst),
+			errorCount: CH.sum($.bErr),
+			estimatedErrorCount: CH.sum($.bEstErr),
+			errorRate: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bEstErr).div(CH.sum($.bEst)), CH.lit(0)),
+			avgDurationMs: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bWDur).div(CH.sum($.bEst)), CH.lit(0)),
+			p50DurationMs: mergedQuantileExpr(1),
+			p95DurationMs: mergedQuantileExpr(2),
+			activeServiceCount: CH.rawExpr<number>("uniqMerge(bSvc)"),
+		}))
+		.format("JSON")
+
+	return compileCH(query, params, { rowSchema: ServiceDbQuerySummaryOutputSchema })
 }
 
 export function serviceDbQueryTimeseriesSQL(
@@ -820,116 +819,147 @@ export function serviceDbQueryTimeseriesSQL(
 	// for ≤24h) can't be served by the hourly rollup, but those scans are cheap;
 	// read raw `traces` directly for the full window.
 	if (bucketSeconds < 3600) {
-		const sql = `SELECT
-  toStartOfInterval(toDateTime(Timestamp), INTERVAL ${bucketSeconds} SECOND) AS bucket,
-  count() AS queryCount,
-  sum(SampleRate) AS estimatedQueryCount,
-  countIf(StatusCode = 'Error') AS errorCount,
-  if(sum(SampleRate) > 0, sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate), 0) AS errorRate,
-  if(sum(SampleRate) > 0, sum(toFloat64(Duration) * SampleRate) / sum(SampleRate) / 1000000, 0) AS avgDurationMs,
-  if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 1) / 1000000, 0) AS p50DurationMs,
-  if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 2) / 1000000, 0) AS p95DurationMs
-FROM traces
-WHERE ${serviceDbRawWhere(params, "fullWindow")}
-GROUP BY bucket
-ORDER BY bucket ASC
-LIMIT 2000
-FORMAT JSON`
-		return unsafeCompiledQuery({
-			sql,
-			rowSchema: ServiceDbQueryTimeseriesOutputSchema,
-		})
+		const query = from(Traces)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval(CH.toDateTime($.Timestamp), bucketSeconds),
+				queryCount: CH.count(),
+				estimatedQueryCount: CH.sum($.SampleRate),
+				errorCount: CH.countIf($.StatusCode.eq("Error")),
+				errorRate: CH.if_(
+					CH.sum($.SampleRate).gt(0),
+					CH.sumIf($.SampleRate, $.StatusCode.eq("Error")).div(CH.sum($.SampleRate)),
+					CH.lit(0),
+				),
+				avgDurationMs: CH.if_(
+					CH.sum($.SampleRate).gt(0),
+					CH.sum(_toFloat64($.Duration).mul($.SampleRate)).div(CH.sum($.SampleRate)).div(1000000),
+					CH.lit(0),
+				),
+				p50DurationMs: CH.rawExpr<number>(
+					`if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 1) / 1000000, 0)`,
+				),
+				p95DurationMs: CH.rawExpr<number>(
+					`if(count() > 0, arrayElement(${DB_DURATION_QUANTILES_EXPR}, 2) / 1000000, 0)`,
+				),
+			}))
+			.where(($) => serviceDbRawFilters($, params, "fullWindow"))
+			.groupBy("bucket")
+			.orderBy(["bucket", "asc"])
+			.limit(2000)
+			.format("JSON")
+		return compileCH(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
 	}
 
 	// Hour-aligned buckets (≥1h — pickDbSummaryBucketSeconds gives 1h/6h for >24h):
 	// sealed rollup hours UNION the in-progress hour from raw traces.
-	const sealed = `SELECT
-      toStartOfInterval(Hour, INTERVAL ${bucketSeconds} SECOND) AS bucket,
-      sum(CallCount) AS bCount,
-      sum(EstimatedCount) AS bEst,
-      sum(ErrorCount) AS bErr,
-      sum(EstimatedErrorCount) AS bEstErr,
-      sum(WeightedDurationSumMs) AS bWDur,
-      quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ
-    FROM service_map_db_query_shapes_hourly
-    WHERE ${shapesHourlyWhere(params)}
-    GROUP BY bucket`
-	const recent = `SELECT
-      toStartOfInterval(toDateTime(Timestamp), INTERVAL ${bucketSeconds} SECOND) AS bucket,
-      count() AS bCount,
-      sum(SampleRate) AS bEst,
-      countIf(StatusCode = 'Error') AS bErr,
-      sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
-      sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
-      ${DB_DURATION_TDIGEST_STATE_EXPR} AS bQ
-    FROM traces
-    WHERE ${serviceDbRawWhere(params, "currentHour")}
-    GROUP BY bucket`
-	const sql = `SELECT
-  bucket,
-  sum(bCount) AS queryCount,
-  sum(bEst) AS estimatedQueryCount,
-  sum(bErr) AS errorCount,
-  if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
-  if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
-  if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
-  if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs
-FROM (
-  ${sealed}
-  UNION ALL
-  ${recent}
-)
-GROUP BY bucket
-ORDER BY bucket ASC
-LIMIT 2000
-FORMAT JSON`
+	const sealed = from(ServiceMapDbQueryShapesHourly)
+		.select(($) => ({
+			bucket: CH.toStartOfInterval($.Hour, bucketSeconds),
+			bCount: CH.sum($.CallCount),
+			bEst: CH.sum($.EstimatedCount),
+			bErr: CH.sum($.ErrorCount),
+			bEstErr: CH.sum($.EstimatedErrorCount),
+			bWDur: CH.sum($.WeightedDurationSumMs),
+			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+		}))
+		.where(($) => shapesHourlyFilters($, params))
+		.groupBy("bucket")
+	const recent = from(Traces)
+		.select(($) => ({
+			bucket: CH.toStartOfInterval(CH.toDateTime($.Timestamp), bucketSeconds),
+			bCount: CH.count(),
+			bEst: CH.sum($.SampleRate),
+			bErr: CH.countIf($.StatusCode.eq("Error")),
+			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
+			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
+			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+		}))
+		.where(($) => serviceDbRawFilters($, params, "currentHour"))
+		.groupBy("bucket")
 
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceDbQueryTimeseriesOutputSchema,
-	})
+	const query = fromUnion(unionAll(sealed, recent), "buckets")
+		.select(($) => ({
+			bucket: $.bucket,
+			queryCount: CH.sum($.bCount),
+			estimatedQueryCount: CH.sum($.bEst),
+			errorCount: CH.sum($.bErr),
+			errorRate: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bEstErr).div(CH.sum($.bEst)), CH.lit(0)),
+			avgDurationMs: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bWDur).div(CH.sum($.bEst)), CH.lit(0)),
+			p50DurationMs: mergedQuantileExpr(1),
+			p95DurationMs: mergedQuantileExpr(2),
+		}))
+		.groupBy("bucket")
+		.orderBy(["bucket", "asc"])
+		.limit(2000)
+		.format("JSON")
+
+	return compileCH(query, params, { rowSchema: ServiceDbQueryTimeseriesOutputSchema })
 }
 
 export function serviceDbTopQueriesSQL(
 	params: ServiceDbQuerySummaryParams,
 ): CompiledQuery<ServiceDbTopQueryOutput> {
 	const topN = clampTopN(params.topN)
+
 	// Sealed rollup shapes — pre-computed QueryKey/QueryLabel, so no per-row
 	// fingerprinting on this branch.
-	const sealed = `SELECT
-      QueryKey AS queryKey,
-      any(QueryLabel) AS bLabel,
-      any(SampleStatement) AS bStatement,
-      any(toString(ServiceName)) AS bSampleService,
-      uniqState(toString(ServiceName)) AS bServices,
-      sum(CallCount) AS bCount,
-      sum(EstimatedCount) AS bEst,
-      sum(ErrorCount) AS bErr,
-      sum(EstimatedErrorCount) AS bEstErr,
-      sum(WeightedDurationSumMs) AS bWDur,
-      quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ,
-      max(Hour) AS bLastSeen
-    FROM service_map_db_query_shapes_hourly
-    WHERE ${shapesHourlyWhere(params)}
-    GROUP BY queryKey`
+	const sealed = from(ServiceMapDbQueryShapesHourly)
+		.select(($) => ({
+			queryKey: $.QueryKey,
+			bLabel: CH.any_($.QueryLabel),
+			bStatement: CH.any_($.SampleStatement),
+			bSampleService: CH.any_(CH.toString_($.ServiceName)),
+			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bCount: CH.sum($.CallCount),
+			bEst: CH.sum($.EstimatedCount),
+			bErr: CH.sum($.ErrorCount),
+			bEstErr: CH.sum($.EstimatedErrorCount),
+			bWDur: CH.sum($.WeightedDurationSumMs),
+			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bLastSeen: CH.max_($.Hour),
+		}))
+		.where(($) => shapesHourlyFilters($, params))
+		.groupBy("queryKey")
 	// In-progress hour — derives QueryKey/QueryLabel from the SAME shared SQL the
-	// rollup MV uses, so a shape's key matches across the sealed/live boundary.
-	const recent = `SELECT
-      ${DB_QUERY_KEY_SQL} AS queryKey,
-      any(substring(${DB_QUERY_LABEL_SQL}, 1, 220)) AS bLabel,
-      any(substring(${DB_STATEMENT_SQL}, 1, 1000)) AS bStatement,
-      any(toString(ServiceName)) AS bSampleService,
-      uniqState(toString(ServiceName)) AS bServices,
-      count() AS bCount,
-      sum(SampleRate) AS bEst,
-      countIf(StatusCode = 'Error') AS bErr,
-      sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
-      sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
-      ${DB_DURATION_TDIGEST_STATE_EXPR} AS bQ,
-      max(toDateTime(Timestamp)) AS bLastSeen
-    FROM traces
-    WHERE ${serviceDbRawWhere(params, "currentHour")}
-    GROUP BY queryKey`
+	// rollup MV uses (raw exprs, no DSL equivalent), so a shape's key matches
+	// across the sealed/live boundary.
+	const recent = from(Traces)
+		.select(($) => ({
+			queryKey: CH.rawExpr<string>(DB_QUERY_KEY_SQL),
+			bLabel: CH.rawExpr<string>(`any(substring(${DB_QUERY_LABEL_SQL}, 1, 220))`),
+			bStatement: CH.rawExpr<string>(`any(substring(${DB_STATEMENT_SQL}, 1, 1000))`),
+			bSampleService: CH.any_(CH.toString_($.ServiceName)),
+			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bCount: CH.count(),
+			bEst: CH.sum($.SampleRate),
+			bErr: CH.countIf($.StatusCode.eq("Error")),
+			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
+			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
+			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bLastSeen: CH.max_(CH.toDateTime($.Timestamp)),
+		}))
+		.where(($) => serviceDbRawFilters($, params, "currentHour"))
+		.groupBy("queryKey")
+
+	// Re-aggregate the two branches per shape.
+	const merged = fromUnion(unionAll(sealed, recent), "shapes")
+		.select(($) => ({
+			queryKey: $.queryKey,
+			fallbackLabel: CH.any_($.bLabel),
+			sampleStatement: CH.anyIf($.bStatement, $.bStatement.neq("")),
+			sampleService: CH.any_($.bSampleService),
+			serviceCount: CH.rawExpr<number>("uniqMerge(bServices)"),
+			queryCount: CH.sum($.bCount),
+			estimatedQueryCount: CH.sum($.bEst),
+			errorCount: CH.sum($.bErr),
+			errorRate: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bEstErr).div(CH.sum($.bEst)), CH.lit(0)),
+			avgDurationMs: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bWDur).div(CH.sum($.bEst)), CH.lit(0)),
+			p50DurationMs: mergedQuantileExpr(1),
+			p95DurationMs: mergedQuantileExpr(2),
+			lastSeen: CH.max_($.bLastSeen),
+		}))
+		.groupBy("queryKey")
+
 	// Outer wrapper derives the display label from the (literal-stripped) sample
 	// statement when present, so co-located shapes — e.g. several different
 	// queries that all carry the generic db.operation.name="execute" +
@@ -937,50 +967,29 @@ export function serviceDbTopQueriesSQL(
 	// indistinct "execute subscriptions" row. Falls back to the derived label for
 	// shapes that carry no statement text (Redis ops, connection spans). Done at
 	// read time off the rollup's stored SampleStatement, so this needs no MV change.
-	const sql = `SELECT
-  queryKey,
-  if(sampleStatement != '', substring(${presentableStatementSql("sampleStatement")}, 1, 220), fallbackLabel) AS queryLabel,
-  sampleStatement,
-  sampleService,
-  serviceCount,
-  queryCount,
-  estimatedQueryCount,
-  errorCount,
-  errorRate,
-  avgDurationMs,
-  p50DurationMs,
-  p95DurationMs,
-  lastSeen
-FROM (
-  SELECT
-    queryKey,
-    any(bLabel) AS fallbackLabel,
-    anyIf(bStatement, bStatement != '') AS sampleStatement,
-    any(bSampleService) AS sampleService,
-    uniqMerge(bServices) AS serviceCount,
-    sum(bCount) AS queryCount,
-    sum(bEst) AS estimatedQueryCount,
-    sum(bErr) AS errorCount,
-    if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
-    if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
-    if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
-    if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs,
-    max(bLastSeen) AS lastSeen
-  FROM (
-    ${sealed}
-    UNION ALL
-    ${recent}
-  )
-  GROUP BY queryKey
-)
-ORDER BY estimatedQueryCount DESC
-LIMIT ${topN}
-FORMAT JSON`
+	const query = fromQuery(merged, "shape")
+		.select(($) => ({
+			queryKey: $.queryKey,
+			queryLabel: CH.rawExpr<string>(
+				`if(sampleStatement != '', substring(${presentableStatementSql("sampleStatement")}, 1, 220), fallbackLabel)`,
+			),
+			sampleStatement: $.sampleStatement,
+			sampleService: $.sampleService,
+			serviceCount: $.serviceCount,
+			queryCount: $.queryCount,
+			estimatedQueryCount: $.estimatedQueryCount,
+			errorCount: $.errorCount,
+			errorRate: $.errorRate,
+			avgDurationMs: $.avgDurationMs,
+			p50DurationMs: $.p50DurationMs,
+			p95DurationMs: $.p95DurationMs,
+			lastSeen: $.lastSeen,
+		}))
+		.orderBy(["estimatedQueryCount", "desc"])
+		.limit(topN)
+		.format("JSON")
 
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceDbTopQueryOutputSchema,
-	})
+	return compileCH(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
 }
 
 // ---------------------------------------------------------------------------

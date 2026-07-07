@@ -1,6 +1,6 @@
-import { trace } from "@opentelemetry/api"
-import { type ResolvedConfig, formatCHDateTime } from "../config"
+import { formatCHDateTime } from "../meta-row"
 import { markActivity } from "../session"
+import type { ReplayEngineConfig } from "./transport"
 import { postSessionEvents } from "./transport"
 import { installConsoleCapture } from "./capture/console"
 import { installNetworkCapture } from "./capture/network"
@@ -33,9 +33,19 @@ const FLUSH_BYTES = 64 * 1024
 
 const ZERO_TRACE_ID = "00000000000000000000000000000000"
 
-/** The OTel trace id of the active span, or undefined when none is active. */
+// Injected by the host SDK (e.g. `@maple-dev/browser` wires OTel's
+// `trace.getActiveSpan()`), keeping this engine free of tracing dependencies.
+// Without a provider, events simply carry no trace id.
+let traceIdProvider: () => string | undefined = () => undefined
+
+/** Wire the host SDK's active-trace-id lookup into event capture. */
+export function setActiveTraceIdProvider(provider: () => string | undefined): void {
+	traceIdProvider = provider
+}
+
+/** The trace id of the active span, or undefined when none is active. */
 export function activeTraceId(): string | undefined {
-	const id = trace.getActiveSpan()?.spanContext().traceId
+	const id = traceIdProvider()
 	return id && id !== ZERO_TRACE_ID ? id : undefined
 }
 
@@ -54,7 +64,7 @@ interface BufferedEvent {
  * interactions) and ship them to the ingest gateway as NDJSON rows. Best-effort
  * and decoupled from the rrweb recorder — runs on its own flush loop.
  */
-export function startEventCapture(config: ResolvedConfig, sessionId: string): EventCapture {
+export function startEventCapture(config: ReplayEngineConfig, sessionId: string): EventCapture {
 	let buffer: BufferedEvent[] = []
 	let bufferBytes = 0
 	let seq = 0
