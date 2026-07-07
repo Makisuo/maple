@@ -1,6 +1,6 @@
 import { record } from "rrweb"
 import type { ResolvedConfig } from "../config"
-import { markActivity, nextChunkSeq } from "../session"
+import { markActivity, nextChunkSeq } from "@maple/browser-session"
 import { gzip, postSessionBlob, type ChunkMeta } from "./transport"
 import { approximateSize } from "./util"
 

@@ -42,6 +42,7 @@
 	},
 	"devDependencies": {
 		"@effect/language-service": "catalog:effect",
+		"@maple/browser-session": "workspace:*",
 		"@types/node": "catalog:tooling",
 		"effect": "catalog:effect",
 		"tsdown": "^0.21.7",

@@ -1,5 +1,6 @@
 import { type MapleBrowserConfig, type ResolvedConfig, formatCHDateTime, resolveConfig } from "./config"
-import { getSession, parseUserAgent } from "./session"
+import { getSession } from "@maple/browser-session"
+import { parseUserAgent } from "./user-agent"
 import { setupTracing } from "./tracing"
 import { getObservedTraceIds, publishSessionSink } from "./session-sink"
 import { startRecording, type Recorder } from "./replay/record"

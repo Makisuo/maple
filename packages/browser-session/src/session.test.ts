@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { getSession, markActivity, nextChunkSeq, parseUserAgent } from "./session"
+import { getSession, getSessionId, markActivity, nextChunkSeq } from "./session"
 
 // Minimal in-memory sessionStorage standing in for the browser's, so the
 // rotation logic can be exercised under Node with a controllable clock.
@@ -17,11 +17,15 @@ class FakeStorage {
 }
 
 const MINUTE = 60_000
+const STORAGE_KEY = "maple.session"
+
+let storage: FakeStorage
 
 beforeEach(() => {
 	vi.useFakeTimers()
 	vi.setSystemTime(new Date("2026-05-22T12:00:00Z"))
-	;(globalThis as { window?: unknown }).window = { sessionStorage: new FakeStorage() }
+	storage = new FakeStorage()
+	;(globalThis as { window?: unknown }).window = { sessionStorage: storage }
 })
 
 afterEach(() => {
@@ -68,6 +72,89 @@ describe("getSession", () => {
 		const latest = getSession()
 		expect(latest.id).not.toBe(first.id)
 	})
+
+	it("ignores a corrupt stored record and mints fresh", () => {
+		storage.setItem(STORAGE_KEY, "{not json")
+		const s = getSession()
+		expect(s.id).toMatch(/[0-9a-f-]{36}/)
+		storage.setItem(STORAGE_KEY, JSON.stringify({ id: "x", startedAt: Date.now() }))
+		const rotated = getSession()
+		expect(rotated.id).not.toBe("x")
+	})
+})
+
+describe("getSessionId", () => {
+	it("returns undefined outside a browser (SSR)", () => {
+		delete (globalThis as { window?: unknown }).window
+		expect(getSessionId()).toBeUndefined()
+	})
+
+	it("mints and persists a session standalone", () => {
+		const id = getSessionId()
+		expect(id).toMatch(/[0-9a-f-]{36}/)
+		const stored = JSON.parse(storage.getItem(STORAGE_KEY)!)
+		expect(stored.id).toBe(id)
+		expect(stored.chunkSeq).toBe(0)
+	})
+
+	it("reuses a record written by getSession (browser SDK path) and preserves chunkSeq", () => {
+		const s = getSession()
+		nextChunkSeq()
+		nextChunkSeq()
+		vi.advanceTimersByTime(5 * MINUTE)
+		expect(getSessionId()).toBe(s.id)
+		const stored = JSON.parse(storage.getItem(STORAGE_KEY)!)
+		expect(stored.chunkSeq).toBe(2)
+	})
+
+	it("is accepted back by getSession (effect SDK wrote first)", () => {
+		const id = getSessionId()
+		vi.advanceTimersByTime(5 * MINUTE)
+		const s = getSession()
+		expect(s.id).toBe(id)
+		expect(nextChunkSeq()).toBe(0)
+	})
+
+	it("throttles the activity touch-write under 5s", () => {
+		const id = getSessionId()
+		const before = storage.getItem(STORAGE_KEY)
+		vi.advanceTimersByTime(3_000)
+		expect(getSessionId()).toBe(id)
+		expect(storage.getItem(STORAGE_KEY)).toBe(before) // no write
+		vi.advanceTimersByTime(3_000) // 6s since last persisted activity
+		expect(getSessionId()).toBe(id)
+		expect(storage.getItem(STORAGE_KEY)).not.toBe(before)
+	})
+
+	it("keeps a session alive through span activity that getSession would have rotated", () => {
+		const id = getSessionId()
+		for (let i = 0; i < 5; i++) {
+			vi.advanceTimersByTime(20 * MINUTE)
+			expect(getSessionId()).toBe(id)
+		}
+	})
+
+	it("rotates after idle timeout", () => {
+		const id = getSessionId()
+		vi.advanceTimersByTime(31 * MINUTE)
+		expect(getSessionId()).not.toBe(id)
+	})
+
+	it("falls back to an ephemeral session when storage throws (private mode)", () => {
+		;(globalThis as { window?: unknown }).window = {
+			sessionStorage: {
+				getItem() {
+					throw new Error("denied")
+				},
+				setItem() {
+					throw new Error("denied")
+				},
+			},
+		}
+		const id = getSessionId()
+		expect(id).toMatch(/[0-9a-f-]{36}/)
+		expect(getSessionId()).toBe(id)
+	})
 })
 
 describe("nextChunkSeq", () => {
@@ -103,16 +190,5 @@ describe("markActivity", () => {
 		vi.advanceTimersByTime(20 * MINUTE) // 40min since start, but only 20min since activity
 		const second = getSession()
 		expect(second.id).toBe(first.id)
-	})
-})
-
-describe("parseUserAgent", () => {
-	it("identifies common browsers and OSes", () => {
-		const chromeMac = parseUserAgent(
-			"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
-		)
-		expect(chromeMac.browserName).toBe("Chrome")
-		expect(chromeMac.osName).toBe("macOS")
-		expect(chromeMac.deviceType).toBe("desktop")
 	})
 })

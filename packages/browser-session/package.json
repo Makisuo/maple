@@ -1,0 +1,19 @@
+{
+	"name": "@maple/browser-session",
+	"version": "0.1.0",
+	"description": "Shared Maple browser session core — the sessionStorage-backed session record and the global session sink contract used by @maple-dev/browser and @maple-dev/effect-sdk. Private: consumers bundle it into their dists.",
+	"private": true,
+	"type": "module",
+	"main": "./src/index.ts",
+	"exports": {
+		".": "./src/index.ts"
+	},
+	"scripts": {
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	}
+}

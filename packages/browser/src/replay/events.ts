@@ -1,6 +1,6 @@
 import { trace } from "@opentelemetry/api"
 import { type ResolvedConfig, formatCHDateTime } from "../config"
-import { markActivity } from "../session"
+import { markActivity } from "@maple/browser-session"
 import { postSessionEvents } from "./transport"
 import { installConsoleCapture } from "./capture/console"
 import { installNetworkCapture } from "./capture/network"

@@ -4,6 +4,12 @@ const STORAGE_KEY = "maple.session"
 const IDLE_TIMEOUT_MS = 30 * 60_000
 /** Hard cap on a single session's lifetime regardless of activity. */
 const MAX_SESSION_MS = 24 * 60 * 60_000
+/**
+ * `getSessionId` runs per span creation; persisting the activity bump on every
+ * call would hammer sessionStorage for no benefit — rotation correctness only
+ * needs sub-idle-timeout granularity.
+ */
+const ACTIVITY_TOUCH_THROTTLE_MS = 5_000
 
 /**
  * A bounded browser session. Persisted in sessionStorage so it survives reloads
@@ -13,13 +19,18 @@ const MAX_SESSION_MS = 24 * 60 * 60_000
  * hours from collapsing into one giant replay whose wall-clock length dwarfs the
  * actual active time.
  */
-interface SessionRecord {
+export interface SessionRecord {
 	id: string
 	/** epoch ms — session start, stable across reloads within the window. */
 	startedAt: number
 	/** epoch ms — bumped on activity; drives idle rotation. */
 	lastActivityAt: number
-	/** Next replay chunk seq — monotonic across reloads so blobs never collide. */
+	/**
+	 * Next replay chunk seq — monotonic across reloads so blobs never collide.
+	 * Only `@maple-dev/browser`'s replay recorder consumes it, but it is part of
+	 * the persisted record shape every writer must preserve: `readRecord`
+	 * rejects records where it is missing.
+	 */
 	chunkSeq: number
 }
 
@@ -77,6 +88,27 @@ export function getSession(): SessionRecord {
 	return record
 }
 
+/**
+ * Resolve the active session id, minting/rotating as needed. Safe to call per
+ * span: the activity touch is only persisted when the recorded activity is
+ * older than `ACTIVITY_TOUCH_THROTTLE_MS`. Returns `undefined` outside a
+ * browser (SSR) so server renders never mint a session shared across requests.
+ */
+export function getSessionId(): string | undefined {
+	if (typeof window === "undefined") return undefined
+	const now = Date.now()
+	const existing = readRecord()
+	if (existing && !isExpired(existing, now)) {
+		if (now - existing.lastActivityAt > ACTIVITY_TOUCH_THROTTLE_MS) {
+			writeRecord({ ...existing, lastActivityAt: now })
+		}
+		return existing.id
+	}
+	const record = freshRecord(now)
+	writeRecord(record)
+	return record.id
+}
+
 /** Mark the session as active right now (called as replay chunks flush). */
 export function markActivity(): void {
 	const record = readRecord()
@@ -94,42 +126,4 @@ export function nextChunkSeq(): number {
 	const seq = record.chunkSeq
 	writeRecord({ ...record, chunkSeq: seq + 1 })
 	return seq
-}
-
-interface ParsedUserAgent {
-	readonly browserName: string
-	readonly osName: string
-	readonly deviceType: string
-}
-
-/** Best-effort UA parse — enough to populate filterable session facets. */
-export function parseUserAgent(ua: string): ParsedUserAgent {
-	const browserName = /edg/i.test(ua)
-		? "Edge"
-		: /opr|opera/i.test(ua)
-			? "Opera"
-			: /chrome|crios/i.test(ua)
-				? "Chrome"
-				: /firefox|fxios/i.test(ua)
-					? "Firefox"
-					: /safari/i.test(ua)
-						? "Safari"
-						: "Unknown"
-	const osName = /windows/i.test(ua)
-		? "Windows"
-		: /mac os|macintosh/i.test(ua)
-			? "macOS"
-			: /android/i.test(ua)
-				? "Android"
-				: /iphone|ipad|ios/i.test(ua)
-					? "iOS"
-					: /linux/i.test(ua)
-						? "Linux"
-						: "Unknown"
-	const deviceType = /mobile|iphone|android.*mobile/i.test(ua)
-		? "mobile"
-		: /ipad|tablet/i.test(ua)
-			? "tablet"
-			: "desktop"
-	return { browserName, osName, deviceType }
 }

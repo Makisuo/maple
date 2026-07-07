@@ -1,27 +1,26 @@
+import { getSessionId, readSessionSink } from "@maple/browser-session"
 import { Effect, Layer, Tracer } from "effect"
 
 /**
- * Key the `@maple-dev/browser` SDK publishes its replay session sink under. Looked up
- * lazily per span so init ordering between the SDKs does not matter; absent on
- * non-replay pages and during SSR, where the decorator below no-ops.
- */
-const SESSION_SINK_KEY = "__MAPLE_BROWSER_SESSION__"
-
-interface SessionSink {
-	readonly sessionId: string
-	readonly recordTraceId: (traceId: string) => void
-}
-
-/**
- * Decorate the OTLP tracer so every span it creates reports its trace id to the
- * active browser replay session (when one exists) and carries `session.id`. This
- * is what links a replay session to the Effect HTTP traces it produced — instead
- * of the redundant auto-instrumented fetch spans `@maple-dev/browser` would otherwise
- * collect. `provideMerge` keeps the base layer's logger/metrics while overriding
- * only the Tracer reference. No-ops cleanly when no session sink is published.
+ * Decorate the OTLP tracer so every span it creates carries `session.id` for
+ * the active Maple browser session.
+ *
+ * Two sources, checked per span so init ordering never matters:
+ *
+ * 1. The sink `@maple-dev/browser` publishes on `globalThis` when a replay
+ *    session is active — used when present so the span's trace id also feeds
+ *    the replay's trace↔session correlation.
+ * 2. Otherwise the shared `sessionStorage`-backed session from
+ *    `@maple/browser-session` (bundled into this SDK), so the Effect SDK works
+ *    standalone — no `@maple-dev/browser` import required. Both SDKs read and
+ *    write the same storage record, so the ids agree when both are present.
+ *
+ * During SSR neither source resolves and the decorator no-ops. `provideMerge`
+ * keeps the base layer's logger/metrics while overriding only the Tracer
+ * reference.
  *
  * Shared by the `Otlp.layerJson`-based client `layer` and the buffer-backed
- * client `MapleFlush.make` preset so both link replay sessions identically.
+ * client `MapleFlush.make` preset so both link sessions identically.
  */
 export const withSessionLink = <ROut, E, RIn>(base: Layer.Layer<ROut, E, RIn>) =>
 	Layer.effect(
@@ -33,12 +32,13 @@ export const withSessionLink = <ROut, E, RIn>(base: Layer.Layer<ROut, E, RIn>) =
 					context: inner.context,
 					span(options) {
 						const span = inner.span(options)
-						const sink = (globalThis as Record<string, unknown>)[SESSION_SINK_KEY] as
-							| SessionSink
-							| undefined
+						const sink = readSessionSink()
 						if (sink) {
 							sink.recordTraceId(span.traceId)
 							span.attribute("session.id", sink.sessionId)
+						} else {
+							const sessionId = getSessionId()
+							if (sessionId !== undefined) span.attribute("session.id", sessionId)
 						}
 						return span
 					},
