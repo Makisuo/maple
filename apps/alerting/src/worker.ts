@@ -6,7 +6,6 @@ import {
 	CacheBackendLive,
 	CloudflareAnalyticsService,
 	CloudflareOAuthService,
-	DatabasePgLive,
 	DigestService,
 	EdgeCacheService,
 	EmailService,
@@ -14,6 +13,7 @@ import {
 	ErrorsService,
 	EscalationService,
 	HazelOAuthService,
+	layerPg,
 	NotificationDispatcher,
 	OnboardingEmailService,
 	OnboardingService,
@@ -41,7 +41,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
 
-	const DatabaseLive = DatabasePgLive.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 

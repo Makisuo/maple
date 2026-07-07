@@ -75,8 +75,3 @@ export const startClientSession = (config: ClientSessionConfig): void => {
 		})
 	}
 }
-
-/** Test-only: allow a fresh replay bootstrap per test. */
-export const resetClientSessionForTests = (): void => {
-	replayStarted = false
-}

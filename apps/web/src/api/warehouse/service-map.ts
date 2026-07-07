@@ -2,11 +2,9 @@ import { Clock, Effect, Schema } from "effect"
 import {
 	DeploymentEnvironment,
 	ServiceCloudflareStatsRequest,
-	ServiceDbEdgesForServiceRequest,
 	ServiceDbEdgesRequest,
 	ServiceDbQuerySummaryRequest,
 	ServiceDependenciesBundleRequest,
-	ServiceDependenciesForServiceRequest,
 	ServiceDependenciesRequest,
 	ServiceName,
 	ServicePlatformsRequest,
@@ -159,42 +157,6 @@ export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(function* ({
 			const client = yield* MapleApiAtomClient
 			return yield* client.queryEngine.serviceDependencies({
 				payload: new ServiceDependenciesRequest({
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					deploymentEnv: input.deploymentEnv,
-				}),
-			})
-		}),
-	)
-
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-	return {
-		edges: result.data.map((row) => transformEdge(row, durationSeconds)),
-	}
-})
-
-// Service-scoped variant used by the service-detail page's Dependencies tab.
-// Hits a different API endpoint that pushes `SourceService = ?` into both
-// branches of the underlying SQL (hourly MV + live topology JOIN), so the
-// returned set is already trimmed to this service's outbound edges — no
-// client-side filter needed.
-export const getServiceMapForService = Effect.fn("QueryEngine.getServiceMapForService")(function* ({
-	data,
-}: {
-	data: GetServiceMapForServiceInput
-}) {
-	const input = yield* decodeInput(GetServiceMapForServiceInputSchema, data, "getServiceMapForService")
-	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-	const result = yield* runWarehouseQuery("serviceDependenciesForService", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.serviceDependenciesForService({
-				payload: new ServiceDependenciesForServiceRequest({
-					serviceName: input.serviceName,
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
 					deploymentEnv: input.deploymentEnv,
@@ -374,42 +336,6 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 		services: result.data.map((row) => transformCloudflareService(row, durationSeconds)),
 	}
 })
-
-// Service-scoped variant: pre-filters by `ServiceName = ?` server-side so the
-// raw-traces fallback branch only scans this service's Client/Producer spans
-// in the in-progress hour, not every span in the org.
-export const getServiceMapDbEdgesForService = Effect.fn("QueryEngine.getServiceMapDbEdgesForService")(
-	function* ({ data }: { data: GetServiceMapForServiceInput }) {
-		const input = yield* decodeInput(
-			GetServiceMapForServiceInputSchema,
-			data,
-			"getServiceMapDbEdgesForService",
-		)
-		const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-		const result = yield* runWarehouseQuery("serviceDbEdgesForService", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
-				return yield* client.queryEngine.serviceDbEdgesForService({
-					payload: new ServiceDbEdgesForServiceRequest({
-						serviceName: input.serviceName,
-						startTime: input.startTime ?? fallback.startTime,
-						endTime: input.endTime ?? fallback.endTime,
-						deploymentEnv: input.deploymentEnv,
-					}),
-				})
-			}),
-		)
-
-		const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-		const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-		const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-		return {
-			edges: result.data.map((row) => transformDbEdge(row, durationSeconds)),
-		}
-	},
-)
 
 export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuerySummary")(function* ({
 	data,

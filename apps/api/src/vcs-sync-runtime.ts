@@ -3,7 +3,7 @@ import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Cause, Effect, Layer, Option } from "effect"
-import { DatabasePgLive } from "./lib/DatabasePgLive"
+import { layerPg } from "./lib/DatabasePgLive"
 import { Env } from "./lib/Env"
 import { GithubAppClient } from "./services/vcs/vendor/github/GithubAppClient"
 import { GithubHttp } from "./services/vcs/vendor/github/GithubHttp"
@@ -30,7 +30,7 @@ const telemetry = MapleCloudflareSDK.make({
 export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
-	const DatabaseLive = DatabasePgLive.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
 	const Base = Layer.mergeAll(EnvLive, DatabaseLive, WorkerEnvironment.layer)
 
 	const VcsRepositoryLive = VcsRepository.layer.pipe(Layer.provide(Base))
@@ -55,7 +55,7 @@ export const buildVcsSyncLayer = (_env: Record<string, unknown>) => {
 export const buildVcsScheduledLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
-	const DatabaseLive = DatabasePgLive.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
 	const Base = Layer.mergeAll(EnvLive, DatabaseLive, WorkerEnvironment.layer)
 
 	const VcsRepositoryLive = VcsRepository.layer.pipe(Layer.provide(Base))
