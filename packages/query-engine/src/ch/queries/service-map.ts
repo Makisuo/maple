@@ -10,11 +10,9 @@
 // ---------------------------------------------------------------------------
 
 import {
-	DB_NAMESPACE_ATTR_SQL,
 	DB_QUERY_KEY_SQL,
 	DB_QUERY_LABEL_SQL,
 	DB_STATEMENT_SQL,
-	DB_SYSTEM_ATTR_SQL,
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { Schema } from "effect"
@@ -32,6 +30,7 @@ import { from, fromQuery, fromUnion } from "@maple-dev/clickhouse-builder"
 import {
 	ServiceMapChildren,
 	ServiceMapDbEdgesHourly,
+	ServiceMapDbQueryShapesHourly,
 	ServiceMapEdgesHourly,
 	ServiceMapSpans,
 	ServicePlatformsHourly,
@@ -897,42 +896,66 @@ export function serviceDbTopQueriesSQL(
 	params: ServiceDbQuerySummaryParams,
 ): CompiledQuery<ServiceDbTopQueryOutput> {
 	const topN = clampTopN(params.topN)
+
 	// Sealed rollup shapes — pre-computed QueryKey/QueryLabel, so no per-row
 	// fingerprinting on this branch.
-	const sealed = `SELECT
-      QueryKey AS queryKey,
-      any(QueryLabel) AS bLabel,
-      any(SampleStatement) AS bStatement,
-      any(toString(ServiceName)) AS bSampleService,
-      uniqState(toString(ServiceName)) AS bServices,
-      sum(CallCount) AS bCount,
-      sum(EstimatedCount) AS bEst,
-      sum(ErrorCount) AS bErr,
-      sum(EstimatedErrorCount) AS bEstErr,
-      sum(WeightedDurationSumMs) AS bWDur,
-      quantilesTDigestWeightedMergeState(0.5, 0.95)(DurationQuantiles) AS bQ,
-      max(Hour) AS bLastSeen
-    FROM service_map_db_query_shapes_hourly
-    WHERE ${shapesHourlyWhere(params)}
-    GROUP BY queryKey`
+	const sealed = from(ServiceMapDbQueryShapesHourly)
+		.select(($) => ({
+			queryKey: $.QueryKey,
+			bLabel: CH.any_($.QueryLabel),
+			bStatement: CH.any_($.SampleStatement),
+			bSampleService: CH.any_(CH.toString_($.ServiceName)),
+			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bCount: CH.sum($.CallCount),
+			bEst: CH.sum($.EstimatedCount),
+			bErr: CH.sum($.ErrorCount),
+			bEstErr: CH.sum($.EstimatedErrorCount),
+			bWDur: CH.sum($.WeightedDurationSumMs),
+			bQ: CH.rawExpr<string>(TDIGEST_MERGE_STATE_EXPR),
+			bLastSeen: CH.max_($.Hour),
+		}))
+		.where(($) => shapesHourlyFilters($, params))
+		.groupBy("queryKey")
 	// In-progress hour — derives QueryKey/QueryLabel from the SAME shared SQL the
-	// rollup MV uses, so a shape's key matches across the sealed/live boundary.
-	const recent = `SELECT
-      ${DB_QUERY_KEY_SQL} AS queryKey,
-      any(substring(${DB_QUERY_LABEL_SQL}, 1, 220)) AS bLabel,
-      any(substring(${DB_STATEMENT_SQL}, 1, 1000)) AS bStatement,
-      any(toString(ServiceName)) AS bSampleService,
-      uniqState(toString(ServiceName)) AS bServices,
-      count() AS bCount,
-      sum(SampleRate) AS bEst,
-      countIf(StatusCode = 'Error') AS bErr,
-      sumIf(SampleRate, StatusCode = 'Error') AS bEstErr,
-      sum(toFloat64(Duration) * SampleRate / 1000000) AS bWDur,
-      ${DB_DURATION_TDIGEST_STATE_EXPR} AS bQ,
-      max(toDateTime(Timestamp)) AS bLastSeen
-    FROM traces
-    WHERE ${serviceDbRawWhere(params, "currentHour")}
-    GROUP BY queryKey`
+	// rollup MV uses (raw exprs, no DSL equivalent), so a shape's key matches
+	// across the sealed/live boundary.
+	const recent = from(Traces)
+		.select(($) => ({
+			queryKey: CH.rawExpr<string>(DB_QUERY_KEY_SQL),
+			bLabel: CH.rawExpr<string>(`any(substring(${DB_QUERY_LABEL_SQL}, 1, 220))`),
+			bStatement: CH.rawExpr<string>(`any(substring(${DB_STATEMENT_SQL}, 1, 1000))`),
+			bSampleService: CH.any_(CH.toString_($.ServiceName)),
+			bServices: CH.rawExpr<string>(UNIQ_SERVICE_STATE_EXPR),
+			bCount: CH.count(),
+			bEst: CH.sum($.SampleRate),
+			bErr: CH.countIf($.StatusCode.eq("Error")),
+			bEstErr: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
+			bWDur: CH.sum(_toFloat64($.Duration).mul($.SampleRate).div(1000000)),
+			bQ: CH.rawExpr<string>(DB_DURATION_TDIGEST_STATE_EXPR),
+			bLastSeen: CH.max_(CH.toDateTime($.Timestamp)),
+		}))
+		.where(($) => serviceDbRawFilters($, params, "currentHour"))
+		.groupBy("queryKey")
+
+	// Re-aggregate the two branches per shape.
+	const merged = fromUnion(unionAll(sealed, recent), "shapes")
+		.select(($) => ({
+			queryKey: $.queryKey,
+			fallbackLabel: CH.any_($.bLabel),
+			sampleStatement: CH.anyIf($.bStatement, $.bStatement.neq("")),
+			sampleService: CH.any_($.bSampleService),
+			serviceCount: CH.rawExpr<number>("uniqMerge(bServices)"),
+			queryCount: CH.sum($.bCount),
+			estimatedQueryCount: CH.sum($.bEst),
+			errorCount: CH.sum($.bErr),
+			errorRate: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bEstErr).div(CH.sum($.bEst)), CH.lit(0)),
+			avgDurationMs: CH.if_(CH.sum($.bEst).gt(0), CH.sum($.bWDur).div(CH.sum($.bEst)), CH.lit(0)),
+			p50DurationMs: mergedQuantileExpr(1),
+			p95DurationMs: mergedQuantileExpr(2),
+			lastSeen: CH.max_($.bLastSeen),
+		}))
+		.groupBy("queryKey")
+
 	// Outer wrapper derives the display label from the (literal-stripped) sample
 	// statement when present, so co-located shapes — e.g. several different
 	// queries that all carry the generic db.operation.name="execute" +
@@ -940,50 +963,29 @@ export function serviceDbTopQueriesSQL(
 	// indistinct "execute subscriptions" row. Falls back to the derived label for
 	// shapes that carry no statement text (Redis ops, connection spans). Done at
 	// read time off the rollup's stored SampleStatement, so this needs no MV change.
-	const sql = `SELECT
-  queryKey,
-  if(sampleStatement != '', substring(${presentableStatementSql("sampleStatement")}, 1, 220), fallbackLabel) AS queryLabel,
-  sampleStatement,
-  sampleService,
-  serviceCount,
-  queryCount,
-  estimatedQueryCount,
-  errorCount,
-  errorRate,
-  avgDurationMs,
-  p50DurationMs,
-  p95DurationMs,
-  lastSeen
-FROM (
-  SELECT
-    queryKey,
-    any(bLabel) AS fallbackLabel,
-    anyIf(bStatement, bStatement != '') AS sampleStatement,
-    any(bSampleService) AS sampleService,
-    uniqMerge(bServices) AS serviceCount,
-    sum(bCount) AS queryCount,
-    sum(bEst) AS estimatedQueryCount,
-    sum(bErr) AS errorCount,
-    if(sum(bEst) > 0, sum(bEstErr) / sum(bEst), 0) AS errorRate,
-    if(sum(bEst) > 0, sum(bWDur) / sum(bEst), 0) AS avgDurationMs,
-    if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 1) / 1000000, 0) AS p50DurationMs,
-    if(sum(bCount) > 0, arrayElement(quantilesTDigestWeightedMerge(0.5, 0.95)(bQ), 2) / 1000000, 0) AS p95DurationMs,
-    max(bLastSeen) AS lastSeen
-  FROM (
-    ${sealed}
-    UNION ALL
-    ${recent}
-  )
-  GROUP BY queryKey
-)
-ORDER BY estimatedQueryCount DESC
-LIMIT ${topN}
-FORMAT JSON`
+	const query = fromQuery(merged, "shape")
+		.select(($) => ({
+			queryKey: $.queryKey,
+			queryLabel: CH.rawExpr<string>(
+				`if(sampleStatement != '', substring(${presentableStatementSql("sampleStatement")}, 1, 220), fallbackLabel)`,
+			),
+			sampleStatement: $.sampleStatement,
+			sampleService: $.sampleService,
+			serviceCount: $.serviceCount,
+			queryCount: $.queryCount,
+			estimatedQueryCount: $.estimatedQueryCount,
+			errorCount: $.errorCount,
+			errorRate: $.errorRate,
+			avgDurationMs: $.avgDurationMs,
+			p50DurationMs: $.p50DurationMs,
+			p95DurationMs: $.p95DurationMs,
+			lastSeen: $.lastSeen,
+		}))
+		.orderBy(["estimatedQueryCount", "desc"])
+		.limit(topN)
+		.format("JSON")
 
-	return unsafeCompiledQuery({
-		sql,
-		rowSchema: ServiceDbTopQueryOutputSchema,
-	})
+	return compileCH(query, params, { rowSchema: ServiceDbTopQueryOutputSchema })
 }
 
 // ---------------------------------------------------------------------------

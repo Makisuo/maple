@@ -542,6 +542,30 @@ describe("service-map database query summaries", () => {
 		expect(unscoped).not.toContain("DbNamespace = ")
 	})
 
+	it("scopes hour-aligned timeseries and top-queries to dbNamespace on both branches", () => {
+		// Both sibling builders must thread the same filter as the summary — a
+		// regression here silently widens the panel to every database of the system.
+		// (Sub-hour timeseries is raw-only, covered separately below.)
+		const namespaceCoalesce =
+			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'"
+		const timeseries = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 3600 }).sql
+		const topQueries = serviceDbTopQueriesSQL({ ...params, dbNamespace: "orders" }).sql
+		for (const sql of [timeseries, topQueries]) {
+			expect(sql).toContain("DbNamespace = 'orders'") // sealed rollup branch
+			expect(sql).toContain(namespaceCoalesce) // raw in-progress-hour branch
+		}
+	})
+
+	it("scopes sub-hour timeseries to dbNamespace via the raw identity fragment", () => {
+		// The <1h path reads raw traces only (rollup can't serve sub-hour buckets),
+		// so it filters on the coalesced identity, not the stored DbNamespace column.
+		const { sql } = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 300 })
+		expect(sql).not.toContain("service_map_db_query_shapes_hourly")
+		expect(sql).toContain(
+			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'",
+		)
+	})
+
 	it("escapes raw params in summary SQL", () => {
 		const { sql } = serviceDbQuerySummarySQL({
 			...baseParams,

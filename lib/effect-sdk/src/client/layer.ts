@@ -1,9 +1,10 @@
 import type { Duration } from "effect"
-import { Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
 import { withSessionLink } from "./session-link.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
+import { identify as identifyUser } from "./user.js"
 
 export interface MapleClientConfig {
 	/** The service name reported in traces, logs, and metrics. */
@@ -117,3 +118,19 @@ export const layer = (config: MapleClientConfig) => {
 
 	return withSessionLink(base)
 }
+
+/**
+ * Effect-idiomatic form of `identify` — attach (or replace) the end-user id on
+ * the active Maple browser session. From this point on the id is written to the
+ * session's next-posted metadata row and stamped as `user.id` on every span the
+ * client tracer creates. Idempotent; safe to run repeatedly (e.g. once a login
+ * flow resolves the user).
+ *
+ * @example
+ * ```typescript
+ * import { Maple } from "@maple-dev/effect-sdk/client"
+ * yield* Maple.identify(user.id)
+ * ```
+ */
+export const identify = (userId: string): Effect.Effect<void> =>
+	Effect.sync(() => identifyUser(userId))

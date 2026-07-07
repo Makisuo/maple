@@ -1,6 +1,7 @@
 import { getSessionId, readSessionSink, recordTraceId } from "@maple/browser-session"
 import { Effect, Layer, Tracer } from "effect"
 import { noteStandaloneSpan } from "./standalone-session.js"
+import { getCurrentUserId } from "./user.js"
 
 /**
  * Decorate the OTLP tracer so every span it creates carries `session.id` for
@@ -50,6 +51,14 @@ export const withSessionLink = <ROut, E, RIn>(base: Layer.Layer<ROut, E, RIn>) =
 								recordTraceId(span.traceId)
 							}
 						}
+						// Stamp the signed-in end-user (once `identify()` has run) so
+						// traces are user-attributable, not just session-grouped.
+						// Read per span at creation time, so spans started before
+						// `identify()` resolves stay anonymous — same semantics as the
+						// session starting anonymous. `user.id` is standard OTel semconv,
+						// used verbatim (no `maple.*` namespace).
+						const userId = getCurrentUserId()
+						if (userId !== undefined) span.attribute("user.id", userId)
 						return span
 					},
 				}),
