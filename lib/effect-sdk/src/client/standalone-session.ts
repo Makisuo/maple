@@ -43,7 +43,7 @@ const post = (status: "active" | "ended", keepalive: boolean): void => {
 	const { sessionId, startedAt, options } = current
 	void postSessionMetaRow(
 		options.endpoint,
-		options.ingestKey!,
+		options.ingestKey,
 		buildSessionMetaRow({
 			sessionId,
 			startedAt,
@@ -82,13 +82,14 @@ export const noteStandaloneSpan = (sessionId: string, traceId: string): void => 
 
 /**
  * Start posting session metadata rows for the standalone session. No-ops
- * outside a browser, without an ingest key, or when the browser SDK's sink is
- * already published. Idempotent per page load — the client presets call it on
- * construction and tests reset via `resetStandaloneSessionForTests`.
+ * outside a browser or when the browser SDK's sink is already published. The
+ * ingest key is auth only — when unset the rows post without an `Authorization`
+ * header (for setups where a proxy injects it). Idempotent per page load — the
+ * client presets call it on construction and tests reset via
+ * `resetStandaloneSessionForTests`.
  */
 export const setupStandaloneSession = (options: StandaloneSessionOptions): void => {
 	if (typeof window === "undefined") return
-	if (!options.ingestKey) return
 	if (current) return
 	if (readSessionSink()) return
 	const record = getSession()

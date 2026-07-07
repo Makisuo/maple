@@ -4,9 +4,19 @@
  */
 export interface ReplayEngineConfig {
 	readonly endpoint: string
-	readonly ingestKey: string
+	/**
+	 * Ingest key, used only for the `Authorization` header. Optional: when unset
+	 * the POSTs go out without an auth header, for setups where a proxy/gateway
+	 * injects it (the ingest key never gates whether replay runs).
+	 */
+	readonly ingestKey?: string | undefined
 	readonly maskAllInputs: boolean
 	readonly maskAllText: boolean
+}
+
+/** Build request headers, attaching `Authorization` only when a key is set. */
+function authHeaders(config: ReplayEngineConfig, extra: Record<string, string>): Record<string, string> {
+	return config.ingestKey ? { Authorization: `Bearer ${config.ingestKey}`, ...extra } : extra
 }
 
 // Replay POSTs are best-effort and must never throw into the host app, but a
@@ -39,10 +49,7 @@ export async function postSessionMeta(
 	const body = `${JSON.stringify(row)}\n`
 	await fetch(`${config.endpoint}/v1/sessionReplays/meta`, {
 		method: "POST",
-		headers: {
-			Authorization: `Bearer ${config.ingestKey}`,
-			"content-type": "application/x-ndjson",
-		},
+		headers: authHeaders(config, { "content-type": "application/x-ndjson" }),
 		body,
 		keepalive,
 	}).catch((error) => {
@@ -61,10 +68,7 @@ export async function postSessionEvents(
 	const body = `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`
 	await fetch(`${config.endpoint}/v1/sessionEvents`, {
 		method: "POST",
-		headers: {
-			Authorization: `Bearer ${config.ingestKey}`,
-			"content-type": "application/x-ndjson",
-		},
+		headers: authHeaders(config, { "content-type": "application/x-ndjson" }),
 		body,
 		keepalive,
 	}).catch((error) => {
@@ -89,15 +93,14 @@ export async function postSessionBlob(
 ): Promise<void> {
 	await fetch(`${config.endpoint}/v1/sessionReplays/blob`, {
 		method: "POST",
-		headers: {
-			Authorization: `Bearer ${config.ingestKey}`,
+		headers: authHeaders(config, {
 			"content-type": "application/octet-stream",
 			"x-maple-session-id": meta.sessionId,
 			"x-maple-chunk-seq": String(meta.chunkSeq),
 			"x-maple-is-checkpoint": meta.isCheckpoint ? "1" : "0",
 			"x-maple-event-count": String(meta.eventCount),
 			"x-maple-duration-ms": String(meta.durationMs),
-		},
+		}),
 		body: gzipped as unknown as BodyInit,
 		keepalive,
 	}).catch((error) => {

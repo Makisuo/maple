@@ -14,7 +14,12 @@ export { setActiveTraceIdProvider } from "./replay/events"
 
 export interface ReplaySessionOptions {
 	readonly endpoint: string
-	readonly ingestKey: string
+	/**
+	 * Ingest key, used only for the `Authorization` header. Optional: when unset
+	 * the session's POSTs go out without an auth header, for setups where a
+	 * proxy/gateway injects it (the key never gates whether recording runs).
+	 */
+	readonly ingestKey?: string | undefined
 	readonly serviceName: string
 	readonly environment?: string | undefined
 	readonly serviceVersion?: string | undefined

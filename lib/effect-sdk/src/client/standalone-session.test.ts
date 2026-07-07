@@ -12,6 +12,15 @@ interface MetaPost {
 	readonly url: string
 	readonly row: Record<string, any>
 	readonly keepalive: boolean | undefined
+	readonly authorization: string | undefined
+}
+
+const headerGet = (headers: HeadersInit | undefined, name: string): string | undefined => {
+	if (!headers) return undefined
+	if (headers instanceof Headers) return headers.get(name) ?? undefined
+	const entries = Array.isArray(headers) ? headers : Object.entries(headers)
+	const match = entries.find(([k]) => k.toLowerCase() === name.toLowerCase())
+	return match?.[1]
 }
 
 const setupFetch = () => {
@@ -20,7 +29,12 @@ const setupFetch = () => {
 	globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
 		if (url.includes("/v1/sessionReplays/meta") && typeof init?.body === "string") {
-			metaPosts.push({ url, row: JSON.parse(init.body.trim()), keepalive: init?.keepalive })
+			metaPosts.push({
+				url,
+				row: JSON.parse(init.body.trim()),
+				keepalive: init?.keepalive,
+				authorization: headerGet(init?.headers, "authorization"),
+			})
 		}
 		return new Response(null, { status: 200 })
 	}) as typeof fetch
@@ -80,6 +94,8 @@ describe("standalone session emission (client)", () => {
 		expect(row.url_initial).toBe("https://app.example.com/dashboard")
 		expect(row.resource_attributes["deployment.environment"]).toBe("test")
 		expect(row.resource_attributes["deployment.commit_sha"]).toBe("abc123")
+		// Ingest key is present → the row carries the Authorization header.
+		expect(metaPosts[0].authorization).toBe("Bearer secret")
 	})
 
 	it("posts nothing when the @maple-dev/browser sink owns the session", async () => {
@@ -98,17 +114,27 @@ describe("standalone session emission (client)", () => {
 		expect(metaPosts.length).toBe(0)
 	})
 
-	it("posts nothing during SSR or without an ingest key", async () => {
+	it("posts nothing during SSR (no window)", async () => {
 		const { metaPosts, restore: r } = setupFetch()
 		restore = r
 
 		make(baseConfig) // node: no window
 
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(metaPosts.length).toBe(0)
+	})
+
+	it("posts without an Authorization header when no ingest key is set (proxy attaches it)", async () => {
+		const { metaPosts, restore: r } = setupFetch()
+		restore = r
 		stubWindow()
+
 		make({ ...baseConfig, ingestKey: undefined }) // window but no key
 
 		await new Promise((resolve) => setTimeout(resolve, 0))
-		expect(metaPosts.length).toBe(0)
+		expect(metaPosts.length).toBe(1)
+		expect(metaPosts[0].row.status).toBe("active")
+		expect(metaPosts[0].authorization).toBeUndefined()
 	})
 
 	it("attaches observed trace ids to the ended row and rotates sessions", async () => {

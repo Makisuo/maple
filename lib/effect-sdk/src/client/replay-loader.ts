@@ -33,12 +33,14 @@ let replayStarted = false
  * Start the session side of the client SDK: a (sampled) rrweb replay session,
  * or — when replay is off, unsampled, or impossible — plain session metadata
  * rows so the session still appears in Maple's Sessions UI with its linked
- * traces. No-ops during SSR, without an ingest key, or when
- * `@maple-dev/browser` already owns the page's session.
+ * traces. No-ops during SSR or when `@maple-dev/browser` already owns the page's
+ * session. The ingest key is auth only — when it's unset the session's POSTs go
+ * out without an `Authorization` header (for setups where a proxy injects it),
+ * so replay/metadata run regardless; gate them with `replay.enabled` /
+ * `emitSessionMeta` instead.
  */
 export const startClientSession = (config: ClientSessionConfig): void => {
 	if (typeof window === "undefined") return
-	if (!config.ingestKey) return
 	if (readSessionSink()) return // `@maple-dev/browser` owns the session.
 
 	// Recording needs a real DOM (`document`); metadata rows below don't.
