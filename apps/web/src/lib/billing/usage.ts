@@ -22,26 +22,3 @@ export function formatUsage(gb: number): string {
 export function formatCount(value: number): string {
 	return Math.max(0, Math.round(value)).toLocaleString("en-US")
 }
-
-const usdFormatter = new Intl.NumberFormat("en-US", {
-	style: "currency",
-	currency: "USD",
-	minimumFractionDigits: 2,
-})
-
-/** Format a USD amount: 1.5 -> "$1.50", 0.003 -> "$0.00". For costs/totals. */
-export function formatCurrency(amount: number): string {
-	return usdFormatter.format(amount)
-}
-
-const usdRateFormatter = new Intl.NumberFormat("en-US", {
-	style: "currency",
-	currency: "USD",
-	minimumFractionDigits: 2,
-	maximumFractionDigits: 4,
-})
-
-/** Format a per-unit price, keeping small fractions: 0.3 -> "$0.30", 0.003 -> "$0.003". */
-export function formatRate(amount: number): string {
-	return usdRateFormatter.format(amount)
-}

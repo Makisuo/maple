@@ -143,6 +143,7 @@ function generateBenchGraph(params: BenchParams): BenchGraph {
 		dbEdges.push({
 			sourceService: name,
 			dbSystem: DB_SYSTEMS[Math.floor(rng() * DB_SYSTEMS.length)],
+			dbNamespace: `bench_db_${Math.floor(rng() * 3)}`,
 			callCount,
 			estimatedCallCount: callCount,
 			errorCount: Math.round(callCount * errorRate),
@@ -350,7 +351,30 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 				<ServiceMapCanvas
 					edges={graph.edges}
 					dbEdges={graph.dbEdges}
-					cloudflareServices={[]}
+					// Exercises the instrumented-Worker overlay: svc-000 gets CF edge
+					// analytics attached; the unmatched script must NOT create a node.
+					cloudflareServices={[
+						{
+							serviceName: "cloudflare-worker/svc-000",
+							kind: "worker",
+							displayName: "svc-000",
+							requests: 120_000,
+							throughput: 120_000 / DURATION_SECONDS,
+							errorRate: 0.004,
+							latencyP99Ms: 38,
+							cpuP99Ms: 9,
+						},
+						{
+							serviceName: "cloudflare-worker/unmatched-script",
+							kind: "worker",
+							displayName: "unmatched-script",
+							requests: 5_000,
+							throughput: 5_000 / DURATION_SECONDS,
+							errorRate: 0.2,
+							latencyP99Ms: 55,
+							cpuP99Ms: 12,
+						},
+					]}
 					faasNames={new Map()}
 					platforms={graph.platforms}
 					runtimes={graph.runtimes}

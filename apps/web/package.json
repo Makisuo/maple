@@ -23,7 +23,6 @@
 		"@fontsource-variable/geist-mono": "^5.2.8",
 		"@json-render/core": "^0.19.0",
 		"@json-render/react": "^0.19.0",
-		"@maple-dev/browser": "workspace:*",
 		"@maple-dev/effect-sdk": "workspace:*",
 		"@maple/domain": "workspace:*",
 		"@maple/effect-db": "workspace:*",

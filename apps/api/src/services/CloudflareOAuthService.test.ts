@@ -129,6 +129,9 @@ describe("CloudflareOAuthService", () => {
 			assert.strictEqual(url.searchParams.get("response_type"), "code")
 			assert.strictEqual(url.searchParams.get("state"), state)
 			assert.include(url.searchParams.get("scope") ?? "", "workers-observability.write")
+			// offline_access must be REQUESTED for Cloudflare to issue a refresh token — the grant
+			// only makes it available. Without it the connection dies at the ~16h expiry.
+			assert.include(url.searchParams.get("scope") ?? "", "offline_access")
 			// PKCE: the authorize URL carries an S256 challenge and the verifier is persisted.
 			assert.strictEqual(url.searchParams.get("code_challenge_method"), "S256")
 			const challenge = url.searchParams.get("code_challenge")
@@ -241,6 +244,75 @@ describe("CloudflareOAuthService", () => {
 		}).pipe(
 			Effect.provide(
 				Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts, counters)),
+			),
+		)
+	})
+
+	it.effect("completeConnect refuses a token with no refresh token and revokes it", () => {
+		const testDb = createTestDb(trackedDbs)
+		const counters = { revoked: 0 }
+		// Cloudflare returns an access token but NO refresh token (offline_access not granted). Such a
+		// connection would silently die at the ~16h access-token expiry, so completeConnect must
+		// refuse it up front instead of storing a doomed row.
+		const fetchImpl: typeof globalThis.fetch = (input) => {
+			const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+			if (url.includes("/oauth2/revoke")) {
+				counters.revoked += 1
+				return Promise.resolve(new Response(null, { status: 200 }))
+			}
+			if (url.includes("/oauth2/token")) {
+				return Promise.resolve(
+					jsonResponse({
+						access_token: "cf-access-token",
+						token_type: "bearer",
+						expires_in: 3600,
+						scope: "account.settings:read workers_observability:write",
+					}),
+				)
+			}
+			if (url.includes("/accounts")) {
+				return Promise.resolve(
+					jsonResponse({
+						success: true,
+						errors: [],
+						messages: [],
+						result: [{ id: "acc_1", name: "Acme Inc", type: "standard" }],
+						result_info: { count: 1, page: 1, per_page: 50, total_count: 1 },
+					}),
+				)
+			}
+			return Promise.resolve(
+				jsonResponse({ success: false, errors: [], messages: [], result: null }, 404),
+			)
+		}
+		return Effect.gen(function* () {
+			const service = yield* CloudflareOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback",
+			})
+			const error = yield* service.completeConnect("auth-code", state).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			if (error._tag === "@maple/http/errors/IntegrationsValidationError") {
+				assert.include(error.message, "refresh token")
+			}
+			// Nothing is persisted, and the doomed access token is revoked upstream.
+			const status = yield* service.getStatus(asOrgId("org_a"))
+			assert.strictEqual(status.connected, false)
+			assert.strictEqual(counters.revoked, 1)
+			const row = yield* Effect.promise(() =>
+				queryFirstRow<{ id: string }>(
+					testDb,
+					"SELECT id FROM oauth_connections WHERE org_id = $1 AND provider = 'cloudflare'",
+					["org_a"],
+				),
+			)
+			assert.isUndefined(row)
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb, withOAuthApp),
+					Layer.succeed(FetchHttpClient.Fetch, fetchImpl),
+				),
 			),
 		)
 	})

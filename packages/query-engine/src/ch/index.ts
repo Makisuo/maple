@@ -51,6 +51,10 @@ export {
 	resourceAttributeValuesQuery,
 	logAttributeValuesQuery,
 	metricAttributeValuesQuery,
+	metricScopedAttributeKeysQuery,
+	metricScopedAttributeValuesQuery,
+	type MetricScopedAttributeKeysOpts,
+	type MetricScopedAttributeValuesOpts,
 	type AttributeKeysQueryOpts,
 	type AttributeKeysOutput,
 	type AttributeValuesOpts,
@@ -121,13 +125,12 @@ export {
 // Queries — Session Events (distilled stream)
 export {
 	sessionTranscriptQuery,
-	searchSessionsByEventQuery,
+	sessionEventMatchQuery,
 	sessionActivityQuery,
 	sessionActivityAggregateQuery,
 	IDLE_GAP_THRESHOLD_MS,
 	type SessionTranscriptOutput,
-	type SearchSessionsByEventOpts,
-	type SearchSessionsByEventOutput,
+	type SessionEventMatchOpts,
 	type SessionActivityOpts,
 	type SessionActivityOutput,
 } from "./queries/session-events"
@@ -302,6 +305,65 @@ export {
 	type CloudflareServiceCountersOutput,
 	type CloudflareServiceLatencyOutput,
 } from "./queries/cloudflare-map"
+
+// Queries — Cloudflare infrastructure page (per-zone HTTP + per-Worker rollups & timeseries)
+export {
+	cloudflareZoneCountersRowSchema,
+	cloudflareZoneCountersSQL,
+	cloudflareZoneLatencyRowSchema,
+	cloudflareZoneLatencySQL,
+	cloudflareZoneTimeseriesRowSchema,
+	cloudflareZoneTimeseriesSQL,
+	cloudflareZoneStatusTimeseriesRowSchema,
+	cloudflareZoneStatusTimeseriesSQL,
+	cloudflareZoneCacheTimeseriesRowSchema,
+	cloudflareZoneCacheTimeseriesSQL,
+	cloudflareZoneLatencyTimeseriesRowSchema,
+	cloudflareZoneLatencyTimeseriesSQL,
+	cloudflareWorkerCountersRowSchema,
+	cloudflareWorkerCountersSQL,
+	cloudflareWorkerLatencyRowSchema,
+	cloudflareWorkerLatencySQL,
+	cloudflareWorkerTimeseriesRowSchema,
+	cloudflareWorkerTimeseriesSQL,
+	type CloudflareZoneCountersOutput,
+	type CloudflareZoneLatencyOutput,
+	type CloudflareZoneTimeseriesOutput,
+	type CloudflareZoneStatusTimeseriesOutput,
+	type CloudflareZoneCacheTimeseriesOutput,
+	type CloudflareZoneLatencyTimeseriesOutput,
+	type CloudflareWorkerCountersOutput,
+	type CloudflareWorkerLatencyOutput,
+	type CloudflareWorkerTimeseriesOutput,
+} from "./queries/cloudflare-infra"
+
+// Queries — Cloudflare infrastructure page, extended datasets (hosts, firewall, DNS, platform)
+export {
+	cloudflareZoneHostBreakdownRowSchema,
+	cloudflareZoneHostBreakdownSQL,
+	cloudflareZoneHostTimeseriesRowSchema,
+	cloudflareZoneHostTimeseriesSQL,
+	cloudflareZoneFirewallTimeseriesRowSchema,
+	cloudflareZoneFirewallTimeseriesSQL,
+	cloudflareZoneFirewallTopRowSchema,
+	cloudflareZoneFirewallTopSQL,
+	cloudflareZoneDnsTimeseriesRowSchema,
+	cloudflareZoneDnsTimeseriesSQL,
+	cloudflareZoneDnsBreakdownRowSchema,
+	cloudflareZoneDnsBreakdownSQL,
+	cloudflareQueueGaugesRowSchema,
+	cloudflareQueueGaugesSQL,
+	cloudflareDurableObjectCountersRowSchema,
+	cloudflareDurableObjectCountersSQL,
+	type CloudflareZoneHostBreakdownOutput,
+	type CloudflareZoneHostTimeseriesOutput,
+	type CloudflareZoneFirewallTimeseriesOutput,
+	type CloudflareZoneFirewallTopOutput,
+	type CloudflareZoneDnsTimeseriesOutput,
+	type CloudflareZoneDnsBreakdownOutput,
+	type CloudflareQueueGaugesOutput,
+	type CloudflareDurableObjectCountersOutput,
+} from "./queries/cloudflare-infra-extended"
 
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {

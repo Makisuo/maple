@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { formatSeconds, formatValueWithUnit } from "./chart-utils"
+import { formatSeconds, formatValueWithUnit, isoToLabel, makeBucketLabeler, transformRows } from "./chart-utils"
 
 describe("formatValueWithUnit", () => {
 	it("renders a percentage with a % sign", () => {
@@ -42,5 +42,39 @@ describe("formatSeconds", () => {
 	it("returns an em dash for non-positive/invalid input", () => {
 		expect(formatSeconds(0)).toBe("—")
 		expect(formatSeconds(-5)).toBe("—")
+	})
+})
+
+describe("makeBucketLabeler", () => {
+	it("uses plain time-of-day labels while the buckets span a single day", () => {
+		const buckets = ["2026-07-03T10:00:00Z", "2026-07-03T22:00:00Z"]
+		const label = makeBucketLabeler(buckets)
+		expect(label(buckets[0]!)).toBe(isoToLabel(buckets[0]!))
+		expect(label(buckets[0]!)).not.toMatch(/Jul/)
+	})
+
+	it("prefixes the date once the buckets cross 24h", () => {
+		const buckets = ["2026-07-01T10:00:00Z", "2026-07-04T10:00:00Z"]
+		const label = makeBucketLabeler(buckets)
+		const iso = "2026-07-03T14:35:00Z"
+		const expectedDate = new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+		expect(label(iso)).toBe(`${expectedDate}, ${isoToLabel(iso)}`)
+	})
+
+	it("falls back to time-of-day for empty or unparsable input", () => {
+		expect(makeBucketLabeler([])("2026-07-03T14:35:00Z")).toBe(isoToLabel("2026-07-03T14:35:00Z"))
+	})
+})
+
+describe("transformRows", () => {
+	it("labels points with the provided labeler", () => {
+		const rows = [
+			{ bucket: "2026-07-01T10:00:00Z", attributeValue: "a", value: 1 },
+			{ bucket: "2026-07-04T10:00:00Z", attributeValue: "a", value: 2 },
+		]
+		const { data } = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket)))
+		expect(data[0]?.time).toMatch(/^[A-Z][a-z]{2} \d{1,2}, /)
+		expect(data[1]?.time).toMatch(/^[A-Z][a-z]{2} \d{1,2}, /)
+		expect(data[0]?.time).not.toBe(data[1]?.time)
 	})
 })

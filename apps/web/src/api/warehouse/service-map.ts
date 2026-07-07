@@ -2,11 +2,9 @@ import { Clock, Effect, Schema } from "effect"
 import {
 	DeploymentEnvironment,
 	ServiceCloudflareStatsRequest,
-	ServiceDbEdgesForServiceRequest,
 	ServiceDbEdgesRequest,
 	ServiceDbQuerySummaryRequest,
 	ServiceDependenciesBundleRequest,
-	ServiceDependenciesForServiceRequest,
 	ServiceDependenciesRequest,
 	ServiceName,
 	ServicePlatformsRequest,
@@ -32,6 +30,8 @@ export interface ServiceEdge {
 export interface ServiceDbEdge {
 	sourceService: string
 	dbSystem: string
+	/** Database identity (db.namespace → db.name → server.address → net.peer.name); "" = unknown. */
+	dbNamespace: string
 	callCount: number
 	estimatedCallCount: number
 	errorCount: number
@@ -108,6 +108,7 @@ export type GetServiceMapForServiceInput = (typeof GetServiceMapForServiceInputS
 
 const GetServiceDbQuerySummaryInputSchema = Schema.Struct({
 	dbSystem: Schema.String,
+	dbNamespace: Schema.optional(Schema.String),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	sourceService: Schema.optional(ServiceName),
@@ -173,42 +174,6 @@ export const getServiceMap = Effect.fn("QueryEngine.getServiceMap")(function* ({
 	}
 })
 
-// Service-scoped variant used by the service-detail page's Dependencies tab.
-// Hits a different API endpoint that pushes `SourceService = ?` into both
-// branches of the underlying SQL (hourly MV + live topology JOIN), so the
-// returned set is already trimmed to this service's outbound edges — no
-// client-side filter needed.
-export const getServiceMapForService = Effect.fn("QueryEngine.getServiceMapForService")(function* ({
-	data,
-}: {
-	data: GetServiceMapForServiceInput
-}) {
-	const input = yield* decodeInput(GetServiceMapForServiceInputSchema, data, "getServiceMapForService")
-	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-	const result = yield* runWarehouseQuery("serviceDependenciesForService", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.serviceDependenciesForService({
-				payload: new ServiceDependenciesForServiceRequest({
-					serviceName: input.serviceName,
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					deploymentEnv: input.deploymentEnv,
-				}),
-			})
-		}),
-	)
-
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-	return {
-		edges: result.data.map((row) => transformEdge(row, durationSeconds)),
-	}
-})
-
 // Service-detail Dependencies tab in one request: the service-map edges, the
 // DB edges, and the external edges run server-side under a single tenant/config
 // resolution (see the `serviceDependenciesBundle` handler), replacing three
@@ -257,6 +222,7 @@ function transformDbEdge(row: Record<string, unknown>, durationSeconds: number):
 	return {
 		sourceService: String(row.sourceService ?? ""),
 		dbSystem: String(row.dbSystem ?? ""),
+		dbNamespace: String(row.dbNamespace ?? ""),
 		callCount,
 		estimatedCallCount,
 		errorCount,
@@ -299,57 +265,46 @@ export const getServiceMapDbEdges = Effect.fn("QueryEngine.getServiceMapDbEdges"
 })
 
 // ---------------------------------------------------------------------------
-// Cloudflare direct-integration nodes
+// Cloudflare direct-integration Worker analytics
 //
-// The analytics poller writes zone / Worker metrics under synthetic service
-// names (`cloudflare/{zone}`, `cloudflare-worker/{script}`) with no spans, so
-// they never appear on the trace-derived map. This surfaces them as
-// first-class CF nodes.
+// The analytics poller writes Worker metrics under the synthetic service name
+// `cloudflare-worker/{script}` with no spans. The map overlays these onto the
+// matching instrumented service node (by service name or faas.name); scripts
+// with no matching real service are dropped — CF data never creates nodes.
 // ---------------------------------------------------------------------------
 
-const ZONE_SERVICE_PREFIX = "cloudflare/"
 const WORKER_SERVICE_PREFIX = "cloudflare-worker/"
 
 export interface CloudflareService {
 	serviceName: string
-	kind: "zone" | "worker"
+	kind: "worker"
 	displayName: string
 	requests: number
 	throughput: number
 	errorRate: number
-	/** Zones only. */
-	cacheHitRate?: number
-	/** Zones: edge TTFB p95. Workers: wall-time duration p99. */
-	latencyP95Ms: number
-	/** Zones only: origin response duration p95. */
-	originP95Ms?: number
-	/** Workers only: CPU time p99. */
+	/** Wall-time duration p99. */
+	latencyP99Ms: number
+	/** CPU time p99. */
 	cpuP99Ms?: number
 }
 
 function transformCloudflareService(row: Record<string, unknown>, durationSeconds: number): CloudflareService {
 	const serviceName = String(row.serviceName ?? "")
-	const isWorker = serviceName.startsWith(WORKER_SERVICE_PREFIX)
-	const displayName = isWorker
+	const displayName = serviceName.startsWith(WORKER_SERVICE_PREFIX)
 		? serviceName.slice(WORKER_SERVICE_PREFIX.length)
-		: serviceName.startsWith(ZONE_SERVICE_PREFIX)
-			? serviceName.slice(ZONE_SERVICE_PREFIX.length)
-			: serviceName
+		: serviceName
 	const requests = Number(row.requests ?? 0)
 	const errorCount = Number(row.errorCount ?? 0)
-	const cacheHitCount = Number(row.cacheHitCount ?? 0)
 	const safeDuration = Math.max(durationSeconds, 1)
 	return {
 		serviceName,
-		kind: isWorker ? "worker" : "zone",
+		kind: "worker",
 		displayName,
 		requests,
 		throughput: requests / safeDuration,
 		errorRate: requests > 0 ? errorCount / requests : 0,
-		cacheHitRate: isWorker ? undefined : requests > 0 ? cacheHitCount / requests : 0,
-		latencyP95Ms: Number(row.latencyP95Ms ?? 0),
-		originP95Ms: isWorker ? undefined : Number(row.originP95Ms ?? 0),
-		cpuP99Ms: isWorker ? Number(row.cpuP99Ms ?? 0) : undefined,
+		latencyP99Ms: Number(row.latencyP99Ms ?? 0),
+		cpuP99Ms: Number(row.cpuP99Ms ?? 0),
 	}
 }
 
@@ -382,42 +337,6 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 	}
 })
 
-// Service-scoped variant: pre-filters by `ServiceName = ?` server-side so the
-// raw-traces fallback branch only scans this service's Client/Producer spans
-// in the in-progress hour, not every span in the org.
-export const getServiceMapDbEdgesForService = Effect.fn("QueryEngine.getServiceMapDbEdgesForService")(
-	function* ({ data }: { data: GetServiceMapForServiceInput }) {
-		const input = yield* decodeInput(
-			GetServiceMapForServiceInputSchema,
-			data,
-			"getServiceMapDbEdgesForService",
-		)
-		const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-		const result = yield* runWarehouseQuery("serviceDbEdgesForService", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
-				return yield* client.queryEngine.serviceDbEdgesForService({
-					payload: new ServiceDbEdgesForServiceRequest({
-						serviceName: input.serviceName,
-						startTime: input.startTime ?? fallback.startTime,
-						endTime: input.endTime ?? fallback.endTime,
-						deploymentEnv: input.deploymentEnv,
-					}),
-				})
-			}),
-		)
-
-		const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-		const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-		const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-		return {
-			edges: result.data.map((row) => transformDbEdge(row, durationSeconds)),
-		}
-	},
-)
-
 export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuerySummary")(function* ({
 	data,
 }: {
@@ -432,6 +351,7 @@ export const getServiceDbQuerySummary = Effect.fn("QueryEngine.getServiceDbQuery
 			return yield* client.queryEngine.serviceDbQuerySummary({
 				payload: new ServiceDbQuerySummaryRequest({
 					dbSystem: input.dbSystem,
+					dbNamespace: input.dbNamespace,
 					startTime: input.startTime ?? fallback.startTime,
 					endTime: input.endTime ?? fallback.endTime,
 					sourceService: input.sourceService,

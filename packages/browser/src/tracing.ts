@@ -7,7 +7,7 @@ import { registerInstrumentations } from "@opentelemetry/instrumentation"
 import { FetchInstrumentation } from "@opentelemetry/instrumentation-fetch"
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from "@opentelemetry/semantic-conventions"
 import type { ResolvedConfig } from "./config"
-import { recordTraceId } from "./session-sink"
+import { recordTraceId } from "@maple/browser-session"
 
 /**
  * Captures every span's trace id into the session sink. Lightweight — runs

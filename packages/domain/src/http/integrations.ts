@@ -139,9 +139,9 @@ export class CloudflareUsageBucket extends Schema.Class<CloudflareUsageBucket>("
  * the data actually queryable in dashboards.
  */
 export class CloudflareServiceUsage extends Schema.Class<CloudflareServiceUsage>("CloudflareServiceUsage")({
-	/** Warehouse ServiceName: `cloudflare/{zone}` or `cloudflare-worker/{script}`. */
+	/** Warehouse ServiceName: `cloudflare/{zone}`, `cloudflare-worker/{script}`, `cloudflare-queue/{queue}`, …. */
 	serviceName: Schema.String,
-	kind: Schema.Literals(["zone", "worker"]),
+	kind: Schema.Literals(["zone", "worker", "queue"]),
 	/** Zone or Worker script name with the ServiceName prefix stripped. */
 	displayName: Schema.String,
 	totalRequests: Schema.Number,
@@ -160,6 +160,45 @@ export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageRespons
 	bucketSeconds: Schema.Number,
 	totalRequests: Schema.Number,
 	services: Schema.Array(CloudflareServiceUsage),
+}) {}
+
+/**
+ * Live top-hosts/top-paths lookup for one zone, proxied straight to Cloudflare's GraphQL
+ * Analytics API — path cardinality is far too high to store as metrics, so this is computed
+ * on demand (and edge-cached briefly) instead of read from the warehouse.
+ */
+export class CloudflareTopTrafficRequest extends Schema.Class<CloudflareTopTrafficRequest>(
+	"CloudflareTopTrafficRequest",
+)({
+	zoneName: Schema.String,
+	dimension: Schema.Literals(["host", "path"]),
+	/** Window bounds, epoch ms. Bounded server-side by the zone plan's retention. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	/** Top-N size; defaults to 15, capped at 50. */
+	limit: Schema.optionalKey(Schema.Number),
+}) {}
+
+export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>(
+	"CloudflareTopTrafficRow",
+)({
+	/** Hostname or path, depending on the requested dimension. */
+	key: Schema.String,
+	/** ABR-adjusted request estimate. */
+	requests: Schema.Number,
+	bytes: Schema.Number,
+	errors5xx: Schema.Number,
+}) {}
+
+export class CloudflareTopTrafficResponse extends Schema.Class<CloudflareTopTrafficResponse>(
+	"CloudflareTopTrafficResponse",
+)({
+	rows: Schema.Array(CloudflareTopTrafficRow),
+	/**
+	 * Set instead of failing when Cloudflare can't serve the query for this zone/plan
+	 * (authz, dataset unavailable) — the UI renders it as an inline empty-state.
+	 */
+	unavailableReason: Schema.NullOr(Schema.String),
 }) {}
 
 export class CloudflareStartConnectRequest extends Schema.Class<CloudflareStartConnectRequest>(
@@ -418,6 +457,19 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.get("cloudflareUsage", "/cloudflare/usage", {
 			success: CloudflareUsageResponse,
 			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("cloudflareTopTraffic", "/cloudflare/top-traffic", {
+			payload: CloudflareTopTrafficRequest,
+			success: CloudflareTopTrafficResponse,
+			error: [
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
 		}),
 	)
 	.add(

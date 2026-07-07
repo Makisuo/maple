@@ -59,6 +59,3 @@ const makePgliteDatabase = Effect.gen(function* () {
 })
 
 export const layerPglite = Layer.effect(Database, makePgliteDatabase)
-
-/** @deprecated Use {@link layerPglite}. */
-export const DatabasePgliteLive = layerPglite

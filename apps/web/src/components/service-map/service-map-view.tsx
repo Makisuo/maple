@@ -85,11 +85,12 @@ import {
 	type ParticleRegistry,
 } from "./service-map-particles"
 import { getDbDescriptor } from "./service-map-db"
-import { CF_NODE_PREFIX, CLOUDFLARE_COLOR, getCloudflareDescriptor, isCfNodeId } from "./service-map-cloudflare"
 import {
 	buildFlowElements,
+	CLOUDFLARE_COLOR,
 	computeNodePositions,
 	DB_NODE_PREFIX,
+	parseDbNodeId,
 	getPlatformColor,
 	getServiceMapNodeColor,
 	topologyKey,
@@ -365,7 +366,7 @@ function ServiceDetailPanel({
 										<div className="space-y-0.5">
 											<span className="text-[10px] text-muted-foreground">Duration p99</span>
 											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-												{formatLatency(cloudflare.latencyP95Ms)}
+												{formatLatency(cloudflare.latencyP99Ms)}
 											</p>
 										</div>
 									</div>
@@ -747,6 +748,8 @@ function ServiceMapEmptyState() {
 
 interface DatabaseDetailPanelProps {
 	dbSystem: string
+	/** "" = the generic/legacy node (edges with no identified database). */
+	dbNamespace: string
 	dbEdges: ServiceDbEdge[]
 	services: string[]
 	durationSeconds: number
@@ -925,6 +928,7 @@ function DbQueryActivityChart({
 
 function DatabaseDetailPanel({
 	dbSystem,
+	dbNamespace,
 	dbEdges,
 	services,
 	durationSeconds,
@@ -932,7 +936,7 @@ function DatabaseDetailPanel({
 	endTime,
 	onClose,
 }: DatabaseDetailPanelProps) {
-	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem)
+	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem && e.dbNamespace === dbNamespace)
 	const totalCalls = callers.reduce((sum, e) => sum + e.callCount, 0)
 	const totalErrors = callers.reduce((sum, e) => sum + e.errorCount, 0)
 	const errorRate = totalCalls > 0 ? totalErrors / totalCalls : 0
@@ -944,6 +948,7 @@ function DatabaseDetailPanel({
 		getServiceDbQuerySummaryResultAtom({
 			data: {
 				dbSystem,
+				dbNamespace,
 				startTime,
 				endTime,
 				bucketSeconds,
@@ -980,9 +985,11 @@ function DatabaseDetailPanel({
 						className="shrink-0"
 						style={dbBranded ? undefined : { color: dbColor }}
 					/>
-					<span className="text-sm font-semibold text-foreground truncate">{dbSystem}</span>
+					<span className="text-sm font-semibold text-foreground truncate">
+						{dbNamespace || dbSystem}
+					</span>
 					<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase shrink-0">
-						{category}
+						{dbNamespace ? dbSystem : category}
 					</span>
 				</div>
 				<Button variant="ghost" size="icon-xs" onClick={onClose}>
@@ -1188,130 +1195,6 @@ function DatabaseDetailPanel({
 	)
 }
 
-interface CloudflareDetailPanelProps {
-	service: CloudflareService
-	onClose: () => void
-}
-
-/**
- * Detail panel for a standalone Cloudflare node (zone / un-instrumented
- * Worker) sourced from the direct integration. Mirrors DatabaseDetailPanel's
- * header + KPI grid; the KPIs differ for zones (cache + edge/origin latency)
- * vs Workers (CPU + duration).
- */
-function CloudflareDetailPanel({ service, onClose }: CloudflareDetailPanelProps) {
-	const isWorker = service.kind === "worker"
-	const descriptor = getCloudflareDescriptor(isWorker ? "cloudflare-worker" : "cloudflare-zone")
-	const color = descriptor.color
-	const errorRate = service.errorRate
-
-	return (
-		<div className="flex flex-col h-full bg-background overflow-hidden">
-			{/* Header */}
-			<div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-				<div className="flex items-center gap-2 min-w-0">
-					<div className="w-[3px] h-[18px] rounded-sm shrink-0" style={{ backgroundColor: color }} />
-					<CloudflareIcon size={14} className="shrink-0" style={{ color }} />
-					<span className="text-sm font-semibold text-foreground truncate">{service.displayName}</span>
-					<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase shrink-0">
-						{descriptor.category}
-					</span>
-				</div>
-				<Button variant="ghost" size="icon-xs" onClick={onClose}>
-					<XmarkIcon size={14} />
-				</Button>
-			</div>
-
-			<ScrollArea className="flex-1 min-h-0">
-				<div className="p-4 space-y-5">
-					<div className="space-y-3">
-						<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
-							Metrics
-						</h4>
-						<div className="grid grid-cols-2 gap-x-6 gap-y-4">
-							<div className="space-y-0.5">
-								<span className="text-[10px] text-muted-foreground">Requests</span>
-								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-									{formatCompactCount(service.requests)}
-								</p>
-							</div>
-							<div className="space-y-0.5">
-								<span className="text-[10px] text-muted-foreground">
-									{isWorker ? "Error Rate" : "5xx Error Rate"}
-								</span>
-								<p
-									className={cn(
-										"text-xl font-semibold tabular-nums font-mono",
-										errorRate > 0.05
-											? "text-severity-error"
-											: errorRate > 0.01
-												? "text-severity-warn"
-												: "text-foreground",
-									)}
-								>
-									{(errorRate * 100).toFixed(1)}%
-								</p>
-							</div>
-							{isWorker ? (
-								<>
-									<div className="space-y-0.5">
-										<span className="text-[10px] text-muted-foreground">CPU p99</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-											{formatLatency(service.cpuP99Ms ?? 0)}
-										</p>
-									</div>
-									<div className="space-y-0.5">
-										<span className="text-[10px] text-muted-foreground">Duration p99</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-											{formatLatency(service.latencyP95Ms)}
-										</p>
-									</div>
-								</>
-							) : (
-								<>
-									<div className="space-y-0.5">
-										<span className="text-[10px] text-muted-foreground">Cache Hit Rate</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-											{((service.cacheHitRate ?? 0) * 100).toFixed(1)}%
-										</p>
-									</div>
-									<div className="space-y-0.5">
-										<span className="text-[10px] text-muted-foreground">Edge TTFB p95</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-											{formatLatency(service.latencyP95Ms)}
-										</p>
-									</div>
-									<div className="space-y-0.5">
-										<span className="text-[10px] text-muted-foreground">Origin p95</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
-											{formatLatency(service.originP95Ms ?? 0)}
-										</p>
-									</div>
-								</>
-							)}
-						</div>
-					</div>
-
-					<div className="space-y-3">
-						<div className="h-px bg-border" />
-						<p className="text-[11px] text-muted-foreground leading-relaxed">
-							Edge analytics from the Cloudflare direct integration. This{" "}
-							{isWorker ? "Worker" : "zone"} has no spans in the trace graph, so it appears as a
-							standalone node.
-						</p>
-						<Link
-							to="/integrations"
-							className="inline-flex items-center gap-1 text-[11px] text-primary hover:text-primary/80 transition-colors"
-						>
-							Manage Cloudflare integration <ArrowRightIcon size={10} />
-						</Link>
-					</div>
-				</div>
-			</ScrollArea>
-		</div>
-	)
-}
-
 // --- Main Canvas ---
 
 interface ServiceMapViewProps {
@@ -1495,26 +1378,18 @@ export function ServiceMapCanvas({
 			cloudflareServices,
 			faasNames,
 		})
-		// Service legend should only include real services, not synthetic db: / cf: nodes
+		// Service legend should only include real services, not synthetic db: nodes
 		const allServices = Array.from(
-			new Set(
-				nodes
-					.filter((n) => !n.id.startsWith(DB_NODE_PREFIX) && !isCfNodeId(n.id))
-					.map((n) => n.id),
-			),
+			new Set(nodes.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
 		).toSorted()
 		return { rawNodes: nodes, flowEdges: edges, services: allServices }
 	}, [serviceEdges, dbEdges, cloudflareServices, faasNames, platforms, runtimes, overviews, workloads, durationSeconds])
 
-	// CF panel lookup (standalone nodes) + overlay lookup (instrumented Workers).
-	const cloudflareByService = useMemo(
-		() => new Map(cloudflareServices.map((s) => [s.serviceName, s])),
-		[cloudflareServices],
-	)
+	// Cloudflare analytics overlaid onto instrumented Workers.
 	const cloudflareOverlayByService = useMemo(() => {
 		const m = new Map<string, CloudflareNodeMetrics>()
 		for (const n of rawNodes) {
-			if (!isCfNodeId(n.id) && n.data.cloudflare) m.set(n.id, n.data.cloudflare)
+			if (n.data.cloudflare) m.set(n.id, n.data.cloudflare)
 		}
 		return m
 	}, [rawNodes])
@@ -1976,24 +1851,14 @@ export function ServiceMapCanvas({
 
 				{selectedServiceId &&
 					(() => {
-						const cfService = isCfNodeId(selectedServiceId)
-							? cloudflareByService.get(
-									decodeURIComponent(selectedServiceId.slice(CF_NODE_PREFIX.length)),
-								)
-							: undefined
 						const panel = selectedServiceId.startsWith(DB_NODE_PREFIX) ? (
 							<DatabaseDetailPanel
-								dbSystem={decodeURIComponent(selectedServiceId.slice(DB_NODE_PREFIX.length))}
+								{...parseDbNodeId(selectedServiceId)}
 								dbEdges={dbEdges}
 								services={services}
 								durationSeconds={durationSeconds}
 								startTime={startTime}
 								endTime={endTime}
-								onClose={() => setSelectedServiceId(null)}
-							/>
-						) : cfService ? (
-							<CloudflareDetailPanel
-								service={cfService}
 								onClose={() => setSelectedServiceId(null)}
 							/>
 						) : (

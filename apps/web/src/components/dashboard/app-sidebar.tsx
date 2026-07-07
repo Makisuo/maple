@@ -15,6 +15,7 @@ import {
 	mainNavItems,
 	topologyNavItems,
 	visibleSignalsNavItems,
+	type NavSubItem,
 } from "@/components/dashboard/nav-items"
 import { showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { KeyboardIcon } from "@/components/icons"
@@ -238,7 +239,7 @@ export function AppSidebar() {
 									const isActive = currentPath.startsWith(item.href)
 									const subItems =
 										"subItems" in item
-											? (item.subItems as { title: string; href: string }[] | undefined)
+											? (item.subItems as NavSubItem[] | undefined)
 											: undefined
 									return (
 										<SidebarMenuItem key={item.title}>
@@ -274,6 +275,7 @@ export function AppSidebar() {
 																	render={<Link to={sub.href} />}
 																	isActive={subActive}
 																>
+																	{sub.icon ? <sub.icon size={14} /> : null}
 																	<span>{sub.title}</span>
 																</SidebarMenuSubButton>
 															</SidebarMenuSubItem>

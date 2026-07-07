@@ -1,4 +1,6 @@
+import { Effect } from "effect"
 import { useSyncExternalStore } from "react"
+import { mapleRuntime } from "@/lib/registry"
 import { getActiveOrgId, subscribeActiveOrgId } from "@/lib/services/common/auth-headers"
 import {
 	createAlertIncidentsCollection,
@@ -67,29 +69,144 @@ export const recreateOrgCollections = (): void => {
 	generation += 1
 	const previous = current
 	current = null
-	if (previous) cleanupOrgCollections(previous)
+	if (previous) scheduleOrgCollectionsCleanup(previous)
 	for (const listener of generationListeners) listener()
+}
+
+// ---------------------------------------------------------------------------
+// Bounded self-heal
+// ---------------------------------------------------------------------------
+//
+// A schema error the recreated shape can't clear (e.g. a client row-schema that
+// declares a column the *deployed* table doesn't have — every row fails
+// validation) would otherwise loop forever: recreate → re-subscribe → same bad
+// row → `collection:schema-error` → recreate, at the shape's fetch cadence
+// (~30ms). That storm hammers the sync proxy + API with a flood of
+// successful-but-useless requests and re-fires the page's dependent queries.
+//
+// Cap the recovery to a few spaced attempts. A transient post-deploy drift still
+// heals (the first recreate refetches fresh rows); a persistent one degrades to
+// stale/empty lists instead of an infinite loop. Bursts (several collections
+// failing from one deploy) collapse into a single pending attempt, and the
+// budget resets on a real org switch.
+const MAX_SCHEMA_HEAL_ATTEMPTS = 3
+const SCHEMA_HEAL_COOLDOWN_MS = 5_000
+let schemaHealAttempts = 0
+let lastSchemaHealAt = 0
+let schemaHealGaveUp = false
+let pendingHealTimer: ReturnType<typeof setTimeout> | null = null
+
+const logSchemaHealGaveUp = (): void => {
+	mapleRuntime.runFork(
+		Effect.logError(
+			"Electric sync self-heal exhausted its retry budget after repeated schema-validation " +
+				"errors; collections left stopped (lists may show stale/empty data until reload).",
+		).pipe(Effect.annotateLogs({ attempts: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS })),
+	)
+}
+
+/** Clears the heal budget + any pending attempt. Called on a genuine org switch. */
+const resetSchemaHealBudget = (): void => {
+	if (pendingHealTimer !== null) {
+		clearTimeout(pendingHealTimer)
+		pendingHealTimer = null
+	}
+	schemaHealAttempts = 0
+	lastSchemaHealAt = 0
+	schemaHealGaveUp = false
+}
+
+/**
+ * Self-heal handler for `collection:schema-error`: schedules a bounded, spaced
+ * recreation. Once the budget is spent it stops recreating and logs once, so a
+ * permanent schema drift can no longer loop the sync proxy. Exported for tests.
+ */
+export const handleSchemaError = (): void => {
+	if (schemaHealGaveUp || pendingHealTimer !== null) return
+	if (schemaHealAttempts >= MAX_SCHEMA_HEAL_ATTEMPTS) {
+		schemaHealGaveUp = true
+		logSchemaHealGaveUp()
+		return
+	}
+	// First attempt fires immediately; later ones wait out the cooldown so the
+	// storm can't re-form between recreations.
+	const elapsed = Date.now() - lastSchemaHealAt
+	const delay = schemaHealAttempts === 0 ? 0 : Math.max(0, SCHEMA_HEAL_COOLDOWN_MS - elapsed)
+	pendingHealTimer = setTimeout(() => {
+		pendingHealTimer = null
+		schemaHealAttempts += 1
+		lastSchemaHealAt = Date.now()
+		recreateOrgCollections()
+	}, delay)
 }
 
 /** Reactive generation counter — re-runs a consumer's collection memo after a self-heal. */
 export const useCollectionsGeneration = (): number =>
 	useSyncExternalStore(subscribeCollectionsGeneration, getCollectionsGeneration, () => 0)
 
-const cleanupOrgCollections = (collections: OrgCollections): void => {
-	void collections.dashboards.cleanup()
-	void collections.alertRules.cleanup()
-	void collections.alertRuleStates.cleanup()
-	void collections.alertIncidents.cleanup()
-	void collections.errorIssues.cleanup()
-	void collections.actors.cleanup()
-	void collections.openErrorIncidents.cleanup()
+// How long a superseded collection may stay subscribed before we tear it down
+// anyway. Live-query collections GC ~5s after their last subscriber leaves and
+// only then release the source, so normal drain finishes well inside this.
+const CLEANUP_FALLBACK_MS = 30_000
+
+// The lifecycle surface the cleanup scheduler needs; every synced collection
+// (any row type) satisfies it.
+type SyncedCollectionLifecycle = Pick<DashboardsCollection, "subscriberCount" | "cleanup" | "on">
+
+/**
+ * Tears a superseded collection down once nothing depends on it. Cleaning up
+ * while live queries still subscribe logs a "[Live Query Error] Source
+ * collection ... was manually cleaned up" and makes TanStack DB restart sync on
+ * the dead collection (zombie shape long-polls under the previous org). The
+ * consumers release the old collection asynchronously — React re-renders onto
+ * the new set, then the old live-query collection GCs (~5s) and unsubscribes —
+ * so cleanup waits for `subscriberCount` to hit zero. The fallback timer covers
+ * a leaked subscription: tearing down then still logs the live-query error
+ * once, but a stale shape stream must not long-poll forever.
+ */
+const cleanupCollectionWhenIdle = (collection: SyncedCollectionLifecycle): void => {
+	if (collection.subscriberCount === 0) {
+		void collection.cleanup()
+		return
+	}
+	let settled = false
+	const settle = () => {
+		if (settled) return
+		settled = true
+		off()
+		clearTimeout(fallback)
+		void collection.cleanup()
+	}
+	const off = collection.on("subscribers:change", (event) => {
+		if (event.subscriberCount === 0) settle()
+	})
+	const fallback = setTimeout(settle, CLEANUP_FALLBACK_MS)
 }
+
+/** Tears down a superseded set as each collection drains (see cleanupCollectionWhenIdle). */
+const scheduleOrgCollectionsCleanup = (collections: OrgCollections): void => {
+	cleanupCollectionWhenIdle(collections.dashboards)
+	cleanupCollectionWhenIdle(collections.alertRules)
+	cleanupCollectionWhenIdle(collections.alertRuleStates)
+	cleanupCollectionWhenIdle(collections.alertIncidents)
+	cleanupCollectionWhenIdle(collections.errorIssues)
+	cleanupCollectionWhenIdle(collections.actors)
+	cleanupCollectionWhenIdle(collections.openErrorIncidents)
+}
+
+// Tracks the last org we resolved collections for, independent of `current`
+// (which `recreateOrgCollections` nulls) so a same-org self-heal rebuild is
+// distinguishable from a genuine org switch.
+let lastResolvedOrgId: string | null = null
 
 // Signing out sets the active org to "pending" (via setActiveOrgId(null)), so
 // the next getOrgCollections call swaps and tears down the prior org's streams —
 // no separate teardown entry point is needed.
 export const getOrgCollections = (orgId: string): OrgCollections => {
 	if (current && current.orgId === orgId && current.generation === generation) return current
+	// A genuine org switch (not a same-org self-heal rebuild) gets a fresh heal budget.
+	if (lastResolvedOrgId !== null && lastResolvedOrgId !== orgId) resetSchemaHealBudget()
+	lastResolvedOrgId = orgId
 	const previous = current
 	current = {
 		orgId,
@@ -103,16 +220,18 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 		openErrorIncidents: createOpenErrorIncidentsCollection(orgId),
 	}
 	// Tear down the previous org's shape streams after swapping so an in-flight
-	// read never resolves against the wrong org.
-	if (previous) cleanupOrgCollections(previous)
+	// read never resolves against the wrong org. Deferred (see
+	// scheduleOrgCollectionsCleanup) so live queries unsubscribe first.
+	if (previous) scheduleOrgCollectionsCleanup(previous)
 	return current
 }
 
 // A schema-validation failure on any shape stream means the client's row schema
 // has drifted from the deployed table — recreate every collection so they re-fetch
-// the shape from scratch. Guarded for SSR (no window during the server render).
+// the shape from scratch, under a bounded retry budget so a *persistent* drift
+// degrades gracefully instead of looping. Guarded for SSR (no window on the server).
 if (typeof window !== "undefined") {
-	window.addEventListener("collection:schema-error", () => recreateOrgCollections())
+	window.addEventListener("collection:schema-error", handleSchemaError)
 }
 
 /** Reactive active-org id (null when signed out / org-less). Mode-agnostic — both Clerk and self-hosted auth publish via setActiveOrgId. */

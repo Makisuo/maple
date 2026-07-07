@@ -278,7 +278,6 @@
         "@fontsource-variable/geist-mono": "^5.2.8",
         "@json-render/core": "^0.19.0",
         "@json-render/react": "^0.19.0",
-        "@maple-dev/browser": "workspace:*",
         "@maple-dev/effect-sdk": "workspace:*",
         "@maple/domain": "workspace:*",
         "@maple/effect-db": "workspace:*",
@@ -401,6 +400,7 @@
       },
       "devDependencies": {
         "@effect/language-service": "catalog:effect",
+        "@maple/browser-session": "workspace:*",
         "@types/node": "catalog:tooling",
         "effect": "catalog:effect",
         "tsdown": "^0.21.7",
@@ -441,7 +441,19 @@
         "rrweb": "^2.0.0-alpha.18",
       },
       "devDependencies": {
+        "@maple/browser-session": "workspace:*",
         "tsdown": "^0.21.7",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/browser-session": {
+      "name": "@maple/browser-session",
+      "version": "0.1.0",
+      "dependencies": {
+        "rrweb": "^2.0.0-alpha.18",
+      },
+      "devDependencies": {
         "typescript": "catalog:tooling",
         "vitest": "catalog:",
       },
@@ -1450,6 +1462,8 @@
     "@maple/api": ["@maple/api@workspace:apps/api"],
 
     "@maple/auth": ["@maple/auth@workspace:packages/auth"],
+
+    "@maple/browser-session": ["@maple/browser-session@workspace:packages/browser-session"],
 
     "@maple/chat-flue": ["@maple/chat-flue@workspace:apps/chat-flue"],
 

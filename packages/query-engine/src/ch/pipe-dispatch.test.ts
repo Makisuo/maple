@@ -83,6 +83,41 @@ describe("compilePipeQuery", () => {
 		expect(result!.sql).toContain("group")
 	})
 
+	it("metric_attribute_keys routes to the raw table when metric_name + metric_type are set", () => {
+		const result = compilePipeQuery("metric_attribute_keys", {
+			...baseParams(),
+			metric_name: "http.server.duration",
+			metric_type: "gauge",
+		})
+		expect(result).toBeDefined()
+		expect(result!.sql).toContain("metrics_gauge")
+		expect(result!.sql).toContain("arrayJoin(mapKeys(Attributes))")
+		expect(result!.sql).toContain("MetricName = 'http.server.duration'")
+	})
+
+	it("metric_attribute_keys ignores an invalid metric_type and stays on the rollup", () => {
+		const result = compilePipeQuery("metric_attribute_keys", {
+			...baseParams(),
+			metric_name: "http.server.duration",
+			metric_type: "not-a-type",
+		})
+		expect(result).toBeDefined()
+		expect(result!.sql).toContain("attribute_keys_hourly")
+	})
+
+	it("metric_attribute_values routes to the raw table when metric_name + metric_type are set", () => {
+		const result = compilePipeQuery("metric_attribute_values", {
+			...baseParams(),
+			attribute_key: "group",
+			metric_name: "http.server.duration",
+			metric_type: "sum",
+		})
+		expect(result).toBeDefined()
+		expect(result!.sql).toContain("metrics_sum")
+		expect(result!.sql).toContain("Attributes['group']")
+		expect(result!.sql).toContain("MetricName = 'http.server.duration'")
+	})
+
 	describe("logs free-text search param", () => {
 		// The dispatch reads `str("search")` for both list_logs and logs_count;
 		// callers must emit `search` (not `body_search`) or the filter is dropped.

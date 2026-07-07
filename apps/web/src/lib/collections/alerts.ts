@@ -17,7 +17,7 @@ import {
 	QueryBuilderQueryDraftSchema,
 	UserId,
 } from "@maple/domain/http"
-import { QueryEngineAlertReducer } from "@maple/domain/query-engine"
+import { QueryEngineAlertReducer, QueryEngineNoDataBehavior } from "@maple/domain/query-engine"
 import { Option, Schema } from "effect"
 import { createSyncedCollection, timestamptzParser } from "./shape-fetch"
 
@@ -36,6 +36,7 @@ const asMetricAggregation = Schema.decodeUnknownSync(AlertMetricAggregation)
 const asIncidentStatus = Schema.decodeUnknownSync(AlertIncidentStatus)
 const asEventType = Schema.decodeUnknownSync(AlertEventType)
 const asReducer = Schema.decodeUnknownSync(QueryEngineAlertReducer)
+const asNoDataBehavior = Schema.decodeUnknownSync(QueryEngineNoDataBehavior)
 
 const decodeNotificationTemplate = Schema.decodeUnknownOption(AlertNotificationTemplate)
 const decodeQueryBuilderDraft = Schema.decodeUnknownOption(QueryBuilderQueryDraftSchema)
@@ -221,8 +222,10 @@ export const rowToAlertRuleDocument = (
 		rawQuerySql: row.raw_query_sql ?? null,
 		rawQueryReducer: row.signal_type === "raw_query" ? asReducer(row.reducer) : null,
 		destinationIds: safeParseStringArray(row.destination_ids_json).map((id) => decodeDestinationId(id)),
+		noDataBehavior: asNoDataBehavior(row.no_data_behavior),
 		lastEvaluationError: state?.last_error ?? null,
 		lastEvaluatedAt: state?.last_evaluated_at != null ? decodeIso(state.last_evaluated_at) : null,
+		lastScheduledAt: row.last_scheduled_at != null ? decodeIso(row.last_scheduled_at) : null,
 		createdAt: decodeIso(row.created_at),
 		updatedAt: decodeIso(row.updated_at),
 		createdBy: asUserId(row.created_by),

@@ -61,6 +61,23 @@ describe("buildUpstreamShapeUrl", () => {
 		assert.isNull(params.get("shape"))
 	})
 
+	it("forwards Electric's cache-recovery params so the client can escape a stale CDN entry", () => {
+		// When Electric rotates a shape handle, @electric-sql/client re-requests with
+		// `expired_handle` (and a `cache-buster`) set to bust Cloudflare's cache of our
+		// upstream fetch. If the proxy drops them the upstream URL is unchanged, the CDN
+		// keeps serving the expired-handle response, and the client spins in an infinite
+		// 409 loop. So these MUST reach Electric.
+		const clientParams = new URLSearchParams({
+			offset: "-1",
+			expired_handle: "130-9999",
+			"cache-buster": "1751742000000",
+			shape: "alert_rules",
+		})
+		const { params } = parse(buildUpstreamShapeUrl({ ...base, shape: "alert_rules", clientParams }))
+		assert.strictEqual(params.get("expired_handle"), "130-9999")
+		assert.strictEqual(params.get("cache-buster"), "1751742000000")
+	})
+
 	it("never lets the client override the pinned table / where / params / columns", () => {
 		const malicious = new URLSearchParams()
 		malicious.set("table", "api_keys")

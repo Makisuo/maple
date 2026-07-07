@@ -27,6 +27,7 @@ export {
 	getSessionTranscript,
 	type SearchSessionsInput,
 	type SessionTranscriptOutput,
+	type SessionReplaysListOutput,
 } from "./session-events"
 export {
 	getSessionTraces,

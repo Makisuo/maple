@@ -81,7 +81,7 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 const buildHandler = async () => {
 	const { AllRoutes, ApiAuthLive, InternalServiceAuthLive, ApiObservabilityLive, MainLive } =
 		await import("./app")
-	const { DatabasePgLive } = await import("./lib/DatabasePgLive")
+	const { layerPg } = await import("./lib/DatabasePgLive")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
@@ -89,7 +89,7 @@ const buildHandler = async () => {
 			Layer.provideMerge(InternalServiceAuthLive),
 			Layer.provideMerge(ApiObservabilityLive),
 			Layer.provideMerge(WorkerPlatformLive),
-			Layer.provideMerge(DatabasePgLive),
+			Layer.provideMerge(layerPg),
 			Layer.provideMerge(WorkerEnvironment.layer),
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLayer),

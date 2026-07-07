@@ -6,7 +6,6 @@ import {
 	CacheBackendLive,
 	CloudflareAnalyticsService,
 	CloudflareOAuthService,
-	DatabasePgLive,
 	DigestService,
 	EdgeCacheService,
 	EmailService,
@@ -14,6 +13,7 @@ import {
 	ErrorsService,
 	EscalationService,
 	HazelOAuthService,
+	layerPg,
 	NotificationDispatcher,
 	OnboardingEmailService,
 	OnboardingService,
@@ -41,7 +41,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	const ConfigLive = WorkerConfigProviderLayer
 	const EnvLive = Env.layer.pipe(Layer.provide(ConfigLive))
 
-	const DatabaseLive = DatabasePgLive.pipe(Layer.provide(WorkerEnvironment.layer))
+	const DatabaseLive = layerPg.pipe(Layer.provide(WorkerEnvironment.layer))
 
 	const BaseLive = Layer.mergeAll(EnvLive, DatabaseLive)
 
@@ -304,7 +304,13 @@ const cloudflareAnalyticsTick = Effect.gen(function* () {
 	const analytics = yield* CloudflareAnalyticsService
 	const result = yield* analytics.pollAllOrgs()
 	yield* Effect.logInfo("Cloudflare analytics tick complete").pipe(
-		Effect.annotateLogs({ orgs: result.orgs, rowsIngested: result.rowsIngested }),
+		Effect.annotateLogs({
+			orgs: result.orgs,
+			rowsIngested: result.rowsIngested,
+			skipped: result.skipped,
+			failures: result.failures,
+			perOrg: result.perOrg,
+		}),
 	)
 }).pipe(
 	Effect.withSpan("alerting.cloudflare_analytics_tick"),

@@ -181,6 +181,13 @@ describe("expression functions", () => {
 		expect(sql).toContain("arrayFilter(x -> x != '', ['a', '', 'b']) AS result")
 	})
 
+	it("compiles arrayJoin", () => {
+		const arr = CH.arrayOf(CH.lit("a"), CH.lit("b"))
+		const q = CH.from(TestTable).select(() => ({ result: CH.arrayJoin(arr) }))
+		const { sql } = compileCH(q, {})
+		expect(sql).toContain("arrayJoin(['a', 'b']) AS result")
+	})
+
 	it("compiles arrayStringConcat with Expr array", () => {
 		const q = CH.from(TestTable).select(($) => ({
 			result: CH.arrayStringConcat(CH.arrayOf($.Name, CH.lit("x")), " | "),

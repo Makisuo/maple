@@ -211,6 +211,7 @@ End-user and platform documentation lives in `docs/`:
 - `docs/sst-fork-workflow.md` — Running maple against a local SST fork, syncing with upstream, and opening PRs from fork branches
 - `docs/local-mode.md` — Local mode (single Bun-compiled `maple` binary from `apps/cli`: CLI + OTLP-ingest/query server + bundled UI, talking to embedded chDB via `bun:ffi`→libchdb), the `/local/query` contract, dev workflow, and the 2-file release bundle
 - `docs/tinybird-pr-branches.md` — Per-PR ephemeral Tinybird branches for preview deploys (`--last-partition` data, branch lifecycle wired into `deploy-pr-preview.yml`)
+- `docs/otel-spec/` — Source-linked internal map of the OpenTelemetry specifications (traces, metrics, logs, OTLP, semconv, resource/config, propagation, stability, profiles/compat), snapshotted at spec v1.58.0. Use it for ingest-gateway OTLP-server compliance, self-instrumentation best practices, and UI data-semantics questions; start at `docs/otel-spec/README.md`
 
 ## Self-Observability (Trace Loop Prevention)
 

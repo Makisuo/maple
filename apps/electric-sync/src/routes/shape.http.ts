@@ -42,9 +42,21 @@ export const isShapeName = (value: string | null): value is ShapeName =>
 
 // The only client-supplied params we forward upstream. Everything else — table,
 // where, columns, params[n] — is pinned by us, so a client can never widen the
-// shape or escape its org scope. These four are Electric's reserved cursor
-// params (see @electric-sql/client): they only advance position in the log.
-const CLIENT_PASSTHROUGH_PARAMS = ["offset", "handle", "live", "cursor"] as const
+// shape or escape its org scope. These are Electric's reserved cursor +
+// cache-recovery params (see @electric-sql/client):
+//   - offset / handle / live / cursor advance position in the log.
+//   - expired_handle / cache-buster are cache-BUSTERS. Electric is designed to run
+//     behind a caching CDN, and Cloudflare caches our upstream fetch to Electric
+//     (Electric marks snapshot/log chunks `cache-control: public`). When Electric
+//     rotates a shape handle (compaction), the client re-requests with these params
+//     set so the new URL misses the stale CDN entry. DROPPING them makes the bust a
+//     no-op: the upstream URL is byte-identical to the cached one, Cloudflare serves
+//     the same stale response carrying the already-expired handle, and the client
+//     spins in an infinite 409 refetch loop — the exact failure @electric-sql/client
+//     warns about ("proxy/CDN is serving a stale cached response and ignoring
+//     cache-buster query params"). They only affect caching, never the shape
+//     definition or org scope, so forwarding them is safe.
+const CLIENT_PASSTHROUGH_PARAMS = ["offset", "handle", "live", "cursor", "expired_handle", "cache-buster"] as const
 
 // Upstream response headers that must not survive re-wrapping: the platform
 // re-encodes and re-chunks the streamed body, so a stale content-encoding /
