@@ -62,12 +62,19 @@ const snapshot = <T extends object>(collection: Collection<T, any, any>): Collec
  * per data change and per status transition. The TanStack DB subscription is
  * acquired when the stream starts and released with the stream's scope — pipe
  * it through `Registry.run` inside a model and teardown follows the instance.
+ *
+ * `startSync` (default true) forces the collection to begin syncing when the
+ * stream starts; pass false to leave a lazily-synced collection idle (honoured
+ * by {@link liveQuery}'s `startSync` option).
  */
-export const changes = <T extends object>(collection: Collection<T, any, any>): Stream.Stream<CollectionState<T>> =>
+export const changes = <T extends object>(
+	collection: Collection<T, any, any>,
+	startSync = true,
+): Stream.Stream<CollectionState<T>> =>
 	Stream.callback<CollectionState<T>>((queue) =>
 		Effect.acquireRelease(
 			Effect.sync(() => {
-				collection.startSyncImmediate()
+				if (startSync) collection.startSyncImmediate()
 				const offer = () => Queue.offerUnsafe(queue, snapshot(collection))
 				const subscription = collection.subscribeChanges(offer)
 				const offStatus = collection.on("status:change", offer)
@@ -153,7 +160,7 @@ export const liveQuery = <TContext extends Context>(
 					}),
 				),
 				(collection) => Effect.promise(() => collection.cleanup()),
-			).pipe(Effect.map((collection) => changes<GetResult<TContext>>(collection))),
+			).pipe(Effect.map((collection) => changes<GetResult<TContext>>(collection, options?.startSync ?? true))),
 		)
 		yield* Registry.run(collectionChanges.pipe(Stream.mapEffect((state) => Store.set(store, state))))
 		return store

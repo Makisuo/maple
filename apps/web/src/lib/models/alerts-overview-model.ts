@@ -149,10 +149,12 @@ interface OverviewSources {
 
 /** Row-level combine body: phase handling + row→document, then {@link deriveOverview}. */
 const buildOverview = (sources: OverviewSources): AlertsOverviewData => {
+	// Rules + incidents gate the page — for BOTH error and loading. Evaluation
+	// states are secondary/derived (the old tab read them via useAlertRuleStates,
+	// which had no error channel and degraded to []): a failing states shape must
+	// not blank the overview, it falls back to the rule doc's lastEvaluation* fields.
 	const message =
-		collectionFailureMessage(sources.rules) ??
-		collectionFailureMessage(sources.states) ??
-		collectionFailureMessage(sources.incidents)
+		collectionFailureMessage(sources.rules) ?? collectionFailureMessage(sources.incidents)
 	if (message !== null) {
 		return { phase: "error", message }
 	}

@@ -104,15 +104,14 @@ interface IssuesSources {
 
 /** Row-level combine body: phase handling + row→document, then {@link deriveErrorIssues}. */
 const buildIssues = (sources: IssuesSources): ErrorIssuesData => {
-	const message =
-		collectionFailureMessage(sources.issues) ??
-		collectionFailureMessage(sources.actors) ??
-		collectionFailureMessage(sources.openIncidents)
+	// Only the issues collection gates the page — for BOTH error and loading.
+	// Actors and open incidents are secondary joins that degrade to [] while
+	// they stream in (and if they fail), exactly like the hook did: a failing
+	// secondary shape must not blank an otherwise-usable list.
+	const message = collectionFailureMessage(sources.issues)
 	if (message !== null) {
 		return { phase: "error", message }
 	}
-	// Only the issues collection gates loading — actors and open incidents
-	// degrade to [] while they stream in, exactly like the hook did.
 	if (!AsyncResult.isSuccess(sources.issues)) {
 		return { phase: "loading" }
 	}
