@@ -17,14 +17,15 @@ export function parseUserAgent(ua: string): ParsedUserAgent {
 					: /safari/i.test(ua)
 						? "Safari"
 						: "Unknown"
+	// iOS UAs contain "like Mac OS X", so test iOS before macOS
 	const osName = /windows/i.test(ua)
 		? "Windows"
-		: /mac os|macintosh/i.test(ua)
-			? "macOS"
-			: /android/i.test(ua)
-				? "Android"
-				: /iphone|ipad|ios/i.test(ua)
-					? "iOS"
+		: /iphone|ipad|ios/i.test(ua)
+			? "iOS"
+			: /mac os|macintosh/i.test(ua)
+				? "macOS"
+				: /android/i.test(ua)
+					? "Android"
 					: /linux/i.test(ua)
 						? "Linux"
 						: "Unknown"
