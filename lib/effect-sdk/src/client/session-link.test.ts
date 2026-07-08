@@ -104,4 +104,20 @@ describe("withSessionLink — user.id span stamping", () => {
 		const attrs = firstSpanAttrs(calls)
 		expect(attrs.find((a) => a.key === "user.id")).toBeUndefined()
 	})
+
+	it("stops stamping user.id after identify(null)", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		identify("user_to_clear")
+		identify(null)
+		const telemetry = make(baseConfig)
+
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("null-cleared-op"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush()
+
+		const attrs = firstSpanAttrs(calls)
+		expect(attrs.find((a) => a.key === "user.id")).toBeUndefined()
+	})
 })

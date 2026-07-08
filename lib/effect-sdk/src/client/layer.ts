@@ -132,7 +132,7 @@ export const layer = (config: MapleClientConfig) => {
  * yield* Maple.identify(user.id)
  * ```
  */
-export const identify = (userId: string): Effect.Effect<void> =>
+export const identify = (userId?: string | null): Effect.Effect<void> =>
 	Effect.sync(() => identifyUser(userId))
 
 /**

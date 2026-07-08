@@ -3,6 +3,7 @@ import { Effect } from "effect"
 import { afterEach, beforeEach, expect, vi } from "vitest"
 import { make } from "./flushable.js"
 import { resetStandaloneSessionForTests } from "./standalone-session.js"
+import { identify } from "./user.js"
 
 // Sessions-UI emission for the standalone Effect client: `make()` must post
 // `/v1/sessionReplays/meta` rows (active on setup, ended with observed trace
@@ -57,6 +58,7 @@ describe("standalone session emission (client)", () => {
 	})
 
 	afterEach(() => {
+		identify(undefined)
 		restore?.()
 		vi.unstubAllGlobals()
 	})
@@ -80,6 +82,19 @@ describe("standalone session emission (client)", () => {
 		expect(row.url_initial).toBe("https://app.example.com/dashboard")
 		expect(row.resource_attributes["deployment.environment"]).toBe("test")
 		expect(row.resource_attributes["deployment.commit_sha"]).toBe("abc123")
+	})
+
+	it("normalizes cleared identity to an anonymous session row", async () => {
+		const { metaPosts, restore: r } = setupFetch()
+		restore = r
+		stubWindow()
+		identify("user_to_clear")
+		identify(undefined)
+
+		make(baseConfig)
+
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(metaPosts[0].row.user_id).toBe("")
 	})
 
 	it("posts nothing when the @maple-dev/browser sink owns the session", async () => {

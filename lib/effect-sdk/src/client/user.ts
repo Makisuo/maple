@@ -5,13 +5,12 @@
 let currentUserId: string | undefined
 
 /**
- * Attach (or replace) the end-user id on the active session. Idempotent and
- * safe to call on every render — the authoritative session row is the latest
- * one posted, which reads this value at post time.
+ * Attach, replace, or clear the end-user id on the active session. Idempotent
+ * and safe to call on every render — the authoritative session row is the
+ * latest one posted, which reads this value at post time.
  */
-export const identify = (userId: string): void => {
-	if (!userId) return
-	currentUserId = userId
+export const identify = (userId?: string | null): void => {
+	currentUserId = userId ? userId : undefined
 }
 
 /**
