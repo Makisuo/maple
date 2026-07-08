@@ -1,6 +1,7 @@
 import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { Exit } from "effect"
-import { useMemo, useState } from "react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
@@ -16,7 +17,7 @@ import {
 } from "@/components/alerts/overview/alerts-health-summary"
 import { RulesOverviewTable } from "@/components/alerts/overview/rules-overview-table"
 import { BellIcon, CircleWarningIcon, MagnifierIcon, PlusIcon, XmarkIcon } from "@/components/icons"
-import { buildRuleToggleRequest, getExitErrorMessage } from "@/lib/alerts/form-utils"
+import { getExitErrorMessage } from "@/lib/alerts/form-utils"
 import { needsAttention } from "@/lib/alerts/rule-status"
 import {
 	filterByTags,
@@ -24,7 +25,7 @@ import {
 	tagFacets,
 	type TagGroup,
 } from "@/lib/alerts/tag-grouping"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomValue } from "@/lib/effect-atom"
 import { AlertsOverviewModel, type AlertsOverviewReady } from "@/lib/models/alerts-overview-model"
 import { unitflowRuntime } from "@/lib/models/runtime"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -90,10 +91,10 @@ function OverviewLoadError() {
 	)
 }
 
-const OverviewBody = View.make(AlertsOverviewModel, ({ overview }) => {
+const OverviewBody = View.make(AlertsOverviewModel, ({ overview, toggleRule, toggleState }) => {
 	if (overview.phase === "loading") return <OverviewSkeleton />
 	if (overview.phase === "error") return <OverviewLoadError />
-	return <AlertsOverviewContent data={overview} />
+	return <AlertsOverviewContent data={overview} onToggleRule={toggleRule} toggleState={toggleState} />
 })
 
 /* ── Presentation ─────────────────────────────────────────────────────────── */
@@ -103,7 +104,17 @@ const OverviewBody = View.make(AlertsOverviewModel, ({ overview }) => {
  * filters, search, the session/destination atoms, and the toggle mutation are
  * view concerns and stay here.
  */
-function AlertsOverviewContent({ data }: { data: AlertsOverviewReady }) {
+function AlertsOverviewContent({
+	data,
+	onToggleRule,
+	toggleState,
+}: {
+	data: AlertsOverviewReady
+	/** The model's rule enable/disable Mutation, bound to a fire callback. */
+	onToggleRule: (rule: AlertRuleDocument) => void
+	/** The shared in-flight state of {@link onToggleRule}. */
+	toggleState: AsyncResult.AsyncResult<AlertRuleDocument, unknown>
+}) {
 	const search = useSearch({ from: "/alerts/" })
 	const navigate = useNavigate({ from: "/alerts/" })
 
@@ -134,9 +145,19 @@ function AlertsOverviewContent({ data }: { data: AlertsOverviewReady }) {
 		.onSuccess((session) => session.userId as string)
 		.orElse(() => null)
 
-	const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), {
-		mode: "promiseExit",
-	})
+	// Surface toggle failures as a toast by watching the shared mutation state
+	// transition to a failure — an external side effect on a state change (the
+	// no-useEffect "sync an external system" case). Success is silent: the
+	// Electric `alertRules` shape re-renders the row on its own.
+	const lastToggleState = useRef(toggleState)
+	useEffect(() => {
+		if (toggleState === lastToggleState.current) return
+		lastToggleState.current = toggleState
+		if (AsyncResult.isFailure(toggleState)) {
+			toast.error(getExitErrorMessage(Exit.failCause(toggleState.cause), "Failed to update rule"))
+		}
+	}, [toggleState])
+	const isToggling = AsyncResult.isWaiting(toggleState)
 
 	const [searchQuery, setSearchQuery] = useState("")
 
@@ -237,19 +258,6 @@ function AlertsOverviewContent({ data }: { data: AlertsOverviewReady }) {
 	}, [incidents])
 
 	const enabledRules = rules.filter((r) => r.enabled).length
-
-	/* ── Actions ────────────────────────────────────────────────────────────── */
-
-	async function handleRuleToggle(rule: AlertRuleDocument) {
-		const result = await updateRule({
-			params: { ruleId: rule.id },
-			payload: buildRuleToggleRequest(rule),
-			reactivityKeys: ["alertRules"],
-		})
-		if (!Exit.isSuccess(result)) {
-			toast.error(getExitErrorMessage(result, "Failed to update rule"))
-		}
-	}
 
 	/* ── Render ─────────────────────────────────────────────────────────────── */
 
@@ -363,7 +371,8 @@ function AlertsOverviewContent({ data }: { data: AlertsOverviewReady }) {
 						incidentsByRuleId={incidentsByRule}
 						timelineRange={timelineRange}
 						isAdmin={isAdmin}
-						onToggle={handleRuleToggle}
+						isToggling={isToggling}
+						onToggle={onToggleRule}
 					/>
 				)}
 			</div>

@@ -39,6 +39,7 @@ export function RulesOverviewTable({
 	incidentsByRuleId,
 	timelineRange,
 	isAdmin,
+	isToggling,
 	onToggle,
 }: {
 	/** Filtered rules, in list order. Ignored when {@link groups} is set. */
@@ -52,6 +53,9 @@ export function RulesOverviewTable({
 	incidentsByRuleId: Map<string, AlertIncidentDocument[]>
 	timelineRange: { min: number; max: number }
 	isAdmin: boolean
+	/** A rule toggle is in flight — briefly disables the switches (the mutation
+	 * serializes writes on one permit). */
+	isToggling?: boolean
 	onToggle: (rule: AlertRuleDocument) => void
 }) {
 	const navigate = useNavigate()
@@ -77,7 +81,7 @@ export function RulesOverviewTable({
 					<Switch
 						checked={rule.enabled}
 						onCheckedChange={() => onToggle(rule)}
-						disabled={!isAdmin}
+						disabled={!isAdmin || isToggling}
 					/>
 				</TableCell>
 				<TableCell className="min-w-0">

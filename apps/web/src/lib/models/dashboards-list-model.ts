@@ -71,7 +71,7 @@ export class DashboardsListModel extends Model.Service<DashboardsListModel>()("m
 			const orgKey = yield* makeOrgCollectionsKey
 			const rows = yield* Db.fromCollectionByKey(orgKey, (key) => getOrgCollections(orgIdOf(key)).dashboards)
 
-			const list = Store.combine([rows], buildList)
+			const list = rows.pipe(Store.map(buildList))
 
 			return {
 				inputs: {},

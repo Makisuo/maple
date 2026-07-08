@@ -28,3 +28,14 @@ export const unitflowRuntime = UnitflowRuntime.make(
 	),
 	{ memoMap: Atom.runtime.memoMap },
 )
+
+// Dispose the runtime on page unload so every live model instance runs its
+// finalizers (Electric shape subscriptions, the delivery-events query, the
+// clock tick) instead of relying solely on the idle TTL — the cleanup the
+// unitflow React binding calls for. Guarded for SSR / non-browser bundles;
+// best-effort (the promise won't settle before the page tears down).
+if (typeof window !== "undefined") {
+	window.addEventListener("beforeunload", () => {
+		void unitflowRuntime.dispose()
+	})
+}

@@ -6,8 +6,10 @@
  * `AlertsOverviewTab` now recomputes only when a source emits, and lives
  * outside the component tree (importable from a non-React runtime).
  *
- * URL-backed filters, session/destination atoms, and the toggle mutation stay
- * in the component — they are routing/React concerns, not model state.
+ * URL-backed filters and the session/destination atoms stay in the component —
+ * they are routing/React concerns. The rule enable/disable toggle is a
+ * model-owned `Mutation` (see `toggleRule` below), so the write and its
+ * in-flight state live with the data they mutate.
  */
 
 import type {
@@ -15,13 +17,15 @@ import type {
 	AlertIncidentDocument,
 	AlertRuleDocument,
 } from "@maple/domain/http"
-import { Event, Model, Query, Registry, Store } from "@maple/unitflow"
+import { Event, Model, Mutation, Query, Registry, Store } from "@maple/unitflow"
 import * as Db from "@maple/unitflow/db"
+import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { Reactivity } from "effect/unstable/reactivity/Reactivity"
 
+import { buildRuleToggleRequest } from "@/lib/alerts/form-utils"
 import { deriveRuleStatus, type DerivedRuleStatus, needsAttention } from "@/lib/alerts/rule-status"
 import {
 	type AlertIncidentRow,
@@ -173,6 +177,26 @@ const buildOverview = (sources: OverviewSources): AlertsOverviewData => {
 	})
 }
 
+/**
+ * The rule enable/disable write, factored out of the model so it is testable
+ * through the registry without standing up the full overview model (collections
+ * + delivery query). Wrapping the PATCH in `reactivity.mutation(["alertRules"])`
+ * keeps atom-world alertRules readers in sync; the model's own alertRules
+ * Electric shape self-updates regardless.
+ */
+export const toggleRuleHandler = (rule: AlertRuleDocument) =>
+	Effect.gen(function* () {
+		const reactivity = yield* Reactivity
+		const client = yield* MapleApiAtomClient
+		return yield* reactivity.mutation(
+			["alertRules"],
+			client.alerts.updateRule({
+				params: { ruleId: rule.id },
+				payload: buildRuleToggleRequest(rule),
+			}),
+		)
+	})
+
 export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("maple/alerts/overview")({
 	// Not the singleton default (keepAlive): the instance — 3 shape-stream
 	// subscriptions, the delivery-events query, and the clock tick — should not
@@ -217,10 +241,20 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 				),
 			)
 
+			// The rule enable/disable toggle is a model-owned write. `Mutation.make`
+			// serializes it on one permit and exposes a `state` the switch reflects
+			// while the PATCH is in flight. The handler is {@link toggleRuleHandler}
+			// (factored out so it is testable through the registry).
+			const toggleRule = yield* Mutation.make(toggleRuleHandler)
+
 			// The staleness derivation compares against wall clock; advance it on a
 			// coarse tick so a rule can go stale without any source emitting.
-			const clock = Store.make(Date.now())
-			yield* Registry.run(Stream.tick(CLOCK_TICK).pipe(Stream.mapEffect(() => Store.set(clock, Date.now()))))
+			const clock = Store.make(yield* Clock.currentTimeMillis)
+			yield* Registry.run(
+				Stream.tick(CLOCK_TICK).pipe(
+					Stream.mapEffect(() => Effect.flatMap(Clock.currentTimeMillis, (ms) => Store.set(clock, ms))),
+				),
+			)
 
 			const overview = Store.combine(
 				[rules, states, incidents, deliveryEvents.state, clock],
@@ -236,9 +270,14 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 			)
 
 			return {
-				inputs: { refreshDeliveries: deliveryEvents.refresh },
+				inputs: { refreshDeliveries: deliveryEvents.refresh, toggleRule: toggleRule.run },
 				outputs: { overview },
-				ui: { overview, refreshDeliveries: deliveryEvents.refresh },
+				ui: {
+					overview,
+					refreshDeliveries: deliveryEvents.refresh,
+					toggleRule: toggleRule.run,
+					toggleState: toggleRule.state,
+				},
 			}
 		}),
 }) {}
