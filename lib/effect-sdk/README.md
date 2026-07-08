@@ -131,6 +131,18 @@ import { Maple } from "@maple-dev/effect-sdk/client"
 yield* Maple.identify(user.id)
 ```
 
+- **Clear the identity** on logout with `clearIdentity()` — the inverse of `identify()`. Metadata rows and spans go back to anonymous (no `user.id`) from then on; the session itself continues.
+
+```typescript
+import { clearIdentity } from "@maple-dev/effect-sdk/client"
+
+clearIdentity()
+
+// or, inside an Effect program:
+import { Maple } from "@maple-dev/effect-sdk/client"
+yield* Maple.clearIdentity
+```
+
 If `@maple-dev/browser` is also on the page, it owns the session and this SDK's replay/emission stands down automatically — exactly one recorder runs, and spans link to that session via the shared sink. Use one or the other for replay, not both.
 
 ## Manual flush

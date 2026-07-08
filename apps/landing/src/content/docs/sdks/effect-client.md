@@ -79,6 +79,14 @@ import { identify } from "@maple-dev/effect-sdk/client"
 identify(user.id)
 ```
 
+- **Clear the identity** on logout with `clearIdentity()` (the inverse of `identify()`); metadata rows and spans go back to anonymous while the session continues:
+
+```typescript
+import { clearIdentity } from "@maple-dev/effect-sdk/client"
+
+clearIdentity()
+```
+
 - **Interop with `@maple-dev/browser`.** If the standalone browser SDK is also on the page, it owns the session — this SDK's recorder and row emission stand down automatically, and spans link to that session instead. Run replay from one SDK, not both.
 
 ## Use a Public Ingest Key

@@ -14,4 +14,14 @@ export const identify = (userId: string): void => {
 	currentUserId = userId
 }
 
+/**
+ * Drop the end-user id from the active session — the inverse of `identify()`.
+ * Subsequent metadata rows and spans go back to anonymous (no `user.id`), so
+ * call this on logout to stop attributing telemetry to the signed-out user.
+ * The session itself continues; only the identity is cleared.
+ */
+export const clearIdentity = (): void => {
+	currentUserId = undefined
+}
+
 export const getCurrentUserId = (): string | undefined => currentUserId
