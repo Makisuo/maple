@@ -12,6 +12,7 @@
 import type { ActorDocument, ErrorIssueDocument } from "@maple/domain/http"
 import { Model, Store } from "@maple/unitflow"
 import * as Db from "@maple/unitflow/db"
+import { Reducer } from "@maple/unitflow/reducer"
 import * as Effect from "effect/Effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 
@@ -23,6 +24,7 @@ import {
 	rowToIssue,
 } from "@/lib/collections/errors"
 import { getOrgCollections } from "@/lib/collections/org-collections"
+import { initialIssueSelection, updateIssueSelection } from "@/lib/models/issue-selection"
 import { collectionFailureMessage, makeOrgCollectionsKey, orgIdOf } from "@/lib/models/org-collections-key"
 
 /** The server's page cap, mirrored client-side by {@link filterIssues}. */
@@ -153,10 +155,20 @@ export class ErrorIssuesModel extends Model.Service<ErrorIssuesModel>()("maple/e
 				buildIssues({ issues: issuesState, actors: actorsState, openIncidents: incidentsState }),
 			)
 
+			// Row selection (multi-select + shift-range + clear) is model-owned
+			// interactive state — a pure reducer instead of the route's old
+			// useState/useRef tangle. The View drives it through `dispatchSelection`
+			// and reads `selection`; see @/lib/models/issue-selection.
+			const selection = yield* Reducer.make({
+				initial: initialIssueSelection,
+				update: updateIssueSelection,
+				name: "maple/errors/issues.selection",
+			})
+
 			return {
-				inputs: {},
+				inputs: { dispatchSelection: selection.dispatch },
 				outputs: { overview },
-				ui: { overview },
+				ui: { overview, selection: selection.state, dispatchSelection: selection.dispatch },
 			}
 		}),
 }) {}

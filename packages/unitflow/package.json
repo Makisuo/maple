@@ -13,7 +13,8 @@
 		"./runtime": "./src/core/runtime.ts",
 		"./store": "./src/core/store.ts",
 		"./react": "./src/react/index.ts",
-		"./db": "./src/db/index.ts"
+		"./db": "./src/db/index.ts",
+		"./reducer": "./src/reducer/index.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc --noEmit",

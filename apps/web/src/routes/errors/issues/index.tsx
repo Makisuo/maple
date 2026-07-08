@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
@@ -7,6 +7,7 @@ import { Unitflow, View } from "@maple/unitflow/react"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
+import { useMountEffect } from "@/hooks/use-mount-effect"
 import { IssueGroup } from "@/components/errors/issue-group"
 import { IssuesBulkBar } from "@/components/errors/issues-bulk-bar"
 import { IssuesToolbar } from "@/components/errors/issues-toolbar"
@@ -14,6 +15,12 @@ import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
 import type { SelectToggleEvent } from "@/components/errors/issue-row"
 import { ErrorIssuesModel, filterIssues } from "@/lib/models/error-issues-model"
+import {
+	clearedSelection,
+	type IssueSelectionMsg,
+	type IssueSelectionState,
+	toggledSelection,
+} from "@/lib/models/issue-selection"
 import { unitflowRuntime } from "@/lib/models/runtime"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
@@ -147,16 +154,12 @@ function IssuesPage() {
 
 	const mutations = useIssueMutations()
 
-	const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-	const anchorRef = useRef<string | null>(null)
-
 	const toolbar = (totalCount?: number) => (
 		<IssuesToolbar
 			tabs={TOOLBAR_TABS}
 			active={activeFilter}
 			totalCount={totalCount}
 			onChange={(value) => {
-				setSelectedIds(new Set())
 				navigate({
 					search: (prev) => ({
 						...prev,
@@ -169,7 +172,6 @@ function IssuesPage() {
 					<Select
 						value={kindFilter}
 						onValueChange={(value) => {
-							setSelectedIds(new Set())
 							navigate({
 								search: (prev) => ({
 									...prev,
@@ -190,7 +192,6 @@ function IssuesPage() {
 					<Select
 						value={severityFilter}
 						onValueChange={(value) => {
-							setSelectedIds(new Set())
 							navigate({
 								search: (prev) => ({
 									...prev,
@@ -233,9 +234,6 @@ function IssuesPage() {
 					severityFilter={severityFilter}
 					kindFilter={kindFilter}
 					mutations={mutations}
-					selectedIds={selectedIds}
-					setSelectedIds={setSelectedIds}
-					anchorRef={anchorRef}
 				/>
 			)}
 		</Unitflow>
@@ -248,24 +246,55 @@ interface IssuesBodyProps {
 	severityFilter: SeverityFilterValue
 	kindFilter: "all" | "error" | "alert"
 	mutations: ReturnType<typeof useIssueMutations>
-	selectedIds: Set<string>
-	setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
-	anchorRef: React.MutableRefObject<string | null>
 }
 
-const IssuesModelBody = View.make(ErrorIssuesModel, ({ overview }, props: IssuesBodyProps) => {
-	if (overview.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
-	if (overview.phase === "error") {
-		return <IssuesLoadError toolbar={props.toolbar()} message={overview.message} />
-	}
-	return <IssuesReadyBody allIssues={overview.issues} {...props} />
-})
+/** The model-owned selection state + its dispatcher, bound from the model's
+ * `ui` and threaded down to the rows and the bulk bar. */
+interface SelectionBinding {
+	selection: IssueSelectionState
+	dispatchSelection: (msg: IssueSelectionMsg) => void
+}
 
-interface IssuesReadyBodyProps extends IssuesBodyProps {
+const IssuesModelBody = View.make(
+	ErrorIssuesModel,
+	({ overview, selection, dispatchSelection }, props: IssuesBodyProps) => {
+		if (overview.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
+		if (overview.phase === "error") {
+			return <IssuesLoadError toolbar={props.toolbar()} message={overview.message} />
+		}
+		return (
+			<IssuesReadyBody
+				allIssues={overview.issues}
+				selection={selection}
+				dispatchSelection={dispatchSelection}
+				{...props}
+			/>
+		)
+	},
+)
+
+/** Clears the model's selection whenever the URL filters change. The filters
+ * live above the `<Unitflow>` provider, so instead of an effect that watches
+ * them, this null component is remounted by its `key` and fires `Cleared` once
+ * on each mount — the sanctioned no-useEffect "re-run via key" pattern. */
+function ClearSelectionOnFilterChange({ dispatchSelection }: { dispatchSelection: (msg: IssueSelectionMsg) => void }) {
+	useMountEffect(() => {
+		dispatchSelection(clearedSelection)
+	})
+	return null
+}
+
+interface IssuesReadyBodyProps extends IssuesBodyProps, SelectionBinding {
 	allIssues: ReadonlyArray<ErrorIssueDocument>
 }
 
-function IssuesReadyBody({ allIssues, activeFilter, severityFilter, kindFilter, ...props }: IssuesReadyBodyProps) {
+function IssuesReadyBody({
+	allIssues,
+	activeFilter,
+	severityFilter,
+	kindFilter,
+	...props
+}: IssuesReadyBodyProps) {
 	const issues = useMemo(
 		() =>
 			filterIssues(allIssues, {
@@ -276,16 +305,21 @@ function IssuesReadyBody({ allIssues, activeFilter, severityFilter, kindFilter, 
 		[allIssues, activeFilter, severityFilter, kindFilter],
 	)
 
-	return <IssuesPageBody issues={issues} activeFilter={activeFilter} {...props} />
+	return (
+		<>
+			<ClearSelectionOnFilterChange
+				key={`${activeFilter}:${severityFilter}:${kindFilter}`}
+				dispatchSelection={props.dispatchSelection}
+			/>
+			<IssuesPageBody issues={issues} activeFilter={activeFilter} {...props} />
+		</>
+	)
 }
 
-interface IssuesPageBodyProps {
+interface IssuesPageBodyProps extends SelectionBinding {
 	issues: ReadonlyArray<ErrorIssueDocument>
 	activeFilter: FilterValue
 	mutations: ReturnType<typeof useIssueMutations>
-	selectedIds: Set<string>
-	setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
-	anchorRef: React.MutableRefObject<string | null>
 	toolbar: (totalCount?: number) => React.ReactNode
 }
 
@@ -293,11 +327,11 @@ function IssuesPageBody({
 	issues,
 	activeFilter,
 	mutations,
-	selectedIds,
-	setSelectedIds,
-	anchorRef,
+	selection,
+	dispatchSelection,
 	toolbar,
 }: IssuesPageBodyProps) {
+	const selectedIds = selection.selectedIds
 	const grouped = useMemo(() => {
 		const map = new Map<WorkflowState, ErrorIssueDocument[]>()
 		for (const issue of issues) {
@@ -337,31 +371,19 @@ function IssuesPageBody({
 
 	const flatIssueIds = useMemo(() => flatIssues.map((i) => i.id as string), [flatIssues])
 
+	// The shift-range/anchor logic now lives in the pure reducer
+	// (updateIssueSelection); the row just reports the toggle + the current
+	// visible order and the model figures out the rest.
 	const toggleSelection = useCallback(
 		(id: string, event: Pick<SelectToggleEvent, "shiftKey">) => {
-			setSelectedIds((prev) => {
-				const next = new Set(prev)
-				if (event.shiftKey && anchorRef.current) {
-					const a = flatIssueIds.indexOf(anchorRef.current)
-					const b = flatIssueIds.indexOf(id)
-					if (a !== -1 && b !== -1) {
-						const [lo, hi] = a < b ? [a, b] : [b, a]
-						for (let i = lo; i <= hi; i++) next.add(flatIssueIds[i]!)
-						return next
-					}
-				}
-				if (next.has(id)) next.delete(id)
-				else next.add(id)
-				anchorRef.current = id
-				return next
-			})
+			dispatchSelection(toggledSelection(id, event.shiftKey, flatIssueIds))
 		},
-		[flatIssueIds, anchorRef, setSelectedIds],
+		[dispatchSelection, flatIssueIds],
 	)
 
 	const clearSelection = useCallback(() => {
-		setSelectedIds(new Set())
-	}, [setSelectedIds])
+		dispatchSelection(clearedSelection)
+	}, [dispatchSelection])
 
 	const navigate = useNavigate({ from: Route.fullPath })
 
