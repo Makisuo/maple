@@ -291,12 +291,23 @@ export class CloudflareObservabilityService extends Context.Service<
 				const apiBaseUrl = env.MAPLE_CLOUDFLARE_API_BASE_URL
 				const ingestBaseUrl = env.MAPLE_INGEST_PUBLIC_URL
 
-				const cfDestinations = yield* withCloudflareFallback(
-					listObservabilityDestinations(connection.accessToken, connection.accountId, apiBaseUrl),
-					"Cloudflare Observability list failed; falling back to persisted rows",
-					{ orgId, accountId: connection.accountId },
-					[],
+				const cfDestinationsOption = yield* listObservabilityDestinations(
+					connection.accessToken,
+					connection.accountId,
+					apiBaseUrl,
+				).pipe(
+					Effect.tapError((error) =>
+						Effect.logWarning("Cloudflare Observability list failed; falling back to persisted rows").pipe(
+							Effect.annotateLogs({ orgId, accountId: connection.accountId, error }),
+						),
+					),
+					Effect.option,
 				)
+				const cfDestinations = fromOption(cfDestinationsOption)
+
+				if (cfDestinations === null) {
+					return yield* safeLoadRows(orgId)
+				}
 
 				const now = new Date()
 				const headers = { "x-maple-ingest-key": keyResponse.publicKey }
