@@ -1,38 +1,36 @@
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Exit } from "effect"
-import { useMemo, useState } from "react"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
-import type {
-	AlertDeliveryEventDocument,
-	AlertDestinationDocument,
-	AlertIncidentDocument,
-	AlertRuleDocument,
-} from "@maple/domain/http"
+import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
+import { Unitflow, View } from "@maple/unitflow/react"
 
 import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select"
 import { AlertStatStrip } from "@/components/alerts/alert-stat-card"
 import { AlertTagControls } from "@/components/alerts/alert-tag-controls"
 import { ActiveIncidentsTable } from "@/components/alerts/overview/active-incidents-table"
+import { AlertsEmptyState } from "@/components/alerts/overview/alerts-empty-state"
 import {
 	AlertsHealthSummary,
 	type AlertsStatusFilter,
 } from "@/components/alerts/overview/alerts-health-summary"
 import { RulesOverviewTable } from "@/components/alerts/overview/rules-overview-table"
-import { BellIcon, CircleWarningIcon, MagnifierIcon, PlusIcon, XmarkIcon } from "@/components/icons"
-import { statesByRuleId, useAlertRuleStates } from "@/hooks/use-alert-rule-states"
-import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
-import { buildRuleToggleRequest, getExitErrorMessage } from "@/lib/alerts/form-utils"
-import { deriveRuleStatus, needsAttention, type DerivedRuleStatus } from "@/lib/alerts/rule-status"
+import { CircleWarningIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
+import { getExitErrorMessage } from "@/lib/alerts/form-utils"
+import { needsAttention } from "@/lib/alerts/rule-status"
 import {
 	filterByTags,
 	groupByTag as groupItemsByTag,
 	tagFacets,
 	type TagGroup,
 } from "@/lib/alerts/tag-grouping"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
+import { Result, useAtomValue } from "@/lib/effect-atom"
+import { AlertsOverviewModel, type AlertsOverviewReady } from "@/lib/models/alerts-overview-model"
+import { unitflowRuntime } from "@/lib/models/runtime"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import {
 	InputGroup,
@@ -50,39 +48,93 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
  * The overview tab: health summary → active incidents (when firing) → filter
- * toolbar → per-rule status table → summary strip. Owns its own data — the
- * route only decides which tab renders.
+ * toolbar → per-rule status table → summary strip. The route only decides
+ * which tab renders.
+ *
+ * Data + status derivation live in {@link AlertsOverviewModel} (unitflow),
+ * fed by the Electric-synced collections; this component tree is pure
+ * presentation over the model's `overview` store.
  */
 export function AlertsOverviewTab() {
+	return (
+		<Unitflow
+			runtime={unitflowRuntime}
+			rootModel={AlertsOverviewModel}
+			building={<OverviewSkeleton />}
+			failed={() => <OverviewLoadError />}
+		>
+			{(unit) => <OverviewBody unit={unit} />}
+		</Unitflow>
+	)
+}
+
+function OverviewSkeleton() {
+	return (
+		<div className="space-y-6">
+			<Skeleton className="h-[84px] w-full" />
+			<Skeleton className="h-10 w-full" />
+			<Skeleton className="h-48 w-full" />
+		</div>
+	)
+}
+
+function OverviewLoadError() {
+	return (
+		<Empty className="py-12">
+			<EmptyHeader>
+				<EmptyMedia variant="icon">
+					<CircleWarningIcon size={18} />
+				</EmptyMedia>
+				<EmptyTitle>Failed to load alert rules</EmptyTitle>
+				<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
+			</EmptyHeader>
+		</Empty>
+	)
+}
+
+const OverviewBody = View.make(AlertsOverviewModel, ({ overview, toggleRule, toggleState }) => {
+	if (overview.phase === "loading") return <OverviewSkeleton />
+	if (overview.phase === "error") return <OverviewLoadError />
+	return <AlertsOverviewContent data={overview} onToggleRule={toggleRule} toggleState={toggleState} />
+})
+
+/* ── Presentation ─────────────────────────────────────────────────────────── */
+
+/**
+ * Everything below is pure presentation over the derived overview: URL-backed
+ * filters, search, the session/destination atoms, and the toggle mutation are
+ * view concerns and stay here.
+ */
+function AlertsOverviewContent({
+	data,
+	onToggleRule,
+	toggleState,
+}: {
+	data: AlertsOverviewReady
+	/** The model's rule enable/disable Mutation, bound to a fire callback. */
+	onToggleRule: (rule: AlertRuleDocument) => void
+	/** The shared in-flight state of {@link onToggleRule}. */
+	toggleState: AsyncResult.AsyncResult<AlertRuleDocument, unknown>
+}) {
 	const search = useSearch({ from: "/alerts/" })
 	const navigate = useNavigate({ from: "/alerts/" })
 
+	const {
+		rules,
+		incidents,
+		openIncidents,
+		statesByRule,
+		incidentsByRule,
+		derivedByRuleId,
+		healthCounts,
+		timelineRange,
+	} = data
+
 	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
-	const destinationsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDestinations", { reactivityKeys: ["alertDestinations"] }),
-	)
-	const deliveryEventsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDeliveryEvents", { reactivityKeys: ["alertDeliveryEvents"] }),
-	)
-	const { result: rulesResult } = useAlertRulesList()
-	const { result: incidentsResult } = useAlertIncidentsList()
-	const states = useAlertRuleStates()
+	const { result: destinationsResult } = useAlertDestinationsList()
 
-	const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), {
-		mode: "promiseExit",
-	})
-
-	const rules = Result.builder(rulesResult)
-		.onSuccess((response) => [...response.rules] as AlertRuleDocument[])
-		.orElse(() => [])
-	const incidents = Result.builder(incidentsResult)
-		.onSuccess((response) => [...response.incidents] as AlertIncidentDocument[])
-		.orElse(() => [] as AlertIncidentDocument[])
 	const destinations = Result.builder(destinationsResult)
 		.onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
-		.orElse(() => [])
-	const deliveryEvents = Result.builder(deliveryEventsResult)
-		.onSuccess((response) => [...response.events] as AlertDeliveryEventDocument[])
 		.orElse(() => [])
 
 	const isAdmin = Result.builder(sessionResult)
@@ -91,6 +143,20 @@ export function AlertsOverviewTab() {
 	const currentUserId = Result.builder(sessionResult)
 		.onSuccess((session) => session.userId as string)
 		.orElse(() => null)
+
+	// Surface toggle failures as a toast by watching the shared mutation state
+	// transition to a failure — an external side effect on a state change (the
+	// no-useEffect "sync an external system" case). Success is silent: the
+	// Electric `alertRules` shape re-renders the row on its own.
+	const lastToggleState = useRef(toggleState)
+	useEffect(() => {
+		if (toggleState === lastToggleState.current) return
+		lastToggleState.current = toggleState
+		if (AsyncResult.isFailure(toggleState)) {
+			toast.error(getExitErrorMessage(Exit.failCause(toggleState.cause), "Failed to update rule"))
+		}
+	}, [toggleState])
+	const isToggling = AsyncResult.isWaiting(toggleState)
 
 	const [searchQuery, setSearchQuery] = useState("")
 
@@ -120,73 +186,6 @@ export function AlertsOverviewTab() {
 	const creatorFilter = search.createdBy ?? ANY_CREATOR
 	const showCreatorFilter = Object.keys(creatorOptions).length > 2
 
-	/* ── Status derivation — one pass per render, shared `now` ─────────────── */
-
-	const openIncidents = useMemo(() => incidents.filter((i) => i.status === "open"), [incidents])
-
-	const openIncidentsByRule = useMemo(() => {
-		const map = new Map<string, AlertIncidentDocument[]>()
-		for (const incident of openIncidents) {
-			const list = map.get(incident.ruleId)
-			if (list) list.push(incident)
-			else map.set(incident.ruleId, [incident])
-		}
-		return map
-	}, [openIncidents])
-
-	const incidentsByRule = useMemo(() => {
-		const map = new Map<string, AlertIncidentDocument[]>()
-		for (const incident of incidents) {
-			const list = map.get(incident.ruleId)
-			if (list) list.push(incident)
-			else map.set(incident.ruleId, [incident])
-		}
-		return map
-	}, [incidents])
-
-	// Delivery events pre-filtered per rule; the org list is already newest-first,
-	// which deriveRuleStatus relies on.
-	const deliveryEventsByRule = useMemo(() => {
-		const map = new Map<string, AlertDeliveryEventDocument[]>()
-		for (const event of deliveryEvents) {
-			const list = map.get(event.ruleId)
-			if (list) list.push(event)
-			else map.set(event.ruleId, [event])
-		}
-		return map
-	}, [deliveryEvents])
-
-	const statesByRule = useMemo(() => statesByRuleId(states), [states])
-
-	const { derivedByRuleId, timelineRange } = useMemo(() => {
-		const now = Date.now()
-		const derived = new Map<string, DerivedRuleStatus>()
-		for (const rule of rules) {
-			derived.set(
-				rule.id,
-				deriveRuleStatus({
-					rule,
-					states: statesByRule.get(rule.id) ?? [],
-					openIncidents: openIncidentsByRule.get(rule.id) ?? [],
-					deliveryEvents: deliveryEventsByRule.get(rule.id) ?? [],
-					now,
-				}),
-			)
-		}
-		return { derivedByRuleId: derived, timelineRange: { min: now - DAY_MS, max: now } }
-	}, [rules, statesByRule, openIncidentsByRule, deliveryEventsByRule])
-
-	const healthCounts = useMemo(() => {
-		const counts = { firing: 0, attention: 0, healthy: 0, disabled: 0 }
-		for (const derived of derivedByRuleId.values()) {
-			if (derived.status === "firing") counts.firing++
-			else if (derived.status === "healthy") counts.healthy++
-			else if (derived.status === "disabled") counts.disabled++
-			if (needsAttention(derived)) counts.attention++
-		}
-		return counts
-	}, [derivedByRuleId])
-
 	/* ── Filtering ──────────────────────────────────────────────────────────── */
 
 	const matchesStatusFilter = (rule: AlertRuleDocument): boolean => {
@@ -198,7 +197,7 @@ export function AlertsOverviewTab() {
 	}
 
 	const filteredRules = useMemo(() => {
-		let result = rules
+		let result: ReadonlyArray<AlertRuleDocument> = rules
 		if (creatorFilter !== ANY_CREATOR) {
 			result = result.filter((r) => r.createdBy === creatorFilter)
 		}
@@ -259,44 +258,7 @@ export function AlertsOverviewTab() {
 
 	const enabledRules = rules.filter((r) => r.enabled).length
 
-	/* ── Actions ────────────────────────────────────────────────────────────── */
-
-	async function handleRuleToggle(rule: AlertRuleDocument) {
-		const result = await updateRule({
-			params: { ruleId: rule.id },
-			payload: buildRuleToggleRequest(rule),
-			reactivityKeys: ["alertRules"],
-		})
-		if (!Exit.isSuccess(result)) {
-			toast.error(getExitErrorMessage(result, "Failed to update rule"))
-		}
-	}
-
 	/* ── Render ─────────────────────────────────────────────────────────────── */
-
-	if (Result.isInitial(rulesResult) || Result.isInitial(incidentsResult)) {
-		return (
-			<div className="space-y-6">
-				<Skeleton className="h-[84px] w-full" />
-				<Skeleton className="h-10 w-full" />
-				<Skeleton className="h-48 w-full" />
-			</div>
-		)
-	}
-
-	if (!Result.isSuccess(rulesResult)) {
-		return (
-			<Empty className="py-12">
-				<EmptyHeader>
-					<EmptyMedia variant="icon">
-						<CircleWarningIcon size={18} />
-					</EmptyMedia>
-					<EmptyTitle>Failed to load alert rules</EmptyTitle>
-					<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
-				</EmptyHeader>
-			</Empty>
-		)
-	}
 
 	return (
 		<div className="space-y-6">
@@ -364,27 +326,7 @@ export function AlertsOverviewTab() {
 				</div>
 
 				{filteredRules.length === 0 && rules.length === 0 ? (
-					<Empty className="py-12">
-						<EmptyHeader>
-							<EmptyMedia variant="icon">
-								<BellIcon size={18} />
-							</EmptyMedia>
-							<EmptyTitle>No alert rules</EmptyTitle>
-							<EmptyDescription>
-								Create a threshold rule to open incidents for latency, error rate, throughput,
-								Apdex, or exact metrics.
-							</EmptyDescription>
-						</EmptyHeader>
-						{isAdmin && (
-							<Button
-								size="sm"
-								render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}
-							>
-								<PlusIcon size={14} />
-								Add rule
-							</Button>
-						)}
-					</Empty>
+					<AlertsEmptyState isAdmin={isAdmin} serviceName={search.serviceName} />
 				) : filteredRules.length === 0 ? (
 					<Empty className="py-12">
 						<EmptyHeader>
@@ -408,7 +350,8 @@ export function AlertsOverviewTab() {
 						incidentsByRuleId={incidentsByRule}
 						timelineRange={timelineRange}
 						isAdmin={isAdmin}
-						onToggle={handleRuleToggle}
+						isToggling={isToggling}
+						onToggle={onToggleRule}
 					/>
 				)}
 			</div>

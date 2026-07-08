@@ -15,8 +15,8 @@ export interface MapleBrowserConfig {
 	readonly serviceVersion?: string
 	/** Deployment environment, e.g. "production". */
 	readonly environment?: string
-	/** Optional user id attached to the replay session. */
-	readonly userId?: string
+	/** Optional user id attached to replay sessions and future browser spans. */
+	readonly userId?: string | null | undefined
 	readonly tracing?: {
 		/** Default true. */
 		readonly enabled?: boolean
@@ -52,7 +52,7 @@ export interface ResolvedConfig {
 	readonly serviceNamespace: string | undefined
 	readonly serviceVersion: string | undefined
 	readonly environment: string | undefined
-	/** Mutable: `MapleBrowser.identify()` can attach/replace the user id after init. */
+	/** Mutable: `MapleBrowser.identify()` can attach/replace/clear the user id after init. */
 	userId: string | undefined
 	readonly tracingEnabled: boolean
 	readonly tracingInstrumentFetch: boolean
@@ -64,6 +64,10 @@ export interface ResolvedConfig {
 
 const DEFAULT_ENDPOINT = "https://ingest.maple.dev"
 
+export function normalizeUserId(userId: string | null | undefined): string | undefined {
+	return userId ? userId : undefined
+}
+
 export function resolveConfig(config: MapleBrowserConfig): ResolvedConfig {
 	return {
 		ingestKey: config.ingestKey,
@@ -72,7 +76,7 @@ export function resolveConfig(config: MapleBrowserConfig): ResolvedConfig {
 		serviceNamespace: config.serviceNamespace,
 		serviceVersion: config.serviceVersion,
 		environment: config.environment,
-		userId: config.userId,
+		userId: normalizeUserId(config.userId),
 		tracingEnabled: config.tracing?.enabled ?? true,
 		tracingInstrumentFetch: config.tracing?.instrumentFetch ?? true,
 		replayEnabled: config.replay?.enabled ?? true,

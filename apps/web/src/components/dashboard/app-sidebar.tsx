@@ -50,7 +50,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
-import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -191,7 +191,7 @@ function GuestMenu() {
 export function AppSidebar() {
 	const routerState = useRouterState()
 	const currentPath = routerState.location.pathname
-	const { dashboards, isLoading } = useDashboardStore()
+	const { dashboards, isLoading } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 
 	const dashboardMatch = currentPath.match(/^\/dashboards\/([^/]+)/)

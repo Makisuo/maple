@@ -84,7 +84,7 @@ import {
 	ServiceMapParticleCanvas,
 	type ParticleRegistry,
 } from "./service-map-particles"
-import { getDbDescriptor } from "./service-map-db"
+import { resolveDbNodePresentation } from "./service-map-db"
 import {
 	buildFlowElements,
 	CLOUDFLARE_COLOR,
@@ -334,7 +334,9 @@ function ServiceDetailPanel({
 									</div>
 									<div className="grid grid-cols-2 gap-x-6 gap-y-4">
 										<div className="space-y-0.5">
-											<span className="text-[10px] text-muted-foreground">Requests</span>
+											<span className="text-[10px] text-muted-foreground">
+												Requests
+											</span>
 											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
 												{formatCompactCount(cloudflare.requests)}
 											</p>
@@ -343,7 +345,9 @@ function ServiceDetailPanel({
 											</span>
 										</div>
 										<div className="space-y-0.5">
-											<span className="text-[10px] text-muted-foreground">Error Rate</span>
+											<span className="text-[10px] text-muted-foreground">
+												Error Rate
+											</span>
 											<p
 												className={cn(
 													"text-xl font-semibold tabular-nums font-mono",
@@ -364,7 +368,9 @@ function ServiceDetailPanel({
 											</p>
 										</div>
 										<div className="space-y-0.5">
-											<span className="text-[10px] text-muted-foreground">Duration p99</span>
+											<span className="text-[10px] text-muted-foreground">
+												Duration p99
+											</span>
 											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
 												{formatLatency(cloudflare.latencyP99Ms)}
 											</p>
@@ -755,6 +761,8 @@ interface DatabaseDetailPanelProps {
 	durationSeconds: number
 	startTime: string
 	endTime: string
+	/** Scope the query summary to the map's selected environment; `undefined` = all. */
+	deploymentEnv?: string
 	onClose: () => void
 }
 
@@ -934,6 +942,7 @@ function DatabaseDetailPanel({
 	durationSeconds,
 	startTime,
 	endTime,
+	deploymentEnv,
 	onClose,
 }: DatabaseDetailPanelProps) {
 	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem && e.dbNamespace === dbNamespace)
@@ -951,6 +960,7 @@ function DatabaseDetailPanel({
 				dbNamespace,
 				startTime,
 				endTime,
+				deploymentEnv,
 				bucketSeconds,
 				topN: 8,
 			},
@@ -969,7 +979,13 @@ function DatabaseDetailPanel({
 		: callers.some((caller) => caller.hasSampling)
 	const summaryWaiting = Boolean(summaryResult.waiting)
 
-	const { category, Icon: DbIcon, color: dbColor, branded: dbBranded } = getDbDescriptor(dbSystem)
+	const {
+		title: dbTitle,
+		badge: dbBadge,
+		Icon: DbIcon,
+		color: dbColor,
+		branded: dbBranded,
+	} = resolveDbNodePresentation(dbSystem, dbNamespace)
 
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">
@@ -985,11 +1001,9 @@ function DatabaseDetailPanel({
 						className="shrink-0"
 						style={dbBranded ? undefined : { color: dbColor }}
 					/>
-					<span className="text-sm font-semibold text-foreground truncate">
-						{dbNamespace || dbSystem}
-					</span>
+					<span className="text-sm font-semibold text-foreground truncate">{dbTitle}</span>
 					<span className="text-[9px] font-medium tracking-wide text-muted-foreground/60 uppercase shrink-0">
-						{dbNamespace ? dbSystem : category}
+						{dbBadge}
 					</span>
 				</div>
 				<Button variant="ghost" size="icon-xs" onClick={onClose}>
@@ -1200,6 +1214,8 @@ function DatabaseDetailPanel({
 interface ServiceMapViewProps {
 	startTime: string
 	endTime: string
+	/** Deployment environment to scope the map to; `undefined` = all environments. */
+	deploymentEnv?: string
 }
 
 // --- Debug Layout Sliders ---
@@ -1334,6 +1350,7 @@ export function ServiceMapCanvas({
 	durationSeconds,
 	startTime,
 	endTime,
+	deploymentEnv,
 	layoutKey,
 }: {
 	edges: ServiceEdge[]
@@ -1348,6 +1365,8 @@ export function ServiceMapCanvas({
 	durationSeconds: number
 	startTime: string
 	endTime: string
+	/** Selected deployment environment (`undefined` = all); scopes the DB detail panel. */
+	deploymentEnv?: string
 	// Namespaces persisted drag positions / viewport. Lifted to a prop so the
 	// component renders without a Clerk session (e.g. the /service-map-bench
 	// perf harness, which runs in self-hosted mode with no ClerkProvider).
@@ -1383,7 +1402,17 @@ export function ServiceMapCanvas({
 			new Set(nodes.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
 		).toSorted()
 		return { rawNodes: nodes, flowEdges: edges, services: allServices }
-	}, [serviceEdges, dbEdges, cloudflareServices, faasNames, platforms, runtimes, overviews, workloads, durationSeconds])
+	}, [
+		serviceEdges,
+		dbEdges,
+		cloudflareServices,
+		faasNames,
+		platforms,
+		runtimes,
+		overviews,
+		workloads,
+		durationSeconds,
+	])
 
 	// Cloudflare analytics overlaid onto instrumented Workers.
 	const cloudflareOverlayByService = useMemo(() => {
@@ -1665,8 +1694,21 @@ export function ServiceMapCanvas({
 	// LIVE `nodes` (must stay current); only the derived boxes run a frame behind.
 	const renderedNodes = useMemo(() => [...namespaceGroupNodes, ...nodes], [namespaceGroupNodes, nodes])
 
+	// Hold the skeleton until the first layout for the initial data is FINAL, so the
+	// graph paints once in its settled positions instead of jumping. Without
+	// namespaces the synchronous layout is already final; with namespaces the async
+	// ELK swimlane pass repositions every node, so wait for `elk` to resolve before
+	// revealing. Reveal once, then never fall back to the skeleton — later
+	// refresh-driven ELK recomputes keep showing the current graph.
+	const revealedRef = useRef(false)
+	if (!hasNamespaces || elk != null) revealedRef.current = true
+
 	if (nodes.length === 0) {
 		return <ServiceMapEmptyState />
+	}
+
+	if (!revealedRef.current) {
+		return <ServiceMapLoading />
 	}
 
 	return (
@@ -1859,6 +1901,7 @@ export function ServiceMapCanvas({
 								durationSeconds={durationSeconds}
 								startTime={startTime}
 								endTime={endTime}
+								deploymentEnv={deploymentEnv}
 								onClose={() => setSelectedServiceId(null)}
 							/>
 						) : (
@@ -1890,8 +1933,8 @@ export function ServiceMapCanvas({
 	)
 }
 
-export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
-	const orgId = useMapleOrganizationId();
+export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMapViewProps) {
+	const orgId = useMapleOrganizationId()
 	const infraEnabled = useInfraEnabled()
 	const durationSeconds = useMemo(() => {
 		const ms = new Date(endTime).getTime() - new Date(startTime).getTime()
@@ -1899,11 +1942,21 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 	}, [startTime, endTime])
 
 	const mapInput: { data: GetServiceMapInput } = useMemo(
-		() => ({ data: { startTime, endTime } }),
-		[startTime, endTime],
+		() => ({ data: { startTime, endTime, deploymentEnv } }),
+		[startTime, endTime, deploymentEnv],
 	)
 
 	const overviewInput: { data: GetServiceOverviewInput } = useMemo(
+		// getServiceOverview scopes by an environments array, not the singular field.
+		() => ({ data: { startTime, endTime, environments: deploymentEnv ? [deploymentEnv] : undefined } }),
+		[startTime, endTime, deploymentEnv],
+	)
+
+	// Cloudflare worker stats come from Cloudflare's own analytics (keyed by script,
+	// with no Maple deployment.environment dimension), so they can't be env-scoped —
+	// keep them on an env-less input so switching environments doesn't refetch the
+	// same all-account data.
+	const cloudflareInput: { data: GetServiceMapInput } = useMemo(
 		() => ({ data: { startTime, endTime } }),
 		[startTime, endTime],
 	)
@@ -1911,10 +1964,12 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 	const mapResult = useRefreshableAtomValue(getServiceMapResultAtom(mapInput))
 	const overviewResult = useRefreshableAtomValue(getServiceOverviewResultAtom(overviewInput))
 	const dbEdgesResult = useRefreshableAtomValue(getServiceMapDbEdgesResultAtom(mapInput))
-	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(mapInput))
+	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(cloudflareInput))
 	const platformsResult = useRefreshableAtomValue(getServicePlatformsResultAtom(mapInput))
 
-	// Render map as soon as edges arrive — don't wait for overview metrics
+	// Node DATA that streams in after the canvas mounts and refines nodes in place
+	// (colors, icons, pod badges, detail-panel overlays) without moving them —
+	// topology-determining results (edges, db edges, overviews) are gated below.
 	const overviews = Result.isSuccess(overviewResult) ? overviewResult.value.data : []
 	const dbEdges = Result.isSuccess(dbEdgesResult) ? dbEdgesResult.value.edges : []
 	const cloudflareServices = Result.isSuccess(cloudflareResult) ? cloudflareResult.value.services : []
@@ -1970,6 +2025,14 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 	// Don't block first paint on workloads — fall back to empty until it lands.
 	const workloads = infraEnabled && Result.isSuccess(workloadsResult) ? workloadsResult.value.workloads : []
 
+	// Keep the skeleton until every result that determines the NODE SET / namespaces
+	// has settled (resolved once — success or error), so the layout is computed a
+	// single time from a complete graph rather than re-flowing as db nodes and
+	// namespaces arrive on separate queries. A failing db-edges/overview query is
+	// "settled" too, so it proceeds with the empty-array fallback above instead of
+	// pinning the skeleton forever.
+	const topologyPending = Result.isInitial(dbEdgesResult) || Result.isInitial(overviewResult)
+
 	return Result.builder(mapResult)
 		.onInitial(() => <ServiceMapLoading />)
 		.onError((error) => {
@@ -1983,22 +2046,27 @@ export function ServiceMapView({ startTime, endTime }: ServiceMapViewProps) {
 				</div>
 			)
 		})
-		.onSuccess((mapResponse) => (
-			<ServiceMapCanvas
-				edges={mapResponse.edges}
-				dbEdges={dbEdges}
-				cloudflareServices={cloudflareServices}
-				faasNames={faasNames}
-				platforms={platforms}
-				runtimes={runtimes}
-				overviews={overviews}
-				workloads={workloads}
-				showInfraTab={infraEnabled}
-				durationSeconds={durationSeconds}
-				startTime={startTime}
-				endTime={endTime}
-				layoutKey={orgId ?? "default"}
-			/>
-		))
+		.onSuccess((mapResponse) =>
+			topologyPending ? (
+				<ServiceMapLoading />
+			) : (
+				<ServiceMapCanvas
+					edges={mapResponse.edges}
+					dbEdges={dbEdges}
+					cloudflareServices={cloudflareServices}
+					faasNames={faasNames}
+					platforms={platforms}
+					runtimes={runtimes}
+					overviews={overviews}
+					workloads={workloads}
+					showInfraTab={infraEnabled}
+					durationSeconds={durationSeconds}
+					startTime={startTime}
+					endTime={endTime}
+					deploymentEnv={deploymentEnv}
+					layoutKey={orgId ?? "default"}
+				/>
+			),
+		)
 		.render()
 }

@@ -6,8 +6,9 @@ real time using [ElectricSQL](https://electric.ax) shapes fronted by
 (traces, logs, metrics via `@maple/query-engine`) is **not** synced — it stays on
 the effect-atom + `WarehouseQueryService` path.
 
-The feature is **off by default** (`VITE_ELECTRIC_SYNC` unset). The dashboards,
-alerts, and error-issue verticals are all implemented behind the flag.
+Electric sync is the **only read path** for the dashboards, alerts, and
+error-issue verticals — there is no fetch fallback, so the web app needs the
+sync worker (and its upstream Electric) reachable for those lists to load.
 
 The reusable machinery lives in the **`@maple/effect-db`** workspace package
 (source-only, consumed by `apps/web`'s Vite and, later, the mobile app):
@@ -79,8 +80,9 @@ full re-sync for every client. If you must change one, version the shape name
    `VITE_ELECTRIC_SYNC_URL=http://localhost:3476` (both already in `.env.example`).
    `ELECTRIC_URL` is now read by the `apps/electric-sync` worker (default port 3476);
    `VITE_ELECTRIC_SYNC_URL` points the web app's ShapeStreams at it.
-4. Run the app (`bun dev`) with `VITE_ELECTRIC_SYNC=1` to exercise the sync path.
-   `bun dev` starts the `electric-sync` worker alongside the others via portless.
+4. Run the app (`bun dev`) — it starts the `electric-sync` worker alongside the
+   others via portless. The dashboards/alerts/errors lists read exclusively from
+   the sync path, so steps 1–3 are required for them to load.
 
 Smoke-test the proxy directly (through the standalone worker; needs a bearer):
 `curl -g 'http://localhost:3476/api/sync/shape?shape=dashboards&offset=-1' -H "authorization: Bearer <token>"`,
@@ -126,9 +128,9 @@ CREATE PUBLICATION electric_publication_default FOR TABLE
 SQL
 ```
 
-**Nothing syncs but no error** — check `VITE_ELECTRIC_SYNC=1` is actually in the build.
-It's off by default and only opts in via `.env.local` (`bun dev`). It's a build-time
-constant, so a Vite restart is needed after changing it.
+**Nothing syncs but no error** — check `VITE_ELECTRIC_SYNC_URL` points at the
+running `electric-sync` worker and that the docker `electric` service is up. It's
+a build-time constant, so a Vite restart is needed after changing it.
 
 ## Production runbook (PlanetScale + Electric Cloud)
 
@@ -149,9 +151,8 @@ constant, so a Vite restart is needed after changing it.
    `src/config.ts`), which also needs the auth env (`MAPLE_AUTH_MODE`,
    `MAPLE_ROOT_PASSWORD` or `CLERK_*`). The root `alchemy.run.ts` bakes the worker's
    public origin into the web build as `VITE_ELECTRIC_SYNC_URL`. Then `alchemy deploy`.
-   With `ELECTRIC_URL` unset the proxy returns 503 and the app stays on effect-atom.
-6. Validate initial per-org snapshot sizes before flipping `VITE_ELECTRIC_SYNC=1`
-   on the web deploy.
+   With `ELECTRIC_URL` unset the proxy returns 503 and the synced lists fail to load.
+6. Validate initial per-org snapshot sizes before deploying a new synced table.
 
 ## PR previews (per-PR Electric Cloud environment)
 
@@ -167,9 +168,8 @@ the electric-sync worker by alchemy). On close it deletes the environment
 (cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay
 green (and the worker 503s) until the token lands in Infisical.
 
-- The web build already defaults `VITE_ELECTRIC_SYNC=1` for deploys
-  (`apps/web/alchemy.run.ts`), so no client flag change is needed — provisioning
-  the source is what makes the already-on sync path work in previews.
+- The web build always reads through the sync path — provisioning the source is
+  what makes it work in previews.
 - **Publication:** the migrate step runs `0009` (creates
   `electric_publication_default`) before the source is created. Prod uses manual
   publishing against that publication; confirm the `electric services create
@@ -191,7 +191,7 @@ green (and the worker 503s) until the token lands in Infisical.
    `alerts.ts`/`errors.ts` for a read-only one — an identity `Schema.Struct` row
    schema that mirrors the table columns, plus a `timestamptz` parser normalizing
    to ISO), register it in `org-collections.ts` (constructor + `cleanup()`), and
-   swap the consumer read behind `ELECTRIC_SYNC_ENABLED`.
+   point the consumer read at the collection.
 
 ## Status / remaining work
 
@@ -205,14 +205,14 @@ green (and the worker 503s) until the token lands in Infisical.
 - txid capture: dashboards (all writes), alert rules (create/update/delete), and
   error issues `heartbeat`/`assign`/`setSeverity`.
 - **`@maple/effect-db`** package (typecheck-clean) + **dashboards** collection
-  refactored onto `createEffectCollection` + `useDashboardStore` collection path
-  (behind the flag), proven against a live Electric 1.6.2 instance locally.
+  refactored onto `createEffectCollection` + the `useDashboardStore` collection
+  path, proven against a live Electric 1.6.2 instance locally.
 - **Alerts + error-issue read consumers (Phase 6):** `collections/alerts.ts` +
   `collections/errors.ts` (read-only collections; client-side live-query joins
   `alert_rules ⟕ alert_rule_states` and `error_issues ⟕ actors ⟕ open_error_incidents`);
-  `useAlertRulesList` / `useAlertIncidentsList` / `useErrorIssuesList` hooks swap the
-  reads behind `ELECTRIC_SYNC_ENABLED` (writes stay on the typed endpoints — the
-  shape stream delivers results). The row→document mappers mirror the server's
+  `useAlertRulesList` / `useAlertIncidentsList` / `useErrorIssuesList` hooks read
+  from the collections (writes stay on the typed endpoints — the shape stream
+  delivers results). The row→document mappers mirror the server's
   `rowToRuleDocument`/`rowToIssue`/`rowToActor` and are unit-tested
   (`collections/alerts.test.ts`, `collections/errors.test.ts`).
 - **Self-heal:** a `collection:schema-error` listener in `org-collections.ts`
@@ -222,9 +222,8 @@ green (and the worker 503s) until the token lands in Infisical.
 **Remaining (follow-ups)**
 - **Live smoke of alerts + errors:** the mappers/joins/timestamps typecheck and
   unit-test green, but the end-to-end sync for these two verticals still needs the
-  docker-Electric smoke (flip `VITE_ELECTRIC_SYNC=1`, verify each list streams in
-  scoped to the org and updates live after a write) — same validation dashboards
-  already passed.
+  docker-Electric smoke (verify each list streams in scoped to the org and
+  updates live after a write) — same validation dashboards already passed.
 - **txid on the transition-composed error mutations** (`transitionIssue`,
   `claimIssue`, `releaseIssue`): these compose `applyTransition` (multiple
   `error_issues` writes), so they currently return no `txid` and clients drop

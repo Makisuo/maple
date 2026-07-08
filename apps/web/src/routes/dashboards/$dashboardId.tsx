@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
+import { DashboardId, DashboardVersionId } from "@maple/domain/http"
 import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -33,6 +34,11 @@ import { useMemo, type ReactNode } from "react"
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
 const chartPickerOpenAtom = Atom.make(false)
+
+// Decode the raw `$dashboardId` URL segment into its branded id once, at the
+// route boundary, so the branded value threads through the store/history hooks
+// without a per-call cast.
+const asDashboardId = Schema.decodeSync(DashboardId)
 
 // `var-<name>` keys carry dashboard-variable selections (Grafana-style), so
 // views are shareable/deep-linkable. Values are `Unknown` on purpose: TanStack
@@ -72,7 +78,8 @@ function DashboardRefreshBridge({ children }: { children: ReactNode }) {
 }
 
 function DashboardViewPage() {
-	const { dashboardId } = Route.useParams()
+	const { dashboardId: dashboardIdParam } = Route.useParams()
+	const dashboardId = asDashboardId(dashboardIdParam)
 	const search = Route.useSearch()
 	const navigate = useNavigate()
 
@@ -287,11 +294,11 @@ function DashboardViewPage() {
 	)
 }
 
-function HistoryPanelMount({ dashboardId, onClose }: { dashboardId: string; onClose: () => void }) {
+function HistoryPanelMount({ dashboardId, onClose }: { dashboardId: DashboardId; onClose: () => void }) {
 	const [previewed, setPreviewed] = useAtom(previewedVersionAtom)
 	const result = useDashboardVersions(dashboardId)
 
-	const onPreview = (versionId: string) => {
+	const onPreview = (versionId: DashboardVersionId) => {
 		if (!Result.isSuccess(result)) return
 		const version = result.value.versions.find((v) => v.id === versionId)
 		if (!version) return

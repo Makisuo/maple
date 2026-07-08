@@ -115,12 +115,13 @@ const TracerLive = Maple.layer({
 - **Bundle size:** the replay engine (rrweb included) loads through a dynamic import, so it lands in a code-split chunk (~360 kB) fetched only when replay is enabled *and* the session is sampled. The base client bundle stays ~13 kB.
 - **Opt out** with `replay: { enabled: false }`. Unsampled or disabled sessions still appear in the Sessions UI (metadata rows + linked traces, no recording); turn that off too with `emitSessionMeta: false`.
 - **Tab lifecycle:** recording suspends on `visibilitychange → hidden` (flushing the tail with `keepalive`) and resumes when the tab becomes visible again, rotating to a fresh session after 30 minutes of inactivity.
-- **Identify users** at any point — the id is attached to the session's next-posted metadata row _and_ stamped as `user.id` on every span the client tracer creates from then on (traces become user-attributable, not just session-grouped). Spans created before you call it stay anonymous.
+- **Identify users** at any point — the id is attached to the session's next-posted metadata row _and_ stamped as `user.id` on every span the client tracer creates from then on (traces become user-attributable, not just session-grouped). Spans created before you call it stay anonymous. Pass `null` or `undefined` after sign-out to make future telemetry anonymous again.
 
 ```typescript
 import { identify } from "@maple-dev/effect-sdk/client"
 
 identify(user.id)
+identify(null)
 ```
 
 Inside an Effect program (e.g. once a login flow resolves the user) use the Effect-returning form:
@@ -129,6 +130,18 @@ Inside an Effect program (e.g. once a login flow resolves the user) use the Effe
 import { Maple } from "@maple-dev/effect-sdk/client"
 
 yield* Maple.identify(user.id)
+```
+
+- **Clear the identity** on logout with `clearIdentity()` — the explicit inverse of `identify()`. Metadata rows and spans go back to anonymous (no `user.id`) from then on; the session itself continues.
+
+```typescript
+import { clearIdentity } from "@maple-dev/effect-sdk/client"
+
+clearIdentity()
+
+// or, inside an Effect program:
+import { Maple } from "@maple-dev/effect-sdk/client"
+yield* Maple.clearIdentity
 ```
 
 If `@maple-dev/browser` is also on the page, it owns the session and this SDK's replay/emission stands down automatically — exactly one recorder runs, and spans link to that session via the shared sink. Use one or the other for replay, not both.

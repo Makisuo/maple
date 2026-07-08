@@ -284,6 +284,7 @@
         "@maple/infra": "workspace:*",
         "@maple/query-engine": "workspace:*",
         "@maple/ui": "workspace:*",
+        "@maple/unitflow": "workspace:*",
         "@rrweb/replay": "^2.0.1",
         "@rrweb/types": "^2.0.1",
         "@streamdown/cjk": "^1.0.3",
@@ -623,6 +624,22 @@
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "tailwindcss": "^4.0.0",
+      },
+    },
+    "packages/unitflow": {
+      "name": "@maple/unitflow",
+      "dependencies": {
+        "@tanstack/db": "0.6.13",
+        "effect": "catalog:effect",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.0-beta.93",
+        "@types/react": "catalog:react",
+        "typescript": "catalog:tooling",
+        "vitest": "^4.1.9",
+      },
+      "peerDependencies": {
+        "react": "^19.0.0",
       },
     },
   },
@@ -1498,6 +1515,8 @@
     "@maple/scraper": ["@maple/scraper@workspace:apps/scraper"],
 
     "@maple/ui": ["@maple/ui@workspace:packages/ui"],
+
+    "@maple/unitflow": ["@maple/unitflow@workspace:packages/unitflow"],
 
     "@maple/web": ["@maple/web@workspace:apps/web"],
 

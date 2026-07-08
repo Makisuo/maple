@@ -56,6 +56,9 @@ describe("bundled migrations", () => {
 		"error_issues",
 		"actors",
 		"error_incidents",
+		// Wave 1 (0011_electric_publication_wave1)
+		"alert_destinations",
+		"scrape_target_checks",
 	]
 
 	it(

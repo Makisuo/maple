@@ -16,10 +16,12 @@ describe("resolveConfig", () => {
 			ingestKey: "maple_pk_x",
 			serviceName: "acme-web",
 			endpoint: "https://ingest.example.com/",
+			userId: null,
 			tracing: { instrumentFetch: false },
 			replay: { sampleRate: 0.25 },
 		})
 		expect(custom.endpoint).toBe("https://ingest.example.com")
+		expect(custom.userId).toBeUndefined()
 		expect(custom.tracingInstrumentFetch).toBe(false)
 		expect(custom.replaySampleRate).toBe(0.25)
 	})

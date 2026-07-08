@@ -4,7 +4,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
 import { withSessionLink } from "./session-link.js"
 import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
-import { identify as identifyUser } from "./user.js"
+import { clearIdentity as clearIdentityUser, identify as identifyUser } from "./user.js"
 
 export interface MapleClientConfig {
 	/** The service name reported in traces, logs, and metrics. */
@@ -132,5 +132,19 @@ export const layer = (config: MapleClientConfig) => {
  * yield* Maple.identify(user.id)
  * ```
  */
-export const identify = (userId: string): Effect.Effect<void> =>
+export const identify = (userId?: string | null): Effect.Effect<void> =>
 	Effect.sync(() => identifyUser(userId))
+
+/**
+ * Effect-idiomatic form of `clearIdentity` — drop the end-user id from the
+ * active Maple browser session (the inverse of `identify`). From this point on
+ * metadata rows and spans go back to anonymous (no `user.id` stamp). Call this
+ * when a login flow signs the user out; the session itself continues.
+ *
+ * @example
+ * ```typescript
+ * import { Maple } from "@maple-dev/effect-sdk/client"
+ * yield* Maple.clearIdentity
+ * ```
+ */
+export const clearIdentity: Effect.Effect<void> = Effect.sync(() => clearIdentityUser())

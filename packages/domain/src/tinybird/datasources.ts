@@ -378,16 +378,16 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
 	// re-points the MV can't reconstruct the full window from `traces`. Carry
 	// existing rows forward (non-destructive) instead — same pattern as the other
 	// hourly rollups (`service_map_db_query_shapes_hourly`, `logs_aggregates_hourly`,
-	// `service_platforms_hourly`). DbNamespace is being added to a datasource that
-	// already holds data, so this add-deploy defaults it to '' for existing rows
-	// (they render as the per-system generic node for historical windows); once
-	// the deploy lands, a follow-up commit must switch this to carry the column
-	// through unchanged (see the ServiceNamespace note on `logs_aggregates_hourly`).
+	// `service_platforms_hourly`). The DbNamespace add-deploy (migration 0006) is
+	// COMPLETE — the column now exists in the deployed datasource and is populated,
+	// so the forward query carries it through unchanged. Re-defaulting it (the old
+	// `defaultValueOfTypeName(...)`) would overwrite the values accumulated since,
+	// which Tinybird rejects on every later deploy.
 	forwardQuery: `SELECT
     OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
     CallCount, ErrorCount, DurationSumMs, MaxDurationMs,
     SampledSpanCount, UnsampledSpanCount, SampleRateSum,
-    defaultValueOfTypeName('LowCardinality(String)') AS DbNamespace`,
+    DbNamespace`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		// DbNamespace is a grouping dimension, so it must live in the sorting key —
@@ -456,17 +456,17 @@ export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_qu
 	// The 90d rollup TTL outlives the 30d `traces` source, so a backfill from
 	// `traces` can't reconstruct the full window. Carry existing rows forward
 	// (non-destructive deploy) instead — same pattern as the other hourly
-	// rollups (`logs_aggregates_hourly`, `service_usage_hourly`). DbNamespace is
-	// being added to a datasource that already holds data, so this add-deploy
-	// defaults it to '' for existing rows; once the deploy lands, a follow-up
-	// commit must switch this to carry the column through unchanged (see the
-	// ServiceNamespace note on `logs_aggregates_hourly`).
+	// rollups (`logs_aggregates_hourly`, `service_usage_hourly`). The DbNamespace
+	// add-deploy (migration 0006) is COMPLETE — the column now exists in the
+	// deployed datasource and is populated, so the forward query carries it through
+	// unchanged. Re-defaulting it (the old `defaultValueOfTypeName(...)`) would
+	// overwrite the values accumulated since, which Tinybird rejects on every later deploy.
 	forwardQuery: `SELECT
     OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
     QueryKey, QueryLabel, SampleStatement,
     CallCount, ErrorCount, EstimatedCount, EstimatedErrorCount,
     WeightedDurationSumMs, DurationQuantiles,
-    defaultValueOfTypeName('LowCardinality(String)') AS DbNamespace`,
+    DbNamespace`,
 })
 
 export type ServiceMapDbQueryShapesHourlyRow = InferRow<typeof serviceMapDbQueryShapesHourly>

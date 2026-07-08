@@ -23,8 +23,12 @@ import { SyncConfig } from "../config"
  */
 
 // Server-pinned shape whitelist. Every shape is additionally org-scoped below;
-// `extraWhere` narrows the synced rows further (immutable — changing it is a new
-// shape name + full re-sync, so version the name if it must ever change).
+// `extraWhere` narrows the synced rows further and `columns` restricts which
+// columns Electric streams to the browser (drop encrypted secrets / large jsonb
+// blobs — the client never needs them, and they must not leave the server). Both
+// are immutable — changing either is a new shape name + full re-sync, so version
+// the name if it must ever change. When `columns` is set it MUST include the
+// table's primary-key column(s) (Electric requires the PK in the projection).
 const SHAPES = {
 	dashboards: { table: "dashboards" },
 	alert_rules: { table: "alert_rules" },
@@ -33,7 +37,33 @@ const SHAPES = {
 	error_issues: { table: "error_issues", extraWhere: `"archived_at" IS NULL` },
 	actors: { table: "actors" },
 	open_error_incidents: { table: "error_incidents", extraWhere: `"status" = 'open'` },
-} as const satisfies Record<string, { readonly table: string; readonly extraWhere?: string }>
+	// `config_json` holds only public config (summary / channel label / hazel
+	// metadata); the encrypted webhook secrets live in separate `secret_*` columns
+	// that MUST NOT reach the browser, so the projection drops them (and the
+	// unused `created_by`/`updated_by`). The PK `id` is required in the projection.
+	alert_destinations: {
+		table: "alert_destinations",
+		columns: [
+			"id",
+			"org_id",
+			"name",
+			"type",
+			"enabled",
+			"config_json",
+			"last_tested_at",
+			"last_test_error",
+			"created_at",
+			"updated_at",
+		],
+	},
+	// Uptime-probe history — already pruned server-side to 24h + a 10k-per-target
+	// cap (see ScrapeTargetsService.pruneChecks), so the whole per-org shape stays
+	// bounded. No secrets in this table.
+	scrape_target_checks: { table: "scrape_target_checks" },
+} as const satisfies Record<
+	string,
+	{ readonly table: string; readonly extraWhere?: string; readonly columns?: ReadonlyArray<string> }
+>
 
 export type ShapeName = keyof typeof SHAPES
 
@@ -135,6 +165,10 @@ export const buildUpstreamShapeUrl = (args: {
 		"extraWhere" in def && def.extraWhere ? `${orgWhere} AND ${def.extraWhere}` : orgWhere,
 	)
 	url.searchParams.set("params[1]", args.orgId)
+
+	// Column projection is pinned server-side too — a shape that drops secret /
+	// oversized columns must never let the client widen it back to `SELECT *`.
+	if ("columns" in def && def.columns) url.searchParams.set("columns", def.columns.join(","))
 
 	// Electric Cloud source credentials (absent when self-hosting Electric).
 	if (args.sourceId) url.searchParams.set("source_id", args.sourceId)

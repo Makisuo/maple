@@ -144,13 +144,16 @@ await maple.shutdown()
 
 ## Identifying users
 
-Pass `userId` so replays and traces are correlated to a known user — it populates the user column in the Maple session list and detail views.
+Pass `userId` so replays and traces are correlated to a known user — it populates the user column in the Maple session list and detail views, and browser-created spans include `user.id`.
 
-If you don't know the user at init time (e.g. the SDK starts before login resolves), omit it; the session begins anonymous. Once you know who the user is, call `MapleBrowser.identify(userId)` to attach (or replace) the id on the active session. It's safe to call repeatedly and is a no-op when replay isn't active.
+If you don't know the user at init time (e.g. the SDK starts before login resolves), omit it; the session begins anonymous. Once you know who the user is, call `MapleBrowser.identify(userId)` to attach (or replace) the id on the active session. Future session rows read the latest id when they post, and future spans read it when they start.
 
 ```ts
 // after the user signs in
 MapleBrowser.identify(user.id)
+
+// after the user signs out
+MapleBrowser.identify(null)
 ```
 
 ## Privacy & masking

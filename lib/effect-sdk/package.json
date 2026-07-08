@@ -1,6 +1,6 @@
 {
 	"name": "@maple-dev/effect-sdk",
-	"version": "0.6.0",
+	"version": "0.7.0",
 	"description": "Maple observability SDK for Effect applications",
 	"license": "MIT",
 	"files": [

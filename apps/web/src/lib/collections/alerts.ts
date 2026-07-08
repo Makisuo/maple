@@ -1,6 +1,8 @@
 import {
 	AlertComparator,
+	AlertDestinationDocument,
 	AlertDestinationId,
+	AlertDestinationType,
 	AlertEventType,
 	AlertGroupBy,
 	AlertIncidentDocument,
@@ -27,6 +29,8 @@ const asAlertIncidentId = Schema.decodeUnknownSync(AlertIncidentDocument.fields.
 const asUserId = Schema.decodeUnknownSync(UserId)
 const asErrorIssueId = Schema.decodeUnknownSync(ErrorIssueId)
 const decodeDestinationId = Schema.decodeUnknownSync(AlertDestinationId)
+
+const asDestinationType = Schema.decodeUnknownSync(AlertDestinationType)
 
 const asSeverity = Schema.decodeUnknownSync(AlertSeverity)
 const asSignalType = Schema.decodeUnknownSync(AlertSignalType)
@@ -293,6 +297,79 @@ export const createAlertIncidentsCollection = (orgId: string) =>
 		getKey: (row) => row.id,
 	})
 
+// ---------------------------------------------------------------------------
+// alert_destinations
+// ---------------------------------------------------------------------------
+
+/**
+ * Identity row schema for the `alert_destinations` shape. The shape is
+ * column-restricted server-side (the encrypted `secret_*` columns are dropped —
+ * see the proxy whitelist), so this struct intentionally lists only the synced
+ * columns. `config_json` carries ONLY public config (summary / channel label /
+ * hazel metadata); the webhook secrets live in the excluded encrypted columns.
+ */
+export const AlertDestinationRowSchema = Schema.Struct({
+	id: Schema.String,
+	org_id: Schema.String,
+	name: Schema.String,
+	type: Schema.String,
+	enabled: Schema.Boolean,
+	config_json: Schema.Unknown,
+	last_tested_at: Schema.NullOr(Schema.String),
+	last_test_error: Schema.NullOr(Schema.String),
+	created_at: Schema.String,
+	updated_at: Schema.String,
+})
+export type AlertDestinationRow = typeof AlertDestinationRowSchema.Type
+
+/**
+ * The public projection of a destination's `config_json` the browser renders —
+ * mirrors the server's `DestinationPublicConfigSchema` (summary + channelLabel;
+ * the hazel-* fields are excess and ignored here). The server stringifies the
+ * jsonb before decoding; Electric's default parser already gives us the parsed
+ * object, so we decode it directly.
+ */
+const AlertDestinationPublicConfig = Schema.Struct({
+	summary: Schema.String,
+	channelLabel: Schema.NullOr(Schema.String),
+})
+const decodeDestinationPublicConfig = Schema.decodeUnknownOption(AlertDestinationPublicConfig)
+
+/**
+ * Decodes a raw `alert_destinations` row into the domain
+ * {@link AlertDestinationDocument}, mirroring `rowToDestinationDocument` +
+ * `safeParsePublicConfig` in AlertsService.ts (invalid config → the same
+ * "Invalid destination config" fallback the server uses).
+ */
+export const rowToAlertDestinationDocument = (row: AlertDestinationRow): AlertDestinationDocument => {
+	const publicConfig = Option.getOrElse(decodeDestinationPublicConfig(row.config_json), () => ({
+		summary: "Invalid destination config",
+		channelLabel: null,
+	}))
+	return new AlertDestinationDocument({
+		id: decodeDestinationId(row.id),
+		name: row.name,
+		type: asDestinationType(row.type),
+		enabled: row.enabled,
+		summary: publicConfig.summary,
+		channelLabel: publicConfig.channelLabel,
+		lastTestedAt: row.last_tested_at != null ? decodeIso(row.last_tested_at) : null,
+		lastTestError: row.last_test_error,
+		createdAt: decodeIso(row.created_at),
+		updatedAt: decodeIso(row.updated_at),
+	})
+}
+
+export const createAlertDestinationsCollection = (orgId: string) =>
+	createSyncedCollection({
+		shape: "alert_destinations",
+		orgId,
+		schema: AlertDestinationRowSchema,
+		parser: timestamptzParser,
+		getKey: (row) => row.id,
+	})
+
 export type AlertRulesCollection = ReturnType<typeof createAlertRulesCollection>
 export type AlertRuleStatesCollection = ReturnType<typeof createAlertRuleStatesCollection>
 export type AlertIncidentsCollection = ReturnType<typeof createAlertIncidentsCollection>
+export type AlertDestinationsCollection = ReturnType<typeof createAlertDestinationsCollection>

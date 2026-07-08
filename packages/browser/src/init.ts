@@ -5,7 +5,12 @@ import {
 	startReplaySession,
 	type ReplaySessionHandle,
 } from "@maple/browser-session/replay"
-import { type MapleBrowserConfig, type ResolvedConfig, resolveConfig } from "./config"
+import {
+	type MapleBrowserConfig,
+	type ResolvedConfig,
+	normalizeUserId,
+	resolveConfig,
+} from "./config"
 import { setupTracing } from "./tracing"
 
 export interface MapleBrowserHandle {
@@ -78,16 +83,12 @@ export function init(rawConfig: MapleBrowserConfig): MapleBrowserHandle {
 }
 
 /**
- * Attach (or replace) the user id on the active session. Idempotent and safe to
- * call on every render. The session's authoritative row is the latest-version
- * "ended" row posted on suspend/unload, which reads `config.userId` at that
- * moment — so an id set here before the session ends is what the session is
- * tagged with.
+ * Attach, replace, or clear the user id on the active session. Idempotent and
+ * safe to call on every render. Future browser-created spans read this value
+ * when they start, and future session metadata rows read it when they post.
  */
-export function identify(userId: string): void {
+export function identify(userId?: string | null): void {
 	if (typeof window === "undefined") return
 	if (!activeConfig) return
-	if (!userId) return
-	if (activeConfig.userId === userId) return
-	activeConfig.userId = userId
+	activeConfig.userId = normalizeUserId(userId)
 }

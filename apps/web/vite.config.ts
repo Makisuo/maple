@@ -40,10 +40,6 @@ export default defineConfig(({ mode }) => {
 		"VITE_INGEST_URL",
 		"VITE_FLUE_CHAT_URL",
 		"VITE_ELECTRIC_SYNC_URL",
-		// The sync on/off flag, injected via process.env by apps/web/alchemy.run.ts
-		// at deploy time (and settable as a shell env locally). Must be listed here
-		// or the process.env value is ignored in favour of the .env files.
-		"VITE_ELECTRIC_SYNC",
 		"VITE_MAPLE_AUTH_MODE",
 		"VITE_CLERK_PUBLISHABLE_KEY",
 		"VITE_MAPLE_INGEST_KEY",

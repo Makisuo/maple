@@ -1,5 +1,6 @@
 import * as React from "react"
 import type { ReactNode } from "react"
+import type { DashboardId } from "@maple/domain/http"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 import { pickVariableParams } from "@/lib/dashboard-variables/search-params"
@@ -13,7 +14,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 
 interface DashboardActionsContextValue {
-	dashboardId: string
+	dashboardId: DashboardId
 	mode: WidgetMode
 	readOnly: boolean
 	removeWidget: (widgetId: string) => void
@@ -34,7 +35,7 @@ const DashboardActionsContext = React.createContext<DashboardActionsContextValue
 
 interface DashboardActionsProviderProps {
 	children: ReactNode
-	dashboardId: string
+	dashboardId: DashboardId
 	mode: WidgetMode
 	readOnly: boolean
 	store: {

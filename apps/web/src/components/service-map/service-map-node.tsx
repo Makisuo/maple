@@ -12,7 +12,7 @@ import {
 	ServerIcon,
 } from "@/components/icons"
 import type { ServicePlatform } from "@/api/warehouse/service-map"
-import { getDbDescriptor, withAlpha } from "./service-map-db"
+import { resolveDbNodePresentation, withAlpha } from "./service-map-db"
 import { getServiceMapNodeColor, type ServiceNodeData } from "./service-map-utils"
 
 function getPlatformIcon(platform: ServicePlatform | undefined): {
@@ -132,11 +132,14 @@ const Handles = () => (
  * infrastructure dependencies stand out from application services on the map.
  */
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
-	const { label, throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, dbNamespace, selected } = data
-	const { category, Icon, label: systemLabel, color, branded } = getDbDescriptor(dbSystem)
-	// Named databases show their identity as the title; the system name takes
-	// over the small badge slot (the generic node keeps the coarse category).
-	const badge = dbNamespace ? systemLabel : category
+	const { throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, dbNamespace, selected } = data
+	// Named databases show their identity as the title; the system name takes over
+	// the small badge slot (the generic node keeps the coarse category). Databases
+	// behind Cloudflare Hyperdrive collapse to a single "Hyperdrive"-branded node.
+	const { title, badge, Icon, systemLabel, color, branded } = resolveDbNodePresentation(
+		dbSystem,
+		dbNamespace,
+	)
 
 	return (
 		<>
@@ -170,7 +173,7 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 								<p>{systemLabel}</p>
 							</TooltipContent>
 						</Tooltip>
-						<span className="truncate text-xs font-medium text-foreground">{label}</span>
+						<span className="truncate text-xs font-medium text-foreground">{title}</span>
 						<span
 							className="ml-auto shrink-0 text-[9px] font-semibold uppercase tracking-wide"
 							style={{ color }}

@@ -6,12 +6,14 @@ import type { AlertDestinationDocument, AlertRuleDocument, DashboardDocument } f
 import { AlertCreateFormSurface } from "@/components/alerts/alert-create-form-surface"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import { defaultRuleForm, ruleToFormState, type RuleFormState } from "@/lib/alerts/form-utils"
+import { ALERT_TEMPLATES, applyTemplate } from "@/lib/alerts/templates"
 import { decodeAlertChartFromSearchParam, type AlertChartContext } from "@/lib/alerts/widget-chart-param"
 import {
 	createWidgetAlertPrefill,
 	resolveWidgetAlertPrefill,
 	type WidgetAlertPrefillNotice,
 } from "@/lib/alerts/widget-prefill"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
@@ -21,6 +23,7 @@ type AlertCreateSearchValue = {
 	dashboardId?: string
 	widgetId?: string
 	chart?: string
+	template?: string
 }
 
 type InitialRuleDraft = {
@@ -48,16 +51,13 @@ export function AlertCreatePageContent() {
 	const needsDashboards =
 		!search.ruleId && chartContext == null && Boolean(search.dashboardId || search.widgetId)
 
-	const destinationsQueryAtom = MapleApiAtomClient.query("alerts", "listDestinations", {
-		reactivityKeys: ["alertDestinations"],
-	})
 	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", {
 		reactivityKeys: ["alertRules"],
 	})
 	const dashboardsQueryAtom = MapleApiAtomClient.query("dashboards", "list", {
 		reactivityKeys: ["dashboards"],
 	})
-	const destinationsResult = useAtomValue(destinationsQueryAtom)
+	const { result: destinationsResult } = useAlertDestinationsList()
 	const rulesResult = useAtomValue(rulesQueryAtom)
 	const dashboardsResult = useAtomValue(needsDashboards ? dashboardsQueryAtom : idleDashboardsAtom)
 
@@ -93,7 +93,7 @@ export function AlertCreatePageContent() {
 	)
 }
 
-function deriveInitialRuleDraft({
+export function deriveInitialRuleDraft({
 	search,
 	chartContext,
 	rulesResult,
@@ -210,6 +210,22 @@ function deriveInitialRuleDraft({
 			prefillNotices: [],
 			editingRule: null,
 			showTemplatesInitially: false,
+		}
+	}
+
+	// Starter-template deep link from the overview empty state — pre-apply the
+	// preset and skip the first-touch overlay. An unknown id falls through to the
+	// blank draft below (overlay still opens).
+	if (search.template) {
+		const template = ALERT_TEMPLATES.find((t) => t.id === search.template)
+		if (template) {
+			return {
+				key: `new:template:${template.id}`,
+				form: applyTemplate(template, base),
+				prefillNotices: [],
+				editingRule: null,
+				showTemplatesInitially: false,
+			}
 		}
 	}
 

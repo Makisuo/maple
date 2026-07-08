@@ -28,13 +28,42 @@ export const DB_SYSTEM_ATTR_SQL =
 	"coalesce(nullIf(SpanAttributes['db.system.name'], ''), SpanAttributes['db.system'])"
 
 /**
+ * Sentinel `db.namespace` value for a database reached through Cloudflare
+ * Hyperdrive. Hyperdrive presents Postgres to the driver with its 32-char hex
+ * config ID as the database name, and there is a *separate config per deployment
+ * environment*, so the raw namespace explodes into one service-map node per
+ * Worker/PR-preview binding — all fronting the same database. We collapse those
+ * opaque IDs (see `OPAQUE_DB_NAMESPACE_RE`) to this single readable value; the UI
+ * brands the node as "Hyperdrive". Kept in sync with the read-side collapse in
+ * `@maple/query-engine` (`collapseHyperdriveNs`) and the frontend resolver.
+ */
+export const HYPERDRIVE_DB_NAMESPACE = "hyperdrive"
+
+/**
+ * Matches an *opaque* database namespace that should collapse to
+ * `HYPERDRIVE_DB_NAMESPACE`: a bare 32-char hex string (a Cloudflare Hyperdrive
+ * config ID) or a `*.hyperdrive.local` host (the `server.address`/`net.peer.name`
+ * fallback). `[.]` matches a literal dot without a backslash, so the pattern
+ * carries no escapes — it embeds byte-identically in both the raw SQL below and
+ * the escaped DSL `match()` literal on the read side.
+ */
+export const OPAQUE_DB_NAMESPACE_RE = "^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$"
+
+/** Raw identity coalesce: `db.namespace` → `db.name` → `server.address` → `net.peer.name`. */
+const DB_NAMESPACE_COALESCE_SQL =
+	"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name'])"
+
+/**
  * Best-available database identity disambiguator, by the semconv target-identity
  * order (`db.namespace` → `server.address`), each with its legacy spelling as
- * fallback (`db.name`, `net.peer.name`). Empty when the instrumentation emits
+ * fallback (`db.name`, `net.peer.name`), then collapsed to `HYPERDRIVE_DB_NAMESPACE`
+ * when it is an opaque Hyperdrive identifier. Empty when the instrumentation emits
  * none of them — those spans keep collapsing into the per-system generic node.
+ *
+ * MUST stay byte-identical to the compiled `collapseHyperdriveNs(dbNamespaceCoalesce)`
+ * DSL on the read side (`packages/query-engine` service-map.ts) — see the header.
  */
-export const DB_NAMESPACE_ATTR_SQL =
-	"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name'])"
+export const DB_NAMESPACE_ATTR_SQL = `if(match(${DB_NAMESPACE_COALESCE_SQL}, '${OPAQUE_DB_NAMESPACE_RE}'), '${HYPERDRIVE_DB_NAMESPACE}', ${DB_NAMESPACE_COALESCE_SQL})`
 
 /** Full query text: `db.query.text` (stable semconv) with `db.statement` (legacy) fallback. */
 export const DB_STATEMENT_SQL =

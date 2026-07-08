@@ -2,7 +2,7 @@ import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { afterEach, expect } from "vitest"
 import { make } from "./flushable.js"
-import { identify } from "./user.js"
+import { clearIdentity, identify } from "./user.js"
 
 // `withSessionLink` (shared by Maple.layer and MapleFlush.make) stamps the
 // signed-in end-user as `user.id` on every span, read per span from the
@@ -86,5 +86,38 @@ describe("withSessionLink — user.id span stamping", () => {
 
 		const attrs = firstSpanAttrs(calls)
 		expect(attrs.find((a) => a.key === "user.id")?.value.stringValue).toBe("user_abc123")
+	})
+
+	// Runs after the identify() test above (module state persists within the
+	// file), so this exercises the set → clear transition, not a fresh baseline.
+	it("stops stamping user.id after clearIdentity()", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		clearIdentity()
+		const telemetry = make(baseConfig)
+
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("signed-out-op"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush()
+
+		const attrs = firstSpanAttrs(calls)
+		expect(attrs.find((a) => a.key === "user.id")).toBeUndefined()
+	})
+
+	it("stops stamping user.id after identify(null)", async () => {
+		const { calls, restore: r } = setupFetch()
+		restore = r
+		identify("user_to_clear")
+		identify(null)
+		const telemetry = make(baseConfig)
+
+		await Effect.runPromise(
+			Effect.succeed(undefined).pipe(Effect.withSpan("null-cleared-op"), Effect.provide(telemetry.layer)),
+		)
+		await telemetry.flush()
+
+		const attrs = firstSpanAttrs(calls)
+		expect(attrs.find((a) => a.key === "user.id")).toBeUndefined()
 	})
 })

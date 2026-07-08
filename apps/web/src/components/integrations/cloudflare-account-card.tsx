@@ -1,10 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Exit } from "effect"
-import {
-	CloudflareStartConnectRequest,
-	type CloudflareServiceUsage,
-	type CloudflareUsageResponse,
-} from "@maple/domain/http"
+import { CloudflareStartConnectRequest } from "@maple/domain/http"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -15,218 +11,24 @@ import { toast } from "sonner"
 
 import { CircleWarningIcon, CloudflareIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatNumber, formatRelativeTime } from "@/lib/format"
+import { formatNumber } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { IntegrationEmptyState } from "./integration-empty-state"
+import {
+	CloudflareZoneBoard,
+	ResourceRow,
+	SectionLabel,
+	describeCloudflareError,
+	isAccountScoped,
+	toRowUsage,
+	zoneStatus,
+	type CloudflareErrorInfo,
+	type RowUsage,
+	type ZoneEntry,
+} from "./cloudflare-zone-board"
 
-const HOUR_MS = 3_600_000
-
-/** Warehouse-derived ingest proof for one status row, precomputed for rendering. */
-interface RowUsage {
-	totalRequests: number
-	lastDataAt: number | null
-	/** Zero-filled hourly series over the usage window (StatSparkline plots `v`). */
-	points: Array<{ v: number }>
-}
-
-/** Zero-fill the sparse hourly buckets across the whole window so gaps read as gaps. */
-function fillHourlyPoints(
-	usage: CloudflareUsageResponse,
-	buckets: ReadonlyArray<{ bucketStart: number; requests: number }>,
-): Array<{ v: number }> {
-	const byStart = new Map(buckets.map((bucket) => [bucket.bucketStart, bucket.requests]))
-	const first = Math.floor(usage.windowStart / HOUR_MS) * HOUR_MS
-	const points: Array<{ v: number }> = []
-	for (let t = first; t <= usage.windowEnd; t += HOUR_MS) {
-		points.push({ v: byStart.get(t) ?? 0 })
-	}
-	return points
-}
-
-/** Merge one or more usage services into a single row readout (workers aggregate N scripts). */
-function toRowUsage(
-	usage: CloudflareUsageResponse,
-	services: ReadonlyArray<CloudflareServiceUsage>,
-): RowUsage {
-	const summed = new Map<number, number>()
-	let totalRequests = 0
-	let lastDataAt: number | null = null
-	for (const service of services) {
-		totalRequests += service.totalRequests
-		if (service.lastDataAt != null) {
-			lastDataAt = lastDataAt == null ? service.lastDataAt : Math.max(lastDataAt, service.lastDataAt)
-		}
-		for (const bucket of service.buckets) {
-			summed.set(bucket.bucketStart, (summed.get(bucket.bucketStart) ?? 0) + bucket.requests)
-		}
-	}
-	const buckets = [...summed.entries()].map(([bucketStart, requests]) => ({ bucketStart, requests }))
-	return { totalRequests, lastDataAt, points: fillHourlyPoints(usage, buckets) }
-}
-
-const relativeFromMs = (ms: number) => formatRelativeTime(new Date(ms).toISOString())
-
-type CloudflareErrorTone = "error" | "warning"
-
-interface CloudflareErrorInfo {
-	/** Human-readable summary shown in the UI; falls back to the raw string when unrecognized. */
-	summary: string
-	tone: CloudflareErrorTone
-	/**
-	 * "account" errors break the whole integration and are fixed once (reconnect / retry),
-	 * so they surface as a single banner. "resource" errors are per zone/worker and stay inline.
-	 */
-	scope: "account" | "resource"
-}
-
-/**
- * Turn a raw `lastError` (free-form, up to 500 chars from the poller / Cloudflare GraphQL) into a
- * friendly, legible readout. Known shapes get a plain-language summary; anything unrecognized falls
- * back to the raw text (still shown in full, never truncated). The raw string is always kept by the
- * caller for a "Details" tooltip so nothing is hidden.
- */
-function describeCloudflareError(raw: string): CloudflareErrorInfo {
-	const s = raw.toLowerCase()
-	const has = (...needles: Array<string>) => needles.some((n) => s.includes(n))
-
-	if (has("revoked", "no longer valid"))
-		return { summary: "Cloudflare access was revoked — reconnect to resume.", tone: "error", scope: "account" }
-	if (has("lacks the analytics scopes", "scope"))
-		return { summary: "Reconnect to grant Maple analytics access.", tone: "warning", scope: "account" }
-	if (has("cloudflare_oauth_client_id", "is required", "ingest key unavailable"))
-		return {
-			summary: "Traffic collection is temporarily unavailable — try again shortly.",
-			tone: "error",
-			scope: "account",
-		}
-	if (has("not authenticated", "not authorized", "unauthorized", "access denied"))
-		return { summary: "Cloudflare denied the request — reconnect to refresh access.", tone: "error", scope: "account" }
-	if (has("no longer present"))
-		return { summary: "This zone was removed from your Cloudflare account.", tone: "warning", scope: "resource" }
-	if (has("not enabled", "disabled"))
-		return { summary: "Analytics isn't enabled for this zone in Cloudflare.", tone: "warning", scope: "resource" }
-	if (has("unknown field", "cannot query"))
-		return { summary: "Some analytics aren't available on this Cloudflare plan.", tone: "warning", scope: "resource" }
-
-	return { summary: raw, tone: "error", scope: "resource" }
-}
-
-const isAccountScoped = (raw: string | null): boolean =>
-	raw != null && describeCloudflareError(raw).scope === "account"
-
-/** Small uppercase eyebrow that groups the readout (Zones / Workers). */
-function SectionLabel({ children, count }: { children: ReactNode; count?: number }) {
-	return (
-		<div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-			<span>{children}</span>
-			{count != null ? <span className="text-muted-foreground/50 tabular-nums">{count}</span> : null}
-		</div>
-	)
-}
-
-/** A resolved error line: friendly summary plus a "Details" tooltip carrying the raw string. */
-function ErrorLine({ info, raw }: { info: CloudflareErrorInfo; raw: string }) {
-	if (info.summary === raw) {
-		return <span className="line-clamp-2 break-words">{raw}</span>
-	}
-	return (
-		<span className="line-clamp-2 break-words">
-			{info.summary}{" "}
-			<Tooltip>
-				<TooltipTrigger
-					render={<span />}
-					className="cursor-help font-medium underline decoration-dotted underline-offset-2"
-				>
-					Details
-				</TooltipTrigger>
-				<TooltipContent className="max-w-xs whitespace-pre-wrap break-words font-mono text-[11px]">
-					{raw}
-				</TooltipContent>
-			</Tooltip>
-		</span>
-	)
-}
-
-interface StatusRowProps {
-	name: string
-	enabled: boolean
-	lastSyncedAt: number | null
-	lastError: string | null
-	/** null = usage unavailable (loading/failed) — render poller state only. */
-	usage: RowUsage | null
-	/** True once the usage query resolved, so zero rows means "no data", not "still loading". */
-	usageLoaded: boolean
-	/** This row's failure is an account-wide one already shown in the banner — collapse it to "Paused". */
-	accountPaused?: boolean
-	indent?: boolean
-}
-
-/**
- * One zone/worker as a two-line flex row: status dot + name over a status detail line, with the
- * sparkline + request total right-aligned. The detail line wraps (errors are never clipped) — this
- * is the fix for the old fixed-width `truncate` cell that hid what actually went wrong.
- */
-function StatusRow(props: StatusRowProps) {
-	const { name, enabled, lastError, usage, usageLoaded, lastSyncedAt, accountPaused, indent } = props
-	const hasData = usage != null && (usage.totalRequests > 0 || usage.lastDataAt != null)
-	const err = lastError ? describeCloudflareError(lastError) : null
-	const showInlineError = err != null && !accountPaused && err.scope === "resource"
-
-	let dot = "bg-muted-foreground/40"
-	let detail: ReactNode = null
-	let detailClass = "text-muted-foreground"
-
-	if (!enabled) {
-		detail = "Disabled"
-	} else if (accountPaused) {
-		detail = "Paused"
-	} else if (showInlineError && err && lastError) {
-		dot = err.tone === "error" ? "bg-destructive" : "bg-warning"
-		detailClass = err.tone === "error" ? "text-destructive-foreground" : "text-warning-foreground"
-		detail = <ErrorLine info={err} raw={lastError} />
-	} else if (hasData) {
-		dot = "bg-success"
-		detail = usage?.lastDataAt != null ? `Last data ${relativeFromMs(usage.lastDataAt)}` : "Receiving data"
-	} else if (usageLoaded && lastSyncedAt) {
-		dot = "bg-warning"
-		detailClass = "text-warning-foreground"
-		detail = "No data in last 24h"
-	} else if (lastSyncedAt) {
-		dot = "bg-success"
-		detail = `Checked ${relativeFromMs(lastSyncedAt)}`
-	} else {
-		dot = "bg-warning"
-		detailClass = "text-warning-foreground"
-		detail = "Waiting for first data"
-	}
-
-	return (
-		<div className="flex items-start gap-2.5 py-1">
-			<span
-				className={`mt-[5px] size-1.5 shrink-0 rounded-full ${indent ? "invisible" : dot}`}
-				aria-hidden
-			/>
-			<div className="min-w-0 flex-1">
-				<span
-					className={`block truncate text-xs ${indent ? "pl-3 text-muted-foreground" : "font-medium text-foreground"}`}
-					title={name}
-				>
-					{name}
-				</span>
-				<div className={`mt-0.5 text-[11px] ${indent ? "pl-3" : ""} ${detailClass}`}>{detail}</div>
-			</div>
-			<div className="flex shrink-0 items-center gap-3 pt-0.5">
-				{hasData && usage ? (
-					<StatSparkline data={usage.points} color={CLOUDFLARE_ACCENT} className="h-5 w-20" />
-				) : null}
-				<span className="w-14 text-right text-xs font-medium tabular-nums text-foreground">
-					{hasData && usage ? formatNumber(usage.totalRequests) : null}
-				</span>
-			</div>
-		</div>
-	)
-}
+const EMPTY_USAGE: RowUsage = { totalRequests: 0, lastDataAt: null, points: [] }
 
 /**
  * Account-level Cloudflare OAuth connection (Authorization Code + PKCE). Distinct from the
@@ -258,7 +60,6 @@ export function CloudflareAccountCard() {
 	})
 
 	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
-	const [showQuietZones, setShowQuietZones] = useState(false)
 	const popupRef = useRef<Window | null>(null)
 	const [popupOpen, setPopupOpen] = useState(false)
 
@@ -320,7 +121,7 @@ export function CloudflareAccountCard() {
 	const zoneUsage = (zoneName: string): RowUsage | null => {
 		if (!usage) return null
 		const service = usage.services.find((s) => s.kind === "zone" && s.displayName === zoneName)
-		return service ? toRowUsage(usage, [service]) : { totalRequests: 0, lastDataAt: null, points: [] }
+		return service ? toRowUsage(usage, [service]) : { ...EMPTY_USAGE }
 	}
 
 	// Zones the warehouse has data for but the poller has no state row yet (discovery
@@ -344,17 +145,8 @@ export function CloudflareAccountCard() {
 		return null
 	}, [status])
 
-	// One renderable entry per zone (poller state joined with warehouse usage), busiest
-	// first. Accounts hold many parked domains, so zones that are healthy but saw zero
-	// traffic collapse behind a toggle instead of drowning the live ones.
-	interface ZoneEntry {
-		key: string
-		name: string
-		enabled: boolean
-		lastSyncedAt: number | null
-		lastError: string | null
-		usage: RowUsage | null
-	}
+	// One renderable entry per zone (poller state joined with warehouse usage). The board owns
+	// searching, status filtering, sorting, and the bounded scroll — this just assembles the set.
 	const zoneEntries: Array<ZoneEntry> = (status?.zones ?? []).map((zone) => ({
 		key: zone.id,
 		name: zone.name,
@@ -373,17 +165,6 @@ export function CloudflareAccountCard() {
 			usage: usage ? toRowUsage(usage, [service]) : null,
 		})
 	}
-	const isQuietZone = (entry: ZoneEntry) =>
-		usageLoaded &&
-		entry.enabled &&
-		entry.lastError == null &&
-		entry.usage != null &&
-		entry.usage.totalRequests === 0 &&
-		entry.usage.lastDataAt == null
-	const byTraffic = (a: ZoneEntry, b: ZoneEntry) =>
-		(b.usage?.totalRequests ?? 0) - (a.usage?.totalRequests ?? 0)
-	const activeZones = zoneEntries.filter((entry) => !isQuietZone(entry)).sort(byTraffic)
-	const quietZones = zoneEntries.filter(isQuietZone).sort((a, b) => a.name.localeCompare(b.name))
 
 	async function handleConnect() {
 		// Open the popup synchronously (inside the click) so the browser doesn't block it,
@@ -486,8 +267,19 @@ export function CloudflareAccountCard() {
 	const hasReadout =
 		status != null &&
 		(status.zones.length > 0 || status.workers != null || (usage != null && usage.services.length > 0))
-	const zoneCount = activeZones.length + quietZones.length
+	const zoneCount = zoneEntries.length
 	const hasWorkers = status?.workers != null || workerServices.length > 0
+
+	// Aggregate the Workers scripts into one health row, mirroring the zone entry shape so the
+	// same ResourceRow + zoneStatus drive it. Sub-scripts nest below when there's more than one.
+	const workerEntry: ZoneEntry = {
+		key: "workers",
+		name: "Workers",
+		enabled: status?.workers?.enabled ?? true,
+		lastSyncedAt: status?.workers?.lastSyncedAt ?? null,
+		lastError: status?.workers?.lastError ?? null,
+		usage: usage ? (workersRowUsage ?? { ...EMPTY_USAGE }) : null,
+	}
 
 	return (
 		<div className="overflow-hidden rounded-lg border border-border/60 bg-card">
@@ -592,84 +384,43 @@ export function CloudflareAccountCard() {
 							) : null}
 
 							{zoneCount > 0 ? (
-								<div className="flex flex-col gap-0.5">
-									<SectionLabel count={zoneCount}>Zones</SectionLabel>
-									{activeZones.map((entry) => (
-										<StatusRow
-											key={entry.key}
-											name={entry.name}
-											enabled={entry.enabled}
-											lastSyncedAt={entry.lastSyncedAt}
-											lastError={entry.lastError}
-											usage={entry.usage}
-											usageLoaded={usageLoaded}
-											accountPaused={isAccountScoped(entry.lastError)}
-										/>
-									))}
-									{showQuietZones
-										? quietZones.map((entry) => (
-												<StatusRow
-													key={entry.key}
-													name={entry.name}
-													enabled={entry.enabled}
-													lastSyncedAt={entry.lastSyncedAt}
-													lastError={entry.lastError}
-													usage={entry.usage}
-													usageLoaded={usageLoaded}
-													accountPaused={isAccountScoped(entry.lastError)}
-												/>
-											))
-										: null}
-									{quietZones.length > 0 ? (
-										<button
-											type="button"
-											onClick={() => setShowQuietZones((v) => !v)}
-											className="mt-1 w-fit cursor-pointer text-left text-[11px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
-										>
-											{showQuietZones
-												? "Hide zones with no data"
-												: `Show ${quietZones.length} more ${quietZones.length === 1 ? "zone" : "zones"} · no data in last 24h`}
-										</button>
-									) : null}
-								</div>
+								<CloudflareZoneBoard zones={zoneEntries} usageLoaded={usageLoaded} />
 							) : null}
 
 							{hasWorkers ? (
-								<div className="flex flex-col gap-0.5">
+								<div className="flex flex-col gap-2">
 									<SectionLabel>Workers</SectionLabel>
-									<StatusRow
-										name="Workers"
-										enabled={status.workers?.enabled ?? true}
-										lastSyncedAt={status.workers?.lastSyncedAt ?? null}
-										lastError={status.workers?.lastError ?? null}
-										usage={
-											usage
-												? (workersRowUsage ?? {
-														totalRequests: 0,
-														lastDataAt: null,
-														points: [],
+									<div className="overflow-hidden rounded-lg border border-border/60">
+										<ResourceRow
+											name="Workers"
+											status={zoneStatus(workerEntry, usageLoaded)}
+											usage={workerEntry.usage}
+										/>
+										{usage && workerServices.length > 1
+											? [...workerServices]
+													.sort((a, b) => b.totalRequests - a.totalRequests)
+													.map((service) => {
+														const scriptUsage = toRowUsage(usage, [service])
+														const scriptEntry: ZoneEntry = {
+															key: service.serviceName,
+															name: service.displayName,
+															enabled: true,
+															lastSyncedAt: null,
+															lastError: null,
+															usage: scriptUsage,
+														}
+														return (
+															<ResourceRow
+																key={service.serviceName}
+																name={service.displayName}
+																status={zoneStatus(scriptEntry, usageLoaded)}
+																usage={scriptUsage}
+																indent
+															/>
+														)
 													})
-												: null
-										}
-										usageLoaded={usageLoaded}
-										accountPaused={isAccountScoped(status.workers?.lastError ?? null)}
-									/>
-									{usage && workerServices.length > 1
-										? [...workerServices]
-												.sort((a, b) => b.totalRequests - a.totalRequests)
-												.map((service) => (
-													<StatusRow
-														key={service.serviceName}
-														name={service.displayName}
-														enabled={true}
-														lastSyncedAt={null}
-														lastError={null}
-														usage={toRowUsage(usage, [service])}
-														usageLoaded={usageLoaded}
-														indent
-													/>
-												))
-										: null}
+											: null}
+									</div>
 								</div>
 							) : null}
 						</>

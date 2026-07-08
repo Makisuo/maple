@@ -15,7 +15,7 @@ export function ClerkAuthBridge() {
 	// auth-headers bridge below.
 	useEffect(() => {
 		setActiveOrgId(isLoaded && isSignedIn ? orgId : null)
-		if (isLoaded && isSignedIn && userId) identify(userId)
+		if (isLoaded) identify(isSignedIn ? userId : undefined)
 	}, [isLoaded, isSignedIn, orgId, userId])
 
 	useEffect(() => {

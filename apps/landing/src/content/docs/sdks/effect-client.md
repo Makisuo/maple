@@ -71,12 +71,21 @@ How it behaves:
 
 - **Sampling still yields sessions.** When replay is disabled or a session isn't sampled, the SDK still posts session metadata rows — the session shows up in the Sessions UI with its linked traces, just without a recording. Set `emitSessionMeta: false` to turn that off too.
 - **Tab lifecycle.** Recording suspends when the tab is hidden (flushing the tail with `keepalive`) and resumes when it becomes visible again. Sessions survive reloads within a tab and rotate after 30 minutes of inactivity (24-hour hard cap).
-- **Identify users** at any point; the id is attached when the session's next metadata row is posted:
+- **Identify users** at any point; the id is attached when the session's next metadata row is posted and stamped as `user.id` on future spans. Pass `null` or `undefined` after sign-out to make future telemetry anonymous again:
 
 ```typescript
 import { identify } from "@maple-dev/effect-sdk/client"
 
 identify(user.id)
+identify(null)
+```
+
+- **Clear the identity** on logout with `clearIdentity()` (the explicit inverse of `identify()`); metadata rows and spans go back to anonymous while the session continues:
+
+```typescript
+import { clearIdentity } from "@maple-dev/effect-sdk/client"
+
+clearIdentity()
 ```
 
 - **Interop with `@maple-dev/browser`.** If the standalone browser SDK is also on the page, it owns the session — this SDK's recorder and row emission stand down automatically, and spans link to that session instead. Run replay from one SDK, not both.

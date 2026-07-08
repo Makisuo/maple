@@ -29,6 +29,7 @@
 		"@maple/infra": "workspace:*",
 		"@maple/query-engine": "workspace:*",
 		"@maple/ui": "workspace:*",
+		"@maple/unitflow": "workspace:*",
 		"@rrweb/replay": "^2.0.1",
 		"@rrweb/types": "^2.0.1",
 		"@streamdown/cjk": "^1.0.3",

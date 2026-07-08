@@ -3,6 +3,7 @@ import { isBackfill, renderStatementFull, type BackfillSpec } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
 import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_error_columns"
 import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
+import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hyperdrive"
 import { migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -17,8 +18,8 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6])
-		expect(migrations.at(-1)).toBe(migration_0006_db_edge_namespace)
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7])
+		expect(migrations.at(-1)).toBe(migration_0007_db_namespace_hyperdrive)
 	})
 
 	it("adds alert_checks error columns as idempotent ALTERs", () => {

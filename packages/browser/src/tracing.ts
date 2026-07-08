@@ -13,9 +13,13 @@ import { recordTraceId } from "@maple/browser-session"
  * Captures every span's trace id into the session sink. Lightweight — runs
  * alongside the BatchSpanProcessor, does no export of its own.
  */
-class TraceIdCollector implements SpanProcessor {
+export class TraceIdCollector implements SpanProcessor {
+	constructor(private readonly getUserId: () => string | undefined = () => undefined) {}
+
 	onStart(span: Span): void {
 		recordTraceId(span.spanContext().traceId)
+		const userId = this.getUserId()
+		if (userId !== undefined) span.setAttribute("user.id", userId)
 	}
 	onEnd(_span: ReadableSpan): void {}
 	forceFlush(): Promise<void> {
@@ -61,7 +65,7 @@ export function setupTracing(config: ResolvedConfig, sessionId: string): () => P
 
 	const provider = new WebTracerProvider({
 		resource: resourceFromAttributes(attributes),
-		spanProcessors: [new TraceIdCollector(), new BatchSpanProcessor(exporter)],
+		spanProcessors: [new TraceIdCollector(() => config.userId), new BatchSpanProcessor(exporter)],
 	})
 	provider.register()
 
