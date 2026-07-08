@@ -1,14 +1,17 @@
 import { memo, useEffect, useId } from "react"
 import { getSmoothStepPath, type EdgeProps } from "@xyflow/react"
 import { getServiceLegendColor } from "@maple/ui/colors"
-import { getDbColor } from "./service-map-db"
+import { getDbNodeColor } from "./service-map-db"
 import { isDbNodeId, parseDbNodeId, type ServiceEdgeData } from "./service-map-utils"
 import { useParticleRegistry } from "./service-map-particles"
 
 // `getServiceLegendColor` cannot produce a stable color from `db:<system>:<namespace>`
 // ids that aren't in the services list, so resolve db endpoints to their brand color
-// (per system — all namespaces of one system share the brand color).
-const dbEndpointColor = (nodeId: string): string => getDbColor(parseDbNodeId(nodeId).dbSystem)
+// (per system — Hyperdrive-collapsed nodes get the Cloudflare orange instead).
+const dbEndpointColor = (nodeId: string): string => {
+	const { dbSystem, dbNamespace } = parseDbNodeId(nodeId)
+	return getDbNodeColor(dbSystem, dbNamespace)
+}
 
 function getStrokeWidth(callCount: number): number {
 	if (callCount <= 0) return 2

@@ -3,7 +3,7 @@ import type { CloudflareService, ServiceDbEdge, ServiceEdge, ServicePlatform } f
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { getServiceLegendColor } from "@maple/ui/colors"
-import { getDbColor } from "./service-map-db"
+import { getDbNodeColor, resolveDbNodePresentation } from "./service-map-db"
 
 interface ServiceNodeInfra {
 	podCount: number
@@ -82,11 +82,11 @@ export function getHealthColor(errorRate: number): string {
  * the "color by" affordance is for slicing service nodes only.
  */
 export function getServiceMapNodeColor(
-	data: Pick<ServiceNodeData, "label" | "kind" | "errorRate" | "platform" | "dbSystem">,
+	data: Pick<ServiceNodeData, "label" | "kind" | "errorRate" | "platform" | "dbSystem" | "dbNamespace">,
 	services: string[],
 	mode: ServiceMapColorMode,
 ): string {
-	if (data.kind === "database") return getDbColor(data.dbSystem)
+	if (data.kind === "database") return getDbNodeColor(data.dbSystem, data.dbNamespace ?? "")
 	switch (mode) {
 		case "health":
 			return getHealthColor(data.errorRate)
@@ -300,8 +300,9 @@ export function buildFlowElements({
 			type: "serviceNode",
 			position: { x: 0, y: 0 },
 			data: {
-				// Named databases show their identity; the generic node keeps the system.
-				label: agg.dbNamespace || agg.dbSystem,
+				// Named databases show their identity; the generic node keeps the system;
+				// Hyperdrive-fronted databases collapse to a single "Hyperdrive" node.
+				label: resolveDbNodePresentation(agg.dbSystem, agg.dbNamespace).title,
 				kind: "database",
 				throughput: agg.callCount / safeDuration,
 				tracedThroughput: agg.callCount / safeDuration,

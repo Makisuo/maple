@@ -1,5 +1,8 @@
+import { HYPERDRIVE_DB_NAMESPACE } from "@maple/domain/tinybird/db-query-shape-sql"
+
 import {
 	ClickhouseIcon,
+	CloudflareIcon,
 	DatabaseIcon,
 	FireIcon,
 	type IconComponent,
@@ -121,9 +124,70 @@ export function getDbDescriptor(system: string | undefined): DbDescriptor {
 	}
 }
 
-/** Per-system brand color with a neutral fallback for unknown systems. */
-export function getDbColor(system: string | undefined): string {
-	return getDbDescriptor(system).color
+/** Cloudflare brand orange, used to brand the collapsed Hyperdrive node. */
+const HYPERDRIVE_COLOR = "oklch(0.7 0.16 50)"
+
+/** Everything a DB node / detail-panel header needs to render, brand included. */
+export interface DbNodePresentation {
+	/** Node title — the database identity, or "Hyperdrive" for the collapsed proxy node. */
+	title: string
+	/** Small uppercase badge — the underlying system, or the coarse category. */
+	badge: string
+	Icon: IconComponent
+	color: string
+	branded: boolean
+	category: DbCategory
+	/** Tooltip / long-form label (e.g. "PostgreSQL via Hyperdrive"). */
+	systemLabel: string
+}
+
+/**
+ * Resolve how a database node is presented, given its system and namespace.
+ *
+ * When the namespace is the `HYPERDRIVE_DB_NAMESPACE` sentinel (all of an org's
+ * Cloudflare Hyperdrive config IDs collapse to it — see the query engine's
+ * `collapseHyperdriveNs`), the node is branded as **Hyperdrive** with the
+ * underlying system ("PostgreSQL") kept in the badge. Otherwise it mirrors the
+ * prior behavior: the namespace is the title, the friendly system name the badge.
+ *
+ * Shared by the map node and the detail-panel header so they always agree — and
+ * the sentinel branch is the hook for a future per-connection Hyperdrive panel.
+ */
+export function resolveDbNodePresentation(
+	dbSystem: string | undefined,
+	dbNamespace: string | undefined,
+): DbNodePresentation {
+	const ns = dbNamespace ?? ""
+	const sys = getDbDescriptor(dbSystem)
+	if (ns === HYPERDRIVE_DB_NAMESPACE) {
+		return {
+			title: "Hyperdrive",
+			badge: sys.label,
+			Icon: CloudflareIcon,
+			color: HYPERDRIVE_COLOR,
+			branded: true,
+			category: sys.category,
+			systemLabel: `${sys.label} via Hyperdrive`,
+		}
+	}
+	return {
+		title: ns || dbSystem || sys.label,
+		badge: ns ? sys.label : sys.category,
+		Icon: sys.Icon,
+		color: sys.color,
+		branded: sys.branded,
+		category: sys.category,
+		systemLabel: sys.label,
+	}
+}
+
+/**
+ * Node color with a neutral fallback for unknown systems, honoring the Hyperdrive
+ * collapse (Cloudflare orange) so the minimap, "color by" accent, and edge
+ * endpoints match the branded node.
+ */
+export function getDbNodeColor(system: string | undefined, namespace: string): string {
+	return resolveDbNodePresentation(system, namespace).color
 }
 
 /** Append an alpha channel to an `oklch(L C H)` color string. */

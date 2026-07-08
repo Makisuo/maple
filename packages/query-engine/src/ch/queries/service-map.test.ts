@@ -13,6 +13,17 @@ import {
 	servicePlatformsSQL,
 } from "./service-map"
 import { serviceMapResolutionsRollupSQL } from "./service-map-rollup"
+import { DB_NAMESPACE_ATTR_SQL } from "@maple/domain/tinybird/db-query-shape-sql"
+
+// The read side must derive `DbNamespace` byte-identically to the write side's
+// `DB_NAMESPACE_ATTR_SQL` (Hyperdrive-collapsing coalesce) or the sealed-hour and
+// raw-fallback branches won't merge. Assertions below reference these directly so
+// a drift in either surface fails the build.
+//
+// Sealed rows already store the collapsed value, but pre-migration rows still hold
+// the raw Hyperdrive hex, so the sealed column is re-collapsed on read too:
+const SEALED_NAMESPACE_COLLAPSE =
+	"if(match(DbNamespace, '^([0-9a-fA-F]{32}|.*[.]hyperdrive[.]local)$'), 'hyperdrive', DbNamespace)"
 
 const baseParams = {
 	orgId: "org_1",
@@ -345,14 +356,12 @@ describe("serviceDbEdgesForServiceQuery", () => {
 		}),
 	)
 
-	it("splits database nodes by namespace on both branches (org-wide SQL)", () => {
+	it("splits database nodes by namespace on both branches, collapsing Hyperdrive (org-wide SQL)", () => {
 		const { sql } = serviceDbEdgesSQL({}, baseParams)
-		// hourly branch reads the rollup's stored dimension…
-		expect(sql).toContain("DbNamespace AS dbNamespace")
-		// …the raw branch derives the SAME identity via the shared fragment
-		expect(sql).toContain(
-			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) AS dbNamespace",
-		)
+		// hourly branch reads the rollup's stored dimension, re-collapsing pre-migration hex…
+		expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} AS dbNamespace`)
+		// …the raw branch derives the SAME identity via the shared write-side fragment
+		expect(sql).toContain(`${DB_NAMESPACE_ATTR_SQL} AS dbNamespace`)
 		// …and every GROUP BY carries it so distinct databases stay distinct rows
 		const matches = sql.match(/GROUP BY sourceService, dbSystem, dbNamespace/g)
 		expect(matches?.length).toBe(3)
@@ -534,31 +543,28 @@ describe("service-map database query summaries", () => {
 
 	it("scopes to one database identity when dbNamespace is set (rollup + raw branches)", () => {
 		const { sql } = serviceDbQuerySummarySQL({ ...params, dbNamespace: "orders" })
-		// sealed rollup branch filters the stored dimension…
-		expect(sql).toContain("DbNamespace = 'orders'")
+		// sealed rollup branch filters the stored dimension (re-collapsed)…
+		expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} = 'orders'`)
 		// …the raw branch filters via the shared identity fragment
-		expect(sql).toContain(
-			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'",
-		)
+		expect(sql).toContain(`${DB_NAMESPACE_ATTR_SQL} = 'orders'`)
 	})
 
 	it("treats dbNamespace='' as the legacy/unknown node and undefined as unscoped", () => {
 		const scoped = serviceDbQuerySummarySQL({ ...params, dbNamespace: "" }).sql
-		expect(scoped).toContain("DbNamespace = ''")
+		expect(scoped).toContain(`${SEALED_NAMESPACE_COLLAPSE} = ''`)
 		const unscoped = serviceDbQuerySummarySQL(params).sql
-		expect(unscoped).not.toContain("DbNamespace = ")
+		expect(unscoped).not.toContain(`${SEALED_NAMESPACE_COLLAPSE} = `)
 	})
 
 	it("scopes hour-aligned timeseries and top-queries to dbNamespace on both branches", () => {
 		// Both sibling builders must thread the same filter as the summary — a
 		// regression here silently widens the panel to every database of the system.
 		// (Sub-hour timeseries is raw-only, covered separately below.)
-		const namespaceCoalesce =
-			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'"
+		const namespaceCoalesce = `${DB_NAMESPACE_ATTR_SQL} = 'orders'`
 		const timeseries = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 3600 }).sql
 		const topQueries = serviceDbTopQueriesSQL({ ...params, dbNamespace: "orders" }).sql
 		for (const sql of [timeseries, topQueries]) {
-			expect(sql).toContain("DbNamespace = 'orders'") // sealed rollup branch
+			expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} = 'orders'`) // sealed rollup branch
 			expect(sql).toContain(namespaceCoalesce) // raw in-progress-hour branch
 		}
 	})
@@ -568,9 +574,7 @@ describe("service-map database query summaries", () => {
 		// so it filters on the coalesced identity, not the stored DbNamespace column.
 		const { sql } = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 300 })
 		expect(sql).not.toContain("service_map_db_query_shapes_hourly")
-		expect(sql).toContain(
-			"coalesce(nullIf(SpanAttributes['db.namespace'], ''), nullIf(SpanAttributes['db.name'], ''), nullIf(SpanAttributes['server.address'], ''), SpanAttributes['net.peer.name']) = 'orders'",
-		)
+		expect(sql).toContain(`${DB_NAMESPACE_ATTR_SQL} = 'orders'`)
 	})
 
 	it("escapes raw params in summary SQL", () => {

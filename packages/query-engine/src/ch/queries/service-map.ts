@@ -13,6 +13,8 @@ import {
 	DB_QUERY_KEY_SQL,
 	DB_QUERY_LABEL_SQL,
 	DB_STATEMENT_SQL,
+	HYPERDRIVE_DB_NAMESPACE,
+	OPAQUE_DB_NAMESPACE_RE,
 	presentableStatementSql,
 } from "@maple/domain/tinybird/db-query-shape-sql"
 import { Schema } from "effect"
@@ -447,13 +449,25 @@ const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }
 		CH.nullIf($.SpanAttributes.get("db.system.name"), ""),
 		$.SpanAttributes.get("db.system"),
 	)
-const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
 	CH.coalesce(
 		CH.nullIf($.SpanAttributes.get("db.namespace"), ""),
 		CH.nullIf($.SpanAttributes.get("db.name"), ""),
 		CH.nullIf($.SpanAttributes.get("server.address"), ""),
 		$.SpanAttributes.get("net.peer.name"),
 	)
+
+// Collapse an *opaque* database namespace (a Cloudflare Hyperdrive config ID, or a
+// `*.hyperdrive.local` host) to the `HYPERDRIVE_DB_NAMESPACE` sentinel so all of an
+// org's per-binding/per-env Hyperdrive hashes merge into one map node the UI brands
+// as "Hyperdrive". Idempotent (the sentinel doesn't match the pattern) so it is safe
+// to apply on already-collapsed sealed rows. Compiles byte-identically to the write
+// side's `DB_NAMESPACE_ATTR_SQL` when the argument is `dbNamespaceCoalesce`.
+const collapseHyperdriveNs = (ns: CH.Expr<string>): CH.Expr<string> =>
+	CH.if_(_matchRegex(ns, OPAQUE_DB_NAMESPACE_RE), CH.lit(HYPERDRIVE_DB_NAMESPACE), ns)
+
+const dbNamespaceExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
+	collapseHyperdriveNs(dbNamespaceCoalesce($))
 
 /**
  * Shared builder behind `serviceDbEdgesSQL` (org-wide) and
@@ -474,7 +488,9 @@ function serviceDbEdgesQueryBase(opts: { serviceName?: string; deploymentEnv?: s
 		.select(($) => ({
 			sourceService: $.ServiceName,
 			dbSystem: $.DbSystem,
-			dbNamespace: $.DbNamespace,
+			// Collapse pre-migration sealed rows that still carry the raw Hyperdrive
+			// hex namespace, so they merge with the recent branch's collapsed value.
+			dbNamespace: collapseHyperdriveNs($.DbNamespace),
 			bucketCallCount: CH.sum($.CallCount),
 			bucketErrorCount: CH.sum($.ErrorCount),
 			bucketDurationSumMs: CH.sum($.DurationSumMs),
@@ -714,7 +730,11 @@ const shapesHourlyFilters = (
 	$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
 	$.DbSystem.eq(params.dbSystem),
 	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
-	params.dbNamespace !== undefined ? $.DbNamespace.eq(params.dbNamespace) : undefined,
+	// Collapse sealed hex → sentinel so a `dbNamespace: "hyperdrive"` filter also
+	// matches pre-migration rows that still carry the raw Hyperdrive config ID.
+	params.dbNamespace !== undefined
+		? collapseHyperdriveNs($.DbNamespace).eq(params.dbNamespace)
+		: undefined,
 	params.sourceService ? $.ServiceName.eq(params.sourceService) : undefined,
 	params.deploymentEnv ? $.DeploymentEnv.eq(params.deploymentEnv) : undefined,
 ]
