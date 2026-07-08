@@ -273,13 +273,22 @@ const IssuesModelBody = View.make(
 	},
 )
 
-/** Clears the model's selection whenever the URL filters change. The filters
- * live above the `<Unitflow>` provider, so instead of an effect that watches
- * them, this null component is remounted by its `key` and fires `Cleared` once
- * on each mount — the sanctioned no-useEffect "re-run via key" pattern. */
-function ClearSelectionOnFilterChange({ dispatchSelection }: { dispatchSelection: (msg: IssueSelectionMsg) => void }) {
+/** Resets the model-owned selection on page entry and whenever the URL filters
+ * change. The filters live above the `<Unitflow>` provider, so rather than an
+ * effect that watches them, this null component is remounted by its `key` (and
+ * on a fresh page mount, since the whole subtree unmounts on navigation away)
+ * and fires `Cleared` — the sanctioned no-useEffect "re-run via key" pattern.
+ * `hasSelection` gates the dispatch so the common empty-selection case (first
+ * load, or a filter change with nothing selected) doesn't emit a no-op. */
+function ClearSelectionOnFilterChange({
+	dispatchSelection,
+	hasSelection,
+}: {
+	dispatchSelection: (msg: IssueSelectionMsg) => void
+	hasSelection: boolean
+}) {
 	useMountEffect(() => {
-		dispatchSelection(clearedSelection)
+		if (hasSelection) dispatchSelection(clearedSelection)
 	})
 	return null
 }
@@ -310,6 +319,7 @@ function IssuesReadyBody({
 			<ClearSelectionOnFilterChange
 				key={`${activeFilter}:${severityFilter}:${kindFilter}`}
 				dispatchSelection={props.dispatchSelection}
+				hasSelection={props.selection.selectedIds.size > 0}
 			/>
 			<IssuesPageBody issues={issues} activeFilter={activeFilter} {...props} />
 		</>
