@@ -1,7 +1,12 @@
 /** Public configuration for `MapleBrowser.init`. */
 export interface MapleBrowserConfig {
-	/** Public ingest key (`maple_pk_...`). */
-	readonly ingestKey: string
+	/**
+	 * Public ingest key (`maple_pk_...`), used only for the `Authorization`
+	 * header. Optional: leave it unset when a self-hosted proxy/gateway injects
+	 * auth server-side — traces and replay still run, POSTing without an auth
+	 * header. The key never gates whether telemetry runs.
+	 */
+	readonly ingestKey?: string
 	/** Service name reported on traces and stored on replay sessions. */
 	readonly serviceName: string
 	/** Maple ingest base URL. Defaults to `https://ingest.maple.dev`. */
@@ -46,7 +51,7 @@ export interface MapleBrowserConfig {
 }
 
 export interface ResolvedConfig {
-	readonly ingestKey: string
+	readonly ingestKey: string | undefined
 	readonly serviceName: string
 	readonly endpoint: string
 	readonly serviceNamespace: string | undefined
