@@ -72,6 +72,7 @@ import { Env } from "../lib/Env"
 import { dateToMs } from "../lib/time"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { CloudflareOAuthService } from "./CloudflareOAuthService"
+import { hasObservabilityScopes } from "./CloudflareObservabilityService"
 import { OrgClickHouseSettingsService } from "./OrgClickHouseSettingsService"
 import { OrgIngestKeysService } from "./OrgIngestKeysService"
 import {
@@ -2044,8 +2045,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 					connectedByUserId: null,
 					scope: null,
 					analyticsCapable: false,
+					observabilityCapable: false,
 					zones: [],
 					workers: null,
+					observabilityDestinations: [],
 				})
 			}
 			const analytics = yield* getStatus(orgId)
@@ -2056,8 +2059,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 				connectedByUserId: decodeUserIdSync(connection.connectedByUserId),
 				scope: connection.scope,
 				analyticsCapable: hasAnalyticsScopes(connection.scope),
+				observabilityCapable: hasObservabilityScopes(connection.scope),
 				zones: analytics.zones.map((zone) => new CloudflareAnalyticsZoneStatus(zone)),
 				workers: analytics.workers ? new CloudflareAnalyticsWorkersStatus(analytics.workers) : null,
+				observabilityDestinations: [],
 			})
 		})
 

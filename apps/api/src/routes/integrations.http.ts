@@ -2,6 +2,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CloudflareDisconnectResponse,
+	CloudflareIntegrationStatus,
 	CloudflareStartConnectResponse,
 	CloudflareTopTrafficResponse,
 	CloudflareTopTrafficRow,
@@ -35,6 +36,7 @@ import { Env } from "../lib/Env"
 import { graphqlQuery } from "../lib/CloudflareApi"
 import { CloudflareAnalyticsService } from "../services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "../services/CloudflareOAuthService"
+import { CloudflareObservabilityService } from "../services/CloudflareObservabilityService"
 import { abrCount } from "../services/cloudflare-analytics/mapping"
 import {
 	decodeTopTrafficResponse,
@@ -50,6 +52,9 @@ import { requireAdmin as requireAdminRole } from "../lib/auth"
 
 const asExternalUserId = Schema.decodeUnknownSync(ExternalUserId)
 const asUserId = Schema.decodeUnknownSync(UserId)
+const CLOUDFLARE_OBSERVABILITY_SYSTEM_USER_ID = Schema.decodeUnknownSync(UserId)(
+	"system-cloudflare-observability",
+)
 
 const HAZEL_CALLBACK_PATH = "/api/integrations/hazel/callback"
 const GITHUB_CALLBACK_PATH = "/api/integrations/github/callback"
@@ -97,6 +102,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const vcsCommits = yield* VcsCommitService
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
+		const cloudflareObservability = yield* CloudflareObservabilityService
 		const database = yield* Database
 		const edgeCache = yield* EdgeCacheService
 		const env = yield* Env
@@ -176,7 +182,15 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 				.handle("cloudflareStatus", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						return yield* cloudflareAnalytics.getIntegrationStatus(tenant.orgId)
+						const base = yield* cloudflareAnalytics.getIntegrationStatus(tenant.orgId)
+						const destinations = yield* cloudflareObservability.ensureDestinations(
+							tenant.orgId,
+							tenant.userId,
+						)
+						return new CloudflareIntegrationStatus({
+							...base,
+							observabilityDestinations: destinations,
+						})
 					}),
 				)
 				.handle("cloudflareUsage", () =>
@@ -347,6 +361,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						const tenant = yield* CurrentTenant.Context
 						yield* requireAdmin(tenant.roles)
 						const result = yield* cloudflare.disconnect(tenant.orgId)
+						yield* cloudflareObservability.deleteDestinations(tenant.orgId)
 						return new CloudflareDisconnectResponse(result)
 					}),
 				)
@@ -603,6 +618,7 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 		const github = yield* GithubConnectService
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
+		const cloudflareObservability = yield* CloudflareObservabilityService
 		const env = yield* Env
 
 		const dashboardTargetOrigin = resolveDashboardTargetOrigin(env.MAPLE_APP_BASE_URL)
@@ -894,6 +910,14 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 									error: Cause.pretty(cause),
 								}),
 							),
+						),
+					),
+					// Auto-provision trace/log Workers Observability destinations while the user is still
+					// on the callback page so the dashboard card is immediately up to date.
+					Effect.tap((result) =>
+						cloudflareObservability.ensureDestinations(
+							result.orgId,
+							CLOUDFLARE_OBSERVABILITY_SYSTEM_USER_ID,
 						),
 					),
 					Effect.map((result) =>

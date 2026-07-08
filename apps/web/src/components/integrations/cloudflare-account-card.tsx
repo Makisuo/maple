@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Exit } from "effect"
-import { CloudflareStartConnectRequest } from "@maple/domain/http"
+import { CloudflareObservabilityDestination, CloudflareStartConnectRequest } from "@maple/domain/http"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -11,7 +11,7 @@ import { toast } from "sonner"
 
 import { CircleWarningIcon, CloudflareIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatNumber } from "@/lib/format"
+import { formatNumber, formatRelativeTime } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { IntegrationEmptyState } from "./integration-empty-state"
@@ -26,9 +26,48 @@ import {
 	type CloudflareErrorInfo,
 	type RowUsage,
 	type ZoneEntry,
+	type ZoneStatusInfo,
 } from "./cloudflare-zone-board"
 
 const EMPTY_USAGE: RowUsage = { totalRequests: 0, lastDataAt: null, points: [] }
+
+const observabilityStatus = (
+	destination: CloudflareObservabilityDestination,
+): ZoneStatusInfo => {
+	if (!destination.enabled) {
+		return {
+			kind: "disabled",
+			dot: "bg-muted-foreground/40",
+			detail: "Disabled",
+			detailClass: "text-muted-foreground",
+		}
+	}
+	if (destination.lastError) {
+		const info = describeCloudflareError(destination.lastError)
+		const dot = info.tone === "error" ? "bg-destructive" : "bg-warning"
+		const text = info.tone === "error" ? "text-destructive-foreground" : "text-warning-foreground"
+		return {
+			kind: "issue",
+			dot,
+			detail: info.summary,
+			detailClass: text,
+		}
+	}
+	if (destination.lastSyncedAt) {
+		return {
+			kind: "live",
+			dot: "bg-success",
+			detail: `Last data ${formatRelativeTime(new Date(destination.lastSyncedAt).toISOString())}`,
+			detailClass: "text-muted-foreground",
+		}
+	}
+	return {
+		kind: "no-data",
+		dot: "bg-warning",
+		detail: "Waiting for first data",
+		detailClass: "text-warning-foreground",
+	}
+}
 
 /**
  * Account-level Cloudflare OAuth connection (Authorization Code + PKCE). Distinct from the
@@ -138,7 +177,11 @@ export function CloudflareAccountCard() {
 	// auth). Surfaced once as a banner instead of repeated — and unreadable — on every row.
 	const accountError = useMemo((): (CloudflareErrorInfo & { raw: string }) | null => {
 		if (!status) return null
-		const raws = [status.workers?.lastError ?? null, ...status.zones.map((z) => z.lastError)]
+		const raws = [
+			status.workers?.lastError ?? null,
+			...status.zones.map((z) => z.lastError),
+			...status.observabilityDestinations.map((d) => d.lastError),
+		]
 		for (const raw of raws) {
 			if (raw && isAccountScoped(raw)) return { ...describeCloudflareError(raw), raw }
 		}
@@ -266,9 +309,13 @@ export function CloudflareAccountCard() {
 
 	const hasReadout =
 		status != null &&
-		(status.zones.length > 0 || status.workers != null || (usage != null && usage.services.length > 0))
+		(status.zones.length > 0 ||
+			status.workers != null ||
+			status.observabilityDestinations.length > 0 ||
+			(usage != null && usage.services.length > 0))
 	const zoneCount = zoneEntries.length
 	const hasWorkers = status?.workers != null || workerServices.length > 0
+	const hasObservability = (status?.observabilityDestinations.length ?? 0) > 0
 
 	// Aggregate the Workers scripts into one health row, mirroring the zone entry shape so the
 	// same ResourceRow + zoneStatus drive it. Sub-scripts nest below when there's more than one.
@@ -420,6 +467,24 @@ export function CloudflareAccountCard() {
 														)
 													})
 											: null}
+									</div>
+								</div>
+							) : null}
+
+							{hasObservability ? (
+								<div className="flex flex-col gap-2">
+									<SectionLabel count={status?.observabilityDestinations.length}>
+										Observability destinations
+									</SectionLabel>
+									<div className="overflow-hidden rounded-lg border border-border/60">
+										{status!.observabilityDestinations.map((destination) => (
+											<ResourceRow
+												key={destination.id}
+												name={destination.name}
+												status={observabilityStatus(destination)}
+												usage={EMPTY_USAGE}
+											/>
+										))}
 									</div>
 								</div>
 							) : null}

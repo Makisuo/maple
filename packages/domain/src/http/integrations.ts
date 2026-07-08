@@ -101,11 +101,42 @@ export class CloudflareAnalyticsWorkersStatus extends Schema.Class<CloudflareAna
 	watermarkAt: Schema.NullOr(Schema.Number),
 }) {}
 
+export const CloudflareObservabilityDataset = Schema.Literals([
+	"opentelemetry-traces",
+	"opentelemetry-logs",
+	"opentelemetry-metrics",
+]).annotate({
+	identifier: "@maple/CloudflareObservabilityDataset",
+	title: "Cloudflare Workers Observability Dataset",
+})
+export type CloudflareObservabilityDataset = Schema.Schema.Type<typeof CloudflareObservabilityDataset>
+
+/**
+ * One auto-provisioned Workers Observability telemetry destination. `lastSyncedAt` is the most
+ * recent time Cloudflare reported a successful delivery to the OTLP endpoint; `lastError` carries
+ * the current job error message when delivery is failing.
+ */
+export class CloudflareObservabilityDestination extends Schema.Class<CloudflareObservabilityDestination>(
+	"CloudflareObservabilityDestination",
+)({
+	id: Schema.String,
+	name: Schema.String,
+	dataset: CloudflareObservabilityDataset,
+	enabled: Schema.Boolean,
+	url: Schema.String,
+	lastError: Schema.NullOr(Schema.String),
+	lastSyncedAt: Schema.NullOr(Schema.Number),
+	scripts: Schema.Array(Schema.String),
+}) {}
+
 /**
  * Connection state of the Cloudflare integration. `accountId`/`accountName` identify the single
  * Cloudflare account the OAuth token is scoped to (Maple enforces exactly one account per org).
  * `analyticsCapable` is false when the stored grant predates the analytics scopes — the UI offers
  * an "Update permissions" reconnect; `zones`/`workers` surface the poller's per-dataset state.
+ * `observabilityCapable` is false when the token lacks the Workers Observability Telemetry scopes
+ * needed to auto-provision trace/log destinations; `observabilityDestinations` lists those that
+ * exist (or an empty array when disconnected or not yet provisioned).
  */
 export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrationStatus>(
 	"CloudflareIntegrationStatus",
@@ -116,8 +147,10 @@ export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrat
 	connectedByUserId: Schema.NullOr(UserId),
 	scope: Schema.NullOr(Schema.String),
 	analyticsCapable: Schema.Boolean,
+	observabilityCapable: Schema.Boolean,
 	zones: Schema.Array(CloudflareAnalyticsZoneStatus),
 	workers: Schema.NullOr(CloudflareAnalyticsWorkersStatus),
+	observabilityDestinations: Schema.Array(CloudflareObservabilityDestination),
 }) {}
 
 /**

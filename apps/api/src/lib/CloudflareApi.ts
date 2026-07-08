@@ -189,6 +189,126 @@ export const listWorkerScripts: (
 	return scripts.flatMap((script) => (script.id == null || script.id === "" ? [] : [script.id]))
 })
 
+export interface CloudflareObservabilityDestinationApi {
+	readonly slug: string
+	readonly name: string
+	readonly dataset: string
+	readonly enabled: boolean
+	readonly url: string
+	readonly destinationConf: string
+	readonly logpushJob: number | null
+	readonly scripts: ReadonlyArray<string>
+	readonly headers: Record<string, unknown>
+	readonly jobStatus: {
+		readonly errorMessage: string
+		readonly lastComplete: string
+		readonly lastError: string
+	} | null
+}
+
+// Workers Observability destinations are account-level resources; a connected account is unlikely
+// to have more than a handful, but cap the stream to avoid a pathological response fan-out.
+const MAX_OBSERVABILITY_DESTINATIONS = 100
+
+/**
+ * List Workers Observability telemetry destinations for the account.
+ */
+export const listObservabilityDestinations: (
+	accessToken: string,
+	accountId: string,
+	apiBaseUrl?: string,
+) => Effect.Effect<ReadonlyArray<CloudflareObservabilityDestinationApi>, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.listObservabilityDestinations",
+)(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+	const destinations = yield* runMapped(
+		accessToken,
+		Workers.listObservabilityDestinations
+			.items({ accountId })
+			.pipe(Stream.take(MAX_OBSERVABILITY_DESTINATIONS), Stream.runCollect),
+		apiBaseUrl,
+	)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.observability_destination_count", destinations.length)
+	return destinations.map((destination): CloudflareObservabilityDestinationApi => ({
+		slug: destination.slug,
+		name: destination.name,
+		dataset: destination.configuration.logpushDataset,
+		enabled: destination.enabled,
+		url: destination.configuration.url,
+		destinationConf: destination.configuration.destinationConf,
+		logpushJob: null,
+		scripts: destination.scripts,
+		headers: destination.configuration.headers,
+		jobStatus: destination.configuration.jobStatus ?? null,
+	}))
+})
+
+/**
+ * Create a Workers Observability telemetry destination pointing at an OTLP HTTP endpoint.
+ */
+export const createObservabilityDestination: (
+	accessToken: string,
+	accountId: string,
+	name: string,
+	dataset: string,
+	url: string,
+	headers: Record<string, string>,
+	apiBaseUrl?: string,
+) => Effect.Effect<CloudflareObservabilityDestinationApi, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.createObservabilityDestination",
+)(function* (
+	accessToken: string,
+	accountId: string,
+	name: string,
+	dataset: string,
+	url: string,
+	headers: Record<string, string>,
+	apiBaseUrl?: string,
+) {
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+	const destination = yield* runMapped(
+		accessToken,
+		Workers.createObservabilityDestination({
+			accountId,
+			configuration: { headers, logpushDataset: dataset, type: "logpush", url },
+			enabled: true,
+			name,
+		}),
+		apiBaseUrl,
+	)
+	return {
+		slug: destination.slug,
+		name: destination.name,
+		dataset: destination.configuration.logpushDataset,
+		enabled: destination.enabled,
+		url: destination.configuration.url,
+		destinationConf: destination.configuration.destinationConf,
+		logpushJob: destination.configuration.logpushJob,
+		scripts: destination.scripts,
+		headers, // caller-supplied; the response does not round-trip headers.
+		jobStatus: null,
+	} satisfies CloudflareObservabilityDestinationApi
+})
+
+/**
+ * Delete a Workers Observability telemetry destination by slug.
+ */
+export const deleteObservabilityDestination: (
+	accessToken: string,
+	accountId: string,
+	slug: string,
+	apiBaseUrl?: string,
+) => Effect.Effect<void, CloudflareApiError, never> = Effect.fn("CloudflareApi.deleteObservabilityDestination")(
+	function* (accessToken: string, accountId: string, slug: string, apiBaseUrl?: string) {
+		yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+		yield* runMapped(
+			accessToken,
+			Workers.deleteObservabilityDestination({ accountId, slug }),
+			apiBaseUrl,
+		)
+	},
+)
+
 // ---------------------------------------------------------------------------
 // GraphQL Analytics (the raw escape hatch the module doc-comment anticipates)
 // ---------------------------------------------------------------------------

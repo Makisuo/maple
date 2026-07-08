@@ -47,6 +47,7 @@ import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
 import { InternalServiceAuthorizationLayer } from "./services/InternalServiceAuthorizationLayer"
 import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
+import { CloudflareObservabilityService } from "./services/CloudflareObservabilityService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
 import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
@@ -113,6 +114,10 @@ const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provide
 // runs in the alerting worker's cron, not here.
 const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
+
+const CloudflareObservabilityServiceLive = CloudflareObservabilityService.layer.pipe(
+	Layer.provideMerge(CoreServicesLive),
 )
 
 const DemoServiceLive = DemoService.layer.pipe(
@@ -192,6 +197,7 @@ const VcsServicesLive = Layer.mergeAll(
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
 	CloudflareAnalyticsServiceLive,
+	CloudflareObservabilityServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
