@@ -183,10 +183,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						const base = yield* cloudflareAnalytics.getIntegrationStatus(tenant.orgId)
-						const destinations = yield* cloudflareObservability.ensureDestinations(
-							tenant.orgId,
-							tenant.userId,
-						)
+						const destinations = yield* cloudflareObservability.getDestinations(tenant.orgId)
 						return new CloudflareIntegrationStatus({
 							...base,
 							observabilityDestinations: destinations,
@@ -360,8 +357,9 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* requireAdmin(tenant.roles)
-						const result = yield* cloudflare.disconnect(tenant.orgId)
+						// Clean up Cloudflare-side observability destinations while the OAuth token is still valid.
 						yield* cloudflareObservability.deleteDestinations(tenant.orgId)
+						const result = yield* cloudflare.disconnect(tenant.orgId)
 						return new CloudflareDisconnectResponse(result)
 					}),
 				)

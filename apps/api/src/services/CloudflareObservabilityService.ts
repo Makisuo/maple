@@ -52,6 +52,11 @@ export const hasObservabilityScopes = (scope: string | null | undefined): boolea
 	normalizeScope(scope).includes("workersobservabilitytelemetrywrite")
 
 interface CloudflareObservabilityServiceShape {
+	/** Return persisted observability destinations for an org (never fails, logs on DB error). */
+	readonly getDestinations: (
+		orgId: OrgId,
+	) => Effect.Effect<ReadonlyArray<CloudflareObservabilityDestination>, never, never>
+
 	/** Idempotently ensure trace/log Workers Observability destinations exist and return them. */
 	readonly ensureDestinations: (
 		orgId: OrgId,
@@ -124,7 +129,7 @@ const persistDestination = async (
 		.where(
 			and(
 				eq(cloudflareObservabilityDestinations.orgId, orgId),
-				eq(cloudflareObservabilityDestinations.slug, apiDestination.slug),
+				eq(cloudflareObservabilityDestinations.dataset, apiDestination.dataset),
 			),
 		)
 		.limit(1)
@@ -235,6 +240,12 @@ export class CloudflareObservabilityService extends Context.Service<
 				{ orgId },
 				[],
 			)
+
+		const getDestinations = Effect.fn("CloudflareObservabilityService.getDestinations")(
+			function* (orgId: OrgId) {
+				return yield* safeLoadRows(orgId)
+			},
+		)
 
 		const ensureDestinations = Effect.fn("CloudflareObservabilityService.ensureDestinations")(
 			function* (orgId: OrgId, userId: UserId) {
@@ -376,16 +387,18 @@ export class CloudflareObservabilityService extends Context.Service<
 								rows.filter((r) => !managedDatasets.has(r.dataset as CloudflareObservabilityDataset)),
 							),
 							Effect.flatMap((staleRows) =>
-								database.execute((db) =>
-									db
-										.delete(cloudflareObservabilityDestinations)
-										.where(
-											inArray(
-												cloudflareObservabilityDestinations.id,
-												staleRows.map((r) => r.id),
-											),
+								staleRows.length === 0
+									? Effect.void
+									: database.execute((db) =>
+											db
+												.delete(cloudflareObservabilityDestinations)
+												.where(
+													inArray(
+														cloudflareObservabilityDestinations.id,
+														staleRows.map((r) => r.id),
+													),
+												),
 										),
-								),
 							),
 						),
 					"Failed to evict stale Cloudflare observability rows",
@@ -455,6 +468,7 @@ export class CloudflareObservabilityService extends Context.Service<
 		)
 
 		return {
+			getDestinations,
 			ensureDestinations,
 			deleteDestinations,
 		} satisfies CloudflareObservabilityServiceShape
