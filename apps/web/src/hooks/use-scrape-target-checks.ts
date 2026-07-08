@@ -1,4 +1,4 @@
-import { ScrapeTargetChecksListResponse } from "@maple/domain/http"
+import { ScrapeTargetChecksListResponse, type ScrapeTargetId } from "@maple/domain/http"
 import { useLiveQuery } from "@tanstack/react-db"
 import { useMemo } from "react"
 import { rowToScrapeTargetCheckDocument } from "@/lib/collections/scrape-targets"
@@ -26,7 +26,7 @@ const noop = () => {}
  * the target client-side (bounded to 24h / 10k-per-target by server pruning),
  * exactly like `useAlertRuleStates` filters by rule id.
  */
-export function useScrapeTargetChecks(targetId: string, limit: number): ScrapeTargetChecksHook {
+export function useScrapeTargetChecks(targetId: ScrapeTargetId, limit: number): ScrapeTargetChecksHook {
 	const orgKey = useActiveOrgId() ?? "pending"
 	const generation = useCollectionsGeneration()
 	const collection = useMemo(

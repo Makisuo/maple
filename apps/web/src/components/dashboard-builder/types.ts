@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import type {
+	DashboardId,
 	DashboardVariableSchema,
 	DashboardWidgetSchema,
 	WidgetDataSourceSchema,
@@ -122,7 +123,7 @@ export type DashboardVariable = DeepMutable<typeof DashboardVariableSchema.Type>
 // --- Dashboard ---
 
 export interface Dashboard {
-	id: string
+	id: DashboardId
 	name: string
 	description?: string
 	tags?: string[]
