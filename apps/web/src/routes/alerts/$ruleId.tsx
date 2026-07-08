@@ -78,6 +78,11 @@ import { formatSql } from "@/lib/sql-format"
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
 
+// Decode the raw `$ruleId` URL segment into its branded id once, at the route
+// boundary, so the branded value threads through the checks/states queries
+// without a per-call cast.
+const asAlertRuleId = Schema.decodeSync(AlertRuleId)
+
 const RuleDetailSearch = Schema.Struct({
 	tab: Schema.optional(Schema.String),
 	startTime: Schema.optional(Schema.String),
@@ -100,7 +105,8 @@ function RuleDetailPage() {
 }
 
 function RuleDetailContent() {
-	const { ruleId } = Route.useParams()
+	const { ruleId: ruleIdParam } = Route.useParams()
+	const ruleId = asAlertRuleId(ruleIdParam)
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 
@@ -135,7 +141,7 @@ function RuleDetailContent() {
 		mode: "promiseExit",
 	})
 	const checksQueryAtom = MapleApiAtomClient.query("alerts", "listRuleChecks", {
-		params: { ruleId: ruleId as AlertRuleId },
+		params: { ruleId },
 		query: { since, until },
 		reactivityKeys: ["alertChecks", ruleId, since, until],
 	})

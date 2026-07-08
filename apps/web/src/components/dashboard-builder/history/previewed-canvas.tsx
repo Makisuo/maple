@@ -1,3 +1,4 @@
+import type { DashboardId } from "@maple/domain/http"
 import { Result } from "@/lib/effect-atom"
 import type { DashboardWidget } from "@/components/dashboard-builder/types"
 import { DashboardCanvas } from "@/components/dashboard-builder/canvas/dashboard-canvas"
@@ -6,7 +7,7 @@ import { useDashboardVersionDetail } from "./use-dashboard-history"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
 
 interface PreviewedCanvasProps {
-	dashboardId: string
+	dashboardId: DashboardId
 	preview: PreviewedVersion
 	onCancel: () => void
 	onRestored: () => void

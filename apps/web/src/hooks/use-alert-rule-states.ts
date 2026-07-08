@@ -1,5 +1,6 @@
 import { useLiveQuery } from "@tanstack/react-db"
 import { useMemo } from "react"
+import type { AlertRuleId } from "@maple/domain/http"
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
 import {
 	getOrgCollections,
@@ -12,7 +13,7 @@ import {
  * sample count/evaluated-at/error per `(ruleId, groupKey)`), synced via
  * Electric. Powers the overview status derivation and the rule diagnosis panel.
  */
-export function useAlertRuleStates(ruleId?: string): ReadonlyArray<AlertRuleStateRow> {
+export function useAlertRuleStates(ruleId?: AlertRuleId): ReadonlyArray<AlertRuleStateRow> {
 	const orgKey = useActiveOrgId() ?? "pending"
 	const generation = useCollectionsGeneration()
 	const collection = useMemo(
