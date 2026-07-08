@@ -1,9 +1,14 @@
-import { AlertIncidentsListResponse, AlertRulesListResponse } from "@maple/domain/http"
+import {
+	AlertDestinationsListResponse,
+	AlertIncidentsListResponse,
+	AlertRulesListResponse,
+} from "@maple/domain/http"
 import { useLiveQuery } from "@tanstack/react-db"
 import { useMemo } from "react"
 import { Result } from "@/lib/effect-atom"
 import {
 	buildRuleStatesByRuleId,
+	rowToAlertDestinationDocument,
 	rowToAlertIncidentDocument,
 	rowToAlertRuleDocument,
 } from "@/lib/collections/alerts"
@@ -29,6 +34,11 @@ export interface AlertRulesListHook {
 
 export interface AlertIncidentsListHook {
 	readonly result: Result.Result<AlertIncidentsListResponse, ListError>
+	readonly refresh: () => void
+}
+
+export interface AlertDestinationsListHook {
+	readonly result: Result.Result<AlertDestinationsListResponse, ListError>
 	readonly refresh: () => void
 }
 
@@ -84,6 +94,30 @@ export function useAlertIncidentsList(): AlertIncidentsListHook {
 		if (isLoading && (rows?.length ?? 0) === 0) return Result.initial(true)
 		const incidents = (rows ?? []).map(rowToAlertIncidentDocument)
 		return Result.success(new AlertIncidentsListResponse({ incidents }))
+	}, [rows, isLoading])
+
+	return { result, refresh: noop }
+}
+
+export function useAlertDestinationsList(): AlertDestinationsListHook {
+	const orgKey = useActiveOrgId() ?? "pending"
+	const generation = useCollectionsGeneration()
+	const collection = useMemo(
+		() => getOrgCollections(orgKey).alertDestinations,
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[orgKey, generation],
+	)
+
+	const { data: rows, isLoading } = useLiveQuery(
+		// Match the server's `listDestinations` ordering (desc updatedAt).
+		(q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
+		[collection],
+	)
+
+	const result = useMemo<Result.Result<AlertDestinationsListResponse, ListError>>(() => {
+		if (isLoading && (rows?.length ?? 0) === 0) return Result.initial(true)
+		const destinations = (rows ?? []).map(rowToAlertDestinationDocument)
+		return Result.success(new AlertDestinationsListResponse({ destinations }))
 	}, [rows, isLoading])
 
 	return { result, refresh: noop }

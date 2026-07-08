@@ -1,4 +1,4 @@
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
+import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Exit } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -11,12 +11,13 @@ import { AlertSegmentedSelect } from "@/components/alerts/alert-segmented-select
 import { AlertStatStrip } from "@/components/alerts/alert-stat-card"
 import { AlertTagControls } from "@/components/alerts/alert-tag-controls"
 import { ActiveIncidentsTable } from "@/components/alerts/overview/active-incidents-table"
+import { AlertsEmptyState } from "@/components/alerts/overview/alerts-empty-state"
 import {
 	AlertsHealthSummary,
 	type AlertsStatusFilter,
 } from "@/components/alerts/overview/alerts-health-summary"
 import { RulesOverviewTable } from "@/components/alerts/overview/rules-overview-table"
-import { BellIcon, CircleWarningIcon, MagnifierIcon, PlusIcon, XmarkIcon } from "@/components/icons"
+import { CircleWarningIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { getExitErrorMessage } from "@/lib/alerts/form-utils"
 import { needsAttention } from "@/lib/alerts/rule-status"
 import {
@@ -25,11 +26,11 @@ import {
 	tagFacets,
 	type TagGroup,
 } from "@/lib/alerts/tag-grouping"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { AlertsOverviewModel, type AlertsOverviewReady } from "@/lib/models/alerts-overview-model"
 import { unitflowRuntime } from "@/lib/models/runtime"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 import {
 	InputGroup,
@@ -130,9 +131,7 @@ function AlertsOverviewContent({
 	} = data
 
 	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
-	const destinationsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDestinations", { reactivityKeys: ["alertDestinations"] }),
-	)
+	const { result: destinationsResult } = useAlertDestinationsList()
 
 	const destinations = Result.builder(destinationsResult)
 		.onSuccess((response) => [...response.destinations] as AlertDestinationDocument[])
@@ -327,27 +326,7 @@ function AlertsOverviewContent({
 				</div>
 
 				{filteredRules.length === 0 && rules.length === 0 ? (
-					<Empty className="py-12">
-						<EmptyHeader>
-							<EmptyMedia variant="icon">
-								<BellIcon size={18} />
-							</EmptyMedia>
-							<EmptyTitle>No alert rules</EmptyTitle>
-							<EmptyDescription>
-								Create a threshold rule to open incidents for latency, error rate, throughput,
-								Apdex, or exact metrics.
-							</EmptyDescription>
-						</EmptyHeader>
-						{isAdmin && (
-							<Button
-								size="sm"
-								render={<Link to="/alerts/create" search={{ serviceName: search.serviceName }} />}
-							>
-								<PlusIcon size={14} />
-								Add rule
-							</Button>
-						)}
-					</Empty>
+					<AlertsEmptyState isAdmin={isAdmin} serviceName={search.serviceName} />
 				) : filteredRules.length === 0 ? (
 					<Empty className="py-12">
 						<EmptyHeader>

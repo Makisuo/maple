@@ -7,6 +7,7 @@ import { Schema } from "effect"
 
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import {
 	IssueEscalationPolicyRule,
 	IssueEscalationPolicyUpsertRequest,
@@ -59,9 +60,7 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 	const policyResult = useAtomValue(policyQueryAtom)
 	const refreshPolicy = useAtomRefresh(policyQueryAtom)
 
-	const destinationsQueryAtom = MapleApiAtomClient.query("alerts", "listDestinations", {})
-	const destinationsResult = useAtomValue(destinationsQueryAtom)
-	const refreshDestinations = useAtomRefresh(destinationsQueryAtom)
+	const { result: destinationsResult, refresh: refreshDestinations } = useAlertDestinationsList()
 
 	const upsertMutation = useAtomSet(MapleApiAtomClient.mutation("errors", "upsertEscalationPolicy"), {
 		mode: "promiseExit",

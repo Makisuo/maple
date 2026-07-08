@@ -21,6 +21,7 @@ import {
 	groupDeliveryEventsByDay,
 	type DestinationFormState,
 } from "@/lib/alerts/form-utils"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -183,9 +184,7 @@ export function useDestinationManager(): DestinationManager {
  * "Add destination" action drives the same dialog.
  */
 export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationManager; isAdmin: boolean }) {
-	const destinationsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDestinations", { reactivityKeys: ["alertDestinations"] }),
-	)
+	const { result: destinationsResult } = useAlertDestinationsList()
 	const deliveryEventsResult = useAtomValue(
 		MapleApiAtomClient.query("alerts", "listDeliveryEvents", { reactivityKeys: ["alertDeliveryEvents"] }),
 	)

@@ -41,7 +41,11 @@ import {
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
-import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
+import {
+	useAlertDestinationsList,
+	useAlertIncidentsList,
+	useAlertRulesList,
+} from "@/hooks/use-alerts-list"
 import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
 import { AlertChatSheet } from "@/components/alerts/alert-chat-sheet"
 import { toAlertContext, type AlertContext } from "@/components/chat/alert-context"
@@ -121,9 +125,7 @@ function RuleDetailContent() {
 	const { result: rulesResult, refresh: refreshRules } = useAlertRulesList()
 	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
 	const ruleStates = useAlertRuleStates(ruleId)
-	const destinationsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDestinations", { reactivityKeys: ["alertDestinations"] }),
-	)
+	const { result: destinationsResult } = useAlertDestinationsList()
 	const deliveryEventsResult = useAtomValue(
 		MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
 			reactivityKeys: ["alertDeliveryEvents"],

@@ -6,6 +6,7 @@ import { AlertsOverviewTab } from "@/components/alerts/overview/alerts-overview-
 import { AlertsSettingsTab, useDestinationManager } from "@/components/alerts/overview/settings-tab"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { PlusIcon } from "@/components/icons"
+import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { BooleanFromStringParam, OptionalStringArrayParam } from "@/lib/search-params"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -44,9 +45,7 @@ function AlertsPage() {
 	// Session + destinations back the header action only; the tabs own the rest
 	// of their data (the atoms are shared, so this costs no extra requests).
 	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
-	const destinationsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listDestinations", { reactivityKeys: ["alertDestinations"] }),
-	)
+	const { result: destinationsResult } = useAlertDestinationsList()
 	const isAdmin = Result.builder(sessionResult)
 		.onSuccess((session) => session.roles.some((role) => role === "root" || role === "org:admin"))
 		.orElse(() => false)

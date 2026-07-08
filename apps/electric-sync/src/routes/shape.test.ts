@@ -97,6 +97,36 @@ describe("buildUpstreamShapeUrl", () => {
 		assert.isNull(params.get("replica"))
 	})
 
+	it("pins a shape's column projection and drops the secret columns", () => {
+		const { params } = parse(buildUpstreamShapeUrl({ ...base, shape: "alert_destinations" }))
+		const columns = params.get("columns")?.split(",") ?? []
+		// PK + org scope must be present for Electric.
+		assert.include(columns, "id")
+		assert.include(columns, "org_id")
+		// The public config the browser renders is allowed…
+		assert.include(columns, "config_json")
+		// …but the encrypted secret columns must never be projected.
+		assert.notInclude(columns, "secret_ciphertext")
+		assert.notInclude(columns, "secret_iv")
+		assert.notInclude(columns, "secret_tag")
+	})
+
+	it("omits the columns param for shapes that sync every column", () => {
+		const { params } = parse(buildUpstreamShapeUrl({ ...base, shape: "scrape_target_checks" }))
+		assert.isNull(params.get("columns"))
+	})
+
+	it("never lets the client widen a column-restricted shape back to secrets", () => {
+		const malicious = new URLSearchParams()
+		malicious.set("columns", "id,org_id,secret_ciphertext,secret_iv,secret_tag")
+		const { params } = parse(
+			buildUpstreamShapeUrl({ ...base, shape: "alert_destinations", clientParams: malicious }),
+		)
+		const columns = params.get("columns")?.split(",") ?? []
+		assert.notInclude(columns, "secret_ciphertext")
+		assert.include(columns, "config_json")
+	})
+
 	it("adds Electric Cloud source credentials only when provided", () => {
 		const without = parse(buildUpstreamShapeUrl({ ...base, shape: "dashboards" })).params
 		assert.isNull(without.get("source_id"))

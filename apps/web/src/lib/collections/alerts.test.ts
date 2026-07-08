@@ -6,10 +6,12 @@ import { vi } from "vitest"
 vi.mock("@/lib/registry", () => ({ mapleRuntime: {} }))
 
 import {
+	type AlertDestinationRow,
 	type AlertIncidentRow,
 	type AlertRuleRow,
 	type AlertRuleStateRow,
 	buildRuleStatesByRuleId,
+	rowToAlertDestinationDocument,
 	rowToAlertIncidentDocument,
 	rowToAlertRuleDocument,
 } from "./alerts"
@@ -177,5 +179,46 @@ describe("rowToAlertIncidentDocument", () => {
 		assert.strictEqual(doc.resolvedAt, null)
 		assert.strictEqual(doc.errorIssueId, null)
 		assert.strictEqual(doc.firstTriggeredAt, "2026-07-04T00:00:00.000Z")
+	})
+})
+
+describe("rowToAlertDestinationDocument", () => {
+	const base: AlertDestinationRow = {
+		id: DEST_ID,
+		org_id: "org_1",
+		name: "Ops Slack",
+		type: "slack",
+		enabled: true,
+		// Only the public config the browser renders — no secrets (those live in
+		// the excluded encrypted columns, which the shape never projects).
+		config_json: { summary: "Slack incoming webhook", channelLabel: "#ops" },
+		last_tested_at: "2026-07-04T00:00:00.000Z",
+		last_test_error: null,
+		created_at: "2026-06-01T00:00:00.000Z",
+		updated_at: "2026-07-04T00:00:00.000Z",
+	}
+
+	it("maps a raw alert_destinations row and derives the public config", () => {
+		const doc = rowToAlertDestinationDocument(base)
+		assert.strictEqual(doc.id, DEST_ID)
+		assert.strictEqual(doc.name, "Ops Slack")
+		assert.strictEqual(doc.type, "slack")
+		assert.strictEqual(doc.enabled, true)
+		assert.strictEqual(doc.summary, "Slack incoming webhook")
+		assert.strictEqual(doc.channelLabel, "#ops")
+		assert.strictEqual(doc.lastTestedAt, "2026-07-04T00:00:00.000Z")
+		assert.strictEqual(doc.lastTestError, null)
+		assert.strictEqual(doc.createdAt, "2026-06-01T00:00:00.000Z")
+	})
+
+	it("falls back to the server's invalid-config summary when config_json is unusable", () => {
+		const doc = rowToAlertDestinationDocument({ ...base, config_json: { nope: true } })
+		assert.strictEqual(doc.summary, "Invalid destination config")
+		assert.strictEqual(doc.channelLabel, null)
+	})
+
+	it("leaves lastTestedAt null when the destination was never tested", () => {
+		const doc = rowToAlertDestinationDocument({ ...base, last_tested_at: null })
+		assert.strictEqual(doc.lastTestedAt, null)
 	})
 })
