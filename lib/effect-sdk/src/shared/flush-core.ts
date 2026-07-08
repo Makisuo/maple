@@ -70,6 +70,14 @@ export const buildResolved = (
 		readonly tracesPath?: string | undefined
 		readonly logsPath?: string | undefined
 		readonly userAgent: string
+		/**
+		 * Keep exporting even without an ingest key, POSTing without an
+		 * `Authorization` header (for setups where a proxy/gateway injects it).
+		 * The browser client sets this so `MapleFlush.make` matches `Maple.layer`'s
+		 * keyless-send behavior; the env-driven server/Cloudflare presets leave it
+		 * unset and keep no-op'ing when unconfigured.
+		 */
+		readonly allowKeyless?: boolean | undefined
 	},
 ): Resolved => {
 	// `r.endpoint` is always defined in practice (every resolver falls back to
@@ -89,7 +97,7 @@ export const buildResolved = (
 		resource: makeOtlpResource(r.resource),
 		scope: { name: r.resource.serviceName },
 		headers,
-		noOp: r.ingestKey === undefined,
+		noOp: r.ingestKey === undefined && !opts.allowKeyless,
 	}
 }
 

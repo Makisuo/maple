@@ -187,7 +187,7 @@ Both server and client layers accept these options:
 | ----------------------- | --------------------------------------- | ---------------------------------- |
 | `serviceName`           | Yes                                     | Service name reported in telemetry |
 | `endpoint`              | Server: env or config, Client: required | Maple ingest endpoint URL          |
-| `ingestKey`             | No                                      | Maple ingest key                   |
+| `ingestKey`             | No                                      | Maple ingest key — used only for the `Authorization` header (see [Auth via a proxy](#auth-via-a-proxy)) |
 | `serviceVersion`        | No                                      | Override auto-detected commit SHA  |
 | `environment`           | No                                      | Override auto-detected environment |
 | `attributes`            | No                                      | Additional resource attributes     |
@@ -206,6 +206,28 @@ Client-only options:
 | `replay.maskAllInputs`| `true`  | Mask all `<input>` values in the recording                                           |
 | `replay.maskAllText`  | `false` | Mask all text in the recording                                                       |
 | `emitSessionMeta`     | `true`  | Post session metadata rows so unrecorded sessions still appear in the Sessions UI    |
+
+## Auth via a proxy
+
+`ingestKey` is **auth only** — it just sets the `Authorization: Bearer …` header. It does **not** gate
+whether any feature runs. Leave it unset and everything still works: traces, logs, metrics, session
+metadata, and replay all POST **without** an `Authorization` header, and whatever sits in front of your
+endpoint attaches auth for them.
+
+This is the pattern for a self-hosted proxy (e.g. to sidestep ad-blockers / privacy browsers): point
+`endpoint` at your proxy, leave `ingestKey` unset in browser code, and have the proxy inject the ingest
+key server-side.
+
+```typescript
+const TracerLive = Maple.layer({
+	serviceName: "my-frontend",
+	endpoint: "https://telemetry.myapp.com", // your proxy; it adds Authorization
+	// no ingestKey — the proxy attaches it
+})
+```
+
+Feature enablement is controlled independently by `replay.enabled` and `emitSessionMeta` (both default
+`true`), regardless of whether a key is set.
 
 ## License
 

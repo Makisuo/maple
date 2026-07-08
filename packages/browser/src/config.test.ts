@@ -23,4 +23,12 @@ describe("resolveConfig", () => {
 		expect(custom.tracingInstrumentFetch).toBe(false)
 		expect(custom.replaySampleRate).toBe(0.25)
 	})
+
+	it("allows a keyless config (auth handled by a proxy)", () => {
+		// ingestKey is auth only — omitting it is valid; the proxy attaches auth.
+		const config = resolveConfig({ serviceName: "acme-web" })
+		expect(config.ingestKey).toBeUndefined()
+		expect(config.serviceName).toBe("acme-web")
+		expect(config.replayEnabled).toBe(true)
+	})
 })

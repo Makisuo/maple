@@ -35,6 +35,22 @@ That single call:
 - writes session metadata at start (`active`) and on page hide (`ended`),
   including the trace ids observed during the session.
 
+## Auth via a proxy
+
+`ingestKey` is **auth only** — it just sets the `Authorization` header, and is
+optional. Point `endpoint` at a self-hosted proxy/gateway that injects the key
+server-side (e.g. to sidestep ad-blockers) and leave `ingestKey` unset: tracing
+and replay still run, POSTing without an `Authorization` header for the proxy to
+complete.
+
+```ts
+MapleBrowser.init({
+	serviceName: "acme-web",
+	endpoint: "https://telemetry.acme.com", // your proxy; it adds Authorization
+	// no ingestKey — the proxy attaches it
+})
+```
+
 ## Privacy
 
 `maskAllInputs` (default **on**) masks every `<input>` value. Use rrweb's

@@ -48,7 +48,11 @@ export interface MapleClientFlushableConfig {
 	readonly serviceName: string
 	/** Maple ingest endpoint URL. */
 	readonly endpoint: string
-	/** Maple ingest key. When unset, the preset runs in no-op mode. */
+	/**
+	 * Maple ingest key, used only for the `Authorization` header. When unset the
+	 * preset still exports, POSTing without an auth header — for setups where a
+	 * proxy/gateway injects it.
+	 */
 	readonly ingestKey?: string | undefined
 	/** Service version or commit SHA. */
 	readonly serviceVersion?: string | undefined
@@ -87,7 +91,8 @@ export interface MapleClientFlushableConfig {
 	 * Post session metadata rows for the standalone session so it appears in
 	 * Maple's Sessions UI (list entry + linked traces, no replay recording).
 	 * Default `true`; no-ops when `@maple-dev/browser` is on the page (it owns
-	 * the session rows), during SSR, or without an ingest key.
+	 * the session rows) or during SSR. The ingest key is auth only — with no key
+	 * the rows still post, without an `Authorization` header (proxy attaches it).
 	 */
 	readonly emitSessionMeta?: boolean | undefined
 	/**
@@ -185,15 +190,23 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 			attributes: buildBrowserAttributes(config),
 		},
 	}
+	// The ingest key is auth only: with no key we still export, POSTing without
+	// an `Authorization` header (for setups where a proxy/gateway injects it),
+	// matching `Maple.layer`. `allowKeyless` keeps `runFlush` from no-op'ing.
 	const resolved: Resolved = buildResolved(resource, {
 		tracesPath: config.tracesPath,
 		logsPath: config.logsPath,
 		userAgent: "maple-effect-sdk-client/0.0.0",
+		allowKeyless: true,
 	})
+	if (!config.ingestKey) {
+		console.info(
+			"[MapleClientSDK] no ingest key set — telemetry will POST without an Authorization header (expecting a proxy/gateway to attach it)",
+		)
+	}
 
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
-	let noOpLogged = false
 
 	const flush = async (): Promise<void> => {
 		await runFlush({
@@ -204,14 +217,9 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 			logsState,
 			transport: keepaliveTransport,
 			logPrefix: "[MapleClientSDK]",
-			onNoOp: () => {
-				if (!noOpLogged) {
-					noOpLogged = true
-					console.info(
-						"[MapleClientSDK] no ingest key configured — telemetry disabled (pass `ingestKey` to enable)",
-					)
-				}
-			},
+			// `allowKeyless` above keeps `noOp` false, so this never fires; kept to
+			// satisfy the shared `runFlush` contract.
+			onNoOp: () => {},
 		})
 	}
 

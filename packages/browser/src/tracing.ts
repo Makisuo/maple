@@ -56,7 +56,9 @@ export function setupTracing(config: ResolvedConfig, sessionId: string): () => P
 
 	const exporter = new OTLPTraceExporter({
 		url: `${config.endpoint}/v1/traces`,
-		headers: { Authorization: `Bearer ${config.ingestKey}` },
+		// Auth header only when a key is set; without one the POST goes out
+		// headerless for a proxy/gateway to complete.
+		headers: config.ingestKey ? { Authorization: `Bearer ${config.ingestKey}` } : undefined,
 	})
 
 	const provider = new WebTracerProvider({

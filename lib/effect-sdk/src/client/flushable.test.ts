@@ -265,7 +265,7 @@ describe("MapleFlush.make (client)", () => {
 		expect(calls.length).toBe(afterAuto)
 	})
 
-	it("runs in no-op mode when no ingest key is configured", async () => {
+	it("still exports without an Authorization header when no ingest key is set (proxy attaches it)", async () => {
 		const consoleInfoSpy = vi.spyOn(console, "info").mockImplementation(() => {})
 		const { calls, restore: rf } = setupFetch()
 		restore = () => {
@@ -284,9 +284,13 @@ describe("MapleFlush.make (client)", () => {
 		)
 		await telemetry.flush()
 
-		expect(calls.length).toBe(0)
+		// Ingest key is auth only — the span still POSTs, just without auth.
+		const traceCall = calls.find((c) => c.url.endsWith("/v1/traces"))
+		expect(traceCall).toBeDefined()
+		expect(traceCall!.headers.authorization).toBeUndefined()
+		// One-shot heads-up that we're running keyless (expecting a proxy).
 		expect(consoleInfoSpy).toHaveBeenCalledTimes(1)
-		expect(consoleInfoSpy.mock.calls[0][0]).toContain("no ingest key configured")
+		expect(consoleInfoSpy.mock.calls[0][0]).toContain("no ingest key set")
 	})
 
 	it("flushes on visibilitychange only when the document is hidden", async () => {

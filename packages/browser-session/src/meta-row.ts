@@ -70,19 +70,24 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 	return row
 }
 
-/** POST one session metadata row (NDJSON). Best-effort — never throws. */
+/**
+ * POST one session metadata row (NDJSON). Best-effort — never throws.
+ *
+ * `ingestKey` is used only for the `Authorization` header and is optional: when
+ * unset the row goes out without an auth header, for setups where a proxy or
+ * gateway injects it (the key never gates whether the row is posted).
+ */
 export async function postSessionMetaRow(
 	endpoint: string,
-	ingestKey: string,
+	ingestKey: string | undefined,
 	row: Record<string, unknown>,
 	keepalive = false,
 ): Promise<void> {
+	const headers: Record<string, string> = { "content-type": "application/x-ndjson" }
+	if (ingestKey) headers.Authorization = `Bearer ${ingestKey}`
 	await fetch(`${endpoint.replace(/\/$/, "")}/v1/sessionReplays/meta`, {
 		method: "POST",
-		headers: {
-			Authorization: `Bearer ${ingestKey}`,
-			"content-type": "application/x-ndjson",
-		},
+		headers,
 		body: `${JSON.stringify(row)}\n`,
 		keepalive,
 	}).catch(() => {
