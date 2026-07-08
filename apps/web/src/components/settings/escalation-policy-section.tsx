@@ -60,7 +60,7 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 	const policyResult = useAtomValue(policyQueryAtom)
 	const refreshPolicy = useAtomRefresh(policyQueryAtom)
 
-	const { result: destinationsResult, refresh: refreshDestinations } = useAlertDestinationsList()
+	const { result: destinationsResult } = useAlertDestinationsList()
 
 	const upsertMutation = useAtomSet(MapleApiAtomClient.mutation("errors", "upsertEscalationPolicy"), {
 		mode: "promiseExit",
@@ -150,15 +150,10 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 				</div>
 
 				{Result.builder(destinationsResult)
+					// Destinations come from the live-synced collection, which only
+					// resolves to `initial` (loading) or `success` — never a failure —
+					// so there is no error/retry branch to render here.
 					.onInitial(() => <Skeleton className="h-24 w-full" />)
-					.onError(() => (
-						<div className="flex items-center justify-between gap-4 py-2 text-sm text-muted-foreground">
-							<span>Failed to load alert destinations.</span>
-							<Button size="sm" variant="outline" onClick={() => refreshDestinations()}>
-								Retry
-							</Button>
-						</div>
-					))
 					.onSuccess((response) => {
 						if (response.destinations.length === 0) {
 							return (
