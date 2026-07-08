@@ -755,6 +755,8 @@ interface DatabaseDetailPanelProps {
 	durationSeconds: number
 	startTime: string
 	endTime: string
+	/** Scope the query summary to the map's selected environment; `undefined` = all. */
+	deploymentEnv?: string
 	onClose: () => void
 }
 
@@ -934,6 +936,7 @@ function DatabaseDetailPanel({
 	durationSeconds,
 	startTime,
 	endTime,
+	deploymentEnv,
 	onClose,
 }: DatabaseDetailPanelProps) {
 	const callers = dbEdges.filter((e) => e.dbSystem === dbSystem && e.dbNamespace === dbNamespace)
@@ -951,6 +954,7 @@ function DatabaseDetailPanel({
 				dbNamespace,
 				startTime,
 				endTime,
+				deploymentEnv,
 				bucketSeconds,
 				topN: 8,
 			},
@@ -1342,6 +1346,7 @@ export function ServiceMapCanvas({
 	durationSeconds,
 	startTime,
 	endTime,
+	deploymentEnv,
 	layoutKey,
 }: {
 	edges: ServiceEdge[]
@@ -1356,6 +1361,8 @@ export function ServiceMapCanvas({
 	durationSeconds: number
 	startTime: string
 	endTime: string
+	/** Selected deployment environment (`undefined` = all); scopes the DB detail panel. */
+	deploymentEnv?: string
 	// Namespaces persisted drag positions / viewport. Lifted to a prop so the
 	// component renders without a Clerk session (e.g. the /service-map-bench
 	// perf harness, which runs in self-hosted mode with no ClerkProvider).
@@ -1867,6 +1874,7 @@ export function ServiceMapCanvas({
 								durationSeconds={durationSeconds}
 								startTime={startTime}
 								endTime={endTime}
+								deploymentEnv={deploymentEnv}
 								onClose={() => setSelectedServiceId(null)}
 							/>
 						) : (
@@ -2015,6 +2023,7 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMap
 				durationSeconds={durationSeconds}
 				startTime={startTime}
 				endTime={endTime}
+				deploymentEnv={deploymentEnv}
 				layoutKey={orgId ?? "default"}
 			/>
 		))
