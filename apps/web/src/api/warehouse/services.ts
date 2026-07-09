@@ -69,6 +69,7 @@ interface CoercedRow {
 	commitSha: string
 	spanCount: number
 	errorCount: number
+	estimatedErrorCount?: number
 	totalCount: number
 	p50LatencyMs: number
 	p95LatencyMs: number
@@ -84,6 +85,7 @@ function coerceRow(raw: Record<string, unknown>): CoercedRow {
 		commitSha: String(raw.commitSha ?? "N/A"),
 		spanCount: Number(raw.spanCount ?? 0),
 		errorCount: Number(raw.errorCount ?? 0),
+		estimatedErrorCount: raw.estimatedErrorCount == null ? undefined : Number(raw.estimatedErrorCount),
 		totalCount: Number(raw.throughput ?? 0),
 		p50LatencyMs: Number(raw.p50LatencyMs ?? 0),
 		p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
@@ -111,6 +113,10 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 		const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
 		const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
 		const totalEstimated = group.reduce((sum, r) => sum + r.estimatedSpanCount, 0)
+		const hasEstimatedErrors = group.every(
+			(r) => r.estimatedErrorCount != null && Number.isFinite(r.estimatedErrorCount),
+		)
+		const totalEstimatedErrors = group.reduce((sum, r) => sum + (r.estimatedErrorCount ?? 0), 0)
 
 		// Resolve throughput as sum(SampleRate) (pre-sampling estimate) → raw traced
 		// count. Each row is environment-specific, and the per-env detail page it
@@ -152,7 +158,12 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 			p50LatencyMs: p50,
 			p95LatencyMs: p95,
 			p99LatencyMs: p99,
-			errorRate: totalSpans > 0 ? totalErrors / totalSpans : 0,
+			errorRate:
+				hasEstimatedErrors && totalEstimated > 0
+					? totalEstimatedErrors / totalEstimated
+					: totalSpans > 0
+						? totalErrors / totalSpans
+						: 0,
 			throughput: sampling.hasSampling ? sampling.estimated : sampling.traced,
 			tracedThroughput: sampling.traced,
 			hasSampling: sampling.hasSampling,

@@ -36,6 +36,7 @@ const overviewRow = {
 	commitSha: "abc1234",
 	throughput: 100,
 	errorCount: 0,
+	estimatedErrorCount: 0,
 	spanCount: 100,
 	p50LatencyMs: 1,
 	p95LatencyMs: 2,
@@ -126,6 +127,82 @@ describe("getServiceOverview throughput resolution", () => {
 				(call) => call[0] === "queryEngine.spanMetricsCalls",
 			)
 			assert.strictEqual(spanMetricsCalls.length, 0)
+		}),
+	)
+
+	it.effect("weights errors with the same per-span sampling factors as throughput", () =>
+		Effect.gen(function* () {
+			// One retained error represents one request while one retained success
+			// represents 100 requests. The raw retained-span rate would be 50%; the
+			// sampling-corrected population rate is 1 / 101.
+			runWarehouseQueryMock.mockReturnValue(
+				Effect.succeed({
+					data: [
+						{
+							...overviewRow,
+							throughput: 2,
+							spanCount: 2,
+							errorCount: 1,
+							estimatedErrorCount: 1,
+							estimatedSpanCount: 101,
+						},
+					],
+				}),
+			)
+
+			const { data } = yield* getServiceOverview({
+				data: { startTime: START, endTime: END },
+			})
+
+			assert.strictEqual(data.length, 1)
+			assert.ok(Math.abs(data[0].errorRate - 1 / 101) < 1e-12, `errorRate=${data[0].errorRate}`)
+		}),
+	)
+
+	it.effect("preserves the raw error rate when spans are unsampled", () =>
+		Effect.gen(function* () {
+			runWarehouseQueryMock.mockReturnValue(
+				Effect.succeed({
+					data: [
+						{
+							...overviewRow,
+							errorCount: 5,
+							estimatedErrorCount: 5,
+						},
+					],
+				}),
+			)
+
+			const { data } = yield* getServiceOverview({
+				data: { startTime: START, endTime: END },
+			})
+
+			assert.strictEqual(data.length, 1)
+			assert.strictEqual(data[0].errorRate, 0.05)
+		}),
+	)
+
+	it.effect("falls back to the raw rate when a stale response omits weighted errors", () =>
+		Effect.gen(function* () {
+			const { estimatedErrorCount: _, ...staleRow } = overviewRow
+			runWarehouseQueryMock.mockReturnValue(
+				Effect.succeed({
+					data: [
+						{
+							...staleRow,
+							errorCount: 5,
+							estimatedSpanCount: 1000,
+						},
+					],
+				}),
+			)
+
+			const { data } = yield* getServiceOverview({
+				data: { startTime: START, endTime: END },
+			})
+
+			assert.strictEqual(data.length, 1)
+			assert.strictEqual(data[0].errorRate, 0.05)
 		}),
 	)
 })
