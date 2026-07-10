@@ -376,14 +376,14 @@ above), so a generation is reproducible and deployment drift is visible.
 ### The calibration config document
 
 `maple archive calibrate --write-config <path>` writes a **versioned calibration
-config document** (`formatVersion: 2`, mode `0o600`) with strict, exact-key
+config document** (`formatVersion: 3`, mode `0o600`) with strict, exact-key
 schema. It is a complete evidence record, not just the numbers, and the loader
 re-derives every aggregate from the recorded evidence rather than trusting it.
 Top-level keys (all required; unknown keys rejected):
 
 | Key                     | Contents                                                               |
 | ----------------------- | ---------------------------------------------------------------------- |
-| `formatVersion`         | `2`                                                                    |
+| `formatVersion`         | `3`                                                                    |
 | `checkpoint`            | `{ checkpointId, manifestFingerprint }` — the single source snapshot   |
 | `candidateMatrix`       | The exact four-candidate matrix evaluated                              |
 | `requiredSignals`       | The exact six-signal set                                               |
@@ -421,6 +421,15 @@ re-derives them from the training/held-out results by candidate + signal). The
 loader recomputes these values; the document cannot choose its own ratio,
 prediction, tolerance, or signal pairing.
 
+Format 3 treats resource costs directionally: a lower observed RSS, wall time,
+compression ratio, physical-byte count, or temporary-disk peak is safe; only a
+regression beyond tolerance fails. Write operations emit only format 3. For
+upgrade compatibility, the loader also accepts a format-2 document only when
+its *entire* held-out evidence matches one coherent historical policy: either
+the original symmetric comparison or the brief directional format-2 form. It
+rejects a document that mixes those representations across the selected
+evidence and attempts.
+
 `environment.archiveVolume` records `{ fsid, type, archiveDir }` so a config is
 bound to the volume it was measured on, and `archive create --config` enforces
 that identity (plus the host environment) before exporting. `recalibrationTriggers`
@@ -457,14 +466,14 @@ TOCTOU:
 The result is a `TuningConfigIdentity` bound into the manifest:
 
 ```jsonc
-{ "formatVersion": 2, "configName": "maple-archive-config.json", "sha256": "<64 hex>" }
+{ "formatVersion": 3, "configName": "maple-archive-config.json", "sha256": "<64 hex>" }
 ```
 
 `configName` is the file basename (validated `^[A-Za-z0-9._-]+$`); `sha256` is
 the content hash. A generation thus records exactly which config produced it.
 (The manifest stores this as an opaque, hash-bound identity, so it can describe
 both legacy v1 and verified v2 config documents; only the loader refuses v1 for
-new writes.)
+new writes. It also records and accepts format-3 directional config documents.)
 
 ## Calibration
 

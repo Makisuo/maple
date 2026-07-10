@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { type ArchiveTuningRecord, type TuningConfigIdentity, TUNING_CONFIG_FORMAT_VERSION } from "./config"
+import {
+	type ArchiveTuningRecord,
+	type TuningConfigIdentity,
+	LEGACY_TUNING_CONFIG_FORMAT_VERSION,
+	TUNING_CONFIG_FORMAT_VERSION,
+} from "./config"
 import { KNOWN_COMPLEX_DIGEST_ALGORITHMS } from "./export"
 import {
 	assertNoSymlinkSync,
@@ -172,8 +177,8 @@ const SAFE_CONFIG_NAME = /^[A-Za-z0-9._-]+$/
  * `{ formatVersion, configName, sha256 }`. Rejects unknown subfields, a bad
  * SHA-256, an unsafe config name, or a config formatVersion outside the two
  * explicitly known identities. Manifest v3 stores an opaque, hash-bound config
- * identity and can therefore safely describe both legacy v1 and verified v2;
- * only the config loader refuses v1 for new writes.
+ * identity and can therefore safely describe legacy v1, symmetric v2, and
+ * directional v3 documents; only the config loader refuses v1 for new writes.
  */
 const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
 	if (value === null) return null
@@ -190,10 +195,12 @@ const parseTuningConfig = (value: unknown): TuningConfigIdentity | null => {
 	if (
 		typeof formatVersion !== "number" ||
 		!Number.isSafeInteger(formatVersion) ||
-		(formatVersion !== 1 && formatVersion !== TUNING_CONFIG_FORMAT_VERSION)
+		(formatVersion !== 1 &&
+			formatVersion !== LEGACY_TUNING_CONFIG_FORMAT_VERSION &&
+			formatVersion !== TUNING_CONFIG_FORMAT_VERSION)
 	) {
 		throw new Error(
-			`invalid archive manifest tuningConfig.formatVersion (known versions: 1, ${TUNING_CONFIG_FORMAT_VERSION}): ${String(formatVersion)}`,
+			`invalid archive manifest tuningConfig.formatVersion (known versions: 1, ${LEGACY_TUNING_CONFIG_FORMAT_VERSION}, ${TUNING_CONFIG_FORMAT_VERSION}): ${String(formatVersion)}`,
 		)
 	}
 	const configName = requiredString(value, "configName")

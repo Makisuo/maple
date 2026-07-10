@@ -9,6 +9,7 @@ import {
 	resolveArchiveTuning,
 	tuningRecord,
 	loadTuningConfig,
+	LEGACY_TUNING_CONFIG_FORMAT_VERSION,
 	TUNING_CONFIG_FORMAT_VERSION,
 } from "../src/server/archives/config"
 import {
@@ -282,6 +283,54 @@ describe("loadTuningConfig", () => {
 		}
 	}
 
+	/**
+	 * Model the actual Phase 3B shape: held-out RSS is lower than the selected
+	 * training worst case. The evidence representation is what distinguishes a
+	 * legacy v2 document (symmetric delta) from the repaired directional form.
+	 */
+	const makeHeldOutRssCheaper = (
+		doc: ReturnType<typeof validConfigDoc>,
+		policy: "directional" | "symmetric",
+	): void => {
+		for (const result of doc.heldOut.results) result.metrics.peakRssBytes = 100
+		doc.heldOut.worstCase.peakRssBytes = 100
+		const heldOutMetrics = doc.heldOut.results[0]!.metrics
+		const ratio = heldOutMetrics.logicalBytes / doc.selected.worstCase.logicalBytes
+		const signalComparisons = ARCHIVE_SIGNALS.map((signal) => {
+			const comparison = comparePredictedObserved(
+				doc.selected.worstCase,
+				heldOutMetrics,
+				HELD_OUT_TOLERANCES,
+				{ ratio, metrics: new Set(["wallMs", "physicalBytes"]) },
+			)
+			return {
+				signal: signal.name,
+				scaleRatio: ratio,
+				comparisons: comparison.comparisons.map((entry) => ({ ...entry })),
+				passed: comparison.passed,
+			}
+		})
+		if (policy === "symmetric") {
+			for (const signal of signalComparisons) {
+				const rss = signal.comparisons.find((entry) => entry.metric === "peakRssBytes")!
+				// 100 observed versus 200 predicted: a valid v2 two-sided delta.
+				rss.relativeDelta = 0.5
+			}
+		}
+		doc.heldOut.signalComparisons = signalComparisons
+		doc.heldOutAttempts[doc.heldOutAttempts.length - 1]!.signalComparisons = signalComparisons
+	}
+
+	const setConfigFormat = (doc: ReturnType<typeof validConfigDoc>, formatVersion: number): void => {
+		;(doc as { formatVersion: number }).formatVersion = formatVersion
+	}
+
+	const cloneSignalComparisons = (doc: ReturnType<typeof validConfigDoc>) =>
+		doc.heldOut.signalComparisons.map((signal) => ({
+			...signal,
+			comparisons: signal.comparisons.map((comparison) => ({ ...comparison })),
+		}))
+
 	it("round-trips an earlier non-positive-logical attempt before a later passing candidate", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-zero-logical-"))
 		try {
@@ -314,33 +363,69 @@ describe("loadTuningConfig", () => {
 		}
 	})
 
-	it("accepts a config whose held-out resource cost is lower than the training prediction", () => {
-		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-lower-cost-"))
+	it("accepts the directional v3 evidence emitted after the calibration repair", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-directional-v3-"))
 		try {
 			const path = join(dir, "cfg.json")
 			const doc = validConfigDoc()
-			for (const result of doc.heldOut.results) result.metrics.peakRssBytes = 100
-			doc.heldOut.worstCase.peakRssBytes = 100
-			const heldOutMetrics = doc.heldOut.results[0]!.metrics
-			const ratio = heldOutMetrics.logicalBytes / doc.selected.worstCase.logicalBytes
-			const signalComparisons = ARCHIVE_SIGNALS.map((signal) => {
-				const comparison = comparePredictedObserved(
-					doc.selected.worstCase,
-					heldOutMetrics,
-					HELD_OUT_TOLERANCES,
-					{ ratio, metrics: new Set(["wallMs", "physicalBytes"]) },
-				)
-				return {
-					signal: signal.name,
-					scaleRatio: ratio,
-					comparisons: comparison.comparisons,
-					passed: comparison.passed,
-				}
-			})
-			doc.heldOut.signalComparisons = signalComparisons
-			doc.heldOutAttempts[0]!.signalComparisons = signalComparisons
+			makeHeldOutRssCheaper(doc, "directional")
 			writeFileSync(path, JSON.stringify(doc))
-			strictEqual(loadTuningConfig(path).identity.configName, "cfg.json")
+			const loaded = loadTuningConfig(path)
+			strictEqual(loaded.identity.formatVersion, TUNING_CONFIG_FORMAT_VERSION)
+			strictEqual(loaded.identity.configName, "cfg.json")
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("loads valid legacy v2 symmetric evidence and records its actual identity version", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-symmetric-v2-"))
+		try {
+			const path = join(dir, "cfg.json")
+			const doc = validConfigDoc()
+			setConfigFormat(doc, LEGACY_TUNING_CONFIG_FORMAT_VERSION)
+			makeHeldOutRssCheaper(doc, "symmetric")
+			writeFileSync(path, JSON.stringify(doc))
+			strictEqual(loadTuningConfig(path).identity.formatVersion, LEGACY_TUNING_CONFIG_FORMAT_VERSION)
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("loads the deployed transitional v2 directional evidence and records version 2", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-directional-v2-"))
+		try {
+			const path = join(dir, "cfg.json")
+			const doc = validConfigDoc()
+			setConfigFormat(doc, LEGACY_TUNING_CONFIG_FORMAT_VERSION)
+			makeHeldOutRssCheaper(doc, "directional")
+			writeFileSync(path, JSON.stringify(doc))
+			strictEqual(loadTuningConfig(path).identity.formatVersion, LEGACY_TUNING_CONFIG_FORMAT_VERSION)
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects a v3 document with legacy evidence and a v2 document that mixes policies", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-mixed-policy-"))
+		try {
+			const legacyInV3 = validConfigDoc()
+			makeHeldOutRssCheaper(legacyInV3, "symmetric")
+			const legacyInV3Path = join(dir, "legacy-in-v3.json")
+			writeFileSync(legacyInV3Path, JSON.stringify(legacyInV3))
+			throws(() => loadTuningConfig(legacyInV3Path), /signalComparisons.*recomputed/i)
+
+			const mixedV2 = validConfigDoc()
+			setConfigFormat(mixedV2, LEGACY_TUNING_CONFIG_FORMAT_VERSION)
+			makeHeldOutRssCheaper(mixedV2, "directional")
+			const legacyAttempt = cloneSignalComparisons(mixedV2)
+			for (const signal of legacyAttempt) {
+				signal.comparisons.find((entry) => entry.metric === "peakRssBytes")!.relativeDelta = 0.5
+			}
+			mixedV2.heldOutAttempts[0]!.signalComparisons = legacyAttempt
+			const mixedV2Path = join(dir, "mixed-v2.json")
+			writeFileSync(mixedV2Path, JSON.stringify(mixedV2))
+			throws(() => loadTuningConfig(mixedV2Path), /signalComparisons.*recomputed|semantic evidence/i)
 		} finally {
 			rmSync(dir, { recursive: true, force: true })
 		}

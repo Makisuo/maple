@@ -100,6 +100,7 @@ import { listActiveOperationIds } from "../src/server/archives/journal"
 import {
 	loadTuningConfig,
 	resolveArchiveTuning,
+	TUNING_CONFIG_FORMAT_VERSION,
 	type LoadedTuningConfig,
 } from "../src/server/archives/config"
 
@@ -379,7 +380,7 @@ describe("calibration measurement engine — comparePredictedObserved", () => {
 		ok(!rssCmp.withinTolerance)
 	})
 
-	it("accepts a faster or smaller held-out cost measurement", () => {
+	it("accepts lower cost across every resource metric, including scaled held-out costs", () => {
 		const pred = baseMetrics({
 			peakRssBytes: 200_000_000,
 			wallMs: 1_000,
@@ -394,16 +395,81 @@ describe("calibration measurement engine — comparePredictedObserved", () => {
 			physicalBytes: 25_000,
 			peakTempDiskBytes: 500_000,
 		})
-		const result = comparePredictedObserved(pred, obs, {
+		const result = comparePredictedObserved(
+			pred,
+			obs,
+			{
+				peakRssBytes: 0.1,
+				wallMs: 0.1,
+				writeThroughputBytesPerSec: 0.1,
+				compressionRatio: 0.1,
+				physicalBytes: 0.1,
+				peakTempDiskBytes: 0.1,
+			},
+			{ ratio: 2, metrics: new Set(["wallMs", "physicalBytes"]) },
+		)
+		strictEqual(result.passed, true)
+		for (const metric of [
+			"peakRssBytes",
+			"wallMs",
+			"compressionRatio",
+			"physicalBytes",
+			"peakTempDiskBytes",
+		] as const) {
+			strictEqual(result.comparisons.find((c) => c.metric === metric)!.relativeDelta, 0)
+		}
+	})
+
+	it("rejects a regression beyond tolerance for each directional resource cost", () => {
+		const tolerance = {
 			peakRssBytes: 0.1,
 			wallMs: 0.1,
 			writeThroughputBytesPerSec: 0.1,
 			compressionRatio: 0.1,
 			physicalBytes: 0.1,
 			peakTempDiskBytes: 0.1,
-		})
-		strictEqual(result.passed, true)
-		strictEqual(result.comparisons.find((c) => c.metric === "wallMs")!.relativeDelta, 0)
+		}
+		const costs = [
+			"peakRssBytes",
+			"wallMs",
+			"compressionRatio",
+			"physicalBytes",
+			"peakTempDiskBytes",
+		] as const
+		for (const metric of costs) {
+			const predicted = baseMetrics()
+			const observed = { ...predicted, [metric]: predicted[metric] * 1.11 }
+			const result = comparePredictedObserved(predicted, observed, tolerance)
+			strictEqual(result.passed, false, `${metric} regression must fail`)
+			ok(!result.comparisons.find((comparison) => comparison.metric === metric)!.withinTolerance)
+		}
+	})
+
+	it("handles a zero predicted resource cost fail-closed", () => {
+		const tolerance = {
+			peakRssBytes: 0.1,
+			wallMs: 0.1,
+			writeThroughputBytesPerSec: 0.1,
+			compressionRatio: 0.1,
+			physicalBytes: 0.1,
+			peakTempDiskBytes: 0.1,
+		}
+		const predicted = baseMetrics({ peakTempDiskBytes: 0 })
+		strictEqual(
+			comparePredictedObserved(predicted, baseMetrics({ peakTempDiskBytes: 0 }), tolerance).passed,
+			true,
+		)
+		const regression = comparePredictedObserved(
+			predicted,
+			baseMetrics({ peakTempDiskBytes: 1 }),
+			tolerance,
+		)
+		strictEqual(regression.passed, false)
+		strictEqual(
+			regression.comparisons.find((comparison) => comparison.metric === "peakTempDiskBytes")!
+				.withinTolerance,
+			false,
+		)
 	})
 
 	it("throughput is directional (higher observed is better, always passes)", () => {
@@ -419,6 +485,35 @@ describe("calibration measurement engine — comparePredictedObserved", () => {
 		})
 		const tputCmp = result.comparisons.find((c) => c.metric === "writeThroughputBytesPerSec")!
 		ok(tputCmp.withinTolerance)
+	})
+
+	it("rejects throughput below its floor and allows a zero predicted throughput", () => {
+		const tolerance = {
+			peakRssBytes: 0.1,
+			wallMs: 0.1,
+			writeThroughputBytesPerSec: 0.1,
+			compressionRatio: 0.1,
+			physicalBytes: 0.1,
+			peakTempDiskBytes: 0.1,
+		}
+		const predicted = baseMetrics({ writeThroughputBytesPerSec: 100_000 })
+		const tooSlow = comparePredictedObserved(
+			predicted,
+			baseMetrics({ writeThroughputBytesPerSec: 89_999 }),
+			tolerance,
+		)
+		strictEqual(tooSlow.passed, false)
+		strictEqual(
+			tooSlow.comparisons.find((comparison) => comparison.metric === "writeThroughputBytesPerSec")!
+				.withinTolerance,
+			false,
+		)
+		const zeroBaseline = comparePredictedObserved(
+			baseMetrics({ writeThroughputBytesPerSec: 0 }),
+			baseMetrics({ writeThroughputBytesPerSec: 1 }),
+			tolerance,
+		)
+		strictEqual(zeroBaseline.passed, true)
 	})
 })
 
@@ -521,7 +616,7 @@ describe("calibration config document — writeCalibrationConfig emits required 
 		try {
 			const path = join(dir, "cfg.json")
 			const rec: CalibrationRecommendation = {
-				formatVersion: 2,
+				formatVersion: TUNING_CONFIG_FORMAT_VERSION,
 				checkpoint: {
 					checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
 					manifestFingerprint: "checkpoint:fingerprint",
@@ -571,7 +666,7 @@ describe("calibration config document — writeCalibrationConfig emits required 
 			const tuning = recommendationToTuning(rec, "/tmp/archive", "/tmp/scratch")
 			writeCalibrationConfig(path, rec, tuning)
 			const doc = JSON.parse(require("node:fs").readFileSync(path, "utf8")) as Record<string, unknown>
-			strictEqual(doc.formatVersion, 2)
+			strictEqual(doc.formatVersion, TUNING_CONFIG_FORMAT_VERSION)
 			ok(doc.environment !== undefined)
 			ok(Array.isArray(doc.results))
 			ok(doc.safetyMargin !== undefined)
@@ -1016,7 +1111,7 @@ describe("config-bound create enforces environment and volume identity", () => {
 			}
 		})
 		return {
-			formatVersion: 2,
+			formatVersion: TUNING_CONFIG_FORMAT_VERSION,
 			measuredAt: "2026-07-01T00:00:00.000Z",
 			confidence: "high" as const,
 			checkpoint: { checkpointId, manifestFingerprint: fingerprint },

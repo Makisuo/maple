@@ -4,8 +4,7 @@ import * as Flag from "effect/unstable/cli/Flag"
 import * as Argument from "effect/unstable/cli/Argument"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
-import { homedir, tmpdir } from "node:os"
+import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { createArchiveGeneration, runArchiveReconciliation } from "../server/archives/generation"
 import { listActiveGenerations, activeParquetPaths, rebuildCatalog } from "../server/archives/listing"
@@ -13,6 +12,7 @@ import { runArchiveGc } from "../server/archives/gc"
 import {
 	resolveArchiveTuning,
 	loadTuningConfig,
+	TUNING_CONFIG_FORMAT_VERSION,
 	type ArchiveTuningOverrides,
 	type TuningConfigIdentity,
 	type LoadedTuningConfig,
@@ -66,6 +66,12 @@ import { ensurePrivateDirectory } from "../server/archives/paths"
 import { CHDB_VERSION, MAPLE_VERSION } from "../version"
 import { SCHEMA_FINGERPRINT } from "../server/serve"
 import { amber, bold, dim, green, red } from "../lib/style"
+import {
+	collectChildOutputAfterClose,
+	createTimeReport,
+	parsePeakRss,
+	timeArgv,
+} from "../server/archives/timed-process"
 
 /** An archive command failure. The message is shown to the user and the process
  *  exits non-zero, mirroring `ServerError` and `CheckpointError`. */
@@ -694,21 +700,6 @@ interface ChildMetrics {
 	}
 }
 
-/** `/usr/bin/time` argv: `-lp` on macOS/BSD, `-v` on GNU/Linux. */
-const timeArgv = (): string[] => (process.platform === "darwin" ? ["-lp"] : ["-v"])
-
-/** Parse peak RSS (bytes) from `/usr/bin/time` stderr; fail-closed (null if unparseable). */
-const parsePeakRss = (stderr: string, platform: string): number | null => {
-	// macOS/BSD `-lp`: "123456 maximum resident set size" (bytes).
-	// GNU/Linux `-v`: "Maximum resident set size (kbytes): 12345" (kbytes).
-	if (platform === "darwin") {
-		const m = stderr.match(/(\d+)\s+maximum resident set size/i)
-		return m ? Number.parseInt(m[1]!, 10) : null
-	}
-	const m = stderr.match(/Maximum resident set size \(kbytes\):\s*(\d+)/i)
-	return m ? Number.parseInt(m[1]!, 10) * 1024 : null
-}
-
 /**
  * Run one calibrate-run child under /usr/bin/time in a DEDICATED PROCESS GROUP
  * so peak RSS is measured externally and the watchdog can kill the entire
@@ -741,9 +732,9 @@ const runCandidateChild = (
 		// EAGAIN when directed at the inherited stderr pipe. Write it to an
 		// independent temporary file instead; stderr remains available for real
 		// worker diagnostics and the report is removed after this one child closes.
-		let timeDir: string
+		let timeReport: ReturnType<typeof createTimeReport>
 		try {
-			timeDir = mkdtempSync(join(tmpdir(), "maple-calibration-time-"))
+			timeReport = createTimeReport()
 		} catch (error) {
 			resolvePromise({
 				candidate,
@@ -753,27 +744,6 @@ const runCandidateChild = (
 				error: `failed to create time-report directory: ${error instanceof Error ? error.message : String(error)}`,
 			})
 			return
-		}
-		const timeReportPath = join(timeDir, "report.txt")
-		const removeTimeDir = () => {
-			try {
-				rmSync(timeDir, { recursive: true, force: true })
-			} catch {
-				// Best effort only: a measurement-artifact cleanup failure must not
-				// mask the worker outcome or leave the parent process unhandled.
-			}
-		}
-		const readTimeReport = (): { report: string; error?: string } => {
-			try {
-				return { report: readFileSync(timeReportPath, "utf8") }
-			} catch (error) {
-				return {
-					report: "",
-					error: `failed to read /usr/bin/time report: ${error instanceof Error ? error.message : String(error)}`,
-				}
-			} finally {
-				removeTimeDir()
-			}
 		}
 		const args = [
 			"archive",
@@ -811,21 +781,20 @@ const runCandidateChild = (
 		]
 		// Spawn under /usr/bin/time in its own process group so the watchdog can
 		// kill the whole group (Maple descendant included), not just /usr/bin/time.
-		const child = spawn("/usr/bin/time", [...timeArgv(), "-o", timeReportPath, bundlePath, ...args], {
+		const child = spawn("/usr/bin/time", [...timeArgv(), "-o", timeReport.path, bundlePath, ...args], {
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: true,
 		})
+		const childOutput = collectChildOutputAfterClose(child)
 		const pgid = child.pid ?? 0
-		let stdout = ""
-		let stderr = ""
 		let killedByWatchdog = false
 		let killReason = ""
-		child.stdout.on("data", (chunk: Buffer) => {
-			stdout += chunk.toString()
-		})
-		child.stderr.on("data", (chunk: Buffer) => {
-			stderr += chunk.toString()
-		})
+		let settled = false
+		const finish = (result: CandidateResult) => {
+			if (settled) return
+			settled = true
+			resolvePromise(result)
+		}
 		// Watchdog deadline = min(remaining total budget, per-candidate wallMs).
 		const remaining = budget.timeBudget - (Date.now() - matrixStart)
 		const deadline = Math.max(1000, Math.min(budget.maxCandidateWallMs, remaining))
@@ -865,18 +834,19 @@ const runCandidateChild = (
 		child.on("error", (error) => {
 			clearTimeout(watchdog)
 			clearInterval(diskPoll)
-			removeTimeDir()
-			resolvePromise({ candidate, signal, metrics: null, ok: false, error: error.message })
+			timeReport.remove()
+			finish({ candidate, signal, metrics: null, ok: false, error: error.message })
 		})
 		// `exit` fires before stdio has necessarily drained.  Wait for `close` so
 		// the next candidate cannot start while this worker still owns its pipes,
 		// and so failure reports include the complete worker diagnostics.
-		child.on("close", (code) => {
+		void childOutput.then(({ code, stdout, stderr }) => {
+			if (settled) return
 			clearTimeout(watchdog)
 			clearInterval(diskPoll)
-			const timeReport = readTimeReport()
+			const timeOutput = timeReport.readAndRemove()
 			if (killedByWatchdog) {
-				resolvePromise({
+				finish({
 					candidate,
 					signal,
 					metrics: null,
@@ -890,31 +860,33 @@ const runCandidateChild = (
 			// cleanup; a JSON line present with a nonzero exit still means the
 			// owned resources may not have been released. Treat nonzero as failure.
 			if (code !== 0) {
-				const fullDiagnostic = `${stderr}\n${stdout}\n${timeReport.report}`
+				const fullDiagnostic = `${stderr}\n${stdout}\n${timeOutput.report}`
 				const diagnostic =
 					fullDiagnostic.length <= 1600
 						? fullDiagnostic
 						: `${fullDiagnostic.slice(0, 800)}\n… diagnostics truncated …\n${fullDiagnostic.slice(-800)}`
-				resolvePromise({
+				finish({
 					candidate,
 					signal,
 					metrics: null,
 					ok: false,
-					error: `calibrate-run exited ${code} (cleanup or export failure): ${diagnostic}${timeReport.error ? `\n${timeReport.error}` : ""}`,
+					error: `calibrate-run exited ${code} (cleanup or export failure): ${diagnostic}${timeOutput.error ? `\n${timeOutput.error}` : ""}`,
 				})
 				return
 			}
 			// Peak RSS: FAIL-CLOSED. Unparseable /usr/bin/time output fails the
 			// candidate (no completion-RSS fallback).
 			const peakRssBytes =
-				timeReport.error === undefined ? parsePeakRss(timeReport.report, process.platform) : null
+				timeOutput.error === undefined ? parsePeakRss(timeOutput.report, process.platform) : null
 			if (peakRssBytes === null) {
-				resolvePromise({
+				finish({
 					candidate,
 					signal,
 					metrics: null,
 					ok: false,
-					error: `failed to parse peak RSS from /usr/bin/time stderr (fail-closed)`,
+					error: timeOutput.error
+						? `${timeOutput.error} (fail-closed)`
+						: `failed to parse peak RSS from /usr/bin/time report (fail-closed)`,
 				})
 				return
 			}
@@ -954,7 +926,7 @@ const runCandidateChild = (
 					typeof sample.rowCount !== "number" ||
 					sample.rowCount !== raw.rowCount
 				) {
-					resolvePromise({
+					finish({
 						candidate,
 						signal,
 						metrics: null,
@@ -963,9 +935,9 @@ const runCandidateChild = (
 					})
 					return
 				}
-				resolvePromise({ candidate, signal, metrics, ok: true, sample })
+				finish({ candidate, signal, metrics, ok: true, sample })
 			} catch (error) {
-				resolvePromise({
+				finish({
 					candidate,
 					signal,
 					metrics: null,
@@ -1250,7 +1222,7 @@ const runBoundCalibrationMatrix = async (
 		selectedHeldOut = null
 	}
 	return {
-		formatVersion: 2,
+		formatVersion: TUNING_CONFIG_FORMAT_VERSION,
 		checkpoint: { checkpointId, manifestFingerprint: checkpointManifestFingerprint },
 		selected,
 		heldOut: selectedHeldOut,

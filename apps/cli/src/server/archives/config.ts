@@ -188,10 +188,23 @@ export interface TuningConfigIdentity {
 	readonly sha256: string
 }
 
-/** The calibration config document format version accepted by the loader. */
-export const TUNING_CONFIG_FORMAT_VERSION = 2
+/**
+ * The prior v2 document encoded two-sided held-out resource deltas. Keep it
+ * readable because calibration configs are immutable operator artifacts.
+ */
+export const LEGACY_TUNING_CONFIG_FORMAT_VERSION = 2
 
-/** Canonical held-out comparison policy for config format v2. */
+/**
+ * New calibration configs encode directional held-out resource costs: lower
+ * observed cost is safe, while only a regression beyond tolerance fails.
+ */
+export const TUNING_CONFIG_FORMAT_VERSION = 3
+
+export type SupportedTuningConfigFormatVersion =
+	| typeof LEGACY_TUNING_CONFIG_FORMAT_VERSION
+	| typeof TUNING_CONFIG_FORMAT_VERSION
+
+/** Canonical held-out tolerances shared by calibration config formats 2 and 3. */
 export const CALIBRATION_HELD_OUT_TOLERANCES = {
 	peakRssBytes: 0.5,
 	wallMs: 0.5,
@@ -271,7 +284,7 @@ const METRIC_KEYS = new Set([
 ])
 
 export interface VerifiedCalibrationConfigDocument {
-	readonly formatVersion: typeof TUNING_CONFIG_FORMAT_VERSION
+	readonly formatVersion: SupportedTuningConfigFormatVersion
 	readonly measuredAt: string
 	readonly confidence: "high"
 	readonly checkpoint: {
@@ -394,10 +407,13 @@ const metricsMeetBudget = (metrics: Record<string, number>, budget: Record<strin
 	)
 }
 
+type HeldOutComparisonPolicy = "symmetric" | "directional"
+
 const expectedComparisons = (
 	predicted: Record<string, number>,
 	observed: Record<string, number>,
 	tolerances: Record<string, number>,
+	policy: HeldOutComparisonPolicy,
 	sizeScaling?: { ratio: number; metrics: ReadonlySet<"wallMs" | "physicalBytes"> },
 ): ReadonlyArray<Record<string, unknown>> => {
 	const ratio = sizeScaling?.ratio ?? 1
@@ -429,10 +445,11 @@ const expectedComparisons = (
 				? Math.max(0, (p - o) / p)
 				: 0
 			: p > 0
-				? // Resource costs are directional: a lower observed cost is safe.
-					// This must mirror comparePredictedObserved exactly, otherwise a
-					// freshly written config cannot pass its own semantic validation.
-					Math.max(0, (o - p) / p)
+				? policy === "directional"
+					? // Lower resource use is safe. This mirrors comparePredictedObserved
+						// exactly for v3 (and transitional directional v2) documents.
+						Math.max(0, (o - p) / p)
+					: Math.abs(o - p) / p
 				: o === 0
 					? 0
 					: null
@@ -458,6 +475,7 @@ const expectedSignalComparisons = (
 	heldOutResults: ReadonlyArray<Record<string, unknown>>,
 	candidate: Record<string, number>,
 	tolerances: Record<string, number>,
+	policy: HeldOutComparisonPolicy,
 ): ReadonlyArray<Record<string, unknown>> | null => {
 	const findPaired = (
 		results: ReadonlyArray<Record<string, unknown>>,
@@ -481,7 +499,7 @@ const expectedSignalComparisons = (
 		const heldOutLogical = heldMetrics.logicalBytes!
 		if (!(trainingLogical > 0) || !(heldOutLogical > 0)) return null
 		const ratio = heldOutLogical / trainingLogical
-		const comparisons = expectedComparisons(trainMetrics, heldMetrics, tolerances, {
+		const comparisons = expectedComparisons(trainMetrics, heldMetrics, tolerances, policy, {
 			ratio,
 			metrics: new Set(["wallMs", "physicalBytes"]),
 		})
@@ -621,6 +639,7 @@ const validateSampleScope = (
 const validateCompleteConfigSchema = (
 	parsed: Record<string, unknown>,
 	path: string,
+	formatVersion: SupportedTuningConfigFormatVersion,
 ): VerifiedCalibrationConfigDocument => {
 	const knownTopLevel = new Set([
 		"formatVersion",
@@ -1040,152 +1059,179 @@ const validateCompleteConfigSchema = (
 	if (!exactJson(held.tolerances, CALIBRATION_HELD_OUT_TOLERANCES)) {
 		throw new Error(`invalid calibration config heldOut.tolerances (exact policy required): ${path}`)
 	}
-	// PER-SIGNAL, like-for-like hybrid comparison: recompute each signal's entry
-	// by pairing the selected candidate's training result with the held-out
-	// result for that same signal, scaling wallMs/physicalBytes by that signal's
-	// own logical-byte ratio. Aggregate extrema (heldWorst) are descriptive only.
-	const recomputedSignalComparisons = expectedSignalComparisons(
-		parsed.results as Record<string, unknown>[],
-		held.results as Record<string, unknown>[],
-		sel.candidate as Record<string, number>,
-		held.tolerances as Record<string, number>,
-	)
-	if (recomputedSignalComparisons === null) {
-		throw new Error(
-			`invalid calibration config heldOut could not pair every signal like-for-like: ${path}`,
+	const validateHeldOutEvidence = (policy: HeldOutComparisonPolicy): void => {
+		// PER-SIGNAL, like-for-like hybrid comparison: recompute each signal's
+		// entry by pairing the selected candidate's training result with the
+		// held-out result for that same signal, scaling wallMs/physicalBytes by
+		// that signal's own logical-byte ratio. Aggregate extrema (heldWorst) are
+		// descriptive only. The policy must be global to the document: accepting
+		// a mixture would let forged evidence combine two incompatible policies.
+		const recomputedSignalComparisons = expectedSignalComparisons(
+			parsed.results as Record<string, unknown>[],
+			held.results as Record<string, unknown>[],
+			sel.candidate as Record<string, number>,
+			held.tolerances as Record<string, number>,
+			policy,
 		)
-	}
-	if (
-		!Array.isArray(held.signalComparisons) ||
-		!exactJson(recomputedSignalComparisons, held.signalComparisons)
-	) {
-		throw new Error(`invalid calibration config heldOut.signalComparisons were not recomputed: ${path}`)
-	}
-	const heldOutPassed = recomputedSignalComparisons.every((entry) => entry.passed === true)
-	if (held.passed !== true || !heldOutPassed) {
-		throw new Error(`invalid calibration config heldOut did not pass every signal: ${path}`)
-	}
-	if (!Array.isArray(parsed.heldOutAttempts) || parsed.heldOutAttempts.length === 0) {
-		throw new Error(`invalid calibration config heldOutAttempts (non-empty evidence required): ${path}`)
-	}
-	for (let attemptIndex = 0; attemptIndex < parsed.heldOutAttempts.length; attemptIndex++) {
-		const attempt = parsed.heldOutAttempts[attemptIndex]
-		if (!isRecord(attempt)) {
-			throw new Error(`invalid calibration config heldOutAttempts[${attemptIndex}]: ${path}`)
+		if (recomputedSignalComparisons === null) {
+			throw new Error(
+				`invalid calibration config heldOut could not pair every signal like-for-like: ${path}`,
+			)
 		}
-		assertExactKeys(
-			attempt,
-			new Set(["candidate", "results", "worstCase", "signalComparisons", "passed"]),
-			`heldOutAttempts[${attemptIndex}]`,
-			path,
-		)
 		if (
-			attemptIndex >= eligible.length ||
-			!exactJson(attempt.candidate, eligible[attemptIndex]!.candidate) ||
-			!Array.isArray(attempt.results)
+			!Array.isArray(held.signalComparisons) ||
+			!exactJson(recomputedSignalComparisons, held.signalComparisons)
 		) {
-			throw new Error(`invalid calibration config heldOutAttempts candidate order: ${path}`)
+			throw new Error(
+				`invalid calibration config heldOut.signalComparisons were not recomputed: ${path}`,
+			)
 		}
-		const attemptSignals = new Set<string>()
-		let completeAndWithinBudget = attempt.results.length === EXPECTED_SIGNALS.length
-		for (let resultIndex = 0; resultIndex < attempt.results.length; resultIndex++) {
-			const result = attempt.results[resultIndex]
-			if (!isRecord(result)) {
-				throw new Error(`invalid calibration config heldOutAttempts result: ${path}`)
+		const heldOutPassed = recomputedSignalComparisons.every((entry) => entry.passed === true)
+		if (held.passed !== true || !heldOutPassed) {
+			throw new Error(`invalid calibration config heldOut did not pass every signal: ${path}`)
+		}
+		if (!Array.isArray(parsed.heldOutAttempts) || parsed.heldOutAttempts.length === 0) {
+			throw new Error(
+				`invalid calibration config heldOutAttempts (non-empty evidence required): ${path}`,
+			)
+		}
+		for (let attemptIndex = 0; attemptIndex < parsed.heldOutAttempts.length; attemptIndex++) {
+			const attempt = parsed.heldOutAttempts[attemptIndex]
+			if (!isRecord(attempt)) {
+				throw new Error(`invalid calibration config heldOutAttempts[${attemptIndex}]: ${path}`)
 			}
-			for (const key of Object.keys(result)) {
-				if (!new Set(["candidate", "signal", "metrics", "ok", "error", "sample"]).has(key)) {
-					throw new Error(`unknown calibration config heldOutAttempts result.${key}: ${path}`)
-				}
-			}
+			assertExactKeys(
+				attempt,
+				new Set(["candidate", "results", "worstCase", "signalComparisons", "passed"]),
+				`heldOutAttempts[${attemptIndex}]`,
+				path,
+			)
 			if (
-				typeof result.signal !== "string" ||
-				attemptSignals.has(result.signal) ||
-				!EXPECTED_SIGNALS.includes(result.signal as (typeof EXPECTED_SIGNALS)[number]) ||
-				!exactJson(result.candidate, attempt.candidate)
+				attemptIndex >= eligible.length ||
+				!exactJson(attempt.candidate, eligible[attemptIndex]!.candidate) ||
+				!Array.isArray(attempt.results)
 			) {
-				throw new Error(`invalid calibration config heldOutAttempts result identity: ${path}`)
+				throw new Error(`invalid calibration config heldOutAttempts candidate order: ${path}`)
 			}
-			attemptSignals.add(result.signal)
-			if (result.ok === true && isRecord(result.metrics)) {
-				validateMeasuredMetricsRecord(result.metrics, "heldOutAttempts.metrics", path)
+			const attemptSignals = new Set<string>()
+			let completeAndWithinBudget = attempt.results.length === EXPECTED_SIGNALS.length
+			for (let resultIndex = 0; resultIndex < attempt.results.length; resultIndex++) {
+				const result = attempt.results[resultIndex]
+				if (!isRecord(result)) {
+					throw new Error(`invalid calibration config heldOutAttempts result: ${path}`)
+				}
+				for (const key of Object.keys(result)) {
+					if (!new Set(["candidate", "signal", "metrics", "ok", "error", "sample"]).has(key)) {
+						throw new Error(`unknown calibration config heldOutAttempts result.${key}: ${path}`)
+					}
+				}
 				if (
-					!metricsMeetBudget(
-						result.metrics as Record<string, number>,
-						budget as Record<string, number>,
-					)
+					typeof result.signal !== "string" ||
+					attemptSignals.has(result.signal) ||
+					!EXPECTED_SIGNALS.includes(result.signal as (typeof EXPECTED_SIGNALS)[number]) ||
+					!exactJson(result.candidate, attempt.candidate)
 				) {
-					completeAndWithinBudget = false
+					throw new Error(`invalid calibration config heldOutAttempts result identity: ${path}`)
 				}
-				validateSampleScope(
-					result.sample,
-					`heldOutAttempts[${attemptIndex}].results[${resultIndex}].sample`,
-					path,
-					{
-						checkpointId: configCheckpoint.checkpointId,
-						manifestFingerprint: configCheckpoint.manifestFingerprint,
-						rangeDate: sharedRangeDate,
-						role: "held-out",
-						startRow: trainingRows,
-						requestedRows: expectedHeldOutRows,
-					},
-					(result.metrics as Record<string, unknown>).rowCount as number,
-				)
-			} else {
-				completeAndWithinBudget = false
-				if (result.metrics !== null) {
-					throw new Error(`invalid calibration config heldOutAttempts failed metrics: ${path}`)
-				}
-				if (result.sample !== undefined) {
-					throw new Error(
-						`invalid calibration config heldOutAttempts failed result must not record a scope: ${path}`,
+				attemptSignals.add(result.signal)
+				if (result.ok === true && isRecord(result.metrics)) {
+					validateMeasuredMetricsRecord(result.metrics, "heldOutAttempts.metrics", path)
+					if (
+						!metricsMeetBudget(
+							result.metrics as Record<string, number>,
+							budget as Record<string, number>,
+						)
+					) {
+						completeAndWithinBudget = false
+					}
+					validateSampleScope(
+						result.sample,
+						`heldOutAttempts[${attemptIndex}].results[${resultIndex}].sample`,
+						path,
+						{
+							checkpointId: configCheckpoint.checkpointId,
+							manifestFingerprint: configCheckpoint.manifestFingerprint,
+							rangeDate: sharedRangeDate,
+							role: "held-out",
+							startRow: trainingRows,
+							requestedRows: expectedHeldOutRows,
+						},
+						(result.metrics as Record<string, unknown>).rowCount as number,
 					)
+				} else {
+					completeAndWithinBudget = false
+					if (result.metrics !== null) {
+						throw new Error(`invalid calibration config heldOutAttempts failed metrics: ${path}`)
+					}
+					if (result.sample !== undefined) {
+						throw new Error(
+							`invalid calibration config heldOutAttempts failed result must not record a scope: ${path}`,
+						)
+					}
 				}
 			}
-		}
-		const completeWorst = completeAndWithinBudget
-			? worstCaseFromResults(attempt.results as Record<string, unknown>[], path)
-			: null
-		const attemptCandidate = eligible[attemptIndex]!.candidate as Record<string, number>
-		// Complete attempt: recompute per-signal comparisons against this
-		// candidate's training results. A non-positive logical-byte pair makes
-		// the attempt incomplete under the same rule as the runner.
-		const completeSignalComparisons = completeWorst
-			? expectedSignalComparisons(
-					parsed.results as Record<string, unknown>[],
-					attempt.results as Record<string, unknown>[],
-					attemptCandidate,
-					held.tolerances as Record<string, number>,
+			const completeWorst = completeAndWithinBudget
+				? worstCaseFromResults(attempt.results as Record<string, unknown>[], path)
+				: null
+			const attemptCandidate = eligible[attemptIndex]!.candidate as Record<string, number>
+			// Complete attempt: recompute per-signal comparisons against this
+			// candidate's training results. A non-positive logical-byte pair makes
+			// the attempt incomplete under the same rule as the runner.
+			const completeSignalComparisons = completeWorst
+				? expectedSignalComparisons(
+						parsed.results as Record<string, unknown>[],
+						attempt.results as Record<string, unknown>[],
+						attemptCandidate,
+						held.tolerances as Record<string, number>,
+						policy,
+					)
+				: []
+			const attemptIncomplete = completeWorst === null || completeSignalComparisons === null
+			const attemptWorst = attemptIncomplete ? null : completeWorst
+			const attemptSignalComparisons = attemptIncomplete ? [] : completeSignalComparisons
+			const attemptPassed =
+				attemptWorst !== null && attemptSignalComparisons.every((entry) => entry.passed === true)
+			if (
+				!exactJson(attempt.worstCase, attemptWorst) ||
+				!exactJson(attempt.signalComparisons, attemptSignalComparisons) ||
+				attempt.passed !== attemptPassed
+			) {
+				throw new Error(`invalid calibration config heldOutAttempts semantic evidence: ${path}`)
+			}
+			if (attemptPassed && attemptIndex !== parsed.heldOutAttempts.length - 1) {
+				throw new Error(
+					`invalid calibration config continued after a passing held-out attempt: ${path}`,
 				)
-			: []
-		const attemptIncomplete = completeWorst === null || completeSignalComparisons === null
-		const attemptWorst = attemptIncomplete ? null : completeWorst
-		const attemptSignalComparisons = attemptIncomplete ? [] : completeSignalComparisons
-		const attemptPassed =
-			attemptWorst !== null && attemptSignalComparisons.every((entry) => entry.passed === true)
-		if (
-			!exactJson(attempt.worstCase, attemptWorst) ||
-			!exactJson(attempt.signalComparisons, attemptSignalComparisons) ||
-			attempt.passed !== attemptPassed
-		) {
-			throw new Error(`invalid calibration config heldOutAttempts semantic evidence: ${path}`)
+			}
 		}
-		if (attemptPassed && attemptIndex !== parsed.heldOutAttempts.length - 1) {
-			throw new Error(`invalid calibration config continued after a passing held-out attempt: ${path}`)
+		const finalAttempt = parsed.heldOutAttempts[parsed.heldOutAttempts.length - 1]!
+		if (
+			!isRecord(finalAttempt) ||
+			finalAttempt.passed !== true ||
+			!exactJson(finalAttempt.candidate, sel.candidate) ||
+			!exactJson(finalAttempt.results, held.results) ||
+			!exactJson(finalAttempt.worstCase, held.worstCase) ||
+			!exactJson(finalAttempt.signalComparisons, held.signalComparisons)
+		) {
+			throw new Error(
+				`invalid calibration config selected held-out evidence is not final passing attempt: ${path}`,
+			)
 		}
 	}
-	const finalAttempt = parsed.heldOutAttempts[parsed.heldOutAttempts.length - 1]!
-	if (
-		!isRecord(finalAttempt) ||
-		finalAttempt.passed !== true ||
-		!exactJson(finalAttempt.candidate, sel.candidate) ||
-		!exactJson(finalAttempt.results, held.results) ||
-		!exactJson(finalAttempt.worstCase, held.worstCase) ||
-		!exactJson(finalAttempt.signalComparisons, held.signalComparisons)
-	) {
-		throw new Error(
-			`invalid calibration config selected held-out evidence is not final passing attempt: ${path}`,
-		)
+	const allowedPolicies: ReadonlyArray<HeldOutComparisonPolicy> =
+		formatVersion === LEGACY_TUNING_CONFIG_FORMAT_VERSION ? ["directional", "symmetric"] : ["directional"]
+	const validationErrors: Error[] = []
+	let matchedPolicy = false
+	for (const policy of allowedPolicies) {
+		try {
+			validateHeldOutEvidence(policy)
+			matchedPolicy = true
+		} catch (error) {
+			validationErrors.push(error instanceof Error ? error : new Error(String(error)))
+		}
+	}
+	if (!matchedPolicy) {
+		throw validationErrors[0]!
 	}
 	if (!isRecord(parsed.derivation)) {
 		throw new Error(`invalid calibration config derivation (record required): ${path}`)
@@ -1320,14 +1366,21 @@ export const loadTuningConfig = (path: string): LoadedTuningConfig => {
 	if (!isRecord(parsed)) {
 		throw new Error(`malformed calibration config (not a record): ${path}`)
 	}
-	if (parsed.formatVersion !== TUNING_CONFIG_FORMAT_VERSION) {
+	if (
+		parsed.formatVersion !== LEGACY_TUNING_CONFIG_FORMAT_VERSION &&
+		parsed.formatVersion !== TUNING_CONFIG_FORMAT_VERSION
+	) {
 		throw new Error(
 			`unsupported calibration config formatVersion ${String(parsed.formatVersion)} ` +
-				`(expected ${TUNING_CONFIG_FORMAT_VERSION}); refusing: ${path}`,
+				`(expected ${LEGACY_TUNING_CONFIG_FORMAT_VERSION} or ${TUNING_CONFIG_FORMAT_VERSION}); refusing: ${path}`,
 		)
 	}
+	const formatVersion: SupportedTuningConfigFormatVersion =
+		parsed.formatVersion === LEGACY_TUNING_CONFIG_FORMAT_VERSION
+			? LEGACY_TUNING_CONFIG_FORMAT_VERSION
+			: TUNING_CONFIG_FORMAT_VERSION
 	// Complete strict schema validation (S10): all evidence fields required.
-	const document = validateCompleteConfigSchema(parsed, path)
+	const document = validateCompleteConfigSchema(parsed, path, formatVersion)
 	// effective: required, six numeric knobs, no unknown fields.
 	const effectiveRaw = parsed.effective
 	if (!isRecord(effectiveRaw)) {
@@ -1362,7 +1415,7 @@ export const loadTuningConfig = (path: string): LoadedTuningConfig => {
 	}
 	return {
 		overrides,
-		identity: { formatVersion: TUNING_CONFIG_FORMAT_VERSION, configName, sha256 },
+		identity: { formatVersion, configName, sha256 },
 		document,
 	}
 }
