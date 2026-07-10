@@ -105,7 +105,7 @@ import {
 	type LoadedTuningConfig,
 } from "../src/server/archives/config"
 import { requireCalibrationSelection } from "../src/commands/archive"
-import { ArchiveError } from "../src/server/archives/errors"
+import { ArchiveError, archiveErrorMessage } from "../src/server/archives/errors"
 
 const baseMetrics = (over: Partial<CandidateMetrics> = {}): CandidateMetrics => ({
 	logicalBytes: 1_000_000,
@@ -171,6 +171,11 @@ describe("calibration recommendation error handling", () => {
 			await Effect.runPromise(requireCalibrationSelection({ selected, note: "selected" })),
 			selected,
 		)
+	})
+
+	it("renders an expected archive failure without diagnostic stack frames", () => {
+		const error = new ArchiveError({ message: "calibration did not produce a recommendation" })
+		strictEqual(archiveErrorMessage(error), "calibration did not produce a recommendation\n")
 	})
 })
 

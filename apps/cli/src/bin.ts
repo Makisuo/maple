@@ -9,6 +9,7 @@ import { Mode } from "./core/mode"
 import { TelemetryLayer } from "./core/telemetry"
 import { maybeNotifyUpdate } from "./core/update"
 import { WarehouseExecutorFromMode } from "./core/warehouse"
+import { archiveErrorMessage } from "./server/archives/errors"
 import { MAPLE_VERSION } from "./version"
 
 // WarehouseExecutorFromMode needs Mode (which needs MapleConfig). provideMerge
@@ -34,6 +35,12 @@ const MainLayer = WarehouseExecutorFromMode.pipe(
 maybeNotifyUpdate.pipe(
 	Effect.flatMap(() => Command.run(cli, { version: MAPLE_VERSION })),
 	Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
+	Effect.catchTag("@maple/cli/ArchiveError", (error) =>
+		Effect.sync(() => {
+			process.stderr.write(archiveErrorMessage(error))
+			process.exitCode = 1
+		}),
+	),
 	Effect.provide(MainLayer),
 	Effect.provide(TelemetryLayer),
 	BunRuntime.runMain,
