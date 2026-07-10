@@ -314,6 +314,38 @@ describe("loadTuningConfig", () => {
 		}
 	})
 
+	it("accepts a config whose held-out resource cost is lower than the training prediction", () => {
+		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-lower-cost-"))
+		try {
+			const path = join(dir, "cfg.json")
+			const doc = validConfigDoc()
+			for (const result of doc.heldOut.results) result.metrics.peakRssBytes = 100
+			doc.heldOut.worstCase.peakRssBytes = 100
+			const heldOutMetrics = doc.heldOut.results[0]!.metrics
+			const ratio = heldOutMetrics.logicalBytes / doc.selected.worstCase.logicalBytes
+			const signalComparisons = ARCHIVE_SIGNALS.map((signal) => {
+				const comparison = comparePredictedObserved(
+					doc.selected.worstCase,
+					heldOutMetrics,
+					HELD_OUT_TOLERANCES,
+					{ ratio, metrics: new Set(["wallMs", "physicalBytes"]) },
+				)
+				return {
+					signal: signal.name,
+					scaleRatio: ratio,
+					comparisons: comparison.comparisons,
+					passed: comparison.passed,
+				}
+			})
+			doc.heldOut.signalComparisons = signalComparisons
+			doc.heldOutAttempts[0]!.signalComparisons = signalComparisons
+			writeFileSync(path, JSON.stringify(doc))
+			strictEqual(loadTuningConfig(path).identity.configName, "cfg.json")
+		} finally {
+			rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
 	it("rejects an unknown top-level field (strict schema)", () => {
 		const dir = mkdtempSync(join(tmpdir(), "maple-loadcfg-"))
 		try {

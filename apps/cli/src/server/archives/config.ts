@@ -429,7 +429,10 @@ const expectedComparisons = (
 				? Math.max(0, (p - o) / p)
 				: 0
 			: p > 0
-				? Math.abs(o - p) / p
+				? // Resource costs are directional: a lower observed cost is safe.
+					// This must mirror comparePredictedObserved exactly, otherwise a
+					// freshly written config cannot pass its own semantic validation.
+					Math.max(0, (o - p) / p)
 				: o === 0
 					? 0
 					: null
