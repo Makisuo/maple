@@ -379,6 +379,33 @@ describe("calibration measurement engine — comparePredictedObserved", () => {
 		ok(!rssCmp.withinTolerance)
 	})
 
+	it("accepts a faster or smaller held-out cost measurement", () => {
+		const pred = baseMetrics({
+			peakRssBytes: 200_000_000,
+			wallMs: 1_000,
+			compressionRatio: 0.5,
+			physicalBytes: 100_000,
+			peakTempDiskBytes: 1_000_000,
+		})
+		const obs = baseMetrics({
+			peakRssBytes: 100_000_000,
+			wallMs: 250,
+			compressionRatio: 0.25,
+			physicalBytes: 25_000,
+			peakTempDiskBytes: 500_000,
+		})
+		const result = comparePredictedObserved(pred, obs, {
+			peakRssBytes: 0.1,
+			wallMs: 0.1,
+			writeThroughputBytesPerSec: 0.1,
+			compressionRatio: 0.1,
+			physicalBytes: 0.1,
+			peakTempDiskBytes: 0.1,
+		})
+		strictEqual(result.passed, true)
+		strictEqual(result.comparisons.find((c) => c.metric === "wallMs")!.relativeDelta, 0)
+	})
+
 	it("throughput is directional (higher observed is better, always passes)", () => {
 		const pred = baseMetrics({ writeThroughputBytesPerSec: 100_000 })
 		const obs = baseMetrics({ writeThroughputBytesPerSec: 200_000 })

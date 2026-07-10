@@ -4,7 +4,8 @@ import * as Flag from "effect/unstable/cli/Flag"
 import * as Argument from "effect/unstable/cli/Argument"
 import { spawn } from "node:child_process"
 import { randomUUID } from "node:crypto"
-import { homedir } from "node:os"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { createArchiveGeneration, runArchiveReconciliation } from "../server/archives/generation"
 import { listActiveGenerations, activeParquetPaths, rebuildCatalog } from "../server/archives/listing"
@@ -735,6 +736,45 @@ const runCandidateChild = (
 	matrixStart: number,
 ): Promise<CandidateResult> => {
 	return new Promise((resolvePromise) => {
+		// Bun creates nonblocking stdio pipes for spawned children. GNU/BSD `time`
+		// writes a large multi-line report on exit, and that report can fail with
+		// EAGAIN when directed at the inherited stderr pipe. Write it to an
+		// independent temporary file instead; stderr remains available for real
+		// worker diagnostics and the report is removed after this one child closes.
+		let timeDir: string
+		try {
+			timeDir = mkdtempSync(join(tmpdir(), "maple-calibration-time-"))
+		} catch (error) {
+			resolvePromise({
+				candidate,
+				signal,
+				metrics: null,
+				ok: false,
+				error: `failed to create time-report directory: ${error instanceof Error ? error.message : String(error)}`,
+			})
+			return
+		}
+		const timeReportPath = join(timeDir, "report.txt")
+		const removeTimeDir = () => {
+			try {
+				rmSync(timeDir, { recursive: true, force: true })
+			} catch {
+				// Best effort only: a measurement-artifact cleanup failure must not
+				// mask the worker outcome or leave the parent process unhandled.
+			}
+		}
+		const readTimeReport = (): { report: string; error?: string } => {
+			try {
+				return { report: readFileSync(timeReportPath, "utf8") }
+			} catch (error) {
+				return {
+					report: "",
+					error: `failed to read /usr/bin/time report: ${error instanceof Error ? error.message : String(error)}`,
+				}
+			} finally {
+				removeTimeDir()
+			}
+		}
 		const args = [
 			"archive",
 			"calibrate-run",
@@ -771,7 +811,7 @@ const runCandidateChild = (
 		]
 		// Spawn under /usr/bin/time in its own process group so the watchdog can
 		// kill the whole group (Maple descendant included), not just /usr/bin/time.
-		const child = spawn("/usr/bin/time", [...timeArgv(), bundlePath, ...args], {
+		const child = spawn("/usr/bin/time", [...timeArgv(), "-o", timeReportPath, bundlePath, ...args], {
 			stdio: ["ignore", "pipe", "pipe"],
 			detached: true,
 		})
@@ -825,11 +865,16 @@ const runCandidateChild = (
 		child.on("error", (error) => {
 			clearTimeout(watchdog)
 			clearInterval(diskPoll)
+			removeTimeDir()
 			resolvePromise({ candidate, signal, metrics: null, ok: false, error: error.message })
 		})
-		child.on("exit", (code) => {
+		// `exit` fires before stdio has necessarily drained.  Wait for `close` so
+		// the next candidate cannot start while this worker still owns its pipes,
+		// and so failure reports include the complete worker diagnostics.
+		child.on("close", (code) => {
 			clearTimeout(watchdog)
 			clearInterval(diskPoll)
+			const timeReport = readTimeReport()
 			if (killedByWatchdog) {
 				resolvePromise({
 					candidate,
@@ -845,18 +890,24 @@ const runCandidateChild = (
 			// cleanup; a JSON line present with a nonzero exit still means the
 			// owned resources may not have been released. Treat nonzero as failure.
 			if (code !== 0) {
+				const fullDiagnostic = `${stderr}\n${stdout}\n${timeReport.report}`
+				const diagnostic =
+					fullDiagnostic.length <= 1600
+						? fullDiagnostic
+						: `${fullDiagnostic.slice(0, 800)}\n… diagnostics truncated …\n${fullDiagnostic.slice(-800)}`
 				resolvePromise({
 					candidate,
 					signal,
 					metrics: null,
 					ok: false,
-					error: `calibrate-run exited ${code} (cleanup or export failure): ${stderr.slice(-400)}`,
+					error: `calibrate-run exited ${code} (cleanup or export failure): ${diagnostic}${timeReport.error ? `\n${timeReport.error}` : ""}`,
 				})
 				return
 			}
 			// Peak RSS: FAIL-CLOSED. Unparseable /usr/bin/time output fails the
 			// candidate (no completion-RSS fallback).
-			const peakRssBytes = parsePeakRss(stderr, process.platform)
+			const peakRssBytes =
+				timeReport.error === undefined ? parsePeakRss(timeReport.report, process.platform) : null
 			if (peakRssBytes === null) {
 				resolvePromise({
 					candidate,

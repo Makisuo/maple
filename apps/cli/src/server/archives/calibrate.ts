@@ -319,10 +319,12 @@ export interface SignalComparison {
  * metrics (wallMs, physicalBytes) do not compare cleanly: a 2×-larger held-out
  * naturally takes ~2× the wall time and bytes. `sizeScaling` rescales the
  * training prediction for those metrics by `ratio` (= heldOut.logicalBytes /
- * training.logicalBytes) before the two-sided check, while peak RSS and peak
- * temp disk remain absolute peaks and throughput/compression are size-invariant
- * rates compared directly. The recorded `predicted` is the adjusted value, and
- * `scaleRatio` is returned so the document is fully auditable.
+ * training.logicalBytes) before the upper-bound check. Every resource cost
+ * (RSS, wall time, bytes, compression ratio, and temp disk) is directional:
+ * lower held-out cost is safe, while only a regression beyond tolerance fails.
+ * Throughput is directional in the opposite sense: higher is safe. The
+ * recorded `predicted` is the adjusted value, and `scaleRatio` is returned so
+ * the document is fully auditable.
  */
 export const comparePredictedObserved = (
 	predicted: CandidateMetrics,
@@ -340,19 +342,16 @@ export const comparePredictedObserved = (
 	const ratio = sizeScaling?.ratio ?? 1
 	const scale = (metric: "wallMs" | "physicalBytes", value: number): number =>
 		sizeScaling && sizeScaling.metrics.has(metric) && Number.isFinite(ratio) ? value * ratio : value
-	const twoSided = (
-		metric: MetricComparison["metric"],
-		p: number,
-		o: number,
-		t: number,
-	): MetricComparison => {
-		const rel = p > 0 ? Math.abs(o - p) / p : o === 0 ? 0 : Number.POSITIVE_INFINITY
+	const cost = (metric: MetricComparison["metric"], p: number, o: number, t: number): MetricComparison => {
+		// Lower resource use is not a model failure. Reject only a cost regression
+		// beyond tolerance; a larger held-out sample can amortize fixed overhead.
+		const rel = p > 0 ? Math.max(0, (o - p) / p) : o === 0 ? 0 : Number.POSITIVE_INFINITY
 		return {
 			metric,
 			predicted: p,
 			observed: o,
 			tolerance: t,
-			withinTolerance: rel <= t,
+			withinTolerance: o <= p * (1 + t),
 			relativeDelta: rel,
 		}
 	}
@@ -374,27 +373,27 @@ export const comparePredictedObserved = (
 		}
 	}
 	const comparisons: MetricComparison[] = [
-		twoSided("peakRssBytes", predicted.peakRssBytes, observed.peakRssBytes, tolerance.peakRssBytes),
-		twoSided("wallMs", scale("wallMs", predicted.wallMs), observed.wallMs, tolerance.wallMs),
+		cost("peakRssBytes", predicted.peakRssBytes, observed.peakRssBytes, tolerance.peakRssBytes),
+		cost("wallMs", scale("wallMs", predicted.wallMs), observed.wallMs, tolerance.wallMs),
 		throughput(
 			"writeThroughputBytesPerSec",
 			predicted.writeThroughputBytesPerSec,
 			observed.writeThroughputBytesPerSec,
 			tolerance.writeThroughputBytesPerSec,
 		),
-		twoSided(
+		cost(
 			"compressionRatio",
 			predicted.compressionRatio,
 			observed.compressionRatio,
 			tolerance.compressionRatio,
 		),
-		twoSided(
+		cost(
 			"physicalBytes",
 			scale("physicalBytes", predicted.physicalBytes),
 			observed.physicalBytes,
 			tolerance.physicalBytes,
 		),
-		twoSided(
+		cost(
 			"peakTempDiskBytes",
 			predicted.peakTempDiskBytes,
 			observed.peakTempDiskBytes,
