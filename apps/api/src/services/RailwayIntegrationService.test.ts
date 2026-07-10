@@ -347,6 +347,31 @@ describe("RailwayIntegrationService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("discover flags the connection only on auth rejections, not transient outages", () => {
+		const testDb = createTestDb(trackedDbs)
+		stubRailwayFetch()
+		return Effect.gen(function* () {
+			const service = yield* RailwayIntegrationService
+			const orgId = asOrgId("org_1")
+			yield* service.connect(orgId, "user_1", ACCOUNT_TOKEN)
+
+			// Transient Railway outage: discovery fails, but the card must NOT
+			// flip to "Reconnect needed".
+			globalThis.fetch = (async () => new Response("oops", { status: 500 })) as typeof fetch
+			const outage = yield* service.discover(orgId).pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(outage))
+			const afterOutage = yield* service.status(orgId)
+			assert.isNull(afterOutage.lastValidationError)
+
+			// A genuine token rejection does flag it.
+			globalThis.fetch = (async () => new Response("Unauthorized", { status: 401 })) as typeof fetch
+			const revoked = yield* service.discover(orgId).pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(revoked))
+			const afterRevocation = yield* service.status(orgId)
+			assert.isNotNull(afterRevocation.lastValidationError)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("an unauthorized report flags the connection for reconnection", () => {
 		const testDb = createTestDb(trackedDbs)
 		stubRailwayFetch()

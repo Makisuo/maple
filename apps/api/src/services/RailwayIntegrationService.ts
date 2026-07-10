@@ -355,9 +355,13 @@ export class RailwayIntegrationService extends Context.Service<
 		) {
 			const token = yield* decryptToken(connection)
 			return yield* fetchRailwayProjects(token).pipe(
-				Effect.tapCause(() =>
+				Effect.tapError((error) =>
 					Effect.gen(function* () {
-						// Best-effort revocation surfacing; the caller still sees the upstream error.
+						// Best-effort revocation surfacing; the caller still sees the
+						// upstream error. Only a genuine auth rejection flags the
+						// connection — a transient Railway outage (timeout, 5xx, DNS)
+						// must not flip the card to "Reconnect needed".
+						if (!error.unauthorized) return
 						const now = yield* Clock.currentTimeMillis
 						yield* database
 							.execute((db) =>
