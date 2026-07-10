@@ -14,10 +14,15 @@ import {
 } from "@/components/icons"
 
 export interface NavItem {
+	/** Stable identity for user sidebar preferences — never derive from href
+	 *  (visibleSignalsNavItems rewrites hrefs when features are gated off). */
+	id: string
 	title: string
 	href: string
 	icon: typeof PulseIcon
 }
+
+export type SidebarGroupId = "main" | "topology" | "signals" | "investigate"
 
 export interface NavSubItem {
 	title: string
@@ -26,18 +31,20 @@ export interface NavSubItem {
 	icon?: typeof PulseIcon
 }
 
-interface SignalsNavItem extends NavItem {
+export interface SignalsNavItem extends NavItem {
 	badge?: string
 	subItems?: NavSubItem[]
 }
 
 export const mainNavItems: NavItem[] = [
 	{
+		id: "overview",
 		title: "Overview",
 		href: "/",
 		icon: HouseIcon,
 	},
 	{
+		id: "chat",
 		title: "Chat",
 		href: "/chat",
 		icon: ChatBubbleSparkleIcon,
@@ -46,11 +53,13 @@ export const mainNavItems: NavItem[] = [
 
 export const topologyNavItems: NavItem[] = [
 	{
+		id: "services",
 		title: "Services",
 		href: "/services",
 		icon: ServerIcon,
 	},
 	{
+		id: "service-map",
 		title: "Service Map",
 		href: "/service-map",
 		icon: NetworkNodesIcon,
@@ -59,26 +68,31 @@ export const topologyNavItems: NavItem[] = [
 
 const signalsNavItems: SignalsNavItem[] = [
 	{
+		id: "traces",
 		title: "Traces",
 		href: "/traces",
 		icon: PulseIcon,
 	},
 	{
+		id: "logs",
 		title: "Logs",
 		href: "/logs",
 		icon: FileIcon,
 	},
 	{
+		id: "metrics",
 		title: "Metrics",
 		href: "/metrics",
 		icon: ChartLineIcon,
 	},
 	{
+		id: "replays",
 		title: "Replays",
 		href: "/replays",
 		icon: PlayRotateClockwiseIcon,
 	},
 	{
+		id: "infrastructure",
 		title: "Infrastructure",
 		href: "/infra",
 		icon: ComputerIcon,
@@ -94,6 +108,7 @@ const signalsNavItems: SignalsNavItem[] = [
 
 export const investigateNavItems: NavItem[] = [
 	{
+		id: "errors",
 		title: "Errors",
 		href: "/errors",
 		icon: CircleWarningIcon,
@@ -106,6 +121,7 @@ export const investigateNavItems: NavItem[] = [
 	// 	icon: ChartBarTrendUpIcon,
 	// },
 	{
+		id: "alerts",
 		title: "Alerts",
 		href: "/alerts",
 		icon: BellIcon,

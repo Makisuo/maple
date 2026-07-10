@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useUser, useClerk } from "@clerk/clerk-react"
 import {
@@ -9,14 +10,16 @@ import {
 	ChevronUpIcon,
 	ChevronRightIcon,
 	GridSquareCirclePlusIcon,
+	PencilIcon,
 } from "@/components/icons"
 import {
 	investigateNavItems,
 	mainNavItems,
 	topologyNavItems,
 	visibleSignalsNavItems,
-	type NavSubItem,
 } from "@/components/dashboard/nav-items"
+import { SidebarEditBar, SidebarNavGroup } from "@/components/dashboard/sidebar-nav-group"
+import { useSidebarPreferences } from "@/hooks/use-sidebar-preferences"
 import { showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { KeyboardIcon } from "@/components/icons"
 import { OrgSwitcher } from "@/components/dashboard/org-switcher"
@@ -40,20 +43,20 @@ import {
 	SidebarGroupLabel,
 	SidebarHeader,
 	SidebarMenu,
-	SidebarMenuBadge,
 	SidebarMenuButton,
 	SidebarMenuItem,
 	SidebarMenuSub,
 	SidebarMenuSubButton,
 	SidebarMenuSubItem,
+	useSidebar,
 } from "@maple/ui/components/ui/sidebar"
+import { cn } from "@maple/ui/utils"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
-import { Badge } from "@maple/ui/components/ui/badge"
 
 function UserAvatar({ imageUrl, initials, name }: { imageUrl?: string; initials: string; name: string }) {
 	return imageUrl ? (
@@ -203,95 +206,62 @@ export function AppSidebar() {
 	const infraEnabled = useInfraEnabled()
 	const signalsItems = visibleSignalsNavItems({ infraEnabled })
 
+	const [editing, setEditing] = useState(false)
+	const { state, setOpen } = useSidebar()
+	const { resetToDefaults, isCustomized } = useSidebarPreferences()
+	// Collapsing the rail mid-edit acts as an implicit Done (prefs save live);
+	// adjust during render instead of an effect.
+	if (editing && state === "collapsed") {
+		setEditing(false)
+	}
+	const inEdit = editing && state === "expanded"
+
 	return (
 		<Sidebar collapsible="icon">
-			<SidebarHeader>
+			<SidebarHeader className={cn(inEdit && "pointer-events-none opacity-60")}>
 				<OrgSwitcher />
 			</SidebarHeader>
-			<SidebarContent>
-				<SidebarGroup>
-					<SidebarGroupContent>
-						<SidebarMenu>
-							{mainNavItems.map((item) => {
-								const isActive = currentPath === item.href
-								return (
-									<SidebarMenuItem key={item.title}>
-										<SidebarMenuButton
-											render={<Link to={item.href} />}
-											tooltip={item.title}
-											isActive={isActive}
-										>
-											<item.icon size={18} />
-											<span>{item.title}</span>
-										</SidebarMenuButton>
-									</SidebarMenuItem>
-								)
-							})}
-						</SidebarMenu>
-					</SidebarGroupContent>
-				</SidebarGroup>
+			{inEdit ? (
+				<SidebarEditBar
+					isCustomized={isCustomized}
+					onReset={resetToDefaults}
+					onDone={() => setEditing(false)}
+				/>
+			) : null}
+			<SidebarContent
+				onKeyDown={(e) => {
+					if (e.key === "Escape") setEditing(false)
+				}}
+			>
+				<SidebarNavGroup
+					groupId="main"
+					items={mainNavItems}
+					currentPath={currentPath}
+					editing={inEdit}
+				/>
+				<SidebarNavGroup
+					groupId="topology"
+					items={topologyNavItems}
+					currentPath={currentPath}
+					editing={inEdit}
+				/>
+				<SidebarNavGroup
+					groupId="signals"
+					items={signalsItems}
+					currentPath={currentPath}
+					editing={inEdit}
+				/>
+				<SidebarNavGroup
+					groupId="investigate"
+					items={investigateNavItems}
+					currentPath={currentPath}
+					editing={inEdit}
+				/>
 
-				{[topologyNavItems, signalsItems, investigateNavItems].map((group) => (
-					<SidebarGroup key={group[0].title}>
-						<SidebarGroupContent>
-							<SidebarMenu>
-								{group.map((item) => {
-									const isActive = currentPath.startsWith(item.href)
-									const subItems =
-										"subItems" in item
-											? (item.subItems as NavSubItem[] | undefined)
-											: undefined
-									return (
-										<SidebarMenuItem key={item.title}>
-											<SidebarMenuButton
-												render={<Link to={item.href} />}
-												tooltip={item.title}
-												isActive={isActive}
-											>
-												<item.icon size={18} />
-												<span>{item.title}</span>
-											</SidebarMenuButton>
-											{"badge" in item && (item.badge as string) ? (
-												<SidebarMenuBadge>
-													<Badge
-														variant="secondary"
-														className="text-[10px] px-1.5 py-0 h-4 font-medium"
-													>
-														{item.badge as string}
-													</Badge>
-												</SidebarMenuBadge>
-											) : null}
-											{subItems && isActive ? (
-												<SidebarMenuSub>
-													{subItems.map((sub) => {
-														const subActive =
-															sub.href === item.href
-																? currentPath === item.href ||
-																	currentPath === `${item.href}/`
-																: currentPath.startsWith(sub.href)
-														return (
-															<SidebarMenuSubItem key={sub.title}>
-																<SidebarMenuSubButton
-																	render={<Link to={sub.href} />}
-																	isActive={subActive}
-																>
-																	{sub.icon ? <sub.icon size={14} /> : null}
-																	<span>{sub.title}</span>
-																</SidebarMenuSubButton>
-															</SidebarMenuSubItem>
-														)
-													})}
-												</SidebarMenuSub>
-											) : null}
-										</SidebarMenuItem>
-									)
-								})}
-							</SidebarMenu>
-						</SidebarGroupContent>
-					</SidebarGroup>
-				))}
-
-				<Collapsible defaultOpen className="group/dashboards flex flex-col">
+				<Collapsible
+					defaultOpen
+					className={cn("group/dashboards flex flex-col", inEdit && "pointer-events-none opacity-60")}
+				>
 					<SidebarGroup className="flex flex-col">
 						<SidebarGroupLabel render={<CollapsibleTrigger />}>
 							<GridSquareCirclePlusIcon size={14} className="mr-1 !size-3.5" />
@@ -358,7 +328,7 @@ export function AppSidebar() {
 					</SidebarGroup>
 				</Collapsible>
 
-				<SidebarGroup>
+				<SidebarGroup className={cn(inEdit && "pointer-events-none opacity-60")}>
 					<SidebarGroupContent>
 						<SidebarMenu>
 							<SidebarMenuItem>
@@ -412,11 +382,23 @@ export function AppSidebar() {
 									<span>Settings</span>
 								</SidebarMenuButton>
 							</SidebarMenuItem>
+							<SidebarMenuItem>
+								<SidebarMenuButton
+									tooltip="Customize sidebar"
+									onClick={() => {
+										setOpen(true)
+										setEditing(true)
+									}}
+								>
+									<PencilIcon size={18} />
+									<span>Customize sidebar</span>
+								</SidebarMenuButton>
+							</SidebarMenuItem>
 						</SidebarMenu>
 					</SidebarGroupContent>
 				</SidebarGroup>
 			</SidebarContent>
-			<SidebarFooter>
+			<SidebarFooter className={cn(inEdit && "pointer-events-none opacity-60")}>
 				<SidebarMenu>
 					<SidebarMenuItem>{isClerkAuthEnabled ? <UserMenu /> : <GuestMenu />}</SidebarMenuItem>
 				</SidebarMenu>
