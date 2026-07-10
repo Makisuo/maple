@@ -6,6 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { CloudflareAccountCard } from "@/components/integrations/cloudflare-account-card"
 import { GithubIntegrationCard } from "@/components/integrations/github-integration-card"
 import { HazelIntegrationCard } from "@/components/integrations/hazel-integration-card"
+import { RailwayIntegrationCard } from "@/components/integrations/railway-integration-card"
 import {
 	IntegrationCatalog,
 	IntegrationIconPlate,
@@ -22,7 +23,15 @@ import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon } from "@/components/ic
 
 const IntegrationsSearch = Schema.Struct({
 	integration: Schema.optional(
-		Schema.Literals(["cloudflare", "prometheus", "planetscale", "warpstream", "hazel", "github"]),
+		Schema.Literals([
+			"cloudflare",
+			"prometheus",
+			"planetscale",
+			"warpstream",
+			"hazel",
+			"github",
+			"railway",
+		]),
 	),
 })
 
@@ -96,6 +105,8 @@ function IntegrationsPage() {
 					<HazelIntegrationCard />
 				) : integration === "github" ? (
 					<GithubIntegrationCard />
+				) : integration === "railway" ? (
+					<RailwayIntegrationCard />
 				) : integration === "planetscale" ? (
 					<ScrapeTargetsSection sourceFilter="planetscale" />
 				) : (

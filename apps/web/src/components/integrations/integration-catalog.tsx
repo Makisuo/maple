@@ -9,12 +9,20 @@ import {
 	HazelIcon,
 	PlanetScaleIcon,
 	PrometheusIcon,
+	RailwayIcon,
 	WarpStreamIcon,
 } from "@/components/icons"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
-export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warpstream" | "hazel" | "github"
+export type IntegrationId =
+	| "cloudflare"
+	| "prometheus"
+	| "planetscale"
+	| "warpstream"
+	| "hazel"
+	| "github"
+	| "railway"
 
 /**
  * Third-party brand accents for the icon-plate wash — no app token applies.
@@ -76,6 +84,17 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		docsUrl: "https://maple.dev/docs/integrations/warpstream",
 	},
 	{
+		id: "railway",
+		name: "Railway",
+		description:
+			"Paste a Railway API token — Maple streams service logs and collects CPU, memory, network, and disk metrics.",
+		icon: RailwayIcon,
+		// Railway's mark is monochrome — neutral wash that works in both themes.
+		accent: "#8B8B8B",
+		iconClassName: "text-foreground",
+		docsUrl: "https://maple.dev/docs/integrations/railway",
+	},
+	{
 		id: "hazel",
 		name: "Hazel",
 		description:
@@ -129,6 +148,11 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 			reactivityKeys: ["githubIntegrationStatus"],
 		}),
 	)
+	const railwayResult = useAtomValue(
+		MapleApiAtomClient.query("railway", "status", {
+			reactivityKeys: ["railwayIntegrationStatus"],
+		}),
+	)
 
 	const cloudflare: CardStatus | null = Result.builder(cloudflareAccountResult)
 		.onSuccess(
@@ -180,6 +204,19 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		.onInitial(() => null)
 		.orElse(() => STATUS_UNAVAILABLE)
 
+	const railway: CardStatus | null = Result.builder(railwayResult)
+		.onSuccess((status): CardStatus => {
+			if (!status.connected) return NOT_CONNECTED
+			if (status.lastValidationError) return { label: "Reconnect needed", variant: "warning" }
+			if (status.targetCount === 0) return { label: "Connected", variant: "success" }
+			return {
+				label: `${status.targetCount} environment${status.targetCount === 1 ? "" : "s"}`,
+				variant: status.erroredTargetCount > 0 ? "warning" : "success",
+			}
+		})
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
+
 	return {
 		cloudflare,
 		prometheus: scrapeStatus("prometheus"),
@@ -188,6 +225,7 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		warpstream: { label: "Via Prometheus", variant: "outline" },
 		hazel,
 		github,
+		railway,
 	}
 }
 
