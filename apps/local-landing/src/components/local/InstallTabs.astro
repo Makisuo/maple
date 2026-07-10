@@ -5,8 +5,8 @@
  * Renders inside the docs `.docs-content` prose column, so every element carries
  * an explicit scoped class (the docs "prose" is hand-rolled `.docs-content X`
  * descendant rules in global.css — Tailwind utilities and `not-prose` lose to it,
- * scoped classes win). Mirrors LocalHero's terminal frame + copy button and
- * Quickstart's tab-trigger/tab-panel pattern. Tokens from global.css only.
+ * scoped classes win). Uses the shared terminal-frame + copy-button styling
+ * and a tab-trigger/tab-panel pattern. Tokens from global.css only.
  *
  * Inline `<code>` inside blurbs/notes is injected via set:html, so its styling
  * lives under `:global(code)` rules below.

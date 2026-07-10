@@ -2,9 +2,8 @@
 /**
  * LocalLoopback — the /local page's signature data-flow diagram.
  *
- * A page-only elevation of the docs-tuned `LocalFlow.astro` (left untouched so
- * the docs keep their compact linear strip). Here the flow is drawn as a closed
- * loop: telemetry moves forward through the pipeline along marching-ants wires,
+ * The flow is drawn as a closed loop: telemetry moves forward through the
+ * pipeline along marching-ants wires,
  * then an animated return rail carries it back — making "nothing leaves
  * 127.0.0.1" literal. Reuses global tokens + the service-map dash-flow cadence.
  */
@@ -57,7 +56,7 @@ const nodes = [
 		background: var(--bg-deep);
 		overflow: hidden;
 	}
-	/* Dot grid, faded to the right — echoes the service map + LocalFlow. */
+	/* Dot grid, faded to the right — echoes the service map. */
 	.llb::before {
 		content: "";
 		position: absolute;
