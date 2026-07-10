@@ -109,7 +109,9 @@ export const runLogStream = (
 			// bounded by MAX_BUFFERED_ENTRIES with oldest-first eviction.
 			const error = outcome.failure
 			if (error.status === 402) {
-				state.droppedSinceLastReport += entries.length
+				// `dropped` (pre-flush overflow evictions) was reset above — carry it
+				// into the count alongside the batch this branch is discarding.
+				state.droppedSinceLastReport += dropped + entries.length
 			} else {
 				const room = MAX_BUFFERED_ENTRIES - state.buffer.length
 				const requeued = entries.slice(Math.max(0, entries.length - room))
