@@ -98,7 +98,12 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 	const groups = new Map<string, CoercedRow[]>()
 
 	for (const row of rows) {
-		const key = `${row.serviceName}::${row.serviceNamespace}::${row.environment}`
+		// The web UI routes and filters service detail by service name +
+		// environment; namespace is display metadata, not part of that identity.
+		// Collapse namespace variants here so a tiny legacy/missing-namespace slice
+		// cannot surface as a second, misleading row that links to the combined
+		// service detail page.
+		const key = `${row.serviceName}::${row.environment}`
 		const group = groups.get(key)
 		if (group) {
 			group.push(row)
@@ -110,6 +115,9 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 	const results: ServiceOverview[] = []
 
 	for (const group of groups.values()) {
+		const representative = group.reduce((best, row) =>
+			row.estimatedSpanCount > best.estimatedSpanCount ? row : best,
+		)
 		const totalSpans = group.reduce((sum, r) => sum + r.spanCount, 0)
 		const totalErrors = group.reduce((sum, r) => sum + r.errorCount, 0)
 		const totalEstimated = group.reduce((sum, r) => sum + r.estimatedSpanCount, 0)
@@ -151,9 +159,11 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 			.sort((a, b) => b.percentage - a.percentage)
 
 		results.push({
-			serviceName: group[0].serviceName,
-			serviceNamespace: group[0].serviceNamespace,
-			environment: group[0].environment,
+			serviceName: representative.serviceName,
+			// Keep the dominant namespace for display and baseline matching while
+			// the metrics above represent every namespace variant of this service.
+			serviceNamespace: representative.serviceNamespace,
+			environment: representative.environment,
 			commits,
 			p50LatencyMs: p50,
 			p95LatencyMs: p95,

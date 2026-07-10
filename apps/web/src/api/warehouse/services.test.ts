@@ -32,6 +32,7 @@ const END = "2026-02-01 01:00:00"
 // (estimatedSpanCount == spanCount), so sum(SampleRate) alone yields no estimate.
 const overviewRow = {
 	serviceName: "frontend",
+	serviceNamespace: "web",
 	environment: "production",
 	commitSha: "abc1234",
 	throughput: 100,
@@ -203,6 +204,51 @@ describe("getServiceOverview throughput resolution", () => {
 
 			assert.strictEqual(data.length, 1)
 			assert.strictEqual(data[0].errorRate, 0.05)
+		}),
+	)
+
+	it.effect("collapses namespace variants that route to the same service detail", () =>
+		Effect.gen(function* () {
+			runWarehouseQueryMock.mockReturnValue(
+				Effect.succeed({
+					data: [
+						{
+							...overviewRow,
+							serviceName: "dash-api",
+							serviceNamespace: "api",
+							throughput: 19_413,
+							spanCount: 19_413,
+							errorCount: 0,
+							estimatedErrorCount: 0,
+							estimatedSpanCount: 194_118.15196827185,
+						},
+						{
+							...overviewRow,
+							serviceName: "dash-api",
+							serviceNamespace: "",
+							commitSha: "legacy-deploy",
+							throughput: 17,
+							spanCount: 17,
+							errorCount: 17,
+							estimatedErrorCount: 169.9896246566982,
+							estimatedSpanCount: 169.9896246566982,
+						},
+					],
+				}),
+			)
+
+			const { data } = yield* getServiceOverview({
+				data: { startTime: START, endTime: END },
+			})
+
+			assert.strictEqual(data.length, 1)
+			assert.strictEqual(data[0].serviceName, "dash-api")
+			assert.strictEqual(data[0].serviceNamespace, "api")
+			assert.ok(data[0].errorRate < 0.001, `errorRate=${data[0].errorRate}`)
+			assert.ok(
+				Math.abs(data[0].errorRate - 169.9896246566982 / (194_118.15196827185 + 169.9896246566982)) <
+					1e-12,
+			)
 		}),
 	)
 })
