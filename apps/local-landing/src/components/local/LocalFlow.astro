@@ -1,0 +1,158 @@
+---
+/**
+ * LocalFlow — a compact left-to-right data-flow strip showing how telemetry
+ * moves through local mode: OTLP exporter → ingest → embedded chDB → query API
+ * → dashboard / CLI. Reuses the dot-grid motif and global.css tokens.
+ */
+const nodes = [
+	{ label: "OTLP exporter", sub: "your app / SDK" },
+	{ label: "POST /v1/*", sub: "ingest · :4318" },
+	{ label: "chDB store", sub: "~/.maple/data" },
+	{ label: "POST /local/query", sub: "query API" },
+	{ label: "dashboard · CLI", sub: "read your data" },
+];
+---
+
+<figure class="lf" aria-label="Local mode data flow">
+	<ol class="lf__track" role="list">
+		{nodes.map((n, i) => (
+			<li class="lf__node">
+				<span class="lf__idx" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+				<span class="lf__label">{n.label}</span>
+				<span class="lf__sub">{n.sub}</span>
+				{i < nodes.length - 1 ? <span class="lf__arrow" aria-hidden="true">→</span> : null}
+			</li>
+		))}
+	</ol>
+	<figcaption class="lf__cap">
+		One process owns the chDB connection; short-lived CLI commands read it over the same
+		<code>/local/query</code> HTTP contract the dashboard uses.
+	</figcaption>
+</figure>
+
+<style>
+	.lf {
+		position: relative;
+		margin: 8px 0 4px;
+		padding: 22px 18px 18px;
+		border: 1px solid var(--border);
+		background: var(--bg-deep);
+		overflow: hidden;
+	}
+	/* Subtle dot grid, faded to the right — echoes the docs index / service map. */
+	.lf::before {
+		content: "";
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		pointer-events: none;
+		background-image: radial-gradient(
+			color-mix(in oklab, var(--border) 95%, transparent) 1px,
+			transparent 1px
+		);
+		background-size: 18px 18px;
+		mask-image: linear-gradient(to right, black 0%, transparent 85%);
+		opacity: 0.5;
+	}
+
+	.lf__track {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		align-items: stretch;
+		gap: 0;
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		overflow-x: auto;
+	}
+	.lf__node {
+		position: relative;
+		flex: 1 1 0;
+		min-width: 132px;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		padding: 12px 30px 12px 14px;
+		border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+		background: color-mix(in oklab, var(--bg-elevated) 60%, transparent);
+		transition: border-color 180ms ease, background-color 180ms ease;
+	}
+	.lf__node + .lf__node {
+		margin-left: 14px;
+	}
+	.lf__node:hover {
+		border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+		background: color-mix(in oklab, var(--accent) 7%, var(--bg-elevated));
+	}
+	.lf__idx {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.12em;
+		color: var(--accent);
+		opacity: 0.8;
+	}
+	.lf__label {
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		color: var(--foreground);
+		letter-spacing: -0.01em;
+	}
+	.lf__sub {
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		color: var(--muted-foreground);
+	}
+	.lf__arrow {
+		position: absolute;
+		right: -11px;
+		top: 50%;
+		transform: translateY(-50%);
+		z-index: 2;
+		font-family: var(--font-mono);
+		font-size: 14px;
+		line-height: 1;
+		color: color-mix(in oklab, var(--accent) 70%, var(--muted-foreground));
+		background: var(--bg-deep);
+		padding: 2px 1px;
+	}
+
+	.lf__cap {
+		position: relative;
+		z-index: 1;
+		margin: 16px 0 0;
+		font-size: 12px;
+		line-height: 1.6;
+		color: var(--muted-foreground);
+		max-width: 64ch;
+	}
+	.lf__cap code {
+		font-family: var(--font-mono);
+		font-size: 11.5px;
+		color: var(--accent);
+		background: color-mix(in oklab, var(--bg-elevated) 80%, transparent);
+		border: 1px solid var(--border);
+		padding: 1px 5px;
+	}
+
+	@media (max-width: 720px) {
+		.lf__track {
+			flex-direction: column;
+			gap: 0;
+		}
+		.lf__node {
+			min-width: 0;
+			padding-right: 14px;
+		}
+		.lf__node + .lf__node {
+			margin-left: 0;
+			margin-top: 20px;
+		}
+		.lf__arrow {
+			right: 50%;
+			top: auto;
+			bottom: -17px;
+			transform: translateX(50%) rotate(90deg);
+		}
+	}
+</style>

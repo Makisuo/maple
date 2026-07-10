@@ -1,0 +1,93 @@
+---
+// Honest comparison against the usual ways of looking at OTel data locally.
+// Keep factual and terse — each row links to the project it describes.
+const rows = [
+    {
+        name: "Maple Local",
+        href: "/",
+        install: "One binary (brew or curl)",
+        signals: "Traces, logs, metrics",
+        storage: "Embedded ClickHouse (chDB)",
+        auth: "None — loopback only",
+        cli: "Full query CLI",
+        highlight: true,
+    },
+    {
+        name: "Jaeger all-in-one",
+        href: "https://www.jaegertracing.io/",
+        install: "One binary or docker",
+        signals: "Traces only",
+        storage: "In-memory / Badger",
+        auth: "None",
+        cli: "—",
+    },
+    {
+        name: "SigNoz",
+        href: "https://signoz.io/",
+        install: "docker-compose (multi-container)",
+        signals: "Traces, logs, metrics",
+        storage: "ClickHouse (separate container)",
+        auth: "Account + login",
+        cli: "—",
+    },
+    {
+        name: "otel-tui",
+        href: "https://github.com/ymtdzzz/otel-tui",
+        install: "One binary",
+        signals: "Traces, logs, metrics",
+        storage: "In-memory (lost on exit)",
+        auth: "None",
+        cli: "TUI only",
+    },
+    {
+        name: "Grafana LGTM stack",
+        href: "https://github.com/grafana/docker-otel-lgtm",
+        install: "docker (multi-service image)",
+        signals: "Traces, logs, metrics",
+        storage: "Tempo + Loki + Prometheus",
+        auth: "Login (default creds)",
+        cli: "—",
+    },
+];
+---
+
+<div class="overflow-x-auto border border-border bg-bg-elevated">
+    <table class="w-full min-w-[720px] text-left text-xs">
+        <thead>
+            <tr class="border-b border-border">
+                <th class="px-5 py-3.5 text-[10px] uppercase tracking-wider text-fg-muted font-medium">Tool</th>
+                <th class="px-5 py-3.5 text-[10px] uppercase tracking-wider text-fg-muted font-medium">Install footprint</th>
+                <th class="px-5 py-3.5 text-[10px] uppercase tracking-wider text-fg-muted font-medium">Signals</th>
+                <th class="px-5 py-3.5 text-[10px] uppercase tracking-wider text-fg-muted font-medium">Storage</th>
+                <th class="px-5 py-3.5 text-[10px] uppercase tracking-wider text-fg-muted font-medium">Auth</th>
+                <th class="px-5 py-3.5 text-[10px] uppercase tracking-wider text-fg-muted font-medium">Query CLI</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+            {
+                rows.map((r) => (
+                    <tr class={r.highlight ? "bg-accent/5" : undefined}>
+                        <td class="px-5 py-3.5 font-medium text-fg whitespace-nowrap">
+                            {r.href.startsWith("http") ? (
+                                <a href={r.href} target="_blank" rel="noopener noreferrer" class="hover:text-accent transition-colors">
+                                    {r.name}
+                                </a>
+                            ) : (
+                                <span class={r.highlight ? "text-accent" : undefined}>{r.name}</span>
+                            )}
+                        </td>
+                        <td class="px-5 py-3.5 text-fg-muted">{r.install}</td>
+                        <td class="px-5 py-3.5 text-fg-muted">{r.signals}</td>
+                        <td class="px-5 py-3.5 text-fg-muted">{r.storage}</td>
+                        <td class="px-5 py-3.5 text-fg-muted">{r.auth}</td>
+                        <td class="px-5 py-3.5 text-fg-muted">{r.cli}</td>
+                    </tr>
+                ))
+            }
+        </tbody>
+    </table>
+</div>
+<p class="mt-4 text-[11px] text-fg-muted leading-relaxed">
+    All of these are good tools — the comparison is about local, single-developer workflows, not production
+    deployments. Details reflect each project's default local/dev setup as of mid-2026.
+</p>

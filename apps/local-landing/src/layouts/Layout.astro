@@ -1,0 +1,54 @@
+---
+import "../styles/global.css";
+
+interface Props {
+    title?: string;
+    description?: string;
+    image?: string;
+    ogType?: "website" | "article";
+}
+
+const {
+    title = "Maple Local — Local OpenTelemetry Traces, Logs & Metrics in One Binary",
+    description = "A single binary that ingests OTLP, stores it in an embedded ClickHouse, and serves a full observability dashboard — all on localhost. No cloud, no account, no docker-compose.",
+    image = "/og-image.png",
+    ogType = "website",
+} = Astro.props;
+
+const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
+const absoluteImage = image.startsWith("http")
+    ? image
+    : new URL(image, Astro.site).toString();
+---
+
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="icon" href="/favicon.ico" />
+        <link rel="apple-touch-icon" sizes="192x192" href="/logo192.png" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content={description} />
+        <meta name="theme-color" content="#272219" />
+        <meta name="robots" content="index,follow" />
+        <link rel="canonical" href={canonicalUrl} />
+        <meta property="og:type" content={ogType} />
+        <meta property="og:site_name" content="Maple Local" />
+        <meta property="og:locale" content="en_US" />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+        <meta property="og:image" content={absoluteImage} />
+        <meta property="og:url" content={canonicalUrl} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:site" content="@maple_dev" />
+        <meta name="twitter:title" content={title} />
+        <meta name="twitter:description" content={description} />
+        <meta name="twitter:image" content={absoluteImage} />
+        <meta name="generator" content={Astro.generator} />
+        <title>{title}</title>
+    </head>
+    <body class="min-h-screen antialiased">
+        <slot />
+    </body>
+</html>

@@ -1,0 +1,45 @@
+# https://www.robotstxt.org/robotstxt.html
+
+# Default: allow all crawlers full access.
+User-agent: *
+Disallow:
+
+# Explicitly welcome AI search & answer engines.
+# Citation by AI chatbots is impossible if these are blocked, so we opt in by name.
+User-agent: GPTBot
+Disallow:
+
+User-agent: OAI-SearchBot
+Disallow:
+
+User-agent: ChatGPT-User
+Disallow:
+
+User-agent: ClaudeBot
+Disallow:
+
+User-agent: Claude-SearchBot
+Disallow:
+
+User-agent: Claude-User
+Disallow:
+
+User-agent: anthropic-ai
+Disallow:
+
+User-agent: PerplexityBot
+Disallow:
+
+User-agent: Perplexity-User
+Disallow:
+
+User-agent: Google-Extended
+Disallow:
+
+User-agent: Applebot-Extended
+Disallow:
+
+User-agent: CCBot
+Disallow:
+
+Sitemap: https://maplelocal.dev/sitemap-index.xml

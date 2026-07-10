@@ -1,0 +1,31 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Nav from "../components/Nav.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<Layout title="Page not found — Maple Local" description="This page doesn't exist.">
+    <Nav />
+    <main class="mx-auto flex min-h-[60vh] max-w-6xl flex-col items-start justify-center px-6 py-24">
+        <p class="font-mono text-xs uppercase tracking-wider text-fg-muted">404</p>
+        <h1 class="mt-3 font-display text-3xl sm:text-4xl font-semibold tracking-tight">Page not found</h1>
+        <p class="mt-4 max-w-md text-sm text-fg-muted leading-relaxed">
+            The page you're looking for doesn't exist. Try the docs, or head back to the start.
+        </p>
+        <div class="mt-7 flex flex-wrap items-center gap-3">
+            <a
+                href="/"
+                class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
+            >
+                Home
+            </a>
+            <a
+                href="/docs"
+                class="inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50"
+            >
+                Docs
+            </a>
+        </div>
+    </main>
+    <Footer />
+</Layout>

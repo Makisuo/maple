@@ -1,0 +1,64 @@
+---
+import { getGitHubStars, formatStars } from "../lib/github-stars";
+
+const stars = await getGitHubStars();
+---
+
+<footer class="border-t border-border bg-bg-deep">
+    <div class="border-b border-border">
+        <div class="mx-auto max-w-6xl px-6 py-12 md:py-16">
+            <p class="font-display text-2xl md:text-3xl text-foreground leading-snug max-w-2xl tracking-tight">
+                Observability shouldn't need a deployment. One binary, your machine, your data.
+            </p>
+        </div>
+    </div>
+
+    <div class="mx-auto max-w-6xl px-6 py-12">
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-8">
+            <div class="col-span-2">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="w-7 h-7 bg-primary flex items-center justify-center">
+                        <span class="text-primary-foreground text-xs font-bold">M</span>
+                    </div>
+                    <span class="text-foreground text-sm font-medium">Maple Local</span>
+                </div>
+                <p class="text-fg-muted text-xs leading-relaxed max-w-xs">
+                    A local OpenTelemetry tool: OTLP ingest, embedded ClickHouse, query CLI, and a full
+                    dashboard in a single binary. Built by the team behind
+                    <a href="https://maple.dev" class="text-fg hover:text-foreground underline underline-offset-2">maple.dev</a>.
+                </p>
+            </div>
+
+            <div>
+                <h4 class="text-[10px] text-foreground font-medium uppercase tracking-wider mb-4">Docs</h4>
+                <ul class="space-y-2">
+                    <li><a href="/docs/getting-started/install" class="text-fg-muted text-xs hover:text-foreground transition-colors">Install</a></li>
+                    <li><a href="/docs/getting-started/quickstart" class="text-fg-muted text-xs hover:text-foreground transition-colors">Quickstart</a></li>
+                    <li><a href="/docs/sending-data/overview" class="text-fg-muted text-xs hover:text-foreground transition-colors">Sending data</a></li>
+                    <li><a href="/docs/reference/cli" class="text-fg-muted text-xs hover:text-foreground transition-colors">CLI reference</a></li>
+                </ul>
+            </div>
+
+            <div>
+                <h4 class="text-[10px] text-foreground font-medium uppercase tracking-wider mb-4">Project</h4>
+                <ul class="space-y-2">
+                    <li>
+                        <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-foreground transition-colors">
+                            GitHub{stars !== null && <span class="font-mono text-[10px]"> · {formatStars(stars)} ★</span>}
+                        </a>
+                    </li>
+                    <li><a href="https://github.com/Makisuo/maple/releases" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-foreground transition-colors">Releases</a></li>
+                    <li><a href="https://maple.dev" class="text-fg-muted text-xs hover:text-foreground transition-colors">Maple Cloud</a></li>
+                    <li><a href="https://x.com/maple_dev" target="_blank" rel="noopener noreferrer" class="text-fg-muted text-xs hover:text-foreground transition-colors">X / Twitter</a></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="mt-12 pt-6 border-t border-border flex flex-wrap items-center justify-between gap-4">
+            <p class="text-[10px] text-fg-muted tracking-wider">
+                Need hosted, team-wide observability? <a href="https://maple.dev" class="text-fg hover:text-foreground underline underline-offset-2">Maple Cloud</a>
+            </p>
+            <p class="text-[10px] text-fg-muted tracking-wider">&copy; {new Date().getFullYear()} Maple</p>
+        </div>
+    </div>
+</footer>

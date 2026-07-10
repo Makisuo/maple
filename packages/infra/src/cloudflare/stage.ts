@@ -17,6 +17,8 @@ export interface MapleDomains {
 	sync?: string
 	/** Auto-updating local-mode dashboard SPA (the `maple` binary points users here by default). */
 	local?: string
+	/** Standalone Maple Local marketing + docs site (its own apex zone, separate from maple.dev). */
+	localLanding?: string
 }
 
 export const CLOUDFLARE_WORKER_PLACEMENT = { region: "aws:us-east-1" } as const
@@ -29,6 +31,8 @@ const PRD_DOMAINS: MapleDomains = {
 	sync: "sync.maple.dev",
 	landing: "maple.dev",
 	local: "local.maple.dev",
+	// localLanding: "maplelocal.dev" — uncomment once the maplelocal.dev zone is
+	// live in the Cloudflare account; until then the worker deploys on workers.dev.
 }
 
 const STG_DOMAINS: MapleDomains = {
@@ -39,6 +43,7 @@ const STG_DOMAINS: MapleDomains = {
 	sync: "sync-staging.maple.dev",
 	landing: "staging-landing.maple.dev",
 	local: "local-staging.maple.dev",
+	// localLanding: "staging.maplelocal.dev" — uncomment with the prd entry above.
 }
 
 export function parseMapleStage(stage: string): MapleStage {

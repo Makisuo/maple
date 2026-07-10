@@ -1,14 +1,13 @@
 ---
 title: "CLI Reference"
 description: "Every maple command, argument, and flag — plus the server endpoints, environment variables, and troubleshooting for local mode."
-group: "Local Mode"
-order: 2
-draft: true
+group: "Reference"
+order: 1
 ---
 
 The `maple` binary is one CLI with two backends: a local server (`maple start`) and a remote workspace (`maple login`). Every query command runs against whichever is [resolved](#auth-and-configuration) for that invocation. Output is JSON by default — clean enough to pipe into `jq` or an agent.
 
-This page is the complete surface. For a guided walkthrough, start with [Maple Local](/docs/local-mode).
+This page is the complete surface. For a guided walkthrough, start with [Quickstart](/docs/getting-started/quickstart).
 
 ## Global flags
 

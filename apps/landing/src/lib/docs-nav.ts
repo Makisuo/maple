@@ -13,7 +13,6 @@ export const UNIVERSAL_GROUP_ORDER = [
 	"Infrastructure",
 	"Integrations",
 	"Alerting",
-	"Local Mode",
 ] as const
 
 /** Order of SDK-scoped groups (Effect SDK pages). */
@@ -46,7 +45,6 @@ export const HEADER_NAV: HeaderNavItem[] = [
 	{ key: "Infrastructure", icon: "Infrastructure", kind: "group" },
 	{ key: "Integrations", icon: "Integrations", kind: "group" },
 	{ key: "Alerting", icon: "Alerting", kind: "group" },
-	{ key: "Local Mode", icon: "Local Mode", kind: "group" },
 ]
 
 /** Group names (and the synthetic `sdks` key) that have a DocsCategoryIcon glyph. */
@@ -57,7 +55,6 @@ const CATEGORY_ICON_KEYS = new Set<string>([
 	"Infrastructure",
 	"Integrations",
 	"Alerting",
-	"Local Mode",
 	"sdks",
 ])
 

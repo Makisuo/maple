@@ -1,0 +1,52 @@
+---
+const faqs = [
+    {
+        q: "Is my telemetry sent anywhere?",
+        a: `No. Ingest, storage, and queries all happen in one process bound to 127.0.0.1, and data persists in
+            <code>~/.maple/data</code>. By default the dashboard itself is loaded from <code>local.maple.dev</code>
+            (a static page that talks back to your local server), but your telemetry never leaves the machine.
+            Run <code>maple start --offline</code> to serve the UI from the binary too — then nothing touches the
+            network at all.`,
+    },
+    {
+        q: "What does offline mode do?",
+        a: `<code>maple start --offline</code> serves the dashboard bundled inside the binary from
+            <code>127.0.0.1</code> instead of loading the auto-updating hosted copy. Same-origin, no browser
+            local-network prompt, and it works with no internet connection.`,
+    },
+    {
+        q: "Where does my data live, and how do I wipe it?",
+        a: `Everything is stored in <code>~/.maple/data</code> (override with <code>--data-dir</code>) and survives
+            restarts. <code>maple reset</code> wipes the store; <code>maple start --reset</code> wipes and restarts
+            in one step.`,
+    },
+    {
+        q: "How does this relate to Maple Cloud?",
+        a: `Same query engine, same dashboard — Maple Local runs them on your machine against an embedded
+            ClickHouse, while <a href="https://maple.dev">Maple Cloud</a> is the hosted, team-wide version. Your
+            instrumentation is identical OTLP either way, so pointing the exporter at a cloud ingest endpoint is
+            the only change if you later want shared dashboards, alerting, and retention.`,
+    },
+    {
+        q: "Does it run on Windows?",
+        a: `Not natively yet — builds ship for macOS (Apple Silicon) and Linux (x86_64 and arm64). On Windows,
+            use WSL2 and follow the Linux install.`,
+    },
+];
+---
+
+<div class="divide-y divide-border border border-border bg-bg-elevated">
+    {
+        faqs.map((f) => (
+            <details class="group px-5 py-4">
+                <summary class="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-medium text-fg [&::-webkit-details-marker]:hidden">
+                    {f.q}
+                    <span class="shrink-0 font-mono text-fg-muted transition-transform duration-200 group-open:rotate-45" aria-hidden="true">
+                        +
+                    </span>
+                </summary>
+                <p class="mt-3 text-sm text-fg-muted leading-relaxed [&_code]:text-accent [&_code]:font-mono [&_code]:text-[0.9em] [&_a]:text-fg [&_a]:underline [&_a]:underline-offset-2" set:html={f.a} />
+            </details>
+        ))
+    }
+</div>

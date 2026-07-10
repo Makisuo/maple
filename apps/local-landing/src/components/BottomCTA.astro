@@ -1,0 +1,58 @@
+<section class="relative py-16 md:py-24 lg:py-32 overflow-hidden">
+    <!-- Grid background -->
+    <div class="absolute inset-0 pointer-events-none" style="
+        background-image:
+            linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px),
+            linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px);
+        background-size: 60px 60px;
+        mask-image: radial-gradient(ellipse 60% 50% at 50% 50%, black, transparent);
+    "></div>
+
+    <div class="relative mx-auto max-w-6xl px-6 text-center">
+        <h2 class="font-display text-2xl sm:text-3xl md:text-4xl font-bold text-fg mb-4 tracking-tight">
+            Traces on localhost in under a minute
+        </h2>
+        <p class="text-sm md:text-base text-fg-muted max-w-md mx-auto mb-8">
+            Install the binary, run <code class="text-accent font-mono text-[0.9em]">maple start</code>,
+            and point your OTLP exporter at <code class="text-accent font-mono text-[0.9em]">:4318</code>.
+        </p>
+
+        <div class="mx-auto mb-8 flex max-w-md items-center justify-between gap-3 border border-border bg-bg-elevated px-4 py-3">
+            <code id="cta-install-cmd" class="font-mono text-xs text-fg truncate">brew install Makisuo/tap/maple</code>
+            <button
+                id="cta-copy-btn"
+                type="button"
+                class="shrink-0 rounded-md border border-input bg-input/30 px-2.5 py-1 text-[10px] font-medium text-fg transition-all hover:bg-input/50"
+                aria-label="Copy install command"
+            >
+                Copy
+            </button>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-center gap-3">
+            <a href="/docs/getting-started/quickstart" class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80">
+                Read the quickstart
+            </a>
+            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50">
+                Star on GitHub
+            </a>
+        </div>
+
+        <p class="mt-12 text-[10px] text-fg-muted tracking-wider">
+            No cloud. No account. No data leaves your machine.
+        </p>
+    </div>
+</section>
+
+<script>
+    const btn = document.getElementById("cta-copy-btn");
+    const cmd = document.getElementById("cta-install-cmd");
+    btn?.addEventListener("click", async () => {
+        if (!cmd?.textContent) return;
+        await navigator.clipboard.writeText(cmd.textContent.trim());
+        btn.textContent = "Copied";
+        setTimeout(() => {
+            btn.textContent = "Copy";
+        }, 1500);
+    });
+</script>

@@ -1,0 +1,51 @@
+---
+/**
+ * LocalEyebrow — the section-index label used across the /local page.
+ *
+ * With an `index` it renders a mono number + an accent rule + the label
+ * (e.g. `01 ──── WHY LOCAL`), giving the page an editorial, dev-tool spine.
+ * Without an `index` it degrades to a plain uppercase sub-label, matching the
+ * existing eyebrow style for nested UI-view headings.
+ */
+interface Props {
+	index?: string;
+	label: string;
+}
+const { index, label } = Astro.props;
+---
+
+<div class="le" class:list={[index && "le--indexed"]}>
+	{index ? <span class="le__idx">{index}</span> : null}
+	{index ? <span class="le__rule" aria-hidden="true"></span> : null}
+	<span class="le__label">{label}</span>
+</div>
+
+<style>
+	.le {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		margin-bottom: 14px;
+	}
+	.le__idx {
+		font-family: var(--font-mono);
+		font-size: 11px;
+		font-weight: 500;
+		letter-spacing: 0.04em;
+		color: var(--accent);
+	}
+	.le__rule {
+		width: 28px;
+		height: 1px;
+		background: linear-gradient(to right, var(--accent), transparent);
+	}
+	.le__label {
+		font-size: 10px;
+		letter-spacing: 0.18em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+	.le--indexed .le__label {
+		color: color-mix(in oklab, var(--muted-foreground) 92%, var(--foreground));
+	}
+</style>

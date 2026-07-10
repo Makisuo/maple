@@ -1,0 +1,278 @@
+---
+/**
+ * LocalLoopback — the /local page's signature data-flow diagram.
+ *
+ * A page-only elevation of the docs-tuned `LocalFlow.astro` (left untouched so
+ * the docs keep their compact linear strip). Here the flow is drawn as a closed
+ * loop: telemetry moves forward through the pipeline along marching-ants wires,
+ * then an animated return rail carries it back — making "nothing leaves
+ * 127.0.0.1" literal. Reuses global tokens + the service-map dash-flow cadence.
+ */
+const nodes = [
+	{ label: "OTLP exporter", sub: "your app / SDK" },
+	{ label: "POST /v1/*", sub: "ingest · :4318" },
+	{ label: "chDB store", sub: "~/.maple/data" },
+	{ label: "POST /local/query", sub: "query API" },
+	{ label: "dashboard · CLI", sub: "read it back" },
+];
+---
+
+<figure class="llb" aria-label="Local mode data flow — a closed loop on localhost">
+	<div class="llb__glow" aria-hidden="true"></div>
+
+	<ol class="llb__track" role="list">
+		{nodes.map((n, i) => (
+			<Fragment>
+				<li class="llb__node">
+					<span class="llb__idx" aria-hidden="true">{String(i + 1).padStart(2, "0")}</span>
+					<span class="llb__label">{n.label}</span>
+					<span class="llb__sub">{n.sub}</span>
+				</li>
+				{i < nodes.length - 1 ? <span class="llb__wire" aria-hidden="true" /> : null}
+			</Fragment>
+		))}
+	</ol>
+
+	<div class="llb__loop" aria-hidden="true">
+		<span class="llb__end llb__end--l"></span>
+		<span class="llb__end llb__end--r"></span>
+		<svg class="llb__loopsvg" viewBox="0 0 1000 46" preserveAspectRatio="none">
+			<path class="llb__looppath" d="M 992 1 V 30 H 8 V 1" fill="none" />
+		</svg>
+		<span class="llb__loop-label">↺&nbsp;&nbsp;127.0.0.1 · nothing leaves your machine</span>
+	</div>
+
+	<figcaption class="llb__cap">
+		One process owns the chDB connection; short-lived CLI commands and the dashboard read it back over
+		the same <code>/local/query</code> HTTP contract — a complete loop that never leaves loopback.
+	</figcaption>
+</figure>
+
+<style>
+	.llb {
+		position: relative;
+		margin: 8px 0 4px;
+		padding: 24px 20px 20px;
+		border: 1px solid var(--border);
+		background: var(--bg-deep);
+		overflow: hidden;
+	}
+	/* Dot grid, faded to the right — echoes the service map + LocalFlow. */
+	.llb::before {
+		content: "";
+		position: absolute;
+		inset: 0;
+		z-index: 0;
+		pointer-events: none;
+		background-image: radial-gradient(
+			color-mix(in oklab, var(--border) 95%, transparent) 1px,
+			transparent 1px
+		);
+		background-size: 18px 18px;
+		mask-image: linear-gradient(to right, black 0%, transparent 88%);
+		opacity: 0.5;
+	}
+	/* Soft amber pool behind the loop for depth. */
+	.llb__glow {
+		position: absolute;
+		left: 50%;
+		bottom: -30%;
+		width: 70%;
+		height: 80%;
+		z-index: 0;
+		transform: translateX(-50%);
+		pointer-events: none;
+		background: radial-gradient(
+			ellipse at center,
+			color-mix(in oklab, var(--amber-deep) 16%, transparent),
+			transparent 70%
+		);
+		filter: blur(26px);
+	}
+
+	/* ── Forward track ──────────────────────────────────────── */
+	.llb__track {
+		position: relative;
+		z-index: 1;
+		display: flex;
+		align-items: stretch;
+		gap: 0;
+		list-style: none;
+		margin: 0;
+		padding: 0;
+	}
+	.llb__node {
+		position: relative;
+		flex: 1 1 0;
+		min-width: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		padding: 12px 14px;
+		border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+		background: color-mix(in oklab, var(--bg-elevated) 60%, transparent);
+		transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
+	}
+	.llb__node:hover {
+		border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
+		background: color-mix(in oklab, var(--accent) 8%, var(--bg-elevated));
+		transform: translateY(-2px);
+	}
+	.llb__idx {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.12em;
+		color: var(--accent);
+		opacity: 0.85;
+	}
+	.llb__label {
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		color: var(--foreground);
+		letter-spacing: -0.01em;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.llb__sub {
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+	}
+
+	/* Marching-ants connector between nodes (forward = left → right). */
+	.llb__wire {
+		flex: 0 0 24px;
+		align-self: center;
+		height: 2px;
+		background-image: linear-gradient(
+			to right,
+			var(--accent) 0 6px,
+			transparent 6px 12px
+		);
+		background-size: 12px 2px;
+		background-repeat: repeat-x;
+		opacity: 0.55;
+		animation: llb-march 600ms linear infinite;
+	}
+
+	/* ── Return rail (the loopback) ─────────────────────────── */
+	.llb__loop {
+		position: relative;
+		z-index: 1;
+		height: 46px;
+		margin-top: 4px;
+	}
+	.llb__loopsvg {
+		display: block;
+		width: 100%;
+		height: 46px;
+		overflow: visible;
+	}
+	.llb__looppath {
+		stroke: color-mix(in oklab, var(--accent) 75%, var(--muted-foreground));
+		stroke-width: 1.5;
+		stroke-dasharray: 7 7;
+		vector-effect: non-scaling-stroke;
+		animation: llb-flow 1.4s linear infinite;
+	}
+	/* Endpoint dots where the loop meets the track (HTML — never distorts). */
+	.llb__end {
+		position: absolute;
+		top: -2px;
+		width: 6px;
+		height: 6px;
+		border-radius: 999px;
+		background: var(--accent);
+		box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+	}
+	.llb__end--l {
+		left: 5px;
+	}
+	.llb__end--r {
+		right: 5px;
+	}
+	.llb__loop-label {
+		position: absolute;
+		left: 50%;
+		top: 24px;
+		transform: translateX(-50%);
+		background: var(--bg-deep);
+		padding: 2px 12px;
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		letter-spacing: 0.02em;
+		color: var(--accent);
+		white-space: nowrap;
+	}
+
+	.llb__cap {
+		position: relative;
+		z-index: 1;
+		margin: 18px 0 0;
+		font-size: 12px;
+		line-height: 1.6;
+		color: var(--muted-foreground);
+		max-width: 66ch;
+	}
+	.llb__cap code {
+		font-family: var(--font-mono);
+		font-size: 11.5px;
+		color: var(--accent);
+		background: color-mix(in oklab, var(--bg-elevated) 80%, transparent);
+		border: 1px solid var(--border);
+		padding: 1px 5px;
+	}
+
+	@keyframes llb-march {
+		to {
+			background-position-x: 12px;
+		}
+	}
+	@keyframes llb-flow {
+		to {
+			stroke-dashoffset: -28;
+		}
+	}
+
+	/* ── Mobile: stack nodes, drop the horizontal rails ─────── */
+	@media (max-width: 720px) {
+		.llb__track {
+			flex-direction: column;
+			gap: 10px;
+		}
+		.llb__node {
+			padding: 12px 14px;
+		}
+		.llb__label,
+		.llb__sub {
+			white-space: normal;
+		}
+		.llb__wire {
+			display: none;
+		}
+		.llb__loop {
+			height: auto;
+			margin-top: 14px;
+			text-align: center;
+		}
+		.llb__loopsvg,
+		.llb__end {
+			display: none;
+		}
+		.llb__loop-label {
+			position: static;
+			transform: none;
+			display: inline-block;
+			border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border));
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.llb__wire,
+		.llb__looppath {
+			animation: none !important;
+		}
+	}
+</style>

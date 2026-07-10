@@ -7,6 +7,7 @@ import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createChatFlueWorker } from "./apps/chat-flue/alchemy.run.ts"
 import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
+import { createLocalLandingWorker } from "./apps/local-landing/alchemy.run.ts"
 import { createLocalUiWorker } from "./apps/local-ui/alchemy.run.ts"
 import { createMapleWeb } from "./apps/web/alchemy.run.ts"
 
@@ -72,6 +73,8 @@ const landing = await createLandingWorker({ stage, domains })
 
 const localUi = await createLocalUiWorker({ stage, domains })
 
+const localLanding = await createLocalLandingWorker({ stage, domains })
+
 const alerting = await createAlertingWorker({ stage, domains, mapleDb })
 
 const summary = {
@@ -83,6 +86,7 @@ const summary = {
 	webUrl: domains.web ? `https://${domains.web}` : web.url,
 	landingUrl: domains.landing ? `https://${domains.landing}` : landing.url,
 	localUiUrl: domains.local ? `https://${domains.local}` : localUi.url,
+	localLandingUrl: domains.localLanding ? `https://${domains.localLanding}` : localLanding.url,
 	alertingWorker: alerting.name,
 }
 

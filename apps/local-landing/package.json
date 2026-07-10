@@ -1,0 +1,45 @@
+{
+	"name": "@maple/local-landing",
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "portless",
+		"sync:cli": "mkdir -p public/cli && cp ../../scripts/install.sh public/cli/install && cp ../../scripts/uninstall.sh public/cli/uninstall",
+		"dev:app": "bun run sync:cli && astro dev --port ${PORT:-3392} --host ${HOST:-127.0.0.1}",
+		"build": "bun run sync:cli && astro build",
+		"preview": "astro preview",
+		"astro": "astro"
+	},
+	"dependencies": {
+		"@astrojs/mdx": "^5.0.3",
+		"@astrojs/react": "^4.4.2",
+		"@astrojs/sitemap": "^3.7.0",
+		"@fontsource-variable/geist": "^5.2.9",
+		"@fontsource-variable/geist-mono": "^5.2.8",
+		"@maple/infra": "workspace:*",
+		"@maple/ui": "workspace:*",
+		"@tailwindcss/vite": "catalog:tailwind",
+		"@types/react": "catalog:react",
+		"@types/react-dom": "catalog:react",
+		"alchemy": "^0.93.12",
+		"astro": "^5.17.1",
+		"class-variance-authority": "catalog:ui",
+		"clsx": "catalog:ui",
+		"fuse.js": "^7.4.2",
+		"motion": "^12.40.0",
+		"react": "catalog:react",
+		"react-dom": "catalog:react",
+		"recharts": "catalog:ui",
+		"tailwind-merge": "catalog:tailwind",
+		"tailwindcss": "catalog:tailwind",
+		"tw-animate-css": "catalog:tailwind"
+	},
+	"devDependencies": {
+		"@astrojs/check": "^0.9.9",
+		"typescript": "^6.0.3"
+	},
+	"portless": {
+		"name": "local-landing",
+		"script": "dev:app"
+	}
+}

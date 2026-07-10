@@ -1,0 +1,16 @@
+---
+interface Props {
+    group: string;
+    title: string;
+}
+
+const { group, title } = Astro.props;
+---
+
+<nav aria-label="Breadcrumb" class="flex items-center gap-1.5 text-[10px] text-fg-muted uppercase tracking-wider mb-4">
+    <a href="/docs" class="hover:text-fg transition-colors">Docs</a>
+    <span class="text-border">/</span>
+    <span>{group}</span>
+    <span class="text-border">/</span>
+    <span class="text-fg-muted/80 truncate normal-case tracking-normal text-xs">{title}</span>
+</nav>

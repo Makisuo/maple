@@ -1,0 +1,57 @@
+---
+import { getCollection } from "astro:content";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { GROUP_ORDER } from "../../lib/docs-nav";
+
+const allDocs = await getCollection("docs", ({ data }) => !data.draft);
+
+const groups = new Map<string, typeof allDocs>();
+for (const doc of allDocs) {
+    const group = doc.data.group;
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group)!.push(doc);
+}
+for (const [, items] of groups) {
+    items.sort((a, b) => a.data.order - b.data.order);
+}
+
+const orderedGroups = [...groups.entries()].sort((a, b) => {
+    const ai = GROUP_ORDER.indexOf(a[0] as (typeof GROUP_ORDER)[number]);
+    const bi = GROUP_ORDER.indexOf(b[0] as (typeof GROUP_ORDER)[number]);
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+});
+---
+
+<DocsLayout
+    title="Documentation"
+    description="Documentation for Maple Local — install, quickstart, sending OTLP data, CLI reference, and operations."
+    headings={[]}
+    currentSlug=""
+>
+    <header class="mb-10">
+        <h1 class="font-display text-2xl font-bold text-fg mb-2 tracking-tight">Maple Local documentation</h1>
+        <p class="text-sm text-fg-muted leading-relaxed max-w-xl">
+            Everything you need to run a full OpenTelemetry stack on your machine: install the binary,
+            point an exporter at <code class="text-accent font-mono text-[0.9em]">:4318</code>, and query
+            your traces, logs, and metrics.
+        </p>
+    </header>
+
+    <div class="grid gap-8 sm:grid-cols-2">
+        {orderedGroups.map(([groupName, items]) => (
+            <section class="border border-border bg-bg-elevated p-5">
+                <h2 class="text-[10px] text-fg/75 uppercase tracking-wider font-semibold mb-3">{groupName}</h2>
+                <ul class="space-y-1">
+                    {items.map((doc) => (
+                        <li>
+                            <a href={`/docs/${doc.id}`} class="group block py-1">
+                                <span class="text-sm text-fg group-hover:text-accent transition-colors">{doc.data.title}</span>
+                                <span class="block text-xs text-fg-muted leading-relaxed">{doc.data.description}</span>
+                            </a>
+                        </li>
+                    ))}
+                </ul>
+            </section>
+        ))}
+    </div>
+</DocsLayout>

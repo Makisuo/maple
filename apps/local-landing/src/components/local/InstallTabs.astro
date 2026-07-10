@@ -1,0 +1,463 @@
+---
+/**
+ * InstallTabs — install-method switcher for the Maple Local docs page.
+ *
+ * Renders inside the docs `.docs-content` prose column, so every element carries
+ * an explicit scoped class (the docs "prose" is hand-rolled `.docs-content X`
+ * descendant rules in global.css — Tailwind utilities and `not-prose` lose to it,
+ * scoped classes win). Mirrors LocalHero's terminal frame + copy button and
+ * Quickstart's tab-trigger/tab-panel pattern. Tokens from global.css only.
+ *
+ * Inline `<code>` inside blurbs/notes is injected via set:html, so its styling
+ * lives under `:global(code)` rules below.
+ */
+
+type Method = {
+	id: string;
+	label: string;
+	recommended?: boolean;
+	command: string;
+	blurb: string;
+	upgrade?: string;
+	uninstall: string;
+	notes: string[];
+};
+
+const methods: Method[] = [
+	{
+		id: "homebrew",
+		label: "Homebrew",
+		recommended: true,
+		command: "brew install Makisuo/tap/maple",
+		blurb:
+			"Homebrew downloads the matching release bundle, verifies its checksum, installs <code>maple</code> and <code>libchdb</code> together, and links <code>maple</code> onto your <code>PATH</code>.",
+		upgrade: "brew upgrade maple",
+		uninstall: "brew uninstall maple",
+		notes: [
+			"Homebrew-managed installs block <code>maple update</code> so the package manager stays in charge.",
+			"If Homebrew asks you to trust the tap, run <code>brew trust Makisuo/tap</code> once and retry the install.",
+		],
+	},
+	{
+		id: "script",
+		label: "Install script",
+		command: "curl -fsSL https://maple.dev/cli/install | sh",
+		blurb:
+			"The script is <code>scripts/install.sh</code> — read it first. It detects your OS/arch, downloads the matching bundle from the latest GitHub release, verifies its checksum, installs <code>maple</code> + <code>libchdb</code> into <code>~/.maple/bin</code>, clears the macOS Gatekeeper quarantine, and symlinks <code>maple</code> onto your <code>PATH</code>.",
+		uninstall: "curl -fsSL https://maple.dev/cli/uninstall | sh",
+		notes: [
+			"Your <code>~/.maple/data</code> is kept on uninstall.",
+			"Migrating to Homebrew later? Remove the old PATH symlink so your shell resolves Homebrew's <code>maple</code>.",
+		],
+	},
+];
+
+const defaultId = methods[0].id;
+
+// simpleicons.org — Homebrew (fill), monochrome via currentColor.
+const HOMEBREW_PATH =
+	"M7.938 0a.214.214 0 0 0-.206.156c-.316 1.104.179 2.15.838 2.935.153.181.313.347.476.501a2.039 2.039 0 0 0-.665.02c-1.184.233-2.193.985-2.74 2.532a3.893 3.893 0 0 0-.2 1.466 1.565 1.565 0 0 0-1.156 1.504 1.59 1.59 0 0 0 1.227 1.541l.026 12.046c0 .195.1.377.264.482a.214.214 0 0 0 .008.005c.537.31 2.047.812 5.21.812 3.238 0 4.7-.678 5.181-1.04a.214.214 0 0 0 .008-.007.571.571 0 0 0 .206-.439c.002-.344.002-1.136.002-1.604a.143.143 0 0 1 .147-.144c.397.006.869.006 1.318.005a1.826 1.826 0 0 0 1.832-1.825v-5.804a1.826 1.826 0 0 0-1.825-1.826H16.56a.14.14 0 0 1-.143-.144V10.6h.007v-.001a1.573 1.573 0 0 0 1.356-1.556c0-.816-.627-1.489-1.424-1.563-.025-1.438-.437-2.126-.736-2.58a.214.214 0 0 0-.005-.007c-.364-.51-1.193-1.282-2.275-1.316-.503-.016-.842.124-1.125.254-.217.1-.42.177-.67.22.002-1.286.945-1.981.945-1.981a.214.214 0 0 0 .05-.298s-.087-.122-.21-.26c-.121-.136-.269-.294-.47-.378a.214.214 0 0 0-.079-.017.214.214 0 0 0-.145.055 4.308 4.308 0 0 0-.875 1.101 3.42 3.42 0 0 0-.133.273 3.497 3.497 0 0 0-.381-.846C9.794.978 9.063.436 8.017.016A.214.214 0 0 0 7.939 0zm.156.524c.85.378 1.43.83 1.79 1.403.274.438.426.962.484 1.584a3.07 3.07 0 0 0-.012.462 6.897 6.897 0 0 1-.168-.052 5.487 5.487 0 0 1-1.29-1.106c-.551-.657-.935-1.46-.804-2.291zM11.8 1.618c.07.054.141.101.212.18.034.039.032.04.058.073-.332.308-1.07 1.144-.952 2.453a.214.214 0 0 0 .222.195c.469-.017.782-.172 1.056-.299.273-.126.508-.228.931-.214.875.027 1.639.715 1.939 1.134.295.449.65 1 .663 2.36a1.66 1.66 0 0 0-.41.142 1.938 1.938 0 0 0-1.77-1.16 1.94 1.94 0 0 0-1.87 1.448 1.783 1.783 0 0 0-1.356-.64c-.484 0-.91.205-1.233.517a1.873 1.873 0 0 0-1.85-1.625c-.649 0-1.218.335-1.552.84a3.1 3.1 0 0 1 .157-.735c.51-1.437 1.355-2.045 2.42-2.254.367-.073.664-.011.99.095.325.106.671.262 1.094.342a.214.214 0 0 0 .252-.245c-.112-.67.073-1.266.336-1.744a3.71 3.71 0 0 1 .663-.863zM7.44 6.611a1.442 1.442 0 0 1 1.363 1.925.214.214 0 0 0 .168.283h.005a.214.214 0 0 0 .238-.146 1.373 1.373 0 0 1 2.613-.01.214.214 0 0 0 .417-.09 1.509 1.509 0 0 1 1.504-1.664c.678 0 1.249.445 1.442 1.056a.214.214 0 0 0 .259.143l.15-.04a.214.214 0 0 0 .051-.02 1.139 1.139 0 0 1 1.702.995 1.14 1.14 0 0 1-.985 1.131.214.214 0 0 0-.001 0 2.215 2.215 0 0 0-.485.126 10.65 10.65 0 0 1-1.176.365.214.214 0 0 0-.162.186 1.276 1.276 0 0 1-.146.478 2.07 2.07 0 0 0-.239 1.111l.001.151a.438.438 0 0 1-.16.36.665.665 0 0 1-.43.14.586.586 0 0 1-.588-.59.803.803 0 0 0-.38-.681.214.214 0 0 0-.002-.002c-.24-.145-.43-.37-.532-.636a.214.214 0 0 0-.207-.138 19.469 19.469 0 0 1-5.37-.6l-.003-.002a9.007 9.007 0 0 0-.838-.194h.003a1.16 1.16 0 0 1-.937-1.134c0-.619.488-1.118 1.101-1.14a.214.214 0 0 0 .204-.176 1.443 1.443 0 0 1 1.42-1.187zm8.549 4.106v.455c0 .314.259.573.572.573h1.329a1.397 1.397 0 0 1 1.397 1.397v5.804a1.396 1.396 0 0 1-1.402 1.396.214.214 0 0 0-.002 0c-.448.002-.918 0-1.31-.005a.573.573 0 0 0-.584.573c0 .468 0 1.262-.002 1.603a.214.214 0 0 0 0 .001c0 .042-.019.08-.05.107-.346.26-1.75.95-4.915.95-3.107 0-4.587-.52-4.99-.752a.143.143 0 0 1-.065-.118l-.025-11.955c.145.033.288.07.431.11a.214.214 0 0 0 .003 0c.115.031.246.064.383.097v10.37c0 .129.069.247.18.31.453.217 1.767.732 4.071.732 2.32 0 3.595-.626 4.022-.884a.357.357 0 0 0 .164-.3l.001-10.21c.267-.075.531-.158.792-.254zm-7.99.894a.493.493 0 0 1 .494.493v8.578a.493.493 0 0 1-.493.493.493.493 0 0 1-.494-.493v-8.578A.493.493 0 0 1 8 11.611zm8.652 1.14a.663.663 0 0 0-.662.662v5.208a.663.663 0 0 0 .662.662h1.14a.663.663 0 0 0 .662-.662v-5.209a.663.663 0 0 0-.662-.662zm0 .428h1.14a.233.233 0 0 1 .233.233v5.21a.233.233 0 0 1-.233.232h-1.14a.233.233 0 0 1-.233-.233v-5.209a.233.233 0 0 1 .233-.233z";
+---
+
+<section class="it" data-install-tabs aria-label="Install method">
+	<div class="it__rail" role="tablist" aria-label="Install method">
+		{
+			methods.map((m) => (
+				<button
+					type="button"
+					role="tab"
+					data-tab-trigger={m.id}
+					aria-selected={m.id === defaultId ? "true" : "false"}
+					class="it__tab"
+				>
+					{m.id === "homebrew" ? (
+						<svg class="it__tab-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+							<path d={HOMEBREW_PATH} />
+						</svg>
+					) : (
+						<svg
+							class="it__tab-icon"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.6"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<rect x="2.5" y="4.5" width="19" height="15" rx="2.5" />
+							<polyline points="6.5 9.5 9.5 12 6.5 14.5" />
+							<line x1="12.5" y1="14.5" x2="16.5" y2="14.5" />
+						</svg>
+					)}
+					<span class="it__tab-label">{m.label}</span>
+					{m.recommended ? <span class="it__rec">Recommended</span> : null}
+				</button>
+			))
+		}
+	</div>
+
+	{
+		methods.map((m) => (
+			<div class="it__panel" data-tab-panel={m.id} role="tabpanel" hidden={m.id !== defaultId}>
+				<div class="it__frame">
+					<div class="it__head">
+						<span class="it__dots" aria-hidden="true">
+							<i />
+							<i />
+							<i />
+						</span>
+						<span class="it__platforms">macOS · Linux</span>
+					</div>
+					<div class="it__body">
+						<div class="it__cmd" data-copy={m.command}>
+							<span class="it__prompt" aria-hidden="true">
+								$
+							</span>
+							<code class="it__code">{m.command}</code>
+							<button class="it__copy" type="button" aria-label={`Copy ${m.label} install command`}>
+								copy
+							</button>
+						</div>
+					</div>
+				</div>
+
+				<p class="it__blurb" set:html={m.blurb} />
+
+				<dl class="it__meta">
+					{m.upgrade ? (
+						<div class="it__meta-row">
+							<dt class="it__meta-key">Upgrade</dt>
+							<dd class="it__meta-val">
+								<code class="it__meta-cmd">{m.upgrade}</code>
+							</dd>
+						</div>
+					) : null}
+					<div class="it__meta-row">
+						<dt class="it__meta-key">Uninstall</dt>
+						<dd class="it__meta-val">
+							<code class="it__meta-cmd">{m.uninstall}</code>
+						</dd>
+					</div>
+				</dl>
+
+				<ul class="it__notes">
+					{m.notes.map((n) => (
+						<li class="it__note" set:html={n} />
+					))}
+				</ul>
+			</div>
+		))
+	}
+</section>
+
+<script>
+	for (const root of document.querySelectorAll<HTMLElement>("[data-install-tabs]")) {
+		function setActive(id: string) {
+			root.querySelectorAll<HTMLElement>("[data-tab-trigger]").forEach((btn) => {
+				btn.setAttribute("aria-selected", btn.dataset.tabTrigger === id ? "true" : "false");
+			});
+			root.querySelectorAll<HTMLElement>("[data-tab-panel]").forEach((panel) => {
+				panel.hidden = panel.dataset.tabPanel !== id;
+			});
+		}
+
+		root.addEventListener("click", (event) => {
+			const target = event.target as HTMLElement | null;
+			const trigger = target?.closest<HTMLElement>("[data-tab-trigger]");
+			if (trigger?.dataset.tabTrigger) setActive(trigger.dataset.tabTrigger);
+		});
+
+		// Progressive enhancement: wire copy buttons. Without JS the command is
+		// still fully visible and selectable — the button just does nothing.
+		for (const cmd of root.querySelectorAll<HTMLElement>(".it__cmd[data-copy]")) {
+			const btn = cmd.querySelector<HTMLButtonElement>(".it__copy");
+			const text = cmd.dataset.copy ?? "";
+			btn?.addEventListener("click", async () => {
+				try {
+					await navigator.clipboard.writeText(text);
+					btn.textContent = "copied";
+					btn.classList.add("is-done");
+					setTimeout(() => {
+						btn.textContent = "copy";
+						btn.classList.remove("is-done");
+					}, 1400);
+				} catch {
+					/* clipboard blocked — no-op */
+				}
+			});
+		}
+	}
+</script>
+
+<style>
+	.it {
+		display: block;
+		margin: 4px 0 8px;
+	}
+
+	/* ── Tab rail ───────────────────────────────────────────── */
+	.it__rail {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin: 0 0 14px;
+	}
+	.it__tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--bg-elevated) 45%, transparent);
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		padding: 6px 11px 6px 9px;
+		cursor: pointer;
+		transition:
+			color 140ms ease,
+			border-color 140ms ease,
+			background-color 140ms ease;
+	}
+	.it__tab:hover {
+		color: var(--foreground);
+		border-color: color-mix(in oklab, var(--muted-foreground) 50%, var(--border));
+	}
+	.it__tab[aria-selected="true"] {
+		color: var(--foreground);
+		border-color: var(--accent);
+		background: color-mix(in oklab, var(--accent) 12%, transparent);
+		box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent);
+	}
+	.it__tab-icon {
+		width: 18px;
+		height: 18px;
+		flex: none;
+		opacity: 0.85;
+		transition: opacity 140ms ease;
+	}
+	.it__tab:hover .it__tab-icon,
+	.it__tab[aria-selected="true"] .it__tab-icon {
+		opacity: 1;
+	}
+	.it__rec {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--accent);
+		background: color-mix(in oklab, var(--accent) 14%, transparent);
+		border-radius: 4px;
+		padding: 2px 6px;
+	}
+
+	/* ── Panels ─────────────────────────────────────────────── */
+	.it__panel[hidden] {
+		display: none;
+	}
+
+	/* ── Terminal frame ─────────────────────────────────────── */
+	.it__frame {
+		border: 1px solid var(--border);
+		border-radius: 10px;
+		overflow: hidden;
+		background: color-mix(in oklab, var(--bg-elevated) 30%, transparent);
+		opacity: 0;
+		transform: translateY(6px);
+		animation: it-rise 460ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+	}
+	.it__head {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 9px 13px;
+		background: var(--bg-elevated);
+		border-bottom: 1px solid var(--border);
+	}
+	.it__dots {
+		display: inline-flex;
+		gap: 5px;
+	}
+	.it__dots i {
+		width: 8px;
+		height: 8px;
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+	}
+	.it__platforms {
+		margin-left: auto;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.04em;
+		color: var(--muted-foreground);
+	}
+	.it__body {
+		padding: 15px 16px;
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		line-height: 1.5;
+		background: color-mix(in oklab, var(--bg-deep) 60%, transparent);
+	}
+	.it__cmd {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+	}
+	.it__prompt {
+		color: var(--accent);
+		user-select: none;
+	}
+	.it__code {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow-x: auto;
+		white-space: nowrap;
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		color: var(--foreground);
+		/* reset docs prose inline-code pill */
+		background: none;
+		border: 0;
+		padding: 0;
+	}
+	.it__copy {
+		flex: none;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
+		border: 1px solid var(--border);
+		border-radius: 5px;
+		padding: 3px 8px;
+		cursor: pointer;
+		transition:
+			color 140ms ease,
+			border-color 140ms ease;
+	}
+	.it__copy:hover {
+		color: var(--accent);
+		border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
+	}
+	.it__copy.is-done {
+		color: var(--chart-3);
+		border-color: color-mix(in oklab, var(--chart-3) 55%, var(--border));
+	}
+
+	/* ── Blurb ──────────────────────────────────────────────── */
+	.it__blurb {
+		font-size: 13px;
+		line-height: 1.65;
+		color: var(--muted-foreground);
+		max-width: 64ch;
+		margin: 14px 0 0;
+	}
+
+	/* ── Upgrade / uninstall meta ───────────────────────────── */
+	.it__meta {
+		margin: 14px 0 0;
+		border: 1px solid var(--border);
+		border-radius: 8px;
+		background: color-mix(in oklab, var(--bg-elevated) 40%, transparent);
+		overflow: hidden;
+	}
+	.it__meta-row {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 9px 13px;
+		border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+	}
+	.it__meta-row:last-child {
+		border-bottom: 0;
+	}
+	.it__meta-key {
+		flex: none;
+		width: 8ch;
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.1em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+	.it__meta-val {
+		margin: 0;
+		min-width: 0;
+		overflow-x: auto;
+	}
+	.it__meta-cmd {
+		font-family: var(--font-mono);
+		font-size: 12px;
+		color: var(--foreground);
+		white-space: nowrap;
+		/* reset docs prose inline-code pill */
+		background: none;
+		border: 0;
+		padding: 0;
+	}
+
+	/* ── Notes ──────────────────────────────────────────────── */
+	.it__notes {
+		list-style: none;
+		margin: 12px 0 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+	.it__note {
+		position: relative;
+		padding-left: 16px;
+		font-size: 12px;
+		line-height: 1.6;
+		color: var(--muted-foreground);
+	}
+	.it__note::before {
+		content: "";
+		position: absolute;
+		left: 3px;
+		top: 0.62em;
+		width: 4px;
+		height: 4px;
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--accent) 70%, transparent);
+	}
+
+	/* inline <code> injected via set:html inside blurb/notes */
+	.it__blurb :global(code),
+	.it__note :global(code) {
+		font-family: var(--font-mono);
+		font-size: 0.9em;
+		color: var(--foreground);
+		background: color-mix(in oklab, var(--bg-elevated) 60%, transparent);
+		border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		border-radius: 4px;
+		padding: 0.5px 4px;
+	}
+
+	@keyframes it-rise {
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.it__body {
+			font-size: 11.5px;
+		}
+		.it__tab {
+			font-size: 12px;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.it__frame {
+			opacity: 1;
+			transform: none;
+			animation: none;
+		}
+	}
+</style>

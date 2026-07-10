@@ -6,21 +6,24 @@ import LocalProductHero from "../components/local/LocalProductHero.astro";
 import LocalLoopback from "../components/local/LocalLoopback.astro";
 import LocalCommandGrid from "../components/local/LocalCommandGrid.astro";
 import LocalEyebrow from "../components/local/LocalEyebrow.astro";
+import InstallTabs from "../components/local/InstallTabs.astro";
 import LiveTrace from "../components/live/LiveTrace.astro";
 import LiveLogStream from "../components/live/LiveLogStream.astro";
 import LiveLogsVolumeChart from "../components/live/LiveLogsVolumeChart.tsx";
 import LiveServiceMap from "../components/live/LiveServiceMap.astro";
+import Comparison from "../components/Comparison.astro";
+import Faq from "../components/Faq.astro";
 import BottomCTA from "../components/BottomCTA.astro";
 import Footer from "../components/Footer.astro";
 
-const pageTitle = "Maple Local | Observability on localhost";
+const pageTitle = "Maple Local — Local OpenTelemetry Traces, Logs & Metrics in One Binary";
 const pageDescription =
-    "Run Maple as a single binary on your machine — OTLP ingest, an embedded ClickHouse, a query API, and the dashboard, with no cloud and no auth.";
+    "A single binary that ingests OTLP, stores it in an embedded ClickHouse, and serves a full observability dashboard — all on localhost. No cloud, no account, no docker-compose.";
 
 const valueProps = [
     {
         title: "One binary, zero deps",
-        body: "A single Bun-compiled `maple` executable bundles OTLP ingest, the query API, and the dashboard. No runtime to install, no second language — it talks to ClickHouse in-process via libchdb.",
+        body: "A single Bun-compiled `maple` executable bundles OTLP ingest, the query API, and the dashboard. No runtime to install, no docker-compose, no collector to configure — it talks to ClickHouse in-process via libchdb.",
     },
     {
         title: "Fully local, no auth",
@@ -28,7 +31,7 @@ const valueProps = [
     },
     {
         title: "Embedded ClickHouse",
-        body: "The same column store that powers hosted Maple, running in-process as chDB. Traces, logs, and metrics are queryable in sub-second time the moment they land.",
+        body: "A real column store running in-process as chDB — not an in-memory buffer that forgets on exit. Traces, logs, and metrics are queryable in sub-second time the moment they land.",
     },
     {
         title: "OTLP-native",
@@ -38,7 +41,7 @@ const valueProps = [
 ---
 
 <Layout title={pageTitle} description={pageDescription}>
-    <SeoHead title={pageTitle} description={pageDescription} type="SoftwareApplication" />
+    <SeoHead title={pageTitle} description={pageDescription} type="SoftwareApplication" includeOrganization />
 
     <Nav />
     <LocalProductHero />
@@ -47,14 +50,14 @@ const valueProps = [
     <section class="bg-bg-deep">
         <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
             <div class="max-w-2xl mb-12">
-                <LocalEyebrow index="01" label="Why local" />
+                <LocalEyebrow index="01" label="Why Maple Local" />
                 <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
                     The fastest way to look at OpenTelemetry data
                 </h2>
                 <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
                     Point any OTLP exporter at localhost, open the dashboard, and explore traces, logs, and
-                    metrics — no account, nothing to deploy. Everything is single-tenant: every row is stored
-                    under <code class="text-accent font-mono text-[0.9em]">org_id = "local"</code>.
+                    metrics — no account, nothing to deploy. One install replaces the collector + storage +
+                    UI stack you'd otherwise wire together just to see your spans.
                 </p>
             </div>
 
@@ -98,11 +101,11 @@ const valueProps = [
             <div class="max-w-2xl mb-12">
                 <LocalEyebrow index="03" label="The dashboard" />
                 <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
-                    The same dashboard, on your machine
+                    A full observability UI, on your machine
                 </h2>
                 <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
-                    Hosted Maple's UI, served straight from your binary. Every view below runs against the
-                    local <code class="text-accent font-mono text-[0.9em]">/local/query</code> API reading your
+                    Every view below runs against the local
+                    <code class="text-accent font-mono text-[0.9em]">/local/query</code> API reading your
                     embedded store — no data leaves the machine.
                 </p>
             </div>
@@ -186,12 +189,29 @@ const valueProps = [
         </div>
     </section>
 
-    <!-- 07 — Platforms / install recap. -->
+    <!-- 07 — Comparison vs other local OTel setups. -->
     <section class="bg-bg-deep">
+        <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+            <div class="max-w-2xl mb-12">
+                <LocalEyebrow index="05" label="Alternatives" />
+                <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
+                    How it compares to other local setups
+                </h2>
+                <p class="mt-5 text-sm md:text-base text-fg-muted leading-relaxed">
+                    Plenty of tools can show you OTel data on your machine. The difference is how much you
+                    install, what survives a restart, and whether you can query it.
+                </p>
+            </div>
+            <Comparison />
+        </div>
+    </section>
+
+    <!-- 08 — Platforms / install recap. -->
+    <section class="bg-bg">
         <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
             <div class="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,420px)] gap-12 lg:gap-16 items-start">
                 <div>
-                    <LocalEyebrow index="05" label="Install" />
+                    <LocalEyebrow index="06" label="Install" />
                     <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
                         Two files, one command
                     </h2>
@@ -204,18 +224,16 @@ const valueProps = [
                         your PATH. Prefer a standalone script? The curl installer still works.
                     </p>
 
+                    <div class="mt-7">
+                        <InstallTabs />
+                    </div>
+
                     <div class="mt-7 flex flex-wrap items-center gap-3">
                         <a
-                            href="https://maplelocal.dev/docs"
+                            href="/docs/getting-started/install"
                             class="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
                         >
                             Read the docs
-                        </a>
-                        <a
-                            href="https://maplelocal.dev"
-                            class="inline-flex h-9 items-center justify-center rounded-lg border border-input bg-input/30 px-3 text-xs font-medium text-fg transition-all hover:bg-input/50"
-                        >
-                            Visit maplelocal.dev
                         </a>
                         <a
                             href="https://github.com/Makisuo/maple/releases"
@@ -256,6 +274,21 @@ const valueProps = [
                         <span class="font-mono text-xs text-fg">brew uninstall maple</span>
                     </li>
                 </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- 09 — FAQ. -->
+    <section class="bg-bg-deep">
+        <div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+            <div class="max-w-2xl mb-12">
+                <LocalEyebrow index="07" label="FAQ" />
+                <h2 class="font-display text-3xl sm:text-4xl md:text-5xl font-semibold leading-[1.04] tracking-tight">
+                    Common questions
+                </h2>
+            </div>
+            <div class="max-w-3xl">
+                <Faq />
             </div>
         </div>
     </section>

@@ -178,6 +178,38 @@
         "typescript": "^6.0.3",
       },
     },
+    "apps/local-landing": {
+      "name": "@maple/local-landing",
+      "version": "0.0.1",
+      "dependencies": {
+        "@astrojs/mdx": "^5.0.3",
+        "@astrojs/react": "^4.4.2",
+        "@astrojs/sitemap": "^3.7.0",
+        "@fontsource-variable/geist": "^5.2.9",
+        "@fontsource-variable/geist-mono": "^5.2.8",
+        "@maple/infra": "workspace:*",
+        "@maple/ui": "workspace:*",
+        "@tailwindcss/vite": "catalog:tailwind",
+        "@types/react": "catalog:react",
+        "@types/react-dom": "catalog:react",
+        "alchemy": "^0.93.12",
+        "astro": "^5.17.1",
+        "class-variance-authority": "catalog:ui",
+        "clsx": "catalog:ui",
+        "fuse.js": "^7.4.2",
+        "motion": "^12.40.0",
+        "react": "catalog:react",
+        "react-dom": "catalog:react",
+        "recharts": "catalog:ui",
+        "tailwind-merge": "catalog:tailwind",
+        "tailwindcss": "catalog:tailwind",
+        "tw-animate-css": "catalog:tailwind",
+      },
+      "devDependencies": {
+        "@astrojs/check": "^0.9.9",
+        "typescript": "^6.0.3",
+      },
+    },
     "apps/local-ui": {
       "name": "@maple/local-ui",
       "dependencies": {
@@ -395,7 +427,7 @@
     },
     "lib/effect-sdk": {
       "name": "@maple-dev/effect-sdk",
-      "version": "0.5.0",
+      "version": "0.7.0",
       "dependencies": {
         "std-env": "^4.0.0",
       },
@@ -429,7 +461,7 @@
     },
     "packages/browser": {
       "name": "@maple-dev/browser",
-      "version": "0.1.0",
+      "version": "0.3.0",
       "dependencies": {
         "@opentelemetry/api": "^1.9.0",
         "@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
@@ -1505,6 +1537,8 @@
     "@maple/ingest": ["@maple/ingest@workspace:apps/ingest"],
 
     "@maple/landing": ["@maple/landing@workspace:apps/landing"],
+
+    "@maple/local-landing": ["@maple/local-landing@workspace:apps/local-landing"],
 
     "@maple/local-ui": ["@maple/local-ui@workspace:apps/local-ui"],
 

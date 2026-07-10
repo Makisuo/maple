@@ -1,0 +1,295 @@
+---
+/**
+ * LocalHero — terminal showcase for the Maple Local overview page.
+ *
+ * Renders inside the docs `.docs-content` article column (below the auto
+ * page title), so it leads with a one-line install + the real `maple start`
+ * banner rather than restating the title. Reuses global.css tokens only.
+ */
+const INSTALL = "brew install Makisuo/tap/maple";
+
+// Tidied reproduction of the startup banner from apps/cli/src/commands/server.ts.
+const banner: Array<{ key?: string; value: string; tone?: "amber" | "green" | "dim" | "fg" }> = [
+	{ value: "🍁 maple  · local mode", tone: "amber" },
+	{ value: "● listening on http://127.0.0.1:4318", tone: "green" },
+	{ value: "" },
+	{ key: "OTLP/HTTP", value: "POST /v1/{traces,logs,metrics}" },
+	{ key: "query", value: "POST /local/query" },
+	{ key: "dashboard", value: "https://local.maple.dev", tone: "amber" },
+	{ key: "data", value: "~/.maple/data" },
+	{ key: "pid", value: "48213  · stop with `maple stop`", tone: "dim" },
+];
+
+const stats = [
+	{ cap: "port", val: ":4318" },
+	{ cap: "store", val: "chDB" },
+	{ cap: "signals", val: "traces · logs · metrics" },
+	{ cap: "deps", val: "none" },
+];
+---
+
+<section class="lh" aria-label="Maple Local quickstart">
+	<p class="lh__lead">
+		One Bun-compiled binary — OTLP ingest, an embedded ClickHouse, a query API, and the dashboard —
+		running on <span class="lh__hl">127.0.0.1</span>. No cloud, no Tinybird, no auth.
+	</p>
+
+	<div class="lh__frame live-frame">
+		<div class="lh__head live-frame__head">
+			<span class="lh__dots" aria-hidden="true"><i></i><i></i><i></i></span>
+			<span>~/your-app</span>
+			<span class="live-frame__live"><span class="live-frame__live-dot"></span>local</span>
+		</div>
+
+		<div class="lh__body">
+			<div class="lh__cmd" data-copy={INSTALL}>
+				<span class="lh__prompt" aria-hidden="true">$</span>
+				<code class="lh__install">{INSTALL}</code>
+				<button class="lh__copy" type="button" aria-label="Copy install command">copy</button>
+			</div>
+
+			<div class="lh__cmd lh__cmd--next">
+				<span class="lh__prompt" aria-hidden="true">$</span>
+				<code>maple start</code>
+			</div>
+
+			<pre class="lh__out" aria-label="maple start output">{
+				banner.map((line) => (
+					<div class:list={["lh__row", line.tone && `lh__row--${line.tone}`]}>
+						{line.key ? <span class="lh__row-key">{line.key}</span> : null}
+						<span class="lh__row-val">{line.value}</span>
+					</div>
+				))
+			}</pre>
+		</div>
+	</div>
+
+	<ul class="lh__stats" aria-label="Local mode at a glance">
+		{stats.map((s) => (
+			<li>
+				<span class="lh__stat-cap">{s.cap}</span>
+				<span class="lh__stat-val">{s.val}</span>
+			</li>
+		))}
+	</ul>
+</section>
+
+<script>
+	// Progressive enhancement: wire copy buttons. Without JS the command is still
+	// fully visible and selectable — the button just does nothing.
+	for (const cmd of document.querySelectorAll<HTMLElement>(".lh__cmd[data-copy]")) {
+		const btn = cmd.querySelector<HTMLButtonElement>(".lh__copy");
+		const text = cmd.dataset.copy ?? "";
+		btn?.addEventListener("click", async () => {
+			try {
+				await navigator.clipboard.writeText(text);
+				btn.textContent = "copied";
+				btn.classList.add("is-done");
+				setTimeout(() => {
+					btn.textContent = "copy";
+					btn.classList.remove("is-done");
+				}, 1400);
+			} catch {
+				/* clipboard blocked — no-op */
+			}
+		});
+	}
+</script>
+
+<style>
+	.lh {
+		margin: 4px 0 8px;
+	}
+
+	.lh__lead {
+		font-size: 14px;
+		line-height: 1.6;
+		color: var(--muted-foreground);
+		max-width: 60ch;
+		margin: 0 0 22px;
+	}
+	.lh__hl {
+		font-family: var(--font-mono);
+		color: var(--accent);
+		font-size: 13px;
+	}
+
+	/* ── Terminal frame ─────────────────────────────────────── */
+	.lh__frame {
+		opacity: 0;
+		transform: translateY(8px);
+		animation: lh-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+	}
+	.lh__head {
+		/* live-frame__head already styles this; add the traffic dots inline */
+		gap: 10px;
+		justify-content: flex-start;
+	}
+	.lh__dots {
+		display: inline-flex;
+		gap: 5px;
+	}
+	.lh__dots i {
+		width: 8px;
+		height: 8px;
+		border-radius: 999px;
+		background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
+	}
+	.lh__head .live-frame__live {
+		margin-left: auto;
+	}
+
+	.lh__body {
+		padding: 16px 16px 18px;
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		line-height: 1.5;
+	}
+
+	.lh__cmd {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		color: var(--foreground);
+	}
+	.lh__cmd--next {
+		margin-top: 4px;
+	}
+	.lh__prompt {
+		color: var(--accent);
+		user-select: none;
+	}
+	.lh__cmd code {
+		font-family: var(--font-mono);
+		background: none;
+		border: 0;
+		padding: 0;
+		color: var(--foreground);
+	}
+	.lh__install {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow-x: auto;
+		white-space: nowrap;
+	}
+	.lh__copy {
+		flex: none;
+		font-family: var(--font-mono);
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+		background: color-mix(in oklab, var(--bg-elevated) 70%, transparent);
+		border: 1px solid var(--border);
+		padding: 3px 8px;
+		cursor: pointer;
+		transition: color 140ms ease, border-color 140ms ease;
+	}
+	.lh__copy:hover {
+		color: var(--accent);
+		border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
+	}
+	.lh__copy.is-done {
+		color: var(--chart-3);
+		border-color: color-mix(in oklab, var(--chart-3) 55%, var(--border));
+	}
+
+	.lh__out {
+		margin: 14px 0 0;
+		padding: 0;
+		background: none;
+		border: 0;
+		border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+		padding-top: 12px;
+		overflow-x: auto;
+	}
+	.lh__row {
+		display: flex;
+		gap: 12px;
+		min-height: 1.5em;
+		color: var(--muted-foreground);
+		white-space: nowrap;
+	}
+	.lh__row-key {
+		flex: none;
+		width: 9ch;
+		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+	}
+	.lh__row-val {
+		color: var(--foreground);
+	}
+	.lh__row--amber .lh__row-val,
+	.lh__row--amber {
+		color: var(--accent);
+	}
+	.lh__row--green .lh__row-val,
+	.lh__row--green {
+		color: var(--chart-3);
+	}
+	.lh__row--dim .lh__row-val {
+		color: var(--muted-foreground);
+	}
+
+	/* ── Stat strip ─────────────────────────────────────────── */
+	.lh__stats {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0;
+		list-style: none;
+		margin: 18px 0 0;
+		padding: 0;
+		border: 1px solid var(--border);
+		background: color-mix(in oklab, var(--bg-elevated) 55%, transparent);
+		width: fit-content;
+		max-width: 100%;
+	}
+	.lh__stats li {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 8px 14px;
+		border-right: 1px solid var(--border);
+	}
+	.lh__stats li:last-child {
+		border-right: 0;
+	}
+	.lh__stat-cap {
+		font-family: var(--font-mono);
+		font-size: 9px;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+	.lh__stat-val {
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		color: var(--foreground);
+	}
+
+	@keyframes lh-rise {
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.lh__body {
+			font-size: 11.5px;
+		}
+		.lh__stats {
+			width: 100%;
+		}
+		.lh__stats li {
+			flex: 1 1 auto;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.lh__frame {
+			opacity: 1;
+			transform: none;
+			animation: none;
+		}
+	}
+</style>
