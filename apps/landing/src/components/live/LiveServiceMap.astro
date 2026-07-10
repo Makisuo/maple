@@ -229,7 +229,7 @@ const VIEW_H = 400;
 				const y = ROWS_PER_COL[n.col][n.row] - NODE_H / 2;
 				const accent = serviceColorVar(n.label);
 				const errNum = n.err ? parseFloat(n.err) : 0;
-				const healthClass = errNum > 1 ? "svc-map-health--warn" : errNum > 0.05 ? "svc-map-health--info" : "svc-map-health--info";
+				const healthClass = errNum > 1 ? "svc-map-health--error" : errNum > 0.3 ? "svc-map-health--warn" : "svc-map-health--info";
 				return (
 					<g transform={`translate(${x} ${y})`} class={n.hot ? "svc-map-node svc-map-node--hot" : "svc-map-node"}>
 						{n.hot && (
