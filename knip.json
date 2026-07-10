@@ -1,6 +1,6 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/mobile", "examples/*"],
+	"ignoreWorkspaces": ["apps/ingest", "apps/landing", "apps/local-landing", "apps/mobile", "examples/*"],
 	"ignore": ["**/routeTree.gen.ts", ".context/**", ".deepsec/**", "**/sst-env.d.ts"],
 	"ignoreExportsUsedInFile": true,
 	"workspaces": {

@@ -1,6 +1,6 @@
 # build output
 dist/
-# generated from scripts/install.sh by the `sync:install` script (served at /cli/install)
+# generated from scripts/install.sh by the `sync:cli` script (served at /cli/install)
 public/cli/
 # generated types
 .astro/
