@@ -84,6 +84,12 @@ export type ApiKeyId = Schema.Schema.Type<typeof ApiKeyId>
 export const ScrapeTargetId = MapleUuidId("@maple/ScrapeTargetId", "Scrape Target ID")
 export type ScrapeTargetId = Schema.Schema.Type<typeof ScrapeTargetId>
 
+export const RailwayConnectionId = MapleUuidId("@maple/RailwayConnectionId", "Railway Connection ID")
+export type RailwayConnectionId = Schema.Schema.Type<typeof RailwayConnectionId>
+
+export const RailwayTargetId = MapleUuidId("@maple/RailwayTargetId", "Railway Target ID")
+export type RailwayTargetId = Schema.Schema.Type<typeof RailwayTargetId>
+
 export const AlertDestinationId = MapleUuidId("@maple/AlertDestinationId", "Alert Destination ID")
 export type AlertDestinationId = Schema.Schema.Type<typeof AlertDestinationId>
 
@@ -160,6 +166,26 @@ export const ScrapeTargetType = Schema.Literals(["prometheus", "planetscale"]).a
 	title: "Scrape Target Type",
 })
 export type ScrapeTargetType = Schema.Schema.Type<typeof ScrapeTargetType>
+
+export const RailwayTokenType = Schema.Literals(["account", "workspace"]).annotate({
+	identifier: "@maple/RailwayTokenType",
+	title: "Railway Token Type",
+})
+export type RailwayTokenType = Schema.Schema.Type<typeof RailwayTokenType>
+
+/** Poll interval bounds reflect Railway's per-plan rate limits (100 RPH on the free plan). */
+export const RailwayMetricsIntervalSeconds = Schema.Number.check(
+	Schema.isInt(),
+	Schema.isGreaterThanOrEqualTo(60),
+	Schema.isLessThanOrEqualTo(3600),
+).pipe(
+	Schema.brand("@maple/RailwayMetricsIntervalSeconds"),
+	Schema.annotate({
+		identifier: "@maple/RailwayMetricsIntervalSeconds",
+		title: "Railway Metrics Interval Seconds",
+	}),
+)
+export type RailwayMetricsIntervalSeconds = Schema.Schema.Type<typeof RailwayMetricsIntervalSeconds>
 
 export const IngestAttributeMappingId = MapleUuidId(
 	"@maple/IngestAttributeMappingId",

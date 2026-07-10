@@ -28,6 +28,8 @@ import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.ht
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
 import { HttpQueryEngineLive } from "./routes/query-engine.http"
+import { HttpRailwayLive } from "./routes/railway.http"
+import { RailwayInternalRouter } from "./routes/railway-internal.http"
 import { HttpRecommendationIssuesLive } from "./routes/recommendation-issues.http"
 import { HttpScrapeTargetsLive } from "./routes/scrape-targets.http"
 import { HttpSessionReplaysLive } from "./routes/session-replay.http"
@@ -58,6 +60,7 @@ import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
 import { OrgClickHouseSettingsService } from "./services/OrgClickHouseSettingsService"
 import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
+import { RailwayIntegrationService } from "./services/RailwayIntegrationService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
@@ -103,6 +106,7 @@ const CoreServicesLive = Layer.mergeAll(
 	// Shared with ScrapeTargetsService via layer memoization so the proxy and
 	// the internal target list resolve sub-targets from one discovery cache.
 	PlanetScaleDiscoveryService.layer,
+	RailwayIntegrationService.layer,
 	ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
 	IngestAttributeMappingService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
@@ -233,6 +237,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpOnboardingLive),
 	Layer.provide(HttpOrgClickHouseSettingsLive),
 	Layer.provide(HttpOrganizationsLive),
+	Layer.provide(HttpRailwayLive),
 	Layer.provide(HttpScrapeTargetsLive),
 	Layer.provide(
 		Layer.mergeAll(
@@ -249,6 +254,7 @@ export const AllRoutes = Layer.mergeAll(
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
 	PrometheusScrapeProxyRouter,
+	RailwayInternalRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,
 	McpLive,

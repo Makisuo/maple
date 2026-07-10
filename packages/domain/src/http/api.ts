@@ -19,6 +19,7 @@ import { OnboardingApiGroup } from "./onboarding"
 import { OrgClickHouseSettingsApiGroup } from "./org-clickhouse-settings"
 import { OrganizationsApiGroup } from "./organizations"
 import { QueryEngineApiGroup } from "./query-engine"
+import { RailwayApiGroup } from "./railway"
 import { RecommendationIssuesApiGroup } from "./recommendation-issues"
 import { ScrapeTargetsApiGroup } from "./scrape-targets"
 import { SessionReplaysApiGroup } from "./session-replay"
@@ -47,6 +48,7 @@ export class MapleApi extends HttpApi.make("MapleApi")
 	.add(OrgClickHouseSettingsApiGroup)
 	.add(OrganizationsApiGroup)
 	.add(QueryEngineApiGroup)
+	.add(RailwayApiGroup)
 	.add(RecommendationIssuesApiGroup)
 	.add(ScrapeTargetsApiGroup)
 	.add(SessionReplaysApiGroup)
