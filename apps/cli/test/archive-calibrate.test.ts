@@ -1,4 +1,5 @@
 import { describe, it } from "@effect/vitest"
+import { Effect } from "effect"
 import { ok, rejects, strictEqual, throws } from "node:assert"
 import {
 	writeFileSync as writeFileSyncSync,
@@ -103,6 +104,8 @@ import {
 	TUNING_CONFIG_FORMAT_VERSION,
 	type LoadedTuningConfig,
 } from "../src/server/archives/config"
+import { requireCalibrationSelection } from "../src/commands/archive"
+import { ArchiveError } from "../src/server/archives/errors"
 
 const baseMetrics = (over: Partial<CandidateMetrics> = {}): CandidateMetrics => ({
 	logicalBytes: 1_000_000,
@@ -144,6 +147,31 @@ const cand = (wt: number, rg: number): CalibrationCandidate => ({
 	rowGroupRows: rg,
 	maxShardRows: 500_000,
 	maxShardBytes: 256 * 1024 * 1024,
+})
+
+describe("calibration recommendation error handling", () => {
+	it("returns no-recommendation as a typed ArchiveError instead of a fiber defect", async () => {
+		const error = await Effect.runPromise(
+			Effect.flip(
+				requireCalibrationSelection({
+					selected: null,
+					note: "no candidate met the declared goals",
+				}),
+			),
+		)
+
+		ok(error instanceof ArchiveError)
+		ok(error.message.includes("calibration did not produce a recommendation"))
+		ok(error.message.includes("no candidate met the declared goals"))
+	})
+
+	it("returns the selected recommendation on success", async () => {
+		const selected = { candidate: CANDIDATE_MATRIX[0]!, worstCase: baseMetrics() }
+		strictEqual(
+			await Effect.runPromise(requireCalibrationSelection({ selected, note: "selected" })),
+			selected,
+		)
+	})
 })
 
 /** Create isolated data/archive/scratch roots under the real temp volume. */

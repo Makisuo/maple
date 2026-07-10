@@ -1,4 +1,4 @@
-import { Effect, Option, Schema } from "effect"
+import { Effect, Option } from "effect"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import * as Argument from "effect/unstable/cli/Argument"
@@ -72,12 +72,7 @@ import {
 	parsePeakRss,
 	timeArgv,
 } from "../server/archives/timed-process"
-
-/** An archive command failure. The message is shown to the user and the process
- *  exits non-zero, mirroring `ServerError` and `CheckpointError`. */
-class ArchiveError extends Schema.TaggedErrorClass<ArchiveError>()("@maple/cli/ArchiveError", {
-	message: Schema.String,
-}) {}
+import { ArchiveError } from "../server/archives/errors"
 
 const defaultDataDir = (): string => join(homedir(), ".maple", "data")
 const defaultArchiveDir = (): string => join(homedir(), ".maple", "archive")
@@ -537,6 +532,22 @@ const sessionMarkerDirFlag = Flag.optional(
 	),
 )
 
+type CalibrationSelection = NonNullable<CalibrationRecommendation["selected"]>
+
+/** Require a successful calibration recommendation through Effect's typed
+ * error channel. Keeping this check outside Effect.sync prevents an expected
+ * calibration failure from becoming an unhandled fiber defect. */
+export const requireCalibrationSelection = (
+	recommendation: Pick<CalibrationRecommendation, "selected" | "note">,
+): Effect.Effect<CalibrationSelection, ArchiveError> =>
+	recommendation.selected === null
+		? Effect.fail(
+				new ArchiveError({
+					message: `${red("!")} calibration did not produce a recommendation: ${recommendation.note}`,
+				}),
+			)
+		: Effect.succeed(recommendation.selected)
+
 export const archiveCalibrate = Command.make("calibrate", {
 	dataDir: dataDirFlag,
 	archiveDir: archiveDirFlag,
@@ -633,7 +644,6 @@ export const archiveCalibrate = Command.make("calibrate", {
 						}),
 				})
 			}
-			const tuning = recommendationToTuning(rec, archiveDir, scratchRoot)
 			yield* Effect.sync(() => {
 				for (const r of rec.results) {
 					const status = r.ok && r.metrics ? `${r.metrics.peakRssBytes}B RSS` : `FAIL: ${r.error}`
@@ -641,36 +651,34 @@ export const archiveCalibrate = Command.make("calibrate", {
 						`  ${dim(`${r.signal} t=${r.candidate.writerThreads} rg=${r.candidate.rowGroupRows}`)}  ${status}\n`,
 					)
 				}
-				const writePath = Option.getOrUndefined(a.writeConfig)
-				if (writePath) {
-					if (rec.selected === null) {
-						// No config emitted: a held-out pass did not succeed across the
-						// required signals, or no candidate met the declared goals.
-						throw new ArchiveError({
-							message: `${red("!")} calibration did not produce a recommendation: ${rec.note}`,
-						})
-					}
-					writeCalibrationConfig(writePath, rec, tuning)
+			})
+			const selected = yield* requireCalibrationSelection(rec)
+			const tuning = recommendationToTuning(rec, archiveDir, scratchRoot)
+			const writePath = Option.getOrUndefined(a.writeConfig)
+			if (writePath) {
+				yield* Effect.try({
+					try: () => writeCalibrationConfig(writePath, rec, tuning),
+					catch: (error) =>
+						new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+				})
+				yield* Effect.sync(() =>
 					process.stdout.write(
 						`${green("✓")} calibration ${rec.confidence} confidence; config written to ${writePath}\n` +
-							`  ${dim("selected")} t=${rec.selected.candidate.writerThreads} ` +
-							`rg=${rec.selected.candidate.rowGroupRows} rss=${rec.selected.worstCase.peakRssBytes}B\n` +
+							`  ${dim("selected")} t=${selected.candidate.writerThreads} ` +
+							`rg=${selected.candidate.rowGroupRows} rss=${selected.worstCase.peakRssBytes}B\n` +
 							`  ${dim("margin")}      ${budget.safetyMargin.toFixed(3)}x applied inside each ceiling\n`,
-					)
-				} else {
-					if (rec.selected === null) {
-						throw new ArchiveError({
-							message: `${red("!")} calibration did not produce a recommendation: ${rec.note}`,
-						})
-					}
+					),
+				)
+			} else {
+				yield* Effect.sync(() =>
 					process.stdout.write(
 						`${green("✓")} calibration ${rec.confidence} confidence\n` +
-							`  ${dim("selected")} t=${rec.selected.candidate.writerThreads} ` +
-							`rg=${rec.selected.candidate.rowGroupRows} rss=${rec.selected.worstCase.peakRssBytes}B\n` +
+							`  ${dim("selected")} t=${selected.candidate.writerThreads} ` +
+							`rg=${selected.candidate.rowGroupRows} rss=${selected.worstCase.peakRssBytes}B\n` +
 							`  ${dim("note")} pass --write-config <path> to apply\n`,
-					)
-				}
-			})
+					),
+				)
+			}
 		}),
 	),
 )
