@@ -181,6 +181,25 @@ export class ScrapeTargetAuthError extends Schema.TaggedErrorClass<ScrapeTargetA
 	{ httpApiStatus: 502 },
 ) {}
 
+/**
+ * The scrape target's upstream (the provider being scraped/discovered — e.g.
+ * PlanetScale's http_sd endpoint) failed at the transport level, timed out,
+ * answered a non-2xx that isn't an auth rejection, or returned an undecodable
+ * payload. Distinct from `ScrapeTargetPersistenceError` (503, *our* database)
+ * so callers, the scrape proxy, and dashboards can tell "the provider is
+ * misbehaving" (502, retryable) from "our storage broke" instead of
+ * regex-sniffing the HTTP status back out of a persistence message. `status`
+ * carries the upstream HTTP status when the failure reached one.
+ */
+export class ScrapeTargetUpstreamError extends Schema.TaggedErrorClass<ScrapeTargetUpstreamError>()(
+	"@maple/http/errors/ScrapeTargetUpstreamError",
+	{
+		message: Schema.String,
+		status: Schema.optionalKey(Schema.Number),
+	},
+	{ httpApiStatus: 502 },
+) {}
+
 export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 	.add(
 		HttpApiEndpoint.get("list", "/", {

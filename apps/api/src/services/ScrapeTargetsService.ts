@@ -14,6 +14,7 @@ import {
 	ScrapeTargetResponse,
 	ScrapeTargetsListResponse,
 	ScrapeTargetType,
+	ScrapeTargetUpstreamError,
 	ScrapeTargetValidationError,
 	type CreateScrapeTargetRequest,
 	type UpdateScrapeTargetRequest,
@@ -97,6 +98,7 @@ export interface ScrapeTargetsServiceShape {
 		| ScrapeTargetPersistenceError
 		| ScrapeTargetEncryptionError
 		| ScrapeTargetAuthError
+		| ScrapeTargetUpstreamError
 	>
 	readonly recordScrapeResults: (
 		results: ReadonlyArray<{

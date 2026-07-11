@@ -3,6 +3,7 @@ import {
 	ScrapeTargetAuthError,
 	ScrapeTargetEncryptionError,
 	ScrapeTargetPersistenceError,
+	ScrapeTargetUpstreamError,
 } from "@maple/domain/http"
 import type { scrapeTargets } from "@maple/db"
 import { Clock, Context, Deferred, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
@@ -58,9 +59,19 @@ interface CacheEntry {
 	readonly lastError: string | null
 }
 
-type DiscoveryError = ScrapeTargetPersistenceError | ScrapeTargetEncryptionError | ScrapeTargetAuthError
+type DiscoveryError =
+	| ScrapeTargetPersistenceError
+	| ScrapeTargetEncryptionError
+	| ScrapeTargetAuthError
+	| ScrapeTargetUpstreamError
 
 const toPersistenceError = (message: string) => new ScrapeTargetPersistenceError({ message })
+
+// Provider-side (http_sd) failures: transport, timeout, non-2xx non-auth, or an
+// undecodable payload. Kept distinct from persistence (our DB) so the class —
+// not a regex over the message — carries the failure kind downstream.
+const toUpstreamError = (message: string, status?: number) =>
+	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
 
 /** Convert one http_sd group into sub-targets, dropping SSRF-invalid hosts. */
 const subTargetsFromGroup = (group: {
@@ -160,7 +171,10 @@ export interface PlanetScaleDiscoveryServiceShape {
 		row: ScrapeTargetRow,
 	) => Effect.Effect<
 		ReadonlyArray<PlanetScaleSubTarget>,
-		ScrapeTargetPersistenceError | ScrapeTargetEncryptionError | ScrapeTargetAuthError
+		| ScrapeTargetPersistenceError
+		| ScrapeTargetEncryptionError
+		| ScrapeTargetAuthError
+		| ScrapeTargetUpstreamError
 	>
 	/** Last discovery error for a target (null when the last refresh succeeded). */
 	readonly lastError: (targetId: string) => Effect.Effect<string | null>
@@ -217,12 +231,12 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				return { status: res.status, text }
 			}).pipe(
 				Effect.mapError((error) =>
-					toPersistenceError(`PlanetScale discovery request failed: ${error.message}`),
+					toUpstreamError(`PlanetScale discovery request failed: ${error.message}`),
 				),
 				Effect.timeoutOrElse({
 					duration: DISCOVERY_TIMEOUT,
 					orElse: () =>
-						Effect.fail(toPersistenceError("PlanetScale discovery request timed out after 10s")),
+						Effect.fail(toUpstreamError("PlanetScale discovery request timed out after 10s")),
 				}),
 			)
 
@@ -244,7 +258,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			}
 			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
-					toPersistenceError(`PlanetScale discovery failed: HTTP ${response.status}`),
+					toUpstreamError(`PlanetScale discovery failed: HTTP ${response.status}`, response.status),
 				)
 			}
 
@@ -252,7 +266,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				response.text,
 			).pipe(
 				Effect.mapError(() =>
-					toPersistenceError("PlanetScale discovery returned an unexpected payload"),
+					toUpstreamError("PlanetScale discovery returned an unexpected payload"),
 				),
 			)
 
