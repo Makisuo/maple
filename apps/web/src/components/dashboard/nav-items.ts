@@ -128,6 +128,8 @@ export function visibleSignalsNavItems(flags: { infraEnabled: boolean }) {
 		const subItems = item.subItems?.filter(
 			(sub) => sub.href.startsWith("/infra/cloudflare") || sub.href.startsWith("/infra/planetscale"),
 		)
-		return { ...item, href: "/infra/cloudflare", subItems }
+		// The parent click target follows the first surviving integration page
+		// instead of hardcoding one of them.
+		return { ...item, href: subItems?.[0]?.href ?? "/infra/cloudflare", subItems }
 	})
 }
