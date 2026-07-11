@@ -306,6 +306,11 @@ export const upsertPlanetScaleIssue: (
 			})
 		} else {
 			issueId = prior.id
+			// Mirrors the alert issue hub and the errors tick: a wontfix issue with
+			// an active (or indefinite — snoozeUntil null) snooze is left alone
+			// entirely; only done issues and wontfix issues whose snooze expired
+			// re-open on the next firing. "Won't fix" without a deadline is the
+			// operator saying "stop resurfacing this".
 			const snoozeActive =
 				prior.workflowState === "wontfix" &&
 				(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > input.timestamp)
