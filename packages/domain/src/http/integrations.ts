@@ -220,6 +220,158 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 	disconnected: Schema.Boolean,
 }) {}
 
+// ---- PlanetScale (service-token integration) --------------------------------
+
+/**
+ * The managed scrape target this connection auto-provisioned — surfaced on the
+ * integration card so scraping health and branch filters are editable there
+ * (managed rows are hidden from the generic scrape-target UI).
+ */
+export class PlanetScaleScrapeTargetSummary extends Schema.Class<PlanetScaleScrapeTargetSummary>(
+	"PlanetScaleScrapeTargetSummary",
+)({
+	id: Schema.String,
+	enabled: Schema.Boolean,
+	scrapeIntervalSeconds: Schema.Number,
+	includeBranches: Schema.Array(Schema.String),
+	excludeBranches: Schema.Array(Schema.String),
+	/** Epoch ms of the last successful scrape; null before the first one. */
+	lastScrapeAt: Schema.NullOr(Schema.Number),
+	lastScrapeError: Schema.NullOr(Schema.String),
+}) {}
+
+export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegrationStatus>(
+	"PlanetScaleIntegrationStatus",
+)({
+	connected: Schema.Boolean,
+	/** PlanetScale organization slug the service token is scoped to. */
+	organization: Schema.NullOr(Schema.String),
+	/** Service token id (not secret) for display. */
+	tokenId: Schema.NullOr(Schema.String),
+	connectedByUserId: Schema.NullOr(UserId),
+	/** Token permissions probed at connect time (e.g. readMetricsEndpoints). */
+	detectedPermissions: Schema.NullOr(Schema.Record(Schema.String, Schema.Boolean)),
+	scrapeTarget: Schema.NullOr(PlanetScaleScrapeTargetSummary),
+	/** Epoch ms of the last successful inventory refresh; null before the first. */
+	lastInventoryAt: Schema.NullOr(Schema.Number),
+	lastInventoryError: Schema.NullOr(Schema.String),
+}) {}
+
+export class PlanetScaleConnectRequest extends Schema.Class<PlanetScaleConnectRequest>(
+	"PlanetScaleConnectRequest",
+)({
+	/** PlanetScale organization slug. */
+	organization: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+	tokenId: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+	tokenSecret: Schema.String.check(Schema.isMinLength(1)),
+	/** Branch glob allowlist for the managed scrape target (omit/empty = all branches). */
+	includeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
+	/** Branch glob denylist for the managed scrape target (e.g. `pr-*`). */
+	excludeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
+}) {}
+
+export class PlanetScaleDisconnectResponse extends Schema.Class<PlanetScaleDisconnectResponse>(
+	"PlanetScaleDisconnectResponse",
+)({
+	disconnected: Schema.Boolean,
+}) {}
+
+export class PlanetScaleBranchSummary extends Schema.Class<PlanetScaleBranchSummary>(
+	"PlanetScaleBranchSummary",
+)({
+	id: Schema.String,
+	name: Schema.String,
+	production: Schema.Boolean,
+	ready: Schema.Boolean,
+}) {}
+
+/** One database from the org's polled PlanetScale inventory. */
+export class PlanetScaleDatabaseSummary extends Schema.Class<PlanetScaleDatabaseSummary>(
+	"PlanetScaleDatabaseSummary",
+)({
+	/** PlanetScale's database id. */
+	id: Schema.String,
+	name: Schema.String,
+	/** Product kind: "mysql" (Vitess) or "postgresql". */
+	kind: Schema.String,
+	state: Schema.NullOr(Schema.String),
+	region: Schema.NullOr(Schema.String),
+	plan: Schema.NullOr(Schema.String),
+	branches: Schema.Array(PlanetScaleBranchSummary),
+}) {}
+
+export class PlanetScaleDatabasesResponse extends Schema.Class<PlanetScaleDatabasesResponse>(
+	"PlanetScaleDatabasesResponse",
+)({
+	databases: Schema.Array(PlanetScaleDatabaseSummary),
+	/** Epoch ms of the last successful inventory refresh; null before the first. */
+	lastInventoryAt: Schema.NullOr(Schema.Number),
+}) {}
+
+/**
+ * Manual webhook setup material (admin-only): the endpoint path to register in
+ * PlanetScale's per-database webhook settings, and the HMAC secret Maple
+ * verifies deliveries with.
+ */
+export class PlanetScaleWebhookConfigResponse extends Schema.Class<PlanetScaleWebhookConfigResponse>(
+	"PlanetScaleWebhookConfigResponse",
+)({
+	configured: Schema.Boolean,
+	/** Absolute webhook URL to paste into PlanetScale (built from the API origin). */
+	url: Schema.NullOr(Schema.String),
+	secret: Schema.NullOr(Schema.String),
+}) {}
+
+/**
+ * Live top-queries lookup for one database branch, proxied to PlanetScale's
+ * Query Insights API — per-fingerprint cardinality is far too high to store as
+ * metrics, so this is computed on demand (and edge-cached briefly), mirroring
+ * the Cloudflare top-traffic pattern.
+ */
+export class PlanetScaleQueryInsightsRequest extends Schema.Class<PlanetScaleQueryInsightsRequest>(
+	"PlanetScaleQueryInsightsRequest",
+)({
+	database: Schema.String.check(Schema.isMinLength(1)),
+	/** Branch to inspect; defaults to the database's production branch. */
+	branch: Schema.optionalKey(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	/** Top-N by total time; defaults to 10, capped at 25. */
+	limit: Schema.optionalKey(Schema.Number),
+}) {}
+
+export class PlanetScaleQueryInsightRow extends Schema.Class<PlanetScaleQueryInsightRow>(
+	"PlanetScaleQueryInsightRow",
+)({
+	fingerprint: Schema.String,
+	normalizedSql: Schema.String,
+	statementType: Schema.NullOr(Schema.String),
+	queryCount: Schema.Number,
+	errorCount: Schema.Number,
+	totalDurationMillis: Schema.Number,
+	timePerQueryMillis: Schema.Number,
+	p50LatencyMillis: Schema.Number,
+	p99LatencyMillis: Schema.Number,
+	rowsReadPerQuery: Schema.Number,
+	rowsReturnedPerQuery: Schema.Number,
+	/** Epoch ms; null when PlanetScale reported none. */
+	lastRunAt: Schema.NullOr(Schema.Number),
+}) {}
+
+export class PlanetScaleQueryInsightsResponse extends Schema.Class<PlanetScaleQueryInsightsResponse>(
+	"PlanetScaleQueryInsightsResponse",
+)({
+	/** The branch actually queried (resolved server-side when omitted). */
+	branch: Schema.String,
+	rows: Schema.Array(PlanetScaleQueryInsightRow),
+	/**
+	 * Set instead of failing when PlanetScale can't serve the lookup (token
+	 * missing read_database, unknown branch) — the UI renders it inline.
+	 */
+	unavailableReason: Schema.NullOr(Schema.String),
+}) {}
+
 // ---- GitHub (VCS App installation) ----------------------------------------
 
 /** One branch a repo knows about — an option in the tracked-branch picker. */
@@ -488,6 +640,59 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.delete("cloudflareDisconnect", "/cloudflare", {
 			success: CloudflareDisconnectResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("planetscaleStatus", "/planetscale/status", {
+			success: PlanetScaleIntegrationStatus,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		// Validates the service token against PlanetScale before persisting, then
+		// auto-provisions (or adopts) the managed scrape target. Reconnecting with
+		// fresh credentials is an upsert.
+		HttpApiEndpoint.post("planetscaleConnect", "/planetscale/connect", {
+			payload: PlanetScaleConnectRequest,
+			success: PlanetScaleIntegrationStatus,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.delete("planetscaleDisconnect", "/planetscale", {
+			success: PlanetScaleDisconnectResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		// The org's polled database/branch inventory — consumed by the service map
+		// (node branding + metric-overlay matching) and the infra page.
+		HttpApiEndpoint.get("planetscaleDatabases", "/planetscale/databases", {
+			success: PlanetScaleDatabasesResponse,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("planetscaleWebhookConfig", "/planetscale/webhook-config", {
+			success: PlanetScaleWebhookConfigResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("planetscaleQueryInsights", "/planetscale/query-insights", {
+			payload: PlanetScaleQueryInsightsRequest,
+			success: PlanetScaleQueryInsightsResponse,
+			error: [
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
 		}),
 	)
 	.add(

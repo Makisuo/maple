@@ -119,6 +119,11 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		}),
 	)
 	const scrapeResult = useAtomValue(MapleApiAtomClient.query("scrapeTargets", "list", {}))
+	const planetscaleResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
 	const hazelResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "hazelStatus", {
 			reactivityKeys: ["hazelIntegrationStatus"],
@@ -154,6 +159,20 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 			.onInitial(() => null)
 			.orElse(() => STATUS_UNAVAILABLE)
 
+	// First-class connection status; falls back to the scrape-target derivation for
+	// orgs still on the manual (user-created target) escape hatch.
+	const planetscale: CardStatus | null = Result.builder(planetscaleResult)
+		.onSuccess((status): CardStatus | null => {
+			if (!status.connected) return scrapeStatus("planetscale")
+			const failing = status.scrapeTarget?.lastScrapeError != null
+			return {
+				label: status.organization ?? "Connected",
+				variant: failing ? "warning" : "success",
+			}
+		})
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
+
 	const hazel: CardStatus | null = Result.builder(hazelResult)
 		.onSuccess(
 			(status): CardStatus =>
@@ -183,7 +202,7 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 	return {
 		cloudflare,
 		prometheus: scrapeStatus("prometheus"),
-		planetscale: scrapeStatus("planetscale"),
+		planetscale,
 		// WarpStream rides the generic Prometheus pipeline — no own target type.
 		warpstream: { label: "Via Prometheus", variant: "outline" },
 		hazel,

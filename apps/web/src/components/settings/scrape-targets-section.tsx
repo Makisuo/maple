@@ -884,6 +884,16 @@ function ScrapeTargetRow({
 							PlanetScale
 						</Badge>
 					)}
+					{target.managedBy && (
+						<Tooltip>
+							<TooltipTrigger render={<span className="shrink-0" />}>
+								<Badge variant="outline">Managed</Badge>
+							</TooltipTrigger>
+							<TooltipContent>
+								Provisioned by the PlanetScale integration — edit it from the integration card.
+							</TooltipContent>
+						</Tooltip>
+					)}
 					{target.serviceName && (
 						<Badge variant="outline" className="shrink-0">
 							{target.serviceName}
@@ -972,12 +982,17 @@ function ScrapeTargetRow({
 						<DotsVerticalIcon size={14} />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
-						<DropdownMenuItem onClick={() => onEdit(target)}>
+						{/* Managed targets are edited/removed through the owning integration card. */}
+						<DropdownMenuItem disabled={target.managedBy != null} onClick={() => onEdit(target)}>
 							<PencilIcon size={14} />
 							Edit
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
-						<DropdownMenuItem variant="destructive" onClick={() => onDelete(target)}>
+						<DropdownMenuItem
+							variant="destructive"
+							disabled={target.managedBy != null}
+							onClick={() => onDelete(target)}
+						>
 							<TrashIcon size={14} />
 							Delete
 						</DropdownMenuItem>
@@ -1035,7 +1050,13 @@ function ScrapeTargetDetails({
 						{probing ? <LoaderIcon size={14} className="animate-spin" /> : <BoltIcon size={14} />}
 						Test
 					</Button>
-					<Button variant="outline" size="sm" onClick={() => onEdit(target)}>
+					{/* Managed targets are edited/removed through the owning integration card. */}
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => onEdit(target)}
+						disabled={target.managedBy != null}
+					>
 						<PencilIcon size={14} />
 						Edit
 					</Button>
@@ -1047,6 +1068,7 @@ function ScrapeTargetDetails({
 						size="sm"
 						className="text-destructive"
 						onClick={() => onDelete(target)}
+						disabled={target.managedBy != null}
 					>
 						<TrashIcon size={14} />
 						Delete

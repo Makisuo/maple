@@ -18,7 +18,9 @@ import {
 	ServiceApdexResponse,
 	ServiceDependenciesResponse,
 	ServiceDbEdgesResponse,
+	PlanetScaleInfraTimeseriesResponse,
 	ServiceCloudflareStatsResponse,
+	ServicePlanetScaleStatsResponse,
 	CloudflareInfraZonesResponse,
 	CloudflareInfraZoneTimeseriesResponse,
 	CloudflareInfraZoneDetailResponse,
@@ -614,6 +616,105 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						}
 					})
 					return new ServiceCloudflareStatsResponse({ data })
+				}),
+			)
+			.handle("servicePlanetScaleStats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const byBranch = payload.database !== undefined
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+						...(payload.database !== undefined ? { database: payload.database } : {}),
+					}
+					// Utilization gauges + the two-level connections rollup run
+					// concurrently, then merge by database(+branch). Routed through the
+					// org's configured warehouse like the metric explorer reads the same
+					// scraped `planetscale_*` metrics.
+					const gaugesCompiled = byBranch
+						? CH.compile(CH.planetscaleBranchGaugesSQL(), params, {
+								rowSchema: CH.planetscaleBranchStatsRowSchema,
+							})
+						: CH.compile(CH.planetscaleGaugesSQL(), params, {
+								rowSchema: CH.planetscaleDatabaseStatsRowSchema,
+							})
+					const connectionsCompiled = byBranch
+						? CH.compile(CH.planetscaleBranchConnectionsSQL(), params, {
+								rowSchema: CH.planetscaleBranchConnectionsRowSchema,
+							})
+						: CH.compile(CH.planetscaleConnectionsSQL(), params, {
+								rowSchema: CH.planetscaleConnectionsRowSchema,
+							})
+					const [gaugeRows, connectionRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, gaugesCompiled, {
+									profile: "aggregation",
+									context: "planetscaleServiceGauges",
+								}),
+								"planetscaleServiceGauges query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, connectionsCompiled, {
+									profile: "aggregation",
+									context: "planetscaleServiceConnections",
+								}),
+								"planetscaleServiceConnections query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					const keyOf = (row: { database: string; branch?: string }) =>
+						byBranch ? `${row.database} ${(row as { branch?: string }).branch ?? ""}` : row.database
+					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
+					const seen = new Set<string>()
+					const data: Array<Record<string, unknown>> = gaugeRows.map((row) => {
+						const key = keyOf(row)
+						seen.add(key)
+						const connections = connectionsByKey.get(key)
+						return {
+							...row,
+							connectionsAvg: connections?.connectionsAvg ?? 0,
+							connectionsMax: connections?.connectionsMax ?? 0,
+						}
+					})
+					// Databases with connection samples but no utilization gauges still
+					// deserve a row (e.g. filtered scrape sets).
+					for (const row of connectionRows) {
+						if (seen.has(keyOf(row))) continue
+						data.push({
+							...row,
+							cpuMaxPercent: 0,
+							memMaxPercent: 0,
+							replicaLagMaxSeconds: 0,
+						})
+					}
+					return new ServicePlanetScaleStatsResponse({ data })
+				}),
+			)
+			.handle("planetscaleInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.compile(
+						CH.planetscaleInfraTimeseriesSQL(),
+						{
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							bucketSeconds: Math.max(60, Math.floor(payload.bucketSeconds)),
+							database: payload.database,
+						},
+						{ rowSchema: CH.planetscaleInfraTimeseriesRowSchema },
+					)
+					const rows = yield* mapExecError(
+						warehouse.compiledQuery(tenant, compiled, {
+							profile: "aggregation",
+							context: "planetscaleInfraTimeseries",
+						}),
+						"planetscaleInfraTimeseries query failed",
+					)
+					return new PlanetScaleInfraTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
 			.handle("cloudflareInfraZones", ({ payload }) =>

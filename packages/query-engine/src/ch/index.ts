@@ -306,6 +306,29 @@ export {
 	type CloudflareServiceLatencyOutput,
 } from "./queries/cloudflare-map"
 
+// Queries — PlanetScale service-map stats (per-database / per-branch rollups)
+export {
+	planetscaleBranchConnectionsRowSchema,
+	planetscaleBranchConnectionsSQL,
+	planetscaleBranchGaugesSQL,
+	planetscaleBranchStatsRowSchema,
+	planetscaleConnectionsRowSchema,
+	planetscaleConnectionsSQL,
+	planetscaleDatabaseStatsRowSchema,
+	planetscaleGaugesSQL,
+	type PlanetScaleBranchConnectionsOutput,
+	type PlanetScaleBranchStatsOutput,
+	type PlanetScaleConnectionsOutput,
+	type PlanetScaleDatabaseStatsOutput,
+} from "./queries/planetscale-map"
+
+// Queries — PlanetScale infrastructure page (per-database timeseries)
+export {
+	planetscaleInfraTimeseriesRowSchema,
+	planetscaleInfraTimeseriesSQL,
+	type PlanetScaleInfraTimeseriesOutput,
+} from "./queries/planetscale-infra"
+
 // Queries — Cloudflare infrastructure page (per-zone HTTP + per-Worker rollups & timeseries)
 export {
 	cloudflareZoneCountersRowSchema,

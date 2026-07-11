@@ -7,6 +7,7 @@ import {
 	ServiceDependenciesBundleRequest,
 	ServiceDependenciesRequest,
 	ServiceName,
+	ServicePlanetScaleStatsRequest,
 	ServicePlatformsRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -334,6 +335,103 @@ export const getServiceMapCloudflare = Effect.fn("QueryEngine.getServiceMapCloud
 
 	return {
 		services: result.data.map((row) => transformCloudflareService(row, durationSeconds)),
+	}
+})
+
+// ---------------------------------------------------------------------------
+// PlanetScale scraped-metrics rollups
+//
+// The scraper collects PlanetScale's Prometheus metrics per branch; the map
+// overlays the per-database rollup onto the matching trace-derived DB node
+// (matched by database name against the org's polled inventory). PlanetScale
+// data never creates nodes of its own.
+// ---------------------------------------------------------------------------
+
+export interface PlanetScaleDatabaseStat {
+	database: string
+	connectionsAvg: number
+	connectionsMax: number
+	cpuMaxPercent: number
+	memMaxPercent: number
+	replicaLagMaxSeconds: number
+}
+
+export interface PlanetScaleBranchStat extends PlanetScaleDatabaseStat {
+	branch: string
+}
+
+function transformPlanetScaleStat(row: Record<string, unknown>): PlanetScaleDatabaseStat {
+	return {
+		database: String(row.database ?? ""),
+		connectionsAvg: Number(row.connectionsAvg ?? 0),
+		connectionsMax: Number(row.connectionsMax ?? 0),
+		cpuMaxPercent: Number(row.cpuMaxPercent ?? 0),
+		memMaxPercent: Number(row.memMaxPercent ?? 0),
+		replicaLagMaxSeconds: Number(row.replicaLagMaxSeconds ?? 0),
+	}
+}
+
+export const getServiceMapPlanetScale = Effect.fn("QueryEngine.getServiceMapPlanetScale")(function* ({
+	data,
+}: {
+	data: GetServiceMapInput
+}) {
+	const input = yield* decodeInput(GetServiceMapInputSchema, data ?? {}, "getServiceMapPlanetScale")
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+
+	const result = yield* runWarehouseQuery("servicePlanetScaleStats", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.servicePlanetScaleStats({
+				payload: new ServicePlanetScaleStatsRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+				}),
+			})
+		}),
+	)
+
+	return {
+		databases: result.data.map(transformPlanetScaleStat),
+	}
+})
+
+const GetPlanetScaleBranchStatsInputSchema = Schema.Struct({
+	database: Schema.String,
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+})
+
+export type GetPlanetScaleBranchStatsInput = (typeof GetPlanetScaleBranchStatsInputSchema)["Encoded"]
+
+export const getPlanetScaleBranchStats = Effect.fn("QueryEngine.getPlanetScaleBranchStats")(function* ({
+	data,
+}: {
+	data: GetPlanetScaleBranchStatsInput
+}) {
+	const input = yield* decodeInput(GetPlanetScaleBranchStatsInputSchema, data, "getPlanetScaleBranchStats")
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+
+	const result = yield* runWarehouseQuery("planetscaleBranchStats", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.servicePlanetScaleStats({
+				payload: new ServicePlanetScaleStatsRequest({
+					startTime: input.startTime ?? fallback.startTime,
+					endTime: input.endTime ?? fallback.endTime,
+					database: input.database,
+				}),
+			})
+		}),
+	)
+
+	return {
+		branches: result.data.map(
+			(row): PlanetScaleBranchStat => ({
+				...transformPlanetScaleStat(row),
+				branch: String(row.branch ?? ""),
+			}),
+		),
 	}
 })
 

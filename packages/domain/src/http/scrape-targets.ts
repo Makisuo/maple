@@ -25,6 +25,12 @@ export class ScrapeTargetResponse extends Schema.Class<ScrapeTargetResponse>("Sc
 	labelsJson: Schema.NullOr(Schema.String),
 	authType: ScrapeAuthType,
 	hasCredentials: Schema.Boolean,
+	/**
+	 * Integration ownership marker (e.g. `"planetscale:{connectionId}"`); null for
+	 * user-created targets. Managed rows are hidden from the generic scrape-target
+	 * UI and edited through the owning integration's card.
+	 */
+	managedBy: Schema.NullOr(Schema.String),
 	enabled: Schema.Boolean,
 	lastScrapeAt: Schema.NullOr(IsoDateTimeString),
 	lastScrapeError: Schema.NullOr(Schema.String),

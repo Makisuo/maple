@@ -19,6 +19,7 @@ import {
 	OnboardingService,
 	OrgClickHouseSettingsService,
 	OrgIngestKeysService,
+	PlanetScaleService,
 	QueryEngineService,
 	ServiceMapRollupService,
 	WarehouseQueryService,
@@ -151,10 +152,13 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		),
 	)
 
+	const PlanetScaleServiceLive = PlanetScaleService.layer.pipe(Layer.provide(BaseLive))
+
 	return Layer.mergeAll(
 		AlertsServiceLive,
 		AnomalyDetectionServiceLive,
 		CloudflareAnalyticsServiceLive,
+		PlanetScaleServiceLive,
 		DigestServiceLive,
 		OnboardingEmailServiceLive,
 		ErrorsServiceLive,
@@ -317,6 +321,24 @@ const cloudflareAnalyticsTick = Effect.gen(function* () {
 	catchTickFailure("Cloudflare analytics tick failed"),
 )
 
+const planetScaleTick = Effect.gen(function* () {
+	const planetscale = yield* PlanetScaleService
+	const result = yield* planetscale.pollAllOrgs()
+	if (result.orgs > 0) {
+		yield* Effect.logInfo("PlanetScale poll tick complete").pipe(
+			Effect.annotateLogs({
+				orgs: result.orgs,
+				refreshed: result.refreshed,
+				skipped: result.skipped,
+				failures: result.failures,
+			}),
+		)
+	}
+}).pipe(
+	Effect.withSpan("alerting.planetscale_tick"),
+	catchTickFailure("PlanetScale poll tick failed"),
+)
+
 interface ScheduledEventLike {
 	readonly cron: string
 }
@@ -333,7 +355,10 @@ export default {
 	): Promise<void> {
 		const program = Match.value(event.cron).pipe(
 			Match.when("*/5 * * * *", () =>
-				Effect.all([anomalyTick, cloudflareAnalyticsTick], { concurrency: 2, discard: true }),
+				Effect.all([anomalyTick, cloudflareAnalyticsTick, planetScaleTick], {
+					concurrency: 3,
+					discard: true,
+				}),
 			),
 			Match.when("*/15 * * * *", () => digestTick),
 			Match.when("0 * * * *", () => serviceMapRollupTick),

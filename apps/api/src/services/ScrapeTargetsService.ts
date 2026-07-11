@@ -253,6 +253,7 @@ const rowToResponse = (row: ScrapeTargetRow): ScrapeTargetResponse => {
 		labelsJson: row.labelsJson == null ? null : JSON.stringify(row.labelsJson),
 		authType: decodeScrapeAuthTypeSync(row.authType),
 		hasCredentials: row.authCredentialsCiphertext !== null,
+		managedBy: row.managedBy ?? null,
 		enabled: row.enabled,
 		lastScrapeAt: row.lastScrapeAt
 			? decodeIsoDateTimeStringSync(row.lastScrapeAt.toISOString())

@@ -24,6 +24,7 @@ import { HttpOnboardingLive } from "./routes/onboarding.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
+import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -60,7 +61,9 @@ import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
+import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
+import { PlanetScaleService } from "./services/PlanetScaleService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { WarehouseQueryService } from "./lib/WarehouseQueryService"
 import { OAuthStateRepository } from "./services/OAuthStateRepository"
@@ -104,6 +107,10 @@ const CoreServicesLive = Layer.mergeAll(
 	// the internal target list resolve sub-targets from one discovery cache.
 	PlanetScaleDiscoveryService.layer,
 	ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
+	PlanetScaleConnectionService.layer.pipe(
+		Layer.provide(ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer))),
+	),
+	PlanetScaleService.layer,
 	IngestAttributeMappingService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
@@ -248,6 +255,7 @@ export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
+	PlanetScaleWebhookRouter,
 	PrometheusScrapeProxyRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,

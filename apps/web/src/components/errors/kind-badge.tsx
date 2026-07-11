@@ -12,9 +12,13 @@ export function IssueKindBadge({ kind, className }: { kind: IssueKind; className
 		<Badge
 			variant="outline"
 			className={cn("bg-blue-500/10 text-blue-600 dark:text-blue-400", className)}
-			title="Created from an alert rule incident"
+			title={
+				kind === "alert"
+					? "Created from an alert rule incident"
+					: "Created from a third-party integration webhook"
+			}
 		>
-			alert
+			{kind}
 		</Badge>
 	)
 }
