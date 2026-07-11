@@ -27,7 +27,7 @@
 import * as Effect from "../../../Effect.ts"
 import * as Option from "../../../Option.ts"
 import * as CliError from "../CliError.ts"
-import type { Command, ParsedTokens } from "../Command.ts"
+import type { Command, Environment, ParsedTokens } from "../Command.ts"
 import * as Param from "../Param.ts"
 import * as Primitive from "../Primitive.ts"
 import { suggest } from "./auto-suggest.ts"
@@ -50,7 +50,7 @@ export const parseArgs = (
   lexResult: LexResult,
   command: Command.Any,
   commandPath: ReadonlyArray<string> = []
-): Effect.Effect<ParsedTokens, never, Param.Environment> =>
+): Effect.Effect<ParsedTokens, never, Environment> =>
   Effect.gen(function*() {
     const { tokens, trailingOperands: afterEndOfOptions } = lexResult
     const newCommandPath = [...commandPath, command.name]

@@ -34,7 +34,7 @@ export function useDashboardPreferences() {
 	const isFavorite = useCallback((dashboardId: string) => favoritesSet.has(dashboardId), [favoritesSet])
 
 	const sortAndFilter = useCallback(
-		(dashboards: Dashboard[]) => {
+		(dashboards: ReadonlyArray<Dashboard>) => {
 			let filtered = dashboards
 			if (tagFilter) {
 				filtered = dashboards.filter((d) => d.tags?.includes(tagFilter))
@@ -66,7 +66,7 @@ export function useDashboardPreferences() {
 		[favoritesSet, sortOption, tagFilter],
 	)
 
-	const allTags = useCallback((dashboards: Dashboard[]) => {
+	const allTags = useCallback((dashboards: ReadonlyArray<Dashboard>) => {
 		const tags = new Set<string>()
 		for (const d of dashboards) {
 			if (d.tags) {

@@ -9,10 +9,65 @@
  * @since 4.0.0
  */
 import * as Cause from "../../Cause.ts"
+import * as Data from "../../Data.ts"
 import { dual } from "../../Function.ts"
 import * as Redacted from "../../Redacted.ts"
 import * as Result from "../../Result.ts"
 import * as UrlParams from "./UrlParams.ts"
+
+/**
+ * Error returned when constructing a `URL` fails.
+ *
+ * @category errors
+ * @since 4.0.0
+ */
+export class UrlError extends Data.TaggedError("UrlError")<{
+  readonly cause: unknown
+}> {}
+
+/**
+ * Creates a `URL` safely by appending `UrlParams` and an optional hash to a URL string.
+ *
+ * **Details**
+ *
+ * Returns a `Result` that fails with `UrlError` if the URL cannot be constructed.
+ *
+ * @category constructors
+ * @since 4.0.0
+ */
+export const make = (
+  url: string,
+  params: UrlParams.UrlParams,
+  hash: string | undefined
+): Result.Result<URL, UrlError> =>
+  Result.try({
+    try: () => {
+      const urlInstance = new URL(url, baseUrl())
+      for (let i = 0; i < params.params.length; i++) {
+        const [key, value] = params.params[i]
+        if (value !== undefined) {
+          urlInstance.searchParams.append(key, value)
+        }
+      }
+      if (hash !== undefined) {
+        urlInstance.hash = hash
+      }
+      return urlInstance
+    },
+    catch: (cause) => new UrlError({ cause })
+  })
+
+const baseUrl = (): string | undefined => {
+  if (
+    "location" in globalThis &&
+    globalThis.location !== undefined &&
+    globalThis.location.origin !== undefined &&
+    globalThis.location.pathname !== undefined
+  ) {
+    return location.origin + location.pathname
+  }
+  return undefined
+}
 
 /**
  * Parses a URL string safely into a `URL` object, returning a `Result` type for
@@ -259,11 +314,11 @@ export const setUsername: {
  * @since 4.0.0
  */
 export const setUrlParams: {
-  (urlParams: UrlParams.UrlParams): (url: URL) => URL
-  (url: URL, urlParams: UrlParams.UrlParams): URL
-} = dual(2, (url: URL, searchParams: UrlParams.UrlParams) =>
+  (urlParams: UrlParams.Input): (url: URL) => URL
+  (url: URL, urlParams: UrlParams.Input): URL
+} = dual(2, (url: URL, urlParams: UrlParams.Input) =>
   mutate(url, (url) => {
-    url.search = UrlParams.toString(searchParams)
+    url.search = UrlParams.toString(UrlParams.fromInput(urlParams))
   }))
 
 /**
@@ -321,9 +376,9 @@ export const urlParams = (url: URL): UrlParams.UrlParams => UrlParams.fromInput(
  * @since 4.0.0
  */
 export const modifyUrlParams: {
-  (f: (urlParams: UrlParams.UrlParams) => UrlParams.UrlParams): (url: URL) => URL
-  (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.UrlParams): URL
-} = dual(2, (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.UrlParams) =>
+  (f: (urlParams: UrlParams.UrlParams) => UrlParams.Input): (url: URL) => URL
+  (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.Input): URL
+} = dual(2, (url: URL, f: (urlParams: UrlParams.UrlParams) => UrlParams.Input) =>
   mutate(url, (url) => {
     const params = f(UrlParams.fromInput(url.searchParams))
     url.search = UrlParams.toString(params)

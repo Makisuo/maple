@@ -14,6 +14,7 @@ import {
 
 import { WORKFLOW_LABEL, WorkflowRingIcon } from "@/components/icons/workflow-ring"
 import { CheckIcon } from "@/components/icons"
+import { agentPromptFromIssue } from "./agent-debug-prompt"
 import type { IssueMutations } from "./use-issue-mutations"
 
 const STATE_ORDER: ReadonlyArray<WorkflowState> = [
@@ -55,6 +56,15 @@ export function IssueContextMenu({
 		try {
 			await navigator.clipboard.writeText(window.location.origin + issueUrl)
 			toast.success("Copied link")
+		} catch {
+			toast.error("Copy failed")
+		}
+	}
+
+	const copyAgentPrompt = async () => {
+		try {
+			await navigator.clipboard.writeText(agentPromptFromIssue(issue))
+			toast.success("Copied agent prompt — paste it into your MCP agent")
 		} catch {
 			toast.error("Copy failed")
 		}
@@ -106,6 +116,9 @@ export function IssueContextMenu({
 				<ContextMenuItem onClick={onOpenInNewTab}>Open in new tab</ContextMenuItem>
 				<ContextMenuItem onClick={copyUrl}>Copy link</ContextMenuItem>
 				<ContextMenuItem onClick={copyId}>Copy ID</ContextMenuItem>
+				{issue.kind === "error" ? (
+					<ContextMenuItem onClick={copyAgentPrompt}>Copy agent prompt</ContextMenuItem>
+				) : null}
 			</ContextMenuContent>
 		</ContextMenu>
 	)

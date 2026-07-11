@@ -1,18 +1,27 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
+import { Unitflow, View } from "@maple/unitflow/react"
+
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
+import { useMountEffect } from "@/hooks/use-mount-effect"
 import { IssueGroup } from "@/components/errors/issue-group"
 import { IssuesBulkBar } from "@/components/errors/issues-bulk-bar"
 import { IssuesToolbar } from "@/components/errors/issues-toolbar"
 import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
 import type { SelectToggleEvent } from "@/components/errors/issue-row"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { ErrorIssuesModel, filterIssues } from "@/lib/models/error-issues-model"
+import {
+	clearedSelection,
+	type IssueSelectionMsg,
+	type IssueSelectionState,
+	toggledSelection,
+} from "@/lib/models/issue-selection"
+import { unitflowRuntime } from "@/lib/models/runtime"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -57,8 +66,6 @@ const GROUP_ORDER: ReadonlyArray<WorkflowState> = [
 	"wontfix",
 ]
 
-const ISSUES_PAGE_LIMIT = 100
-
 const SEVERITY_FILTER_VALUES = ["all", "critical", "high", "medium", "low", "unset"] as const
 type SeverityFilterValue = (typeof SEVERITY_FILTER_VALUES)[number]
 
@@ -93,6 +100,51 @@ export const Route = effectRoute(createFileRoute("/errors/issues/"))({
 	validateSearch: Schema.toStandardSchemaV1(searchSchema),
 })
 
+/** The page chrome every phase renders: breadcrumbs + title + toolbar. */
+function IssuesPageFrame({ toolbar, children }: { toolbar: React.ReactNode; children: React.ReactNode }) {
+	return (
+		<DashboardLayout
+			breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
+			title="Issues"
+			description="Errors grouped into triage, in-progress, and resolved work."
+		>
+			<div>
+				{toolbar}
+				{children}
+			</div>
+		</DashboardLayout>
+	)
+}
+
+function IssuesSkeleton({ toolbar }: { toolbar: React.ReactNode }) {
+	return (
+		<IssuesPageFrame toolbar={toolbar}>
+			<div className="space-y-px p-2">
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+				<Skeleton className="h-9 w-full" />
+			</div>
+		</IssuesPageFrame>
+	)
+}
+
+function IssuesLoadError({ toolbar, message }: { toolbar: React.ReactNode; message?: string }) {
+	return (
+		<IssuesPageFrame toolbar={toolbar}>
+			<div className="p-4">
+				<Empty>
+					<EmptyHeader>
+						<EmptyTitle>Failed to load issues</EmptyTitle>
+						<EmptyDescription>{message ?? "Try refreshing or check API logs."}</EmptyDescription>
+					</EmptyHeader>
+				</Empty>
+			</div>
+		</IssuesPageFrame>
+	)
+}
+
 function IssuesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
@@ -100,30 +152,14 @@ function IssuesPage() {
 	const severityFilter: SeverityFilterValue = search.severity ?? "all"
 	const kindFilter = search.kind ?? "all"
 
-	const issuesQueryAtom = MapleApiAtomClient.query("errors", "listIssues", {
-		query: {
-			...(activeFilter === "all" ? {} : { workflowState: activeFilter }),
-			...(severityFilter === "all" ? {} : { severity: severityFilter }),
-			...(kindFilter === "all" ? {} : { kind: kindFilter }),
-			limit: ISSUES_PAGE_LIMIT,
-		},
-		reactivityKeys: ["errorIssues"],
-	})
-	const issuesResult = useAtomValue(issuesQueryAtom)
 	const mutations = useIssueMutations()
 
-	const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
-	const anchorRef = useRef<string | null>(null)
-
-	const totalCount = Result.isSuccess(issuesResult) ? issuesResult.value.issues.length : undefined
-
-	const toolbar = (
+	const toolbar = (totalCount?: number) => (
 		<IssuesToolbar
 			tabs={TOOLBAR_TABS}
 			active={activeFilter}
 			totalCount={totalCount}
 			onChange={(value) => {
-				setSelectedIds(new Set())
 				navigate({
 					search: (prev) => ({
 						...prev,
@@ -136,7 +172,6 @@ function IssuesPage() {
 					<Select
 						value={kindFilter}
 						onValueChange={(value) => {
-							setSelectedIds(new Set())
 							navigate({
 								search: (prev) => ({
 									...prev,
@@ -157,7 +192,6 @@ function IssuesPage() {
 					<Select
 						value={severityFilter}
 						onValueChange={(value) => {
-							setSelectedIds(new Set())
 							navigate({
 								search: (prev) => ({
 									...prev,
@@ -185,85 +219,129 @@ function IssuesPage() {
 		/>
 	)
 
-	return Result.builder(issuesResult)
-		.onInitial(() => (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-				title="Issues"
-				description="Errors grouped into triage, in-progress, and resolved work."
-			>
-				<div>
-					{toolbar}
-					<div className="space-y-px p-2">
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-						<Skeleton className="h-9 w-full" />
-					</div>
-				</div>
-			</DashboardLayout>
-		))
-		.onError((error) => (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Errors", href: "/errors" }, { label: "Issues" }]}
-				title="Issues"
-				description="Errors grouped into triage, in-progress, and resolved work."
-			>
-				<div>
-					{toolbar}
-					<div className="p-4">
-						<Empty>
-							<EmptyHeader>
-								<EmptyTitle>Failed to load issues</EmptyTitle>
-								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
-								</EmptyDescription>
-							</EmptyHeader>
-						</Empty>
-					</div>
-				</div>
-			</DashboardLayout>
-		))
-		.onSuccess((response) => {
-			const issues = response.issues
-			return (
-				<IssuesPageBody
-					issues={issues}
-					isRefreshing={issuesResult.waiting}
-					activeFilter={activeFilter}
-					mutations={mutations}
-					selectedIds={selectedIds}
-					setSelectedIds={setSelectedIds}
-					anchorRef={anchorRef}
+	return (
+		<Unitflow
+			runtime={unitflowRuntime}
+			rootModel={ErrorIssuesModel}
+			building={<IssuesSkeleton toolbar={toolbar()} />}
+			failed={() => <IssuesLoadError toolbar={toolbar()} />}
+		>
+			{(unit) => (
+				<IssuesModelBody
+					unit={unit}
 					toolbar={toolbar}
+					activeFilter={activeFilter}
+					severityFilter={severityFilter}
+					kindFilter={kindFilter}
+					mutations={mutations}
 				/>
-			)
-		})
-		.render()
+			)}
+		</Unitflow>
+	)
 }
 
-interface IssuesPageBodyProps {
+interface IssuesBodyProps {
+	toolbar: (totalCount?: number) => React.ReactNode
+	activeFilter: FilterValue
+	severityFilter: SeverityFilterValue
+	kindFilter: "all" | "error" | "alert"
+	mutations: ReturnType<typeof useIssueMutations>
+}
+
+/** The model-owned selection state + its dispatcher, bound from the model's
+ * `ui` and threaded down to the rows and the bulk bar. */
+interface SelectionBinding {
+	selection: IssueSelectionState
+	dispatchSelection: (msg: IssueSelectionMsg) => void
+}
+
+const IssuesModelBody = View.make(
+	ErrorIssuesModel,
+	({ overview, selection, dispatchSelection }, props: IssuesBodyProps) => {
+		if (overview.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
+		if (overview.phase === "error") {
+			return <IssuesLoadError toolbar={props.toolbar()} message={overview.message} />
+		}
+		return (
+			<IssuesReadyBody
+				allIssues={overview.issues}
+				selection={selection}
+				dispatchSelection={dispatchSelection}
+				{...props}
+			/>
+		)
+	},
+)
+
+/** Resets the model-owned selection on page entry and whenever the URL filters
+ * change. The filters live above the `<Unitflow>` provider, so rather than an
+ * effect that watches them, this null component is remounted by its `key` (and
+ * on a fresh page mount, since the whole subtree unmounts on navigation away)
+ * and fires `Cleared` — the sanctioned no-useEffect "re-run via key" pattern.
+ * `hasSelection` gates the dispatch so the common empty-selection case (first
+ * load, or a filter change with nothing selected) doesn't emit a no-op. */
+function ClearSelectionOnFilterChange({
+	dispatchSelection,
+	hasSelection,
+}: {
+	dispatchSelection: (msg: IssueSelectionMsg) => void
+	hasSelection: boolean
+}) {
+	useMountEffect(() => {
+		if (hasSelection) dispatchSelection(clearedSelection)
+	})
+	return null
+}
+
+interface IssuesReadyBodyProps extends IssuesBodyProps, SelectionBinding {
+	allIssues: ReadonlyArray<ErrorIssueDocument>
+}
+
+function IssuesReadyBody({
+	allIssues,
+	activeFilter,
+	severityFilter,
+	kindFilter,
+	...props
+}: IssuesReadyBodyProps) {
+	const issues = useMemo(
+		() =>
+			filterIssues(allIssues, {
+				workflowState: activeFilter === "all" ? undefined : activeFilter,
+				severity: severityFilter === "all" ? undefined : severityFilter,
+				kind: kindFilter === "all" ? undefined : kindFilter,
+			}),
+		[allIssues, activeFilter, severityFilter, kindFilter],
+	)
+
+	return (
+		<>
+			<ClearSelectionOnFilterChange
+				key={`${activeFilter}:${severityFilter}:${kindFilter}`}
+				dispatchSelection={props.dispatchSelection}
+				hasSelection={props.selection.selectedIds.size > 0}
+			/>
+			<IssuesPageBody issues={issues} activeFilter={activeFilter} {...props} />
+		</>
+	)
+}
+
+interface IssuesPageBodyProps extends SelectionBinding {
 	issues: ReadonlyArray<ErrorIssueDocument>
-	isRefreshing: boolean
 	activeFilter: FilterValue
 	mutations: ReturnType<typeof useIssueMutations>
-	selectedIds: Set<string>
-	setSelectedIds: React.Dispatch<React.SetStateAction<Set<string>>>
-	anchorRef: React.MutableRefObject<string | null>
-	toolbar: React.ReactNode
+	toolbar: (totalCount?: number) => React.ReactNode
 }
 
 function IssuesPageBody({
 	issues,
-	isRefreshing,
 	activeFilter,
 	mutations,
-	selectedIds,
-	setSelectedIds,
-	anchorRef,
+	selection,
+	dispatchSelection,
 	toolbar,
 }: IssuesPageBodyProps) {
+	const selectedIds = selection.selectedIds
 	const grouped = useMemo(() => {
 		const map = new Map<WorkflowState, ErrorIssueDocument[]>()
 		for (const issue of issues) {
@@ -303,31 +381,19 @@ function IssuesPageBody({
 
 	const flatIssueIds = useMemo(() => flatIssues.map((i) => i.id as string), [flatIssues])
 
+	// The shift-range/anchor logic now lives in the pure reducer
+	// (updateIssueSelection); the row just reports the toggle + the current
+	// visible order and the model figures out the rest.
 	const toggleSelection = useCallback(
 		(id: string, event: Pick<SelectToggleEvent, "shiftKey">) => {
-			setSelectedIds((prev) => {
-				const next = new Set(prev)
-				if (event.shiftKey && anchorRef.current) {
-					const a = flatIssueIds.indexOf(anchorRef.current)
-					const b = flatIssueIds.indexOf(id)
-					if (a !== -1 && b !== -1) {
-						const [lo, hi] = a < b ? [a, b] : [b, a]
-						for (let i = lo; i <= hi; i++) next.add(flatIssueIds[i]!)
-						return next
-					}
-				}
-				if (next.has(id)) next.delete(id)
-				else next.add(id)
-				anchorRef.current = id
-				return next
-			})
+			dispatchSelection(toggledSelection(id, event.shiftKey, flatIssueIds))
 		},
-		[flatIssueIds, anchorRef, setSelectedIds],
+		[dispatchSelection, flatIssueIds],
 	)
 
 	const clearSelection = useCallback(() => {
-		setSelectedIds(new Set())
-	}, [setSelectedIds])
+		dispatchSelection(clearedSelection)
+	}, [dispatchSelection])
 
 	const navigate = useNavigate({ from: Route.fullPath })
 
@@ -369,11 +435,8 @@ function IssuesPageBody({
 			title="Issues"
 			description="Errors grouped into triage, in-progress, and resolved work."
 		>
-			<div
-				className={isRefreshing ? "opacity-60 transition-opacity" : undefined}
-				aria-busy={isRefreshing}
-			>
-				{toolbar}
+			<div>
+				{toolbar(issues.length)}
 				{issues.length === 0 ? (
 					<div className="p-4">
 						<Empty>

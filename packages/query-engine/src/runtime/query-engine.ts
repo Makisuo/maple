@@ -29,7 +29,7 @@ import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "e
 import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
 import { makeExpandMacros } from "./raw-sql"
-import { encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
+import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
@@ -176,25 +176,21 @@ const snapSeconds = (dateStr: string): string => snapToWindow(dateStr, CACHE_SNA
  * concurrent dashboard widgets share cache entries.
  */
 export function snapWindowForQueryKind(kind: string): number {
-	switch (kind) {
-		case "attributeKeys":
-			return 300 // 5 min
-		case "attributeValues":
-			return 60 // 1 min
-		case "facets":
-			// 15 min — environments / commit SHAs / service names rarely change,
-			// and the dashboard route reuses this cache for demo-detection + the
-			// environment dropdown (was a heavy `serviceOverview` probe). This is
-			// the gate on the dashboard critical path, so a wider window cuts
-			// cold-miss frequency ~3× vs 5 min; a new service/env appearing up to
-			// 15 min late in the dropdown is fine. Wider snap also collapses
-			// near-simultaneous calls whose `startTime` ISO strings drift by
-			// milliseconds between renders (useEffectiveTimeRange recomputes
-			// `new Date()` per render).
-			return 900
-		default:
-			return CACHE_SNAP_S
-	}
+	return Match.value(kind).pipe(
+		Match.when("attributeKeys", () => 300), // 5 min
+		Match.when("attributeValues", () => 60), // 1 min
+		// 15 min — environments / commit SHAs / service names rarely change,
+		// and the dashboard route reuses this cache for demo-detection + the
+		// environment dropdown (was a heavy `serviceOverview` probe). This is
+		// the gate on the dashboard critical path, so a wider window cuts
+		// cold-miss frequency ~3× vs 5 min; a new service/env appearing up to
+		// 15 min late in the dropdown is fine. Wider snap also collapses
+		// near-simultaneous calls whose `startTime` ISO strings drift by
+		// milliseconds between renders (useEffectiveTimeRange recomputes
+		// `new Date()` per render).
+		Match.when("facets", () => 900),
+		Match.orElse(() => CACHE_SNAP_S),
+	)
 }
 
 /**
@@ -203,16 +199,12 @@ export function snapWindowForQueryKind(kind: string): number {
  * gradually as data ingests.
  */
 export function cacheTtlForQueryKind(kind: string): number {
-	switch (kind) {
-		case "attributeKeys":
-			return 300
-		case "attributeValues":
-			return 60
-		case "facets":
-			return 900 // matches snapWindowForQueryKind — see comment above
-		default:
-			return 15
-	}
+	return Match.value(kind).pipe(
+		Match.when("attributeKeys", () => 300),
+		Match.when("attributeValues", () => 60),
+		Match.when("facets", () => 900), // matches snapWindowForQueryKind — see comment above
+		Match.orElse(() => 15),
+	)
 }
 
 export function buildCacheKey(orgId: string, request: QueryEngineExecuteRequest): string {
@@ -364,12 +356,29 @@ const validateMetricsAttributeFilters = Effect.fn(
 	// `groupBy` is an array for timeseries, a single literal for breakdown.
 	const groupBy = query.groupBy
 	const wantsAttribute = Array.isArray(groupBy) ? groupBy.includes("attribute") : groupBy === "attribute"
+	const wantsResourceAttribute = Array.isArray(groupBy)
+		? groupBy.includes("resource_attribute")
+		: groupBy === "resource_attribute"
 	if (wantsAttribute && !query.filters.groupByAttributeKey) {
 		// Mirror the traces guard: never silently downgrade an attribute grouping
 		// to a service grouping — the agent asked for a label breakdown.
 		return yield* new QueryEngineValidationError({
 			message: "Invalid metrics attribute grouping",
 			details: ["groupBy=attribute requires filters.groupByAttributeKey"],
+		})
+	}
+	if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
+		return yield* new QueryEngineValidationError({
+			message: "Invalid metrics attribute grouping",
+			details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
+		})
+	}
+	if (wantsAttribute && wantsResourceAttribute) {
+		// The metrics queries carry a single attributeValue group column — one
+		// attribute dimension per query.
+		return yield* new QueryEngineValidationError({
+			message: "Invalid metrics attribute grouping",
+			details: ["groupBy cannot combine attribute and resource_attribute"],
 		})
 	}
 })
@@ -1064,7 +1073,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const groupByAttributeKey = groupByAttribute
 				? request.query.filters.groupByAttributeKey
 				: undefined
+			const groupByResourceAttributeKey = request.query.groupBy?.includes("resource_attribute")
+				? request.query.filters.groupByResourceAttributeKey
+				: undefined
 			const attributeFilter = request.query.filters.attributeFilters?.[0]
+			const resourceAttributeFilters = request.query.filters.resourceAttributeFilters
 
 			const isRateOrIncrease = request.query.metric === "rate" || request.query.metric === "increase"
 
@@ -1076,8 +1089,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						bucketSeconds: bucketSeconds!,
 						serviceName: request.query.filters.serviceName,
 						groupByAttributeKey,
+						groupByResourceAttributeKey,
 						attributeKey: attributeFilter?.key,
 						attributeValue: attributeFilter?.value,
+						resourceAttributeFilters,
 					}),
 					{
 						orgId: tenant.orgId,
@@ -1090,7 +1105,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				const rateResult = yield* annotateWarehouseError(
 					warehouse.compiledQuery(tenant, compiled, {
 						profile: "aggregation",
-						context: "metrics rate/increase query",
+						context: "metricsRateIncrease",
 					}),
 					"metricsRateIncrease",
 				)
@@ -1101,7 +1116,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					rateResult,
 					(row) => Number(row[rateValueField]),
 					request.query.groupBy,
-					groupByAttributeKey,
+					groupByAttributeKey ?? groupByResourceAttributeKey,
 					fillOptions,
 				)
 
@@ -1121,8 +1136,10 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					metricType: request.query.filters.metricType,
 					serviceName: request.query.filters.serviceName,
 					groupByAttributeKey,
+					groupByResourceAttributeKey,
 					attributeKey: attributeFilter?.key,
 					attributeValue: attributeFilter?.value,
+					resourceAttributeFilters,
 				}),
 				{
 					orgId: tenant.orgId,
@@ -1157,7 +1174,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 							result,
 							(row) => Number(row[valueField]),
 							request.query.groupBy,
-							groupByAttributeKey,
+							groupByAttributeKey ?? groupByResourceAttributeKey,
 							fillOptions,
 						)
 
@@ -1241,6 +1258,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						request.query.filters.groupByAttributeKey && {
 							groupByAttributeKey: request.query.filters.groupByAttributeKey,
 						}),
+					...(request.query.groupBy === "resource_attribute" &&
+						request.query.filters.groupByResourceAttributeKey && {
+							groupByResourceAttributeKey: request.query.filters.groupByResourceAttributeKey,
+						}),
+					resourceAttributeFilters: request.query.filters.resourceAttributeFilters,
 					limit: request.query.limit,
 				}),
 				{
@@ -1319,19 +1341,32 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		if (request.query.kind === "attributeKeys") {
 			const scope = resolveAttributeScope(request.query.source, request.query.scope)
+			// Per-metric scoping reads the raw metric table (the hourly rollup has no
+			// MetricName column). Requires both metricName and metricType; otherwise
+			// fall back to the org-wide rollup.
+			const metricScoped =
+				request.query.source === "metrics" && request.query.metricName && request.query.metricType
+					? { metricName: request.query.metricName, metricType: request.query.metricType }
+					: undefined
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.attributeKeysQuery({
-					scope,
-					limit: request.query.limit,
-				}),
+				metricScoped
+					? CH.metricScopedAttributeKeysQuery({
+							metricType: metricScoped.metricType,
+							limit: request.query.limit,
+						})
+					: CH.attributeKeysQuery({
+							scope,
+							limit: request.query.limit,
+						}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
 					endTime: request.endTime,
+					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
 				},
-				"attributeKeys",
+				metricScoped ? "attributeKeys:metric" : "attributeKeys",
 				"discovery",
 			)
 
@@ -1355,12 +1390,13 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				const opts = extractTracesFacetsOpts(
 					request.query.filters as Record<string, unknown> | undefined,
 				)
+				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
-					CH.tracesFacetsQuery(opts),
+					CH.tracesFacetsQuery({ ...opts, facet }),
 					baseParams,
-					"tracesFacets",
+					facet ? `tracesFacets:${facet}` : "tracesFacets",
 					"discovery",
 				)
 				return new QueryEngineExecuteResponse({
@@ -1378,18 +1414,22 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 			if (request.query.source === "logs") {
 				const filters = request.query.filters as Record<string, unknown> | undefined
+				const facet = request.query.facet
 				const rows = yield* executeCHUnionQuery(
 					warehouse,
 					tenant,
-					CH.logsFacetsQuery({
-						serviceName: filters?.serviceName as string | undefined,
-						severity: filters?.severity as string | undefined,
-						environments: filters?.environments as readonly string[] | undefined,
-						namespaces: filters?.namespaces as readonly string[] | undefined,
-						matchModes: logsMatchModes(filters),
-					}),
+					CH.logsFacetsQuery(
+						{
+							serviceName: filters?.serviceName as string | undefined,
+							severity: filters?.severity as string | undefined,
+							environments: filters?.environments as readonly string[] | undefined,
+							namespaces: filters?.namespaces as readonly string[] | undefined,
+							matchModes: logsMatchModes(filters),
+						},
+						facet,
+					),
 					baseParams,
-					"logsFacets",
+					facet ? `logsFacets:${facet}` : "logsFacets",
 					"discovery",
 				)
 				return new QueryEngineExecuteResponse({
@@ -1497,6 +1537,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		// ---- Attribute Values ----
 		if (request.query.kind === "attributeValues") {
+			// Per-metric scoping reads the raw metric table (see attributeKeys above).
+			const metricScoped =
+				request.query.source === "metrics" && request.query.metricName && request.query.metricType
+					? { metricName: request.query.metricName, metricType: request.query.metricType }
+					: undefined
 			const queryFn = Match.value(request.query.scope).pipe(
 				Match.when("resource", () => CH.resourceAttributeValuesQuery),
 				Match.when("log", () => CH.logAttributeValuesQuery),
@@ -1506,9 +1551,20 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
-				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
-				`attributeValues:${request.query.scope}`,
+				metricScoped
+					? CH.metricScopedAttributeValuesQuery({
+							metricType: metricScoped.metricType,
+							attributeKey: request.query.attributeKey,
+							limit: request.query.limit,
+						})
+					: queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
+				{
+					orgId: tenant.orgId,
+					startTime: request.startTime,
+					endTime: request.endTime,
+					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
+				},
+				metricScoped ? "attributeValues:metric-scoped" : `attributeValues:${request.query.scope}`,
 				"discovery",
 			)
 			return new QueryEngineExecuteResponse({
@@ -1592,7 +1648,9 @@ const composeMetricsGroupKey = (
 	const parts: string[] = []
 	for (const dim of groupBy) {
 		if (dim === "service") parts.push(serviceName || "")
-		else if (dim === "attribute") parts.push(attributeValue || "")
+		// Both attribute dimensions surface through the query's single
+		// attributeValue column (only one can be active per query).
+		else if (dim === "attribute" || dim === "resource_attribute") parts.push(attributeValue || "")
 	}
 	const filtered = parts.filter((p) => p.length > 0)
 	if (filtered.length === 0) return "all"
@@ -1696,6 +1754,9 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 	} else {
 		const groupByAttribute = query.groupBy?.includes("attribute")
 		const groupByAttributeKey = groupByAttribute ? query.filters.groupByAttributeKey : undefined
+		const groupByResourceAttributeKey = query.groupBy?.includes("resource_attribute")
+			? query.filters.groupByResourceAttributeKey
+			: undefined
 		const rows = yield* executeCHQuery(
 			warehouse,
 			tenant,
@@ -1703,6 +1764,8 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 				metricType: query.filters.metricType,
 				serviceName: query.filters.serviceName,
 				groupByAttributeKey,
+				groupByResourceAttributeKey,
+				resourceAttributeFilters: query.filters.resourceAttributeFilters,
 			}),
 			{
 				orgId: tenant.orgId,
@@ -1858,6 +1921,9 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 			const groupByAttributeKey = groupByAttribute
 				? metricsQuery.filters.groupByAttributeKey
 				: undefined
+			const groupByResourceAttributeKey = metricsQuery.groupBy?.includes("resource_attribute")
+				? metricsQuery.filters.groupByResourceAttributeKey
+				: undefined
 
 			const rows = yield* executeCHQuery(
 				warehouse,
@@ -1866,6 +1932,8 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 					metricType: metricsQuery.filters.metricType,
 					serviceName: metricsQuery.filters.serviceName,
 					groupByAttributeKey,
+					groupByResourceAttributeKey,
+					resourceAttributeFilters: metricsQuery.filters.resourceAttributeFilters,
 				}),
 				{
 					orgId: tenant.orgId,
@@ -1904,6 +1972,52 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 		const result = reducePerGroupObservations(byGroup, request.reducer)
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 		return result
+	})
+
+/**
+ * Like `makeQueryEngineEvaluate`, but returns the per-(bucket, group)
+ * observations instead of reducing each group to a scalar. Backs the alert
+ * rule preview chart: each bucket is one evaluation window, so the series is
+ * exactly the sequence of observations the scheduler would have produced.
+ *
+ * Deliberately NOT routed through the bucket cache — preview requests are
+ * ad-hoc form states and would only pollute it (see the eval-bucket-cache
+ * regression note in QueryEngineService).
+ */
+export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
+	Effect.fn("QueryEngineService.evaluateSeries")(function* (
+		tenant: T,
+		request: QueryEngineEvaluateRequest,
+	): Effect.fn.Return<
+		ReadonlyArray<BucketGroupObs>,
+		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
+	> {
+		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
+		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
+
+		yield* validateEvaluate(request)
+
+		if (
+			request.query.kind !== "timeseries" ||
+			(request.query.source !== "traces" &&
+				request.query.source !== "metrics" &&
+				request.query.source !== "logs")
+		) {
+			return yield* new QueryEngineValidationError({
+				message: "Unsupported alert evaluation query",
+				details: ["Alert evaluation supports traces, logs, and metrics timeseries queries only"],
+			})
+		}
+
+		const startMs = toEpochMs(request.startTime)
+		const endMs = toEpochMs(request.endTime)
+		const bucketSeconds = request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+
+		const points = yield* computeEvaluateBuckets(warehouse, tenant, request, bucketSeconds)
+		const series = decodeEvalSeries(points)
+		yield* Effect.annotateCurrentSpan("result.pointCount", series.length)
+		return series
 	})
 
 const RawSqlAlertRowSchema = Schema.Struct({

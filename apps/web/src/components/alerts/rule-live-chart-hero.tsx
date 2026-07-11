@@ -5,10 +5,13 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Card } from "@maple/ui/components/ui/card"
 import { cn } from "@maple/ui/utils"
 
-import { AlertPreviewChart } from "@/components/alerts/alert-preview-chart"
+import type { AlertRulePreviewResponse } from "@maple/domain/http"
+import { AlertRuleChart } from "@/components/alerts/alert-rule-chart"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
-import { CheckIcon, EyeIcon, FireIcon, LoaderIcon, SquareTerminalIcon } from "@/components/icons"
-import { computeBreachStats, formatBreachDuration, type BreachStats } from "@/lib/alerts/breach-stats"
+import { CheckIcon, EyeIcon, FireIcon, LoaderIcon } from "@/components/icons"
+import { breachStatsFromPreview, formatBreachDuration, type BreachStats } from "@/lib/alerts/breach-stats"
+import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import {
 	formThresholdToDomain,
 	formatSignalValue,
@@ -18,9 +21,10 @@ import {
 
 interface RuleLiveChartHeroProps {
 	form: RuleFormState
-	chartData: Record<string, unknown>[]
-	chartLoading: boolean
-	chartError: string | null
+	/** Evaluator-faithful preview from `useAlertRulePreview`. */
+	preview: AlertRulePreviewResponse | null
+	previewLoading: boolean
+	previewError: string | null
 	onTestRule: () => void
 	testing: boolean
 	previewResult: {
@@ -30,18 +34,18 @@ interface RuleLiveChartHeroProps {
 }
 
 /**
- * Hero block sitting above the form: a live chart of the rule's signal over
- * the last 24h with the threshold line drawn in. The "would-have-fired"
- * status is folded into the header strip as a compact pill so the entire
- * hero stays inside one short card. For raw-SQL rules — where there's no
- * structured preview — the chart is replaced with a hint pointing the user
- * at the Test rule button instead.
+ * Hero block sitting above the form: the SAME chart the rule detail page
+ * renders, fed by the evaluator's own preview over the last 24h — threshold
+ * line, per-window observations, and shaded "would have fired" spans. The
+ * would-have-fired count is folded into the header strip as a compact pill so
+ * the entire hero stays inside one short card. Raw-SQL rules get a real
+ * preview too (the endpoint replays the SQL per evaluation window).
  */
 export function RuleLiveChartHero({
 	form,
-	chartData,
-	chartLoading,
-	chartError,
+	preview,
+	previewLoading,
+	previewError,
 	onTestRule,
 	testing,
 	previewResult,
@@ -55,19 +59,20 @@ export function RuleLiveChartHero({
 			? formThresholdToDomain(form.signalType, form.thresholdUpper)
 			: null
 
-	const stats = useMemo(
-		() => computeBreachStats(chartData, threshold, form.comparator, thresholdUpper),
-		[chartData, threshold, form.comparator, thresholdUpper],
+	// Same canned 24h window `useAlertRulePreview` uses when no range is passed.
+	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "24h")
+	const window = useMemo(
+		() => ({
+			min: new Date(normalizeTimestampInput(startTime)).getTime(),
+			max: new Date(normalizeTimestampInput(endTime)).getTime(),
+		}),
+		[startTime, endTime],
 	)
 
-	const isRawQuery = form.signalType === "raw_query"
+	const stats = useMemo(() => breachStatsFromPreview(preview), [preview])
+
 	const safeThreshold = Number.isFinite(threshold) ? threshold : 0
 	const groupBySummary = formatGroupBySummary(form)
-	const hasPreviewSeries = chartData.some((row) => Object.keys(row).some((key) => key !== "bucket"))
-	const emptyMessage =
-		form.signalType === "builder_query"
-			? "No series returned for this query in the last 24h"
-			: "No preview data for this signal in the last 24h"
 
 	return (
 		<Card className="overflow-hidden">
@@ -82,7 +87,7 @@ export function RuleLiveChartHero({
 							Grouped by {groupBySummary}
 						</span>
 					)}
-					{!isRawQuery && <BreachPill stats={stats} />}
+					<BreachPill stats={stats} />
 				</div>
 				<div className="flex items-center gap-2">
 					{previewResult && (
@@ -100,21 +105,17 @@ export function RuleLiveChartHero({
 			</div>
 
 			<div className="px-4 pb-4">
-				{isRawQuery ? (
-					<RawQueryPreviewPlaceholder />
-				) : chartError != null ? (
-					<ChartErrorPlaceholder message={chartError} />
-				) : !chartLoading && !hasPreviewSeries ? (
-					<EmptyPreviewPlaceholder message={emptyMessage} />
-				) : (
-					<AlertPreviewChart
-						data={chartData}
-						threshold={safeThreshold}
-						signalType={form.signalType}
-						loading={chartLoading}
-						className="h-[220px] w-full"
-					/>
-				)}
+				<AlertRuleChart
+					preview={preview}
+					showWouldFire
+					threshold={safeThreshold}
+					thresholdUpper={thresholdUpper}
+					comparator={form.comparator}
+					signalType={form.signalType}
+					window={window}
+					loading={previewLoading}
+					error={previewError}
+				/>
 			</div>
 		</Card>
 	)
@@ -130,25 +131,6 @@ function formatGroupBySummary(form: RuleFormState): string | null {
 	return visible.join(", ")
 }
 
-function ChartErrorPlaceholder({ message }: { message: string }) {
-	return (
-		<div className="flex h-[220px] w-full items-center justify-center rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-6 text-center">
-			<div className="max-w-md space-y-1">
-				<p className="font-medium text-destructive text-sm">Preview query failed</p>
-				<p className="line-clamp-3 text-muted-foreground text-xs">{message}</p>
-			</div>
-		</div>
-	)
-}
-
-function EmptyPreviewPlaceholder({ message }: { message: string }) {
-	return (
-		<div className="flex h-[220px] w-full items-center justify-center rounded-md border border-dashed bg-muted/20 px-6 text-center">
-			<p className="text-muted-foreground text-sm">{message}</p>
-		</div>
-	)
-}
-
 function BreachPill({ stats }: { stats: BreachStats }) {
 	if (stats.bucketCount === 0) return null
 	if (stats.breachCount === 0) {
@@ -162,8 +144,9 @@ function BreachPill({ stats }: { stats: BreachStats }) {
 	return (
 		<span className="hidden items-center gap-1 text-xs text-destructive sm:inline-flex">
 			<FireIcon size={12} />
-			Fired <span className="font-mono font-semibold tabular-nums">{stats.breachCount}×</span>
-			{stats.longestRunMs !== null && stats.longestRunBuckets > 1 && (
+			Would have fired{" "}
+			<span className="font-mono font-semibold tabular-nums">{stats.breachCount}×</span>
+			{stats.longestRunMs !== null && (
 				<>
 					{" "}
 					· longest{" "}
@@ -202,23 +185,6 @@ function PreviewBadge({
 				state={status === "breached" ? "firing" : "ok"}
 				label={status === "breached" ? "Would trigger" : "Within threshold"}
 			/>
-		</div>
-	)
-}
-
-function RawQueryPreviewPlaceholder() {
-	return (
-		<div className="flex h-[220px] w-full items-center justify-center rounded-md border border-dashed bg-muted/20 px-6 text-center">
-			<div className="max-w-sm space-y-2">
-				<div className="mx-auto flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
-					<SquareTerminalIcon size={16} />
-				</div>
-				<p className="font-medium text-sm">Live preview unavailable for raw SQL</p>
-				<p className="text-muted-foreground text-xs">
-					Use <span className="font-medium">Test rule</span> to execute the SQL and see the
-					resulting value.
-				</p>
-			</div>
 		</div>
 	)
 }

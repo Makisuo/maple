@@ -3,6 +3,7 @@ import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { CloudflareAccountCard } from "@/components/integrations/cloudflare-account-card"
 import { GithubIntegrationCard } from "@/components/integrations/github-integration-card"
 import { HazelIntegrationCard } from "@/components/integrations/hazel-integration-card"
 import {
@@ -12,7 +13,6 @@ import {
 	useIntegrationStatuses,
 	type IntegrationId,
 } from "@/components/integrations/integration-catalog"
-import { CloudflareLogpushSection } from "@/components/settings/cloudflare-logpush-section"
 import { ScrapeTargetsSection } from "@/components/settings/scrape-targets-section"
 import { SettingsNav, useVisibleSettingsSections } from "@/components/settings/settings-nav"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
@@ -91,7 +91,7 @@ function IntegrationsPage() {
 					</Alert>
 				)}
 				{integration === "cloudflare" ? (
-					<CloudflareLogpushSection />
+					<CloudflareAccountCard />
 				) : integration === "hazel" ? (
 					<HazelIntegrationCard />
 				) : integration === "github" ? (

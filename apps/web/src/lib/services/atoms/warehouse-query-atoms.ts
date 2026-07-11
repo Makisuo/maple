@@ -18,9 +18,10 @@ import {
 	getErrorsSummary,
 	getErrorsTimeseries,
 } from "@/api/warehouse/errors"
-import { getLog, getLogAttributeKeys, getLogsFacets, listLogs } from "@/api/warehouse/logs"
+import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
+	getMetricAttributeValues,
 	getMetricTimeSeries,
 	getMetricsSummary,
 	listMetrics,
@@ -47,11 +48,23 @@ import { getServiceUsage } from "@/api/warehouse/service-usage"
 import {
 	getServiceDependenciesBundle,
 	getServiceMap,
+	getServiceMapCloudflare,
 	getServiceMapDbEdges,
 	getServiceDbQuerySummary,
 	getServicePlatforms,
 } from "@/api/warehouse/service-map"
 import { getServiceWorkloads } from "@/api/warehouse/service-infra"
+import {
+	getCloudflarePlatformResources,
+	getCloudflareTopTraffic,
+	getCloudflareWorkers,
+	getCloudflareZoneDetail,
+	getCloudflareZoneDns,
+	getCloudflareZoneHosts,
+	getCloudflareZones,
+	getCloudflareZoneSecurity,
+	getCloudflareZoneTimeseries,
+} from "@/api/warehouse/cloudflare-infra"
 import { getServiceHealthBaseline, getServiceOverview, getServicesFacets } from "@/api/warehouse/services"
 import {
 	getResourceAttributeKeys,
@@ -60,6 +73,7 @@ import {
 	getSpanAttributeValues,
 	getSpanDetail,
 	getSpanHierarchy,
+	getTracesFacetValues,
 	getTracesFacets,
 	listTraces,
 } from "@/api/warehouse/traces"
@@ -175,6 +189,12 @@ export const getTracesFacetsResultAtom = makeQueryAtomFamily(getTracesFacets, {
 	staleTime: 30_000,
 })
 
+// Single-dimension facet list for dashboard variables — server compiles only
+// the requested UNION branch, so this never triggers the full facets scan.
+export const getTracesFacetValuesResultAtom = makeQueryAtomFamily(getTracesFacetValues, {
+	staleTime: 30_000,
+})
+
 export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy)
 
 export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
@@ -226,6 +246,10 @@ export const getLogsFacetsResultAtom = makeQueryAtomFamily(getLogsFacets, {
 	staleTime: 30_000,
 })
 
+export const getLogsFacetValuesResultAtom = makeQueryAtomFamily(getLogsFacetValues, {
+	staleTime: 30_000,
+})
+
 export const getErrorsByTypeResultAtom = makeQueryAtomFamily(getErrorsByType, {
 	staleTime: 60_000,
 })
@@ -259,6 +283,10 @@ export const getMetricTimeSeriesResultAtom = makeQueryAtomFamily(getMetricTimeSe
 })
 
 export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAttributeKeys, {
+	staleTime: 60_000,
+})
+
+export const getMetricAttributeValuesResultAtom = makeQueryAtomFamily(getMetricAttributeValues, {
 	staleTime: 60_000,
 })
 
@@ -326,6 +354,45 @@ export const workloadFacetsResultAtom = makeQueryAtomFamily(getWorkloadFacets, {
 	staleTime: 30_000,
 })
 
+// Cloudflare infrastructure page (/infra/cloudflare): per-zone HTTP edge
+// analytics + per-Worker invocation analytics from the direct integration.
+export const cloudflareZonesResultAtom = makeQueryAtomFamily(getCloudflareZones, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneTimeseriesResultAtom = makeQueryAtomFamily(getCloudflareZoneTimeseries, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneDetailResultAtom = makeQueryAtomFamily(getCloudflareZoneDetail, {
+	staleTime: 30_000,
+})
+
+export const cloudflareWorkersResultAtom = makeQueryAtomFamily(getCloudflareWorkers, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneHostsResultAtom = makeQueryAtomFamily(getCloudflareZoneHosts, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneSecurityResultAtom = makeQueryAtomFamily(getCloudflareZoneSecurity, {
+	staleTime: 30_000,
+})
+
+export const cloudflareZoneDnsResultAtom = makeQueryAtomFamily(getCloudflareZoneDns, {
+	staleTime: 30_000,
+})
+
+export const cloudflarePlatformResourcesResultAtom = makeQueryAtomFamily(getCloudflarePlatformResources, {
+	staleTime: 30_000,
+})
+
+// Live Cloudflare GraphQL proxy — server edge-caches ~60s, so match that here.
+export const cloudflareTopTrafficResultAtom = makeQueryAtomFamily(getCloudflareTopTraffic, {
+	staleTime: 60_000,
+})
+
 // Service-detail Overview tab bundle: primary chart + releases timeline +
 // environments in one fetch. The chart grid and the environment switcher read
 // this atom with the same input key, so they share a single round-trip.
@@ -369,6 +436,10 @@ export const getServiceDependenciesBundleResultAtom = makeQueryAtomFamily(getSer
 })
 
 export const getServiceMapDbEdgesResultAtom = makeQueryAtomFamily(getServiceMapDbEdges, {
+	staleTime: 15_000,
+})
+
+export const getServiceMapCloudflareResultAtom = makeQueryAtomFamily(getServiceMapCloudflare, {
 	staleTime: 15_000,
 })
 

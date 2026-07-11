@@ -48,6 +48,23 @@ export function computeSeriesStats(
 	return result
 }
 
+function isAllZeroStats(stats: SeriesStats | undefined): boolean {
+	return stats != null && stats.min === 0 && stats.max === 0 && stats.mean === 0 && stats.last === 0
+}
+
+/**
+ * Stable sort that pushes all-zero series to the bottom of the legend, so
+ * series with actual data aren't buried under rows of zeros (MAP-49).
+ */
+export function sortZeroSeriesLast(
+	series: ReadonlyArray<LegendSeries>,
+	stats: Record<string, SeriesStats>,
+): LegendSeries[] {
+	return [...series].sort(
+		(a, b) => Number(isAllZeroStats(stats[a.key])) - Number(isAllZeroStats(stats[b.key])),
+	)
+}
+
 interface QueryBuilderLegendProps {
 	series: ReadonlyArray<LegendSeries>
 	stats: Record<string, SeriesStats>
@@ -60,6 +77,12 @@ interface QueryBuilderLegendProps {
 	 * per-series Min/Max/Mean/Last columns.
 	 */
 	variant?: "compact" | "stats"
+	/**
+	 * Upper bound (px) on the legend's own height. A right-aligned legend isn't
+	 * height-constrained by Recharts, so a long series list would overflow the
+	 * card; capping it here lets the `overflow-auto` body scroll instead.
+	 */
+	maxHeight?: number
 }
 
 /** Vertical space (px) a bottom-aligned legend block needs. */
@@ -120,12 +143,16 @@ export function QueryBuilderLegend({
 	unit,
 	layout = "bottom",
 	variant = "stats",
+	maxHeight,
 }: QueryBuilderLegendProps) {
 	if (series.length === 0) return null
+
+	const maxHeightStyle = maxHeight != null ? { maxHeight } : undefined
 
 	if (variant === "compact") {
 		return (
 			<div
+				style={maxHeightStyle}
 				className={cn(
 					"h-full overflow-auto text-xs",
 					layout === "right"
@@ -158,7 +185,10 @@ export function QueryBuilderLegend({
 	}
 
 	return (
-		<div className={cn("h-full overflow-auto text-xs", layout === "right" ? "pl-3" : "pt-2")}>
+		<div
+			style={maxHeightStyle}
+			className={cn("h-full overflow-auto text-xs", layout === "right" ? "pl-3" : "pt-2")}
+		>
 			<table className="w-full border-collapse">
 				<thead>
 					<tr className="text-muted-foreground">
@@ -174,6 +204,7 @@ export function QueryBuilderLegend({
 					{series.map((entry) => {
 						const entryStats = stats[entry.key]
 						const isHidden = hidden.has(entry.key)
+						const allZero = isAllZeroStats(entryStats)
 						return (
 							<tr
 								key={entry.key}
@@ -189,17 +220,31 @@ export function QueryBuilderLegend({
 											className="size-2 shrink-0 rounded-[2px]"
 											style={{ backgroundColor: entry.color }}
 										/>
-										<span className="truncate">{entry.label}</span>
+										<span className={cn("truncate", allZero && "text-muted-foreground")}>
+											{entry.label}
+										</span>
 									</span>
 								</td>
-								{STAT_COLUMNS.map((column) => (
+								{allZero ? (
+									// Four zeros in a row read as noise — collapse to one muted 0.
 									<td
-										key={column.field}
-										className="px-2 text-right font-mono tabular-nums last:pr-0"
+										colSpan={STAT_COLUMNS.length}
+										className="px-2 text-right font-mono tabular-nums text-muted-foreground/60"
 									>
-										{entryStats ? formatValueByUnit(entryStats[column.field], unit) : "—"}
+										0
 									</td>
-								))}
+								) : (
+									STAT_COLUMNS.map((column) => (
+										<td
+											key={column.field}
+											className="px-2 text-right font-mono tabular-nums last:pr-0"
+										>
+											{entryStats
+												? formatValueByUnit(entryStats[column.field], unit)
+												: "—"}
+										</td>
+									))
+								)}
 							</tr>
 						)
 					})}

@@ -93,6 +93,7 @@ export const kafkaTemplate: TemplateDefinition = {
 	category: "messaging",
 	tags: ["kafka", "messaging"],
 	requirements: ["OpenTelemetry kafkametricsreceiver"],
+	requiredMetricPrefixes: ["kafka."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

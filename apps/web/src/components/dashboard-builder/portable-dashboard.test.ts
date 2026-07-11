@@ -47,6 +47,37 @@ describe("portable-dashboard", () => {
 		})
 	})
 
+	it("round-trips dashboard variables through export and import", () => {
+		const variables = [
+			{
+				name: "service",
+				type: "query" as const,
+				source: { kind: "facet" as const, facet: "service" as const },
+				includeAll: true,
+			},
+			{
+				name: "env",
+				type: "custom" as const,
+				options: [{ value: "prod" }, { value: "stg" }],
+				defaultValue: "prod",
+			},
+		]
+
+		const exported = toPortableDashboard({
+			id: "dash_123",
+			name: "With Variables",
+			timeRange: { type: "relative", value: "12h" },
+			widgets: [],
+			variables,
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T01:00:00.000Z",
+		})
+		expect(exported.variables).toEqual(variables)
+
+		const imported = parsePortableDashboardJson(JSON.stringify(exported))
+		expect(imported.variables).toEqual(variables)
+	})
+
 	it("rejects non-canonical dashboard files", () => {
 		expect(() =>
 			parsePortableDashboardJson(

@@ -16,6 +16,8 @@ import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Exit, Schema } from "effect"
 import { toast } from "sonner"
 
+import { useScrapeTargetChecks } from "@/hooks/use-scrape-target-checks"
+
 import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import {
 	AlertDialog,
@@ -846,13 +848,7 @@ function ScrapeTargetRow({
 	onEdit: (target: ScrapeTarget) => void
 	onDelete: (target: ScrapeTarget) => void
 }) {
-	const latestCheckResult = useAtomValue(
-		MapleApiAtomClient.query("scrapeTargets", "listChecks", {
-			params: { targetId: target.id },
-			query: { limit: 1 },
-			reactivityKeys: ["scrapeTargetChecks", target.id, "latest"],
-		}),
-	)
+	const { result: latestCheckResult } = useScrapeTargetChecks(target.id, 1)
 	const latestCheck = checksFromResult(latestCheckResult).at(0) ?? null
 	const status = scheduledStatus(target, latestCheck, Result.isInitial(latestCheckResult))
 
@@ -1009,12 +1005,7 @@ function ScrapeTargetDetails({
 	onEdit: (target: ScrapeTarget) => void
 	onDelete: (target: ScrapeTarget) => void
 }) {
-	const checksQueryAtom = MapleApiAtomClient.query("scrapeTargets", "listChecks", {
-		params: { targetId: target.id },
-		query: { limit: 20 },
-		reactivityKeys: ["scrapeTargetChecks", target.id],
-	})
-	const checksResult = useAtomValue(checksQueryAtom)
+	const { result: checksResult } = useScrapeTargetChecks(target.id, 20)
 	const checks = checksFromResult(checksResult)
 	const latestCheck = checks.at(0) ?? null
 	const status = scheduledStatus(target, latestCheck, Result.isInitial(checksResult))

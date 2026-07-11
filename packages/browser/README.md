@@ -35,6 +35,19 @@ That single call:
 - writes session metadata at start (`active`) and on page hide (`ended`),
   including the trace ids observed during the session.
 
+## Identifying users
+
+Pass `userId` to `init()` when you already know the signed-in user, or call
+`MapleBrowser.identify(user.id)` later. The id is attached to future session
+metadata rows and stamped as `user.id` on future browser-created spans.
+
+```ts
+MapleBrowser.identify(user.id)
+
+// after sign-out
+MapleBrowser.identify(null)
+```
+
 ## Privacy
 
 `maskAllInputs` (default **on**) masks every `<input>` value. Use rrweb's

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
+import { DashboardId, DashboardVersionId } from "@maple/domain/http"
 import { Atom, useAtom } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -12,6 +13,12 @@ import {
 	DashboardTimeRangeWrapper,
 	useDashboardTimeRange,
 } from "@/components/dashboard-builder/dashboard-providers"
+import { DashboardVariablesProvider } from "@/components/dashboard-builder/dashboard-variables-context"
+import {
+	VARIABLE_PARAM_PREFIX,
+	pickVariableParams,
+	variableSearchRest,
+} from "@/lib/dashboard-variables/search-params"
 import {
 	DashboardActionsProvider,
 	useDashboardActions,
@@ -23,14 +30,39 @@ import { DashboardHistoryPanel, PreviewedCanvas } from "@/components/dashboard-b
 import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-history-atoms"
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
 import { Result } from "@/lib/effect-atom"
-import type { ReactNode } from "react"
+import { useMemo, type ReactNode } from "react"
 
 // Module-level atoms — singleton (only one dashboard page visible at a time)
 const chartPickerOpenAtom = Atom.make(false)
 
-const dashboardViewSearchSchema = Schema.Struct({
-	mode: Schema.optional(Schema.Literal("edit")),
-})
+// Decode the raw `$dashboardId` URL segment into its branded id once, at the
+// route boundary, so the branded value threads through the store/history hooks
+// without a per-call cast.
+const asDashboardId = Schema.decodeSync(DashboardId)
+
+// `var-<name>` keys carry dashboard-variable selections (Grafana-style), so
+// views are shareable/deep-linkable. Values are `Unknown` on purpose: TanStack
+// JSON-parses each search value, and a hand-edited URL must never crash the
+// route — non-string values are coerced or ignored when read.
+const dashboardViewSearchSchema = Schema.StructWithRest(
+	Schema.Struct({
+		mode: Schema.optional(Schema.Literal("edit")),
+	}),
+	[variableSearchRest],
+)
+
+function variableValuesFromSearch(search: Record<string, unknown>): Record<string, string> {
+	const values: Record<string, string> = {}
+	for (const [key, value] of Object.entries(search)) {
+		if (!key.startsWith(VARIABLE_PARAM_PREFIX)) continue
+		if (typeof value === "string") {
+			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = value
+		} else if (typeof value === "number" || typeof value === "boolean") {
+			values[key.slice(VARIABLE_PARAM_PREFIX.length)] = String(value)
+		}
+	}
+	return values
+}
 
 export const Route = effectRoute(createFileRoute("/dashboards/$dashboardId"))({
 	component: DashboardViewPage,
@@ -46,7 +78,8 @@ function DashboardRefreshBridge({ children }: { children: ReactNode }) {
 }
 
 function DashboardViewPage() {
-	const { dashboardId } = Route.useParams()
+	const { dashboardId: dashboardIdParam } = Route.useParams()
+	const dashboardId = asDashboardId(dashboardIdParam)
 	const search = Route.useSearch()
 	const navigate = useNavigate()
 
@@ -76,12 +109,31 @@ function DashboardViewPage() {
 	const isPreviewing = previewed !== null
 	const mode: WidgetMode = search.mode === "edit" && !readOnly && !isPreviewing ? "edit" : "view"
 
+	// Functional search updates so toggling edit mode never wipes `var-*` params.
 	const handleToggleEdit = () => {
 		if (isPreviewing) return
 		navigate({
 			to: "/dashboards/$dashboardId",
 			params: { dashboardId },
-			search: mode === "edit" ? {} : { mode: "edit" },
+			search: (prev) =>
+				mode === "edit"
+					? pickVariableParams(prev)
+					: { ...pickVariableParams(prev), mode: "edit" as const },
+		})
+	}
+
+	const urlVariableValues = useMemo(() => variableValuesFromSearch(search), [search])
+
+	const handleVariableChange = (name: string, value: string) => {
+		navigate({
+			to: "/dashboards/$dashboardId",
+			params: { dashboardId },
+			replace: true,
+			search: (prev) => ({
+				...pickVariableParams(prev),
+				...(prev.mode === "edit" ? { mode: "edit" as const } : {}),
+				[`${VARIABLE_PARAM_PREFIX}${name}`]: value,
+			}),
 		})
 	}
 
@@ -128,6 +180,11 @@ function DashboardViewPage() {
 			initialTimeRange={activeDashboard.timeRange}
 			onTimeRangeChange={(timeRange) => updateDashboardTimeRange(activeDashboard.id, timeRange)}
 		>
+			<DashboardVariablesProvider
+				variables={activeDashboard.variables}
+				urlValues={urlVariableValues}
+				onValueChange={handleVariableChange}
+			>
 			<DashboardActionsProvider
 				dashboardId={dashboardId}
 				mode={mode}
@@ -210,7 +267,10 @@ function DashboardViewPage() {
 										navigate({
 											to: "/dashboards/$dashboardId",
 											params: { dashboardId },
-											search: { mode: "edit" },
+											search: (prev) => ({
+												...pickVariableParams(prev),
+												mode: "edit" as const,
+											}),
 										})
 										setChartPickerOpen(true)
 									}}
@@ -229,15 +289,16 @@ function DashboardViewPage() {
 					</DashboardLayout>
 				</DashboardRefreshBridge>
 			</DashboardActionsProvider>
+			</DashboardVariablesProvider>
 		</DashboardTimeRangeWrapper>
 	)
 }
 
-function HistoryPanelMount({ dashboardId, onClose }: { dashboardId: string; onClose: () => void }) {
+function HistoryPanelMount({ dashboardId, onClose }: { dashboardId: DashboardId; onClose: () => void }) {
 	const [previewed, setPreviewed] = useAtom(previewedVersionAtom)
 	const result = useDashboardVersions(dashboardId)
 
-	const onPreview = (versionId: string) => {
+	const onPreview = (versionId: DashboardVersionId) => {
 		if (!Result.isSuccess(result)) return
 		const version = result.value.versions.find((v) => v.id === versionId)
 		if (!version) return

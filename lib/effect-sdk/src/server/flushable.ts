@@ -60,6 +60,12 @@ export interface MapleFlushableConfig {
 	readonly excludeLogSpans?: boolean | undefined
 	/** Span name prefixes to drop before OTLP export. */
 	readonly dropSpanNames?: ReadonlyArray<string> | undefined
+	/**
+	 * `_tag`s of *anticipated* failures (expected 4xx business errors). Spans
+	 * failing entirely with these export as status `Ok` (no `exception` event),
+	 * so they stay visible but never count as errors.
+	 */
+	readonly anticipatedErrorTags?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
@@ -92,7 +98,11 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 		dropPrefixes !== undefined && dropPrefixes.length > 0
 			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
 			: undefined
-	const spans: SpanBuffer = makeSpanBuffer({ dropSpan })
+	const anticipatedErrorTags =
+		config.anticipatedErrorTags !== undefined && config.anticipatedErrorTags.length > 0
+			? new Set(config.anticipatedErrorTags)
+			: undefined
+	const spans: SpanBuffer = makeSpanBuffer({ dropSpan, anticipatedErrorTags })
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer)
 

@@ -1,7 +1,9 @@
 import * as React from "react"
 import type { ReactNode } from "react"
+import type { DashboardId } from "@maple/domain/http"
 import { useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
+import { pickVariableParams } from "@/lib/dashboard-variables/search-params"
 
 import type {
 	DashboardWidget,
@@ -12,7 +14,7 @@ import type {
 } from "@/components/dashboard-builder/types"
 
 interface DashboardActionsContextValue {
-	dashboardId: string
+	dashboardId: DashboardId
 	mode: WidgetMode
 	readOnly: boolean
 	removeWidget: (widgetId: string) => void
@@ -33,7 +35,7 @@ const DashboardActionsContext = React.createContext<DashboardActionsContextValue
 
 interface DashboardActionsProviderProps {
 	children: ReactNode
-	dashboardId: string
+	dashboardId: DashboardId
 	mode: WidgetMode
 	readOnly: boolean
 	store: {
@@ -105,6 +107,9 @@ export function DashboardActionsProvider({
 				navigate({
 					to: "/dashboards/$dashboardId/widgets/$widgetId",
 					params: { dashboardId, widgetId },
+					// Carry the dashboard's `var-*` selections into the editor so returning
+					// from it restores them (the editor itself renders variables at defaults).
+					search: (prev) => pickVariableParams(prev),
 				})
 			},
 			updateWidgetDisplay: (widgetId, display) => {

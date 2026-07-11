@@ -75,6 +75,151 @@ export class HazelDisconnectResponse extends Schema.Class<HazelDisconnectRespons
 	},
 ) {}
 
+// ---- Cloudflare (account OAuth + telemetry auto-provisioning) --------------
+
+/** Per-zone edge-analytics collection state (from the GraphQL Analytics poller). */
+export class CloudflareAnalyticsZoneStatus extends Schema.Class<CloudflareAnalyticsZoneStatus>(
+	"CloudflareAnalyticsZoneStatus",
+)({
+	id: Schema.String,
+	name: Schema.String,
+	enabled: Schema.Boolean,
+	lastSyncedAt: Schema.NullOr(Schema.Number),
+	lastError: Schema.NullOr(Schema.String),
+	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
+	watermarkAt: Schema.NullOr(Schema.Number),
+}) {}
+
+/** Account-level Workers invocation-metrics collection state. */
+export class CloudflareAnalyticsWorkersStatus extends Schema.Class<CloudflareAnalyticsWorkersStatus>(
+	"CloudflareAnalyticsWorkersStatus",
+)({
+	enabled: Schema.Boolean,
+	lastSyncedAt: Schema.NullOr(Schema.Number),
+	lastError: Schema.NullOr(Schema.String),
+	/** Last successfully-ingested 5-min bucket (epoch ms) — how far the poller has caught up. */
+	watermarkAt: Schema.NullOr(Schema.Number),
+}) {}
+
+/**
+ * Connection state of the Cloudflare integration. `accountId`/`accountName` identify the single
+ * Cloudflare account the OAuth token is scoped to (Maple enforces exactly one account per org).
+ * `analyticsCapable` is false when the stored grant predates the analytics scopes — the UI offers
+ * an "Update permissions" reconnect; `zones`/`workers` surface the poller's per-dataset state.
+ */
+export class CloudflareIntegrationStatus extends Schema.Class<CloudflareIntegrationStatus>(
+	"CloudflareIntegrationStatus",
+)({
+	connected: Schema.Boolean,
+	accountId: Schema.NullOr(Schema.String),
+	accountName: Schema.NullOr(Schema.String),
+	connectedByUserId: Schema.NullOr(UserId),
+	scope: Schema.NullOr(Schema.String),
+	analyticsCapable: Schema.Boolean,
+	zones: Schema.Array(CloudflareAnalyticsZoneStatus),
+	workers: Schema.NullOr(CloudflareAnalyticsWorkersStatus),
+}) {}
+
+/**
+ * One hourly bucket of ingested Cloudflare edge data. Buckets are sparse —
+ * hours with no ingested rows are omitted; the client zero-fills the window.
+ */
+export class CloudflareUsageBucket extends Schema.Class<CloudflareUsageBucket>("CloudflareUsageBucket")({
+	/** Start of the hour, epoch ms. */
+	bucketStart: Schema.Number,
+	/** Sum of the request-count metric values in the bucket. */
+	requests: Schema.Number,
+	/** Raw metric datapoints ingested in the bucket. */
+	datapoints: Schema.Number,
+}) {}
+
+/**
+ * Ingest proof for one Cloudflare-derived service (a zone or a Worker script) over the
+ * usage window — computed from the warehouse, not the poller's bookkeeping, so it shows
+ * the data actually queryable in dashboards.
+ */
+export class CloudflareServiceUsage extends Schema.Class<CloudflareServiceUsage>("CloudflareServiceUsage")({
+	/** Warehouse ServiceName: `cloudflare/{zone}`, `cloudflare-worker/{script}`, `cloudflare-queue/{queue}`, …. */
+	serviceName: Schema.String,
+	kind: Schema.Literals(["zone", "worker", "queue"]),
+	/** Zone or Worker script name with the ServiceName prefix stripped. */
+	displayName: Schema.String,
+	totalRequests: Schema.Number,
+	totalDatapoints: Schema.Number,
+	/** Most recent metric timestamp in the warehouse (epoch ms) — end-to-end delivery proof. */
+	lastDataAt: Schema.NullOr(Schema.Number),
+	buckets: Schema.Array(CloudflareUsageBucket),
+}) {}
+
+/** Warehouse-derived Cloudflare ingest usage for the org, fixed at the last 24h hourly. */
+export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageResponse>(
+	"CloudflareUsageResponse",
+)({
+	windowStart: Schema.Number,
+	windowEnd: Schema.Number,
+	bucketSeconds: Schema.Number,
+	totalRequests: Schema.Number,
+	services: Schema.Array(CloudflareServiceUsage),
+}) {}
+
+/**
+ * Live top-hosts/top-paths lookup for one zone, proxied straight to Cloudflare's GraphQL
+ * Analytics API — path cardinality is far too high to store as metrics, so this is computed
+ * on demand (and edge-cached briefly) instead of read from the warehouse.
+ */
+export class CloudflareTopTrafficRequest extends Schema.Class<CloudflareTopTrafficRequest>(
+	"CloudflareTopTrafficRequest",
+)({
+	zoneName: Schema.String,
+	dimension: Schema.Literals(["host", "path"]),
+	/** Window bounds, epoch ms. Bounded server-side by the zone plan's retention. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	/** Top-N size; defaults to 15, capped at 50. */
+	limit: Schema.optionalKey(Schema.Number),
+}) {}
+
+export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>(
+	"CloudflareTopTrafficRow",
+)({
+	/** Hostname or path, depending on the requested dimension. */
+	key: Schema.String,
+	/** ABR-adjusted request estimate. */
+	requests: Schema.Number,
+	bytes: Schema.Number,
+	errors5xx: Schema.Number,
+}) {}
+
+export class CloudflareTopTrafficResponse extends Schema.Class<CloudflareTopTrafficResponse>(
+	"CloudflareTopTrafficResponse",
+)({
+	rows: Schema.Array(CloudflareTopTrafficRow),
+	/**
+	 * Set instead of failing when Cloudflare can't serve the query for this zone/plan
+	 * (authz, dataset unavailable) — the UI renders it as an inline empty-state.
+	 */
+	unavailableReason: Schema.NullOr(Schema.String),
+}) {}
+
+export class CloudflareStartConnectRequest extends Schema.Class<CloudflareStartConnectRequest>(
+	"CloudflareStartConnectRequest",
+)({
+	returnTo: Schema.optionalKey(Schema.String),
+}) {}
+
+export class CloudflareStartConnectResponse extends Schema.Class<CloudflareStartConnectResponse>(
+	"CloudflareStartConnectResponse",
+)({
+	redirectUrl: Schema.String,
+	state: Schema.String,
+}) {}
+
+export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconnectResponse>(
+	"CloudflareDisconnectResponse",
+)({
+	disconnected: Schema.Boolean,
+}) {}
+
 // ---- GitHub (VCS App installation) ----------------------------------------
 
 /** One branch a repo knows about — an option in the tracked-branch picker. */
@@ -299,6 +444,49 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 	.add(
 		HttpApiEndpoint.delete("hazelDisconnect", "/hazel", {
 			success: HazelDisconnectResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("cloudflareStatus", "/cloudflare/status", {
+			success: CloudflareIntegrationStatus,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("cloudflareUsage", "/cloudflare/usage", {
+			success: CloudflareUsageResponse,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("cloudflareTopTraffic", "/cloudflare/top-traffic", {
+			payload: CloudflareTopTrafficRequest,
+			success: CloudflareTopTrafficResponse,
+			error: [
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("cloudflareStart", "/cloudflare/start", {
+			payload: CloudflareStartConnectRequest,
+			success: CloudflareStartConnectResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.delete("cloudflareDisconnect", "/cloudflare", {
+			success: CloudflareDisconnectResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
 		}),
 	)

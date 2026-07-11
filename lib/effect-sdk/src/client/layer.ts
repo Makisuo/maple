@@ -1,8 +1,10 @@
 import type { Duration } from "effect"
-import { Layer } from "effect"
+import { Effect, Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Otlp } from "effect/unstable/observability"
 import { withSessionLink } from "./session-link.js"
+import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
+import { clearIdentity as clearIdentityUser, identify as identifyUser } from "./user.js"
 
 export interface MapleClientConfig {
 	/** The service name reported in traces, logs, and metrics. */
@@ -22,6 +24,19 @@ export interface MapleClientConfig {
 	readonly environment?: string | undefined
 	/** Additional resource attributes merged into the telemetry resource. */
 	readonly attributes?: Record<string, unknown> | undefined
+	/**
+	 * Post session metadata rows for the standalone session so it appears in
+	 * Maple's Sessions UI (list entry + linked traces, no replay recording).
+	 * Default `true`; no-ops when `@maple-dev/browser` is on the page (it owns
+	 * the session rows), during SSR, or without an ingest key.
+	 */
+	readonly emitSessionMeta?: boolean | undefined
+	/**
+	 * rrweb session replay for this app, recorded by the shared Maple replay
+	 * engine (loaded lazily in a code-split chunk). Default enabled with
+	 * sampleRate 1 and inputs masked — set `{ enabled: false }` to opt out.
+	 */
+	readonly replay?: ClientReplayConfig | undefined
 	readonly maxBatchSize?: number | undefined
 	readonly loggerExportInterval?: Duration.Input | undefined
 	readonly metricsExportInterval?: Duration.Input | undefined
@@ -76,6 +91,16 @@ export const layer = (config: MapleClientConfig) => {
 	if (config.serviceNamespace) attributes["service.namespace"] = config.serviceNamespace
 	if (config.attributes) Object.assign(attributes, config.attributes)
 
+	startClientSession({
+		endpoint: config.endpoint,
+		ingestKey: config.ingestKey,
+		serviceName: config.serviceName,
+		environment: config.environment,
+		serviceVersion: config.serviceVersion,
+		replay: config.replay,
+		emitSessionMeta: config.emitSessionMeta,
+	})
+
 	const base = Otlp.layerJson({
 		baseUrl: config.endpoint,
 		resource: {
@@ -93,3 +118,33 @@ export const layer = (config: MapleClientConfig) => {
 
 	return withSessionLink(base)
 }
+
+/**
+ * Effect-idiomatic form of `identify` — attach (or replace) the end-user id on
+ * the active Maple browser session. From this point on the id is written to the
+ * session's next-posted metadata row and stamped as `user.id` on every span the
+ * client tracer creates. Idempotent; safe to run repeatedly (e.g. once a login
+ * flow resolves the user).
+ *
+ * @example
+ * ```typescript
+ * import { Maple } from "@maple-dev/effect-sdk/client"
+ * yield* Maple.identify(user.id)
+ * ```
+ */
+export const identify = (userId?: string | null): Effect.Effect<void> =>
+	Effect.sync(() => identifyUser(userId))
+
+/**
+ * Effect-idiomatic form of `clearIdentity` — drop the end-user id from the
+ * active Maple browser session (the inverse of `identify`). From this point on
+ * metadata rows and spans go back to anonymous (no `user.id` stamp). Call this
+ * when a login flow signs the user out; the session itself continues.
+ *
+ * @example
+ * ```typescript
+ * import { Maple } from "@maple-dev/effect-sdk/client"
+ * yield* Maple.clearIdentity
+ * ```
+ */
+export const clearIdentity: Effect.Effect<void> = Effect.sync(() => clearIdentityUser())

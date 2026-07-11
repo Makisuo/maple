@@ -15,6 +15,7 @@ import {
 import { cn } from "@maple/ui/utils"
 import { GroupByMultiSelect } from "@/components/query-builder/group-by-multi-select"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
+import { useMetricScopedAutocomplete } from "@/hooks/use-metric-scoped-autocomplete"
 import type { WhereClauseAutocompleteValues } from "@/lib/query-builder/where-clause-autocomplete"
 import {
 	AGGREGATIONS_BY_SOURCE,
@@ -384,6 +385,15 @@ function MetricsBody({
 	}) => void
 	onAggregationChange: (aggregation: string) => void
 }) {
+	// Scope attribute suggestions (WHERE clause + group-by) to the selected
+	// metric — the shared context values span every metric in the org.
+	const metricsQuery = query.dataSource === "metrics" ? query : undefined
+	const scopedAutocomplete = useMetricScopedAutocomplete({
+		base: autocompleteValues.metrics,
+		metricName: metricsQuery?.metricName || undefined,
+		metricType: metricsQuery?.metricType || undefined,
+	})
+
 	return (
 		<>
 			{/* Row 1: Metric type + name */}
@@ -431,7 +441,8 @@ function MetricsBody({
 				rows={1}
 				value={query.whereClause}
 				dataSource={query.dataSource}
-				values={autocompleteValues.metrics}
+				values={scopedAutocomplete.values}
+				onActiveAttributeKey={scopedAutocomplete.onActiveAttributeKey}
 				onChange={(nextWhereClause) =>
 					onUpdate((current) => ({
 						...current,
@@ -529,7 +540,7 @@ function MetricsBody({
 						<ComboboxList>
 							<ComboboxItem value="__none__">Everything (no breakdown)</ComboboxItem>
 							<ComboboxItem value="service.name">service.name</ComboboxItem>
-							{(autocompleteValues.metrics?.attributeKeys ?? []).map((key) => (
+							{scopedAutocomplete.groupByKeys.map((key) => (
 								<ComboboxItem key={key} value={`attr.${key}`}>
 									attr.{key}
 								</ComboboxItem>

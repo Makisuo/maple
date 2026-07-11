@@ -16,9 +16,18 @@ import {
 	ServiceOverviewResponse,
 	ServiceHealthBaselineResponse,
 	ServiceApdexResponse,
-	ServiceReleasesResponse,
 	ServiceDependenciesResponse,
 	ServiceDbEdgesResponse,
+	ServiceCloudflareStatsResponse,
+	CloudflareInfraZonesResponse,
+	CloudflareInfraZoneTimeseriesResponse,
+	CloudflareInfraZoneDetailResponse,
+	CloudflareInfraZoneHostsResponse,
+	CloudflareInfraZoneSecurityResponse,
+	CloudflareInfraZoneDnsResponse,
+	CloudflareInfraPlatformResourcesResponse,
+	CloudflareInfraWorkersResponse,
+	CloudflareInfraWorkerTimeseriesResponse,
 	ServiceDbQuerySummaryResponse,
 	ServiceExternalEdgesResponse,
 	ServiceDetailOverviewResponse,
@@ -472,35 +481,6 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					})
 				}),
 			)
-			.handle("serviceReleases", ({ payload }) =>
-				Effect.gen(function* () {
-					const tenant = yield* CurrentTenant.Context
-					const compiled = CH.compile(
-						CH.serviceReleasesTimelineQuery({ serviceName: payload.serviceName }),
-						{
-							orgId: tenant.orgId,
-							startTime: payload.startTime,
-							endTime: payload.endTime,
-							bucketSeconds: payload.bucketSeconds ?? 300,
-						},
-					)
-					const rows = yield* mapExecError(
-						warehouse.compiledQuery(tenant, compiled, {
-							profile: "list",
-							context: "serviceReleases",
-						}),
-						"serviceReleases query failed",
-					)
-					const typedRows = rows
-					return new ServiceReleasesResponse({
-						data: typedRows.map((row) => ({
-							bucket: String(row.bucket),
-							commitSha: decodeCommitSha(row.commitSha),
-							count: Number(row.count),
-						})),
-					})
-				}),
-			)
 			.handle("serviceDependencies", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -581,6 +561,429 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"serviceDbEdgesForService query failed",
 					)
 					return new ServiceDbEdgesResponse({ data: rows })
+				}),
+			)
+			.handle("serviceCloudflareStats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					// Counters (metrics_sum) + percentiles (metrics_gauge) run
+					// concurrently, then merge by ServiceName. Routed through the org's
+					// configured warehouse exactly like the metric explorer reads these
+					// same `cloudflare.*` metrics — no special ingest pin needed.
+					const countersCompiled = CH.compile(CH.cloudflareServiceCountersSQL(), params, {
+						rowSchema: CH.cloudflareServiceCountersRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareServiceLatencySQL(), params, {
+						rowSchema: CH.cloudflareServiceLatencyRowSchema,
+					})
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, countersCompiled, {
+									profile: "aggregation",
+									context: "cloudflareServiceCounters",
+								}),
+								"cloudflareServiceCounters query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, latencyCompiled, {
+									profile: "aggregation",
+									context: "cloudflareServiceLatency",
+								}),
+								"cloudflareServiceLatency query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(
+						latencyRows.map((row) => [row.serviceName, row]),
+					)
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errorCount: row.errorCount,
+							latencyP99Ms: latency?.latencyP99Ms ?? 0,
+							cpuP99Ms: latency?.cpuP99Ms ?? 0,
+						}
+					})
+					return new ServiceCloudflareStatsResponse({ data })
+				}),
+			)
+			.handle("cloudflareInfraZones", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					// Counters (metrics_sum) + percentiles (metrics_gauge) run
+					// concurrently, then merge by ServiceName — same shape as
+					// serviceCloudflareStats above.
+					const countersCompiled = CH.compile(CH.cloudflareZoneCountersSQL(), params, {
+						rowSchema: CH.cloudflareZoneCountersRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencySQL(), params, {
+						rowSchema: CH.cloudflareZoneLatencyRowSchema,
+					})
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, countersCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneCounters",
+								}),
+								"cloudflareInfraZoneCounters query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, latencyCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneLatency",
+								}),
+								"cloudflareInfraZoneLatency query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(latencyRows.map((row) => [row.serviceName, row]))
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errors5xx: row.errors5xx,
+							cacheHits: row.cacheHits,
+							bytes: row.bytes,
+							visits: row.visits,
+							ttfbP50Ms: latency?.ttfbP50Ms ?? 0,
+							ttfbP95Ms: latency?.ttfbP95Ms ?? 0,
+							ttfbP99Ms: latency?.ttfbP99Ms ?? 0,
+							originP50Ms: latency?.originP50Ms ?? 0,
+							originP95Ms: latency?.originP95Ms ?? 0,
+							originP99Ms: latency?.originP99Ms ?? 0,
+						}
+					})
+					return new CloudflareInfraZonesResponse({ data })
+				}),
+			)
+			.handle("cloudflareInfraZoneTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.compile(
+						CH.cloudflareZoneTimeseriesSQL(),
+						{
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							bucketSeconds: payload.bucketSeconds,
+						},
+						{ rowSchema: CH.cloudflareZoneTimeseriesRowSchema },
+					)
+					const rows = yield* mapExecError(
+						warehouse.compiledQuery(tenant, compiled, {
+							profile: "aggregation",
+							context: "cloudflareInfraZoneTimeseries",
+						}),
+						"cloudflareInfraZoneTimeseries query failed",
+					)
+					return new CloudflareInfraZoneTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
+				}),
+			)
+			.handle("cloudflareInfraZoneDetail", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						serviceName: payload.serviceName,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+						bucketSeconds: payload.bucketSeconds,
+					}
+					const statusCompiled = CH.compile(CH.cloudflareZoneStatusTimeseriesSQL(), params, {
+						rowSchema: CH.cloudflareZoneStatusTimeseriesRowSchema,
+					})
+					const cacheCompiled = CH.compile(CH.cloudflareZoneCacheTimeseriesSQL(), params, {
+						rowSchema: CH.cloudflareZoneCacheTimeseriesRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareZoneLatencyTimeseriesSQL(), params, {
+						rowSchema: CH.cloudflareZoneLatencyTimeseriesRowSchema,
+					})
+					const [statusRows, cacheRows, latencyRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, statusCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDetailStatus",
+								}),
+								"cloudflareInfraZoneDetailStatus query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, cacheCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDetailCache",
+								}),
+								"cloudflareInfraZoneDetailCache query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, latencyCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDetailLatency",
+								}),
+								"cloudflareInfraZoneDetailLatency query failed",
+							),
+						],
+						{ concurrency: 3 },
+					)
+					return new CloudflareInfraZoneDetailResponse({
+						statusBuckets: statusRows.map((row) => ({ ...row })),
+						cacheBuckets: cacheRows.map((row) => ({ ...row })),
+						latencyBuckets: latencyRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneHosts", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						serviceName: payload.serviceName,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					const totalsCompiled = CH.compile(CH.cloudflareZoneHostBreakdownSQL(), params, {
+						rowSchema: CH.cloudflareZoneHostBreakdownRowSchema,
+					})
+					const bucketsCompiled = CH.compile(
+						CH.cloudflareZoneHostTimeseriesSQL(),
+						{ ...params, bucketSeconds: payload.bucketSeconds },
+						{ rowSchema: CH.cloudflareZoneHostTimeseriesRowSchema },
+					)
+					const [totalRows, bucketRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, totalsCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneHostTotals",
+								}),
+								"cloudflareInfraZoneHostTotals query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, bucketsCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneHostTimeseries",
+								}),
+								"cloudflareInfraZoneHostTimeseries query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraZoneHostsResponse({
+						totals: totalRows.map((row) => ({ ...row })),
+						buckets: bucketRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneSecurity", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						serviceName: payload.serviceName,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					const bucketsCompiled = CH.compile(
+						CH.cloudflareZoneFirewallTimeseriesSQL(),
+						{ ...params, bucketSeconds: payload.bucketSeconds },
+						{ rowSchema: CH.cloudflareZoneFirewallTimeseriesRowSchema },
+					)
+					const topCompiled = CH.compile(CH.cloudflareZoneFirewallTopSQL(), params, {
+						rowSchema: CH.cloudflareZoneFirewallTopRowSchema,
+					})
+					const [bucketRows, topRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, bucketsCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneFirewallTimeseries",
+								}),
+								"cloudflareInfraZoneFirewallTimeseries query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, topCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneFirewallTop",
+								}),
+								"cloudflareInfraZoneFirewallTop query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraZoneSecurityResponse({
+						buckets: bucketRows.map((row) => ({ ...row })),
+						top: topRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("cloudflareInfraZoneDns", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						serviceName: payload.serviceName,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					const bucketsCompiled = CH.compile(
+						CH.cloudflareZoneDnsTimeseriesSQL(),
+						{ ...params, bucketSeconds: payload.bucketSeconds },
+						{ rowSchema: CH.cloudflareZoneDnsTimeseriesRowSchema },
+					)
+					const namesCompiled = CH.compile(CH.cloudflareZoneDnsBreakdownSQL(), params, {
+						rowSchema: CH.cloudflareZoneDnsBreakdownRowSchema,
+					})
+					const [bucketRows, nameRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, bucketsCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDnsTimeseries",
+								}),
+								"cloudflareInfraZoneDnsTimeseries query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, namesCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraZoneDnsBreakdown",
+								}),
+								"cloudflareInfraZoneDnsBreakdown query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraZoneDnsResponse({
+						buckets: bucketRows.map((row) => ({ ...row })),
+						names: nameRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("cloudflareInfraPlatformResources", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					const queuesCompiled = CH.compile(CH.cloudflareQueueGaugesSQL(), params, {
+						rowSchema: CH.cloudflareQueueGaugesRowSchema,
+					})
+					const doCompiled = CH.compile(CH.cloudflareDurableObjectCountersSQL(), params, {
+						rowSchema: CH.cloudflareDurableObjectCountersRowSchema,
+					})
+					const [queueRows, doRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, queuesCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraQueueGauges",
+								}),
+								"cloudflareInfraQueueGauges query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, doCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraDurableObjects",
+								}),
+								"cloudflareInfraDurableObjects query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					return new CloudflareInfraPlatformResourcesResponse({
+						queues: queueRows.map((row) => ({ ...row })),
+						durableObjects: doRows.map((row) => ({ ...row })),
+					})
+				}),
+			)
+			.handle("cloudflareInfraWorkers", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+					}
+					const countersCompiled = CH.compile(CH.cloudflareWorkerCountersSQL(), params, {
+						rowSchema: CH.cloudflareWorkerCountersRowSchema,
+					})
+					const latencyCompiled = CH.compile(CH.cloudflareWorkerLatencySQL(), params, {
+						rowSchema: CH.cloudflareWorkerLatencyRowSchema,
+					})
+					const [counterRows, latencyRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, countersCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraWorkerCounters",
+								}),
+								"cloudflareInfraWorkerCounters query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, latencyCompiled, {
+									profile: "aggregation",
+									context: "cloudflareInfraWorkerLatency",
+								}),
+								"cloudflareInfraWorkerLatency query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					const latencyByService = new Map(latencyRows.map((row) => [row.serviceName, row]))
+					const data = counterRows.map((row) => {
+						const latency = latencyByService.get(row.serviceName)
+						return {
+							serviceName: row.serviceName,
+							requests: row.requests,
+							errors: row.errors,
+							subrequests: row.subrequests,
+							cpuP50Ms: latency?.cpuP50Ms ?? 0,
+							cpuP99Ms: latency?.cpuP99Ms ?? 0,
+							durationP50Ms: latency?.durationP50Ms ?? 0,
+							durationP99Ms: latency?.durationP99Ms ?? 0,
+						}
+					})
+					return new CloudflareInfraWorkersResponse({ data })
+				}),
+			)
+			.handle("cloudflareInfraWorkerTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.compile(
+						CH.cloudflareWorkerTimeseriesSQL(),
+						{
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							bucketSeconds: payload.bucketSeconds,
+						},
+						{ rowSchema: CH.cloudflareWorkerTimeseriesRowSchema },
+					)
+					const rows = yield* mapExecError(
+						warehouse.compiledQuery(tenant, compiled, {
+							profile: "aggregation",
+							context: "cloudflareInfraWorkerTimeseries",
+						}),
+						"cloudflareInfraWorkerTimeseries query failed",
+					)
+					return new CloudflareInfraWorkerTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
 			.handle("serviceDetailOverview", ({ payload }) =>
@@ -716,6 +1119,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const params = {
 						orgId: tenant.orgId,
 						dbSystem: payload.dbSystem,
+						dbNamespace: payload.dbNamespace,
 						startTime: payload.startTime,
 						endTime: payload.endTime,
 						sourceService: payload.sourceService,

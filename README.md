@@ -145,8 +145,7 @@ Secrets source model (CI):
     - `CLOUDFLARE_DEFAULT_ACCOUNT_ID`
     - `TINYBIRD_HOST`
     - `TINYBIRD_TOKEN`
-    - `RESEND_API_KEY`
-    - `RESEND_FROM_EMAIL`
+    - `EMAIL_FROM` (sender address on an onboarded Cloudflare Email Service domain; delivery uses the `EMAIL` worker binding, no API key)
     - `MAPLE_INGEST_KEY_ENCRYPTION_KEY`
     - `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`
     - `MAPLE_AUTH_MODE`

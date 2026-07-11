@@ -22,6 +22,8 @@ export interface WhereClauseAutocompleteValues {
 	attributeValues?: string[]
 	resourceAttributeKeys?: string[]
 	resourceAttributeValues?: string[]
+	/** Dashboard variable names — suggested as `$name` in every value position. */
+	variables?: string[]
 }
 
 export interface WhereClauseAutocompleteSuggestion {
@@ -652,6 +654,21 @@ function toStringValueSuggestion(value: string, idPrefix: string): WhereClauseAu
 	}
 }
 
+// Dashboard variables are valid in ANY value position — a variable-driven
+// filter is the whole point of defining one — so they lead the suggestion
+// list for every key. Quoted, matching the documented `key = "$name"` usage.
+function buildVariableSuggestions(
+	values: WhereClauseAutocompleteValues | undefined,
+): WhereClauseAutocompleteSuggestion[] {
+	return uniqueValues(values?.variables ?? []).map((name) => ({
+		id: `variable:${name}`,
+		kind: "value",
+		label: `$${name}`,
+		insertText: `"$${name}"`,
+		description: "Dashboard variable",
+	}))
+}
+
 function buildValueSuggestions(
 	key: string | null,
 	dataSource: QueryBuilderDataSource,
@@ -902,7 +919,10 @@ function buildSuggestions(
 	}
 
 	if (parsed.context === "value") {
-		const valueSuggestions = buildValueSuggestions(parsed.key, dataSource, values, scope)
+		const valueSuggestions = [
+			...buildVariableSuggestions(values),
+			...buildValueSuggestions(parsed.key, dataSource, values, scope),
+		]
 		return filterAndRankSuggestions(valueSuggestions, parsed.query, maxSuggestions)
 	}
 

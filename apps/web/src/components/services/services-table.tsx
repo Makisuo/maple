@@ -4,7 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { listIncidentsAtom } from "@/lib/services/atoms/alerts-atoms"
+import { useAlertIncidentsList } from "@/hooks/use-alerts-list"
 import {
 	baselineKey,
 	buildBaselineMap,
@@ -269,7 +269,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 		.orElse(() => new Map<string, LatencyBaselineSignal>())
 
 	const healthFilter = filters?.health
-	const incidentsResult = useAtomValue(listIncidentsAtom)
+	const { result: incidentsResult } = useAlertIncidentsList()
 	const openIncidents = Result.builder(incidentsResult)
 		.onSuccess((response) => response.incidents.filter((incident) => incident.status === "open"))
 		.orElse(() => [])

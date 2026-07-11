@@ -1,6 +1,6 @@
 import path from "node:path"
 import alchemy from "alchemy"
-import { Worker, Workflow, type Hyperdrive } from "alchemy/cloudflare"
+import { EmailSender, Worker, Workflow, type Hyperdrive } from "alchemy/cloudflare"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -55,10 +55,14 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 		compatibilityDate: "2026-04-08",
 		placement: CLOUDFLARE_WORKER_PLACEMENT,
 		adopt: true,
-		crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 9 * * *"],
+		crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 9 * * *"],
 		bindings: {
 			MAPLE_DB: mapleDb,
 			AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
+			EMAIL: EmailSender({
+				allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+				dev: { remote: true },
+			}),
 			TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 			TINYBIRD_TOKEN: alchemy.secret(requireEnv("TINYBIRD_TOKEN")),
 			MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
@@ -68,7 +72,7 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			MAPLE_INGEST_PUBLIC_URL:
 				process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
 			MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
-			RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL?.trim() || "Maple <notifications@maple.dev>",
+			EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 			...optionalPlain("MAPLE_ENDPOINT"),
 			...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 			...optionalPlain("COMMIT_SHA"),
@@ -79,7 +83,17 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			...optionalSecret("CLERK_JWT_KEY"),
 			...optionalSecret("AUTUMN_SECRET_KEY"),
 			...optionalSecret("INTERNAL_SERVICE_TOKEN"),
-			...optionalSecret("RESEND_API_KEY"),
+			// Cloudflare integration (account OAuth — Authorization Code + PKCE).
+			// The alerting worker runs the cloudflare analytics poller (cloudflareAnalyticsTick
+			// → CloudflareAnalyticsService.pollAllOrgs), which resolves + refreshes each org's
+			// OAuth token via CloudflareOAuthService and needs the same config as the api worker.
+			...optionalPlain("CLOUDFLARE_OAUTH_CLIENT_ID"),
+			...optionalSecret("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("CLOUDFLARE_OAUTH_SCOPES"),
+			...optionalPlain("CLOUDFLARE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
+			...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
 		},
 	})
 

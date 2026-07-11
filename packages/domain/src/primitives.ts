@@ -84,12 +84,6 @@ export type ApiKeyId = Schema.Schema.Type<typeof ApiKeyId>
 export const ScrapeTargetId = MapleUuidId("@maple/ScrapeTargetId", "Scrape Target ID")
 export type ScrapeTargetId = Schema.Schema.Type<typeof ScrapeTargetId>
 
-export const CloudflareLogpushConnectorId = MapleUuidId(
-	"@maple/CloudflareLogpushConnectorId",
-	"Cloudflare Logpush Connector ID",
-)
-export type CloudflareLogpushConnectorId = Schema.Schema.Type<typeof CloudflareLogpushConnectorId>
-
 export const AlertDestinationId = MapleUuidId("@maple/AlertDestinationId", "Alert Destination ID")
 export type AlertDestinationId = Schema.Schema.Type<typeof AlertDestinationId>
 

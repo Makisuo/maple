@@ -1,17 +1,23 @@
-import { useRef, useMemo } from "react"
+import { useMemo, useRef } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { toast } from "sonner"
 
-import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { Unitflow, View } from "@maple/unitflow/react"
+import { Button } from "@maple/ui/components/ui/button"
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+
 import { DashboardList } from "@/components/dashboard-builder/list/dashboard-list"
 import {
 	isPersesDashboardJson,
 	parsePortableDashboardJson,
 } from "@/components/dashboard-builder/portable-dashboard"
-import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import type { Dashboard } from "@/components/dashboard-builder/types"
+import { CircleWarningIcon, GridIcon, PlusIcon, UploadIcon } from "@/components/icons"
+import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
-import { GridIcon, PlusIcon, UploadIcon } from "@/components/icons"
-import { Button } from "@maple/ui/components/ui/button"
+import { useDashboardMutations } from "@/hooks/use-dashboard-store"
+import { DashboardsListModel } from "@/lib/models/dashboards-list-model"
+import { unitflowRuntime } from "@/lib/models/runtime"
 
 export const Route = createFileRoute("/dashboards/")({
 	component: DashboardListPage,
@@ -21,30 +27,13 @@ function DashboardListPage() {
 	const navigate = useNavigate()
 
 	const {
-		dashboards,
-		isLoading,
 		readOnly,
 		persistenceError,
 		createDashboard,
 		importDashboard,
 		importPersesDashboard,
 		deleteDashboard,
-	} = useDashboardStore()
-
-	const {
-		favorites,
-		sortOption,
-		tagFilter,
-		toggleFavorite,
-		setSortOption,
-		setTagFilter,
-		sortAndFilter,
-		allTags,
-	} = useDashboardPreferences()
-
-	const sortedDashboards = useMemo(() => sortAndFilter(dashboards), [sortAndFilter, dashboards])
-
-	const tags = useMemo(() => allTags(dashboards), [allTags, dashboards])
+	} = useDashboardMutations()
 
 	const importInputRef = useRef<HTMLInputElement>(null)
 
@@ -152,23 +141,97 @@ function DashboardListPage() {
 					{persistenceError}. Dashboard editing is temporarily disabled.
 				</div>
 			)}
-			{isLoading && dashboards.length === 0 ? (
-				<div className="py-12 text-sm text-muted-foreground">Loading dashboards…</div>
-			) : null}
-			<DashboardList
-				dashboards={sortedDashboards}
-				readOnly={readOnly}
-				sortOption={sortOption}
-				tagFilter={tagFilter}
-				allTags={tags}
-				favorites={favorites}
-				onSelect={handleSelect}
-				onCreate={handleCreate}
-				onDelete={deleteDashboard}
-				onToggleFavorite={toggleFavorite}
-				onSortChange={setSortOption}
-				onTagFilterChange={setTagFilter}
-			/>
+			<Unitflow
+				runtime={unitflowRuntime}
+				rootModel={DashboardsListModel}
+				building={<ListLoading />}
+				failed={() => <ListLoadError />}
+			>
+				{(unit) => (
+					<ModelListBody
+						unit={unit}
+						readOnly={readOnly}
+						onSelect={handleSelect}
+						onCreate={handleCreate}
+						onDelete={deleteDashboard}
+					/>
+				)}
+			</Unitflow>
 		</DashboardLayout>
+	)
+}
+
+function ListLoading() {
+	return <div className="py-12 text-sm text-muted-foreground">Loading dashboards…</div>
+}
+
+function ListLoadError() {
+	return (
+		<Empty className="py-12">
+			<EmptyHeader>
+				<EmptyMedia variant="icon">
+					<CircleWarningIcon size={18} />
+				</EmptyMedia>
+				<EmptyTitle>Failed to load dashboards</EmptyTitle>
+				<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
+			</EmptyHeader>
+		</Empty>
+	)
+}
+
+interface ListActionProps {
+	readonly readOnly: boolean
+	readonly onSelect: (id: string) => void
+	readonly onCreate: () => void
+	readonly onDelete: (id: string) => void
+}
+
+const ModelListBody = View.make(DashboardsListModel, ({ list }, actions: ListActionProps) => {
+	if (list.phase === "loading") return <ListLoading />
+	if (list.phase === "error") return <ListLoadError />
+	return <DashboardListContent dashboards={list.dashboards} {...actions} />
+})
+
+/**
+ * Pure presentation over the derived list: the localStorage-backed preferences
+ * (favorites, sort, tag filter) are view concerns and stay here.
+ */
+function DashboardListContent({
+	dashboards,
+	readOnly,
+	onSelect,
+	onCreate,
+	onDelete,
+}: { readonly dashboards: ReadonlyArray<Dashboard> } & ListActionProps) {
+	const {
+		favorites,
+		sortOption,
+		tagFilter,
+		toggleFavorite,
+		setSortOption,
+		setTagFilter,
+		sortAndFilter,
+		allTags,
+	} = useDashboardPreferences()
+
+	const sortedDashboards = useMemo(() => sortAndFilter(dashboards), [sortAndFilter, dashboards])
+
+	const tags = useMemo(() => allTags(dashboards), [allTags, dashboards])
+
+	return (
+		<DashboardList
+			dashboards={sortedDashboards}
+			readOnly={readOnly}
+			sortOption={sortOption}
+			tagFilter={tagFilter}
+			allTags={tags}
+			favorites={favorites}
+			onSelect={onSelect}
+			onCreate={onCreate}
+			onDelete={onDelete}
+			onToggleFavorite={toggleFavorite}
+			onSortChange={setSortOption}
+			onTagFilterChange={setTagFilter}
+		/>
 	)
 }

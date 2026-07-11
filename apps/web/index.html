@@ -60,6 +60,7 @@
 					.maple-bootshell {
 						--boot-bg: oklch(0.207 0.008 67);
 						--boot-amber: oklch(0.714 0.154 59);
+						--boot-muted: oklch(0.603 0.023 72);
 						position: fixed;
 						inset: 0;
 						display: flex;
@@ -72,6 +73,7 @@
 					html.light .maple-bootshell {
 						--boot-bg: #fff;
 						--boot-amber: oklch(0.66 0.16 59);
+						--boot-muted: oklch(0.552 0.016 285.938);
 					}
 					.maple-bootshell__mark {
 						display: flex;
@@ -90,64 +92,142 @@
 							inset 0 1px 0 color-mix(in oklab, white 35%, transparent);
 					}
 					.maple-bootshell__trace {
-						display: flex;
-						width: 132px;
-						flex-direction: column;
-						gap: 7px;
+						position: relative;
+						width: 200px;
+						height: 73px;
+					}
+					.maple-bootshell__track,
+					.maple-bootshell__span {
+						position: absolute;
+						height: 9px;
+						border-radius: 9999px;
+					}
+					.maple-bootshell__track {
+						background: color-mix(in oklab, var(--boot-amber) 9%, transparent);
 					}
 					.maple-bootshell__span {
-						position: relative;
-						height: 8px;
-						overflow: hidden;
-						border-radius: 9999px;
-						background: color-mix(in oklab, var(--boot-amber) 15%, transparent);
+						background: var(--boot-amber);
+						transform-origin: left center;
+						transform: scaleX(0);
+						opacity: 0;
+						animation: maple-bootshell-land 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 					}
-					.maple-bootshell__span::after {
-						content: "";
+					.maple-bootshell__track--1,
+					.maple-bootshell__span--1 {
+						top: 0;
+						left: 0;
+						width: 200px;
+					}
+					.maple-bootshell__track--2,
+					.maple-bootshell__span--2 {
+						top: 16px;
+						left: 14px;
+						width: 124px;
+					}
+					.maple-bootshell__track--3,
+					.maple-bootshell__span--3 {
+						top: 32px;
+						left: 28px;
+						width: 70px;
+					}
+					.maple-bootshell__track--4,
+					.maple-bootshell__span--4 {
+						top: 48px;
+						left: 96px;
+						width: 52px;
+					}
+					.maple-bootshell__track--5,
+					.maple-bootshell__span--5 {
+						top: 64px;
+						left: 140px;
+						width: 56px;
+					}
+					.maple-bootshell__span--1 {
+						animation-delay: 0s;
+					}
+					.maple-bootshell__span--2 {
+						animation-delay: 0.13s;
+					}
+					.maple-bootshell__span--3 {
+						animation-delay: 0.26s;
+					}
+					.maple-bootshell__span--4 {
+						animation-delay: 0.42s;
+					}
+					.maple-bootshell__span--5 {
+						animation-delay: 0.58s;
+					}
+					@keyframes maple-bootshell-land {
+						0% {
+							transform: scaleX(0);
+							opacity: 0;
+						}
+						13% {
+							transform: scaleX(1);
+							opacity: 1;
+						}
+						66% {
+							transform: scaleX(1);
+							opacity: 1;
+						}
+						84% {
+							transform: scaleX(1);
+							opacity: 0.2;
+						}
+						100% {
+							transform: scaleX(0);
+							opacity: 0;
+						}
+					}
+					.maple-bootshell__scan {
 						position: absolute;
-						inset: 0;
-						border-radius: inherit;
+						top: -6px;
+						bottom: -6px;
+						left: 0;
+						width: 2px;
+						border-radius: 2px;
 						background: linear-gradient(
-							90deg,
+							180deg,
 							transparent,
-							color-mix(in oklab, var(--boot-amber) 80%, transparent),
+							color-mix(in oklab, var(--boot-amber) 85%, transparent),
 							transparent
 						);
-						transform: translateX(-130%);
-						animation: maple-bootshell-shimmer 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+						box-shadow: 0 0 10px 1px color-mix(in oklab, var(--boot-amber) 45%, transparent);
+						transform: translateX(-2px);
+						opacity: 0;
+						animation: maple-bootshell-scan 2.4s linear infinite;
 					}
-					.maple-bootshell__span:nth-child(1) {
-						width: 100%;
-					}
-					.maple-bootshell__span:nth-child(2) {
-						width: 74%;
-						margin-left: 16px;
-					}
-					.maple-bootshell__span:nth-child(2)::after {
-						animation-delay: 0.18s;
-					}
-					.maple-bootshell__span:nth-child(3) {
-						width: 52%;
-						margin-left: 32px;
-					}
-					.maple-bootshell__span:nth-child(3)::after {
-						animation-delay: 0.36s;
-					}
-					@keyframes maple-bootshell-shimmer {
+					@keyframes maple-bootshell-scan {
 						0% {
-							transform: translateX(-130%);
+							transform: translateX(-2px);
+							opacity: 0;
 						}
-						60%,
+						8% {
+							opacity: 0.65;
+						}
+						78% {
+							opacity: 0.65;
+						}
 						100% {
-							transform: translateX(230%);
+							transform: translateX(202px);
+							opacity: 0;
 						}
+					}
+					.maple-bootshell__caption {
+						margin: 0;
+						font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+						font-size: 12px;
+						letter-spacing: 0.02em;
+						color: var(--boot-muted);
 					}
 					@media (prefers-reduced-motion: reduce) {
-						.maple-bootshell__span::after {
-							display: none;
-						}
 						.maple-bootshell__span {
-							background: color-mix(in oklab, var(--boot-amber) 38%, transparent);
+							transform: scaleX(1);
+							opacity: 1;
+							animation: none;
+						}
+						.maple-bootshell__scan {
+							display: none;
 						}
 					}
 				</style>
@@ -167,10 +247,19 @@
 					</svg>
 				</div>
 				<div class="maple-bootshell__trace" aria-hidden="true">
-					<span class="maple-bootshell__span"></span>
-					<span class="maple-bootshell__span"></span>
-					<span class="maple-bootshell__span"></span>
+					<span class="maple-bootshell__track maple-bootshell__track--1"></span>
+					<span class="maple-bootshell__track maple-bootshell__track--2"></span>
+					<span class="maple-bootshell__track maple-bootshell__track--3"></span>
+					<span class="maple-bootshell__track maple-bootshell__track--4"></span>
+					<span class="maple-bootshell__track maple-bootshell__track--5"></span>
+					<span class="maple-bootshell__span maple-bootshell__span--1"></span>
+					<span class="maple-bootshell__span maple-bootshell__span--2"></span>
+					<span class="maple-bootshell__span maple-bootshell__span--3"></span>
+					<span class="maple-bootshell__span maple-bootshell__span--4"></span>
+					<span class="maple-bootshell__span maple-bootshell__span--5"></span>
+					<span class="maple-bootshell__scan"></span>
 				</div>
+				<p class="maple-bootshell__caption">Collecting spans…</p>
 			</div>
 		</div>
 		<script type="module" src="/src/main.tsx"></script>

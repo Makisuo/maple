@@ -53,6 +53,10 @@ export interface RateLimiter {
     readonly key: string
     readonly tokens?: number | undefined
   }) => Effect.Effect<ConsumeResult, RateLimiterError>
+
+  readonly adaptiveConsume: (options: AdaptiveConsumeOptions) => Effect.Effect<AdaptiveConsumeResult, RateLimiterError>
+
+  readonly adaptiveFeedback: (options: AdaptiveFeedbackOptions) => Effect.Effect<void, RateLimiterError>
 }
 
 /**
@@ -88,6 +92,8 @@ export const make: Effect.Effect<
 
   return identity<RateLimiter>({
     [TypeId]: TypeId,
+    adaptiveConsume: store.adaptiveConsume,
+    adaptiveFeedback: store.adaptiveFeedback,
     consume(options) {
       const tokens = options.tokens ?? 1
       const onExceeded = options.onExceeded ?? "fail"
@@ -470,12 +476,104 @@ export interface ConsumeResult {
 }
 
 /**
- * Defines the low-level backing store for fixed-window counters and token-bucket state.
+ * Phase of adaptive rate limiting driven by server feedback.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export type AdaptivePhase = "inactive" | "cooldown" | "learning" | "learned"
+
+/**
+ * Options for consuming tokens from the adaptive rate limiter store.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface AdaptiveConsumeOptions {
+  /**
+   * The rate-limit key.
+   */
+  readonly key: string
+
+  /**
+   * The number of tokens to consume.
+   */
+  readonly tokens: number
+
+  /**
+   * The fallback limit configured for the regular rate limiter.
+   */
+  readonly fallbackLimit: number
+
+  /**
+   * The fallback window configured for the regular rate limiter.
+   */
+  readonly fallbackWindow: Duration.Duration
+}
+
+/**
+ * Metadata returned after consuming tokens from the adaptive rate limiter store.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface AdaptiveConsumeResult {
+  /**
+   * The amount of delay to wait before making the request.
+   */
+  readonly delay: Duration.Duration
+
+  /**
+   * The adaptive state epoch used to correlate later response feedback.
+   */
+  readonly epoch: number
+
+  /**
+   * The adaptive phase observed by this consume operation.
+   */
+  readonly phase: AdaptivePhase
+}
+
+/**
+ * Options for reporting response feedback to the adaptive rate limiter store.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface AdaptiveFeedbackOptions {
+  /**
+   * The rate-limit key.
+   */
+  readonly key: string
+
+  /**
+   * The adaptive state epoch returned by `adaptiveConsume`.
+   */
+  readonly epoch: number
+
+  /**
+   * The number of tokens consumed by the request.
+   */
+  readonly tokens: number
+
+  /**
+   * The HTTP response status code.
+   */
+  readonly status: number
+
+  /**
+   * The parsed `Retry-After` delay, when present.
+   */
+  readonly retryAfter: Duration.Duration | undefined
+}
+
+/**
+ * Defines the low-level backing store for rate-limit state.
  *
  * **When to use**
  *
- * Use to provide the shared counter storage used by persistent rate-limit
- * checks.
+ * Use to provide the shared counter storage and adaptive feedback state used by
+ * persistent rate-limit checks.
  *
  * @category store
  * @since 4.0.0
@@ -517,8 +615,42 @@ export class RateLimiterStore extends Context.Service<
       readonly refillRate: Duration.Duration
       readonly allowOverflow: boolean
     }) => Effect.Effect<number, RateLimiterError>
+
+    /**
+     * Consumes tokens from the adaptive rate-limit state for the `key`.
+     *
+     * When the store has no adaptive state for the `key`, implementations
+     * should return a zero delay with the inactive phase.
+     */
+    readonly adaptiveConsume: (
+      options: AdaptiveConsumeOptions
+    ) => Effect.Effect<AdaptiveConsumeResult, RateLimiterError>
+
+    /**
+     * Records response feedback for the adaptive rate-limit state.
+     */
+    readonly adaptiveFeedback: (options: AdaptiveFeedbackOptions) => Effect.Effect<void, RateLimiterError>
   }
 >()("effect/persistence/RateLimiter/RateLimiterStore") {}
+
+const adaptiveStateTtlGraceMillis = 60_000
+const adaptiveStateMaxWindowMillis = 60 * 60 * 1_000
+
+const clampAdaptiveDurationMillis = (millis: number): number => {
+  if (Number.isNaN(millis) || millis <= 0) return 1
+  return Math.min(millis, adaptiveStateMaxWindowMillis)
+}
+
+interface AdaptiveState {
+  phase: AdaptivePhase
+  epoch: number
+  cooldownUntil: number
+  learningStartedAt: number
+  observedTokens: number
+  learnedLimit: number
+  learnedWindowMillis: number
+  expiresAt: number
+}
 
 /**
  * Provides a process-local in-memory `RateLimiterStore`.
@@ -531,6 +663,25 @@ export const layerStoreMemory: Layer.Layer<
 > = Layer.sync(RateLimiterStore, () => {
   const fixedCounters = new Map<string, { count: number; expiresAt: number }>()
   const tokenBuckets = new Map<string, { tokens: number; lastRefill: number }>()
+  const adaptiveStates = new Map<string, AdaptiveState>()
+
+  const getAdaptiveState = (key: string, now: number): AdaptiveState | undefined => {
+    const state = adaptiveStates.get(key)
+    if (!state) return undefined
+    if (state.expiresAt <= now) {
+      adaptiveStates.delete(key)
+      return undefined
+    }
+    return state
+  }
+
+  const cooldownExpiresAt = (cooldownUntil: number): number => cooldownUntil + adaptiveStateTtlGraceMillis
+
+  const learningExpiresAt = (now: number, fallbackWindow: Duration.Duration): number =>
+    now + Duration.toMillis(fallbackWindow) + adaptiveStateTtlGraceMillis
+
+  const learnedExpiresAt = (now: number, learnedWindowMillis: number): number =>
+    now + learnedWindowMillis + adaptiveStateTtlGraceMillis
 
   return RateLimiterStore.of({
     fixedWindow: (options) =>
@@ -575,6 +726,146 @@ export const layerStoreMemory: Layer.Layer<
           }
           return newTokenCount
         })
+      ),
+    adaptiveConsume: (options) =>
+      Effect.clockWith((clock) =>
+        Effect.sync(() => {
+          const now = clock.currentTimeMillisUnsafe()
+          const state = getAdaptiveState(options.key, now)
+          if (!state) {
+            return {
+              delay: Duration.zero,
+              epoch: 0,
+              phase: "inactive"
+            }
+          }
+
+          if (state.phase === "cooldown") {
+            if (state.cooldownUntil > now) {
+              return {
+                delay: Duration.millis(state.cooldownUntil - now),
+                epoch: state.epoch,
+                phase: "cooldown"
+              }
+            }
+
+            state.phase = "learning"
+            state.epoch += 1
+            state.learningStartedAt = now
+            state.observedTokens = options.tokens
+            state.expiresAt = learningExpiresAt(now, options.fallbackWindow)
+            return {
+              delay: Duration.zero,
+              epoch: state.epoch,
+              phase: "learning"
+            }
+          }
+
+          if (state.phase === "learning") {
+            state.observedTokens += options.tokens
+            return {
+              delay: Duration.zero,
+              epoch: state.epoch,
+              phase: state.phase
+            }
+          }
+
+          if (state.phase === "learned") {
+            const refillRateMillis = state.learnedWindowMillis / state.learnedLimit
+            if (state.cooldownUntil <= now) {
+              state.observedTokens = 0
+              state.cooldownUntil = now
+            }
+            state.observedTokens += options.tokens
+            state.cooldownUntil += refillRateMillis * options.tokens
+
+            const ttl = state.cooldownUntil - now
+            const ttlTotal = state.observedTokens * refillRateMillis
+            const elapsed = ttlTotal - ttl
+            const windowNumber = Math.floor((state.observedTokens - 1) / state.learnedLimit)
+            const remaining = (windowNumber * state.learnedWindowMillis) - elapsed
+
+            return {
+              delay: remaining <= 0 ? Duration.zero : Duration.millis(remaining),
+              epoch: state.epoch,
+              phase: state.phase
+            }
+          }
+
+          return {
+            delay: Duration.zero,
+            epoch: state.epoch,
+            phase: state.phase
+          }
+        })
+      ),
+    adaptiveFeedback: (options) =>
+      Effect.clockWith((clock) =>
+        Effect.sync(() => {
+          if (options.status !== 429 || options.retryAfter === undefined) return
+
+          const retryAfterMillis = clampAdaptiveDurationMillis(Duration.toMillis(options.retryAfter))
+
+          const now = clock.currentTimeMillisUnsafe()
+          const cooldownUntil = now + retryAfterMillis
+          const state = getAdaptiveState(options.key, now)
+          if (!state) {
+            if (options.epoch !== 0) return
+            adaptiveStates.set(options.key, {
+              phase: "cooldown",
+              epoch: 0,
+              cooldownUntil,
+              learningStartedAt: 0,
+              observedTokens: 0,
+              learnedLimit: 0,
+              learnedWindowMillis: 0,
+              expiresAt: cooldownExpiresAt(cooldownUntil)
+            })
+            return
+          }
+
+          if (state.epoch !== options.epoch) return
+
+          if (state.phase === "cooldown") {
+            state.cooldownUntil = Math.max(state.cooldownUntil, cooldownUntil)
+            state.expiresAt = cooldownExpiresAt(state.cooldownUntil)
+            return
+          }
+
+          if (state.phase === "learning") {
+            const acceptedTokens = state.observedTokens - options.tokens
+            if (acceptedTokens <= 0) {
+              state.phase = "cooldown"
+              state.cooldownUntil = cooldownUntil
+              state.learningStartedAt = 0
+              state.observedTokens = 0
+              state.learnedLimit = 0
+              state.learnedWindowMillis = 0
+              state.expiresAt = cooldownExpiresAt(cooldownUntil)
+              return
+            }
+
+            const learnedWindowMillis = clampAdaptiveDurationMillis((now - state.learningStartedAt) + retryAfterMillis)
+            state.phase = "learned"
+            state.epoch += 1
+            state.cooldownUntil = state.learningStartedAt + learnedWindowMillis
+            state.observedTokens = acceptedTokens
+            state.learnedLimit = acceptedTokens
+            state.learnedWindowMillis = learnedWindowMillis
+            state.expiresAt = learnedExpiresAt(now, learnedWindowMillis)
+            return
+          }
+
+          if (state.phase === "learned") {
+            state.phase = "cooldown"
+            state.cooldownUntil = cooldownUntil
+            state.learningStartedAt = 0
+            state.observedTokens = 0
+            state.learnedLimit = 0
+            state.learnedWindowMillis = 0
+            state.expiresAt = cooldownExpiresAt(cooldownUntil)
+          }
+        })
       )
   })
 })
@@ -596,6 +887,8 @@ export const makeStoreRedis = Effect.fnUntraced(function*(
 
   const fixedWindow = redis.eval(fixedWindowScript)
   const tokenBucket = redis.eval(tokenBucketScript)
+  const adaptiveConsume = redis.eval(adaptiveConsumeScript)
+  const adaptiveFeedback = redis.eval(adaptiveFeedbackScript)
 
   return RateLimiterStore.of({
     fixedWindow(options) {
@@ -636,6 +929,55 @@ export const makeStoreRedis = Effect.fnUntraced(function*(
             })
         )
       )
+    },
+    adaptiveConsume(options) {
+      const key = `${prefix}${options.key}:adaptive`
+      return Effect.map(
+        Effect.mapError(
+          adaptiveConsume(
+            key,
+            options.tokens,
+            Duration.toMillis(options.fallbackWindow),
+            adaptiveStateTtlGraceMillis
+          ),
+          (cause) =>
+            new RateLimiterError({
+              reason: new RateLimitStoreError({
+                message: `Failed to execute adaptiveConsume rate limiting command`,
+                cause: cause.cause
+              })
+            })
+        ),
+        ([delayMillis, epoch, phase]) => ({
+          delay: delayMillis <= 0 ? Duration.zero : Duration.millis(delayMillis),
+          epoch,
+          phase
+        })
+      )
+    },
+    adaptiveFeedback(options) {
+      if (options.status !== 429 || options.retryAfter === undefined) return Effect.void
+      const retryAfterMillis = clampAdaptiveDurationMillis(Duration.toMillis(options.retryAfter))
+      const key = `${prefix}${options.key}:adaptive`
+      return Effect.asVoid(
+        Effect.mapError(
+          adaptiveFeedback(
+            key,
+            options.epoch,
+            options.tokens,
+            retryAfterMillis,
+            adaptiveStateTtlGraceMillis,
+            adaptiveStateMaxWindowMillis
+          ),
+          (cause) =>
+            new RateLimiterError({
+              reason: new RateLimitStoreError({
+                message: `Failed to execute adaptiveFeedback rate limiting command`,
+                cause: cause.cause
+              })
+            })
+        )
+      )
     }
   })
 })
@@ -652,7 +994,7 @@ local limit = tonumber(ARGV[3])
 local current = tonumber(redis.call("GET", key))
 
 if not current then
-  local nextpttl = refillms * tokens
+  local nextpttl = math.max(1, math.ceil(refillms * tokens))
   redis.call("SET", key, tokens, "PX", nextpttl)
   return { tokens, nextpttl }
 end
@@ -663,7 +1005,7 @@ if limit and next > limit then
   return { next, currentpttl }
 end
 
-local nextpttl = currentpttl + (refillms * tokens)
+local nextpttl = math.max(1, math.ceil(currentpttl + (refillms * tokens)))
 redis.call("SET", key, next, "PX", nextpttl)
 return { next, nextpttl }
 `
@@ -714,6 +1056,258 @@ if ttl < 1 then ttl = 1 end
 redis.call("SET", key, stored, "PX", ttl)
 redis.call("SET", last_refill_key, last_refill, "PX", ttl)
 return next
+`
+  }
+).withReturnType<number>()
+
+const adaptiveConsumeScript = Redis.script(
+  (key: string, tokens: number, fallbackWindowMillis: number, ttlGraceMillis: number) => [
+    key,
+    tokens,
+    fallbackWindowMillis,
+    ttlGraceMillis
+  ],
+  {
+    numberOfKeys: 1,
+    lua: `
+local key = KEYS[1]
+local tokens = tonumber(ARGV[1])
+local fallback_window_ms = tonumber(ARGV[2])
+local ttl_grace_ms = tonumber(ARGV[3])
+
+local time = redis.call("TIME")
+local now = (tonumber(time[1]) * 1000) + math.floor(tonumber(time[2]) / 1000)
+
+local phase = redis.call("HGET", key, "phase")
+if not phase then
+  return { 0, 0, "inactive" }
+end
+
+local epoch = tonumber(redis.call("HGET", key, "epoch") or "0")
+
+if phase == "cooldown" then
+  local cooldown_until = tonumber(redis.call("HGET", key, "cooldownUntil") or "0")
+  if cooldown_until > now then
+    return { math.ceil(cooldown_until - now), epoch, "cooldown" }
+  end
+
+  epoch = epoch + 1
+  redis.call(
+    "HSET",
+    key,
+    "phase",
+    "learning",
+    "epoch",
+    epoch,
+    "cooldownUntil",
+    0,
+    "learningStartedAt",
+    now,
+    "observedTokens",
+    tokens,
+    "learnedLimit",
+    0,
+    "learnedWindowMillis",
+    0
+  )
+  redis.call("PEXPIRE", key, math.max(1, math.ceil(fallback_window_ms + ttl_grace_ms)))
+  return { 0, epoch, "learning" }
+end
+
+if phase == "learning" then
+  local observed_tokens = tonumber(redis.call("HGET", key, "observedTokens") or "0") + tokens
+  redis.call("HSET", key, "observedTokens", observed_tokens)
+  return { 0, epoch, "learning" }
+end
+
+if phase == "learned" then
+  local cooldown_until = tonumber(redis.call("HGET", key, "cooldownUntil") or "0")
+  local observed_tokens = tonumber(redis.call("HGET", key, "observedTokens") or "0")
+  local learned_limit = tonumber(redis.call("HGET", key, "learnedLimit") or "0")
+  local learned_window_ms = tonumber(redis.call("HGET", key, "learnedWindowMillis") or "0")
+  local refill_rate_ms = learned_window_ms / learned_limit
+
+  if cooldown_until <= now then
+    observed_tokens = 0
+    cooldown_until = now
+  end
+
+  observed_tokens = observed_tokens + tokens
+  cooldown_until = cooldown_until + (refill_rate_ms * tokens)
+
+  local ttl = cooldown_until - now
+  local ttl_total = observed_tokens * refill_rate_ms
+  local elapsed = ttl_total - ttl
+  local window_number = math.floor((observed_tokens - 1) / learned_limit)
+  local remaining = (window_number * learned_window_ms) - elapsed
+
+  redis.call("HSET", key, "observedTokens", observed_tokens, "cooldownUntil", cooldown_until)
+
+  if remaining <= 0 then
+    return { 0, epoch, "learned" }
+  end
+  return { math.ceil(remaining), epoch, "learned" }
+end
+
+return { 0, epoch, phase }
+`
+  }
+).withReturnType<readonly [delayMillis: number, epoch: number, phase: AdaptivePhase]>()
+
+const adaptiveFeedbackScript = Redis.script(
+  (
+    key: string,
+    epoch: number,
+    tokens: number,
+    retryAfterMillis: number,
+    ttlGraceMillis: number,
+    maxWindowMillis: number
+  ) => [
+    key,
+    epoch,
+    tokens,
+    retryAfterMillis,
+    ttlGraceMillis,
+    maxWindowMillis
+  ],
+  {
+    numberOfKeys: 1,
+    lua: `
+local key = KEYS[1]
+local feedback_epoch = tonumber(ARGV[1])
+local tokens = tonumber(ARGV[2])
+local retry_after_ms = tonumber(ARGV[3])
+local ttl_grace_ms = tonumber(ARGV[4])
+local max_window_ms = tonumber(ARGV[5])
+
+if retry_after_ms <= 0 then
+  retry_after_ms = 1
+end
+if retry_after_ms > max_window_ms then
+  retry_after_ms = max_window_ms
+end
+
+local time = redis.call("TIME")
+local now = (tonumber(time[1]) * 1000) + math.floor(tonumber(time[2]) / 1000)
+local cooldown_until = now + retry_after_ms
+
+local phase = redis.call("HGET", key, "phase")
+if not phase then
+  if feedback_epoch ~= 0 then
+    return 0
+  end
+  redis.call(
+    "HSET",
+    key,
+    "phase",
+    "cooldown",
+    "epoch",
+    0,
+    "cooldownUntil",
+    cooldown_until,
+    "learningStartedAt",
+    0,
+    "observedTokens",
+    0,
+    "learnedLimit",
+    0,
+    "learnedWindowMillis",
+    0
+  )
+  redis.call("PEXPIRE", key, math.max(1, math.ceil(retry_after_ms + ttl_grace_ms)))
+  return 1
+end
+
+local epoch = tonumber(redis.call("HGET", key, "epoch") or "0")
+if epoch ~= feedback_epoch then
+  return 0
+end
+
+if phase == "cooldown" then
+  local current_cooldown_until = tonumber(redis.call("HGET", key, "cooldownUntil") or "0")
+  if current_cooldown_until > cooldown_until then
+    cooldown_until = current_cooldown_until
+  end
+  redis.call("HSET", key, "cooldownUntil", cooldown_until)
+  redis.call("PEXPIRE", key, math.max(1, math.ceil((cooldown_until - now) + ttl_grace_ms)))
+  return 1
+end
+
+if phase == "learning" then
+  local observed_tokens = tonumber(redis.call("HGET", key, "observedTokens") or "0")
+  local accepted_tokens = observed_tokens - tokens
+  if accepted_tokens <= 0 then
+    redis.call(
+      "HSET",
+      key,
+      "phase",
+      "cooldown",
+      "cooldownUntil",
+      cooldown_until,
+      "learningStartedAt",
+      0,
+      "observedTokens",
+      0,
+      "learnedLimit",
+      0,
+      "learnedWindowMillis",
+      0
+    )
+    redis.call("PEXPIRE", key, math.max(1, math.ceil(retry_after_ms + ttl_grace_ms)))
+    return 1
+  end
+
+  local learning_started_at = tonumber(redis.call("HGET", key, "learningStartedAt") or now)
+  local learned_window_ms = (now - learning_started_at) + retry_after_ms
+  if learned_window_ms <= 0 then
+    learned_window_ms = 1
+  end
+  if learned_window_ms > max_window_ms then
+    learned_window_ms = max_window_ms
+  end
+  local next_epoch = epoch + 1
+  redis.call(
+    "HSET",
+    key,
+    "phase",
+    "learned",
+    "epoch",
+    next_epoch,
+    "cooldownUntil",
+    learning_started_at + learned_window_ms,
+    "observedTokens",
+    accepted_tokens,
+    "learnedLimit",
+    accepted_tokens,
+    "learnedWindowMillis",
+    learned_window_ms
+  )
+  redis.call("PEXPIRE", key, math.max(1, math.ceil(learned_window_ms + ttl_grace_ms)))
+  return 1
+end
+
+if phase == "learned" then
+  redis.call(
+    "HSET",
+    key,
+    "phase",
+    "cooldown",
+    "cooldownUntil",
+    cooldown_until,
+    "learningStartedAt",
+    0,
+    "observedTokens",
+    0,
+    "learnedLimit",
+    0,
+    "learnedWindowMillis",
+    0
+  )
+  redis.call("PEXPIRE", key, math.max(1, math.ceil(retry_after_ms + ttl_grace_ms)))
+  return 1
+end
+
+return 0
 `
   }
 ).withReturnType<number>()

@@ -1,5 +1,5 @@
 import { Atom, scheduleTask } from "@/lib/effect-atom"
-import { Layer } from "effect"
+import { Layer, ManagedRuntime } from "effect"
 import { AtomRegistry } from "effect/unstable/reactivity"
 import { MapleApiAtomClient } from "./services/common/atom-client"
 import { MapleFetchHttpClientLive } from "./services/common/http-client"
@@ -25,3 +25,10 @@ appRegistry.mount(sharedAtomRuntime)
 export const mapleApiClientLayer: Layer.Layer<MapleApiAtomClient> = appRegistry.get(
 	MapleApiAtomClient.runtime.layer,
 )
+
+// One persistent ManagedRuntime built from the typed API layer, shared by every
+// imperative (non-React) Effect run: `runMapleApi` (collection write handlers) and
+// the `optimisticAction` atoms in @maple/effect-db. Building it once avoids
+// rebuilding `Effect.provide(mapleApiClientLayer)` on every call, and gives the
+// Effect-native collection factory a runtime for its handlers + backoff logging.
+export const mapleRuntime = ManagedRuntime.make(mapleApiClientLayer)

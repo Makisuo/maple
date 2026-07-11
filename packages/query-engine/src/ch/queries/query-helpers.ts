@@ -109,6 +109,21 @@ export interface TracesBaseWhereOpts {
 	excludedNamespaces?: readonly string[]
 }
 
+/**
+ * Tri-state errorsOnly filter: `true` keeps only errored spans, `false` keeps
+ * only non-errored spans, `undefined` applies no filter. The `false` case
+ * backs `has_error = false` clauses (e.g. the "OK" side of an errors-vs-OK
+ * comparison) — collapsing it to "no filter" silently counts every span.
+ */
+export function errorsOnlyCondition(
+	statusCode: CH.Expr<string>,
+	errorsOnly: boolean | undefined,
+): CH.Condition | undefined {
+	if (errorsOnly === true) return statusCode.eq("Error")
+	if (errorsOnly === false) return statusCode.neq("Error")
+	return undefined
+}
+
 type TracesBaseWhereColumns = Pick<
 	typeof Traces.columns,
 	| "OrgId"
@@ -161,7 +176,7 @@ export function tracesBaseWhereConditions(
 				: $.SpanName.eq(v).or(display.eq(v))
 		}),
 		CH.whenTrue(!!opts.rootOnly, () => $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq(""))),
-		CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
+		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]
 
 	if (opts.minDurationMs != null) {
@@ -283,7 +298,7 @@ export function serviceOverviewWhereConditions(
 				? CH.positionCaseInsensitive($.ServiceName, CH.lit(v)).gt(0)
 				: $.ServiceName.eq(v),
 		),
-		CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
+		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]
 
 	if (opts.minDurationMs != null) {
@@ -383,7 +398,7 @@ export function tracesAggregatesWhereConditions(
 				: $.SpanName.eq(v),
 		),
 		CH.whenTrue(!!opts.rootOnly, () => $.IsEntryPoint.eq(1)),
-		CH.whenTrue(!!opts.errorsOnly, () => $.StatusCode.eq("Error")),
+		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]
 
 	if (opts.environments?.length) {

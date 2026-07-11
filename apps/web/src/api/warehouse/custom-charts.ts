@@ -881,10 +881,10 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 
 	return {
 		data: buildServiceDetailPoints(result.timeseries, startTime, endTime, bucketSeconds, nowMs),
-		releases: result.releases.map((row) => ({
-			bucket: toIsoBucket(row.bucket),
-			commitSha: row.commitSha,
-			count: Number(row.count),
+		releases: result.releases.map((r) => ({
+			bucket: toIsoBucket(r.bucket),
+			commitSha: r.commitSha,
+			count: Number(r.count),
 		})),
 		environments: [...result.environments],
 	} satisfies ServiceDetailOverviewResult

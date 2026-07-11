@@ -36,6 +36,8 @@ export interface ListRuleChecksOutput {
 	readonly incidentId: string | null
 	readonly incidentTransition: string
 	readonly evaluationDurationMs: number
+	readonly errorMessage: string | null
+	readonly errorCategory: string
 }
 
 export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
@@ -57,6 +59,8 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 			incidentId: $.IncidentId,
 			incidentTransition: $.IncidentTransition,
 			evaluationDurationMs: $.EvaluationDurationMs,
+			errorMessage: $.ErrorMessage,
+			errorCategory: $.ErrorCategory,
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

@@ -34,8 +34,8 @@ const TypeId = "~effect/workflow/Activity"
  * @since 4.0.0
  */
 export interface Activity<
-  Success extends Schema.Top = Schema.Void,
-  Error extends Schema.Top = Schema.Never,
+  Success extends Schema.Constraint = Schema.Void,
+  Error extends Schema.Constraint = Schema.Never,
   R = never
 > extends
   Effect.Effect<
@@ -122,8 +122,8 @@ export interface AnyWithProps {
  */
 export const make = <
   R,
-  Success extends Schema.Top = Schema.Void,
-  Error extends Schema.Top = Schema.Never
+  Success extends Schema.Constraint = Schema.Void,
+  Error extends Schema.Constraint = Schema.Never
 >(options: {
   readonly name: string
   readonly success?: Success | undefined
@@ -303,8 +303,8 @@ const InstanceTag = Context.Service<WorkflowInstance, WorkflowInstance["Service"
 
 const makeExecute = Effect.fnUntraced(function*<
   R,
-  Success extends Schema.Top = typeof Schema.Void,
-  Error extends Schema.Top = typeof Schema.Never
+  Success extends Schema.Constraint = typeof Schema.Void,
+  Error extends Schema.Constraint = typeof Schema.Never
 >(activity: Activity<Success, Error, R>) {
   const engine = yield* EngineTag
   const instance = yield* InstanceTag

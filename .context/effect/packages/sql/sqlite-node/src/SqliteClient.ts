@@ -199,6 +199,25 @@ export const make = (
           (statement) => Effect.sync(() => statement.reader && statement.raw(false))
         )
 
+      const runValuesUnprepared = (
+        sql: string,
+        params: ReadonlyArray<unknown>
+      ) =>
+        Effect.try({
+          try: () => {
+            const statement = db.prepare(sql)
+            if (statement.reader) {
+              statement.raw(true)
+              return statement.all(...params) as ReadonlyArray<
+                ReadonlyArray<unknown>
+              >
+            }
+            statement.run(...params)
+            return []
+          },
+          catch: (cause) => new SqlError({ reason: classifyError(cause, "Failed to execute statement", "execute") })
+        })
+
       return identity<SqliteConnection>({
         execute(sql, params, transformRows) {
           return transformRows
@@ -210,6 +229,9 @@ export const make = (
         },
         executeValues(sql, params) {
           return runValues(sql, params)
+        },
+        executeValuesUnprepared(sql, params) {
+          return runValuesUnprepared(sql, params)
         },
         executeUnprepared(sql, params, transformRows) {
           const effect = runStatement(db.prepare(sql), params ?? [], false)

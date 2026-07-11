@@ -75,19 +75,28 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 	const gradientPrefix = useId().replace(/:/g, "")
 	const { data, series } = useMemo(() => transformRows(rows), [rows])
 
+	// Series names can contain dots/slashes (container names, pod names),
+	// which are invalid in a raw `var(--color-…)` reference — colour series
+	// directly instead of via the ChartContainer CSS variables.
+	const seriesColor = useMemo(
+		() =>
+			new Map(series.map((name, idx) => [name, COLOR_PALETTE[idx % COLOR_PALETTE.length] ?? ""])),
+		[series],
+	)
+
 	const config = useMemo<ChartConfig>(
 		() =>
 			Object.fromEntries(
-				series.map((name, idx) => [
+				series.map((name) => [
 					name,
 					{
 						// Swap the unnamed-series placeholder for the metric label.
 						label: name === UNNAMED_SERIES_KEY ? (seriesLabel ?? name) : name,
-						color: COLOR_PALETTE[idx % COLOR_PALETTE.length],
+						color: seriesColor.get(name),
 					},
 				]),
 			),
-		[series, seriesLabel],
+		[series, seriesLabel, seriesColor],
 	)
 
 	const lastValues = useMemo(() => {
@@ -129,7 +138,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 						>
 							<span
 								className="size-2 rounded-full"
-								style={{ background: `var(--color-${s})` }}
+								style={{ background: seriesColor.get(s) }}
 							/>
 							<span className="font-medium text-foreground/80">{config[s]?.label ?? s}</span>
 							{value !== undefined && (
@@ -151,12 +160,12 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 									<linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
 										<stop
 											offset="5%"
-											stopColor={`var(--color-${s})`}
+											stopColor={seriesColor.get(s)}
 											stopOpacity={0.45}
 										/>
 										<stop
 											offset="95%"
-											stopColor={`var(--color-${s})`}
+											stopColor={seriesColor.get(s)}
 											stopOpacity={0.05}
 										/>
 									</linearGradient>
@@ -206,7 +215,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 									indicator="dot"
 									formatter={(value, name) => (
 										<InfraTooltipItem
-											color={`var(--color-${name})`}
+											color={seriesColor.get(String(name)) ?? ""}
 											label={config[String(name)]?.label ?? String(name)}
 											value={Number(value)}
 											unit={unit}
@@ -223,7 +232,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 									dataKey={s}
 									type="monotone"
 									stackId="a"
-									stroke={`var(--color-${s})`}
+									stroke={seriesColor.get(s)}
 									strokeWidth={1.6}
 									fill={`url(#${id})`}
 									fillOpacity={1}
@@ -262,7 +271,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 									indicator="line"
 									formatter={(value, name) => (
 										<InfraTooltipItem
-											color={`var(--color-${name})`}
+											color={seriesColor.get(String(name)) ?? ""}
 											label={config[String(name)]?.label ?? String(name)}
 											value={Number(value)}
 											unit={unit}
@@ -276,7 +285,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 								key={s}
 								dataKey={s}
 								type="monotone"
-								stroke={`var(--color-${s})`}
+								stroke={seriesColor.get(s)}
 								strokeWidth={1.8}
 								dot={false}
 								activeDot={{ r: 3, strokeWidth: 0 }}

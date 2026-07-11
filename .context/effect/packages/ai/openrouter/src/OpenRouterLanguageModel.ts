@@ -1766,7 +1766,7 @@ const unsupportedSchemaError = (error: unknown, method: string): AiError.AiError
     })
   })
 
-const tryJsonSchema = <S extends Schema.Top>(
+const tryJsonSchema = <S extends Schema.Constraint>(
   schema: S,
   method: string,
   transformer: LanguageModel.CodecTransformer

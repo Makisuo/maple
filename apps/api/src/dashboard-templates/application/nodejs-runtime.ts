@@ -15,18 +15,22 @@ function widgets(serviceName?: string): WidgetDef[] {
 	const groupBy = ["service.name"]
 	return [
 		{
+			// The query-builder metrics source supports avg/sum/min/max/count/rate/
+			// increase only — no percentiles — and event-loop lag is emitted as a
+			// gauge (ms) by the Node.js runtime instrumentation, so chart the
+			// worst-case lag per bucket instead of a P95.
 			id: "event-loop-lag",
 			visualization: "chart",
 			dataSource: metricsTimeseries({
 				id: "node-eventloop-lag",
 				name: "Event Loop Lag",
 				metricName: "process.runtime.nodejs.eventloop.lag",
-				metricType: "histogram",
-				aggregation: "p95_duration",
+				metricType: "gauge",
+				aggregation: "max",
 				whereClause: where,
 				groupBy,
 			}),
-			display: { title: "Event Loop Lag (P95)", ...CHART_DISPLAY_AREA, unit: "duration_ms" },
+			display: { title: "Event Loop Lag (Max)", ...CHART_DISPLAY_LINE, unit: "duration_ms" },
 			layout: { x: 0, y: 0, w: 6, h: 4 },
 		},
 		{
@@ -83,6 +87,7 @@ export const nodejsRuntimeTemplate: TemplateDefinition = {
 	category: "application",
 	tags: ["nodejs", "runtime"],
 	requirements: ["OpenTelemetry Node.js instrumentation"],
+	requiredMetricPrefixes: ["process.runtime.nodejs."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

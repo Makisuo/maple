@@ -38,6 +38,7 @@ import {
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { withSessionLink } from "./session-link.js"
+import { type ClientReplayConfig, startClientSession } from "./replay-loader.js"
 
 /** Default auto-flush cadence (ms), matching `Otlp.layerJson`'s 5s export interval. */
 const DEFAULT_AUTO_FLUSH_MS = 5_000
@@ -59,6 +60,12 @@ export interface MapleClientFlushableConfig {
 	readonly excludeLogSpans?: boolean | undefined
 	/** Span name prefixes to drop before OTLP export. */
 	readonly dropSpanNames?: ReadonlyArray<string> | undefined
+	/**
+	 * `_tag`s of *anticipated* failures (expected 4xx business errors). Spans
+	 * failing entirely with these export as status `Ok` (no `exception` event),
+	 * so they stay visible but never count as errors.
+	 */
+	readonly anticipatedErrorTags?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
@@ -76,6 +83,19 @@ export interface MapleClientFlushableConfig {
 	 * `addEventListener` (SSR / non-DOM runtime).
 	 */
 	readonly flushOnUnload?: boolean | undefined
+	/**
+	 * Post session metadata rows for the standalone session so it appears in
+	 * Maple's Sessions UI (list entry + linked traces, no replay recording).
+	 * Default `true`; no-ops when `@maple-dev/browser` is on the page (it owns
+	 * the session rows), during SSR, or without an ingest key.
+	 */
+	readonly emitSessionMeta?: boolean | undefined
+	/**
+	 * rrweb session replay for this app, recorded by the shared Maple replay
+	 * engine (loaded lazily in a code-split chunk). Default enabled with
+	 * sampleRate 1 and inputs masked — set `{ enabled: false }` to opt out.
+	 */
+	readonly replay?: ClientReplayConfig | undefined
 }
 
 export interface FlushableTelemetry {
@@ -134,7 +154,21 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		dropPrefixes !== undefined && dropPrefixes.length > 0
 			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
 			: undefined
-	const spans: SpanBuffer = makeSpanBuffer({ dropSpan })
+	const anticipatedErrorTags =
+		config.anticipatedErrorTags !== undefined && config.anticipatedErrorTags.length > 0
+			? new Set(config.anticipatedErrorTags)
+			: undefined
+	startClientSession({
+		endpoint: config.endpoint,
+		ingestKey: config.ingestKey,
+		serviceName: config.serviceName,
+		environment: config.environment,
+		serviceVersion: config.serviceVersion,
+		replay: config.replay,
+		emitSessionMeta: config.emitSessionMeta,
+	})
+
+	const spans: SpanBuffer = makeSpanBuffer({ dropSpan, anticipatedErrorTags })
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 	// `withSessionLink` overrides only the Tracer reference, keeping the logger.
 	const layer = withSessionLink(Layer.mergeAll(spans.tracerLayer, logs.loggerLayer))

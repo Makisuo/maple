@@ -5,12 +5,8 @@ import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
-import {
-	type LegendSeries,
-	QueryBuilderLegend,
-	computeSeriesStats,
-	responsiveLegendHeight,
-} from "../_shared/query-builder-legend"
+import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
+import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
 import { findNearestSeriesKey } from "../_shared/nearest-series"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
@@ -167,20 +163,13 @@ export function QueryBuilderLineChart({
 		})
 	}, [])
 
-	const seriesStats = React.useMemo(
-		() => computeSeriesStats(processedData, valueKeys),
-		[processedData, valueKeys],
-	)
-
-	const legendSeries = React.useMemo<LegendSeries[]>(
-		() =>
-			seriesDefinitions.map((definition) => ({
-				key: definition.chartKey,
-				label: definition.rawKey,
-				color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
-			})),
-		[seriesDefinitions, chartConfig],
-	)
+	const { seriesStats, legendSeries, renderDots, integerOnlyData } = useTimeseriesSeriesPresentation({
+		data: processedData,
+		valueKeys,
+		seriesDefinitions,
+		chartConfig,
+		showPoints,
+	})
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const { height: containerHeight } = useContainerSize(containerRef)
@@ -229,7 +218,11 @@ export function QueryBuilderLineChart({
 
 	return (
 		<div ref={containerRef} className={cn("h-full w-full", className)}>
-			<ChartContainer config={chartConfig} className="h-full w-full aspect-auto">
+			<ChartContainer
+				config={chartConfig}
+				className="h-full w-full aspect-auto"
+				hoistLegend={!showLegendBlock}
+			>
 				<LineChart data={processedData} accessibilityLayer syncId={syncId} syncMethod="value">
 					<CartesianGrid vertical={false} />
 					<XAxis
@@ -242,8 +235,9 @@ export function QueryBuilderLineChart({
 					<YAxis
 						tickLine={false}
 						axisLine={false}
-						tickMargin={8}
-						width={80}
+						tickMargin={6}
+						width={56}
+						allowDecimals={!integerOnlyData}
 						scale={logScale ? "log" : "auto"}
 						domain={[yDomainMin, yDomainMax]}
 						allowDataOverflow={
@@ -321,6 +315,7 @@ export function QueryBuilderLineChart({
 									unit={unit}
 									layout="right"
 									variant={variant}
+									maxHeight={containerHeight}
 								/>
 							}
 						/>
@@ -335,7 +330,11 @@ export function QueryBuilderLineChart({
 							dataKey={definition.chartKey}
 							stroke={`var(--color-${definition.chartKey})`}
 							strokeWidth={2}
-							dot={showPoints ? { r: 2 } : false}
+							dot={
+								renderDots
+									? { r: 2.5, strokeWidth: 0, fill: `var(--color-${definition.chartKey})` }
+									: false
+							}
 							hide={hiddenSeries.has(definition.chartKey)}
 							isAnimationActive={false}
 							activeDot={(props: { cx?: number; cy?: number }) => {

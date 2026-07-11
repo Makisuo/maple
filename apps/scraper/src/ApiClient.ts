@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Redacted, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import {
 	InternalScrapeTargetList,
@@ -51,6 +51,11 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			authorization: `Bearer ${Redacted.value(env.SD_INTERNAL_TOKEN)}`,
 		}
 
+		// Bound every API round-trip. `FetchHttpClient` sets no timeout, so a
+		// stalled Worker (e.g. an oversized scrape-results POST) would otherwise
+		// hang for minutes; cap it so a flush fails fast and re-buffers instead.
+		const REQUEST_TIMEOUT = Duration.seconds(30)
+
 		const transportError = (error: { readonly message: string }) =>
 			new ApiRequestError({ message: `Maple API unreachable: ${error.message}`, status: null })
 
@@ -58,7 +63,9 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			const request = HttpClientRequest.get(`${env.MAPLE_API_URL}/api/internal/scrape-targets`, {
 				headers: authHeaders,
 			})
-			const response = yield* client.execute(request).pipe(Effect.mapError(transportError))
+			const response = yield* client
+				.execute(request)
+				.pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(transportError))
 			const text = yield* response.text.pipe(Effect.mapError(transportError))
 			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
@@ -96,7 +103,9 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 				`${env.MAPLE_API_URL}/api/internal/prometheus-scrape?targetId=${encodeURIComponent(targetId)}${sub}`,
 				{ headers: authHeaders },
 			)
-			const response = yield* client.execute(request).pipe(Effect.mapError(transportError))
+			const response = yield* client
+				.execute(request)
+				.pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(transportError))
 			const body = yield* response.text.pipe(Effect.mapError(transportError))
 			const retryAfterRaw = response.headers["retry-after"]
 			const retryAfterSeconds =
@@ -113,7 +122,9 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			const request = HttpClientRequest.post(`${env.MAPLE_API_URL}/api/internal/scrape-results`, {
 				headers: authHeaders,
 			}).pipe(HttpClientRequest.bodyText(JSON.stringify(results), "application/json"))
-			const response = yield* client.execute(request).pipe(Effect.mapError(transportError))
+			const response = yield* client
+				.execute(request)
+				.pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(transportError))
 			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
 					new ApiRequestError({

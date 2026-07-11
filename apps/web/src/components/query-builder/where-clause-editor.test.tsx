@@ -77,4 +77,36 @@ describe("WhereClauseEditor", () => {
 
 		expect(textarea.value).toBe('service.name = "checkout" AND ')
 	})
+
+	it("suggests dashboard variables first in value position and applies them quoted", () => {
+		function VariablesHarness() {
+			const [value, setValue] = React.useState("service.name = ")
+			return (
+				<WhereClauseEditor
+					dataSource="traces"
+					value={value}
+					onChange={setValue}
+					placeholder="where clause"
+					values={{ services: ["checkout"], variables: ["service", "env"] }}
+					ariaLabel="where-clause"
+				/>
+			)
+		}
+
+		render(<VariablesHarness />)
+
+		const textarea = screen.getByLabelText("where-clause") as HTMLTextAreaElement
+		fireEvent.focus(textarea)
+		fireEvent.change(textarea, { target: { value: "service.name = " } })
+		textarea.setSelectionRange(15, 15)
+		fireEvent.select(textarea)
+
+		const options = screen.getAllByRole("option")
+		expect(options[0]?.textContent).toContain("$service")
+		expect(screen.getByRole("option", { name: /checkout/i })).toBeTruthy()
+
+		fireEvent.keyDown(textarea, { key: "Enter" })
+
+		expect(textarea.value).toBe('service.name = "$service" ')
+	})
 })

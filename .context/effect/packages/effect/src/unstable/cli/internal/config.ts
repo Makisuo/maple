@@ -46,7 +46,6 @@
  * 1. Flat iteration over all params for parsing/validation
  * 2. Reconstruction of original nested shape for handler input
  */
-import * as Predicate from "../../../Predicate.ts"
 import * as Param from "../Param.ts"
 
 /* ========================================================================== */
@@ -104,13 +103,6 @@ export declare namespace ConfigInternal {
     | { readonly _tag: "Array"; readonly children: ReadonlyArray<Node> }
     | { readonly _tag: "Nested"; readonly tree: Tree }
 }
-
-/* ========================================================================== */
-/* Guards                                                                     */
-/* ========================================================================== */
-
-/** @internal */
-export const isConfigInternal = (u: unknown): u is ConfigInternal => Predicate.hasProperty(u, ConfigInternalTypeId)
 
 /* ========================================================================== */
 /* Parsing                                                                    */

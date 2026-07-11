@@ -10,6 +10,20 @@ export interface MaplePgConnection {
 	readonly end: () => Promise<void>
 }
 
+export interface MaplePgClientOptions {
+	readonly maxConnections?: number
+	/**
+	 * Called once per executed statement with the parameterized SQL ($1
+	 * placeholders — params are never inlined). Fires for statements inside
+	 * `db.transaction` callbacks too; `BEGIN`/`COMMIT` are issued below drizzle
+	 * and are not reported.
+	 */
+	readonly onQuery?: (query: string) => void
+}
+
+const toDrizzleLogger = (onQuery: ((query: string) => void) | undefined) =>
+	onQuery ? { logQuery: (query: string, _params: unknown[]) => onQuery(query) } : undefined
+
 /**
  * Drizzle over postgres.js, for real Postgres (PlanetScale via Hyperdrive in
  * Workers, docker-compose Postgres in `wrangler dev`, direct URLs in scripts).
@@ -22,14 +36,14 @@ export interface MaplePgConnection {
  */
 export const createMaplePgClient = (
 	connectionString: string,
-	options?: { readonly maxConnections?: number },
+	options?: MaplePgClientOptions,
 ): MaplePgConnection => {
 	const sql = postgres(connectionString, {
 		max: options?.maxConnections ?? 5,
 		fetch_types: false,
 	})
 	return {
-		db: drizzlePostgres(sql, { schema }),
+		db: drizzlePostgres(sql, { schema, logger: toDrizzleLogger(options?.onQuery) }),
 		end: () => sql.end(),
 	}
 }
@@ -37,7 +51,10 @@ export const createMaplePgClient = (
 export type MaplePgClient = ReturnType<typeof drizzlePostgres<typeof schema>>
 
 /** Drizzle over an embedded PGlite instance — local dev and vitest. */
-export const createMaplePgliteClient = (pglite: PGlite) => drizzlePglite(pglite, { schema })
+export const createMaplePgliteClient = (
+	pglite: PGlite,
+	options?: Pick<MaplePgClientOptions, "onQuery">,
+) => drizzlePglite(pglite, { schema, logger: toDrizzleLogger(options?.onQuery) })
 
 export type MaplePgliteClient = ReturnType<typeof createMaplePgliteClient>
 

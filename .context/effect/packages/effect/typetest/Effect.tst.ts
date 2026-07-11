@@ -62,6 +62,7 @@ declare const channelStringOrNumber:
 declare const layerStringOrNumber:
   | Layer.Layer<"out-1", "err-1", "dep-1">
   | Layer.Layer<"out-2", "err-2", "dep-2">
+declare const optionString: Option.Option<string>
 declare const optionStringOrNumber: Option.Option<string> | Option.Option<number>
 declare const resultStringOrNumber: Result.Result<string, "err-1"> | Result.Result<number, "err-2">
 declare const fiberStringOrNumber: Fiber.Fiber<string, "err-1"> | Fiber.Fiber<number, "err-2">
@@ -209,6 +210,31 @@ describe("Effect.transposeOption", () => {
   it("preserves success, error, and requirements", () => {
     const result = Effect.transposeOption(optionalEffect)
     expect(result).type.toBe<Effect.Effect<Option.Option<string>, "err-1", "dep-1">>()
+  })
+})
+
+describe("Effect.fromOption", () => {
+  it("uses NoSuchElementError by default", () => {
+    const result = Effect.fromOption(optionString)
+    expect(result).type.toBe<Effect.Effect<string, Cause.NoSuchElementError>>()
+  })
+
+  it("supports a custom error in data-first form", () => {
+    const result = Effect.fromOption(optionString, () => new SimpleError({ code: 1 }))
+    expect(result).type.toBe<Effect.Effect<string, SimpleError>>()
+  })
+
+  it("supports a custom error in data-last form", () => {
+    const result = pipe(
+      optionString,
+      Effect.fromOption(() => new SimpleError({ code: 1 }))
+    )
+    expect(result).type.toBe<Effect.Effect<string, SimpleError>>()
+  })
+
+  it("supports callback usage with the default error", () => {
+    const result = Effect.flatMap(Effect.succeed(optionString), Effect.fromOption)
+    expect(result).type.toBe<Effect.Effect<string, Cause.NoSuchElementError>>()
   })
 })
 

@@ -181,6 +181,15 @@ export interface OrgClickHouseSettingsServiceShape {
 		Option.Option<RuntimeBackendConfig>,
 		OrgClickHouseSettingsPersistenceError | OrgClickHouseSettingsEncryptionError
 	>
+	/**
+	 * Whether the ingest gateway is currently routing this org's frames to its
+	 * own ClickHouse (vs. falling back to managed Tinybird). Mirror of the
+	 * gateway's `clickhouse_ready` gate — read paths for gateway-written data
+	 * consult this to hit the warehouse the write actually landed in.
+	 */
+	readonly isWarehouseWriteReady: (
+		orgId: OrgId,
+	) => Effect.Effect<boolean, OrgClickHouseSettingsPersistenceError>
 	readonly collectorConfig: (
 		orgId: OrgId,
 		roles: ReadonlyArray<RoleName>,
@@ -1165,6 +1174,28 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			},
 		)
 
+		// Mirror the ingest gateway's `clickhouse_ready` gate (apps/ingest/src/main.rs
+		// `native_destination_for` + its routing query:
+		// `sync_status = 'connected' AND schema_version = CLICKHOUSE_SCHEMA_VERSION`).
+		// The gateway only writes an org's frames to its own ClickHouse when this
+		// holds; otherwise it falls back to managed Tinybird. Reads of gateway-written
+		// data (e.g. the Cloudflare poller's `metrics_sum` rows) must consult this same
+		// gate so they resolve to the warehouse the write actually landed in.
+		//
+		// Unlike `resolveRuntimeConfig` — which deliberately ignores readiness because
+		// the org's own collector writes traces/logs straight to its CH regardless —
+		// this gate matters for data whose ONLY writer is the readiness-aware gateway.
+		const isWarehouseWriteReady = Effect.fn("OrgClickHouseSettingsService.isWarehouseWriteReady")(
+			function* (orgId: OrgId) {
+				const row = yield* selectActiveRow(orgId)
+				return (
+					Option.isSome(row) &&
+					row.value.syncStatus === "connected" &&
+					row.value.schemaVersion === clickHouseSchemaVersion
+				)
+			},
+		)
+
 		const collectorConfig = Effect.fn("OrgClickHouseSettingsService.collectorConfig")(function* (
 			orgId: OrgId,
 			roles: ReadonlyArray<RoleName>,
@@ -1193,6 +1224,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			applySchema,
 			applySchemaStatus,
 			resolveRuntimeConfig,
+			isWarehouseWriteReady,
 			collectorConfig,
 		} satisfies OrgClickHouseSettingsServiceShape
 	}),
@@ -1214,6 +1246,9 @@ export class OrgClickHouseSettingsService extends Context.Service<
 
 	static readonly resolveRuntimeConfig = (orgId: OrgId) =>
 		this.use((service) => service.resolveRuntimeConfig(orgId))
+
+	static readonly isWarehouseWriteReady = (orgId: OrgId) =>
+		this.use((service) => service.isWarehouseWriteReady(orgId))
 
 	static readonly collectorConfig = (orgId: OrgId, roles: ReadonlyArray<RoleName>) =>
 		this.use((service) => service.collectorConfig(orgId, roles))

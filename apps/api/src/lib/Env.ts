@@ -1,3 +1,4 @@
+import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
@@ -27,10 +28,10 @@ export interface EnvShape {
 	readonly CLERK_JWT_KEY: Option.Option<Redacted.Redacted<string>>
 	readonly MAPLE_ORG_ID_OVERRIDE: Option.Option<string>
 	readonly AUTUMN_SECRET_KEY: Option.Option<Redacted.Redacted<string>>
+	readonly AUTUMN_API_URL: string
 	readonly SD_INTERNAL_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
-	readonly RESEND_API_KEY: Option.Option<Redacted.Redacted<string>>
-	readonly RESEND_FROM_EMAIL: string
+	readonly EMAIL_FROM: string
 	readonly HAZEL_API_BASE_URL: string
 	readonly HAZEL_OAUTH_DISCOVERY_URL: string
 	readonly HAZEL_OAUTH_CLIENT_ID: Option.Option<string>
@@ -43,24 +44,19 @@ export interface EnvShape {
 	readonly GITHUB_APP_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_WEBHOOK_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_API_BASE_URL: string
+	readonly CLOUDFLARE_OAUTH_CLIENT_ID: Option.Option<string>
+	readonly CLOUDFLARE_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
+	readonly CLOUDFLARE_OAUTH_SCOPES: string
+	readonly CLOUDFLARE_OAUTH_AUTHORIZE_URL: string
+	readonly CLOUDFLARE_OAUTH_TOKEN_URL: string
+	readonly CLOUDFLARE_OAUTH_REVOKE_URL: string
+	/**
+	 * Base URL for Cloudflare's REST API. Deliberately NOT named CLOUDFLARE_API_BASE_URL —
+	 * wrangler treats that env var as an override for its own API endpoint, so under
+	 * `wrangler dev --env-file` it would hijack wrangler's control-plane calls too.
+	 */
+	readonly MAPLE_CLOUDFLARE_API_BASE_URL: string
 }
-
-const stringWithDefault = (key: string, fallback: string) =>
-	Config.string(key).pipe(Config.withDefault(fallback))
-
-const optionalString = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(s) : Option.none())),
-		),
-	)
-
-const optionalRedacted = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(Redacted.make(s)) : Option.none())),
-		),
-	)
 
 const portConfig = Config.number("PORT").pipe(Config.withDefault(3472))
 
@@ -85,10 +81,10 @@ const envConfig = Config.all({
 	CLERK_JWT_KEY: optionalRedacted("CLERK_JWT_KEY"),
 	MAPLE_ORG_ID_OVERRIDE: optionalString("MAPLE_ORG_ID_OVERRIDE"),
 	AUTUMN_SECRET_KEY: optionalRedacted("AUTUMN_SECRET_KEY"),
+	AUTUMN_API_URL: stringWithDefault("AUTUMN_API_URL", "https://api.useautumn.com"),
 	SD_INTERNAL_TOKEN: optionalRedacted("SD_INTERNAL_TOKEN"),
 	INTERNAL_SERVICE_TOKEN: optionalRedacted("INTERNAL_SERVICE_TOKEN"),
-	RESEND_API_KEY: optionalRedacted("RESEND_API_KEY"),
-	RESEND_FROM_EMAIL: stringWithDefault("RESEND_FROM_EMAIL", "Maple <notifications@maple.dev>"),
+	EMAIL_FROM: stringWithDefault("EMAIL_FROM", "Maple <notifications@noreply.maple.dev>"),
 	HAZEL_API_BASE_URL: stringWithDefault("HAZEL_API_BASE_URL", "https://api.hazel.sh"),
 	HAZEL_OAUTH_DISCOVERY_URL: stringWithDefault(
 		"HAZEL_OAUTH_DISCOVERY_URL",
@@ -107,10 +103,53 @@ const envConfig = Config.all({
 	GITHUB_APP_CLIENT_SECRET: optionalRedacted("GITHUB_APP_CLIENT_SECRET"),
 	GITHUB_APP_WEBHOOK_SECRET: optionalRedacted("GITHUB_APP_WEBHOOK_SECRET"),
 	GITHUB_API_BASE_URL: stringWithDefault("GITHUB_API_BASE_URL", "https://api.github.com"),
+	CLOUDFLARE_OAUTH_CLIENT_ID: optionalString("CLOUDFLARE_OAUTH_CLIENT_ID"),
+	CLOUDFLARE_OAUTH_CLIENT_SECRET: optionalRedacted("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+	// Cloudflare OAuth scope ids are DOT-delimited (mirroring API-token permission names;
+	// registry: GET /client/v4/oauth/scopes). The client may only request scopes it was
+	// created with — keep the OAuth client's granted set in sync with this list.
+	// `offline_access` is deliberately NOT in this list: it is not a data scope (nothing gates or
+	// stores on it), it is the request flag that makes Cloudflare issue a refresh token. The
+	// client's Refresh Token grant only makes it *available*; it must still be *requested*, so
+	// `startConnect` appends it to the authorize request instead of carrying it here. (Enabling the
+	// grant without requesting the scope was the 31h-outage root cause: access-token-only
+	// connections that die at the ~16h expiry.)
+	// The analytics scopes power the edge-metrics poller. There are THREE distinct ones and they
+	// are NOT interchangeable (Cloudflare authorizes account- vs zone-scoped GraphQL datasets
+	// separately):
+	//   - account-analytics.read → account-scoped datasets (workersInvocationsAdaptive = Workers)
+	//   - analytics.read          → zone-scoped datasets (httpRequestsAdaptiveGroups = HTTP/zone traffic)
+	//   - zone.read               → zone discovery only (REST /zones listing); does NOT grant analytics
+	// zone.read is enough to LIST zones but NOT to read their analytics — the zone GraphQL query
+	// returns "not authorized" without analytics.read (that was the original bug: workers ingested
+	// fine while every zone query was rejected). Every id below is verified verbatim against the
+	// live scope registry (GET /client/v4/oauth/scopes). The registered OAuth client must have all
+	// of these granted, or connects fail with invalid_scope — and existing users must reconnect to
+	// pick up a newly-added scope.
+	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
+		"CLOUDFLARE_OAUTH_SCOPES",
+		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
+	),
+	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
+		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",
+		"https://dash.cloudflare.com/oauth2/auth",
+	),
+	CLOUDFLARE_OAUTH_TOKEN_URL: stringWithDefault(
+		"CLOUDFLARE_OAUTH_TOKEN_URL",
+		"https://dash.cloudflare.com/oauth2/token",
+	),
+	CLOUDFLARE_OAUTH_REVOKE_URL: stringWithDefault(
+		"CLOUDFLARE_OAUTH_REVOKE_URL",
+		"https://dash.cloudflare.com/oauth2/revoke",
+	),
+	MAPLE_CLOUDFLARE_API_BASE_URL: stringWithDefault(
+		"MAPLE_CLOUDFLARE_API_BASE_URL",
+		"https://api.cloudflare.com/client/v4",
+	),
 })
 
 const makeEnv = Effect.gen(function* () {
-	const env = (yield* envConfig) as EnvShape
+	const env: EnvShape = yield* envConfig
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))

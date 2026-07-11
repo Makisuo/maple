@@ -149,6 +149,22 @@ const toVcsCommitError = (
 
 const finiteOrNull = (value: number) => (Number.isFinite(value) ? value : null)
 
+// GitHub serves a stable avatar for any login at `<host>/<login>.png`, redirecting
+// to that user's current avatar. Derive one from a login so commits whose ingestion
+// path carries no avatar URL still resolve to a picture. The host is taken from the
+// commit's own html URL (rather than hardcoding github.com) so github.com and GitHub
+// Enterprise both stay correct. Returns null when there's no login (no commit author
+// linked to a GitHub account) or the base URL can't be parsed — the only cases the
+// dashboard renders with an initials fallback.
+const githubAvatarUrl = (htmlUrl: string, login: string | null): string | null => {
+	if (!login) return null
+	try {
+		return new URL(`/${encodeURIComponent(login)}.png?size=64`, htmlUrl).href
+	} catch {
+		return null
+	}
+}
+
 const installationReason = (action: string): VcsInstallationSyncReason | null => {
 	switch (action) {
 		case "created":
@@ -184,7 +200,9 @@ const normalizeFetchedCommit = (commit: GithubApiCommit, now: number): CommitUps
 		authorName: commit.commit.author?.name ?? null,
 		authorEmail: commit.commit.author?.email ?? null,
 		authorLogin: commit.author?.login ?? null,
-		authorAvatarUrl: commit.author?.avatar_url ?? null,
+		// REST commits normally carry the user's `avatar_url`; fall back to the
+		// login-derived avatar for the (rare) case the field is absent.
+		authorAvatarUrl: commit.author?.avatar_url ?? githubAvatarUrl(commit.html_url, commit.author?.login ?? null),
 		authoredAt,
 		committedAt: committedAt ?? authoredAt ?? now,
 		htmlUrl: commit.html_url,
@@ -327,7 +345,10 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 							authorName: c.author?.name ?? null,
 							authorEmail: c.author?.email ?? null,
 							authorLogin: c.author?.username ?? null,
-							authorAvatarUrl: null,
+							// Push payloads carry only a committer username — no avatar URL —
+							// so derive one from the login (see githubAvatarUrl) instead of
+							// leaving it null and patching it up in the dashboard.
+							authorAvatarUrl: githubAvatarUrl(c.url, c.author?.username ?? null),
 							authoredAt: ts,
 							committedAt: ts ?? now,
 							htmlUrl: c.url,

@@ -72,6 +72,7 @@ export interface Statement<A> extends Fragment, Effect.Effect<ReadonlyArray<A>, 
   readonly withoutTransform: Effect.Effect<ReadonlyArray<A>, SqlError>
   readonly stream: Stream.Stream<A, SqlError>
   readonly values: Effect.Effect<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>
+  readonly valuesUnprepared: Effect.Effect<ReadonlyArray<ReadonlyArray<unknown>>, SqlError>
   readonly unprepared: Effect.Effect<ReadonlyArray<A>, SqlError>
   readonly compile: (withoutTransform?: boolean | undefined) => readonly [
     sql: string,
@@ -1352,6 +1353,16 @@ const StatementProto: Omit<
     SqlError
   > {
     return this.withConnection("executeValues", (connection, sql, params) => connection.executeValues(sql, params))
+  },
+
+  get valuesUnprepared(): Effect.Effect<
+    ReadonlyArray<ReadonlyArray<unknown>>,
+    SqlError
+  > {
+    return this.withConnection(
+      "executeValuesUnprepared",
+      (connection, sql, params) => connection.executeValuesUnprepared(sql, params)
+    )
   },
 
   get unprepared(): Effect.Effect<ReadonlyArray<any>, SqlError> {

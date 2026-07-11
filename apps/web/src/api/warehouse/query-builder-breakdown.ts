@@ -13,10 +13,7 @@ import {
 // Discriminate the typed query-engine error channel on `_tag` (both the local
 // `WarehouseQueryError` and the backend `@maple/http/errors/Warehouse*` union
 // carry a `message` field) rather than collapsing it via `instanceof Error`.
-function queryEngineErrorMessage(
-	error: WarehouseQueryError | BackendError,
-	fallback: string,
-): string {
+function queryEngineErrorMessage(error: WarehouseQueryError | BackendError, fallback: string): string {
 	return "message" in error && typeof error.message === "string" ? error.message : fallback
 }
 
@@ -36,10 +33,6 @@ interface BreakdownQueryResult {
 	status: "success" | "error"
 	error: string | null
 	data: Array<{ name: string; value: number }>
-}
-
-export interface QueryBuilderBreakdownResponse {
-	data: Array<Record<string, string | number>>
 }
 
 const executeBreakdownQuery = Effect.fn("QueryEngine.executeBreakdownQuery")(function* (
@@ -202,3 +195,7 @@ const getQueryBuilderBreakdownEffect = Effect.fn("QueryEngine.getQueryBuilderBre
 		data: mergeBreakdownResults(results, enabledQueries),
 	}
 })
+
+export const __testables = {
+	mergeBreakdownResults,
+}

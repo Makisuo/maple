@@ -110,14 +110,13 @@ Source: `apps/api/src/services/BucketCacheService.ts`, `apps/api/src/services/Qu
 
 Emitted by `EmailService` for outbound transactional email.
 
-Source: `apps/api/src/services/EmailService.ts`
+Source: `apps/api/src/lib/EmailService.ts`
 
 | Key | Type | Set at | Meaning |
 |---|---|---|---|
-| `email.to` | string | `EmailService.ts:27` | Recipient address |
-| `email.subject` | string | `EmailService.ts:28` | Subject line |
-| `email.provider` | string | `EmailService.ts:29` | `"resend"` (current provider) |
-| `http.status_code` | int | `EmailService.ts:70` | Provider HTTP response status (non-semconv shortcut used by EmailService only — new code should use `http.response.status_code`) |
+| `email.subject` | string | `EmailService.ts:59` | Subject line |
+| `email.provider` | string | `EmailService.ts:60` | `"cloudflare"` (Cloudflare Email Service Workers binding) |
+| `email.message_id` | string | `EmailService.ts:103` | Provider message id returned after a successful send |
 
 ---
 

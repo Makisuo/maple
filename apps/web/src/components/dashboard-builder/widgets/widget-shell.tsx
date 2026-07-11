@@ -22,6 +22,8 @@ import {
 } from "@maple/ui/components/ui/dropdown-menu"
 import type { WidgetMode, WidgetDataState } from "@/components/dashboard-builder/types"
 import { useWidgetActions } from "@/components/dashboard-builder/widgets/widget-actions-context"
+import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
+import { interpolateDisplayText } from "@/lib/dashboard-variables/interpolate"
 
 interface WidgetShellProps {
 	title: string
@@ -69,6 +71,11 @@ export function WidgetShell({
 	const [legendItems, setLegendItems] = useState<ChartLegendItem[]>([])
 	const legendSlot = useMemo(() => ({ setItems: setLegendItems }), [])
 
+	// Titles can reference dashboard variables ("Latency — $service"); render
+	// the resolved value. Outside a dashboard (widget lab) this is a no-op.
+	const variablesContext = useDashboardVariablesOptional()
+	const displayTitle = variablesContext ? interpolateDisplayText(title, variablesContext.values) : title
+
 	return (
 		<Card className="h-full flex flex-col">
 			<CardHeader className="py-2.5">
@@ -79,7 +86,7 @@ export function WidgetShell({
 						</div>
 					)}
 					<CardTitle className="min-w-0 truncate text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-						{title}
+						{displayTitle}
 					</CardTitle>
 					{headerValue != null && (
 						<div className="ml-auto shrink-0 font-mono font-semibold text-xs tabular-nums">
@@ -169,7 +176,11 @@ export function WidgetShell({
 					</CardAction>
 				)}
 			</CardHeader>
-			<CardContent className={contentClassName ?? "flex-1 min-h-0 p-2"}>
+			{/* Default containment: no chart may paint outside its card (MAP-49 —
+			    funnel rows spilled over the header). Widgets that scroll
+			    (list/table/markdown) override with overflow-auto, which wins the
+			    tailwind-merge conflict. */}
+			<CardContent className={cn("overflow-hidden", contentClassName ?? "flex-1 min-h-0 p-2")}>
 				<ChartLegendSlotContext.Provider value={legendSlot}>
 					{children}
 				</ChartLegendSlotContext.Provider>

@@ -122,23 +122,23 @@ export interface MakeOptions {
    * Whether to disable validation for the schema.
    */
   readonly disableChecks?: boolean | undefined
+
+  /** @internal */
+  readonly "~payload"?: {
+    readonly token: unknown
+    readonly value: unknown
+  }
 }
 
 /**
  * The fully-parameterized base interface for all schemas. Exposes all 14 type
- * parameters controlling type inference, mutability, optionality, services,
- * and transformation behavior.
+ * parameters controlling type inference, mutability, optionality, services, and
+ * transformation behavior.
  *
  * **When to use**
  *
- * Use when you are writing advanced generic schema utilities or performing schema
- *   introspection.
- * - In user code, prefer {@link Schema}, {@link Codec}, {@link Decoder}, or
- *   {@link Encoder} instead.
- *
- * @see {@link Top} — the existential "any schema" type (erased type params)
- * @see {@link Schema} — tracks only the decoded Type
- * @see {@link Codec} — tracks Type + Encoded
+ * Use when you are writing advanced generic schema utilities or performing
+ *   schema introspection.
  *
  * @category models
  * @since 4.0.0
@@ -152,7 +152,7 @@ export interface Bottom<
   out Rebuild extends Top,
   out TypeMakeIn = T,
   out Iso = T,
-  in out TypeParameters extends ReadonlyArray<Top> = readonly [],
+  in out TypeParameters extends ReadonlyArray<Constraint> = readonly [],
   out TypeMake = TypeMakeIn,
   out TypeMutability extends Mutability = "readonly",
   out TypeOptionality extends Optionality = "required",
@@ -249,12 +249,66 @@ export interface Bottom<
 }
 
 /**
+ * Lazy `Bottom` variant for schema implementations that compute their public
+ * views on demand.
+ *
+ * **When to use**
+ *
+ * Use as an implementation base for schema interfaces that must expose
+ * `Bottom` behavior without forcing TypeScript to eagerly evaluate expensive
+ * `Type`, `Encoded`, or service views.
+ *
+ * **Details**
+ *
+ * The laziness is purely type-level; runtime behavior is unchanged.
+ * `BottomLazy` keeps the structural operations inherited from `Bottom`, but
+ * erases the expensive schema views to `unknown`. Concrete schema interfaces can
+ * then redeclare the precise views they expose. This keeps wide schemas such as
+ * `Struct` and `Union` cheaper when generic code reads a single view, while
+ * preserving their exact public types.
+ *
+ * @see {@link Bottom} for the fully parameterized schema interface when every
+ * view must be supplied directly.
+ *
+ * @category utility types
+ * @since 4.0.0
+ */
+export interface BottomLazy<
+  out Ast extends SchemaAST.AST,
+  out Rebuild extends Top,
+  in out TypeParameters extends ReadonlyArray<Constraint> = readonly [],
+  out TypeMutability extends Mutability = "readonly",
+  out TypeOptionality extends Optionality = "required",
+  out TypeConstructorDefault extends ConstructorDefault = "no-default",
+  out EncodedMutability extends Mutability = "readonly",
+  out EncodedOptionality extends Optionality = "required"
+> extends
+  Bottom<
+    unknown,
+    unknown,
+    unknown,
+    unknown,
+    Ast,
+    Rebuild,
+    unknown,
+    unknown,
+    TypeParameters,
+    unknown,
+    TypeMutability,
+    TypeOptionality,
+    TypeConstructorDefault,
+    EncodedMutability,
+    EncodedOptionality
+  >
+{}
+
+/**
  * Type-level representation returned by {@link declareConstructor}.
  *
  * @category constructors
  * @since 4.0.0
  */
-export interface declareConstructor<T, E, TypeParameters extends ReadonlyArray<Top>, Iso = T> extends
+export interface declareConstructor<T, E, TypeParameters extends ReadonlyArray<Constraint>, Iso = T> extends
   Bottom<
     T,
     E,
@@ -301,7 +355,7 @@ export interface declareConstructor<T, E, TypeParameters extends ReadonlyArray<T
  * const isBox = (u: unknown): u is Box<unknown> =>
  *   typeof u === "object" && u !== null && "value" in u
  *
- * const Box = <A extends Schema.Top>(item: A) =>
+ * const Box = <A extends Schema.Constraint>(item: A) =>
  *   Schema.declareConstructor<Box<A["Type"]>, Box<A["Encoded"]>>()(
  *     [item],
  *     ([itemCodec]) =>
@@ -323,7 +377,7 @@ export interface declareConstructor<T, E, TypeParameters extends ReadonlyArray<T
  * @since 4.0.0
  */
 export function declareConstructor<T, E = T, Iso = T>() {
-  return <const TypeParameters extends ReadonlyArray<Top>>(
+  return <const TypeParameters extends ReadonlyArray<Constraint>>(
     typeParameters: TypeParameters,
     run: (
       typeParameters: {
@@ -566,8 +620,8 @@ export function annotateKey<S extends Top>(annotations: Annotations.Key<S["Type"
  * In user code prefer the narrower interfaces:
  * - {@link Schema}`<T>` — when you only care about the decoded type
  * - {@link Codec}`<T, E, RD, RE>` — when you need the encoded type and service requirements
- * - {@link Decoder}`<T, RD>` — for decode-only APIs
- * - {@link Encoder}`<E, RE>` — for encode-only APIs
+ * - {@link ConstraintDecoder}`<T, RD>` — for decode-only APIs
+ * - {@link ConstraintEncoder}`<E, RE>` — for encode-only APIs
  *
  * @category models
  * @since 4.0.0
@@ -593,6 +647,127 @@ export interface Top extends
 {}
 
 /**
+ * Lightweight structural constraint for APIs that accept schema values but only
+ * read their data and type-level views.
+ *
+ * **When to use**
+ *
+ * Use when you need to constrain a generic value to be a schema, but the API
+ * only reads properties such as `ast`, `Type`, `Encoded`, service
+ * requirements, constructor input views, or modifier flags.
+ *
+ * **Details**
+ *
+ * `Constraint` keeps the schema type identifier and the property surface needed
+ * by schema constructors, while avoiding the full `Bottom` protocol. Use
+ * {@link Top} when an API calls schema methods such as `annotate`, `check`,
+ * `rebuild`, `make`, or `makeEffect`.
+ *
+ * @see {@link Top} for the complete schema protocol.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface Constraint {
+  readonly [TypeId]: typeof TypeId
+  readonly "ast": SchemaAST.AST
+
+  readonly "Type": unknown
+  readonly "Encoded": unknown
+  readonly "DecodingServices": unknown
+  readonly "EncodingServices": unknown
+
+  readonly "~type.parameters": any
+  readonly "~type.make.in": unknown
+  readonly "~type.make": unknown
+  readonly "Iso": unknown
+
+  readonly "~type.optionality": Optionality
+  readonly "~type.mutability": Mutability
+  readonly "~type.constructor.default": ConstructorDefault
+  readonly "~encoded.optionality": Optionality
+  readonly "~encoded.mutability": Mutability
+}
+
+/**
+ * Lightweight structural constraint for APIs that need codec type views but do
+ * not need the full schema protocol.
+ *
+ * **When to use**
+ *
+ * Use when you need to preserve decoded type, encoded type, and service
+ * requirements for a schema value, but the API does not call schema methods
+ * such as `annotate`, `check`, `rebuild`, `make`, or `makeEffect`.
+ *
+ * @see {@link Constraint} for the generic lightweight schema constraint.
+ * @see {@link Codec} for the full schema protocol with codec type views.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface ConstraintCodec<out T, out E = T, out RD = never, out RE = never> extends Constraint {
+  readonly "Type": T
+  readonly "Encoded": E
+  readonly "DecodingServices": RD
+  readonly "EncodingServices": RE
+}
+
+/**
+ * Lightweight structural constraint for APIs that need decoder type views but
+ * do not need the full schema protocol.
+ *
+ * **When to use**
+ *
+ * Use when you need to preserve a schema's decoded type and decoding services,
+ * but the API does not constrain the encoded type, encoding services, or call
+ * schema methods such as `annotate`, `check`, `rebuild`, `make`, or
+ * `makeEffect`.
+ *
+ * @see {@link ConstraintCodec} for APIs that need both decoded and encoded codec views.
+ * @see {@link Codec} for the full schema protocol with codec type views.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface ConstraintDecoder<out T, out RD = never> extends ConstraintCodec<T, unknown, RD, unknown> {}
+
+/**
+ * Lightweight structural constraint for APIs that need encoder type views but
+ * do not need the full schema protocol.
+ *
+ * **When to use**
+ *
+ * Use when you need to preserve a schema's encoded type and encoding services,
+ * but the API does not constrain the decoded type, decoding services, or call
+ * schema methods such as `annotate`, `check`, `rebuild`, `make`, or
+ * `makeEffect`.
+ *
+ * @see {@link ConstraintCodec} for APIs that need both decoded and encoded codec views.
+ * @see {@link Codec} for the full schema protocol with codec type views.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface ConstraintEncoder<out E, out RE = never> extends ConstraintCodec<unknown, E, unknown, RE> {}
+
+/**
+ * Lightweight structural constraint for APIs that need schema views and the
+ * rebuilt schema type, but do not call the full schema protocol.
+ *
+ * **When to use**
+ *
+ * Use when an API needs to read `Rebuild` in addition to the schema views
+ * exposed by {@link Constraint}, but does not call methods such as `annotate`,
+ * `check`, `rebuild`, `make`, or `makeEffect`.
+ *
+ * @category models
+ * @since 4.0.0
+ */
+export interface ConstraintRebuildable extends Constraint {
+  readonly "Rebuild": Constraint
+}
+
+/**
  * Namespace of type-level helpers for {@link Schema}.
  *
  * @since 3.10.0
@@ -614,7 +789,7 @@ export declare namespace Schema {
    * @category utility types
    * @since 3.10.0
    */
-  export type Type<S> = S extends Top ? S["Type"] : never
+  export type Type<S> = S extends { readonly "Type": infer T } ? T : never
 }
 
 /**
@@ -674,7 +849,8 @@ export declare namespace Codec {
    * @category utility types
    * @since 3.10.0
    */
-  export type Encoded<S> = S extends Top ? S["Encoded"] : never
+  export type Encoded<S> = S extends { readonly "Encoded": infer E } ? E : never
+
   /**
    * Extracts the Effect services required during *decoding* from a schema.
    *
@@ -691,7 +867,8 @@ export declare namespace Codec {
    * @category utility types
    * @since 4.0.0
    */
-  export type DecodingServices<S> = S extends Top ? S["DecodingServices"] : never
+  export type DecodingServices<S> = S extends { readonly "DecodingServices": infer R } ? R : never
+
   /**
    * Extracts the Effect services required during *encoding* from a schema.
    *
@@ -708,7 +885,7 @@ export declare namespace Codec {
    * @category utility types
    * @since 4.0.0
    */
-  export type EncodingServices<S> = S extends Top ? S["EncodingServices"] : never
+  export type EncodingServices<S> = S extends { readonly "EncodingServices": infer R } ? R : never
 }
 
 /**
@@ -747,8 +924,8 @@ export interface Optic<out T, out Iso> extends Schema<T> {
  * Most concrete schemas produced by this module implement `Codec`.
  *
  * For APIs that only need one direction, prefer the narrower views:
- * - {@link Decoder}`<T, RD>` — decode-only
- * - {@link Encoder}`<E, RE>` — encode-only
+ * - {@link ConstraintDecoder}`<T, RD>` — decode-only
+ * - {@link ConstraintEncoder}`<E, RE>` — encode-only
  * - {@link Schema}`<T>` — type-only (no encoded representation)
  *
  * **Example** (Accepting a codec that decodes to `number` from `string`)
@@ -774,60 +951,6 @@ export interface Codec<out T, out E = T, out RD = never, out RE = never> extends
   readonly "DecodingServices": RD
   readonly "EncodingServices": RE
   readonly "Rebuild": Codec<T, E, RD, RE>
-}
-
-/**
- * A {@link Codec} view for APIs that only *decode* (parse/validate) values.
- *
- * **Details**
- *
- * Use `Decoder<T, RD>` to accept "any schema that can decode to `T`" without
- * constraining or depending on the encoded representation (`Encoded` is
- * `unknown`) or encoding services.
- *
- * **Example** (Accepting schemas that only need to decode)
- *
- * ```ts
- * import { Schema } from "effect"
- *
- * declare function validate<T>(decoder: Schema.Decoder<T>): (input: unknown) => T
- *
- * validate(Schema.String)          // ok
- * validate(Schema.NumberFromString) // ok
- * ```
- *
- * @category models
- * @since 4.0.0
- */
-export interface Decoder<out T, out RD = never> extends Codec<T, unknown, RD, unknown> {
-  readonly "Rebuild": Decoder<T, RD>
-}
-
-/**
- * A {@link Codec} view for APIs that only *encode* values.
- *
- * **Details**
- *
- * Use `Encoder<E, RE>` to accept "any schema that can encode to `E`" without
- * constraining or depending on the decoded `Type` (`Type` is `unknown`) or
- * decoding services.
- *
- * **Example** (Accepting schemas that only need to encode)
- *
- * ```ts
- * import { Schema } from "effect"
- *
- * declare function serialize<E>(encoder: Schema.Encoder<E>): (value: unknown) => E
- *
- * serialize(Schema.String)          // ok — encodes to string
- * serialize(Schema.NumberFromString) // ok — encodes number to string
- * ```
- *
- * @category models
- * @since 4.0.0
- */
-export interface Encoder<out E, out RE = never> extends Codec<unknown, E, unknown, RE> {
-  readonly "Rebuild": Encoder<E, RE>
 }
 
 /**
@@ -987,7 +1110,7 @@ function makeStandardResult<A>(exit: Exit_.Exit<StandardSchemaV1.Result<A>>): St
  * @category Standard Schema
  * @since 4.0.0
  */
-export function toStandardSchemaV1<S extends Decoder<unknown>>(
+export function toStandardSchemaV1<S extends ConstraintDecoder<unknown>>(
   self: S,
   options?: {
     readonly leafHook?: SchemaIssue.LeafHook | undefined
@@ -1037,7 +1160,7 @@ export function toStandardSchemaV1<S extends Decoder<unknown>>(
   }
 }
 
-function toBaseStandardJSONSchemaV1(self: Top, target: StandardJSONSchemaV1.Target): JsonSchema.JsonSchema {
+function toBaseStandardJSONSchemaV1(self: Constraint, target: StandardJSONSchemaV1.Target): JsonSchema.JsonSchema {
   const doc2020_12 = toJsonSchemaDocument(self)
   if (target === "draft-2020-12") {
     const schema = doc2020_12.schema
@@ -1066,7 +1189,9 @@ function toBaseStandardJSONSchemaV1(self: Top, target: StandardJSONSchemaV1.Targ
  * @category Standard Schema
  * @since 4.0.0
  */
-export function toStandardJSONSchemaV1<S extends Top>(self: S): StandardJSONSchemaV1<S["Encoded"], S["Type"]> & S {
+export function toStandardJSONSchemaV1<S extends Constraint>(
+  self: S
+): StandardJSONSchemaV1<S["Encoded"], S["Type"]> & S {
   const jsonSchema: StandardJSONSchemaV1.Props<S["Encoded"], S["Type"]>["jsonSchema"] = {
     input(options) {
       return toBaseStandardJSONSchemaV1(self, options.target)
@@ -1173,7 +1298,8 @@ export const is = SchemaParser.is
  * @category guards
  * @since 4.0.0
  */
-export const asserts: <S extends Top, I>(schema: S, input: I) => asserts input is I & S["Type"] = SchemaParser.asserts
+export const asserts: <S extends Constraint, I>(schema: S, input: I) => asserts input is I & S["Type"] =
+  SchemaParser.asserts
 
 /**
  * Decodes an `unknown` input against a schema, returning an `Effect` that
@@ -1196,7 +1322,7 @@ export const asserts: <S extends Top, I>(schema: S, input: I) => asserts input i
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownEffect<S extends Top>(schema: S, options?: SchemaAST.ParseOptions) {
+export function decodeUnknownEffect<S extends Constraint>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.decodeUnknownEffect(schema, options)
   return (
     input: unknown,
@@ -1227,7 +1353,7 @@ export function decodeUnknownEffect<S extends Top>(schema: S, options?: SchemaAS
  * @category decoding
  * @since 4.0.0
  */
-export const decodeEffect: <S extends Top>(
+export const decodeEffect: <S extends Constraint>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (
@@ -1303,7 +1429,7 @@ function runSchemaErrorSync<A>(
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownExit<S extends Decoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function decodeUnknownExit<S extends ConstraintDecoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.decodeUnknownExit(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Exit_.Exit<S["Type"], SchemaError> => {
     return InternalSchema.mapSchemaIssueExit(parser(input, options))
@@ -1340,7 +1466,7 @@ export function decodeUnknownExit<S extends Decoder<unknown>>(schema: S, options
  * @category decoding
  * @since 4.0.0
  */
-export const decodeExit: <S extends Decoder<unknown>>(
+export const decodeExit: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Exit_.Exit<S["Type"], SchemaError> = decodeUnknownExit
@@ -1371,7 +1497,7 @@ export const decodeExit: <S extends Decoder<unknown>>(
  * @category decoding
  * @since 3.10.0
  */
-export const decodeUnknownOption: <S extends Decoder<unknown>>(
+export const decodeUnknownOption: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: unknown, options?: SchemaAST.ParseOptions) => Option_.Option<S["Type"]> = SchemaParser.decodeUnknownOption
@@ -1401,10 +1527,10 @@ export const decodeUnknownOption: <S extends Decoder<unknown>>(
  * @category decoding
  * @since 3.10.0
  */
-export const decodeOption: <S extends Decoder<unknown>>(
+export const decodeOption: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
-) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Type"]> = decodeUnknownOption
+) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Type"]> = SchemaParser.decodeOption
 
 /**
  * Decodes an `unknown` input against a schema, returning a `Result` that
@@ -1435,7 +1561,7 @@ export const decodeOption: <S extends Decoder<unknown>>(
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownResult<S extends Decoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function decodeUnknownResult<S extends ConstraintDecoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.decodeUnknownResult(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Result_.Result<S["Type"], SchemaError> => {
     return Result_.mapError(parser(input, options), (issue) => new SchemaError(issue))
@@ -1470,7 +1596,7 @@ export function decodeUnknownResult<S extends Decoder<unknown>>(schema: S, optio
  * @category decoding
  * @since 4.0.0
  */
-export const decodeResult: <S extends Decoder<unknown>>(
+export const decodeResult: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Result_.Result<S["Type"], SchemaError> =
@@ -1503,7 +1629,10 @@ export const decodeResult: <S extends Decoder<unknown>>(
  * @category decoding
  * @since 3.10.0
  */
-export function decodeUnknownPromise<S extends Decoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function decodeUnknownPromise<S extends ConstraintDecoder<unknown>>(
+  schema: S,
+  options?: SchemaAST.ParseOptions
+) {
   const parser = decodeUnknownEffect(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Promise<S["Type"]> => {
     return runSchemaErrorPromise(parser(input, options))
@@ -1537,7 +1666,7 @@ export function decodeUnknownPromise<S extends Decoder<unknown>>(schema: S, opti
  * @category decoding
  * @since 3.10.0
  */
-export const decodePromise: <S extends Decoder<unknown>>(
+export const decodePromise: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Promise<S["Type"]> = decodeUnknownPromise
@@ -1586,7 +1715,7 @@ export const decodePromise: <S extends Decoder<unknown>>(
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownSync<S extends Decoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function decodeUnknownSync<S extends ConstraintDecoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = decodeUnknownEffect(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): S["Type"] => {
     return runSchemaErrorSync(parser(input, options))
@@ -1619,7 +1748,7 @@ export function decodeUnknownSync<S extends Decoder<unknown>>(schema: S, options
  * @category decoding
  * @since 4.0.0
  */
-export const decodeSync: <S extends Decoder<unknown>>(
+export const decodeSync: <S extends ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => S["Type"] = decodeUnknownSync
@@ -1656,7 +1785,7 @@ export const decodeSync: <S extends Decoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownEffect<S extends Top>(schema: S, options?: SchemaAST.ParseOptions) {
+export function encodeUnknownEffect<S extends Constraint>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.encodeUnknownEffect(schema, options)
   return (
     input: unknown,
@@ -1687,7 +1816,7 @@ export function encodeUnknownEffect<S extends Top>(schema: S, options?: SchemaAS
  * @category encoding
  * @since 4.0.0
  */
-export const encodeEffect: <S extends Top>(
+export const encodeEffect: <S extends Constraint>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (
@@ -1724,7 +1853,7 @@ export const encodeEffect: <S extends Top>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownExit<S extends Encoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function encodeUnknownExit<S extends ConstraintEncoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.encodeUnknownExit(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Exit_.Exit<S["Encoded"], SchemaError> => {
     return InternalSchema.mapSchemaIssueExit(parser(input, options))
@@ -1761,7 +1890,7 @@ export function encodeUnknownExit<S extends Encoder<unknown>>(schema: S, options
  * @category encoding
  * @since 4.0.0
  */
-export const encodeExit: <S extends Encoder<unknown>>(
+export const encodeExit: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Exit_.Exit<S["Encoded"], SchemaError> = encodeUnknownExit
@@ -1792,7 +1921,7 @@ export const encodeExit: <S extends Encoder<unknown>>(
  * @category encoding
  * @since 3.10.0
  */
-export const encodeUnknownOption: <S extends Encoder<unknown>>(
+export const encodeUnknownOption: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: unknown, options?: SchemaAST.ParseOptions) => Option_.Option<S["Encoded"]> =
@@ -1823,10 +1952,10 @@ export const encodeUnknownOption: <S extends Encoder<unknown>>(
  * @category encoding
  * @since 3.10.0
  */
-export const encodeOption: <S extends Encoder<unknown>>(
+export const encodeOption: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
-) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Encoded"]> = encodeUnknownOption
+) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Option_.Option<S["Encoded"]> = SchemaParser.encodeOption
 
 /**
  * Encodes an `unknown` input against a schema, returning a `Result` that
@@ -1856,7 +1985,7 @@ export const encodeOption: <S extends Encoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownResult<S extends Encoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function encodeUnknownResult<S extends ConstraintEncoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = SchemaParser.encodeUnknownResult(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Result_.Result<S["Encoded"], SchemaError> => {
     return Result_.mapError(parser(input, options), (issue) => new SchemaError(issue))
@@ -1891,7 +2020,7 @@ export function encodeUnknownResult<S extends Encoder<unknown>>(schema: S, optio
  * @category encoding
  * @since 4.0.0
  */
-export const encodeResult: <S extends Encoder<unknown>>(
+export const encodeResult: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Result_.Result<S["Encoded"], SchemaError> =
@@ -1923,7 +2052,10 @@ export const encodeResult: <S extends Encoder<unknown>>(
  * @category encoding
  * @since 3.10.0
  */
-export function encodeUnknownPromise<S extends Encoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function encodeUnknownPromise<S extends ConstraintEncoder<unknown>>(
+  schema: S,
+  options?: SchemaAST.ParseOptions
+) {
   const parser = encodeUnknownEffect(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): Promise<S["Encoded"]> => {
     return runSchemaErrorPromise(parser(input, options))
@@ -1957,7 +2089,7 @@ export function encodeUnknownPromise<S extends Encoder<unknown>>(schema: S, opti
  * @category encoding
  * @since 3.10.0
  */
-export const encodePromise: <S extends Encoder<unknown>>(
+export const encodePromise: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Promise<S["Encoded"]> = encodeUnknownPromise
@@ -1988,7 +2120,7 @@ export const encodePromise: <S extends Encoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownSync<S extends Encoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
+export function encodeUnknownSync<S extends ConstraintEncoder<unknown>>(schema: S, options?: SchemaAST.ParseOptions) {
   const parser = encodeUnknownEffect(schema, options)
   return (input: unknown, options?: SchemaAST.ParseOptions): S["Encoded"] => {
     return runSchemaErrorSync(parser(input, options) as Effect.Effect<S["Encoded"], SchemaError>)
@@ -2019,7 +2151,7 @@ export function encodeUnknownSync<S extends Encoder<unknown>>(schema: S, options
  * @category encoding
  * @since 4.0.0
  */
-export const encodeSync: <S extends Encoder<unknown>>(
+export const encodeSync: <S extends ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => S["Encoded"] = encodeUnknownSync
@@ -2041,7 +2173,7 @@ export const encodeSync: <S extends Encoder<unknown>>(
  * @category constructors
  * @since 3.10.0
  */
-export const make: <S extends Top>(ast: S["ast"], options?: object) => S = InternalSchema.make
+export const make: <S extends Constraint>(ast: S["ast"], options?: object) => S = InternalSchema.make
 
 /**
  * Transforms a schema into a class that can be extended with `extends`. The
@@ -2086,18 +2218,11 @@ export function isSchema(u: unknown): u is Top {
  * @category models
  * @since 4.0.0
  */
-export interface optionalKey<S extends Top> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface optionalKey<S extends Constraint> extends
+  BottomLazy<
     S["ast"],
     optionalKey<S>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     "optional",
     S["~type.constructor.default"],
@@ -2105,12 +2230,19 @@ export interface optionalKey<S extends Top> extends
     "optional"
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly schema: S
 }
 
 interface optionalKeyLambda extends Lambda {
-  <S extends Top>(self: S): optionalKey<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? optionalKey<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): optionalKey<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? optionalKey<this["~lambda.in"]> : never
 }
 
 /**
@@ -2140,8 +2272,8 @@ export const optionalKey = Struct_.lambda<optionalKeyLambda>((schema) =>
 )
 
 interface requiredKeyLambda extends Lambda {
-  <S extends Top>(self: optionalKey<S>): S
-  readonly "~lambda.out": this["~lambda.in"] extends optionalKey<Top> ? this["~lambda.in"]["schema"]
+  <S extends Constraint>(self: optionalKey<S>): S
+  readonly "~lambda.out": this["~lambda.in"] extends optionalKey<Constraint> ? this["~lambda.in"]["schema"]
     : "Error: schema not eligible for requiredKey"
 }
 
@@ -2164,13 +2296,13 @@ export const requiredKey = Struct_.lambda<requiredKeyLambda>((self) => self.sche
  * @category models
  * @since 3.10.0
  */
-export interface optional<S extends Top> extends optionalKey<UndefinedOr<S>> {
+export interface optional<S extends Constraint> extends optionalKey<UndefinedOr<S>> {
   readonly "Rebuild": optional<S>
 }
 
 interface optionalLambda extends Lambda {
-  <S extends Top>(self: S): optional<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? optional<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): optional<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? optional<this["~lambda.in"]> : never
 }
 
 /**
@@ -2205,8 +2337,8 @@ interface optionalLambda extends Lambda {
 export const optional = Struct_.lambda<optionalLambda>((self) => optionalKey(UndefinedOr(self)))
 
 interface requiredLambda extends Lambda {
-  <S extends Top>(self: optional<S>): S
-  readonly "~lambda.out": this["~lambda.in"] extends optional<Top> ? this["~lambda.in"]["schema"]["members"][0]
+  <S extends Constraint>(self: optional<S>): S
+  readonly "~lambda.out": this["~lambda.in"] extends optional<Constraint> ? this["~lambda.in"]["schema"]["members"][0]
     : "Error: schema not eligible for required"
 }
 
@@ -2233,18 +2365,11 @@ export const required = Struct_.lambda<requiredLambda>((self) => self.schema.mem
  * @category models
  * @since 4.0.0
  */
-export interface mutableKey<S extends Top> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface mutableKey<S extends Constraint> extends
+  BottomLazy<
     S["ast"],
     mutableKey<S>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     "mutable",
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -2252,12 +2377,19 @@ export interface mutableKey<S extends Top> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly schema: S
 }
 
 interface mutableKeyLambda extends Lambda {
-  <S extends Top>(self: S): mutableKey<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? mutableKey<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): mutableKey<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? mutableKey<this["~lambda.in"]> : never
 }
 
 /**
@@ -2272,8 +2404,8 @@ export const mutableKey = Struct_.lambda<mutableKeyLambda>((schema) =>
 )
 
 interface readonlyKeyLambda extends Lambda {
-  <S extends Top>(self: mutableKey<S>): S
-  readonly "~lambda.out": this["~lambda.in"] extends mutableKey<Top> ? this["~lambda.in"]["schema"]
+  <S extends Constraint>(self: mutableKey<S>): S
+  readonly "~lambda.out": this["~lambda.in"] extends mutableKey<Constraint> ? this["~lambda.in"]["schema"]
     : "Error: schema not eligible for readonlyKey"
 }
 
@@ -2296,29 +2428,31 @@ export const readonlyKey = Struct_.lambda<readonlyKeyLambda>((self) => self.sche
  * @category transforming
  * @since 4.0.0
  */
-export interface toType<S extends Top> extends
-  Bottom<
-    S["Type"],
-    S["Type"],
-    never,
-    never,
+export interface toType<S extends Constraint> extends
+  BottomLazy<
     S["ast"],
     toType<S>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{}
+{
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Type"]
+  readonly "DecodingServices": never
+  readonly "EncodingServices": never
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
+  readonly schema: S
+}
 
 interface toTypeLambda extends Lambda {
-  <S extends Top>(self: S): toType<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? toType<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): toType<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? toType<this["~lambda.in"]> : never
 }
 
 /**
@@ -2336,29 +2470,31 @@ export const toType = Struct_.lambda<toTypeLambda>((schema) => make(SchemaAST.to
  * @category transforming
  * @since 4.0.0
  */
-export interface toEncoded<S extends Top> extends
-  Bottom<
-    S["Encoded"],
-    S["Encoded"],
-    never,
-    never,
+export interface toEncoded<S extends Constraint> extends
+  BottomLazy<
     SchemaAST.AST,
     toEncoded<S>,
-    S["Encoded"],
-    S["Encoded"],
-    ReadonlyArray<Top>,
-    S["Encoded"],
+    ReadonlyArray<Constraint>,
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{}
+{
+  readonly "Type": S["Encoded"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": never
+  readonly "EncodingServices": never
+  readonly "~type.make.in": S["Encoded"]
+  readonly "~type.make": S["Encoded"]
+  readonly "Iso": S["Encoded"]
+  readonly schema: S
+}
 
 interface toEncodedLambda extends Lambda {
-  <S extends Top>(self: S): toEncoded<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? toEncoded<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): toEncoded<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? toEncoded<this["~lambda.in"]> : never
 }
 
 /**
@@ -2379,17 +2515,10 @@ const FlipTypeId = "~effect/Schema/flip"
  * @since 4.0.0
  */
 export interface flip<S extends Top> extends
-  Bottom<
-    S["Encoded"],
-    S["Type"],
-    S["EncodingServices"],
-    S["DecodingServices"],
+  BottomLazy<
     SchemaAST.AST,
     flip<S>,
-    S["Encoded"],
-    S["Encoded"],
-    ReadonlyArray<Top>,
-    S["Encoded"],
+    ReadonlyArray<Constraint>,
     S["~encoded.mutability"],
     S["~encoded.optionality"],
     ConstructorDefault,
@@ -2397,6 +2526,13 @@ export interface flip<S extends Top> extends
     S["~type.optionality"]
   >
 {
+  readonly "Type": S["Encoded"]
+  readonly "Encoded": S["Type"]
+  readonly "DecodingServices": S["EncodingServices"]
+  readonly "EncodingServices": S["DecodingServices"]
+  readonly "~type.make.in": S["Encoded"]
+  readonly "~type.make": S["Encoded"]
+  readonly "Iso": S["Encoded"]
   readonly [FlipTypeId]: typeof FlipTypeId
   readonly schema: S
 }
@@ -2498,7 +2634,7 @@ export declare namespace TemplateLiteral {
    * @category utility types
    * @since 4.0.0
    */
-  export interface SchemaPart extends Top {
+  export interface SchemaPart extends Constraint {
     readonly Encoded: string | number | bigint
   }
 
@@ -2531,7 +2667,7 @@ export declare namespace TemplateLiteral {
     Template extends string,
     Next
   > = Next extends LiteralPart ? `${Template}${Next}`
-    : Next extends Codec<unknown, infer E extends LiteralPart, unknown, unknown> ? `${Template}${E}`
+    : Next extends { readonly Encoded: infer E extends LiteralPart } ? `${Template}${E}`
     : never
 
   /**
@@ -2565,7 +2701,9 @@ export interface TemplateLiteral<Parts extends TemplateLiteral.Parts> extends
 }
 
 function templateLiteralFromParts<Parts extends TemplateLiteral.Parts>(parts: Parts) {
-  return new SchemaAST.TemplateLiteral(parts.map((part) => isSchema(part) ? part.ast : new SchemaAST.Literal(part)))
+  return new SchemaAST.TemplateLiteral(
+    parts.map((part) => isSchema(part) ? part.ast : new SchemaAST.Literal(part as TemplateLiteral.LiteralPart))
+  )
 }
 
 /**
@@ -2633,15 +2771,18 @@ export declare namespace TemplateLiteralParser {
  * @since 3.10.0
  */
 export interface TemplateLiteralParser<Parts extends TemplateLiteral.Parts> extends
-  Bottom<
-    TemplateLiteralParser.Type<Parts>,
-    TemplateLiteral.Encoded<Parts>,
-    never,
-    never,
+  BottomLazy<
     SchemaAST.Arrays,
     TemplateLiteralParser<Parts>
   >
 {
+  readonly "Type": TemplateLiteralParser.Type<Parts>
+  readonly "Encoded": TemplateLiteral.Encoded<Parts>
+  readonly "DecodingServices": never
+  readonly "EncodingServices": never
+  readonly "~type.make.in": TemplateLiteralParser.Type<Parts>
+  readonly "~type.make": TemplateLiteralParser.Type<Parts>
+  readonly "Iso": TemplateLiteralParser.Type<Parts>
   readonly parts: Parts
 }
 
@@ -2921,8 +3062,21 @@ export const BigInt: BigInt = make(SchemaAST.bigInt)
 export interface Void extends Bottom<void, void, never, never, SchemaAST.Void, Void> {}
 
 /**
- * Schema for the `void` type. Accepts `undefined` as the encoded value.
+ * Schema for a TypeScript `void` return value.
  *
+ * **When to use**
+ *
+ * Use when you need to model the return value of a function, RPC, or endpoint
+ * whose result is intentionally ignored.
+ *
+ * **Details**
+ *
+ * Runtime parsing accepts any present value and discards it, producing
+ * `undefined`. The public decoded and encoded TypeScript representation remains
+ * `void`, so typed construction, decoding, and encoding APIs are still modeled
+ * as `void`.
+ *
+ * @see {@link Undefined} for a schema that matches only the exact `undefined` value.
  * @category schemas
  * @since 3.10.0
  */
@@ -2999,7 +3153,7 @@ export declare namespace Struct {
    * @category utility types
    * @since 3.10.0
    */
-  export type Fields = { readonly [x: PropertyKey]: Top }
+  export type Fields = { readonly [x: PropertyKey]: Constraint }
 
   type TypeOptionalKeys<Fields extends Struct.Fields> = {
     [K in keyof Fields]: Fields[K] extends { readonly "~type.optionality": "optional" } ? K
@@ -3011,15 +3165,46 @@ export declare namespace Struct {
       : never
   }[keyof Fields]
 
-  type Type_<
+  type SetOptional<A, K extends keyof A> = Omit<A, K> & Partial<Pick<A, K>>
+
+  type Mutable<A> = { -readonly [K in keyof A]: A[K] }
+
+  type SetMutable<A, K extends keyof A> = Omit<A, K> & Mutable<Pick<A, K>>
+
+  type Side = "Type" | "Iso" | "Encoded"
+
+  type EncodedOptionalKeys<Fields extends Struct.Fields> = {
+    [K in keyof Fields]: Fields[K] extends { readonly "~encoded.optionality": "optional" } ? K
+      : never
+  }[keyof Fields]
+
+  type EncodedMutableKeys<Fields extends Struct.Fields> = {
+    [K in keyof Fields]: Fields[K] extends { readonly "~encoded.mutability": "mutable" } ? K
+      : never
+  }[keyof Fields]
+
+  type SideOptionalKeys<F extends Fields, S extends Side> = S extends "Encoded" ? EncodedOptionalKeys<F>
+    : TypeOptionalKeys<F>
+
+  type SideMutableKeys<F extends Fields, S extends Side> = S extends "Encoded" ? EncodedMutableKeys<F>
+    : TypeMutableKeys<F>
+
+  type ReadonlySide<F extends Fields, S extends Side> = { readonly [K in keyof F]: F[K][S] }
+
+  type View<
     F extends Fields,
-    O extends keyof F = TypeOptionalKeys<F>,
-    M extends keyof F = TypeMutableKeys<F>
-  > =
-    & { readonly [K in keyof F as K extends M | O ? never : K]: F[K]["Type"] }
-    & { readonly [K in keyof F as K extends O ? K extends M ? never : K : never]?: F[K]["Type"] }
-    & { -readonly [K in keyof F as K extends M ? K extends O ? never : K : never]: F[K]["Type"] }
-    & { -readonly [K in keyof F as K extends M & O ? K : never]?: F[K]["Type"] }
+    S extends Side,
+    O extends keyof F = SideOptionalKeys<F, S>,
+    M extends keyof F = SideMutableKeys<F, S>
+  > = [O | M] extends [never] ? ReadonlySide<F, S>
+    : [M] extends [never] ? Simplify<SetOptional<ReadonlySide<F, S>, O>>
+    : [O] extends [never] ? Simplify<SetMutable<ReadonlySide<F, S>, M>>
+    : Simplify<
+      SetMutable<
+        SetOptional<ReadonlySide<F, S>, O>,
+        Extract<keyof SetOptional<ReadonlySide<F, S>, O>, M>
+      >
+    >
 
   /**
    * Computes the decoded object type for a struct field map.
@@ -3032,17 +3217,7 @@ export declare namespace Struct {
    * @category utility types
    * @since 3.10.0
    */
-  export type Type<F extends Fields> = Simplify<Type_<F>>
-
-  type Iso_<
-    F extends Fields,
-    O extends keyof F = TypeOptionalKeys<F>,
-    M extends keyof F = TypeMutableKeys<F>
-  > =
-    & { readonly [K in keyof F as K extends M | O ? never : K]: F[K]["Iso"] }
-    & { readonly [K in keyof F as K extends O ? K extends M ? never : K : never]?: F[K]["Iso"] }
-    & { -readonly [K in keyof F as K extends M ? K extends O ? never : K : never]: F[K]["Iso"] }
-    & { -readonly [K in keyof F as K extends M & O ? K : never]?: F[K]["Iso"] }
+  export type Type<F extends Fields> = View<F, "Type">
 
   /**
    * Computes the iso object type for a struct field map from each field schema's
@@ -3056,27 +3231,7 @@ export declare namespace Struct {
    * @category utility types
    * @since 4.0.0
    */
-  export type Iso<F extends Fields> = Simplify<Iso_<F>>
-
-  type EncodedOptionalKeys<Fields extends Struct.Fields> = {
-    [K in keyof Fields]: Fields[K] extends { readonly "~encoded.optionality": "optional" } ? K
-      : never
-  }[keyof Fields]
-
-  type EncodedMutableKeys<Fields extends Struct.Fields> = {
-    [K in keyof Fields]: Fields[K] extends { readonly "~encoded.mutability": "mutable" } ? K
-      : never
-  }[keyof Fields]
-
-  type Encoded_<
-    F extends Fields,
-    O extends keyof F = EncodedOptionalKeys<F>,
-    M extends keyof F = EncodedMutableKeys<F>
-  > =
-    & { readonly [K in keyof F as K extends M | O ? never : K]: F[K]["Encoded"] }
-    & { readonly [K in keyof F as K extends O ? K extends M ? never : K : never]?: F[K]["Encoded"] }
-    & { -readonly [K in keyof F as K extends M ? K extends O ? never : K : never]: F[K]["Encoded"] }
-    & { -readonly [K in keyof F as K extends M & O ? K : never]?: F[K]["Encoded"] }
+  export type Iso<F extends Fields> = View<F, "Iso">
 
   /**
    * Computes the encoded object type for a struct field map.
@@ -3090,7 +3245,7 @@ export declare namespace Struct {
    * @category utility types
    * @since 3.10.0
    */
-  export type Encoded<F extends Fields> = Simplify<Encoded_<F>>
+  export type Encoded<F extends Fields> = View<F, "Encoded">
 
   /**
    * Union of all decoding service requirements needed by the schemas in a struct
@@ -3115,12 +3270,12 @@ export declare namespace Struct {
       : never
   }[keyof Fields]
 
-  type MakeIn_<
+  type ReadonlyMakeIn<F extends Fields> = { readonly [K in keyof F]: F[K]["~type.make"] }
+
+  type MakeInView<
     F extends Fields,
-    O = TypeOptionalKeys<F> | TypeConstructorDefaultedKeys<F>
-  > =
-    & { readonly [K in keyof F as K extends O ? never : K]: F[K]["~type.make"] }
-    & { readonly [K in keyof F as K extends O ? K : never]?: F[K]["~type.make"] }
+    O extends keyof F = TypeOptionalKeys<F> | TypeConstructorDefaultedKeys<F>
+  > = [O] extends [never] ? ReadonlyMakeIn<F> : Simplify<SetOptional<ReadonlyMakeIn<F>, O>>
 
   /**
    * Computes the input object type accepted when constructing a struct value.
@@ -3133,7 +3288,7 @@ export declare namespace Struct {
    * @category utility types
    * @since 4.0.0
    */
-  export type MakeIn<F extends Fields> = Simplify<MakeIn_<F>>
+  export type MakeIn<F extends Fields> = MakeInView<F>
 }
 
 /**
@@ -3142,18 +3297,14 @@ export declare namespace Struct {
  * @category models
  * @since 3.10.0
  */
-export interface Struct<Fields extends Struct.Fields> extends
-  Bottom<
-    Struct.Type<Fields>,
-    Struct.Encoded<Fields>,
-    Struct.DecodingServices<Fields>,
-    Struct.EncodingServices<Fields>,
-    SchemaAST.Objects,
-    Struct<Fields>,
-    Struct.MakeIn<Fields>,
-    Struct.Iso<Fields>
-  >
-{
+export interface Struct<Fields extends Struct.Fields> extends BottomLazy<SchemaAST.Objects, Struct<Fields>> {
+  readonly "Type": Struct.Type<Fields>
+  readonly "Encoded": Struct.Encoded<Fields>
+  readonly "DecodingServices": Struct.DecodingServices<Fields>
+  readonly "EncodingServices": Struct.EncodingServices<Fields>
+  readonly "~type.make.in": Struct.MakeIn<Fields>
+  readonly "~type.make": Struct.MakeIn<Fields>
+  readonly "Iso": Struct.Iso<Fields>
   /**
    * The field definitions of this struct. Spread them into a new struct to
    * reuse fields across schemas.
@@ -3300,7 +3451,7 @@ export function fieldsAssign<const NewFields extends Struct.Fields>(fields: NewF
  * @since 4.0.0
  */
 export interface encodeKeys<
-  S extends Top & { readonly fields: Struct.Fields },
+  S extends Constraint & { readonly fields: Struct.Fields },
   M extends { readonly [K in keyof S["fields"]]?: PropertyKey }
 > extends
   decodeTo<
@@ -3347,7 +3498,7 @@ const canonicalPropertyKey = (key: PropertyKey): string | symbol =>
  * @since 4.0.0
  */
 export function encodeKeys<
-  S extends Top & { readonly fields: Struct.Fields },
+  S extends Constraint & { readonly fields: Struct.Fields },
   const M extends { readonly [K in keyof S["fields"]]?: PropertyKey }
 >(mapping: M) {
   return function(self: S): encodeKeys<S, M> {
@@ -3489,7 +3640,7 @@ export declare namespace Record {
    * @category utility types
    * @since 3.10.0
    */
-  export type Type<Key extends Record.Key, Value extends Top> = Value extends
+  export type Type<Key extends Record.Key, Value extends Constraint> = Value extends
     { readonly "~type.optionality": "optional" } ?
     Value extends { readonly "~type.mutability": "mutable" } ? { [P in Key["Type"]]?: Value["Type"] }
     : { readonly [P in Key["Type"]]?: Value["Type"] }
@@ -3503,7 +3654,7 @@ export declare namespace Record {
    * @category utility types
    * @since 4.0.0
    */
-  export type Iso<Key extends Record.Key, Value extends Top> = Value extends
+  export type Iso<Key extends Record.Key, Value extends Constraint> = Value extends
     { readonly "~type.optionality": "optional" } ?
     Value extends { readonly "~type.mutability": "mutable" } ? { [P in Key["Iso"]]?: Value["Iso"] }
     : { readonly [P in Key["Iso"]]?: Value["Iso"] }
@@ -3522,7 +3673,7 @@ export declare namespace Record {
    * @category utility types
    * @since 3.10.0
    */
-  export type Encoded<Key extends Record.Key, Value extends Top> = Value extends
+  export type Encoded<Key extends Record.Key, Value extends Constraint> = Value extends
     { readonly "~encoded.optionality": "optional" } ?
     Value extends { readonly "~encoded.mutability": "mutable" } ? { [P in Key["Encoded"]]?: Value["Encoded"] }
     : { readonly [P in Key["Encoded"]]?: Value["Encoded"] }
@@ -3536,7 +3687,7 @@ export declare namespace Record {
    * @category utility types
    * @since 4.0.0
    */
-  export type DecodingServices<Key extends Record.Key, Value extends Top> =
+  export type DecodingServices<Key extends Record.Key, Value extends Constraint> =
     | Key["DecodingServices"]
     | Value["DecodingServices"]
 
@@ -3547,7 +3698,7 @@ export declare namespace Record {
    * @category utility types
    * @since 4.0.0
    */
-  export type EncodingServices<Key extends Record.Key, Value extends Top> =
+  export type EncodingServices<Key extends Record.Key, Value extends Constraint> =
     | Key["EncodingServices"]
     | Value["EncodingServices"]
 
@@ -3563,7 +3714,7 @@ export declare namespace Record {
    * @category utility types
    * @since 4.0.0
    */
-  export type MakeIn<Key extends Record.Key, Value extends Top> = Value extends
+  export type MakeIn<Key extends Record.Key, Value extends Constraint> = Value extends
     { readonly "~encoded.optionality": "optional" } ?
     Value extends { readonly "~encoded.mutability": "mutable" } ? { [P in Key["~type.make"]]?: Value["~type.make"] }
     : { readonly [P in Key["~type.make"]]?: Value["~type.make"] }
@@ -3577,18 +3728,19 @@ export declare namespace Record {
  * @category models
  * @since 4.0.0
  */
-export interface $Record<Key extends Record.Key, Value extends Top> extends
-  Bottom<
-    Record.Type<Key, Value>,
-    Record.Encoded<Key, Value>,
-    Record.DecodingServices<Key, Value>,
-    Record.EncodingServices<Key, Value>,
+export interface $Record<Key extends Record.Key, Value extends Constraint> extends
+  BottomLazy<
     SchemaAST.Objects,
-    $Record<Key, Value>,
-    Simplify<Record.MakeIn<Key, Value>>,
-    Record.Iso<Key, Value>
+    $Record<Key, Value>
   >
 {
+  readonly "Type": Record.Type<Key, Value>
+  readonly "Encoded": Record.Encoded<Key, Value>
+  readonly "DecodingServices": Record.DecodingServices<Key, Value>
+  readonly "EncodingServices": Record.EncodingServices<Key, Value>
+  readonly "~type.make.in": Simplify<Record.MakeIn<Key, Value>>
+  readonly "~type.make": Simplify<Record.MakeIn<Key, Value>>
+  readonly "Iso": Record.Iso<Key, Value>
   readonly key: Key
   readonly value: Value
 }
@@ -3625,7 +3777,7 @@ export interface $Record<Key extends Record.Key, Value extends Top> extends
  * @category constructors
  * @since 3.10.0
  */
-export function Record<Key extends Record.Key, Value extends Top>(
+export function Record<Key extends Record.Key, Value extends Constraint>(
   key: Key,
   value: Value,
   options?: {
@@ -3659,7 +3811,7 @@ export declare namespace StructWithRest {
    * @category utility types
    * @since 4.0.0
    */
-  export type Objects = Top & { readonly ast: SchemaAST.Objects }
+  export type Objects = Constraint & { readonly ast: SchemaAST.Objects }
 
   /**
    * Readonly list of record schemas that provide the additional index signatures
@@ -3668,7 +3820,7 @@ export declare namespace StructWithRest {
    * @category utility types
    * @since 3.10.0
    */
-  export type Records = ReadonlyArray<$Record<Record.Key, Top>>
+  export type Records = ReadonlyArray<$Record<Record.Key, Constraint>>
 
   type MergeTuple<T extends ReadonlyArray<unknown>> = T extends readonly [infer Head, ...infer Tail] ?
     Head & MergeTuple<Tail>
@@ -3765,24 +3917,52 @@ export declare namespace StructWithRest {
     [I in keyof Records]: Records[I][Side] extends object ? IncompatibleKeys<S[Side], Records[I][Side]> : never
   }[number]
 
-  /**
-   * Validates that the records are compatible with the struct.
-   *
-   * @category utility types
-   * @since 4.0.0
-   */
-  export type ValidateRecords<S extends Objects, Records extends StructWithRest.Records> = [
+  type IncompatibleRecords<S extends Objects, Records extends StructWithRest.Records> =
     | IncompatibleSideKeys<S, Records, "Type">
     | IncompatibleSideKeys<S, Records, "Encoded">
     | IncompatibleSideKeys<S, Records, "Iso">
     | IncompatibleSideKeys<S, Records, "~type.make">
-  ] extends [never] ? unknown
+
+  /**
+   * Checks whether fixed fields are compatible with the rest record schemas.
+   *
+   * **Details**
+   *
+   * Returns `true` when all fixed fields can also satisfy the matching rest
+   * index signatures. Returns a diagnostic object when TypeScript would make
+   * the resulting intersection too narrow for one or more fixed keys.
+   *
+   * **Example** (Checking record compatibility)
+   *
+   * ```ts
+   * import { Schema } from "effect"
+   *
+   * const user = Schema.Struct({ id: Schema.String })
+   * const stringExtras = [Schema.Record(Schema.String, Schema.String)] as const
+   *
+   * type UserCheck = Schema.StructWithRest.ValidateRecords<typeof user, typeof stringExtras>
+   *
+   * const userCheck: UserCheck = true
+   * void userCheck
+   *
+   * const counter = Schema.Struct({ count: Schema.NumberFromString })
+   *
+   * type CounterCheck = Schema.StructWithRest.ValidateRecords<typeof counter, typeof stringExtras>
+   * //    ^? { "incompatible index signatures": "count" }
+   *
+   * const counterCheck = null as unknown as CounterCheck
+   * void counterCheck
+   * ```
+   *
+   * @category utility types
+   * @since 4.0.0
+   */
+  export type ValidateRecords<
+    S extends Objects,
+    Records extends StructWithRest.Records
+  > = [IncompatibleRecords<S, Records>] extends [never] ? true
     : {
-      "incompatible index signatures":
-        | IncompatibleSideKeys<S, Records, "Type">
-        | IncompatibleSideKeys<S, Records, "Encoded">
-        | IncompatibleSideKeys<S, Records, "Iso">
-        | IncompatibleSideKeys<S, Records, "~type.make">
+      "incompatible index signatures": IncompatibleRecords<S, Records>
     }
 }
 
@@ -3796,17 +3976,18 @@ export interface StructWithRest<
   S extends StructWithRest.Objects,
   Records extends StructWithRest.Records
 > extends
-  Bottom<
-    Simplify<StructWithRest.Type<S, Records>>,
-    Simplify<StructWithRest.Encoded<S, Records>>,
-    StructWithRest.DecodingServices<S, Records>,
-    StructWithRest.EncodingServices<S, Records>,
+  BottomLazy<
     SchemaAST.Objects,
-    StructWithRest<S, Records>,
-    Simplify<StructWithRest.MakeIn<S, Records>>,
-    Simplify<StructWithRest.Iso<S, Records>>
+    StructWithRest<S, Records>
   >
 {
+  readonly "Type": Simplify<StructWithRest.Type<S, Records>>
+  readonly "Encoded": Simplify<StructWithRest.Encoded<S, Records>>
+  readonly "DecodingServices": StructWithRest.DecodingServices<S, Records>
+  readonly "EncodingServices": StructWithRest.EncodingServices<S, Records>
+  readonly "~type.make.in": Simplify<StructWithRest.MakeIn<S, Records>>
+  readonly "~type.make": Simplify<StructWithRest.MakeIn<S, Records>>
+  readonly "Iso": Simplify<StructWithRest.Iso<S, Records>>
   readonly schema: S
   readonly records: Records
 }
@@ -3814,6 +3995,13 @@ export interface StructWithRest<
 /**
  * Extends a struct schema with one or more record (index-signature) schemas,
  * producing a schema whose decoded type intersects the struct and all records.
+ *
+ * **Gotchas**
+ *
+ * TypeScript index signatures also apply to fixed keys. `StructWithRest` does
+ * not reject incompatible fixed fields at the call site; use
+ * `StructWithRest.ValidateRecords` when you want an explicit type-level
+ * compatibility check.
  *
  * **Example** (Defining structs with string-indexed extra keys)
  *
@@ -3837,7 +4025,7 @@ export function StructWithRest<
   const Records extends StructWithRest.Records
 >(
   schema: S,
-  records: Records & StructWithRest.ValidateRecords<S, Records>
+  records: Records
 ): StructWithRest<S, Records> {
   return make(SchemaAST.structWithRest(schema.ast, records.map(SchemaAST.getAST)), { schema, records })
 }
@@ -3862,7 +4050,7 @@ export declare namespace Tuple {
    * @category utility types
    * @since 3.10.0
    */
-  export type Elements = ReadonlyArray<Top>
+  export type Elements = ReadonlyArray<Constraint>
 
   type Type_<
     Elements,
@@ -3980,17 +4168,18 @@ export declare namespace Tuple {
  * @since 3.10.0
  */
 export interface Tuple<Elements extends Tuple.Elements> extends
-  Bottom<
-    Tuple.Type<Elements>,
-    Tuple.Encoded<Elements>,
-    Tuple.DecodingServices<Elements>,
-    Tuple.EncodingServices<Elements>,
+  BottomLazy<
     SchemaAST.Arrays,
-    Tuple<Elements>,
-    Tuple.MakeIn<Elements>,
-    Tuple.Iso<Elements>
+    Tuple<Elements>
   >
 {
+  readonly "Type": Tuple.Type<Elements>
+  readonly "Encoded": Tuple.Encoded<Elements>
+  readonly "DecodingServices": Tuple.DecodingServices<Elements>
+  readonly "EncodingServices": Tuple.EncodingServices<Elements>
+  readonly "~type.make.in": Tuple.MakeIn<Elements>
+  readonly "~type.make": Tuple.MakeIn<Elements>
+  readonly "Iso": Tuple.Iso<Elements>
   readonly elements: Elements
   /**
    * Returns a new tuple with the elements modified by the provided function.
@@ -4050,7 +4239,7 @@ function makeTuple<Elements extends Tuple.Elements>(ast: SchemaAST.Arrays, eleme
  * @category constructors
  * @since 3.10.0
  */
-export function Tuple<const Elements extends ReadonlyArray<Top>>(elements: Elements): Tuple<Elements> {
+export function Tuple<const Elements extends ReadonlyArray<Constraint>>(elements: Elements): Tuple<Elements> {
   return makeTuple(SchemaAST.tuple(elements), elements)
 }
 
@@ -4074,7 +4263,7 @@ export declare namespace TupleWithRest {
    * @category utility types
    * @since 3.10.0
    */
-  export type TupleType = Top & {
+  export type TupleType = Constraint & {
     readonly Type: ReadonlyArray<unknown>
     readonly Encoded: ReadonlyArray<unknown>
     readonly ast: SchemaAST.Arrays
@@ -4093,7 +4282,7 @@ export declare namespace TupleWithRest {
    * @category utility types
    * @since 3.10.0
    */
-  export type Rest = readonly [Top, ...Array<Top>]
+  export type Rest = readonly [Constraint, ...Array<Constraint>]
 
   /**
    * Computes the decoded tuple type for a `TupleWithRest`.
@@ -4108,7 +4297,7 @@ export declare namespace TupleWithRest {
    * @since 3.10.0
    */
   export type Type<T extends ReadonlyArray<unknown>, Rest extends TupleWithRest.Rest> = Rest extends
-    readonly [infer Head extends Top, ...infer Tail extends ReadonlyArray<Top>] ? Readonly<[
+    readonly [infer Head extends Constraint, ...infer Tail extends ReadonlyArray<Constraint>] ? Readonly<[
       ...T,
       ...Array<Head["Type"]>,
       ...{ readonly [K in keyof Tail]: Tail[K]["Type"] }
@@ -4128,7 +4317,7 @@ export declare namespace TupleWithRest {
    * @since 4.0.0
    */
   export type Iso<T extends ReadonlyArray<unknown>, Rest extends TupleWithRest.Rest> = Rest extends
-    readonly [infer Head extends Top, ...infer Tail extends ReadonlyArray<Top>] ? Readonly<[
+    readonly [infer Head extends Constraint, ...infer Tail extends ReadonlyArray<Constraint>] ? Readonly<[
       ...T,
       ...Array<Head["Iso"]>,
       ...{ readonly [K in keyof Tail]: Tail[K]["Iso"] }
@@ -4148,7 +4337,7 @@ export declare namespace TupleWithRest {
    * @since 3.10.0
    */
   export type Encoded<E extends ReadonlyArray<unknown>, Rest extends TupleWithRest.Rest> = Rest extends
-    readonly [infer Head extends Top, ...infer Tail extends ReadonlyArray<Top>] ? readonly [
+    readonly [infer Head extends Constraint, ...infer Tail extends ReadonlyArray<Constraint>] ? readonly [
       ...E,
       ...Array<Head["Encoded"]>,
       ...{ readonly [K in keyof Tail]: Tail[K]["Encoded"] }
@@ -4168,7 +4357,7 @@ export declare namespace TupleWithRest {
    * @since 4.0.0
    */
   export type MakeIn<M extends ReadonlyArray<unknown>, Rest extends TupleWithRest.Rest> = Rest extends
-    readonly [infer Head extends Top, ...infer Tail extends ReadonlyArray<Top>] ? readonly [
+    readonly [infer Head extends Constraint, ...infer Tail extends ReadonlyArray<Constraint>] ? readonly [
       ...M,
       ...Array<Head["~type.make"]>,
       ...{ readonly [K in keyof Tail]: Tail[K]["~type.make"] }
@@ -4186,17 +4375,18 @@ export interface TupleWithRest<
   S extends TupleWithRest.TupleType,
   Rest extends TupleWithRest.Rest
 > extends
-  Bottom<
-    TupleWithRest.Type<S["Type"], Rest>,
-    TupleWithRest.Encoded<S["Encoded"], Rest>,
-    S["DecodingServices"] | Rest[number]["DecodingServices"],
-    S["EncodingServices"] | Rest[number]["EncodingServices"],
+  BottomLazy<
     SchemaAST.Arrays,
-    TupleWithRest<S, Rest>,
-    TupleWithRest.MakeIn<S["~type.make"], Rest>,
-    TupleWithRest.Iso<S["Iso"], Rest>
+    TupleWithRest<S, Rest>
   >
 {
+  readonly "Type": TupleWithRest.Type<S["Type"], Rest>
+  readonly "Encoded": TupleWithRest.Encoded<S["Encoded"], Rest>
+  readonly "DecodingServices": S["DecodingServices"] | Rest[number]["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"] | Rest[number]["EncodingServices"]
+  readonly "~type.make.in": TupleWithRest.MakeIn<S["~type.make"], Rest>
+  readonly "~type.make": TupleWithRest.MakeIn<S["~type.make"], Rest>
+  readonly "Iso": TupleWithRest.Iso<S["Iso"], Rest>
   readonly schema: S
   readonly rest: Rest
 }
@@ -4244,24 +4434,25 @@ export function TupleWithRest<S extends Tuple<Tuple.Elements>, const Rest extend
  * @category models
  * @since 4.0.0
  */
-export interface $Array<S extends Top> extends
-  Bottom<
-    ReadonlyArray<S["Type"]>,
-    ReadonlyArray<S["Encoded"]>,
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface $Array<S extends Constraint> extends
+  BottomLazy<
     SchemaAST.Arrays,
-    $Array<S>,
-    ReadonlyArray<S["~type.make"]>,
-    ReadonlyArray<S["Iso"]>
+    $Array<S>
   >
 {
+  readonly "Type": ReadonlyArray<S["Type"]>
+  readonly "Encoded": ReadonlyArray<S["Encoded"]>
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": ReadonlyArray<S["~type.make"]>
+  readonly "~type.make": ReadonlyArray<S["~type.make"]>
+  readonly "Iso": ReadonlyArray<S["Iso"]>
   readonly value: S
 }
 
 interface ArrayLambda extends Lambda {
-  <S extends Top>(self: S): $Array<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? $Array<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): $Array<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? $Array<this["~lambda.in"]> : never
 }
 
 /**
@@ -4300,24 +4491,25 @@ export {
  * @category models
  * @since 3.10.0
  */
-export interface NonEmptyArray<S extends Top> extends
-  Bottom<
-    readonly [S["Type"], ...Array<S["Type"]>],
-    readonly [S["Encoded"], ...Array<S["Encoded"]>],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface NonEmptyArray<S extends Constraint> extends
+  BottomLazy<
     SchemaAST.Arrays,
-    NonEmptyArray<S>,
-    readonly [S["~type.make"], ...Array<S["~type.make"]>],
-    readonly [S["Iso"], ...Array<S["Iso"]>]
+    NonEmptyArray<S>
   >
 {
+  readonly "Type": readonly [S["Type"], ...Array<S["Type"]>]
+  readonly "Encoded": readonly [S["Encoded"], ...Array<S["Encoded"]>]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": readonly [S["~type.make"], ...Array<S["~type.make"]>]
+  readonly "~type.make": readonly [S["~type.make"], ...Array<S["~type.make"]>]
+  readonly "Iso": readonly [S["Iso"], ...Array<S["Iso"]>]
   readonly value: S
 }
 
 interface NonEmptyArrayLambda extends Lambda {
-  <S extends Top>(self: S): NonEmptyArray<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? NonEmptyArray<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): NonEmptyArray<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? NonEmptyArray<this["~lambda.in"]> : never
 }
 
 /**
@@ -4348,7 +4540,7 @@ export const NonEmptyArray = Struct_.lambda<NonEmptyArrayLambda>((schema) =>
  * @category constructors
  * @since 3.10.0
  */
-export interface ArrayEnsure<S extends Top> extends decodeTo<$Array<toType<S>>, Union<readonly [S, $Array<S>]>> {
+export interface ArrayEnsure<S extends Constraint> extends decodeTo<$Array<toType<S>>, Union<readonly [S, $Array<S>]>> {
   readonly "Rebuild": ArrayEnsure<S>
 }
 
@@ -4378,7 +4570,7 @@ export interface ArrayEnsure<S extends Top> extends decodeTo<$Array<toType<S>>, 
  * @category constructors
  * @since 3.10.0
  */
-export function ArrayEnsure<S extends Top>(schema: S): ArrayEnsure<S> {
+export function ArrayEnsure<S extends Constraint>(schema: S): ArrayEnsure<S> {
   return Union([schema, ArraySchema(schema)]).pipe(decodeTo(
     ArraySchema(toType(schema)),
     SchemaTransformation.transform({
@@ -4394,7 +4586,7 @@ export function ArrayEnsure<S extends Top>(schema: S): ArrayEnsure<S> {
  * @category models
  * @since 4.0.0
  */
-export interface UniqueArray<S extends Top> extends $Array<S> {
+export interface UniqueArray<S extends Constraint> extends $Array<S> {
   readonly "Rebuild": UniqueArray<S>
 }
 
@@ -4409,7 +4601,7 @@ export interface UniqueArray<S extends Top> extends $Array<S> {
  * @category constructors
  * @since 4.0.0
  */
-export function UniqueArray<S extends Top>(item: S): UniqueArray<S> {
+export function UniqueArray<S extends Constraint>(item: S): UniqueArray<S> {
   return ArraySchema(item).check(isUnique())
 }
 
@@ -4419,19 +4611,11 @@ export function UniqueArray<S extends Top>(item: S): UniqueArray<S> {
  * @category transforming
  * @since 3.10.0
  */
-export interface mutable<S extends Top & { readonly "ast": SchemaAST.Arrays }> extends
-  Bottom<
-    Mutable<S["Type"]>,
-    Mutable<S["Encoded"]>,
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface mutable<S extends Constraint & { readonly "ast": SchemaAST.Arrays }> extends
+  BottomLazy<
     S["ast"],
     mutable<S>,
-    // "~type.make" and "~type.make.in" as they are because they are contravariant
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -4439,12 +4623,20 @@ export interface mutable<S extends Top & { readonly "ast": SchemaAST.Arrays }> e
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": Mutable<S["Type"]>
+  readonly "Encoded": Mutable<S["Encoded"]>
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  // "~type.make" and "~type.make.in" as they are because they are contravariant
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly schema: S
 }
 
 interface mutableLambda extends Lambda {
-  <S extends Top & { readonly "ast": SchemaAST.Arrays }>(self: S): mutable<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top & { readonly "ast": SchemaAST.Arrays } ?
+  <S extends Constraint & { readonly "ast": SchemaAST.Arrays }>(self: S): mutable<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint & { readonly "ast": SchemaAST.Arrays } ?
     mutable<this["~lambda.in"]>
     : "Error: schema not eligible for mutable"
 }
@@ -4476,18 +4668,19 @@ export const mutable = Struct_.lambda<mutableLambda>((schema) => {
  * @category models
  * @since 3.10.0
  */
-export interface Union<Members extends ReadonlyArray<Top>> extends
-  Bottom<
-    { [K in keyof Members]: Members[K]["Type"] }[number],
-    { [K in keyof Members]: Members[K]["Encoded"] }[number],
-    { [K in keyof Members]: Members[K]["DecodingServices"] }[number],
-    { [K in keyof Members]: Members[K]["EncodingServices"] }[number],
+export interface Union<Members extends ReadonlyArray<Constraint>> extends
+  BottomLazy<
     SchemaAST.Union<{ [K in keyof Members]: Members[K]["ast"] }[number]>,
-    Union<Members>,
-    { [K in keyof Members]: Members[K]["~type.make"] }[number],
-    { [K in keyof Members]: Members[K]["Iso"] }[number]
+    Union<Members>
   >
 {
+  readonly "Type": { [K in keyof Members]: Members[K]["Type"] }[number]
+  readonly "Encoded": { [K in keyof Members]: Members[K]["Encoded"] }[number]
+  readonly "DecodingServices": { [K in keyof Members]: Members[K]["DecodingServices"] }[number]
+  readonly "EncodingServices": { [K in keyof Members]: Members[K]["EncodingServices"] }[number]
+  readonly "~type.make.in": { [K in keyof Members]: Members[K]["~type.make"] }[number]
+  readonly "~type.make": { [K in keyof Members]: Members[K]["~type.make"] }[number]
+  readonly "Iso": { [K in keyof Members]: Members[K]["Iso"] }[number]
   readonly members: Members
   /**
    * Returns a new union with the members modified by the provided function.
@@ -4505,7 +4698,7 @@ export interface Union<Members extends ReadonlyArray<Top>> extends
    *   use this option if you have verified that your refinements remain correct
    *   after the transformation.
    */
-  mapMembers<To extends ReadonlyArray<Top>>(
+  mapMembers<To extends ReadonlyArray<Constraint>>(
     f: (members: Members) => To,
     options?: {
       readonly unsafePreserveChecks?: boolean | undefined
@@ -4513,13 +4706,13 @@ export interface Union<Members extends ReadonlyArray<Top>> extends
   ): Union<Simplify<Readonly<To>>>
 }
 
-function makeUnion<Members extends ReadonlyArray<Top>>(
+function makeUnion<Members extends ReadonlyArray<Constraint>>(
   ast: SchemaAST.Union<Members[number]["ast"]>,
   members: Members
 ): Union<Members> {
   return make(ast, {
     members,
-    mapMembers<To extends ReadonlyArray<Top>>(
+    mapMembers<To extends ReadonlyArray<Constraint>>(
       this: Union<Members>,
       f: (members: Members) => To,
       options?: {
@@ -4559,7 +4752,7 @@ function makeUnion<Members extends ReadonlyArray<Top>>(
  * @category constructors
  * @since 3.10.0
  */
-export function Union<const Members extends ReadonlyArray<Top>>(
+export function Union<const Members extends ReadonlyArray<Constraint>>(
   members: Members,
   options?: { mode?: "anyOf" | "oneOf" }
 ): Union<Members> {
@@ -4580,7 +4773,7 @@ export interface Literals<L extends ReadonlyArray<SchemaAST.LiteralValue>>
   /**
    * Map over the members of the union.
    */
-  mapMembers<To extends ReadonlyArray<Top>>(f: (members: this["members"]) => To): Union<Simplify<Readonly<To>>>
+  mapMembers<To extends ReadonlyArray<Constraint>>(f: (members: this["members"]) => To): Union<Simplify<Readonly<To>>>
 
   pick<const L2 extends ReadonlyArray<L[number]>>(literals: L2): Literals<L2>
 
@@ -4610,7 +4803,7 @@ export function Literals<const L extends ReadonlyArray<SchemaAST.LiteralValue>>(
   return make(SchemaAST.union(members, "anyOf", undefined), {
     literals,
     members,
-    mapMembers<To extends ReadonlyArray<Top>>(
+    mapMembers<To extends ReadonlyArray<Constraint>>(
       this: Literals<L>,
       f: (members: Literals<L>["members"]) => To
     ): Union<Simplify<Readonly<To>>> {
@@ -4633,13 +4826,13 @@ export function Literals<const L extends ReadonlyArray<SchemaAST.LiteralValue>>(
  * @category models
  * @since 3.10.0
  */
-export interface NullOr<S extends Top> extends Union<readonly [S, Null]> {
+export interface NullOr<S extends Constraint> extends Union<readonly [S, Null]> {
   readonly "Rebuild": NullOr<S>
 }
 
 interface NullOrLambda extends Lambda {
-  <S extends Top>(self: S): NullOr<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? NullOr<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): NullOr<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? NullOr<this["~lambda.in"]> : never
 }
 
 /**
@@ -4656,13 +4849,13 @@ export const NullOr = Struct_.lambda<NullOrLambda>((self) => Union([self, Null])
  * @category models
  * @since 3.10.0
  */
-export interface UndefinedOr<S extends Top> extends Union<readonly [S, Undefined]> {
+export interface UndefinedOr<S extends Constraint> extends Union<readonly [S, Undefined]> {
   readonly "Rebuild": UndefinedOr<S>
 }
 
 interface UndefinedOrLambda extends Lambda {
-  <S extends Top>(self: S): UndefinedOr<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? UndefinedOr<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): UndefinedOr<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? UndefinedOr<this["~lambda.in"]> : never
 }
 
 /**
@@ -4679,13 +4872,13 @@ export const UndefinedOr = Struct_.lambda<UndefinedOrLambda>((self) => Union([se
  * @category models
  * @since 3.10.0
  */
-export interface NullishOr<S extends Top> extends Union<readonly [S, Null, Undefined]> {
+export interface NullishOr<S extends Constraint> extends Union<readonly [S, Null, Undefined]> {
   readonly "Rebuild": NullishOr<S>
 }
 
 interface NullishOrLambda extends Lambda {
-  <S extends Top>(self: S): NullishOr<S>
-  readonly "~lambda.out": this["~lambda.in"] extends Top ? NullishOr<this["~lambda.in"]> : never
+  <S extends Constraint>(self: S): NullishOr<S>
+  readonly "~lambda.out": this["~lambda.in"] extends Constraint ? NullishOr<this["~lambda.in"]> : never
 }
 
 /**
@@ -4702,25 +4895,26 @@ export const NullishOr = Struct_.lambda<NullishOrLambda>((self) => Union([self, 
  * @category models
  * @since 3.10.0
  */
-export interface suspend<S extends Top> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface suspend<S extends Constraint> extends
+  BottomLazy<
     SchemaAST.Suspend,
     suspend<S>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
     S["~encoded.mutability"],
     S["~encoded.optionality"]
   >
-{}
+{
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
+}
 
 /**
  * Creates a suspended schema that defers evaluation until needed. This is
@@ -4746,7 +4940,7 @@ export interface suspend<S extends Top> extends
  * @category constructors
  * @since 3.10.0
  */
-export function suspend<S extends Top>(f: () => S): suspend<S> {
+export function suspend<S extends Constraint>(f: () => S): suspend<S> {
   return make(new SchemaAST.Suspend(() => f().ast))
 }
 
@@ -4779,18 +4973,11 @@ export function check<S extends Top>(
  * @category filtering
  * @since 3.10.0
  */
-export interface refine<T extends S["Type"], S extends Top> extends
-  Bottom<
-    T,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface refine<T extends S["Type"], S extends Constraint> extends
+  BottomLazy<
     S["ast"],
     refine<T, S>,
-    S["~type.make.in"],
-    T,
     S["~type.parameters"],
-    T,
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -4798,6 +4985,13 @@ export interface refine<T extends S["Type"], S extends Top> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": T
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": T
+  readonly "Iso": T
   readonly schema: S
 }
 
@@ -4816,7 +5010,7 @@ export interface refine<T extends S["Type"], S extends Top> extends
  * @category filtering
  * @since 3.10.0
  */
-export function refine<S extends Top, T extends S["Type"]>(
+export function refine<S extends Constraint, T extends S["Type"]>(
   refinement: (value: S["Type"]) => value is T,
   annotations?: Annotations.Filter
 ) {
@@ -4832,18 +5026,11 @@ type DistributeBrands<B> = UnionToIntersection<B extends infer U extends string 
  * @category branding
  * @since 3.10.0
  */
-export interface brand<S extends Top, B> extends
-  Bottom<
-    S["Type"] & DistributeBrands<B>,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface brand<S extends Constraint, B> extends
+  BottomLazy<
     S["ast"],
     brand<S, B>,
-    S["~type.make.in"],
-    S["Type"] & DistributeBrands<B>,
     S["~type.parameters"],
-    S["Type"] & DistributeBrands<B>,
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -4851,6 +5038,13 @@ export interface brand<S extends Top, B> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"] & DistributeBrands<B>
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["Type"] & DistributeBrands<B>
+  readonly "Iso": S["Type"] & DistributeBrands<B>
   readonly schema: S
   readonly identifier: string
 }
@@ -4875,7 +5069,7 @@ export interface brand<S extends Top, B> extends
  * @since 3.10.0
  */
 export function brand<B extends string>(identifier: B) {
-  return <S extends Top>(schema: S): brand<S["Rebuild"], B> =>
+  return <S extends ConstraintRebuildable>(schema: S): brand<S["Rebuild"], B> =>
     make(SchemaAST.brand(schema.ast, identifier), { schema, identifier })
 }
 
@@ -4900,18 +5094,11 @@ export function fromBrand<A extends Brand.Brand<any>>(identifier: string, ctor: 
  * @category decoding
  * @since 4.0.0
  */
-export interface middlewareDecoding<S extends Top, RD> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    RD,
-    S["EncodingServices"],
+export interface middlewareDecoding<S extends Constraint, RD> extends
+  BottomLazy<
     S["ast"],
     middlewareDecoding<S, RD>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -4919,6 +5106,13 @@ export interface middlewareDecoding<S extends Top, RD> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": RD
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly schema: S
 }
 
@@ -4947,7 +5141,7 @@ export interface middlewareDecoding<S extends Top, RD> extends
  * @category decoding
  * @since 4.0.0
  */
-export function middlewareDecoding<S extends Top, RD>(
+export function middlewareDecoding<S extends Constraint, RD>(
   decode: (
     effect: Effect.Effect<Option_.Option<S["Type"]>, SchemaIssue.Issue, S["DecodingServices"]>,
     options: SchemaAST.ParseOptions
@@ -4966,18 +5160,11 @@ export function middlewareDecoding<S extends Top, RD>(
  * @category encoding
  * @since 4.0.0
  */
-export interface middlewareEncoding<S extends Top, RE> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    RE,
+export interface middlewareEncoding<S extends Constraint, RE> extends
+  BottomLazy<
     S["ast"],
     middlewareEncoding<S, RE>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -4985,6 +5172,13 @@ export interface middlewareEncoding<S extends Top, RE> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": RE
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly schema: S
 }
 
@@ -5013,7 +5207,7 @@ export interface middlewareEncoding<S extends Top, RE> extends
  * @category encoding
  * @since 4.0.0
  */
-export function middlewareEncoding<S extends Top, RE>(
+export function middlewareEncoding<S extends Constraint, RE>(
   encode: (
     effect: Effect.Effect<Option_.Option<S["Encoded"]>, SchemaIssue.Issue, S["EncodingServices"]>,
     options: SchemaAST.ParseOptions
@@ -5048,9 +5242,9 @@ export function middlewareEncoding<S extends Top, RE>(
  * @category error handling
  * @since 4.0.0
  */
-export function catchDecoding<S extends Top>(
+export function catchDecoding<S extends Constraint>(
   f: (issue: SchemaIssue.Issue) => Effect.Effect<Option_.Option<S["Type"]>, SchemaIssue.Issue>
-): (self: S) => S["Rebuild"] {
+): (self: S) => middlewareDecoding<S, S["DecodingServices"]> {
   return catchDecodingWithContext(f)
 }
 
@@ -5074,11 +5268,11 @@ export function catchDecoding<S extends Top>(
  * @category error handling
  * @since 4.0.0
  */
-export function catchDecodingWithContext<S extends Top, R = never>(
+export function catchDecodingWithContext<S extends Constraint, R = never>(
   f: (issue: SchemaIssue.Issue) => Effect.Effect<Option_.Option<S["Type"]>, SchemaIssue.Issue, R>
 ) {
   return (self: S): middlewareDecoding<S, S["DecodingServices"] | R> =>
-    self.pipe(middlewareDecoding(Effect.catchEager(f)))
+    middlewareDecoding<S, S["DecodingServices"] | R>(Effect.catchEager(f))(self)
 }
 
 /**
@@ -5093,9 +5287,9 @@ export function catchDecodingWithContext<S extends Top, R = never>(
  * @category error handling
  * @since 4.0.0
  */
-export function catchEncoding<S extends Top>(
+export function catchEncoding<S extends Constraint>(
   f: (issue: SchemaIssue.Issue) => Effect.Effect<Option_.Option<S["Encoded"]>, SchemaIssue.Issue>
-): (self: S) => S["Rebuild"] {
+): (self: S) => middlewareEncoding<S, S["EncodingServices"]> {
   return catchEncodingWithContext(f)
 }
 
@@ -5119,11 +5313,11 @@ export function catchEncoding<S extends Top>(
  * @category error handling
  * @since 4.0.0
  */
-export function catchEncodingWithContext<S extends Top, R = never>(
+export function catchEncodingWithContext<S extends Constraint, R = never>(
   f: (issue: SchemaIssue.Issue) => Effect.Effect<Option_.Option<S["Encoded"]>, SchemaIssue.Issue, R>
 ) {
   return (self: S): middlewareEncoding<S, S["EncodingServices"] | R> =>
-    self.pipe(middlewareEncoding(Effect.catchEager(f)))
+    middlewareEncoding<S, S["EncodingServices"] | R>(Effect.catchEager(f))(self)
 }
 
 /**
@@ -5132,18 +5326,11 @@ export function catchEncodingWithContext<S extends Top, R = never>(
  * @category transforming
  * @since 4.0.0
  */
-export interface decodeTo<To extends Top, From extends Top, RD = never, RE = never> extends
-  Bottom<
-    To["Type"],
-    From["Encoded"],
-    To["DecodingServices"] | From["DecodingServices"] | RD,
-    To["EncodingServices"] | From["EncodingServices"] | RE,
+export interface decodeTo<To extends Constraint, From extends Constraint, RD = never, RE = never> extends
+  BottomLazy<
     To["ast"],
     decodeTo<To, From, RD, RE>,
-    To["~type.make.in"],
-    To["Iso"],
     To["~type.parameters"],
-    To["~type.make"],
     To["~type.mutability"],
     To["~type.optionality"],
     To["~type.constructor.default"],
@@ -5151,6 +5338,13 @@ export interface decodeTo<To extends Top, From extends Top, RD = never, RE = nev
     From["~encoded.optionality"]
   >
 {
+  readonly "Type": To["Type"]
+  readonly "Encoded": From["Encoded"]
+  readonly "DecodingServices": To["DecodingServices"] | From["DecodingServices"] | RD
+  readonly "EncodingServices": To["EncodingServices"] | From["EncodingServices"] | RE
+  readonly "~type.make.in": To["~type.make.in"]
+  readonly "~type.make": To["~type.make"]
+  readonly "Iso": To["Iso"]
   readonly from: From
   readonly to: To
 }
@@ -5161,7 +5355,7 @@ export interface decodeTo<To extends Top, From extends Top, RD = never, RE = nev
  * @category transforming
  * @since 3.10.0
  */
-export interface compose<To extends Top, From extends Top> extends decodeTo<To, From> {}
+export interface compose<To extends Constraint, From extends Constraint> extends decodeTo<To, From> {}
 
 /**
  * Creates a schema that transforms from a source schema to a target schema.
@@ -5211,15 +5405,15 @@ export interface compose<To extends Top, From extends Top> extends decodeTo<To, 
  * @category transforming
  * @since 4.0.0
  */
-export function decodeTo<To extends Top>(to: To): <From extends Top>(from: From) => compose<To, From>
-export function decodeTo<To extends Top, From extends Top, RD = never, RE = never>(
+export function decodeTo<To extends Constraint>(to: To): <From extends Constraint>(from: From) => compose<To, From>
+export function decodeTo<To extends Constraint, From extends Constraint, RD = never, RE = never>(
   to: To,
   transformation: {
     readonly decode: SchemaGetter.Getter<NoInfer<To["Encoded"]>, NoInfer<From["Type"]>, RD>
     readonly encode: SchemaGetter.Getter<NoInfer<From["Type"]>, NoInfer<To["Encoded"]>, RE>
   }
 ): (from: From) => decodeTo<To, From, RD, RE>
-export function decodeTo<To extends Top, From extends Top, RD = never, RE = never>(
+export function decodeTo<To extends Constraint, From extends Constraint, RD = never, RE = never>(
   to: To,
   transformation?: {
     readonly decode: SchemaGetter.Getter<To["Encoded"], From["Type"], RD>
@@ -5284,12 +5478,12 @@ export function decodeTo<To extends Top, From extends Top, RD = never, RE = neve
  * @category transforming
  * @since 3.10.0
  */
-export function decode<S extends Top, RD = never, RE = never>(transformation: {
+export function decode<S extends Constraint, RD = never, RE = never>(transformation: {
   readonly decode: SchemaGetter.Getter<S["Type"], S["Type"], RD>
   readonly encode: SchemaGetter.Getter<S["Type"], S["Type"], RE>
 }) {
   return (self: S): decodeTo<toType<S>, S, RD, RE> => {
-    return self.pipe(decodeTo(toType(self), transformation))
+    return decodeTo<toType<S>, S, RD, RE>(toType(self), transformation)(self)
   }
 }
 
@@ -5322,17 +5516,17 @@ export function decode<S extends Top, RD = never, RE = never>(transformation: {
  * @category transforming
  * @since 4.0.0
  */
-export function encodeTo<To extends Top>(
+export function encodeTo<To extends Constraint>(
   to: To
-): <From extends Top>(from: From) => decodeTo<From, To>
-export function encodeTo<To extends Top, From extends Top, RD = never, RE = never>(
+): <From extends Constraint>(from: From) => decodeTo<From, To>
+export function encodeTo<To extends Constraint, From extends Constraint, RD = never, RE = never>(
   to: To,
   transformation: {
     readonly decode: SchemaGetter.Getter<NoInfer<From["Encoded"]>, NoInfer<To["Type"]>, RD>
     readonly encode: SchemaGetter.Getter<NoInfer<To["Type"]>, NoInfer<From["Encoded"]>, RE>
   }
 ): (from: From) => decodeTo<From, To, RD, RE>
-export function encodeTo<To extends Top, From extends Top, RD = never, RE = never>(
+export function encodeTo<To extends Constraint, From extends Constraint, RD = never, RE = never>(
   to: To,
   transformation?: {
     readonly decode: SchemaGetter.Getter<From["Encoded"], To["Type"], RD>
@@ -5341,8 +5535,8 @@ export function encodeTo<To extends Top, From extends Top, RD = never, RE = neve
 ) {
   return (from: From): decodeTo<From, To, RD, RE> => {
     return transformation ?
-      to.pipe(decodeTo(from, transformation)) :
-      to.pipe(decodeTo(from))
+      decodeTo<From, To, RD, RE>(from, transformation)(to) :
+      decodeTo<From>(from)(to)
   }
 }
 
@@ -5371,12 +5565,12 @@ export function encodeTo<To extends Top, From extends Top, RD = never, RE = neve
  * @category transforming
  * @since 3.10.0
  */
-export function encode<S extends Top, RD = never, RE = never>(transformation: {
+export function encode<S extends Constraint, RD = never, RE = never>(transformation: {
   readonly decode: SchemaGetter.Getter<S["Encoded"], S["Encoded"], RD>
   readonly encode: SchemaGetter.Getter<S["Encoded"], S["Encoded"], RE>
 }) {
   return (self: S): decodeTo<S, toEncoded<S>, RD, RE> => {
-    return toEncoded(self).pipe(decodeTo(self, transformation))
+    return decodeTo<S, toEncoded<S>, RD, RE>(self, transformation)(toEncoded(self))
   }
 }
 
@@ -5400,18 +5594,11 @@ export interface WithoutConstructorDefault {
  * @category constructors
  * @since 3.10.0
  */
-export interface withConstructorDefault<S extends Top & WithoutConstructorDefault> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface withConstructorDefault<S extends Constraint & WithoutConstructorDefault> extends
+  BottomLazy<
     S["ast"],
     withConstructorDefault<S>,
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     "with-default",
@@ -5419,6 +5606,13 @@ export interface withConstructorDefault<S extends Top & WithoutConstructorDefaul
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   readonly schema: S
 }
 
@@ -5449,7 +5643,7 @@ export interface withConstructorDefault<S extends Top & WithoutConstructorDefaul
  * @category constructors
  * @since 3.10.0
  */
-export function withConstructorDefault<S extends Top & WithoutConstructorDefault>(
+export function withConstructorDefault<S extends Constraint & WithoutConstructorDefault>(
   // `S["~type.make.in"]` instead of `S["Type"]` is intentional here because
   // it makes easier to define the default value if there are nested defaults
   defaultValue: Effect.Effect<S["~type.make.in"], SchemaError>
@@ -5464,7 +5658,9 @@ export function withConstructorDefault<S extends Top & WithoutConstructorDefault
  * @category decoding
  * @since 4.0.0
  */
-export interface withDecodingDefaultKey<S extends Top, R = never> extends decodeTo<S, optionalKey<toEncoded<S>>, R> {
+export interface withDecodingDefaultKey<S extends Constraint, R = never>
+  extends decodeTo<S, optionalKey<toEncoded<S>>, R>
+{
   readonly "Rebuild": withDecodingDefaultKey<S, R>
 }
 
@@ -5518,7 +5714,7 @@ export type DecodingDefaultOptions = {
  * @category decoding
  * @since 4.0.0
  */
-export function withDecodingDefaultKey<S extends Top, R = never>(
+export function withDecodingDefaultKey<S extends Constraint, R = never>(
   defaultValue: Effect.Effect<S["Encoded"], SchemaError, R>,
   options?: DecodingDefaultOptions
 ) {
@@ -5537,7 +5733,7 @@ export function withDecodingDefaultKey<S extends Top, R = never>(
  * @category decoding
  * @since 4.0.0
  */
-export interface withDecodingDefaultTypeKey<S extends Top, R = never>
+export interface withDecodingDefaultTypeKey<S extends Constraint, R = never>
   extends decodeTo<withDecodingDefaultKey<toType<S>, R>, optionalKey<S>>
 {
   readonly "Rebuild": withDecodingDefaultTypeKey<S, R>
@@ -5565,7 +5761,7 @@ export interface withDecodingDefaultTypeKey<S extends Top, R = never>
  * @category decoding
  * @since 4.0.0
  */
-export function withDecodingDefaultTypeKey<S extends Top, R = never>(
+export function withDecodingDefaultTypeKey<S extends Constraint, R = never>(
   defaultValue: Effect.Effect<S["Type"], SchemaError, R>,
   options?: DecodingDefaultOptions
 ) {
@@ -5583,7 +5779,7 @@ export function withDecodingDefaultTypeKey<S extends Top, R = never>(
  * @category decoding
  * @since 3.10.0
  */
-export interface withDecodingDefault<S extends Top, R = never> extends decodeTo<S, optional<toEncoded<S>>, R> {
+export interface withDecodingDefault<S extends Constraint, R = never> extends decodeTo<S, optional<toEncoded<S>>, R> {
   readonly "Rebuild": withDecodingDefault<S, R>
 }
 
@@ -5626,7 +5822,7 @@ export interface withDecodingDefault<S extends Top, R = never> extends decodeTo<
  * @category decoding
  * @since 3.10.0
  */
-export function withDecodingDefault<S extends Top, R = never>(
+export function withDecodingDefault<S extends Constraint, R = never>(
   defaultValue: Effect.Effect<S["Encoded"], SchemaError, R>,
   options?: DecodingDefaultOptions
 ) {
@@ -5645,7 +5841,7 @@ export function withDecodingDefault<S extends Top, R = never>(
  * @category decoding
  * @since 4.0.0
  */
-export interface withDecodingDefaultType<S extends Top, R = never>
+export interface withDecodingDefaultType<S extends Constraint, R = never>
   extends decodeTo<withDecodingDefault<toType<S>, R>, optional<S>>
 {
   readonly "Rebuild": withDecodingDefaultType<S, R>
@@ -5678,7 +5874,7 @@ export interface withDecodingDefaultType<S extends Top, R = never>
  * @category decoding
  * @since 4.0.0
  */
-export function withDecodingDefaultType<S extends Top, R = never>(
+export function withDecodingDefaultType<S extends Constraint, R = never>(
   defaultValue: Effect.Effect<S["Type"], SchemaError, R>,
   options?: DecodingDefaultOptions
 ) {
@@ -5833,8 +6029,8 @@ type Flatten<Schemas> = Schemas extends readonly [infer Head, ...infer Tail]
 
 type TaggedUnionUtils<
   Tag extends PropertyKey,
-  Members extends ReadonlyArray<Top & { readonly Type: { readonly [K in Tag]: PropertyKey } }>,
-  Flattened extends ReadonlyArray<Top & { readonly Type: { readonly [K in Tag]: PropertyKey } }> = Flatten<
+  Members extends ReadonlyArray<Constraint & { readonly Type: { readonly [K in Tag]: PropertyKey } }>,
+  Flattened extends ReadonlyArray<Constraint & { readonly Type: { readonly [K in Tag]: PropertyKey } }> = Flatten<
     Members
   >
 > = {
@@ -5868,7 +6064,7 @@ type TaggedUnionUtils<
  */
 export type toTaggedUnion<
   Tag extends PropertyKey,
-  Members extends ReadonlyArray<Top & { readonly Type: { readonly [K in Tag]: PropertyKey } }>
+  Members extends ReadonlyArray<Constraint & { readonly Type: { readonly [K in Tag]: PropertyKey } }>
 > = Union<Members> & TaggedUnionUtils<Tag, Members>
 
 /**
@@ -5896,7 +6092,7 @@ export type toTaggedUnion<
  * @since 4.0.0
  */
 export function toTaggedUnion<const Tag extends PropertyKey>(tag: Tag) {
-  return <const Members extends ReadonlyArray<Top & { readonly Type: { readonly [K in Tag]: PropertyKey } }>>(
+  return <const Members extends ReadonlyArray<Constraint & { readonly Type: { readonly [K in Tag]: PropertyKey } }>>(
     self: Union<Members>
   ): toTaggedUnion<Tag, Members> => {
     const cases: Record<PropertyKey, unknown> = {}
@@ -5907,7 +6103,7 @@ export function toTaggedUnion<const Tag extends PropertyKey>(tag: Tag) {
 
     return Object.assign(self, { cases, isAnyOf, guards, match }) as any
 
-    function walk(schema: Top) {
+    function walk(schema: Constraint) {
       const ast = schema.ast
 
       if (
@@ -5950,17 +6146,19 @@ export function toTaggedUnion<const Tag extends PropertyKey>(tag: Tag) {
  * @category models
  * @since 4.0.0
  */
-export interface TaggedUnion<Cases extends Record<string, Top>> extends
-  Bottom<
-    { [K in keyof Cases]: Cases[K]["Type"] }[keyof Cases],
-    { [K in keyof Cases]: Cases[K]["Encoded"] }[keyof Cases],
-    { [K in keyof Cases]: Cases[K]["DecodingServices"] }[keyof Cases],
-    { [K in keyof Cases]: Cases[K]["EncodingServices"] }[keyof Cases],
+export interface TaggedUnion<Cases extends Record<string, Constraint>> extends
+  BottomLazy<
     SchemaAST.Union<SchemaAST.Objects>,
-    TaggedUnion<Cases>,
-    { [K in keyof Cases]: Cases[K]["~type.make"] }[keyof Cases]
+    TaggedUnion<Cases>
   >
 {
+  readonly "Type": { [K in keyof Cases]: Cases[K]["Type"] }[keyof Cases]
+  readonly "Encoded": { [K in keyof Cases]: Cases[K]["Encoded"] }[keyof Cases]
+  readonly "DecodingServices": { [K in keyof Cases]: Cases[K]["DecodingServices"] }[keyof Cases]
+  readonly "EncodingServices": { [K in keyof Cases]: Cases[K]["EncodingServices"] }[keyof Cases]
+  readonly "~type.make.in": { [K in keyof Cases]: Cases[K]["~type.make"] }[keyof Cases]
+  readonly "~type.make": { [K in keyof Cases]: Cases[K]["~type.make"] }[keyof Cases]
+  readonly "Iso": { [K in keyof Cases]: Cases[K]["Type"] }[keyof Cases]
   readonly cases: Cases
   readonly isAnyOf: <const Keys>(
     keys: ReadonlyArray<Keys>
@@ -6023,17 +6221,10 @@ export function TaggedUnion<const CasesByTag extends Record<string, Struct.Field
  * @since 4.0.0
  */
 export interface Opaque<Self, S extends Top, Brand> extends
-  Bottom<
-    Self,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+  BottomLazy<
     S["ast"],
     S["Rebuild"],
-    S["~type.make.in"],
-    S["Iso"],
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -6041,6 +6232,13 @@ export interface Opaque<Self, S extends Top, Brand> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": Self
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
   new(_: never): S["Type"] & Brand
 }
 
@@ -6119,7 +6317,7 @@ export function instanceOf<C extends abstract new(...args: any) => any, Iso = In
  * @since 4.0.0
  */
 export function link<T>() {
-  return <To extends Top>(
+  return <To extends Constraint>(
     encodeTo: To,
     transformation: {
       readonly decode: SchemaGetter.Getter<T, NoInfer<To["Type"]>>
@@ -8132,7 +8330,7 @@ export function isPropertiesLengthBetween(minimum: number, maximum: number, anno
  * @category Object checks
  * @since 4.0.0
  */
-export function isPropertyNames(keySchema: Top, annotations?: Annotations.Filter) {
+export function isPropertyNames(keySchema: Constraint, annotations?: Annotations.Filter) {
   const propertyNames = toEncoded(keySchema)
   const parser = SchemaParser._issue(propertyNames.ast)
   return makeFilter<object>(
@@ -8258,7 +8456,7 @@ export const Char: Char = String.check(isLengthBetween(1, 1))
  * @category Option
  * @since 3.10.0
  */
-export interface Option<A extends Top> extends
+export interface Option<A extends Constraint> extends
   declareConstructor<
     Option_.Option<A["Type"]>,
     Option_.Option<A["Encoded"]>,
@@ -8281,7 +8479,7 @@ export interface Option<A extends Top> extends
  * @category Option
  * @since 4.0.0
  */
-export type OptionIso<A extends Top> =
+export type OptionIso<A extends Constraint> =
   | { readonly _tag: "None" }
   | { readonly _tag: "Some"; readonly value: A["Iso"] }
 
@@ -8291,7 +8489,7 @@ export type OptionIso<A extends Top> =
  * @category Option
  * @since 3.10.0
  */
-export function Option<A extends Top>(value: A): Option<A> {
+export function Option<A extends Constraint>(value: A): Option<A> {
   const schema = declareConstructor<
     Option_.Option<A["Type"]>,
     Option_.Option<A["Encoded"]>,
@@ -8360,7 +8558,7 @@ export function Option<A extends Top>(value: A): Option<A> {
  * @category Option
  * @since 3.10.0
  */
-export interface OptionFromNullOr<S extends Top> extends decodeTo<Option<toType<S>>, NullOr<S>> {
+export interface OptionFromNullOr<S extends Constraint> extends decodeTo<Option<toType<S>>, NullOr<S>> {
   readonly "Rebuild": OptionFromNullOr<S>
 }
 
@@ -8375,7 +8573,7 @@ export interface OptionFromNullOr<S extends Top> extends decodeTo<Option<toType<
  * @category Option
  * @since 3.10.0
  */
-export function OptionFromNullOr<S extends Top>(schema: S): OptionFromNullOr<S> {
+export function OptionFromNullOr<S extends Constraint>(schema: S): OptionFromNullOr<S> {
   return NullOr(schema).pipe(decodeTo(
     Option(toType(schema)),
     SchemaTransformation.optionFromNullOr()
@@ -8388,7 +8586,7 @@ export function OptionFromNullOr<S extends Top>(schema: S): OptionFromNullOr<S> 
  * @category Option
  * @since 3.10.0
  */
-export interface OptionFromUndefinedOr<S extends Top> extends decodeTo<Option<toType<S>>, UndefinedOr<S>> {
+export interface OptionFromUndefinedOr<S extends Constraint> extends decodeTo<Option<toType<S>>, UndefinedOr<S>> {
   readonly "Rebuild": OptionFromUndefinedOr<S>
 }
 
@@ -8404,7 +8602,7 @@ export interface OptionFromUndefinedOr<S extends Top> extends decodeTo<Option<to
  * @category Option
  * @since 3.10.0
  */
-export function OptionFromUndefinedOr<S extends Top>(schema: S): OptionFromUndefinedOr<S> {
+export function OptionFromUndefinedOr<S extends Constraint>(schema: S): OptionFromUndefinedOr<S> {
   return UndefinedOr(schema).pipe(decodeTo(
     Option(toType(schema)),
     SchemaTransformation.optionFromUndefinedOr()
@@ -8417,7 +8615,7 @@ export function OptionFromUndefinedOr<S extends Top>(schema: S): OptionFromUndef
  * @category Option
  * @since 3.10.0
  */
-export interface OptionFromNullishOr<S extends Top> extends decodeTo<Option<toType<S>>, NullishOr<S>> {
+export interface OptionFromNullishOr<S extends Constraint> extends decodeTo<Option<toType<S>>, NullishOr<S>> {
   readonly "Rebuild": OptionFromNullishOr<S>
 }
 
@@ -8434,7 +8632,7 @@ export interface OptionFromNullishOr<S extends Top> extends decodeTo<Option<toTy
  * @category Option
  * @since 3.10.0
  */
-export function OptionFromNullishOr<S extends Top>(
+export function OptionFromNullishOr<S extends Constraint>(
   schema: S,
   options?: {
     onNoneEncoding: null | undefined
@@ -8452,7 +8650,7 @@ export function OptionFromNullishOr<S extends Top>(
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromOptionalKey<S extends Top> extends decodeTo<Option<toType<S>>, optionalKey<S>> {
+export interface OptionFromOptionalKey<S extends Constraint> extends decodeTo<Option<toType<S>>, optionalKey<S>> {
   readonly "Rebuild": OptionFromOptionalKey<S>
 }
 
@@ -8467,7 +8665,7 @@ export interface OptionFromOptionalKey<S extends Top> extends decodeTo<Option<to
  * @category Option
  * @since 4.0.0
  */
-export function OptionFromOptionalKey<S extends Top>(schema: S): OptionFromOptionalKey<S> {
+export function OptionFromOptionalKey<S extends Constraint>(schema: S): OptionFromOptionalKey<S> {
   return optionalKey(schema).pipe(decodeTo(
     Option(toType(schema)),
     SchemaTransformation.optionFromOptionalKey()
@@ -8480,7 +8678,7 @@ export function OptionFromOptionalKey<S extends Top>(schema: S): OptionFromOptio
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromOptional<S extends Top> extends decodeTo<Option<toType<S>>, optional<S>> {
+export interface OptionFromOptional<S extends Constraint> extends decodeTo<Option<toType<S>>, optional<S>> {
   readonly "Rebuild": OptionFromOptional<S>
 }
 
@@ -8497,7 +8695,7 @@ export interface OptionFromOptional<S extends Top> extends decodeTo<Option<toTyp
  * @category Option
  * @since 4.0.0
  */
-export function OptionFromOptional<S extends Top>(schema: S): OptionFromOptional<S> {
+export function OptionFromOptional<S extends Constraint>(schema: S): OptionFromOptional<S> {
   return optional(schema).pipe(decodeTo(
     Option(toType(schema)),
     SchemaTransformation.optionFromOptional<any>()
@@ -8510,7 +8708,9 @@ export function OptionFromOptional<S extends Top>(schema: S): OptionFromOptional
  * @category Option
  * @since 4.0.0
  */
-export interface OptionFromOptionalNullOr<S extends Top> extends decodeTo<Option<toType<S>>, optional<NullOr<S>>> {
+export interface OptionFromOptionalNullOr<S extends Constraint>
+  extends decodeTo<Option<toType<S>>, optional<NullOr<S>>>
+{
   readonly "Rebuild": OptionFromOptionalNullOr<S>
 }
 
@@ -8528,7 +8728,7 @@ export interface OptionFromOptionalNullOr<S extends Top> extends decodeTo<Option
  * @category Option
  * @since 4.0.0
  */
-export function OptionFromOptionalNullOr<S extends Top>(
+export function OptionFromOptionalNullOr<S extends Constraint>(
   schema: S,
   options?: {
     readonly onNoneEncoding: "omit" | null | undefined
@@ -8555,7 +8755,7 @@ export function OptionFromOptionalNullOr<S extends Top>(
  * @category schemas
  * @since 4.0.0
  */
-export interface Result<A extends Top, E extends Top> extends
+export interface Result<A extends Constraint, E extends Constraint> extends
   declareConstructor<
     Result_.Result<A["Type"], E["Type"]>,
     Result_.Result<A["Encoded"], E["Encoded"]>,
@@ -8579,7 +8779,7 @@ export interface Result<A extends Top, E extends Top> extends
  * @category schemas
  * @since 4.0.0
  */
-export type ResultIso<A extends Top, E extends Top> =
+export type ResultIso<A extends Constraint, E extends Constraint> =
   | { readonly _tag: "Success"; readonly success: A["Iso"] }
   | { readonly _tag: "Failure"; readonly failure: E["Iso"] }
 
@@ -8589,7 +8789,7 @@ export type ResultIso<A extends Top, E extends Top> =
  * @category schemas
  * @since 4.0.0
  */
-export function Result<A extends Top, E extends Top>(
+export function Result<A extends Constraint, E extends Constraint>(
   success: A,
   failure: E
 ): Result<A, E> {
@@ -8672,7 +8872,7 @@ export function Result<A extends Top, E extends Top>(
  * @category Redacted
  * @since 3.10.0
  */
-export interface Redacted<S extends Top> extends
+export interface Redacted<S extends Constraint> extends
   declareConstructor<
     Redacted_.Redacted<S["Type"]>,
     Redacted_.Redacted<S["Encoded"]>,
@@ -8703,10 +8903,11 @@ export interface Redacted<S extends Top> extends
  *   into JSON, it will fail with an error. This is useful when the wrapped schema is
  *   sensitive and should not be exposed in JSON.
  *
+ * @see {@link RedactedFromValue} for decoding raw values and wrapping them in `Redacted`.
  * @category Redacted
  * @since 3.10.0
  */
-export function Redacted<S extends Top>(value: S, options?: {
+export function Redacted<S extends Constraint>(value: S, options?: {
   readonly label?: string | undefined
   readonly disallowJsonEncode?: boolean | undefined
 }): Redacted<S> {
@@ -8783,7 +8984,7 @@ export function Redacted<S extends Top>(value: S, options?: {
  * @category Redacted
  * @since 4.0.0
  */
-export interface RedactedFromValue<S extends Top>
+export interface RedactedFromValue<S extends Constraint>
   extends decodeTo<Redacted<toType<S>>, middlewareDecoding<S, S["DecodingServices"]>>
 {
   readonly "Rebuild": RedactedFromValue<S>
@@ -8796,8 +8997,8 @@ export interface RedactedFromValue<S extends Top>
  * @category Redacted
  * @since 4.0.0
  */
-export function redact<S extends Top>(schema: S): middlewareDecoding<S, S["DecodingServices"]> {
-  return schema.pipe(middlewareDecoding(Effect.mapErrorEager(SchemaIssue.redact)))
+export function redact<S extends Constraint>(schema: S): middlewareDecoding<S, S["DecodingServices"]> {
+  return middlewareDecoding<S, S["DecodingServices"]>(Effect.mapErrorEager(SchemaIssue.redact))(schema)
 }
 
 /**
@@ -8805,10 +9006,11 @@ export function redact<S extends Top>(schema: S): middlewareDecoding<S, S["Decod
  * expects the input to already be a `Redacted` instance, this schema decodes
  * the raw value and wraps it.
  *
+ * @see {@link Redacted} for schemas whose input is already a `Redacted` value.
  * @category Redacted
  * @since 4.0.0
  */
-export function RedactedFromValue<S extends Top>(value: S, options?: {
+export function RedactedFromValue<S extends Constraint>(value: S, options?: {
   readonly label?: string | undefined
   readonly disallowEncode?: boolean | undefined
 }): RedactedFromValue<S> {
@@ -8837,7 +9039,7 @@ export function RedactedFromValue<S extends Top>(value: S, options?: {
  * @category CauseReason
  * @since 4.0.0
  */
-export interface CauseReason<E extends Top, D extends Top> extends
+export interface CauseReason<E extends Constraint, D extends Constraint> extends
   declareConstructor<
     Cause_.Reason<E["Type"]>,
     Cause_.Reason<E["Encoded"]>,
@@ -8861,7 +9063,7 @@ export interface CauseReason<E extends Top, D extends Top> extends
  * @category CauseReason
  * @since 4.0.0
  */
-export type CauseReasonIso<E extends Top, D extends Top> = {
+export type CauseReasonIso<E extends Constraint, D extends Constraint> = {
   readonly _tag: "Fail"
   readonly error: E["Iso"]
 } | {
@@ -8892,7 +9094,7 @@ export type CauseReasonIso<E extends Top, D extends Top> = {
  * @category CauseReason
  * @since 4.0.0
  */
-export function CauseReason<E extends Top, D extends Top>(error: E, defect: D): CauseReason<E, D> {
+export function CauseReason<E extends Constraint, D extends Constraint>(error: E, defect: D): CauseReason<E, D> {
   const schema = declareConstructor<Cause_.Reason<E["Type"]>, Cause_.Reason<E["Encoded"]>, CauseReasonIso<E, D>>()(
     [error, defect],
     ([error, defect]) => (input, ast, options) => {
@@ -9010,7 +9212,7 @@ function causeReasonToFormatter<E>(error: Formatter<E>, defect: Formatter<unknow
  * @category Cause
  * @since 3.10.0
  */
-export interface Cause<E extends Top, D extends Top> extends
+export interface Cause<E extends Constraint, D extends Constraint> extends
   declareConstructor<
     Cause_.Cause<E["Type"]>,
     Cause_.Cause<E["Encoded"]>,
@@ -9038,7 +9240,7 @@ export interface Cause<E extends Top, D extends Top> extends
  * @category Cause
  * @since 4.0.0
  */
-export type CauseIso<E extends Top, D extends Top> = ReadonlyArray<CauseReasonIso<E, D>>
+export type CauseIso<E extends Constraint, D extends Constraint> = ReadonlyArray<CauseReasonIso<E, D>>
 
 /**
  * Creates a schema for `Cause` values using separate schemas for typed failures
@@ -9061,7 +9263,7 @@ export type CauseIso<E extends Top, D extends Top> = ReadonlyArray<CauseReasonIs
  * @category Cause
  * @since 3.10.0
  */
-export function Cause<E extends Top, D extends Top>(error: E, defect: D): Cause<E, D> {
+export function Cause<E extends Constraint, D extends Constraint>(error: E, defect: D): Cause<E, D> {
   const schema = declareConstructor<Cause_.Cause<E["Type"]>, Cause_.Cause<E["Encoded"]>, CauseIso<E, D>>()(
     [error, defect],
     ([error, defect]) => {
@@ -9287,7 +9489,7 @@ export function Defect(options?: ErrorOptions): Defect {
  * @category Exit
  * @since 3.10.0
  */
-export interface Exit<A extends Top, E extends Top, D extends Top> extends
+export interface Exit<A extends Constraint, E extends Constraint, D extends Constraint> extends
   declareConstructor<
     Exit_.Exit<A["Type"], E["Type"]>,
     Exit_.Exit<A["Encoded"], E["Encoded"]>,
@@ -9312,7 +9514,7 @@ export interface Exit<A extends Top, E extends Top, D extends Top> extends
  * @category Exit
  * @since 4.0.0
  */
-export type ExitIso<A extends Top, E extends Top, D extends Top> = {
+export type ExitIso<A extends Constraint, E extends Constraint, D extends Constraint> = {
   readonly _tag: "Success"
   readonly value: A["Iso"]
 } | {
@@ -9332,7 +9534,11 @@ export type ExitIso<A extends Top, E extends Top, D extends Top> = {
  * @category Exit
  * @since 3.10.0
  */
-export function Exit<A extends Top, E extends Top, D extends Top>(value: A, error: E, defect: D): Exit<A, E, D> {
+export function Exit<A extends Constraint, E extends Constraint, D extends Constraint>(
+  value: A,
+  error: E,
+  defect: D
+): Exit<A, E, D> {
   const schema = declareConstructor<
     Exit_.Exit<A["Type"], E["Type"]>,
     Exit_.Exit<A["Encoded"], E["Encoded"]>,
@@ -9439,7 +9645,7 @@ export function Exit<A extends Top, E extends Top, D extends Top>(value: A, erro
  * @category ReadonlyMap
  * @since 4.0.0
  */
-export interface $ReadonlyMap<Key extends Top, Value extends Top> extends
+export interface $ReadonlyMap<Key extends Constraint, Value extends Constraint> extends
   declareConstructor<
     globalThis.ReadonlyMap<Key["Type"], Value["Type"]>,
     globalThis.ReadonlyMap<Key["Encoded"], Value["Encoded"]>,
@@ -9459,7 +9665,9 @@ export interface $ReadonlyMap<Key extends Top, Value extends Top> extends
  * @category ReadonlyMap
  * @since 4.0.0
  */
-export type ReadonlyMapIso<Key extends Top, Value extends Top> = ReadonlyArray<readonly [Key["Iso"], Value["Iso"]]>
+export type ReadonlyMapIso<Key extends Constraint, Value extends Constraint> = ReadonlyArray<
+  readonly [Key["Iso"], Value["Iso"]]
+>
 
 function oneOfArbitraries<T>(
   fc: typeof FastCheck,
@@ -9558,7 +9766,10 @@ function entriesArbitrary<K, V, Out>(
  * @category ReadonlyMap
  * @since 3.10.0
  */
-export function ReadonlyMap<Key extends Top, Value extends Top>(key: Key, value: Value): $ReadonlyMap<Key, Value> {
+export function ReadonlyMap<Key extends Constraint, Value extends Constraint>(
+  key: Key,
+  value: Value
+): $ReadonlyMap<Key, Value> {
   const schema = declareConstructor<
     globalThis.ReadonlyMap<Key["Type"], Value["Type"]>,
     globalThis.ReadonlyMap<Key["Encoded"], Value["Encoded"]>,
@@ -9619,7 +9830,7 @@ export function ReadonlyMap<Key extends Top, Value extends Top>(key: Key, value:
  * @category HashMap
  * @since 3.10.0
  */
-export interface HashMap<Key extends Top, Value extends Top> extends
+export interface HashMap<Key extends Constraint, Value extends Constraint> extends
   declareConstructor<
     HashMap_.HashMap<Key["Type"], Value["Type"]>,
     HashMap_.HashMap<Key["Encoded"], Value["Encoded"]>,
@@ -9639,7 +9850,9 @@ export interface HashMap<Key extends Top, Value extends Top> extends
  * @category HashMap
  * @since 4.0.0
  */
-export type HashMapIso<Key extends Top, Value extends Top> = ReadonlyArray<readonly [Key["Iso"], Value["Iso"]]>
+export type HashMapIso<Key extends Constraint, Value extends Constraint> = ReadonlyArray<
+  readonly [Key["Iso"], Value["Iso"]]
+>
 
 /**
  * Schema for hash maps whose keys and values conform to the provided schemas.
@@ -9647,7 +9860,7 @@ export type HashMapIso<Key extends Top, Value extends Top> = ReadonlyArray<reado
  * @category HashMap
  * @since 3.10.0
  */
-export function HashMap<Key extends Top, Value extends Top>(key: Key, value: Value): HashMap<Key, Value> {
+export function HashMap<Key extends Constraint, Value extends Constraint>(key: Key, value: Value): HashMap<Key, Value> {
   const schema = declareConstructor<
     HashMap_.HashMap<Key["Type"], Value["Type"]>,
     HashMap_.HashMap<Key["Encoded"], Value["Encoded"]>,
@@ -9709,7 +9922,7 @@ export function HashMap<Key extends Top, Value extends Top>(key: Key, value: Val
  * @category ReadonlySet
  * @since 4.0.0
  */
-export interface $ReadonlySet<Value extends Top> extends
+export interface $ReadonlySet<Value extends Constraint> extends
   declareConstructor<
     globalThis.ReadonlySet<Value["Type"]>,
     globalThis.ReadonlySet<Value["Encoded"]>,
@@ -9728,7 +9941,7 @@ export interface $ReadonlySet<Value extends Top> extends
  * @category ReadonlySet
  * @since 4.0.0
  */
-export type ReadonlySetIso<Value extends Top> = ReadonlyArray<Value["Iso"]>
+export type ReadonlySetIso<Value extends Constraint> = ReadonlyArray<Value["Iso"]>
 
 /**
  * Schema for readonly sets whose values conform to the provided element schema.
@@ -9736,7 +9949,7 @@ export type ReadonlySetIso<Value extends Top> = ReadonlyArray<Value["Iso"]>
  * @category ReadonlySet
  * @since 3.10.0
  */
-export function ReadonlySet<Value extends Top>(value: Value): $ReadonlySet<Value> {
+export function ReadonlySet<Value extends Constraint>(value: Value): $ReadonlySet<Value> {
   const schema = declareConstructor<
     globalThis.ReadonlySet<Value["Type"]>,
     globalThis.ReadonlySet<Value["Encoded"]>,
@@ -9798,7 +10011,7 @@ export function ReadonlySet<Value extends Top>(value: Value): $ReadonlySet<Value
  * @category HashSet
  * @since 3.10.0
  */
-export interface HashSet<Value extends Top> extends
+export interface HashSet<Value extends Constraint> extends
   declareConstructor<
     HashSet_.HashSet<Value["Type"]>,
     HashSet_.HashSet<Value["Encoded"]>,
@@ -9817,7 +10030,7 @@ export interface HashSet<Value extends Top> extends
  * @category HashSet
  * @since 4.0.0
  */
-export type HashSetIso<Value extends Top> = ReadonlyArray<Value["Iso"]>
+export type HashSetIso<Value extends Constraint> = ReadonlyArray<Value["Iso"]>
 
 /**
  * Schema for hash sets whose values conform to the provided element schema.
@@ -9825,7 +10038,7 @@ export type HashSetIso<Value extends Top> = ReadonlyArray<Value["Iso"]>
  * @category HashSet
  * @since 3.10.0
  */
-export function HashSet<Value extends Top>(value: Value): HashSet<Value> {
+export function HashSet<Value extends Constraint>(value: Value): HashSet<Value> {
   const schema = declareConstructor<
     HashSet_.HashSet<Value["Type"]>,
     HashSet_.HashSet<Value["Encoded"]>,
@@ -9887,7 +10100,7 @@ export function HashSet<Value extends Top>(value: Value): HashSet<Value> {
  * @category Chunk
  * @since 3.10.0
  */
-export interface Chunk<Value extends Top> extends
+export interface Chunk<Value extends Constraint> extends
   declareConstructor<
     Chunk_.Chunk<Value["Type"]>,
     Chunk_.Chunk<Value["Encoded"]>,
@@ -9913,7 +10126,7 @@ export interface Chunk<Value extends Top> extends
  * @category Chunk
  * @since 4.0.0
  */
-export type ChunkIso<Value extends Top> = ReadonlyArray<Value["Iso"]>
+export type ChunkIso<Value extends Constraint> = ReadonlyArray<Value["Iso"]>
 
 /**
  * Schema for chunks whose values conform to the provided element schema.
@@ -9921,7 +10134,7 @@ export type ChunkIso<Value extends Top> = ReadonlyArray<Value["Iso"]>
  * @category Chunk
  * @since 3.10.0
  */
-export function Chunk<Value extends Top>(value: Value): Chunk<Value> {
+export function Chunk<Value extends Constraint>(value: Value): Chunk<Value> {
   const schema = declareConstructor<
     Chunk_.Chunk<Value["Type"]>,
     Chunk_.Chunk<Value["Encoded"]>,
@@ -10139,7 +10352,7 @@ type DateArbitraryConstraints = FastCheck.DateConstraints & {
 }
 
 function dateArbitraryConstraints<T = globalThis.Date>(
-  constraint: Annotations.ToArbitrary.Constraint | undefined,
+  constraint: Annotations.ToArbitrary.GenerationConstraint | undefined,
   ordered: Annotations.ToArbitrary.OrderedConstraint<T> | undefined,
   base?: DateArbitraryConstraints | undefined,
   toDate?: (value: T) => globalThis.Date
@@ -10697,7 +10910,7 @@ export const UnknownFromJsonString: UnknownFromJsonString = fromJsonString(Unkno
  * @category models
  * @since 4.0.0
  */
-export interface fromJsonString<S extends Top> extends decodeTo<S, String> {
+export interface fromJsonString<S extends Constraint> extends decodeTo<S, String> {
   readonly "Rebuild": fromJsonString<S>
 }
 
@@ -10767,8 +10980,11 @@ export interface fromJsonString<S extends Top> extends decodeTo<S, String> {
  * @category constructors
  * @since 4.0.0
  */
-export function fromJsonString<S extends Top>(schema: S): fromJsonString<S> {
+export function fromJsonString<S extends Constraint>(schema: S): fromJsonString<S> {
+  const identifier = SchemaAST.resolveIdentifier(schema.ast)
   return String.annotate({
+    // Give the transport wrapper its own name so the decoded payload keeps its identifier.
+    identifier: identifier === undefined ? undefined : `${identifier}JsonString`,
     expected: "a string that will be decoded as JSON",
     contentMediaType: "application/json",
     contentSchema: SchemaAST.toEncoded(schema.ast)
@@ -10919,7 +11135,7 @@ export const FormData: FormData = instanceOf(globalThis.FormData, {
  * @category FormData
  * @since 4.0.0
  */
-export interface fromFormData<S extends Top> extends decodeTo<S, FormData> {
+export interface fromFormData<S extends Constraint> extends decodeTo<S, FormData> {
   readonly "Rebuild": fromFormData<S>
 }
 
@@ -10939,10 +11155,8 @@ export interface fromFormData<S extends Top> extends decodeTo<S, FormData> {
  *
  * You can express nested values using bracket notation.
  *
- * If you want to decode values that are not strings, use
- * `Schema.toCodecStringTree` with the `keepDeclarations: true` option.
- * This serializer preserves values such as numbers and `Blob` objects when
- * compatible with the schema.
+ * If you want to decode string fields into non-string primitive values, use
+ * `Schema.toCodecStringTree`.
  *
  * **Example** (Decoding a flat structure)
  *
@@ -10996,8 +11210,7 @@ export interface fromFormData<S extends Top> extends decodeTo<S, FormData> {
  *   Schema.toCodecStringTree(
  *     Schema.Struct({
  *       a: Schema.Int
- *     }),
- *     { keepDeclarations: true }
+ *     })
  *   )
  * )
  *
@@ -11011,7 +11224,7 @@ export interface fromFormData<S extends Top> extends decodeTo<S, FormData> {
  * @category decoding
  * @since 4.0.0
  */
-export function fromFormData<S extends Top>(schema: S): fromFormData<S> {
+export function fromFormData<S extends Constraint>(schema: S): fromFormData<S> {
   return FormData.pipe(decodeTo(schema, SchemaTransformation.fromFormData))
 }
 
@@ -11060,7 +11273,7 @@ export const URLSearchParams: URLSearchParams = instanceOf(globalThis.URLSearchP
  * @category search params
  * @since 4.0.0
  */
-export interface fromURLSearchParams<S extends Top> extends decodeTo<S, URLSearchParams> {
+export interface fromURLSearchParams<S extends Constraint> extends decodeTo<S, URLSearchParams> {
   readonly "Rebuild": fromURLSearchParams<S>
 }
 
@@ -11144,7 +11357,7 @@ export interface fromURLSearchParams<S extends Top> extends decodeTo<S, URLSearc
  * @category decoding
  * @since 4.0.0
  */
-export function fromURLSearchParams<S extends Top>(schema: S): fromURLSearchParams<S> {
+export function fromURLSearchParams<S extends Constraint>(schema: S): fromURLSearchParams<S> {
   return URLSearchParams.pipe(decodeTo(schema, SchemaTransformation.fromURLSearchParams))
 }
 
@@ -12163,18 +12376,11 @@ export const DateTimeZonedFromString: DateTimeZonedFromString = DateTimeZonedStr
  * @category models
  * @since 3.10.0
  */
-export interface Class<Self, S extends Top & { readonly fields: Struct.Fields }, Inherited> extends
-  Bottom<
-    Self,
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface Class<Self, S extends Constraint & { readonly fields: Struct.Fields }, Inherited> extends
+  BottomLazy<
     SchemaAST.Declaration,
     decodeTo<declareConstructor<Self, S["Encoded"], readonly [S], S["Iso"]>, S>,
-    RequiredKeys<S["~type.make.in"]> extends never ? void | S["~type.make.in"] : S["~type.make.in"],
-    S["Iso"],
     readonly [S],
-    Self,
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -12182,6 +12388,14 @@ export interface Class<Self, S extends Top & { readonly fields: Struct.Fields },
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": Self
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": RequiredKeys<S["~type.make.in"]> extends never ? void | S["~type.make.in"]
+    : S["~type.make.in"]
+  readonly "~type.make": Self
+  readonly "Iso": S["Iso"]
   new(
     ...args: {} extends S["~type.make.in"] ? [props?: S["~type.make.in"], options?: MakeOptions]
       : [props: S["~type.make.in"], options?: MakeOptions]
@@ -12262,6 +12476,8 @@ type InheritStaticMembers<C, Static> = C & Pick<Static, Exclude<keyof Static, ke
 
 const immerable: unique symbol = globalThis.Symbol.for("immer-draftable") as any
 
+const payloadToken = {}
+
 function makeClass<
   Self,
   S extends Struct<Struct.Fields>,
@@ -12278,9 +12494,12 @@ function makeClass<
 
   const out = class extends Inherited {
     constructor(...[input, options]: ReadonlyArray<any>) {
-      input = input ?? {}
-      const validated = struct.make(input, options)
-      super({ ...input, ...validated }, { ...options, disableChecks: true })
+      const internalOptions = options as MakeOptions | undefined
+      const payload = internalOptions?.["~payload"]
+      const value = payload?.token === payloadToken
+        ? payload.value
+        : struct.make(input ?? {}, options)
+      super(value, { ...options, disableChecks: true, "~payload": { token: payloadToken, value } })
     }
 
     static readonly [TypeId] = TypeId
@@ -12368,7 +12587,7 @@ function getClassTypeId(identifier: string) {
   return `~effect/Schema/Class/${identifier}`
 }
 
-function getClassSchemaFactory<S extends Top>(
+function getClassSchemaFactory<S extends Constraint>(
   from: S,
   identifier: string,
   annotations: Annotations.Declaration<any, readonly [S]> | undefined
@@ -12377,34 +12596,34 @@ function getClassSchemaFactory<S extends Top>(
   return <Self extends (new(...args: ReadonlyArray<any>) => any) & { readonly identifier: string }>(
     self: Self
   ): decodeTo<declareConstructor<Self, S["Encoded"], readonly [S]>, S> => {
-    if (memo === undefined) {
-      const transformation = getClassTransformation(self)
-      const to = make<declareConstructor<Self, S["Encoded"], readonly [S]>>(
-        new SchemaAST.Declaration(
-          [from.ast],
-          () => (input, ast) => {
-            return input instanceof self ||
-                Predicate.hasProperty(input, getClassTypeId(identifier)) ?
-              Effect.succeed(input) :
-              Effect.fail(new SchemaIssue.InvalidType(ast, Option_.some(input)))
-          },
-          {
-            identifier,
-            [SchemaAST.ClassTypeId]: ([from]: readonly [SchemaAST.AST]) => new SchemaAST.Link(from, transformation),
-            toCodec: ([from]: readonly [Codec<S["Encoded"]>]) => new SchemaAST.Link(from.ast, transformation),
-            toArbitrary: ([from]: readonly [Annotations.ToArbitrary.TypeParameter<S["Type"]>]) => () => ({
-              arbitrary: from.arbitrary.map((args: S["Type"]) => new self(args)),
-              terminal: from.terminal?.map((args: S["Type"]) => new self(args))
-            }),
-            toFormatter: ([from]: readonly [Formatter<S["Type"]>]) => (t: Self) => `${self.identifier}(${from(t)})`,
-            "~sentinels": SchemaAST.collectSentinels(from.ast),
-            ...annotations
-          }
-        )
-      )
-      memo = from.pipe(decodeTo(to, transformation))
+    if (memo !== undefined) {
+      return memo
     }
-    return memo
+    const transformation = getClassTransformation(self)
+    const to = make<declareConstructor<Self, S["Encoded"], readonly [S]>>(
+      new SchemaAST.Declaration(
+        [from.ast],
+        () => (input, ast) => {
+          return input instanceof self ||
+              Predicate.hasProperty(input, getClassTypeId(identifier)) ?
+            Effect.succeed(input) :
+            Effect.fail(new SchemaIssue.InvalidType(ast, Option_.some(input)))
+        },
+        {
+          identifier,
+          [SchemaAST.ClassTypeId]: ([from]: readonly [SchemaAST.AST]) => new SchemaAST.Link(from, transformation),
+          toCodec: ([from]: readonly [Codec<S["Encoded"]>]) => new SchemaAST.Link(from.ast, transformation),
+          toArbitrary: ([from]: readonly [Annotations.ToArbitrary.TypeParameter<S["Type"]>]) => () => ({
+            arbitrary: from.arbitrary.map((args: S["Type"]) => new self(args)),
+            terminal: from.terminal?.map((args: S["Type"]) => new self(args))
+          }),
+          toFormatter: ([from]: readonly [Formatter<S["Type"]>]) => (t: Self) => `${self.identifier}(${from(t)})`,
+          "~sentinels": SchemaAST.collectSentinels(from.ast),
+          ...annotations
+        }
+      )
+    )
+    return memo = decodeTo<declareConstructor<Self, S["Encoded"], readonly [S]>, S>(to, transformation)(from)
   }
 }
 
@@ -12714,7 +12933,7 @@ export type LazyArbitrary<T> = (fc: typeof FastCheck) => FastCheck.Arbitrary<T>
  * @category Arbitrary
  * @since 4.0.0
  */
-export function toArbitraryLazy<S extends Top>(schema: S): LazyArbitrary<S["Type"]> {
+export function toArbitraryLazy<S extends Constraint>(schema: S): LazyArbitrary<S["Type"]> {
   const lawc = InternalArbitrary.memoized(schema.ast)
   return (fc) => lawc(fc, {})
 }
@@ -12748,12 +12967,12 @@ export function toArbitraryLazy<S extends Top>(schema: S): LazyArbitrary<S["Type
  * @category Arbitrary
  * @since 4.0.0
  */
-export function toArbitrary<S extends Top>(schema: S): FastCheck.Arbitrary<S["Type"]>
-export function toArbitrary<S extends Top>(
+export function toArbitrary<S extends Constraint>(schema: S): FastCheck.Arbitrary<S["Type"]>
+export function toArbitrary<S extends Constraint>(
   schema: S,
   options: { readonly report: true }
 ): Annotations.ToArbitrary.WithReport<FastCheck.Arbitrary<S["Type"]>>
-export function toArbitrary<S extends Top>(
+export function toArbitrary<S extends Constraint>(
   schema: S,
   options?: { readonly report?: boolean }
 ): FastCheck.Arbitrary<S["Type"]> | Annotations.ToArbitrary.WithReport<FastCheck.Arbitrary<S["Type"]>> {
@@ -12804,14 +13023,14 @@ export function overrideToFormatter<S extends Top>(toFormatter: () => Formatter<
  * @category Formatter
  * @since 4.0.0
  */
-export function toFormatter<T>(schema: Schema<T>, options?: {
+export function toFormatter<S extends Constraint>(schema: S, options?: {
   readonly onBefore?:
     | ((ast: SchemaAST.AST, recur: (ast: SchemaAST.AST) => Formatter<any>) => Formatter<any> | undefined)
     | undefined
-}): Formatter<T> {
+}): Formatter<S["Type"]> {
   return recur(schema.ast)
 
-  function recur(ast: SchemaAST.AST): Formatter<T> {
+  function recur(ast: SchemaAST.AST): Formatter<S["Type"]> {
     // ---------------------------------------------
     // handle annotation
     // ---------------------------------------------
@@ -12995,7 +13214,7 @@ export function toEquivalence<T>(schema: Schema<T>): Equivalence.Equivalence<T> 
  * @category Representation
  * @since 4.0.0
  */
-export function toRepresentation(schema: Top): SchemaRepresentation.Document {
+export function toRepresentation(schema: Constraint): SchemaRepresentation.Document {
   return InternalStandard.fromAST(schema.ast)
 }
 
@@ -13096,7 +13315,10 @@ export interface ToJsonSchemaOptions {
  * @category converting
  * @since 4.0.0
  */
-export function toJsonSchemaDocument(schema: Top, options?: ToJsonSchemaOptions): JsonSchema.Document<"draft-2020-12"> {
+export function toJsonSchemaDocument(
+  schema: Constraint,
+  options?: ToJsonSchemaOptions
+): JsonSchema.Document<"draft-2020-12"> {
   const sd = toRepresentation(schema)
   const jd = InternalStandard.toJsonSchemaDocument(sd, options)
   return {
@@ -13111,17 +13333,45 @@ export function toJsonSchemaDocument(schema: Top, options?: ToJsonSchemaOptions)
 // -----------------------------------------------------------------------------
 
 /**
+ * Type-level representation returned by {@link toCodecJson}.
+ *
+ * @category Canonical Codecs
+ * @since 4.0.0
+ */
+export interface toCodecJson<S extends Constraint> extends
+  BottomLazy<
+    S["ast"],
+    toCodecJson<S>,
+    S["~type.parameters"],
+    S["~type.mutability"],
+    S["~type.optionality"],
+    S["~type.constructor.default"],
+    S["~encoded.mutability"],
+    S["~encoded.optionality"]
+  >
+{
+  readonly "Type": S["Type"]
+  readonly "Encoded": Json
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
+  readonly schema: S
+}
+
+/**
  * Derives a canonical JSON codec from a schema. The encoded form is `Json`, and
  * decoding produces the schema's `Type`.
  *
  * @category Canonical Codecs
  * @since 4.0.0
  */
-export function toCodecJson<T, E, RD, RE>(schema: Codec<T, E, RD, RE>): Codec<T, Json, RD, RE> {
-  return make(toCodecJsonTop(schema.ast))
+export function toCodecJson<S extends Constraint>(schema: S): toCodecJson<S> {
+  return make(toCodecJsonTop(schema.ast), { schema })
 }
 
-const toCodecJsonTop = SchemaAST.toCodec((ast) => {
+const toCodecJsonTop = SchemaAST.applyToSelfOrLastLinkEncoding((ast) => {
   const out = toCodecJsonBase(ast, toCodecJsonTop)
   return out !== ast && SchemaAST.isOptional(ast) ? SchemaAST.optionalKeyLastLink(out) : out
 })
@@ -13188,7 +13438,7 @@ function toCodecJsonBase(ast: SchemaAST.AST, recur: (ast: SchemaAST.AST) => Sche
  * @category Canonical Codecs
  * @since 4.0.0
  */
-export function toCodecIso<S extends Top>(schema: S): Codec<S["Type"], S["Iso"]> {
+export function toCodecIso<S extends Constraint>(schema: S): Codec<S["Type"], S["Iso"]> {
   return make(toCodecIsoTop(SchemaAST.toType(schema.ast)))
 }
 
@@ -13227,6 +13477,34 @@ function toCodecIsoBase(ast: SchemaAST.AST, recur: (ast: SchemaAST.AST) => Schem
 export type StringTree = Tree<string | undefined>
 
 /**
+ * Type-level representation returned by {@link toCodecStringTree}.
+ *
+ * @category Canonical Codecs
+ * @since 4.0.0
+ */
+export interface toCodecStringTree<S extends Constraint> extends
+  BottomLazy<
+    S["ast"],
+    toCodecStringTree<S>,
+    ReadonlyArray<Constraint>,
+    S["~type.mutability"],
+    S["~type.optionality"],
+    S["~type.constructor.default"],
+    S["~encoded.mutability"],
+    S["~encoded.optionality"]
+  >
+{
+  readonly "Type": S["Type"]
+  readonly "Encoded": StringTree
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
+  readonly schema: S
+}
+
+/**
  * Converts a schema to the StringTree canonical codec, where every leaf value
  * becomes a string while preserving the original structure.
  *
@@ -13235,33 +13513,60 @@ export type StringTree = Tree<string | undefined>
  * Declarations are converted to `undefined` (unless they have a
  * `toCodecJson` or `toCodec` annotation).
  *
- * Options:
- *
- * - `keepDeclarations`: if `true`, it **does not** convert declarations to
- *   `undefined` but instead keeps them as they are (unless they have a
- *   `toCodecJson` or `toCodec` annotation).
- *
- *    Defaults to `false`.
+ * @category Canonical Codecs
+ * @since 4.0.0
+ */
+export function toCodecStringTree<S extends Constraint>(schema: S): toCodecStringTree<S> {
+  return make(serializerStringTree(schema.ast), { schema })
+}
+
+/**
+ * Type-level representation returned by {@link toCodecArrayFromSingle}.
  *
  * @category Canonical Codecs
  * @since 4.0.0
  */
-export function toCodecStringTree<T, E, RD, RE>(schema: Codec<T, E, RD, RE>): Codec<T, StringTree, RD, RE>
-export function toCodecStringTree<T, E, RD, RE>(
-  schema: Codec<T, E, RD, RE>,
-  options: { readonly keepDeclarations: true } // Used in FormData
-): Codec<T, unknown, RD, RE>
-export function toCodecStringTree<T, E, RD, RE>(
-  schema: Codec<T, E, RD, RE>,
-  options?: { readonly keepDeclarations?: boolean | undefined }
-): Codec<T, unknown, RD, RE> {
-  return make(
-    toCodecEnsureArray(
-      options?.keepDeclarations === true
-        ? serializerStringTreeKeepDeclarations(schema.ast)
-        : serializerStringTree(schema.ast)
-    )
-  )
+export interface toCodecArrayFromSingle<S extends Constraint> extends
+  BottomLazy<
+    S["ast"],
+    toCodecArrayFromSingle<S>,
+    S["~type.parameters"],
+    S["~type.mutability"],
+    S["~type.optionality"],
+    S["~type.constructor.default"],
+    S["~encoded.mutability"],
+    S["~encoded.optionality"]
+  >
+{
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": S["Iso"]
+}
+
+/**
+ * Allows array schemas to decode from either an array input or a single value
+ * input.
+ *
+ * **When to use**
+ *
+ * Use when you need to accept transport formats that may represent a
+ * single-item array as a bare value, such as query-string or form-data adapters.
+ *
+ * **Gotchas**
+ *
+ * This combinator is intentionally not part of `toCodecStringTree`; it adds a
+ * decoding convenience rather than a canonical StringTree representation. It
+ * does not parse comma-separated strings.
+ *
+ * @category Canonical Codecs
+ * @since 4.0.0
+ */
+export function toCodecArrayFromSingle<S extends Constraint>(schema: S): toCodecArrayFromSingle<S> {
+  return make(toCodecArrayFromSingleTop(schema.ast))
 }
 
 type XmlEncoderOptions = {
@@ -13477,7 +13782,15 @@ const booleanToString = new SchemaAST.Link(
   )
 )
 
-const serializerStringTree = SchemaAST.toCodec((ast) => {
+const SERIALIZER_ENSURE_ARRAY = "~effect/Schema/SERIALIZER_ENSURE_ARRAY"
+
+const isSerializerArrayFromSingle = (ast: SchemaAST.AST): boolean =>
+  SchemaAST.isUnion(ast) && ast.annotations?.[SERIALIZER_ENSURE_ARRAY] === true
+
+const serializerStringTree = SchemaAST.applyToSelfOrLastLinkEncoding((ast) => {
+  if (isSerializerArrayFromSingle(ast)) {
+    return ast
+  }
   const out = serializerTree(ast, serializerStringTree, (ast) => SchemaAST.replaceEncoding(ast, [unknownToUndefined]))
   if (out !== ast && SchemaAST.isOptional(ast)) {
     return SchemaAST.optionalKeyLastLink(out)
@@ -13493,53 +13806,46 @@ const unknownToUndefined = new SchemaAST.Link(
   )
 )
 
-const serializerStringTreeKeepDeclarations = SchemaAST.toCodec((ast) => {
-  const out = serializerTree(ast, serializerStringTreeKeepDeclarations, identity)
-  if (out !== ast && SchemaAST.isOptional(ast)) {
-    return SchemaAST.optionalKeyLastLink(out)
-  }
-  return out
-})
+const toArrayFromSingleInputElement = (ast: SchemaAST.AST): SchemaAST.AST =>
+  SchemaAST.isOptional(ast) ? SchemaAST.optionalKey(SchemaAST.unknown) : SchemaAST.unknown
 
-const SERIALIZER_ENSURE_ARRAY = "~effect/Schema/SERIALIZER_ENSURE_ARRAY"
+const arrayFromSingleTransformation = new SchemaTransformation.Transformation(
+  SchemaGetter.transform((input: ReadonlyArray<unknown> | string) => typeof input === "string" ? [input] : input),
+  SchemaGetter.passthrough()
+)
 
-const toCodecEnsureArray = SchemaAST.toCodec((ast) => {
-  if (SchemaAST.isUnion(ast) && ast.annotations?.[SERIALIZER_ENSURE_ARRAY]) {
+const toCodecArrayFromSingleTop = SchemaAST.applyToSelfOrLastLinkEncoding((ast) => {
+  if (isSerializerArrayFromSingle(ast)) {
     return ast
   }
-  const out = onSerializerEnsureArray(ast)
+  const out = onSerializerArrayFromSingle(ast)
   if (SchemaAST.isArrays(out)) {
-    const ensure = new SchemaAST.Union(
-      [
-        out,
-        SchemaAST.decodeTo(
-          SchemaAST.string,
-          out,
-          new SchemaTransformation.Transformation(
-            SchemaGetter.split(),
-            SchemaGetter.passthrough()
-          )
-        )
-      ],
-      "anyOf",
-      { [SERIALIZER_ENSURE_ARRAY]: true }
+    const ensure = SchemaAST.decodeTo(
+      new SchemaAST.Union(
+        [
+          new SchemaAST.Arrays(
+            out.isMutable,
+            out.elements.map(toArrayFromSingleInputElement),
+            out.rest.map(toArrayFromSingleInputElement)
+          ),
+          SchemaAST.string
+        ],
+        "anyOf",
+        { [SERIALIZER_ENSURE_ARRAY]: true }
+      ),
+      out,
+      arrayFromSingleTransformation
     )
     return SchemaAST.isOptional(ast) ? SchemaAST.optionalKey(ensure) : ensure
   }
   return out
 })
 
-function onSerializerEnsureArray(ast: SchemaAST.AST): SchemaAST.AST {
-  switch (ast._tag) {
-    default:
-      return ast
-    case "Declaration":
-    case "Arrays":
-    case "Objects":
-    case "Union":
-    case "Suspend":
-      return ast.recur(toCodecEnsureArray)
-  }
+function onSerializerArrayFromSingle(ast: SchemaAST.AST): SchemaAST.AST {
+  return ast._tag === "Declaration" || ast._tag === "Arrays" || ast._tag === "Objects" || ast._tag === "Union" ||
+      ast._tag === "Suspend"
+    ? ast.recur(toCodecArrayFromSingleTop)
+    : ast
 }
 
 // -----------------------------------------------------------------------------
@@ -13553,7 +13859,7 @@ function onSerializerEnsureArray(ast: SchemaAST.AST): SchemaAST.AST {
  * @category Optic
  * @since 4.0.0
  */
-export function toIso<S extends Top>(schema: S): Optic_.Iso<S["Type"], S["Iso"]> {
+export function toIso<S extends Constraint>(schema: S): Optic_.Iso<S["Type"], S["Iso"]> {
   const serializer = toCodecIso(schema)
   return Optic_.makeIso(SchemaParser.encodeSync(serializer), SchemaParser.decodeSync(serializer))
 }
@@ -13564,7 +13870,7 @@ export function toIso<S extends Top>(schema: S): Optic_.Iso<S["Type"], S["Iso"]>
  * @category Optic
  * @since 4.0.0
  */
-export function toIsoSource<S extends Top>(_: S): Optic_.Iso<S["Type"], S["Type"]> {
+export function toIsoSource<S extends Constraint>(_: S): Optic_.Iso<S["Type"], S["Type"]> {
   return Optic_.id()
 }
 
@@ -13574,7 +13880,7 @@ export function toIsoSource<S extends Top>(_: S): Optic_.Iso<S["Type"], S["Type"
  * @category Optic
  * @since 4.0.0
  */
-export function toIsoFocus<S extends Top>(_: S): Optic_.Iso<S["Iso"], S["Iso"]> {
+export function toIsoFocus<S extends Constraint>(_: S): Optic_.Iso<S["Iso"], S["Iso"]> {
   return Optic_.id()
 }
 
@@ -13584,18 +13890,11 @@ export function toIsoFocus<S extends Top>(_: S): Optic_.Iso<S["Iso"], S["Iso"]> 
  * @category Optic
  * @since 4.0.0
  */
-export interface overrideToCodecIso<S extends Top, Iso> extends
-  Bottom<
-    S["Type"],
-    S["Encoded"],
-    S["DecodingServices"],
-    S["EncodingServices"],
+export interface overrideToCodecIso<S extends Constraint, Iso> extends
+  BottomLazy<
     S["ast"],
     overrideToCodecIso<S, Iso>,
-    S["~type.make.in"],
-    Iso,
     S["~type.parameters"],
-    S["~type.make"],
     S["~type.mutability"],
     S["~type.optionality"],
     S["~type.constructor.default"],
@@ -13603,6 +13902,13 @@ export interface overrideToCodecIso<S extends Top, Iso> extends
     S["~encoded.optionality"]
   >
 {
+  readonly "Type": S["Type"]
+  readonly "Encoded": S["Encoded"]
+  readonly "DecodingServices": S["DecodingServices"]
+  readonly "EncodingServices": S["EncodingServices"]
+  readonly "~type.make.in": S["~type.make.in"]
+  readonly "~type.make": S["~type.make"]
+  readonly "Iso": Iso
   readonly schema: S
 }
 
@@ -13623,7 +13929,7 @@ export interface overrideToCodecIso<S extends Top, Iso> extends
  * @category Optic
  * @since 4.0.0
  */
-export function overrideToCodecIso<S extends Top, Iso>(
+export function overrideToCodecIso<S extends Constraint, Iso>(
   to: Codec<Iso>,
   transformation: {
     readonly decode: SchemaGetter.Getter<S["Type"], Iso>
@@ -13696,7 +14002,7 @@ export interface TreeRecord<A> {
  * @category Tree
  * @since 4.0.0
  */
-export function Tree<S extends Top>(node: S) {
+export function Tree<S extends Constraint>(node: S) {
   const Tree$ref = suspend((): Codec<
     Tree<S["Type"]>,
     Tree<S["Encoded"]>,
@@ -13813,7 +14119,7 @@ export const MutableJson: Codec<MutableJson> = make(SchemaAST.MutableJson)
  * @category Schema Resolvers
  * @since 4.0.0
  */
-export function resolveAnnotations<S extends Top>(
+export function resolveAnnotations<S extends Constraint>(
   schema: S
 ): Annotations.Bottom<S["Type"], S["~type.parameters"]> | undefined {
   return InternalAnnotations.resolve(schema.ast)
@@ -13827,7 +14133,7 @@ export function resolveAnnotations<S extends Top>(
  * @category Schema Resolvers
  * @since 4.0.0
  */
-export function resolveAnnotationsKey<S extends Top>(schema: S): Annotations.Key<S["Type"]> | undefined {
+export function resolveAnnotationsKey<S extends Constraint>(schema: S): Annotations.Key<S["Type"]> | undefined {
   return schema.ast.context?.annotations
 }
 
@@ -13956,7 +14262,7 @@ export declare namespace Annotations {
    * @category models
    * @since 4.0.0
    */
-  export interface Bottom<T, TypeParameters extends ReadonlyArray<Top>> extends Documentation<T> {
+  export interface Bottom<T, TypeParameters extends ReadonlyArray<Constraint>> extends Documentation<T> {
     /**
      * Complete message to use when this schema node reports an issue.
      *
@@ -14016,7 +14322,7 @@ export declare namespace Annotations {
      * @category utility types
      * @since 4.0.0
      */
-    export type Type<TypeParameters extends ReadonlyArray<Top>> = {
+    export type Type<TypeParameters extends ReadonlyArray<Constraint>> = {
       readonly [K in keyof TypeParameters]: Codec<TypeParameters[K]["Type"]>
     }
     /**
@@ -14025,7 +14331,7 @@ export declare namespace Annotations {
      * @category utility types
      * @since 4.0.0
      */
-    export type Encoded<TypeParameters extends ReadonlyArray<Top>> = {
+    export type Encoded<TypeParameters extends ReadonlyArray<Constraint>> = {
       readonly [K in keyof TypeParameters]: Codec<TypeParameters[K]["Encoded"]>
     }
   }
@@ -14040,7 +14346,7 @@ export declare namespace Annotations {
    * @category models
    * @since 4.0.0
    */
-  export interface Declaration<T, TypeParameters extends ReadonlyArray<Top> = readonly []>
+  export interface Declaration<T, TypeParameters extends ReadonlyArray<Constraint> = readonly []>
     extends Bottom<T, TypeParameters>
   {
     readonly toCodec?:
@@ -14153,7 +14459,7 @@ export declare namespace Annotations {
      * @since 4.0.0
      */
     export interface Filter {
-      readonly constraint?: Constraint | undefined
+      readonly constraint?: GenerationConstraint | undefined
       readonly candidate?: Candidate | undefined
     }
 
@@ -14205,10 +14511,10 @@ export declare namespace Annotations {
      *
      * **Details**
      *
-     * `Constraint` is a generation hint for the current schema AST node, not a
-     * self-describing validation contract. Each generator consumes the fields it
-     * understands for the current node and ignores the rest; final schema
-     * filters still validate every generated value.
+     * `GenerationConstraint` is a generation hint for the current schema AST
+     * node, not a self-describing validation contract. Each generator consumes
+     * the fields it understands for the current node and ignores the rest;
+     * final schema filters still validate every generated value.
      *
      * `minLength` and `maxLength` represent node-local cardinality: string
      * length for strings, array length for arrays, final own-property count for
@@ -14221,7 +14527,7 @@ export declare namespace Annotations {
      * @category models
      * @since 4.0.0
      */
-    export interface Constraint {
+    export interface GenerationConstraint {
       readonly minLength?: number | undefined
       readonly maxLength?: number | undefined
       readonly patterns?: readonly [string, ...Array<string>]
@@ -14264,7 +14570,7 @@ export declare namespace Annotations {
      * @since 4.0.0
      */
     export interface Context {
-      readonly constraint?: ToArbitrary.Constraint | undefined
+      readonly constraint?: ToArbitrary.GenerationConstraint | undefined
       readonly recursion?: ToArbitrary.Recursion | undefined
     }
 
@@ -14330,7 +14636,7 @@ export declare namespace Annotations {
      * @category models
      * @since 4.0.0
      */
-    export interface Declaration<T, TypeParameters extends ReadonlyArray<Top>> {
+    export interface Declaration<T, TypeParameters extends ReadonlyArray<Constraint>> {
       (
         /* Arbitrary derivations for any type parameters of the schema (if present) */
         typeParameters: { readonly [K in keyof TypeParameters]: TypeParameter<TypeParameters[K]["Type"]> }
@@ -14407,7 +14713,7 @@ export declare namespace Annotations {
      * @category models
      * @since 4.0.0
      */
-    export interface Declaration<T, TypeParameters extends ReadonlyArray<Top>> {
+    export interface Declaration<T, TypeParameters extends ReadonlyArray<Constraint>> {
       (
         /* Formatters for any type parameters of the schema (if present) */
         typeParameters: { readonly [K in keyof TypeParameters]: Formatter<TypeParameters[K]["Type"]> }
@@ -14432,7 +14738,7 @@ export declare namespace Annotations {
      * @category models
      * @since 4.0.0
      */
-    export interface Declaration<T, TypeParameters extends ReadonlyArray<Top>> {
+    export interface Declaration<T, TypeParameters extends ReadonlyArray<Constraint>> {
       (
         /* Equivalences for any type parameters of the schema (if present) */
         typeParameters: { readonly [K in keyof TypeParameters]: Equivalence.Equivalence<TypeParameters[K]["Type"]> }

@@ -1,6 +1,7 @@
 export * from "./query-engine"
 export * from "./datetime"
 export * from "./where-clause"
+export * from "./dashboard-variables/interpolate"
 export * from "./traces-shared"
 export * from "./sql"
 export * as CH from "./ch"

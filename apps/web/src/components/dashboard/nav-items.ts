@@ -3,6 +3,7 @@ import {
 	ChartLineIcon,
 	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
+	CloudflareIcon,
 	ComputerIcon,
 	FileIcon,
 	HouseIcon,
@@ -18,9 +19,16 @@ export interface NavItem {
 	icon: typeof PulseIcon
 }
 
+export interface NavSubItem {
+	title: string
+	href: string
+	/** Brand mark for integration-sourced entries (agent-sourced siblings stay text-only). */
+	icon?: typeof PulseIcon
+}
+
 interface SignalsNavItem extends NavItem {
 	badge?: string
-	subItems?: { title: string; href: string }[]
+	subItems?: NavSubItem[]
 }
 
 export const mainNavItems: NavItem[] = [
@@ -79,6 +87,7 @@ const signalsNavItems: SignalsNavItem[] = [
 			{ title: "K8s Pods", href: "/infra/kubernetes/pods" },
 			{ title: "K8s Nodes", href: "/infra/kubernetes/nodes" },
 			{ title: "K8s Workloads", href: "/infra/kubernetes/workloads" },
+			{ title: "Cloudflare", href: "/infra/cloudflare", icon: CloudflareIcon },
 		],
 	},
 ]
@@ -103,7 +112,18 @@ export const investigateNavItems: NavItem[] = [
 	},
 ]
 
-/** Signals items with org feature gates applied (matches the sidebar's filtering). */
+/**
+ * Signals items with org feature gates applied (matches the sidebar's
+ * filtering). `infra_monitoring` gates the host/k8s agent pages only —
+ * Cloudflare analytics come from the integration, not the infra agent, so
+ * when infra is off the Infrastructure entry collapses to just Cloudflare
+ * (whose page gates itself on the integration's connection status).
+ */
 export function visibleSignalsNavItems(flags: { infraEnabled: boolean }) {
-	return signalsNavItems.filter((item) => flags.infraEnabled || item.href !== "/infra")
+	if (flags.infraEnabled) return signalsNavItems
+	return signalsNavItems.map((item) => {
+		if (item.href !== "/infra") return item
+		const subItems = item.subItems?.filter((sub) => sub.href.startsWith("/infra/cloudflare"))
+		return { ...item, href: "/infra/cloudflare", subItems }
+	})
 }

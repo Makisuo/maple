@@ -208,6 +208,9 @@ export const makeMemory = (
         executeValues(sql, params) {
           return run(sql, params, "array")
         },
+        executeValuesUnprepared(sql, params) {
+          return run(sql, params, "array")
+        },
         executeUnprepared(sql, params, transformRows) {
           return this.execute(sql, params, transformRows)
         },
@@ -392,6 +395,9 @@ export const make = (
           return run(sql, params)
         },
         executeValues(sql, params) {
+          return run(sql, params, "array")
+        },
+        executeValuesUnprepared(sql, params) {
           return run(sql, params, "array")
         },
         executeUnprepared(sql, params, transformRows) {

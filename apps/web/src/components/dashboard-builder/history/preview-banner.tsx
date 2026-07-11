@@ -11,13 +11,14 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
+import type { DashboardId } from "@maple/domain/http"
 import { ArrowPathIcon, HistoryIcon } from "@/components/icons"
 import { formatRelativeTime } from "@/lib/format"
 import { buildRestorePayload, useRestoreDashboardVersion } from "./use-dashboard-history"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
 
 interface PreviewBannerProps {
-	dashboardId: string
+	dashboardId: DashboardId
 	preview: PreviewedVersion
 	onCancel: () => void
 	onRestored: () => void

@@ -1,9 +1,9 @@
 import type { Node, Edge } from "@xyflow/react"
-import type { ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
+import type { CloudflareService, ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { getServiceLegendColor } from "@maple/ui/colors"
-import { getDbColor } from "./service-map-db"
+import { getDbNodeColor, resolveDbNodePresentation } from "./service-map-db"
 
 interface ServiceNodeInfra {
 	podCount: number
@@ -13,6 +13,23 @@ interface ServiceNodeInfra {
 type ServiceNodeKind = "service" | "database"
 
 export type ServiceMapColorMode = "service" | "health" | "platform"
+
+/** Cloudflare brand orange — accent for the detail-panel overlay section. */
+export const CLOUDFLARE_COLOR = "oklch(0.7 0.16 50)"
+
+/**
+ * Cloudflare direct-integration analytics overlaid onto an instrumented Worker
+ * node whose script name matched (by service name or `faas.name`).
+ */
+export interface CloudflareNodeMetrics {
+	kind: "worker"
+	requests: number
+	errorRate: number
+	/** Wall-time duration p99. */
+	latencyP99Ms: number
+	/** CPU time p99. */
+	cpuP99Ms?: number
+}
 
 export interface ServiceNodeData {
 	label: string
@@ -30,6 +47,10 @@ export interface ServiceNodeData {
 	platform?: ServicePlatform
 	runtime?: string
 	dbSystem?: string
+	/** Database identity (db.namespace et al.); "" for the generic per-system node. */
+	dbNamespace?: string
+	/** Overlaid onto matched instrumented Workers from the direct integration. */
+	cloudflare?: CloudflareNodeMetrics
 	colorMode?: ServiceMapColorMode
 	/** OTel `service.namespace`, when defined. Drives namespace-cluster layout + dotted boxes. */
 	namespace?: string
@@ -38,7 +59,7 @@ export interface ServiceNodeData {
 
 const PLATFORM_COLORS: Record<ServicePlatform | "unknown", string> = {
 	kubernetes: "oklch(0.62 0.16 250)",
-	cloudflare: "oklch(0.7 0.16 50)",
+	cloudflare: CLOUDFLARE_COLOR,
 	lambda: "oklch(0.7 0.18 60)",
 	web: "oklch(0.65 0.15 145)",
 	unknown: "oklch(0.55 0.02 270)",
@@ -61,11 +82,11 @@ export function getHealthColor(errorRate: number): string {
  * the "color by" affordance is for slicing service nodes only.
  */
 export function getServiceMapNodeColor(
-	data: Pick<ServiceNodeData, "label" | "kind" | "errorRate" | "platform" | "dbSystem">,
+	data: Pick<ServiceNodeData, "label" | "kind" | "errorRate" | "platform" | "dbSystem" | "dbNamespace">,
 	services: string[],
 	mode: ServiceMapColorMode,
 ): string {
-	if (data.kind === "database") return getDbColor(data.dbSystem)
+	if (data.kind === "database") return getDbNodeColor(data.dbSystem, data.dbNamespace ?? "")
 	switch (mode) {
 		case "health":
 			return getHealthColor(data.errorRate)
@@ -95,11 +116,27 @@ const EDGE_ID_PREFIX = "edge:"
 
 const encodeIdComponent = (raw: string): string => encodeURIComponent(raw)
 
-export const dbNodeId = (system: string) => `${DB_NODE_PREFIX}${encodeIdComponent(system)}`
+export const dbNodeId = (system: string, namespace: string) =>
+	`${DB_NODE_PREFIX}${encodeIdComponent(system)}:${encodeIdComponent(namespace)}`
 const edgeIdFor = (source: string, target: string) =>
 	`${EDGE_ID_PREFIX}${encodeIdComponent(source)}:${encodeIdComponent(target)}`
 
 export const isDbNodeId = (id: string) => id.startsWith(DB_NODE_PREFIX)
+
+/**
+ * Inverse of {@link dbNodeId}. Both components are URI-encoded, so the first
+ * `:` after the prefix is the separator. Legacy single-component ids (from a
+ * stale layout snapshot) decode with `dbNamespace: ""` — the generic node.
+ */
+export const parseDbNodeId = (id: string): { dbSystem: string; dbNamespace: string } => {
+	const rest = id.slice(DB_NODE_PREFIX.length)
+	const sep = rest.indexOf(":")
+	if (sep === -1) return { dbSystem: decodeURIComponent(rest), dbNamespace: "" }
+	return {
+		dbSystem: decodeURIComponent(rest.slice(0, sep)),
+		dbNamespace: decodeURIComponent(rest.slice(sep + 1)),
+	}
+}
 
 // Layout constants (defaults)
 export const DEFAULT_LAYOUT_CONFIG = {
@@ -147,6 +184,10 @@ export interface BuildFlowElementsInput {
 	serviceWorkloads?: ServiceWorkload[]
 	platforms?: Map<string, ServicePlatform>
 	runtimes?: Map<string, string>
+	/** Cloudflare direct-integration Worker analytics (instrumented-Worker overlay). */
+	cloudflareServices?: CloudflareService[]
+	/** service.name → faas.name, so a `cloudflare-worker/{script}` can match its instrumented node. */
+	faasNames?: Map<string, string>
 }
 
 /**
@@ -164,6 +205,8 @@ export function buildFlowElements({
 	serviceWorkloads = [],
 	platforms,
 	runtimes,
+	cloudflareServices = [],
+	faasNames,
 }: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
@@ -189,15 +232,28 @@ export function buildFlowElements({
 		infraMap.set(wl.serviceName, existing)
 	}
 
-	// Aggregate by `db.system` so multiple services calling the same database
-	// land on a single node. Sum of call/error counts; weighted-average latency.
+	// Aggregate by database identity — (db.system, db.namespace) — so services
+	// calling the SAME database share a node while distinct databases of the
+	// same system stay separate. Namespace-less edges ("" — legacy rows or
+	// unidentified instrumentation) collapse into one generic per-system node.
+	// Sum of call/error counts; weighted-average latency.
 	const dbAgg = new Map<
 		string,
-		{ callCount: number; errorCount: number; durationSumMs: number; maxP95: number }
+		{
+			dbSystem: string
+			dbNamespace: string
+			callCount: number
+			errorCount: number
+			durationSumMs: number
+			maxP95: number
+		}
 	>()
 	for (const e of dbEdges) {
 		if (!e.dbSystem) continue
-		const existing = dbAgg.get(e.dbSystem) ?? {
+		const nodeId = dbNodeId(e.dbSystem, e.dbNamespace)
+		const existing = dbAgg.get(nodeId) ?? {
+			dbSystem: e.dbSystem,
+			dbNamespace: e.dbNamespace,
 			callCount: 0,
 			errorCount: 0,
 			durationSumMs: 0,
@@ -207,7 +263,7 @@ export function buildFlowElements({
 		existing.errorCount += e.errorCount
 		existing.durationSumMs += e.avgDurationMs * e.callCount
 		existing.maxP95 = Math.max(existing.maxP95, e.p95DurationMs)
-		dbAgg.set(e.dbSystem, existing)
+		dbAgg.set(nodeId, existing)
 	}
 
 	const safeDuration = Math.max(durationSeconds, 1)
@@ -238,13 +294,15 @@ export function buildFlowElements({
 		}
 	})
 
-	for (const [dbSystem, agg] of dbAgg) {
+	for (const [nodeId, agg] of dbAgg) {
 		flowNodes.push({
-			id: dbNodeId(dbSystem),
+			id: nodeId,
 			type: "serviceNode",
 			position: { x: 0, y: 0 },
 			data: {
-				label: dbSystem,
+				// Named databases show their identity; the generic node keeps the system;
+				// Hyperdrive-fronted databases collapse to a single "Hyperdrive" node.
+				label: resolveDbNodePresentation(agg.dbSystem, agg.dbNamespace).title,
 				kind: "database",
 				throughput: agg.callCount / safeDuration,
 				tracedThroughput: agg.callCount / safeDuration,
@@ -255,9 +313,38 @@ export function buildFlowElements({
 				p95LatencyMs: agg.maxP95,
 				services,
 				selected: false,
-				dbSystem,
+				dbSystem: agg.dbSystem,
+				dbNamespace: agg.dbNamespace,
 			},
 		})
+	}
+
+	// Cloudflare direct-integration analytics. A Worker whose script matches an
+	// instrumented service (by service name or faas.name) gets its analytics
+	// OVERLAID onto that node's detail; anything without a matching real service
+	// is dropped — Cloudflare data never creates nodes of its own.
+	const nodeById = new Map(flowNodes.map((n) => [n.id, n]))
+	const serviceNameSet = new Set(services)
+	const scriptToInstrumented = new Map<string, string>()
+	if (faasNames) {
+		for (const [serviceName, faasName] of faasNames) {
+			if (faasName) scriptToInstrumented.set(faasName, serviceName)
+		}
+	}
+	const matchInstrumented = (script: string): string | undefined =>
+		serviceNameSet.has(script) ? script : scriptToInstrumented.get(script)
+
+	for (const cf of cloudflareServices) {
+		const matchedService = matchInstrumented(cf.displayName)
+		const overlayTarget = matchedService ? nodeById.get(matchedService) : undefined
+		if (!overlayTarget) continue
+		overlayTarget.data.cloudflare = {
+			kind: cf.kind,
+			requests: cf.requests,
+			errorRate: cf.errorRate,
+			latencyP99Ms: cf.latencyP99Ms,
+			cpuP99Ms: cf.cpuP99Ms,
+		}
 	}
 
 	const flowEdges: Edge<ServiceEdgeData>[] = edges.map((edge) => ({
@@ -281,9 +368,9 @@ export function buildFlowElements({
 	for (const e of dbEdges) {
 		if (!e.dbSystem || !e.sourceService) continue
 		flowEdges.push({
-			id: edgeIdFor(e.sourceService, dbNodeId(e.dbSystem)),
+			id: edgeIdFor(e.sourceService, dbNodeId(e.dbSystem, e.dbNamespace)),
 			source: e.sourceService,
-			target: dbNodeId(e.dbSystem),
+			target: dbNodeId(e.dbSystem, e.dbNamespace),
 			type: "serviceEdge",
 			data: {
 				callCount: e.callCount,

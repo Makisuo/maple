@@ -4646,7 +4646,7 @@ console.log(String(Schema.decodeUnknownExit(schema)(formData)))
 // Success({"a":"1","b":{"c":"2","d":"3"}})
 ```
 
-If you want to decode values that are not strings, use `Schema.toCodecStringTree` with the `keepDeclarations: true` option. This serializer preserves values such as numbers and `Blob` objects when compatible with the schema.
+If you want to decode string fields into non-string primitive values, use `Schema.toCodecStringTree`.
 
 **Example** (Parsing non-string values)
 
@@ -4657,8 +4657,7 @@ const schema = Schema.fromFormData(
   Schema.toCodecStringTree(
     Schema.Struct({
       a: Schema.Int
-    }),
-    { keepDeclarations: true }
+    })
   )
 )
 
@@ -4720,7 +4719,7 @@ console.log(String(Schema.decodeUnknownExit(schema)(urlSearchParams)))
 // Success({"a":"1","b":{"c":"2","d":"3"}})
 ```
 
-If you want to decode values that are not strings, use `Schema.toCodecStringTree` with the `keepDeclarations: true` option. This serializer preserves values such as numbers or declarations when compatible with the schema.
+If you want to decode values that are not strings, use `Schema.toCodecStringTree`. This serializer preserves values such as numbers when compatible with the schema.
 
 **Example** (Parsing non-string values)
 
@@ -4731,8 +4730,7 @@ const schema = Schema.fromURLSearchParams(
   Schema.toCodecStringTree(
     Schema.Struct({
       a: Schema.Int
-    }),
-    { keepDeclarations: true }
+    })
   )
 )
 
@@ -4993,31 +4991,6 @@ const stringTree = Schema.encodeUnknownSync(toCodecStringTree)(point)
 // every leaf value becomes a string
 console.log(stringTree)
 // [ '1', '2' ]
-```
-
-#### keepDeclarations: true
-
-The `keepDeclarations: true` option behaves like the StringTree codec, but it does **not** convert declarations without a `toCodecJson` annotation to `undefined`. Instead, it keeps them as they are.
-
-This is usefult for example when you encode a schema to a `FormData` format and you want to preserve `Blob` values.
-
-```ts
-import { Schema } from "effect"
-
-const schema = Schema.Struct({
-  a: Schema.instanceOf(URL),
-  b: Schema.Number
-})
-
-const stringTree = Schema.toCodecStringTree(schema, { keepDeclarations: true })
-
-console.log(
-  Schema.encodeUnknownSync(stringTree)({
-    a: new URL("https://effect.website"),
-    b: 1
-  })
-)
-// { a: URL("https://effect.website"), b: '1' }
 ```
 
 ### ISO Canonical Codec

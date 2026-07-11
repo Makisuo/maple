@@ -5,11 +5,14 @@
  * Clerk auth settles (`main.tsx`) and while the customer/plan query resolves
  * (`__root.tsx`). Replaces both the blank screen and the bare radial spinner.
  *
- * The signature is a trace-waterfall: an amber Maple mark above three indented
- * "span" bars with a soft amber shimmer sweeping through them in sequence —
- * Maple's own material (a trace) standing in for a generic loader. Motion lives
- * only in the bars; the mark stays still. Reduced motion settles the bars to a
- * static amber fill (see the `.boot-span` rules in `styles.css`).
+ * The signature is a self-assembling trace waterfall: an amber Maple mark above
+ * five "span" bars laid out like a nested call tree (each bar's left = its start
+ * time, width = its duration). The bars grow in, in start-time order, while a
+ * thin amber playhead sweeps across "collecting" them — Maple's own material (a
+ * trace being recorded) standing in for a generic loader. Motion lives only in
+ * the waterfall; the mark stays still. Reduced motion settles the spans to the
+ * fully-assembled trace and drops the playhead (see the `.boot-*` rules in
+ * `styles.css`).
  *
  * An inline, JS-free copy of this lives inside `#app` in `index.html` so the
  * very first paint already shows it; React replaces that copy with this
@@ -39,10 +42,19 @@ export function BootSplash() {
 				</svg>
 			</div>
 			<div className="boot-trace" aria-hidden="true">
+				<span className="boot-track boot-track--1" />
+				<span className="boot-track boot-track--2" />
+				<span className="boot-track boot-track--3" />
+				<span className="boot-track boot-track--4" />
+				<span className="boot-track boot-track--5" />
 				<span className="boot-span boot-span--1" />
 				<span className="boot-span boot-span--2" />
 				<span className="boot-span boot-span--3" />
+				<span className="boot-span boot-span--4" />
+				<span className="boot-span boot-span--5" />
+				<span className="boot-scan" />
 			</div>
+			<p className="boot-caption">Collecting spans…</p>
 			<span className="sr-only">Loading…</span>
 		</main>
 	)

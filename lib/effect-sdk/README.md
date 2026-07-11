@@ -95,6 +95,57 @@ const program = Effect.log("Hello!").pipe(Effect.withSpan("hello"))
 Effect.runPromise(program.pipe(Effect.provide(TracerLive)))
 ```
 
+### Session replay & sessions (built in)
+
+The browser presets (`Maple.layer` and `MapleFlush.make`) record **rrweb session replays by default** — no separate browser SDK needed. Every span carries a `session.id`, the session appears in Maple's Sessions UI with its linked traces, and the recording is playable next to them.
+
+```typescript
+const TracerLive = Maple.layer({
+	serviceName: "my-frontend",
+	endpoint: "https://ingest.maple.dev",
+	ingestKey: "maple_pk_...",
+	replay: {
+		sampleRate: 0.1, // record 10% of sessions (default 1)
+		maskAllInputs: true, // default
+		maskAllText: false, // default
+	},
+})
+```
+
+- **Bundle size:** the replay engine (rrweb included) loads through a dynamic import, so it lands in a code-split chunk (~360 kB) fetched only when replay is enabled *and* the session is sampled. The base client bundle stays ~13 kB.
+- **Opt out** with `replay: { enabled: false }`. Unsampled or disabled sessions still appear in the Sessions UI (metadata rows + linked traces, no recording); turn that off too with `emitSessionMeta: false`.
+- **Tab lifecycle:** recording suspends on `visibilitychange → hidden` (flushing the tail with `keepalive`) and resumes when the tab becomes visible again, rotating to a fresh session after 30 minutes of inactivity.
+- **Identify users** at any point — the id is attached to the session's next-posted metadata row _and_ stamped as `user.id` on every span the client tracer creates from then on (traces become user-attributable, not just session-grouped). Spans created before you call it stay anonymous. Pass `null` or `undefined` after sign-out to make future telemetry anonymous again.
+
+```typescript
+import { identify } from "@maple-dev/effect-sdk/client"
+
+identify(user.id)
+identify(null)
+```
+
+Inside an Effect program (e.g. once a login flow resolves the user) use the Effect-returning form:
+
+```typescript
+import { Maple } from "@maple-dev/effect-sdk/client"
+
+yield* Maple.identify(user.id)
+```
+
+- **Clear the identity** on logout with `clearIdentity()` — the explicit inverse of `identify()`. Metadata rows and spans go back to anonymous (no `user.id`) from then on; the session itself continues.
+
+```typescript
+import { clearIdentity } from "@maple-dev/effect-sdk/client"
+
+clearIdentity()
+
+// or, inside an Effect program:
+import { Maple } from "@maple-dev/effect-sdk/client"
+yield* Maple.clearIdentity
+```
+
+If `@maple-dev/browser` is also on the page, it owns the session and this SDK's replay/emission stands down automatically — exactly one recorder runs, and spans link to that session via the shared sink. Use one or the other for replay, not both.
+
 ## Manual flush
 
 `Maple.layer` (server + client) batches in the background and only exports on a timer, on batch overflow, or when its scope closes — there's no way to force an export. That's a problem in two places: a browser tab dropping the last few seconds of spans on unload, and a short-lived process exiting before the timer fires.
@@ -158,6 +209,16 @@ Both server and client layers accept these options:
 | `loggerExportInterval`  | No                                      | Log export interval                |
 | `metricsExportInterval` | No                                      | Metrics export interval            |
 | `shutdownTimeout`       | No                                      | Graceful shutdown timeout          |
+
+Client-only options:
+
+| Option                | Default | Description                                                                          |
+| --------------------- | ------- | ------------------------------------------------------------------------------------ |
+| `replay.enabled`      | `true`  | Record rrweb session replays (lazy code-split chunk)                                 |
+| `replay.sampleRate`   | `1`     | Fraction of sessions to record, 0–1                                                  |
+| `replay.maskAllInputs`| `true`  | Mask all `<input>` values in the recording                                           |
+| `replay.maskAllText`  | `false` | Mask all text in the recording                                                       |
+| `emitSessionMeta`     | `true`  | Post session metadata rows so unrecorded sessions still appear in the Sessions UI    |
 
 ## License
 

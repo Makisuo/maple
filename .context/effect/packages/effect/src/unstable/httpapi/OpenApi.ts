@@ -454,7 +454,7 @@ export function fromApi<Id extends string, Groups extends HttpApiGroup.Any>(
         }
       }
 
-      function processParameters(schema: Schema.Top | undefined, i: OpenAPISpecParameter["in"]) {
+      function processParameters(schema: Schema.Constraint | undefined, i: OpenAPISpecParameter["in"]) {
         if (schema) {
           const ast = SchemaAST.getLastEncoding(schema.ast)
           if (SchemaAST.isObjects(ast)) {
@@ -636,7 +636,7 @@ function extractSuccessResponseBodies(endpoint: HttpApiEndpoint.AnyWithProps): R
 }
 
 function extractResponseBodies(
-  schemas: Array<Schema.Top>,
+  schemas: Array<Schema.Constraint>,
   getStatus: (ast: SchemaAST.AST) => number,
   getDescription: (ast: SchemaAST.AST) => string | undefined
 ): ResponseBodies {
@@ -650,7 +650,7 @@ function extractResponseBodies(
 
   return map
 
-  function process(schema: Schema.Top) {
+  function process(schema: Schema.Constraint) {
     if (HttpApiSchema.isStreamSchema(schema)) {
       addStreamContent(schema)
       return
@@ -679,7 +679,7 @@ function extractResponseBodies(
     }
   }
 
-  function addContent(schema: Schema.Top, status: number, encoding: HttpApiSchema.Encoding) {
+  function addContent(schema: Schema.Constraint, status: number, encoding: HttpApiSchema.Encoding) {
     const description = getDescription(schema.ast)
     const statusMap = map.get(status)
     const { _tag, contentType } = encoding
@@ -738,7 +738,7 @@ type Content = Map<
   HttpApiSchema.Encoding["_tag"],
   Map<
     string, // contentType
-    Set<Schema.Top>
+    Set<Schema.Constraint>
   >
 >
 
