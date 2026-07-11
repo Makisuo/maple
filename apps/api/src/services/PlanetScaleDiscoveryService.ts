@@ -315,7 +315,11 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			if (existingAwaiter) {
 				return yield* existingAwaiter.await
 			}
-			const deferred = yield* Deferred.make<ReadonlyArray<PlanetScaleSubTarget>, DiscoveryError>()
+			// Construct the deferred synchronously (makeUnsafe, not `yield* make`) so
+			// the check-then-set across `inFlight` has no yield point in between —
+			// otherwise two fibers discovering the same row could both miss the guard
+			// and both issue the rate-limited SD fetch, defeating the single-flight.
+			const deferred = Deferred.makeUnsafe<ReadonlyArray<PlanetScaleSubTarget>, DiscoveryError>()
 			inFlight.set(row.id, { await: Deferred.await(deferred) })
 
 			const refresh = Effect.gen(function* () {

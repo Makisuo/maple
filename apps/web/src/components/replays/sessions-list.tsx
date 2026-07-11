@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useRef } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import {
 	GlobeIcon,
@@ -82,15 +82,22 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 	// Auto-load the next page when the bottom sentinel nears the viewport. Guards
 	// live in refs so the observer is created once yet always reads fresh values;
 	// appending a full page pushes the sentinel out of view and re-arms it.
-	const sentinelRef = useRef<HTMLDivElement | null>(null)
 	const onReachEndRef = useRef(onReachEnd)
 	onReachEndRef.current = onReachEnd
 	const canLoadRef = useRef(false)
 	canLoadRef.current = hasMore && !loadingMore
+	const observerRef = useRef<IntersectionObserver | null>(null)
 
-	useEffect(() => {
-		const el = sentinelRef.current
-		if (!el) return
+	// Attach the observer via a callback ref so it follows the sentinel's
+	// existence: the sentinel only renders while `hasMore`, so a mount with
+	// hasMore=false that later flips true (a live append while this branch stays
+	// mounted) would never arm a mount-time observer, silently stopping paging.
+	const sentinelRef = useCallback((el: HTMLDivElement | null) => {
+		observerRef.current?.disconnect()
+		if (!el) {
+			observerRef.current = null
+			return
+		}
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (entries[0]?.isIntersecting && canLoadRef.current) {
@@ -100,7 +107,7 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 			{ rootMargin: "400px 0px" },
 		)
 		observer.observe(el)
-		return () => observer.disconnect()
+		observerRef.current = observer
 	}, [])
 
 	if (sessions.length === 0) {

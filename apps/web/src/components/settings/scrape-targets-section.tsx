@@ -278,9 +278,13 @@ export function ScrapeTargetsSection({
 
 	async function handleProbe(target: ScrapeTarget) {
 		setProbingId(target.id)
-		const result = await probeMutation({ params: { targetId: target.id } })
+		const result = await probeMutation({
+			params: { targetId: target.id },
+			// Invalidate the list plus the PlanetScale card's status (which surfaces
+			// this target's lastScrapeError/enabled) instead of only refreshing locally.
+			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+		})
 		if (Exit.isSuccess(result)) {
-			refreshTargets()
 			if (result.value.success) {
 				toast.success("Connection successful")
 			} else {
@@ -418,11 +422,11 @@ export function ScrapeTargetsSection({
 							}),
 					...(authCredentials !== null ? { authCredentials } : {}),
 				}),
+				reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Scrape target updated")
 				setDialogOpen(false)
-				refreshTargets()
 			} else {
 				toast.error("Failed to update scrape target")
 			}
@@ -446,12 +450,12 @@ export function ScrapeTargetsSection({
 							}),
 					...(authCredentials !== null ? { authCredentials } : {}),
 				}),
+				reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Scrape target created")
 				setDialogOpen(false)
 				setSelectedTargetId(result.value.id)
-				refreshTargets()
 			} else {
 				toast.error("Failed to create scrape target")
 			}
@@ -461,11 +465,13 @@ export function ScrapeTargetsSection({
 
 	async function handleDelete(targetId: ScrapeTargetId) {
 		setDeleteConfirmTarget(null)
-		const result = await deleteMutation({ params: { targetId } })
+		const result = await deleteMutation({
+			params: { targetId },
+			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+		})
 		if (Exit.isSuccess(result)) {
 			toast.success("Scrape target deleted")
 			if (selectedTargetId === targetId) setSelectedTargetId(null)
-			refreshTargets()
 		} else {
 			toast.error("Failed to delete scrape target")
 		}
@@ -478,10 +484,9 @@ export function ScrapeTargetsSection({
 			payload: new UpdateScrapeTargetRequest({
 				enabled: !target.enabled,
 			}),
+			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
 		})
-		if (Exit.isSuccess(result)) {
-			refreshTargets()
-		} else {
+		if (!Exit.isSuccess(result)) {
 			toast.error("Failed to update scrape target")
 		}
 		setTogglingId(null)

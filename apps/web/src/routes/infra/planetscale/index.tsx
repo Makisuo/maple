@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
@@ -102,7 +103,9 @@ function PlanetScaleData({ startTime, endTime }: { startTime: string; endTime: s
 			reactivityKeys: ["planetscaleIntegrationStatus"],
 		}),
 	)
-	const statsResult = useAtomValue(getServiceMapPlanetScaleResultAtom({ data: { startTime, endTime } }))
+	const statsResult = useRefreshableAtomValue(
+		getServiceMapPlanetScaleResultAtom({ data: { startTime, endTime } }),
+	)
 
 	const stats = Result.builder(statsResult)
 		.onSuccess((r) => r.databases)

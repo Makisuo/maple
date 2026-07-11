@@ -42,6 +42,13 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 				}
 
 				const { targetId: rawTargetId, sub } = queryParamsFromRequest(req)
+				// Annotate the existing request span (no new span — this route is on the
+				// per-branch scrape hot path) so a flatlining scrape is filterable by
+				// target instead of grepping lastScrapeError rows.
+				yield* Effect.annotateCurrentSpan({
+					"maple.scrape.target_id": rawTargetId ?? "",
+					"maple.scrape.sub": sub ?? "",
+				})
 				if (!rawTargetId) {
 					return errorText("Missing targetId", 400)
 				}
@@ -52,6 +59,9 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* service.scrapeForCollector(targetId.value, sub).pipe(
+					Effect.tap((response) =>
+						Effect.annotateCurrentSpan({ "maple.scrape.upstream_status": response.status }),
+					),
 					Effect.flatMap((response) =>
 						Effect.succeed(
 							HttpServerResponse.text(response.body, {
@@ -79,7 +89,9 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 						"@maple/http/errors/ScrapeTargetPersistenceError": (error) =>
 							Effect.succeed(errorText(error.message, 502)),
 						"@maple/http/errors/ScrapeTargetAuthError": (error) =>
-							Effect.succeed(errorText(`[auth:${error.reason}] ${error.message}`, 502)),
+							Effect.annotateCurrentSpan({ "maple.scrape.auth_failure_reason": error.reason }).pipe(
+								Effect.as(errorText(`[auth:${error.reason}] ${error.message}`, 502)),
+							),
 					}),
 				)
 			})

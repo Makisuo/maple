@@ -3,6 +3,7 @@ import {
 	CHART_DISPLAY_LINE,
 	buildPortableDashboard,
 	combineWhere,
+	escapeMetricStringLiteral,
 	metricsTimeseries,
 	paramKey,
 	paramValue,
@@ -15,7 +16,7 @@ import type { TemplateDefinition, WidgetDef } from "../types"
 // The http_sd discovery labels ride along as point attributes, so widgets group
 // and filter on `attr.planetscale_database` / `attr.planetscale_branch`.
 function databaseWhere(database?: string): string {
-	return database ? `attr.planetscale_database = "${database}"` : ""
+	return database ? `attr.planetscale_database = "${escapeMetricStringLiteral(database)}"` : ""
 }
 
 function gaugeChart(opts: {

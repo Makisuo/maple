@@ -437,6 +437,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 			})
 
 			const list = Effect.fn("ScrapeTargetsService.list")(function* (orgId: OrgId) {
+				yield* Effect.annotateCurrentSpan({ orgId })
 				const rows = yield* database
 					.execute((db) => db.select().from(scrapeTargets).where(eq(scrapeTargets.orgId, orgId)))
 					.pipe(Effect.mapError(toPersistenceError))
@@ -450,6 +451,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const row = yield* requireTarget(orgId, targetId)
 				return rowToResponse(row)
 			})
@@ -458,6 +460,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				orgId: OrgId,
 				request: CreateScrapeTargetRequest,
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId })
 				const targetType = request.targetType ?? "prometheus"
 
 				let url: string
@@ -590,7 +593,19 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					)
 				}
 
-				yield* probe(orgId, id).pipe(Effect.ignore, Effect.forkDetach)
+				// Fire the first scrape in the background so target creation returns
+				// promptly, but never swallow its failure silently: a probe that fails
+				// before it can record a result (e.g. a revoked/not-connected OAuth
+				// grant → ScrapeTargetAuthError) would otherwise leave the fresh target
+				// looking healthy with no log and no lastScrapeError row.
+				yield* probe(orgId, id).pipe(
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Initial scrape probe failed").pipe(
+							Effect.annotateLogs({ orgId, scrapeTargetId: id, error: Cause.pretty(cause) }),
+						),
+					),
+					Effect.forkDetach,
+				)
 
 				return rowToResponse(row.value)
 			})
@@ -600,6 +615,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				targetId: ScrapeTargetId,
 				request: UpdateScrapeTargetRequest,
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const existing = yield* requireTarget(orgId, targetId)
 				const isPlanetScale = existing.targetType === "planetscale"
 
@@ -757,6 +773,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const rows = yield* database
 					.execute((db) =>
 						db
@@ -809,6 +826,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				targetId: ScrapeTargetId,
 				subTargetKey?: string,
 			) {
+				yield* Effect.annotateCurrentSpan({
+					scrapeTargetId: targetId,
+					subTargetKey: subTargetKey ?? "",
+				})
 				const row = yield* selectByIdForInternalScrape(targetId)
 				if (Option.isNone(row) || !row.value.enabled) {
 					return yield* Effect.fail(
@@ -1054,6 +1075,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
 			) {
+				yield* Effect.annotateCurrentSpan({ orgId, scrapeTargetId: targetId })
 				const row = yield* requireTarget(orgId, targetId)
 				const headers = yield* authHeadersForRow(row)
 

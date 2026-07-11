@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 
+import { useMountEffect } from "@/hooks/use-mount-effect"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import {
 	InputGroup,
@@ -29,19 +30,36 @@ export function ReplaysToolbar({
 	waiting = false,
 }: ReplaysToolbarProps) {
 	const [value, setValue] = useState(query)
+	const [prevQuery, setPrevQuery] = useState(query)
 	const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	// The trimmed value we last pushed to `onSearch`, in the form it comes back as
+	// `query`. Lets us tell an external `q` change (Clear all, back/forward) from
+	// our own debounced search echoing through the URL, so a resync never clobbers
+	// keystrokes typed since.
+	const lastSentRef = useRef(query)
 
-	// Keep the input in sync when the param changes elsewhere (e.g. Clear all).
-	useEffect(() => {
-		setValue(query)
-	}, [query])
+	// Resync the input when `q` changes from outside — during render (no double
+	// commit), and never for our own echo.
+	if (query !== prevQuery) {
+		setPrevQuery(query)
+		if (query !== lastSentRef.current) {
+			setValue(query)
+		}
+	}
+
+	// Cancel a pending debounce if the toolbar unmounts mid-type.
+	useMountEffect(() => () => {
+		if (debounceRef.current) clearTimeout(debounceRef.current)
+	})
 
 	const handleChange = useCallback(
 		(next: string) => {
 			setValue(next)
 			if (debounceRef.current) clearTimeout(debounceRef.current)
 			debounceRef.current = setTimeout(() => {
-				onSearch(next.trim() || undefined)
+				const trimmed = next.trim() || undefined
+				lastSentRef.current = trimmed ?? ""
+				onSearch(trimmed)
 			}, 300)
 		},
 		[onSearch],

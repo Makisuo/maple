@@ -671,7 +671,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						{ concurrency: 2 },
 					)
 					const keyOf = (row: { database: string; branch?: string }) =>
-						byBranch ? `${row.database} ${(row as { branch?: string }).branch ?? ""}` : row.database
+						byBranch ? `${row.database} ${row.branch ?? ""}` : row.database
 					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
 					const seen = new Set<string>()
 					const data: Array<Record<string, unknown>> = gaugeRows.map((row) => {
@@ -1599,39 +1599,58 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						// multiple queries, otherwise we keep the raw group names from the query
 						// engine result so single-query widgets render naturally.
 						type Point = { bucket: string; series: Record<string, number> }
-						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
+						type QueryOutcome = {
+							warnings: string[]
+							entry: { name: string; points: Point[] } | null
+						}
 
-						yield* Effect.forEach(enabledQueries, (query) =>
-							Effect.gen(function* () {
-								const built = buildTimeseriesQuerySpec(query)
-								for (const w of built.warnings) allWarnings.push(`${query.name}: ${w}`)
+						// Execute each query concurrently (independent warehouse round-trips)
+						// but collect positionally: Effect.forEach returns results in input
+						// order regardless of concurrency, so series naming/merge order stays
+						// deterministic instead of depending on which query finishes first.
+						const outcomes: QueryOutcome[] = yield* Effect.forEach(
+							enabledQueries,
+							(query) =>
+								Effect.gen(function* () {
+									const built = buildTimeseriesQuerySpec(query)
+									const warnings = built.warnings.map((w) => `${query.name}: ${w}`)
 
-								if (!built.query) {
-									if (built.error) allWarnings.push(`${query.name}: ${built.error}`)
-									return
-								}
+									if (!built.query) {
+										if (built.error) warnings.push(`${query.name}: ${built.error}`)
+										return { warnings, entry: null }
+									}
 
-								const request = new QueryEngineExecuteRequest({
-									startTime: payload.startTime,
-									endTime: payload.endTime,
-									query: built.query,
-								})
+									const request = new QueryEngineExecuteRequest({
+										startTime: payload.startTime,
+										endTime: payload.endTime,
+										query: built.query,
+									})
 
-								const response = yield* queryEngine.execute(tenant, request)
-								if (response.result.kind !== "timeseries") {
-									allWarnings.push(`${query.name}: unexpected non-timeseries result`)
-									return
-								}
+									const response = yield* queryEngine.execute(tenant, request)
+									if (response.result.kind !== "timeseries") {
+										warnings.push(`${query.name}: unexpected non-timeseries result`)
+										return { warnings, entry: null }
+									}
 
-								perQueryPoints.push({
-									name: query.legend?.trim() || query.name,
-									points: response.result.data.map((p) => ({
-										bucket: p.bucket,
-										series: { ...p.series },
-									})),
-								})
-							}),
+									return {
+										warnings,
+										entry: {
+											name: query.legend?.trim() || query.name,
+											points: response.result.data.map((p) => ({
+												bucket: p.bucket,
+												series: { ...p.series },
+											})),
+										},
+									}
+								}),
+							{ concurrency: 4 },
 						)
+
+						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
+						for (const outcome of outcomes) {
+							allWarnings.push(...outcome.warnings)
+							if (outcome.entry) perQueryPoints.push(outcome.entry)
+						}
 
 						const multiQuery = perQueryPoints.length > 1
 						const rowsByBucket = new Map<string, Record<string, number>>()
@@ -2513,7 +2532,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"rawSql query failed",
 					)
 
-					const records = rows as ReadonlyArray<Record<string, unknown>>
+					const records = rows
 					const columns = records.length > 0 ? Object.keys(records[0]) : []
 
 					return new RawSqlExecuteResponse({

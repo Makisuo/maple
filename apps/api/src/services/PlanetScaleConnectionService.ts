@@ -283,6 +283,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		})
 
 		const getStatus = Effect.fn("PlanetScaleConnectionService.getStatus")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const connection = yield* selectConnection(orgId)
 			return yield* statusForConnection(orgId, connection)
 		})
@@ -484,6 +485,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 			orgId: OrgId,
 			request: PlanetScaleMetricsTokenRequest,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const connection = yield* selectConnection(orgId)
 			if (connection === null) {
 				return yield* Effect.fail(
@@ -531,6 +533,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		})
 
 		const disconnect = Effect.fn("PlanetScaleConnectionService.disconnect")(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const connection = yield* selectConnection(orgId)
 
 			if (connection !== null) {
@@ -571,6 +574,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const webhookConfig = Effect.fn("PlanetScaleConnectionService.webhookConfig")(function* (
 			orgId: OrgId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const connection = yield* selectConnection(orgId)
 			if (
 				connection === null ||

@@ -664,6 +664,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			})
 
 			const listDatabases = Effect.fn("PlanetScaleService.listDatabases")(function* (orgId: OrgId) {
+				yield* Effect.annotateCurrentSpan({ orgId })
 				return yield* database
 					.execute((db) =>
 						db

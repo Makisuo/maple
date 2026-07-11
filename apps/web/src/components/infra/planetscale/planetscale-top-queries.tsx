@@ -4,6 +4,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { planetscaleQueryInsightsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatLatency, formatNumber } from "@/lib/format"
 
@@ -43,7 +44,7 @@ export function PlanetScaleTopQueries({
 		}),
 		[database, branch, startTime, endTime, limit],
 	)
-	const result = useAtomValue(planetscaleQueryInsightsResultAtom(input))
+	const result = useRefreshableAtomValue(planetscaleQueryInsightsResultAtom(input))
 
 	if (Result.isInitial(result)) {
 		return <Skeleton className={cn("h-24 w-full", className)} />

@@ -3,6 +3,7 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
+import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -130,10 +131,10 @@ function PlanetScaleDatabaseData({
 	endTime: string
 }) {
 	const bucketSeconds = chartBucketSeconds(startTime, endTime)
-	const timeseriesResult = useAtomValue(
+	const timeseriesResult = useRefreshableAtomValue(
 		planetscaleInfraTimeseriesResultAtom({ data: { database, startTime, endTime, bucketSeconds } }),
 	)
-	const branchStatsResult = useAtomValue(
+	const branchStatsResult = useRefreshableAtomValue(
 		getPlanetScaleBranchStatsResultAtom({ data: { database, startTime, endTime } }),
 	)
 	const inventoryResult = useAtomValue(
