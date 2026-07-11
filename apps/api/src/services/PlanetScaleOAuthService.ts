@@ -30,8 +30,8 @@ const MAX_PAGES = 10
 
 interface ResolvedPlanetScaleOAuthConfig {
 	readonly clientId: string
-	/** Always present — PlanetScale OAuth apps are confidential clients (no PKCE). */
-	readonly clientSecret: string
+	/** Always present — PlanetScale OAuth apps are confidential clients (no PKCE). Redacted until the wire. */
+	readonly clientSecret: Redacted.Redacted<string>
 	readonly authorizeUrl: string
 	readonly tokenUrl: string
 }
@@ -53,7 +53,7 @@ const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(functio
 					message: "PLANETSCALE_OAUTH_CLIENT_SECRET is required to use the PlanetScale integration",
 				}),
 			),
-		onSome: (value) => Effect.succeed(Redacted.value(value)),
+		onSome: (value) => Effect.succeed(value),
 	})
 	return {
 		clientId,
@@ -365,6 +365,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 		const listOrganizations = Effect.fn("PlanetScaleOAuthService.listOrganizations")(function* (
 			orgId: OrgId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const { accessToken } = yield* getValidAccessToken(orgId)
 			return yield* fetchOrganizations(accessToken)
 		})
@@ -372,6 +373,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 		const hasConnection = Effect.fn("PlanetScaleOAuthService.hasConnection")(function* (
 			orgId: OrgId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const row = yield* oauth.loadConnection(orgId)
 			return row !== null
 		})
@@ -379,6 +381,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 		const connectedByUserId = Effect.fn("PlanetScaleOAuthService.connectedByUserId")(function* (
 			orgId: OrgId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const row = yield* oauth.loadConnection(orgId)
 			return row?.connectedByUserId ?? null
 		})

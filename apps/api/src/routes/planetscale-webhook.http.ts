@@ -37,7 +37,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			(message) => new IntegrationsPersistenceError({ message }),
-		).pipe(Effect.orDie)
+		)
 
 		const handle = Effect.fn("PlanetScaleWebhook.receive")(function* (
 			req: HttpServerRequest.HttpServerRequest,
@@ -69,7 +69,14 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 							.where(eq(planetscaleConnections.id, connectionId))
 							.limit(1),
 					)
-					.pipe(Effect.orDie)
+					.pipe(
+						Effect.mapError(
+							(error) =>
+								new IntegrationsPersistenceError({
+									message: error instanceof Error ? error.message : "Failed to load webhook connection",
+								}),
+						),
+					)
 				const connection = rows[0]
 				if (
 					connection === undefined ||
@@ -98,7 +105,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 						new IntegrationsPersistenceError({
 							message: "Failed to decrypt webhook secret",
 						}),
-				).pipe(Effect.orDie)
+				)
 
 				const headers = req.headers as Record<string, string | undefined>
 				const signature = headers["x-planetscale-signature"]

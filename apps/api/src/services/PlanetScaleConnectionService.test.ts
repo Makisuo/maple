@@ -313,6 +313,32 @@ describe("PlanetScaleConnectionService", () => {
 		)
 	})
 
+	it.effect("classifies transient metrics probe failures as upstream errors", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubPlanetScaleApi({ deny: { "/metrics": 503 } })
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const orgId = asOrgId("org_1")
+
+			yield* storeGrant(orgId)
+			const bound = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+			assert.strictEqual(bound.metricsAuth, "missing")
+
+			const error = yield* service
+				.setMetricsToken(
+					orgId,
+					new PlanetScaleMetricsTokenRequest({ tokenId: "tok_retry", tokenSecret: "secret" }),
+				)
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+			assert.include(error.message, "HTTP 503")
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
 	it.effect("finalizeOrgSelection adopts an existing user-created target and keeps its service token", () => {
 		const testDb = createTestDb(trackedDbs)
 		const stub = stubPlanetScaleApi()

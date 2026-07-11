@@ -674,7 +674,16 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						byBranch ? `${row.database} ${row.branch ?? ""}` : row.database
 					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
 					const seen = new Set<string>()
-					const data: Array<Record<string, unknown>> = gaugeRows.map((row) => {
+					type MergedStatsRow = {
+							readonly database: string
+							readonly branch?: string
+							readonly cpuMaxPercent: number
+							readonly memMaxPercent: number
+							readonly replicaLagMaxSeconds: number
+							readonly connectionsAvg: number
+							readonly connectionsMax: number
+						}
+						const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
 						const key = keyOf(row)
 						seen.add(key)
 						const connections = connectionsByKey.get(key)

@@ -1,5 +1,6 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
@@ -258,6 +259,22 @@ describe("PlanetScaleOAuthService", () => {
 				.completeConnect("auth-code", "state-that-was-never-issued")
 				.pipe(Effect.flip)
 			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			assert.isFalse(yield* service.hasConnection(asOrgId("org_a")))
+		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch())))
+	})
+
+	it.effect("completeConnect rejects a state after its TTL", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: CALLBACK_URL,
+			})
+			yield* TestClock.adjust("11 minutes")
+
+			const error = yield* service.completeConnect("auth-code", state).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			assert.include(error.message, "expired")
 			assert.isFalse(yield* service.hasConnection(asOrgId("org_a")))
 		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch())))
 	})

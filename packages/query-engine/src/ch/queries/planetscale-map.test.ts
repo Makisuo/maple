@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest"
+import { Effect } from "effect"
 import { compileCH } from "@maple-dev/clickhouse-builder"
 import {
+	planetscaleBranchConnectionsRowSchema,
 	planetscaleBranchConnectionsSQL,
+	planetscaleBranchStatsRowSchema,
 	planetscaleBranchGaugesSQL,
+	planetscaleConnectionsRowSchema,
 	planetscaleConnectionsSQL,
+	planetscaleDatabaseStatsRowSchema,
 	planetscaleGaugesSQL,
 } from "./planetscale-map"
 
@@ -66,5 +71,86 @@ describe("planetscaleConnectionsSQL", () => {
 		})
 		expect(sql).toContain("GROUP BY database, branch, t")
 		expect(sql).toContain("GROUP BY database, branch")
+	})
+})
+
+describe("PlanetScale map row schemas", () => {
+	it("decode ClickHouse numeric strings for database and branch outputs", () => {
+		const databaseStats = compileCH(planetscaleGaugesSQL(), baseParams, {
+			rowSchema: planetscaleDatabaseStatsRowSchema,
+		})
+		const branchStats = compileCH(
+			planetscaleBranchGaugesSQL(),
+			{ ...baseParams, database: "main-db" },
+			{ rowSchema: planetscaleBranchStatsRowSchema },
+		)
+		const connections = compileCH(planetscaleConnectionsSQL(), baseParams, {
+			rowSchema: planetscaleConnectionsRowSchema,
+		})
+		const branchConnections = compileCH(
+			planetscaleBranchConnectionsSQL(),
+			{ ...baseParams, database: "main-db" },
+			{ rowSchema: planetscaleBranchConnectionsRowSchema },
+		)
+
+		expect(
+			Effect.runSync(
+				databaseStats.decodeRows([
+					{
+						database: "main-db",
+						cpuMaxPercent: "90.5",
+						memMaxPercent: "75",
+						replicaLagMaxSeconds: "3",
+					},
+				]),
+			),
+		).toEqual([
+			{
+				database: "main-db",
+				cpuMaxPercent: 90.5,
+				memMaxPercent: 75,
+				replicaLagMaxSeconds: 3,
+			},
+		])
+		expect(
+			Effect.runSync(
+				branchStats.decodeRows([
+					{
+						database: "main-db",
+						branch: "main",
+						cpuMaxPercent: "85",
+						memMaxPercent: "65",
+						replicaLagMaxSeconds: "1.5",
+					},
+				]),
+			),
+		).toEqual([
+			{
+				database: "main-db",
+				branch: "main",
+				cpuMaxPercent: 85,
+				memMaxPercent: 65,
+				replicaLagMaxSeconds: 1.5,
+			},
+		])
+		expect(
+			Effect.runSync(
+				connections.decodeRows([
+					{ database: "main-db", connectionsAvg: "12.25", connectionsMax: "18" },
+				]),
+			),
+		).toEqual([{ database: "main-db", connectionsAvg: 12.25, connectionsMax: 18 }])
+		expect(
+			Effect.runSync(
+				branchConnections.decodeRows([
+					{
+						database: "main-db",
+						branch: "main",
+						connectionsAvg: "6.5",
+						connectionsMax: "9",
+					},
+				]),
+			),
+		).toEqual([{ database: "main-db", branch: "main", connectionsAvg: 6.5, connectionsMax: 9 }])
 	})
 })

@@ -305,6 +305,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 		})
 
 		const discover = Effect.fn("PlanetScaleDiscoveryService.discover")(function* (row: ScrapeTargetRow) {
+			yield* Effect.annotateCurrentSpan({ orgId: row.orgId })
 			const now = yield* Clock.currentTimeMillis
 			const cached = (yield* Ref.get(cache)).get(row.id)
 			if (cached && now - cached.fetchedAt < DISCOVERY_TTL_MS) {
