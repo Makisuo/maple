@@ -163,6 +163,21 @@ export class ScrapeTargetEncryptionError extends Schema.TaggedErrorClass<ScrapeT
 	{ httpApiStatus: 500 },
 ) {}
 
+/**
+ * Token resolution for a managed (OAuth-backed) scrape target failed. `reason`
+ * preserves the actionable failure class: `not_connected`/`revoked` need a
+ * reconnect, `upstream` is a transient provider failure, `config` is a
+ * server-side OAuth app misconfiguration.
+ */
+export class ScrapeTargetAuthError extends Schema.TaggedErrorClass<ScrapeTargetAuthError>()(
+	"@maple/http/errors/ScrapeTargetAuthError",
+	{
+		message: Schema.String,
+		reason: Schema.Literals(["not_connected", "revoked", "upstream", "config"]),
+	},
+	{ httpApiStatus: 502 },
+) {}
+
 export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
@@ -207,7 +222,12 @@ export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 				targetId: ScrapeTargetId,
 			},
 			success: ScrapeTargetProbeResponse,
-			error: [ScrapeTargetNotFoundError, ScrapeTargetPersistenceError, ScrapeTargetEncryptionError],
+			error: [
+				ScrapeTargetNotFoundError,
+				ScrapeTargetPersistenceError,
+				ScrapeTargetEncryptionError,
+				ScrapeTargetAuthError,
+			],
 		}),
 	)
 	.add(

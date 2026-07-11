@@ -186,7 +186,12 @@ function PlanetScaleDatabaseData({
 				/>
 			</div>
 
-			{branchStats.length > 0 ? (
+			{Result.isFailure(branchStatsResult) ? (
+				<div className="space-y-2">
+					<h2 className="text-sm font-medium text-foreground">Branches</h2>
+					<QueryErrorState error={branchStatsResult.cause} />
+				</div>
+			) : branchStats.length > 0 ? (
 				<div className="space-y-2">
 					<h2 className="text-sm font-medium text-foreground">Branches</h2>
 					<div className="overflow-hidden rounded-lg border border-border/60">

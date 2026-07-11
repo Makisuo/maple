@@ -1,5 +1,4 @@
-import { afterEach, describe, it } from "@effect/vitest"
-import { expect } from "vitest"
+import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { ConfigProvider, Duration, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -13,9 +12,12 @@ import { ScrapeTargetsService } from "./ScrapeTargetsService"
 const trackedDbs: TestDb[] = []
 const originalFetch = globalThis.fetch
 
-// create() forks a detached probe that uses the global fetch; stub it so the
-// tests never touch the real network.
-globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
+// create() forks a detached probe that uses the global fetch; stub it before
+// EVERY test (afterEach restores the real fetch, so a module-level stub would
+// only protect the first test) so the tests never touch the real network.
+beforeEach(() => {
+	globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
+})
 
 afterEach(async () => {
 	globalThis.fetch = originalFetch
@@ -142,15 +144,15 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(recorded[0]?.url).toBe("https://api.planetscale.com/v1/organizations/my-org/metrics")
-			expect(recorded[0]?.authorization).toBe("token tok_id:tok_secret")
+			assert.strictEqual(recorded[0]?.url, "https://api.planetscale.com/v1/organizations/my-org/metrics")
+			assert.strictEqual(recorded[0]?.authorization, "token tok_id:tok_secret")
 
 			// The 169.254.* target is dropped by the SSRF guard.
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["branch-1", "branch-2"])
-			expect(entries[0]?.url).toBe("https://branch-1.metrics.psdb.cloud:443/metrics")
-			expect(entries[1]?.url).toBe("https://branch-2.metrics.psdb.cloud:443/metrics")
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.strictEqual(entries[0]?.url, "https://branch-1.metrics.psdb.cloud:443/metrics")
+			assert.strictEqual(entries[1]?.url, "https://branch-2.metrics.psdb.cloud:443/metrics")
 			// `__`-prefixed Prometheus meta labels are stripped; SD labels survive.
-			expect(entries[0]?.labels).toEqual({
+			assert.deepStrictEqual(entries[0]?.labels, {
 				planetscale_database_branch_id: "branch-1",
 				planetscale_database: "mydb",
 			})
@@ -181,9 +183,9 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(entries).toHaveLength(1)
-			expect(entries[0]?.subTargetKey).toBe("metrics.psdb.cloud:443")
-			expect(entries[0]?.url).toBe("https://metrics.psdb.cloud:443/metrics")
+			assert.strictEqual(entries.length, 1)
+			assert.strictEqual(entries[0]?.subTargetKey, "metrics.psdb.cloud:443")
+			assert.strictEqual(entries[0]?.url, "https://metrics.psdb.cloud:443/metrics")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -197,11 +199,11 @@ describe("PlanetScaleDiscoveryService", () => {
 
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
-			expect(recorded).toHaveLength(1)
+			assert.strictEqual(recorded.length, 1)
 
 			yield* TestClock.adjust(Duration.minutes(11))
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
-			expect(recorded).toHaveLength(2)
+			assert.strictEqual(recorded.length, 2)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -227,9 +229,9 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(stale.map((entry) => entry.subTargetKey)).toEqual(["branch-1", "branch-2"])
+			assert.deepStrictEqual(stale.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
 			const lastError = yield* discovery.lastError(row.id)
-			expect(lastError).toContain("HTTP 503")
+			assert.include(lastError ?? "", "HTTP 503")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -247,7 +249,7 @@ describe("PlanetScaleDiscoveryService", () => {
 				Effect.flip,
 			)
 
-			expect(error.message).toContain("read_metrics_endpoints")
+			assert.include(error.message, "read_metrics_endpoints")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -265,7 +267,7 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["main", "stg"])
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["main", "stg"])
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -283,7 +285,7 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["main", "stg"])
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["main", "stg"])
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -340,8 +342,8 @@ describe("PlanetScaleDiscoveryService", () => {
 			const entries = yield* discovery.discover(row)
 
 			const sdCall = recorded.find((call) => call.url.includes("/my-org/metrics"))
-			expect(sdCall?.authorization).toBe("Bearer ps-access-token")
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["branch-1", "branch-2"])
+			assert.strictEqual(sdCall?.authorization, "Bearer ps-access-token")
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
 		}).pipe(
 			Effect.provideService(FetchHttpClient.Fetch, stub),
 			Effect.provide(makeLayer(testDb, stub)),
@@ -359,7 +361,7 @@ describe("PlanetScaleDiscoveryService", () => {
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
 			yield* discovery.invalidate(row.id)
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
-			expect(recorded).toHaveLength(2)
+			assert.strictEqual(recorded.length, 2)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

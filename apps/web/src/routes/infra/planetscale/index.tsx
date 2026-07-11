@@ -136,6 +136,12 @@ function PlanetScaleData({ startTime, endTime }: { startTime: string; endTime: s
 			const branchTotal = inventory.databases.reduce((sum, db) => sum + db.branches.length, 0)
 			return (
 				<div className="space-y-6">
+					{Result.isFailure(statsResult) ? (
+						<QueryErrorState
+							error={statsResult.cause}
+							className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs flex flex-col gap-1"
+						/>
+					) : null}
 					<StatRail>
 						<StatRailItem eyebrow="Databases" value={String(inventory.databases.length)} />
 						<StatRailItem eyebrow="Branches" value={String(branchTotal)} />

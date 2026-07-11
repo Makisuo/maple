@@ -1,5 +1,5 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Exit, Layer, Schema } from "effect"
+import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { CreateScrapeTargetRequest, OrgId, ScrapeIntervalSeconds, ScrapeTargetId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
@@ -412,8 +412,8 @@ describe("ScrapeTargetsService", () => {
 				}),
 			)
 
-			const result = yield* service.listChecks(asOrgId("org_2"), target.id, {}).pipe(Effect.exit)
-			assert.isTrue(Exit.isFailure(result))
+			const error = yield* service.listChecks(asOrgId("org_2"), target.id, {}).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetNotFoundError")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 

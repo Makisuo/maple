@@ -4,6 +4,7 @@ import {
 	OrgId,
 	ScrapeAuthType,
 	ScrapeIntervalSeconds,
+	ScrapeTargetAuthError,
 	ScrapeTargetDeleteResponse,
 	ScrapeTargetEncryptionError,
 	ScrapeTargetId,
@@ -27,9 +28,11 @@ import {
 	BasicCredentialsSchema,
 	BearerCredentialsSchema,
 	buildScrapeAuthHeaders,
+	catchOAuthTokenFailure,
 	TokenCredentialsSchema,
 } from "../lib/scrape-auth"
 import { safeFetch, validateExternalUrl } from "../lib/url-validator"
+import { decodeDiscoveryConfig, DiscoveryConfigSchema } from "./planetscale/discovery-config"
 import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
@@ -90,7 +93,10 @@ export interface ScrapeTargetsServiceShape {
 		subTargetKey?: string,
 	) => Effect.Effect<
 		ScrapeTargetProxyResponse,
-		ScrapeTargetNotFoundError | ScrapeTargetPersistenceError | ScrapeTargetEncryptionError
+		| ScrapeTargetNotFoundError
+		| ScrapeTargetPersistenceError
+		| ScrapeTargetEncryptionError
+		| ScrapeTargetAuthError
 	>
 	readonly recordScrapeResults: (
 		results: ReadonlyArray<{
@@ -123,7 +129,10 @@ export interface ScrapeTargetsServiceShape {
 		targetId: ScrapeTargetId,
 	) => Effect.Effect<
 		ScrapeTargetProbeResponse,
-		ScrapeTargetNotFoundError | ScrapeTargetPersistenceError | ScrapeTargetEncryptionError
+		| ScrapeTargetNotFoundError
+		| ScrapeTargetPersistenceError
+		| ScrapeTargetEncryptionError
+		| ScrapeTargetAuthError
 	>
 }
 
@@ -145,11 +154,6 @@ const decodeScrapeIntervalSecondsSync = Schema.decodeUnknownSync(ScrapeIntervalS
 const decodeScrapeAuthTypeSync = Schema.decodeUnknownSync(ScrapeAuthType)
 const decodeScrapeTargetTypeSync = Schema.decodeUnknownSync(ScrapeTargetType)
 const ScrapeLabelsSchema = Schema.Record(Schema.String, Schema.String)
-const DiscoveryConfigSchema = Schema.Struct({
-	organization: Schema.String,
-	includeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
-	excludeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
-})
 
 /** Cap pattern lists so a target config stays small and bounded. */
 const MAX_BRANCH_PATTERNS = 50
@@ -232,15 +236,6 @@ const validateAuthCredentials = (authType: string, authCredentials: string | nul
 		),
 		Effect.as(authCredentials),
 	)
-}
-
-const decodeDiscoveryConfig = (discoveryConfigJson: unknown) => {
-	if (!discoveryConfigJson) return null
-	try {
-		return Schema.decodeUnknownSync(DiscoveryConfigSchema)(discoveryConfigJson)
-	} catch {
-		return null
-	}
 }
 
 const rowToResponse = (row: ScrapeTargetRow): ScrapeTargetResponse => {
@@ -437,12 +432,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				}
 				const { accessToken } = yield* psOAuth
 					.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
-					.pipe(
-						Effect.mapError(
-							(error) =>
-								toEncryptionError(`Failed to resolve the PlanetScale OAuth token: ${error.message}`),
-						),
-					)
+					.pipe(Effect.catchTags(catchOAuthTokenFailure))
 				return { Authorization: planetScaleBearerHeader(accessToken) }
 			})
 
@@ -834,9 +824,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					// Resolve the per-branch endpoint from the discovery cache. The
 					// scrape itself carries the auth header too — PlanetScale's docs
 					// only auth the SD call, but sending it is harmless if unneeded.
-					const subTargets = yield* discovery
-						.discover(row.value)
-						.pipe(Effect.mapError(toPersistenceError))
+					const subTargets = yield* discovery.discover(row.value)
 					const match = subTargets.find((entry) => entry.subTargetKey === subTargetKey)
 					if (!match) {
 						return yield* Effect.fail(

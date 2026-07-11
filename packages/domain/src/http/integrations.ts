@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { ExternalUserId, UserId } from "../primitives"
+import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 import {
 	GitCommitSha,
@@ -230,7 +230,7 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 export class PlanetScaleScrapeTargetSummary extends Schema.Class<PlanetScaleScrapeTargetSummary>(
 	"PlanetScaleScrapeTargetSummary",
 )({
-	id: Schema.String,
+	id: ScrapeTargetId,
 	enabled: Schema.Boolean,
 	scrapeIntervalSeconds: Schema.Number,
 	includeBranches: Schema.Array(Schema.String),

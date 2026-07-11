@@ -148,6 +148,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			const database = yield* Database
 			const env = yield* Env
 			const psOAuth = yield* PlanetScaleOAuthService
+			const httpClient = yield* HttpClient.HttpClient
 			const apiBase = env.MAPLE_PLANETSCALE_API_BASE_URL.replace(/\/$/, "")
 
 			const apiGetJson = Effect.fn("PlanetScaleService.apiGetJson")(function* (
@@ -155,14 +156,13 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				authorization: string,
 			) {
 				return yield* Effect.gen(function* () {
-					const client = yield* HttpClient.HttpClient
 					const request = HttpClientRequest.get(`${apiBase}${path}`).pipe(
 						HttpClientRequest.setHeaders({
 							Authorization: authorization,
 							Accept: "application/json",
 						}),
 					)
-					const res = yield* client.execute(request)
+					const res = yield* httpClient.execute(request)
 					const text = yield* res.text
 					return { status: res.status, text }
 				}).pipe(
@@ -181,7 +181,6 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 								}),
 							),
 					}),
-					Effect.provide(FetchHttpClient.layer),
 				)
 			})
 
@@ -192,7 +191,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				itemSchema: S,
 			) {
 				const decodePage = Schema.decodeUnknownEffect(Schema.fromJsonString(PageSchema(itemSchema)))
-				const items: Array<Schema.Schema.Type<S>> = []
+				const items: Array<S["Type"]> = []
 				for (let page = 1; page <= MAX_PAGES; page++) {
 					const separator = basePath.includes("?") ? "&" : "?"
 					const response = yield* apiGetJson(
@@ -223,7 +222,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 								}),
 						),
 					)
-					items.push(...(decoded.data as ReadonlyArray<Schema.Schema.Type<S>>))
+					items.push(...decoded.data)
 					if (decoded.data.length < PAGE_SIZE) break
 				}
 				return items
@@ -406,55 +405,57 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				const existingByDatabaseId = new Map(existingRows.map((row) => [row.databaseId, row]))
 				const upstreamIds = new Set(withBranches.map(({ db }) => db.id))
 
-				for (const { db, branches } of withBranches) {
-					const values = {
-						name: db.name,
-						kind: normalizeKind(db.kind),
-						state: db.state ?? null,
-						region: db.region?.slug ?? db.region?.display_name ?? null,
-						plan: db.plan ?? null,
-						branchesJson: branches,
-						deletedAt: null,
-						updatedAt: new Date(now),
-					}
-					const existing = existingByDatabaseId.get(db.id)
-					if (existing !== undefined) {
-						yield* database
-							.execute((client) =>
-								client
-									.update(planetscaleDatabases)
-									.set(values)
-									.where(eq(planetscaleDatabases.id, existing.id)),
-							)
-							.pipe(Effect.mapError(toPersistenceError))
-					} else {
-						yield* database
-							.execute((client) =>
-								client.insert(planetscaleDatabases).values({
-									id: randomUUID(),
-									orgId: connection.orgId,
-									databaseId: db.id,
-									createdAt: new Date(now),
-									...values,
-								}),
-							)
-							.pipe(Effect.mapError(toPersistenceError))
-					}
-				}
+				yield* Effect.forEach(
+					withBranches,
+					({ db, branches }) => {
+						const values = {
+							name: db.name,
+							kind: normalizeKind(db.kind),
+							state: db.state ?? null,
+							region: db.region?.slug ?? db.region?.display_name ?? null,
+							plan: db.plan ?? null,
+							branchesJson: branches,
+							deletedAt: null,
+							updatedAt: new Date(now),
+						}
+						const existing = existingByDatabaseId.get(db.id)
+						return (
+							existing !== undefined
+								? database.execute((client) =>
+										client
+											.update(planetscaleDatabases)
+											.set(values)
+											.where(eq(planetscaleDatabases.id, existing.id)),
+									)
+								: database.execute((client) =>
+										client.insert(planetscaleDatabases).values({
+											id: randomUUID(),
+											orgId: connection.orgId,
+											databaseId: db.id,
+											createdAt: new Date(now),
+											...values,
+										}),
+									)
+						).pipe(Effect.mapError(toPersistenceError))
+					},
+					{ discard: true },
+				)
 
 				// Soft-delete rows whose database disappeared upstream, so identity is
 				// kept if it re-appears.
-				for (const row of existingRows) {
-					if (upstreamIds.has(row.databaseId) || row.deletedAt !== null) continue
-					yield* database
-						.execute((client) =>
-							client
-								.update(planetscaleDatabases)
-								.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
-								.where(eq(planetscaleDatabases.id, row.id)),
-						)
-						.pipe(Effect.mapError(toPersistenceError))
-				}
+				yield* Effect.forEach(
+					existingRows.filter((row) => !upstreamIds.has(row.databaseId) && row.deletedAt === null),
+					(row) =>
+						database
+							.execute((client) =>
+								client
+									.update(planetscaleDatabases)
+									.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
+									.where(eq(planetscaleDatabases.id, row.id)),
+							)
+							.pipe(Effect.mapError(toPersistenceError)),
+					{ discard: true },
+				)
 
 				return withBranches.length
 			})
@@ -542,6 +543,11 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				orgId: OrgId,
 				options: PlanetScaleQueryInsightsOptions,
 			) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"maple.planetscale.database": options.database,
+					"maple.planetscale.branch": options.branch ?? "",
+				})
 				const connections = yield* database
 					.execute((db) =>
 						db
@@ -662,7 +668,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 		}),
 	},
 ) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }
 
 /** Normalize PlanetScale's product kind to "mysql" | "postgresql". */

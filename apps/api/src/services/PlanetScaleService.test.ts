@@ -335,7 +335,7 @@ describe("PlanetScaleService", () => {
 
 			// listDatabases hides soft-deleted rows.
 			const rows = yield* service.listDatabases(asOrgId("org_1"))
-			assert.deepEqual(
+			assert.deepStrictEqual(
 				rows.map((row) => row.name),
 				["main-db"],
 			)

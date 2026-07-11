@@ -1,11 +1,17 @@
-import { OrgId, ScrapeTargetEncryptionError, ScrapeTargetPersistenceError } from "@maple/domain/http"
+import {
+	OrgId,
+	ScrapeTargetEncryptionError,
+	ScrapeTargetPersistenceError,
+	type ScrapeTargetAuthError,
+} from "@maple/domain/http"
 import type { scrapeTargets } from "@maple/db"
 import { Clock, Context, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Env } from "../lib/Env"
-import { buildScrapeAuthHeaders } from "../lib/scrape-auth"
+import { buildScrapeAuthHeaders, catchOAuthTokenFailure } from "../lib/scrape-auth"
 import { validateExternalUrlSync } from "../lib/url-validator"
+import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
@@ -130,13 +136,8 @@ interface BranchFilters {
 
 /** Read include/exclude branch globs off the row's `discovery_config_json`. */
 const parseBranchFilters = (discoveryConfigJson: unknown): BranchFilters => {
-	const cfg = discoveryConfigJson as
-		| { includeBranches?: unknown; excludeBranches?: unknown }
-		| null
-		| undefined
-	const toList = (value: unknown): string[] =>
-		Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
-	return { include: toList(cfg?.includeBranches), exclude: toList(cfg?.excludeBranches) }
+	const cfg = decodeDiscoveryConfig(discoveryConfigJson)
+	return { include: cfg?.includeBranches ?? [], exclude: cfg?.excludeBranches ?? [] }
 }
 
 /** exclude wins over include; an empty include list means "all branches". */
@@ -157,7 +158,7 @@ export interface PlanetScaleDiscoveryServiceShape {
 		row: ScrapeTargetRow,
 	) => Effect.Effect<
 		ReadonlyArray<PlanetScaleSubTarget>,
-		ScrapeTargetPersistenceError | ScrapeTargetEncryptionError
+		ScrapeTargetPersistenceError | ScrapeTargetEncryptionError | ScrapeTargetAuthError
 	>
 	/** Last discovery error for a target (null when the last refresh succeeded). */
 	readonly lastError: (targetId: string) => Effect.Effect<string | null>
@@ -172,6 +173,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 	make: Effect.gen(function* () {
 		const env = yield* Env
 		const psOAuth = yield* PlanetScaleOAuthService
+		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			(message) => new ScrapeTargetEncryptionError({ message }),
@@ -189,11 +191,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			}
 			const { accessToken } = yield* psOAuth
 				.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
-				.pipe(
-					Effect.mapError((error) =>
-						toPersistenceError(`Failed to resolve the PlanetScale OAuth token: ${error.message}`),
-					),
-				)
+				.pipe(Effect.catchTags(catchOAuthTokenFailure))
 			return { Authorization: planetScaleBearerHeader(accessToken) }
 		})
 
@@ -202,9 +200,8 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 		) {
 			const headers = yield* authHeadersForRow(row)
 			const response = yield* Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.get(row.url).pipe(HttpClientRequest.setHeaders(headers))
-				const res = yield* client.execute(request)
+				const res = yield* httpClient.execute(request)
 				const text = yield* res.text
 				return { status: res.status, text }
 			}).pipe(
@@ -216,7 +213,6 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 					orElse: () =>
 						Effect.fail(toPersistenceError("PlanetScale discovery request timed out after 10s")),
 				}),
-				Effect.provide(FetchHttpClient.layer),
 			)
 
 			if (response.status < 200 || response.status >= 300) {
@@ -333,5 +329,5 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 		return { discover, lastError, invalidate } satisfies PlanetScaleDiscoveryServiceShape
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

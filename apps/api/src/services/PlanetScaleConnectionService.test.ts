@@ -146,7 +146,7 @@ describe("PlanetScaleConnectionService", () => {
 			assert.isFalse(status.pendingOrgSelection)
 			assert.strictEqual(status.organization, "acme")
 			assert.strictEqual(status.connectedByUserId, "user_1")
-			assert.deepEqual(status.detectedPermissions, {
+			assert.deepStrictEqual(status.detectedPermissions, {
 				readOrganization: true,
 				readMetricsEndpoints: true,
 				readDatabases: true,
@@ -266,7 +266,7 @@ describe("PlanetScaleConnectionService", () => {
 			assert.isTrue(bound.connected)
 			assert.strictEqual(bound.metricsAuth, "missing")
 			assert.isFalse(bound.scrapeTarget!.enabled)
-			assert.deepEqual(bound.detectedPermissions, {
+			assert.deepStrictEqual(bound.detectedPermissions, {
 				readOrganization: true,
 				readMetricsEndpoints: false,
 				readDatabases: true,

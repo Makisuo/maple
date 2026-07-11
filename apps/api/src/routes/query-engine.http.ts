@@ -74,11 +74,16 @@ import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
-// classes per failure mode). This identity combinator threads that typed error
-// channel through unchanged so HTTP status mapping stays accurate — every
-// endpoint declares the full set via `warehouseHttpErrors`.
-const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, _context: string): Effect.Effect<A, E, R> =>
-	effect
+// classes per failure mode). The typed error channel threads through unchanged
+// so HTTP status mapping stays accurate — every endpoint declares the full set
+// via `warehouseHttpErrors`; on failure the context string lands on the route
+// span so a failed request names which sub-query broke.
+const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string): Effect.Effect<A, E, R> =>
+	effect.pipe(
+		Effect.tapError(() =>
+			Effect.annotateCurrentSpan({ "maple.query_engine.failed_step": context }),
+		),
+	)
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)

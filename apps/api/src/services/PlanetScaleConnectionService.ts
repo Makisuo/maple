@@ -9,6 +9,10 @@ import {
 	PlanetScaleScrapeTargetSummary,
 	ScrapeTargetId,
 	UserId,
+	type ScrapeTargetEncryptionError,
+	type ScrapeTargetNotFoundError,
+	type ScrapeTargetPersistenceError,
+	type ScrapeTargetValidationError,
 	type OrgId,
 	type PlanetScaleMetricsTokenRequest,
 	type PlanetScaleSelectOrganizationRequest,
@@ -20,6 +24,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
+import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
@@ -106,21 +111,6 @@ const toPersistenceError = (error: unknown) =>
 const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
 const decodeScrapeTargetIdSync = Schema.decodeUnknownSync(ScrapeTargetId)
 
-const DiscoveryConfigSchema = Schema.Struct({
-	organization: Schema.String,
-	includeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
-	excludeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
-})
-
-const decodeDiscoveryConfig = (json: unknown) => {
-	if (!json) return null
-	try {
-		return Schema.decodeUnknownSync(DiscoveryConfigSchema)(json)
-	} catch {
-		return null
-	}
-}
-
 export class PlanetScaleConnectionService extends Context.Service<
 	PlanetScaleConnectionService,
 	PlanetScaleConnectionServiceShape
@@ -130,6 +120,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const env = yield* Env
 		const scrapeTargetsService = yield* ScrapeTargetsService
 		const psOAuth = yield* PlanetScaleOAuthService
+		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			(message) => new IntegrationsPersistenceError({ message }),
@@ -146,14 +137,13 @@ export class PlanetScaleConnectionService extends Context.Service<
 			authorization: string,
 		) {
 			return yield* Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.get(`${apiBase}${path}`).pipe(
 					HttpClientRequest.setHeaders({
 						Authorization: authorization,
 						Accept: "application/json",
 					}),
 				)
-				const res = yield* client.execute(request)
+				const res = yield* httpClient.execute(request)
 				// Drain the body so the connection is released.
 				yield* res.text
 				return res.status
@@ -173,7 +163,6 @@ export class PlanetScaleConnectionService extends Context.Service<
 							}),
 						),
 				}),
-				Effect.provide(FetchHttpClient.layer),
 			)
 		})
 
@@ -279,7 +268,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				detectedPermissions: connection.detectedPermissionsJson ?? null,
 				scrapeTarget: target
 					? new PlanetScaleScrapeTargetSummary({
-							id: target.id,
+							id: decodeScrapeTargetIdSync(target.id),
 							enabled: target.enabled,
 							scrapeIntervalSeconds: target.scrapeIntervalSeconds,
 							includeBranches: discoveryConfig?.includeBranches ?? [],
@@ -334,13 +323,25 @@ export class PlanetScaleConnectionService extends Context.Service<
 				.pipe(Effect.mapError(toPersistenceError))
 		})
 
-		const mapScrapeTargetError = (error: {
-			readonly _tag: string
-			readonly message: string
-		}): IntegrationsValidationError | IntegrationsPersistenceError =>
-			error._tag === "@maple/http/errors/ScrapeTargetValidationError"
-				? new IntegrationsValidationError({ message: error.message })
-				: new IntegrationsPersistenceError({ message: error.message })
+		// Typed on the concrete scrape-target error union so a new tag added to
+		// ScrapeTargetsService's error channel fails compilation here instead of
+		// silently collapsing into a 503 persistence error.
+		const mapScrapeTargetError = (
+			error:
+				| ScrapeTargetNotFoundError
+				| ScrapeTargetValidationError
+				| ScrapeTargetPersistenceError
+				| ScrapeTargetEncryptionError,
+		): IntegrationsValidationError | IntegrationsPersistenceError => {
+			switch (error._tag) {
+				case "@maple/http/errors/ScrapeTargetValidationError":
+					return new IntegrationsValidationError({ message: error.message })
+				case "@maple/http/errors/ScrapeTargetNotFoundError":
+				case "@maple/http/errors/ScrapeTargetPersistenceError":
+				case "@maple/http/errors/ScrapeTargetEncryptionError":
+					return new IntegrationsPersistenceError({ message: error.message })
+			}
+		}
 
 		const finalizeOrgSelection = Effect.fn("PlanetScaleConnectionService.finalizeOrgSelection")(function* (
 			orgId: OrgId,
@@ -605,5 +606,5 @@ export class PlanetScaleConnectionService extends Context.Service<
 		} satisfies PlanetScaleConnectionServiceShape
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

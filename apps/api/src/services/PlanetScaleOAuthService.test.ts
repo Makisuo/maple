@@ -60,9 +60,16 @@ const mockPlanetScaleFetch =
 					expires_in: 3600,
 				})
 			}
-			assert.strictEqual(body.get("grant_type"), "authorization_code")
-			assert.strictEqual(body.get("client_id"), "ps-client-id")
-			assert.strictEqual(body.get("client_secret"), "ps-client-secret")
+			// A malformed exchange fails as an upstream 400 (readable at the test
+			// site) instead of asserting inside the fetch stub, where a throw would
+			// surface as an opaque mapped HTTP error.
+			if (
+				body.get("grant_type") !== "authorization_code" ||
+				body.get("client_id") !== "ps-client-id" ||
+				body.get("client_secret") !== "ps-client-secret"
+			) {
+				return jsonResponse({ error: "unexpected_token_exchange_request" }, 400)
+			}
 			return jsonResponse({
 				access_token: "ps-access-token",
 				token_type: "Bearer",

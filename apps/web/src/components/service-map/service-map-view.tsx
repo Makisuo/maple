@@ -1042,7 +1042,19 @@ function PlanetScaleSection({
 				</p>
 			)}
 
-			{branchStats.length > 0 || idleBranches.length > 0 ? (
+			{Result.builder(branchStatsResult)
+				.onError((error) => {
+					const formatted = formatBackendError(error)
+					return (
+						<div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs">
+							<p className="font-medium text-destructive">{formatted.title}</p>
+							<p className="mt-1 text-muted-foreground">{formatted.description}</p>
+						</div>
+					)
+				})
+				.orElse(() => null)}
+
+			{!Result.isFailure(branchStatsResult) && (branchStats.length > 0 || idleBranches.length > 0) ? (
 				<div className="space-y-1.5">
 					{branchStats.map((row) => {
 						const info = branchInfoByName.get(row.branch)

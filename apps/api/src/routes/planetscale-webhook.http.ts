@@ -1,5 +1,5 @@
 import { HttpRouter, HttpServerResponse, type HttpServerRequest } from "effect/unstable/http"
-import { OrgId } from "@maple/domain/http"
+import { IntegrationsPersistenceError, OrgId } from "@maple/domain/http"
 import { planetscaleConnections } from "@maple/db"
 import { eq } from "drizzle-orm"
 import { Clock, Effect, Option, Redacted, Schema } from "effect"
@@ -36,12 +36,13 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 		const env = yield* Env
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
-			(message) => new Error(message),
+			(message) => new IntegrationsPersistenceError({ message }),
 		).pipe(Effect.orDie)
 
-		const handle = (req: HttpServerRequest.HttpServerRequest) =>
-			Effect.gen(function* () {
-				const params = yield* HttpRouter.params
+		const handle = Effect.fn("PlanetScaleWebhook.receive")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			const params = yield* HttpRouter.params
 				const connectionId = params.connectionId ?? ""
 				yield* Effect.annotateCurrentSpan({
 					"http.request.method": req.method,
@@ -52,8 +53,8 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 					Effect.annotateCurrentSpan({
 						"http.response.status_code": status,
 						"otel.status_code": "Ok",
-						"planetscale.webhook.outcome": "rejected",
-						"planetscale.webhook.reason": reason,
+						"maple.planetscale.webhook.outcome": "rejected",
+						"maple.planetscale.webhook.reason": reason,
 					}).pipe(Effect.as(textResponse(body, status)))
 
 				if (connectionId.length === 0) {
@@ -78,6 +79,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				) {
 					return yield* reject(404, "unknown_connection", "Unknown webhook endpoint")
 				}
+				yield* Effect.annotateCurrentSpan({ orgId: connection.orgId })
 
 				const bodyOpt = yield* req.text.pipe(Effect.option)
 				if (Option.isNone(bodyOpt) || bodyOpt.value.length === 0) {
@@ -92,7 +94,10 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 						tag: connection.webhookSecretTag,
 					},
 					encryptionKey,
-					() => new Error("Failed to decrypt webhook secret"),
+					() =>
+						new IntegrationsPersistenceError({
+							message: "Failed to decrypt webhook secret",
+						}),
 				).pipe(Effect.orDie)
 
 				const headers = req.headers as Record<string, string | undefined>
@@ -101,7 +106,16 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 					return yield* reject(401, "signature_rejected", "Invalid signature")
 				}
 
-				const payloadResult = yield* decodePlanetScaleWebhookPayload(rawBody).pipe(Effect.option)
+				const payloadResult = yield* decodePlanetScaleWebhookPayload(rawBody).pipe(
+					// Log which field failed to decode — this is a public endpoint and
+					// "Unrecognized payload" alone is undebuggable.
+					Effect.tapError((error) =>
+						Effect.logInfo("PlanetScale webhook payload failed to decode").pipe(
+							Effect.annotateLogs({ connectionId, orgId: connection.orgId, error: String(error) }),
+						),
+					),
+					Effect.option,
+				)
 				if (Option.isNone(payloadResult)) {
 					return yield* reject(400, "parse_rejected", "Unrecognized payload")
 				}
@@ -109,16 +123,16 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 
 				const classified = classifyPlanetScaleEvent(payload.event)
 				yield* Effect.annotateCurrentSpan({
-					"planetscale.webhook.event": payload.event,
-					"planetscale.webhook.database": payload.database ?? "",
-					"planetscale.webhook.action": classified.action,
+					"maple.planetscale.webhook.event": payload.event,
+					"maple.planetscale.webhook.database": payload.database ?? "",
+					"maple.planetscale.webhook.action": classified.action,
 				})
 
 				if (classified.action === "test") {
 					yield* Effect.annotateCurrentSpan({
 						"http.response.status_code": 200,
 						"otel.status_code": "Ok",
-						"planetscale.webhook.outcome": "handled",
+						"maple.planetscale.webhook.outcome": "handled",
 					})
 					return textResponse("ok", 200)
 				}
@@ -136,7 +150,7 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 						timestamp,
 					})
 					yield* Effect.annotateCurrentSpan({
-						"planetscale.webhook.issue_action": result.action,
+						"maple.planetscale.webhook.issue_action": result.action,
 					})
 					yield* Effect.logInfo("PlanetScale webhook event handled").pipe(
 						Effect.annotateLogs({
@@ -154,10 +168,10 @@ export const PlanetScaleWebhookRouter = HttpRouter.use((router) =>
 				yield* Effect.annotateCurrentSpan({
 					"http.response.status_code": 202,
 					"otel.status_code": "Ok",
-					"planetscale.webhook.outcome": "handled",
+					"maple.planetscale.webhook.outcome": "handled",
 				})
 				return textResponse("accepted", 202)
-			}).pipe(Effect.withSpan("PlanetScaleWebhook.receive"))
+		})
 
 		yield* router.add("POST", ROUTE, handle)
 	}),

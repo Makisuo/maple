@@ -136,7 +136,12 @@ function checksFromResult(result: ScrapeTargetChecksResult): ScrapeTargetCheck[]
 		.orElse(() => [])
 }
 
-function scheduledStatus(target: ScrapeTarget, latestCheck: ScrapeTargetCheck | null, isLoading: boolean) {
+function scheduledStatus(
+	target: ScrapeTarget,
+	latestCheck: ScrapeTargetCheck | null,
+	isLoading: boolean,
+	checksUnavailable: boolean,
+) {
 	if (!target.enabled) {
 		return {
 			label: "Disabled",
@@ -149,6 +154,14 @@ function scheduledStatus(target: ScrapeTarget, latestCheck: ScrapeTargetCheck | 
 		return {
 			label: "Checking",
 			detail: "Loading scheduled history",
+			dotClass: "bg-muted-foreground/40",
+			badgeVariant: "outline" as const,
+		}
+	}
+	if (checksUnavailable) {
+		return {
+			label: "Unavailable",
+			detail: "Failed to load scheduled checks",
 			dotClass: "bg-muted-foreground/40",
 			badgeVariant: "outline" as const,
 		}
@@ -869,7 +882,12 @@ function ScrapeTargetRow({
 }) {
 	const { result: latestCheckResult } = useScrapeTargetChecks(target.id, 1)
 	const latestCheck = checksFromResult(latestCheckResult).at(0) ?? null
-	const status = scheduledStatus(target, latestCheck, Result.isInitial(latestCheckResult))
+	const status = scheduledStatus(
+		target,
+		latestCheck,
+		Result.isInitial(latestCheckResult),
+		Result.isFailure(latestCheckResult),
+	)
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.key === "Enter" || event.key === " ") {
@@ -1042,7 +1060,12 @@ function ScrapeTargetDetails({
 	const { result: checksResult } = useScrapeTargetChecks(target.id, 20)
 	const checks = checksFromResult(checksResult)
 	const latestCheck = checks.at(0) ?? null
-	const status = scheduledStatus(target, latestCheck, Result.isInitial(checksResult))
+	const status = scheduledStatus(
+		target,
+		latestCheck,
+		Result.isInitial(checksResult),
+		Result.isFailure(checksResult),
+	)
 	const labels = labelEntries(target.labelsJson)
 
 	// Diagnose the freshest failure: the latest failed check, falling back to the
