@@ -385,7 +385,8 @@ function PlanetScaleMetricsSetup({
 		setSubmitting(true)
 		const result = await setMetricsToken({
 			payload: new PlanetScaleMetricsTokenRequest({ tokenId: tokenId.trim(), tokenSecret }),
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+			// The managed scrape target row below flips authType/enabled — refresh it too.
+			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {
@@ -510,7 +511,8 @@ function PlanetScaleOrgPicker(props: {
 				organization: selected,
 				...(patterns.length > 0 ? { excludeBranches: patterns } : {}),
 			}),
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+			// finalizeOrgSelection re-parents the managed scrape target — refresh the list below.
+			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
 		})
 		setSubmitting(false)
 		if (Exit.isSuccess(result)) {

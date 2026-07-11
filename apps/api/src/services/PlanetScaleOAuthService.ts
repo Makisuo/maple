@@ -110,7 +110,10 @@ export interface PlanetScaleOAuthServiceShape {
 			readonly returnTo: string | null
 			readonly organizations: ReadonlyArray<PlanetScaleOrganization>
 		},
-		IntegrationsValidationError | IntegrationsUpstreamError | IntegrationsPersistenceError
+		| IntegrationsValidationError
+		| IntegrationsRevokedError
+		| IntegrationsUpstreamError
+		| IntegrationsPersistenceError
 	>
 	readonly getValidAccessToken: (
 		orgId: OrgId,
@@ -197,6 +200,15 @@ export class PlanetScaleOAuthService extends Context.Service<
 					`/v1/organizations?page=${page}&per_page=${PAGE_SIZE}`,
 					accessToken,
 				)
+				// A dead grant is a revoked-authorization failure, not a generic
+				// upstream one — the org picker keys its reconnect CTA on the tag.
+				if (response.status === 401 || response.status === 403) {
+					return yield* Effect.fail(
+						new IntegrationsRevokedError({
+							message: `PlanetScale rejected the authorization (HTTP ${response.status}) when listing organizations — reconnect the integration`,
+						}),
+					)
+				}
 				if (response.status < 200 || response.status >= 300) {
 					return yield* Effect.fail(
 						toUpstreamError(

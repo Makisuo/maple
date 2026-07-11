@@ -198,11 +198,13 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						`${basePath}${separator}page=${page}&per_page=${PAGE_SIZE}`,
 						authorization,
 					)
+					// Same taxonomy as fetchOrganizations: a rejected grant surfaces as
+					// revoked, so the per-org lastInventoryError copy (and any future
+					// tag-keyed handling) distinguishes it from a transient blip.
 					if (response.status === 401 || response.status === 403) {
 						return yield* Effect.fail(
-							new IntegrationsUpstreamError({
-								message: `PlanetScale rejected the authorization (HTTP ${response.status}) for ${basePath}`,
-								status: response.status,
+							new IntegrationsRevokedError({
+								message: `PlanetScale rejected the authorization (HTTP ${response.status}) for ${basePath} — reconnect the integration`,
 							}),
 						)
 					}
@@ -241,8 +243,11 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					.pipe(Effect.map(({ accessToken }) => planetScaleBearerHeader(accessToken)))
 
 			/**
-			 * Claim the org's inventory anchor row for this tick. Returns false when
-			 * another tick holds the lease (or the TTL says the inventory is fresh).
+			 * Claim the org's inventory anchor row for this tick. A non-"claimed"
+			 * outcome says exactly why the org was skipped — polling disabled, the
+			 * TTL says the inventory is still fresh, or another tick holds the
+			 * lease — so pollOrg can put the reason on its span instead of
+			 * collapsing them into one invisible boolean.
 			 */
 			const claimInventoryWork = Effect.fn("PlanetScaleService.claimInventoryWork")(function* (
 				orgId: string,
@@ -279,15 +284,15 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							}),
 						)
 						.pipe(Effect.mapError(toPersistenceError))
-					return true
+					return "claimed" as const
 				}
 
-				if (!existing.enabled) return false
+				if (!existing.enabled) return "disabled" as const
 				if (
 					existing.lastSuccessAt !== null &&
 					now - existing.lastSuccessAt.getTime() < INVENTORY_TTL_MS
 				) {
-					return false
+					return "fresh" as const
 				}
 
 				// Lease claim: only wins if the previous lease expired. `.returning()`
@@ -309,7 +314,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							.returning({ id: planetscalePollState.id }),
 					)
 					.pipe(Effect.mapError(toPersistenceError))
-				return claimed.length > 0
+				return claimed.length > 0 ? ("claimed" as const) : ("lease_held" as const)
 			})
 
 			const recordInventoryResult = Effect.fn("PlanetScaleService.recordInventoryResult")(function* (
@@ -463,8 +468,15 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			const pollOrg = Effect.fn("PlanetScaleService.pollOrg")(function* (
 				connection: PlanetScaleConnectionRow,
 			) {
-				const claimed = yield* claimInventoryWork(connection.orgId)
-				if (!claimed) return "skipped" as const
+				yield* Effect.annotateCurrentSpan({ orgId: connection.orgId })
+				const claim = yield* claimInventoryWork(connection.orgId)
+				if (claim !== "claimed") {
+					// A silent skip is how the Cloudflare poller once hid a real outage —
+					// put the reason on the span (mirrors CloudflareAnalyticsService.pollOrg)
+					// so every skipped org is visible on the trace.
+					yield* Effect.annotateCurrentSpan({ "maple.planetscale.skip_reason": claim })
+					return "skipped" as const
+				}
 
 				const result = yield* refreshInventory(connection).pipe(
 					Effect.map((count) => ({ ok: true as const, count })),

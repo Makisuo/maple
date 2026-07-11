@@ -235,7 +235,7 @@ describe("PlanetScaleDiscoveryService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
-	it.effect("fails with a clear token error when discovery is rejected and no cache exists", () => {
+	it.effect("maps a rejected service token to ScrapeTargetAuthError when no cache exists", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			const discovery = yield* PlanetScaleDiscoveryService
@@ -249,7 +249,36 @@ describe("PlanetScaleDiscoveryService", () => {
 				Effect.flip,
 			)
 
+			// Credential rejection is an auth failure (502 taxonomy), not the
+			// persistence 503 — the reason keys the UI's remediation copy.
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetAuthError")
+			if (error._tag === "@maple/http/errors/ScrapeTargetAuthError") {
+				assert.strictEqual(error.reason, "config")
+			}
 			assert.include(error.message, "read_metrics_endpoints")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("collapses concurrent TTL-miss refreshes into a single SD fetch", () => {
+		const testDb = createTestDb(trackedDbs)
+		const recorded: Array<RecordedRequest> = []
+		return Effect.gen(function* () {
+			const discovery = yield* PlanetScaleDiscoveryService
+			const row = yield* createPlanetScaleTargetRow("my-org")
+			const fetchStub = stubFetch(recorded, () => Response.json(SD_PAYLOAD))
+
+			// N per-branch scrapes miss the cold cache together — without the
+			// in-flight collapse each would issue its own fetch against
+			// PlanetScale's rate-limited SD endpoint.
+			const [first, second, third] = yield* Effect.all(
+				[discovery.discover(row), discovery.discover(row), discovery.discover(row)],
+				{ concurrency: "unbounded" },
+			).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
+
+			assert.strictEqual(recorded.length, 1)
+			assert.deepStrictEqual(first?.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.deepStrictEqual(second, first)
+			assert.deepStrictEqual(third, first)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 

@@ -164,10 +164,13 @@ export class ScrapeTargetEncryptionError extends Schema.TaggedErrorClass<ScrapeT
 ) {}
 
 /**
- * Token resolution for a managed (OAuth-backed) scrape target failed. `reason`
- * preserves the actionable failure class: `not_connected`/`revoked` need a
- * reconnect, `upstream` is a transient provider failure, `config` is a
- * server-side OAuth app misconfiguration.
+ * Authenticating a scrape target against its provider failed — token
+ * resolution for a managed (OAuth-backed) target, or the provider rejecting
+ * the presented credentials (e.g. PlanetScale's SD endpoint answering
+ * 401/403). `reason` preserves the actionable failure class:
+ * `not_connected`/`revoked` need a reconnect, `upstream` is a transient
+ * provider failure, `config` is a credential/OAuth-app misconfiguration
+ * (bad service token, missing scope).
  */
 export class ScrapeTargetAuthError extends Schema.TaggedErrorClass<ScrapeTargetAuthError>()(
 	"@maple/http/errors/ScrapeTargetAuthError",

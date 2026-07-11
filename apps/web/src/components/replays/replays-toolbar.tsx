@@ -68,15 +68,15 @@ export function ReplaysToolbar({
 			</InputGroup>
 
 			<div
-				className={cn("flex items-center gap-4 text-sm transition-opacity", waiting && "opacity-60")}
+				className={cn("flex flex-wrap items-center gap-x-4 gap-y-1 text-sm transition-opacity", waiting && "opacity-60")}
 			>
 				<Stat label="sessions" value={totalSessions} />
-				<span className="flex items-center gap-1.5">
+				<span className="flex items-center gap-1.5 whitespace-nowrap">
 					<span className="size-1.5 rounded-full bg-success" />
 					<span className="font-medium tabular-nums">{activeSessions.toLocaleString()}</span>
 					<span className="text-muted-foreground">active</span>
 				</span>
-				<span className="flex items-center gap-1.5">
+				<span className="flex items-center gap-1.5 whitespace-nowrap">
 					<span className={cn("font-medium tabular-nums", errorSessions > 0 && "text-destructive")}>
 						{errorSessions.toLocaleString()}
 					</span>
@@ -89,7 +89,7 @@ export function ReplaysToolbar({
 
 function Stat({ label, value }: { label: string; value: number }) {
 	return (
-		<span className="flex items-center gap-1.5">
+		<span className="flex items-center gap-1.5 whitespace-nowrap">
 			<span className="font-medium tabular-nums">{value.toLocaleString()}</span>
 			<span className="text-muted-foreground">{label}</span>
 		</span>

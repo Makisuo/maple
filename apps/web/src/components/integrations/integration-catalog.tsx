@@ -118,7 +118,11 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
-	const scrapeResult = useAtomValue(MapleApiAtomClient.query("scrapeTargets", "list", {}))
+	const scrapeResult = useAtomValue(
+		MapleApiAtomClient.query("scrapeTargets", "list", {
+			reactivityKeys: ["scrapeTargets"],
+		}),
+	)
 	const planetscaleResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
 			reactivityKeys: ["planetscaleIntegrationStatus"],

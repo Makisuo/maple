@@ -324,6 +324,33 @@ describe("PlanetScaleOAuthService", () => {
 		)
 	})
 
+	it.effect("listOrganizations surfaces a dead grant as revoked (org-picker reconnect CTA)", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: CALLBACK_URL,
+			})
+			yield* service.completeConnect("auth-code", state)
+
+			// The grant dies upstream: the org listing starts answering 401. That
+			// must surface as revoked, not a generic upstream failure — the picker
+			// keys its reconnect CTA on the tag.
+			const deadGrantFetch: typeof globalThis.fetch = async (input, init) => {
+				const url =
+					typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+				if (url.includes("/v1/organizations")) {
+					return jsonResponse({ code: "unauthorized" }, 401)
+				}
+				return mockPlanetScaleFetch()(input, init)
+			}
+			const error = yield* service
+				.listOrganizations(asOrgId("org_a"))
+				.pipe(Effect.provideService(FetchHttpClient.Fetch, deadGrantFetch), Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsRevokedError")
+		}).pipe(Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch())))
+	})
+
 	it.effect("listOrganizations fails not-connected without a stored grant", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {

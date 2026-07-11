@@ -247,7 +247,9 @@ export function ScrapeTargetsSection({
 	const [formAuthUsername, setFormAuthUsername] = useState("")
 	const [formAuthPassword, setFormAuthPassword] = useState("")
 
-	const listQueryAtom = MapleApiAtomClient.query("scrapeTargets", "list", {})
+	const listQueryAtom = MapleApiAtomClient.query("scrapeTargets", "list", {
+		reactivityKeys: ["scrapeTargets"],
+	})
 	const listResult = useAtomValue(listQueryAtom)
 	const refreshTargets = useAtomRefresh(listQueryAtom)
 

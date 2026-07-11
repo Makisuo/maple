@@ -1,4 +1,4 @@
-import { afterEach, assert, describe, it } from "@effect/vitest"
+import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { CreateScrapeTargetRequest, OrgId, ScrapeIntervalSeconds, ScrapeTargetId } from "@maple/domain/http"
@@ -10,6 +10,13 @@ import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
 const trackedDbs: TestDb[] = []
 const originalFetch = globalThis.fetch
+
+// create() forks a detached probe that uses the global fetch; stub it before
+// EVERY test (afterEach restores the real fetch, so a module-level stub would
+// only protect the first test) so the tests never touch the real network.
+beforeEach(() => {
+	globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
+})
 
 afterEach(async () => {
 	globalThis.fetch = originalFetch
