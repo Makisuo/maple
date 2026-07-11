@@ -412,4 +412,34 @@ describe("PlanetScaleConnectionService", () => {
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
 		)
 	})
+
+	it.effect("webhookConfig decrypts the minted secret once bound, and reports unconfigured otherwise", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubPlanetScaleApi()
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const orgId = asOrgId("org_1")
+
+			// No binding yet → nothing to expose (exercises the null-ciphertext branch).
+			const before = yield* service.webhookConfig(orgId)
+			assert.isFalse(before.configured)
+			assert.isNull(before.path)
+			assert.isNull(before.secret)
+
+			yield* storeGrant(orgId)
+			yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+
+			// Bound → the secret decrypts (the only decrypt path for the webhook
+			// secret) and the delivery path is exposed.
+			const after = yield* service.webhookConfig(orgId)
+			assert.isTrue(after.configured)
+			assert.isNotNull(after.secret)
+			assert.isAbove((after.secret ?? "").length, 0)
+			assert.match(after.path ?? "", /^\/api\/integrations\/planetscale\/webhook\//)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
 })

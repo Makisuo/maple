@@ -257,6 +257,107 @@ describe("PlanetScaleService", () => {
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
 	})
 
+	it.effect('queryInsights soft-fails with a not-found message on 404', () => {
+		const testDb = createTestDb(trackedDbs)
+		const baseStub = stubApi({ databases: [], branchesByDatabase: {} })
+		const stub = (async (input: string | URL | Request) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			if (url.includes("/insights")) {
+				return new Response("{}", { status: 404, headers: { "content-type": "application/json" } })
+			}
+			return baseStub(input)
+		}) as typeof fetch
+		globalThis.fetch = stub
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+
+			const result = yield* service.queryInsights(asOrgId("org_1"), {
+				database: "main-db",
+				branch: "main",
+				startTime: 0,
+				endTime: 60_000,
+			})
+
+			assert.strictEqual(result.rows.length, 0)
+			assert.include(result.unavailableReason ?? "", 'no insights')
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+	})
+
+	it.effect('queryInsights soft-fails with the upstream status on a 5xx', () => {
+		const testDb = createTestDb(trackedDbs)
+		const baseStub = stubApi({ databases: [], branchesByDatabase: {} })
+		const stub = (async (input: string | URL | Request) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			if (url.includes("/insights")) {
+				return new Response("{}", { status: 500, headers: { "content-type": "application/json" } })
+			}
+			return baseStub(input)
+		}) as typeof fetch
+		globalThis.fetch = stub
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+
+			const result = yield* service.queryInsights(asOrgId("org_1"), {
+				database: "main-db",
+				branch: "main",
+				startTime: 0,
+				endTime: 60_000,
+			})
+
+			assert.strictEqual(result.rows.length, 0)
+			assert.include(result.unavailableReason ?? "", 'HTTP 500')
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+	})
+
+	it.effect("queryInsights defaults to the first inventoried branch when none is production", () => {
+		const testDb = createTestDb(trackedDbs)
+		const insightCalls: string[] = []
+		const baseStub = stubApi({
+			databases: [{ id: "db_1", name: "main-db" }],
+			branchesByDatabase: { "main-db": [{ id: "br_1", name: "dev" }] },
+		})
+		const stub = (async (input: string | URL | Request) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			if (url.includes("/insights")) {
+				insightCalls.push(url)
+				return new Response(JSON.stringify({ data: [] }), {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				})
+			}
+			return baseStub(input)
+		}) as typeof fetch
+		globalThis.fetch = stub
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const service = yield* PlanetScaleService
+			yield* service.pollAllOrgs()
+
+			// No branch requested and the inventory has no production branch → the
+			// first inventoried branch ("dev") is used, not the "main" hard fallback.
+			const result = yield* service.queryInsights(asOrgId("org_1"), {
+				database: "main-db",
+				startTime: 0,
+				endTime: 60_000,
+			})
+
+			assert.strictEqual(result.branch, "dev")
+			assert.isTrue(insightCalls[0]?.includes("/branches/dev/insights"))
+			assert.isNull(result.unavailableReason)
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+	})
+
 	it.effect("a missing grant fails the org's tick without killing the fleet", () => {
 		const testDb = createTestDb(trackedDbs)
 		const stub = stubApi({

@@ -424,6 +424,52 @@ describe("ScrapeTargetsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("delete removes the target and returns its id; a later get is NotFound", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			const target = yield* service.create(
+				orgId,
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(15),
+				}),
+			)
+
+			const deleted = yield* service.delete(orgId, target.id)
+			assert.strictEqual(deleted.id, target.id)
+
+			const afterList = yield* service.list(orgId)
+			assert.lengthOf(afterList.targets, 0)
+			const getError = yield* service.get(orgId, target.id).pipe(Effect.flip)
+			assert.strictEqual(getError._tag, "@maple/http/errors/ScrapeTargetNotFoundError")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("delete rejects a target owned by another org and leaves it intact", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const target = yield* service.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(15),
+				}),
+			)
+
+			const error = yield* service.delete(asOrgId("org_2"), target.id).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetNotFoundError")
+
+			// The owning org still sees it.
+			const stillThere = yield* service.get(asOrgId("org_1"), target.id)
+			assert.strictEqual(stillThere.id, target.id)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("planetscale targets accept credential-less planetscale_oauth auth", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
