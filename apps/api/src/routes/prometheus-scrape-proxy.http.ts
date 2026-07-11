@@ -78,15 +78,17 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 						),
 					),
 					// Map each concrete scrape error to its HTTP status: missing/disabled
-					// target → 404, decryption failure → 500, persistence/discovery →
-					// 502 (upstream/dependency), OAuth token resolution → 502 with the
-					// reason preserved in the body so a revoked grant stays diagnosable.
+					// target → 404, decryption failure → 500, persistence (our DB) → 502,
+					// upstream (provider/discovery) → 502, OAuth token resolution → 502 with
+					// the reason preserved in the body so a revoked grant stays diagnosable.
 					Effect.catchTags({
 						"@maple/http/errors/ScrapeTargetNotFoundError": (error) =>
 							Effect.succeed(errorText(error.message, 404)),
 						"@maple/http/errors/ScrapeTargetEncryptionError": (error) =>
 							Effect.succeed(errorText(error.message, 500)),
 						"@maple/http/errors/ScrapeTargetPersistenceError": (error) =>
+							Effect.succeed(errorText(error.message, 502)),
+						"@maple/http/errors/ScrapeTargetUpstreamError": (error) =>
 							Effect.succeed(errorText(error.message, 502)),
 						"@maple/http/errors/ScrapeTargetAuthError": (error) =>
 							Effect.annotateCurrentSpan({ "maple.scrape.auth_failure_reason": error.reason }).pipe(
