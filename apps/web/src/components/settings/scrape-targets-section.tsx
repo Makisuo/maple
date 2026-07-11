@@ -84,6 +84,7 @@ const AUTH_TYPE_LABELS: Record<ScrapeAuthType, string> = {
 	bearer: "Bearer Token",
 	basic: "Basic Auth",
 	token: "Service Token",
+	planetscale_oauth: "PlanetScale OAuth",
 }
 
 const asScrapeIntervalSeconds = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
@@ -135,7 +136,12 @@ function checksFromResult(result: ScrapeTargetChecksResult): ScrapeTargetCheck[]
 		.orElse(() => [])
 }
 
-function scheduledStatus(target: ScrapeTarget, latestCheck: ScrapeTargetCheck | null, isLoading: boolean) {
+function scheduledStatus(
+	target: ScrapeTarget,
+	latestCheck: ScrapeTargetCheck | null,
+	isLoading: boolean,
+	checksUnavailable: boolean,
+) {
 	if (!target.enabled) {
 		return {
 			label: "Disabled",
@@ -148,6 +154,14 @@ function scheduledStatus(target: ScrapeTarget, latestCheck: ScrapeTargetCheck | 
 		return {
 			label: "Checking",
 			detail: "Loading scheduled history",
+			dotClass: "bg-muted-foreground/40",
+			badgeVariant: "outline" as const,
+		}
+	}
+	if (checksUnavailable) {
+		return {
+			label: "Unavailable",
+			detail: "Failed to load scheduled checks",
 			dotClass: "bg-muted-foreground/40",
 			badgeVariant: "outline" as const,
 		}
@@ -233,7 +247,9 @@ export function ScrapeTargetsSection({
 	const [formAuthUsername, setFormAuthUsername] = useState("")
 	const [formAuthPassword, setFormAuthPassword] = useState("")
 
-	const listQueryAtom = MapleApiAtomClient.query("scrapeTargets", "list", {})
+	const listQueryAtom = MapleApiAtomClient.query("scrapeTargets", "list", {
+		reactivityKeys: ["scrapeTargets"],
+	})
 	const listResult = useAtomValue(listQueryAtom)
 	const refreshTargets = useAtomRefresh(listQueryAtom)
 
@@ -262,9 +278,13 @@ export function ScrapeTargetsSection({
 
 	async function handleProbe(target: ScrapeTarget) {
 		setProbingId(target.id)
-		const result = await probeMutation({ params: { targetId: target.id } })
+		const result = await probeMutation({
+			params: { targetId: target.id },
+			// Invalidate the list plus the PlanetScale card's status (which surfaces
+			// this target's lastScrapeError/enabled) instead of only refreshing locally.
+			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+		})
 		if (Exit.isSuccess(result)) {
-			refreshTargets()
 			if (result.value.success) {
 				toast.success("Connection successful")
 			} else {
@@ -320,8 +340,14 @@ export function ScrapeTargetsSection({
 		setFormInterval(type === "planetscale" ? "30" : "15")
 	}
 
+	// Managed rows (provisioned by the PlanetScale integration) resolve auth from
+	// the org's OAuth grant — the edit dialog must not flip them back to "token"
+	// or ask for credentials.
+	const isManagedPlanetScaleAuth = editingTarget?.authType === "planetscale_oauth"
+
 	function buildAuthCredentials(): string | null {
 		if (formTargetType === "planetscale") {
+			if (isManagedPlanetScaleAuth) return null
 			if (!formTokenId.trim() || !formTokenSecret.trim()) return null
 			return JSON.stringify({
 				tokenId: formTokenId.trim(),
@@ -384,7 +410,9 @@ export function ScrapeTargetsSection({
 					...(isPlanetScale
 						? {
 								organization: formOrganization.trim(),
-								authType: "token" as const,
+								authType: isManagedPlanetScaleAuth
+									? ("planetscale_oauth" as const)
+									: ("token" as const),
 								includeBranches: parseBranchList(formIncludeBranches),
 								excludeBranches: parseBranchList(formExcludeBranches),
 							}
@@ -394,11 +422,11 @@ export function ScrapeTargetsSection({
 							}),
 					...(authCredentials !== null ? { authCredentials } : {}),
 				}),
+				reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Scrape target updated")
 				setDialogOpen(false)
-				refreshTargets()
 			} else {
 				toast.error("Failed to update scrape target")
 			}
@@ -422,12 +450,12 @@ export function ScrapeTargetsSection({
 							}),
 					...(authCredentials !== null ? { authCredentials } : {}),
 				}),
+				reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Scrape target created")
 				setDialogOpen(false)
 				setSelectedTargetId(result.value.id)
-				refreshTargets()
 			} else {
 				toast.error("Failed to create scrape target")
 			}
@@ -437,11 +465,13 @@ export function ScrapeTargetsSection({
 
 	async function handleDelete(targetId: ScrapeTargetId) {
 		setDeleteConfirmTarget(null)
-		const result = await deleteMutation({ params: { targetId } })
+		const result = await deleteMutation({
+			params: { targetId },
+			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+		})
 		if (Exit.isSuccess(result)) {
 			toast.success("Scrape target deleted")
 			if (selectedTargetId === targetId) setSelectedTargetId(null)
-			refreshTargets()
 		} else {
 			toast.error("Failed to delete scrape target")
 		}
@@ -454,10 +484,9 @@ export function ScrapeTargetsSection({
 			payload: new UpdateScrapeTargetRequest({
 				enabled: !target.enabled,
 			}),
+			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
 		})
-		if (Exit.isSuccess(result)) {
-			refreshTargets()
-		} else {
+		if (!Exit.isSuccess(result)) {
 			toast.error("Failed to update scrape target")
 		}
 		setTogglingId(null)
@@ -624,38 +653,48 @@ export function ScrapeTargetsSection({
 										Your PlanetScale organization name as it appears in the dashboard URL.
 									</p>
 								</div>
-								<div className="space-y-2">
-									<Label htmlFor="scrape-token-id">Service Token ID</Label>
-									<Input
-										id="scrape-token-id"
-										placeholder={
-											editingTarget?.hasCredentials
-												? "Leave blank to keep existing"
-												: "Enter service token ID"
-										}
-										value={formTokenId}
-										onChange={(e) => setFormTokenId(e.target.value)}
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="scrape-token-secret">Service Token Secret</Label>
-									<Input
-										id="scrape-token-secret"
-										type="password"
-										placeholder={
-											editingTarget?.hasCredentials
-												? "Leave blank to keep existing"
-												: "Enter service token secret"
-										}
-										value={formTokenSecret}
-										onChange={(e) => setFormTokenSecret(e.target.value)}
-									/>
+								{isManagedPlanetScaleAuth ? (
 									<p className="text-muted-foreground text-xs">
-										Create a service token with the{" "}
-										<span className="font-mono">read_metrics_endpoints</span> organization
-										permission.
+										Authentication is managed by the PlanetScale integration — this target
+										scrapes with the connected organization&apos;s OAuth authorization, no
+										credentials to enter.
 									</p>
-								</div>
+								) : (
+									<>
+										<div className="space-y-2">
+											<Label htmlFor="scrape-token-id">Service Token ID</Label>
+											<Input
+												id="scrape-token-id"
+												placeholder={
+													editingTarget?.hasCredentials
+														? "Leave blank to keep existing"
+														: "Enter service token ID"
+												}
+												value={formTokenId}
+												onChange={(e) => setFormTokenId(e.target.value)}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="scrape-token-secret">Service Token Secret</Label>
+											<Input
+												id="scrape-token-secret"
+												type="password"
+												placeholder={
+													editingTarget?.hasCredentials
+														? "Leave blank to keep existing"
+														: "Enter service token secret"
+												}
+												value={formTokenSecret}
+												onChange={(e) => setFormTokenSecret(e.target.value)}
+											/>
+											<p className="text-muted-foreground text-xs">
+												Create a service token with the{" "}
+												<span className="font-mono">read_metrics_endpoints</span>{" "}
+												organization permission.
+											</p>
+										</div>
+									</>
+								)}
 								<div className="space-y-2">
 									<Label htmlFor="scrape-include-branches">Include branches (optional)</Label>
 									<Input
@@ -850,7 +889,12 @@ function ScrapeTargetRow({
 }) {
 	const { result: latestCheckResult } = useScrapeTargetChecks(target.id, 1)
 	const latestCheck = checksFromResult(latestCheckResult).at(0) ?? null
-	const status = scheduledStatus(target, latestCheck, Result.isInitial(latestCheckResult))
+	const status = scheduledStatus(
+		target,
+		latestCheck,
+		Result.isInitial(latestCheckResult),
+		Result.isFailure(latestCheckResult),
+	)
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.key === "Enter" || event.key === " ") {
@@ -883,6 +927,16 @@ function ScrapeTargetRow({
 						<Badge variant="outline" className="shrink-0">
 							PlanetScale
 						</Badge>
+					)}
+					{target.managedBy && (
+						<Tooltip>
+							<TooltipTrigger render={<span className="shrink-0" />}>
+								<Badge variant="outline">Managed</Badge>
+							</TooltipTrigger>
+							<TooltipContent>
+								Provisioned by the PlanetScale integration — edit it from the integration card.
+							</TooltipContent>
+						</Tooltip>
 					)}
 					{target.serviceName && (
 						<Badge variant="outline" className="shrink-0">
@@ -972,12 +1026,17 @@ function ScrapeTargetRow({
 						<DotsVerticalIcon size={14} />
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
-						<DropdownMenuItem onClick={() => onEdit(target)}>
+						{/* Managed targets are edited/removed through the owning integration card. */}
+						<DropdownMenuItem disabled={target.managedBy != null} onClick={() => onEdit(target)}>
 							<PencilIcon size={14} />
 							Edit
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
-						<DropdownMenuItem variant="destructive" onClick={() => onDelete(target)}>
+						<DropdownMenuItem
+							variant="destructive"
+							disabled={target.managedBy != null}
+							onClick={() => onDelete(target)}
+						>
 							<TrashIcon size={14} />
 							Delete
 						</DropdownMenuItem>
@@ -1008,7 +1067,12 @@ function ScrapeTargetDetails({
 	const { result: checksResult } = useScrapeTargetChecks(target.id, 20)
 	const checks = checksFromResult(checksResult)
 	const latestCheck = checks.at(0) ?? null
-	const status = scheduledStatus(target, latestCheck, Result.isInitial(checksResult))
+	const status = scheduledStatus(
+		target,
+		latestCheck,
+		Result.isInitial(checksResult),
+		Result.isFailure(checksResult),
+	)
 	const labels = labelEntries(target.labelsJson)
 
 	// Diagnose the freshest failure: the latest failed check, falling back to the
@@ -1035,7 +1099,13 @@ function ScrapeTargetDetails({
 						{probing ? <LoaderIcon size={14} className="animate-spin" /> : <BoltIcon size={14} />}
 						Test
 					</Button>
-					<Button variant="outline" size="sm" onClick={() => onEdit(target)}>
+					{/* Managed targets are edited/removed through the owning integration card. */}
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => onEdit(target)}
+						disabled={target.managedBy != null}
+					>
 						<PencilIcon size={14} />
 						Edit
 					</Button>
@@ -1047,6 +1117,7 @@ function ScrapeTargetDetails({
 						size="sm"
 						className="text-destructive"
 						onClick={() => onDelete(target)}
+						disabled={target.managedBy != null}
 					>
 						<TrashIcon size={14} />
 						Delete

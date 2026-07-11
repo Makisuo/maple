@@ -25,6 +25,7 @@ import { HttpOnboardingLive } from "./routes/onboarding.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
+import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -62,7 +63,10 @@ import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
+import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./services/PlanetScaleOAuthService"
+import { PlanetScaleService } from "./services/PlanetScaleService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { WarehouseQueryService } from "./lib/WarehouseQueryService"
 import { OAuthStateRepository } from "./services/OAuthStateRepository"
@@ -92,6 +96,18 @@ const DocsRoute = HttpApiScalar.layerCdn(MapleApi, {
 
 const InfraLive = Env.layer
 
+// PlanetScale layer composition: the OAuth grant (token lifecycle) feeds
+// discovery, scrape-time auth, the org binding, and the inventory poller.
+// Compose each wired layer once so memoization resolves them to single
+// instances (one discovery cache, one refresh single-flight).
+const PlanetScaleOAuthLive = PlanetScaleOAuthService.layer
+const PlanetScaleDiscoveryLive = PlanetScaleDiscoveryService.layer.pipe(
+	Layer.provide(PlanetScaleOAuthLive),
+)
+const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
+)
+
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
@@ -103,10 +119,13 @@ const CoreServicesLive = Layer.mergeAll(
 	OrgClickHouseSettingsService.layer,
 	OrganizationService.layer,
 	BillingSuspensionService.layer,
-	// Shared with ScrapeTargetsService via layer memoization so the proxy and
-	// the internal target list resolve sub-targets from one discovery cache.
-	PlanetScaleDiscoveryService.layer,
-	ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
+	PlanetScaleOAuthLive,
+	PlanetScaleDiscoveryLive,
+	ScrapeTargetsLive,
+	PlanetScaleConnectionService.layer.pipe(
+		Layer.provide(Layer.mergeAll(ScrapeTargetsLive, PlanetScaleOAuthLive)),
+	),
+	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
@@ -251,6 +270,7 @@ export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
+	PlanetScaleWebhookRouter,
 	PrometheusScrapeProxyRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,

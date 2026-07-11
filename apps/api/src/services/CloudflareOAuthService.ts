@@ -32,8 +32,8 @@ const deriveCodeChallenge = (verifier: string): string =>
 
 interface ResolvedCloudflareOAuthConfig {
 	readonly clientId: string
-	/** null for a public (PKCE-only) client — Cloudflare's default for third-party SaaS apps. */
-	readonly clientSecret: string | null
+	/** null for a public (PKCE-only) client — Cloudflare's default for third-party SaaS apps. Redacted until the wire. */
+	readonly clientSecret: Redacted.Redacted<string> | null
 	readonly authorizeUrl: string
 	readonly tokenUrl: string
 	readonly revokeUrl: string
@@ -58,7 +58,7 @@ const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(
 			clientId,
 			clientSecret: Option.match(env.CLOUDFLARE_OAUTH_CLIENT_SECRET, {
 				onNone: () => null,
-				onSome: (value) => Redacted.value(value),
+				onSome: (value) => value,
 			}),
 			authorizeUrl: env.CLOUDFLARE_OAUTH_AUTHORIZE_URL,
 			tokenUrl: env.CLOUDFLARE_OAUTH_TOKEN_URL,
@@ -140,7 +140,7 @@ export class CloudflareOAuthService extends Context.Service<
 				.postForm(config.revokeUrl, {
 					token,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
 				})
 				.pipe(Effect.ignore)
 

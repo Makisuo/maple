@@ -1,9 +1,15 @@
 import type { Node, Edge } from "@xyflow/react"
-import type { CloudflareService, ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
+import type {
+	CloudflareService,
+	PlanetScaleDatabaseStat,
+	ServiceDbEdge,
+	ServiceEdge,
+	ServicePlatform,
+} from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { getServiceLegendColor } from "@maple/ui/colors"
-import { getDbNodeColor, resolveDbNodePresentation } from "./service-map-db"
+import { getDbNodeColor, PLANETSCALE_COLOR, resolveDbNodePresentation } from "./service-map-db"
 
 interface ServiceNodeInfra {
 	podCount: number
@@ -31,6 +37,23 @@ export interface CloudflareNodeMetrics {
 	cpuP99Ms?: number
 }
 
+/**
+ * PlanetScale integration data overlaid onto a trace-derived DB node whose
+ * namespace matched a database in the org's polled PlanetScale inventory.
+ * `stats` is absent when the inventory matched but no scraped metrics landed
+ * in the window (branding still applies).
+ */
+export interface PlanetScaleNodeMetrics {
+	/** Product kind from the inventory: "mysql" (Vitess) or "postgresql". */
+	kind: string
+	/** Inventory database name (canonical casing). */
+	database: string
+	branchCount: number
+	/** Branch identities from the inventory (name + production/ready flags). */
+	branches: ReadonlyArray<{ name: string; production: boolean; ready: boolean }>
+	stats?: PlanetScaleDatabaseStat
+}
+
 export interface ServiceNodeData {
 	label: string
 	kind: ServiceNodeKind
@@ -51,6 +74,8 @@ export interface ServiceNodeData {
 	dbNamespace?: string
 	/** Overlaid onto matched instrumented Workers from the direct integration. */
 	cloudflare?: CloudflareNodeMetrics
+	/** Overlaid onto DB nodes matched against the org's PlanetScale inventory. */
+	planetscale?: PlanetScaleNodeMetrics
 	colorMode?: ServiceMapColorMode
 	/** OTel `service.namespace`, when defined. Drives namespace-cluster layout + dotted boxes. */
 	namespace?: string
@@ -82,11 +107,16 @@ export function getHealthColor(errorRate: number): string {
  * the "color by" affordance is for slicing service nodes only.
  */
 export function getServiceMapNodeColor(
-	data: Pick<ServiceNodeData, "label" | "kind" | "errorRate" | "platform" | "dbSystem" | "dbNamespace">,
+	data: Pick<
+		ServiceNodeData,
+		"label" | "kind" | "errorRate" | "platform" | "dbSystem" | "dbNamespace" | "planetscale"
+	>,
 	services: string[],
 	mode: ServiceMapColorMode,
 ): string {
-	if (data.kind === "database") return getDbNodeColor(data.dbSystem, data.dbNamespace ?? "")
+	if (data.kind === "database") {
+		return data.planetscale ? PLANETSCALE_COLOR : getDbNodeColor(data.dbSystem, data.dbNamespace ?? "")
+	}
 	switch (mode) {
 		case "health":
 			return getHealthColor(data.errorRate)
@@ -188,6 +218,18 @@ export interface BuildFlowElementsInput {
 	cloudflareServices?: CloudflareService[]
 	/** service.name → faas.name, so a `cloudflare-worker/{script}` can match its instrumented node. */
 	faasNames?: Map<string, string>
+	/** PlanetScale inventory: lowercased database name → identity + branches. */
+	planetscaleDatabases?: Map<
+		string,
+		{
+			name: string
+			kind: string
+			branchCount: number
+			branches: ReadonlyArray<{ name: string; production: boolean; ready: boolean }>
+		}
+	>
+	/** PlanetScale scraped-metric rollups, one per database. */
+	planetscaleStats?: PlanetScaleDatabaseStat[]
 }
 
 /**
@@ -207,6 +249,8 @@ export function buildFlowElements({
 	runtimes,
 	cloudflareServices = [],
 	faasNames,
+	planetscaleDatabases,
+	planetscaleStats = [],
 }: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
@@ -294,12 +338,35 @@ export function buildFlowElements({
 		}
 	})
 
+	// PlanetScale inventory match: a DB node whose namespace equals a database
+	// name in the org's polled inventory (and whose system is a PlanetScale
+	// product) gets the integration's data OVERLAID — branding plus, when the
+	// scraper delivered metrics in the window, live health numbers. Like the
+	// Cloudflare overlay, PlanetScale data never creates nodes of its own.
+	const planetscaleStatsByName = new Map(planetscaleStats.map((s) => [s.database.toLowerCase(), s]))
+	const PLANETSCALE_SYSTEMS = new Set(["mysql", "mariadb", "postgresql", "postgres"])
+	const planetscaleFor = (dbSystem: string, dbNamespace: string): PlanetScaleNodeMetrics | undefined => {
+		if (!planetscaleDatabases || dbNamespace === "") return undefined
+		if (!PLANETSCALE_SYSTEMS.has(dbSystem.toLowerCase())) return undefined
+		const match = planetscaleDatabases.get(dbNamespace.toLowerCase())
+		if (!match) return undefined
+		return {
+			kind: match.kind,
+			database: match.name,
+			branchCount: match.branchCount,
+			branches: match.branches,
+			stats: planetscaleStatsByName.get(dbNamespace.toLowerCase()),
+		}
+	}
+
 	for (const [nodeId, agg] of dbAgg) {
+		const planetscale = planetscaleFor(agg.dbSystem, agg.dbNamespace)
 		flowNodes.push({
 			id: nodeId,
 			type: "serviceNode",
 			position: { x: 0, y: 0 },
 			data: {
+				planetscale,
 				// Named databases show their identity; the generic node keeps the system;
 				// Hyperdrive-fronted databases collapse to a single "Hyperdrive" node.
 				label: resolveDbNodePresentation(agg.dbSystem, agg.dbNamespace).title,

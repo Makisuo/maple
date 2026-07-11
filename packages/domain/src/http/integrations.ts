@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { ExternalUserId, UserId } from "../primitives"
+import { ExternalUserId, ScrapeTargetId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 import {
 	GitCommitSha,
@@ -218,6 +218,213 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 	"CloudflareDisconnectResponse",
 )({
 	disconnected: Schema.Boolean,
+}) {}
+
+// ---- PlanetScale (OAuth integration) ----------------------------------------
+
+/**
+ * The managed scrape target this connection auto-provisioned — surfaced on the
+ * integration card so scraping health and branch filters are editable there
+ * (managed rows are hidden from the generic scrape-target UI).
+ */
+export class PlanetScaleScrapeTargetSummary extends Schema.Class<PlanetScaleScrapeTargetSummary>(
+	"PlanetScaleScrapeTargetSummary",
+)({
+	id: ScrapeTargetId,
+	enabled: Schema.Boolean,
+	scrapeIntervalSeconds: Schema.Number,
+	includeBranches: Schema.Array(Schema.String),
+	excludeBranches: Schema.Array(Schema.String),
+	/** Epoch ms of the last successful scrape; null before the first one. */
+	lastScrapeAt: Schema.NullOr(Schema.Number),
+	lastScrapeError: Schema.NullOr(Schema.String),
+}) {}
+
+export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegrationStatus>(
+	"PlanetScaleIntegrationStatus",
+)({
+	connected: Schema.Boolean,
+	/**
+	 * OAuth grant stored but no organization bound yet — the UI shows the org
+	 * picker. Mutually exclusive with `connected`.
+	 */
+	pendingOrgSelection: Schema.Boolean,
+	/** PlanetScale organization slug the connection is bound to. */
+	organization: Schema.NullOr(Schema.String),
+	connectedByUserId: Schema.NullOr(UserId),
+	/** API permissions probed at org-binding time (e.g. readMetricsEndpoints). */
+	detectedPermissions: Schema.NullOr(Schema.Record(Schema.String, Schema.Boolean)),
+	/**
+	 * How branch-metrics scraping authenticates. PlanetScale's metrics endpoints
+	 * only document service-token auth, so "oauth" applies only when the bearer
+	 * probe succeeded; "missing" means scraping is paused until a service token
+	 * with the read_metrics_endpoints permission is added (the one manual step —
+	 * inventory, insights, and webhooks run on the OAuth grant regardless).
+	 */
+	metricsAuth: Schema.Literals(["oauth", "service_token", "missing"]),
+	scrapeTarget: Schema.NullOr(PlanetScaleScrapeTargetSummary),
+	/** Epoch ms of the last successful inventory refresh; null before the first. */
+	lastInventoryAt: Schema.NullOr(Schema.Number),
+	lastInventoryError: Schema.NullOr(Schema.String),
+}) {}
+
+export class PlanetScaleStartConnectRequest extends Schema.Class<PlanetScaleStartConnectRequest>(
+	"PlanetScaleStartConnectRequest",
+)({
+	returnTo: Schema.optionalKey(Schema.String),
+}) {}
+
+export class PlanetScaleStartConnectResponse extends Schema.Class<PlanetScaleStartConnectResponse>(
+	"PlanetScaleStartConnectResponse",
+)({
+	redirectUrl: Schema.String,
+	state: Schema.String,
+}) {}
+
+/** One PlanetScale organization the OAuth grant can access — org-picker material. */
+export class PlanetScaleOrganizationSummary extends Schema.Class<PlanetScaleOrganizationSummary>(
+	"PlanetScaleOrganizationSummary",
+)({
+	id: Schema.String,
+	name: Schema.String,
+}) {}
+
+export class PlanetScaleOrganizationsResponse extends Schema.Class<PlanetScaleOrganizationsResponse>(
+	"PlanetScaleOrganizationsResponse",
+)({
+	organizations: Schema.Array(PlanetScaleOrganizationSummary),
+}) {}
+
+/**
+ * Bind the stored OAuth grant to one PlanetScale organization and provision the
+ * managed scrape target. Called automatically from the OAuth callback when the
+ * grant reaches exactly one org, or from the org picker otherwise. Re-binding
+ * (changing org / editing filters) is an upsert.
+ */
+export class PlanetScaleSelectOrganizationRequest extends Schema.Class<PlanetScaleSelectOrganizationRequest>(
+	"PlanetScaleSelectOrganizationRequest",
+)({
+	/** PlanetScale organization slug. */
+	organization: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+	/** Branch glob allowlist for the managed scrape target (omit/empty = all branches). */
+	includeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
+	/** Branch glob denylist for the managed scrape target (e.g. `pr-*`). */
+	excludeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
+}) {}
+
+export class PlanetScaleDisconnectResponse extends Schema.Class<PlanetScaleDisconnectResponse>(
+	"PlanetScaleDisconnectResponse",
+)({
+	disconnected: Schema.Boolean,
+}) {}
+
+/**
+ * Attach a service token (permission: read_metrics_endpoints only) to the
+ * managed scrape target. PlanetScale's Prometheus discovery + branch metrics
+ * endpoints authenticate with service tokens, not OAuth bearers — this is the
+ * one manual step the OAuth flow can't cover.
+ */
+export class PlanetScaleMetricsTokenRequest extends Schema.Class<PlanetScaleMetricsTokenRequest>(
+	"PlanetScaleMetricsTokenRequest",
+)({
+	tokenId: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+	tokenSecret: Schema.String.check(Schema.isMinLength(1)),
+}) {}
+
+export class PlanetScaleBranchSummary extends Schema.Class<PlanetScaleBranchSummary>(
+	"PlanetScaleBranchSummary",
+)({
+	id: Schema.String,
+	name: Schema.String,
+	production: Schema.Boolean,
+	ready: Schema.Boolean,
+}) {}
+
+/** One database from the org's polled PlanetScale inventory. */
+export class PlanetScaleDatabaseSummary extends Schema.Class<PlanetScaleDatabaseSummary>(
+	"PlanetScaleDatabaseSummary",
+)({
+	/** PlanetScale's database id. */
+	id: Schema.String,
+	name: Schema.String,
+	/** Product kind: "mysql" (Vitess) or "postgresql". */
+	kind: Schema.String,
+	state: Schema.NullOr(Schema.String),
+	region: Schema.NullOr(Schema.String),
+	plan: Schema.NullOr(Schema.String),
+	branches: Schema.Array(PlanetScaleBranchSummary),
+}) {}
+
+export class PlanetScaleDatabasesResponse extends Schema.Class<PlanetScaleDatabasesResponse>(
+	"PlanetScaleDatabasesResponse",
+)({
+	databases: Schema.Array(PlanetScaleDatabaseSummary),
+	/** Epoch ms of the last successful inventory refresh; null before the first. */
+	lastInventoryAt: Schema.NullOr(Schema.Number),
+}) {}
+
+/**
+ * Manual webhook setup material (admin-only): the endpoint path to register in
+ * PlanetScale's per-database webhook settings, and the HMAC secret Maple
+ * verifies deliveries with.
+ */
+export class PlanetScaleWebhookConfigResponse extends Schema.Class<PlanetScaleWebhookConfigResponse>(
+	"PlanetScaleWebhookConfigResponse",
+)({
+	configured: Schema.Boolean,
+	/** Absolute webhook URL to paste into PlanetScale (built from the API origin). */
+	url: Schema.NullOr(Schema.String),
+	secret: Schema.NullOr(Schema.String),
+}) {}
+
+/**
+ * Live top-queries lookup for one database branch, proxied to PlanetScale's
+ * Query Insights API — per-fingerprint cardinality is far too high to store as
+ * metrics, so this is computed on demand (and edge-cached briefly), mirroring
+ * the Cloudflare top-traffic pattern.
+ */
+export class PlanetScaleQueryInsightsRequest extends Schema.Class<PlanetScaleQueryInsightsRequest>(
+	"PlanetScaleQueryInsightsRequest",
+)({
+	database: Schema.String.check(Schema.isMinLength(1)),
+	/** Branch to inspect; defaults to the database's production branch. */
+	branch: Schema.optionalKey(Schema.String),
+	/** Window bounds, epoch ms. */
+	startTime: Schema.Number,
+	endTime: Schema.Number,
+	/** Top-N by total time; defaults to 10, capped at 25. */
+	limit: Schema.optionalKey(Schema.Number),
+}) {}
+
+export class PlanetScaleQueryInsightRow extends Schema.Class<PlanetScaleQueryInsightRow>(
+	"PlanetScaleQueryInsightRow",
+)({
+	fingerprint: Schema.String,
+	normalizedSql: Schema.String,
+	statementType: Schema.NullOr(Schema.String),
+	queryCount: Schema.Number,
+	errorCount: Schema.Number,
+	totalDurationMillis: Schema.Number,
+	timePerQueryMillis: Schema.Number,
+	p50LatencyMillis: Schema.Number,
+	p99LatencyMillis: Schema.Number,
+	rowsReadPerQuery: Schema.Number,
+	rowsReturnedPerQuery: Schema.Number,
+	/** Epoch ms; null when PlanetScale reported none. */
+	lastRunAt: Schema.NullOr(Schema.Number),
+}) {}
+
+export class PlanetScaleQueryInsightsResponse extends Schema.Class<PlanetScaleQueryInsightsResponse>(
+	"PlanetScaleQueryInsightsResponse",
+)({
+	/** The branch actually queried (resolved server-side when omitted). */
+	branch: Schema.String,
+	rows: Schema.Array(PlanetScaleQueryInsightRow),
+	/**
+	 * Set instead of failing when PlanetScale can't serve the lookup (token
+	 * missing read_database, unknown branch) — the UI renders it inline.
+	 */
+	unavailableReason: Schema.NullOr(Schema.String),
 }) {}
 
 // ---- GitHub (VCS App installation) ----------------------------------------
@@ -488,6 +695,104 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.delete("cloudflareDisconnect", "/cloudflare", {
 			success: CloudflareDisconnectResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("planetscaleStatus", "/planetscale/status", {
+			success: PlanetScaleIntegrationStatus,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
+			payload: PlanetScaleStartConnectRequest,
+			success: PlanetScaleStartConnectResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		// Organizations the stored OAuth grant can access — drives the org picker
+		// while the connection is pendingOrgSelection (and "change organization").
+		HttpApiEndpoint.get("planetscaleOrganizations", "/planetscale/organizations", {
+			success: PlanetScaleOrganizationsResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsNotConnectedError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		// Binds the OAuth grant to one PlanetScale organization: probes API
+		// permissions, then auto-provisions (or adopts) the managed scrape target.
+		// Re-binding is an upsert.
+		HttpApiEndpoint.post("planetscaleSelectOrganization", "/planetscale/select-organization", {
+			payload: PlanetScaleSelectOrganizationRequest,
+			success: PlanetScaleIntegrationStatus,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsNotConnectedError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		// Validates the token against the metrics discovery endpoint before
+		// storing it on the managed scrape target (re-submitting rotates it).
+		HttpApiEndpoint.post("planetscaleSetMetricsToken", "/planetscale/metrics-token", {
+			payload: PlanetScaleMetricsTokenRequest,
+			success: PlanetScaleIntegrationStatus,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.delete("planetscaleDisconnect", "/planetscale", {
+			success: PlanetScaleDisconnectResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		// The org's polled database/branch inventory — consumed by the service map
+		// (node branding + metric-overlay matching) and the infra page.
+		HttpApiEndpoint.get("planetscaleDatabases", "/planetscale/databases", {
+			success: PlanetScaleDatabasesResponse,
+			error: IntegrationsPersistenceError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("planetscaleWebhookConfig", "/planetscale/webhook-config", {
+			success: PlanetScaleWebhookConfigResponse,
+			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("planetscaleQueryInsights", "/planetscale/query-insights", {
+			payload: PlanetScaleQueryInsightsRequest,
+			success: PlanetScaleQueryInsightsResponse,
+			error: [
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
 		}),
 	)
 	.add(

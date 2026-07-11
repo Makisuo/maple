@@ -376,6 +376,8 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 						},
 					]}
 					faasNames={new Map()}
+					planetscaleDatabases={new Map()}
+					planetscaleStats={[]}
 					platforms={graph.platforms}
 					runtimes={graph.runtimes}
 					overviews={graph.overviews}

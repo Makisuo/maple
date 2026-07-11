@@ -740,6 +740,19 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 							return []
 						}
 
+						const claimedIds = new Set(claim.map((c) => c.id))
+						const claimedSubs = orgSubs.filter((s) => claimedIds.has(s.id))
+
+						if (claimedSubs.length < orgSubs.length) {
+							yield* Effect.logInfo("Skipping digest subscriptions already attempted today").pipe(
+								Effect.annotateLogs({
+									orgId: rawOrgId,
+									skippedCount: orgSubs.length - claimedSubs.length,
+									claimedCount: claimedSubs.length,
+								}),
+							)
+						}
+
 						const props = yield* generateDigestData(orgId)
 						if (!hasDigestContent(props)) {
 							yield* Effect.logInfo("Skipping digest for org with no data").pipe(
@@ -755,7 +768,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						const subject = deriveDigestStatus(props).subject
 
 						const sendResults = yield* Effect.forEach(
-							orgSubs,
+							claimedSubs,
 							(sub) =>
 								email.send(sub.email, subject, html).pipe(
 									Effect.tap(() =>
@@ -767,7 +780,20 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 													.set({ lastSentAt: new Date(lastSentAt) })
 													.where(eq(digestSubscriptions.id, sub.id)),
 											)
-										}),
+										}).pipe(
+											// The email is already sent — a failed bookkeeping write must
+											// not surface as a send failure (lastAttemptedAt still blocks
+											// same-day retries).
+											Effect.catchCause((cause) =>
+												Effect.logWarning("Failed to record digest lastSentAt").pipe(
+													Effect.annotateLogs({
+														subscriptionId: sub.id,
+														orgId: rawOrgId,
+														error: Cause.pretty(cause),
+													}),
+												),
+											),
+										),
 									),
 									Effect.match({
 										onSuccess: () => ({ sent: true }),

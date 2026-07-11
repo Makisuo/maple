@@ -1,4 +1,13 @@
-import { ScrapeTargetEncryptionError } from "@maple/domain/http"
+import {
+	ScrapeTargetAuthError,
+	ScrapeTargetEncryptionError,
+	ScrapeTargetPersistenceError,
+	type IntegrationsNotConnectedError,
+	type IntegrationsPersistenceError,
+	type IntegrationsRevokedError,
+	type IntegrationsUpstreamError,
+	type IntegrationsValidationError,
+} from "@maple/domain/http"
 import { Effect, Schema } from "effect"
 import { decryptAes256Gcm } from "./Crypto"
 
@@ -33,6 +42,31 @@ export interface ScrapeAuthRowLike {
 }
 
 const toEncryptionError = (message: string) => new ScrapeTargetEncryptionError({ message })
+
+/**
+ * `Effect.catchTags` handler set mapping a PlanetScale OAuth token-resolution
+ * failure onto the scrape error taxonomy without losing the failure class: a
+ * revoked or never-connected grant must stay distinguishable from a transient
+ * upstream blip — a collapsed tag is how a dead grant goes invisible on the
+ * error dashboards.
+ */
+export const catchOAuthTokenFailure = {
+	"@maple/http/errors/IntegrationsNotConnectedError": (error: IntegrationsNotConnectedError) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "not_connected", message: error.message })),
+	"@maple/http/errors/IntegrationsRevokedError": (error: IntegrationsRevokedError) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "revoked", message: error.message })),
+	"@maple/http/errors/IntegrationsUpstreamError": (error: IntegrationsUpstreamError) =>
+		Effect.fail(
+			new ScrapeTargetAuthError({
+				reason: "upstream",
+				message: `PlanetScale token refresh failed upstream: ${error.message}`,
+			}),
+		),
+	"@maple/http/errors/IntegrationsValidationError": (error: IntegrationsValidationError) =>
+		Effect.fail(new ScrapeTargetAuthError({ reason: "config", message: error.message })),
+	"@maple/http/errors/IntegrationsPersistenceError": (error: IntegrationsPersistenceError) =>
+		Effect.fail(new ScrapeTargetPersistenceError({ message: error.message })),
+} as const
 
 const decodeCredentials = <S extends Schema.Top>(schema: S, credentialsJson: string) =>
 	Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(credentialsJson).pipe(
