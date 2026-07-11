@@ -2,10 +2,12 @@ import { randomUUID } from "node:crypto"
 import {
 	IntegrationsNotConnectedError,
 	IntegrationsPersistenceError,
+	IntegrationsRevokedError,
 	IntegrationsUpstreamError,
+	IntegrationsValidationError,
+	OrgId,
 	PlanetScaleQueryInsightRow,
 	PlanetScaleQueryInsightsResponse,
-	type OrgId,
 } from "@maple/domain/http"
 import {
 	planetscaleConnections,
@@ -16,12 +18,11 @@ import {
 	type PlanetScaleDatabaseRow,
 } from "@maple/db"
 import { and, eq, isNull, lt, or } from "drizzle-orm"
-import { Cause, Clock, Context, Duration, Effect, Layer, Redacted, Schema } from "effect"
+import { Cause, Clock, Context, Duration, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { decryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
-import { planetScaleAuthHeader } from "./PlanetScaleConnectionService"
+import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 /**
  * PlanetScale management-API poller: keeps the org's database/branch inventory
@@ -79,7 +80,11 @@ export interface PlanetScaleServiceShape {
 		options: PlanetScaleQueryInsightsOptions,
 	) => Effect.Effect<
 		PlanetScaleQueryInsightsResponse,
-		IntegrationsNotConnectedError | IntegrationsUpstreamError | IntegrationsPersistenceError
+		| IntegrationsNotConnectedError
+		| IntegrationsRevokedError
+		| IntegrationsValidationError
+		| IntegrationsUpstreamError
+		| IntegrationsPersistenceError
 	>
 }
 
@@ -142,10 +147,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 		make: Effect.gen(function* () {
 			const database = yield* Database
 			const env = yield* Env
-			const encryptionKey = yield* parseBase64Aes256GcmKey(
-				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
-				(message) => new IntegrationsPersistenceError({ message }),
-			)
+			const psOAuth = yield* PlanetScaleOAuthService
 			const apiBase = env.MAPLE_PLANETSCALE_API_BASE_URL.replace(/\/$/, "")
 
 			const apiGetJson = Effect.fn("PlanetScaleService.apiGetJson")(function* (
@@ -200,7 +202,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					if (response.status === 401 || response.status === 403) {
 						return yield* Effect.fail(
 							new IntegrationsUpstreamError({
-								message: `PlanetScale rejected the service token (HTTP ${response.status}) for ${basePath}`,
+								message: `PlanetScale rejected the authorization (HTTP ${response.status}) for ${basePath}`,
 								status: response.status,
 							}),
 						)
@@ -227,16 +229,17 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 				return items
 			})
 
-			const tokenSecretFor = (connection: PlanetScaleConnectionRow) =>
-				decryptAes256Gcm(
-					{
-						ciphertext: connection.tokenSecretCiphertext,
-						iv: connection.tokenSecretIv,
-						tag: connection.tokenSecretTag,
-					},
-					encryptionKey,
-					() => toPersistenceError(new Error("Failed to decrypt PlanetScale token secret")),
-				)
+			const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
+
+			/**
+			 * Bearer Authorization for the org's OAuth grant, refreshed as needed.
+			 * A revoked/missing grant surfaces as-is — the poller records it per-org
+			 * and moves on; queryInsights lets the endpoint error union carry it.
+			 */
+			const authorizationFor = (connection: PlanetScaleConnectionRow) =>
+				psOAuth
+					.getValidAccessToken(decodeOrgIdSync(connection.orgId))
+					.pipe(Effect.map(({ accessToken }) => planetScaleBearerHeader(accessToken)))
 
 			/**
 			 * Claim the org's inventory anchor row for this tick. Returns false when
@@ -362,8 +365,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			const refreshInventory = Effect.fn("PlanetScaleService.refreshInventory")(function* (
 				connection: PlanetScaleConnectionRow,
 			) {
-				const tokenSecret = yield* tokenSecretFor(connection)
-				const authorization = planetScaleAuthHeader(connection.tokenId, tokenSecret)
+				const authorization = yield* authorizationFor(connection)
 				const org = encodeURIComponent(connection.psOrganization)
 
 				const upstreamDatabases = yield* fetchAllPages(
@@ -579,8 +581,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					branch = branches.find((entry) => entry.production)?.name ?? branches[0]?.name ?? "main"
 				}
 
-				const tokenSecret = yield* tokenSecretFor(connection)
-				const authorization = planetScaleAuthHeader(connection.tokenId, tokenSecret)
+				const authorization = yield* authorizationFor(connection)
 				const limit = Math.min(Math.max(Math.floor(options.limit ?? 10), 1), 25)
 				const path =
 					`/v1/organizations/${encodeURIComponent(connection.psOrganization)}` +
@@ -599,7 +600,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 						rows: [],
 						unavailableReason:
 							response.status === 401 || response.status === 403
-								? "The service token lacks the read_database permission needed for Query Insights."
+								? "The PlanetScale authorization lacks the read_databases scope needed for Query Insights."
 								: response.status === 404
 									? `PlanetScale has no insights for ${options.database}/${branch}.`
 									: `PlanetScale Query Insights returned HTTP ${response.status}.`,

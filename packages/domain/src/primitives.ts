@@ -149,7 +149,13 @@ export const ScrapeIntervalSeconds = Schema.Number.check(
 )
 export type ScrapeIntervalSeconds = Schema.Schema.Type<typeof ScrapeIntervalSeconds>
 
-export const ScrapeAuthType = Schema.Literals(["none", "bearer", "basic", "token"]).annotate({
+export const ScrapeAuthType = Schema.Literals([
+	"none",
+	"bearer",
+	"basic",
+	"token",
+	"planetscale_oauth",
+]).annotate({
 	identifier: "@maple/ScrapeAuthType",
 	title: "Scrape Auth Type",
 })

@@ -94,6 +94,16 @@ export const createAlertingWorker = async ({ stage, mapleDb }: CreateAlertingWor
 			...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
 			...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
 			...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
+			// PlanetScale integration (OAuth application — confidential client). The
+			// alerting worker runs the inventory poller (planetScaleTick →
+			// PlanetScaleService.pollAllOrgs), which resolves + refreshes each org's
+			// OAuth token via PlanetScaleOAuthService and needs the same config as
+			// the api worker.
+			...optionalPlain("PLANETSCALE_OAUTH_CLIENT_ID"),
+			...optionalSecret("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("PLANETSCALE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("PLANETSCALE_OAUTH_TOKEN_URL"),
+			...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
 		},
 	})
 

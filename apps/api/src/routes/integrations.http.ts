@@ -24,7 +24,10 @@ import {
 	MapleApi,
 	PlanetScaleDatabasesResponse,
 	PlanetScaleDisconnectResponse,
+	PlanetScaleOrganizationsResponse,
+	PlanetScaleOrganizationSummary,
 	PlanetScaleQueryInsightsResponse,
+	PlanetScaleStartConnectResponse,
 	PlanetScaleWebhookConfigResponse,
 	RoleName,
 	UserId,
@@ -48,6 +51,7 @@ import {
 	type TopTrafficGroupShape,
 } from "../services/cloudflare-analytics/queries"
 import { PlanetScaleConnectionService } from "../services/PlanetScaleConnectionService"
+import { PlanetScaleOAuthService } from "../services/PlanetScaleOAuthService"
 import { PlanetScaleService } from "../services/PlanetScaleService"
 import { GithubConnectService } from "../services/vcs/vendor/github/GithubConnectService"
 import { VcsCommitService } from "../services/vcs/VcsCommitService"
@@ -60,9 +64,11 @@ const asUserId = Schema.decodeUnknownSync(UserId)
 const HAZEL_CALLBACK_PATH = "/api/integrations/hazel/callback"
 const GITHUB_CALLBACK_PATH = "/api/integrations/github/callback"
 const CLOUDFLARE_CALLBACK_PATH = "/api/integrations/cloudflare/callback"
+const PLANETSCALE_CALLBACK_PATH = "/api/integrations/planetscale/callback"
 const HAZEL_MESSAGE_TYPE = "maple:integration:hazel"
 const GITHUB_MESSAGE_TYPE = "maple:integration:github"
 const CLOUDFLARE_MESSAGE_TYPE = "maple:integration:cloudflare"
+const PLANETSCALE_MESSAGE_TYPE = "maple:integration:planetscale"
 
 const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
@@ -90,6 +96,9 @@ const resolveGithubCallbackUrl = (req: HttpServerRequest.HttpServerRequest): str
 const resolveCloudflareCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
 	`${resolveRequestOrigin(req)}${CLOUDFLARE_CALLBACK_PATH}`
 
+const resolvePlanetScaleCallbackUrl = (req: HttpServerRequest.HttpServerRequest): string =>
+	`${resolveRequestOrigin(req)}${PLANETSCALE_CALLBACK_PATH}`
+
 const requireAdmin = (roles: ReadonlyArray<RoleName>) =>
 	requireAdminRole(
 		roles,
@@ -104,6 +113,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
 		const planetscale = yield* PlanetScaleConnectionService
+		const planetscaleOAuth = yield* PlanetScaleOAuthService
 		const planetscaleInventory = yield* PlanetScaleService
 		const database = yield* Database
 		const edgeCache = yield* EdgeCacheService
@@ -364,11 +374,37 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						return yield* planetscale.getStatus(tenant.orgId)
 					}),
 				)
-				.handle("planetscaleConnect", ({ payload }) =>
+				.handle("planetscaleStart", ({ payload }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						yield* requireAdmin(tenant.roles)
-						return yield* planetscale.connect(tenant.orgId, tenant.userId, payload)
+						const req = yield* HttpServerRequest.HttpServerRequest
+						const result = yield* planetscaleOAuth.startConnect(tenant.orgId, tenant.userId, {
+							callbackUrl: resolvePlanetScaleCallbackUrl(req),
+							returnTo: payload.returnTo,
+						})
+						return new PlanetScaleStartConnectResponse(result)
+					}),
+				)
+				// Admin-gated: drives the org picker while pendingOrgSelection (and
+				// "change organization" re-binding), both admin-only flows.
+				.handle("planetscaleOrganizations", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						const organizations = yield* planetscaleOAuth.listOrganizations(tenant.orgId)
+						return new PlanetScaleOrganizationsResponse({
+							organizations: organizations.map(
+								(org) => new PlanetScaleOrganizationSummary({ id: org.id, name: org.name }),
+							),
+						})
+					}),
+				)
+				.handle("planetscaleSelectOrganization", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						return yield* planetscale.finalizeOrgSelection(tenant.orgId, payload)
 					}),
 				)
 				.handle("planetscaleDisconnect", () =>
@@ -702,6 +738,8 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 		const github = yield* GithubConnectService
 		const cloudflare = yield* CloudflareOAuthService
 		const cloudflareAnalytics = yield* CloudflareAnalyticsService
+		const planetscaleOAuth = yield* PlanetScaleOAuthService
+		const planetscaleConnection = yield* PlanetScaleConnectionService
 		const env = yield* Env
 
 		const dashboardTargetOrigin = resolveDashboardTargetOrigin(env.MAPLE_APP_BASE_URL)
@@ -725,6 +763,13 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				targetOrigin: dashboardTargetOrigin,
 				messageType: CLOUDFLARE_MESSAGE_TYPE,
 				label: "Cloudflare",
+			})
+		const planetscaleCallbackPage = (params: Omit<CallbackPageParams, "targetOrigin">) =>
+			renderCallbackPage({
+				...params,
+				targetOrigin: dashboardTargetOrigin,
+				messageType: PLANETSCALE_MESSAGE_TYPE,
+				label: "PlanetScale",
 			})
 
 		const handle = Effect.fn("integrations.hazelOAuthCallback")(
@@ -1024,5 +1069,96 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 		)
 
 		yield* router.add("GET", "/api/integrations/cloudflare/callback", handleCloudflare)
+
+		const planetscaleErrorPage = (message: string) =>
+			htmlResponse(planetscaleCallbackPage({ status: "error", message, returnTo: null }), 400)
+
+		const handlePlanetScale = Effect.fn("integrations.planetscaleOAuthCallback")(
+			function* (req: HttpServerRequest.HttpServerRequest) {
+				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+				if (Option.isNone(urlOption)) {
+					return planetscaleErrorPage("Malformed callback URL")
+				}
+				const url = urlOption.value
+				const code = url.searchParams.get("code")
+				const state = url.searchParams.get("state")
+				const oauthError = url.searchParams.get("error")
+				const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
+
+				if (oauthError) {
+					return planetscaleErrorPage(oauthErrorDescription || "PlanetScale returned an error")
+				}
+
+				if (!code || !state) {
+					return planetscaleErrorPage("Missing code or state in callback")
+				}
+
+				return yield* planetscaleOAuth.completeConnect(code, state).pipe(
+					// Single-org grants finish here (bind + provision the scrape target);
+					// multi-org grants leave the org picker to the dashboard. A finalize
+					// failure (e.g. missing read_metrics_endpoints scope) surfaces on the
+					// callback page — this is the moment the user can act on it.
+					Effect.flatMap((result) =>
+						result.organizations.length === 1
+							? planetscaleConnection
+									.finalizeOrgSelection(result.orgId, {
+										organization: result.organizations[0]!.name,
+									})
+									.pipe(
+										Effect.map(() => ({
+											returnTo: result.returnTo,
+											message: `Connected to ${result.organizations[0]!.name}. You can close this window and return to Maple.`,
+										})),
+									)
+							: Effect.succeed({
+									returnTo: result.returnTo,
+									message:
+										"Authorization complete. Choose which PlanetScale organization to connect back in Maple.",
+								}),
+					),
+					// The callback page reduces failures to short human copy — make sure the real
+					// cause still lands in the server log for diagnosis.
+					Effect.tapError((error) =>
+						Effect.logError("PlanetScale OAuth completeConnect failed", {
+							tag: error._tag,
+							message: error.message,
+						}),
+					),
+					Effect.map(({ returnTo, message }) =>
+						htmlResponse(
+							planetscaleCallbackPage({
+								status: "success",
+								message,
+								returnTo,
+							}),
+						),
+					),
+					Effect.catchTags({
+						// Validation/upstream messages are our own sanitized strings — showing
+						// them turns "it failed" into something actionable.
+						"@maple/http/errors/IntegrationsValidationError": (error) =>
+							Effect.succeed(planetscaleErrorPage(error.message)),
+						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+							Effect.succeed(planetscaleErrorPage(error.message)),
+						"@maple/http/errors/IntegrationsNotConnectedError": () =>
+							Effect.succeed(
+								planetscaleErrorPage(
+									"PlanetScale connection not found — restart the connect flow",
+								),
+							),
+						"@maple/http/errors/IntegrationsRevokedError": () =>
+							Effect.succeed(
+								planetscaleErrorPage(
+									"PlanetScale rejected the authorization — reconnect and try again",
+								),
+							),
+						"@maple/http/errors/IntegrationsPersistenceError": () =>
+							Effect.succeed(planetscaleErrorPage("Failed to complete PlanetScale connection")),
+					}),
+				)
+			},
+		)
+
+		yield* router.add("GET", "/api/integrations/planetscale/callback", handlePlanetScale)
 	}),
 )

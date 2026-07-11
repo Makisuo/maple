@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Cause, Exit } from "effect"
-import { PlanetScaleConnectRequest } from "@maple/domain/http"
+import { PlanetScaleSelectOrganizationRequest, PlanetScaleStartConnectRequest } from "@maple/domain/http"
 import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -16,10 +16,10 @@ import {
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { toast } from "sonner"
 
 import { CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
+import { cn } from "@maple/ui/utils"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { formatRelativeTime } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -37,10 +37,11 @@ const parsePatternList = (value: string): string[] =>
 		.filter((pattern) => pattern.length > 0)
 
 /**
- * First-class PlanetScale connection card: paste a service token once and Maple
- * validates it, provisions the managed branch-metrics scrape target, and (in
- * later phases) polls database inventory + query insights. The managed scrape
- * target's per-branch health renders below via the shared scrape-target list.
+ * First-class PlanetScale connection card: authorize Maple's OAuth application
+ * in a popup, pick the PlanetScale organization (auto-bound when the grant
+ * reaches exactly one), and Maple provisions the managed branch-metrics scrape
+ * target, polls database inventory, and proxies query insights. The managed
+ * scrape target's per-branch health renders below via the shared list.
  */
 export function PlanetScaleIntegrationCard() {
 	const statusQuery = MapleApiAtomClient.query("integrations", "planetscaleStatus", {
@@ -49,53 +50,81 @@ export function PlanetScaleIntegrationCard() {
 	const statusResult = useAtomValue(statusQuery)
 	const refreshStatus = useAtomRefresh(statusQuery)
 
-	const connect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleConnect"), {
+	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleStart"), {
 		mode: "promiseExit",
 	})
 	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleDisconnect"), {
 		mode: "promiseExit",
 	})
 
-	const [dialogOpen, setDialogOpen] = useState(false)
 	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
-	const [formOrganization, setFormOrganization] = useState("")
-	const [formTokenId, setFormTokenId] = useState("")
-	const [formTokenSecret, setFormTokenSecret] = useState("")
-	const [formExcludeBranches, setFormExcludeBranches] = useState("")
+	const [pickerOpen, setPickerOpen] = useState(false)
+	const popupRef = useRef<Window | null>(null)
+	const [popupOpen, setPopupOpen] = useState(false)
+
+	// The OAuth popup posts a message before closing — refresh status so the card
+	// flips to Connected (or to the org picker) without a manual page reload.
+	useEffect(() => {
+		function onMessage(event: MessageEvent) {
+			if (event.data?.type === "maple:integration:planetscale") {
+				if (event.data.status === "success") {
+					refreshStatus()
+				} else if (event.data.status === "error") {
+					toast.error(event.data.message ?? "PlanetScale connection failed")
+				}
+			}
+		}
+		window.addEventListener("message", onMessage)
+		return () => window.removeEventListener("message", onMessage)
+	}, [refreshStatus])
+
+	// Cross-origin popups fire no "closed" event, so poll the handle. When it
+	// closes, refresh immediately — covers the case where the success message
+	// never arrives (popup closed manually or blocked).
+	useEffect(() => {
+		if (!popupOpen) return
+		const id = setInterval(() => {
+			if (popupRef.current?.closed ?? true) {
+				popupRef.current = null
+				setPopupOpen(false)
+				refreshStatus()
+			}
+		}, 500)
+		return () => clearInterval(id)
+	}, [popupOpen, refreshStatus])
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
 		.orElse(() => null)
 	const isConnected = status?.connected === true
-
-	function openConnectDialog() {
-		setFormOrganization(status?.organization ?? "")
-		setFormTokenId("")
-		setFormTokenSecret("")
-		setFormExcludeBranches(status?.scrapeTarget?.excludeBranches.join(", ") ?? "")
-		setDialogOpen(true)
-	}
+	const pendingOrgSelection = status?.pendingOrgSelection === true
 
 	async function handleConnect() {
+		// Open the popup synchronously (inside the click) so the browser doesn't
+		// block it, then point it at the authorize URL once the start call returns.
+		const popup = window.open("", "maple-planetscale-connect", "popup,width=520,height=680")
+		popupRef.current = popup
+		if (popup) setPopupOpen(true)
 		setBusy("connect")
-		const excludeBranches = parsePatternList(formExcludeBranches)
-		const result = await connect({
-			payload: new PlanetScaleConnectRequest({
-				organization: formOrganization.trim(),
-				tokenId: formTokenId.trim(),
-				tokenSecret: formTokenSecret,
-				...(excludeBranches.length > 0 ? { excludeBranches } : {}),
-			}),
+		const result = await startConnect({
+			payload: new PlanetScaleStartConnectRequest({ returnTo: window.location.href }),
 			reactivityKeys: ["planetscaleIntegrationStatus"],
 		})
 		setBusy(null)
 		if (Exit.isSuccess(result)) {
-			toast.success("PlanetScale organization connected")
-			setDialogOpen(false)
-			refreshStatus()
+			const url = result.value.redirectUrl
+			if (popup && !popup.closed) {
+				popup.location.href = url
+			} else {
+				const reopened = window.open(url, "maple-planetscale-connect", "popup,width=520,height=680")
+				popupRef.current = reopened
+				if (reopened) setPopupOpen(true)
+			}
 		} else {
-			// Surface the API's message (token rejected, unknown org, …) — it's actionable.
-			toast.error(extractErrorMessage(result) ?? "Failed to connect PlanetScale organization")
+			popup?.close()
+			popupRef.current = null
+			setPopupOpen(false)
+			toast.error(extractErrorMessage(result) ?? "Failed to start PlanetScale connect flow")
 		}
 	}
 
@@ -113,86 +142,6 @@ export function PlanetScaleIntegrationCard() {
 		}
 	}
 
-	const connectDialog = (
-		<Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-			<DialogContent className="sm:max-w-md">
-				<DialogHeader>
-					<DialogTitle>
-						{isConnected ? "Update PlanetScale connection" : "Connect PlanetScale"}
-					</DialogTitle>
-					<DialogDescription>
-						Create a service token in the PlanetScale organization settings with the{" "}
-						<code className="font-mono text-xs">read_metrics_endpoints</code> and{" "}
-						<code className="font-mono text-xs">read_databases</code> permissions.
-					</DialogDescription>
-				</DialogHeader>
-				<DialogPanel className="flex flex-col gap-4">
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="ps-organization">Organization</Label>
-						<Input
-							id="ps-organization"
-							placeholder="my-org"
-							value={formOrganization}
-							onChange={(event) => setFormOrganization(event.target.value)}
-							autoComplete="off"
-						/>
-					</div>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="ps-token-id">Service token ID</Label>
-						<Input
-							id="ps-token-id"
-							placeholder="tok_…"
-							value={formTokenId}
-							onChange={(event) => setFormTokenId(event.target.value)}
-							autoComplete="off"
-						/>
-					</div>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="ps-token-secret">Service token secret</Label>
-						<Input
-							id="ps-token-secret"
-							type="password"
-							placeholder="pscale_tkn_…"
-							value={formTokenSecret}
-							onChange={(event) => setFormTokenSecret(event.target.value)}
-							autoComplete="off"
-						/>
-					</div>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="ps-exclude-branches">Exclude branches (optional)</Label>
-						<Input
-							id="ps-exclude-branches"
-							placeholder="pr-*, preview-*"
-							value={formExcludeBranches}
-							onChange={(event) => setFormExcludeBranches(event.target.value)}
-							autoComplete="off"
-						/>
-						<p className="text-xs text-muted-foreground">
-							Glob patterns for branches to skip — keeps preview branches from being scraped.
-						</p>
-					</div>
-				</DialogPanel>
-				<DialogFooter>
-					<Button variant="outline" onClick={() => setDialogOpen(false)} disabled={busy !== null}>
-						Cancel
-					</Button>
-					<Button
-						onClick={handleConnect}
-						disabled={
-							busy !== null ||
-							formOrganization.trim().length === 0 ||
-							formTokenId.trim().length === 0 ||
-							formTokenSecret.length === 0
-						}
-					>
-						{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
-						{isConnected ? "Update connection" : "Connect"}
-					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
-	)
-
 	// Guard the first fetch so a connected org doesn't flash the "Connect" empty state.
 	if (Result.isInitial(statusResult)) {
 		return <Skeleton className="h-40 w-full rounded-lg" />
@@ -207,8 +156,36 @@ export function PlanetScaleIntegrationCard() {
 				<div className="flex flex-col gap-1">
 					<h3 className="text-sm font-semibold">PlanetScale</h3>
 					<p className="text-xs text-muted-foreground">
-						Couldn't load the PlanetScale connection status — refresh the page to try again.
+						Couldn&apos;t load the PlanetScale connection status — refresh the page to try again.
 					</p>
+				</div>
+			</div>
+		)
+	}
+
+	// Grant stored, organization not chosen yet: the picker is the whole card.
+	if (!isConnected && pendingOrgSelection) {
+		return (
+			<div className="overflow-hidden rounded-lg border border-border/60 bg-card">
+				<div className="flex items-start gap-3 p-4">
+					<IntegrationIconPlate icon={PlanetScaleIcon} accent={PLANETSCALE_ENTRY.accent} />
+					<div className="min-w-0">
+						<div className="flex items-center gap-2">
+							<h3 className="text-sm font-semibold">PlanetScale</h3>
+							<Badge variant="secondary">Authorized</Badge>
+						</div>
+						<p className="mt-1 text-xs text-muted-foreground">
+							The authorization covers multiple PlanetScale organizations — choose which one to
+							connect.
+						</p>
+					</div>
+				</div>
+				<div className="border-t border-border/60 p-4">
+					<PlanetScaleOrgPicker
+						onDone={() => refreshStatus()}
+						onCancel={handleDisconnect}
+						cancelLabel="Disconnect"
+					/>
 				</div>
 			</div>
 		)
@@ -216,26 +193,27 @@ export function PlanetScaleIntegrationCard() {
 
 	if (!isConnected) {
 		return (
-			<>
-				<IntegrationEmptyState
-					icon={PlanetScaleIcon}
-					accent={PLANETSCALE_ENTRY.accent}
-					title="Connect your PlanetScale organization"
-					description="Paste a service token once — Maple discovers every database branch and streams CPU, connections, replication lag, and query metrics into your dashboards."
-					features={[
-						"Branch metrics scraped automatically, no agent required",
-						"Databases appear on the service map with live health",
-						"Branch filters keep preview branches out",
-					]}
-					footer="The token needs the read_metrics_endpoints organization permission."
-				>
-					<Button onClick={openConnectDialog}>
+			<IntegrationEmptyState
+				icon={PlanetScaleIcon}
+				accent={PLANETSCALE_ENTRY.accent}
+				title="Connect your PlanetScale organization"
+				description="Authorize Maple in PlanetScale — no tokens to paste. Maple discovers every database branch and streams CPU, connections, replication lag, and query metrics into your dashboards."
+				features={[
+					"Branch metrics scraped automatically, no agent required",
+					"Databases appear on the service map with live health",
+					"Branch filters keep preview branches out",
+				]}
+				footer="The OAuth application needs the organization-level read_metrics_endpoints and read_databases scopes."
+			>
+				<Button onClick={handleConnect} disabled={busy !== null}>
+					{busy === "connect" ? (
+						<LoaderIcon size={16} className="animate-spin" />
+					) : (
 						<PlanetScaleIcon size={16} />
-						Connect PlanetScale
-					</Button>
-				</IntegrationEmptyState>
-				{connectDialog}
-			</>
+					)}
+					Connect PlanetScale
+				</Button>
+			</IntegrationEmptyState>
 		)
 	}
 
@@ -256,19 +234,6 @@ export function PlanetScaleIntegrationCard() {
 							<p className="mt-1 text-xs text-muted-foreground">
 								Streaming branch metrics from{" "}
 								<span className="font-medium text-foreground">{status?.organization}</span>
-								{status?.tokenId ? (
-									<Tooltip>
-										<TooltipTrigger
-											render={<span />}
-											className="ml-1 cursor-help font-mono text-[11px] text-muted-foreground"
-										>
-											· {status.tokenId.slice(0, 12)}…
-										</TooltipTrigger>
-										<TooltipContent className="font-mono text-xs">
-											Service token {status.tokenId}
-										</TooltipContent>
-									</Tooltip>
-								) : null}
 							</p>
 							{target ? (
 								<p className="mt-1 text-xs text-muted-foreground">
@@ -290,8 +255,13 @@ export function PlanetScaleIntegrationCard() {
 					</div>
 
 					<div className="flex shrink-0 items-center gap-1.5">
-						<Button size="sm" variant="outline" onClick={openConnectDialog} disabled={busy !== null}>
-							Update connection
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={() => setPickerOpen(true)}
+							disabled={busy !== null}
+						>
+							Change organization
 						</Button>
 						<Button size="sm" variant="outline" onClick={handleDisconnect} disabled={busy !== null}>
 							{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
@@ -306,9 +276,10 @@ export function PlanetScaleIntegrationCard() {
 							<CircleWarningIcon />
 							<AlertTitle>Database inventory unavailable</AlertTitle>
 							<AlertDescription>
-								The service token can read metrics but not databases — grant it the{" "}
-								<code className="font-mono text-xs">read_databases</code> permission so Maple
-								can link databases on the service map, then update the connection.
+								The authorization can read metrics but not databases — grant the OAuth
+								application the{" "}
+								<code className="font-mono text-xs">read_databases</code> scope so Maple can
+								link databases on the service map, then reconnect.
 							</AlertDescription>
 						</Alert>
 					</div>
@@ -332,7 +303,140 @@ export function PlanetScaleIntegrationCard() {
 			{/* The managed target's per-branch scrape health, via the shared scrape-target list. */}
 			<ScrapeTargetsSection sourceFilter="planetscale" />
 
-			{connectDialog}
+			{/* Re-binding to another org the grant covers — finalize is an upsert. */}
+			<Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+				<DialogContent className="sm:max-w-md">
+					<DialogHeader>
+						<DialogTitle>Change PlanetScale organization</DialogTitle>
+						<DialogDescription>
+							Pick another organization the authorization covers. The managed scrape target
+							follows the new organization.
+						</DialogDescription>
+					</DialogHeader>
+					<DialogPanel>
+						<PlanetScaleOrgPicker
+							initialOrganization={status?.organization ?? null}
+							initialExcludeBranches={status?.scrapeTarget?.excludeBranches.join(", ") ?? ""}
+							onDone={() => {
+								setPickerOpen(false)
+								refreshStatus()
+							}}
+							onCancel={() => setPickerOpen(false)}
+							cancelLabel="Cancel"
+						/>
+					</DialogPanel>
+				</DialogContent>
+			</Dialog>
+		</div>
+	)
+}
+
+/**
+ * Organization picker over the stored OAuth grant: lists the orgs the grant can
+ * access and finalizes the binding via select-organization. Rendered inline for
+ * the pending state and inside a dialog for post-connect re-binding.
+ */
+function PlanetScaleOrgPicker(props: {
+	initialOrganization?: string | null
+	initialExcludeBranches?: string
+	onDone: () => void
+	onCancel: () => void
+	cancelLabel: string
+}) {
+	const organizationsResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleOrganizations", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
+	const selectOrganization = useAtomSet(
+		MapleApiAtomClient.mutation("integrations", "planetscaleSelectOrganization"),
+		{ mode: "promiseExit" },
+	)
+
+	const [selected, setSelected] = useState<string | null>(props.initialOrganization ?? null)
+	const [excludeBranches, setExcludeBranches] = useState(props.initialExcludeBranches ?? "")
+	const [submitting, setSubmitting] = useState(false)
+
+	async function handleSubmit() {
+		if (selected === null) return
+		setSubmitting(true)
+		const patterns = parsePatternList(excludeBranches)
+		const result = await selectOrganization({
+			payload: new PlanetScaleSelectOrganizationRequest({
+				organization: selected,
+				...(patterns.length > 0 ? { excludeBranches: patterns } : {}),
+			}),
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		})
+		setSubmitting(false)
+		if (Exit.isSuccess(result)) {
+			toast.success(`PlanetScale organization ${selected} connected`)
+			props.onDone()
+		} else {
+			// Surface the API's message (missing scope, org outside the grant, …) — actionable.
+			toast.error(extractErrorMessage(result) ?? "Failed to connect PlanetScale organization")
+		}
+	}
+
+	if (Result.isInitial(organizationsResult)) {
+		return <Skeleton className="h-24 w-full" />
+	}
+	if (Result.isFailure(organizationsResult)) {
+		return (
+			<p className="text-xs text-muted-foreground">
+				Couldn&apos;t list the authorized PlanetScale organizations — the authorization may have
+				been revoked. Disconnect and connect again.
+			</p>
+		)
+	}
+	const organizations = organizationsResult.value.organizations
+
+	return (
+		<div className="flex flex-col gap-4">
+			<div className="flex flex-col gap-1.5" role="radiogroup" aria-label="PlanetScale organization">
+				{organizations.map((org) => (
+					<button
+						key={org.id}
+						type="button"
+						role="radio"
+						aria-checked={selected === org.name}
+						onClick={() => setSelected(org.name)}
+						className={cn(
+							"flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors",
+							selected === org.name
+								? "border-primary bg-primary/5 font-medium"
+								: "border-border/60 hover:bg-muted/50",
+						)}
+					>
+						<span className="truncate">{org.name}</span>
+						{selected === org.name ? (
+							<span className="text-xs text-primary">Selected</span>
+						) : null}
+					</button>
+				))}
+			</div>
+			<div className="flex flex-col gap-2">
+				<Label htmlFor="ps-exclude-branches">Exclude branches (optional)</Label>
+				<Input
+					id="ps-exclude-branches"
+					placeholder="pr-*, preview-*"
+					value={excludeBranches}
+					onChange={(event) => setExcludeBranches(event.target.value)}
+					autoComplete="off"
+				/>
+				<p className="text-xs text-muted-foreground">
+					Glob patterns for branches to skip — keeps preview branches from being scraped.
+				</p>
+			</div>
+			<DialogFooter>
+				<Button variant="outline" onClick={props.onCancel} disabled={submitting}>
+					{props.cancelLabel}
+				</Button>
+				<Button onClick={handleSubmit} disabled={submitting || selected === null}>
+					{submitting ? <LoaderIcon size={14} className="animate-spin" /> : null}
+					Connect organization
+				</Button>
+			</DialogFooter>
 		</div>
 	)
 }

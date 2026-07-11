@@ -84,6 +84,7 @@ const AUTH_TYPE_LABELS: Record<ScrapeAuthType, string> = {
 	bearer: "Bearer Token",
 	basic: "Basic Auth",
 	token: "Service Token",
+	planetscale_oauth: "PlanetScale OAuth",
 }
 
 const asScrapeIntervalSeconds = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
@@ -320,8 +321,14 @@ export function ScrapeTargetsSection({
 		setFormInterval(type === "planetscale" ? "30" : "15")
 	}
 
+	// Managed rows (provisioned by the PlanetScale integration) resolve auth from
+	// the org's OAuth grant — the edit dialog must not flip them back to "token"
+	// or ask for credentials.
+	const isManagedPlanetScaleAuth = editingTarget?.authType === "planetscale_oauth"
+
 	function buildAuthCredentials(): string | null {
 		if (formTargetType === "planetscale") {
+			if (isManagedPlanetScaleAuth) return null
 			if (!formTokenId.trim() || !formTokenSecret.trim()) return null
 			return JSON.stringify({
 				tokenId: formTokenId.trim(),
@@ -384,7 +391,9 @@ export function ScrapeTargetsSection({
 					...(isPlanetScale
 						? {
 								organization: formOrganization.trim(),
-								authType: "token" as const,
+								authType: isManagedPlanetScaleAuth
+									? ("planetscale_oauth" as const)
+									: ("token" as const),
 								includeBranches: parseBranchList(formIncludeBranches),
 								excludeBranches: parseBranchList(formExcludeBranches),
 							}
@@ -624,38 +633,48 @@ export function ScrapeTargetsSection({
 										Your PlanetScale organization name as it appears in the dashboard URL.
 									</p>
 								</div>
-								<div className="space-y-2">
-									<Label htmlFor="scrape-token-id">Service Token ID</Label>
-									<Input
-										id="scrape-token-id"
-										placeholder={
-											editingTarget?.hasCredentials
-												? "Leave blank to keep existing"
-												: "Enter service token ID"
-										}
-										value={formTokenId}
-										onChange={(e) => setFormTokenId(e.target.value)}
-									/>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="scrape-token-secret">Service Token Secret</Label>
-									<Input
-										id="scrape-token-secret"
-										type="password"
-										placeholder={
-											editingTarget?.hasCredentials
-												? "Leave blank to keep existing"
-												: "Enter service token secret"
-										}
-										value={formTokenSecret}
-										onChange={(e) => setFormTokenSecret(e.target.value)}
-									/>
+								{isManagedPlanetScaleAuth ? (
 									<p className="text-muted-foreground text-xs">
-										Create a service token with the{" "}
-										<span className="font-mono">read_metrics_endpoints</span> organization
-										permission.
+										Authentication is managed by the PlanetScale integration — this target
+										scrapes with the connected organization&apos;s OAuth authorization, no
+										credentials to enter.
 									</p>
-								</div>
+								) : (
+									<>
+										<div className="space-y-2">
+											<Label htmlFor="scrape-token-id">Service Token ID</Label>
+											<Input
+												id="scrape-token-id"
+												placeholder={
+													editingTarget?.hasCredentials
+														? "Leave blank to keep existing"
+														: "Enter service token ID"
+												}
+												value={formTokenId}
+												onChange={(e) => setFormTokenId(e.target.value)}
+											/>
+										</div>
+										<div className="space-y-2">
+											<Label htmlFor="scrape-token-secret">Service Token Secret</Label>
+											<Input
+												id="scrape-token-secret"
+												type="password"
+												placeholder={
+													editingTarget?.hasCredentials
+														? "Leave blank to keep existing"
+														: "Enter service token secret"
+												}
+												value={formTokenSecret}
+												onChange={(e) => setFormTokenSecret(e.target.value)}
+											/>
+											<p className="text-muted-foreground text-xs">
+												Create a service token with the{" "}
+												<span className="font-mono">read_metrics_endpoints</span>{" "}
+												organization permission.
+											</p>
+										</div>
+									</>
+								)}
 								<div className="space-y-2">
 									<Label htmlFor="scrape-include-branches">Include branches (optional)</Label>
 									<Input

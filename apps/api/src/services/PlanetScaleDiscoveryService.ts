@@ -1,4 +1,4 @@
-import { ScrapeTargetEncryptionError, ScrapeTargetPersistenceError } from "@maple/domain/http"
+import { OrgId, ScrapeTargetEncryptionError, ScrapeTargetPersistenceError } from "@maple/domain/http"
 import type { scrapeTargets } from "@maple/db"
 import { Clock, Context, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
@@ -6,14 +6,17 @@ import { parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Env } from "../lib/Env"
 import { buildScrapeAuthHeaders } from "../lib/scrape-auth"
 import { validateExternalUrlSync } from "../lib/url-validator"
+import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
 /**
  * Resolves PlanetScale `planetscale`-type scrape targets into their concrete
  * per-database-branch scrape endpoints via PlanetScale's Prometheus http_sd
- * discovery API (`GET /v1/organizations/{org}/metrics` with
- * `Authorization: token {ID}:{SECRET}`).
+ * discovery API (`GET /v1/organizations/{org}/metrics`). Managed targets
+ * (`authType "planetscale_oauth"`) authenticate with the org's OAuth grant
+ * (`Authorization: Bearer …`); manual escape-hatch targets keep the service
+ * token scheme (`Authorization: token {ID}:{SECRET}`).
  *
  * Discovery results are cached in-memory per target with a 10-minute TTL
  * (PlanetScale's documented refresh cadence). On refresh failure stale entries
@@ -168,6 +171,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 >()("@maple/api/services/PlanetScaleDiscoveryService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
+		const psOAuth = yield* PlanetScaleOAuthService
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			(message) => new ScrapeTargetEncryptionError({ message }),
@@ -175,10 +179,28 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 
 		const cache = yield* Ref.make(new Map<string, CacheEntry>())
 
+		// Managed rows store no credentials — resolve (and auto-refresh) the org's
+		// OAuth grant at discovery time; manual rows decrypt their stored token.
+		const authHeadersForRow = Effect.fn("PlanetScaleDiscoveryService.authHeadersForRow")(function* (
+			row: ScrapeTargetRow,
+		) {
+			if (row.authType !== "planetscale_oauth") {
+				return yield* buildScrapeAuthHeaders(row, encryptionKey)
+			}
+			const { accessToken } = yield* psOAuth
+				.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
+				.pipe(
+					Effect.mapError((error) =>
+						toPersistenceError(`Failed to resolve the PlanetScale OAuth token: ${error.message}`),
+					),
+				)
+			return { Authorization: planetScaleBearerHeader(accessToken) }
+		})
+
 		const fetchSubTargets = Effect.fn("PlanetScaleDiscoveryService.fetchSubTargets")(function* (
 			row: ScrapeTargetRow,
 		) {
-			const headers = yield* buildScrapeAuthHeaders(row, encryptionKey)
+			const headers = yield* authHeadersForRow(row)
 			const response = yield* Effect.gen(function* () {
 				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.get(row.url).pipe(HttpClientRequest.setHeaders(headers))
@@ -201,7 +223,9 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				return yield* Effect.fail(
 					toPersistenceError(
 						response.status === 401 || response.status === 403
-							? `PlanetScale discovery rejected the service token (HTTP ${response.status}). Check the token id/secret and its read_metrics_endpoints permission.`
+							? row.authType === "planetscale_oauth"
+								? `PlanetScale discovery rejected the OAuth token (HTTP ${response.status}). Check the OAuth app's read_metrics_endpoints scope and reconnect.`
+								: `PlanetScale discovery rejected the service token (HTTP ${response.status}). Check the token id/secret and its read_metrics_endpoints permission.`
 							: `PlanetScale discovery failed: HTTP ${response.status}`,
 					),
 				)

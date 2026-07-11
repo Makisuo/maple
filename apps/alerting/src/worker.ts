@@ -19,6 +19,7 @@ import {
 	OnboardingService,
 	OrgClickHouseSettingsService,
 	OrgIngestKeysService,
+	PlanetScaleOAuthService,
 	PlanetScaleService,
 	QueryEngineService,
 	ServiceMapRollupService,
@@ -152,7 +153,11 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		),
 	)
 
-	const PlanetScaleServiceLive = PlanetScaleService.layer.pipe(Layer.provide(BaseLive))
+	const PlanetScaleOAuthServiceLive = PlanetScaleOAuthService.layer.pipe(Layer.provide(BaseLive))
+
+	const PlanetScaleServiceLive = PlanetScaleService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, PlanetScaleOAuthServiceLive)),
+	)
 
 	return Layer.mergeAll(
 		AlertsServiceLive,

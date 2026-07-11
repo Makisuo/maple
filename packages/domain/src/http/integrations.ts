@@ -220,7 +220,7 @@ export class CloudflareDisconnectResponse extends Schema.Class<CloudflareDisconn
 	disconnected: Schema.Boolean,
 }) {}
 
-// ---- PlanetScale (service-token integration) --------------------------------
+// ---- PlanetScale (OAuth integration) ----------------------------------------
 
 /**
  * The managed scrape target this connection auto-provisioned — surfaced on the
@@ -244,12 +244,15 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 	"PlanetScaleIntegrationStatus",
 )({
 	connected: Schema.Boolean,
-	/** PlanetScale organization slug the service token is scoped to. */
+	/**
+	 * OAuth grant stored but no organization bound yet — the UI shows the org
+	 * picker. Mutually exclusive with `connected`.
+	 */
+	pendingOrgSelection: Schema.Boolean,
+	/** PlanetScale organization slug the connection is bound to. */
 	organization: Schema.NullOr(Schema.String),
-	/** Service token id (not secret) for display. */
-	tokenId: Schema.NullOr(Schema.String),
 	connectedByUserId: Schema.NullOr(UserId),
-	/** Token permissions probed at connect time (e.g. readMetricsEndpoints). */
+	/** API permissions probed at org-binding time (e.g. readMetricsEndpoints). */
 	detectedPermissions: Schema.NullOr(Schema.Record(Schema.String, Schema.Boolean)),
 	scrapeTarget: Schema.NullOr(PlanetScaleScrapeTargetSummary),
 	/** Epoch ms of the last successful inventory refresh; null before the first. */
@@ -257,13 +260,44 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 	lastInventoryError: Schema.NullOr(Schema.String),
 }) {}
 
-export class PlanetScaleConnectRequest extends Schema.Class<PlanetScaleConnectRequest>(
-	"PlanetScaleConnectRequest",
+export class PlanetScaleStartConnectRequest extends Schema.Class<PlanetScaleStartConnectRequest>(
+	"PlanetScaleStartConnectRequest",
+)({
+	returnTo: Schema.optionalKey(Schema.String),
+}) {}
+
+export class PlanetScaleStartConnectResponse extends Schema.Class<PlanetScaleStartConnectResponse>(
+	"PlanetScaleStartConnectResponse",
+)({
+	redirectUrl: Schema.String,
+	state: Schema.String,
+}) {}
+
+/** One PlanetScale organization the OAuth grant can access — org-picker material. */
+export class PlanetScaleOrganizationSummary extends Schema.Class<PlanetScaleOrganizationSummary>(
+	"PlanetScaleOrganizationSummary",
+)({
+	id: Schema.String,
+	name: Schema.String,
+}) {}
+
+export class PlanetScaleOrganizationsResponse extends Schema.Class<PlanetScaleOrganizationsResponse>(
+	"PlanetScaleOrganizationsResponse",
+)({
+	organizations: Schema.Array(PlanetScaleOrganizationSummary),
+}) {}
+
+/**
+ * Bind the stored OAuth grant to one PlanetScale organization and provision the
+ * managed scrape target. Called automatically from the OAuth callback when the
+ * grant reaches exactly one org, or from the org picker otherwise. Re-binding
+ * (changing org / editing filters) is an upsert.
+ */
+export class PlanetScaleSelectOrganizationRequest extends Schema.Class<PlanetScaleSelectOrganizationRequest>(
+	"PlanetScaleSelectOrganizationRequest",
 )({
 	/** PlanetScale organization slug. */
 	organization: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
-	tokenId: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
-	tokenSecret: Schema.String.check(Schema.isMinLength(1)),
 	/** Branch glob allowlist for the managed scrape target (omit/empty = all branches). */
 	includeBranches: Schema.optionalKey(Schema.Array(Schema.String)),
 	/** Branch glob denylist for the managed scrape target (e.g. `pr-*`). */
@@ -649,15 +683,44 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		}),
 	)
 	.add(
-		// Validates the service token against PlanetScale before persisting, then
-		// auto-provisions (or adopts) the managed scrape target. Reconnecting with
-		// fresh credentials is an upsert.
-		HttpApiEndpoint.post("planetscaleConnect", "/planetscale/connect", {
-			payload: PlanetScaleConnectRequest,
+		HttpApiEndpoint.post("planetscaleStart", "/planetscale/start", {
+			payload: PlanetScaleStartConnectRequest,
+			success: PlanetScaleStartConnectResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		// Organizations the stored OAuth grant can access — drives the org picker
+		// while the connection is pendingOrgSelection (and "change organization").
+		HttpApiEndpoint.get("planetscaleOrganizations", "/planetscale/organizations", {
+			success: PlanetScaleOrganizationsResponse,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsValidationError,
+				IntegrationsNotConnectedError,
+				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		// Binds the OAuth grant to one PlanetScale organization: probes API
+		// permissions, then auto-provisions (or adopts) the managed scrape target.
+		// Re-binding is an upsert.
+		HttpApiEndpoint.post("planetscaleSelectOrganization", "/planetscale/select-organization", {
+			payload: PlanetScaleSelectOrganizationRequest,
 			success: PlanetScaleIntegrationStatus,
 			error: [
 				IntegrationsForbiddenError,
 				IntegrationsValidationError,
+				IntegrationsNotConnectedError,
+				IntegrationsRevokedError,
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],
@@ -690,6 +753,7 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 			error: [
 				IntegrationsNotConnectedError,
 				IntegrationsValidationError,
+				IntegrationsRevokedError,
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],

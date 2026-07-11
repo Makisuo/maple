@@ -31,6 +31,7 @@ import {
 } from "../lib/scrape-auth"
 import { safeFetch, validateExternalUrl } from "../lib/url-validator"
 import { PlanetScaleDiscoveryService, planetScaleDiscoveryUrl } from "./PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
@@ -190,14 +191,18 @@ const validateAuthType = (authType: string | undefined) => {
 		Effect.mapError(
 			() =>
 				new ScrapeTargetValidationError({
-					message: `Invalid auth type: "${authType}". Must be one of: none, bearer, basic, token`,
+					message: `Invalid auth type: "${authType}". Must be one of: none, bearer, basic, token, planetscale_oauth`,
 				}),
 		),
 	)
 }
 
+/** Auth types that store no credentials on the row. */
+const isCredentialLessAuthType = (authType: string): boolean =>
+	authType === "none" || authType === "planetscale_oauth"
+
 const validateAuthCredentials = (authType: string, authCredentials: string | null | undefined) => {
-	if (authType === "none") return Effect.succeed(undefined)
+	if (isCredentialLessAuthType(authType)) return Effect.succeed(undefined)
 
 	if (!authCredentials) {
 		return Effect.fail(
@@ -372,6 +377,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 			const database = yield* Database
 			const env = yield* Env
 			const discovery = yield* PlanetScaleDiscoveryService
+			const psOAuth = yield* PlanetScaleOAuthService
 			const encryptionKey = yield* parseEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
@@ -420,7 +426,25 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				},
 			)
 
-			const authHeadersForRow = (row: ScrapeTargetRow) => buildScrapeAuthHeaders(row, encryptionKey)
+			// Managed PlanetScale targets store no credentials — the org's OAuth grant
+			// is resolved (and refreshed) at scrape time. Everything else decrypts the
+			// row's stored credentials.
+			const authHeadersForRow = Effect.fn("ScrapeTargetsService.authHeadersForRow")(function* (
+				row: ScrapeTargetRow,
+			) {
+				if (row.authType !== "planetscale_oauth") {
+					return yield* buildScrapeAuthHeaders(row, encryptionKey)
+				}
+				const { accessToken } = yield* psOAuth
+					.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
+					.pipe(
+						Effect.mapError(
+							(error) =>
+								toEncryptionError(`Failed to resolve the PlanetScale OAuth token: ${error.message}`),
+						),
+					)
+				return { Authorization: planetScaleBearerHeader(accessToken) }
+			})
 
 			const list = Effect.fn("ScrapeTargetsService.list")(function* (orgId: OrgId) {
 				const rows = yield* database
@@ -469,11 +493,15 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 							}),
 						)
 					}
-					if (request.authType !== undefined && request.authType !== "token") {
+					if (
+						request.authType !== undefined &&
+						request.authType !== "token" &&
+						request.authType !== "planetscale_oauth"
+					) {
 						return yield* Effect.fail(
 							new ScrapeTargetValidationError({
 								message:
-									'PlanetScale targets use auth type "token" (service token id + secret)',
+									'PlanetScale targets use auth type "token" (service token id + secret) or "planetscale_oauth" (managed by the PlanetScale integration)',
 							}),
 						)
 					}
@@ -487,12 +515,19 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					)
 					url = planetScaleDiscoveryUrl(organization)
 					discoveryConfigJson = buildDiscoveryConfig(organization, includeBranches, excludeBranches)
-					authType = "token"
+					authType = request.authType ?? "token"
 				} else {
 					if (request.includeBranches !== undefined || request.excludeBranches !== undefined) {
 						return yield* Effect.fail(
 							new ScrapeTargetValidationError({
 								message: "includeBranches/excludeBranches are only valid for PlanetScale targets",
+							}),
+						)
+					}
+					if (request.authType === "planetscale_oauth") {
+						return yield* Effect.fail(
+							new ScrapeTargetValidationError({
+								message: 'Auth type "planetscale_oauth" is only valid for PlanetScale targets',
 							}),
 						)
 					}
@@ -521,7 +556,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					authCredentialsTag: null,
 				}
 
-				if (authType !== "none") {
+				if (!isCredentialLessAuthType(authType)) {
 					yield* validateAuthCredentials(authType, request.authCredentials)
 					const encrypted = yield* encryptCredentials(request.authCredentials!, encryptionKey)
 					credentialFields = {
@@ -586,10 +621,23 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 						}),
 					)
 				}
-				if (isPlanetScale && request.authType !== undefined && request.authType !== "token") {
+				if (
+					isPlanetScale &&
+					request.authType !== undefined &&
+					request.authType !== "token" &&
+					request.authType !== "planetscale_oauth"
+				) {
 					return yield* Effect.fail(
 						new ScrapeTargetValidationError({
-							message: 'PlanetScale targets use auth type "token" (service token id + secret)',
+							message:
+								'PlanetScale targets use auth type "token" (service token id + secret) or "planetscale_oauth" (managed by the PlanetScale integration)',
+						}),
+					)
+				}
+				if (!isPlanetScale && request.authType === "planetscale_oauth") {
+					return yield* Effect.fail(
+						new ScrapeTargetValidationError({
+							message: 'Auth type "planetscale_oauth" is only valid for PlanetScale targets',
 						}),
 					)
 				}
@@ -668,7 +716,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					const newAuthType = yield* validateAuthType(request.authType)
 					updates.authType = newAuthType
 
-					if (newAuthType === "none") {
+					if (newAuthType !== undefined && isCredentialLessAuthType(newAuthType)) {
 						updates.authCredentialsCiphertext = null
 						updates.authCredentialsIv = null
 						updates.authCredentialsTag = null
@@ -681,7 +729,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					}
 				} else if (request.authCredentials) {
 					const currentAuthType = existing.authType
-					if (currentAuthType !== "none") {
+					if (!isCredentialLessAuthType(currentAuthType)) {
 						yield* validateAuthCredentials(currentAuthType, request.authCredentials)
 						const encrypted = yield* encryptCredentials(request.authCredentials!, encryptionKey)
 						updates.authCredentialsCiphertext = encrypted.ciphertext
@@ -784,8 +832,8 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				let scrapeUrl = row.value.url
 				if (row.value.targetType === "planetscale") {
 					// Resolve the per-branch endpoint from the discovery cache. The
-					// scrape itself carries the service-token header too — PlanetScale's
-					// docs only auth the SD call, but sending it is harmless if unneeded.
+					// scrape itself carries the auth header too — PlanetScale's docs
+					// only auth the SD call, but sending it is harmless if unneeded.
 					const subTargets = yield* discovery
 						.discover(row.value)
 						.pipe(Effect.mapError(toPersistenceError))
