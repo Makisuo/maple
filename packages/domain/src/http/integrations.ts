@@ -254,6 +254,14 @@ export class PlanetScaleIntegrationStatus extends Schema.Class<PlanetScaleIntegr
 	connectedByUserId: Schema.NullOr(UserId),
 	/** API permissions probed at org-binding time (e.g. readMetricsEndpoints). */
 	detectedPermissions: Schema.NullOr(Schema.Record(Schema.String, Schema.Boolean)),
+	/**
+	 * How branch-metrics scraping authenticates. PlanetScale's metrics endpoints
+	 * only document service-token auth, so "oauth" applies only when the bearer
+	 * probe succeeded; "missing" means scraping is paused until a service token
+	 * with the read_metrics_endpoints permission is added (the one manual step —
+	 * inventory, insights, and webhooks run on the OAuth grant regardless).
+	 */
+	metricsAuth: Schema.Literals(["oauth", "service_token", "missing"]),
 	scrapeTarget: Schema.NullOr(PlanetScaleScrapeTargetSummary),
 	/** Epoch ms of the last successful inventory refresh; null before the first. */
 	lastInventoryAt: Schema.NullOr(Schema.Number),
@@ -308,6 +316,19 @@ export class PlanetScaleDisconnectResponse extends Schema.Class<PlanetScaleDisco
 	"PlanetScaleDisconnectResponse",
 )({
 	disconnected: Schema.Boolean,
+}) {}
+
+/**
+ * Attach a service token (permission: read_metrics_endpoints only) to the
+ * managed scrape target. PlanetScale's Prometheus discovery + branch metrics
+ * endpoints authenticate with service tokens, not OAuth bearers — this is the
+ * one manual step the OAuth flow can't cover.
+ */
+export class PlanetScaleMetricsTokenRequest extends Schema.Class<PlanetScaleMetricsTokenRequest>(
+	"PlanetScaleMetricsTokenRequest",
+)({
+	tokenId: Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed()),
+	tokenSecret: Schema.String.check(Schema.isMinLength(1)),
 }) {}
 
 export class PlanetScaleBranchSummary extends Schema.Class<PlanetScaleBranchSummary>(
@@ -721,6 +742,21 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 				IntegrationsValidationError,
 				IntegrationsNotConnectedError,
 				IntegrationsRevokedError,
+				IntegrationsUpstreamError,
+				IntegrationsPersistenceError,
+			],
+		}),
+	)
+	.add(
+		// Validates the token against the metrics discovery endpoint before
+		// storing it on the managed scrape target (re-submitting rotates it).
+		HttpApiEndpoint.post("planetscaleSetMetricsToken", "/planetscale/metrics-token", {
+			payload: PlanetScaleMetricsTokenRequest,
+			success: PlanetScaleIntegrationStatus,
+			error: [
+				IntegrationsForbiddenError,
+				IntegrationsNotConnectedError,
+				IntegrationsValidationError,
 				IntegrationsUpstreamError,
 				IntegrationsPersistenceError,
 			],

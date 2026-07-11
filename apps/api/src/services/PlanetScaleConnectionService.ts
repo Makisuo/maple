@@ -10,6 +10,7 @@ import {
 	ScrapeTargetId,
 	UserId,
 	type OrgId,
+	type PlanetScaleMetricsTokenRequest,
 	type PlanetScaleSelectOrganizationRequest,
 } from "@maple/domain/http"
 import { planetscaleConnections, scrapeTargets, type PlanetScaleConnectionRow } from "@maple/db"
@@ -61,6 +62,23 @@ export interface PlanetScaleConnectionServiceShape {
 		PlanetScaleIntegrationStatus,
 		| IntegrationsNotConnectedError
 		| IntegrationsRevokedError
+		| IntegrationsValidationError
+		| IntegrationsUpstreamError
+		| IntegrationsPersistenceError
+	>
+	/**
+	 * Attach (or rotate) the service token that authenticates branch-metrics
+	 * scraping — PlanetScale's metrics endpoints only accept service tokens, so
+	 * this is the one credential the OAuth grant can't replace. Validates the
+	 * token against the metrics discovery endpoint before storing it on the
+	 * managed scrape target and re-enabling scraping.
+	 */
+	readonly setMetricsToken: (
+		orgId: OrgId,
+		request: PlanetScaleMetricsTokenRequest,
+	) => Effect.Effect<
+		PlanetScaleIntegrationStatus,
+		| IntegrationsNotConnectedError
 		| IntegrationsValidationError
 		| IntegrationsUpstreamError
 		| IntegrationsPersistenceError
@@ -119,18 +137,19 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const apiBase = env.MAPLE_PLANETSCALE_API_BASE_URL.replace(/\/$/, "")
 
 		/**
-		 * GET a management-API path with the grant's access token. Returns the HTTP
-		 * status; network-level failures surface as IntegrationsUpstreamError.
+		 * GET a management-API path with the given Authorization header (an OAuth
+		 * bearer or a service-token scheme). Returns the HTTP status;
+		 * network-level failures surface as IntegrationsUpstreamError.
 		 */
 		const probeStatus = Effect.fn("PlanetScaleConnectionService.probeStatus")(function* (
 			path: string,
-			accessToken: string,
+			authorization: string,
 		) {
 			return yield* Effect.gen(function* () {
 				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.get(`${apiBase}${path}`).pipe(
 					HttpClientRequest.setHeaders({
-						Authorization: planetScaleBearerHeader(accessToken),
+						Authorization: authorization,
 						Accept: "application/json",
 					}),
 				)
@@ -163,11 +182,12 @@ export class PlanetScaleConnectionService extends Context.Service<
 			accessToken: string,
 		) {
 			const org = encodeURIComponent(organization)
+			const bearer = planetScaleBearerHeader(accessToken)
 			const [orgStatus, metricsStatus, databasesStatus] = yield* Effect.all(
 				[
-					probeStatus(`/v1/organizations/${org}`, accessToken),
-					probeStatus(`/v1/organizations/${org}/metrics`, accessToken),
-					probeStatus(`/v1/organizations/${org}/databases?per_page=1`, accessToken),
+					probeStatus(`/v1/organizations/${org}`, bearer),
+					probeStatus(`/v1/organizations/${org}/metrics`, bearer),
+					probeStatus(`/v1/organizations/${org}/databases?per_page=1`, bearer),
 				],
 				{ concurrency: 3 },
 			)
@@ -226,6 +246,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 				return new PlanetScaleIntegrationStatus({
 					connected: false,
 					pendingOrgSelection,
+					metricsAuth: "missing",
 					organization: null,
 					connectedByUserId: null,
 					detectedPermissions: null,
@@ -236,9 +257,23 @@ export class PlanetScaleConnectionService extends Context.Service<
 			}
 			const target = yield* selectManagedTarget(connection)
 			const discoveryConfig = target ? decodeDiscoveryConfig(target.discoveryConfigJson) : null
+			// How scraping authenticates: a stored service token wins; grant-resolved
+			// bearer auth counts only while the target is enabled (finalize disables
+			// it when the bearer probe failed — PlanetScale's metrics endpoints only
+			// document service-token auth); anything else means scraping is paused
+			// until a token is added.
+			const metricsAuth =
+				target === null
+					? ("missing" as const)
+					: target.authType === "token" && target.authCredentialsCiphertext !== null
+						? ("service_token" as const)
+						: target.authType === "planetscale_oauth" && target.enabled
+							? ("oauth" as const)
+							: ("missing" as const)
 			return new PlanetScaleIntegrationStatus({
 				connected: true,
 				pendingOrgSelection: false,
+				metricsAuth,
 				organization: connection.psOrganization,
 				connectedByUserId: decodeUserIdSync(connection.connectedByUserId),
 				detectedPermissions: connection.detectedPermissionsJson ?? null,
@@ -330,18 +365,12 @@ export class PlanetScaleConnectionService extends Context.Service<
 				)
 			}
 
-			// Validate what the grant can do against this org before persisting anything.
-			const { permissions, metricsStatus } = yield* probePermissions(organization, accessToken)
-			if (!permissions.readMetricsEndpoints) {
-				const rejected = metricsStatus === 401 || metricsStatus === 403
-				return yield* Effect.fail(
-					new IntegrationsValidationError({
-						message: rejected
-							? "PlanetScale rejected the authorization for the metrics endpoint. Grant the OAuth application the organization-level read_metrics_endpoints scope and reconnect."
-							: `PlanetScale metrics discovery failed (HTTP ${metricsStatus}).`,
-					}),
-				)
-			}
+			// Probe what the grant can do against this org. The metrics endpoints
+			// only document service-token auth, so a failing bearer probe does NOT
+			// block the binding — inventory/insights/webhooks work on the grant, and
+			// scraping stays paused until a service token is added via
+			// setMetricsToken (the card's follow-up step).
+			const { permissions } = yield* probePermissions(organization, accessToken)
 
 			// Attribution comes from the grant, so finalize behaves identically when
 			// called from the tenantless OAuth callback and the picker endpoint. The
@@ -366,18 +395,22 @@ export class PlanetScaleConnectionService extends Context.Service<
 			const adoptable = yield* findAdoptableTarget(orgId, organization)
 			let scrapeTargetId: string
 			if (adoptable !== null) {
-				// Switch the adopted row to grant-resolved auth (clearing any stored
-				// service-token credentials) so scraping follows the OAuth connection.
+				// An adopted row with working service-token credentials keeps them —
+				// that's the auth the metrics endpoints actually accept. Only
+				// credential-less rows switch to grant-resolved auth, and those stay
+				// enabled only if the bearer probe passed.
+				const keepsToken =
+					adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
 				yield* scrapeTargetsService
 					.update(orgId, decodeScrapeTargetIdSync(adoptable.id), {
-						authType: "planetscale_oauth",
+						...(keepsToken ? {} : { authType: "planetscale_oauth" }),
 						...(request.includeBranches !== undefined
 							? { includeBranches: request.includeBranches }
 							: {}),
 						...(request.excludeBranches !== undefined
 							? { excludeBranches: request.excludeBranches }
 							: {}),
-						enabled: true,
+						enabled: keepsToken || permissions.readMetricsEndpoints,
 					})
 					.pipe(Effect.mapError(mapScrapeTargetError))
 				scrapeTargetId = adoptable.id
@@ -394,6 +427,9 @@ export class PlanetScaleConnectionService extends Context.Service<
 						...(request.excludeBranches !== undefined
 							? { excludeBranches: request.excludeBranches }
 							: {}),
+						// Paused until a service token arrives when the bearer probe
+						// failed — an enabled target would just 401 every scrape.
+						enabled: permissions.readMetricsEndpoints,
 					})
 					.pipe(Effect.mapError(mapScrapeTargetError))
 				scrapeTargetId = created.id
@@ -439,6 +475,56 @@ export class PlanetScaleConnectionService extends Context.Service<
 					)
 					.pipe(Effect.mapError(toPersistenceError))
 			}
+
+			return yield* getStatus(orgId)
+		})
+
+		const setMetricsToken = Effect.fn("PlanetScaleConnectionService.setMetricsToken")(function* (
+			orgId: OrgId,
+			request: PlanetScaleMetricsTokenRequest,
+		) {
+			const connection = yield* selectConnection(orgId)
+			if (connection === null) {
+				return yield* Effect.fail(
+					new IntegrationsNotConnectedError({
+						message: "Connect PlanetScale before adding a metrics service token",
+					}),
+				)
+			}
+
+			// Validate the token against the metrics discovery endpoint before
+			// storing anything — this is exactly the call the scraper will make.
+			const tokenId = request.tokenId.trim()
+			const sdStatus = yield* probeStatus(
+				`/v1/organizations/${encodeURIComponent(connection.psOrganization)}/metrics`,
+				`token ${tokenId}:${request.tokenSecret}`,
+			)
+			if (sdStatus < 200 || sdStatus >= 300) {
+				return yield* Effect.fail(
+					new IntegrationsValidationError({
+						message:
+							sdStatus === 401 || sdStatus === 403
+								? "PlanetScale rejected the service token for the metrics endpoint. Create the token in the organization settings with the read_metrics_endpoints permission."
+								: `PlanetScale metrics discovery failed (HTTP ${sdStatus}).`,
+					}),
+				)
+			}
+
+			const target = yield* selectManagedTarget(connection)
+			if (target === null) {
+				return yield* Effect.fail(
+					new IntegrationsPersistenceError({
+						message: "The managed scrape target is missing — disconnect and reconnect PlanetScale.",
+					}),
+				)
+			}
+			yield* scrapeTargetsService
+				.update(orgId, decodeScrapeTargetIdSync(target.id), {
+					authType: "token",
+					authCredentials: JSON.stringify({ tokenId, tokenSecret: request.tokenSecret }),
+					enabled: true,
+				})
+				.pipe(Effect.mapError(mapScrapeTargetError))
 
 			return yield* getStatus(orgId)
 		})
@@ -512,6 +598,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		return {
 			getStatus,
 			finalizeOrgSelection,
+			setMetricsToken,
 			disconnect,
 			loadConnection,
 			webhookConfig,

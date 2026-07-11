@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 import { Cause, Exit } from "effect"
-import { PlanetScaleSelectOrganizationRequest, PlanetScaleStartConnectRequest } from "@maple/domain/http"
+import {
+	PlanetScaleMetricsTokenRequest,
+	PlanetScaleSelectOrganizationRequest,
+	PlanetScaleStartConnectRequest,
+} from "@maple/domain/http"
 import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -18,7 +22,7 @@ import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
-import { CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
+import { CheckIcon, CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { formatRelativeTime } from "@/lib/format"
@@ -197,13 +201,13 @@ export function PlanetScaleIntegrationCard() {
 				icon={PlanetScaleIcon}
 				accent={PLANETSCALE_ENTRY.accent}
 				title="Connect your PlanetScale organization"
-				description="Authorize Maple in PlanetScale — no tokens to paste. Maple discovers every database branch and streams CPU, connections, replication lag, and query metrics into your dashboards."
+				description="Authorize Maple in PlanetScale and databases, branches, query insights, and webhooks connect instantly. Branch metrics take one more paste: a read-only service token, since PlanetScale only exposes its metrics endpoints to service tokens."
 				features={[
-					"Branch metrics scraped automatically, no agent required",
 					"Databases appear on the service map with live health",
+					"Branch metrics scraped automatically, no agent required",
 					"Branch filters keep preview branches out",
 				]}
-				footer="The OAuth application needs the organization-level read_metrics_endpoints and read_databases scopes."
+				footer="You'll authorize Maple in a PlanetScale popup; a read_metrics_endpoints service token completes metrics afterwards."
 			>
 				<Button onClick={handleConnect} disabled={busy !== null}>
 					{busy === "connect" ? (
@@ -232,8 +236,18 @@ export function PlanetScaleIntegrationCard() {
 								<Badge variant="success">Connected</Badge>
 							</div>
 							<p className="mt-1 text-xs text-muted-foreground">
-								Streaming branch metrics from{" "}
-								<span className="font-medium text-foreground">{status?.organization}</span>
+								{status?.metricsAuth === "missing" ? (
+									<>
+										Connected to{" "}
+										<span className="font-medium text-foreground">{status?.organization}</span>
+										{" — inventory, insights, and webhooks are live."}
+									</>
+								) : (
+									<>
+										Streaming branch metrics from{" "}
+										<span className="font-medium text-foreground">{status?.organization}</span>
+									</>
+								)}
 							</p>
 							{target ? (
 								<p className="mt-1 text-xs text-muted-foreground">
@@ -270,6 +284,13 @@ export function PlanetScaleIntegrationCard() {
 					</div>
 				</div>
 
+				{status ? (
+					<PlanetScaleMetricsSetup
+						metricsAuth={status.metricsAuth}
+						onSaved={() => refreshStatus()}
+					/>
+				) : null}
+
 				{missingDatabasesPermission ? (
 					<div className="border-t border-border/60 p-4">
 						<Alert variant="warning">
@@ -285,7 +306,7 @@ export function PlanetScaleIntegrationCard() {
 					</div>
 				) : null}
 
-				{target?.lastScrapeError ? (
+				{target?.lastScrapeError && status?.metricsAuth !== "missing" ? (
 					<div className="border-t border-border/60 p-4">
 						<Alert variant="warning">
 							<CircleWarningIcon />
@@ -327,6 +348,129 @@ export function PlanetScaleIntegrationCard() {
 					</DialogPanel>
 				</DialogContent>
 			</Dialog>
+		</div>
+	)
+}
+
+/**
+ * The metrics half of the hybrid setup. The OAuth grant covers the management
+ * plane (inventory, insights, webhooks), but PlanetScale's metrics endpoints
+ * only accept service tokens — so the connected card carries one follow-up
+ * step: paste a token created with just the read_metrics_endpoints permission.
+ * Once configured it collapses to a quiet confirmation row with a rotate
+ * affordance.
+ */
+function PlanetScaleMetricsSetup({
+	metricsAuth,
+	onSaved,
+}: {
+	metricsAuth: "oauth" | "service_token" | "missing"
+	onSaved: () => void
+}) {
+	const setMetricsToken = useAtomSet(
+		MapleApiAtomClient.mutation("integrations", "planetscaleSetMetricsToken"),
+		{ mode: "promiseExit" },
+	)
+	const [formOpen, setFormOpen] = useState(false)
+	const [tokenId, setTokenId] = useState("")
+	const [tokenSecret, setTokenSecret] = useState("")
+	const [submitting, setSubmitting] = useState(false)
+
+	// Scraping works through the grant — nothing to set up.
+	if (metricsAuth === "oauth") return null
+
+	const showForm = metricsAuth === "missing" || formOpen
+
+	async function handleSubmit() {
+		setSubmitting(true)
+		const result = await setMetricsToken({
+			payload: new PlanetScaleMetricsTokenRequest({ tokenId: tokenId.trim(), tokenSecret }),
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		})
+		setSubmitting(false)
+		if (Exit.isSuccess(result)) {
+			toast.success("Branch metrics enabled")
+			setTokenId("")
+			setTokenSecret("")
+			setFormOpen(false)
+			onSaved()
+		} else {
+			// Surface the API's message (token rejected, wrong permission, …) — actionable.
+			toast.error(extractErrorMessage(result) ?? "Failed to save the metrics service token")
+		}
+	}
+
+	return (
+		<div className="border-t border-border/60 p-4">
+			{metricsAuth === "service_token" ? (
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<div className="flex items-center gap-2 text-xs text-muted-foreground">
+						<CheckIcon size={14} className="shrink-0 text-severity-info" />
+						<span>
+							Branch metrics authenticated with a service token
+							{" — inventory, insights, and webhooks use the OAuth grant."}
+						</span>
+					</div>
+					{!formOpen ? (
+						<Button size="sm" variant="outline" onClick={() => setFormOpen(true)}>
+							Rotate token
+						</Button>
+					) : null}
+				</div>
+			) : (
+				<div className="space-y-1">
+					<div className="flex items-center gap-2">
+						<h4 className="text-sm font-semibold">Enable branch metrics</h4>
+						<Badge variant="warning">1 step left</Badge>
+					</div>
+					<p className="text-xs text-muted-foreground">
+						PlanetScale only exposes branch metrics (CPU, connections, replication lag) to
+						service tokens. Create one in the organization settings with just the{" "}
+						<code className="font-mono">read_metrics_endpoints</code> permission and paste it
+						here — everything else already runs on the OAuth authorization.
+					</p>
+				</div>
+			)}
+
+			{showForm ? (
+				<div className="mt-3 flex flex-wrap items-end gap-2">
+					<div className="flex min-w-40 flex-1 flex-col gap-1.5">
+						<Label htmlFor="ps-metrics-token-id">Service token ID</Label>
+						<Input
+							id="ps-metrics-token-id"
+							placeholder="tok_…"
+							value={tokenId}
+							onChange={(event) => setTokenId(event.target.value)}
+							autoComplete="off"
+						/>
+					</div>
+					<div className="flex min-w-40 flex-1 flex-col gap-1.5">
+						<Label htmlFor="ps-metrics-token-secret">Service token secret</Label>
+						<Input
+							id="ps-metrics-token-secret"
+							type="password"
+							placeholder="pscale_tkn_…"
+							value={tokenSecret}
+							onChange={(event) => setTokenSecret(event.target.value)}
+							autoComplete="off"
+						/>
+					</div>
+					<div className="flex items-center gap-1.5">
+						{metricsAuth === "service_token" ? (
+							<Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitting}>
+								Cancel
+							</Button>
+						) : null}
+						<Button
+							onClick={handleSubmit}
+							disabled={submitting || tokenId.trim().length === 0 || tokenSecret.length === 0}
+						>
+							{submitting ? <LoaderIcon size={14} className="animate-spin" /> : null}
+							{metricsAuth === "service_token" ? "Update token" : "Enable metrics"}
+						</Button>
+					</div>
+				</div>
+			) : null}
 		</div>
 	)
 }

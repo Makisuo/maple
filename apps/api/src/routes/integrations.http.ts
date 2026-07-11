@@ -407,6 +407,13 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						return yield* planetscale.finalizeOrgSelection(tenant.orgId, payload)
 					}),
 				)
+				.handle("planetscaleSetMetricsToken", ({ payload }) =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						yield* requireAdmin(tenant.roles)
+						return yield* planetscale.setMetricsToken(tenant.orgId, payload)
+					}),
+				)
 				.handle("planetscaleDisconnect", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
