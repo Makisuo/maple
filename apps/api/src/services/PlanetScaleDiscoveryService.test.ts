@@ -3,10 +3,11 @@ import { expect } from "vitest"
 import { ConfigProvider, Duration, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
-import { CreateScrapeTargetRequest, OrgId } from "@maple/domain/http"
+import { CreateScrapeTargetRequest, OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
 const trackedDbs: TestDb[] = []
@@ -33,17 +34,29 @@ const makeConfig = () =>
 			MAPLE_DEFAULT_ORG_ID: "default",
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			PLANETSCALE_OAUTH_CLIENT_ID: "ps-client-id",
+			PLANETSCALE_OAUTH_CLIENT_SECRET: "ps-client-secret",
 		}),
 	)
 
 // Single memoized discovery layer shared by both services, mirroring app.ts.
-const makeLayer = (testDb: TestDb) =>
-	Layer.mergeAll(
-		PlanetScaleDiscoveryService.layer,
-		ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
+// `fetchStub` (when given) is provided as the FetchHttpClient.Fetch reference at
+// layer scope so it also reaches the OAuth service's layer-built client.
+const makeLayer = (testDb: TestDb, fetchStub?: typeof globalThis.fetch) => {
+	const oauthLive = PlanetScaleOAuthService.layer
+	const discoveryLive = PlanetScaleDiscoveryService.layer.pipe(Layer.provide(oauthLive))
+	const composed = Layer.mergeAll(
+		discoveryLive,
+		ScrapeTargetsService.layer.pipe(Layer.provide(Layer.mergeAll(discoveryLive, oauthLive))),
+		oauthLive,
 	).pipe(Layer.provide(testDb.layer), Layer.provide(Env.layer), Layer.provide(makeConfig()))
+	return fetchStub
+		? Layer.mergeAll(composed, Layer.succeed(FetchHttpClient.Fetch, fetchStub))
+		: composed
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
+const asUserId = Schema.decodeUnknownSync(UserId)
 
 const SD_PAYLOAD = [
 	{
@@ -272,6 +285,67 @@ describe("PlanetScaleDiscoveryService", () => {
 
 			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["main", "stg"])
 		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("a managed planetscale_oauth row discovers with the grant's Bearer token", () => {
+		const testDb = createTestDb(trackedDbs)
+		const recorded: Array<RecordedRequest> = []
+		// One stub serves the OAuth token exchange, the org probes, and the SD call.
+		const stub: typeof fetch = async (input, init) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			const headers = new Headers(
+				init?.headers ?? (input instanceof Request ? input.headers : undefined),
+			)
+			recorded.push({ url, authorization: headers.get("authorization") })
+			if (url.includes("/oauth/token")) {
+				return Response.json({
+					access_token: "ps-access-token",
+					refresh_token: "ps-refresh-token",
+					token_type: "Bearer",
+					expires_in: 3600,
+				})
+			}
+			if (url.includes("/v1/user")) {
+				return Response.json({ id: "psuser_1" })
+			}
+			if (/\/v1\/organizations\?/.test(url)) {
+				return Response.json({ data: [{ id: "psorg_1", name: "my-org" }] })
+			}
+			return Response.json(SD_PAYLOAD)
+		}
+		return Effect.gen(function* () {
+			const oauth = yield* PlanetScaleOAuthService
+			const targets = yield* ScrapeTargetsService
+			const discovery = yield* PlanetScaleDiscoveryService
+
+			// Store a grant for the org, then create a managed (credential-less) row.
+			const { state } = yield* oauth.startConnect(asOrgId("org_1"), asUserId("user_1"), {
+				callbackUrl: "https://api.example.com/api/integrations/planetscale/callback",
+			})
+			yield* oauth.completeConnect("auth-code", state)
+			const created = yield* targets.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Managed PlanetScale",
+					targetType: "planetscale",
+					organization: "my-org",
+					authType: "planetscale_oauth",
+				}),
+			)
+			const rows = yield* targets.listAllEnabled()
+			const row = rows.find((candidate) => candidate.id === created.id)
+			if (!row) return yield* Effect.die("created row not found")
+
+			const entries = yield* discovery.discover(row)
+
+			const sdCall = recorded.find((call) => call.url.includes("/my-org/metrics"))
+			expect(sdCall?.authorization).toBe("Bearer ps-access-token")
+			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["branch-1", "branch-2"])
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(makeLayer(testDb, stub)),
+		)
 	})
 
 	it.effect("invalidate drops the cache so the next discover refetches", () => {

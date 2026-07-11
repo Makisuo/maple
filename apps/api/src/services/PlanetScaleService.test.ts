@@ -1,11 +1,12 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
-import { OrgId, PlanetScaleConnectRequest } from "@maple/domain/http"
+import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 import { PlanetScaleConnectionService } from "./PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
 import { PlanetScaleService } from "./PlanetScaleService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
@@ -28,20 +29,28 @@ const makeConfig = () =>
 			MAPLE_DEFAULT_ORG_ID: "default",
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			PLANETSCALE_OAUTH_CLIENT_ID: "ps-client-id",
+			PLANETSCALE_OAUTH_CLIENT_SECRET: "ps-client-secret",
 		}),
 	)
 
-const makeLayer = (testDb: TestDb) =>
-	Layer.mergeAll(
-		PlanetScaleService.layer,
+const makeLayer = (testDb: TestDb) => {
+	const oauthLive = PlanetScaleOAuthService.layer
+	const discoveryLive = PlanetScaleDiscoveryService.layer.pipe(Layer.provide(oauthLive))
+	const scrapeTargetsLive = ScrapeTargetsService.layer.pipe(
+		Layer.provide(Layer.mergeAll(discoveryLive, oauthLive)),
+	)
+	return Layer.mergeAll(
+		PlanetScaleService.layer.pipe(Layer.provide(oauthLive)),
 		PlanetScaleConnectionService.layer.pipe(
-			Layer.provide(
-				ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
-			),
+			Layer.provide(Layer.mergeAll(scrapeTargetsLive, oauthLive)),
 		),
+		oauthLive,
 	).pipe(Layer.provide(testDb.layer), Layer.provide(Env.layer), Layer.provide(makeConfig()))
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
+const asUserId = Schema.decodeUnknownSync(UserId)
 
 /**
  * Stub the management API: databases/branches listings return the given
@@ -58,6 +67,20 @@ const stubApi = (fixtures: {
 				status: 200,
 				headers: { "content-type": "application/json" },
 			})
+		if (url.includes("/oauth/token")) {
+			return json({
+				access_token: "ps-access-token",
+				refresh_token: "ps-refresh-token",
+				token_type: "Bearer",
+				expires_in: 3600,
+			})
+		}
+		if (url.includes("/v1/user")) {
+			return json({ id: "psuser_1" })
+		}
+		if (/\/v1\/organizations\?/.test(url)) {
+			return json({ data: [{ id: "psorg_1", name: "acme" }] })
+		}
 		const branchesMatch = url.match(/\/databases\/([^/?]+)\/branches/)
 		if (branchesMatch) {
 			return json({ data: fixtures.branchesByDatabase[decodeURIComponent(branchesMatch[1])] ?? [] })
@@ -71,18 +94,16 @@ const stubApi = (fixtures: {
 	return stub
 }
 
+/** Store the OAuth grant (start + exchange) and bind it to the "acme" org. */
 const connect = (orgId: string) =>
 	Effect.gen(function* () {
+		const oauth = yield* PlanetScaleOAuthService
 		const connections = yield* PlanetScaleConnectionService
-		yield* connections.connect(
-			asOrgId(orgId),
-			"user_1",
-			new PlanetScaleConnectRequest({
-				organization: "acme",
-				tokenId: "tok_1",
-				tokenSecret: "secret",
-			}),
-		)
+		const { state } = yield* oauth.startConnect(asOrgId(orgId), asUserId("user_1"), {
+			callbackUrl: "https://api.example.com/api/integrations/planetscale/callback",
+		})
+		yield* oauth.completeConnect("auth-code", state)
+		yield* connections.finalizeOrgSelection(asOrgId(orgId), { organization: "acme" })
 	})
 
 describe("PlanetScaleService", () => {
@@ -134,7 +155,8 @@ describe("PlanetScaleService", () => {
 			const second = yield* service.pollAllOrgs()
 			assert.strictEqual(second.skipped, 1)
 			assert.strictEqual(second.refreshed, 0)
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub), Effect.provide(makeLayer(testDb)))
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
 	})
 
 	it.effect("queryInsights proxies top queries, defaulting to the production branch", () => {
@@ -201,7 +223,8 @@ describe("PlanetScaleService", () => {
 			assert.strictEqual(row.queryCount, 420)
 			assert.strictEqual(row.p99LatencyMillis, 140)
 			assert.strictEqual(row.lastRunAt, Date.UTC(2026, 6, 10, 12, 0, 0))
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub), Effect.provide(makeLayer(testDb)))
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
 	})
 
 	it.effect("queryInsights soft-fails when the token lacks read_database", () => {
@@ -230,7 +253,43 @@ describe("PlanetScaleService", () => {
 
 			assert.strictEqual(result.rows.length, 0)
 			assert.include(result.unavailableReason ?? "", "read_database")
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub), Effect.provide(makeLayer(testDb)))
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+	})
+
+	it.effect("a missing grant fails the org's tick without killing the fleet", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubApi({
+			databases: [{ id: "db_1", name: "main-db" }],
+			branchesByDatabase: { "main-db": [{ id: "br_1", name: "main", production: true }] },
+		})
+
+		return Effect.gen(function* () {
+			yield* connect("org_1")
+			const oauth = yield* PlanetScaleOAuthService
+			const service = yield* PlanetScaleService
+
+			// The grant vanishes (revoked / cleaned up) while the binding row stays.
+			yield* oauth.disconnect(asOrgId("org_1"))
+
+			const summary = yield* service.pollAllOrgs()
+			assert.strictEqual(summary.orgs, 1)
+			assert.strictEqual(summary.failures, 1)
+			assert.strictEqual(summary.refreshed, 0)
+
+			// The failure lands on the connection row for the status endpoint.
+			const connection = yield* Effect.promise(() =>
+				queryFirstRow<{ last_inventory_error: string | null }>(
+					testDb,
+					"SELECT last_inventory_error FROM planetscale_connections WHERE org_id = $1",
+					["org_1"],
+				),
+			)
+			assert.isNotNull(connection?.last_inventory_error)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
 	it.effect("soft-deletes databases that disappeared upstream", () => {
@@ -280,6 +339,7 @@ describe("PlanetScaleService", () => {
 				rows.map((row) => row.name),
 				["main-db"],
 			)
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub), Effect.provide(makeLayer(testDb)))
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
 	})
 })

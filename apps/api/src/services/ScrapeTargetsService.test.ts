@@ -5,6 +5,7 @@ import { CreateScrapeTargetRequest, OrgId, ScrapeIntervalSeconds, ScrapeTargetId
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
 const trackedDbs: TestDb[] = []
@@ -30,13 +31,17 @@ const makeConfig = () =>
 		}),
 	)
 
-const makeLayer = (testDb: TestDb) =>
-	ScrapeTargetsService.layer.pipe(
-		Layer.provide(PlanetScaleDiscoveryService.layer),
+const makeLayer = (testDb: TestDb) => {
+	const oauthLive = PlanetScaleOAuthService.layer
+	return ScrapeTargetsService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(PlanetScaleDiscoveryService.layer.pipe(Layer.provide(oauthLive)), oauthLive),
+		),
 		Layer.provide(testDb.layer),
 		Layer.provide(Env.layer),
 		Layer.provide(makeConfig()),
 	)
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
 const asScrapeIntervalSeconds = Schema.decodeUnknownSync(ScrapeIntervalSeconds)
@@ -409,6 +414,61 @@ describe("ScrapeTargetsService", () => {
 
 			const result = yield* service.listChecks(asOrgId("org_2"), target.id, {}).pipe(Effect.exit)
 			assert.isTrue(Exit.isFailure(result))
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("planetscale targets accept credential-less planetscale_oauth auth", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const target = yield* service.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Managed PlanetScale",
+					targetType: "planetscale",
+					organization: "acme",
+					authType: "planetscale_oauth",
+				}),
+			)
+			assert.strictEqual(target.authType, "planetscale_oauth")
+			assert.isFalse(target.hasCredentials)
+
+			// Switching a token row to planetscale_oauth clears the stored credentials.
+			const tokenTarget = yield* service.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Manual PlanetScale",
+					targetType: "planetscale",
+					organization: "other-org",
+					authType: "token",
+					authCredentials: JSON.stringify({ tokenId: "tok", tokenSecret: "sec" }),
+				}),
+			)
+			assert.isTrue(tokenTarget.hasCredentials)
+			const switched = yield* service.update(asOrgId("org_1"), tokenTarget.id, {
+				authType: "planetscale_oauth",
+			})
+			assert.strictEqual(switched.authType, "planetscale_oauth")
+			assert.isFalse(switched.hasCredentials)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("prometheus targets reject the planetscale_oauth auth type", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const error = yield* service
+				.create(
+					asOrgId("org_1"),
+					new CreateScrapeTargetRequest({
+						name: "Node Exporter",
+						url: "https://metrics.example.com/metrics",
+						authType: "planetscale_oauth",
+					}),
+				)
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetValidationError")
+			assert.include(error.message, "only valid for PlanetScale targets")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })
