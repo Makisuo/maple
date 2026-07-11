@@ -259,6 +259,31 @@ describe("PlanetScaleDiscoveryService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("maps a non-auth upstream failure to ScrapeTargetUpstreamError with the status", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const discovery = yield* PlanetScaleDiscoveryService
+			const row = yield* createPlanetScaleTargetRow("my-org")
+
+			const error = yield* discovery.discover(row).pipe(
+				Effect.provideService(
+					FetchHttpClient.Fetch,
+					stubFetch([], () => new Response("boom", { status: 500 })),
+				),
+				Effect.flip,
+			)
+
+			// A provider 5xx is an upstream failure (502 taxonomy), NOT our-DB
+			// persistence (503) — the class carries the status so downstream never
+			// has to regex it back out of the message.
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetUpstreamError")
+			if (error._tag === "@maple/http/errors/ScrapeTargetUpstreamError") {
+				assert.strictEqual(error.status, 500)
+			}
+			assert.include(error.message, "HTTP 500")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("collapses concurrent TTL-miss refreshes into a single SD fetch", () => {
 		const testDb = createTestDb(trackedDbs)
 		const recorded: Array<RecordedRequest> = []
