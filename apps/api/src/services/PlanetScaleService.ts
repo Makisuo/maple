@@ -43,6 +43,7 @@ const INVENTORY_TTL_MS = Duration.toMillis(Duration.hours(1))
 const LEASE_MS = Duration.toMillis(Duration.minutes(4))
 const REQUEST_TIMEOUT = Duration.seconds(15)
 const ORG_CONCURRENCY = 3
+const INVENTORY_WRITE_CONCURRENCY = 4
 /** Pagination caps — a runaway org can't make a tick unbounded. */
 const PAGE_SIZE = 100
 const MAX_PAGES = 10
@@ -64,7 +65,7 @@ export interface PlanetScaleQueryInsightsOptions {
 }
 
 export interface PlanetScaleServiceShape {
-	readonly pollAllOrgs: () => Effect.Effect<PlanetScalePollSummary>
+	readonly pollAllOrgs: () => Effect.Effect<PlanetScalePollSummary, IntegrationsPersistenceError>
 	/** The org's (non-deleted) database inventory, for the API surface. */
 	readonly listDatabases: (
 		orgId: OrgId,
@@ -443,7 +444,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 									)
 						).pipe(Effect.mapError(toPersistenceError))
 					},
-					{ discard: true },
+					{ concurrency: INVENTORY_WRITE_CONCURRENCY, discard: true },
 				)
 
 				// Soft-delete rows whose database disappeared upstream, so identity is
@@ -459,7 +460,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 									.where(eq(planetscaleDatabases.id, row.id)),
 							)
 							.pipe(Effect.mapError(toPersistenceError)),
-					{ discard: true },
+					{ concurrency: INVENTORY_WRITE_CONCURRENCY, discard: true },
 				)
 
 				return withBranches.length
@@ -512,10 +513,9 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					.execute((db) => db.select().from(planetscaleConnections))
 					.pipe(
 						Effect.mapError(toPersistenceError),
-						Effect.catch((error) =>
+						Effect.tapError((error) =>
 							Effect.logWarning("PlanetScale poll could not list connections").pipe(
 								Effect.annotateLogs({ error: error.message }),
-								Effect.as([] as PlanetScaleConnectionRow[]),
 							),
 						),
 					)

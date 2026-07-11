@@ -964,40 +964,55 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				}>,
 				options?: { readonly recordChecks?: boolean },
 			) {
+				const resultsByTarget = new Map<ScrapeTargetId, typeof results>()
+				for (const result of results) {
+					const targetResults = resultsByTarget.get(result.targetId)
+					if (targetResults === undefined) {
+						resultsByTarget.set(result.targetId, [result])
+					} else {
+						resultsByTarget.set(result.targetId, [...targetResults, result])
+					}
+				}
+
 				yield* Effect.forEach(
-					results,
-					(result) => {
-						// Rollup for discovered sub-targets: any branch success advances
-						// lastScrapeAt; any branch failure surfaces (branch-prefixed) as
-						// lastScrapeError. Per-branch health stays visible in check history
-						// via the per-branch `instance`.
-						const error =
-							result.error !== null && result.subTargetKey
-								? `[branch:${result.subTargetKey}] ${result.error}`
-								: result.error
-						return database
-							.execute((db) =>
-								db
-									.update(scrapeTargets)
-									.set(
-										error === null
-											? {
-													lastScrapeAt: new Date(result.scrapedAt),
-													lastScrapeError: null,
-													updatedAt: new Date(result.scrapedAt),
-												}
-											: // Failure keeps lastScrapeAt at the last good scrape so data
-												// gaps stay visible alongside the error.
-												{
-													lastScrapeError: error,
-													updatedAt: new Date(result.scrapedAt),
-												},
+					resultsByTarget.values(),
+					(targetResults) =>
+						Effect.forEach(
+							targetResults,
+							(result) => {
+								// Rollup for discovered sub-targets: any branch success advances
+								// lastScrapeAt; any branch failure surfaces (branch-prefixed) as
+								// lastScrapeError. Per-branch health stays visible in check history
+								// via the per-branch `instance`.
+								const error =
+									result.error !== null && result.subTargetKey
+										? `[branch:${result.subTargetKey}] ${result.error}`
+										: result.error
+								return database
+									.execute((db) =>
+										db
+											.update(scrapeTargets)
+											.set(
+												error === null
+													? {
+															lastScrapeAt: new Date(result.scrapedAt),
+															lastScrapeError: null,
+															updatedAt: new Date(result.scrapedAt),
+														}
+													: // Failure keeps lastScrapeAt at the last good scrape so data
+														// gaps stay visible alongside the error.
+														{
+															lastScrapeError: error,
+															updatedAt: new Date(result.scrapedAt),
+														},
+											)
+											.where(eq(scrapeTargets.id, result.targetId)),
 									)
-									.where(eq(scrapeTargets.id, result.targetId)),
-							)
-							.pipe(Effect.mapError(toPersistenceError))
-					},
-					{ discard: true },
+									.pipe(Effect.mapError(toPersistenceError))
+							},
+							{ discard: true },
+						),
+					{ concurrency: 8, discard: true },
 				)
 
 				if (options?.recordChecks === false || results.length === 0) return

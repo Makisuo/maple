@@ -135,7 +135,7 @@ export function PlanetScaleIntegrationCard() {
 	async function handleDisconnect() {
 		setBusy("disconnect")
 		const result = await disconnect({
-			reactivityKeys: ["planetscaleIntegrationStatus"],
+			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
 		})
 		setBusy(null)
 		if (Exit.isSuccess(result)) {

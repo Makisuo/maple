@@ -503,12 +503,17 @@ export class PlanetScaleConnectionService extends Context.Service<
 				`token ${tokenId}:${request.tokenSecret}`,
 			)
 			if (sdStatus < 200 || sdStatus >= 300) {
+				if (sdStatus !== 401 && sdStatus !== 403) {
+					return yield* Effect.fail(
+						new IntegrationsUpstreamError({
+							message: `PlanetScale metrics discovery failed (HTTP ${sdStatus}). Try again shortly.`,
+						}),
+					)
+				}
 				return yield* Effect.fail(
 					new IntegrationsValidationError({
 						message:
-							sdStatus === 401 || sdStatus === 403
-								? "PlanetScale rejected the service token for the metrics endpoint. Create the token in the organization settings with the read_metrics_endpoints permission."
-								: `PlanetScale metrics discovery failed (HTTP ${sdStatus}).`,
+							"PlanetScale rejected the service token for the metrics endpoint. Create the token in the organization settings with the read_metrics_endpoints permission.",
 					}),
 				)
 			}
@@ -568,6 +573,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const loadConnection = Effect.fn("PlanetScaleConnectionService.loadConnection")(function* (
 			orgId: OrgId,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			return yield* selectConnection(orgId)
 		})
 
