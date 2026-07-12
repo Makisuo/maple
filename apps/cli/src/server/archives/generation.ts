@@ -144,49 +144,109 @@ const toShardRecord = (shard: WrittenShard): ArchiveShardRecord => ({
 	complexDigestAlgorithm: COMPLEX_DIGEST_ALGORITHM,
 })
 
-/**
- * Refuse to start if the archive volume does not have at least
- * `minFreeSpaceReserve` bytes free. Machine conditions can change after
- * calibration, so this runs at operation time, not just at calibration.
- */
-/**
- * Preflight that the destination volume has enough free space for the reserve
- * PLUS the predicted working bytes (scratch restore + Parquet output). If the
- * archive root does not yet exist, check the volume of the closest existing
- * ancestor (the containing volume), not skip the check. `archiveDir` and
- * `tuning.archiveDir` must be the same path (the output destination).
- */
-const preflightFreeSpace = async (
-	archiveDir: string,
-	tuningArchiveDir: string,
+export interface FreeSpaceSnapshot {
+	readonly identity: string
+	readonly path: string
+	readonly freeBytes: number
+}
+
+const addRequiredBytes = (label: string, ...parts: readonly number[]): number => {
+	if (parts.some((part) => !Number.isSafeInteger(part) || part < 0)) {
+		throw new Error(`${label} free-space requirement contains an invalid byte count`)
+	}
+	const total = parts.reduce((sum, part) => sum + part, 0)
+	if (!Number.isSafeInteger(total))
+		throw new Error(`${label} free-space requirement exceeds the safe integer range`)
+	return total
+}
+
+/** Apply the archive-output and checkpoint-restore requirements independently,
+ * or as one combined requirement when both paths live on the same device. */
+export const assertArchiveScratchFreeSpace = (
+	archive: FreeSpaceSnapshot,
+	scratch: FreeSpaceSnapshot,
 	minFreeSpaceReserve: number,
-	estimatedWorkingBytes: number,
-): Promise<void> => {
-	if (resolve(archiveDir) !== resolve(tuningArchiveDir)) {
+	estimatedArchiveBytes: number,
+	checkpointBackupBytes: number,
+): void => {
+	const archiveRequired = addRequiredBytes("archive", minFreeSpaceReserve, estimatedArchiveBytes)
+	if (archive.identity === scratch.identity) {
+		const combinedRequired = addRequiredBytes(
+			"archive/scratch",
+			minFreeSpaceReserve,
+			estimatedArchiveBytes,
+			checkpointBackupBytes,
+		)
+		const free = Math.min(archive.freeBytes, scratch.freeBytes)
+		if (free < combinedRequired) {
+			throw new Error(
+				`archive/scratch volume has ${free} bytes free, below the required ${combinedRequired} bytes ` +
+					`(archive reserve ${minFreeSpaceReserve} + archive working ${estimatedArchiveBytes} + ` +
+					`checkpoint restore ${checkpointBackupBytes}); free space or recalibrate`,
+			)
+		}
+		return
+	}
+	if (archive.freeBytes < archiveRequired) {
 		throw new Error(
-			`archive directory mismatch: output target ${archiveDir} != tuning.archiveDir ${tuningArchiveDir}`,
+			`archive volume has ${archive.freeBytes} bytes free, below the required ${archiveRequired} bytes ` +
+				`(reserve ${minFreeSpaceReserve} + working ${estimatedArchiveBytes}); free space or recalibrate`,
 		)
 	}
-	// Find the closest existing ancestor to statfs (handles a not-yet-created root).
-	let statPath = archiveDir
+	if (scratch.freeBytes < checkpointBackupBytes) {
+		throw new Error(
+			`scratch volume has ${scratch.freeBytes} bytes free, below the required ${checkpointBackupBytes} bytes ` +
+				`for checkpoint restore; free space or choose a larger scratch volume`,
+		)
+	}
+}
+
+/** Inspect the containing volume even when the configured leaf does not yet
+ * exist. Device id plus filesystem type distinguishes separate filesystems. */
+const freeSpaceSnapshot = async (path: string, label: string): Promise<FreeSpaceSnapshot> => {
+	let statPath = resolve(path)
 	let climbs = 0
 	while (!existsSync(statPath) && climbs < 64) {
 		statPath = resolve(statPath, "..")
 		climbs++
 	}
 	if (!existsSync(statPath)) {
-		throw new Error(`cannot determine volume for archive dir ${archiveDir} (no existing ancestor)`)
+		throw new Error(`cannot determine volume for ${label} ${path} (no existing ancestor)`)
 	}
 	const info = await statfs(statPath)
-	const free = info.bavail * info.bsize
-	const required = minFreeSpaceReserve + estimatedWorkingBytes
-	if (free < required) {
+	return {
+		identity: `dev:${statSync(statPath).dev.toString(16)}/type:${info.type}`,
+		path: statPath,
+		freeBytes: info.bavail * info.bsize,
+	}
+}
+
+/** Preflight archive output and restored-checkpoint scratch before publishing
+ * an operation intent or acquiring a checkpoint pin. */
+const preflightArchiveScratchFreeSpace = async (
+	archiveDir: string,
+	tuningArchiveDir: string,
+	scratchRoot: string,
+	minFreeSpaceReserve: number,
+	estimatedArchiveBytes: number,
+	checkpointBackupBytes: number,
+): Promise<void> => {
+	if (resolve(archiveDir) !== resolve(tuningArchiveDir)) {
 		throw new Error(
-			`archive volume has ${free} bytes free, below the required ${required} bytes ` +
-				`(reserve ${minFreeSpaceReserve} + working ${estimatedWorkingBytes}); ` +
-				`free space or recalibrate`,
+			`archive directory mismatch: output target ${archiveDir} != tuning.archiveDir ${tuningArchiveDir}`,
 		)
 	}
+	const [archive, scratch] = await Promise.all([
+		freeSpaceSnapshot(archiveDir, "archive dir"),
+		freeSpaceSnapshot(scratchRoot, "scratch root"),
+	])
+	assertArchiveScratchFreeSpace(
+		archive,
+		scratch,
+		minFreeSpaceReserve,
+		estimatedArchiveBytes,
+		checkpointBackupBytes,
+	)
 }
 
 const assertCalibrationArchiveVolume = async (
@@ -287,7 +347,7 @@ export const createArchiveGeneration = async (
 		await assertCalibrationEnvironment(loadedTuningConfig, archiveDir)
 	}
 	const signal = archiveSignal(signalName)
-	const estimatedWorkingBytes = tuning.targetChunkBytes
+	const estimatedArchiveBytes = tuning.targetChunkBytes
 	const generationId = newArchiveGenerationId()
 	const operationId = randomUUID()
 	// Deterministic identities recorded in the journal BEFORE allocation.
@@ -299,17 +359,21 @@ export const createArchiveGeneration = async (
 		// Step 1: reconcile any prior interrupted operation before allocating a
 		// new one. This is the crash-recovery entry point.
 		await reconcileArchiveGeneration(dataDir, archiveDir, tuning.scratchRoot, faults)
-		// Reject impossible capacity before checkpoint resolution, pointer/base
-		// reads, or creation of a new durable intent. A failed preflight must not
-		// leave an operation for reconciliation to clean up.
-		await preflightFreeSpace(
+		// Step 2: resolve and validate the checkpoint so its immutable backup size
+		// can be included in scratch-volume capacity planning. This is read-only.
+		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+		// Reject impossible archive and scratch capacity before pointer/base reads
+		// or creation of a durable intent/pin. A failed preflight leaves no new
+		// operation for reconciliation to clean up.
+		await preflightArchiveScratchFreeSpace(
 			archiveDir,
 			tuning.archiveDir,
+			tuning.scratchRoot,
 			tuning.minFreeSpaceReserve,
-			estimatedWorkingBytes,
+			estimatedArchiveBytes,
+			resolved.manifest.backupBytes,
 		)
-		// Step 2: resolve checkpoint; read the CAS base (current active pointer).
-		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+		// Read the CAS base (current active pointer).
 		const baseActiveGenerationId = resolveBaseActiveGenerationId(archiveDir, signal.name, rangeDate)
 		// Step 3: write the initial intent BEFORE the pin or any allocation. A
 		// crash here leaves only the journal; reconciliation quarantines it.

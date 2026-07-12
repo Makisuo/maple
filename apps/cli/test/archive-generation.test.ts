@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest"
-import { ok, rejects, strictEqual } from "node:assert"
+import { ok, rejects, strictEqual, throws } from "node:assert"
 import {
 	existsSync,
 	mkdirSync,
@@ -23,6 +23,7 @@ import {
 } from "../src/server/archives/paths"
 import { parseArchiveActivePointer, type ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import {
+	assertArchiveScratchFreeSpace,
 	appendCatalog,
 	createArchiveGeneration,
 	promoteGeneration,
@@ -38,7 +39,12 @@ import {
 } from "../src/server/archives/journal"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
-import { checkpointPinsRoot } from "../src/server/checkpoints"
+import {
+	checkpointPinsRoot,
+	checkpointRoot,
+	checkpointSnapshotDir,
+	checkpointStatePath,
+} from "../src/server/checkpoints"
 import { assertCatalogExact, rebuildCatalog } from "../src/server/archives/listing"
 
 // Filesystem-level tests for generation promotion, supersession, and catalog
@@ -54,6 +60,49 @@ const withArchive = async (run: (archiveDir: string) => Promise<void> | void): P
 	} finally {
 		rmSync(parent, { recursive: true, force: true })
 	}
+}
+
+const seedCheckpoint = (dataDir: string, checkpointId: string, backupBytes = 6): void => {
+	const createdAt = "2026-01-01T00:00:00.000Z"
+	const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
+	mkdirSync(join(snapshot, "backup"), { recursive: true })
+	writeFileSync(join(snapshot, "backup", "data.bin"), "x".repeat(backupBytes))
+	writeFileSync(
+		join(snapshot, "manifest.json"),
+		`${JSON.stringify({
+			formatVersion: 1,
+			checkpointId,
+			operationId: randomUUID(),
+			mapleVersion: MAPLE_VERSION,
+			chdbVersion: CHDB_VERSION,
+			schemaFingerprint: SCHEMA_FINGERPRINT,
+			createdAt,
+			sourceDataDir: dataDir,
+			backupRelativePath: `snapshots/${checkpointId}/backup`,
+			backupBytes,
+			validation: {
+				validatedAt: createdAt,
+				traces: 0,
+				logs: 0,
+				metricsSum: 0,
+				metricsGauge: 0,
+				metricsHistogram: 0,
+				metricsExponentialHistogram: 0,
+				materializedViews: 0,
+			},
+		})}\n`,
+	)
+	mkdirSync(checkpointRoot(dataDir), { recursive: true })
+	writeFileSync(
+		checkpointStatePath(dataDir),
+		`${JSON.stringify({
+			formatVersion: 1,
+			revision: randomUUID(),
+			current: checkpointId,
+			previous: null,
+			committedAt: createdAt,
+		})}\n`,
+	)
 }
 
 const manifest = (
@@ -173,6 +222,59 @@ const seedPublishedOperation = async (
 }
 
 describe("archive generation promotion", () => {
+	it("preflights archive and scratch independently on separate devices", () => {
+		assertArchiveScratchFreeSpace(
+			{ identity: "archive", path: "/archive", freeBytes: 150 },
+			{ identity: "scratch", path: "/scratch", freeBytes: 80 },
+			50,
+			100,
+			80,
+		)
+		throws(
+			() =>
+				assertArchiveScratchFreeSpace(
+					{ identity: "archive", path: "/archive", freeBytes: 149 },
+					{ identity: "scratch", path: "/scratch", freeBytes: 80 },
+					50,
+					100,
+					80,
+				),
+			/archive volume .* below the required 150 bytes/,
+		)
+		throws(
+			() =>
+				assertArchiveScratchFreeSpace(
+					{ identity: "archive", path: "/archive", freeBytes: 150 },
+					{ identity: "scratch", path: "/scratch", freeBytes: 79 },
+					50,
+					100,
+					80,
+				),
+			/scratch volume .* below the required 80 bytes/,
+		)
+	})
+
+	it("combines archive and scratch requirements exactly once on one device", () => {
+		assertArchiveScratchFreeSpace(
+			{ identity: "shared", path: "/archive", freeBytes: 230 },
+			{ identity: "shared", path: "/scratch", freeBytes: 230 },
+			50,
+			100,
+			80,
+		)
+		throws(
+			() =>
+				assertArchiveScratchFreeSpace(
+					{ identity: "shared", path: "/archive", freeBytes: 229 },
+					{ identity: "shared", path: "/scratch", freeBytes: 229 },
+					50,
+					100,
+					80,
+				),
+			/archive\/scratch volume .* below the required 230 bytes/,
+		)
+	})
+
 	it("fails free-space preflight before creating an active operation journal", async () => {
 		await withArchive(async (archiveDir) => {
 			const parent = join(archiveDir, "..")
@@ -180,6 +282,7 @@ describe("archive generation promotion", () => {
 			const scratchRoot = join(parent, "scratch")
 			mkdirSync(dataDir, { recursive: true })
 			mkdirSync(scratchRoot, { recursive: true })
+			seedCheckpoint(dataDir, randomUUID())
 			await rejects(
 				createArchiveGeneration(dataDir, archiveDir, "traces", "2026-06-01", {
 					writerThreads: 1,
@@ -187,7 +290,7 @@ describe("archive generation promotion", () => {
 					maxShardRows: 1,
 					maxShardBytes: 1,
 					targetChunkBytes: 1,
-					minFreeSpaceReserve: Number.MAX_SAFE_INTEGER - 1,
+					minFreeSpaceReserve: Number.MAX_SAFE_INTEGER - 100,
 					archiveDir,
 					scratchRoot,
 				}),
