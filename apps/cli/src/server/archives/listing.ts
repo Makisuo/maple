@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import {
 	readArchiveGenerationManifest,
 	parseArchiveActivePointer,
@@ -49,6 +49,8 @@ export interface ArchiveListingError {
 
 export interface ArchiveListing {
 	readonly archiveDir: string
+	/** Listing validates topology and manifest-bound sizes, but does not hash shard contents. */
+	readonly integrity: "metadata-only"
 	readonly active: ReadonlyArray<ActiveGenerationSummary>
 	readonly signals: ReadonlyArray<string>
 	/** Preserved errors surfaced (not silently skipped) so a corrupt range is visible (H-7). */
@@ -122,25 +124,15 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 				continue
 			}
 			signalHasActive = true
-			// Verify each shard is a real regular file with the correct SHA-256
-			// and byte size before returning it to DuckDB (HIGH-1 + cross-check HIGH +
-			// tamper verification): a planted symlink, a missing shard, OR a tampered
-			// shard whose actual hash/size disagrees with the manifest must fail
-			// closed. The manifest is authoritative; a mismatched regular file is
-			// rejected, not silently returned.
+			// Cheap metadata listing verifies path topology, regular-file type, and
+			// manifest-bound byte size. Content hashing is deliberately reserved for
+			// explicit `archive verify`, which streams every shard with bounded memory.
 			let shardPaths: string[]
 			try {
 				shardPaths = manifest.shards.map((shard) => {
 					const p = shardFilePath(archiveDir, signal.name, rangeDate, generationId, shard.name)
 					assertNoSymlinkSync(archiveDir, p, "archive shard")
 					assertRealFileSync(p, "archive shard")
-					// Verify the file's actual SHA-256 and byte size match the manifest.
-					const actualSha = sha256FileSync(p)
-					if (actualSha !== shard.sha256) {
-						throw new Error(
-							`shard ${shard.name} SHA-256 mismatch: manifest ${shard.sha256.slice(0, 16)}…, actual ${actualSha.slice(0, 16)}… (file may be tampered)`,
-						)
-					}
 					const actualBytes = statSync(p).size
 					if (actualBytes !== shard.bytes) {
 						throw new Error(
@@ -171,18 +163,89 @@ export const listActiveGenerations = (archiveDir: string): ArchiveListing => {
 		}
 		if (signalHasActive) signalsPresent.push(signal.name)
 	}
-	return { archiveDir, active, signals: signalsPresent, errors }
+	return { archiveDir, integrity: "metadata-only", active, signals: signalsPresent, errors }
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-/** Compute SHA-256 of a file. Reads the whole file into memory; acceptable for
- *  bounded shards (maxShardBytes) but not suitable for unbounded files. */
-const sha256FileSync = (path: string): string => {
+export const ARCHIVE_VERIFY_BUFFER_BYTES = 1024 * 1024
+
+/** Compute SHA-256 with a fixed 1 MiB stream buffer rather than allocating a
+ * full shard-sized buffer. Verification processes one shard at a time. */
+const sha256FileStreaming = async (path: string): Promise<string> => {
 	const hash = createHash("sha256")
-	const data = readFileSync(path)
-	hash.update(data)
+	const stream = createReadStream(path, { highWaterMark: ARCHIVE_VERIFY_BUFFER_BYTES })
+	for await (const chunk of stream) hash.update(chunk)
 	return hash.digest("hex")
+}
+
+export interface ArchiveVerification {
+	readonly archiveDir: string
+	readonly signals: ReadonlyArray<string>
+	readonly generationCount: number
+	readonly shardCount: number
+	readonly verifiedBytes: number
+}
+
+/** Explicitly verify every selected active shard against its manifest SHA-256.
+ * Listing errors fail the operation before any partial success is reported. */
+export const verifyActiveGenerations = async (
+	archiveDir: string,
+	signal?: ArchiveSignalName,
+): Promise<ArchiveVerification> => {
+	const listing = listActiveGenerations(archiveDir)
+	const relevantErrors = signal ? listing.errors.filter((error) => error.signal === signal) : listing.errors
+	if (relevantErrors.length > 0) {
+		const detail = relevantErrors
+			.map((error) => `${error.signal}/${error.rangeStart || "(root)"}: ${error.error}`)
+			.join("; ")
+		throw new Error(`refusing archive integrity verification: ${detail}`)
+	}
+	const active = signal ? listing.active.filter((summary) => summary.signal === signal) : listing.active
+	let shardCount = 0
+	let verifiedBytes = 0
+	for (const summary of active) {
+		const manifest = readArchiveGenerationManifest(
+			archiveDir,
+			summary.signal,
+			summary.rangeStart,
+			summary.generationId,
+		)
+		for (const shard of manifest.shards) {
+			const path = shardFilePath(
+				archiveDir,
+				summary.signal,
+				summary.rangeStart,
+				summary.generationId,
+				shard.name,
+			)
+			assertNoSymlinkSync(archiveDir, path, "archive shard")
+			assertRealFileSync(path, "archive shard")
+			const actualBytes = statSync(path).size
+			if (actualBytes !== shard.bytes) {
+				throw new Error(
+					`shard ${summary.signal}/${summary.rangeStart}/${shard.name} byte size mismatch: ` +
+						`manifest ${shard.bytes}, actual ${actualBytes}`,
+				)
+			}
+			const actualSha = await sha256FileStreaming(path)
+			if (actualSha !== shard.sha256) {
+				throw new Error(
+					`shard ${summary.signal}/${summary.rangeStart}/${shard.name} SHA-256 mismatch: ` +
+						`manifest ${shard.sha256.slice(0, 16)}…, actual ${actualSha.slice(0, 16)}…`,
+				)
+			}
+			shardCount++
+			verifiedBytes += actualBytes
+		}
+	}
+	return {
+		archiveDir,
+		signals: signal ? [signal] : listing.signals,
+		generationCount: active.length,
+		shardCount,
+		verifiedBytes,
+	}
 }
 
 /**
@@ -191,11 +254,9 @@ const sha256FileSync = (path: string): string => {
  * an operator feeds to DuckDB's `read_parquet`. Returns the paths grouped by
  * range in ascending order.
  *
- * Fail-closed: if ANY range for this signal has a malformed pointer, manifest,
- * or shard path, the call THROWS rather than returning a partial path list. A
- * partial list would silently feed DuckDB incomplete data, which is worse than a
- * visible error. The operator runs `archive rebuild` or inspects the error to
- * recover.
+ * Fail-closed on malformed topology or manifest-bound byte-size mismatches, but
+ * deliberately does not hash shard contents. Run `archive verify` for explicit
+ * bounded-memory integrity verification before querying when required.
  */
 export const activeParquetPaths = (archiveDir: string, signal: ArchiveSignalName): ReadonlyArray<string> => {
 	const listing = listActiveGenerations(archiveDir)

@@ -326,6 +326,8 @@ fi
 grep -q "archive generation sealed" "$ROOT/create-config.out" || fail "create --config did not seal"
 grep -q "config" "$ROOT/create-config.out" || fail "create --config summary missing config identity"
 grep -q "effective" "$ROOT/create-config.out" || fail "create --config summary missing effective values"
+"$MAPLE" archive verify --archive-dir "$ARCHIVE" --signal logs >"$ROOT/archive-verify.out" 2>&1 \
+	|| fail "archive verify failed: $(cat "$ROOT/archive-verify.out")"
 LISTING_JSON="$("$MAPLE" archive list --archive-dir "$ARCHIVE" --output json 2>/dev/null)"
 GEN_ID="$(jq -r '[.active[] | select(.signal=="logs")][0].generationId' <<<"$LISTING_JSON")"
 [[ -n "$GEN_ID" && "$GEN_ID" != "null" ]] || fail "could not find the logs generation"

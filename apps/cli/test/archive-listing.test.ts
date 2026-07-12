@@ -12,7 +12,13 @@ import {
 	nextMidnightUtc,
 	shardsRoot,
 } from "../src/server/archives/paths"
-import { activeParquetPaths, listActiveGenerations, rebuildCatalog } from "../src/server/archives/listing"
+import {
+	ARCHIVE_VERIFY_BUFFER_BYTES,
+	activeParquetPaths,
+	listActiveGenerations,
+	rebuildCatalog,
+	verifyActiveGenerations,
+} from "../src/server/archives/listing"
 import { type ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
@@ -149,6 +155,61 @@ describe("archive listing", () => {
 		await withArchive(async (archiveDir) => {
 			const listing = listActiveGenerations(archiveDir)
 			strictEqual(listing.active.length, 0)
+		})
+	})
+
+	it("lists metadata without hashing shard contents", async () => {
+		await withArchive(async (archiveDir) => {
+			const generationId = randomUUID()
+			seedActiveGeneration(archiveDir, "logs", "2026-06-01", generationId, 3)
+			const shardPath = join(
+				shardsRoot(archiveDir, "logs", "2026-06-01", generationId),
+				"00-0000.parquet",
+			)
+			writeFileSync(shardPath, "XXXX")
+			const listing = listActiveGenerations(archiveDir)
+			strictEqual(listing.integrity, "metadata-only")
+			strictEqual(listing.active.length, 1)
+		})
+	})
+
+	it("explicit verification streams multi-buffer shards and rejects same-size tampering", async () => {
+		await withArchive(async (archiveDir) => {
+			const generationId = randomUUID()
+			const content = Buffer.alloc(ARCHIVE_VERIFY_BUFFER_BYTES * 2 + 17, 0x61)
+			const shardsDir = shardsRoot(archiveDir, "logs", "2026-06-01", generationId)
+			mkdirSync(shardsDir, { recursive: true })
+			const shardPath = join(shardsDir, "00-0000.parquet")
+			writeFileSync(shardPath, content)
+			writeFileSync(
+				generationManifestPath(archiveDir, "logs", "2026-06-01", generationId),
+				`${JSON.stringify(
+					manifest(
+						generationId,
+						"logs",
+						"2026-06-01",
+						3,
+						createHash("sha256").update(content).digest("hex"),
+						content.length,
+					),
+				)}\n`,
+			)
+			writeFileSync(
+				activePointerPath(archiveDir, "logs", "2026-06-01"),
+				`${JSON.stringify({
+					formatVersion: 1,
+					generationId,
+					signal: "logs",
+					rangeStart: "2026-06-01",
+					selectedAt: "2026-06-02T00:00:00.000Z",
+				})}\n`,
+			)
+			const verified = await verifyActiveGenerations(archiveDir, "logs")
+			strictEqual(verified.shardCount, 1)
+			strictEqual(verified.verifiedBytes, content.length)
+			content[0] = 0x62
+			writeFileSync(shardPath, content)
+			await rejects(verifyActiveGenerations(archiveDir, "logs"), /SHA-256 mismatch/)
 		})
 	})
 

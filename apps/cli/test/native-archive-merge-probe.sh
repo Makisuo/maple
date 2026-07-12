@@ -93,6 +93,10 @@ SHARD_COUNT=$("$MAPLE" archive list --archive-dir "$ARCHIVE" --output json 2>/de
 echo "shard count: $SHARD_COUNT"
 [[ "$SHARD_COUNT" -ge 1 ]] || fail "no shards produced"
 
+# Explicitly stream-verify the active shard contents before querying their paths.
+"$MAPLE" archive verify --archive-dir "$ARCHIVE" --signal traces >"$ROOT/archive-verify.out" 2>&1 \
+	|| fail "archive verify failed: $(cat "$ROOT/archive-verify.out")"
+
 # Get the active Parquet paths and read ALL TraceIds via DuckDB.
 PATHS=$("$MAPLE" archive list --archive-dir "$ARCHIVE" --output paths --signal traces 2>/dev/null)
 echo "paths: $PATHS"

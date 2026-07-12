@@ -157,6 +157,11 @@ stop_server
 ACTIVE_COUNT="$("$MAPLE" archive list --archive-dir "$ARCHIVE" --output json 2>/dev/null | jq '[.active[]] | length')"
 [[ "$ACTIVE_COUNT" == "6" ]] || fail "expected 6 active generations, got $ACTIVE_COUNT"
 
+# Listing is metadata-only; integrity verification is explicit and streams each
+# shard with bounded memory before DuckDB receives any active paths.
+"$MAPLE" archive verify --archive-dir "$ARCHIVE" >"$ROOT/archive-verify.out" 2>&1 \
+	|| fail "archive verify failed: $(cat "$ROOT/archive-verify.out")"
+
 # Query each signal's archive with DuckDB and confirm exact marker counts (2).
 for signal in logs traces metrics_sum metrics_gauge metrics_histogram metrics_exponential_histogram; do
 	PATHS="$(active_paths "$signal")"

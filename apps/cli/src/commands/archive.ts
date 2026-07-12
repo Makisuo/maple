@@ -7,7 +7,12 @@ import { randomUUID } from "node:crypto"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 import { createArchiveGeneration, runArchiveReconciliation } from "../server/archives/generation"
-import { listActiveGenerations, activeParquetPaths, rebuildCatalog } from "../server/archives/listing"
+import {
+	listActiveGenerations,
+	activeParquetPaths,
+	rebuildCatalog,
+	verifyActiveGenerations,
+} from "../server/archives/listing"
 import { runArchiveGc } from "../server/archives/gc"
 import {
 	resolveArchiveTuning,
@@ -338,7 +343,9 @@ export const archiveList = Command.make("list", {
 	output: outputFlag,
 	signal: signalFlag,
 }).pipe(
-	Command.withDescription("List active archive generations and their Parquet shard paths"),
+	Command.withDescription(
+		"List active archive metadata and Parquet shard paths without hashing shard contents",
+	),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
 			const archiveDir = Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir()
@@ -372,7 +379,37 @@ export const archiveList = Command.make("list", {
 			)
 			yield* Effect.sync(() =>
 				process.stdout.write(
-					`${green("✓")} ${listing.active.length} active generation(s) in ${prettyPath(archiveDir)}\n${lines.join("\n")}\n`,
+					`${green("✓")} ${listing.active.length} active generation(s) in ${prettyPath(archiveDir)} ` +
+						`(metadata only; run 'maple archive verify' for SHA-256)\n${lines.join("\n")}\n`,
+				),
+			)
+		}),
+	),
+)
+
+export const archiveVerify = Command.make("verify", {
+	archiveDir: archiveDirFlag,
+	signal: signalFlag,
+}).pipe(
+	Command.withDescription("Stream and SHA-256 verify active archive shards with bounded memory"),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			const archiveDir = Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir()
+			const signalOpt = Option.getOrUndefined(a.signal)
+			if (signalOpt !== undefined && !isArchiveSignalName(signalOpt)) {
+				return yield* new ArchiveError({
+					message: `unknown signal '${signalOpt}'; expected one of ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`,
+				})
+			}
+			const result = yield* Effect.tryPromise({
+				try: () => verifyActiveGenerations(archiveDir, signalOpt),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			yield* Effect.sync(() =>
+				process.stdout.write(
+					`${green("✓")} verified ${result.shardCount} active shard(s) across ` +
+						`${result.generationCount} generation(s) (${formatBytes(result.verifiedBytes)})\n`,
 				),
 			)
 		}),
@@ -1688,6 +1725,7 @@ export const archive = Command.make("archive").pipe(
 	Command.withSubcommands([
 		archiveCreate,
 		archiveList,
+		archiveVerify,
 		archiveRebuild,
 		archiveReconcile,
 		archiveGc,
