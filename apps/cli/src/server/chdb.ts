@@ -87,17 +87,21 @@ export interface ChdbOptions {
 	readonly bootstrapSchema?: boolean
 }
 
-/** Build the embedded ClickHouse argv. Keep table metadata loading serialized:
+/** Build the embedded ClickHouse argv. Keep table metadata loading and restore
+ * work serialized:
  * chDB v26.1.0 can otherwise fail nondeterministically while its loader resolves
  * Maple's materialized-view dependency graph (`recursive_mutex lock failed` /
  * `ASYNC_LOAD_WAIT_FAILED`). `async_load_databases=0` waits for loading, but it
- * does not make the loader pools single-threaded. */
+ * does not make the loader pools single-threaded. RESTORE uses a separate
+ * 16-thread pool by default and can trip the same invalid recursive-mutex state
+ * while restoring that dependency graph. */
 export const chdbArgv = (options: Pick<ChdbOptions, "dataDir" | "configFile">): string[] => [
 	"clickhouse",
 	"--async_load_databases=0",
 	"--async_load_system_database=0",
 	"--tables_loader_foreground_pool_size=1",
 	"--tables_loader_background_pool_size=1",
+	"--restore_threads=1",
 	`--path=${options.dataDir}`,
 	...(options.configFile ? [`--config-file=${options.configFile}`] : []),
 ]
