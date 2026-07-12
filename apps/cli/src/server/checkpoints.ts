@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { spawnSync } from "node:child_process"
 import { existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { cp, lstat, mkdir, readFile, readdir, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
@@ -31,6 +32,7 @@ const RESTORE_TRANSACTION_FORMAT_VERSION = 1
 const RESET_TRANSACTION_FORMAT_VERSION = 1
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const RESETTABLE_CHDB_ENTRIES = new Set(["data", "metadata", "store", "tmp"])
+export const CHECKPOINT_REOPEN_PROBE_ENV = "MAPLE_INTERNAL_CHECKPOINT_REOPEN_DATA_DIR"
 
 export class CheckpointError extends Schema.TaggedErrorClass<CheckpointError>()(
 	"@maple/cli/CheckpointError",
@@ -386,6 +388,34 @@ const validateRestoredDatabase = (db: Chdb): CheckpointValidation => ({
 	),
 })
 
+/** Open and validate a restored store in the current process. Production
+ * restore calls this only from the dedicated child-process entrypoint in
+ * `bin.ts`; keeping it synchronous ensures the child exits only after chDB has
+ * closed cleanly. */
+export const validateCheckpointDataDir = (dataDir: string): CheckpointValidation => {
+	const resolvedDataDir = resolve(dataDir)
+	if (!isAbsolute(dataDir) || resolvedDataDir !== dataDir) {
+		throw new Error("checkpoint reopen probe requires a normalized absolute data directory")
+	}
+	if (!existsSync(resolvedDataDir)) {
+		throw new Error("checkpoint reopen probe data directory is missing")
+	}
+	const info = lstatSync(resolvedDataDir)
+	if (info.isSymbolicLink() || !info.isDirectory()) {
+		throw new Error("checkpoint reopen probe data directory is not a real directory")
+	}
+	const db = Chdb.open({
+		dataDir: resolvedDataDir,
+		schemaSql,
+		bootstrapSchema: false,
+	})
+	try {
+		return validateRestoredDatabase(db)
+	} finally {
+		db.close()
+	}
+}
+
 const dirSize = async (path: string): Promise<number> => {
 	let total = 0
 	const entries = await readdir(path, { withFileTypes: true })
@@ -411,6 +441,55 @@ const parseValidation = (value: unknown): CheckpointValidation => {
 		metricsExponentialHistogram: requiredCount(value, "metricsExponentialHistogram"),
 		materializedViews: requiredCount(value, "materializedViews"),
 	}
+}
+
+const validationCountsMatch = (left: CheckpointValidation, right: CheckpointValidation): boolean =>
+	left.traces === right.traces &&
+	left.logs === right.logs &&
+	left.metricsSum === right.metricsSum &&
+	left.metricsGauge === right.metricsGauge &&
+	left.metricsHistogram === right.metricsHistogram &&
+	left.metricsExponentialHistogram === right.metricsExponentialHistogram &&
+	left.materializedViews === right.materializedViews
+
+/** Re-exec Maple and prove a wholly fresh process can load the restored
+ * representation. A successful query in the restoring connection is not
+ * sufficient: chDB's persisted metadata is loaded again only on process start. */
+const validateRestoredDatabaseInFreshProcess = (
+	dataDir: string,
+	expected: CheckpointValidation,
+): CheckpointValidation => {
+	const entry = process.argv[1]
+	const childArgs = entry && !entry.startsWith("/$bunfs") ? [entry] : []
+	const child = spawnSync(process.execPath, childArgs, {
+		env: { ...process.env, [CHECKPOINT_REOPEN_PROBE_ENV]: resolve(dataDir) },
+		encoding: "utf8",
+		timeout: 30_000,
+		maxBuffer: 1024 * 1024,
+		stdio: ["ignore", "pipe", "pipe"],
+	})
+	const stderr = child.stderr.trim()
+	if (child.error) {
+		throw new Error(`fresh-process checkpoint reopen probe failed to run: ${child.error.message}`)
+	}
+	if (child.status !== 0) {
+		throw new Error(
+			`fresh-process checkpoint reopen probe failed${child.signal ? ` (${child.signal})` : ""}` +
+				`${stderr ? `: ${stderr.slice(-4096)}` : ""}`,
+		)
+	}
+	let parsed: CheckpointValidation
+	try {
+		parsed = parseValidation(JSON.parse(child.stdout.trim()) as unknown)
+	} catch (error) {
+		throw new Error(
+			`fresh-process checkpoint reopen probe returned invalid output: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	}
+	if (!validationCountsMatch(expected, parsed)) {
+		throw new Error("fresh-process checkpoint reopen validation does not match the restoring process")
+	}
+	return parsed
 }
 
 export const parseCheckpointManifest = (
@@ -1670,8 +1749,15 @@ export const restoreCheckpoint = (
 				await writeRestoreTransaction(dataDir, transaction)
 				await mkdir(restoreRoot, { mode: 0o700 })
 				const restored = await restoreResolvedInto(resolvedCheckpoint, restoreData)
-				const validation = restored.validation
+				const restoringProcessValidation = restored.validation
 				restored.db.close()
+				// Do not publish a representation that only the restoring connection can
+				// read. Re-exec Maple after close and require the persisted metadata to
+				// load and produce the same counts in a wholly fresh chDB process.
+				const validation = validateRestoredDatabaseInFreshProcess(
+					restoreData,
+					restoringProcessValidation,
+				)
 				await cp(checkpointRoot(dataDir), join(restoreData, "backups"), {
 					recursive: true,
 					force: false,

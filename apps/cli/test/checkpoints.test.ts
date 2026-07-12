@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
 import { Effect } from "effect"
-import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert"
+import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert"
 import {
 	existsSync,
 	lstatSync,
@@ -37,6 +37,7 @@ import {
 	restoreRootPath,
 	restoreTransactionPath,
 	retireCheckpointIfEligible,
+	validateCheckpointDataDir,
 	writeBackupConfig,
 } from "../src/server/checkpoints"
 import {
@@ -85,6 +86,12 @@ const manifest = (
 		metricsExponentialHistogram: 6,
 		materializedViews: 33,
 	},
+})
+
+describe("fresh-process checkpoint reopen probe", () => {
+	it("rejects a non-normalized or relative data directory before opening chDB", () => {
+		throws(() => validateCheckpointDataDir("relative/data"), /normalized absolute data directory/)
+	})
 })
 
 const writeSnapshot = (dataDir: string, checkpointId: string, operationId = newCheckpointId()): void => {

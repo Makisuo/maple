@@ -102,6 +102,21 @@ assert_counts() {
 	done
 }
 
+# A restore is not accepted merely because the restoring chDB connection could
+# query it. Repeatedly exec wholly fresh Maple processes so persisted metadata
+# must load from disk on every cycle.
+assert_fresh_reopen_cycles() {
+	local expected="$1"
+	local cycles="${2:-3}"
+	local label="${3:-restored-store}"
+	for cycle in $(seq 1 "$cycles"); do
+		start_server fail
+		assert_counts "$expected"
+		stop_server
+		echo "fresh reopen $label: $cycle/$cycles"
+	done
+}
+
 printf '%s\n' \
 	'<clickhouse>' \
 	'  <backups>' \
@@ -141,12 +156,13 @@ jq -e --arg c "$C2" --arg p "$C1" \
 stop_server
 
 "$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C1" --yes >/dev/null
-start_server
-assert_counts 1
-stop_server
+assert_fresh_reopen_cycles 1 3 C1
 
 "$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C2" --yes >/dev/null
-start_server
+assert_fresh_reopen_cycles 2 3 C2
+
+# Leave one healthy process running for the dirty-store recovery cases below.
+start_server fail
 assert_counts 2
 
 # Foreground dirty-store recovery.
@@ -189,9 +205,7 @@ jq -e --arg c "$C3" --arg p "$C2" \
 [[ -d "$DATA/backups/snapshots/$C3" ]] || fail "current C3 is missing"
 
 stop_server
-start_server fail
-assert_counts 3
-stop_server
+assert_fresh_reopen_cycles 3 5 C3-after-checkpoint
 
 "$MAPLE" reset --data-dir "$DATA" --yes >/dev/null
 jq -e --arg c "$C3" --arg p "$C2" \
@@ -202,8 +216,6 @@ start_server fail
 assert_counts 0
 stop_server
 "$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C3" --yes >/dev/null
-start_server fail
-assert_counts 3
-stop_server
+assert_fresh_reopen_cycles 3 3 C3-after-reset
 
 echo "PASS native checkpoint smoke: C1=$C1 C2=$C2 C3=$C3"
