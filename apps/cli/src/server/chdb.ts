@@ -87,6 +87,21 @@ export interface ChdbOptions {
 	readonly bootstrapSchema?: boolean
 }
 
+/** Build the embedded ClickHouse argv. Keep table metadata loading serialized:
+ * chDB v26.1.0 can otherwise fail nondeterministically while its loader resolves
+ * Maple's materialized-view dependency graph (`recursive_mutex lock failed` /
+ * `ASYNC_LOAD_WAIT_FAILED`). `async_load_databases=0` waits for loading, but it
+ * does not make the loader pools single-threaded. */
+export const chdbArgv = (options: Pick<ChdbOptions, "dataDir" | "configFile">): string[] => [
+	"clickhouse",
+	"--async_load_databases=0",
+	"--async_load_system_database=0",
+	"--tables_loader_foreground_pool_size=1",
+	"--tables_loader_background_pool_size=1",
+	`--path=${options.dataDir}`,
+	...(options.configFile ? [`--config-file=${options.configFile}`] : []),
+]
+
 /**
  * A live chDB connection. `query` runs read SQL and returns the raw result
  * bytes (in whatever `format` was requested — default JSONEachRow). `exec` runs
@@ -105,26 +120,7 @@ export class Chdb {
 
 	static open(options: ChdbOptions): Chdb {
 		const sym = symbols()
-		// `--async_load_databases=0`: make chdb_connect BLOCK until every persisted
-		// table has finished loading before it returns. chDB v26.1.0 defaults this to
-		// true, so connect returns while the existing tables (our ~30 MVs feeding
-		// MergeTree targets) are still loading on background loader threads — and the
-		// `#bootstrap` DDL we run immediately after (`CREATE TABLE IF NOT EXISTS …`)
-		// then races the concurrent load of the same table, tripping a
-		// `recursive_mutex lock failed: Invalid argument` → `ASYNC_LOAD_WAIT_FAILED`
-		// → chdb_connect returns NULL. Most visible after an unclean kill, when more
-		// load/merge work is still in flight on reopen. Waiting serializes load before
-		// bootstrap and substantially narrows the race. One fresh-process native smoke
-		// still observed a non-reproducible ASYNC_LOAD_WAIT_FAILED before 40 focused
-		// restart passes; never retry a failed FFI open in this process.
-		// (`--async_load_system_database=0` is set explicitly for symmetry.)
-		const args = [
-			"clickhouse",
-			"--async_load_databases=0",
-			"--async_load_system_database=0",
-			`--path=${options.dataDir}`,
-			...(options.configFile ? [`--config-file=${options.configFile}`] : []),
-		]
+		const args = chdbArgv(options)
 		const argBufs = args.map(cstr)
 		const argv = new BigUint64Array(args.length)
 		argBufs.forEach((b, i) => {
