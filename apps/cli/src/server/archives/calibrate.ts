@@ -93,6 +93,35 @@ export interface CalibrationBudget {
 	readonly safetyMargin: number
 }
 
+const POSITIVE_SAFE_INTEGER_BUDGET_FIELDS = [
+	"memoryBudget",
+	"timeBudget",
+	"sampleRows",
+	"maxCandidateWallMs",
+	"maxTempDiskBytes",
+	"freeSpaceReserve",
+] as const satisfies readonly (keyof CalibrationBudget)[]
+
+/** Validate every operator-controlled calibration budget value before any
+ * checkpoint pin, calibration session, child process, or filesystem I/O. */
+export const validateCalibrationBudget = (budget: CalibrationBudget): CalibrationBudget => {
+	for (const field of POSITIVE_SAFE_INTEGER_BUDGET_FIELDS) {
+		const value = budget[field]
+		if (!Number.isSafeInteger(value) || value <= 0) {
+			throw new Error(`calibration ${field} must be a positive safe integer: ${value}`)
+		}
+	}
+	if (!Number.isSafeInteger(budget.minThroughputBytesPerSec) || budget.minThroughputBytesPerSec < 0) {
+		throw new Error(
+			`calibration minThroughputBytesPerSec must be a non-negative safe integer: ${budget.minThroughputBytesPerSec}`,
+		)
+	}
+	if (!Number.isFinite(budget.safetyMargin) || budget.safetyMargin < 1) {
+		throw new Error(`calibration safetyMargin must be a finite number at least 1: ${budget.safetyMargin}`)
+	}
+	return budget
+}
+
 /**
  * Precisely-defined metrics measured for one candidate on one signal. All names
  * are used consistently throughout calibration, the config document, and the

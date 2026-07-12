@@ -35,6 +35,7 @@ import {
 	isSameCalibrationCandidate,
 	heldOutSampleRows,
 	compareHeldOutPerSignal,
+	validateCalibrationBudget,
 } from "../server/archives/calibrate"
 import {
 	preflightCalibrationFreeSpace,
@@ -579,18 +580,25 @@ export const archiveCalibrate = Command.make("calibrate", {
 					message: error instanceof Error ? error.message : String(error),
 				})
 			}
+			let budget: CalibrationBudget
+			try {
+				budget = validateCalibrationBudget({
+					memoryBudget: a.memoryBudget,
+					timeBudget: a.timeBudget,
+					sampleRows: a.sampleRows,
+					maxCandidateWallMs: a.maxCandidateWallMs,
+					minThroughputBytesPerSec: a.minThroughput,
+					maxTempDiskBytes: a.maxTempDisk,
+					freeSpaceReserve: a.freeSpaceReserve,
+					safetyMargin: a.safetyMarginMilli / 1000,
+				})
+			} catch (error) {
+				return yield* new ArchiveError({
+					message: error instanceof Error ? error.message : String(error),
+				})
+			}
 			const { dataDir, archiveDir, scratchRoot } = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
 			const checkpointId = Option.getOrUndefined(a.checkpointId) ?? "current"
-			const budget: CalibrationBudget = {
-				memoryBudget: a.memoryBudget,
-				timeBudget: a.timeBudget,
-				sampleRows: a.sampleRows,
-				maxCandidateWallMs: a.maxCandidateWallMs,
-				minThroughputBytesPerSec: a.minThroughput,
-				maxTempDiskBytes: a.maxTempDisk,
-				freeSpaceReserve: a.freeSpaceReserve,
-				safetyMargin: a.safetyMarginMilli / 1000,
-			}
 			yield* Effect.sync(() =>
 				process.stderr.write(
 					`${amber("⟳")} calibrating all six signals for ${bold(rangeDate)} ` +

@@ -81,6 +81,7 @@ import {
 	type CalibrationRecommendation,
 	CANDIDATE_MATRIX,
 	deriveTargetChunkBytes,
+	validateCalibrationBudget,
 } from "../src/server/archives/calibrate"
 import { ARCHIVE_SIGNALS } from "../src/server/archives/signals"
 import {
@@ -147,6 +148,49 @@ const cand = (wt: number, rg: number): CalibrationCandidate => ({
 	rowGroupRows: rg,
 	maxShardRows: 500_000,
 	maxShardBytes: 256 * 1024 * 1024,
+})
+
+describe("calibration budget validation", () => {
+	it("accepts a complete valid budget", () => {
+		const budget = baseBudget()
+		strictEqual(validateCalibrationBudget(budget), budget)
+	})
+
+	it("requires positive safe-integer ceilings, sample sizes, and reserves", () => {
+		for (const field of [
+			"memoryBudget",
+			"timeBudget",
+			"sampleRows",
+			"maxCandidateWallMs",
+			"maxTempDiskBytes",
+			"freeSpaceReserve",
+		] as const) {
+			for (const value of [0, -1, Number.MAX_SAFE_INTEGER + 1]) {
+				throws(
+					() => validateCalibrationBudget(baseBudget({ [field]: value })),
+					new RegExp(`${field} must be a positive safe integer`),
+				)
+			}
+		}
+	})
+
+	it("requires non-negative safe-integer throughput", () => {
+		for (const value of [-1, Number.MAX_SAFE_INTEGER + 1]) {
+			throws(
+				() => validateCalibrationBudget(baseBudget({ minThroughputBytesPerSec: value })),
+				/minThroughputBytesPerSec must be a non-negative safe integer/,
+			)
+		}
+	})
+
+	it("requires a finite safety margin of at least one", () => {
+		for (const value of [0, 0.999, Number.NaN, Number.POSITIVE_INFINITY]) {
+			throws(
+				() => validateCalibrationBudget(baseBudget({ safetyMargin: value })),
+				/safetyMargin must be a finite number at least 1/,
+			)
+		}
+	})
 })
 
 describe("calibration recommendation error handling", () => {
