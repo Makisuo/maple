@@ -144,8 +144,8 @@ export class WorkflowEngine extends Context.Service<
      * Execute an activity from a workflow.
      */
     readonly activityExecute: <
-      Success extends Schema.Top,
-      Error extends Schema.Top,
+      Success extends Schema.Constraint,
+      Error extends Schema.Constraint,
       R
     >(
       activity: Activity.Activity<Success, Error, R>,
@@ -163,8 +163,8 @@ export class WorkflowEngine extends Context.Service<
      * Try to retrieve the result of an DurableDeferred
      */
     readonly deferredResult: <
-      Success extends Schema.Top,
-      Error extends Schema.Top
+      Success extends Schema.Constraint,
+      Error extends Schema.Constraint
     >(
       deferred: DurableDeferred.DurableDeferred<Success, Error>
     ) => Effect.Effect<
@@ -178,8 +178,8 @@ export class WorkflowEngine extends Context.Service<
      * workflows.
      */
     readonly deferredDone: <
-      Success extends Schema.Top,
-      Error extends Schema.Top
+      Success extends Schema.Constraint,
+      Error extends Schema.Constraint
     >(
       deferred: DurableDeferred.DurableDeferred<Success, Error>,
       options: {
@@ -469,8 +469,8 @@ export const makeUnsafe = (options: Encoded): WorkflowEngine["Service"] =>
     interruptUnsafe: options.interruptUnsafe,
     resume: options.resume,
     activityExecute: Effect.fnUntraced(function*<
-      Success extends Schema.Top,
-      Error extends Schema.Top,
+      Success extends Schema.Constraint,
+      Error extends Schema.Constraint,
       R
     >(activity: Activity.Activity<Success, Error, R>, attempt: number) {
       const result = yield* options.activityExecute(activity, attempt)
@@ -483,7 +483,7 @@ export const makeUnsafe = (options: Encoded): WorkflowEngine["Service"] =>
       return new Workflow.Complete({ exit })
     }),
     deferredResult: Effect.fnUntraced(
-      function*<Success extends Schema.Top, Error extends Schema.Top>(
+      function*<Success extends Schema.Constraint, Error extends Schema.Constraint>(
         deferred: DurableDeferred.DurableDeferred<Success, Error>
       ) {
         const instance = yield* WorkflowInstance
@@ -509,7 +509,7 @@ export const makeUnsafe = (options: Encoded): WorkflowEngine["Service"] =>
       )
     ),
     deferredDone: Effect.fnUntraced(
-      function*<Success extends Schema.Top, Error extends Schema.Top>(
+      function*<Success extends Schema.Constraint, Error extends Schema.Constraint>(
         deferred: DurableDeferred.DurableDeferred<Success, Error>,
         opts: {
           readonly workflowName: string

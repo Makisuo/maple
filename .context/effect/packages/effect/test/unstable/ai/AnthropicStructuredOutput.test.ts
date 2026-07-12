@@ -4,11 +4,11 @@ import { TestSchema } from "effect/testing"
 import { toCodecAnthropic } from "effect/unstable/ai/AnthropicStructuredOutput"
 import * as Tool from "effect/unstable/ai/Tool"
 
-function assertJsonSchema(schema: Schema.Top, expected: JsonSchema.JsonSchema) {
+function assertJsonSchema(schema: Schema.Constraint, expected: JsonSchema.JsonSchema) {
   assert.deepStrictEqual(toCodecAnthropic(schema).jsonSchema, expected)
 }
 
-function assertError(schema: Schema.Top, message: string) {
+function assertError(schema: Schema.Constraint, message: string) {
   assert.throws(() => toCodecAnthropic(schema), message)
 }
 

@@ -22,6 +22,7 @@ export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warps
  */
 export const GITHUB_ACCENT = "#181717"
 export const HAZEL_ACCENT = "#F46F0F"
+export const CLOUDFLARE_ACCENT = "#F38020"
 
 export interface CatalogEntry {
 	readonly id: IntegrationId
@@ -41,10 +42,11 @@ export interface CatalogEntry {
 const CATALOG: ReadonlyArray<CatalogEntry> = [
 	{
 		id: "cloudflare",
-		name: "Cloudflare Logpush",
-		description: "Receive Cloudflare HTTP request logs over HTTPS and map them into Maple logs.",
+		name: "Cloudflare",
+		description:
+			"Connect your Cloudflare account via OAuth — the foundation for one-click Workers telemetry.",
 		icon: CloudflareIcon,
-		accent: "#F38020",
+		accent: CLOUDFLARE_ACCENT,
 	},
 	{
 		id: "prometheus",
@@ -58,7 +60,7 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		id: "planetscale",
 		name: "PlanetScale",
 		description:
-			"Connect an organization with a service token — Maple discovers and scrapes every database branch.",
+			"Authorize your organization with one click — Maple discovers and scrapes every database branch.",
 		icon: PlanetScaleIcon,
 		// PlanetScale's mark is monochrome — neutral wash that works in both themes.
 		accent: "#8B8B8B",
@@ -102,14 +104,30 @@ interface CardStatus {
 }
 
 const NOT_CONNECTED: CardStatus = { label: "Not connected", variant: "outline" }
+// Status query failed — distinct from "Not connected" so a fetch error doesn't
+// masquerade as a disconnected integration.
+const STATUS_UNAVAILABLE: CardStatus = { label: "Status unavailable", variant: "outline" }
 
 /**
  * Per-integration status derived purely from the list queries the drill-ins
  * already use — no per-target check fan-out at catalog level.
  */
 export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStatus | null>> {
-	const cloudflareResult = useAtomValue(MapleApiAtomClient.query("cloudflareLogpush", "list", {}))
-	const scrapeResult = useAtomValue(MapleApiAtomClient.query("scrapeTargets", "list", {}))
+	const cloudflareAccountResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+			reactivityKeys: ["cloudflareIntegrationStatus"],
+		}),
+	)
+	const scrapeResult = useAtomValue(
+		MapleApiAtomClient.query("scrapeTargets", "list", {
+			reactivityKeys: ["scrapeTargets"],
+		}),
+	)
+	const planetscaleResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
 	const hazelResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "hazelStatus", {
 			reactivityKeys: ["hazelIntegrationStatus"],
@@ -121,18 +139,13 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		}),
 	)
 
-	const cloudflare: CardStatus | null = Result.builder(cloudflareResult)
-		.onSuccess((response): CardStatus => {
-			const connectors = response.connectors
-			if (connectors.length === 0) return NOT_CONNECTED
-			const enabled = connectors.filter((connector) => connector.enabled).length
-			const failing = connectors.some((connector) => connector.lastError)
-			return {
-				label: `${connectors.length} connector${connectors.length === 1 ? "" : "s"} · ${enabled} enabled`,
-				variant: failing ? "warning" : "success",
-			}
-		})
-		.orElse(() => (Result.isInitial(cloudflareResult) ? null : NOT_CONNECTED))
+	const cloudflare: CardStatus | null = Result.builder(cloudflareAccountResult)
+		.onSuccess(
+			(status): CardStatus =>
+				status.connected ? { label: "Connected", variant: "success" } : NOT_CONNECTED,
+		)
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	const scrapeStatus = (targetType: "prometheus" | "planetscale"): CardStatus | null =>
 		Result.builder(scrapeResult)
@@ -147,14 +160,30 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 					variant: failing ? "warning" : "success",
 				}
 			})
-			.orElse(() => (Result.isInitial(scrapeResult) ? null : NOT_CONNECTED))
+			.onInitial(() => null)
+			.orElse(() => STATUS_UNAVAILABLE)
+
+	// First-class connection status; falls back to the scrape-target derivation for
+	// orgs still on the manual (user-created target) escape hatch.
+	const planetscale: CardStatus | null = Result.builder(planetscaleResult)
+		.onSuccess((status): CardStatus | null => {
+			if (!status.connected) return scrapeStatus("planetscale")
+			const failing = status.scrapeTarget?.lastScrapeError != null
+			return {
+				label: status.organization ?? "Connected",
+				variant: failing ? "warning" : "success",
+			}
+		})
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	const hazel: CardStatus | null = Result.builder(hazelResult)
 		.onSuccess(
 			(status): CardStatus =>
 				status.connected ? { label: "Connected", variant: "success" } : NOT_CONNECTED,
 		)
-		.orElse(() => (Result.isInitial(hazelResult) ? null : NOT_CONNECTED))
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	const github: CardStatus | null = Result.builder(githubResult)
 		.onSuccess((status): CardStatus => {
@@ -171,12 +200,13 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 				variant: "success",
 			}
 		})
-		.orElse(() => (Result.isInitial(githubResult) ? null : NOT_CONNECTED))
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
 
 	return {
 		cloudflare,
 		prometheus: scrapeStatus("prometheus"),
-		planetscale: scrapeStatus("planetscale"),
+		planetscale,
 		// WarpStream rides the generic Prometheus pipeline — no own target type.
 		warpstream: { label: "Via Prometheus", variant: "outline" },
 		hazel,

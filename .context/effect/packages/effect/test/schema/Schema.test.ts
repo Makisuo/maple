@@ -111,6 +111,31 @@ Expected an integer, got -1.2`
   at ["b"]["c"]`
       )
     })
+
+    it("should not read parseOptions from encodingChecks", async () => {
+      const schema = Schema.Struct({
+        a: Schema.String,
+        b: Schema.String
+      }).pipe(
+        Schema.flip,
+        Schema.check(Schema.isMaxProperties(1)),
+        Schema.annotate({ parseOptions: { errors: "first" } }),
+        Schema.flip
+      )
+      assertTrue(SchemaAST.isObjects(schema.ast))
+      strictEqual(schema.ast.checks, undefined)
+      strictEqual(schema.ast.encodingChecks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding({ parseOptions: { errors: "all" } })
+      await decoding.fail(
+        {},
+        `Missing key
+  at ["a"]
+Missing key
+  at ["b"]`
+      )
+    })
   })
 
   describe("parse options", () => {
@@ -409,17 +434,28 @@ Expected an integer, got -1.2`
     const schema = Schema.Void
     const asserts = new TestSchema.Asserts(schema)
 
+    // The public make input stays typed as void; these callbacks exercise runtime parser behavior.
+    let fn: () => void
+
     const make = asserts.make()
+    await make.succeed()
     await make.succeed(undefined)
-    await make.fail(null, `Expected void, got null`)
+    fn = () => undefined
+    await make.succeed(fn())
+    fn = () => null
+    await make.succeed(fn(), undefined)
+    fn = () => "a"
+    await make.succeed(fn(), undefined)
 
     const decoding = asserts.decoding()
     await decoding.succeed(undefined)
-    await decoding.fail(null, `Expected void, got null`)
+    await decoding.succeed(null, undefined)
+    await decoding.succeed("a", undefined)
 
     const encoding = asserts.encoding()
     await encoding.succeed(undefined)
-    await encoding.fail("1", `Expected void, got "1"`)
+    await encoding.succeed(null, undefined)
+    await encoding.succeed("1", undefined)
   })
 
   it("ObjectKeyword", async () => {
@@ -2441,6 +2477,182 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       await encoding.succeed("123", 123)
     })
 
+    it("Struct & flip & check & flip should apply the check to the encoded side", async () => {
+      const schema = Schema.Struct({ a: Schema.String }).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((o) => o.a.length > 1, { expected: "a length > 1" })),
+        Schema.flip
+      )
+      assertTrue(SchemaAST.isObjects(schema.ast))
+      strictEqual(schema.ast.checks, undefined)
+      strictEqual(schema.ast.encodingChecks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.fail(
+        { a: "a" },
+        `Expected a length > 1, got {"a":"a"}`
+      )
+      await decoding.succeed({ a: "aa" })
+
+      const encoding = asserts.encoding()
+      await encoding.fail(
+        { a: "a" },
+        `Expected a length > 1, got {"a":"a"}`
+      )
+      await encoding.succeed({ a: "aa" })
+    })
+
+    it("Tuple & flip & check & flip should apply the check to the encoded side", async () => {
+      const schema = Schema.Tuple([Schema.String]).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((tuple) => tuple[0].length > 1, { expected: "head length > 1" })),
+        Schema.flip
+      )
+      assertTrue(SchemaAST.isArrays(schema.ast))
+      strictEqual(schema.ast.checks, undefined)
+      strictEqual(schema.ast.encodingChecks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.fail(
+        ["a"],
+        `Expected head length > 1, got ["a"]`
+      )
+      await decoding.succeed(["aa"])
+
+      const encoding = asserts.encoding()
+      await encoding.fail(
+        ["a"],
+        `Expected head length > 1, got ["a"]`
+      )
+      await encoding.succeed(["aa"])
+    })
+
+    it("Union & flip & check & flip should apply the check to the encoded side", async () => {
+      const schema = Schema.Union([Schema.Literal("a"), Schema.Literal("aa")]).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((s) => s === "aa", { expected: `"aa"` })),
+        Schema.flip
+      )
+      assertTrue(SchemaAST.isUnion(schema.ast))
+      strictEqual(schema.ast.checks, undefined)
+      strictEqual(schema.ast.encodingChecks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.fail(
+        "a",
+        `Expected "aa", got "a"`
+      )
+      await decoding.succeed("aa")
+
+      const encoding = asserts.encoding()
+      await encoding.fail(
+        "a",
+        `Expected "aa", got "a"`
+      )
+      await encoding.succeed("aa")
+    })
+
+    it("Declaration & flip & check & flip should apply the check to the encoded side", async () => {
+      const schema = Schema.declare(
+        (u): u is string => typeof u === "string",
+        { expected: "string declaration" }
+      ).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((s) => s.length > 1, { expected: "a length > 1" })),
+        Schema.flip
+      )
+      assertTrue(SchemaAST.isDeclaration(schema.ast))
+      strictEqual(schema.ast.checks, undefined)
+      strictEqual(schema.ast.encodingChecks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.fail(
+        "a",
+        `Expected a length > 1, got "a"`
+      )
+      await decoding.succeed("aa")
+
+      const encoding = asserts.encoding()
+      await encoding.fail(
+        "a",
+        `Expected a length > 1, got "a"`
+      )
+      await encoding.succeed("aa")
+    })
+
+    it("Struct & flip & check & flip with encoding chain should check the local value", async () => {
+      const local = Schema.Struct({ a: Schema.String }).pipe(
+        Schema.flip,
+        Schema.check(Schema.makeFilter((o) => typeof o.a === "string" && o.a.length > 1, {
+          expected: "a length > 1"
+        })),
+        Schema.flip
+      )
+      const schema = Schema.Struct({ b: Schema.String }).pipe(
+        Schema.decodeTo(local, {
+          decode: SchemaGetter.transform<{ readonly a: string }, { readonly b: string }>((o) => ({ a: o.b })),
+          encode: SchemaGetter.transform<{ readonly b: string }, { readonly a: string }>((o) => ({ b: o.a }))
+        })
+      )
+      assertTrue(SchemaAST.isObjects(schema.ast))
+      strictEqual(schema.ast.encoding?.length, 1)
+      strictEqual(schema.ast.encodingChecks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.fail(
+        { b: "a" },
+        `Expected a length > 1, got {"a":"a"}`
+      )
+      await decoding.succeed({ b: "aa" }, { a: "aa" })
+
+      const encoding = asserts.encoding()
+      await encoding.fail(
+        { a: "a" },
+        `Expected a length > 1, got {"a":"a"}`
+      )
+      await encoding.succeed({ a: "aa" }, { b: "aa" })
+    })
+
+    it(`Struct & encoding chain & structural checks should check the local value with errors: "all"`, async () => {
+      const local = Schema.Struct({ a: Schema.Finite }).check(Schema.isMaxProperties(1))
+      const schema = Schema.Struct({ b: Schema.Number, c: Schema.String }).pipe(
+        Schema.decodeTo(local, {
+          decode: SchemaGetter.transform<
+            { readonly a: number },
+            { readonly b: number; readonly c: string }
+          >((o) => ({ a: o.b })),
+          encode: SchemaGetter.transform<
+            { readonly b: number; readonly c: string },
+            { readonly a: number }
+          >((o) => ({ b: o.a, c: "" }))
+        })
+      )
+      assertTrue(SchemaAST.isObjects(schema.ast))
+      strictEqual(schema.ast.encoding?.length, 1)
+      strictEqual(schema.ast.checks?.length, 1)
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding({ parseOptions: { errors: "all" } })
+      await decoding.fail(
+        { b: NaN, c: "extra" },
+        `Expected a finite number, got NaN
+  at ["a"]`
+      )
+
+      const encoding = asserts.encoding({ parseOptions: { errors: "all" } })
+      await encoding.fail(
+        { a: NaN },
+        `Expected a finite number, got NaN
+  at ["a"]`
+      )
+      await encoding.succeed({ a: 1 }, { b: 1, c: "" })
+    })
+
     it("should work with withConstructorDefault", async () => {
       const schema = Schema.Struct({
         a: Schema.FiniteFromString.pipe(Schema.withConstructorDefault(Effect.succeed(-1)))
@@ -3808,6 +4020,27 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       await decoding.fail(null, `Expected string, got null`)
     })
 
+    it(`Void`, async () => {
+      const schema = Schema.Union([Schema.Void])
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.succeed(undefined)
+      await decoding.succeed(null, undefined)
+      await decoding.succeed("a", undefined)
+      await decoding.succeed(1, undefined)
+      await decoding.succeed({}, undefined)
+      await decoding.succeed([], undefined)
+    })
+
+    it(`Void | String`, async () => {
+      const schema = Schema.Union([Schema.Void, Schema.String])
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.succeed("a", undefined)
+    })
+
     it(`String | Number`, async () => {
       const schema = Schema.Union([Schema.String, Schema.Number])
       const asserts = new TestSchema.Asserts(schema)
@@ -3866,6 +4099,14 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
         { a: "a", b: 1 },
         `Expected exactly one member to match the input {"a":"a","b":1}`
       )
+    })
+
+    it(`mode: "oneOf" with Void`, async () => {
+      const schema = Schema.Union([Schema.Void, Schema.String], { mode: "oneOf" })
+      const asserts = new TestSchema.Asserts(schema)
+
+      const decoding = asserts.decoding()
+      await decoding.fail("a", `Expected exactly one member to match the input "a"`)
     })
 
     it("{} & Literal", async () => {
@@ -6029,6 +6270,42 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       )
     })
 
+    it("constructor ignores excess properties by default", () => {
+      class A extends Schema.Class<A>("A")({
+        a: Schema.String
+      }) {}
+
+      const instance = new A({ a: "a", extra: "extra" } as any)
+
+      strictEqual(instance.a, "a")
+      assertFalse("extra" in instance)
+    })
+
+    it("constructor preserves excess properties when requested", () => {
+      class A extends Schema.Class<A>("A")({
+        a: Schema.String
+      }) {}
+
+      const instance = new A({ a: "a", extra: "extra" } as any, {
+        parseOptions: { onExcessProperty: "preserve" }
+      })
+
+      strictEqual(instance.a, "a")
+      strictEqual((instance as any).extra, "extra")
+    })
+
+    it("constructor rejects excess properties when requested", () => {
+      class A extends Schema.Class<A>("A")({
+        a: Schema.String
+      }) {}
+
+      throws(() =>
+        new A({ a: "a", extra: "extra" } as any, {
+          parseOptions: { onExcessProperty: "error" }
+        })
+      )
+    })
+
     it("annotate", async () => {
       class A extends Schema.Class<A>("A")({
         a: Schema.String
@@ -6076,6 +6353,60 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
 
         const decoding = asserts.decoding()
         await decoding.succeed({ a: "a", b: 2 }, new B({ a: "a", b: 2 }))
+      })
+
+      it("constructor preserves subclass fields while ignoring excess properties by default", () => {
+        class A extends Schema.Class<A>("A")({
+          a: Schema.String
+        }) {}
+        class B extends A.extend<B>("B")({
+          b: Schema.Number
+        }) {}
+
+        const instance = new B({ a: "a", b: 2, extra: "extra" } as any)
+
+        strictEqual(instance.a, "a")
+        strictEqual(instance.b, 2)
+        assertFalse("extra" in instance)
+      })
+
+      it("constructor preserves subclass fields and excess properties when requested", () => {
+        class A extends Schema.Class<A>("A")({
+          a: Schema.String
+        }) {}
+        class B extends A.extend<B>("B")({
+          b: Schema.Number
+        }) {}
+
+        const instance = new B({ a: "a", b: 2, extra: "extra" } as any, {
+          parseOptions: { onExcessProperty: "preserve" }
+        })
+
+        strictEqual(instance.a, "a")
+        strictEqual(instance.b, 2)
+        strictEqual((instance as any).extra, "extra")
+      })
+
+      it("constructor does not treat subclass fields as excess properties", () => {
+        class A extends Schema.Class<A>("A")({
+          a: Schema.String
+        }) {}
+        class B extends A.extend<B>("B")({
+          b: Schema.Number
+        }) {}
+
+        const instance = new B({ a: "a", b: 2 }, {
+          parseOptions: { onExcessProperty: "error" }
+        })
+
+        strictEqual(instance.a, "a")
+        strictEqual(instance.b, 2)
+
+        throws(() =>
+          new B({ a: "a", b: 2, extra: "extra" } as any, {
+            parseOptions: { onExcessProperty: "error" }
+          })
+        )
       })
 
       it("Struct argument", async () => {
@@ -6152,6 +6483,18 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       await encoding.succeed(new A({ a: "a" }), { _tag: "A", a: "a" })
     })
 
+    it("constructor ignores excess properties by default", () => {
+      class A extends Schema.TaggedClass<A>()("A", {
+        a: Schema.String
+      }) {}
+
+      const instance = new A({ a: "a", extra: "extra" } as any)
+
+      strictEqual(instance._tag, "A")
+      strictEqual(instance.a, "a")
+      assertFalse("extra" in instance)
+    })
+
     it("Struct argument", async () => {
       class A extends Schema.TaggedClass<A>()(
         "A",
@@ -6174,6 +6517,36 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
   at ["_tag"]`
       )
       await decoding.fail({ _tag: "A", a: "" }, `Expected "a" being longer than 0, got {"_tag":"A","a":""}`)
+    })
+
+    it("extended constructor does not treat subclass fields as excess properties", () => {
+      class A extends Schema.TaggedClass<A>()("A", {
+        a: Schema.String
+      }) {}
+      class B extends A.extend<B>("B")({
+        b: Schema.Number
+      }) {}
+
+      const instance = new B({ a: "a", b: 2, extra: "extra" } as any)
+
+      strictEqual(instance._tag, "A")
+      strictEqual(instance.a, "a")
+      strictEqual(instance.b, 2)
+      assertFalse("extra" in instance)
+
+      const strictInstance = new B({ a: "a", b: 2 }, {
+        parseOptions: { onExcessProperty: "error" }
+      })
+
+      strictEqual(strictInstance._tag, "A")
+      strictEqual(strictInstance.a, "a")
+      strictEqual(strictInstance.b, 2)
+
+      throws(() =>
+        new B({ a: "a", b: 2, extra: "extra" } as any, {
+          parseOptions: { onExcessProperty: "error" }
+        })
+      )
     })
   })
 
@@ -6200,6 +6573,37 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       const make = asserts.make()
       await make.succeed(new E({ id: 1 }))
       await make.succeed({ id: 1 }, new E({ id: 1 }))
+    })
+
+    it("constructor ignores excess properties by default", () => {
+      class E extends Schema.ErrorClass<E>("E")({
+        message: Schema.String,
+        cause: Schema.optionalKey(Schema.Unknown),
+        code: Schema.Number
+      }) {}
+      const cause = new Error("cause")
+
+      const err = new E({ message: "boom", cause, code: 1, extra: "extra" } as any)
+
+      strictEqual(err.message, "boom")
+      strictEqual(err.cause, cause)
+      strictEqual(err.code, 1)
+      assertFalse("extra" in err)
+    })
+
+    it("constructor preserves excess properties when requested", () => {
+      class E extends Schema.ErrorClass<E>("E")({
+        message: Schema.String,
+        code: Schema.Number
+      }) {}
+
+      const err = new E({ message: "boom", code: 1, extra: "extra" } as any, {
+        parseOptions: { onExcessProperty: "preserve" }
+      })
+
+      strictEqual(err.message, "boom")
+      strictEqual(err.code, 1)
+      strictEqual((err as any).extra, "extra")
     })
 
     it("Struct argument", async () => {
@@ -6259,6 +6663,37 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       await decoding.succeed({ a: "a", b: 2 }, new B({ a: "a", b: 2 }))
     })
 
+    it("extended constructor ignores excess properties by default", () => {
+      class A extends Schema.ErrorClass<A>("A")({
+        message: Schema.String
+      }) {}
+      class B extends A.extend<B>("B")({
+        code: Schema.Number
+      }) {}
+
+      const err = new B({ message: "boom", code: 1, extra: "extra" } as any)
+
+      strictEqual(err.message, "boom")
+      strictEqual(err.code, 1)
+      assertFalse("extra" in err)
+    })
+
+    it("extended constructor does not treat subclass fields as excess properties", () => {
+      class A extends Schema.ErrorClass<A>("A")({
+        message: Schema.String
+      }) {}
+      class B extends A.extend<B>("B")({
+        code: Schema.Number
+      }) {}
+
+      const err = new B({ message: "boom", code: 1 }, {
+        parseOptions: { onExcessProperty: "error" }
+      })
+
+      strictEqual(err.message, "boom")
+      strictEqual(err.code, 1)
+    })
+
     it("`toString` to match native `Error` output format", async () => {
       class E extends Schema.ErrorClass<E>("E")({
         message: Schema.String
@@ -6296,6 +6731,18 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
 
       const encoding = asserts.encoding()
       await encoding.succeed(new E({ id: 1 }), { _tag: "E", id: 1 })
+    })
+
+    it("constructor ignores excess properties by default", () => {
+      class E extends Schema.TaggedErrorClass<E>()("E", {
+        id: Schema.Number
+      }) {}
+
+      const err = new E({ id: 1, extra: "extra" } as any)
+
+      strictEqual(err._tag, "E")
+      strictEqual(err.id, 1)
+      assertFalse("extra" in err)
     })
 
     it("Struct argument", async () => {
@@ -6367,6 +6814,39 @@ Expected a value with a size of at most 2, got Map([["a",1],["b",NaN],["c",3]])`
       strictEqual(instance._tag, "A")
       assertTrue(instance instanceof A)
       assertTrue(instance instanceof B)
+    })
+
+    it("extended constructor ignores excess properties by default", () => {
+      class A extends Schema.TaggedErrorClass<A>()("A", {
+        a: Schema.String
+      }) {}
+      class B extends A.extend<B>("B")({
+        b: Schema.Number
+      }) {}
+
+      const instance = new B({ a: "a", b: 2, extra: "extra" } as any)
+
+      strictEqual(instance._tag, "A")
+      strictEqual(instance.a, "a")
+      strictEqual(instance.b, 2)
+      assertFalse("extra" in instance)
+    })
+
+    it("extended constructor does not treat subclass fields as excess properties", () => {
+      class A extends Schema.TaggedErrorClass<A>()("A", {
+        a: Schema.String
+      }) {}
+      class B extends A.extend<B>("B")({
+        b: Schema.Number
+      }) {}
+
+      const instance = new B({ a: "a", b: 2 }, {
+        parseOptions: { onExcessProperty: "error" }
+      })
+
+      strictEqual(instance._tag, "A")
+      strictEqual(instance.a, "a")
+      strictEqual(instance.b, 2)
     })
   })
 

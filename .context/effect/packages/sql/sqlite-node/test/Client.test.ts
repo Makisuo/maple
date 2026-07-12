@@ -23,6 +23,8 @@ describe("Client", () => {
       assert.deepStrictEqual(response, [])
       response = yield* sql`SELECT * FROM test`
       assert.deepStrictEqual(response, [{ id: 1, name: "hello" }])
+      response = yield* sql`SELECT * FROM test`.valuesUnprepared
+      assert.deepStrictEqual(response, [[1, "hello"]])
       response = yield* sql`INSERT INTO test (name) VALUES ('world')`.pipe(sql.withTransaction)
       assert.deepStrictEqual(response, [])
       response = yield* sql`SELECT * FROM test`

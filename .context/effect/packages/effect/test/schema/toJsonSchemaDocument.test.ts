@@ -17,7 +17,7 @@ const baseAjvOptions: AjvOptions = {
 const ajvDraft2020_12 = new Ajv2020.default(baseAjvOptions)
 
 function assertUnsupportedSchema(
-  schema: Schema.Top,
+  schema: Schema.Constraint,
   message: string,
   options?: Schema.ToJsonSchemaOptions
 ) {
@@ -3546,6 +3546,81 @@ describe("toJsonSchemaDocument", () => {
             "contentMediaType": "application/json",
             "contentSchema": {
               "type": "string"
+            }
+          }
+        }
+      )
+    })
+
+    it("preserves the content schema identifier", () => {
+      const MyEvent = Schema.Struct({
+        value: Schema.String
+      }).annotate({ identifier: "MyEvent" })
+
+      assertJsonSchemaDocument(
+        Schema.fromJsonString(MyEvent),
+        {
+          schema: {
+            "$ref": "#/$defs/MyEventJsonString"
+          },
+          definitions: {
+            "MyEvent": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            "MyEventJsonString": {
+              "type": "string",
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "$ref": "#/$defs/MyEvent"
+              }
+            }
+          }
+        }
+      )
+    })
+
+    it("respects an explicit encoded-side identifier", () => {
+      const MyEvent = Schema.Struct({
+        value: Schema.String
+      }).annotate({ identifier: "MyEvent" })
+      const MyWireEvent = Schema.flip(
+        Schema.flip(Schema.fromJsonString(MyEvent)).annotate({ identifier: "MyWireEvent" })
+      )
+
+      assertJsonSchemaDocument(
+        MyWireEvent,
+        {
+          schema: {
+            "$ref": "#/$defs/MyWireEvent"
+          },
+          definitions: {
+            "MyEvent": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            "MyWireEvent": {
+              "type": "string",
+              "contentMediaType": "application/json",
+              "contentSchema": {
+                "$ref": "#/$defs/MyEvent"
+              }
             }
           }
         }

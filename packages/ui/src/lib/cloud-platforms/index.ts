@@ -1,5 +1,6 @@
 import type { CloudPlatformInfo } from "./types"
 import { cloudflareAdapter } from "./cloudflare"
+import { databaseAdapter } from "./database"
 
 export type {
 	CloudPlatformAdapter,
@@ -20,9 +21,11 @@ export { outcomeBadgeStyle } from "./types"
 //      id → a copyable field, etc.
 //   2. import it here and add it to `ADAPTERS`.
 // Order matters only if two adapters could match the same span; keep the most
-// specific first.
+// specific first. The `databaseAdapter` (generic `db.*` semconv) is a broad
+// last resort — a serverless span and a DB-client span are disjoint in practice,
+// but keep provider adapters ahead of it regardless.
 const ADAPTERS: ReadonlyArray<{ detect: (a: Record<string, string>) => CloudPlatformInfo | null }> =
-	[cloudflareAdapter]
+	[cloudflareAdapter, databaseAdapter]
 
 /** First adapter that recognizes these span attributes, normalized; else null. */
 export function getCloudPlatform(attrs: Record<string, string>): CloudPlatformInfo | null {

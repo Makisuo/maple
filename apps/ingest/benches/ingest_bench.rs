@@ -108,6 +108,7 @@ impl BenchFixture {
                 batch_max_wait: Duration::from_millis(10),
                 export_concurrency_per_shard: 1,
                 export_max_attempts: 20,
+                clickhouse_export_timeout: Duration::from_secs(5),
                 clickhouse_breaker: ClickHouseBreakerConfig::default(),
                 datasources: DatasourceNames::defaults(),
                 datasource_session_replays: "session_replays".to_string(),

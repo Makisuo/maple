@@ -33,6 +33,7 @@ describe("serviceOverviewQuery", () => {
 		expect(sql).toContain("CommitSha AS commitSha")
 		expect(sql).toContain("count() AS throughput")
 		expect(sql).toContain("countIf(StatusCode = 'Error') AS errorCount")
+		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error') AS estimatedErrorCount")
 		expect(sql).toContain("quantile(0.5)(Duration) / 1000000 AS p50LatencyMs")
 		expect(sql).toContain("quantile(0.95)(Duration) / 1000000 AS p95LatencyMs")
 		expect(sql).toContain("quantile(0.99)(Duration) / 1000000 AS p99LatencyMs")
@@ -47,6 +48,8 @@ describe("serviceOverviewQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("estimatedSpanCount")
 		expect(sql).toContain("sum(SampleRate)")
+		expect(sql).toContain("estimatedErrorCount")
+		expect(sql).toContain("sumIf(SampleRate, StatusCode = 'Error')")
 		// The old `anyIf(threshold)` approach must be gone — it was the bug.
 		expect(sql).not.toContain("dominantThreshold")
 		expect(sql).not.toContain("anyIf")

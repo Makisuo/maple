@@ -15,6 +15,7 @@ import {
 	mainNavItems,
 	topologyNavItems,
 	visibleSignalsNavItems,
+	type NavSubItem,
 } from "@/components/dashboard/nav-items"
 import { showKeyboardShortcuts } from "@/components/command-palette/global-shortcuts"
 import { KeyboardIcon } from "@/components/icons"
@@ -49,7 +50,7 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { clearSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
-import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -190,7 +191,7 @@ function GuestMenu() {
 export function AppSidebar() {
 	const routerState = useRouterState()
 	const currentPath = routerState.location.pathname
-	const { dashboards, isLoading } = useDashboardStore()
+	const { dashboards, isLoading } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 
 	const dashboardMatch = currentPath.match(/^\/dashboards\/([^/]+)/)
@@ -238,7 +239,7 @@ export function AppSidebar() {
 									const isActive = currentPath.startsWith(item.href)
 									const subItems =
 										"subItems" in item
-											? (item.subItems as { title: string; href: string }[] | undefined)
+											? (item.subItems as NavSubItem[] | undefined)
 											: undefined
 									return (
 										<SidebarMenuItem key={item.title}>
@@ -274,6 +275,7 @@ export function AppSidebar() {
 																	render={<Link to={sub.href} />}
 																	isActive={subActive}
 																>
+																	{sub.icon ? <sub.icon size={14} /> : null}
 																	<span>{sub.title}</span>
 																</SidebarMenuSubButton>
 															</SidebarMenuSubItem>

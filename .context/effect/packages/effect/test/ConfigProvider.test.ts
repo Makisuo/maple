@@ -107,6 +107,17 @@ describe("ConfigProvider", () => {
     await assertSuccess(provider, ["constant.case"], ConfigProvider.makeValue("value1"))
   })
 
+  it("constantCase uses config casing for numeric word groups", async () => {
+    const provider = ConfigProvider.constantCase(ConfigProvider.fromEnv({
+      env: {
+        "API_V2_XML": "value1",
+        "FIELD2_VALUE": "value2"
+      }
+    }))
+    await assertSuccess(provider, ["api-v2 xml"], ConfigProvider.makeValue("value1"))
+    await assertSuccess(provider, ["field2Value"], ConfigProvider.makeValue("value2"))
+  })
+
   describe("mapInput", () => {
     it("two mappings", async () => {
       const appendA = ConfigProvider.mapInput((path) => path.map((sn) => typeof sn === "string" ? sn + "_A" : sn))

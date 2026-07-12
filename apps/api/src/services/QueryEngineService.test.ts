@@ -356,6 +356,102 @@ describe("makeQueryEngineExecute", () => {
 		}),
 	)
 
+	it.effect("routes metric-scoped attributeKeys to the raw metric table", () =>
+		Effect.gen(function* () {
+			let receivedSql: string | undefined
+
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					sqlQuery: (_tenant: unknown, sql: unknown) => {
+						receivedSql = sql as string
+						return Effect.succeed([{ attributeKey: "region", usageCount: 12 }])
+					},
+				}),
+			)
+
+			const response = yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: {
+					kind: "attributeKeys",
+					source: "metrics",
+					metricName: "http.server.duration",
+					metricType: "gauge",
+				},
+			})
+
+			assert.include(receivedSql ?? "", "metrics_gauge")
+			assert.include(receivedSql ?? "", "arrayJoin(mapKeys(Attributes))")
+			assert.include(receivedSql ?? "", "MetricName = 'http.server.duration'")
+			assert.deepStrictEqual(response.result, {
+				kind: "attributeKeys",
+				source: "metrics",
+				data: [{ key: "region", count: 12 }],
+			})
+		}),
+	)
+
+	it.effect("keeps unscoped metrics attributeKeys on the hourly rollup", () =>
+		Effect.gen(function* () {
+			let receivedSql: string | undefined
+
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					sqlQuery: (_tenant: unknown, sql: unknown) => {
+						receivedSql = sql as string
+						return Effect.succeed([{ attributeKey: "region", usageCount: 12 }])
+					},
+				}),
+			)
+
+			yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: { kind: "attributeKeys", source: "metrics" },
+			})
+
+			assert.include(receivedSql ?? "", "attribute_keys_hourly")
+			assert.include(receivedSql ?? "", "AttributeScope = 'metric'")
+		}),
+	)
+
+	it.effect("routes metric-scoped attributeValues to the raw metric table", () =>
+		Effect.gen(function* () {
+			let receivedSql: string | undefined
+
+			const execute = makeQueryEngineExecute(
+				makeTinybirdStub({
+					sqlQuery: (_tenant: unknown, sql: unknown) => {
+						receivedSql = sql as string
+						return Effect.succeed([{ attributeValue: "eu-west-1", usageCount: 7 }])
+					},
+				}),
+			)
+
+			const response = yield* execute(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				query: {
+					kind: "attributeValues",
+					source: "metrics",
+					scope: "metric",
+					attributeKey: "region",
+					metricName: "http.server.duration",
+					metricType: "sum",
+				},
+			})
+
+			assert.include(receivedSql ?? "", "metrics_sum")
+			assert.include(receivedSql ?? "", "Attributes['region']")
+			assert.include(receivedSql ?? "", "MetricName = 'http.server.duration'")
+			assert.deepStrictEqual(response.result, {
+				kind: "attributeValues",
+				source: "metrics",
+				data: [{ value: "eu-west-1", count: 7 }],
+			})
+		}),
+	)
+
 	it.effect("maps apdex traces execution and forwards the apdex threshold", () =>
 		Effect.gen(function* () {
 			let receivedSql: string | undefined

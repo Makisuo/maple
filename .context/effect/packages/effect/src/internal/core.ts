@@ -87,7 +87,7 @@ export const StructuralProto = {
     const thatKeys = Object.keys(that)
     if (selfKeys.length !== thatKeys.length) return false
     for (let i = 0; i < selfKeys.length; i++) {
-      if (selfKeys[i] !== thatKeys[i] && !Equal.equals(this[selfKeys[i]], that[selfKeys[i]])) {
+      if (selfKeys[i] !== thatKeys[i] || !Equal.equals(this[selfKeys[i]], that[selfKeys[i]])) {
         return false
       }
     }

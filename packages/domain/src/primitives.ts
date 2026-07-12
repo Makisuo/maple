@@ -84,12 +84,6 @@ export type ApiKeyId = Schema.Schema.Type<typeof ApiKeyId>
 export const ScrapeTargetId = MapleUuidId("@maple/ScrapeTargetId", "Scrape Target ID")
 export type ScrapeTargetId = Schema.Schema.Type<typeof ScrapeTargetId>
 
-export const CloudflareLogpushConnectorId = MapleUuidId(
-	"@maple/CloudflareLogpushConnectorId",
-	"Cloudflare Logpush Connector ID",
-)
-export type CloudflareLogpushConnectorId = Schema.Schema.Type<typeof CloudflareLogpushConnectorId>
-
 export const AlertDestinationId = MapleUuidId("@maple/AlertDestinationId", "Alert Destination ID")
 export type AlertDestinationId = Schema.Schema.Type<typeof AlertDestinationId>
 
@@ -155,7 +149,13 @@ export const ScrapeIntervalSeconds = Schema.Number.check(
 )
 export type ScrapeIntervalSeconds = Schema.Schema.Type<typeof ScrapeIntervalSeconds>
 
-export const ScrapeAuthType = Schema.Literals(["none", "bearer", "basic", "token"]).annotate({
+export const ScrapeAuthType = Schema.Literals([
+	"none",
+	"bearer",
+	"basic",
+	"token",
+	"planetscale_oauth",
+]).annotate({
 	identifier: "@maple/ScrapeAuthType",
 	title: "Scrape Auth Type",
 })

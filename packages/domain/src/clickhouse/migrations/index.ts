@@ -3,6 +3,9 @@ import { migration_0001_initial } from "./0001_initial"
 import { migration_0002_service_map_edges_rollup } from "./0002_service_map_edges_rollup"
 import { migration_0003_error_events_label } from "./0003_error_events_label"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
+import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_error_columns"
+import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
+import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hyperdrive"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -36,6 +39,9 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0002_service_map_edges_rollup,
 	migration_0003_error_events_label,
 	migration_0004_service_namespace_projections,
+	migration_0005_alert_checks_error_columns,
+	migration_0006_db_edge_namespace,
+	migration_0007_db_namespace_hyperdrive,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

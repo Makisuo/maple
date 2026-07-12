@@ -58,7 +58,7 @@ export {
 
 export { if_, multiIf, coalesce, nullIf } from "./conditional"
 
-export { arrayOf, arrayStringConcat, arrayFilter } from "./array"
+export { arrayOf, arrayStringConcat, arrayFilter, arrayJoin } from "./array"
 
 export { mapContains, mapGet, mapKeys, mapValues, mapLiteral } from "./map"
 

@@ -1,8 +1,4 @@
-import { Clock, Effect, Schema } from "effect"
-import { DeploymentEnvironment, ServiceExternalEdgesRequest, ServiceName } from "@maple/domain/http"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { summarizeSampling } from "@/lib/sampling"
-import { WarehouseDateTimeString, decodeInput, runWarehouseQuery } from "@/api/warehouse/effect-utils"
 
 type ServiceExternalTargetType = "http" | "messaging" | "rpc"
 
@@ -19,20 +15,6 @@ export interface ServiceExternalEdge {
 	p95DurationMs: number
 	hasSampling: boolean
 	samplingWeight: number
-}
-
-const GetServiceExternalEdgesInputSchema = Schema.Struct({
-	serviceName: ServiceName,
-	startTime: Schema.optional(WarehouseDateTimeString),
-	endTime: Schema.optional(WarehouseDateTimeString),
-	deploymentEnv: Schema.optional(DeploymentEnvironment),
-})
-
-export type GetServiceExternalEdgesInput = (typeof GetServiceExternalEdgesInputSchema)["Encoded"]
-
-const defaultTimeRange = (nowMillis: number) => {
-	const fmt = (ms: number) => new Date(ms).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(nowMillis - 24 * 60 * 60 * 1000), endTime: fmt(nowMillis) }
 }
 
 const knownTargetTypes: ReadonlySet<ServiceExternalTargetType> = new Set(["http", "messaging", "rpc"])
@@ -67,38 +49,3 @@ export function transformExternalEdge(
 		samplingWeight: sampling.weight,
 	}
 }
-
-export const getServiceExternalEdges = Effect.fn("QueryEngine.getServiceExternalEdges")(function* ({
-	data,
-}: {
-	data: GetServiceExternalEdgesInput
-}) {
-	const input = yield* decodeInput(
-		GetServiceExternalEdgesInputSchema,
-		data ?? {},
-		"getServiceExternalEdges",
-	)
-	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
-
-	const result = yield* runWarehouseQuery("serviceExternalEdges", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.serviceExternalEdges({
-				payload: new ServiceExternalEdgesRequest({
-					serviceName: input.serviceName,
-					startTime: input.startTime ?? fallback.startTime,
-					endTime: input.endTime ?? fallback.endTime,
-					deploymentEnv: input.deploymentEnv,
-				}),
-			})
-		}),
-	)
-
-	const startMs = input.startTime ? new Date(input.startTime.replace(" ", "T") + "Z").getTime() : 0
-	const endMs = input.endTime ? new Date(input.endTime.replace(" ", "T") + "Z").getTime() : 0
-	const durationSeconds = startMs > 0 && endMs > 0 ? Math.max((endMs - startMs) / 1000, 1) : 3600
-
-	return {
-		edges: result.data.map((row) => transformExternalEdge(row, durationSeconds)),
-	}
-})

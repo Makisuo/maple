@@ -83,13 +83,13 @@ export const diagnoseScrapeError = (
 			severity: "error",
 			title: "Authentication rejected",
 			summary: planetScale
-				? `PlanetScale rejected the service token (HTTP ${status}).`
+				? `PlanetScale rejected the credentials (HTTP ${status}).`
 				: `The target rejected the credentials (HTTP ${status}).`,
 			fixes: planetScale
 				? [
-						"Check the service-token id and secret in this target's settings.",
-						"Confirm the token has the read_metrics_endpoints permission.",
-						"Re-create the token in PlanetScale if it was revoked or rotated, then update it here.",
+						"For the managed integration target, reconnect PlanetScale from the Integrations page to refresh the authorization.",
+						"Confirm the authorization (OAuth app scope or service token) has the read_metrics_endpoints permission.",
+						"For a manual service-token target, re-create the token in PlanetScale if it was revoked or rotated, then update it here.",
 					]
 				: [
 						"Check the auth type and credentials configured for this target.",

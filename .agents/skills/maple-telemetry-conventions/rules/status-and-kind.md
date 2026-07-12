@@ -49,7 +49,7 @@ The OTel spec defines five kinds. Maple uses three actively:
 | Kind | Use for | Example |
 |---|---|---|
 | `Server` | Inbound network request handlers | Ingest gateway `POST /v1/traces`, API HTTP handlers |
-| `Client` | Outbound network calls | Ingest forward to downstream collector, fetch to ClickHouse, Resend email API |
+| `Client` | Outbound network calls | Ingest forward to downstream collector, fetch to ClickHouse, Cloudflare Email send |
 | `Internal` | Everything in-process | Query compilation, cache lookups, validation, DSL evaluation |
 | `Producer` | (not currently used) | Reserved for future queue producers |
 | `Consumer` | (not currently used) | Reserved for future queue consumers |

@@ -64,7 +64,7 @@ const ProtocolTag = Context.Service<Protocol, Protocol["Service"]>(
  * @category initial message
  * @since 4.0.0
  */
-export const makeInitialMessage = <S extends Schema.Top, E, R2>(
+export const makeInitialMessage = <S extends Schema.Constraint, E, R2>(
   schema: S,
   effect: Effect.Effect<S["Type"], E, R2>
 ): Effect.Effect<
@@ -89,7 +89,7 @@ export const makeInitialMessage = <S extends Schema.Top, E, R2>(
  * @category initial message
  * @since 4.0.0
  */
-export const layerInitialMessage = <S extends Schema.Top, R2>(
+export const layerInitialMessage = <S extends Schema.Constraint, R2>(
   schema: S,
   build: Effect.Effect<S["Type"], never, R2>
 ): Layer.Layer<InitialMessage, never, S["EncodingServices"] | R2> =>
@@ -108,7 +108,7 @@ export const layerInitialMessage = <S extends Schema.Top, R2>(
  * @category initial message
  * @since 4.0.0
  */
-export const initialMessage = <S extends Schema.Top>(
+export const initialMessage = <S extends Schema.Constraint>(
   schema: S
 ): Effect.Effect<S["Type"], NoSuchElementError | Schema.SchemaError, Protocol | S["DecodingServices"]> =>
   ProtocolTag.pipe(

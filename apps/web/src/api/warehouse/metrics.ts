@@ -8,6 +8,7 @@ import {
 	WarehouseQueryError,
 	decodeInput,
 	executeQueryEngine,
+	extractAttributeValues,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
 import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
@@ -284,7 +285,7 @@ const GetMetricAttributeKeysInputSchema = Schema.Struct({
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	metricName: Schema.optional(Schema.String),
-	metricType: Schema.optional(Schema.String),
+	metricType: Schema.optional(MetricTypeSchema),
 })
 
 export type GetMetricAttributeKeysInput = Schema.Schema.Type<typeof GetMetricAttributeKeysInputSchema>
@@ -308,7 +309,12 @@ const getMetricAttributeKeysEffect = Effect.fn("QueryEngine.getMetricAttributeKe
 	const request = new QueryEngineExecuteRequest({
 		startTime: input.startTime ?? fallback.startTime,
 		endTime: input.endTime ?? fallback.endTime,
-		query: { kind: "attributeKeys" as const, source: "metrics" as const },
+		query: {
+			kind: "attributeKeys" as const,
+			source: "metrics" as const,
+			metricName: input.metricName,
+			metricType: input.metricType,
+		},
 	})
 	const response = yield* executeQueryEngine("queryEngine.getMetricAttributeKeys", request)
 	const result = response.result
@@ -317,6 +323,58 @@ const getMetricAttributeKeysEffect = Effect.fn("QueryEngine.getMetricAttributeKe
 	return {
 		data: result.data.map((row) => ({
 			attributeKey: row.key,
+			usageCount: Number(row.count),
+		})),
+	}
+})
+
+const GetMetricAttributeValuesInputSchema = Schema.Struct({
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+	attributeKey: Schema.String,
+	metricName: Schema.optional(Schema.String),
+	metricType: Schema.optional(MetricTypeSchema),
+})
+
+export type GetMetricAttributeValuesInput = Schema.Schema.Type<typeof GetMetricAttributeValuesInputSchema>
+
+export function getMetricAttributeValues({ data }: { data: GetMetricAttributeValuesInput }) {
+	return getMetricAttributeValuesEffect({ data })
+}
+
+const getMetricAttributeValuesEffect = Effect.fn("QueryEngine.getMetricAttributeValues")(function* ({
+	data,
+}: {
+	data: GetMetricAttributeValuesInput
+}) {
+	const input = yield* decodeInput(GetMetricAttributeValuesInputSchema, data ?? {}, "getMetricAttributeValues")
+
+	yield* Effect.annotateCurrentSpan("attributeKey", input.attributeKey)
+
+	if (!input.attributeKey) {
+		return { data: [] }
+	}
+
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+	const response = yield* executeQueryEngine(
+		"queryEngine.getMetricAttributeValues",
+		new QueryEngineExecuteRequest({
+			startTime: input.startTime ?? fallback.startTime,
+			endTime: input.endTime ?? fallback.endTime,
+			query: {
+				kind: "attributeValues" as const,
+				source: "metrics" as const,
+				scope: "metric" as const,
+				attributeKey: input.attributeKey,
+				metricName: input.metricName,
+				metricType: input.metricType,
+			},
+		}),
+	)
+
+	return {
+		data: extractAttributeValues(response).map((row) => ({
+			attributeValue: row.value,
 			usageCount: Number(row.count),
 		})),
 	}

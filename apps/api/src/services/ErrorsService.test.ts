@@ -26,6 +26,7 @@ import {
 } from "@maple/db"
 import { eq } from "drizzle-orm"
 import type { CompiledQuery } from "@maple/query-engine/ch"
+import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
 import { Database, DatabaseError } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
@@ -90,14 +91,33 @@ describe("isBusyDatabaseError", () => {
 		expect(isBusyDatabaseError(makeError("wrapper", cause))).toBe(true)
 	})
 
+	it("matches Postgres serialization_failure (SQLSTATE 40001) via the cause code", () => {
+		const cause = Object.assign(new Error("could not serialize access due to concurrent update"), {
+			code: "40001",
+		})
+		expect(isBusyDatabaseError(makeError("query failed", cause))).toBe(true)
+	})
+
+	it("matches Postgres deadlock_detected (SQLSTATE 40P01) via the cause code", () => {
+		const cause = Object.assign(new Error("deadlock detected"), { code: "40P01" })
+		expect(isBusyDatabaseError(makeError("query failed", cause))).toBe(true)
+	})
+
+	it("matches PG contention codes appearing in the message", () => {
+		expect(isBusyDatabaseError(makeError("SQLSTATE 40001: could not serialize access"))).toBe(true)
+		expect(isBusyDatabaseError(makeError("SQLSTATE 40P01: deadlock detected"))).toBe(true)
+	})
+
 	it("rejects unrelated database errors", () => {
 		expect(isBusyDatabaseError(makeError("UNIQUE constraint failed"))).toBe(false)
 		expect(isBusyDatabaseError(makeError("no such table"))).toBe(false)
+		const uniqueViolation = Object.assign(new Error("duplicate key value"), { code: "23505" })
+		expect(isBusyDatabaseError(makeError("query failed", uniqueViolation))).toBe(false)
 	})
 })
 
 // ---------------------------------------------------------------------------
-// libsql-backed integration harness (fresh temp DB per test)
+// PGlite-backed integration harness (fresh in-memory DB per test)
 // ---------------------------------------------------------------------------
 
 const createdDbs: TestDb[] = []
@@ -153,7 +173,11 @@ const makeWarehouseStub = (
 	},
 })
 
-const makeErrorsLayer = (scanRows?: () => ReadonlyArray<Record<string, unknown>>, onScan?: () => void) => {
+const makeErrorsLayer = (
+	scanRows?: () => ReadonlyArray<Record<string, unknown>>,
+	onScan?: () => void,
+	edgeBackend?: ReturnType<typeof makeMemoryBackend>,
+) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
@@ -166,6 +190,88 @@ const makeErrorsLayer = (scanRows?: () => ReadonlyArray<Record<string, unknown>>
 				envLive,
 				databaseLive,
 				Layer.succeed(WarehouseQueryService, makeWarehouseStub(scanRows, onScan)),
+				Layer.succeed(EdgeCacheService, makeEdgeCacheService(edgeBackend ?? makeMemoryBackend())),
+				dispatcherStub,
+			),
+		),
+		Layer.provideMerge(databaseLive),
+	)
+}
+
+/**
+ * Wraps the in-memory edge-cache backend to record which buckets were written to
+ * / read from, so a test can prove the EdgeCacheService is actually exercised at
+ * runtime — not merely required by the layer (a regression that stopped *using*
+ * the cache while still depending on it would otherwise pass silently).
+ */
+const makeSpyEdgeBackend = () => {
+	const inner = makeMemoryBackend()
+	const puts: Array<string> = []
+	const gets: Array<string> = []
+	const backend: ReturnType<typeof makeMemoryBackend> = {
+		get: (bucket, hash, nowMs) => {
+			gets.push(bucket)
+			return inner.get(bucket, hash, nowMs)
+		},
+		put: (bucket, hash, value, ttlSeconds, nowMs) => {
+			puts.push(bucket)
+			return inner.put(bucket, hash, value, ttlSeconds, nowMs)
+		},
+		delete: inner.delete,
+	}
+	return { backend, puts, gets }
+}
+
+/**
+ * Layer variant for active-org gating tests. Lets a test force discovery to
+ * FAIL (to exercise the fail-CLOSED path) and/or capture the cost `profile`
+ * each query context was issued with.
+ */
+const makeGatingLayer = (opts: {
+	failDiscovery?: boolean
+	scanRows?: () => ReadonlyArray<Record<string, unknown>>
+	scanned?: Set<string>
+	profiles?: Map<string, string | undefined>
+}) => {
+	const testDb = createTestDb(createdDbs)
+	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
+	const databaseLive = testDb.layer
+	const dispatcherStub = Layer.succeed(NotificationDispatcher, {
+		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
+	})
+	const scanRows = opts.scanRows ?? (() => [])
+	const warehouseStub: WarehouseQueryServiceShape = {
+		query: () => Effect.die(new Error("unexpected warehouse query")),
+		sqlQuery: () => Effect.succeed([]),
+		compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) => {
+			if (options?.context) opts.profiles?.set(options.context, options.profile)
+			if (options?.context === "errorActiveOrgsDiscovery") {
+				if (opts.failDiscovery) return Effect.die(new Error("discovery down"))
+				const orgId = (tenant as { orgId?: string }).orgId ?? ""
+				return Effect.sync(() => compiled.castRows(scanRows().length > 0 ? [{ orgId }] : []))
+			}
+			if (options?.context === "errorIssuesScan") {
+				const orgId = (tenant as { orgId?: string }).orgId ?? ""
+				return Effect.sync(() => {
+					opts.scanned?.add(orgId)
+					return compiled.castRows(scanRows())
+				})
+			}
+			return Effect.sync(() => compiled.castRows([]))
+		},
+		compiledQueryFirst: () => Effect.die(new Error("unexpected warehouse query")),
+		ingest: () => Effect.void,
+		asExecutor: () => {
+			throw new Error("asExecutor is not supported by this test stub")
+		},
+	}
+	return ErrorsService.layer.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				envLive,
+				databaseLive,
+				Layer.succeed(WarehouseQueryService, warehouseStub),
+				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
 				dispatcherStub,
 			),
 		),
@@ -254,7 +360,7 @@ describe("ErrorsService.setSeverity", () => {
 			)
 			const severityEvents = events.filter((e) => e.type === "severity_change")
 			assert.lengthOf(severityEvents, 1)
-			expect(severityEvents[0]?.payloadJson).toMatchObject({
+			assert.deepInclude(asJsonRecord(severityEvents[0]?.payloadJson), {
 				to: "critical",
 				source: "manual",
 				note: "paging-worthy",
@@ -518,6 +624,58 @@ describe("ErrorsService.runTick", () => {
 				),
 			),
 		)
+	})
+
+	it.effect("discovery failure fails CLOSED — stateful orgs scanned, idle orgs skipped", () => {
+		const scanned = new Set<string>()
+		const IDLE = asOrgId("org_idle_ingest_only")
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* TestClock.setTime(TICK_MS)
+			// ORG becomes known + stateful via an issue; IDLE is known via an ingest
+			// key only (no issue, no incident state).
+			yield* seedIssue(asIssueId(randomUUID()))
+			yield* seedIngestKey(IDLE)
+
+			yield* errors.runTick()
+
+			// The stateful org is still scanned so resolution/aging keeps running…
+			assert.isTrue(scanned.has(ORG))
+			// …but the idle org is NOT scanned: no fan-out to every known org (the old
+			// fail-OPEN behaviour would have scanned it via activeOrgs="all").
+			assert.isFalse(scanned.has(IDLE))
+		}).pipe(Effect.provide(makeGatingLayer({ failDiscovery: true, scanned })))
+	})
+
+	it.effect("discovery uses the 5s discovery profile; the per-org scan uses the list profile", () => {
+		const profiles = new Map<string, string | undefined>()
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+
+			yield* errors.runTick()
+
+			assert.strictEqual(profiles.get("errorActiveOrgsDiscovery"), "discovery")
+			assert.strictEqual(profiles.get("errorIssuesScan"), "list")
+		}).pipe(Effect.provide(makeGatingLayer({ scanRows: () => [scanRow()], profiles })))
+	})
+
+	it.effect("runTick writes the discovered active-org set to the edge cache", () => {
+		const spy = makeSpyEdgeBackend()
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* TestClock.setTime(TICK_MS)
+			// A known org with recent errors: discovery finds it, and resolveActiveOrgs
+			// caches the freshly-discovered active set — the cache is genuinely used.
+			yield* seedIssue(asIssueId(randomUUID()))
+
+			yield* errors.runTick()
+
+			// The active-org discovery result was written to the edge cache. Asserts the
+			// EdgeCacheService is exercised, not just present in the layer.
+			assert.isAbove(spy.puts.length, 0)
+		}).pipe(Effect.provide(makeErrorsLayer(() => [scanRow()], undefined, spy.backend)))
 	})
 
 	it.effect(

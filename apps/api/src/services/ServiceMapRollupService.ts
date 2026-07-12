@@ -104,6 +104,8 @@ export class ServiceMapRollupService extends Context.Service<
 							context: "serviceMapRollup",
 						})
 						if (rows.length > 0) {
+							// Not metered to Autumn: derived from spans that were already billed
+							// on arrival at the ingest gateway.
 							yield* warehouse.ingest(tenant, "service_map_edges_hourly", rows)
 							edgesWritten += rows.length
 						}
@@ -155,21 +157,26 @@ export class ServiceMapRollupService extends Context.Service<
 				orgRows,
 				(row) =>
 					processOrg(row.orgId as OrgId).pipe(
+						// Interrupts (isolate teardown) are NOT failures — re-raise them
+						// so the tick cancels promptly instead of logging phantom
+						// per-org failures.
 						Effect.catchCause((cause) =>
-							Effect.as(
-								Effect.logError("Service map rollup failed for org").pipe(
-									Effect.annotateLogs({
-										orgId: row.orgId,
-										error: Cause.pretty(cause),
-									}),
-								),
-								{
-									hoursRolledUp: 0,
-									edgesWritten: 0,
-									resolutionsWritten: 0,
-									failed: true,
-								},
-							),
+							Cause.hasInterruptsOnly(cause)
+								? Effect.interrupt
+								: Effect.as(
+										Effect.logError("Service map rollup failed for org").pipe(
+											Effect.annotateLogs({
+												orgId: row.orgId,
+												error: Cause.pretty(cause),
+											}),
+										),
+										{
+											hoursRolledUp: 0,
+											edgesWritten: 0,
+											resolutionsWritten: 0,
+											failed: true,
+										},
+									),
 						),
 					),
 				{ concurrency: ORG_CONCURRENCY },

@@ -67,7 +67,7 @@ const recurDefaults = memoize((ast: SchemaAST.AST): SchemaAST.AST => {
  * @category constructors
  * @since 4.0.0
  */
-export function makeEffect<S extends Schema.Top>(schema: S) {
+export function makeEffect<S extends Schema.Constraint>(schema: S) {
   const ast = recurDefaults(SchemaAST.toType(schema.ast))
   const parser = run<S["Type"], never>(ast)
   return (input: S["~type.make.in"], options?: Schema.MakeOptions): Effect.Effect<S["Type"], SchemaIssue.Issue> => {
@@ -98,7 +98,7 @@ export function makeEffect<S extends Schema.Top>(schema: S) {
  * @category constructors
  * @since 4.0.0
  */
-export function makeOption<S extends Schema.Top>(schema: S) {
+export function makeOption<S extends Schema.Constraint>(schema: S) {
   const parser = makeEffect(schema)
   return (input: S["~type.make.in"], options?: Schema.MakeOptions): Option.Option<S["Type"]> => {
     const exit = Effect.runSyncExit(parser(input, options))
@@ -132,7 +132,7 @@ export function makeOption<S extends Schema.Top>(schema: S) {
  * @category constructors
  * @since 4.0.0
  */
-export function make<S extends Schema.Top>(schema: S) {
+export function make<S extends Schema.Constraint>(schema: S) {
   const parser = makeEffect(schema)
   return (input: S["~type.make.in"], options?: Schema.MakeOptions): S["Type"] => {
     const exit = Effect.runSyncExit(parser(input, options))
@@ -222,7 +222,7 @@ export function _issue<T>(ast: SchemaAST.AST) {
  * @category Asserting
  * @since 4.0.0
  */
-export function asserts<S extends Schema.Top, I>(schema: S, input: I): asserts input is I & S["Type"] {
+export function asserts<S extends Schema.Constraint, I>(schema: S, input: I): asserts input is I & S["Type"] {
   const parser = asExit(run<S["Type"], never>(SchemaAST.toType(schema.ast)))
   const exit = parser(input, SchemaAST.defaultParseOptions)
   if (Exit.isFailure(exit)) {
@@ -255,7 +255,7 @@ export function asserts<S extends Schema.Top, I>(schema: S, input: I): asserts i
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownEffect<S extends Schema.Top>(
+export function decodeUnknownEffect<S extends Schema.Constraint>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (
@@ -290,7 +290,7 @@ export function decodeUnknownEffect<S extends Schema.Top>(
  * @category decoding
  * @since 4.0.0
  */
-export const decodeEffect: <S extends Schema.Top>(
+export const decodeEffect: <S extends Schema.Constraint>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (
@@ -322,7 +322,7 @@ export const decodeEffect: <S extends Schema.Top>(
  * @category decoding
  * @since 3.10.0
  */
-export function decodeUnknownPromise<S extends Schema.Decoder<unknown>>(
+export function decodeUnknownPromise<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Promise<S["Type"]> {
@@ -354,7 +354,7 @@ export function decodeUnknownPromise<S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 3.10.0
  */
-export function decodePromise<S extends Schema.Decoder<unknown>>(
+export function decodePromise<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Promise<S["Type"]> {
@@ -390,7 +390,7 @@ export function decodePromise<S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownExit<S extends Schema.Decoder<unknown>>(
+export function decodeUnknownExit<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Exit.Exit<S["Type"], SchemaIssue.Issue> {
@@ -423,14 +423,14 @@ export function decodeUnknownExit<S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 4.0.0
  */
-export const decodeExit: <S extends Schema.Decoder<unknown>>(
+export const decodeExit: <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Exit.Exit<S["Type"], SchemaIssue.Issue> =
   decodeUnknownExit
 
 /** @internal */
-export function decodeUnknownOption<S extends Schema.Decoder<unknown>>(
+export function decodeUnknownOption<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Option.Option<S["Type"]> {
@@ -438,7 +438,7 @@ export function decodeUnknownOption<S extends Schema.Decoder<unknown>>(
 }
 
 /** @internal */
-export const decodeOption: <S extends Schema.Decoder<unknown>>(
+export const decodeOption: <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Option.Option<S["Type"]> = decodeUnknownOption
@@ -469,7 +469,7 @@ export const decodeOption: <S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 4.0.0
  */
-export function decodeUnknownResult<S extends Schema.Decoder<unknown>>(
+export function decodeUnknownResult<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Result.Result<S["Type"], SchemaIssue.Issue> {
@@ -502,7 +502,7 @@ export function decodeUnknownResult<S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 4.0.0
  */
-export const decodeResult: <S extends Schema.Decoder<unknown>>(
+export const decodeResult: <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => Result.Result<S["Type"], SchemaIssue.Issue> =
@@ -534,7 +534,7 @@ export const decodeResult: <S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 3.10.0
  */
-export function decodeUnknownSync<S extends Schema.Decoder<unknown>>(
+export function decodeUnknownSync<S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => S["Type"] {
@@ -568,7 +568,7 @@ export function decodeUnknownSync<S extends Schema.Decoder<unknown>>(
  * @category decoding
  * @since 3.10.0
  */
-export const decodeSync: <S extends Schema.Decoder<unknown>>(
+export const decodeSync: <S extends Schema.ConstraintDecoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Encoded"], options?: SchemaAST.ParseOptions) => S["Type"] = decodeUnknownSync
@@ -594,7 +594,7 @@ export const decodeSync: <S extends Schema.Decoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownEffect<S extends Schema.Top>(
+export function encodeUnknownEffect<S extends Schema.Constraint>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (
@@ -628,7 +628,7 @@ export function encodeUnknownEffect<S extends Schema.Top>(
  * @category encoding
  * @since 4.0.0
  */
-export const encodeEffect: <S extends Schema.Top>(
+export const encodeEffect: <S extends Schema.Constraint>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (
@@ -660,7 +660,7 @@ export const encodeEffect: <S extends Schema.Top>(
  * @category encoding
  * @since 3.10.0
  */
-export const encodeUnknownPromise = <S extends Schema.Encoder<unknown>>(
+export const encodeUnknownPromise = <S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Promise<S["Encoded"]> =>
@@ -691,7 +691,7 @@ export const encodeUnknownPromise = <S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 3.10.0
  */
-export const encodePromise: <S extends Schema.Encoder<unknown>>(
+export const encodePromise: <S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Promise<S["Encoded"]> = encodeUnknownPromise
@@ -722,7 +722,7 @@ export const encodePromise: <S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownExit<S extends Schema.Encoder<unknown>>(
+export function encodeUnknownExit<S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Exit.Exit<S["Encoded"], SchemaIssue.Issue> {
@@ -755,14 +755,14 @@ export function encodeUnknownExit<S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export const encodeExit: <S extends Schema.Encoder<unknown>>(
+export const encodeExit: <S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Exit.Exit<S["Encoded"], SchemaIssue.Issue> =
   encodeUnknownExit
 
 /** @internal */
-export function encodeUnknownOption<S extends Schema.Encoder<unknown>>(
+export function encodeUnknownOption<S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Option.Option<S["Encoded"]> {
@@ -770,7 +770,7 @@ export function encodeUnknownOption<S extends Schema.Encoder<unknown>>(
 }
 
 /** @internal */
-export const encodeOption: <S extends Schema.Encoder<unknown>>(
+export const encodeOption: <S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Option.Option<S["Encoded"]> = encodeUnknownOption
@@ -803,7 +803,7 @@ export const encodeOption: <S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export function encodeUnknownResult<S extends Schema.Encoder<unknown>>(
+export function encodeUnknownResult<S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => Result.Result<S["Encoded"], SchemaIssue.Issue> {
@@ -836,7 +836,7 @@ export function encodeUnknownResult<S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 4.0.0
  */
-export const encodeResult: <S extends Schema.Encoder<unknown>>(
+export const encodeResult: <S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => Result.Result<S["Encoded"], SchemaIssue.Issue> =
@@ -867,7 +867,7 @@ export const encodeResult: <S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 3.10.0
  */
-export function encodeUnknownSync<S extends Schema.Encoder<unknown>>(
+export function encodeUnknownSync<S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ): (input: unknown, options?: SchemaAST.ParseOptions) => S["Encoded"] {
@@ -901,7 +901,7 @@ export function encodeUnknownSync<S extends Schema.Encoder<unknown>>(
  * @category encoding
  * @since 3.10.0
  */
-export const encodeSync: <S extends Schema.Encoder<unknown>>(
+export const encodeSync: <S extends Schema.ConstraintEncoder<unknown>>(
   schema: S,
   options?: SchemaAST.ParseOptions
 ) => (input: S["Type"], options?: SchemaAST.ParseOptions) => S["Encoded"] = encodeUnknownSync
@@ -1007,11 +1007,14 @@ export interface Parser {
 const recur = memoize(
   (ast: SchemaAST.AST): Parser => {
     let parser: Parser
-    const encodingChecks = SchemaAST.getEncodingChecks(ast)
-    const resolvedChecks = ast.checks ?? encodingChecks
-    const astOptions = (resolvedChecks ? resolvedChecks[resolvedChecks.length - 1].annotations : ast.annotations)
+    const checks = ast.checks
+    const encoding = ast.encoding
+    const links = encoding
+    const len = links?.length ?? 0
+    const encodingChecks = (ast as any).encodingChecks
+    const astOptions = (checks ? checks[checks.length - 1].annotations : ast.annotations)
       ?.["parseOptions"]
-    if (!ast.context && !ast.encoding && !ast.checks && !encodingChecks) {
+    if (!ast.context && !encoding && !checks && !encodingChecks) {
       return (ou, options) => {
         parser ??= ast.getParser(recur)
         if (astOptions) {
@@ -1022,15 +1025,15 @@ const recur = memoize(
     }
     const isStructural = SchemaAST.isArrays(ast) || SchemaAST.isObjects(ast) ||
       (SchemaAST.isDeclaration(ast) && ast.typeParameters.length > 0)
+    const structuralChecks = checks && isStructural ?
+      checks.filter((check) => check.annotations?.[SchemaAST.STRUCTURAL_ANNOTATION_KEY]) :
+      undefined
     return (ou, options) => {
       if (astOptions) {
         options = { ...options, ...astOptions }
       }
-      const encoding = ast.encoding
       let srou: Effect.Effect<Option.Option<unknown>, SchemaIssue.Issue, unknown> | undefined
-      if (encoding) {
-        const links = encoding
-        const len = links.length
+      if (links) {
         for (let i = len - 1; i >= 0; i--) {
           const link = links[i]
           const to = link.to
@@ -1047,57 +1050,62 @@ const recur = memoize(
       }
 
       parser ??= ast.getParser(recur)
-      let sroa = srou ? Effect.flatMapEager(srou, (ou) => parser(ou, options)) : parser(ou, options)
+      const parseLocal = (localOu: Option.Option<unknown>) => {
+        let sroa = parser(localOu, options)
 
-      if (encodingChecks && !options?.disableChecks) {
-        sroa = Effect.flatMapEager(sroa, (oa) => {
-          if (Option.isSome(ou) && Option.isSome(oa)) {
-            const issues: Array<SchemaIssue.Issue> = []
+        if (encodingChecks && !options?.disableChecks) {
+          sroa = Effect.flatMapEager(sroa, (oa) => {
+            if (Option.isSome(localOu) && Option.isSome(oa)) {
+              const issues: Array<SchemaIssue.Issue> = []
 
-            SchemaAST.collectIssues(encodingChecks, ou.value, issues, ast, options)
+              SchemaAST.collectIssues(encodingChecks, localOu.value, issues, ast, options)
 
-            if (Arr.isArrayNonEmpty(issues)) {
-              return Effect.fail(new SchemaIssue.Composite(ast, ou, issues))
+              if (Arr.isArrayNonEmpty(issues)) {
+                return Effect.fail(new SchemaIssue.Composite(ast, localOu, issues))
+              }
             }
-          }
-          return Effect.succeed(oa)
-        })
-      }
-
-      if (ast.checks && !options?.disableChecks) {
-        const checks = ast.checks
-        if (options?.errors === "all" && isStructural && Option.isSome(ou)) {
-          sroa = mapSchemaIssueEffect(sroa, (issue) => {
-            const issues: Array<SchemaIssue.Issue> = []
-            SchemaAST.collectIssues(
-              checks.filter((check) => check.annotations?.[SchemaAST.STRUCTURAL_ANNOTATION_KEY]),
-              ou.value,
-              issues,
-              ast,
-              options
-            )
-            const out: SchemaIssue.Issue = Arr.isArrayNonEmpty(issues)
-              ? issue._tag === "Composite" && issue.ast === ast
-                ? new SchemaIssue.Composite(ast, issue.actual, [...issue.issues, ...issues])
-                : new SchemaIssue.Composite(ast, ou, [issue, ...issues])
-              : issue
-            return out
+            return Effect.succeed(oa)
           })
         }
-        sroa = Effect.flatMapEager(sroa, (oa) => {
-          if (Option.isSome(oa)) {
-            const value = oa.value
-            const issues: Array<SchemaIssue.Issue> = []
 
-            SchemaAST.collectIssues(checks, value, issues, ast, options)
-
-            if (Arr.isArrayNonEmpty(issues)) {
-              return Effect.fail(new SchemaIssue.Composite(ast, oa, issues))
-            }
+        if (checks && !options?.disableChecks) {
+          if (options?.errors === "all" && structuralChecks && structuralChecks.length > 0 && Option.isSome(localOu)) {
+            sroa = mapSchemaIssueEffect(sroa, (issue) => {
+              const issues: Array<SchemaIssue.Issue> = []
+              SchemaAST.collectIssues(
+                structuralChecks,
+                localOu.value,
+                issues,
+                ast,
+                options
+              )
+              const out: SchemaIssue.Issue = Arr.isArrayNonEmpty(issues)
+                ? issue._tag === "Composite" && issue.ast === ast
+                  ? new SchemaIssue.Composite(ast, issue.actual, [...issue.issues, ...issues])
+                  : new SchemaIssue.Composite(ast, localOu, [issue, ...issues])
+                : issue
+              return out
+            })
           }
-          return Effect.succeed(oa)
-        })
+          sroa = Effect.flatMapEager(sroa, (oa) => {
+            if (Option.isSome(oa)) {
+              const value = oa.value
+              const issues: Array<SchemaIssue.Issue> = []
+
+              SchemaAST.collectIssues(checks, value, issues, ast, options)
+
+              if (Arr.isArrayNonEmpty(issues)) {
+                return Effect.fail(new SchemaIssue.Composite(ast, oa, issues))
+              }
+            }
+            return Effect.succeed(oa)
+          })
+        }
+
+        return sroa
       }
+
+      const sroa = srou ? Effect.flatMapEager(srou, parseLocal) : parseLocal(ou)
 
       return sroa
     }

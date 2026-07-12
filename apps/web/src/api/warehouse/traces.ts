@@ -1,5 +1,5 @@
 import { Clock, Effect, Schema } from "effect"
-import { QueryEngineExecuteRequest, type AttributeFilter } from "@maple/query-engine"
+import { QueryEngineExecuteRequest, TracesFacetDimension, type AttributeFilter } from "@maple/query-engine"
 import { TraceId, SpanId } from "@maple/domain"
 import {
 	DeploymentEnvironment,
@@ -541,6 +541,47 @@ const getTracesFacetsEffect = Effect.fn("QueryEngine.getTracesFacets")(function*
 			errorCount: errorRow ? Number(errorRow.count) : 0,
 			durationStats: statsData,
 		} satisfies TracesFacets,
+	}
+})
+
+// Single facet list for dashboard variables: compiles only the requested UNION
+// branch server-side and skips the duration-stats companion query, instead of
+// the full multi-facet scan `getTracesFacets` runs for the traces sidebar.
+const GetTracesFacetValuesInputSchema = Schema.Struct({
+	startTime: Schema.optional(WarehouseDateTimeString),
+	endTime: Schema.optional(WarehouseDateTimeString),
+	facet: TracesFacetDimension,
+})
+
+export type GetTracesFacetValuesInput = (typeof GetTracesFacetValuesInputSchema)["Encoded"]
+
+export function getTracesFacetValues({ data }: { data: GetTracesFacetValuesInput }) {
+	return getTracesFacetValuesEffect({ data })
+}
+
+const getTracesFacetValuesEffect = Effect.fn("QueryEngine.getTracesFacetValues")(function* ({
+	data,
+}: {
+	data: GetTracesFacetValuesInput
+}) {
+	const input = yield* decodeInput(GetTracesFacetValuesInputSchema, data ?? {}, "getTracesFacetValues")
+
+	yield* Effect.annotateCurrentSpan("facet", input.facet)
+
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+	const response = yield* executeQueryEngine(
+		"queryEngine.getTracesFacetValues",
+		new QueryEngineExecuteRequest({
+			startTime: input.startTime ?? fallback.startTime,
+			endTime: input.endTime ?? fallback.endTime,
+			query: { kind: "facets" as const, source: "traces" as const, facet: input.facet },
+		}),
+	)
+
+	return {
+		data: extractFacets(response)
+			.filter((row) => row.facetType === input.facet)
+			.map((row): FacetItem => ({ name: row.name, count: Number(row.count) })),
 	}
 })
 

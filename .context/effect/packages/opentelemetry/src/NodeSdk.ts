@@ -21,10 +21,10 @@ import * as Effect from "effect/Effect"
 import { constant, type LazyArg } from "effect/Function"
 import * as Layer from "effect/Layer"
 import { isNonEmpty } from "./internal/utilities.ts"
-import * as Logger from "./Logger.ts"
-import * as Metrics from "./Metrics.ts"
+import * as Logger from "./OtelLogger.ts"
+import * as Metrics from "./OtelMetrics.ts"
+import * as Tracer from "./OtelTracer.ts"
 import * as Resource from "./Resource.ts"
-import * as Tracer from "./Tracer.ts"
 
 /**
  * Configuration for the Node OpenTelemetry layer, including optional tracing, metrics, logging, resource, and shutdown settings.

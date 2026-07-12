@@ -203,3 +203,61 @@ describe("sessionReplaysListQuery session-time filters", () => {
 		expect(sql).toContain("Timestamp >= '2026-06-24 04:00:00'")
 	})
 })
+
+// ---------------------------------------------------------------------------
+// Event refinement — INNER JOIN the distilled session_events match subquery
+//
+// Powers the search_sessions MCP tool's "by what happened inside" filtering.
+// Only an event predicate triggers the join; metadata-only filters (including
+// the web listReplays path) must never read session_events.
+// ---------------------------------------------------------------------------
+
+describe("sessionReplaysListQuery event refinement", () => {
+	it("INNER JOINs the session_events match subquery and selects matchCount", () => {
+		const { sql } = compileCH(
+			sessionReplaysListQuery({ eventType: "network", eventMinStatus: 500 }),
+			{ ...baseParams, ...WINDOW },
+		)
+		expect(sql).toContain("INNER JOIN")
+		expect(sql).toContain("FROM session_events")
+		expect(sql).toContain("ON s.sessionId = e.sessionId")
+		expect(sql).toContain("AS matchCount")
+		// The event predicates land in the joined subquery.
+		expect(sql).toContain("Type = 'network'")
+		expect(sql).toContain("NetStatus >= 500")
+	})
+
+	it("keeps session-metadata filters on the base while the event predicate joins", () => {
+		const { sql } = compileCH(sessionReplaysListQuery({ userId: "4632", eventType: "error" }), {
+			...baseParams,
+			...WINDOW,
+		})
+		// user filter stays on the session_replays base…
+		expect(sql).toContain("UserId = '4632'")
+		// …and the event predicate rides the joined session_events subquery.
+		expect(sql).toContain("INNER JOIN")
+		expect(sql).toContain("Type = 'error'")
+	})
+
+	it("chains the event INNER JOIN with the active-time LEFT JOIN", () => {
+		const { sql } = compileCH(
+			sessionReplaysListQuery({ eventType: "network", activeTimeMinMs: 1000 }),
+			{ ...baseParams, ...WINDOW },
+		)
+		expect(sql).toContain("INNER JOIN")
+		expect(sql).toContain("LEFT JOIN")
+		expect(sql).toContain("ON s.sessionId = e.sessionId")
+		expect(sql).toContain("ON s.sessionId = a.sessionId")
+		expect(sql).toContain("coalesce(a.activeTimeMs, 0) >= 1000")
+	})
+
+	it("never joins session_events for metadata-only filters (web listReplays path)", () => {
+		const { sql } = compileCH(
+			sessionReplaysListQuery({ userId: "4632", browser: "Chrome", hasErrors: true }),
+			{ ...baseParams, ...WINDOW },
+		)
+		expect(sql).not.toContain("JOIN")
+		expect(sql).not.toContain("session_events")
+		expect(sql).not.toContain("matchCount")
+	})
+})

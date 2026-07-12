@@ -15,6 +15,14 @@
 			"localConnectionString": "postgres://maple:maple@localhost:5499/maple",
 		},
 	],
+	// Cloudflare Email Service (Email Sending). `remote: true` routes sends through
+	// the real Cloudflare sender. (Mirrored in alchemy.run.ts for deploy.)
+	"send_email": [
+		{
+			"name": "EMAIL",
+			"remote": true,
+		},
+	],
 	"triggers": {
 		"crons": ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 9 * * *"],
 	},

@@ -16,7 +16,7 @@ const ROOT_ROLE = RoleName.make("root")
 
 /**
  * Reply-To for the founder-voice onboarding emails. Replies land in David's
- * inbox instead of the unattended `RESEND_FROM_EMAIL` so the "I read every
+ * inbox instead of the unattended `EMAIL_FROM` so the "I read every
  * email" promise in the copy is actually true.
  */
 const FOUNDER_REPLY_EMAIL = "david@maple.dev"

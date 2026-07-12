@@ -317,7 +317,7 @@ export const json = (body: unknown, contentType?: string): Effect.Effect<Uint8Ar
  * @category constructors
  * @since 4.0.0
  */
-export const jsonSchema = <S extends Schema.Top>(
+export const jsonSchema = <S extends Schema.Constraint>(
   schema: S,
   options?: ParseOptions | undefined
 ) => {
@@ -335,8 +335,8 @@ export const jsonSchema = <S extends Schema.Top>(
  * @category constructors
  * @since 4.0.0
  */
-export const urlParams = (urlParams: UrlParams.UrlParams, contentType?: string): Uint8Array =>
-  text(UrlParams.toString(urlParams), contentType ?? "application/x-www-form-urlencoded")
+export const urlParams = (urlParams: UrlParams.Input, contentType?: string): Uint8Array =>
+  text(UrlParams.toString(UrlParams.fromInput(urlParams)), contentType ?? "application/x-www-form-urlencoded")
 
 /**
  * HTTP body variant backed by Web `FormData`.

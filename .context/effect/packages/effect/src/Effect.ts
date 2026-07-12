@@ -1791,7 +1791,9 @@ export const fromResult: <A, E>(result: Result.Result<A, E>) => Effect<A, E> = i
  * **Details**
  *
  * `Option.some` becomes a successful effect with the contained value, while
- * `Option.none` becomes a failed effect with `NoSuchElementError`.
+ * `Option.none` becomes a failed effect. By default the failure is a
+ * `NoSuchElementError`, but you can provide an `onNone` callback to customize
+ * the error value.
  *
  * **Example** (Converting an Option into an Effect)
  *
@@ -1803,6 +1805,7 @@ export const fromResult: <A, E>(result: Result.Result<A, E>) => Effect<A, E> = i
  *
  * const effect1 = Effect.fromOption(some)
  * const effect2 = Effect.fromOption(none)
+ * const effect3 = Effect.fromOption(none, () => new Error("missing"))
  *
  * Effect.runPromise(effect1).then(console.log) // 42
  * Effect.runPromiseExit(effect2).then(console.log)
@@ -1812,9 +1815,12 @@ export const fromResult: <A, E>(result: Result.Result<A, E>) => Effect<A, E> = i
  * @category converting
  * @since 4.0.0
  */
-export const fromOption: <A>(
-  option: Option<A>
-) => Effect<A, Cause.NoSuchElementError> = internal.fromOption
+export const fromOption: <Arg extends Option<unknown> | LazyArg<unknown>, E = Cause.NoSuchElementError>(
+  arg: Arg,
+  ...rest: [Arg] extends [Option<unknown>] ? [onNone?: LazyArg<E>] : []
+) => [Arg] extends [Option<infer A>] ? Effect<A, E>
+  : [Arg] extends [LazyArg<infer E>] ? <A>(option: Option<A>) => Effect<A, E>
+  : never = internal.fromOption
 
 /**
  * Converts an `Option` of an `Effect` into an `Effect` of an `Option`.

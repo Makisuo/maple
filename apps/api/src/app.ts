@@ -11,7 +11,6 @@ import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
-import { HttpCloudflareLogpushLive } from "./routes/cloudflare-logpush.http"
 import { HttpDashboardsLive } from "./routes/dashboards.http"
 import { HttpDemoLive } from "./routes/demo.http"
 import { HttpDigestLive } from "./routes/digest.http"
@@ -25,6 +24,7 @@ import { HttpOnboardingLive } from "./routes/onboarding.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
+import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -46,7 +46,8 @@ import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
 import { InternalServiceAuthorizationLayer } from "./services/InternalServiceAuthorizationLayer"
-import { CloudflareLogpushService } from "./services/CloudflareLogpushService"
+import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
+import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
 import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
@@ -60,7 +61,10 @@ import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
+import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./services/PlanetScaleOAuthService"
+import { PlanetScaleService } from "./services/PlanetScaleService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { WarehouseQueryService } from "./lib/WarehouseQueryService"
 import { OAuthStateRepository } from "./services/OAuthStateRepository"
@@ -90,24 +94,45 @@ const DocsRoute = HttpApiScalar.layerCdn(MapleApi, {
 
 const InfraLive = Env.layer
 
+// PlanetScale layer composition: the OAuth grant (token lifecycle) feeds
+// discovery, scrape-time auth, the org binding, and the inventory poller.
+// Compose each wired layer once so memoization resolves them to single
+// instances (one discovery cache, one refresh single-flight).
+const PlanetScaleOAuthLive = PlanetScaleOAuthService.layer
+const PlanetScaleDiscoveryLive = PlanetScaleDiscoveryService.layer.pipe(
+	Layer.provide(PlanetScaleOAuthLive),
+)
+const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
+)
+
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
-	CloudflareLogpushService.layer,
+	CloudflareOAuthService.layer,
 	DashboardPersistenceService.layer,
 	HazelOAuthService.layer,
 	OnboardingService.layer,
 	OrgIngestKeysService.layer,
 	OrgClickHouseSettingsService.layer,
 	OrganizationService.layer,
-	// Shared with ScrapeTargetsService via layer memoization so the proxy and
-	// the internal target list resolve sub-targets from one discovery cache.
-	PlanetScaleDiscoveryService.layer,
-	ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
+	PlanetScaleOAuthLive,
+	PlanetScaleDiscoveryLive,
+	ScrapeTargetsLive,
+	PlanetScaleConnectionService.layer.pipe(
+		Layer.provide(Layer.mergeAll(ScrapeTargetsLive, PlanetScaleOAuthLive)),
+	),
+	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
 const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(Layer.provideMerge(CoreServicesLive))
+
+// Serves the integration page's per-zone collection status; the poll loop itself
+// runs in the alerting worker's cron, not here.
+const CloudflareAnalyticsServiceLive = CloudflareAnalyticsService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
+)
 
 const DemoServiceLive = DemoService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive)),
@@ -134,7 +159,12 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(Layer.provi
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provideMerge(
-		Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, NotificationDispatcherLive),
+		Layer.mergeAll(
+			CoreServicesLive,
+			WarehouseQueryServiceLive,
+			EdgeCacheServiceLive,
+			NotificationDispatcherLive,
+		),
 	),
 )
 
@@ -142,6 +172,9 @@ const RecommendationIssueServiceLive = RecommendationIssueService.layer.pipe(
 	Layer.provideMerge(WarehouseQueryServiceLive),
 )
 
+// WorkerEnvironment is intentionally NOT wired here (unlike the alerting worker):
+// AnomalyDetectionService reads it via Effect.serviceOption, so it degrades
+// gracefully when absent and is provided at worker scope where needed.
 const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, WarehouseQueryServiceLive, EdgeCacheServiceLive)),
 )
@@ -177,6 +210,7 @@ const VcsServicesLive = Layer.mergeAll(
 
 export const MainLive = Layer.mergeAll(
 	CoreServicesLive,
+	CloudflareAnalyticsServiceLive,
 	WarehouseQueryServiceLive,
 	EdgeCacheServiceLive,
 	QueryEngineServiceLive,
@@ -208,7 +242,6 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
 	Layer.provide(HttpAlertsLive),
 	Layer.provide(HttpErrorsLive),
-	Layer.provide(HttpCloudflareLogpushLive),
 	Layer.provide(HttpDashboardsLive),
 	Layer.provide(HttpDemoLive),
 	Layer.provide(HttpDigestLive),
@@ -234,6 +267,7 @@ export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
+	PlanetScaleWebhookRouter,
 	PrometheusScrapeProxyRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,
@@ -247,6 +281,8 @@ export const AllRoutes = Layer.mergeAll(
 			allowedOrigins: ["*"],
 			allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 			allowedHeaders: ["*"],
+			// The ElectricSQL shape proxy (and its electric-* exposed headers) moved
+			// to the standalone `apps/electric-sync` worker.
 			exposedHeaders: ["Mcp-Session-Id"],
 		}),
 	),

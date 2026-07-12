@@ -22,7 +22,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 		Schema.Struct({
 			rule_id: requiredStringParam("ID of the alert rule to inspect"),
 			group_key: optionalStringParam("Filter by a specific group key"),
-			status: optionalStringParam("Filter by check status: breached, healthy, skipped"),
+			status: optionalStringParam("Filter by check status: breached, healthy, skipped, error"),
 			since: optionalStringParam("ISO8601 timestamp — only return checks at or after this time"),
 			until: optionalStringParam("ISO8601 timestamp — only return checks at or before this time"),
 			limit: optionalNumberParam("Max checks to return (default 100, max 2000)"),
@@ -67,6 +67,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 			const breached = checks.filter((c) => c.status === "breached").length
 			const healthy = checks.filter((c) => c.status === "healthy").length
 			const skipped = checks.filter((c) => c.status === "skipped").length
+			const errored = checks.filter((c) => c.status === "error").length
 			const transitions = checks.filter((c) => c.incidentTransition !== "none").length
 
 			yield* Effect.annotateCurrentSpan({
@@ -79,7 +80,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 			const lines: string[] = [
 				`## Alert Checks`,
 				`Rule: ${rule_id}`,
-				`Total: ${checks.length} (${breached} breached · ${healthy} healthy · ${skipped} skipped · ${transitions} incident transitions)`,
+				`Total: ${checks.length} (${breached} breached · ${healthy} healthy · ${skipped} skipped · ${errored} errored · ${transitions} incident transitions)`,
 				``,
 			]
 
@@ -101,7 +102,11 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 					.map((c) => [
 						c.timestamp.slice(0, 19),
 						c.status,
-						c.observedValue != null ? String(c.observedValue) : "—",
+						c.status === "error" && c.errorMessage != null
+							? truncate(c.errorMessage, 40)
+							: c.observedValue != null
+								? String(c.observedValue)
+								: "—",
 						String(c.threshold),
 						String(c.sampleCount),
 						truncate(c.groupKey || "all", 20),
@@ -115,6 +120,11 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 			}
 
 			const nextSteps: string[] = []
+			if (errored > 0) {
+				nextSteps.push(
+					"Evaluations are failing — check `get_alert_rule` lastEvaluationError and fix the rule's query",
+				)
+			}
 			if (transitions > 0) {
 				nextSteps.push("`list_alert_incidents` — follow up on the triggered incidents")
 			}
@@ -137,6 +147,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 						breached,
 						healthy,
 						skipped,
+						errored,
 						transitions,
 						checks: checks.map((c) => ({
 							timestamp: c.timestamp,
@@ -153,6 +164,8 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 							incidentId: c.incidentId,
 							incidentTransition: c.incidentTransition,
 							evaluationDurationMs: c.evaluationDurationMs,
+							errorMessage: c.errorMessage,
+							errorCategory: c.errorCategory,
 						})),
 					},
 				}),

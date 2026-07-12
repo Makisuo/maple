@@ -24,7 +24,7 @@ import {
 	visibleSignalsNavItems,
 } from "@/components/dashboard/nav-items"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
-import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 
 const MAX_RESULTS = 12
@@ -103,7 +103,7 @@ function PaletteContent({
 
 	// These hooks live here (inside the open-gated popup) so the dashboards
 	// query only fires once the palette is first opened.
-	const { dashboards } = useDashboardStore()
+	const { dashboards } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 	const infraEnabled = useInfraEnabled()
 

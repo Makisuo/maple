@@ -178,6 +178,9 @@ export const make = (
         executeValues(sql, params) {
           return run(sql, params, true)
         },
+        executeValuesUnprepared(sql, params) {
+          return run(sql, params, true)
+        },
         executeUnprepared(sql, params, transformRows) {
           return this.execute(sql, params, transformRows)
         },

@@ -365,10 +365,11 @@
 	animation-delay: 0.32s;
 }
 
-/* Cold-boot splash — branded trace-waterfall loader (see boot-splash.tsx and
-   the inline copy in index.html). The amber mark sits still; a soft amber
-   shimmer sweeps through the span bars in sequence so it reads as spans
-   arriving. Keep this in sync with the inline copy in index.html. */
+/* Cold-boot splash — branded self-assembling trace waterfall (see boot-splash.tsx
+   and the inline copy in index.html). The amber mark sits still; five span bars
+   grow in, in start-time order, while a thin amber playhead scans across them so
+   it reads as a trace being collected in real time, not a skeleton shimmering.
+   Keep this in sync with the inline copy in index.html. */
 .boot-mark {
 	display: flex;
 	align-items: center;
@@ -380,73 +381,156 @@
 }
 
 .boot-trace {
-	display: flex;
-	width: 132px;
-	flex-direction: column;
-	gap: 7px;
+	position: relative;
+	width: 200px;
+	height: 73px;
+}
+
+.boot-track,
+.boot-span {
+	position: absolute;
+	height: 9px;
+	border-radius: 9999px;
+}
+
+/* faint empty slot so the un-arrived spans stay visible */
+.boot-track {
+	background: color-mix(in oklab, var(--primary) 9%, transparent);
 }
 
 .boot-span {
-	position: relative;
-	height: 8px;
-	overflow: hidden;
-	border-radius: 9999px;
-	background: color-mix(in oklab, var(--primary) 15%, transparent);
+	background: var(--primary);
+	transform-origin: left center;
+	transform: scaleX(0);
+	opacity: 0;
+	animation: maple-boot-land 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
-.boot-span::after {
-	content: "";
+/* row geometry: left = the span's start time, width = its duration */
+.boot-track--1,
+.boot-span--1 {
+	top: 0;
+	left: 0;
+	width: 200px;
+}
+.boot-track--2,
+.boot-span--2 {
+	top: 16px;
+	left: 14px;
+	width: 124px;
+}
+.boot-track--3,
+.boot-span--3 {
+	top: 32px;
+	left: 28px;
+	width: 70px;
+}
+.boot-track--4,
+.boot-span--4 {
+	top: 48px;
+	left: 96px;
+	width: 52px;
+}
+.boot-track--5,
+.boot-span--5 {
+	top: 64px;
+	left: 140px;
+	width: 56px;
+}
+
+/* stagger arrival in start-time order; with `infinite` the phase offset persists every loop */
+.boot-span--1 {
+	animation-delay: 0s;
+}
+.boot-span--2 {
+	animation-delay: 0.13s;
+}
+.boot-span--3 {
+	animation-delay: 0.26s;
+}
+.boot-span--4 {
+	animation-delay: 0.42s;
+}
+.boot-span--5 {
+	animation-delay: 0.58s;
+}
+
+@keyframes maple-boot-land {
+	0% {
+		transform: scaleX(0);
+		opacity: 0;
+	}
+	13% {
+		transform: scaleX(1);
+		opacity: 1;
+	}
+	66% {
+		transform: scaleX(1);
+		opacity: 1;
+	}
+	84% {
+		transform: scaleX(1);
+		opacity: 0.2;
+	}
+	100% {
+		transform: scaleX(0);
+		opacity: 0;
+	}
+}
+
+/* the playhead that "collects" the spans as it sweeps across */
+.boot-scan {
 	position: absolute;
-	inset: 0;
-	border-radius: inherit;
+	top: -6px;
+	bottom: -6px;
+	left: 0;
+	width: 2px;
+	border-radius: 2px;
 	background: linear-gradient(
-		90deg,
+		180deg,
 		transparent,
-		color-mix(in oklab, var(--primary) 80%, transparent),
+		color-mix(in oklab, var(--primary) 85%, transparent),
 		transparent
 	);
-	transform: translateX(-130%);
-	animation: maple-boot-shimmer 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+	box-shadow: 0 0 10px 1px color-mix(in oklab, var(--primary) 45%, transparent);
+	transform: translateX(-2px);
+	opacity: 0;
+	animation: maple-boot-scan 2.4s linear infinite;
 }
 
-.boot-span--1 {
-	width: 100%;
-}
-
-.boot-span--2 {
-	width: 74%;
-	margin-left: 16px;
-}
-
-.boot-span--2::after {
-	animation-delay: 0.18s;
-}
-
-.boot-span--3 {
-	width: 52%;
-	margin-left: 32px;
-}
-
-.boot-span--3::after {
-	animation-delay: 0.36s;
-}
-
-@keyframes maple-boot-shimmer {
+@keyframes maple-boot-scan {
 	0% {
-		transform: translateX(-130%);
+		transform: translateX(-2px);
+		opacity: 0;
 	}
-	60%,
+	8% {
+		opacity: 0.65;
+	}
+	78% {
+		opacity: 0.65;
+	}
 	100% {
-		transform: translateX(230%);
+		transform: translateX(202px);
+		opacity: 0;
 	}
+}
+
+.boot-caption {
+	font-family: var(--font-mono);
+	font-size: 12px;
+	letter-spacing: 0.02em;
+	color: var(--muted-foreground);
 }
 
 @media (prefers-reduced-motion: reduce) {
-	.boot-span::after {
-		display: none;
-	}
+	/* settle to the fully-assembled trace; no streaming, no playhead */
 	.boot-span {
-		background: color-mix(in oklab, var(--primary) 38%, transparent);
+		transform: scaleX(1);
+		opacity: 1;
+		animation: none;
+	}
+	.boot-scan {
+		display: none;
 	}
 }
 

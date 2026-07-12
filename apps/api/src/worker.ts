@@ -1,5 +1,6 @@
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
+import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 import { runScheduledEffect, WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
 import { Context, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
@@ -44,6 +45,9 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
 	dropSpanNames: ["McpServer/Notifications."],
+	// Expected 4xx outcomes (validation, not-found, unauthorized, …) record as
+	// Ok spans instead of errors — see @maple/domain/anticipated-errors.
+	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
 })
 
 // `HttpMiddleware.tracer` ends the root server span on a deferred macrotask
@@ -77,7 +81,7 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 const buildHandler = async () => {
 	const { AllRoutes, ApiAuthLive, InternalServiceAuthLive, ApiObservabilityLive, MainLive } =
 		await import("./app")
-	const { DatabasePgLive } = await import("./lib/DatabasePgLive")
+	const { layerPg } = await import("./lib/DatabasePgLive")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
@@ -85,7 +89,7 @@ const buildHandler = async () => {
 			Layer.provideMerge(InternalServiceAuthLive),
 			Layer.provideMerge(ApiObservabilityLive),
 			Layer.provideMerge(WorkerPlatformLive),
-			Layer.provideMerge(DatabasePgLive),
+			Layer.provideMerge(layerPg),
 			Layer.provideMerge(WorkerEnvironment.layer),
 			Layer.provideMerge(telemetry.layer),
 			Layer.provideMerge(WorkerConfigProviderLayer),
@@ -242,7 +246,12 @@ const handleQueue = async (
 const handleScheduled = async (env: Record<string, unknown>, ctx: ExecutionContext): Promise<void> => {
 	const { buildVcsScheduledLayer, runScheduledSync, flushVcsTelemetry } = await import("./vcs-sync-runtime")
 	try {
-		await runScheduledEffect(buildVcsScheduledLayer(env), runScheduledSync, ctx)
+		// Graceful on interrupt: a teardown mid-cron is expected lifecycle, and the
+		// schedule reruns — only the queue consumer above must keep rejecting so an
+		// interrupted batch redelivers instead of acking.
+		await runScheduledEffect(buildVcsScheduledLayer(env), runScheduledSync, ctx, {
+			onInterrupt: "graceful",
+		})
 	} finally {
 		ctx.waitUntil(flushVcsTelemetry(env))
 	}

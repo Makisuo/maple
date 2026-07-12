@@ -1,0 +1,32 @@
+{
+	"name": "@maple/electric-sync",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "portless",
+		"dev:app": "bun run ../../scripts/portless-wrangler.ts --env-file ../../.env.local --port ${PORT:-3476} --inspector-port=13476",
+		"deploy": "wrangler deploy",
+		"test": "vitest run",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@maple-dev/effect-sdk": "workspace:*",
+		"@maple/auth": "workspace:*",
+		"@maple/domain": "workspace:*",
+		"@maple/effect-cloudflare": "workspace:*",
+		"effect": "catalog:effect"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "4.20260603.1",
+		"@effect/language-service": "catalog:effect",
+		"@effect/vitest": "4.0.0-beta.93",
+		"@types/node": "catalog:tooling",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:",
+		"wrangler": "^4.41.0"
+	},
+	"portless": {
+		"name": "electric-sync",
+		"script": "dev:app"
+	}
+}

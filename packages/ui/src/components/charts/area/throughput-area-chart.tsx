@@ -2,7 +2,6 @@ import { useMemo, useId } from "react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
-import { renderReferenceLines } from "../_shared/reference-markers"
 import { throughputTimeSeriesData } from "../_shared/sample-data"
 import { VerticalGradient } from "../_shared/svg-patterns"
 import { useIncompleteSegments, extendConfigWithIncomplete } from "../_shared/use-incomplete-segments"
@@ -30,9 +29,9 @@ export function ThroughputAreaChart({
 	legend,
 	tooltip,
 	rateMode,
-	referenceLines,
-	renderReferenceMarker,
 	syncId,
+	overlay,
+	yAxisWidth,
 }: BaseChartProps) {
 	const id = useId()
 	const gradientId = `throughputGradient-${id.replace(/:/g, "")}`
@@ -140,7 +139,6 @@ export function ThroughputAreaChart({
 					)}
 				</defs>
 				<CartesianGrid vertical={false} />
-				{renderReferenceLines(referenceLines, renderReferenceMarker)}
 				<XAxis
 					dataKey="bucket"
 					tickLine={false}
@@ -152,7 +150,7 @@ export function ThroughputAreaChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
-					width={rateLabel.length > 3 ? 90 : 60}
+					width={yAxisWidth ?? (rateLabel.length > 3 ? 90 : 60)}
 					tickFormatter={(value: number) => formatThroughput(value, rateLabel)}
 				/>
 				{tooltip !== "hidden" && (
@@ -162,17 +160,7 @@ export function ThroughputAreaChart({
 								labelFormatter={(_, payload) => {
 									if (!payload?.[0]?.payload?.bucket) return ""
 									const bucket = payload[0].payload.bucket as string
-									const release = referenceLines?.find((rl) => rl.x === bucket)
-									return (
-										<span>
-											{formatBucketLabel(bucket, axisContext, "tooltip")}
-											{release?.label && (
-												<span className="ml-2 text-muted-foreground">
-													Deploy: {release.label}
-												</span>
-											)}
-										</span>
-									)
+									return formatBucketLabel(bucket, axisContext, "tooltip")
 								}}
 								formatter={(value, name, item) => {
 									const nameStr = String(name)
@@ -304,6 +292,7 @@ export function ThroughputAreaChart({
 						isAnimationActive={false}
 					/>
 				)}
+				{overlay}
 			</AreaChart>
 		</ChartContainer>
 	)

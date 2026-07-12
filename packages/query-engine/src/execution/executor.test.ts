@@ -1,5 +1,6 @@
-import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { assert, describe, it } from "@effect/vitest"
+import { Duration, Effect, Ref } from "effect"
+import { TestClock } from "effect/testing"
 import type { OrgId } from "@maple/domain"
 import { compile, listRuleChecksQuery } from "../ch"
 import { makeWarehouseExecutor } from "./executor"
@@ -57,7 +58,7 @@ describe("makeWarehouseExecutor pinToIngestConfig", () => {
 			const created: Array<ResolvedWarehouseConfig["_tag"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
 			yield* executor.compiledQuery(tenant, compiled, { context: "test" })
-			expect(created).toEqual(["clickhouse"])
+			assert.deepStrictEqual(created, ["clickhouse"])
 		}),
 	)
 
@@ -69,7 +70,7 @@ describe("makeWarehouseExecutor pinToIngestConfig", () => {
 				context: "test",
 				pinToIngestConfig: true,
 			})
-			expect(created).toEqual(["tinybird"])
+			assert.deepStrictEqual(created, ["tinybird"])
 		}),
 	)
 })
@@ -106,8 +107,8 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 				context: "test",
 				settings: { maxBlockSize: 512 },
 			})
-			expect(sqls).toHaveLength(1)
-			expect(sqls[0]).not.toContain("max_block_size")
+			assert.lengthOf(sqls, 1)
+			assert.isFalse(sqls[0]?.includes("max_block_size"))
 		}),
 	)
 
@@ -121,7 +122,7 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 				context: "test",
 				settings: { maxBlockSize: 512 },
 			})
-			expect(sqls[0]).not.toContain("max_block_size")
+			assert.isFalse(sqls[0]?.includes("max_block_size"))
 		}),
 	)
 
@@ -135,7 +136,100 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 				context: "test",
 				settings: { maxBlockSize: 512 },
 			})
-			expect(sqls[0]).toContain("max_block_size=512")
+			assert.isTrue(sqls[0]?.includes("max_block_size=512"))
+		}),
+	)
+})
+
+// A client whose query never resolves — models a Tinybird request stuck in the
+// execution queue (the failure mode behind the 03:00–05:00 timeout storm, where
+// queries rode the ambient ~30s Worker fetch limit despite a server-side budget).
+const makeHangingDeps = (): WarehouseExecutorDeps => ({
+	createClient: () => ({
+		sql: () => new Promise<{ data: never[] }>(() => {}),
+		insert: async () => {},
+	}),
+	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+})
+
+// Like makeHangingDeps, but counts how many times the client's `sql` is invoked
+// so a test can prove the client-timeout is NON-transient — i.e. the query is
+// attempted exactly once and the timeout is not fed back into the retry loop.
+const makeCountingHangingDeps = (counter: { count: number }): WarehouseExecutorDeps => ({
+	createClient: () => ({
+		sql: () => {
+			counter.count += 1
+			return new Promise<{ data: never[] }>(() => {})
+		},
+		insert: async () => {},
+	}),
+	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+})
+
+describe("makeWarehouseExecutor client timeout", () => {
+	it.effect("bounds a hung managed query at the profile budget and fails non-transiently", () =>
+		Effect.gen(function* () {
+			const executor = makeWarehouseExecutor(makeHangingDeps())
+			const outcome = yield* Ref.make("pending")
+			// discovery profile ⇒ 5s server budget + 5s buffer = 10s client budget.
+			yield* Effect.forkChild(
+				executor.compiledQuery(tenant, compiled, { profile: "discovery", context: "test" }).pipe(
+					Effect.matchEffect({
+						onFailure: (error) => Ref.set(outcome, error._tag),
+						onSuccess: () => Ref.set(outcome, "success"),
+					}),
+				),
+			)
+			// Before the budget: still pending (not cut off early).
+			yield* TestClock.adjust(Duration.seconds(9))
+			assert.strictEqual(yield* Ref.get(outcome), "pending")
+			// Past the budget: the timeout fires as a non-transient WarehouseQueryError
+			// (so it is NOT fed back into the retry loop).
+			yield* TestClock.adjust(Duration.seconds(2))
+			assert.strictEqual(yield* Ref.get(outcome), "@maple/http/errors/WarehouseQueryError")
+		}),
+	)
+
+	it.effect("attempts a timed-out query exactly once — the timeout is not retried", () =>
+		Effect.gen(function* () {
+			const counter = { count: 0 }
+			const executor = makeWarehouseExecutor(makeCountingHangingDeps(counter))
+			const outcome = yield* Ref.make("pending")
+			yield* Effect.forkChild(
+				executor.compiledQuery(tenant, compiled, { profile: "discovery", context: "test" }).pipe(
+					Effect.matchEffect({
+						onFailure: (error) => Ref.set(outcome, error._tag),
+						onSuccess: () => Ref.set(outcome, "success"),
+					}),
+				),
+			)
+			// Advance past the 10s discovery budget AND past the transient-retry backoff
+			// window (100ms → 200ms). A transient error would drive a second `sql` call;
+			// the non-transient timeout must not — so exactly one attempt is made.
+			yield* TestClock.adjust(Duration.seconds(11))
+			assert.strictEqual(yield* Ref.get(outcome), "@maple/http/errors/WarehouseQueryError")
+			assert.strictEqual(counter.count, 1)
+		}),
+	)
+
+	it.effect("does NOT client-timeout an explicitly unbounded query", () =>
+		Effect.gen(function* () {
+			const executor = makeWarehouseExecutor(makeHangingDeps())
+			const outcome = yield* Ref.make("pending")
+			yield* Effect.forkChild(
+				executor.compiledQuery(tenant, compiled, { profile: "unbounded", context: "test" }).pipe(
+					Effect.matchEffect({
+						onFailure: (error) => Ref.set(outcome, error._tag),
+						onSuccess: () => Ref.set(outcome, "success"),
+					}),
+				),
+			)
+			// Well past the 30s hard cap: `unbounded` opts out of the client timeout,
+			// so the query is never cut off (it only rides the ambient Worker limit).
+			yield* TestClock.adjust(Duration.seconds(60))
+			assert.strictEqual(yield* Ref.get(outcome), "pending")
 		}),
 	)
 })

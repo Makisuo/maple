@@ -4,6 +4,10 @@ services:
     # Postgres. vitest does NOT need this — tests run embedded PGlite.
     postgres:
         image: postgres:17-alpine
+        # wal_level=logical is a runtime GUC (not initdb-time), so flipping it on an
+        # existing volume needs no reset. Electric tails the WAL via logical
+        # replication to serve shapes.
+        command: ["postgres", "-c", "wal_level=logical"]
         ports:
             - "5499:5432"
         environment:
@@ -17,6 +21,24 @@ services:
             interval: 5s
             timeout: 3s
             retries: 5
+
+    # ElectricSQL sync service — tails Postgres logical replication and serves
+    # per-table "shapes" over HTTP. The web app never talks to it directly; the
+    # apps/api shape proxy (/api/sync/shape) authenticates and org-scopes every
+    # request. ELECTRIC_MANUAL_TABLE_PUBLISHING mirrors prod (PlanetScale can't
+    # reassign table ownership, so the publication is managed by a Drizzle
+    # migration rather than by Electric).
+    electric:
+        image: electricsql/electric:latest
+        ports:
+            - "3473:3000"
+        environment:
+            DATABASE_URL: postgresql://maple:maple@postgres:5432/maple?sslmode=disable
+            ELECTRIC_INSECURE: "true"
+            ELECTRIC_MANUAL_TABLE_PUBLISHING: "true"
+        depends_on:
+            postgres:
+                condition: service_healthy
 
     api:
         build:

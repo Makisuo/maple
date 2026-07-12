@@ -400,3 +400,22 @@ export interface Pong {
  * @since 4.0.0
  */
 export const constPong: Pong = { _tag: "Pong" }
+
+/**
+ * Checks if the response type is terminal.
+ *
+ * @category guards
+ * @since 4.0.0
+ */
+export const isTerminalResponse = (response: FromServerEncoded): boolean => {
+  switch (response._tag) {
+    case "Exit":
+    case "Defect":
+    case "ClientProtocolError": {
+      return true
+    }
+    default: {
+      return false
+    }
+  }
+}

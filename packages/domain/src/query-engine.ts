@@ -104,7 +104,12 @@ export const MetricsFilters = Schema.Struct({
 	metricType: MetricType,
 	serviceName: Schema.optional(ServiceName),
 	groupByAttributeKey: Schema.optional(Schema.String),
+	// Resource-attribute counterpart of `groupByAttributeKey` — groups by a
+	// ResourceAttributes key (host.name, k8s.pod.name, …) instead of a datapoint
+	// Attributes key. Required when groupBy includes "resource_attribute".
+	groupByResourceAttributeKey: Schema.optional(Schema.String),
 	attributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
+	resourceAttributeFilters: Schema.optional(Schema.Array(AttributeFilter)),
 })
 export type MetricsFilters = Schema.Schema.Type<typeof MetricsFilters>
 
@@ -145,7 +150,9 @@ export const MetricsTimeseriesQuery = Schema.Struct({
 	kind: Schema.Literal("timeseries"),
 	source: Schema.Literal("metrics"),
 	metric: MetricsMetric,
-	groupBy: Schema.optional(Schema.Array(Schema.Literals(["service", "attribute", "none"]))),
+	groupBy: Schema.optional(
+		Schema.Array(Schema.Literals(["service", "attribute", "resource_attribute", "none"])),
+	),
 	filters: MetricsFilters,
 	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
 })
@@ -180,7 +187,7 @@ export const MetricsBreakdownQuery = Schema.Struct({
 	kind: Schema.Literal("breakdown"),
 	source: Schema.Literal("metrics"),
 	metric: Schema.Literals(["avg", "sum", "count"]),
-	groupBy: Schema.Literals(["service", "attribute"]),
+	groupBy: Schema.Literals(["service", "attribute", "resource_attribute"]),
 	filters: MetricsFilters,
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(100)),
@@ -222,16 +229,36 @@ export const AttributeKeysQuery = Schema.Struct({
 	kind: Schema.Literal("attributeKeys"),
 	source: Schema.Literals(["traces", "logs", "metrics"]),
 	scope: Schema.optional(Schema.Literals(["span", "resource"])),
+	// Scope metrics-source discovery to a single metric (reads the raw metric
+	// table instead of the org-wide hourly rollup). Both fields must be set.
+	metricName: Schema.optional(Schema.String),
+	metricType: Schema.optional(MetricType),
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
 	),
 })
 export type AttributeKeysQuery = Schema.Schema.Type<typeof AttributeKeysQuery>
 
+// Scopes a facets query to a single dimension so only that UNION branch runs
+// (dashboard variables need one dropdown list, not the full facet sidebar).
+export const TracesFacetDimension = Schema.Literals([
+	"service",
+	"spanName",
+	"httpMethod",
+	"httpStatus",
+	"deploymentEnv",
+	"serviceNamespace",
+])
+export type TracesFacetDimension = typeof TracesFacetDimension.Type
+
+export const LogsFacetDimension = Schema.Literals(["severity", "service", "deploymentEnv", "namespace"])
+export type LogsFacetDimension = typeof LogsFacetDimension.Type
+
 export const TracesFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("traces"),
 	filters: Schema.optional(TracesFilters),
+	facet: Schema.optional(TracesFacetDimension),
 })
 export type TracesFacetsQuery = Schema.Schema.Type<typeof TracesFacetsQuery>
 
@@ -239,6 +266,7 @@ export const LogsFacetsQuery = Schema.Struct({
 	kind: Schema.Literal("facets"),
 	source: Schema.Literal("logs"),
 	filters: Schema.optional(LogsFilters),
+	facet: Schema.optional(LogsFacetDimension),
 })
 export type LogsFacetsQuery = Schema.Schema.Type<typeof LogsFacetsQuery>
 
@@ -267,6 +295,9 @@ export const AttributeValuesQuery = Schema.Struct({
 	source: Schema.Literals(["traces", "logs", "metrics"]),
 	scope: Schema.Literals(["span", "resource", "log", "metric"]),
 	attributeKey: Schema.String,
+	// Scope metrics-source discovery to a single metric (see AttributeKeysQuery).
+	metricName: Schema.optional(Schema.String),
+	metricType: Schema.optional(MetricType),
 	limit: Schema.optional(
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(500)),
 	),

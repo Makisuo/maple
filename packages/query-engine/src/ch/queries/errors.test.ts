@@ -298,4 +298,25 @@ describe("tracesFacetsQuery", () => {
 		expect(sql).toContain("t_res.ResourceAttributes")
 		expect(sql).toContain("host.name")
 	})
+
+	it("compiles only the requested branch when facet is set", () => {
+		const q = tracesFacetsQuery({ facet: "service" })
+		const { sql } = compileUnion(q, baseParams)
+		expect(sql).not.toContain("UNION ALL")
+		expect(sql).toContain("'service' AS facetType")
+		expect(sql).not.toContain("'spanName' AS facetType")
+		expect(sql).not.toContain("'errorCount' AS facetType")
+		// Same shape as the branch inside the full union: count-desc, limit 50.
+		expect(sql).toContain("ORDER BY count DESC")
+		expect(sql).toContain("LIMIT 50")
+	})
+
+	it("keeps the non-service branch empty-value guard when facet-scoped", () => {
+		const q = tracesFacetsQuery({ facet: "deploymentEnv" })
+		const { sql } = compileUnion(q, baseParams)
+		expect(sql).not.toContain("UNION ALL")
+		expect(sql).toContain("'deploymentEnv' AS facetType")
+		expect(sql).toContain("DeploymentEnv != ''")
+		expect(sql).toContain("LIMIT 20")
+	})
 })

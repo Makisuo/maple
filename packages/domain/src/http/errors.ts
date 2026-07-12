@@ -63,9 +63,11 @@ export type IssueSeveritySource = Schema.Schema.Type<typeof IssueSeveritySource>
 /**
  * What kind of signal backs the issue. "error" issues are fingerprint groups
  * from the errors tick; "alert" issues are created when an alert incident
- * opens (their fingerprintHash is the synthetic `alert:{ruleId}:{groupKey}`).
+ * opens (their fingerprintHash is the synthetic `alert:{ruleId}:{groupKey}`);
+ * "integration" issues come from third-party webhooks (e.g. PlanetScale
+ * branch.out_of_memory — fingerprint `planetscale:{database}:{event}`).
  */
-export const IssueKind = Schema.Literals(["error", "alert"]).annotate({
+export const IssueKind = Schema.Literals(["error", "alert", "integration"]).annotate({
 	identifier: "@maple/IssueKind",
 	title: "Issue Kind",
 })
@@ -153,6 +155,10 @@ export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>("ErrorI
 	snoozeUntil: Schema.NullOr(IsoDateTimeString),
 	archivedAt: Schema.NullOr(IsoDateTimeString),
 	hasOpenIncident: Schema.Boolean,
+	// Postgres txid of the write, present only on mutation responses so the web's
+	// ElectricSQL error_issues collection can resolve optimistic state on the exact
+	// synced transaction. Absent on list/read responses.
+	txid: Schema.optionalKey(Schema.String),
 }) {}
 
 export class ErrorIssuesListResponse extends Schema.Class<ErrorIssuesListResponse>("ErrorIssuesListResponse")(

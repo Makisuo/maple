@@ -98,6 +98,7 @@ export const rabbitmqTemplate: TemplateDefinition = {
 	category: "messaging",
 	tags: ["rabbitmq", "messaging"],
 	requirements: ["OpenTelemetry rabbitmqreceiver"],
+	requiredMetricPrefixes: ["rabbitmq."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

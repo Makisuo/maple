@@ -8923,7 +8923,7 @@ export const make = (
     Type,
     DecodingServices
   >(
-    schema: Schema.Decoder<Type, DecodingServices>
+    schema: Schema.ConstraintDecoder<Type, DecodingServices>
   ) =>
   (
     request: HttpClientRequest.HttpClientRequest
@@ -8939,10 +8939,10 @@ export const make = (
       Stream.pipeThroughChannel(Sse.decodeDataSchema(schema))
     )
   const decodeSuccess =
-    <Schema extends Schema.Top>(schema: Schema) => (response: HttpClientResponse.HttpClientResponse) =>
+    <Schema extends Schema.Constraint>(schema: Schema) => (response: HttpClientResponse.HttpClientResponse) =>
       HttpClientResponse.schemaBodyJson(schema)(response)
   const decodeError =
-    <const Tag extends string, Schema extends Schema.Top>(tag: Tag, schema: Schema) =>
+    <const Tag extends string, Schema extends Schema.Constraint>(tag: Tag, schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
       Effect.flatMap(
         HttpClientResponse.schemaBodyJson(schema)(response),

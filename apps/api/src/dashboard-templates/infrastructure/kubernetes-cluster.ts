@@ -11,7 +11,9 @@ import {
 import type { TemplateDefinition, WidgetDef } from "../types"
 
 function widgets(clusterName?: string): WidgetDef[] {
-	const where = combineWhere(clusterName ? `k8s.cluster.name = "${clusterName}"` : "")
+	// Node/namespace/cluster identity lives on ResourceAttributes — the metrics
+	// query-builder reaches it via the `resource.` prefix.
+	const where = combineWhere(clusterName ? `resource.k8s.cluster.name = "${clusterName}"` : "")
 	return [
 		{
 			id: "node-count",
@@ -22,7 +24,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				metricName: "k8s.node.condition_ready",
 				metricType: "gauge",
 				whereClause: where,
-				groupBy: ["k8s.node.name"],
+				groupBy: ["resource.k8s.node.name"],
 			}),
 			display: { title: "Node Ready Status", ...CHART_DISPLAY_LINE, unit: "number" },
 			layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -36,7 +38,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				metricName: "k8s.pod.phase",
 				metricType: "gauge",
 				whereClause: where,
-				groupBy: ["k8s.namespace.name"],
+				groupBy: ["resource.k8s.namespace.name"],
 			}),
 			display: { title: "Pod Phase by Namespace", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 6, y: 0, w: 6, h: 4 },
@@ -50,7 +52,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				metricName: "k8s.deployment.available",
 				metricType: "gauge",
 				whereClause: where,
-				groupBy: ["k8s.namespace.name"],
+				groupBy: ["resource.k8s.namespace.name"],
 			}),
 			display: { title: "Deployment Availability", ...CHART_DISPLAY_LINE, unit: "number" },
 			layout: { x: 0, y: 4, w: 6, h: 4 },
@@ -64,7 +66,7 @@ function widgets(clusterName?: string): WidgetDef[] {
 				metricName: "k8s.namespace.phase",
 				metricType: "gauge",
 				whereClause: where,
-				groupBy: ["k8s.namespace.name"],
+				groupBy: ["resource.k8s.namespace.name"],
 			}),
 			display: { title: "Namespace Phase", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 6, y: 4, w: 6, h: 4 },
@@ -79,6 +81,7 @@ export const kubernetesClusterTemplate: TemplateDefinition = {
 	category: "infrastructure",
 	tags: ["kubernetes", "k8s"],
 	requirements: ["OpenTelemetry k8sclusterreceiver"],
+	requiredMetricPrefixes: ["k8s."],
 	parameters: [
 		{
 			key: paramKey("cluster_name"),

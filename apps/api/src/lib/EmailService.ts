@@ -1,4 +1,5 @@
-import { Duration, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
+import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
+import { Duration, Effect, Layer, Schema, Context } from "effect"
 import { Env } from "./Env"
 
 class EmailDeliveryError extends Schema.TaggedErrorClass<EmailDeliveryError>()(
@@ -18,6 +19,22 @@ export interface EmailServiceShape {
 	) => Effect.Effect<void, EmailDeliveryError>
 }
 
+/**
+ * Minimal shape of the Cloudflare Email Service Workers binding (`send_email`).
+ * Mirrors the builder overload of `SendEmail` from `@cloudflare/workers-types`
+ * — we only use the structured-object form, never the raw MIME `EmailMessage`.
+ */
+interface SendEmailBinding {
+	send: (message: {
+		from: string
+		to: string
+		subject: string
+		html?: string
+		text?: string
+		replyTo?: string
+	}) => Promise<{ messageId: string }>
+}
+
 const EMAIL_TIMEOUT = Duration.seconds(15)
 
 export class EmailService extends Context.Service<EmailService, EmailServiceShape>()(
@@ -25,10 +42,12 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 	{
 		make: Effect.gen(function* () {
 			const env = yield* Env
-			const apiKey = env.RESEND_API_KEY
-			const fromEmail = env.RESEND_FROM_EMAIL
+			const fromEmail = env.EMAIL_FROM
 
-			const isConfigured = Option.isSome(apiKey)
+			const workerEnv = yield* WorkerEnvironment
+			const binding = (workerEnv as Record<string, SendEmailBinding | undefined>).EMAIL
+
+			const isConfigured = binding !== undefined
 
 			const send = Effect.fn("EmailService.send")(function* (
 				to: string,
@@ -38,69 +57,53 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 			) {
 				// PII: never stamp recipient/reply-to addresses on spans or logs
 				yield* Effect.annotateCurrentSpan("email.subject", subject)
-				yield* Effect.annotateCurrentSpan("email.provider", "resend")
+				yield* Effect.annotateCurrentSpan("email.provider", "cloudflare")
 
-				if (Option.isNone(apiKey)) {
+				if (binding === undefined) {
 					return yield* Effect.fail(
 						new EmailDeliveryError({
-							message: "Email not configured: RESEND_API_KEY is not set",
+							message: "Email not configured: EMAIL binding is missing",
 						}),
 					)
 				}
 
-				const response = yield* Effect.tryPromise({
+				const result = yield* Effect.tryPromise({
 					try: () =>
-						fetch("https://api.resend.com/emails", {
-							method: "POST",
-							headers: {
-								"Content-Type": "application/json",
-								Authorization: `Bearer ${Redacted.value(apiKey.value)}`,
-							},
-							body: JSON.stringify({
-								from: fromEmail,
-								to: [to],
-								subject,
-								html,
-								...(replyTo ? { reply_to: replyTo } : {}),
-							}),
+						binding.send({
+							from: fromEmail,
+							to,
+							subject,
+							html,
+							...(replyTo ? { replyTo } : {}),
 						}),
-					catch: (error) =>
-						new EmailDeliveryError({
-							message: error instanceof Error ? error.message : "Resend API request failed",
-						}),
+					catch: (error) => {
+						const code =
+							error && typeof error === "object" && "code" in error
+								? ` [${String((error as { code: unknown }).code)}]`
+								: ""
+						return new EmailDeliveryError({
+							message:
+								error instanceof Error
+									? `Cloudflare Email send failed${code}: ${error.message}`
+									: "Cloudflare Email send failed",
+						})
+					},
 				}).pipe(
 					Effect.timeoutOrElse({
 						duration: EMAIL_TIMEOUT,
 						orElse: () =>
 							Effect.fail(
 								new EmailDeliveryError({
-									message: "Resend API request timed out after 15s",
+									message: "Cloudflare Email send timed out after 15s",
 								}),
 							),
 					}),
 				)
 
-				yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
-
-				if (!response.ok) {
-					const body = yield* Effect.tryPromise({
-						try: () => response.text(),
-						catch: () =>
-							new EmailDeliveryError({
-								message: `Resend API returned ${response.status}`,
-							}),
-					})
-					yield* Effect.logError("Email delivery failed").pipe(
-						Effect.annotateLogs({ subject, status: response.status, body }),
-					)
-					return yield* Effect.fail(
-						new EmailDeliveryError({
-							message: `Resend API returned ${response.status}: ${body}`,
-						}),
-					)
-				}
-
-				yield* Effect.logInfo("Email sent successfully").pipe(Effect.annotateLogs({ subject }))
+				yield* Effect.annotateCurrentSpan("email.message_id", result.messageId)
+				yield* Effect.logInfo("Email sent successfully").pipe(
+					Effect.annotateLogs({ subject, messageId: result.messageId }),
+				)
 			})
 
 			return { isConfigured, send } satisfies EmailServiceShape

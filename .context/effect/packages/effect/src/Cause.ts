@@ -1108,7 +1108,9 @@ export const filterInterruptors: <E>(self: Cause<E>) => Result.Result<Set<number
  * @category rendering
  * @since 3.2.0
  */
-export const prettyErrors: <E>(self: Cause<E>) => Array<Error> = effect.causePrettyErrors
+export const prettyErrors: <E>(self: Cause<E>, options?: {
+  readonly includeCauseInStack?: boolean | undefined
+}) => Array<Error> = effect.causePrettyErrors
 
 /**
  * Formats a `Cause` as a human-readable string for logging or debugging.

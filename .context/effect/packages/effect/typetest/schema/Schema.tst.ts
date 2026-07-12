@@ -463,6 +463,7 @@ describe("Schema", () => {
       const schema = Schema.toType(Schema.FiniteFromString)
       expect(Schema.revealCodec(schema)).type.toBe<Schema.Codec<number, number, never, never>>()
       expect(schema).type.toBe<Schema.toType<Schema.FiniteFromString>>()
+      expect(schema.schema).type.toBe<Schema.FiniteFromString>()
       expect(schema.annotate({})).type.toBe<Schema.toType<Schema.FiniteFromString>>()
     })
   })
@@ -477,7 +478,55 @@ describe("Schema", () => {
       const schema = Schema.toEncoded(Schema.FiniteFromString)
       expect(Schema.revealCodec(schema)).type.toBe<Schema.Codec<string, string, never, never>>()
       expect(schema).type.toBe<Schema.toEncoded<Schema.FiniteFromString>>()
+      expect(schema.schema).type.toBe<Schema.FiniteFromString>()
       expect(schema.annotate({})).type.toBe<Schema.toEncoded<Schema.FiniteFromString>>()
+    })
+  })
+
+  describe("toCodecJson", () => {
+    it("ast type", () => {
+      const schema = Schema.toCodecJson(Schema.FiniteFromString)
+      expect(schema.ast).type.toBe<SchemaAST.Number>()
+    })
+
+    it("revealCodec + annotate", () => {
+      const schema = Schema.toCodecJson(Schema.FiniteFromString)
+      expect(Schema.revealCodec(schema)).type.toBe<Schema.Codec<number, Schema.Json, never, never>>()
+      expect(schema).type.toBe<Schema.toCodecJson<Schema.FiniteFromString>>()
+      expect(schema.schema).type.toBe<Schema.FiniteFromString>()
+      expect(schema.annotate({})).type.toBe<Schema.toCodecJson<Schema.FiniteFromString>>()
+    })
+  })
+
+  describe("toCodecStringTree", () => {
+    it("ast type", () => {
+      const schema = Schema.toCodecStringTree(Schema.FiniteFromString)
+      expect(schema.ast).type.toBe<SchemaAST.Number>()
+    })
+
+    it("Array ast type", () => {
+      const schema = Schema.toCodecStringTree(Schema.Array(Schema.FiniteFromString))
+      expect(schema.ast).type.toBe<SchemaAST.Arrays>()
+    })
+
+    it("revealCodec + annotate", () => {
+      const schema = Schema.toCodecStringTree(Schema.FiniteFromString)
+      expect(Schema.revealCodec(schema)).type.toBe<Schema.Codec<number, Schema.StringTree, never, never>>()
+      expect(schema).type.toBe<Schema.toCodecStringTree<Schema.FiniteFromString>>()
+      expect(schema.schema).type.toBe<Schema.FiniteFromString>()
+      expect(schema.annotate({})).type.toBe<Schema.toCodecStringTree<Schema.FiniteFromString>>()
+    })
+  })
+
+  describe("toCodecArrayFromSingle", () => {
+    it("revealCodec + annotate", () => {
+      const stringTree = Schema.toCodecStringTree(Schema.Array(Schema.FiniteFromString))
+      const schema = Schema.toCodecArrayFromSingle(stringTree)
+      expect(Schema.revealCodec(schema)).type.toBe<
+        Schema.Codec<ReadonlyArray<number>, Schema.StringTree, never, never>
+      >()
+      expect(schema).type.toBe<Schema.toCodecArrayFromSingle<typeof stringTree>>()
+      expect(schema.annotate({})).type.toBe<Schema.toCodecArrayFromSingle<typeof stringTree>>()
     })
   })
 
@@ -952,7 +1001,7 @@ describe("Schema", () => {
     it("should allow partial application", () => {
       const f = Schema.decodeTo(Schema.String)
       expect(f).type.toBe<
-        <From extends Schema.Top>(from: From) => Schema.compose<Schema.String, From>
+        <From extends Schema.Constraint>(from: From) => Schema.compose<Schema.String, From>
       >()
 
       expect(f(Schema.Number)).type.toBe<Schema.compose<Schema.String, Schema.Number>>()
@@ -1825,6 +1874,34 @@ describe("Schema", () => {
 
       expect(A.decodeUnknownSync("1")).type.toBe<number>()
       expect(A.encodeSync(1)).type.toBe<string>()
+    })
+  })
+
+  describe("OptionFrom", () => {
+    it("preserves concrete wrapper types", () => {
+      const nullOr = Schema.OptionFromNullOr(Schema.FiniteFromString)
+      expect(nullOr).type.toBe<Schema.OptionFromNullOr<typeof Schema.FiniteFromString>>()
+      expect(nullOr.annotate({})).type.toBe<Schema.OptionFromNullOr<typeof Schema.FiniteFromString>>()
+
+      const undefinedOr = Schema.OptionFromUndefinedOr(Schema.FiniteFromString)
+      expect(undefinedOr).type.toBe<Schema.OptionFromUndefinedOr<typeof Schema.FiniteFromString>>()
+      expect(undefinedOr.annotate({})).type.toBe<Schema.OptionFromUndefinedOr<typeof Schema.FiniteFromString>>()
+
+      const nullishOr = Schema.OptionFromNullishOr(Schema.FiniteFromString)
+      expect(nullishOr).type.toBe<Schema.OptionFromNullishOr<typeof Schema.FiniteFromString>>()
+      expect(nullishOr.annotate({})).type.toBe<Schema.OptionFromNullishOr<typeof Schema.FiniteFromString>>()
+
+      const optionalKey = Schema.OptionFromOptionalKey(Schema.FiniteFromString)
+      expect(optionalKey).type.toBe<Schema.OptionFromOptionalKey<typeof Schema.FiniteFromString>>()
+      expect(optionalKey.annotate({})).type.toBe<Schema.OptionFromOptionalKey<typeof Schema.FiniteFromString>>()
+
+      const optional = Schema.OptionFromOptional(Schema.FiniteFromString)
+      expect(optional).type.toBe<Schema.OptionFromOptional<typeof Schema.FiniteFromString>>()
+      expect(optional.annotate({})).type.toBe<Schema.OptionFromOptional<typeof Schema.FiniteFromString>>()
+
+      const optionalNullOr = Schema.OptionFromOptionalNullOr(Schema.FiniteFromString)
+      expect(optionalNullOr).type.toBe<Schema.OptionFromOptionalNullOr<typeof Schema.FiniteFromString>>()
+      expect(optionalNullOr.annotate({})).type.toBe<Schema.OptionFromOptionalNullOr<typeof Schema.FiniteFromString>>()
     })
   })
 

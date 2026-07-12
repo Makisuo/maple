@@ -8,6 +8,9 @@ export const oauthConnections = pgTable(
 		provider: text("provider").notNull(),
 		externalUserId: text("external_user_id").notNull(),
 		externalUserEmail: text("external_user_email"),
+		// Provider-agnostic display label for the connected principal (e.g. a Cloudflare account
+		// name). Kept separate from externalUserEmail so that column only ever holds real emails.
+		externalAccountName: text("external_account_name"),
 		connectedByUserId: text("connected_by_user_id").notNull(),
 		scope: text("scope").notNull().default(""),
 		accessTokenCiphertext: text("access_token_ciphertext").notNull(),
@@ -35,6 +38,9 @@ export const oauthAuthStates = pgTable(
 		initiatedByUserId: text("initiated_by_user_id").notNull(),
 		redirectUri: text("redirect_uri").notNull(),
 		returnTo: text("return_to"),
+		// PKCE code verifier (RFC 7636). Set for providers that use the Authorization Code + PKCE
+		// flow (e.g. Cloudflare public clients, which carry no client secret); null otherwise.
+		codeVerifier: text("code_verifier"),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
 	},

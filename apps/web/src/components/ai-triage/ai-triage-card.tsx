@@ -87,7 +87,7 @@ export function AiTriageCard({ incidentKind, incidentId, issueId, onOpenChat }: 
 	// --- Loading the run list ------------------------------------------------
 	if (runsLoading) {
 		return (
-			<Card className="space-y-3 p-5">
+			<Card className="space-y-2 p-4">
 				<Skeleton className="h-4 w-40" />
 				<Skeleton className="h-3 w-full" />
 				<Skeleton className="h-3 w-2/3" />
@@ -167,14 +167,14 @@ export function AiTriageCard({ incidentKind, incidentId, issueId, onOpenChat }: 
 /** The "investigating…" placeholder, shared by the active-run and auto-start states. */
 export function InvestigatingCard() {
 	return (
-		<Card className="space-y-3 p-5">
+		<Card className="space-y-2 p-4">
 			<div className="flex items-center gap-2">
 				<Spinner className="size-4 text-muted-foreground" />
 				<Shimmer className="text-sm font-medium">
 					Investigating — reading traces, errors, and logs
 				</Shimmer>
 			</div>
-			<div className="space-y-2">
+			<div className="space-y-1.5">
 				<Skeleton className="h-3 w-3/4" />
 				<Skeleton className="h-3 w-1/2" />
 			</div>
@@ -196,7 +196,7 @@ function AiTriageEmptyState({
 }) {
 	return (
 		<Card>
-			<Empty className="py-8">
+			<Empty className="py-6">
 				<EmptyHeader>
 					<EmptyMedia variant="icon">
 						<PulseIcon size={18} />
@@ -244,30 +244,32 @@ function DiagnosisReadout({
 			<span aria-hidden className={cn("absolute inset-y-0 left-0 z-10 w-1", SEVERITY_ACCENT[severity])} />
 
 			{/* Banner — what's wrong, front and center */}
-			<div className="space-y-3 p-5 pl-6">
-				<div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-					<span className="flex items-center gap-1.5">
-						<PulseIcon className="size-3.5 text-muted-foreground" />
-						<span className={EYEBROW}>AI Diagnosis</span>
-					</span>
-					<Badge variant="outline" className={cn("capitalize", SEVERITY_TONE[severity])}>
-						{SEVERITY_LABEL[severity]}
-					</Badge>
-					<span className="text-muted-foreground/40">·</span>
-					<span className="text-xs text-muted-foreground">
-						investigated {formatRelativeTime(run.completedAt ?? run.createdAt)}
-						{run.model ? ` · ${run.model}` : ""}
-					</span>
+			<div className="space-y-1.5 px-4 py-3 pl-5">
+				<div className="flex items-center justify-between gap-2">
+					<div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+						<span className="flex items-center gap-1.5">
+							<PulseIcon className="size-3.5 text-muted-foreground" />
+							<span className={EYEBROW}>AI Diagnosis</span>
+						</span>
+						<Badge variant="outline" className={cn("capitalize", SEVERITY_TONE[severity])}>
+							{SEVERITY_LABEL[severity]}
+						</Badge>
+						<span className="text-muted-foreground/40">·</span>
+						<span className="truncate text-xs text-muted-foreground">
+							{formatRelativeTime(run.completedAt ?? run.createdAt)}
+							{run.model ? ` · ${run.model}` : ""}
+						</span>
+					</div>
+					<ConfidenceMeter confidence={result.confidence} showLabel={false} />
 				</div>
-				<p className="text-[15px] font-medium leading-snug text-foreground">{result.suspectedCause}</p>
-				<p className="text-sm leading-relaxed text-muted-foreground">{result.summary}</p>
-				<ConfidenceMeter confidence={result.confidence} />
+				<p className="text-sm font-medium leading-snug text-foreground">{result.suspectedCause}</p>
+				<p className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">{result.summary}</p>
 			</div>
 
 			{/* Blast radius */}
-			<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-5 py-3 pl-6">
+			<div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 pb-2.5 pl-5">
 				<span className={EYEBROW}>Blast radius</span>
-				<span className="text-sm text-foreground">{result.affectedScope}</span>
+				<span className="text-[13px] text-foreground">{result.affectedScope}</span>
 				{services.length > 0 ? (
 					<div className="flex flex-wrap gap-1">
 						{services.map((service) => (
@@ -281,14 +283,16 @@ function DiagnosisReadout({
 
 			{/* Evidence */}
 			{traceEvidence.length > 0 ? (
-				<div className="space-y-2.5 border-t border-border px-5 py-4 pl-6">
+				<div className="space-y-1.5 px-4 pb-2.5 pl-5">
 					<span className={EYEBROW}>Evidence</span>
-					<ul className="space-y-3">
+					<ul className="space-y-1.5">
 						{traceEvidence.map((item, index) => (
-							<li key={index} className="space-y-1.5">
-								{item.note ? <p className="text-sm text-muted-foreground">{item.note}</p> : null}
+							<li key={index} className="space-y-1">
+								{item.note ? (
+									<p className="text-[13px] leading-snug text-muted-foreground">{item.note}</p>
+								) : null}
 								{item.traceIds.length || item.logPatterns.length ? (
-									<div className="flex flex-wrap items-center gap-1.5">
+									<div className="flex flex-wrap items-center gap-1">
 										{item.traceIds.map((traceId) => (
 											<Link
 												key={traceId}
@@ -317,12 +321,12 @@ function DiagnosisReadout({
 
 			{/* Runbook */}
 			{result.suggestedActions.length > 0 ? (
-				<div className="space-y-2.5 border-t border-border px-5 py-4 pl-6">
+				<div className="space-y-1.5 px-4 pb-3 pl-5">
 					<span className={EYEBROW}>What to do</span>
-					<ol className="space-y-2">
+					<ol className="space-y-1.5">
 						{result.suggestedActions.map((action, index) => (
-							<li key={action} className="flex gap-2.5 text-sm text-foreground">
-								<span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-md bg-muted font-mono text-[11px] tabular-nums text-muted-foreground">
+							<li key={action} className="flex gap-2 text-[13px] text-foreground">
+								<span className="mt-px flex size-4 shrink-0 items-center justify-center rounded bg-muted font-mono text-[10px] tabular-nums text-muted-foreground">
 									{index + 1}
 								</span>
 								<span className="leading-snug">{action}</span>
@@ -333,7 +337,7 @@ function DiagnosisReadout({
 			) : null}
 
 			{/* Quiet footer */}
-			<div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 pl-5">
+			<div className="flex items-center justify-between gap-2 border-t border-border px-2.5 py-1.5 pl-4">
 				<Button
 					size="sm"
 					variant="ghost"

@@ -4,6 +4,7 @@
 	"type": "module",
 	"exports": {
 		".": "./src/index.ts",
+		"./config-helpers": "./src/config-helpers.ts",
 		"./worker-environment": "./src/worker-environment.ts",
 		"./hyperdrive-connection": "./src/hyperdrive-connection.ts",
 		"./workers-cache": "./src/workers-cache.ts"

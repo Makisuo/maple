@@ -1,7 +1,8 @@
 import { Atom } from "@/lib/effect-atom"
+import type { DashboardVersionId } from "@maple/domain/http"
 
 export interface PreviewedVersion {
-	readonly versionId: string
+	readonly versionId: DashboardVersionId
 	readonly versionNumber: number
 	readonly createdAt: string
 	readonly createdBy: string

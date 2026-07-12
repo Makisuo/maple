@@ -68,14 +68,38 @@ export interface TransformedPoint extends Record<string, string | number> {
 	time: string
 }
 
-function isoToLabel(iso: string): string {
+/** Axis label for a bucket timestamp ("14:35"). */
+export function isoToLabel(iso: string): string {
 	const d = new Date(iso)
 	return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+}
+
+/**
+ * Window-aware axis labeler: plain time-of-day while the plotted buckets span
+ * a single day, "Jul 3, 02:35 PM" once they cross 24h — the multi-day presets
+ * (4d/10d/6w/…) make bare times ambiguous.
+ */
+export function makeBucketLabeler(bucketIsos: ReadonlyArray<string>): (iso: string) => string {
+	let min = Number.POSITIVE_INFINITY
+	let max = Number.NEGATIVE_INFINITY
+	for (const iso of bucketIsos) {
+		const ms = new Date(iso).getTime()
+		if (Number.isFinite(ms)) {
+			min = Math.min(min, ms)
+			max = Math.max(max, ms)
+		}
+	}
+	if (max - min <= 24 * 60 * 60 * 1000) return isoToLabel
+	return (iso) => {
+		const d = new Date(iso)
+		return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${isoToLabel(iso)}`
+	}
 }
 
 /** Pivot long-form `{bucket, attributeValue, value}` rows into per-bucket points keyed by series. */
 export function transformRows(
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>,
+	labeler: (iso: string) => string = isoToLabel,
 ): { data: TransformedPoint[]; series: string[] } {
 	const seriesSet = new Set<string>()
 	const byBucket = new Map<string, TransformedPoint>()
@@ -84,7 +108,7 @@ export function transformRows(
 		seriesSet.add(series)
 		const existing: TransformedPoint = byBucket.get(row.bucket) ?? {
 			bucket: row.bucket,
-			time: isoToLabel(row.bucket),
+			time: labeler(row.bucket),
 		}
 		existing[series] = row.value
 		byBucket.set(row.bucket, existing)

@@ -1,13 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { InternalScrapeTarget, type ScrapeResultReport } from "@maple/domain/http"
+import { InternalScrapeTarget, ScrapeResultReport, ScrapeTargetId } from "@maple/domain/http"
 import { ApiClient, ApiRequestError, type ApiClientShape, type ScrapeProxyResponse } from "./ApiClient"
 import { OtlpIngest, OtlpIngestError, type OtlpIngestShape } from "./OtlpIngest"
 import {
 	initialJitterMs,
 	nextScrapeDelayMs,
 	ScrapeScheduler,
+	sendResultsInChunks,
 	type ScrapeOutcome,
 } from "./ScrapeScheduler"
 import { ScraperEnv, type ScraperEnvShape } from "./Env"
@@ -527,6 +528,61 @@ describe("ScrapeScheduler", () => {
 			yield* TestClock.adjust(Duration.seconds(10))
 			assert.lengthOf(harness.reportedResults, 1)
 			assert.strictEqual(harness.reportedResults[0]?.targetId, TARGET_A)
+		}),
+	)
+})
+
+describe("sendResultsInChunks", () => {
+	const decodeId = Schema.decodeUnknownSync(ScrapeTargetId)
+	const mkReports = (count: number): ReadonlyArray<ScrapeResultReport> =>
+		Array.from(
+			{ length: count },
+			(_, i) => new ScrapeResultReport({ targetId: decodeId(TARGET_A), scrapedAt: i, error: null }),
+		)
+
+	it.effect("splits a batch into chunks no larger than chunkSize", () =>
+		Effect.gen(function* () {
+			const batches: Array<number> = []
+			const result = yield* sendResultsInChunks(mkReports(2500), 1000, (chunk) =>
+				Effect.sync(() => {
+					batches.push(chunk.length)
+				}),
+			)
+			assert.deepStrictEqual(batches, [1000, 1000, 500])
+			assert.lengthOf(result.unsent, 0)
+			assert.isNull(result.error)
+		}),
+	)
+
+	it.effect("stops at the first failed chunk and returns the unsent remainder", () =>
+		Effect.gen(function* () {
+			const batches: Array<number> = []
+			const result = yield* sendResultsInChunks(mkReports(2500), 1000, (chunk) =>
+				Effect.suspend(() => {
+					// First chunk delivers; the second fails → 1500 left unsent.
+					if (batches.length >= 1) {
+						return Effect.fail(new ApiRequestError({ message: "HTTP 503", status: 503 }))
+					}
+					batches.push(chunk.length)
+					return Effect.void
+				}),
+			)
+			assert.deepStrictEqual(batches, [1000])
+			assert.lengthOf(result.unsent, 1500)
+			assert.strictEqual(result.error?.message, "HTTP 503")
+		}),
+	)
+
+	it.effect("no-ops on an empty batch", () =>
+		Effect.gen(function* () {
+			let calls = 0
+			const result = yield* sendResultsInChunks([], 1000, () =>
+				Effect.sync(() => {
+					calls++
+				}),
+			)
+			assert.strictEqual(calls, 0)
+			assert.lengthOf(result.unsent, 0)
 		}),
 	)
 })

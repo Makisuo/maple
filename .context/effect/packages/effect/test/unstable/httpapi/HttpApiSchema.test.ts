@@ -2,6 +2,20 @@ import { assert, describe, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { HttpApiSchema } from "effect/unstable/httpapi"
 
+const getStreamMetadata = (self: HttpApiSchema.StreamSchema) =>
+  self._tag === "StreamSse" ?
+    {
+      mode: self.mode,
+      sseMode: self.sseMode,
+      contentType: self.contentType,
+      events: self.events,
+      error: self.error
+    } :
+    {
+      mode: self.mode,
+      contentType: self.contentType
+    }
+
 describe("HttpApiSchema", () => {
   describe("StreamSse", () => {
     it("stores default metadata", () => {
@@ -22,7 +36,7 @@ describe("HttpApiSchema", () => {
       assert.strictEqual(stream.events, events)
       assert.strictEqual(stream.error, error)
 
-      const metadata = HttpApiSchema.getStreamMetadata(stream)
+      const metadata = getStreamMetadata(stream)
       assert.strictEqual(metadata.mode, "sse")
       assert.strictEqual(metadata.contentType, "text/event-stream")
       if (metadata.mode === "sse") {
@@ -86,7 +100,7 @@ describe("HttpApiSchema", () => {
       assert.isTrue(HttpApiSchema.isStreamUint8Array(stream))
       assert.strictEqual(stream.mode, "uint8array")
       assert.strictEqual(stream.contentType, "application/octet-stream")
-      assert.deepStrictEqual(HttpApiSchema.getStreamMetadata(stream), {
+      assert.deepStrictEqual(getStreamMetadata(stream), {
         mode: "uint8array",
         contentType: "application/octet-stream"
       })

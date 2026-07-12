@@ -1,13 +1,27 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, PlatformError, Redacted } from "effect"
+import { Effect, FileSystem, Layer, Path, PlatformError, Redacted, Stdio } from "effect"
+import { TestConsole } from "effect/testing/index"
 import { Primitive } from "effect/unstable/cli"
+import { ChildProcessSpawner } from "effect/unstable/process"
+import * as MockTerminal from "./services/MockTerminal.ts"
 
+const ConsoleLayer = TestConsole.layer
 const FileSystemLayer = FileSystem.layerNoop({})
 const PathLayer = Path.layer
+const TerminalLayer = MockTerminal.layer
+const StdioLayer = Stdio.layerTest({})
+const ChildProcessSpawnerLayer = Layer.succeed(
+  ChildProcessSpawner.ChildProcessSpawner,
+  ChildProcessSpawner.make(() => Effect.die("Not implemented"))
+)
 
 const TestLayer = Layer.mergeAll(
+  ConsoleLayer,
   FileSystemLayer,
-  PathLayer
+  PathLayer,
+  TerminalLayer,
+  StdioLayer,
+  ChildProcessSpawnerLayer
 )
 
 // Helper functions to reduce repetition

@@ -1,4 +1,5 @@
 import { MapleFlush } from "@maple-dev/effect-sdk/client"
+import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
 import { ingestUrl } from "./ingest-url"
 
 // Buffer-backed client telemetry with flush-on-unload. `Maple.layer`
@@ -24,6 +25,9 @@ const telemetry = MapleFlush.make({
 			? { "vcs.ref.head.revision": import.meta.env.VITE_COMMIT_SHA }
 			: {}),
 	},
+	// Expected 4xx API responses (the maple-web → maple-api edge surfaces these
+	// as client-span failures) record as Ok instead of errors.
+	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
 })
 
 export const mapleOtelLayer = telemetry.layer

@@ -106,7 +106,7 @@ export const encode = <IE = never, Done = unknown>(): Channel.Channel<
  * @category constructors
  * @since 4.0.0
  */
-export const encodeSchema = <S extends Schema.Top>(
+export const encodeSchema = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(): Channel.Channel<
@@ -130,7 +130,7 @@ export const encodeSchema = <S extends Schema.Top>(
  * @category constructors
  * @since 4.0.0
  */
-export const encodeSchemaString = <S extends Schema.Top>(
+export const encodeSchemaString = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(): Channel.Channel<
@@ -222,7 +222,7 @@ export const decode = <IE = never, Done = unknown>(options?: {
  * @category constructors
  * @since 4.0.0
  */
-export const decodeSchema = <S extends Schema.Top>(
+export const decodeSchema = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(options?: {
@@ -248,7 +248,7 @@ export const decodeSchema = <S extends Schema.Top>(
  * @category constructors
  * @since 4.0.0
  */
-export const decodeSchemaString = <S extends Schema.Top>(
+export const decodeSchemaString = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(options?: {
@@ -440,7 +440,7 @@ export const duplexString: {
  * @since 4.0.0
  */
 export const duplexSchema: {
-  <In extends Schema.Top, Out extends Schema.Top>(
+  <In extends Schema.Constraint, Out extends Schema.Constraint>(
     options: {
       readonly inputSchema: In
       readonly outputSchema: Out
@@ -465,7 +465,7 @@ export const duplexSchema: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-  <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+  <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
     self: Channel.Channel<
       Arr.NonEmptyReadonlyArray<Uint8Array>,
       OutErr,
@@ -489,7 +489,7 @@ export const duplexSchema: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-} = dual(2, <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+} = dual(2, <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
   self: Channel.Channel<
     Arr.NonEmptyReadonlyArray<Uint8Array>,
     OutErr,
@@ -527,7 +527,7 @@ export const duplexSchema: {
  * @since 4.0.0
  */
 export const duplexSchemaString: {
-  <In extends Schema.Top, Out extends Schema.Top>(
+  <In extends Schema.Constraint, Out extends Schema.Constraint>(
     options: {
       readonly inputSchema: In
       readonly outputSchema: Out
@@ -552,7 +552,7 @@ export const duplexSchemaString: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-  <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+  <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
     self: Channel.Channel<
       Arr.NonEmptyReadonlyArray<string>,
       OutErr,
@@ -576,7 +576,7 @@ export const duplexSchemaString: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-} = dual(2, <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+} = dual(2, <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
   self: Channel.Channel<
     Arr.NonEmptyReadonlyArray<string>,
     OutErr,

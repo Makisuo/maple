@@ -51,9 +51,9 @@ import * as Tool from "./Tool.ts"
  * @since 4.0.0
  */
 export function toCodecOpenAI<T, E, RD, RE>(
-  schema: Schema.Codec<T, E, RD, RE>
+  schema: Schema.ConstraintCodec<T, E, RD, RE>
 ): {
-  codec: Schema.Codec<T, unknown, RD, RE>
+  codec: Schema.ConstraintCodec<T, unknown, RD, RE>
   jsonSchema: JsonSchema.JsonSchema
 } {
   const to = schema.ast

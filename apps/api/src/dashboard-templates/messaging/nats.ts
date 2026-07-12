@@ -92,6 +92,7 @@ export const natsTemplate: TemplateDefinition = {
 	category: "messaging",
 	tags: ["nats", "messaging"],
 	requirements: ["NATS Prometheus exporter via prometheusreceiver"],
+	requiredMetricPrefixes: ["nats."],
 	parameters: [
 		{
 			key: paramKey("service_name"),

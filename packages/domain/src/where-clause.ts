@@ -80,6 +80,39 @@ export function splitCsv(input: string): string[] {
 // Where-clause parser
 // ---------------------------------------------------------------------------
 
+/**
+ * Split a where-clause expression into its `AND`-joined clauses (the grammar
+ * has no OR). The separator is a whitespace-delimited, case-insensitive `AND`
+ * — but only *outside* single-/double-quoted values, so a quoted value like
+ * `"buy and sell"` is never mis-split.
+ */
+export function splitWhereClause(expression: string): string[] {
+	const parts: string[] = []
+	let start = 0
+	let quote: '"' | "'" | null = null
+	for (let i = 0; i < expression.length; i++) {
+		const char = expression[i]
+		if (quote !== null) {
+			if (char === quote) quote = null
+			continue
+		}
+		if (char === '"' || char === "'") {
+			quote = char
+			continue
+		}
+		if (char === " " || char === "\t" || char === "\n" || char === "\r") {
+			const separator = /^\s+AND\s+/i.exec(expression.slice(i))
+			if (separator) {
+				parts.push(expression.slice(start, i))
+				i += separator[0].length - 1
+				start = i + 1
+			}
+		}
+	}
+	parts.push(expression.slice(start))
+	return parts.map((part) => part.trim()).filter(Boolean)
+}
+
 export interface ParseWhereClauseResult {
 	clauses: readonly ParsedClause[]
 	warnings: readonly WhereClauseParseWarning[]
@@ -91,10 +124,7 @@ export function parseWhereClause(expression: string): ParseWhereClauseResult {
 		return { clauses: [], warnings: [] }
 	}
 
-	const parts = trimmed
-		.split(/\s+AND\s+/i)
-		.map((part) => part.trim())
-		.filter(Boolean)
+	const parts = splitWhereClause(trimmed)
 
 	const clauses: ParsedClause[] = []
 	const warnings: WhereClauseParseWarning[] = []

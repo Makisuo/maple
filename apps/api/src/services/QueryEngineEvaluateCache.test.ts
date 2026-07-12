@@ -4,7 +4,7 @@ import { strict as assert } from "node:assert"
 import { OrgId, UserId } from "@maple/domain"
 import type { QueryEngineEvaluateRequest } from "@maple/query-engine"
 import type { CompiledQuery } from "@maple/query-engine/ch"
-import { makeQueryEngineEvaluate } from "@maple/query-engine/runtime"
+import { makeQueryEngineEvaluate, makeQueryEngineEvaluateSeries } from "@maple/query-engine/runtime"
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
@@ -116,6 +116,54 @@ describe("makeQueryEngineEvaluate (shared bucket-encoding core)", () => {
 		Effect.gen(function* () {
 			const result = yield* makeQueryEngineEvaluate(evalStub([]))(tenant, countRequest("sum"))
 			assert.deepStrictEqual(result, [{ groupKey: "all", value: null, sampleCount: 0, hasData: false }])
+		}),
+	)
+})
+
+describe("makeQueryEngineEvaluateSeries (per-bucket preview core)", () => {
+	it.effect("returns one observation per bucket that evaluate reduces to the same scalar", () =>
+		Effect.gen(function* () {
+			const series = yield* makeQueryEngineEvaluateSeries(evalStub(COUNT_ROWS))(
+				tenant,
+				countRequest("sum"),
+			)
+			assert.deepStrictEqual(series, [
+				{ bucket: "2026-01-01T00:00:00.000Z", groupKey: "all", value: 2, sampleCount: 2 },
+				{ bucket: "2026-01-01T00:05:00.000Z", groupKey: "all", value: 3, sampleCount: 3 },
+				{ bucket: "2026-01-01T00:10:00.000Z", groupKey: "all", value: 5, sampleCount: 5 },
+			])
+
+			// The reduced evaluate path must agree with the sum of the series.
+			const reduced = yield* makeQueryEngineEvaluate(evalStub(COUNT_ROWS))(tenant, countRequest("sum"))
+			const total = series.reduce((sum, obs) => sum + (obs.value ?? 0), 0)
+			assert.equal(reduced[0]?.value, total)
+		}),
+	)
+
+	it.effect("keeps groups separate with per-bucket granularity", () =>
+		Effect.gen(function* () {
+			const rows = [
+				traceRow({ bucket: "2026-01-01 00:00:00", groupName: "a", count: 2 }),
+				traceRow({ bucket: "2026-01-01 00:00:00", groupName: "b", count: 3 }),
+				traceRow({ bucket: "2026-01-01 00:05:00", groupName: "a", count: 4 }),
+			]
+			const req = countRequest("sum")
+			const series = yield* makeQueryEngineEvaluateSeries(evalStub(rows))(tenant, {
+				...req,
+				query: { ...req.query, groupBy: ["service"] },
+			} as QueryEngineEvaluateRequest)
+			assert.deepStrictEqual(series, [
+				{ bucket: "2026-01-01T00:00:00.000Z", groupKey: "a", value: 2, sampleCount: 2 },
+				{ bucket: "2026-01-01T00:00:00.000Z", groupKey: "b", value: 3, sampleCount: 3 },
+				{ bucket: "2026-01-01T00:05:00.000Z", groupKey: "a", value: 4, sampleCount: 4 },
+			])
+		}),
+	)
+
+	it.effect("returns an empty series when there are no rows", () =>
+		Effect.gen(function* () {
+			const series = yield* makeQueryEngineEvaluateSeries(evalStub([]))(tenant, countRequest("sum"))
+			assert.deepStrictEqual(series, [])
 		}),
 	)
 })

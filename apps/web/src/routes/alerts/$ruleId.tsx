@@ -1,20 +1,20 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
-import { Schema } from "effect"
+import { Exit, Schema } from "effect"
 import { Fragment, useMemo, useState } from "react"
+import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatRelativeTime } from "@/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { presetLabel, formatTimeRangeDisplay } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { AlertPreviewChart } from "@/components/alerts/alert-preview-chart"
-import { CheckHistorySparkline } from "@/components/alerts/check-history-sparkline"
+import { AlertRuleChart } from "@/components/alerts/alert-rule-chart"
+import { IncidentTimelineStrip } from "@/components/alerts/incident-timeline-strip"
 import { AlertStatusBadge } from "@/components/alerts/alert-status-badge"
 import { AlertSeverityBadge } from "@/components/alerts/alert-severity-badge"
 import { AlertStatStrip } from "@/components/alerts/alert-stat-card"
@@ -28,7 +28,11 @@ import {
 	formatAlertDateTimeFull,
 	formatAlertDuration,
 	computeIncidentStats,
+	buildRuleToggleRequest,
+	getExitErrorMessage,
 } from "@/lib/alerts/form-utils"
+import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
+import { useAlertRuleStates } from "@/hooks/use-alert-rule-states"
 import {
 	AlertRuleId,
 	IsoDateTimeString,
@@ -37,6 +41,11 @@ import {
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
+import {
+	useAlertDestinationsList,
+	useAlertIncidentsList,
+	useAlertRulesList,
+} from "@/hooks/use-alerts-list"
 import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
 import { AlertChatSheet } from "@/components/alerts/alert-chat-sheet"
 import { toAlertContext, type AlertContext } from "@/components/chat/alert-context"
@@ -45,7 +54,6 @@ import {
 	PencilIcon,
 	DotsVerticalIcon,
 	CircleWarningIcon,
-	SquareTerminalIcon,
 	ChevronDownIcon,
 	ChatBubbleSparkleIcon,
 } from "@/components/icons"
@@ -63,10 +71,17 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
-import { useAlertRuleChart } from "@/hooks/use-alert-rule-chart"
+import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
+import { tokenizeSql } from "@/lib/sql-highlight"
+import { formatSql } from "@/lib/sql-format"
 
-const tabValues = ["overview", "history", "checks"] as const
+const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
+
+// Decode the raw `$ruleId` URL segment into its branded id once, at the route
+// boundary, so the branded value threads through the checks/states queries
+// without a per-call cast.
+const asAlertRuleId = Schema.decodeSync(AlertRuleId)
 
 const RuleDetailSearch = Schema.Struct({
 	tab: Schema.optional(Schema.String),
@@ -90,7 +105,8 @@ function RuleDetailPage() {
 }
 
 function RuleDetailContent() {
-	const { ruleId } = Route.useParams()
+	const { ruleId: ruleIdParam } = Route.useParams()
+	const ruleId = asAlertRuleId(ruleIdParam)
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 
@@ -112,18 +128,20 @@ function RuleDetailContent() {
 		[endTime],
 	)
 
-	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", {
-		reactivityKeys: ["alertRules"],
+	const { result: rulesResult, refresh: refreshRules } = useAlertRulesList()
+	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
+	const ruleStates = useAlertRuleStates(ruleId)
+	const { result: destinationsResult } = useAlertDestinationsList()
+	const deliveryEventsResult = useAtomValue(
+		MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
+			reactivityKeys: ["alertDeliveryEvents"],
+		}),
+	)
+	const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), {
+		mode: "promiseExit",
 	})
-	const rulesResult = useAtomValue(rulesQueryAtom)
-	const refreshRules = useAtomRefresh(rulesQueryAtom)
-	const incidentsQueryAtom = MapleApiAtomClient.query("alerts", "listIncidents", {
-		reactivityKeys: ["alertIncidents"],
-	})
-	const incidentsResult = useAtomValue(incidentsQueryAtom)
-	const refreshIncidents = useAtomRefresh(incidentsQueryAtom)
 	const checksQueryAtom = MapleApiAtomClient.query("alerts", "listRuleChecks", {
-		params: { ruleId: ruleId as AlertRuleId },
+		params: { ruleId },
 		query: { since, until },
 		reactivityKeys: ["alertChecks", ruleId, since, until],
 	})
@@ -139,6 +157,16 @@ function RuleDetailContent() {
 	const checks = Result.builder(checksResult)
 		.onSuccess((response) => response.checks)
 		.orElse(() => [])
+	const destinations = Result.builder(destinationsResult)
+		.onSuccess((response) => response.destinations)
+		.orElse(() => [])
+	const ruleDeliveryEvents = useMemo(
+		() =>
+			Result.builder(deliveryEventsResult)
+				.onSuccess((response) => response.events.filter((event) => event.ruleId === ruleId))
+				.orElse(() => []),
+		[deliveryEventsResult, ruleId],
+	)
 
 	const rule = useMemo(() => rules.find((r) => r.id === ruleId) ?? null, [rules, ruleId])
 
@@ -159,9 +187,7 @@ function RuleDetailContent() {
 		: "overview"
 
 	const [stateFilter, setStateFilter] = useState<"all" | "open" | "resolved">("all")
-	const [checkStatusFilter, setCheckStatusFilter] = useState<"all" | "breached" | "healthy" | "skipped">(
-		"all",
-	)
+	const [checkStatusFilter, setCheckStatusFilter] = useState<CheckStatusFilter>("all")
 
 	const filteredIncidents = useMemo(() => {
 		if (stateFilter === "all") return ruleIncidents
@@ -189,21 +215,6 @@ function RuleDetailContent() {
 	const stats = useMemo(() => computeIncidentStats(ruleIncidents), [ruleIncidents])
 	const maxContributorCount = stats.topContributors.length > 0 ? stats.topContributors[0][1] : 1
 
-	// Timeline bar segments for sticky header
-	const timelineSegments = useMemo(() => {
-		if (ruleIncidents.length === 0) return []
-		const sorted = ruleIncidents.toSorted((a, b) => {
-			const ta = a.firstTriggeredAt ? new Date(a.firstTriggeredAt).getTime() : 0
-			const tb = b.firstTriggeredAt ? new Date(b.firstTriggeredAt).getTime() : 0
-			return ta - tb
-		})
-		return sorted.map((i) => ({
-			status: i.status as "open" | "resolved",
-			start: i.firstTriggeredAt ? new Date(i.firstTriggeredAt).getTime() : Date.now(),
-			end: i.resolvedAt ? new Date(i.resolvedAt).getTime() : Date.now(),
-		}))
-	}, [ruleIncidents])
-
 	// The strip frames the selected window so "today" vs "last week" reshapes the
 	// at-a-glance answer; incident segments still paint wherever they fall within it.
 	const timelineRange = useMemo(
@@ -215,7 +226,10 @@ function RuleDetailContent() {
 	)
 
 	const formState = useMemo(() => (rule ? ruleToFormState(rule) : defaultRuleForm()), [rule])
-	const { chartData, chartLoading, chartError } = useAlertRuleChart(formState, { startTime, endTime })
+	const { preview, previewLoading, previewError } = useAlertRulePreview(formState, {
+		startTime,
+		endTime,
+	})
 
 	// Mirror the picker's default: a custom range formats its bounds, otherwise the
 	// preset label (falling back to the same "24h" the header + data window use).
@@ -227,7 +241,7 @@ function RuleDetailContent() {
 	if (Result.isInitial(rulesResult)) {
 		return (
 			<DashboardLayout
-				breadcrumbs={[{ label: "Alert Rules", href: "/alerts?tab=rules" }, { label: "Loading..." }]}
+				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}
 			>
 				<div className="space-y-4">
 					<Skeleton className="h-12 w-1/3" />
@@ -240,7 +254,7 @@ function RuleDetailContent() {
 	if (Result.isFailure(rulesResult)) {
 		return (
 			<DashboardLayout
-				breadcrumbs={[{ label: "Alert Rules", href: "/alerts?tab=rules" }, { label: "Error" }]}
+				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Error" }]}
 				title="Failed to load alert rule"
 			>
 				<Empty className="py-12">
@@ -262,7 +276,7 @@ function RuleDetailContent() {
 						<Button
 							variant="outline"
 							size="sm"
-							render={<Link to="/alerts" search={{ tab: "rules" }} />}
+							render={<Link to="/alerts" />}
 						>
 							Back to rules
 						</Button>
@@ -275,7 +289,7 @@ function RuleDetailContent() {
 	if (!rule) {
 		return (
 			<DashboardLayout
-				breadcrumbs={[{ label: "Alert Rules", href: "/alerts?tab=rules" }, { label: "Not Found" }]}
+				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Not Found" }]}
 				title="Rule not found"
 			>
 				<Empty className="py-12">
@@ -291,7 +305,7 @@ function RuleDetailContent() {
 					<Button
 						variant="outline"
 						size="sm"
-						render={<Link to="/alerts" search={{ tab: "rules" }} />}
+						render={<Link to="/alerts" />}
 					>
 						Back to rules
 					</Button>
@@ -300,54 +314,26 @@ function RuleDetailContent() {
 		)
 	}
 
+	async function handleToggleEnabled() {
+		if (!rule) return
+		const result = await updateRule({
+			params: { ruleId: rule.id },
+			payload: buildRuleToggleRequest(rule),
+			reactivityKeys: ["alertRules"],
+		})
+		if (!Exit.isSuccess(result)) {
+			toast.error(getExitErrorMessage(result, "Failed to update rule"))
+		} else {
+			refreshRules()
+		}
+	}
+
 	const isFiring = ruleIncidents.some((i) => i.status === "open")
 	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
 
 	const stickyContent = (
 		<div className="space-y-3">
-			<div className="space-y-1">
-				<div className="flex items-center gap-[3px]">
-					{Array.from({ length: 45 }, (_, i) => {
-						const totalRange = timelineRange.max - timelineRange.min
-						const bucketStart = timelineRange.min + (i / 45) * totalRange
-						const bucketEnd = timelineRange.min + ((i + 1) / 45) * totalRange
-						const hit = timelineSegments.find(
-							(seg) => seg.end > bucketStart && seg.start < bucketEnd,
-						)
-						return (
-							<div
-								key={i}
-								className={cn(
-									"h-3 flex-1 rounded-[2px]",
-									hit
-										? hit.status === "open"
-											? "bg-destructive"
-											: "bg-destructive/50"
-										: "bg-chart-apdex/60",
-								)}
-							/>
-						)
-					})}
-				</div>
-				<div className="flex justify-between text-[11px] text-muted-foreground font-mono">
-					<span>
-						{new Date(timelineRange.min).toLocaleString(undefined, {
-							month: "short",
-							day: "numeric",
-							hour: "2-digit",
-							minute: "2-digit",
-						})}
-					</span>
-					<span>
-						{new Date(timelineRange.max).toLocaleString(undefined, {
-							month: "short",
-							day: "numeric",
-							hour: "2-digit",
-							minute: "2-digit",
-						})}
-					</span>
-				</div>
-			</div>
+			<IncidentTimelineStrip incidents={ruleIncidents} range={timelineRange} />
 			<Tabs
 				value={activeTab}
 				onValueChange={(v) => navigate({ search: (prev) => ({ ...prev, tab: v as RuleDetailTab }) })}
@@ -355,7 +341,6 @@ function RuleDetailContent() {
 				<TabsList variant="underline">
 					<TabsTrigger value="overview">Overview</TabsTrigger>
 					<TabsTrigger value="history">History</TabsTrigger>
-					<TabsTrigger value="checks">Checks</TabsTrigger>
 				</TabsList>
 			</Tabs>
 		</div>
@@ -363,7 +348,7 @@ function RuleDetailContent() {
 
 	return (
 		<DashboardLayout
-			breadcrumbs={[{ label: "Alert Rules", href: "/alerts?tab=rules" }, { label: rule.name }]}
+			breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: rule.name }]}
 			titleContent={
 				<div>
 					<div className="flex items-center gap-2 flex-wrap">
@@ -385,7 +370,7 @@ function RuleDetailContent() {
 					<TimeRangeHeaderControls
 						startTime={search.startTime}
 						endTime={search.endTime}
-						presetValue={search.timePreset ?? "24h"}
+						presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
 						defaultPreset="24h"
 						onTimeChange={(range) =>
 							navigate({ search: (prev) => applyTimeRangeSearch(prev, range) })
@@ -405,67 +390,35 @@ function RuleDetailContent() {
 		>
 			{activeTab === "overview" && (
 				<div className="space-y-6">
-					{rule.lastEvaluationError && (
-						<div className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-4">
-							<CircleWarningIcon size={18} className="mt-0.5 shrink-0 text-destructive" />
-							<div className="min-w-0 space-y-1">
-								<p className="text-sm font-medium text-destructive">Last evaluation failed</p>
-								<p className="text-sm text-muted-foreground break-words">
-									{rule.lastEvaluationError}
-								</p>
-								{rule.lastEvaluatedAt && (
-									<p className="text-xs text-muted-foreground">
-										{formatRelativeTime(rule.lastEvaluatedAt)}
-									</p>
-								)}
-							</div>
-						</div>
-					)}
+					<RuleDiagnosisPanel
+						rule={rule}
+						states={ruleStates}
+						checks={checks}
+						openIncidents={ruleIncidents.filter((i) => i.status === "open")}
+						destinations={destinations}
+						deliveryEvents={ruleDeliveryEvents}
+						now={Date.now()}
+						onToggleEnabled={() => void handleToggleEnabled()}
+					/>
 					<div className="space-y-2">
 						<h2 className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
 							{signalLabels[rule.signalType]}: {rangeLabel}
 						</h2>
-						{rule.signalType === "raw_query" ? (
-							// Raw SQL has no structured preview regardless of window, so the
-							// generic "widen the range" empty-state would mislead — mirror
-							// RuleLiveChartHero and show a raw-SQL hint instead.
-							<div className="flex h-[300px] w-full items-center justify-center rounded-md border border-dashed bg-muted/20 px-6 text-center">
-								<div className="max-w-sm space-y-2">
-									<div className="mx-auto flex size-9 items-center justify-center rounded-md bg-muted text-muted-foreground">
-										<SquareTerminalIcon size={16} />
-									</div>
-									<p className="font-medium text-sm">
-										Live preview unavailable for raw SQL
-									</p>
-									<p className="text-muted-foreground text-xs">
-										Raw SQL rules don't have a structured chart preview.
-									</p>
-								</div>
-							</div>
-						) : chartError != null ? (
-							<div className="flex h-[300px] w-full items-center justify-center rounded-md border border-dashed border-destructive/40 bg-destructive/5 px-6 text-center">
-								<div className="max-w-md space-y-1">
-									<p className="font-medium text-destructive text-sm">
-										Preview query failed
-									</p>
-									<p className="line-clamp-3 text-muted-foreground text-xs">{chartError}</p>
-								</div>
-							</div>
-						) : !chartLoading && chartData.length === 0 ? (
-							<div className="flex h-[300px] w-full items-center justify-center rounded-md border border-dashed border-border/60 px-6 text-center">
-								<p className="max-w-md text-muted-foreground text-sm">
-									No data in this window. Try widening the range.
-								</p>
-							</div>
-						) : (
-							<AlertPreviewChart
-								data={chartData}
-								threshold={rule.threshold}
-								signalType={rule.signalType}
-								loading={chartLoading}
-								className="h-[300px] w-full"
-							/>
-						)}
+						<AlertRuleChart
+							preview={preview}
+							checks={checks}
+							incidents={ruleIncidents}
+							threshold={rule.threshold}
+							thresholdUpper={rule.thresholdUpper}
+							comparator={rule.comparator}
+							signalType={rule.signalType}
+							window={timelineRange}
+							loading={
+								previewLoading ||
+								(rule.signalType === "raw_query" && Result.isInitial(checksResult))
+							}
+							error={previewError}
+						/>
 					</div>
 
 					{overviewIncident ? (
@@ -575,11 +528,25 @@ function RuleDetailContent() {
 										</>
 									)}
 									{rule.signalType === "raw_query" && rule.rawQuerySql && (
-										<ConfigRow label="Raw SQL" wide>
-											<pre className="max-w-full overflow-x-auto whitespace-pre-wrap text-left font-mono text-xs">
-												{rule.rawQuerySql}
-											</pre>
-										</ConfigRow>
+										<div className="flex flex-col gap-1.5 sm:col-span-2">
+											<dt className="text-muted-foreground">Raw SQL</dt>
+											<dd>
+												<pre className="overflow-x-auto whitespace-pre rounded-md border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed">
+													<code>
+														{tokenizeSql(formatSql(rule.rawQuerySql)).map(
+															(token) => (
+																<span
+																	key={token.start}
+																	className={token.className}
+																>
+																	{token.text}
+																</span>
+															),
+														)}
+													</code>
+												</pre>
+											</dd>
+										</div>
 									)}
 									<ConfigRow label="Destinations">
 										<span className="font-medium">
@@ -596,6 +563,36 @@ function RuleDetailContent() {
 							</CardContent>
 						</Card>
 					</div>
+
+					{Result.builder(checksResult)
+						.onError((error) => (
+							<div className="space-y-4">
+								<h2 className="text-lg font-semibold">Checks</h2>
+								<Empty className="py-12">
+									<EmptyHeader>
+										<EmptyMedia variant="icon">
+											<CircleWarningIcon size={18} />
+										</EmptyMedia>
+										<EmptyTitle>Failed to load checks</EmptyTitle>
+										<EmptyDescription>
+											{error.message ?? "Try refreshing or check API logs."}
+										</EmptyDescription>
+									</EmptyHeader>
+									<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
+										Retry
+									</Button>
+								</Empty>
+							</div>
+						))
+						.orElse(() => (
+							<ChecksPanel
+								rule={rule}
+								checks={checks}
+								loading={Result.isInitial(checksResult)}
+								statusFilter={checkStatusFilter}
+								setStatusFilter={setCheckStatusFilter}
+							/>
+						))}
 				</div>
 			)}
 
@@ -829,7 +826,7 @@ function RuleDetailContent() {
 																		onClick={() =>
 																			navigate({
 																				to: "/alerts",
-																				search: { tab: "monitor" },
+																				search: { tab: "overview" },
 																			})
 																		}
 																	>
@@ -864,34 +861,6 @@ function RuleDetailContent() {
 					))
 					.render()}
 
-			{activeTab === "checks" &&
-				Result.builder(checksResult)
-					.onError((error) => (
-						<Empty className="py-12">
-							<EmptyHeader>
-								<EmptyMedia variant="icon">
-									<CircleWarningIcon size={18} />
-								</EmptyMedia>
-								<EmptyTitle>Failed to load checks</EmptyTitle>
-								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
-								</EmptyDescription>
-							</EmptyHeader>
-							<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
-								Retry
-							</Button>
-						</Empty>
-					))
-					.orElse(() => (
-						<ChecksPanel
-							rule={rule}
-							checks={checks}
-							loading={Result.isInitial(checksResult)}
-							statusFilter={checkStatusFilter}
-							setStatusFilter={setCheckStatusFilter}
-						/>
-					))}
-
 			<AlertChatSheet open={chatOpen} onOpenChange={setChatOpen} alertContext={chatContext} />
 		</DashboardLayout>
 	)
@@ -906,6 +875,8 @@ function ConfigRow({ label, children, wide }: { label: string; children: React.R
 	)
 }
 
+type CheckStatusFilter = "all" | "breached" | "healthy" | "skipped" | "error"
+
 function ChecksPanel({
 	rule,
 	checks,
@@ -916,21 +887,23 @@ function ChecksPanel({
 	rule: AlertRuleDocument
 	checks: ReadonlyArray<AlertCheckDocument>
 	loading: boolean
-	statusFilter: "all" | "breached" | "healthy" | "skipped"
-	setStatusFilter: (v: "all" | "breached" | "healthy" | "skipped") => void
+	statusFilter: CheckStatusFilter
+	setStatusFilter: (v: CheckStatusFilter) => void
 }) {
 	const totals = useMemo(() => {
 		let breached = 0
 		let healthy = 0
 		let skipped = 0
+		let errored = 0
 		let transitions = 0
 		for (const c of checks) {
 			if (c.status === "breached") breached += 1
 			else if (c.status === "healthy") healthy += 1
+			else if (c.status === "error") errored += 1
 			else skipped += 1
 			if (c.incidentTransition !== "none") transitions += 1
 		}
-		return { breached, healthy, skipped, transitions, total: checks.length }
+		return { breached, healthy, skipped, errored, transitions, total: checks.length }
 	}, [checks])
 
 	const filteredChecks = useMemo(() => {
@@ -966,7 +939,8 @@ function ChecksPanel({
 	}
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-4">
+			<h2 className="text-lg font-semibold">Checks</h2>
 			<AlertStatStrip
 				items={[
 					{ label: "Total checks", value: totals.total },
@@ -976,38 +950,25 @@ function ChecksPanel({
 						tone: totals.breached > 0 ? "critical" : "default",
 					},
 					{ label: "Healthy", value: totals.healthy, tone: "emerald" },
+					...(totals.errored > 0
+						? [{ label: "Failed", value: totals.errored, tone: "critical" as const }]
+						: []),
 					{ label: "Transitions", value: totals.transitions },
 				]}
 			/>
 
-			<div className="space-y-2">
-				<div className="flex items-center justify-between">
-					<h3 className="text-sm font-semibold">Observed values</h3>
-					<span className="text-xs text-muted-foreground">
-						{totals.total} checks · oldest → newest
-					</span>
-				</div>
-				<Card>
-					<CardContent className="p-5">
-						<CheckHistorySparkline
-							checks={checks}
-							threshold={rule.threshold}
-							signalType={rule.signalType}
-							className="h-[200px] w-full"
-						/>
-					</CardContent>
-				</Card>
-			</div>
-
 			<div className="space-y-3">
 				<div className="flex items-center justify-between">
 					<h3 className="text-sm font-semibold">All checks</h3>
-					<AlertSegmentedSelect<"all" | "breached" | "healthy" | "skipped">
+					<AlertSegmentedSelect<CheckStatusFilter>
 						options={[
 							{ value: "all", label: "All" },
 							{ value: "breached", label: "Breached" },
 							{ value: "healthy", label: "Healthy" },
 							{ value: "skipped", label: "Skipped" },
+							...(totals.errored > 0
+								? [{ value: "error" as const, label: "Failed" }]
+								: []),
 						]}
 						value={statusFilter}
 						onChange={setStatusFilter}
@@ -1031,7 +992,7 @@ function ChecksPanel({
 					<TableBody>
 						{filteredChecks.slice(0, 200).map((check) => {
 							const state: "firing" | "ok" | "pending" =
-								check.status === "breached"
+								check.status === "breached" || check.status === "error"
 									? "firing"
 									: check.status === "healthy"
 										? "ok"
@@ -1057,14 +1018,25 @@ function ChecksPanel({
 													? "Breached"
 													: check.status === "healthy"
 														? "Healthy"
-														: "Skipped"
+														: check.status === "error"
+															? "Failed"
+															: "Skipped"
 											}
 										/>
 									</TableCell>
 									<TableCell className="font-mono tabular-nums">
-										{check.observedValue == null
-											? "—"
-											: formatSignalValue(rule.signalType, check.observedValue)}
+										{check.status === "error" ? (
+											<span
+												className="block max-w-[260px] truncate font-sans text-destructive text-xs"
+												title={check.errorMessage ?? undefined}
+											>
+												{check.errorMessage ?? "Evaluation failed"}
+											</span>
+										) : check.observedValue == null ? (
+											"—"
+										) : (
+											formatSignalValue(rule.signalType, check.observedValue)
+										)}
 									</TableCell>
 									<TableCell className="font-mono tabular-nums text-muted-foreground">
 										{formatSignalValue(rule.signalType, check.threshold)}

@@ -101,7 +101,7 @@ export const encode = <IE = never, Done = unknown>(): Channel.Channel<
  * @category constructors
  * @since 4.0.0
  */
-export const encodeSchema = <S extends Schema.Top>(
+export const encodeSchema = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(): Channel.Channel<
@@ -181,7 +181,7 @@ export const decode = <IE = never, Done = unknown>(): Channel.Channel<
  * @category constructors
  * @since 4.0.0
  */
-export const decodeSchema = <S extends Schema.Top>(
+export const decodeSchema = <S extends Schema.Constraint>(
   schema: S
 ) =>
 <IE = never, Done = unknown>(): Channel.Channel<
@@ -243,7 +243,7 @@ export const duplex = <R, IE, OE, OutDone, InDone>(
  * @since 4.0.0
  */
 export const duplexSchema: {
-  <In extends Schema.Top, Out extends Schema.Top>(
+  <In extends Schema.Constraint, Out extends Schema.Constraint>(
     options: {
       readonly inputSchema: In
       readonly outputSchema: Out
@@ -267,7 +267,7 @@ export const duplexSchema: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-  <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+  <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
     self: Channel.Channel<
       Arr.NonEmptyReadonlyArray<Uint8Array<ArrayBuffer>>,
       OutErr,
@@ -290,7 +290,7 @@ export const duplexSchema: {
     InDone,
     R | In["EncodingServices"] | Out["DecodingServices"]
   >
-} = dual(2, <Out extends Schema.Top, In extends Schema.Top, OutErr, OutDone, InErr, InDone, R>(
+} = dual(2, <Out extends Schema.Constraint, In extends Schema.Constraint, OutErr, OutDone, InErr, InDone, R>(
   self: Channel.Channel<
     Arr.NonEmptyReadonlyArray<Uint8Array<ArrayBuffer>>,
     OutErr,
@@ -325,7 +325,9 @@ export const duplexSchema: {
  * @category schemas
  * @since 4.0.0
  */
-export interface schema<S extends Schema.Top> extends Schema.decodeTo<S, Schema.instanceOf<Uint8Array<ArrayBuffer>>> {}
+export interface schema<S extends Schema.Constraint>
+  extends Schema.decodeTo<S, Schema.instanceOf<Uint8Array<ArrayBuffer>>>
+{}
 
 /**
  * Schema for decoding MessagePack bytes into values and encoding values back to
@@ -377,7 +379,7 @@ export const transformation: SchemaTransformation.Transformation<
  * @category schemas
  * @since 4.0.0
  */
-export const schema = <S extends Schema.Top>(schema: S): schema<S> =>
+export const schema = <S extends Schema.Constraint>(schema: S): schema<S> =>
   (Schema.Uint8Array as Schema.instanceOf<Uint8Array<ArrayBuffer>>).pipe(
     Schema.decodeTo(schema, transformation)
   )

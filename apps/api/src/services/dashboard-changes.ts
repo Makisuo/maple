@@ -55,6 +55,11 @@ export const summarizeDashboardChange = (
 		detail = detail ?? `Time range set to ${value}`
 	}
 
+	if (!sameJson(prev.variables ?? [], next.variables ?? [])) {
+		kinds.add("variables_changed")
+		detail = detail ?? "Variables updated"
+	}
+
 	const prevById = new Map(prev.widgets.map((w) => [w.id, w] as const))
 	const nextById = new Map(next.widgets.map((w) => [w.id, w] as const))
 

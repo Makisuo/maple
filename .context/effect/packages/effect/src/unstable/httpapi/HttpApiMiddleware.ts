@@ -45,8 +45,8 @@ export const isSecurity = (u: AnyService): u is AnyServiceSecurity => hasPropert
 
 type ErrorConstraint = Schema.Top | ReadonlyArray<Schema.Top>
 
-type ErrorSchemaFromConstraint<E> = E extends ReadonlyArray<Schema.Top> ? E[number]
-  : E extends Schema.Top ? E
+type ErrorSchemaFromConstraint<E> = E extends ReadonlyArray<Schema.Constraint> ? E[number]
+  : E extends Schema.Constraint ? E
   : never
 
 /**

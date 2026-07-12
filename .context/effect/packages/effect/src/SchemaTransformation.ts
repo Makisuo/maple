@@ -1312,8 +1312,8 @@ export function optionFromOptional<T>(): Transformation<Option.Option<T>, T | un
  *
  * **Details**
  *
- * Decoding calls `new URL(s)` and fails with `InvalidValue` if the string is
- * not a valid URL. Encoding returns `url.href`.
+ * Decoding checks `URL.canParse(s)` and fails with `InvalidValue` if the string
+ * is not a valid URL. Encoding returns `url.href`.
  *
  * **Example** (Converting a string to a URL)
  *
@@ -1333,10 +1333,9 @@ export function optionFromOptional<T>(): Transformation<Option.Option<T>, T | un
  */
 export const urlFromString: Transformation<URL, string> = transformOrFail<URL, string>({
   decode: (s) =>
-    Effect.try({
-      try: () => new URL(s),
-      catch: () => new SchemaIssue.InvalidValue(Option.some(s), { message: `Invalid URL string: ${s}` })
-    }),
+    URL.canParse(s)
+      ? Effect.succeed(new URL(s))
+      : Effect.fail(new SchemaIssue.InvalidValue(Option.some(s), { message: `Invalid URL string: ${s}` })),
   encode: (url) => Effect.succeed(url.href)
 })
 

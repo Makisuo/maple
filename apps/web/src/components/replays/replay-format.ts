@@ -82,7 +82,7 @@ const relativeFmt = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
 const WINDOW_MARGIN_MS = 60 * 60 * 1000 // 1h slack on each side (clock skew, late spans)
 // Upper bound when the session end is unknown (still active). This MUST stay >=
 // the browser SDK's session lifetime cap (`MAX_SESSION_MS` in
-// packages/browser/src/session.ts) — the SDK rotates to a fresh session once it
+// packages/browser-session/src/session.ts) — the SDK rotates to a fresh session once it
 // exceeds that age, so a session's events provably can't extend past
 // `start + cap`. Both constants are 24h. If the SDK cap is ever raised without
 // raising this one, this window would silently prune out a session's tail events

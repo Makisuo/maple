@@ -7,6 +7,7 @@ import { ServiceCombobox } from "@/components/alerts/service-combobox"
 import { SectionLabel } from "@/components/alerts/signal-and-threshold-section"
 import { GroupByMultiSelect } from "@/components/query-builder/group-by-multi-select"
 import type { AutocompleteValuesContextType } from "@/hooks/use-autocomplete-values"
+import { useMetricScopedAutocomplete } from "@/hooks/use-metric-scoped-autocomplete"
 import type { RuleFormState } from "@/lib/alerts/form-utils"
 
 interface ScopeSectionProps {
@@ -32,6 +33,19 @@ export function ScopeSection({ form, onChange, serviceNameOptions, autocompleteV
 			: form.signalType === "metric"
 				? "metrics"
 				: "traces"
+
+	// For metric-signal rules, scope group-by suggestions to the selected metric
+	// instead of the org-wide metric attribute keys.
+	const isMetricSignal = form.signalType === "metric"
+	const scopedAutocomplete = useMetricScopedAutocomplete({
+		base: autocompleteValues.metrics,
+		metricName: isMetricSignal ? form.metricName.trim() || undefined : undefined,
+		metricType: isMetricSignal ? form.metricType : undefined,
+	})
+	const groupByAttributeKeys =
+		effectiveDataSource === "metrics"
+			? scopedAutocomplete.groupByKeys
+			: autocompleteValues[effectiveDataSource]?.attributeKeys
 
 	return (
 		<Card className="p-4">
@@ -69,7 +83,7 @@ export function ScopeSection({ form, onChange, serviceNameOptions, autocompleteV
 							dataSource={effectiveDataSource}
 							value={form.groupBy}
 							onChange={(values) => onChange((c) => ({ ...c, groupBy: values }))}
-							attributeKeys={autocompleteValues[effectiveDataSource]?.attributeKeys}
+							attributeKeys={groupByAttributeKeys}
 							placeholder="service.name"
 							className="w-full"
 							disabled={hasSpecificServices}

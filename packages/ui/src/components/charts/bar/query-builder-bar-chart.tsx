@@ -5,12 +5,8 @@ import { cn } from "../../../lib/utils"
 import { useContainerSize } from "../../../hooks/use-container-size"
 import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
 import type { BaseChartProps } from "../_shared/chart-types"
-import {
-	type LegendSeries,
-	QueryBuilderLegend,
-	computeSeriesStats,
-	responsiveLegendHeight,
-} from "../_shared/query-builder-legend"
+import { QueryBuilderLegend, responsiveLegendHeight } from "../_shared/query-builder-legend"
+import { useTimeseriesSeriesPresentation } from "../_shared/use-series-presentation"
 import { bucketTimeseries, MAX_BAR_SERIES, OTHER_COLOR, OTHER_LABEL } from "../_shared/bucket-series"
 import { thresholdReferenceLines } from "../_shared/threshold-lines"
 import {
@@ -98,6 +94,8 @@ export function QueryBuilderBarChart({
 		return { chartData, seriesDefinitions }
 	}, [data])
 
+	const valueKeys = React.useMemo(() => seriesDefinitions.map((d) => d.chartKey), [seriesDefinitions])
+
 	const bucketSeconds = React.useMemo(
 		() =>
 			inferBucketSeconds(
@@ -157,24 +155,13 @@ export function QueryBuilderBarChart({
 		})
 	}, [])
 
-	const seriesStats = React.useMemo(
-		() =>
-			computeSeriesStats(
-				displayData,
-				seriesDefinitions.map((d) => d.chartKey),
-			),
-		[displayData, seriesDefinitions],
-	)
-
-	const legendSeries = React.useMemo<LegendSeries[]>(
-		() =>
-			seriesDefinitions.map((definition) => ({
-				key: definition.chartKey,
-				label: definition.rawKey,
-				color: chartConfig[definition.chartKey]?.color ?? "var(--chart-1)",
-			})),
-		[seriesDefinitions, chartConfig],
-	)
+	// Bars never render point dots, so the hook's `renderDots` is unused here.
+	const { seriesStats, legendSeries, integerOnlyData } = useTimeseriesSeriesPresentation({
+		data: displayData,
+		valueKeys,
+		seriesDefinitions,
+		chartConfig,
+	})
 
 	const containerRef = React.useRef<HTMLDivElement>(null)
 	const { height: containerHeight } = useContainerSize(containerRef)
@@ -186,8 +173,19 @@ export function QueryBuilderBarChart({
 
 	return (
 		<div ref={containerRef} className={cn("h-full w-full", className)}>
-			<ChartContainer config={chartConfig} className="h-full w-full aspect-auto">
-				<BarChart data={displayData} accessibilityLayer syncId={syncId} syncMethod="value">
+			<ChartContainer
+				config={chartConfig}
+				className="h-full w-full aspect-auto"
+				hoistLegend={!showLegendBlock}
+			>
+				<BarChart
+					data={displayData}
+					accessibilityLayer
+					syncId={syncId}
+					syncMethod="value"
+					maxBarSize={48}
+					barCategoryGap="15%"
+				>
 					<CartesianGrid vertical={false} />
 					<XAxis
 						dataKey="bucket"
@@ -199,10 +197,11 @@ export function QueryBuilderBarChart({
 					<YAxis
 						tickLine={false}
 						axisLine={false}
-						tickMargin={8}
-						width={80}
+						tickMargin={6}
+						width={56}
 						scale={logScale ? "log" : "auto"}
 						domain={[softMin ?? (logScale ? 1 : "auto"), softMax ?? "auto"]}
+						allowDecimals={!integerOnlyData}
 						allowDataOverflow={logScale || softMin != null || softMax != null}
 						tickFormatter={(value) => formatValueByUnit(asFiniteNumber(value), unit)}
 					/>
@@ -271,6 +270,7 @@ export function QueryBuilderBarChart({
 									unit={unit}
 									layout="right"
 									variant={variant}
+									maxHeight={containerHeight}
 								/>
 							}
 						/>
@@ -284,8 +284,9 @@ export function QueryBuilderBarChart({
 							dataKey={definition.chartKey}
 							fill={`var(--color-${definition.chartKey})`}
 							radius={
-								stacked && index < seriesDefinitions.length - 1 ? [0, 0, 0, 0] : [4, 4, 0, 0]
+								stacked && index < seriesDefinitions.length - 1 ? [0, 0, 0, 0] : [2, 2, 0, 0]
 							}
+							minPointSize={(value: number | null | undefined) => ((value ?? 0) > 0 ? 2 : 0)}
 							hide={hiddenSeries.has(definition.chartKey)}
 							isAnimationActive={false}
 							{...(stacked ? { stackId: "a" } : {})}

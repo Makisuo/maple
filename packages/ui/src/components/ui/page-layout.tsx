@@ -67,7 +67,7 @@ function Header({ children, title, titleContent, description, className }: Heade
 		<div
 			data-slot="page-header"
 			className={cn(
-				"flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4",
+				"flex flex-col gap-2 @2xl/page:flex-row @2xl/page:items-start @2xl/page:justify-between @2xl/page:gap-4",
 				className,
 			)}
 		>
@@ -181,7 +181,7 @@ function Content({ children, className }: { children: React.ReactNode; className
 		<main
 			id="main-content"
 			data-slot="page-content"
-			className={cn("flex min-h-0 min-w-0 flex-1 flex-col", className)}
+			className={cn("@container/page flex min-h-0 min-w-0 flex-1 flex-col", className)}
 		>
 			{children}
 		</main>

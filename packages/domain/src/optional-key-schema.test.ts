@@ -15,7 +15,7 @@ type DecodeResult<A> =
 	| { readonly ok: true; readonly value: A }
 	| { readonly ok: false; readonly error: string }
 
-const decode = <A>(schema: Schema.Decoder<A>, value: unknown): DecodeResult<A> => {
+const decode = <A>(schema: Schema.ConstraintDecoder<A>, value: unknown): DecodeResult<A> => {
 	try {
 		return { ok: true, value: Schema.decodeUnknownSync(schema)(value) }
 	} catch (error) {

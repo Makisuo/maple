@@ -5,6 +5,7 @@ import { parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
 import { createMapleApi } from "./apps/api/alchemy.run.ts"
 import { createChatFlueWorker } from "./apps/chat-flue/alchemy.run.ts"
+import { createElectricSyncWorker } from "./apps/electric-sync/alchemy.run.ts"
 import { createLandingWorker } from "./apps/landing/alchemy.run.ts"
 import { createLocalUiWorker } from "./apps/local-ui/alchemy.run.ts"
 import { createMapleWeb } from "./apps/web/alchemy.run.ts"
@@ -49,12 +50,22 @@ const resolvedIngestUrl = domains.ingest
 	? `https://${domains.ingest}`
 	: process.env.VITE_INGEST_URL?.trim() || "https://ingest.maple.dev"
 
+// Standalone ElectricSQL shape-proxy worker (DB-free). Created before web so its
+// public origin can be baked into the web build (VITE_ELECTRIC_SYNC_URL).
+const electricSync = await createElectricSyncWorker({ stage, domains })
+
+const resolvedElectricSyncUrl = domains.sync ? `https://${domains.sync}` : electricSync.url
+if (!resolvedElectricSyncUrl) {
+	throw new Error("electric-sync worker deployed without a url — set `url: true` or provide a custom domain")
+}
+
 const web = await createMapleWeb({
 	stage,
 	domains,
 	apiUrl: resolvedApiUrl,
 	ingestUrl: resolvedIngestUrl,
 	flueChatUrl: resolvedChatUrl,
+	electricSyncUrl: resolvedElectricSyncUrl,
 })
 
 const landing = await createLandingWorker({ stage, domains })
@@ -68,6 +79,7 @@ const summary = {
 	apiUrl: resolvedApiUrl,
 	chatUrl: resolvedChatUrl,
 	ingestUrl: resolvedIngestUrl,
+	electricSyncUrl: resolvedElectricSyncUrl,
 	webUrl: domains.web ? `https://${domains.web}` : web.url,
 	landingUrl: domains.landing ? `https://${domains.landing}` : landing.url,
 	localUiUrl: domains.local ? `https://${domains.local}` : localUi.url,

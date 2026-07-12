@@ -1,6 +1,7 @@
 import path from "node:path"
 import alchemy from "alchemy"
 import {
+	EmailSender,
 	Hyperdrive,
 	HyperdriveRef,
 	KVNamespace,
@@ -162,6 +163,10 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
 			AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
 			CHAT_FLUE: chatFlue,
+			EMAIL: EmailSender({
+				allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+				dev: { remote: true },
+			}),
 			TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 			TINYBIRD_TOKEN: alchemy.secret(requireEnv("TINYBIRD_TOKEN")),
 			...optionalPlain("CLICKHOUSE_URL"),
@@ -175,7 +180,7 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			MAPLE_INGEST_PUBLIC_URL:
 				process.env.MAPLE_INGEST_PUBLIC_URL?.trim() || "https://ingest.maple.dev",
 			MAPLE_APP_BASE_URL: process.env.MAPLE_APP_BASE_URL?.trim() || "https://app.maple.dev",
-			RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL?.trim() || "Maple <notifications@maple.dev>",
+			EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 			// Bucket-cache knobs: on by default in deployed stages. Override via
 			// deploy-time env (e.g. `QE_BUCKET_CACHE_ENABLED=false`) if needed.
 			QE_BUCKET_CACHE_ENABLED: process.env.QE_BUCKET_CACHE_ENABLED?.trim() || "true",
@@ -192,7 +197,6 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalSecret("AUTUMN_SECRET_KEY"),
 			...optionalSecret("SD_INTERNAL_TOKEN"),
 			...optionalSecret("INTERNAL_SERVICE_TOKEN"),
-			...optionalSecret("RESEND_API_KEY"),
 			...optionalPlain("HAZEL_API_BASE_URL"),
 			...optionalPlain("HAZEL_OAUTH_DISCOVERY_URL"),
 			...optionalPlain("HAZEL_OAUTH_CLIENT_ID"),
@@ -205,6 +209,20 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalSecret("GITHUB_APP_CLIENT_SECRET"),
 			...optionalSecret("GITHUB_APP_WEBHOOK_SECRET"),
 			...optionalPlain("GITHUB_API_BASE_URL"),
+			// Cloudflare integration (account OAuth — Authorization Code + PKCE)
+			...optionalPlain("CLOUDFLARE_OAUTH_CLIENT_ID"),
+			...optionalSecret("CLOUDFLARE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("CLOUDFLARE_OAUTH_SCOPES"),
+			...optionalPlain("CLOUDFLARE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
+			...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
+			...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
+			// PlanetScale integration (OAuth application — confidential client, no PKCE)
+			...optionalPlain("PLANETSCALE_OAUTH_CLIENT_ID"),
+			...optionalSecret("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("PLANETSCALE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("PLANETSCALE_OAUTH_TOKEN_URL"),
+			...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
 		},
 	})
 

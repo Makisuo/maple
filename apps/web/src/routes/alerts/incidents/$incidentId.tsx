@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
@@ -12,7 +12,7 @@ import {
 import { InvestigationView } from "@/components/investigations/investigation-view"
 import { subjectFromAlertContext } from "@/components/investigations/subject"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -39,12 +39,8 @@ function AlertIncidentPage() {
 		[alertParam],
 	)
 
-	const incidentsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listIncidents", { reactivityKeys: ["alertIncidents"] }),
-	)
-	const rulesResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listRules", { reactivityKeys: ["alertRules"] }),
-	)
+	const { result: incidentsResult } = useAlertIncidentsList()
+	const { result: rulesResult } = useAlertRulesList()
 
 	const incidents = Result.builder(incidentsResult)
 		.onSuccess((r) => r.incidents)
