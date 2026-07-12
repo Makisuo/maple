@@ -105,7 +105,7 @@ import {
 	TUNING_CONFIG_FORMAT_VERSION,
 	type LoadedTuningConfig,
 } from "../src/server/archives/config"
-import { requireCalibrationSelection } from "../src/commands/archive"
+import { decodeChildMetrics, requireCalibrationSelection } from "../src/commands/archive"
 import { ArchiveError, archiveErrorMessage } from "../src/server/archives/errors"
 
 const baseMetrics = (over: Partial<CandidateMetrics> = {}): CandidateMetrics => ({
@@ -188,6 +188,59 @@ describe("calibration budget validation", () => {
 			throws(
 				() => validateCalibrationBudget(baseBudget({ safetyMargin: value })),
 				/safetyMargin must be a finite number at least 1/,
+			)
+		}
+	})
+})
+
+const childScope = {
+	checkpointId: "00000000-0000-4000-8000-000000000000",
+	checkpointManifestFingerprint: "checkpoint:fingerprint:6",
+	rangeDate: "2026-01-01",
+	role: "held-out" as const,
+	startRow: 10_000,
+	requestedRows: 20_000,
+}
+
+const childMetrics = () => ({
+	logicalBytes: 1_000_000,
+	physicalBytes: 300_000,
+	peakTempDiskBytes: 500_000,
+	peakRssBytes: 200_000_000,
+	exportWallMs: 5_000,
+	rowCount: 19_500,
+	sample: { ...childScope, rowCount: 19_500 },
+})
+
+describe("calibration child protocol", () => {
+	it("decodes an exact finite metrics document bound to the requested sample scope", () => {
+		strictEqual(decodeChildMetrics(childMetrics(), childScope).sample.startRow, childScope.startRow)
+	})
+
+	it("rejects missing, null, string, non-finite, negative, unsafe, and excess fields", () => {
+		const invalid: Array<unknown> = [
+			{ ...childMetrics(), logicalBytes: undefined },
+			{ ...childMetrics(), logicalBytes: null },
+			{ ...childMetrics(), logicalBytes: "1000000" },
+			{ ...childMetrics(), logicalBytes: Number.NaN },
+			{ ...childMetrics(), physicalBytes: Number.POSITIVE_INFINITY },
+			{ ...childMetrics(), peakTempDiskBytes: -1 },
+			{ ...childMetrics(), rowCount: Number.MAX_SAFE_INTEGER + 1 },
+			{ ...childMetrics(), unexpected: true },
+		]
+		for (const value of invalid) throws(() => decodeChildMetrics(value, childScope))
+	})
+
+	it("binds role, requested window, and returned row count exactly", () => {
+		for (const sample of [
+			{ ...childMetrics().sample, role: "training" },
+			{ ...childMetrics().sample, startRow: 0 },
+			{ ...childMetrics().sample, requestedRows: 10_000 },
+			{ ...childMetrics().sample, rowCount: 19_499 },
+		]) {
+			throws(
+				() => decodeChildMetrics({ ...childMetrics(), sample }, childScope),
+				/inconsistent sample scope/,
 			)
 		}
 	})

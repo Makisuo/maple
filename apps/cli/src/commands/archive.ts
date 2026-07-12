@@ -1,4 +1,4 @@
-import { Effect, Option } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as Command from "effect/unstable/cli/Command"
 import * as Flag from "effect/unstable/cli/Flag"
 import * as Argument from "effect/unstable/cli/Argument"
@@ -697,23 +697,55 @@ export const archiveCalibrate = Command.make("calibrate", {
  * process-launch-to-exit), so write throughput is export-throughput, not
  * end-to-end.
  */
-interface ChildMetrics {
-	readonly logicalBytes: number
-	readonly physicalBytes: number
-	readonly peakTempDiskBytes: number
-	readonly peakRssBytes: number
-	readonly exportWallMs: number
-	readonly rowCount: number
-	/** The exact ordered-row sample scope this child exported (tamper-evidence). */
-	readonly sample: {
-		readonly checkpointId: string
-		readonly checkpointManifestFingerprint: string
-		readonly rangeDate: string
-		readonly role: "training" | "held-out"
-		readonly startRow: number
-		readonly requestedRows: number
-		readonly rowCount: number
+const NonNegativeFinite = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
+const NonNegativeSafeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+
+const ChildMetricsSchema = Schema.Struct({
+	logicalBytes: NonNegativeFinite,
+	physicalBytes: NonNegativeFinite,
+	peakTempDiskBytes: NonNegativeFinite,
+	peakRssBytes: NonNegativeFinite,
+	exportWallMs: NonNegativeFinite,
+	rowCount: NonNegativeSafeInteger,
+	sample: Schema.Struct({
+		checkpointId: Schema.String,
+		checkpointManifestFingerprint: Schema.String,
+		rangeDate: Schema.String,
+		role: Schema.Literals(["training", "held-out"]),
+		startRow: NonNegativeSafeInteger,
+		requestedRows: NonNegativeSafeInteger,
+		rowCount: NonNegativeSafeInteger,
+	}),
+})
+
+type ChildMetrics = typeof ChildMetricsSchema.Type
+
+export interface ExpectedChildSampleScope {
+	readonly checkpointId: string
+	readonly checkpointManifestFingerprint: string
+	readonly rangeDate: string
+	readonly role: "training" | "held-out"
+	readonly startRow: number
+	readonly requestedRows: number
+}
+
+/** Decode the child protocol exactly and bind its authoritative sample scope
+ * to the request that the parent actually sent. */
+export const decodeChildMetrics = (input: unknown, expected: ExpectedChildSampleScope): ChildMetrics => {
+	const raw = Schema.decodeUnknownSync(ChildMetricsSchema, { onExcessProperty: "error" })(input)
+	const sample = raw.sample
+	if (
+		sample.checkpointId !== expected.checkpointId ||
+		sample.checkpointManifestFingerprint !== expected.checkpointManifestFingerprint ||
+		sample.rangeDate !== expected.rangeDate ||
+		sample.role !== expected.role ||
+		sample.startRow !== expected.startRow ||
+		sample.requestedRows !== expected.requestedRows ||
+		sample.rowCount !== raw.rowCount
+	) {
+		throw new Error("calibrate-run emitted an inconsistent sample scope")
 	}
+	return raw
 }
 
 /**
@@ -908,7 +940,15 @@ const runCandidateChild = (
 			}
 			try {
 				const lines = stdout.trim().split("\n")
-				const raw = JSON.parse(lines[lines.length - 1]!) as ChildMetrics
+				const parsed: unknown = JSON.parse(lines[lines.length - 1]!)
+				const raw = decodeChildMetrics(parsed, {
+					checkpointId,
+					checkpointManifestFingerprint,
+					rangeDate,
+					role: startRow === 0 ? "training" : "held-out",
+					startRow,
+					requestedRows: sampleRows,
+				})
 				const logicalBytes = raw.logicalBytes
 				const physicalBytes = raw.physicalBytes
 				const compressionRatio = logicalBytes > 0 ? physicalBytes / logicalBytes : 0
@@ -925,32 +965,7 @@ const runCandidateChild = (
 					wallMs: raw.exportWallMs,
 					rowCount: raw.rowCount,
 				}
-				// Bind the child's authoritative sample scope. The recorded rowCount
-				// must equal the measured metrics rowCount (the writer asserted both).
 				const sample = raw.sample
-				if (
-					!sample ||
-					typeof sample.checkpointId !== "string" ||
-					sample.checkpointId !== checkpointId ||
-					typeof sample.checkpointManifestFingerprint !== "string" ||
-					sample.checkpointManifestFingerprint !== checkpointManifestFingerprint ||
-					typeof sample.rangeDate !== "string" ||
-					sample.rangeDate !== rangeDate ||
-					(sample.role !== "training" && sample.role !== "held-out") ||
-					typeof sample.startRow !== "number" ||
-					typeof sample.requestedRows !== "number" ||
-					typeof sample.rowCount !== "number" ||
-					sample.rowCount !== raw.rowCount
-				) {
-					finish({
-						candidate,
-						signal,
-						metrics: null,
-						ok: false,
-						error: `calibrate-run emitted an inconsistent sample scope`,
-					})
-					return
-				}
 				finish({ candidate, signal, metrics, ok: true, sample })
 			} catch (error) {
 				finish({
