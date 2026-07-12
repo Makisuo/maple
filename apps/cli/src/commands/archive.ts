@@ -23,6 +23,7 @@ import {
 	type LoadedTuningConfig,
 } from "../server/archives/config"
 import { ARCHIVE_SIGNALS, isArchiveSignalName, type ArchiveSignalName } from "../server/archives/signals"
+import { expireArchiveDay, retireLiveDay } from "../server/archives/retention"
 import { validateRangeDate } from "../server/archives/paths"
 import {
 	type CalibrationBudget,
@@ -117,6 +118,16 @@ const checkpointIdFlag = Flag.optional(
 const dryRunFlag = Flag.boolean("dry-run").pipe(
 	Flag.withDescription("Report the exact planned actions without modifying any archive state"),
 	Flag.withDefault(false),
+)
+
+const applyFlag = Flag.boolean("apply").pipe(
+	Flag.withDescription("Apply the destructive operation (omitting this flag is a non-mutating refusal)"),
+	Flag.withDefault(false),
+)
+
+const localPortFlag = Flag.integer("port").pipe(
+	Flag.withDescription("Private Maple local-query port"),
+	Flag.withDefault(4318),
 )
 
 const keepFlag = Flag.integer("keep").pipe(
@@ -580,6 +591,61 @@ export const archiveGc = Command.make("gc", {
 						`  ${dim("kept")}        ${plan.keep} newest superseded per range\n`,
 				),
 			)
+		}),
+	),
+)
+
+export const archiveExpire = Command.make("expire", {
+	dataDir: dataDirFlag,
+	archiveDir: archiveDirFlag,
+	scratchRoot: scratchRootFlag,
+	rangeDate: rangeDateArgument,
+	apply: applyFlag,
+}).pipe(
+	Command.withDescription("Expire one complete active archived UTC day across all six signals"),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			if (!a.apply)
+				return yield* new ArchiveError({ message: "refusing archive expiration without --apply" })
+			const roots = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
+			yield* Effect.tryPromise({
+				try: () => expireArchiveDay(roots.dataDir, roots.archiveDir, a.rangeDate),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			yield* Effect.sync(() =>
+				process.stdout.write(`${green("✓")} expired archive day ${a.rangeDate}\n`),
+			)
+		}),
+	),
+)
+
+export const archiveRetireLive = Command.make("retire-live", {
+	dataDir: dataDirFlag,
+	archiveDir: archiveDirFlag,
+	scratchRoot: scratchRootFlag,
+	rangeDate: rangeDateArgument,
+	port: localPortFlag,
+	apply: applyFlag,
+}).pipe(
+	Command.withDescription("Remove one UTC day from live raw tables after complete archive verification"),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			if (!a.apply)
+				return yield* new ArchiveError({ message: "refusing live retirement without --apply" })
+			const roots = resolveRoots(a.dataDir, a.archiveDir, a.scratchRoot)
+			yield* Effect.tryPromise({
+				try: () =>
+					retireLiveDay({
+						dataDir: roots.dataDir,
+						archiveDir: roots.archiveDir,
+						rangeDate: a.rangeDate,
+						port: a.port,
+					}),
+				catch: (error) =>
+					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			yield* Effect.sync(() => process.stdout.write(`${green("✓")} retired live day ${a.rangeDate}\n`))
 		}),
 	),
 )
@@ -1764,6 +1830,8 @@ export const archive = Command.make("archive").pipe(
 		archiveRebuild,
 		archiveReconcile,
 		archiveGc,
+		archiveExpire,
+		archiveRetireLive,
 		archiveCalibrate,
 		archiveCalibrateRun,
 		archiveCalibrateSession,

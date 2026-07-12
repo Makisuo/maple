@@ -136,8 +136,8 @@ released after the generation is durable. Calibration pins use the purpose
 
 ## Commands
 
-`maple archive` has six operator-facing subcommands (`create`, `list`,
-`rebuild`, `reconcile`, `gc`, `calibrate`) plus the internal
+`maple archive` has eight operator-facing subcommands (`create`, `list`,
+`rebuild`, `reconcile`, `gc`, `calibrate`, `retire-live`, `expire`) plus the internal
 `calibrate-session` and `calibrate-run` commands used by calibration and its
 fault probes. There are no short flags anywhere in this command tree. Root
 flags fall back to `~/.maple` defaults when omitted.
@@ -207,6 +207,29 @@ in `errors`, other ranges still list). Only the active generation is exposed.
 Rebuild a signal's `catalog.jsonl` from the authoritative generation manifests,
 recovering from a truncated or missing catalog without rescanning Parquet bytes.
 `<signal>` is positional.
+
+### `maple archive retire-live <range-date> --apply`
+
+Remove one UTC day from all six live raw telemetry tables only after Maple proves
+that every signal has exactly one active archive generation and that each live
+row count matches its archived row count. The operation holds the maintenance
+lock and journals progress at `<data-dir>/retention/retire-live.json`, so reruns
+resume an interrupted partition-by-partition retirement without dropping an
+unverified day.
+
+The command is destructive and refuses to run without `--apply`. Operators whose
+active-data window exceeds Maple's schema TTLs must also start the server with an
+explicit TTL backstop beyond that window, for example
+`maple start --raw-telemetry-retention-days 120`. Omitting that server flag
+preserves Maple's normal per-signal schema TTLs.
+
+### `maple archive expire <range-date> --apply`
+
+Delete one complete archived UTC day across all six signals. Maple freezes the
+selected generation IDs, tombstone-renames each signal range before removal,
+rebuilds each catalog, and journals progress at
+`<archive-dir>/.retention/expire.json`. A rerun resumes only the exact frozen day
+and generations. The command refuses to run without `--apply`.
 
 ### `maple archive reconcile`
 
@@ -700,6 +723,8 @@ idempotently confirms an already-absent target.
 | **Supersession**                                        | Same as late telemetry: the newest generation becomes active; superseded ones remain on disk until `archive gc` reclaims them.                                                  |
 | **Interrupted create**                                  | Reconciles automatically on the next `create`, or via `archive reconcile`. Pre-publication output moves to retained quarantine; post-publication repairs pointer and catalog.   |
 | **Interrupted GC**                                      | Resumes the frozen target set; a half-removed tombstone is finished, an already-absent target is confirmed. Out-of-order mutation fails closed.                                 |
+| **Interrupted live retirement**                         | Resumes the journaled signal set; each remaining live partition must still match the frozen archive evidence before it can be dropped.                                          |
+| **Interrupted archive expiration**                      | Resumes the frozen day and generation IDs; a tombstoned range is removed and its catalog rebuilt before progress advances.                                                      |
 | **Interrupted calibration**                             | The derived-pin and owned-dir reconciliation releases the pin and removes the sample; the record is preserved until cleanup is proven.                                          |
 | **Insufficient memory budget**                          | Calibration reports `low` confidence (or no recommendation) rather than presenting synthetic precision.                                                                         |
 | **Failed calibration**                                  | No config is written; temporary calibration output is cleaned up. Existing configuration is unchanged.                                                                          |

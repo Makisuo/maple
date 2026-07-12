@@ -1,6 +1,6 @@
 import { describe, it } from "@effect/vitest"
-import { deepStrictEqual } from "node:assert"
-import { chdbArgv } from "../src/server/chdb"
+import { deepStrictEqual, strictEqual, throws } from "node:assert"
+import { chdbArgv, rawTelemetryTtlStatements } from "../src/server/chdb"
 
 describe("embedded chDB arguments", () => {
 	it("waits for metadata and serializes table loading and restore work", () => {
@@ -26,5 +26,22 @@ describe("embedded chDB arguments", () => {
 			"--path=/tmp/maple-data",
 			"--config-file=/tmp/backups.xml",
 		])
+	})
+})
+
+describe("rawTelemetryTtlStatements", () => {
+	it("builds one bounded TTL override for every raw telemetry table", () => {
+		const statements = rawTelemetryTtlStatements(120)
+		strictEqual(statements.length, 6)
+		strictEqual(statements[0], "ALTER TABLE logs MODIFY TTL toDate(TimestampTime) + INTERVAL 120 DAY")
+		strictEqual(
+			statements[5],
+			"ALTER TABLE metrics_exponential_histogram MODIFY TTL toDate(TimeUnix) + INTERVAL 120 DAY",
+		)
+	})
+
+	it("rejects unsafe retention values", () => {
+		throws(() => rawTelemetryTtlStatements(0), /positive integer/)
+		throws(() => rawTelemetryTtlStatements(1.5), /positive integer/)
 	})
 })

@@ -85,6 +85,26 @@ export interface ChdbOptions {
 	readonly configFile?: string
 	/** Apply the Maple schema after connect. Defaults to true. */
 	readonly bootstrapSchema?: boolean
+	/** Optional TTL override for the six raw telemetry tables. */
+	readonly rawTelemetryRetentionDays?: number
+}
+
+const RAW_TELEMETRY_TTL_COLUMNS = [
+	["logs", "TimestampTime"],
+	["traces", "Timestamp"],
+	["metrics_sum", "TimeUnix"],
+	["metrics_gauge", "TimeUnix"],
+	["metrics_histogram", "TimeUnix"],
+	["metrics_exponential_histogram", "TimeUnix"],
+] as const
+
+export const rawTelemetryTtlStatements = (days: number): ReadonlyArray<string> => {
+	if (!Number.isSafeInteger(days) || days <= 0) {
+		throw new Error(`raw telemetry retention days must be a positive integer: ${days}`)
+	}
+	return RAW_TELEMETRY_TTL_COLUMNS.map(
+		([table, column]) => `ALTER TABLE ${table} MODIFY TTL toDate(${column}) + INTERVAL ${days} DAY`,
+	)
 }
 
 /** Build the embedded ClickHouse argv. Keep table metadata loading and restore
@@ -149,7 +169,12 @@ export class Chdb {
 			)
 
 		const db = new Chdb(sym, connPtrPtr, conn)
-		if (options.bootstrapSchema !== false) db.#bootstrap(options.schemaSql)
+		if (options.bootstrapSchema !== false) {
+			db.#bootstrap(options.schemaSql)
+			if (options.rawTelemetryRetentionDays !== undefined) {
+				for (const sql of rawTelemetryTtlStatements(options.rawTelemetryRetentionDays)) db.exec(sql)
+			}
+		}
 		return db
 	}
 

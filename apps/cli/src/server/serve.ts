@@ -34,6 +34,7 @@ export interface ServerOptions {
 	readonly port: number
 	readonly dataDir: string
 	readonly configFile?: string
+	readonly rawTelemetryRetentionDays?: number
 	/** Serves the bundled SPA; omit to disable the UI (API-only). */
 	readonly assets?: AssetResolver
 }
@@ -408,6 +409,7 @@ export const startServer = (
 			dataDir: options.dataDir,
 			schemaSql,
 			configFile: options.configFile,
+			rawTelemetryRetentionDays: options.rawTelemetryRetentionDays,
 		})
 		// A dedicated runtime carrying the OTel tracer for per-request spans: the
 		// Bun.serve handler runs outside Effect, so each request's span effect is

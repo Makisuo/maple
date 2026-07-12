@@ -22,6 +22,7 @@ export interface DetachedChildArgs {
 	readonly dataDir: string
 	readonly offline: boolean
 	readonly chdbConfigFile: string | undefined
+	readonly rawTelemetryRetentionDays: number | undefined
 	readonly onDirtyStore: DirtyStorePolicy
 }
 
@@ -43,6 +44,9 @@ export const buildDetachedChildArgs = (options: DetachedChildArgs): string[] => 
 		"--on-dirty-store",
 		options.onDirtyStore,
 		...(options.chdbConfigFile ? ["--chdb-config-file", options.chdbConfigFile] : []),
+		...(options.rawTelemetryRetentionDays !== undefined
+			? ["--raw-telemetry-retention-days", String(options.rawTelemetryRetentionDays)]
+			: []),
 		...(options.offline ? ["--offline"] : []),
 	]
 }

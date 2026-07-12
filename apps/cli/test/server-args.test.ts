@@ -75,6 +75,7 @@ describe("buildDetachedChildArgs", () => {
 				dataDir: "/tmp/maple data",
 				offline: true,
 				chdbConfigFile: "/tmp/backup config.xml",
+				rawTelemetryRetentionDays: 120,
 				onDirtyStore: policy,
 			})
 			deepStrictEqual(args, [
@@ -92,6 +93,8 @@ describe("buildDetachedChildArgs", () => {
 				policy,
 				"--chdb-config-file",
 				"/tmp/backup config.xml",
+				"--raw-telemetry-retention-days",
+				"120",
 				"--offline",
 			])
 			strictEqual(args.filter((arg) => arg === "--on-dirty-store").length, 1)
@@ -110,6 +113,7 @@ describe("buildDetachedChildArgs", () => {
 				dataDir: "/data",
 				offline: false,
 				chdbConfigFile: undefined,
+				rawTelemetryRetentionDays: undefined,
 				onDirtyStore: "fail",
 			}),
 			[

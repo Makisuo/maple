@@ -434,6 +434,19 @@ const localQueryError = (status: number, detail: string, cause = detail): LocalQ
 		cause,
 	})
 
+export const postLoopbackLocalQuery = async (port: number, sql: string): Promise<unknown> => {
+	const response = await fetch(`http://127.0.0.1:${port}/local/query`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ sql }),
+	})
+	if (!response.ok) {
+		const detail = await response.text().catch(() => "")
+		throw localQueryError(response.status, detail)
+	}
+	return response.json()
+}
+
 export const checkpointQueryUrl = (host: string, port: number): string =>
 	`${serverUrl(host, port)}/local/query`
 

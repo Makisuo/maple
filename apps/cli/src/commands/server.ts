@@ -169,6 +169,14 @@ const chdbConfigFileFlag = Flag.optional(
 	),
 )
 
+const rawTelemetryRetentionDaysFlag = Flag.optional(
+	Flag.integer("raw-telemetry-retention-days").pipe(
+		Flag.withDescription(
+			"Override raw-table TTLs in days for coordinated archive rotation (default: preserve schema TTLs)",
+		),
+	),
+)
+
 const backgroundFlag = Flag.boolean("background").pipe(
 	Flag.withAlias("d"),
 	Flag.withDescription("Run the server detached (logs to ~/.maple/maple.log); stop with `maple stop`"),
@@ -232,6 +240,7 @@ const startDetached = (
 	dataDir: string,
 	offline: boolean,
 	chdbConfigFile: string | undefined,
+	rawTelemetryRetentionDays: number | undefined,
 	onDirtyStore: DirtyStorePolicy,
 ): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
@@ -248,6 +257,7 @@ const startDetached = (
 			dataDir,
 			offline,
 			chdbConfigFile,
+			rawTelemetryRetentionDays,
 			onDirtyStore,
 		})
 
@@ -303,6 +313,7 @@ export const start = Command.make("start", {
 	port,
 	dataDir: dataDirFlag,
 	chdbConfigFile: chdbConfigFileFlag,
+	rawTelemetryRetentionDays: rawTelemetryRetentionDaysFlag,
 	background: backgroundFlag,
 	offline: offlineFlag,
 	reset: resetFlag,
@@ -433,6 +444,7 @@ export const start = Command.make("start", {
 					dataDir,
 					a.offline,
 					Option.getOrUndefined(a.chdbConfigFile),
+					Option.getOrUndefined(a.rawTelemetryRetentionDays),
 					a.onDirtyStore,
 				)
 
@@ -474,6 +486,7 @@ export const start = Command.make("start", {
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
+						rawTelemetryRetentionDays: Option.getOrUndefined(a.rawTelemetryRetentionDays),
 						assets,
 					}).pipe(
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),
