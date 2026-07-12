@@ -134,8 +134,15 @@ export function chartDisplayForMetric(aggregation: string): Record<string, unkno
 // Where clause helpers
 // ---------------------------------------------------------------------------
 
+// Escape a user-supplied value before it is interpolated into a double-quoted
+// metric where-clause literal, so a value containing `"` (or `\`) can't break
+// out of the string. Metric where-clauses are ClickHouse-dialect string literals.
+export function escapeMetricStringLiteral(value: string): string {
+	return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
 export function serviceWhereClause(serviceName?: string): string {
-	return serviceName ? `service.name = "${serviceName}"` : ""
+	return serviceName ? `service.name = "${escapeMetricStringLiteral(serviceName)}"` : ""
 }
 
 export function combineWhere(...clauses: Array<string | undefined>): string {

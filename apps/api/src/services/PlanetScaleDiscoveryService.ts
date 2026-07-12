@@ -1,19 +1,29 @@
-import { ScrapeTargetEncryptionError, ScrapeTargetPersistenceError } from "@maple/domain/http"
+import {
+	OrgId,
+	ScrapeTargetAuthError,
+	ScrapeTargetEncryptionError,
+	ScrapeTargetPersistenceError,
+	ScrapeTargetUpstreamError,
+} from "@maple/domain/http"
 import type { scrapeTargets } from "@maple/db"
-import { Clock, Context, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
+import { Clock, Context, Deferred, Duration, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Env } from "../lib/Env"
-import { buildScrapeAuthHeaders } from "../lib/scrape-auth"
+import { buildScrapeAuthHeaders, catchOAuthTokenFailure } from "../lib/scrape-auth"
 import { validateExternalUrlSync } from "../lib/url-validator"
+import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
+import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 
 type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 
 /**
  * Resolves PlanetScale `planetscale`-type scrape targets into their concrete
  * per-database-branch scrape endpoints via PlanetScale's Prometheus http_sd
- * discovery API (`GET /v1/organizations/{org}/metrics` with
- * `Authorization: token {ID}:{SECRET}`).
+ * discovery API (`GET /v1/organizations/{org}/metrics`). Managed targets
+ * (`authType "planetscale_oauth"`) authenticate with the org's OAuth grant
+ * (`Authorization: Bearer …`); manual escape-hatch targets keep the service
+ * token scheme (`Authorization: token {ID}:{SECRET}`).
  *
  * Discovery results are cached in-memory per target with a 10-minute TTL
  * (PlanetScale's documented refresh cadence). On refresh failure stale entries
@@ -49,7 +59,19 @@ interface CacheEntry {
 	readonly lastError: string | null
 }
 
+type DiscoveryError =
+	| ScrapeTargetPersistenceError
+	| ScrapeTargetEncryptionError
+	| ScrapeTargetAuthError
+	| ScrapeTargetUpstreamError
+
 const toPersistenceError = (message: string) => new ScrapeTargetPersistenceError({ message })
+
+// Provider-side (http_sd) failures: transport, timeout, non-2xx non-auth, or an
+// undecodable payload. Kept distinct from persistence (our DB) so the class —
+// not a regex over the message — carries the failure kind downstream.
+const toUpstreamError = (message: string, status?: number) =>
+	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
 
 /** Convert one http_sd group into sub-targets, dropping SSRF-invalid hosts. */
 const subTargetsFromGroup = (group: {
@@ -127,13 +149,8 @@ interface BranchFilters {
 
 /** Read include/exclude branch globs off the row's `discovery_config_json`. */
 const parseBranchFilters = (discoveryConfigJson: unknown): BranchFilters => {
-	const cfg = discoveryConfigJson as
-		| { includeBranches?: unknown; excludeBranches?: unknown }
-		| null
-		| undefined
-	const toList = (value: unknown): string[] =>
-		Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
-	return { include: toList(cfg?.includeBranches), exclude: toList(cfg?.excludeBranches) }
+	const cfg = decodeDiscoveryConfig(discoveryConfigJson)
+	return { include: cfg?.includeBranches ?? [], exclude: cfg?.excludeBranches ?? [] }
 }
 
 /** exclude wins over include; an empty include list means "all branches". */
@@ -154,7 +171,10 @@ export interface PlanetScaleDiscoveryServiceShape {
 		row: ScrapeTargetRow,
 	) => Effect.Effect<
 		ReadonlyArray<PlanetScaleSubTarget>,
-		ScrapeTargetPersistenceError | ScrapeTargetEncryptionError
+		| ScrapeTargetPersistenceError
+		| ScrapeTargetEncryptionError
+		| ScrapeTargetAuthError
+		| ScrapeTargetUpstreamError
 	>
 	/** Last discovery error for a target (null when the last refresh succeeded). */
 	readonly lastError: (targetId: string) => Effect.Effect<string | null>
@@ -168,6 +188,8 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 >()("@maple/api/services/PlanetScaleDiscoveryService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
+		const psOAuth = yield* PlanetScaleOAuthService
+		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			(message) => new ScrapeTargetEncryptionError({ message }),
@@ -175,35 +197,68 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 
 		const cache = yield* Ref.make(new Map<string, CacheEntry>())
 
+		// In-flight refresh dedup keyed by target id (the bucket-cache/edge-cache
+		// idiom): N per-branch scrapes that miss the TTL together must share one
+		// SD fetch against PlanetScale's rate-limited endpoint instead of issuing
+		// N identical ones.
+		const inFlight = new Map<
+			string,
+			{ readonly await: Effect.Effect<ReadonlyArray<PlanetScaleSubTarget>, DiscoveryError> }
+		>()
+
+		// Managed rows store no credentials — resolve (and auto-refresh) the org's
+		// OAuth grant at discovery time; manual rows decrypt their stored token.
+		const authHeadersForRow = Effect.fn("PlanetScaleDiscoveryService.authHeadersForRow")(function* (
+			row: ScrapeTargetRow,
+		) {
+			if (row.authType !== "planetscale_oauth") {
+				return yield* buildScrapeAuthHeaders(row, encryptionKey)
+			}
+			const { accessToken } = yield* psOAuth
+				.getValidAccessToken(Schema.decodeUnknownSync(OrgId)(row.orgId))
+				.pipe(Effect.catchTags(catchOAuthTokenFailure))
+			return { Authorization: planetScaleBearerHeader(accessToken) }
+		})
+
 		const fetchSubTargets = Effect.fn("PlanetScaleDiscoveryService.fetchSubTargets")(function* (
 			row: ScrapeTargetRow,
 		) {
-			const headers = yield* buildScrapeAuthHeaders(row, encryptionKey)
+			const headers = yield* authHeadersForRow(row)
 			const response = yield* Effect.gen(function* () {
-				const client = yield* HttpClient.HttpClient
 				const request = HttpClientRequest.get(row.url).pipe(HttpClientRequest.setHeaders(headers))
-				const res = yield* client.execute(request)
+				const res = yield* httpClient.execute(request)
 				const text = yield* res.text
 				return { status: res.status, text }
 			}).pipe(
 				Effect.mapError((error) =>
-					toPersistenceError(`PlanetScale discovery request failed: ${error.message}`),
+					toUpstreamError(`PlanetScale discovery request failed: ${error.message}`),
 				),
 				Effect.timeoutOrElse({
 					duration: DISCOVERY_TIMEOUT,
 					orElse: () =>
-						Effect.fail(toPersistenceError("PlanetScale discovery request timed out after 10s")),
+						Effect.fail(toUpstreamError("PlanetScale discovery request timed out after 10s")),
 				}),
-				Effect.provide(FetchHttpClient.layer),
 			)
 
+			// A rejected credential is an auth failure, not a persistence one — keep
+			// the taxonomy so the org-picker/status surfaces can key on the reason
+			// instead of regex-sniffing the status out of the message.
+			if (response.status === 401 || response.status === 403) {
+				return yield* Effect.fail(
+					row.authType === "planetscale_oauth"
+						? new ScrapeTargetAuthError({
+								reason: "revoked",
+								message: `PlanetScale discovery rejected the OAuth token (HTTP ${response.status}). Check the OAuth app's read_metrics_endpoints scope and reconnect.`,
+							})
+						: new ScrapeTargetAuthError({
+								reason: "config",
+								message: `PlanetScale discovery rejected the service token (HTTP ${response.status}). Check the token id/secret and its read_metrics_endpoints permission.`,
+							}),
+				)
+			}
 			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
-					toPersistenceError(
-						response.status === 401 || response.status === 403
-							? `PlanetScale discovery rejected the service token (HTTP ${response.status}). Check the token id/secret and its read_metrics_endpoints permission.`
-							: `PlanetScale discovery failed: HTTP ${response.status}`,
-					),
+					toUpstreamError(`PlanetScale discovery failed: HTTP ${response.status}`, response.status),
 				)
 			}
 
@@ -211,7 +266,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				response.text,
 			).pipe(
 				Effect.mapError(() =>
-					toPersistenceError("PlanetScale discovery returned an unexpected payload"),
+					toUpstreamError("PlanetScale discovery returned an unexpected payload"),
 				),
 			)
 
@@ -264,36 +319,63 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 		})
 
 		const discover = Effect.fn("PlanetScaleDiscoveryService.discover")(function* (row: ScrapeTargetRow) {
+			yield* Effect.annotateCurrentSpan({ orgId: row.orgId })
 			const now = yield* Clock.currentTimeMillis
 			const cached = (yield* Ref.get(cache)).get(row.id)
 			if (cached && now - cached.fetchedAt < DISCOVERY_TTL_MS) {
 				return cached.entries
 			}
 
-			const fresh = yield* fetchSubTargets(row).pipe(
-				Effect.map((entries) => ({ ok: true as const, entries })),
-				Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+			const existingAwaiter = inFlight.get(row.id)
+			if (existingAwaiter) {
+				return yield* existingAwaiter.await
+			}
+			// Construct the deferred synchronously (makeUnsafe, not `yield* make`) so
+			// the check-then-set across `inFlight` has no yield point in between —
+			// otherwise two fibers discovering the same row could both miss the guard
+			// and both issue the rate-limited SD fetch, defeating the single-flight.
+			const deferred = Deferred.makeUnsafe<ReadonlyArray<PlanetScaleSubTarget>, DiscoveryError>()
+			inFlight.set(row.id, { await: Deferred.await(deferred) })
+
+			const refresh = Effect.gen(function* () {
+				const fresh = yield* fetchSubTargets(row).pipe(
+					Effect.map((entries) => ({ ok: true as const, entries })),
+					Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
+				)
+				if (fresh.ok) {
+					yield* Ref.update(cache, (map) =>
+						new Map(map).set(row.id, { fetchedAt: now, entries: fresh.entries, lastError: null }),
+					)
+					return fresh.entries
+				}
+
+				const message = fresh.error.message
+
+				if (cached) {
+					// Serve stale entries through transient discovery failures; keep the
+					// stale fetchedAt so the next call retries instead of waiting a TTL.
+					yield* Effect.logWarning("PlanetScale discovery failed; serving stale targets").pipe(
+						Effect.annotateLogs({ scrapeTargetId: row.id, error: message }),
+					)
+					yield* Ref.update(cache, (map) =>
+						new Map(map).set(row.id, { ...cached, lastError: message }),
+					)
+					return cached.entries
+				}
+
+				return yield* Effect.fail(fresh.error)
+			})
+
+			return yield* refresh.pipe(
+				Effect.tap((entries) => Deferred.succeed(deferred, entries)),
+				Effect.tapError((error) => Deferred.fail(deferred, error)),
+				Effect.onInterrupt(() => Deferred.interrupt(deferred)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						inFlight.delete(row.id)
+					}),
+				),
 			)
-			if (fresh.ok) {
-				yield* Ref.update(cache, (map) =>
-					new Map(map).set(row.id, { fetchedAt: now, entries: fresh.entries, lastError: null }),
-				)
-				return fresh.entries
-			}
-
-			const message = fresh.error.message
-
-			if (cached) {
-				// Serve stale entries through transient discovery failures; keep the
-				// stale fetchedAt so the next call retries instead of waiting a TTL.
-				yield* Effect.logWarning("PlanetScale discovery failed; serving stale targets").pipe(
-					Effect.annotateLogs({ scrapeTargetId: row.id, error: message }),
-				)
-				yield* Ref.update(cache, (map) => new Map(map).set(row.id, { ...cached, lastError: message }))
-				return cached.entries
-			}
-
-			return yield* Effect.fail(fresh.error)
 		})
 
 		const lastError = (targetId: string) =>
@@ -304,10 +386,14 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				const next = new Map(map)
 				next.delete(targetId)
 				return next
-			})
+			}).pipe(
+				// Callers invalidate after credential/org changes — a later discover
+				// must start a fresh fetch, not join one issued with the old creds.
+				Effect.tap(Effect.sync(() => inFlight.delete(targetId))),
+			)
 
 		return { discover, lastError, invalidate } satisfies PlanetScaleDiscoveryServiceShape
 	}),
 }) {
-	static readonly layer = Layer.effect(this, this.make)
+	static readonly layer = Layer.effect(this, this.make).pipe(Layer.provide(FetchHttpClient.layer))
 }

@@ -56,6 +56,22 @@ export interface EnvShape {
 	 * `wrangler dev --env-file` it would hijack wrangler's control-plane calls too.
 	 */
 	readonly MAPLE_CLOUDFLARE_API_BASE_URL: string
+	/** Base URL for PlanetScale's management API (overridable for tests). */
+	readonly MAPLE_PLANETSCALE_API_BASE_URL: string
+	readonly PLANETSCALE_OAUTH_CLIENT_ID: Option.Option<string>
+	/** Required alongside the client id — PlanetScale OAuth apps are confidential clients. */
+	readonly PLANETSCALE_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
+	readonly PLANETSCALE_OAUTH_AUTHORIZE_URL: string
+	readonly PLANETSCALE_OAUTH_TOKEN_URL: string
+	/**
+	 * Space-delimited, resource-prefixed OAuth scopes requested at authorize time
+	 * (e.g. `organization:read_databases`). PlanetScale REQUIRES an explicit scope
+	 * param — the scopes configured on the OAuth app are the allowed maximum, not
+	 * an implicit default — so omitting it fails the authorize with `invalid_scope`.
+	 * The default matches the scopes the Maple OAuth app is provisioned with; each
+	 * request may only name a subset of them.
+	 */
+	readonly PLANETSCALE_OAUTH_SCOPES: string
 }
 
 const portConfig = Config.number("PORT").pipe(Config.withDefault(3472))
@@ -145,6 +161,31 @@ const envConfig = Config.all({
 	MAPLE_CLOUDFLARE_API_BASE_URL: stringWithDefault(
 		"MAPLE_CLOUDFLARE_API_BASE_URL",
 		"https://api.cloudflare.com/client/v4",
+	),
+	MAPLE_PLANETSCALE_API_BASE_URL: stringWithDefault(
+		"MAPLE_PLANETSCALE_API_BASE_URL",
+		"https://api.planetscale.com",
+	),
+	PLANETSCALE_OAUTH_CLIENT_ID: optionalString("PLANETSCALE_OAUTH_CLIENT_ID"),
+	PLANETSCALE_OAUTH_CLIENT_SECRET: optionalRedacted("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+	PLANETSCALE_OAUTH_AUTHORIZE_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_AUTHORIZE_URL",
+		"https://auth.planetscale.com/oauth/authorize",
+	),
+	PLANETSCALE_OAUTH_TOKEN_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_TOKEN_URL",
+		"https://auth.planetscale.com/oauth/token",
+	),
+	// PlanetScale scopes are resource-prefixed (`<resource>:<action>`) and MUST be
+	// sent in the authorize request — the app's configured scopes are the allowed
+	// maximum, not an implicit default, so an absent scope param 302s to
+	// `invalid_scope` ("The requested scope is invalid, unknown, or malformed").
+	// The resource prefix is load-bearing: the same action name (e.g. `read_backups`,
+	// `read_branches`) exists at multiple resource levels, so an unprefixed scope is
+	// ambiguous. Default = the scopes the Maple OAuth app is provisioned with.
+	PLANETSCALE_OAUTH_SCOPES: stringWithDefault(
+		"PLANETSCALE_OAUTH_SCOPES",
+		"user:read_organizations organization:read_organization organization:read_databases organization:read_branches organization:read_backups organization:read_comments organization:read_deploy_requests branch:read_branch",
 	),
 })
 

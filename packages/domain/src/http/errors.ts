@@ -63,9 +63,11 @@ export type IssueSeveritySource = Schema.Schema.Type<typeof IssueSeveritySource>
 /**
  * What kind of signal backs the issue. "error" issues are fingerprint groups
  * from the errors tick; "alert" issues are created when an alert incident
- * opens (their fingerprintHash is the synthetic `alert:{ruleId}:{groupKey}`).
+ * opens (their fingerprintHash is the synthetic `alert:{ruleId}:{groupKey}`);
+ * "integration" issues come from third-party webhooks (e.g. PlanetScale
+ * branch.out_of_memory — fingerprint `planetscale:{database}:{event}`).
  */
-export const IssueKind = Schema.Literals(["error", "alert"]).annotate({
+export const IssueKind = Schema.Literals(["error", "alert", "integration"]).annotate({
 	identifier: "@maple/IssueKind",
 	title: "Issue Kind",
 })

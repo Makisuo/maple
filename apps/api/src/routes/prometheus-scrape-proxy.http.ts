@@ -42,6 +42,13 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 				}
 
 				const { targetId: rawTargetId, sub } = queryParamsFromRequest(req)
+				// Annotate the existing request span (no new span — this route is on the
+				// per-branch scrape hot path) so a flatlining scrape is filterable by
+				// target instead of grepping lastScrapeError rows.
+				yield* Effect.annotateCurrentSpan({
+					"maple.scrape.target_id": rawTargetId ?? "",
+					"maple.scrape.sub": sub ?? "",
+				})
 				if (!rawTargetId) {
 					return errorText("Missing targetId", 400)
 				}
@@ -52,6 +59,9 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 				}
 
 				return yield* service.scrapeForCollector(targetId.value, sub).pipe(
+					Effect.tap((response) =>
+						Effect.annotateCurrentSpan({ "maple.scrape.upstream_status": response.status }),
+					),
 					Effect.flatMap((response) =>
 						Effect.succeed(
 							HttpServerResponse.text(response.body, {
@@ -68,8 +78,9 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 						),
 					),
 					// Map each concrete scrape error to its HTTP status: missing/disabled
-					// target → 404, decryption failure → 500, persistence/discovery →
-					// 502 (upstream/dependency).
+					// target → 404, decryption failure → 500, persistence (our DB) → 502,
+					// upstream (provider/discovery) → 502, OAuth token resolution → 502 with
+					// the reason preserved in the body so a revoked grant stays diagnosable.
 					Effect.catchTags({
 						"@maple/http/errors/ScrapeTargetNotFoundError": (error) =>
 							Effect.succeed(errorText(error.message, 404)),
@@ -77,6 +88,12 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 							Effect.succeed(errorText(error.message, 500)),
 						"@maple/http/errors/ScrapeTargetPersistenceError": (error) =>
 							Effect.succeed(errorText(error.message, 502)),
+						"@maple/http/errors/ScrapeTargetUpstreamError": (error) =>
+							Effect.succeed(errorText(error.message, 502)),
+						"@maple/http/errors/ScrapeTargetAuthError": (error) =>
+							Effect.annotateCurrentSpan({ "maple.scrape.auth_failure_reason": error.reason }).pipe(
+								Effect.as(errorText(`[auth:${error.reason}] ${error.message}`, 502)),
+							),
 					}),
 				)
 			})

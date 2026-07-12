@@ -25,6 +25,12 @@ export class ScrapeTargetResponse extends Schema.Class<ScrapeTargetResponse>("Sc
 	labelsJson: Schema.NullOr(Schema.String),
 	authType: ScrapeAuthType,
 	hasCredentials: Schema.Boolean,
+	/**
+	 * Integration ownership marker (e.g. `"planetscale:{connectionId}"`); null for
+	 * user-created targets. Managed rows are hidden from the generic scrape-target
+	 * UI and edited through the owning integration's card.
+	 */
+	managedBy: Schema.NullOr(Schema.String),
 	enabled: Schema.Boolean,
 	lastScrapeAt: Schema.NullOr(IsoDateTimeString),
 	lastScrapeError: Schema.NullOr(Schema.String),
@@ -157,6 +163,43 @@ export class ScrapeTargetEncryptionError extends Schema.TaggedErrorClass<ScrapeT
 	{ httpApiStatus: 500 },
 ) {}
 
+/**
+ * Authenticating a scrape target against its provider failed — token
+ * resolution for a managed (OAuth-backed) target, or the provider rejecting
+ * the presented credentials (e.g. PlanetScale's SD endpoint answering
+ * 401/403). `reason` preserves the actionable failure class:
+ * `not_connected`/`revoked` need a reconnect, `upstream` is a transient
+ * provider failure, `config` is a credential/OAuth-app misconfiguration
+ * (bad service token, missing scope).
+ */
+export class ScrapeTargetAuthError extends Schema.TaggedErrorClass<ScrapeTargetAuthError>()(
+	"@maple/http/errors/ScrapeTargetAuthError",
+	{
+		message: Schema.String,
+		reason: Schema.Literals(["not_connected", "revoked", "upstream", "config"]),
+	},
+	{ httpApiStatus: 502 },
+) {}
+
+/**
+ * The scrape target's upstream (the provider being scraped/discovered — e.g.
+ * PlanetScale's http_sd endpoint) failed at the transport level, timed out,
+ * answered a non-2xx that isn't an auth rejection, or returned an undecodable
+ * payload. Distinct from `ScrapeTargetPersistenceError` (503, *our* database)
+ * so callers, the scrape proxy, and dashboards can tell "the provider is
+ * misbehaving" (502, retryable) from "our storage broke" instead of
+ * regex-sniffing the HTTP status back out of a persistence message. `status`
+ * carries the upstream HTTP status when the failure reached one.
+ */
+export class ScrapeTargetUpstreamError extends Schema.TaggedErrorClass<ScrapeTargetUpstreamError>()(
+	"@maple/http/errors/ScrapeTargetUpstreamError",
+	{
+		message: Schema.String,
+		status: Schema.optionalKey(Schema.Number),
+	},
+	{ httpApiStatus: 502 },
+) {}
+
 export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 	.add(
 		HttpApiEndpoint.get("list", "/", {
@@ -201,7 +244,12 @@ export class ScrapeTargetsApiGroup extends HttpApiGroup.make("scrapeTargets")
 				targetId: ScrapeTargetId,
 			},
 			success: ScrapeTargetProbeResponse,
-			error: [ScrapeTargetNotFoundError, ScrapeTargetPersistenceError, ScrapeTargetEncryptionError],
+			error: [
+				ScrapeTargetNotFoundError,
+				ScrapeTargetPersistenceError,
+				ScrapeTargetEncryptionError,
+				ScrapeTargetAuthError,
+			],
 		}),
 	)
 	.add(

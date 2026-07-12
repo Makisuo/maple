@@ -1,90 +1,97 @@
 {
-	"version": "7",
-	"dialect": "postgresql",
-	"entries": [
-		{
-			"idx": 0,
-			"version": "7",
-			"when": 1781306960498,
-			"tag": "0000_windy_raza",
-			"breakpoints": true
-		},
-		{
-			"idx": 1,
-			"version": "7",
-			"when": 1782245542758,
-			"tag": "0001_naive_scalphunter",
-			"breakpoints": true
-		},
-		{
-			"idx": 2,
-			"version": "7",
-			"when": 1782656894999,
-			"tag": "0002_bizarre_triathlon",
-			"breakpoints": true
-		},
-		{
-			"idx": 3,
-			"version": "7",
-			"when": 1782992101248,
-			"tag": "0003_backfill_github_commit_avatars",
-			"breakpoints": true
-		},
-		{
-			"idx": 4,
-			"version": "7",
-			"when": 1783200000000,
-			"tag": "0004_premium_korg",
-			"breakpoints": true
-		},
-		{
-			"idx": 5,
-			"version": "7",
-			"when": 1783200001000,
-			"tag": "0005_loud_pyro",
-			"breakpoints": true
-		},
-		{
-			"idx": 6,
-			"version": "7",
-			"when": 1783200002000,
-			"tag": "0006_natural_marvel_apes",
-			"breakpoints": true
-		},
-		{
-			"idx": 7,
-			"version": "7",
-			"when": 1783200003000,
-			"tag": "0007_slippery_winter_soldier",
-			"breakpoints": true
-		},
-		{
-			"idx": 8,
-			"version": "7",
-			"when": 1783200004000,
-			"tag": "0008_elite_butterfly",
-			"breakpoints": true
-		},
-		{
-			"idx": 9,
-			"version": "7",
-			"when": 1783200005000,
-			"tag": "0009_electric_publication",
-			"breakpoints": true
-		},
-		{
-			"idx": 10,
-			"version": "7",
-			"when": 1783377967610,
-			"tag": "0010_huge_dexter_bennett",
-			"breakpoints": true
-		},
-		{
-			"idx": 11,
-			"version": "7",
-			"when": 1783377967700,
-			"tag": "0011_electric_publication_wave1",
-			"breakpoints": true
-		}
-	]
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1781306960498,
+      "tag": "0000_windy_raza",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782245542758,
+      "tag": "0001_naive_scalphunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782656894999,
+      "tag": "0002_bizarre_triathlon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782992101248,
+      "tag": "0003_backfill_github_commit_avatars",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783200000000,
+      "tag": "0004_premium_korg",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783200001000,
+      "tag": "0005_loud_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783200002000,
+      "tag": "0006_natural_marvel_apes",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783200003000,
+      "tag": "0007_slippery_winter_soldier",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783200004000,
+      "tag": "0008_elite_butterfly",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783200005000,
+      "tag": "0009_electric_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783377967610,
+      "tag": "0010_huge_dexter_bennett",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783377967700,
+      "tag": "0011_electric_publication_wave1",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783775467529,
+      "tag": "0012_cute_veda",
+      "breakpoints": true
+    }
+  ]
 }

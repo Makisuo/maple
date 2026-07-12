@@ -52,8 +52,8 @@ export const toUpstreamError = (message: string, status?: number, cause?: unknow
 export interface OAuthTokenEndpointConfig {
 	readonly tokenUrl: string
 	readonly clientId: string
-	/** null for a public (PKCE-only) client. */
-	readonly clientSecret: string | null
+	/** null for a public (PKCE-only) client. Stays Redacted until the token POST body. */
+	readonly clientSecret: Redacted.Redacted<string> | null
 }
 
 export interface MakeOAuthConnectionHelpersOptions {
@@ -256,7 +256,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					code,
 					redirect_uri: redirectUri,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
 					...extraParams,
 				})
 				if (status < 200 || status >= 300) {
@@ -279,7 +279,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					grant_type: "refresh_token",
 					refresh_token: refreshToken,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
 				})
 				if (status === 400 || status === 401) {
 					return yield* Effect.fail(

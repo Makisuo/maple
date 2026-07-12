@@ -1,20 +1,23 @@
-import { afterEach, describe, it } from "@effect/vitest"
-import { expect } from "vitest"
+import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { ConfigProvider, Duration, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
-import { CreateScrapeTargetRequest, OrgId } from "@maple/domain/http"
+import { CreateScrapeTargetRequest, OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
 const trackedDbs: TestDb[] = []
 const originalFetch = globalThis.fetch
 
-// create() forks a detached probe that uses the global fetch; stub it so the
-// tests never touch the real network.
-globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
+// create() forks a detached probe that uses the global fetch; stub it before
+// EVERY test (afterEach restores the real fetch, so a module-level stub would
+// only protect the first test) so the tests never touch the real network.
+beforeEach(() => {
+	globalThis.fetch = (async () => new Response("ok", { status: 200 })) as typeof fetch
+})
 
 afterEach(async () => {
 	globalThis.fetch = originalFetch
@@ -33,17 +36,29 @@ const makeConfig = () =>
 			MAPLE_DEFAULT_ORG_ID: "default",
 			MAPLE_INGEST_KEY_ENCRYPTION_KEY: Buffer.alloc(32, 9).toString("base64"),
 			MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY: "maple-test-lookup-secret",
+			PLANETSCALE_OAUTH_CLIENT_ID: "ps-client-id",
+			PLANETSCALE_OAUTH_CLIENT_SECRET: "ps-client-secret",
 		}),
 	)
 
 // Single memoized discovery layer shared by both services, mirroring app.ts.
-const makeLayer = (testDb: TestDb) =>
-	Layer.mergeAll(
-		PlanetScaleDiscoveryService.layer,
-		ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
+// `fetchStub` (when given) is provided as the FetchHttpClient.Fetch reference at
+// layer scope so it also reaches the OAuth service's layer-built client.
+const makeLayer = (testDb: TestDb, fetchStub?: typeof globalThis.fetch) => {
+	const oauthLive = PlanetScaleOAuthService.layer
+	const discoveryLive = PlanetScaleDiscoveryService.layer.pipe(Layer.provide(oauthLive))
+	const composed = Layer.mergeAll(
+		discoveryLive,
+		ScrapeTargetsService.layer.pipe(Layer.provide(Layer.mergeAll(discoveryLive, oauthLive))),
+		oauthLive,
 	).pipe(Layer.provide(testDb.layer), Layer.provide(Env.layer), Layer.provide(makeConfig()))
+	return fetchStub
+		? Layer.mergeAll(composed, Layer.succeed(FetchHttpClient.Fetch, fetchStub))
+		: composed
+}
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
+const asUserId = Schema.decodeUnknownSync(UserId)
 
 const SD_PAYLOAD = [
 	{
@@ -129,15 +144,15 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(recorded[0]?.url).toBe("https://api.planetscale.com/v1/organizations/my-org/metrics")
-			expect(recorded[0]?.authorization).toBe("token tok_id:tok_secret")
+			assert.strictEqual(recorded[0]?.url, "https://api.planetscale.com/v1/organizations/my-org/metrics")
+			assert.strictEqual(recorded[0]?.authorization, "token tok_id:tok_secret")
 
 			// The 169.254.* target is dropped by the SSRF guard.
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["branch-1", "branch-2"])
-			expect(entries[0]?.url).toBe("https://branch-1.metrics.psdb.cloud:443/metrics")
-			expect(entries[1]?.url).toBe("https://branch-2.metrics.psdb.cloud:443/metrics")
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.strictEqual(entries[0]?.url, "https://branch-1.metrics.psdb.cloud:443/metrics")
+			assert.strictEqual(entries[1]?.url, "https://branch-2.metrics.psdb.cloud:443/metrics")
 			// `__`-prefixed Prometheus meta labels are stripped; SD labels survive.
-			expect(entries[0]?.labels).toEqual({
+			assert.deepStrictEqual(entries[0]?.labels, {
 				planetscale_database_branch_id: "branch-1",
 				planetscale_database: "mydb",
 			})
@@ -168,9 +183,9 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(entries).toHaveLength(1)
-			expect(entries[0]?.subTargetKey).toBe("metrics.psdb.cloud:443")
-			expect(entries[0]?.url).toBe("https://metrics.psdb.cloud:443/metrics")
+			assert.strictEqual(entries.length, 1)
+			assert.strictEqual(entries[0]?.subTargetKey, "metrics.psdb.cloud:443")
+			assert.strictEqual(entries[0]?.url, "https://metrics.psdb.cloud:443/metrics")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -184,11 +199,11 @@ describe("PlanetScaleDiscoveryService", () => {
 
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
-			expect(recorded).toHaveLength(1)
+			assert.strictEqual(recorded.length, 1)
 
 			yield* TestClock.adjust(Duration.minutes(11))
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
-			expect(recorded).toHaveLength(2)
+			assert.strictEqual(recorded.length, 2)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -214,13 +229,13 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(stale.map((entry) => entry.subTargetKey)).toEqual(["branch-1", "branch-2"])
+			assert.deepStrictEqual(stale.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
 			const lastError = yield* discovery.lastError(row.id)
-			expect(lastError).toContain("HTTP 503")
+			assert.include(lastError ?? "", "HTTP 503")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
-	it.effect("fails with a clear token error when discovery is rejected and no cache exists", () => {
+	it.effect("maps a rejected service token to ScrapeTargetAuthError when no cache exists", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			const discovery = yield* PlanetScaleDiscoveryService
@@ -234,7 +249,61 @@ describe("PlanetScaleDiscoveryService", () => {
 				Effect.flip,
 			)
 
-			expect(error.message).toContain("read_metrics_endpoints")
+			// Credential rejection is an auth failure (502 taxonomy), not the
+			// persistence 503 — the reason keys the UI's remediation copy.
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetAuthError")
+			if (error._tag === "@maple/http/errors/ScrapeTargetAuthError") {
+				assert.strictEqual(error.reason, "config")
+			}
+			assert.include(error.message, "read_metrics_endpoints")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("maps a non-auth upstream failure to ScrapeTargetUpstreamError with the status", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const discovery = yield* PlanetScaleDiscoveryService
+			const row = yield* createPlanetScaleTargetRow("my-org")
+
+			const error = yield* discovery.discover(row).pipe(
+				Effect.provideService(
+					FetchHttpClient.Fetch,
+					stubFetch([], () => new Response("boom", { status: 500 })),
+				),
+				Effect.flip,
+			)
+
+			// A provider 5xx is an upstream failure (502 taxonomy), NOT our-DB
+			// persistence (503) — the class carries the status so downstream never
+			// has to regex it back out of the message.
+			assert.strictEqual(error._tag, "@maple/http/errors/ScrapeTargetUpstreamError")
+			if (error._tag === "@maple/http/errors/ScrapeTargetUpstreamError") {
+				assert.strictEqual(error.status, 500)
+			}
+			assert.include(error.message, "HTTP 500")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("collapses concurrent TTL-miss refreshes into a single SD fetch", () => {
+		const testDb = createTestDb(trackedDbs)
+		const recorded: Array<RecordedRequest> = []
+		return Effect.gen(function* () {
+			const discovery = yield* PlanetScaleDiscoveryService
+			const row = yield* createPlanetScaleTargetRow("my-org")
+			const fetchStub = stubFetch(recorded, () => Response.json(SD_PAYLOAD))
+
+			// N per-branch scrapes miss the cold cache together — without the
+			// in-flight collapse each would issue its own fetch against
+			// PlanetScale's rate-limited SD endpoint.
+			const [first, second, third] = yield* Effect.all(
+				[discovery.discover(row), discovery.discover(row), discovery.discover(row)],
+				{ concurrency: "unbounded" },
+			).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
+
+			assert.strictEqual(recorded.length, 1)
+			assert.deepStrictEqual(first?.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.deepStrictEqual(second, first)
+			assert.deepStrictEqual(third, first)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -252,7 +321,7 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["main", "stg"])
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["main", "stg"])
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -270,8 +339,69 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			expect(entries.map((entry) => entry.subTargetKey)).toEqual(["main", "stg"])
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["main", "stg"])
 		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("a managed planetscale_oauth row discovers with the grant's Bearer token", () => {
+		const testDb = createTestDb(trackedDbs)
+		const recorded: Array<RecordedRequest> = []
+		// One stub serves the OAuth token exchange, the org probes, and the SD call.
+		const stub: typeof fetch = async (input, init) => {
+			const url =
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+			const headers = new Headers(
+				init?.headers ?? (input instanceof Request ? input.headers : undefined),
+			)
+			recorded.push({ url, authorization: headers.get("authorization") })
+			if (url.includes("/oauth/token")) {
+				return Response.json({
+					access_token: "ps-access-token",
+					refresh_token: "ps-refresh-token",
+					token_type: "Bearer",
+					expires_in: 3600,
+				})
+			}
+			if (url.includes("/v1/user")) {
+				return Response.json({ id: "psuser_1" })
+			}
+			if (/\/v1\/organizations\?/.test(url)) {
+				return Response.json({ data: [{ id: "psorg_1", name: "my-org" }] })
+			}
+			return Response.json(SD_PAYLOAD)
+		}
+		return Effect.gen(function* () {
+			const oauth = yield* PlanetScaleOAuthService
+			const targets = yield* ScrapeTargetsService
+			const discovery = yield* PlanetScaleDiscoveryService
+
+			// Store a grant for the org, then create a managed (credential-less) row.
+			const { state } = yield* oauth.startConnect(asOrgId("org_1"), asUserId("user_1"), {
+				callbackUrl: "https://api.example.com/api/integrations/planetscale/callback",
+			})
+			yield* oauth.completeConnect("auth-code", state)
+			const created = yield* targets.create(
+				asOrgId("org_1"),
+				new CreateScrapeTargetRequest({
+					name: "Managed PlanetScale",
+					targetType: "planetscale",
+					organization: "my-org",
+					authType: "planetscale_oauth",
+				}),
+			)
+			const rows = yield* targets.listAllEnabled()
+			const row = rows.find((candidate) => candidate.id === created.id)
+			if (!row) return yield* Effect.die("created row not found")
+
+			const entries = yield* discovery.discover(row)
+
+			const sdCall = recorded.find((call) => call.url.includes("/my-org/metrics"))
+			assert.strictEqual(sdCall?.authorization, "Bearer ps-access-token")
+			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(makeLayer(testDb, stub)),
+		)
 	})
 
 	it.effect("invalidate drops the cache so the next discover refetches", () => {
@@ -285,7 +415,7 @@ describe("PlanetScaleDiscoveryService", () => {
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
 			yield* discovery.invalidate(row.id)
 			yield* discovery.discover(row).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
-			expect(recorded).toHaveLength(2)
+			assert.strictEqual(recorded.length, 2)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

@@ -115,12 +115,11 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 				)
 			}
 
-		yield* Effect.forEach(
-			registry.ids,
-			(id) =>
-				registry.resolve(id).pipe(
-					Effect.orDie,
-					Effect.flatMap((provider) =>
+			yield* Effect.forEach(
+				registry.ids,
+				(id) =>
+					registry.resolve(id).pipe(
+						Effect.flatMap((provider) =>
 						router.add(
 							"POST",
 							`/api/integrations/${id}/webhook`,

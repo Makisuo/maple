@@ -48,7 +48,9 @@ import { getServiceUsage } from "@/api/warehouse/service-usage"
 import {
 	getServiceDependenciesBundle,
 	getServiceMap,
+	getPlanetScaleBranchStats,
 	getServiceMapCloudflare,
+	getServiceMapPlanetScale,
 	getServiceMapDbEdges,
 	getServiceDbQuerySummary,
 	getServicePlatforms,
@@ -65,6 +67,7 @@ import {
 	getCloudflareZoneSecurity,
 	getCloudflareZoneTimeseries,
 } from "@/api/warehouse/cloudflare-infra"
+import { getPlanetScaleInfraTimeseries, getPlanetScaleQueryInsights } from "@/api/warehouse/planetscale-infra"
 import { getServiceHealthBaseline, getServiceOverview, getServicesFacets } from "@/api/warehouse/services"
 import {
 	getResourceAttributeKeys,
@@ -440,6 +443,23 @@ export const getServiceMapDbEdgesResultAtom = makeQueryAtomFamily(getServiceMapD
 })
 
 export const getServiceMapCloudflareResultAtom = makeQueryAtomFamily(getServiceMapCloudflare, {
+	staleTime: 15_000,
+})
+
+export const getServiceMapPlanetScaleResultAtom = makeQueryAtomFamily(getServiceMapPlanetScale, {
+	staleTime: 15_000,
+})
+
+export const planetscaleInfraTimeseriesResultAtom = makeQueryAtomFamily(getPlanetScaleInfraTimeseries, {
+	staleTime: 15_000,
+})
+
+export const planetscaleQueryInsightsResultAtom = makeQueryAtomFamily(getPlanetScaleQueryInsights, {
+	// Server-side edge cache is 60s; match it so refreshes don't hammer PlanetScale.
+	staleTime: 60_000,
+})
+
+export const getPlanetScaleBranchStatsResultAtom = makeQueryAtomFamily(getPlanetScaleBranchStats, {
 	staleTime: 15_000,
 })
 

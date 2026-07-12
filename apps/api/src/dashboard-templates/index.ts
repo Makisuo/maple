@@ -14,6 +14,7 @@ import { mysqlTemplate } from "./database/mysql"
 import { postgresTemplate } from "./database/postgres"
 import { redisTemplate } from "./database/redis"
 import { cloudflareTemplate } from "./infrastructure/cloudflare"
+import { planetscaleTemplate } from "./infrastructure/planetscale"
 import { hostMetricsTemplate } from "./infrastructure/host-metrics"
 import { kubernetesClusterTemplate } from "./infrastructure/kubernetes-cluster"
 import { kubernetesPodTemplate } from "./infrastructure/kubernetes-pod"
@@ -41,6 +42,7 @@ export const DASHBOARD_TEMPLATES: ReadonlyArray<TemplateDefinition> = [
 	mysqlTemplate,
 	// Infrastructure
 	cloudflareTemplate,
+	planetscaleTemplate,
 	hostMetricsTemplate,
 	kubernetesClusterTemplate,
 	kubernetesPodTemplate,
