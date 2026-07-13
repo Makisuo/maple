@@ -67,6 +67,8 @@ OpenRouter only emits Broadcast traces for traffic under the OpenRouter account 
 
 OpenRouter Broadcast traces use standard GenAI semantic convention attributes such as `gen_ai.*` for model, usage, and cost data. Maple also receives the custom metadata above under OpenRouter's `trace.metadata.*` namespace.
 
+Maple renders these as first-class LLM calls: any span carrying `gen_ai.*` attributes is badged with a sparkle/provider icon in the waterfall, timeline, and flow views, and the span-detail panel shows a summary block with the provider, operation, model, input/output tokens, cost, request params, and finish reason. In the attribute table, `gen_ai.request.model` / `gen_ai.response.model` render as model chips, token counts are grouped, and `gen_ai.usage.cost` renders as currency. Because OTel renamed `gen_ai.system` → `gen_ai.provider.name`, a provider filter matches spans using either spelling.
+
 Useful filters:
 
 ```text
@@ -74,6 +76,8 @@ trace.metadata.orgId = "<orgId>"
 trace.metadata.operation = "chat.turn"
 trace.metadata.mode = "dashboard_builder"
 session.id = "<orgId>:<tabId>"
+gen_ai.provider.name = "openai"   # also matches the legacy gen_ai.system spelling
+gen_ai.request.model = "openai/gpt-4o"
 ```
 
 If prompt or completion content should not leave OpenRouter, enable Privacy Mode for the OpenRouter observability destination. OpenRouter's docs state that Privacy Mode excludes prompt and completion content while still sending timing, model, token usage, cost, and metadata.

@@ -45,23 +45,29 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 
 // ---------------------------------------------------------------------------
-// HTTP semconv coalescing
+// Semconv coalescing
 //
-// OpenTelemetry renamed several HTTP span attributes in the stable semconv:
-//   http.method      → http.request.method
-//   http.status_code → http.response.status_code
-// `trace_list_mv` coalesces both spellings when it pre-extracts its columns
-// (see materializations.ts), so the quick-filter facet counts cover spans that
-// use *either* key. Filters that read the raw `traces` table must coalesce the
-// same way — otherwise a facet shows a count while applying it matches zero
-// rows (the data carries the new key, the filter looked up the old one).
+// OpenTelemetry renamed several span attributes across semconv versions:
+//   http.method       → http.request.method
+//   http.status_code  → http.response.status_code
+//   gen_ai.system     → gen_ai.provider.name   (GenAI/LLM spans)
+// Emitters in the wild still send either spelling. `trace_list_mv` coalesces the
+// HTTP pair when it pre-extracts its columns (see materializations.ts), so the
+// quick-filter facet counts cover spans that use *either* key. Filters that read
+// the raw `traces` table must coalesce the same way — otherwise a facet shows a
+// count while applying it matches zero rows (the data carries the new key, the
+// filter looked up the old one). The GenAI pair has no MV column yet; coalescing
+// it here still makes provider filters match regardless of which name a span uses.
 // ---------------------------------------------------------------------------
 
-const HTTP_SEMCONV_ALIASES: Record<string, readonly string[]> = {
+const SEMCONV_ALIASES: Record<string, readonly string[]> = {
 	"http.method": ["http.method", "http.request.method"],
 	"http.request.method": ["http.method", "http.request.method"],
 	"http.status_code": ["http.status_code", "http.response.status_code"],
 	"http.response.status_code": ["http.status_code", "http.response.status_code"],
+	// Prefer the new `gen_ai.provider.name` spelling first (first non-empty wins).
+	"gen_ai.provider.name": ["gen_ai.provider.name", "gen_ai.system"],
+	"gen_ai.system": ["gen_ai.provider.name", "gen_ai.system"],
 }
 
 /** `if(map[k0] != '', map[k0], if(map[k1] != '', …))` — first non-empty alias. */
@@ -115,7 +121,7 @@ export function buildAttrFilterCondition(
 	const mapExpr = CH.dynamicColumn<Record<string, string>>(mapName)
 	// Span attributes renamed across OTel semconv versions match either spelling,
 	// mirroring trace_list_mv. Resource attributes have no such aliases.
-	const keys = mapName === "SpanAttributes" ? (HTTP_SEMCONV_ALIASES[af.key] ?? [af.key]) : [af.key]
+	const keys = mapName === "SpanAttributes" ? (SEMCONV_ALIASES[af.key] ?? [af.key]) : [af.key]
 	const colExpr: CH.Expr<string> = coalescedMapGet(mapExpr, keys)
 	const value = af.value ?? ""
 

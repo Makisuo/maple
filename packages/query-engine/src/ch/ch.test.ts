@@ -234,6 +234,23 @@ describe("tracesTimeseriesQuery", () => {
 		expect(sql).toContain("0 AS p50Duration")
 	})
 
+	it("coalesces gen_ai.provider.name and legacy gen_ai.system in an attribute filter", () => {
+		// An org filtering LLM spans by provider must match whichever spelling the
+		// span carries — OTel renamed gen_ai.system → gen_ai.provider.name.
+		const q = tracesTimeseriesQuery({
+			metric: "count",
+			needsSampling: false,
+			attributeFilters: [{ key: "gen_ai.provider.name", value: "openai", mode: "equals" }],
+		})
+		const { sql } = compileCH(q, baseParams)
+		// A span-level attribute filter reads the raw traces table (not the MV)...
+		expect(sql).toContain("FROM traces")
+		// ...and coalesces both spellings to the same value.
+		expect(sql).toContain("SpanAttributes['gen_ai.provider.name']")
+		expect(sql).toContain("SpanAttributes['gen_ai.system']")
+		expect(sql).toContain("= 'openai'")
+	})
+
 	it("builds apdex timeseries with threshold", () => {
 		const q = tracesTimeseriesQuery({ metric: "apdex", needsSampling: false, apdexThresholdMs: 250 })
 		const { sql } = compileCH(q, baseParams)
@@ -1194,6 +1211,10 @@ describe("converted queries", () => {
 		expect(sql).not.toContain("toJSONString(ResourceAttributes)")
 		expect(sql).toContain("'http.route', SpanAttributes['http.route']")
 		expect(sql).toContain("'cache.result', SpanAttributes['cache.result']")
+		// GenAI/LLM keys are projected so the trace views can badge LLM spans.
+		expect(sql).toContain("'gen_ai.operation.name', SpanAttributes['gen_ai.operation.name']")
+		expect(sql).toContain("'gen_ai.request.model', SpanAttributes['gen_ai.request.model']")
+		expect(sql).toContain("'gen_ai.usage.cost', SpanAttributes['gen_ai.usage.cost']")
 		expect(sql).toContain("'deployment.environment', ResourceAttributes['deployment.environment']")
 		expect(sql).toContain("AS spanAttributes")
 		expect(sql).toContain("AS resourceAttributes")

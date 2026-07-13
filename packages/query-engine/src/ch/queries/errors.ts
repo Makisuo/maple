@@ -166,6 +166,21 @@ const TREE_SPAN_ATTR_KEYS = [
 	"cloudflare.colo",
 	"faas.invoked_region",
 	"cloudflare.outcome",
+	// GenAI / LLM client spans (OpenRouter Broadcast + OTel `gen_ai.*` semconv) —
+	// the `gen_ai.operation.name` value (with provider + model + token/cost usage)
+	// lets the trace views detect an LLM call and render its badge without waiting
+	// for the per-span lazy detail fetch. The full set (finish reasons, request
+	// params, prompt/completion) is loaded lazily by `spanDetailQuery` for the
+	// detail panel. Both the new `gen_ai.provider.name` and the legacy
+	// `gen_ai.system` spellings are projected so the detector coalesces either.
+	"gen_ai.operation.name",
+	"gen_ai.provider.name",
+	"gen_ai.system",
+	"gen_ai.request.model",
+	"gen_ai.response.model",
+	"gen_ai.usage.input_tokens",
+	"gen_ai.usage.output_tokens",
+	"gen_ai.usage.cost",
 ] as const
 
 /**
@@ -568,7 +583,8 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		spanName: () => makeFacetQuery("SpanName", "spanName", ($) => $.SpanName.neq(""), 20),
 		httpMethod: () => makeFacetQuery("HttpMethod", "httpMethod", ($) => $.HttpMethod.neq(""), 20),
 		httpStatus: () => makeFacetQuery("HttpStatusCode", "httpStatus", ($) => $.HttpStatusCode.neq(""), 20),
-		deploymentEnv: () => makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
+		deploymentEnv: () =>
+			makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
 		serviceNamespace: () =>
 			makeFacetQuery("ServiceNamespace", "serviceNamespace", ($) => $.ServiceNamespace.neq(""), 20),
 	}

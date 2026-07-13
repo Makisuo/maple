@@ -59,8 +59,15 @@ data exists:
       Histogram datasource has bounds + bucket counts; registry has a generic histogram/heatmap but nothing wired to OTel histogram buckets.
 - [ ] **12. trace_state / sampling filter** — _S, trace filtering_
       `TraceState` + `SampleRate` stored; useful for "show only head-sampled" debugging. Lower demand.
-- [ ] **13. GenAI / LLM semantic conventions** (`gen_ai.*`) — _M, filtering + visuals_
-      Token usage, model, system land in the generic attrs map — no dedicated facets or token/cost visuals. Emerging, high-interest namespace.
+- [~] **13. GenAI / LLM semantic conventions** (`gen_ai.*`) — _M, filtering + visuals_
+      **Trace-level enrichment shipped:** LLM spans (OpenRouter Broadcast et al.) are detected via
+      `getGenAiInfo` (`packages/ui/src/lib/gen-ai.ts`) + a `genAiAdapter`
+      (`packages/ui/src/lib/cloud-platforms/gen-ai.ts`), so the waterfall/flame/flow views badge
+      them and the span-detail panel shows a model/provider/token/cost summary; `gen_ai.*` keys are
+      projected into the trace views (`TREE_SPAN_ATTR_KEYS`), `gen_ai.system`↔`gen_ai.provider.name`
+      coalesce in attribute filters (`traces-shared.ts`), and model/token/cost render formatted in
+      the attribute table. **Deferred:** dedicated token/cost aggregation + AI page (needs the
+      `gen_ai_usage_hourly` rollup and the numeric-attribute aggregation wiring — see below).
 
 ## Tier 3 — Needs ingest-encoder changes (`apps/ingest/src/telemetry.rs`)
 
