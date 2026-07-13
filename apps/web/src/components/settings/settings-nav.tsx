@@ -143,6 +143,7 @@ export function useVisibleSettingsSections() {
 			isAdmin: true,
 			canAccessDataPlatform: true,
 			canAccessAi: true,
+			isCustomerLoading: false,
 			isLoading: false,
 		}
 	}
@@ -171,7 +172,13 @@ export function useVisibleSettingsSections() {
 		isAdmin,
 		canAccessDataPlatform,
 		canAccessAi,
-		isLoading: Result.isInitial(sessionResult) || (isAdmin && isCustomerLoading),
+		isCustomerLoading,
+		// The shell only waits on the (fast) session query. The billing customer —
+		// dominated by an upstream Autumn round-trip — keeps loading in the
+		// background; `canAccessDataPlatform` stays false until it resolves, so the
+		// "Data Platform" nav item just appears when ready (same as /integrations),
+		// instead of blocking the whole page behind it.
+		isLoading: Result.isInitial(sessionResult),
 	}
 }
 
