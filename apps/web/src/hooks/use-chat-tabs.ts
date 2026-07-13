@@ -57,6 +57,24 @@ function saveState(orgId: string, state: ChatTabsState) {
 	}
 }
 
+/**
+ * Register a tab in the org's persisted tab list (and activate it) without
+ * mounting the chat page — used by deep links like the global chat sheet's
+ * "Open full page", since useChatTabs only activates ids it already knows.
+ */
+export function ensureStoredTab(orgId: string, id: string, title: string) {
+	const state = loadState(orgId)
+	const now = Date.now()
+	const existing = state.tabs.find((t) => t.id === id)
+	const next: ChatTabsState = existing
+		? { ...state, activeTabId: id }
+		: {
+				tabs: [...state.tabs, { id, title, createdAt: now, updatedAt: now }],
+				activeTabId: id,
+			}
+	saveState(orgId, next)
+}
+
 export function useChatTabs(orgId: string, initialTabId?: string) {
 	const [state, setState] = useState<ChatTabsState>(() => {
 		const s = loadState(orgId)

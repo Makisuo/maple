@@ -9,6 +9,10 @@ import type { QueryBuilderDataSource } from "@/lib/query-builder/model"
 import { useAutocompleteContextOptional } from "@/hooks/use-autocomplete-context"
 import { useAutocompleteValuesContextOptional } from "@/hooks/use-autocomplete-values"
 import { useWhereClauseAutocomplete } from "@/hooks/use-where-clause-autocomplete"
+import {
+	WHERE_CLAUSE_TOKEN_COLOR,
+	tokenizeWhereClause,
+} from "@/lib/query-builder/where-clause-highlight"
 import { cn } from "@maple/ui/utils"
 
 interface WhereClauseEditorProps {
@@ -25,6 +29,12 @@ interface WhereClauseEditorProps {
 	className?: string
 	textareaClassName?: string
 	ariaLabel?: string
+	/**
+	 * Render syntax highlighting over the textarea. The overlay mirrors the
+	 * Textarea's default padding, so combine only with font/size classes in
+	 * `textareaClassName` — custom padding there would misalign the overlay.
+	 */
+	highlight?: boolean
 }
 
 export function WhereClauseEditor({
@@ -41,8 +51,16 @@ export function WhereClauseEditor({
 	className,
 	textareaClassName,
 	ariaLabel,
+	highlight = false,
 }: WhereClauseEditorProps) {
 	const textAreaRef = React.useRef<HTMLTextAreaElement | null>(null)
+	const highlightRef = React.useRef<HTMLDivElement | null>(null)
+
+	const highlightTokens = React.useMemo(
+		() => (highlight ? tokenizeWhereClause(value) : []),
+		[highlight, value],
+	)
+	const isHighlighting = highlight && value.length > 0
 
 	// Use context directly when available and no explicit props provided
 	const autocompleteCtx = useAutocompleteContextOptional()
@@ -104,8 +122,18 @@ export function WhereClauseEditor({
 				rows={rows}
 				value={value}
 				placeholder={placeholder}
-				className={textareaClassName}
+				className={cn(
+					textareaClassName,
+					// Keep the caret visible while the overlay paints the glyphs.
+					isHighlighting && "text-transparent caret-foreground",
+				)}
 				aria-label={ariaLabel}
+				onScroll={(event) => {
+					const overlay = highlightRef.current
+					if (!overlay) return
+					overlay.scrollTop = event.currentTarget.scrollTop
+					overlay.scrollLeft = event.currentTarget.scrollLeft
+				}}
 				onFocus={(event) => {
 					autocompleteValuesCtx?.activate?.()
 					onFocus()
@@ -159,6 +187,29 @@ export function WhereClauseEditor({
 					}
 				}}
 			/>
+
+			{isHighlighting && (
+				<div
+					ref={highlightRef}
+					aria-hidden
+					// Mirrors the Textarea's inner metrics: 1px border + the default
+					// px/py, plus the same wrapper font classes so wrapping matches.
+					className={cn(
+						"pointer-events-none absolute inset-0 overflow-hidden rounded-lg border border-transparent px-[calc(--spacing(3)-1px)] py-[calc(--spacing(1.5)-1px)] text-base break-words whitespace-pre-wrap sm:text-sm",
+						textareaClassName,
+					)}
+				>
+					{highlightTokens.map((token, index) => (
+						<span
+							// biome-ignore lint/suspicious/noArrayIndexKey: tokens are positional
+							key={index}
+							style={{ color: WHERE_CLAUSE_TOKEN_COLOR[token.type] }}
+						>
+							{token.text}
+						</span>
+					))}
+				</div>
+			)}
 
 			{isOpen && (
 				<div

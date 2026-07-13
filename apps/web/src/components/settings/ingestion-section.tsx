@@ -24,6 +24,7 @@ import {
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { AlertWarningIcon, ArrowPathIcon, CheckIcon, CopyIcon, EyeIcon, ShieldIcon } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { maskKey } from "@/components/ingest/copyable-field"
@@ -115,11 +116,12 @@ function ApiKeyRow({
 export function IngestionSection() {
 	const [publicKeyVisible, setPublicKeyVisible] = useState(false)
 	const [privateKeyVisible, setPrivateKeyVisible] = useState(false)
-	const [copiedKey, setCopiedKey] = useState<"public" | "private" | null>(null)
+	const publicKeyCopy = useCopyToClipboard("Ingest key")
+	const privateKeyCopy = useCopyToClipboard("Ingest key")
+	const endpointCopy = useCopyToClipboard("Ingest endpoint")
 	const [regenerateDialogOpen, setRegenerateDialogOpen] = useState(false)
 	const [regenerateKeyType, setRegenerateKeyType] = useState<"public" | "private" | null>(null)
 	const [submittingKeyType, setSubmittingKeyType] = useState<"public" | "private" | null>(null)
-	const [endpointCopied, setEndpointCopied] = useState(false)
 
 	const keysQueryAtom = MapleApiAtomClient.query("ingestKeys", "get", {})
 	const keysResult = useAtomValue(keysQueryAtom)
@@ -139,32 +141,11 @@ export function IngestionSection() {
 		[keysResult, submittingKeyType],
 	)
 
-	async function handleCopy(keyType: "public" | "private") {
+	function handleCopy(keyType: "public" | "private") {
 		if (!Result.isSuccess(keysResult)) return
 
 		const key = keyType === "public" ? keysResult.value.publicKey : keysResult.value.privateKey
-
-		try {
-			await navigator.clipboard.writeText(key)
-			setCopiedKey(keyType)
-			toast.success("Ingest key copied to clipboard")
-			setTimeout(() => {
-				setCopiedKey((current) => (current === keyType ? null : current))
-			}, 2000)
-		} catch {
-			toast.error("Failed to copy ingest key")
-		}
-	}
-
-	async function handleCopyEndpoint() {
-		try {
-			await navigator.clipboard.writeText(ingestUrl)
-			setEndpointCopied(true)
-			toast.success("Ingest endpoint copied to clipboard")
-			setTimeout(() => setEndpointCopied(false), 2000)
-		} catch {
-			toast.error("Failed to copy endpoint")
-		}
+		;(keyType === "public" ? publicKeyCopy : privateKeyCopy).copy(key)
 	}
 
 	function openRegenerateDialog(keyType: "public" | "private") {
@@ -182,7 +163,6 @@ export function IngestionSection() {
 
 		if (Exit.isSuccess(result)) {
 			refreshKeys()
-			setCopiedKey(null)
 
 			toast.success(
 				`${regenerateKeyType === "public" ? "Public" : "Private"} key regenerated. Previous key was revoked immediately.`,
@@ -236,11 +216,11 @@ export function IngestionSection() {
 								/>
 								<InputGroupAddon align="inline-end">
 									<InputGroupButton
-										onClick={handleCopyEndpoint}
+										onClick={() => endpointCopy.copy(ingestUrl)}
 										aria-label="Copy endpoint to clipboard"
-										title={endpointCopied ? "Copied!" : "Copy"}
+										title={endpointCopy.copied ? "Copied!" : "Copy"}
 									>
-										{endpointCopied ? (
+										{endpointCopy.copied ? (
 											<CheckIcon size={14} className="text-severity-info" />
 										) : (
 											<CopyIcon size={14} />
@@ -278,7 +258,7 @@ export function IngestionSection() {
 								keyValue={publicKey}
 								isVisible={publicKeyVisible}
 								onToggleVisibility={() => setPublicKeyVisible((v) => !v)}
-								isCopied={copiedKey === "public"}
+								isCopied={publicKeyCopy.copied}
 								onCopy={() => handleCopy("public")}
 								onRegenerate={() => openRegenerateDialog("public")}
 								disabled={isBusy}
@@ -291,7 +271,7 @@ export function IngestionSection() {
 								keyValue={privateKey}
 								isVisible={privateKeyVisible}
 								onToggleVisibility={() => setPrivateKeyVisible((v) => !v)}
-								isCopied={copiedKey === "private"}
+								isCopied={privateKeyCopy.copied}
 								onCopy={() => handleCopy("private")}
 								onRegenerate={() => openRegenerateDialog("private")}
 								disabled={isBusy}

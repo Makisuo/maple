@@ -53,6 +53,7 @@ import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
 import { OnboardingService } from "./services/OnboardingService"
 import { EmailService } from "./lib/EmailService"
+import { OrgMembersService } from "./services/OrgMembersService"
 import { Env } from "./lib/Env"
 import { IngestAttributeMappingService } from "./services/IngestAttributeMappingService"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
@@ -99,9 +100,7 @@ const InfraLive = Env.layer
 // Compose each wired layer once so memoization resolves them to single
 // instances (one discovery cache, one refresh single-flight).
 const PlanetScaleOAuthLive = PlanetScaleOAuthService.layer
-const PlanetScaleDiscoveryLive = PlanetScaleDiscoveryService.layer.pipe(
-	Layer.provide(PlanetScaleOAuthLive),
-)
+const PlanetScaleDiscoveryLive = PlanetScaleDiscoveryService.layer.pipe(Layer.provide(PlanetScaleOAuthLive))
 const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
 	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
 )
@@ -151,11 +150,25 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 	Layer.provideMerge(BucketCacheServiceLive),
 )
 
+const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
+
+const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
+
 const AlertsServiceLive = AlertsService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.layer)),
+	Layer.provideMerge(
+		Layer.mergeAll(
+			CoreServicesLive,
+			QueryEngineServiceLive,
+			AlertRuntime.layer,
+			EmailServiceLive,
+			OrgMembersServiceLive,
+		),
+	),
 )
 
-const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(Layer.provideMerge(CoreServicesLive))
+const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, EmailServiceLive)),
+)
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provideMerge(
@@ -182,8 +195,6 @@ const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
 const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
-
-const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
 
 const DigestServiceLive = DigestService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EmailServiceLive)),

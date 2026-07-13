@@ -228,6 +228,14 @@ export const formatBackendError = (input: unknown): FormattedError => {
 	}
 
 	if (error instanceof Error) {
+		// Transport-level failures carry request URLs in their message — swap the
+		// internals for actionable copy.
+		if (/transport error|failed to fetch|load failed|networkerror/i.test(error.message)) {
+			return {
+				title: "Cannot reach Maple API",
+				description: "Check your network connection and try again.",
+			}
+		}
 		return {
 			title: "Something went wrong",
 			description: error.message || "An unexpected error occurred.",

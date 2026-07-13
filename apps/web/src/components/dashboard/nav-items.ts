@@ -1,7 +1,6 @@
 import {
 	BellIcon,
 	ChartLineIcon,
-	ChatBubbleSparkleIcon,
 	CircleWarningIcon,
 	CloudflareIcon,
 	ComputerIcon,
@@ -37,11 +36,6 @@ export const mainNavItems: NavItem[] = [
 		title: "Overview",
 		href: "/",
 		icon: HouseIcon,
-	},
-	{
-		title: "Chat",
-		href: "/chat",
-		icon: ChatBubbleSparkleIcon,
 	},
 ]
 

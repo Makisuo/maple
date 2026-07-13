@@ -17,7 +17,7 @@ import {
 	type AlertsStatusFilter,
 } from "@/components/alerts/overview/alerts-health-summary"
 import { RulesOverviewTable } from "@/components/alerts/overview/rules-overview-table"
-import { CircleWarningIcon, MagnifierIcon, XmarkIcon } from "@/components/icons"
+import { MagnifierIcon, XmarkIcon } from "@/components/icons"
 import { getExitErrorMessage } from "@/lib/alerts/form-utils"
 import { needsAttention } from "@/lib/alerts/rule-status"
 import {
@@ -32,6 +32,7 @@ import { AlertsOverviewModel, type AlertsOverviewReady } from "@/lib/models/aler
 import { unitflowRuntime } from "@/lib/models/runtime"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { ErrorState } from "@/components/common/error-state"
 import {
 	InputGroup,
 	InputGroupAddon,
@@ -80,15 +81,12 @@ function OverviewSkeleton() {
 
 function OverviewLoadError() {
 	return (
-		<Empty className="py-12">
-			<EmptyHeader>
-				<EmptyMedia variant="icon">
-					<CircleWarningIcon size={18} />
-				</EmptyMedia>
-				<EmptyTitle>Failed to load alert rules</EmptyTitle>
-				<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
-			</EmptyHeader>
-		</Empty>
+		<ErrorState
+			error="The alert rules stream could not be loaded."
+			title="Failed to load alert rules"
+			onRetry={() => window.location.reload()}
+			className="py-12"
+		/>
 	)
 }
 

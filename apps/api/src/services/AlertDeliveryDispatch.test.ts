@@ -9,6 +9,7 @@ import {
 	buildTemplateContext,
 	dispatchDelivery,
 	type DispatchContext,
+	type DispatchDeps,
 	type TemplateRenderContext,
 } from "./AlertDeliveryDispatch"
 import { renderTemplate } from "./alert-templating/renderer"
@@ -37,13 +38,16 @@ const baseContext: TemplateRenderContext = {
 const LINK = "https://web.localhost/alerts"
 const CHAT = "https://web.localhost/chat?mode=alert"
 
+/** Dispatch deps for non-email destinations — email sends must not happen. */
+const noEmailDeps: DispatchDeps = {
+	sendEmail: () =>
+		Effect.fail(new AlertDeliveryError({ message: "unexpected sendEmail", destinationType: "email" })),
+}
+
 describe("buildAlertChatUrl (Ask Maple AI link)", () => {
 	it("targets the incident diagnosis page when an incident exists", () => {
 		const url = buildAlertChatUrl("https://web.localhost", baseContext)
-		assert.isTrue(
-			url.startsWith("https://web.localhost/alerts/incidents/inc_1?alert="),
-			url,
-		)
+		assert.isTrue(url.startsWith("https://web.localhost/alerts/incidents/inc_1?alert="), url)
 	})
 
 	it("falls back to the chat surface when there is no incident row", () => {
@@ -182,7 +186,7 @@ describe("dispatchDelivery", () => {
 			const fetchFn: typeof fetch = async () => new Response(body, { status: 400 })
 
 			const error = yield* Effect.flip(
-				dispatchDelivery(pagerdutyContext, "{}", fetchFn, 5_000, LINK, CHAT),
+				dispatchDelivery(pagerdutyContext, "{}", fetchFn, 5_000, LINK, CHAT, noEmailDeps),
 			)
 
 			assert.instanceOf(error, AlertDeliveryError)
@@ -190,6 +194,70 @@ describe("dispatchDelivery", () => {
 			assert.include(error.message, "PagerDuty delivery failed with 400")
 			// The PagerDuty rejection reason is now surfaced instead of swallowed.
 			assert.include(error.message, "routing_key is invalid")
+		}),
+	)
+
+	const failingFetch: typeof fetch = async () => {
+		throw new Error("fetch must not be called for email dispatch")
+	}
+
+	const emailContext: DispatchContext = {
+		...pagerdutyContext,
+		destination: { ...destinationRow, name: "Email", type: "email" },
+		secretConfig: {
+			type: "email",
+			members: [
+				{ userId: "user_ops", email: "ops@acme.test", name: "Ops" },
+				{ userId: "user_oncall", email: "oncall@acme.test", name: null },
+			],
+		},
+	}
+
+	it.effect("email: sends one email per recipient with the built-in format", () =>
+		Effect.gen(function* () {
+			const sent: Array<{ to: string; subject: string; html: string }> = []
+			const deps: DispatchDeps = {
+				sendEmail: (to, subject, html) =>
+					Effect.sync(() => {
+						sent.push({ to, subject, html })
+					}),
+			}
+
+			const result = yield* dispatchDelivery(emailContext, "{}", failingFetch, 5_000, LINK, CHAT, deps)
+
+			assert.deepStrictEqual(
+				sent.map((s) => s.to),
+				["ops@acme.test", "oncall@acme.test"],
+			)
+			assert.include(sent[0]!.subject, "Test alert")
+			assert.include(sent[0]!.subject, "Test")
+			assert.include(sent[0]!.html, "Test alert")
+			assert.include(sent[0]!.html, LINK)
+			assert.include(sent[0]!.html, CHAT)
+			assert.strictEqual(result.providerMessage, "Emailed 2 members")
+			assert.strictEqual(result.responseCode, null)
+		}),
+	)
+
+	it.effect("email: surfaces a send failure as an email delivery error", () =>
+		Effect.gen(function* () {
+			const deps: DispatchDeps = {
+				sendEmail: () =>
+					Effect.fail(
+						new AlertDeliveryError({
+							message: "Email not configured: EMAIL binding is missing",
+							destinationType: "email",
+						}),
+					),
+			}
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(emailContext, "{}", failingFetch, 5_000, LINK, CHAT, deps),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.strictEqual(error.destinationType, "email")
+			assert.include(error.message, "EMAIL binding is missing")
 		}),
 	)
 })

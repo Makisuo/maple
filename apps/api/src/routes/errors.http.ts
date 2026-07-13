@@ -28,6 +28,7 @@ export const HttpErrorsLive = HttpApiBuilder.group(MapleApi, "errors", (handlers
 						startTime: query.startTime,
 						endTime: query.endTime,
 						limit: query.limit,
+						cursor: query.cursor,
 					})
 					yield* Effect.annotateCurrentSpan("issueCount", response.issues.length)
 					return response

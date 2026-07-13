@@ -359,8 +359,7 @@ const queueBacklogDataset: DatasetDef = {
 				}),
 			),
 		),
-	settingsNode: (decoded) =>
-		decoded.viewer.accounts?.[0]?.settings?.queueBacklogAdaptiveGroups ?? null,
+	settingsNode: (decoded) => decoded.viewer.accounts?.[0]?.settings?.queueBacklogAdaptiveGroups ?? null,
 }
 
 const queueConsumersDataset: DatasetDef = {
@@ -437,21 +436,45 @@ const graphqlErrorCode = (error: CloudflareGraphqlError): string | null => {
 	return null
 }
 
+// Cloudflare gates analytics datasets/fields by plan tier. A query for a dataset (or field) the
+// zone's plan doesn't include comes back as an "access controls" / "does not have access to the
+// path|field" GraphQL error (sometimes also tagged extensions.code:"authz"). These are expected
+// per-plan degradations, not incidents — they must route to the quiet `disabled` /
+// `quantiles-unavailable` paths rather than raising `AnalyticsPollError`.
+const isPlanGatedMessage = (message: string): boolean => {
+	const lower = message.toLowerCase()
+	return (
+		lower.includes("does not have access to the path") ||
+		lower.includes("does not have access to the field") ||
+		lower.includes("access controls")
+	)
+}
+
 const classifyGraphqlErrors = (
 	errors: ReadonlyArray<CloudflareGraphqlError>,
 	quantileNeedles: ReadonlyArray<string>,
 ): GraphqlErrorKind => {
 	const messages = errors.map((error) => error.message.toLowerCase())
-	// Plan lacks the dataset's timing-quantile fields → the query referenced an unknown field.
-	// Degrade to counters-only instead of erroring forever.
+	// Plan lacks the dataset's timing-quantile fields → the query referenced an "unknown"/"cannot
+	// query" field, or Cloudflare reports the plan "does not have access to the field". Degrade to
+	// counters-only instead of erroring forever.
 	if (
 		messages.some(
 			(message) =>
-				(message.includes("unknown") || message.includes("cannot query")) &&
+				(message.includes("unknown") ||
+					message.includes("cannot query") ||
+					message.includes("does not have access to the field")) &&
 				quantileNeedles.some((needle) => message.includes(needle)),
 		)
 	) {
 		return "quantiles-unavailable"
+	}
+	// Plan lacks the whole dataset/path → an "access controls" / "does not have access to the path"
+	// error. Expected per-plan gating: quietly disable the dataset (stops polling until a settings
+	// change / reconnect re-enables it) rather than raising. Checked BEFORE the authz-code branch
+	// because Cloudflare tags some plan-gating errors with extensions.code:"authz".
+	if (messages.some(isPlanGatedMessage)) {
+		return "disabled"
 	}
 	// extensions.code carries Cloudflare's machine-readable classification ("authz" on permission
 	// failures); the message substrings are only a fallback for errors that omit it.
@@ -1117,9 +1140,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			const seen = new Set(zones.map((zone) => zone.id))
 			const vanished = rows.filter(
 				(row) =>
-					DATASET_BY_ID.get(row.dataset)?.scope === "zone" &&
-					row.enabled &&
-					!seen.has(row.zoneId),
+					DATASET_BY_ID.get(row.dataset)?.scope === "zone" && row.enabled && !seen.has(row.zoneId),
 			)
 			yield* updateRows(
 				vanished.map((row) => row.id),
@@ -1386,13 +1407,21 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const rowIds = part.rows.map((row) => row.id)
 				let kind = classifyGraphqlErrors(partErrors, part.dataset.quantileNeedles)
 				// Disabling is destructive (the dataset stops polling until settings/reconnect
-				// re-enable it), so a "disabled"-shaped error that ISN'T attributable to this
-				// part's own selection must not cascade across a batched document — one ambiguous
-				// error would silently kill every healthy sibling dataset. With a single part the
-				// attribution is unambiguous (exactly the old single-dataset behavior); otherwise
-				// degrade to a retryable failure and let a properly-attributed error (or the
-				// settings probe) do the disabling.
+				// re-enable it), so a "disabled"-shaped error that ISN'T attributable to this part's
+				// own selection must not cascade across a batched document — one ambiguous error would
+				// silently kill every healthy sibling dataset. With a single part the attribution is
+				// unambiguous (exactly the old single-dataset behavior); otherwise:
+				//   • expected plan-gating ("does not have access to the path/field" / "access
+				//     controls") → skip this part silently and retry next round (no disable, no
+				//     telemetry). Cloudflare voids the whole batched document when any one selection is
+				//     gated, so an unattributed gating error tells us nothing about THIS part — treating
+				//     it as a failure is exactly what floods the error pipeline with expected noise.
+				//   • anything else → degrade to a retryable failure and let a properly-attributed
+				//     error (or the settings probe) do the disabling.
 				if (kind === "disabled" && attributed.length === 0 && item.parts.length > 1) {
+					if (partErrors.some((error) => isPlanGatedMessage(error.message))) {
+						continue
+					}
 					kind = "other"
 				}
 				if (kind === "quantiles-unavailable") {
@@ -1427,6 +1456,15 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// next round. A null data with NO errors is an upstream contract break.
 				if (result.errors.length === 0) {
 					return yield* Effect.fail(decodeError("batched"))
+				}
+				// When every error that nulled `data` is expected per-plan gating, the clean sibling
+				// parts weren't the problem — Cloudflare just voids the whole batch when one selection
+				// is plan-gated. Don't fail them (and don't emit `AnalyticsPollError` telemetry); treat
+				// them like the errorless case above — they didn't advance, retry next round. The
+				// gated part itself is handled by its own classification (disabled/quantiles), and once
+				// it disables, later rounds stop voiding the batch.
+				if (result.errors.every((error) => isPlanGatedMessage(error.message))) {
+					return results
 				}
 				for (const part of cleanParts) {
 					results.push({
@@ -1706,7 +1744,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 												yield* recordOrgError(orgId, failure.message, now, {
 													disable: failure.disable,
 												})
-												for (const row of rows) if (failure.disable) row.enabled = false
+												for (const row of rows)
+													if (failure.disable) row.enabled = false
 											} else {
 												yield* recordError(failure.rowIds, failure.message, now, {
 													disable: failure.disable,
@@ -1815,7 +1854,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 												...list,
 												{
 													orgId: decodeOrgId(row.orgId),
-													skipped: "org poll failed — see the warning log for the cause",
+													skipped:
+														"org poll failed — see the warning log for the cause",
 													callsMade: 0,
 													rowsIngested: 0,
 													failures: [],

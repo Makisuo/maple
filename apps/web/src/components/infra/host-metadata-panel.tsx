@@ -1,7 +1,7 @@
-import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { cn } from "@maple/ui/lib/utils"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 import { CheckIcon, CopyIcon, ServerIcon } from "@/components/icons"
 import type { HostDetailSummaryResponse } from "@maple/domain/http"
@@ -19,19 +19,14 @@ interface RowProps {
 }
 
 function Row({ label, value, copyValue, tooltip }: RowProps) {
-	const [copied, setCopied] = useState(false)
+	// Silent: the check icon is the feedback; a toast per metadata row is noise.
+	const { copied, copy } = useCopyToClipboard(label, { silent: true })
 	if (!value) return null
 
-	const handleCopy = async (e: React.MouseEvent) => {
+	const handleCopy = (e: React.MouseEvent) => {
 		e.preventDefault()
 		e.stopPropagation()
-		try {
-			await navigator.clipboard.writeText(copyValue ?? value)
-			setCopied(true)
-			window.setTimeout(() => setCopied(false), 1500)
-		} catch {
-			// ignore
-		}
+		copy(copyValue ?? value)
 	}
 
 	const valueNode = (

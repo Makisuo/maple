@@ -29,6 +29,8 @@ import {
 	IssueEscalationPolicyDocument,
 	IssueEscalationPolicyRule,
 	type IssueEscalationPolicyUpsertRequest,
+	IssueListCursor,
+	type IssueListCursorFields,
 	type IssueKind,
 	type IssueSeverity,
 	type IssueSeveritySource,
@@ -78,6 +80,7 @@ import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
+const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
@@ -208,6 +211,7 @@ export interface ErrorsServiceShape {
 			readonly startTime?: string
 			readonly endTime?: string
 			readonly limit?: number
+			readonly cursor?: IssueListCursorFields
 		},
 	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError>
 	readonly getIssue: (
@@ -1027,15 +1031,29 @@ const make: Effect.Effect<
 				const startMs = parseWarehouseDateTime(opts.startTime)
 				if (Number.isFinite(startMs)) conditions.push(gt(errorIssues.lastSeenAt, new Date(startMs)))
 			}
+			if (opts.cursor) {
+				// Keyset continuation: strictly after the last row of the previous
+				// page in (lastSeenAt desc, id desc) order.
+				const cursorSeenAt = new Date(opts.cursor.lastSeenAt)
+				const keyset = or(
+					lt(errorIssues.lastSeenAt, cursorSeenAt),
+					and(eq(errorIssues.lastSeenAt, cursorSeenAt), lt(errorIssues.id, opts.cursor.id)),
+				)
+				if (keyset) conditions.push(keyset)
+			}
 
-			const rows = yield* dbExecute((db) =>
+			const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500)
+			// Fetch one extra row: its presence means another page exists.
+			const fetched = yield* dbExecute((db) =>
 				db
 					.select()
 					.from(errorIssues)
 					.where(and(...conditions))
-					.orderBy(desc(errorIssues.lastSeenAt))
-					.limit(opts.limit ?? 100),
+					.orderBy(desc(errorIssues.lastSeenAt), desc(errorIssues.id))
+					.limit(limit + 1),
 			)
+			const hasMore = fetched.length > limit
+			const rows = hasMore ? fetched.slice(0, limit) : fetched
 
 			const issueIds = rows.map((r) => r.id)
 			const openSet = yield* issuesWithOpenIncidents(orgId, issueIds)
@@ -1045,8 +1063,19 @@ const make: Effect.Effect<
 			)
 
 			const issuesResult = rows.map((r) => rowToIssue(r, openSet.has(r.id), actorMap))
-			yield* Effect.annotateCurrentSpan("issueCount", issuesResult.length)
-			return new ErrorIssuesListResponse({ issues: issuesResult })
+			yield* Effect.annotateCurrentSpan({ issueCount: issuesResult.length, hasMore })
+			const lastRow = rows.at(-1)
+			return new ErrorIssuesListResponse(
+				hasMore && lastRow
+					? {
+							issues: issuesResult,
+							nextCursor: encodeIssueListCursor({
+								lastSeenAt: lastRow.lastSeenAt.getTime(),
+								id: decodeErrorIssueIdSync(lastRow.id),
+							}),
+						}
+					: { issues: issuesResult },
+			)
 		},
 	)
 

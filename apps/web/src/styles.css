@@ -534,6 +534,61 @@
 	}
 }
 
+/* Crash screen — the boot trace frozen at the moment of failure (see
+   app-error-boundary.tsx). Reuses the .boot-track / .boot-span--N row
+   geometry; spans 1–3 landed, span 4 errored, span 5 never arrived. */
+.crash-trace {
+	position: relative;
+	width: 200px;
+	height: 73px;
+}
+
+.crash-span {
+	position: absolute;
+	height: 9px;
+	border-radius: 9999px;
+	background: var(--primary);
+}
+
+.crash-span--error {
+	background: var(--destructive);
+	box-shadow: 0 0 12px 0 color-mix(in oklab, var(--destructive) 45%, transparent);
+	animation: maple-crash-flicker 2.8s ease-in-out infinite;
+}
+
+/* the playhead, stopped where the error span ended */
+.crash-scan {
+	position: absolute;
+	top: -6px;
+	bottom: -6px;
+	left: 147px;
+	width: 2px;
+	border-radius: 2px;
+	background: linear-gradient(
+		180deg,
+		transparent,
+		color-mix(in oklab, var(--destructive) 85%, transparent),
+		transparent
+	);
+	box-shadow: 0 0 10px 1px color-mix(in oklab, var(--destructive) 45%, transparent);
+}
+
+@keyframes maple-crash-flicker {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.55;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.crash-span--error {
+		animation: none;
+	}
+}
+
 /* Accessibility: disable animations for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
 	.pulse-dot {

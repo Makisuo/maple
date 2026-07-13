@@ -222,6 +222,7 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalSecret("PLANETSCALE_OAUTH_CLIENT_SECRET"),
 			...optionalPlain("PLANETSCALE_OAUTH_AUTHORIZE_URL"),
 			...optionalPlain("PLANETSCALE_OAUTH_TOKEN_URL"),
+			...optionalPlain("PLANETSCALE_OAUTH_TOKEN_INFO_URL"),
 			...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
 		},
 	})

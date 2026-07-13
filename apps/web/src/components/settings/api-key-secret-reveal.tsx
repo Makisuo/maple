@@ -1,6 +1,3 @@
-import { useState } from "react"
-import { toast } from "sonner"
-
 import {
 	InputGroup,
 	InputGroupAddon,
@@ -8,6 +5,7 @@ import {
 	InputGroupInput,
 } from "@maple/ui/components/ui/input-group"
 import { CheckIcon, CopyIcon } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 interface ApiKeySecretRevealProps {
 	secret: string
@@ -19,18 +17,7 @@ interface ApiKeySecretRevealProps {
  * it again" UX stays identical.
  */
 export function ApiKeySecretReveal({ secret }: ApiKeySecretRevealProps) {
-	const [copied, setCopied] = useState(false)
-
-	async function handleCopy() {
-		try {
-			await navigator.clipboard.writeText(secret)
-			setCopied(true)
-			toast.success("API key copied to clipboard")
-			setTimeout(() => setCopied(false), 2000)
-		} catch {
-			toast.error("Failed to copy API key")
-		}
-	}
+	const { copied, copy } = useCopyToClipboard("API key")
 
 	return (
 		<div className="space-y-3">
@@ -42,7 +29,7 @@ export function ApiKeySecretReveal({ secret }: ApiKeySecretRevealProps) {
 				/>
 				<InputGroupAddon align="inline-end">
 					<InputGroupButton
-						onClick={handleCopy}
+						onClick={() => copy(secret)}
 						aria-label="Copy API key"
 						title={copied ? "Copied!" : "Copy"}
 					>

@@ -25,7 +25,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 interface ReplaysFacetItem {
 	readonly name: string
@@ -111,7 +110,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <FilterSidebarLoading sectionCount={5} />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facets, result) => {
 			const services = withSelected(facets.services, search.service)
 			const browsers = withSelected(facets.browsers, search.browser)

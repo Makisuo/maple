@@ -6,6 +6,7 @@ import { ChartSkeleton } from "@maple/ui/components/charts/_shared/chart-skeleto
 import { ChartTooltipSuppressionProvider } from "@maple/ui/components/ui/chart"
 import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/charts/_shared/chart-types"
 import { ReadonlyWidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
+import { ErrorState } from "@/components/common/error-state"
 
 interface MetricsGridItem {
 	id: string
@@ -17,6 +18,8 @@ interface MetricsGridItem {
 	tooltip?: ChartTooltipMode
 	rateMode?: "per_second"
 	isLoading?: boolean
+	/** When set, the card renders an inline error state instead of the chart. */
+	error?: { error: unknown; onRetry?: () => void }
 	/** Headline stat rendered at the top-right of the card header. */
 	headerValue?: ReactNode
 	/** Summary stat rendered below the chart. */
@@ -85,7 +88,15 @@ export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisW
 								// spill, so nothing else escapes.
 								contentClassName={overlay ? "flex-1 min-h-0 p-2 overflow-visible" : undefined}
 							>
-								{item.isLoading ? (
+								{item.error ? (
+									<div className="flex h-full items-center px-3">
+										<ErrorState
+											variant="inline"
+											error={item.error.error}
+											onRetry={item.error.onRetry}
+										/>
+									</div>
+								) : item.isLoading ? (
 									<ChartSkeleton variant={entry.category} />
 								) : (
 									<Suspense fallback={<ChartSkeleton variant={entry.category} />}>
