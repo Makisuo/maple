@@ -25,6 +25,7 @@ import { unitflowRuntime } from "@/lib/models/runtime"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { ErrorState } from "@/components/common/error-state"
 import type { ErrorIssueDocument, ErrorIssueId, WorkflowState } from "@maple/domain/http"
 
 const FILTER_VALUES = [
@@ -134,12 +135,11 @@ function IssuesLoadError({ toolbar, message }: { toolbar: React.ReactNode; messa
 	return (
 		<IssuesPageFrame toolbar={toolbar}>
 			<div className="p-4">
-				<Empty>
-					<EmptyHeader>
-						<EmptyTitle>Failed to load issues</EmptyTitle>
-						<EmptyDescription>{message ?? "Try refreshing or check API logs."}</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
+				<ErrorState
+					error={message ?? "The issues stream could not be loaded."}
+					title="Failed to load issues"
+					onRetry={() => window.location.reload()}
+				/>
 			</div>
 		</IssuesPageFrame>
 	)

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
@@ -27,7 +27,7 @@ import { WorkflowBadge } from "@/components/errors/workflow-badge"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { ErrorState } from "@/components/common/error-state"
 import {
 	ErrorIssueId,
 	ErrorIssueSetSeverityRequest,
@@ -51,6 +51,7 @@ function IssueDetailPage() {
 		reactivityKeys: ["errorIssues", `errorIssue:${issueId}`],
 	})
 	const detailResult = useAtomValue(detailQueryAtom)
+	const refreshDetail = useAtomRefresh(detailQueryAtom)
 
 	const eventsQueryAtom = MapleApiAtomClient.query("errors", "listIssueEvents", {
 		params: { issueId },
@@ -58,6 +59,7 @@ function IssueDetailPage() {
 		reactivityKeys: ["errorIssues", `errorIssue:${issueId}:events`],
 	})
 	const eventsResult = useAtomValue(eventsQueryAtom)
+	const refreshEvents = useAtomRefresh(eventsQueryAtom)
 
 	const transitionIssue = useAtomSet(MapleApiAtomClient.mutation("errors", "transitionIssue"), {
 		mode: "promiseExit",
@@ -186,14 +188,7 @@ function IssueDetailPage() {
 		))
 		.onError((error) => (
 			<DashboardLayout breadcrumbs={[...breadcrumbsLoading]} title="Issue">
-				<Empty>
-					<EmptyHeader>
-						<EmptyTitle>Failed to load issue</EmptyTitle>
-						<EmptyDescription>
-							{error.message ?? "Try refreshing or check API logs."}
-						</EmptyDescription>
-					</EmptyHeader>
-				</Empty>
+				<ErrorState error={error} title="Failed to load issue" onRetry={refreshDetail} />
 			</DashboardLayout>
 		))
 		.onSuccess((detail) => {
@@ -291,10 +286,13 @@ function IssueDetailPage() {
 						<section aria-labelledby="activity-heading">
 							<SectionHeader id="activity-heading" label="Activity" />
 							{Result.builder(eventsResult)
-								.onError(() => (
-									<div className="py-6 text-center text-sm text-destructive">
-										Failed to load the activity timeline.
-									</div>
+								.onError((error) => (
+									<ErrorState
+										error={error}
+										title="Failed to load the activity timeline"
+										onRetry={refreshEvents}
+										variant="inline"
+									/>
 								))
 								.onSuccess((value) => <IssueTimeline events={value.events} />)
 								.orElse(() => (

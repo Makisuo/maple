@@ -1,4 +1,4 @@
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { useCallback, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { XmarkIcon, MagnifierIcon } from "@/components/icons"
@@ -23,7 +23,6 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@maple/ui/lib/severity"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} />
@@ -55,14 +54,14 @@ export function LogsFilterSidebar() {
 		[navigate],
 	)
 
-	const facetsResult = useAtomValue(
-		getLogsFacetsResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-			},
-		}),
-	)
+	const facetsAtom = getLogsFacetsResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+		},
+	})
+	const facetsResult = useAtomValue(facetsAtom)
+	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
 		navigate({
@@ -94,7 +93,7 @@ export function LogsFilterSidebar() {
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} onRetry={refreshFacets} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 			const hasFacets =

@@ -20,6 +20,7 @@ import { IssuesToolbar } from "@/components/errors/issues-toolbar"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { ErrorState } from "@/components/common/error-state"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import type { AnomalyIncidentDocument, AnomalyIncidentId } from "@maple/domain/http"
 
@@ -183,14 +184,11 @@ function AnomaliesPage() {
 				<div>
 					{toolbar}
 					<div className="p-4">
-						<Empty>
-							<EmptyHeader>
-								<EmptyTitle>Failed to load anomalies</EmptyTitle>
-								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
-								</EmptyDescription>
-							</EmptyHeader>
-						</Empty>
+						<ErrorState
+							error={error}
+							title="Failed to load anomalies"
+							onRetry={refreshIncidents}
+						/>
 					</div>
 				</div>
 			</DashboardLayout>
