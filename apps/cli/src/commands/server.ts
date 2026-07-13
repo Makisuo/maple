@@ -16,6 +16,7 @@ import {
 } from "../server/store-version"
 import {
 	createCheckpoint,
+	parseCheckpointId,
 	reconcileCheckpointRecovery,
 	resetLiveStorePreservingCheckpoints,
 	restoreCheckpoint,
@@ -374,7 +375,7 @@ export const start = Command.make("start", {
 			// `Effect.never`, closing the scope and running finalizers in reverse
 			// registration order: remove PID → stop server → close chDB → print the
 			// stopped notice.
-			yield* Effect.scoped(
+			return yield* Effect.scoped(
 				Effect.gen(function* () {
 					// Only announce "stopped" if we actually started. The finalizer is
 					// registered up front so it fires on the SIGINT/SIGTERM shutdown, but
@@ -424,7 +425,7 @@ export const start = Command.make("start", {
 						process.stdout.write(startBanner(addr, dataDir, dashboardUrl, a.offline)),
 					)
 
-					yield* Effect.never
+					return yield* Effect.never
 				}),
 			)
 		}),
@@ -566,8 +567,13 @@ export const restore = Command.make("restore", {
 				return
 			}
 
-			const checkpointId = Option.getOrUndefined(a.checkpointId)
-			const result = yield* restoreCheckpoint(dataDir, checkpointId ?? "current").pipe(
+			const rawCheckpointId = Option.getOrUndefined(a.checkpointId)
+			const checkpointId = yield* Effect.try({
+				try: () => (rawCheckpointId === undefined ? "current" : parseCheckpointId(rawCheckpointId)),
+				catch: (error) =>
+					new ServerError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			const result = yield* restoreCheckpoint(dataDir, checkpointId).pipe(
 				Effect.mapError((e) => new ServerError({ message: e.message })),
 			)
 			yield* Effect.sync(() =>

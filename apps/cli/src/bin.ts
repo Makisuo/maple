@@ -27,11 +27,11 @@ const MainLayer = WarehouseExecutorFromMode.pipe(
 // (network is hit at most once per 24h), so the latency cost is negligible.
 //
 // `cli.argv` records the sub-command + flags so one root span per invocation
-// ties a command to the warehouse queries it runs. TelemetryLayer is provided
-// OUTERMOST (after MainLayer), not merged into it: the OTLP tracer's batch
-// exporter flushes when its layer scope closes, and only the outermost provide's
-// scope is the runtime's main scope that `BunRuntime.runMain` closes on exit.
-// Merging it into MainLayer leaves spans unflushed for short-lived commands.
+// ties a command to the warehouse queries it runs. A single merged layer keeps
+// both layer lifecycles in the runtime's main scope, so telemetry flushes when
+// `BunRuntime.runMain` closes that scope for short-lived commands.
+const RuntimeLayer = Layer.merge(MainLayer, TelemetryLayer)
+
 const checkpointProbeDataDir = process.env[CHECKPOINT_REOPEN_PROBE_ENV]
 
 if (checkpointProbeDataDir !== undefined) {
@@ -51,8 +51,7 @@ if (checkpointProbeDataDir !== undefined) {
 	maybeNotifyUpdate.pipe(
 		Effect.flatMap(() => Command.run(cli, { version: MAPLE_VERSION })),
 		Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
-		Effect.provide(MainLayer),
-		Effect.provide(TelemetryLayer),
+		Effect.provide(RuntimeLayer),
 		BunRuntime.runMain,
 	)
 }

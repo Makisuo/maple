@@ -247,7 +247,7 @@ const failIfError = (response: Response): Effect.Effect<Response, IngestRejected
 			const body = (yield* Effect.promise(() => response.clone().text())).trim()
 			const message = body.length > 0 ? body : `HTTP ${response.status}`
 			yield* Effect.annotateCurrentSpan({ "error.type": `HTTP ${response.status}` })
-			return yield* Effect.fail(new IngestRejected({ response, status: response.status, message }))
+			return yield* new IngestRejected({ response, status: response.status, message })
 		}
 		return response
 	})
@@ -358,7 +358,7 @@ export const startServer = (
 					fetch: makeFetch(db, options, runSpan),
 				}),
 			),
-			(s) => Effect.sync(() => s.stop(true)),
+			(s) => Effect.promise(() => s.stop(true)),
 		)
 		return { port: server.port ?? options.port }
 	})
