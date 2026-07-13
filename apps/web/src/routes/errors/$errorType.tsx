@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { toast } from "sonner"
@@ -7,6 +7,7 @@ import { formatDistanceToNow, format } from "date-fns"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { ErrorState } from "@/components/common/error-state"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
@@ -97,40 +98,40 @@ function ErrorDetailContent() {
 
 	const bucketSeconds = computeBucketSeconds(effectiveStartTime, effectiveEndTime)
 
-	const errorResult = useRefreshableAtomValue(
-		getErrorsByTypeResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				services: search.services,
-				fingerprintHashes: [fingerprintHash],
-			},
-		}),
-	)
+	const errorAtom = getErrorsByTypeResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			services: search.services,
+			fingerprintHashes: [fingerprintHash],
+		},
+	})
+	const errorResult = useRefreshableAtomValue(errorAtom)
+	const refreshError = useAtomRefresh(errorAtom)
 
-	const tracesResult = useRefreshableAtomValue(
-		getErrorDetailTracesResultAtom({
-			data: {
-				fingerprintHash,
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				services: search.services,
-				limit: 20,
-			},
-		}),
-	)
+	const tracesAtom = getErrorDetailTracesResultAtom({
+		data: {
+			fingerprintHash,
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			services: search.services,
+			limit: 20,
+		},
+	})
+	const tracesResult = useRefreshableAtomValue(tracesAtom)
+	const refreshTraces = useAtomRefresh(tracesAtom)
 
-	const timeseriesResult = useRefreshableAtomValue(
-		getErrorsTimeseriesResultAtom({
-			data: {
-				fingerprintHash,
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				services: search.services,
-				bucketSeconds,
-			},
-		}),
-	)
+	const timeseriesAtom = getErrorsTimeseriesResultAtom({
+		data: {
+			fingerprintHash,
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			services: search.services,
+			bucketSeconds,
+		},
+	})
+	const timeseriesResult = useRefreshableAtomValue(timeseriesAtom)
+	const refreshTimeseries = useAtomRefresh(timeseriesAtom)
 
 	const statsSection = Result.builder(errorResult)
 		.onInitial(() => (
@@ -144,7 +145,14 @@ function ErrorDetailContent() {
 				))}
 			</div>
 		))
-		.onError(() => null)
+		.onError((error) => (
+			<ErrorState
+				variant="inline"
+				error={error}
+				title="Failed to load error details"
+				onRetry={refreshError}
+			/>
+		))
 		.onSuccess((data: { data: ErrorByType[] }) => {
 			const error = data.data[0]
 			if (!error) return null
@@ -177,6 +185,8 @@ function ErrorDetailContent() {
 				<Skeleton className="h-20 w-full" />
 			</div>
 		))
+		// Same query as the stats section — its failure already renders there,
+		// so don't repeat the error for this section.
 		.onError(() => null)
 		.onSuccess((data: { data: ErrorByType[] }) => {
 			const error = data.data[0]
@@ -235,7 +245,12 @@ function ErrorDetailContent() {
 				<Skeleton className="h-[160px] w-full" />
 			</div>
 		))
-		.onError(() => null)
+		.onError((error) => (
+			<div className="space-y-2">
+				<h3 className="text-sm font-semibold">Error Frequency</h3>
+				<ErrorState variant="inline" error={error} onRetry={refreshTimeseries} />
+			</div>
+		))
 		.onSuccess((data: { data: ErrorsTimeseriesItem[] }) => {
 			const chartData = data.data.map((item) => ({
 				bucket: toIsoBucket(item.bucket),
@@ -320,9 +335,10 @@ function ErrorDetailContent() {
 				</div>
 			</div>
 		))
-		.onError(() => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-4">
-				<p className="text-sm text-destructive">Failed to load sample traces</p>
+		.onError((error) => (
+			<div className="space-y-2">
+				<h3 className="text-sm font-semibold">Sample Traces</h3>
+				<ErrorState variant="inline" error={error} onRetry={refreshTraces} />
 			</div>
 		))
 		.onSuccess((data: { data: ErrorDetailTrace[] }) => {

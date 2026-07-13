@@ -47,9 +47,9 @@ export function AlertChatSheet({ open, onOpenChange, alertContext }: AlertChatSh
 				<SheetPopup
 					side="right"
 					className="w-[calc(100%-(--spacing(12)))] sm:max-w-2xl"
-					closeProps={{ className: "absolute end-12 top-4 z-10" }}
+					closeProps={{ className: "absolute end-3 top-5 z-10" }}
 				>
-					<SheetHeader className="flex flex-row items-start justify-between gap-3 border-b pb-4">
+					<SheetHeader className="flex flex-row items-start justify-between gap-3 border-b pe-14 pb-4">
 						<div className="min-w-0 space-y-1">
 							<SheetTitle className="truncate text-base">{alertContext.ruleName}</SheetTitle>
 							<SheetDescription>

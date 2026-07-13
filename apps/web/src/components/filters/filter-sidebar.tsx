@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import { Separator } from "@maple/ui/components/ui/separator"
+import { ErrorState } from "@/components/common/error-state"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ScrollArea } from "@maple/ui/components/ui/scroll-area"
 import { cn } from "@maple/ui/utils"
@@ -88,16 +89,17 @@ export function FilterSidebarLoading({ sectionCount = 3 }: FilterSidebarLoadingP
 	)
 }
 
-interface FilterSidebarMessageProps {
-	message: string
+interface FilterSidebarErrorProps {
+	error: unknown
+	onRetry?: () => void
 }
 
-export function FilterSidebarError({ message }: FilterSidebarMessageProps) {
+export function FilterSidebarError({ error, onRetry }: FilterSidebarErrorProps) {
 	return (
 		<FilterSidebarFrame>
 			<FilterSidebarHeader />
 			<Separator className="my-2" />
-			<p className="text-sm text-muted-foreground py-4">{message}</p>
+			<ErrorState error={error} onRetry={onRetry} variant="inline" />
 		</FilterSidebarFrame>
 	)
 }

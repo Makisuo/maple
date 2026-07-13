@@ -217,6 +217,12 @@ export const createMapleApi = async ({ stage, domains }: CreateMapleApiOptions) 
 			...optionalPlain("CLOUDFLARE_OAUTH_TOKEN_URL"),
 			...optionalPlain("CLOUDFLARE_OAUTH_REVOKE_URL"),
 			...optionalPlain("MAPLE_CLOUDFLARE_API_BASE_URL"),
+			// PlanetScale integration (OAuth application — confidential client, no PKCE)
+			...optionalPlain("PLANETSCALE_OAUTH_CLIENT_ID"),
+			...optionalSecret("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+			...optionalPlain("PLANETSCALE_OAUTH_AUTHORIZE_URL"),
+			...optionalPlain("PLANETSCALE_OAUTH_TOKEN_URL"),
+			...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
 		},
 	})
 

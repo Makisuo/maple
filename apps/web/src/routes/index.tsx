@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
-import { Result, useAtomValue, useAtomSet } from "@/lib/effect-atom"
+import { Result, useAtomValue, useAtomSet, useAtomRefresh } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/atoms/dashboard-facets-hint-atoms"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { ErrorState } from "@/components/common/error-state"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
@@ -114,7 +115,9 @@ function DashboardPage() {
 		return { startTime: fmt(start), endTime: fmt(end) }
 	}, [])
 
-	const facetsResult = useRetainedRefreshableResultValue(getServicesFacetsResultAtom({ data: facetsRange }))
+	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })
+	const facetsResult = useRetainedRefreshableResultValue(facetsAtom)
+	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const defaultPreset = useMemo(() => {
 		// Before facets resolve, fall back to the persisted hint's preset so the
@@ -132,6 +135,7 @@ function DashboardPage() {
 			<DashboardContent
 				defaultPreset={defaultPreset}
 				facetsResult={facetsResult}
+				onRetryFacets={refreshFacets}
 				orgKey={orgKey}
 				hint={hint}
 			/>
@@ -142,11 +146,13 @@ function DashboardPage() {
 function DashboardContent({
 	defaultPreset,
 	facetsResult,
+	onRetryFacets,
 	orgKey,
 	hint,
 }: {
 	defaultPreset: string
 	facetsResult: Result.Result<ServicesFacetsResponse, unknown>
+	onRetryFacets: () => void
 	orgKey: string
 	hint: DashboardFacetsHint
 }) {
@@ -221,37 +227,37 @@ function DashboardContent({
 	// (`waiting`) so there's no flash to a spinner.
 	const canFetch = facetsReady || hint.seen
 
-	const overviewResult = useRetainedRefreshableResultValue(
-		canFetch
-			? getOverviewTimeSeriesResultAtom({
-					data: {
-						startTime: effectiveStartTime,
-						endTime: effectiveEndTime,
+	const overviewAtom = canFetch
+		? getOverviewTimeSeriesResultAtom({
+				data: {
+					startTime: effectiveStartTime,
+					endTime: effectiveEndTime,
+					environments: environmentFilter,
+				},
+			})
+		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
+			disabledResultAtom<{ data: ServiceDetailTimeSeriesPoint[] }, any>()
+	const overviewResult = useRetainedRefreshableResultValue(overviewAtom)
+	const refreshOverview = useAtomRefresh(overviewAtom)
+
+	const logVolumeAtom = canFetch
+		? getCustomChartTimeSeriesResultAtom({
+				data: {
+					source: "logs",
+					metric: "count",
+					groupBy: "none",
+					startTime: effectiveStartTime,
+					endTime: effectiveEndTime,
+					filters: {
+						serviceName: undefined,
 						environments: environmentFilter,
 					},
-				})
-			: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-				disabledResultAtom<{ data: ServiceDetailTimeSeriesPoint[] }, any>(),
-	)
-
-	const logVolumeResult = useRetainedRefreshableResultValue(
-		canFetch
-			? getCustomChartTimeSeriesResultAtom({
-					data: {
-						source: "logs",
-						metric: "count",
-						groupBy: "none",
-						startTime: effectiveStartTime,
-						endTime: effectiveEndTime,
-						filters: {
-							serviceName: undefined,
-							environments: environmentFilter,
-						},
-					},
-				})
-			: // eslint-disable-next-line @typescript-eslint/no-explicit-any
-				disabledResultAtom<CustomChartTimeSeriesResponse, any>(),
-	)
+				},
+			})
+		: // eslint-disable-next-line @typescript-eslint/no-explicit-any
+			disabledResultAtom<CustomChartTimeSeriesResponse, any>()
+	const logVolumeResult = useRetainedRefreshableResultValue(logVolumeAtom)
+	const refreshLogVolume = useAtomRefresh(logVolumeAtom)
 
 	const isWaiting =
 		(Result.isSuccess(overviewResult) && overviewResult.waiting) ||
@@ -266,16 +272,16 @@ function DashboardContent({
 			.onSuccess((r) => r.data.some((p) => p.hasSampling))
 			.orElse(() => false)
 
-	const throughputRefinement = useAtomValue(
-		getOverviewThroughputRefinementResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				environments: environmentFilter,
-				samplingActive: overviewSamplingActive,
-			},
-		}),
-	)
+	const throughputRefinementAtom = getOverviewThroughputRefinementResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			environments: environmentFilter,
+			samplingActive: overviewSamplingActive,
+		},
+	})
+	const throughputRefinement = useAtomValue(throughputRefinementAtom)
+	const refreshThroughputRefinement = useAtomRefresh(throughputRefinementAtom)
 
 	const exactThroughputByBucket = useMemo(() => {
 		const map = new Map<string, number>()
@@ -316,6 +322,34 @@ function DashboardContent({
 	const isLogVolumeLoading = Result.isInitial(logVolumeResult)
 
 	const metrics = useMemo(() => {
+		const overviewError = Result.builder(overviewResult)
+			.onError((error) => ({ error, onRetry: refreshOverview }))
+			.orElse(() => undefined)
+		const logVolumeError = Result.builder(logVolumeResult)
+			.onError((error) => ({ error, onRetry: refreshLogVolume }))
+			.orElse(() => undefined)
+		// The exact pre-sampling throughput overlay is a refinement of the base
+		// chart, so its failure surfaces as a footer note instead of replacing
+		// the (still valid) sampled series.
+		const refinementErrorFooter = Result.builder(throughputRefinement)
+			.onError((error) => (
+				<ErrorState
+					variant="inline"
+					error={error}
+					title="Exact request volume unavailable"
+					onRetry={refreshThroughputRefinement}
+					className="py-0"
+				/>
+			))
+			.orElse(() => undefined)
+
+		const errorMap: Record<string, { error: unknown; onRetry?: () => void } | undefined> = {
+			throughput: overviewError,
+			"error-rate": overviewError,
+			latency: overviewError,
+			"log-volume": logVolumeError,
+		}
+
 		const loadingMap: Record<string, boolean> = {
 			throughput: isOverviewLoading,
 			"error-rate": isOverviewLoading,
@@ -352,21 +386,35 @@ function DashboardContent({
 			tooltip: chart.tooltip,
 			rateMode: chart.rateMode,
 			isLoading: loadingMap[chart.id] ?? false,
+			error: errorMap[chart.id],
 			headerValue:
-				chart.id === "error-rate" && !isOverviewLoading ? (
+				chart.id === "error-rate" && !isOverviewLoading && !errorMap[chart.id] ? (
 					<span className="text-chart-error">{formatErrorRate(avgErrorRate)}</span>
 				) : undefined,
 			footer:
-				chart.id === "throughput" && !isOverviewLoading ? (
-					<>
-						Total{" "}
-						<span className="font-medium text-foreground tabular-nums">
-							{totalVolume.toLocaleString()}
-						</span>
-					</>
+				chart.id === "throughput" && !isOverviewLoading && !errorMap[chart.id] ? (
+					(refinementErrorFooter ?? (
+						<>
+							Total{" "}
+							<span className="font-medium text-foreground tabular-nums">
+								{totalVolume.toLocaleString()}
+							</span>
+						</>
+					))
 				) : undefined,
 		}))
-	}, [overviewPoints, logPoints, isOverviewLoading, isLogVolumeLoading])
+	}, [
+		overviewPoints,
+		logPoints,
+		isOverviewLoading,
+		isLogVolumeLoading,
+		overviewResult,
+		logVolumeResult,
+		throughputRefinement,
+		refreshOverview,
+		refreshLogVolume,
+		refreshThroughputRefinement,
+	])
 
 	const environmentItems = useMemo(
 		() => [
@@ -415,6 +463,19 @@ function DashboardContent({
 					<SetupChecklist />
 				</>
 			)}
+			{/* Facets drive the environment dropdown and the default preset; when
+			    they fail the charts below still load (unfiltered), so surface the
+			    failure instead of silently offering an empty environment list. */}
+			{Result.builder(facetsResult)
+				.onError((error) => (
+					<ErrorState
+						variant="inline"
+						error={error}
+						title="Failed to load environments"
+						onRetry={onRetryFacets}
+					/>
+				))
+				.render()}
 			{/* Persist the facets-derived defaults once facets resolve, so the next
 			    cold load can fetch optimistically. Gated on `facetsReady` and keyed
 			    by the derived hint so it remounts (re-persists) only when the value

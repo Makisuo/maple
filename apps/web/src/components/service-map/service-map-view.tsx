@@ -15,7 +15,8 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
-import { Result, useAtom } from "@/lib/effect-atom"
+import { Result, useAtom, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { serviceMapLayoutAtomFamily } from "@/atoms/service-map-layout-atoms"
 import { Link } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
@@ -51,11 +52,14 @@ import {
 	CubeIcon,
 	ExternalLinkIcon,
 	NetworkNodesIcon,
+	PlanetScaleIcon,
 	XmarkIcon,
 } from "@/components/icons"
 import {
+	getPlanetScaleBranchStatsResultAtom,
 	getServiceDbQuerySummaryResultAtom,
 	getServiceMapCloudflareResultAtom,
+	getServiceMapPlanetScaleResultAtom,
 	getServiceMapDbEdgesResultAtom,
 	getServiceMapResultAtom,
 	getServiceOverviewResultAtom,
@@ -65,6 +69,7 @@ import {
 import type {
 	CloudflareService,
 	GetServiceMapInput,
+	PlanetScaleDatabaseStat,
 	ServiceDbEdge,
 	ServiceDbQuerySummaryResponse,
 	ServiceEdge,
@@ -84,7 +89,8 @@ import {
 	ServiceMapParticleCanvas,
 	type ParticleRegistry,
 } from "./service-map-particles"
-import { resolveDbNodePresentation } from "./service-map-db"
+import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation } from "./service-map-db"
+import { PlanetScaleTopQueries } from "@/components/infra/planetscale/planetscale-top-queries"
 import {
 	buildFlowElements,
 	CLOUDFLARE_COLOR,
@@ -99,6 +105,7 @@ import {
 	NS_PADDING_X,
 	NS_PADDING_Y,
 	type CloudflareNodeMetrics,
+	type PlanetScaleNodeMetrics,
 	type LayoutConfig,
 	type ServiceEdgeData,
 	type ServiceMapColorMode,
@@ -756,6 +763,8 @@ interface DatabaseDetailPanelProps {
 	dbSystem: string
 	/** "" = the generic/legacy node (edges with no identified database). */
 	dbNamespace: string
+	/** Set when this database matched the org's PlanetScale inventory. */
+	planetscale?: PlanetScaleNodeMetrics
 	dbEdges: ServiceDbEdge[]
 	services: string[]
 	durationSeconds: number
@@ -934,9 +943,205 @@ function DbQueryActivityChart({
 	)
 }
 
+/**
+ * PlanetScale overlay in the database detail panel: live health KPIs from the
+ * scraped branch metrics plus a per-branch breakdown joined with the polled
+ * inventory (production/ready flags).
+ */
+function PlanetScaleSection({
+	planetscale,
+	startTime,
+	endTime,
+}: {
+	planetscale: PlanetScaleNodeMetrics
+	startTime: string
+	endTime: string
+}) {
+	const branchStatsResult = useRefreshableAtomValue(
+		getPlanetScaleBranchStatsResultAtom({
+			data: { database: planetscale.database, startTime, endTime },
+		}),
+	)
+	const branchStats = Result.isSuccess(branchStatsResult) ? branchStatsResult.value.branches : []
+	const branchInfoByName = new Map(planetscale.branches.map((branch) => [branch.name, branch]))
+	// Branches with metrics first (production before dev), then metric-less
+	// inventory branches (excluded from scraping or asleep).
+	const statNames = new Set(branchStats.map((row) => row.branch))
+	const idleBranches = planetscale.branches.filter((branch) => !statNames.has(branch.name))
+	const stats = planetscale.stats
+
+	const formatLag = (seconds: number) =>
+		seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`
+
+	return (
+		<div className="space-y-3">
+			<div className="h-px bg-border" />
+			<div className="flex items-center gap-1.5">
+				<PlanetScaleIcon size={12} className="shrink-0 text-muted-foreground" />
+				<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+					PlanetScale
+				</h4>
+				<span className="ml-auto text-[10px] text-muted-foreground">
+					{planetscale.kind === "postgresql" ? "Postgres" : "MySQL"} ·{" "}
+					{planetscale.branchCount} branch{planetscale.branchCount === 1 ? "" : "es"}
+				</span>
+			</div>
+
+			{stats ? (
+				<div className="grid grid-cols-2 gap-x-6 gap-y-4">
+					<div className="space-y-0.5">
+						<span className="text-[10px] text-muted-foreground">Connections</span>
+						<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+							{formatRate(stats.connectionsAvg)}
+						</p>
+						<span className="text-[10px] text-muted-foreground">
+							peak {formatRate(stats.connectionsMax)}
+						</span>
+					</div>
+					<div className="space-y-0.5">
+						<span className="text-[10px] text-muted-foreground">CPU (max)</span>
+						<p
+							className={cn(
+								"text-xl font-semibold tabular-nums font-mono",
+								stats.cpuMaxPercent > 80
+									? "text-severity-error"
+									: stats.cpuMaxPercent > 60
+										? "text-severity-warn"
+										: "text-foreground",
+							)}
+						>
+							{stats.cpuMaxPercent.toFixed(0)}%
+						</p>
+					</div>
+					<div className="space-y-0.5">
+						<span className="text-[10px] text-muted-foreground">Memory (max)</span>
+						<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+							{stats.memMaxPercent.toFixed(0)}%
+						</p>
+					</div>
+					<div className="space-y-0.5">
+						<span className="text-[10px] text-muted-foreground">Replica Lag (max)</span>
+						<p
+							className={cn(
+								"text-xl font-semibold tabular-nums font-mono",
+								stats.replicaLagMaxSeconds > 10
+									? "text-severity-error"
+									: stats.replicaLagMaxSeconds > 1
+										? "text-severity-warn"
+										: "text-foreground",
+							)}
+						>
+							{formatLag(stats.replicaLagMaxSeconds)}
+						</p>
+					</div>
+				</div>
+			) : (
+				<p className="text-xs text-muted-foreground">
+					No PlanetScale metrics in this window yet — the scraper delivers them within a minute of
+					connecting.
+				</p>
+			)}
+
+			{Result.builder(branchStatsResult)
+				.onError((error) => {
+					const formatted = formatBackendError(error)
+					return (
+						<div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs">
+							<p className="font-medium text-destructive">{formatted.title}</p>
+							<p className="mt-1 text-muted-foreground">{formatted.description}</p>
+						</div>
+					)
+				})
+				.orElse(() => null)}
+
+			{!Result.isFailure(branchStatsResult) && (branchStats.length > 0 || idleBranches.length > 0) ? (
+				<div className="space-y-1.5">
+					{branchStats.map((row) => {
+						const info = branchInfoByName.get(row.branch)
+						return (
+							<div
+								key={row.branch}
+								className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-2.5 py-2 text-xs"
+							>
+								<div className="flex min-w-0 items-center gap-1.5">
+									<span className="truncate font-mono text-[11px] text-foreground">
+										{row.branch}
+									</span>
+									{info?.production ? (
+										<span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+											prod
+										</span>
+									) : null}
+								</div>
+								<div className="flex shrink-0 items-center gap-3 font-mono text-[10px] tabular-nums text-muted-foreground">
+									<span>{formatRate(row.connectionsAvg)} conns</span>
+									<span
+										className={cn(
+											row.cpuMaxPercent > 80
+												? "text-severity-error"
+												: row.cpuMaxPercent > 60
+													? "text-severity-warn"
+													: undefined,
+										)}
+									>
+										{row.cpuMaxPercent.toFixed(0)}% cpu
+									</span>
+									<span
+										className={cn(
+											row.replicaLagMaxSeconds > 10
+												? "text-severity-error"
+												: row.replicaLagMaxSeconds > 1
+													? "text-severity-warn"
+													: undefined,
+										)}
+									>
+										{formatLag(row.replicaLagMaxSeconds)} lag
+									</span>
+								</div>
+							</div>
+						)
+					})}
+					{idleBranches.map((branch) => (
+						<div
+							key={branch.name}
+							className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-card px-2.5 py-2 text-xs opacity-70"
+						>
+							<div className="flex min-w-0 items-center gap-1.5">
+								<span className="truncate font-mono text-[11px] text-muted-foreground">
+									{branch.name}
+								</span>
+								{branch.production ? (
+									<span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+										prod
+									</span>
+								) : null}
+							</div>
+							<span className="shrink-0 text-[10px] text-muted-foreground">
+								{branch.ready ? "no metrics" : "not ready"}
+							</span>
+						</div>
+					))}
+				</div>
+			) : null}
+
+			<div className="space-y-2">
+				<h5 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+					Top Queries (PlanetScale Insights)
+				</h5>
+				<PlanetScaleTopQueries
+					database={planetscale.database}
+					startTime={startTime}
+					endTime={endTime}
+				/>
+			</div>
+		</div>
+	)
+}
+
 function DatabaseDetailPanel({
 	dbSystem,
 	dbNamespace,
+	planetscale,
 	dbEdges,
 	services,
 	durationSeconds,
@@ -985,7 +1190,9 @@ function DatabaseDetailPanel({
 		Icon: DbIcon,
 		color: dbColor,
 		branded: dbBranded,
-	} = resolveDbNodePresentation(dbSystem, dbNamespace)
+	} = planetscale
+		? resolvePlanetScaleDbPresentation(dbSystem, dbNamespace, planetscale.kind)
+		: resolveDbNodePresentation(dbSystem, dbNamespace)
 
 	return (
 		<div className="flex flex-col h-full bg-background overflow-hidden">
@@ -1075,6 +1282,14 @@ function DatabaseDetailPanel({
 							</div>
 						</div>
 					</div>
+
+					{planetscale ? (
+						<PlanetScaleSection
+							planetscale={planetscale}
+							startTime={startTime}
+							endTime={endTime}
+						/>
+					) : null}
 
 					<div className="space-y-3">
 						<div className="h-px bg-border" />
@@ -1342,6 +1557,8 @@ export function ServiceMapCanvas({
 	dbEdges,
 	cloudflareServices,
 	faasNames,
+	planetscaleDatabases,
+	planetscaleStats,
 	platforms,
 	runtimes,
 	overviews,
@@ -1357,6 +1574,18 @@ export function ServiceMapCanvas({
 	dbEdges: ServiceDbEdge[]
 	cloudflareServices: CloudflareService[]
 	faasNames: Map<string, string>
+	/** PlanetScale inventory: lowercased database name → identity (empty when not connected). */
+	planetscaleDatabases: Map<
+		string,
+		{
+			name: string
+			kind: string
+			branchCount: number
+			branches: ReadonlyArray<{ name: string; production: boolean; ready: boolean }>
+		}
+	>
+	/** PlanetScale scraped-metric rollups, one per database. */
+	planetscaleStats: PlanetScaleDatabaseStat[]
 	platforms: Map<string, ServicePlatform>
 	runtimes: Map<string, string>
 	overviews: ServiceOverview[]
@@ -1396,6 +1625,8 @@ export function ServiceMapCanvas({
 			runtimes,
 			cloudflareServices,
 			faasNames,
+			planetscaleDatabases,
+			planetscaleStats,
 		})
 		// Service legend should only include real services, not synthetic db: nodes
 		const allServices = Array.from(
@@ -1407,6 +1638,8 @@ export function ServiceMapCanvas({
 		dbEdges,
 		cloudflareServices,
 		faasNames,
+		planetscaleDatabases,
+		planetscaleStats,
 		platforms,
 		runtimes,
 		overviews,
@@ -1419,6 +1652,15 @@ export function ServiceMapCanvas({
 		const m = new Map<string, CloudflareNodeMetrics>()
 		for (const n of rawNodes) {
 			if (n.data.cloudflare) m.set(n.id, n.data.cloudflare)
+		}
+		return m
+	}, [rawNodes])
+
+	// PlanetScale integration data overlaid onto matched DB nodes.
+	const planetscaleOverlayByNode = useMemo(() => {
+		const m = new Map<string, PlanetScaleNodeMetrics>()
+		for (const n of rawNodes) {
+			if (n.data.planetscale) m.set(n.id, n.data.planetscale)
 		}
 		return m
 	}, [rawNodes])
@@ -1896,6 +2138,7 @@ export function ServiceMapCanvas({
 						const panel = selectedServiceId.startsWith(DB_NODE_PREFIX) ? (
 							<DatabaseDetailPanel
 								{...parseDbNodeId(selectedServiceId)}
+								planetscale={planetscaleOverlayByNode.get(selectedServiceId)}
 								dbEdges={dbEdges}
 								services={services}
 								durationSeconds={durationSeconds}
@@ -1965,6 +2208,14 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMap
 	const overviewResult = useRefreshableAtomValue(getServiceOverviewResultAtom(overviewInput))
 	const dbEdgesResult = useRefreshableAtomValue(getServiceMapDbEdgesResultAtom(mapInput))
 	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(cloudflareInput))
+	// PlanetScale scraped metrics carry no deployment.environment either — share
+	// the env-less input so environment switches don't refetch.
+	const planetscaleStatsResult = useRefreshableAtomValue(getServiceMapPlanetScaleResultAtom(cloudflareInput))
+	const planetscaleInventoryResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
 	const platformsResult = useRefreshableAtomValue(getServicePlatformsResultAtom(mapInput))
 
 	// Node DATA that streams in after the canvas mounts and refines nodes in place
@@ -1973,6 +2224,35 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMap
 	const overviews = Result.isSuccess(overviewResult) ? overviewResult.value.data : []
 	const dbEdges = Result.isSuccess(dbEdgesResult) ? dbEdgesResult.value.edges : []
 	const cloudflareServices = Result.isSuccess(cloudflareResult) ? cloudflareResult.value.services : []
+	const planetscaleStats = Result.isSuccess(planetscaleStatsResult)
+		? planetscaleStatsResult.value.databases
+		: []
+	const planetscaleDatabases = useMemo(() => {
+		const map = new Map<
+			string,
+			{
+				name: string
+				kind: string
+				branchCount: number
+				branches: ReadonlyArray<{ name: string; production: boolean; ready: boolean }>
+			}
+		>()
+		if (Result.isSuccess(planetscaleInventoryResult)) {
+			for (const db of planetscaleInventoryResult.value.databases) {
+				map.set(db.name.toLowerCase(), {
+					name: db.name,
+					kind: db.kind,
+					branchCount: db.branches.length,
+					branches: db.branches.map((branch) => ({
+						name: branch.name,
+						production: branch.production,
+						ready: branch.ready,
+					})),
+				})
+			}
+		}
+		return map
+	}, [planetscaleInventoryResult])
 	const platforms = useMemo(() => {
 		const map = new Map<string, ServicePlatform>()
 		if (Result.isSuccess(platformsResult)) {
@@ -2055,6 +2335,8 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMap
 					dbEdges={dbEdges}
 					cloudflareServices={cloudflareServices}
 					faasNames={faasNames}
+					planetscaleDatabases={planetscaleDatabases}
+					planetscaleStats={planetscaleStats}
 					platforms={platforms}
 					runtimes={runtimes}
 					overviews={overviews}

@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
+import { toast } from "sonner"
 
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -10,13 +11,21 @@ import {
 	PopoverTrigger,
 } from "@maple/ui/components/ui/popover"
 import { Separator } from "@maple/ui/components/ui/separator"
-import { ArrowRightIcon, ConnectionIcon } from "@/components/icons"
+import {
+	ArrowRightIcon,
+	ChatBubbleSparkleIcon,
+	CheckIcon,
+	ConnectionIcon,
+	CopyIcon,
+} from "@/components/icons"
 import { CopyableField } from "@/components/ingest/copyable-field"
 import { ConnectCredentials } from "@/components/ingest/connect-credentials"
 import { ConnectionStatusPill } from "@/components/ingest/connection-status"
 import { useIngestConnection } from "@/components/ingest/use-ingest-connection"
+import { mcpUrl } from "@/lib/services/common/mcp-url"
 
 const ONBOARD_SKILL_COMMAND = "bunx skills add Makisuo/maple/skills/maple-onboard"
+const MCP_ENDPOINT = `${mcpUrl}/mcp`
 
 export function ConnectButton() {
 	const [open, setOpen] = useState(false)
@@ -68,6 +77,8 @@ function ConnectPanel() {
 				</p>
 			</div>
 
+			<McpCard />
+
 			<div className="flex items-center justify-between text-xs">
 				<Link
 					to="/settings"
@@ -85,6 +96,64 @@ function ConnectPanel() {
 				>
 					Documentation
 				</a>
+			</div>
+		</div>
+	)
+}
+
+function McpCard() {
+	const [copied, setCopied] = useState(false)
+
+	async function handleCopy() {
+		try {
+			await navigator.clipboard.writeText(MCP_ENDPOINT)
+			setCopied(true)
+			toast.success("MCP endpoint copied")
+			setTimeout(() => setCopied(false), 1500)
+		} catch {
+			toast.error("Failed to copy MCP endpoint")
+		}
+	}
+
+	return (
+		<div className="group overflow-hidden rounded-lg border bg-muted/30 transition-colors hover:border-foreground/20">
+			<Link
+				to="/settings"
+				search={{ tab: "mcp" }}
+				className="flex items-center gap-3 p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+			>
+				<span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-foreground">
+					<ChatBubbleSparkleIcon size={15} />
+				</span>
+				<span className="min-w-0 flex-1 space-y-0.5">
+					<span className="flex items-center text-xs font-medium text-foreground">
+						Connect your own Agent
+					</span>
+					<span className="block text-xs text-muted-foreground">
+						Claude Code, Cursor, or any MCP client can query your telemetry.
+					</span>
+				</span>
+				<ArrowRightIcon
+					size={14}
+					className="shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+				/>
+			</Link>
+			<div className="flex items-center gap-2 border-t bg-background/60 py-1.5 pl-3 pr-1.5">
+				<span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+					MCP
+				</span>
+				<code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+					{MCP_ENDPOINT}
+				</code>
+				<Button
+					variant="ghost"
+					size="icon"
+					className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
+					onClick={handleCopy}
+					aria-label="Copy MCP endpoint"
+				>
+					{copied ? <CheckIcon size={13} className="text-severity-info" /> : <CopyIcon size={13} />}
+				</Button>
 			</div>
 		</div>
 	)

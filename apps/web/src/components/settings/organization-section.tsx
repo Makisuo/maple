@@ -1,5 +1,5 @@
 import { useAtomSet } from "@/lib/effect-atom"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type DragEvent } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { useAuth, useOrganization, useOrganizationList } from "@clerk/clerk-react"
 import { Exit } from "effect"
@@ -22,8 +22,12 @@ import {
 } from "@maple/ui/components/ui/alert-dialog"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
-import { AlertWarningIcon, UserIcon } from "@/components/icons"
+import { AlertWarningIcon, UploadIcon, UserIcon } from "@/components/icons"
+import { OrgAvatar } from "@/components/dashboard/org-switcher-menu"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+
+const MAX_LOGO_BYTES = 10 * 1024 * 1024 // 10 MB
+const ACCEPTED_LOGO_TYPES = "image/png,image/jpeg,image/webp,image/gif"
 
 export function OrganizationSection() {
 	const { orgRole } = useAuth()
@@ -37,6 +41,9 @@ export function OrganizationSection() {
 
 	const [name, setName] = useState("")
 	const [isSavingName, setIsSavingName] = useState(false)
+	const [isSavingLogo, setIsSavingLogo] = useState(false)
+	const [isDragging, setIsDragging] = useState(false)
+	const fileInputRef = useRef<HTMLInputElement>(null)
 	const [deleteOpen, setDeleteOpen] = useState(false)
 	const [confirmText, setConfirmText] = useState("")
 	const [isDeleting, setIsDeleting] = useState(false)
@@ -99,6 +106,55 @@ export function OrganizationSection() {
 		}
 	}
 
+	async function handleLogoSelect(file: File | undefined | null) {
+		if (!organization || !isAdmin || isSavingLogo || !file) return
+		if (!file.type.startsWith("image/")) {
+			toast.error("Please choose an image file")
+			return
+		}
+		if (file.size > MAX_LOGO_BYTES) {
+			toast.error("Image must be 10 MB or smaller")
+			return
+		}
+		setIsSavingLogo(true)
+		try {
+			await organization.setLogo({ file })
+			toast.success("Organization logo updated")
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Failed to update logo"
+			toast.error(message)
+		} finally {
+			setIsSavingLogo(false)
+			if (fileInputRef.current) fileInputRef.current.value = ""
+		}
+	}
+
+	async function handleRemoveLogo() {
+		if (!organization || !isAdmin || isSavingLogo) return
+		setIsSavingLogo(true)
+		try {
+			await organization.setLogo({ file: null })
+			toast.success("Organization logo removed")
+		} catch (err) {
+			const message = err instanceof Error ? err.message : "Failed to remove logo"
+			toast.error(message)
+		} finally {
+			setIsSavingLogo(false)
+		}
+	}
+
+	function openFilePicker() {
+		if (!isAdmin || isSavingLogo) return
+		fileInputRef.current?.click()
+	}
+
+	function handleDrop(e: DragEvent<HTMLDivElement>) {
+		e.preventDefault()
+		setIsDragging(false)
+		if (!isAdmin || isSavingLogo) return
+		void handleLogoSelect(e.dataTransfer.files?.[0])
+	}
+
 	async function handleDelete() {
 		if (!organization || !confirmMatches) return
 		setIsDeleting(true)
@@ -136,12 +192,86 @@ export function OrganizationSection() {
 					<CardTitle>General</CardTitle>
 					<CardDescription>
 						{isAdmin
-							? "Update the name of your organization. The change is visible to all members."
+							? "Update your organization's logo and name. Changes are visible to all members."
 							: "Only org admins can change these settings."}
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="space-y-3 max-w-md">
+					<div className="space-y-4 max-w-md">
+						<div className="space-y-1.5">
+							<Label>Logo</Label>
+							<div className="flex items-center gap-4">
+								<div
+									role="button"
+									tabIndex={isAdmin && !isSavingLogo ? 0 : -1}
+									aria-label="Change organization logo"
+									aria-disabled={!isAdmin || isSavingLogo}
+									onClick={openFilePicker}
+									onKeyDown={(e) => {
+										if (e.key === "Enter" || e.key === " ") {
+											e.preventDefault()
+											openFilePicker()
+										}
+									}}
+									onDragOver={(e) => {
+										e.preventDefault()
+										if (isAdmin && !isSavingLogo) setIsDragging(true)
+									}}
+									onDragLeave={() => setIsDragging(false)}
+									onDrop={handleDrop}
+									className={`relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed p-1 outline-none transition-colors ${
+										isAdmin && !isSavingLogo
+											? "cursor-pointer hover:border-primary focus-visible:ring-2 focus-visible:ring-ring"
+											: "cursor-not-allowed opacity-60"
+									} ${isDragging ? "border-primary ring-2 ring-primary" : "border-border"}`}
+								>
+									<OrgAvatar
+										name={organization.name}
+										imageUrl={organization.imageUrl}
+										className="size-full"
+										fit="contain"
+									/>
+									{isDragging && (
+										<div className="absolute inset-0 flex items-center justify-center rounded-md bg-primary/10 text-center text-[10px] font-medium text-primary">
+											Drop image
+										</div>
+									)}
+								</div>
+								<div className="space-y-1.5">
+									<div className="flex items-center gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={openFilePicker}
+											disabled={!isAdmin || isSavingLogo}
+										>
+											<UploadIcon size={14} className="mr-1.5" />
+											{isSavingLogo ? "Uploading..." : "Change logo"}
+										</Button>
+										{organization.hasImage && (
+											<Button
+												variant="ghost"
+												size="sm"
+												onClick={handleRemoveLogo}
+												disabled={!isAdmin || isSavingLogo}
+											>
+												Remove
+											</Button>
+										)}
+									</div>
+									<p className="text-xs text-muted-foreground">
+										Drop an image or click to upload. PNG, JPG, WEBP or GIF, up to 10 MB.
+									</p>
+								</div>
+							</div>
+							<input
+								ref={fileInputRef}
+								type="file"
+								accept={ACCEPTED_LOGO_TYPES}
+								className="hidden"
+								onChange={(e) => void handleLogoSelect(e.target.files?.[0])}
+							/>
+						</div>
 						<div className="space-y-1.5">
 							<Label htmlFor="org-name">Name</Label>
 							<Input

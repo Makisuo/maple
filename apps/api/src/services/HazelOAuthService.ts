@@ -78,7 +78,7 @@ const decodeDiscoveryDocument = Schema.decodeUnknownEffect(DiscoveryDocumentSche
 
 interface ResolvedHazelOAuthEnv {
 	readonly clientId: string
-	readonly clientSecret: string
+	readonly clientSecret: Redacted.Redacted<string>
 	readonly discoveryUrl: string
 	readonly scopes: string
 	readonly apiBaseUrl: string
@@ -112,7 +112,7 @@ const resolveEnv = Effect.fn("HazelOAuthService.resolveEnv")(
 
 		return {
 			clientId,
-			clientSecret: Redacted.value(clientSecretRedacted),
+			clientSecret: clientSecretRedacted,
 			discoveryUrl: env.HAZEL_OAUTH_DISCOVERY_URL,
 			scopes: env.HAZEL_OAUTH_SCOPES,
 			apiBaseUrl: env.HAZEL_API_BASE_URL.replace(/\/$/, ""),

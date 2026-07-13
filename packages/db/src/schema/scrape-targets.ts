@@ -13,6 +13,13 @@ export const scrapeTargets = pgTable(
 		scrapeIntervalSeconds: integer("scrape_interval_seconds").notNull().default(15),
 		labelsJson: jsonb("labels_json").$type<Record<string, string>>(),
 		authType: text("auth_type").notNull().default("none"),
+		/**
+		 * Integration ownership marker: null for user-created targets;
+		 * `"planetscale:{connectionId}"` when auto-provisioned (and torn down) by
+		 * the PlanetScale integration. Managed rows are hidden from the generic
+		 * scrape-target UI and edited through the integration card instead.
+		 */
+		managedBy: text("managed_by"),
 		authCredentialsCiphertext: text("auth_credentials_ciphertext"),
 		authCredentialsIv: text("auth_credentials_iv"),
 		authCredentialsTag: text("auth_credentials_tag"),

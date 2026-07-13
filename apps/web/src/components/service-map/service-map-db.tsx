@@ -10,6 +10,7 @@ import {
 	MongodbIcon,
 	MysqlIcon,
 	PaperPlaneIcon,
+	PlanetScaleIcon,
 	PostgresIcon,
 	RedisIcon,
 } from "@/components/icons"
@@ -188,6 +189,33 @@ export function resolveDbNodePresentation(
  */
 export function getDbNodeColor(system: string | undefined, namespace: string): string {
 	return resolveDbNodePresentation(system, namespace).color
+}
+
+/** PlanetScale's mark is monochrome — a neutral tone that reads in both themes. */
+export const PLANETSCALE_COLOR = "oklch(0.62 0.02 270)"
+
+/**
+ * Branded presentation for a DB node whose namespace matched the org's
+ * PlanetScale inventory: the PlanetScale mark takes the icon slot, "PlanetScale"
+ * takes the badge, and the underlying system keeps the long-form label
+ * ("MySQL on PlanetScale"). `kind` is the inventory's product kind and wins
+ * over `dbSystem` when the trace attributes were ambiguous.
+ */
+export function resolvePlanetScaleDbPresentation(
+	dbSystem: string | undefined,
+	dbNamespace: string | undefined,
+	kind: string | undefined,
+): DbNodePresentation {
+	const sys = getDbDescriptor(dbSystem || (kind === "postgresql" ? "postgresql" : "mysql"))
+	return {
+		title: dbNamespace || sys.label,
+		badge: "PlanetScale",
+		Icon: PlanetScaleIcon,
+		color: PLANETSCALE_COLOR,
+		branded: false,
+		category: "database",
+		systemLabel: `${sys.label} on PlanetScale`,
+	}
 }
 
 /** Append an alpha channel to an `oklch(L C H)` color string. */
