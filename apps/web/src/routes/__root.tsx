@@ -21,6 +21,7 @@ import { highlightCode } from "@/lib/sugar-high"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
 import { captureChatReferrer } from "@/components/chat/auto-contexts"
+import { GlobalChatSheet } from "@/components/chat/global-chat-sheet"
 import { GlobalShortcuts } from "@/components/command-palette/global-shortcuts"
 import { UnitflowDevtools } from "@/components/devtools/unitflow-devtools"
 
@@ -70,7 +71,12 @@ function AppFrame() {
 		>
 			<Outlet />
 			<Toaster />
-			{!PUBLIC_PATHS.has(pathname) && <GlobalShortcuts />}
+			{!PUBLIC_PATHS.has(pathname) && (
+				<>
+					<GlobalShortcuts />
+					<GlobalChatSheet />
+				</>
+			)}
 			{import.meta.env.DEV && <UnitflowDevtools />}
 		</AttributesProvider>
 	)
