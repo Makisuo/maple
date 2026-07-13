@@ -20,6 +20,7 @@ import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/cachin
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"
 import { HazelOAuthService } from "./HazelOAuthService"
+import { EmailService } from "../lib/EmailService"
 import { QueryEngineService } from "./QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 
@@ -104,10 +105,21 @@ const defaultTestRuntime: AlertRuntimeShape = {
 // manual clock's default start time.
 const DEFAULT_CLOCK_EPOCH_MS = 1_700_000_000_000
 
+const stubEmailService = (
+	sent?: Array<{ to: string; subject: string; html: string }>,
+): (typeof EmailService)["Service"] => ({
+	isConfigured: true,
+	send: (to, subject, html) =>
+		Effect.sync(() => {
+			sent?.push({ to, subject, html })
+		}),
+})
+
 const makeLayer = (
 	testDb: TestDb,
 	warehouseStub: WarehouseQueryServiceShape,
 	runtimeOverrides?: Partial<AlertRuntimeShape>,
+	emailStub?: (typeof EmailService)["Service"],
 ) => {
 	const configLive = makeConfig()
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
@@ -127,6 +139,7 @@ const makeLayer = (
 	)
 	const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })
 	const hazelOAuthLive = HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, databaseLive)))
+	const emailLive = Layer.succeed(EmailService, emailStub ?? stubEmailService())
 
 	return AlertsService.layer.pipe(
 		Layer.provide(
@@ -137,6 +150,7 @@ const makeLayer = (
 				warehouseLive,
 				runtimeLive,
 				hazelOAuthLive,
+				emailLive,
 			),
 		),
 	)
@@ -315,14 +329,15 @@ describe("AlertsService", () => {
 			assert.strictEqual(requests[0]?.url, "https://example.com/maple-alerts")
 			assert.isNotEmpty(requests[0]?.headers.get("x-maple-signature") ?? "")
 			assert.strictEqual(requests[0]?.headers.get("x-maple-event-type"), "trigger")
-			assert.strictEqual(requests[0]?.headers.get("x-maple-delivery-key"), events.events[0]?.deliveryKey)
+			assert.strictEqual(
+				requests[0]?.headers.get("x-maple-delivery-key"),
+				events.events[0]?.deliveryKey,
+			)
 			assert.notStrictEqual(
 				requests[0]?.headers.get("x-maple-delivery-key"),
 				incidentsAfterSecondTick.incidents[0]?.dedupeKey,
 			)
-		}).pipe(
-			Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: fetchImpl })),
-		)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: fetchImpl })))
 	})
 
 	it.effect("snapshots a custom notification template into the delivered payload", () => {
@@ -386,7 +401,10 @@ describe("AlertsService", () => {
 			// The custom template is re-read from the rule and surfaces through
 			// get_alert_rule / listRules.
 			const rules = yield* alerts.listRules(orgId)
-			assert.strictEqual(rules.rules[0]?.notificationTemplate?.title, "{{ severity }} on {{ rule.name }}")
+			assert.strictEqual(
+				rules.rules[0]?.notificationTemplate?.title,
+				"{{ severity }} on {{ rule.name }}",
+			)
 
 			// The webhook body is the snapshotted delivery payload — it carries the
 			// template so retries and downstream consumers render the same message.
@@ -396,9 +414,7 @@ describe("AlertsService", () => {
 			}
 			assert.strictEqual(payload.template?.title, "{{ severity }} on {{ rule.name }}")
 			assert.strictEqual(payload.template?.body, "*Observed:* {{ observed.summary }}")
-		}).pipe(
-			Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: fetchImpl })),
-		)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: fetchImpl })))
 	})
 
 	it.effect("skips no-data error-rate rules instead of opening incidents", () => {
@@ -573,10 +589,10 @@ describe("AlertsService", () => {
 
 			assert.lengthOf(incidents.incidents, 1)
 			assert.strictEqual(incidents.incidents[0]?.status, "resolved")
-			assert.deepStrictEqual(events.events.map((event: { eventType: string }) => event.eventType), [
-				"resolve",
-				"trigger",
-			])
+			assert.deepStrictEqual(
+				events.events.map((event: { eventType: string }) => event.eventType),
+				["resolve", "trigger"],
+			)
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
@@ -794,7 +810,10 @@ describe("AlertsService", () => {
 			const rule = yield* createErrorRateRule(alerts, orgId, userId, destination.id)
 
 			yield* Effect.promise(() =>
-				executeSql(testDb, "update alert_rules set query_spec_json = $1::jsonb where id = $2", ["{}", rule.id]),
+				executeSql(testDb, "update alert_rules set query_spec_json = $1::jsonb where id = $2", [
+					"{}",
+					rule.id,
+				]),
 			)
 
 			yield* Effect.promise(() =>
@@ -1540,6 +1559,118 @@ describe("AlertsService", () => {
 		)
 	})
 
+	it.effect("creates an email destination and delivers a test email to every recipient", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<{ to: string; subject: string; html: string }> = []
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_email_dest")
+			const userId = asUserId("user_email_dest")
+			const destination = yield* alerts.createDestination(orgId, userId, adminRoles, {
+				type: "email",
+				name: "On-call inbox",
+				enabled: true,
+				// duplicate (case-insensitively) collapses; whitespace trims
+				addresses: [" ops@acme.test ", "oncall@acme.test", "OPS@acme.test"],
+			})
+			assert.strictEqual(destination.type, "email")
+			assert.strictEqual(destination.summary, "ops@acme.test +1 more")
+			assert.strictEqual(destination.channelLabel, "ops@acme.test")
+
+			const response = yield* alerts.testDestination(orgId, userId, adminRoles, destination.id)
+			assert.isTrue(response.success)
+			assert.deepStrictEqual(
+				sent.map((s) => s.to),
+				["ops@acme.test", "oncall@acme.test"],
+			)
+			// The synthetic test notification renders under the rule name "Test alert".
+			assert.include(sent[0]?.subject ?? "", "Test alert")
+			assert.include(sent[0]?.html ?? "", "Test alert")
+			assert.include(sent[0]?.html ?? "", "Open in Maple")
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					testDb,
+					makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
+					undefined,
+					stubEmailService(sent),
+				),
+			),
+		)
+	})
+
+	it.effect("rejects email destinations with invalid addresses", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const exit = yield* Effect.gen(function* () {
+				const alerts = yield* AlertsService
+				return yield* alerts.createDestination(
+					asOrgId("org_email_invalid"),
+					asUserId("user_email_invalid"),
+					adminRoles,
+					{ type: "email", name: "Bad", enabled: true, addresses: ["not-an-email"] },
+				)
+			})
+				.pipe(
+					Effect.provide(
+						makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
+					),
+				)
+				.pipe(Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			const failure = getError(exit)
+			assert.instanceOf(failure, AlertValidationError)
+		})
+	})
+
+	it.effect("replaces email recipients on update and keeps them when omitted", () => {
+		const testDb = createTestDb(trackedDbs)
+		const sent: Array<{ to: string; subject: string; html: string }> = []
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_email_update")
+			const userId = asUserId("user_email_update")
+			const created = yield* alerts.createDestination(orgId, userId, adminRoles, {
+				type: "email",
+				name: "On-call inbox",
+				enabled: true,
+				addresses: ["ops@acme.test"],
+			})
+
+			// Omitted addresses → recipients unchanged.
+			const renamed = yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
+				type: "email",
+				name: "Renamed inbox",
+			})
+			assert.strictEqual(renamed.name, "Renamed inbox")
+			assert.strictEqual(renamed.summary, "ops@acme.test")
+
+			// Supplied addresses → replaced wholesale.
+			const replaced = yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
+				type: "email",
+				addresses: ["team@acme.test", "lead@acme.test"],
+			})
+			assert.strictEqual(replaced.summary, "team@acme.test +1 more")
+			assert.strictEqual(replaced.channelLabel, "team@acme.test")
+
+			yield* alerts.testDestination(orgId, userId, adminRoles, created.id)
+			assert.deepStrictEqual(
+				sent.map((s) => s.to),
+				["team@acme.test", "lead@acme.test"],
+			)
+		}).pipe(
+			Effect.provide(
+				makeLayer(
+					testDb,
+					makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }),
+					undefined,
+					stubEmailService(sent),
+				),
+			),
+		)
+	})
+
 	it.effect("opens per-service incidents for grouped logs query alerts", () => {
 		const testDb = createTestDb(trackedDbs)
 
@@ -1874,7 +2005,13 @@ describe("AlertsService", () => {
 							aggregation: "count",
 							whereClause: 'severity = "error"',
 							groupBy: ["service.name"],
-							addOns: { groupBy: true, having: false, orderBy: false, limit: false, legend: false },
+							addOns: {
+								groupBy: true,
+								having: false,
+								orderBy: false,
+								limit: false,
+								legend: false,
+							},
 						},
 						comparator: "gt",
 						threshold: 10,
@@ -1930,7 +2067,9 @@ describe("AlertsService", () => {
 			assert.isTrue(Exit.isFailure(exit))
 			assert.instanceOf(failure, AlertDestinationInUseError)
 			assert.isString((failure as { destinationId: unknown }).destinationId)
-			assert.deepStrictEqual((failure as { ruleNames: ReadonlyArray<string> }).ruleNames, ["Checkout error rate"])
+			assert.deepStrictEqual((failure as { ruleNames: ReadonlyArray<string> }).ruleNames, [
+				"Checkout error rate",
+			])
 		})
 	})
 
@@ -2248,7 +2387,9 @@ describe("AlertsService evaluation error persistence", () => {
 			compiledQuery: (_tenant, compiled) =>
 				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
 			compiledQueryFirst: (_tenant, compiled) =>
-				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie))),
+				sqlQueryStub().pipe(
+					Effect.flatMap((rows) => compiled.decodeFirstRow(rows).pipe(Effect.orDie)),
+				),
 			ingest: (_tenant, _datasource, rows) =>
 				Effect.sync(() => {
 					state.ingested.push(...(rows as Array<Record<string, unknown>>))

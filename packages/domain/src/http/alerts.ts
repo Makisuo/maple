@@ -24,6 +24,7 @@ export const AlertDestinationType = Schema.Literals([
 	"hazel",
 	"hazel-oauth",
 	"discord",
+	"email",
 ]).annotate({
 	identifier: "@maple/AlertDestinationType",
 	title: "Alert Destination Type",
@@ -216,6 +217,31 @@ export class DiscordAlertDestinationConfig extends Schema.Class<DiscordAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+/** Conservative shape check — real validation is delivery bouncing. */
+export const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const EmailAddress = Schema.String.check(
+	Schema.isTrimmed(),
+	Schema.isPattern(EMAIL_ADDRESS_PATTERN),
+	Schema.isMaxLength(254),
+)
+
+export const MAX_EMAIL_RECIPIENTS = 10
+
+const EmailAddressList = Schema.Array(EmailAddress).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_EMAIL_RECIPIENTS),
+)
+
+export class EmailAlertDestinationConfig extends Schema.Class<EmailAlertDestinationConfig>(
+	"EmailAlertDestinationConfig",
+)({
+	type: Schema.Literal("email"),
+	name: ChannelLabel,
+	addresses: EmailAddressList,
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationCreateRequest = Schema.Union([
 	SlackAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
@@ -223,6 +249,7 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	DiscordAlertDestinationConfig,
+	EmailAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<typeof AlertDestinationCreateRequest>
 
@@ -281,6 +308,14 @@ export class UpdateDiscordAlertDestinationConfig extends Schema.Class<UpdateDisc
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailAlertDestinationConfig>(
+	"UpdateEmailAlertDestinationConfig",
+)({
+	name: OptionalNonEmptyString,
+	addresses: Schema.optionalKey(EmailAddressList),
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationUpdateRequest = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("slack"),
@@ -305,6 +340,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("discord"),
 		...UpdateDiscordAlertDestinationConfig.fields,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("email"),
+		...UpdateEmailAlertDestinationConfig.fields,
 	}),
 ])
 export type AlertDestinationUpdateRequest = Schema.Schema.Type<typeof AlertDestinationUpdateRequest>
@@ -504,11 +543,13 @@ export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>("
 	reason: Schema.String,
 }) {}
 
-export class AlertRulePreviewRequest extends Schema.Class<AlertRulePreviewRequest>("AlertRulePreviewRequest")({
-	rule: AlertRuleUpsertRequest,
-	startTime: IsoDateTimeString,
-	endTime: IsoDateTimeString,
-}) {}
+export class AlertRulePreviewRequest extends Schema.Class<AlertRulePreviewRequest>("AlertRulePreviewRequest")(
+	{
+		rule: AlertRuleUpsertRequest,
+		startTime: IsoDateTimeString,
+		endTime: IsoDateTimeString,
+	},
+) {}
 
 /**
  * One evaluator-faithful data point: what the scheduler would have observed for

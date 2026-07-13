@@ -46,6 +46,8 @@ import {
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
 	AlertValidationError,
+	EMAIL_ADDRESS_PATTERN,
+	MAX_EMAIL_RECIPIENTS,
 	QueryBuilderQueryDraftSchema,
 	AlertNotificationTemplate,
 	type AlertComparator,
@@ -121,6 +123,7 @@ import {
 	PAGERDUTY_ROUTING_KEY_PATTERN,
 	verifyPagerDutyRoutingKey,
 } from "./AlertDeliveryDispatch"
+import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
 import { describeCause } from "./ErrorsService"
 import { HazelOAuthService } from "./HazelOAuthService"
@@ -456,6 +459,44 @@ const validateDestinationUrl = (rawUrl: string, field: string): Effect.Effect<st
 		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`, [], error)),
 	)
 
+/** Trim + dedupe (case-insensitive on the domain-insensitive whole address). */
+const normalizeEmailAddresses = (addresses: ReadonlyArray<string>): ReadonlyArray<string> => {
+	const seen = new Set<string>()
+	const out: Array<string> = []
+	for (const raw of addresses) {
+		const address = raw.trim()
+		const key = address.toLowerCase()
+		if (address.length === 0 || seen.has(key)) continue
+		seen.add(key)
+		out.push(address)
+	}
+	return out
+}
+
+const summarizeEmailAddresses = (addresses: ReadonlyArray<string>): string => {
+	const normalized = normalizeEmailAddresses(addresses)
+	const first = normalized[0]
+	if (first === undefined) return "Email"
+	return normalized.length === 1 ? first : `${first} +${normalized.length - 1} more`
+}
+
+const validateEmailAddresses = (
+	addresses: ReadonlyArray<string>,
+): Effect.Effect<ReadonlyArray<string>, AlertValidationError> => {
+	const normalized = normalizeEmailAddresses(addresses)
+	if (normalized.length === 0) {
+		return Effect.fail(makeValidationError("At least one email address is required"))
+	}
+	if (normalized.length > MAX_EMAIL_RECIPIENTS) {
+		return Effect.fail(makeValidationError(`At most ${MAX_EMAIL_RECIPIENTS} email addresses are allowed`))
+	}
+	const invalid = normalized.filter((address) => !EMAIL_ADDRESS_PATTERN.test(address))
+	if (invalid.length > 0) {
+		return Effect.fail(makeValidationError("Invalid email address", invalid))
+	}
+	return Effect.succeed(normalized)
+}
+
 const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, AlertValidationError> =>
 	parseBase64Aes256GcmKey(raw, (message) =>
 		makeValidationError(
@@ -507,7 +548,9 @@ const parseSecretConfig = (json: string): Effect.Effect<DestinationSecretConfig,
 
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
-const parseDeliveryPayload = (value: unknown): Effect.Effect<StoredDeliveryPayloadType, AlertValidationError> =>
+const parseDeliveryPayload = (
+	value: unknown,
+): Effect.Effect<StoredDeliveryPayloadType, AlertValidationError> =>
 	Schema.decodeUnknownEffect(StoredDeliveryPayloadSchema)(value).pipe(
 		Effect.mapError((cause) => makeValidationError("Stored delivery payload is invalid", [], cause)),
 	)
@@ -550,6 +593,13 @@ const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationP
 				summary: summarizeWebhookUrl(r.webhookUrl),
 				channelLabel: null,
 			}),
+			email: (r) => {
+				const addresses = normalizeEmailAddresses(r.addresses)
+				return {
+					summary: summarizeEmailAddresses(addresses),
+					channelLabel: addresses[0] ?? null,
+				}
+			},
 		}),
 	)
 
@@ -583,20 +633,24 @@ const buildSecretConfig = (
 				type: "discord" as const,
 				webhookUrl: r.webhookUrl.trim(),
 			}),
+			email: (r) => ({
+				type: "email" as const,
+				addresses: normalizeEmailAddresses(r.addresses),
+			}),
 		}),
 	)
 
 const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
-	Option.getOrElse(Schema.decodeUnknownOption(PublicConfigFromJson)(JSON.stringify(row.configJson)), () => ({
-		summary: "Invalid destination config",
-		channelLabel: null,
-	}))
+	Option.getOrElse(
+		Schema.decodeUnknownOption(PublicConfigFromJson)(JSON.stringify(row.configJson)),
+		() => ({
+			summary: "Invalid destination config",
+			channelLabel: null,
+		}),
+	)
 
 const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
-	Option.getOrElse(
-		Schema.decodeUnknownOption(StringArraySchema)(value),
-		() => [] as ReadonlyArray<string>,
-	)
+	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [] as ReadonlyArray<string>)
 
 const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (rule: {
 	readonly signalType: AlertSignalType
@@ -1081,6 +1135,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const warehouse = yield* WarehouseQueryService
 			const runtime = yield* AlertRuntime
 			const hazelOAuth = yield* HazelOAuthService
+			const email = yield* EmailService
 			const encryptionKey = yield* parseEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
@@ -1425,7 +1480,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						"@maple/http/errors/QueryEngineExecutionError": (e) =>
 							Effect.fail(makeDeliveryError(e.message, undefined, e)),
 						"@maple/http/errors/QueryEngineTimeoutError": (e) =>
-							Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e)),
+							Effect.fail(
+								makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e),
+							),
 					}),
 				)
 
@@ -1649,6 +1706,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const composeChatUrl = (context: DispatchContext): string =>
 				buildAlertChatUrl(env.MAPLE_APP_BASE_URL, context)
 
+			const sendEmail = (to: string, subject: string, html: string) =>
+				email
+					.send(to, subject, html)
+					.pipe(Effect.mapError((error) => makeDeliveryError(error.message, "email")))
+
 			const dispatchDelivery = (
 				context: DispatchContext,
 				payloadJson: string,
@@ -1660,6 +1722,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					deliveryTimeoutMs(),
 					context.linkUrl,
 					composeChatUrl(context),
+					{ sendEmail },
 				)
 
 			const buildPayload = (context: DeliveryPayloadContext) => ({
@@ -1878,6 +1941,8 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				} else if (request.type === "discord") {
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
+				} else if (request.type === "email") {
+					yield* validateEmailAddresses(request.addresses)
 				}
 				const destinationId = decodeAlertDestinationIdSync(makeUuid())
 				const publicConfig = buildPublicConfig(request)
@@ -2151,6 +2216,35 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											? hydrated.secretConfig.webhookUrl
 											: ""),
 								} satisfies DestinationSecretConfig,
+							}),
+						email: (r) =>
+							Effect.gen(function* () {
+								// Addresses supplied → validate + replace wholesale; omitted
+								// (or empty) → keep the stored recipient list.
+								const supplied =
+									r.addresses != null && r.addresses.length > 0 ? r.addresses : null
+								const nextAddresses =
+									supplied != null
+										? yield* validateEmailAddresses(supplied)
+										: hydrated.secretConfig.type === "email"
+											? hydrated.secretConfig.addresses
+											: []
+								return {
+									nextPublicConfig: {
+										summary:
+											supplied != null
+												? summarizeEmailAddresses(nextAddresses)
+												: hydrated.publicConfig.summary,
+										channelLabel:
+											supplied != null
+												? (nextAddresses[0] ?? null)
+												: hydrated.publicConfig.channelLabel,
+									} satisfies DestinationPublicConfig,
+									nextSecretConfig: {
+										type: "email" as const,
+										addresses: nextAddresses,
+									} satisfies DestinationSecretConfig,
+								}
 							}),
 					}),
 				)
@@ -2737,7 +2831,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										...normalized,
 										serviceName: svcName,
 									})
-									if (perServicePlan.query == null || perServicePlan.sampleCountStrategy == null) {
+									if (
+										perServicePlan.query == null ||
+										perServicePlan.sampleCountStrategy == null
+									) {
 										return
 									}
 									const observations = yield* queryEngine
@@ -2872,7 +2969,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 					if (openStart != null) {
 						wouldFire.push(
-							new AlertRulePreviewFiringSpan({ groupKey, start: iso(openStart), end: iso(endMs) }),
+							new AlertRulePreviewFiringSpan({
+								groupKey,
+								start: iso(openStart),
+								end: iso(endMs),
+							}),
 						)
 					}
 					series.push(new AlertRulePreviewSeries({ groupKey, points }))
@@ -4060,7 +4161,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								eq(alertRules.id, ruleId),
 								or(
 									isNull(alertRules.lastScheduledAt),
-									lt(alertRules.lastScheduledAt, new Date(timestamp - SCHEDULER_LOCK_TTL_MS)),
+									lt(
+										alertRules.lastScheduledAt,
+										new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
+									),
 								),
 							),
 						)

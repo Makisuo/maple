@@ -1,5 +1,10 @@
 import { HazelStartConnectRequest, type AlertDestinationType } from "@maple/domain/http"
-import { type DestinationFormState, defaultDestinationForm } from "@/lib/alerts/form-utils"
+import {
+	type DestinationFormState,
+	defaultDestinationForm,
+	EMAIL_ADDRESS_INPUT_PATTERN,
+	parseEmailAddresses,
+} from "@/lib/alerts/form-utils"
 import {
 	DESTINATION_TYPES,
 	PROVIDERS,
@@ -52,6 +57,9 @@ interface DestinationDialogProps {
  */
 const isValidPagerDutyKey = (key: string): boolean => /^[A-Za-z0-9]{32}$/.test(key.trim())
 
+const invalidEmailAddresses = (input: string): Array<string> =>
+	parseEmailAddresses(input).filter((address) => !EMAIL_ADDRESS_INPUT_PATTERN.test(address))
+
 function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 	if (form.name.trim().length === 0) return false
 	switch (form.type) {
@@ -67,6 +75,12 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 			return isEditing && form.integrationKey.trim().length === 0
 				? true
 				: isValidPagerDutyKey(form.integrationKey)
+		case "email": {
+			// Editing with a blank input keeps the stored recipients.
+			const addresses = parseEmailAddresses(form.emailAddresses)
+			if (addresses.length === 0) return isEditing
+			return addresses.length <= 10 && invalidEmailAddresses(form.emailAddresses).length === 0
+		}
 		default:
 			return true
 	}
@@ -663,6 +677,42 @@ export function DestinationDialog({
 										/>
 									</div>
 								</>
+							)}
+
+							{form.type === "email" && (
+								<div className="space-y-1.5">
+									<Label htmlFor="destination-email-addresses" className="text-xs">
+										Recipients
+									</Label>
+									<Input
+										id="destination-email-addresses"
+										value={form.emailAddresses}
+										onChange={(event) =>
+											onFormChange((current) => ({
+												...current,
+												emailAddresses: event.target.value,
+											}))
+										}
+										placeholder={
+											isEditing
+												? "Leave blank to keep current recipients"
+												: "ops@acme.com, oncall@acme.com"
+										}
+										className="font-mono text-xs"
+									/>
+									{invalidEmailAddresses(form.emailAddresses).length > 0 && (
+										<p className="text-[11px] text-destructive">
+											Invalid address
+											{invalidEmailAddresses(form.emailAddresses).length === 1
+												? ""
+												: "es"}
+											: {invalidEmailAddresses(form.emailAddresses).join(", ")}
+										</p>
+									)}
+									<p className="text-[11px] text-muted-foreground">
+										Comma-separated, up to 10 addresses.
+									</p>
+								</div>
 							)}
 
 							{form.type === "hazel-oauth" && (

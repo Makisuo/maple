@@ -1,6 +1,6 @@
 import type { AlertDestinationType } from "@maple/domain/http"
 import { useState, type ReactNode } from "react"
-import { CodeIcon, DiscordIcon, HazelIcon } from "@/components/icons"
+import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 
 const BRANDFETCH_CLIENT_ID = "1id0IQ-4i8Z46-n-DfQ"
@@ -87,11 +87,20 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		docsUrl: "https://support.discord.com/hc/en-us/articles/228383668-Intro-to-Webhooks",
 		docsLabel: "Discord webhook docs",
 	},
+	email: {
+		type: "email",
+		label: "Email",
+		description: "Send alert notifications to one or more email addresses.",
+		accent: "#E8872A",
+		accentBg: "rgba(232,135,42,0.16)",
+		fallbackIcon: ({ size = 22, className }) => <EnvelopeIcon size={size} className={className} />,
+	},
 }
 
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack",
 	"discord",
+	"email",
 	"pagerduty",
 	"webhook",
 	"hazel-oauth",
