@@ -565,7 +565,9 @@ export function DestinationDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="space-y-5 px-6">
+				{/* DialogContent is a viewport-capped flex column; the body scrolls so
+				    the header and footer stay pinned when the form outgrows the screen. */}
+				<div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6">
 					{!isEditing && (
 						<div className="space-y-2">
 							<div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
