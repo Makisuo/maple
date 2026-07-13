@@ -53,6 +53,7 @@ import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
 import { OnboardingService } from "./services/OnboardingService"
 import { EmailService } from "./lib/EmailService"
+import { OrgMembersService } from "./services/OrgMembersService"
 import { Env } from "./lib/Env"
 import { IngestAttributeMappingService } from "./services/IngestAttributeMappingService"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
@@ -151,9 +152,17 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 
 const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
 
+const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
+
 const AlertsServiceLive = AlertsService.layer.pipe(
 	Layer.provideMerge(
-		Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.layer, EmailServiceLive),
+		Layer.mergeAll(
+			CoreServicesLive,
+			QueryEngineServiceLive,
+			AlertRuntime.layer,
+			EmailServiceLive,
+			OrgMembersServiceLive,
+		),
 	),
 )
 

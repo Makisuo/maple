@@ -881,12 +881,14 @@ export const dispatchDelivery = (
 				email: (config) =>
 					Effect.gen(function* () {
 						const { subject, html } = yield* buildAlertEmailContent(context, linkUrl, chatUrl)
-						yield* Effect.forEach(config.addresses, (to) => deps.sendEmail(to, subject, html), {
-							discard: true,
-						})
-						const count = config.addresses.length
+						yield* Effect.forEach(
+							config.members,
+							(member) => deps.sendEmail(member.email, subject, html),
+							{ discard: true },
+						)
+						const count = config.members.length
 						return {
-							providerMessage: `Emailed ${count} recipient${count === 1 ? "" : "s"}`,
+							providerMessage: `Emailed ${count} member${count === 1 ? "" : "s"}`,
 							providerReference: null,
 							responseCode: null,
 						} as DispatchResult

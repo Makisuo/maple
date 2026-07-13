@@ -19,6 +19,7 @@ import {
 	OnboardingService,
 	OrgClickHouseSettingsService,
 	OrgIngestKeysService,
+	OrgMembersService,
 	PlanetScaleOAuthService,
 	PlanetScaleService,
 	QueryEngineService,
@@ -73,6 +74,8 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		Layer.provide(Layer.mergeAll(EnvLive, WorkerEnvironment.layer)),
 	)
 
+	const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(EnvLive))
+
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
 	// the cross-script AI_TRIAGE_WORKFLOW binding (absent → triage marked failed).
 	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
@@ -84,6 +87,7 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				WarehouseQueryServiceLive,
 				HazelOAuthServiceLive,
 				EmailServiceLive,
+				OrgMembersServiceLive,
 				WorkerEnvironment.layer,
 			),
 		),

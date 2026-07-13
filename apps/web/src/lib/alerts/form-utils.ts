@@ -460,25 +460,11 @@ export type DestinationFormState = {
 	hazelOrganizationLogoUrl: string | null
 	hazelChannelId: string
 	hazelChannelName: string
-	/** Comma/whitespace-separated email recipient list (email type only). */
-	emailAddresses: string
+	/** Selected workspace-member recipients (email type only). */
+	memberUserIds: string[]
 }
 
-/** Split a comma/whitespace-separated recipient input into trimmed, deduped addresses. */
-export function parseEmailAddresses(input: string): Array<string> {
-	const seen = new Set<string>()
-	const out: Array<string> = []
-	for (const raw of input.split(/[\s,;]+/)) {
-		const address = raw.trim()
-		const key = address.toLowerCase()
-		if (address.length === 0 || seen.has(key)) continue
-		seen.add(key)
-		out.push(address)
-	}
-	return out
-}
-
-export const EMAIL_ADDRESS_INPUT_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
 	return {
@@ -496,7 +482,7 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
-		emailAddresses: "",
+		memberUserIds: [],
 	}
 }
 
@@ -516,7 +502,7 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
-		emailAddresses: "",
+		memberUserIds: destination.memberUserIds != null ? [...destination.memberUserIds] : [],
 	}
 }
 
@@ -586,7 +572,7 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
 				type: "email",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				addresses: parseEmailAddresses(form.emailAddresses),
+				memberUserIds: form.memberUserIds,
 			})
 	}
 }
@@ -649,15 +635,13 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
 				enabled: form.enabled,
 				webhookUrl: form.webhookUrl.trim() || undefined,
 			}
-		case "email": {
-			const addresses = parseEmailAddresses(form.emailAddresses)
+		case "email":
 			return {
 				type: "email",
 				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				addresses: addresses.length > 0 ? addresses : undefined,
+				memberUserIds: form.memberUserIds.length > 0 ? form.memberUserIds : undefined,
 			}
-		}
 	}
 }
 

@@ -21,6 +21,7 @@ import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"
 import { HazelOAuthService } from "./HazelOAuthService"
 import { EmailService } from "../lib/EmailService"
+import { OrgMembersError, OrgMembersService, type OrgMember } from "./OrgMembersService"
 import { QueryEngineService } from "./QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 
@@ -115,6 +116,36 @@ const stubEmailService = (
 		}),
 })
 
+/** Fixed workspace-member directory the OrgMembersService stub resolves against. */
+const TEST_ORG_MEMBERS: ReadonlyArray<OrgMember> = [
+	{ userId: "user_ops", email: "ops@acme.test", name: "Ops Team" },
+	{ userId: "user_oncall", email: "oncall@acme.test", name: null },
+	{ userId: "user_lead", email: "lead@acme.test", name: "Lead" },
+]
+
+const stubOrgMembersService = (
+	members: ReadonlyArray<OrgMember> = TEST_ORG_MEMBERS,
+): (typeof OrgMembersService)["Service"] => ({
+	resolveMembers: (_orgId, userIds) => {
+		const byId = new Map(members.map((member) => [member.userId, member]))
+		const resolved: Array<OrgMember> = []
+		const unknown: Array<string> = []
+		for (const userId of userIds) {
+			const member = byId.get(userId)
+			if (member === undefined) unknown.push(userId)
+			else resolved.push(member)
+		}
+		return unknown.length > 0
+			? Effect.fail(
+					new OrgMembersError({
+						message: "Some selected users are not members of this workspace",
+						unknownUserIds: unknown,
+					}),
+				)
+			: Effect.succeed(resolved)
+	},
+})
+
 const makeLayer = (
 	testDb: TestDb,
 	warehouseStub: WarehouseQueryServiceShape,
@@ -140,6 +171,7 @@ const makeLayer = (
 	const runtimeLive = Layer.succeed(AlertRuntime, { ...defaultTestRuntime, ...runtimeOverrides })
 	const hazelOAuthLive = HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, databaseLive)))
 	const emailLive = Layer.succeed(EmailService, emailStub ?? stubEmailService())
+	const orgMembersLive = Layer.succeed(OrgMembersService, stubOrgMembersService())
 
 	return AlertsService.layer.pipe(
 		Layer.provide(
@@ -151,6 +183,7 @@ const makeLayer = (
 				runtimeLive,
 				hazelOAuthLive,
 				emailLive,
+				orgMembersLive,
 			),
 		),
 	)
@@ -1559,7 +1592,7 @@ describe("AlertsService", () => {
 		)
 	})
 
-	it.effect("creates an email destination and delivers a test email to every recipient", () => {
+	it.effect("creates an email destination and delivers a test email to every member", () => {
 		const testDb = createTestDb(trackedDbs)
 		const sent: Array<{ to: string; subject: string; html: string }> = []
 		return Effect.gen(function* () {
@@ -1570,12 +1603,13 @@ describe("AlertsService", () => {
 				type: "email",
 				name: "On-call inbox",
 				enabled: true,
-				// duplicate (case-insensitively) collapses; whitespace trims
-				addresses: [" ops@acme.test ", "oncall@acme.test", "OPS@acme.test"],
+				memberUserIds: ["user_ops", "user_oncall"],
 			})
 			assert.strictEqual(destination.type, "email")
-			assert.strictEqual(destination.summary, "ops@acme.test +1 more")
+			// Summary uses the member's display name; channelLabel the email.
+			assert.strictEqual(destination.summary, "Ops Team +1 more")
 			assert.strictEqual(destination.channelLabel, "ops@acme.test")
+			assert.deepStrictEqual(destination.memberUserIds, ["user_ops", "user_oncall"])
 
 			const response = yield* alerts.testDestination(orgId, userId, adminRoles, destination.id)
 			assert.isTrue(response.success)
@@ -1599,7 +1633,7 @@ describe("AlertsService", () => {
 		)
 	})
 
-	it.effect("rejects email destinations with invalid addresses", () => {
+	it.effect("rejects email destinations targeting users outside the workspace", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			const exit = yield* Effect.gen(function* () {
@@ -1608,7 +1642,7 @@ describe("AlertsService", () => {
 					asOrgId("org_email_invalid"),
 					asUserId("user_email_invalid"),
 					adminRoles,
-					{ type: "email", name: "Bad", enabled: true, addresses: ["not-an-email"] },
+					{ type: "email", name: "Bad", enabled: true, memberUserIds: ["user_stranger"] },
 				)
 			})
 				.pipe(
@@ -1621,10 +1655,11 @@ describe("AlertsService", () => {
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = getError(exit)
 			assert.instanceOf(failure, AlertValidationError)
+			assert.include(failure.message, "not members")
 		})
 	})
 
-	it.effect("replaces email recipients on update and keeps them when omitted", () => {
+	it.effect("replaces email members on update and keeps them when omitted", () => {
 		const testDb = createTestDb(trackedDbs)
 		const sent: Array<{ to: string; subject: string; html: string }> = []
 		return Effect.gen(function* () {
@@ -1635,29 +1670,30 @@ describe("AlertsService", () => {
 				type: "email",
 				name: "On-call inbox",
 				enabled: true,
-				addresses: ["ops@acme.test"],
+				memberUserIds: ["user_ops"],
 			})
 
-			// Omitted addresses → recipients unchanged.
+			// Omitted member ids → recipients unchanged.
 			const renamed = yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
 				type: "email",
 				name: "Renamed inbox",
 			})
 			assert.strictEqual(renamed.name, "Renamed inbox")
-			assert.strictEqual(renamed.summary, "ops@acme.test")
+			assert.strictEqual(renamed.summary, "Ops Team")
 
-			// Supplied addresses → replaced wholesale.
+			// Supplied member ids → replaced wholesale.
 			const replaced = yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
 				type: "email",
-				addresses: ["team@acme.test", "lead@acme.test"],
+				memberUserIds: ["user_oncall", "user_lead"],
 			})
-			assert.strictEqual(replaced.summary, "team@acme.test +1 more")
-			assert.strictEqual(replaced.channelLabel, "team@acme.test")
+			assert.strictEqual(replaced.summary, "oncall@acme.test +1 more")
+			assert.strictEqual(replaced.channelLabel, "oncall@acme.test")
+			assert.deepStrictEqual(replaced.memberUserIds, ["user_oncall", "user_lead"])
 
 			yield* alerts.testDestination(orgId, userId, adminRoles, created.id)
 			assert.deepStrictEqual(
 				sent.map((s) => s.to),
-				["team@acme.test", "lead@acme.test"],
+				["oncall@acme.test", "lead@acme.test"],
 			)
 		}).pipe(
 			Effect.provide(

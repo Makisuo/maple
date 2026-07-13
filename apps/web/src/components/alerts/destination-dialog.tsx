@@ -2,8 +2,7 @@ import { HazelStartConnectRequest, type AlertDestinationType } from "@maple/doma
 import {
 	type DestinationFormState,
 	defaultDestinationForm,
-	EMAIL_ADDRESS_INPUT_PATTERN,
-	parseEmailAddresses,
+	MAX_EMAIL_MEMBER_RECIPIENTS,
 } from "@/lib/alerts/form-utils"
 import {
 	DESTINATION_TYPES,
@@ -38,7 +37,11 @@ import {
 	SelectValue,
 } from "@maple/ui/components/ui/select"
 import { Switch } from "@maple/ui/components/ui/switch"
+import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
+import { Checkbox } from "@maple/ui/components/ui/checkbox"
 import { cn } from "@maple/ui/utils"
+import { useOrganization } from "@clerk/clerk-react"
+import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 
 interface DestinationDialogProps {
 	open: boolean
@@ -57,9 +60,6 @@ interface DestinationDialogProps {
  */
 const isValidPagerDutyKey = (key: string): boolean => /^[A-Za-z0-9]{32}$/.test(key.trim())
 
-const invalidEmailAddresses = (input: string): Array<string> =>
-	parseEmailAddresses(input).filter((address) => !EMAIL_ADDRESS_INPUT_PATTERN.test(address))
-
 function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 	if (form.name.trim().length === 0) return false
 	switch (form.type) {
@@ -75,12 +75,12 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 			return isEditing && form.integrationKey.trim().length === 0
 				? true
 				: isValidPagerDutyKey(form.integrationKey)
-		case "email": {
-			// Editing with a blank input keeps the stored recipients.
-			const addresses = parseEmailAddresses(form.emailAddresses)
-			if (addresses.length === 0) return isEditing
-			return addresses.length <= 10 && invalidEmailAddresses(form.emailAddresses).length === 0
-		}
+		case "email":
+			// The current selection is prefilled when editing, so a member is
+			// always required.
+			return (
+				form.memberUserIds.length > 0 && form.memberUserIds.length <= MAX_EMAIL_MEMBER_RECIPIENTS
+			)
 		default:
 			return true
 	}
@@ -126,6 +126,96 @@ function ProviderTile({
 			</div>
 			<p className="relative text-[11px] leading-snug text-muted-foreground">{provider.description}</p>
 		</button>
+	)
+}
+
+/**
+ * Workspace-member recipient picker. Members come from Clerk's frontend
+ * memberships hook — the server re-resolves the selected ids to emails via the
+ * Clerk backend on save, so this list is a convenience, not a trust boundary.
+ */
+function EmailMemberPicker({
+	form,
+	onFormChange,
+}: {
+	form: DestinationFormState
+	onFormChange: (updater: (current: DestinationFormState) => DestinationFormState) => void
+}) {
+	const { memberships, isLoaded } = useOrganization({ memberships: { infinite: true } })
+	const members = memberships?.data ?? []
+
+	const toggleMember = (userId: string) =>
+		onFormChange((current) => ({
+			...current,
+			memberUserIds: current.memberUserIds.includes(userId)
+				? current.memberUserIds.filter((id) => id !== userId)
+				: [...current.memberUserIds, userId],
+		}))
+
+	return (
+		<div className="space-y-1.5">
+			<Label className="text-xs">Recipients</Label>
+			<div className="max-h-56 space-y-0.5 overflow-y-auto rounded-md border border-border/60 p-1">
+				{!isLoaded && (
+					<p className="px-2 py-1.5 text-[11px] text-muted-foreground">Loading members…</p>
+				)}
+				{isLoaded && members.length === 0 && (
+					<p className="px-2 py-1.5 text-[11px] text-muted-foreground">
+						No members found in this workspace.
+					</p>
+				)}
+				{members.map((member) => {
+					const userId = member.publicUserData?.userId
+					const email = member.publicUserData?.identifier
+					if (!userId || !email) return null
+					const name = [member.publicUserData?.firstName, member.publicUserData?.lastName]
+						.filter(Boolean)
+						.join(" ")
+					const checked = form.memberUserIds.includes(userId)
+					return (
+						<label
+							key={userId}
+							className={cn(
+								"flex cursor-pointer items-center gap-2.5 rounded-sm px-2 py-1.5 hover:bg-muted/40",
+								checked && "bg-muted/40",
+							)}
+						>
+							<Checkbox checked={checked} onCheckedChange={() => toggleMember(userId)} />
+							<Avatar className="size-6">
+								<AvatarImage src={member.publicUserData?.imageUrl} alt={name || email} />
+								<AvatarFallback>{(name || email)[0]?.toUpperCase() ?? "?"}</AvatarFallback>
+							</Avatar>
+							<span className="min-w-0 flex-1">
+								<span className="block truncate text-xs font-medium">{name || email}</span>
+								{name && (
+									<span className="block truncate text-[11px] text-muted-foreground">
+										{email}
+									</span>
+								)}
+							</span>
+						</label>
+					)
+				})}
+				{memberships?.hasNextPage && (
+					<Button
+						variant="ghost"
+						size="sm"
+						className="w-full text-xs"
+						onClick={() => memberships.fetchNext?.()}
+					>
+						Load more
+					</Button>
+				)}
+			</div>
+			<p className="text-[11px] text-muted-foreground">
+				Alert emails go to the selected workspace members (up to {MAX_EMAIL_MEMBER_RECIPIENTS}).
+			</p>
+			{form.memberUserIds.length > MAX_EMAIL_MEMBER_RECIPIENTS && (
+				<p className="text-[11px] text-destructive">
+					Select at most {MAX_EMAIL_MEMBER_RECIPIENTS} members.
+				</p>
+			)}
+		</div>
 	)
 }
 
@@ -679,41 +769,15 @@ export function DestinationDialog({
 								</>
 							)}
 
-							{form.type === "email" && (
-								<div className="space-y-1.5">
-									<Label htmlFor="destination-email-addresses" className="text-xs">
-										Recipients
-									</Label>
-									<Input
-										id="destination-email-addresses"
-										value={form.emailAddresses}
-										onChange={(event) =>
-											onFormChange((current) => ({
-												...current,
-												emailAddresses: event.target.value,
-											}))
-										}
-										placeholder={
-											isEditing
-												? "Leave blank to keep current recipients"
-												: "ops@acme.com, oncall@acme.com"
-										}
-										className="font-mono text-xs"
-									/>
-									{invalidEmailAddresses(form.emailAddresses).length > 0 && (
-										<p className="text-[11px] text-destructive">
-											Invalid address
-											{invalidEmailAddresses(form.emailAddresses).length === 1
-												? ""
-												: "es"}
-											: {invalidEmailAddresses(form.emailAddresses).join(", ")}
-										</p>
-									)}
+							{form.type === "email" &&
+								(isClerkAuthEnabled ? (
+									<EmailMemberPicker form={form} onFormChange={onFormChange} />
+								) : (
 									<p className="text-[11px] text-muted-foreground">
-										Comma-separated, up to 10 addresses.
+										Email destinations target workspace members and require Clerk
+										authentication, which is not enabled in this deployment.
 									</p>
-								</div>
-							)}
+								))}
 
 							{form.type === "hazel-oauth" && (
 								<HazelOAuthFields

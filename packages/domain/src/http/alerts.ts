@@ -217,18 +217,14 @@ export class DiscordAlertDestinationConfig extends Schema.Class<DiscordAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
-/** Conservative shape check — real validation is delivery bouncing. */
-export const EMAIL_ADDRESS_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-const EmailAddress = Schema.String.check(
-	Schema.isTrimmed(),
-	Schema.isPattern(EMAIL_ADDRESS_PATTERN),
-	Schema.isMaxLength(254),
-)
-
 export const MAX_EMAIL_RECIPIENTS = 10
 
-const EmailAddressList = Schema.Array(EmailAddress).check(
+/**
+ * Recipients are workspace members, referenced by user id. The server resolves
+ * each id to the member's email via the auth provider (Clerk) at save time, so
+ * clients can never route alerts to arbitrary addresses.
+ */
+const MemberUserIdList = Schema.Array(NonEmptyString).check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_EMAIL_RECIPIENTS),
 )
@@ -238,7 +234,7 @@ export class EmailAlertDestinationConfig extends Schema.Class<EmailAlertDestinat
 )({
 	type: Schema.Literal("email"),
 	name: ChannelLabel,
-	addresses: EmailAddressList,
+	memberUserIds: MemberUserIdList,
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
@@ -312,7 +308,7 @@ export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailA
 	"UpdateEmailAlertDestinationConfig",
 )({
 	name: OptionalNonEmptyString,
-	addresses: Schema.optionalKey(EmailAddressList),
+	memberUserIds: Schema.optionalKey(MemberUserIdList),
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
@@ -357,6 +353,8 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	enabled: Schema.Boolean,
 	summary: Schema.String,
 	channelLabel: Schema.NullOr(Schema.String),
+	/** Selected workspace-member recipients (email destinations only). */
+	memberUserIds: Schema.NullOr(Schema.Array(Schema.String)),
 	lastTestedAt: Schema.NullOr(IsoDateTimeString),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,

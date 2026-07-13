@@ -204,7 +204,13 @@ describe("dispatchDelivery", () => {
 	const emailContext: DispatchContext = {
 		...pagerdutyContext,
 		destination: { ...destinationRow, name: "Email", type: "email" },
-		secretConfig: { type: "email", addresses: ["ops@acme.test", "oncall@acme.test"] },
+		secretConfig: {
+			type: "email",
+			members: [
+				{ userId: "user_ops", email: "ops@acme.test", name: "Ops" },
+				{ userId: "user_oncall", email: "oncall@acme.test", name: null },
+			],
+		},
 	}
 
 	it.effect("email: sends one email per recipient with the built-in format", () =>
@@ -228,7 +234,7 @@ describe("dispatchDelivery", () => {
 			assert.include(sent[0]!.html, "Test alert")
 			assert.include(sent[0]!.html, LINK)
 			assert.include(sent[0]!.html, CHAT)
-			assert.strictEqual(result.providerMessage, "Emailed 2 recipients")
+			assert.strictEqual(result.providerMessage, "Emailed 2 members")
 			assert.strictEqual(result.responseCode, null)
 		}),
 	)

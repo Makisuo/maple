@@ -46,8 +46,6 @@ import {
 	AlertSeverity as AlertSeveritySchema,
 	AlertSignalType as AlertSignalTypeSchema,
 	AlertValidationError,
-	EMAIL_ADDRESS_PATTERN,
-	MAX_EMAIL_RECIPIENTS,
 	QueryBuilderQueryDraftSchema,
 	AlertNotificationTemplate,
 	type AlertComparator,
@@ -125,6 +123,7 @@ import {
 } from "./AlertDeliveryDispatch"
 import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
+import { OrgMembersService, type OrgMember } from "./OrgMembersService"
 import { describeCause } from "./ErrorsService"
 import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService } from "./QueryEngineService"
@@ -459,43 +458,28 @@ const validateDestinationUrl = (rawUrl: string, field: string): Effect.Effect<st
 		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`, [], error)),
 	)
 
-/** Trim + dedupe (case-insensitive on the domain-insensitive whole address). */
-const normalizeEmailAddresses = (addresses: ReadonlyArray<string>): ReadonlyArray<string> => {
-	const seen = new Set<string>()
-	const out: Array<string> = []
-	for (const raw of addresses) {
-		const address = raw.trim()
-		const key = address.toLowerCase()
-		if (address.length === 0 || seen.has(key)) continue
-		seen.add(key)
-		out.push(address)
-	}
-	return out
-}
-
-const summarizeEmailAddresses = (addresses: ReadonlyArray<string>): string => {
-	const normalized = normalizeEmailAddresses(addresses)
-	const first = normalized[0]
+/** Resolved member recipients — display label from names, address in channelLabel. */
+const summarizeMembers = (members: ReadonlyArray<OrgMember>): string => {
+	const first = members[0]
 	if (first === undefined) return "Email"
-	return normalized.length === 1 ? first : `${first} +${normalized.length - 1} more`
+	const label = first.name ?? first.email
+	return members.length === 1 ? label : `${label} +${members.length - 1} more`
 }
 
-const validateEmailAddresses = (
-	addresses: ReadonlyArray<string>,
-): Effect.Effect<ReadonlyArray<string>, AlertValidationError> => {
-	const normalized = normalizeEmailAddresses(addresses)
-	if (normalized.length === 0) {
-		return Effect.fail(makeValidationError("At least one email address is required"))
-	}
-	if (normalized.length > MAX_EMAIL_RECIPIENTS) {
-		return Effect.fail(makeValidationError(`At most ${MAX_EMAIL_RECIPIENTS} email addresses are allowed`))
-	}
-	const invalid = normalized.filter((address) => !EMAIL_ADDRESS_PATTERN.test(address))
-	if (invalid.length > 0) {
-		return Effect.fail(makeValidationError("Invalid email address", invalid))
-	}
-	return Effect.succeed(normalized)
-}
+const emailPublicConfig = (members: ReadonlyArray<OrgMember>): DestinationPublicConfig => ({
+	summary: summarizeMembers(members),
+	channelLabel: members[0]?.email ?? null,
+	memberUserIds: members.map((member) => member.userId),
+})
+
+const emailSecretConfig = (members: ReadonlyArray<OrgMember>): DestinationSecretConfig => ({
+	type: "email" as const,
+	members: members.map((member) => ({
+		userId: member.userId,
+		email: member.email,
+		name: member.name,
+	})),
+})
 
 const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, AlertValidationError> =>
 	parseBase64Aes256GcmKey(raw, (message) =>
@@ -561,7 +545,12 @@ const summarizeWebhookUrl = (url: string) =>
 		onSome: (parsed) => `POST ${parsed.host}`,
 	})
 
-const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationPublicConfig =>
+// Email requires resolving member ids → emails via the auth provider first, so
+// its public/secret configs are built inline (emailPublicConfig/emailSecretConfig)
+// after that effect — the type excludes it here, like hazel-oauth below.
+const buildPublicConfig = (
+	request: Exclude<AlertDestinationCreateRequest, { readonly type: "email" }>,
+): DestinationPublicConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
 			slack: (r) => ({
@@ -593,13 +582,6 @@ const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationP
 				summary: summarizeWebhookUrl(r.webhookUrl),
 				channelLabel: null,
 			}),
-			email: (r) => {
-				const addresses = normalizeEmailAddresses(r.addresses)
-				return {
-					summary: summarizeEmailAddresses(addresses),
-					channelLabel: addresses[0] ?? null,
-				}
-			},
 		}),
 	)
 
@@ -607,7 +589,7 @@ const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationP
 // secret config is built inline after that side effect — the type excludes it
 // here so this stays a pure, total function over the remaining variants.
 const buildSecretConfig = (
-	request: Exclude<AlertDestinationCreateRequest, { readonly type: "hazel-oauth" }>,
+	request: Exclude<AlertDestinationCreateRequest, { readonly type: "hazel-oauth" | "email" }>,
 ): DestinationSecretConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
@@ -632,10 +614,6 @@ const buildSecretConfig = (
 			discord: (r) => ({
 				type: "discord" as const,
 				webhookUrl: r.webhookUrl.trim(),
-			}),
-			email: (r) => ({
-				type: "email" as const,
-				addresses: normalizeEmailAddresses(r.addresses),
 			}),
 		}),
 	)
@@ -889,6 +867,7 @@ const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: Destin
 		enabled: row.enabled,
 		summary: publicConfig.summary,
 		channelLabel: publicConfig.channelLabel,
+		memberUserIds: publicConfig.memberUserIds != null ? [...publicConfig.memberUserIds] : null,
 		lastTestedAt: toIso(row.lastTestedAt),
 		lastTestError: row.lastTestError,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
@@ -1136,6 +1115,20 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const runtime = yield* AlertRuntime
 			const hazelOAuth = yield* HazelOAuthService
 			const email = yield* EmailService
+			const orgMembers = yield* OrgMembersService
+
+			const resolveEmailMembers = (
+				orgId: OrgId,
+				memberUserIds: ReadonlyArray<string>,
+			): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
+				orgMembers.resolveMembers(orgId, memberUserIds).pipe(
+					Effect.mapError((error) => makeValidationError(error.message, error.unknownUserIds ?? [])),
+					Effect.flatMap((members) =>
+						members.length === 0
+							? Effect.fail(makeValidationError("At least one workspace member is required"))
+							: Effect.succeed(members),
+					),
+				)
 			const encryptionKey = yield* parseEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
@@ -1941,36 +1934,45 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				} else if (request.type === "discord") {
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
-				} else if (request.type === "email") {
-					yield* validateEmailAddresses(request.addresses)
 				}
 				const destinationId = decodeAlertDestinationIdSync(makeUuid())
-				const publicConfig = buildPublicConfig(request)
-				const secretConfig: DestinationSecretConfig =
-					request.type === "hazel-oauth"
-						? yield* hazelOAuth
-								.createChannelWebhook(orgId, {
-									channelId: request.hazelChannelId.trim(),
-									name: request.name.trim(),
-								})
-								.pipe(
-									Effect.map((webhook) => ({
-										type: "hazel-oauth" as const,
-										hazelOrganizationId: request.hazelOrganizationId.trim(),
-										hazelOrganizationName: request.hazelOrganizationName.trim(),
-										hazelChannelId: request.hazelChannelId.trim(),
-										hazelChannelName: request.hazelChannelName.trim(),
-										webhookId: webhook.id,
-										webhookUrl: webhook.webhookUrl,
-										webhookToken: webhook.token,
-									})),
-									Effect.mapError((error) =>
-										makeValidationError(
-											`Could not provision Hazel channel webhook: ${error.message}`,
+				let publicConfig: DestinationPublicConfig
+				let secretConfig: DestinationSecretConfig
+				if (request.type === "email") {
+					// Email recipients are workspace members: resolve the selected ids
+					// to emails via the auth provider so clients can never route alerts
+					// to arbitrary addresses.
+					const members = yield* resolveEmailMembers(orgId, request.memberUserIds)
+					publicConfig = emailPublicConfig(members)
+					secretConfig = emailSecretConfig(members)
+				} else {
+					publicConfig = buildPublicConfig(request)
+					secretConfig =
+						request.type === "hazel-oauth"
+							? yield* hazelOAuth
+									.createChannelWebhook(orgId, {
+										channelId: request.hazelChannelId.trim(),
+										name: request.name.trim(),
+									})
+									.pipe(
+										Effect.map((webhook) => ({
+											type: "hazel-oauth" as const,
+											hazelOrganizationId: request.hazelOrganizationId.trim(),
+											hazelOrganizationName: request.hazelOrganizationName.trim(),
+											hazelChannelId: request.hazelChannelId.trim(),
+											hazelChannelName: request.hazelChannelName.trim(),
+											webhookId: webhook.id,
+											webhookUrl: webhook.webhookUrl,
+											webhookToken: webhook.token,
+										})),
+										Effect.mapError((error) =>
+											makeValidationError(
+												`Could not provision Hazel channel webhook: ${error.message}`,
+											),
 										),
-									),
-								)
-						: buildSecretConfig(request)
+									)
+							: buildSecretConfig(request)
+				}
 				if (secretConfig.type === "pagerduty") {
 					yield* validatePagerDutyKey(secretConfig.integrationKey)
 				}
@@ -2219,31 +2221,26 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							}),
 						email: (r) =>
 							Effect.gen(function* () {
-								// Addresses supplied → validate + replace wholesale; omitted
-								// (or empty) → keep the stored recipient list.
+								// Member ids supplied → re-resolve via the auth provider and
+								// replace wholesale; omitted (or empty) → keep the stored
+								// recipient snapshot.
 								const supplied =
-									r.addresses != null && r.addresses.length > 0 ? r.addresses : null
-								const nextAddresses =
-									supplied != null
-										? yield* validateEmailAddresses(supplied)
-										: hydrated.secretConfig.type === "email"
-											? hydrated.secretConfig.addresses
-											: []
+									r.memberUserIds != null && r.memberUserIds.length > 0
+										? r.memberUserIds
+										: null
+								if (supplied === null) {
+									return {
+										nextPublicConfig: hydrated.publicConfig,
+										nextSecretConfig:
+											hydrated.secretConfig.type === "email"
+												? hydrated.secretConfig
+												: emailSecretConfig([]),
+									}
+								}
+								const members = yield* resolveEmailMembers(orgId, supplied)
 								return {
-									nextPublicConfig: {
-										summary:
-											supplied != null
-												? summarizeEmailAddresses(nextAddresses)
-												: hydrated.publicConfig.summary,
-										channelLabel:
-											supplied != null
-												? (nextAddresses[0] ?? null)
-												: hydrated.publicConfig.channelLabel,
-									} satisfies DestinationPublicConfig,
-									nextSecretConfig: {
-										type: "email" as const,
-										addresses: nextAddresses,
-									} satisfies DestinationSecretConfig,
+									nextPublicConfig: emailPublicConfig(members),
+									nextSecretConfig: emailSecretConfig(members),
 								}
 							}),
 					}),
