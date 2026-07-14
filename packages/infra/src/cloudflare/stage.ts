@@ -66,7 +66,7 @@ export function parseMapleStage(stage: string): MapleStage {
 	}
 
 	throw new Error(
-		`Unsupported deployment stage "${stage}". Expected prd, stg, pr-<number>, or a dev stage name matching [a-z0-9-]+.`,
+		`Unsupported deployment stage "${stage}". Expected prd, stg, pr-<number>, or a dev stage name matching [a-z0-9][a-z0-9_-]*.`,
 	)
 }
 
