@@ -1,4 +1,5 @@
 ---
+import { buttonVariants } from "@maple/ui/components/ui/button";
 import AppMock from './AppMock.astro';
 import * as m from "../paraglide/messages";
 import { HeroCta } from "./HeroCta";
@@ -36,8 +37,8 @@ import { HeroCta } from "./HeroCta";
 
         <!-- Dual CTAs -->
         <div class="mt-10 flex flex-wrap items-center gap-3">
-            <HeroCta client:load className="inline-flex h-11 items-center justify-center rounded-lg bg-primary px-5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90" />
-            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class="inline-flex h-11 items-center justify-center rounded-lg border border-border bg-transparent px-5 text-sm font-medium text-fg transition-colors hover:bg-bg-elevated">
+            <HeroCta client:load className={buttonVariants({ size: "xl" })} />
+            <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class={buttonVariants({ variant: "outline", size: "xl" })}>
                 {m.cta_github()}
             </a>
         </div>

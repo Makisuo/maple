@@ -134,8 +134,8 @@ const MAP_VIEW_H = 360;
         <!-- Sidebar -->
         <div class="w-40 border-r border-border shrink-0 hidden md:flex flex-col bg-bg">
             <div class="flex items-center gap-2 px-3 py-3 border-b border-border">
-                <div class="w-5 h-5 bg-accent flex items-center justify-center">
-                    <span class="text-accent-foreground text-[9px] font-bold">M</span>
+                <div class="w-5 h-5 bg-primary flex items-center justify-center">
+                    <span class="text-primary-foreground text-[9px] font-bold">M</span>
                 </div>
                 <span class="text-fg text-[11px] font-medium">Maple</span>
             </div>
@@ -473,7 +473,7 @@ const MAP_VIEW_H = 360;
                     <span>Service</span><span>Env</span><span>P50</span><span>P95</span><span>P99</span><span class="text-right">Throughput</span>
                 </div>
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">api-gateway</span>
+                    <span class="text-primary font-medium">api-gateway</span>
                     <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
                     <span class="text-fg-muted font-mono">12ms</span>
                     <span class="text-fg-muted font-mono">45ms</span>
@@ -481,7 +481,7 @@ const MAP_VIEW_H = 360;
                     <span class="text-fg-muted font-mono text-right">1.2K/s</span>
                 </div>
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">auth-service</span>
+                    <span class="text-primary font-medium">auth-service</span>
                     <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
                     <span class="text-fg-muted font-mono">8ms</span>
                     <span class="text-fg-muted font-mono">22ms</span>
@@ -489,7 +489,7 @@ const MAP_VIEW_H = 360;
                     <span class="text-fg-muted font-mono text-right">890/s</span>
                 </div>
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">order-service</span>
+                    <span class="text-primary font-medium">order-service</span>
                     <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
                     <span class="text-fg-muted font-mono">34ms</span>
                     <span class="text-fg-muted font-mono">89ms</span>
@@ -497,7 +497,7 @@ const MAP_VIEW_H = 360;
                     <span class="text-fg-muted font-mono text-right">456/s</span>
                 </div>
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">payment-svc</span>
+                    <span class="text-primary font-medium">payment-svc</span>
                     <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
                     <span class="text-fg-muted font-mono">56ms</span>
                     <span class="text-fg-muted font-mono">145ms</span>
@@ -505,7 +505,7 @@ const MAP_VIEW_H = 360;
                     <span class="text-fg-muted font-mono text-right">234/s</span>
                 </div>
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">notification-svc</span>
+                    <span class="text-primary font-medium">notification-svc</span>
                     <span><span class="text-[8px] px-1.5 py-0.5 bg-yellow-500/10 text-yellow-400">staging</span></span>
                     <span class="text-fg-muted font-mono">5ms</span>
                     <span class="text-fg-muted font-mono">15ms</span>
@@ -513,7 +513,7 @@ const MAP_VIEW_H = 360;
                     <span class="text-fg-muted font-mono text-right">120/s</span>
                 </div>
                 <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">inventory-svc</span>
+                    <span class="text-primary font-medium">inventory-svc</span>
                     <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
                     <span class="text-fg-muted font-mono">18ms</span>
                     <span class="text-fg-muted font-mono">52ms</span>
@@ -533,12 +533,12 @@ const MAP_VIEW_H = 360;
                         <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Status</div>
                         <div class="space-y-1">
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 Ok
                                 <span class="text-[8px] text-fg-muted/60 ml-auto">5</span>
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 Error
                                 <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
                             </label>
@@ -550,15 +550,15 @@ const MAP_VIEW_H = 360;
                         <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Service</div>
                         <div class="space-y-1">
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 api-gateway
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 auth-service
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 order-service
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
@@ -566,7 +566,7 @@ const MAP_VIEW_H = 360;
                                 payment-svc
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 inventory-svc
                             </label>
                         </div>
@@ -581,7 +581,7 @@ const MAP_VIEW_H = 360;
                             <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">5s</span>
                         </div>
                         <div class="mt-1.5 h-1 bg-bg-elevated border border-border relative">
-                            <div class="absolute inset-y-0 left-[5%] right-[15%] bg-accent/30"></div>
+                            <div class="absolute inset-y-0 left-[5%] right-[15%] bg-primary/30"></div>
                         </div>
                     </div>
                     <div class="border-t border-border"></div>
@@ -589,8 +589,8 @@ const MAP_VIEW_H = 360;
                     <div>
                         <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Method</div>
                         <div class="flex flex-wrap gap-1">
-                            <span class="text-[8px] px-1.5 py-0.5 border border-accent/30 bg-accent/10 text-accent">GET</span>
-                            <span class="text-[8px] px-1.5 py-0.5 border border-accent/30 bg-accent/10 text-accent">POST</span>
+                            <span class="text-[8px] px-1.5 py-0.5 border border-primary/30 bg-primary/10 text-primary">GET</span>
+                            <span class="text-[8px] px-1.5 py-0.5 border border-primary/30 bg-primary/10 text-primary">POST</span>
                             <span class="text-[8px] px-1.5 py-0.5 border border-border text-fg-muted">PUT</span>
                             <span class="text-[8px] px-1.5 py-0.5 border border-border text-fg-muted">DELETE</span>
                         </div>
@@ -612,7 +612,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <!-- Row 1 -->
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">a3f8c1d2</span>
+                            <span class="text-primary font-mono text-[9px]">a3f8c1d2</span>
                             <span class="text-fg truncate">POST /api/checkout</span>
                             <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">order</span><span class="text-[8px] text-fg-muted">+2</span></span>
                             <span class="text-fg-muted font-mono">203ms</span>
@@ -621,7 +621,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <!-- Row 2 (error) -->
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border bg-destructive/5 hover:bg-destructive/10 items-center">
-                            <span class="text-accent font-mono text-[9px]">b7e2f9a1</span>
+                            <span class="text-primary font-mono text-[9px]">b7e2f9a1</span>
                             <span class="text-fg truncate">POST /api/payment</span>
                             <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">payment</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
                             <span class="text-fg-muted font-mono">1.2s</span>
@@ -630,7 +630,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <!-- Row 3 -->
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">c4d1e8b3</span>
+                            <span class="text-primary font-mono text-[9px]">c4d1e8b3</span>
                             <span class="text-fg truncate">GET /api/products</span>
                             <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">inventory</span></span>
                             <span class="text-fg-muted font-mono">45ms</span>
@@ -639,7 +639,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <!-- Row 4 -->
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">d9a3b5c7</span>
+                            <span class="text-primary font-mono text-[9px]">d9a3b5c7</span>
                             <span class="text-fg truncate">POST /api/auth/login</span>
                             <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
                             <span class="text-fg-muted font-mono">89ms</span>
@@ -648,7 +648,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <!-- Row 5 -->
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">e2f6a8d4</span>
+                            <span class="text-primary font-mono text-[9px]">e2f6a8d4</span>
                             <span class="text-fg truncate">GET /api/users/me</span>
                             <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
                             <span class="text-fg-muted font-mono">23ms</span>
@@ -657,7 +657,7 @@ const MAP_VIEW_H = 360;
                         </div>
                         <!-- Row 6 -->
                         <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">f1c5d7e9</span>
+                            <span class="text-primary font-mono text-[9px]">f1c5d7e9</span>
                             <span class="text-fg truncate">PUT /api/orders/confirm</span>
                             <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">order</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">notify</span></span>
                             <span class="text-fg-muted font-mono">156ms</span>
@@ -679,17 +679,17 @@ const MAP_VIEW_H = 360;
                         <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Level</div>
                         <div class="space-y-1">
                             <label class="flex items-center gap-1.5 text-[10px] text-blue-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 INFO
                                 <span class="text-[8px] text-fg-muted/60 ml-auto">4</span>
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-yellow-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 WARN
                                 <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-red-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 ERROR
                                 <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
                             </label>
@@ -706,19 +706,19 @@ const MAP_VIEW_H = 360;
                         <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Service</div>
                         <div class="space-y-1">
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 api-gateway
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 order-service
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 payment-svc
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                                <span class="w-2.5 h-2.5 border border-primary/50 bg-primary/30 shrink-0"></span>
                                 auth-service
                             </label>
                             <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">

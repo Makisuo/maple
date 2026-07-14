@@ -51,7 +51,7 @@ const jsonLd = {
 };
 
 const backLink =
-    "inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted transition-colors hover:text-accent";
+    "inline-flex items-center gap-1.5 font-mono text-xs text-fg-muted transition-colors hover:text-primary";
 const hasToc = toc.length > 0;
 ---
 
@@ -71,7 +71,7 @@ const hasToc = toc.length > 0;
 
                     <div class="mt-[22px] flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums tracking-[0.02em] text-fg-muted">
                         {featured && (
-                            <span class="border border-accent/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent">
+                            <span class="border border-primary/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-primary">
                                 featured
                             </span>
                         )}
@@ -92,7 +92,7 @@ const hasToc = toc.length > 0;
                     <p class="mt-5 max-w-[68ch] font-sans text-[15px] leading-[1.7] text-pretty text-fg-muted">{description}</p>
 
                     <div class="mt-6 flex items-center gap-2.5 font-mono text-xs text-fg/80">
-                        <span class="inline-flex h-6 w-6 items-center justify-center bg-accent font-display text-xs font-bold text-accent-foreground" aria-hidden="true">M</span>
+                        <span class="inline-flex h-6 w-6 items-center justify-center bg-primary font-display text-xs font-bold text-primary-foreground" aria-hidden="true">M</span>
                         <span>{author}</span>
                     </div>
 
@@ -132,7 +132,7 @@ const hasToc = toc.length > 0;
                                             href={`#${h.slug}`}
                                             data-toc-link
                                             class:list={[
-                                                "-ml-px block border-l border-transparent pl-3.5 text-[13px] leading-snug text-fg-muted transition-colors hover:text-foreground data-[active=true]:border-accent data-[active=true]:text-foreground",
+                                                "-ml-px block border-l border-transparent pl-3.5 text-[13px] leading-snug text-fg-muted transition-colors hover:text-foreground data-[active=true]:border-primary data-[active=true]:text-foreground",
                                                 h.depth === 3 && "pl-6",
                                             ]}
                                         >
@@ -153,7 +153,7 @@ const hasToc = toc.length > 0;
         <section class="mt-16 border-t border-border pt-12">
             <div class="mx-auto max-w-6xl px-6">
                 <div class="mb-[22px] flex items-center gap-3">
-                    <span class="font-mono text-xs text-accent">#</span>
+                    <span class="font-mono text-xs text-primary">#</span>
                     <span class="h-px w-9 shrink-0 bg-border" aria-hidden="true"></span>
                     <h2 class="m-0 font-display text-xl font-semibold tracking-[-0.015em] text-foreground">Read next</h2>
                 </div>

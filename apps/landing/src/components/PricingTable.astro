@@ -216,7 +216,7 @@ const maxWidthClass = cards.length >= 3 ? "max-w-6xl" : "max-w-4xl"
                         <div class="flex items-center gap-2">
                             <span class="text-[11px] uppercase tracking-widest text-fg-muted">{plan.name}</span>
                             {plan.hasTrial && plan.trialDuration && (
-                                <span class="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent">
+                                <span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
                                     {m.pricing_trial_badge({ duration: String(plan.trialDuration) })}
                                 </span>
                             )}
@@ -272,7 +272,7 @@ const maxWidthClass = cards.length >= 3 ? "max-w-6xl" : "max-w-4xl"
                             <div class="mt-4 space-y-3">
                                 {plan.platformFeatures.map((label) => (
                                     <div class="flex items-center gap-2.5">
-                                        <svg class="w-4 h-4 text-accent shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M8 2L16 2"/><path d="M8 22L16 22"/><path d="M2 8L2 16"/><path d="M22 8L22 16"/><path d="M6 4L6 4.01"/><path d="M4 6L4 6.01"/><path d="M18 4L18 4.01"/><path d="M20 6L20 6.01"/><path d="M6 20L6 20.01"/><path d="M4 18L4 18.01"/><path d="M18 20L18 20.01"/><path d="M20 18L20 18.01"/><path d="M8 12L11 15L16 9"/></svg>
+                                        <svg class="w-4 h-4 text-primary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="square"><path d="M8 2L16 2"/><path d="M8 22L16 22"/><path d="M2 8L2 16"/><path d="M22 8L22 16"/><path d="M6 4L6 4.01"/><path d="M4 6L4 6.01"/><path d="M18 4L18 4.01"/><path d="M20 6L20 6.01"/><path d="M6 20L6 20.01"/><path d="M4 18L4 18.01"/><path d="M18 20L18 20.01"/><path d="M20 18L20 18.01"/><path d="M8 12L11 15L16 9"/></svg>
                                         <span class="text-sm text-fg">{label}</span>
                                     </div>
                                 ))}
