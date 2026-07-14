@@ -14,7 +14,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={5} />
@@ -48,7 +47,7 @@ function TracesFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 

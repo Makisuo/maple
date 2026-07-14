@@ -332,6 +332,7 @@ export type AlertDestinationRow = typeof AlertDestinationRowSchema.Type
 const AlertDestinationPublicConfig = Schema.Struct({
 	summary: Schema.String,
 	channelLabel: Schema.NullOr(Schema.String),
+	memberUserIds: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 const decodeDestinationPublicConfig = Schema.decodeUnknownOption(AlertDestinationPublicConfig)
 
@@ -342,10 +343,13 @@ const decodeDestinationPublicConfig = Schema.decodeUnknownOption(AlertDestinatio
  * "Invalid destination config" fallback the server uses).
  */
 export const rowToAlertDestinationDocument = (row: AlertDestinationRow): AlertDestinationDocument => {
-	const publicConfig = Option.getOrElse(decodeDestinationPublicConfig(row.config_json), () => ({
-		summary: "Invalid destination config",
-		channelLabel: null,
-	}))
+	const publicConfig = Option.getOrElse(
+		decodeDestinationPublicConfig(row.config_json),
+		(): Schema.Schema.Type<typeof AlertDestinationPublicConfig> => ({
+			summary: "Invalid destination config",
+			channelLabel: null,
+		}),
+	)
 	return new AlertDestinationDocument({
 		id: decodeDestinationId(row.id),
 		name: row.name,
@@ -353,6 +357,7 @@ export const rowToAlertDestinationDocument = (row: AlertDestinationRow): AlertDe
 		enabled: row.enabled,
 		summary: publicConfig.summary,
 		channelLabel: publicConfig.channelLabel,
+		memberUserIds: publicConfig.memberUserIds != null ? [...publicConfig.memberUserIds] : null,
 		lastTestedAt: row.last_tested_at != null ? decodeIso(row.last_tested_at) : null,
 		lastTestError: row.last_test_error,
 		createdAt: decodeIso(row.created_at),

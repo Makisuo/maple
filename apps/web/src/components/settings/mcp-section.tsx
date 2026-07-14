@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { toast } from "sonner"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import {
@@ -12,6 +11,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { Button } from "@maple/ui/components/ui/button"
 import { CheckIcon, CopyIcon, PlusIcon } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { mcpUrl } from "@/lib/services/common/mcp-url"
 import { McpToolsList } from "@/components/mcp/mcp-tools-list"
 import { CreateApiKeyDialog } from "@/components/settings/create-api-key-dialog"
@@ -49,23 +49,12 @@ const CONFIG_FILE_HINTS: Record<string, string> = {
 }
 
 export function McpSection() {
-	const [endpointCopied, setEndpointCopied] = useState(false)
+	const { copied: endpointCopied, copy: copyEndpoint } = useCopyToClipboard("MCP endpoint")
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)
 	const [createdSecret, setCreatedSecret] = useState<string | null>(null)
 	const [configTab, setConfigTab] = useState("claude-code")
 
 	const apiKeyPlaceholder = createdSecret ?? "<your-api-key>"
-
-	async function handleCopyEndpoint() {
-		try {
-			await navigator.clipboard.writeText(mcpEndpoint)
-			setEndpointCopied(true)
-			toast.success("MCP endpoint copied to clipboard")
-			setTimeout(() => setEndpointCopied(false), 2000)
-		} catch {
-			toast.error("Failed to copy endpoint")
-		}
-	}
 
 	return (
 		<div className="max-w-3xl space-y-6">
@@ -85,7 +74,7 @@ export function McpSection() {
 						/>
 						<InputGroupAddon align="inline-end">
 							<InputGroupButton
-								onClick={handleCopyEndpoint}
+								onClick={() => copyEndpoint(mcpEndpoint)}
 								aria-label="Copy endpoint to clipboard"
 								title={endpointCopied ? "Copied!" : "Copy"}
 							>

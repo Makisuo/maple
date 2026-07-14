@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import {
 	NavigationMenu,
@@ -49,8 +49,29 @@ function MegaLink({ link }: { link: MenuLink }) {
 	)
 }
 
+/**
+ * True while the page's hero CTA (`[data-hero-cta]`) is in the viewport.
+ * Pages without a hero CTA report false immediately so the header CTA shows.
+ */
+function useHeroCtaVisible() {
+	// Assume visible during SSR/first paint so the header CTA doesn't flash in at the top of the page
+	const [heroCtaVisible, setHeroCtaVisible] = useState(true)
+	useEffect(() => {
+		const target = document.querySelector("[data-hero-cta]")
+		if (!target) {
+			setHeroCtaVisible(false)
+			return
+		}
+		const observer = new IntersectionObserver(([entry]) => setHeroCtaVisible(entry.isIntersecting))
+		observer.observe(target)
+		return () => observer.disconnect()
+	}, [])
+	return heroCtaVisible
+}
+
 function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number | null }) {
 	const [menuOpen, setMenuOpen] = useState(false)
+	const heroCtaVisible = useHeroCtaVisible()
 	const l = (path: string) => (locale === "en" ? path : `/${locale}${path}`)
 
 	const featureLinks: MenuLink[] = [
@@ -257,7 +278,13 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 
 				<a
 					href="https://app.maple.dev"
-					className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
+					className={`inline-flex h-8 items-center justify-center overflow-hidden whitespace-nowrap rounded-lg bg-primary text-xs font-medium text-primary-foreground transition-all duration-300 hover:bg-primary/80 ${
+						heroCtaVisible
+							? "pointer-events-none max-w-0 px-0 opacity-0 -ml-3 sm:-ml-6"
+							: "max-w-40 px-2.5 opacity-100 ml-0"
+					}`}
+					aria-hidden={heroCtaVisible}
+					tabIndex={heroCtaVisible ? -1 : undefined}
 				>
 					<CTAButton />
 				</a>

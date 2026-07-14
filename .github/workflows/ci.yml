@@ -46,13 +46,43 @@ jobs:
 
             # shellcheck is preinstalled on the ubuntu-latest runner image.
             - name: shellcheck
-              run: shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
+              run: shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh apps/cli/test/native-checkpoint-smoke.sh
 
             # Syntax-check the POSIX installers against the actual /bin/sh they claim.
             - name: sh -n
               run: |
                   sh -n scripts/install.sh
                   sh -n scripts/uninstall.sh
+
+    local-checkpoint-native:
+        name: Local checkpoint native
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - run: bun install --frozen-lockfile
+
+            - name: Build native local bundle
+              run: scripts/build-local-binary.sh
+
+            - name: Run repeated checkpoint restore and fresh-process reopen smoke
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-checkpoint
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-checkpoint-smoke.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Upload checkpoint failure evidence
+              if: ${{ failure() }}
+              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              with:
+                  name: native-checkpoint-failure-${{ github.run_id }}
+                  path: ${{ runner.temp }}/maple-native-checkpoint
+                  if-no-files-found: ignore
 
     service-map-perf:
         name: Service Map Perf

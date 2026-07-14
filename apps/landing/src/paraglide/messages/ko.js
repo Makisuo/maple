@@ -47,22 +47,6 @@ export const cta_see_full_story = () => `전체 스토리 보기 →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement = () => `Maple이 출시되었습니다 — `
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `무료 평가판 시작하기`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const nav_features = () => `기능`
 
 

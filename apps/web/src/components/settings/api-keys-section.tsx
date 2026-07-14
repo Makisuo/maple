@@ -37,6 +37,7 @@ import {
 	SquareTerminalIcon,
 	TrashIcon,
 } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CreateApiKeyDialog } from "./create-api-key-dialog"
 import { RollApiKeyDialog } from "./roll-api-key-dialog"
@@ -277,14 +278,7 @@ function ApiKeyListItem({
 			? "bg-info/10 text-info border-info/30"
 			: "bg-success/10 text-success border-success/30"
 
-	async function handleCopyPrefix() {
-		try {
-			await navigator.clipboard.writeText(apiKey.keyPrefix)
-			toast.success("Key prefix copied to clipboard")
-		} catch {
-			toast.error("Failed to copy key prefix")
-		}
-	}
+	const prefixCopy = useCopyToClipboard("Key prefix")
 
 	return (
 		<div
@@ -364,7 +358,7 @@ function ApiKeyListItem({
 							<DotsVerticalIcon size={14} />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
-							<DropdownMenuItem onClick={handleCopyPrefix}>
+							<DropdownMenuItem onClick={() => prefixCopy.copy(apiKey.keyPrefix)}>
 								<CopyIcon size={14} />
 								Copy key prefix
 							</DropdownMenuItem>

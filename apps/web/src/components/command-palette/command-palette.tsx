@@ -16,7 +16,15 @@ import {
 	CommandShortcut,
 } from "@maple/ui/components/ui/command"
 import { Kbd } from "@maple/ui/components/ui/kbd"
-import { GearIcon, GridSquareCirclePlusIcon, KeyboardIcon, MoonIcon, SunIcon } from "@/components/icons"
+import {
+	ChatBubbleSparkleIcon,
+	GearIcon,
+	GridSquareCirclePlusIcon,
+	KeyboardIcon,
+	MoonIcon,
+	SunIcon,
+} from "@/components/icons"
+import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import {
 	investigateNavItems,
 	mainNavItems,
@@ -173,6 +181,15 @@ function PaletteContent({
 
 		const isDark = theme === "dark"
 		const actions: PaletteEntry[] = [
+			{
+				id: "action:ask-maple-ai",
+				title: "Ask Maple AI",
+				group: "Actions",
+				keywords: "chat ai assistant maple ask question",
+				icon: ChatBubbleSparkleIcon,
+				run: openGlobalChat,
+				shortcut: "C",
+			},
 			{
 				id: "action:toggle-theme",
 				title: isDark ? "Switch to light mode" : "Switch to dark mode",

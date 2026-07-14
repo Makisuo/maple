@@ -1,3 +1,23 @@
+diff --git a/node_modules/effect/.bun-tag-2454eb89a3caa910 b/.bun-tag-2454eb89a3caa910
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/internal/redacted.js b/dist/internal/redacted.js
+index b71c514f6c36983a6fb94a663e9ff878d58a3c1b..6192bdac6f761aef3c8e1ed2f3b4747ffd55692f 100644
+--- a/dist/internal/redacted.js
++++ b/dist/internal/redacted.js
+@@ -1,5 +1,11 @@
+ /** @internal */
+-export const redactedRegistry = /*#__PURE__*/new WeakMap();
++// Patched (maple): share the registry across duplicate `effect` module
++// instances via a Symbol.for-keyed global (like effect v3's globalValue).
++// Bun's isolated linker gives the alchemy CLI and the user's alchemy.run.ts
++// two path-distinct copies of this module; a module-local WeakMap makes
++// `Redacted.value` throw "Unable to get redacted value" for a Redacted made
++// by the other copy.
++export const redactedRegistry = globalThis[Symbol.for("effect/Redacted/redactedRegistry")] ??= /*#__PURE__*/new WeakMap();
+ /** @internal */
+ export const value = self => {
+   if (redactedRegistry.has(self)) {
 diff --git a/dist/unstable/ai/McpServer.d.ts b/dist/unstable/ai/McpServer.d.ts
 index 87a6f7acdd3d7f89b41fac68e575d80a09748f64..b523535a8123bb7e6bb0f8022ca597cb91e36f5f 100644
 --- a/dist/unstable/ai/McpServer.d.ts

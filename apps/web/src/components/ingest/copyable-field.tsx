@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { toast } from "sonner"
 
 import {
 	InputGroup,
@@ -8,6 +7,7 @@ import {
 	InputGroupInput,
 } from "@maple/ui/components/ui/input-group"
 import { CheckIcon, CopyIcon, EyeIcon } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 /** Mask an ingest key, keeping the readable prefix + last four characters. */
 export function maskKey(key: string): string {
@@ -31,19 +31,8 @@ interface CopyableFieldProps {
  * dashboard setup checklist.
  */
 export function CopyableField({ value, label, masked }: CopyableFieldProps) {
-	const [copied, setCopied] = useState(false)
+	const { copied, copy } = useCopyToClipboard(label || "Command")
 	const [isVisible, setIsVisible] = useState(false)
-
-	async function handleCopy() {
-		try {
-			await navigator.clipboard.writeText(value)
-			setCopied(true)
-			toast.success(`${label || "Command"} copied`)
-			setTimeout(() => setCopied(false), 1500)
-		} catch {
-			toast.error(`Failed to copy ${(label || "command").toLowerCase()}`)
-		}
-	}
 
 	return (
 		<div className="space-y-1">
@@ -64,7 +53,7 @@ export function CopyableField({ value, label, masked }: CopyableFieldProps) {
 						</InputGroupButton>
 					)}
 					<InputGroupButton
-						onClick={handleCopy}
+						onClick={() => copy(value)}
 						aria-label={`Copy ${(label || "command").toLowerCase()}`}
 					>
 						{copied ? (

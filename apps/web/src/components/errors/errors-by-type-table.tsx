@@ -1,4 +1,4 @@
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Fragment, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { formatDistanceToNow, format } from "date-fns"
@@ -222,11 +222,13 @@ function LoadingState() {
 export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 	const [expandedError, setExpandedError] = useState<string | null>(null)
 
-	const errorsResult = useRefreshableAtomValue(getErrorsByTypeResultAtom({ data: filters }))
+	const errorsAtom = getErrorsByTypeResultAtom({ data: filters })
+	const errorsResult = useRefreshableAtomValue(errorsAtom)
+	const refreshErrors = useAtomRefresh(errorsAtom)
 
 	return Result.builder(errorsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <QueryErrorState error={error} />)
+		.onError((error) => <QueryErrorState error={error} onRetry={refreshErrors} />)
 		.onSuccess((response, result) => {
 			const errors = response.data ?? []
 

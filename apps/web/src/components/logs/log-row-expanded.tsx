@@ -1,6 +1,5 @@
-import { toast } from "sonner"
 import { CopyIcon, ExternalLinkIcon } from "@/components/icons"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import type { Log } from "@/api/warehouse/logs"
 import { LogAttributesPanel } from "./log-attributes-panel"
 import { buildLogJsonPayload } from "./log-raw-panel"
@@ -18,7 +17,7 @@ interface LogRowExpandedProps {
  * without leaving the stream.
  */
 export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
-	const clipboard = useClipboard()
+	const { copy } = useCopyToClipboard("Log JSON")
 
 	return (
 		<div className="border-t border-border/60 bg-muted/15 px-3 py-2.5 font-mono">
@@ -38,8 +37,7 @@ export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
 					type="button"
 					onClick={(e) => {
 						e.stopPropagation()
-						clipboard.copy(buildLogJsonPayload(log))
-						toast.success("Copied log as JSON")
+						copy(buildLogJsonPayload(log))
 					}}
 					className="flex items-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground cursor-pointer"
 				>

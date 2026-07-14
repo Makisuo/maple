@@ -1,7 +1,8 @@
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomValue, useAtomRefresh } from "@/lib/effect-atom"
 import { PlusIcon, ChartLineIcon, ChartBarIcon, ChartBarTrendUpIcon } from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
+import { ErrorState } from "@/components/common/error-state"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type ListMetricsInput } from "@/api/warehouse/metrics"
 import { getMetricsSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -54,7 +55,9 @@ export function MetricsSummaryCards({
 	startTime,
 	endTime,
 }: MetricsSummaryCardsProps) {
-	const summaryResult = useAtomValue(getMetricsSummaryResultAtom({ data: { startTime, endTime } }))
+	const summaryAtom = getMetricsSummaryResultAtom({ data: { startTime, endTime } })
+	const summaryResult = useAtomValue(summaryAtom)
+	const refreshSummary = useAtomRefresh(summaryAtom)
 
 	return Result.builder(summaryResult)
 		.onInitial(() => (
@@ -72,20 +75,13 @@ export function MetricsSummaryCards({
 				))}
 			</div>
 		))
-		.onError(() => (
-			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-				{cardConfig.map((card) => (
-					<Card key={card.title}>
-						<CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
-							<CardTitle className="text-sm font-medium">{card.title}</CardTitle>
-							<card.icon size={16} className="text-muted-foreground" />
-						</CardHeader>
-						<CardContent>
-							<div className="text-sm text-muted-foreground">Unable to load</div>
-						</CardContent>
-					</Card>
-				))}
-			</div>
+		.onError((error) => (
+			<ErrorState
+				variant="inline"
+				error={error}
+				title="Failed to load metrics summary"
+				onRetry={refreshSummary}
+			/>
 		))
 		.onSuccess((response, result) => {
 			const summaryByType = response.data.reduce(

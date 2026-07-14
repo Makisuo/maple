@@ -11,8 +11,7 @@ import {
 	ChevronUpIcon,
 	CopyIcon,
 } from "@/components/icons"
-import { toast } from "sonner"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Alert, AlertTitle, AlertDescription } from "@maple/ui/components/ui/alert"
@@ -157,15 +156,12 @@ What could be causing this error and how can I fix it?`
 }
 
 function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSectionProps) {
-	const clipboard = useClipboard()
+	const promptCopy = useCopyToClipboard("Error prompt")
 	const [expanded, setExpanded] = useState(false)
 	const isLong = message.length > 120 || message.includes("\n")
 
-	const handleCopyPrompt = async () => {
-		const prompt = formatErrorPrompt({ message, serviceName, spanName, attributes })
-		await clipboard.copy(prompt)
-		toast.success("Copied error prompt to clipboard")
-	}
+	const handleCopyPrompt = () =>
+		promptCopy.copy(formatErrorPrompt({ message, serviceName, spanName, attributes }))
 
 	return (
 		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">

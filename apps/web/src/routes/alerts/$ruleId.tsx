@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
@@ -265,7 +266,7 @@ function RuleDetailContent() {
 						<EmptyTitle>Failed to load alert rule</EmptyTitle>
 						<EmptyDescription>
 							{Result.builder(rulesResult)
-								.onError((error) => error.message)
+								.onError((error) => formatBackendError(error).description)
 								.orElse(() => undefined) ?? "Try refreshing or check API logs."}
 						</EmptyDescription>
 					</EmptyHeader>
@@ -575,7 +576,7 @@ function RuleDetailContent() {
 										</EmptyMedia>
 										<EmptyTitle>Failed to load checks</EmptyTitle>
 										<EmptyDescription>
-											{error.message ?? "Try refreshing or check API logs."}
+											{formatBackendError(error).description}
 										</EmptyDescription>
 									</EmptyHeader>
 									<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
@@ -612,7 +613,7 @@ function RuleDetailContent() {
 								</EmptyMedia>
 								<EmptyTitle>Failed to load incidents</EmptyTitle>
 								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
+									{formatBackendError(error).description}
 								</EmptyDescription>
 							</EmptyHeader>
 							<Button variant="outline" size="sm" onClick={() => refreshIncidents()}>

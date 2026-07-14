@@ -9,7 +9,7 @@ import {
 	type UserId,
 } from "@maple/domain/http"
 import { oauthAuthStates } from "@maple/db"
-import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Option, Redacted, Result, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Database } from "../lib/DatabaseLive"
 import { Env, type EnvShape } from "../lib/Env"
@@ -24,6 +24,12 @@ const decodeOrgId = Schema.decodeUnknownSync(OrgId)
 export const planetScaleBearerHeader = (accessToken: string): string => `Bearer ${accessToken}`
 
 const REQUEST_TIMEOUT = Duration.seconds(15)
+/**
+ * The exchange mints the token at auth.planetscale.com but the v1 API validates
+ * it against its own store — an immediate `invalid_token` right after a
+ * successful exchange smells like propagation lag, so wait once before retrying.
+ */
+const TOKEN_REJECTED_RETRY_DELAY = Duration.seconds(2)
 /** Pagination caps for the org listing — same bounds as the inventory poller. */
 const PAGE_SIZE = 100
 const MAX_PAGES = 10
@@ -34,6 +40,8 @@ interface ResolvedPlanetScaleOAuthConfig {
 	readonly clientSecret: Redacted.Redacted<string>
 	readonly authorizeUrl: string
 	readonly tokenUrl: string
+	/** Space-delimited, resource-prefixed scopes sent in the authorize request. */
+	readonly scopes: string
 }
 
 const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(function* (env: EnvShape) {
@@ -60,6 +68,7 @@ const resolveConfig = Effect.fn("PlanetScaleOAuthService.resolveConfig")(functio
 		clientSecret,
 		authorizeUrl: env.PLANETSCALE_OAUTH_AUTHORIZE_URL,
 		tokenUrl: env.PLANETSCALE_OAUTH_TOKEN_URL,
+		scopes: env.PLANETSCALE_OAUTH_SCOPES,
 	} satisfies ResolvedPlanetScaleOAuthConfig
 })
 
@@ -78,6 +87,14 @@ const OrganizationsPageSchema = Schema.Struct({ data: Schema.Array(OrganizationS
 const decodeOrganizationsPage = Schema.decodeUnknownEffect(
 	Schema.fromJsonString(OrganizationsPageSchema),
 )
+
+/**
+ * `GET /oauth/token/info` is doorkeeper-style: a VALID presented token answers
+ * 200 with the token's details (scope, expires_in, resource_owner_id — no RFC
+ * 7662 `active` field), an invalid one answers 401 `invalid_token`. The verdict
+ * is therefore the status code, not a body field. Verified live 2026-07-13.
+ */
+type TokenIntrospectionVerdict = "valid" | "invalid" | "unknown"
 
 const CurrentUserSchema = Schema.Struct({
 	id: Schema.String,
@@ -191,6 +208,55 @@ export class PlanetScaleOAuthService extends Context.Service<
 			)
 		})
 
+		/**
+		 * Ask PlanetScale's auth server whether a token it minted is valid. Purely
+		 * diagnostic — never fails, never logs the token. `Option.none` means the
+		 * introspection itself was unreachable/undecodable.
+		 */
+		const introspectToken = Effect.fn("PlanetScaleOAuthService.introspectToken")(function* (
+			accessToken: string,
+		) {
+			return yield* Effect.gen(function* () {
+				const request = HttpClientRequest.get(env.PLANETSCALE_OAUTH_TOKEN_INFO_URL).pipe(
+					HttpClientRequest.setHeaders({
+						Authorization: planetScaleBearerHeader(accessToken),
+						Accept: "application/json",
+					}),
+				)
+				const res = yield* httpClient.execute(request)
+				const text = yield* res.text
+				if (res.status >= 200 && res.status < 300) {
+					// The token-info body carries scope/expiry/owner ids, never the token
+					// itself — safe (and load-bearing) to log for diagnosis.
+					yield* Effect.logInfo("PlanetScale auth server accepted the token on introspection", {
+						body: text.slice(0, 300),
+					})
+					return "valid" satisfies TokenIntrospectionVerdict
+				}
+				if (res.status === 401 || res.status === 403) {
+					yield* Effect.logError("PlanetScale auth server rejected the token on introspection", {
+						status: res.status,
+						body: text.slice(0, 200),
+					})
+					return "invalid" satisfies TokenIntrospectionVerdict
+				}
+				yield* Effect.logWarning("PlanetScale token introspection returned an unexpected status", {
+					status: res.status,
+				})
+				return "unknown" satisfies TokenIntrospectionVerdict
+			}).pipe(
+				Effect.timeoutOrElse({
+					duration: REQUEST_TIMEOUT,
+					orElse: () => Effect.succeed("unknown" satisfies TokenIntrospectionVerdict),
+				}),
+				Effect.catchCause((cause) =>
+					Effect.logWarning("PlanetScale token introspection failed", { cause }).pipe(
+						Effect.as("unknown" satisfies TokenIntrospectionVerdict),
+					),
+				),
+			)
+		})
+
 		const fetchOrganizations = Effect.fn("PlanetScaleOAuthService.fetchOrganizations")(function* (
 			accessToken: string,
 		) {
@@ -203,6 +269,12 @@ export class PlanetScaleOAuthService extends Context.Service<
 				// A dead grant is a revoked-authorization failure, not a generic
 				// upstream one — the org picker keys its reconnect CTA on the tag.
 				if (response.status === 401 || response.status === 403) {
+					// Surface PlanetScale's own error body — `invalid_token` vs an
+					// insufficient-scope message points to very different causes.
+					yield* Effect.logError("PlanetScale rejected the OAuth token on /v1/organizations", {
+						status: response.status,
+						body: response.text.slice(0, 400),
+					})
 					return yield* Effect.fail(
 						new IntegrationsRevokedError({
 							message: `PlanetScale rejected the authorization (HTTP ${response.status}) when listing organizations — reconnect the integration`,
@@ -252,13 +324,16 @@ export class PlanetScaleOAuthService extends Context.Service<
 				}),
 			)
 
-			// No scope param — access scopes are configured on the PlanetScale OAuth
-			// application itself. No PKCE — PlanetScale OAuth apps are confidential
-			// clients authenticated by the client secret at token exchange.
+			// PlanetScale REQUIRES the scope param — the app's configured scopes are the
+			// allowed maximum, not an implicit default, so omitting it fails the authorize
+			// with `invalid_scope`. Scopes are resource-prefixed (`organization:read_databases`)
+			// and space-delimited. No PKCE — PlanetScale OAuth apps are confidential clients
+			// authenticated by the client secret at token exchange.
 			const params = new URLSearchParams({
 				client_id: config.clientId,
 				redirect_uri: options.callbackUrl,
 				response_type: "code",
+				scope: config.scopes,
 				state,
 			})
 			return { redirectUrl: `${config.authorizeUrl}?${params.toString()}`, state }
@@ -281,6 +356,19 @@ export class PlanetScaleOAuthService extends Context.Service<
 			const orgId = decodeOrgId(stateRow.orgId)
 			yield* Effect.annotateCurrentSpan({ orgId })
 
+			// Diagnostic: the exchange succeeds but the API rejects the token. Record
+			// the token's shape (secret-safe: prefix + length only) and what scopes
+			// PlanetScale actually granted — an opaque `pscale_oauth_` token vs a JWT,
+			// and the granted-scope string, disambiguate why /v1 says `invalid_token`.
+			yield* Effect.annotateCurrentSpan({
+				"planetscale.token.granted_scope": tokenResponse.scope ?? "(none)",
+				"planetscale.token.type": tokenResponse.token_type ?? "(none)",
+				"planetscale.token.prefix": tokenResponse.access_token.slice(0, 13),
+				"planetscale.token.length": tokenResponse.access_token.length,
+				"planetscale.token.looks_jwt": tokenResponse.access_token.split(".").length === 3,
+				"planetscale.token.expires_in": tokenResponse.expires_in ?? "(none)",
+			})
+
 			// The background poller and scraper must renew indefinitely; a grant with
 			// no refresh token silently dies at the access-token expiry. Refuse it
 			// loudly at connect time instead of storing a doomed connection.
@@ -301,7 +389,39 @@ export class PlanetScaleOAuthService extends Context.Service<
 
 			// Resolve what the grant can see before persisting anything: a grant with
 			// no organizations can never feed metrics, so refuse it up front.
-			const organizations = yield* fetchOrganizations(tokenResponse.access_token)
+			//
+			// A 401 here — milliseconds after a successful exchange — cannot be a real
+			// revocation. Retry once (auth→API token-store propagation lag), then
+			// introspect the token at the auth server to classify what remains: a dead
+			// token means reconnecting may help; an active-but-rejected token means it
+			// cannot, and saying "reconnect" would send the user in circles.
+			const organizations = yield* fetchOrganizations(tokenResponse.access_token).pipe(
+				Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (rejection) =>
+					Effect.gen(function* () {
+						yield* Effect.sleep(TOKEN_REJECTED_RETRY_DELAY)
+						const retried = yield* Effect.result(fetchOrganizations(tokenResponse.access_token))
+						yield* Effect.annotateCurrentSpan({
+							"planetscale.orgs.retry_succeeded": Result.isSuccess(retried),
+						})
+						if (Result.isSuccess(retried)) return retried.success
+						if (retried.failure._tag !== "@maple/http/errors/IntegrationsRevokedError") {
+							return yield* Effect.fail(retried.failure)
+						}
+
+						const verdict = yield* introspectToken(tokenResponse.access_token)
+						yield* Effect.annotateCurrentSpan({ "planetscale.token.introspection": verdict })
+						if (verdict === "valid") {
+							return yield* Effect.fail(
+								toUpstreamError(
+									"PlanetScale's API rejected the new access token even though PlanetScale's auth server reports it as valid. Reconnecting won't help — try again in a few minutes, and contact support if it persists.",
+									401,
+								),
+							)
+						}
+						return yield* Effect.fail(rejection)
+					}),
+				),
+			)
 			if (organizations.length === 0) {
 				return yield* Effect.fail(
 					new IntegrationsValidationError({

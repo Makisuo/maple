@@ -133,15 +133,25 @@ export function ServiceUsageCards({ startTime, endTime }: ServiceUsageCardsProps
 			</div>
 		))
 		.onError(() => (
+			// Quiet absence, not four more error blocks — the chart panels below
+			// already carry the full message. Keep the loaded state's card rhythm
+			// with an em-dash in the value slot.
 			<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
 				{cardConfig.map((card) => (
 					<Card key={card.title}>
-						<CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-2">
-							<CardTitle className="text-sm font-medium">{card.title}</CardTitle>
-							<card.icon size={16} className="text-muted-foreground" />
+						<CardHeader className="flex flex-row items-center justify-between gap-y-0 pb-1">
+							<CardTitle className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+								{card.title}
+							</CardTitle>
+							<card.icon size={14} className="text-muted-foreground/70" />
 						</CardHeader>
-						<CardContent>
-							<div className="text-sm text-muted-foreground">Unable to load</div>
+						<CardContent className="pt-0 pb-4">
+							<div className="font-mono text-3xl font-semibold leading-none tracking-tight tabular-nums text-muted-foreground/40">
+								—
+							</div>
+							<div className="mt-2 flex h-[14px] items-center text-xs text-muted-foreground">
+								Couldn&apos;t load
+							</div>
 						</CardContent>
 					</Card>
 				))}

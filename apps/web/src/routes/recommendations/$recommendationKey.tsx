@@ -38,6 +38,7 @@ import {
 	PulseIcon,
 	XmarkIcon,
 } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 export const Route = effectRoute(createFileRoute("/recommendations/$recommendationKey"))({
 	component: RecommendationDetailPage,
@@ -365,16 +366,10 @@ function CautionCallout({ issue, isApplyable }: { issue: RecommendationIssue; is
 
 /** The exact ingest mapping Apply creates — the analog of the reference page's SQL block. */
 function MappingBlock({ issue, isLive }: { issue: RecommendationIssue; isLive: boolean }) {
-	const [copied, setCopied] = useState(false)
+	const { copied, copy } = useCopyToClipboard("Mapping")
 	const snippet = `WHEN span attribute \`${issue.sourceKey}\` is present\nCOPY → \`${issue.canonicalKey}\``
 
-	const onCopy = () => {
-		void navigator.clipboard.writeText(snippet).then(() => {
-			setCopied(true)
-			toast.success("Copied mapping")
-			setTimeout(() => setCopied(false), 1500)
-		})
-	}
+	const onCopy = () => copy(snippet)
 
 	return (
 		<section>

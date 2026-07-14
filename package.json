@@ -18,13 +18,13 @@
 		"dev:alerting": "bun --filter=@maple/alerting dev",
 		"format": "oxfmt && oxlint --ignore-pattern '.context/**' --fix",
 		"alchemy:build-deps": "turbo build --filter=@maple-dev/effect-sdk --filter=@maple-dev/browser --filter=@maple-dev/clickhouse-builder",
-		"alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy",
-		"alchemy:deploy:prd": "bun run alchemy:build-deps && alchemy deploy --stage prd",
-		"alchemy:deploy:stg": "bun run alchemy:build-deps && alchemy deploy --stage stg",
-		"alchemy:deploy:pr": "bun run alchemy:build-deps && alchemy deploy --stage pr-${PR_NUMBER}",
-		"alchemy:destroy": "alchemy destroy",
-		"alchemy:destroy:stg": "alchemy destroy --stage stg",
-		"alchemy:destroy:pr": "alchemy destroy --stage pr-${PR_NUMBER}",
+		"alchemy:deploy": "bun run alchemy:build-deps && alchemy deploy --yes",
+		"alchemy:deploy:prd": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage prd",
+		"alchemy:deploy:stg": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage stg",
+		"alchemy:deploy:pr": "bun run alchemy:build-deps && alchemy deploy --yes --adopt --stage pr-${PR_NUMBER}",
+		"alchemy:destroy": "alchemy destroy --yes",
+		"alchemy:destroy:stg": "alchemy destroy --yes --stage stg",
+		"alchemy:destroy:pr": "alchemy destroy --yes --stage pr-${PR_NUMBER}",
 		"test": "turbo test",
 		"tinybird:manifest": "bun run ./scripts/generate-tinybird-project-manifest.ts",
 		"tinybird:manifest:check": "bun run ./scripts/generate-tinybird-project-manifest.ts --check",
@@ -33,16 +33,18 @@
 		"clickhouse:schema:lint": "bun run ./scripts/lint-clickhouse-schema.ts",
 		"knip": "knip",
 		"knip:fix": "knip --fix --allow-remove-files",
-		"typecheck": "turbo typecheck"
+		"typecheck": "turbo typecheck && tsc -p tsconfig.alchemy.json"
 	},
 	"dependencies": {},
 	"devDependencies": {
 		"@cloudflare/workers-types": "4.20260603.1",
+		"@effect/platform-node": "4.0.0-beta.93",
 		"@effect/vitest": "4.0.0-beta.93",
 		"@maple/infra": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"@types/node": "catalog:tooling",
-		"alchemy": "^0.93.12",
+		"alchemy": "2.0.0-beta.61",
+		"effect": "catalog:effect",
 		"knip": "^6.17.1",
 		"oxfmt": "^0.55.0",
 		"oxlint": "^1.70.0",
@@ -93,6 +95,7 @@
 		}
 	},
 	"patchedDependencies": {
-		"effect@4.0.0-beta.93": "patches/effect@4.0.0-beta.93.patch"
+		"effect@4.0.0-beta.93": "patches/effect@4.0.0-beta.93.patch",
+		"@distilled.cloud/cloudflare@0.28.2": "patches/@distilled.cloud%2Fcloudflare@0.28.2.patch"
 	}
 }

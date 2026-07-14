@@ -1,11 +1,10 @@
-import { useState, type ReactNode } from "react"
-import { toast } from "sonner"
+import type { ReactNode } from "react"
 
 import type { VariantProps } from "class-variance-authority"
 import { badgeVariants } from "@maple/ui/components/ui/badge"
 import { Tooltip, TooltipTrigger, TooltipPopup } from "@maple/ui/components/ui/tooltip"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
 import { cn } from "@maple/ui/utils"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 interface CopyableBadgeProps {
 	/** The full value written to the clipboard (may differ from the displayed children). */
@@ -27,25 +26,13 @@ export function CopyableBadge({
 	size = "default",
 	className,
 }: CopyableBadgeProps) {
-	const clipboard = useClipboard()
-	const [copied, setCopied] = useState(false)
-
-	async function handleCopy() {
-		try {
-			await clipboard.copy(value)
-			setCopied(true)
-			toast.success(`${label} copied to clipboard`)
-			setTimeout(() => setCopied(false), 2000)
-		} catch {
-			toast.error(`Failed to copy ${label}`)
-		}
-	}
+	const { copied, copy } = useCopyToClipboard(label)
 
 	return (
 		<Tooltip>
 			<TooltipTrigger
 				render={<button type="button" />}
-				onClick={handleCopy}
+				onClick={() => copy(value)}
 				aria-label={`Copy ${label}`}
 				className={cn(badgeVariants({ variant, size }), "max-w-full", className)}
 			>

@@ -11,6 +11,9 @@ import type { AlertDestinationRow } from "@maple/db"
 import { Clock, Duration, Effect, Match, Option } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
 import { safeFetch } from "../lib/url-validator"
+// Circular with ./alert-email (it imports our formatting helpers); safe — both
+// sides only reference the other's exports inside function bodies.
+import { buildAlertEmailContent } from "./alert-email"
 import { DEFAULT_BODY_TEMPLATE, DEFAULT_TITLE_TEMPLATE } from "./alert-templating/defaultTemplates"
 import {
 	hasCustomTemplate,
@@ -157,7 +160,7 @@ export const formatComparator = (
 	return `${operator} ${threshold}`
 }
 
-const formatSignalLabel = (signal: string) => {
+export const formatSignalLabel = (signal: string) => {
 	const labels: Record<string, string> = {
 		error_rate: "Error Rate",
 		p95_latency: "P95 Latency",
@@ -169,7 +172,7 @@ const formatSignalLabel = (signal: string) => {
 	return labels[signal] ?? signal
 }
 
-const eventTypeEmoji = (type: string) => {
+export const eventTypeEmoji = (type: string) => {
 	const map: Record<string, string> = {
 		trigger: "\u{1F6A8}",
 		resolve: "\u2705",
@@ -179,7 +182,7 @@ const eventTypeEmoji = (type: string) => {
 	return map[type] ?? "\u{1F4E2}"
 }
 
-const formatEventTypeLabel = (type: string) => {
+export const formatEventTypeLabel = (type: string) => {
 	const map: Record<string, string> = {
 		trigger: "Triggered",
 		resolve: "Resolved",
@@ -202,13 +205,13 @@ const formatSignalMetric = (value: number | null, signalType: string): string =>
 			),
 	})
 
-const formatWindow = (minutes: number): string => {
+export const formatWindow = (minutes: number): string => {
 	if (minutes < 60) return `${minutes}m`
 	const hours = minutes / 60
 	return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
 }
 
-const slackAttachmentColor = (eventType: string, severity: string): string => {
+export const slackAttachmentColor = (eventType: string, severity: string): string => {
 	if (eventType === "resolve") return "#2eb67d"
 	if (eventType === "test") return "#36c5f0"
 	if (severity === "critical") return "#e01e5a"
@@ -228,7 +231,7 @@ type ObservedContext = Pick<
 	"value" | "signalType" | "comparator" | "threshold" | "thresholdUpper"
 >
 
-const formatObservedSummary = (context: ObservedContext): string => {
+export const formatObservedSummary = (context: ObservedContext): string => {
 	const observed = formatSignalMetric(context.value, context.signalType)
 	const comparison =
 		context.comparator === "between" || context.comparator === "not_between"
@@ -563,6 +566,14 @@ export const buildDiscordEmbedsFromTemplate = (
 	},
 ]
 
+export interface DispatchDeps {
+	/**
+	 * Sends one email via the platform email channel (Cloudflare `EMAIL`
+	 * binding). Injected like `fetchFn` so this module stays dependency-free.
+	 */
+	readonly sendEmail: (to: string, subject: string, html: string) => Effect.Effect<void, AlertDeliveryError>
+}
+
 export const dispatchDelivery = (
 	context: DispatchContext,
 	payloadJson: string,
@@ -570,6 +581,7 @@ export const dispatchDelivery = (
 	timeoutMs: number,
 	linkUrl: string,
 	chatUrl: string,
+	deps: DispatchDeps,
 ): Effect.Effect<DispatchResult, AlertDeliveryError> =>
 	Effect.gen(function* () {
 		return yield* Match.value(context.secretConfig).pipe(
@@ -864,6 +876,21 @@ export const dispatchDelivery = (
 							providerMessage: "Delivered to Discord",
 							providerReference: null,
 							responseCode: response.status,
+						} as DispatchResult
+					}),
+				email: (config) =>
+					Effect.gen(function* () {
+						const { subject, html } = yield* buildAlertEmailContent(context, linkUrl, chatUrl)
+						yield* Effect.forEach(
+							config.members,
+							(member) => deps.sendEmail(member.email, subject, html),
+							{ discard: true },
+						)
+						const count = config.members.length
+						return {
+							providerMessage: `Emailed ${count} member${count === 1 ? "" : "s"}`,
+							providerReference: null,
+							responseCode: null,
 						} as DispatchResult
 					}),
 			}),
