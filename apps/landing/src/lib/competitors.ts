@@ -42,19 +42,19 @@ export const competitors: Record<string, Competitor> = {
 		slug: "datadog",
 		tagline: "Open-source observability without the surprise bills",
 		description:
-			"Maple gives you the same distributed tracing, log management, and metrics dashboards as Datadog — built on OpenTelemetry with transparent usage-based pricing and no vendor lock-in.",
+			"Maple covers the core observability workflow — distributed tracing, log management, and metrics dashboards — built on OpenTelemetry with a flat per-GB rate and source code you can read.",
 		features: {
 			"Pricing model": {
 				maple: "Usage-based, transparent",
 				competitor: "Complex per-host + per-GB",
 			},
 			"Open source": {
-				maple: true,
+				maple: "FSL-1.1 → Apache 2.0",
 				competitor: false,
 			},
 			"OpenTelemetry native": {
 				maple: true,
-				competitor: false,
+				competitor: "OTLP ingest via Datadog Agent",
 			},
 			"Distributed tracing": {
 				maple: true,
@@ -70,7 +70,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			"AI / MCP integration": {
 				maple: true,
-				competitor: false,
+				competitor: true,
 			},
 			"Self-hosting available": {
 				maple: true,
@@ -78,7 +78,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			"No vendor lock-in": {
 				maple: true,
-				competitor: false,
+				competitor: "Proprietary agent by default",
 			},
 			"Custom dashboards": {
 				maple: true,
@@ -90,15 +90,15 @@ export const competitors: Record<string, Competitor> = {
 			},
 			"Setup time": {
 				maple: "Minutes",
-				competitor: "Hours to days",
+				competitor: "Agent rollout per host",
 			},
 			"Proprietary agents required": {
 				maple: false,
 				competitor: true,
 			},
 			"Data retention control": {
-				maple: true,
-				competitor: false,
+				maple: "Configurable",
+				competitor: "Fixed tiers per product",
 			},
 			"Team seats included": {
 				maple: "Unlimited",
@@ -154,7 +154,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			{
 				question: "How does Maple's pricing compare to Datadog?",
-				answer: "Maple uses transparent, usage-based pricing based on data volume — no per-host fees, no per-seat charges, no separate costs for custom metrics. Datadog's pricing combines per-host, per-GB, and per-feature charges that can lead to unexpected bills as you scale. Most teams see significant cost savings with Maple.",
+				answer: "Maple charges a flat rate per GB of ingested data — no per-host fees, no per-seat charges, no separate costs for custom metrics. Datadog's list pricing combines per-host, per-GB, and per-feature charges. Whether you save depends on your host count and data volume; the pricing calculator compares both on your actual numbers.",
 			},
 			{
 				question: "Can I migrate from Datadog to Maple without downtime?",
@@ -181,13 +181,13 @@ export const competitors: Record<string, Competitor> = {
 			},
 			{
 				value: "100%",
-				label: "Open source",
-				detail: "Every line of code is open — audit, contribute, and self-host freely",
+				label: "Source on GitHub",
+				detail: "FSL-1.1, converting to Apache 2.0 — audit it, fork it, self-host it",
 			},
 			{
 				value: "$0",
 				label: "Per-seat cost",
-				detail: "Unlimited team members included. No per-seat pricing, ever",
+				detail: "No per-seat pricing on any plan — every engineer gets access",
 			},
 		],
 	},
@@ -203,7 +203,7 @@ export const competitors: Record<string, Competitor> = {
 				competitor: "Usage-based + self-host costs",
 			},
 			"Open source": {
-				maple: true,
+				maple: "FSL-1.1 → Apache 2.0",
 				competitor: true,
 			},
 			"OpenTelemetry native": {
@@ -224,7 +224,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			"AI / MCP integration": {
 				maple: true,
-				competitor: false,
+				competitor: true,
 			},
 			"Self-hosting available": {
 				maple: true,
@@ -309,7 +309,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			{
 				question: "How does Maple compare to Grafana Cloud?",
-				answer: "Grafana Cloud manages the Loki/Tempo/Mimir stack for you but you're still working with multiple query languages and separate data stores. Maple provides a unified experience where all signals are correlated automatically — plus AI-powered diagnostics and MCP integration that Grafana doesn't offer.",
+				answer: "Grafana Cloud manages the Loki/Tempo/Mimir stack for you, but you're still working with multiple query languages and separate data stores. Maple stores all three signals in one database, so traces, logs, and metrics are correlated automatically instead of joined across backends.",
 			},
 			{
 				question: "Do I need to learn a new query language?",
@@ -351,14 +351,14 @@ export const competitors: Record<string, Competitor> = {
 		slug: "new-relic",
 		tagline: "Full-stack observability without per-seat pricing",
 		description:
-			"Maple provides the same full-stack observability as New Relic — traces, logs, and metrics — with OpenTelemetry-native ingestion, no per-seat fees, and the freedom to self-host.",
+			"Maple covers the observability core — traces, logs, and metrics — with OpenTelemetry-native ingestion, no per-seat fees, and the freedom to self-host.",
 		features: {
 			"Pricing model": {
 				maple: "Usage-based, transparent",
 				competitor: "Per-seat + per-GB",
 			},
 			"Open source": {
-				maple: true,
+				maple: "FSL-1.1 → Apache 2.0",
 				competitor: false,
 			},
 			"OpenTelemetry native": {
@@ -379,7 +379,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			"AI / MCP integration": {
 				maple: true,
-				competitor: false,
+				competitor: true,
 			},
 			"Self-hosting available": {
 				maple: true,
@@ -387,7 +387,7 @@ export const competitors: Record<string, Competitor> = {
 			},
 			"No vendor lock-in": {
 				maple: true,
-				competitor: false,
+				competitor: "Proprietary agents, NRQL",
 			},
 			"Custom dashboards": {
 				maple: true,
@@ -406,8 +406,8 @@ export const competitors: Record<string, Competitor> = {
 				competitor: true,
 			},
 			"Data retention control": {
-				maple: true,
-				competitor: false,
+				maple: "Configurable",
+				competitor: "Extended retention costs extra",
 			},
 			"Team seats included": {
 				maple: "Unlimited",
@@ -460,11 +460,11 @@ export const competitors: Record<string, Competitor> = {
 		faqs: [
 			{
 				question: "Is Maple a full replacement for New Relic?",
-				answer: "Maple covers the core observability features: distributed tracing, log management, metrics dashboards, alerting, and AI-powered diagnostics. If you're using New Relic primarily for APM, logs, and infrastructure monitoring, Maple handles those use cases. Advanced New Relic features like Browser Monitoring and Synthetics are not yet available.",
+				answer: "Maple covers the core observability features: distributed tracing, log management, metrics dashboards, alerting, and AI-powered diagnostics. If you're using New Relic primarily for APM, logs, and infrastructure monitoring, Maple handles those use cases. For browser-side visibility Maple offers session replay correlated with backend traces rather than full RUM; Synthetics has no Maple equivalent yet.",
 			},
 			{
 				question: "How much can I save by switching from New Relic to Maple?",
-				answer: "Savings depend on your team size and data volume. New Relic charges per full-platform user (and per GB of data beyond the free tier). Maple charges only for data volume with unlimited seats — so the more engineers you have, the more you save. Teams with 10+ users typically see significant reductions.",
+				answer: "Savings depend on your team size and data volume. New Relic's list price charges per full-platform user plus per GB of data beyond the free tier. Maple charges only for data volume, with no seat fees — so the difference grows with the number of engineers who need access. Run both through the pricing calculator on your actual numbers.",
 			},
 			{
 				question: "Does Maple support NRQL or a similar query language?",
@@ -487,12 +487,12 @@ export const competitors: Record<string, Competitor> = {
 			{
 				value: "$0",
 				label: "Per-seat cost",
-				detail: "Unlimited team members — no per-user fees to limit observability access",
+				detail: "No per-user fees to limit observability access",
 			},
 			{
 				value: "100%",
-				label: "Open source",
-				detail: "Inspect every line of code. No black-box data processing",
+				label: "Source on GitHub",
+				detail: "FSL-1.1, converting to Apache 2.0 — no black-box data processing",
 			},
 			{
 				value: "0",
@@ -513,7 +513,7 @@ export const competitors: Record<string, Competitor> = {
 				competitor: "Usage-based, transparent",
 			},
 			"Open source": {
-				maple: true,
+				maple: "FSL-1.1 → Apache 2.0",
 				competitor: false,
 			},
 			"OpenTelemetry native": {

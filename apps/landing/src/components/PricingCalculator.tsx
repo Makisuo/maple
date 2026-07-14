@@ -222,8 +222,8 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 	}
 
 	// Maple: 100 GB each for logs, traces, metrics = 300 GB total included
-	// Overage billed at $0.25/GB beyond 300 GB total
-	const overage = Math.max(0, totalDataGB - 300) * 0.25
+	// Overage billed at $0.30/GB beyond 300 GB total (autumn.config.ts)
+	const overage = Math.max(0, totalDataGB - 300) * 0.3
 
 	return {
 		total: baseCost + overage,
@@ -234,11 +234,11 @@ function calculateMaple(values: Record<string, number>, competitor: Competitor) 
 						{
 							label: "Overage",
 							value: overage,
-							detail: `${Math.round(totalDataGB - 300)} GB × $0.25`,
+							detail: `${Math.round(totalDataGB - 300)} GB × $0.30`,
 						},
 					]
 				: []),
-			{ label: "Team seats", value: 0, detail: "Unlimited — always free" },
+			{ label: "Team seats", value: 0, detail: "No per-seat fees" },
 		],
 	}
 }
@@ -437,7 +437,7 @@ export function PricingCalculator({ competitor }: { competitor: Competitor }) {
 			<p className="mt-4 text-[10px] text-[oklch(0.4_0.02_60)] leading-relaxed">
 				Estimates based on published pricing as of 2025. Actual costs may vary based on contract
 				terms, volume discounts, and additional features. Maple pricing based on the Startup plan
-				($39/mo with 300 GB total included data, then $0.25/GB).
+				($39/mo with 300 GB total included data, then $0.30/GB).
 				{competitor === "dash0" &&
 					" Dash0 bills per data point (spans & logs $0.60/M, metrics $0.20/M); Maple bills per GB, so the Maple estimate converts data points to volume at roughly 1 KB per span and log record and 0.1 KB per metric data point. Your real ratio depends on attribute and payload sizes."}
 			</p>
