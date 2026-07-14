@@ -278,8 +278,10 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 
 				<a
 					href="https://app.maple.dev"
-					className={`inline-flex h-8 items-center justify-center rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-all duration-300 hover:bg-primary/80 ${
-						heroCtaVisible ? "pointer-events-none -translate-y-1 opacity-0" : "translate-y-0 opacity-100"
+					className={`inline-flex h-8 items-center justify-center overflow-hidden whitespace-nowrap rounded-lg bg-primary text-xs font-medium text-primary-foreground transition-all duration-300 hover:bg-primary/80 ${
+						heroCtaVisible
+							? "pointer-events-none max-w-0 px-0 opacity-0 -ml-3 sm:-ml-6"
+							: "max-w-40 px-2.5 opacity-100 ml-0"
 					}`}
 					aria-hidden={heroCtaVisible}
 					tabIndex={heroCtaVisible ? -1 : undefined}
