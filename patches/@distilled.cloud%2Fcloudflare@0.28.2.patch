@@ -1,0 +1,28 @@
+diff --git a/src/services/workers.ts b/src/services/workers.ts
+index 37a49f4f921ac3aab77cc907d643fb5c5543a522..f60712eace118447f06a27b6c20943f5b851b6bc 100644
+--- a/src/services/workers.ts
++++ b/src/services/workers.ts
+@@ -1722,7 +1722,10 @@ const GetBetaWorkerVersionResponsePlacement4 =
+   /*@__PURE__*/ /*#__PURE__*/ Schema.suspend(() =>
+     Schema.Struct({
+       mode: Schema.Literal("targeted"),
+-      region: Schema.String,
++      // Patched (maple): Cloudflare's put-script response can echo a targeted
++      // placement without the region (`{"mode":"targeted"}`), which failed this
++      // union and surfaced as CloudflareHttpError on a 200 response.
++      region: Schema.optional(Schema.String),
+     }),
+   ) as unknown as Schema.Codec<GetBetaWorkerVersionResponsePlacement4>;
+ 
+@@ -5984,7 +5987,10 @@ const ListScriptsResponseResultPlacement4 =
+   /*@__PURE__*/ /*#__PURE__*/ Schema.suspend(() =>
+     Schema.Struct({
+       mode: Schema.Literal("targeted"),
+-      region: Schema.String,
++      // Patched (maple): Cloudflare's put-script response can echo a targeted
++      // placement without the region (`{"mode":"targeted"}`), which failed this
++      // union and surfaced as CloudflareHttpError on a 200 response.
++      region: Schema.optional(Schema.String),
+       lastAnalyzedAt: Schema.optional(
+         Schema.Union([Schema.String, Schema.Null]),
+       ),
