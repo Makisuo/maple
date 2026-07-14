@@ -203,7 +203,7 @@ function Waterfall({
 							key={s.spanId}
 							onClick={() => onSelectSpan(s)}
 							className={`flex items-center px-4 py-1.5 text-[10px] transition-colors cursor-pointer ${
-								isSelected ? "bg-primary/5 border-l-2 border-l-accent" : "hover:bg-muted/20"
+								isSelected ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/20"
 							}`}
 						>
 							<div

@@ -279,15 +279,15 @@ const valueProps = [
         left: 0;
         right: 0;
         height: 2px;
-        background: linear-gradient(to right, var(--accent), transparent);
+        background: linear-gradient(to right, var(--primary), transparent);
         transform: scaleX(0);
         transform-origin: left center;
         transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
     }
     .vp:hover {
-        border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+        border-color: color-mix(in oklab, var(--primary) 40%, var(--border));
         transform: translateY(-3px);
-        background: color-mix(in oklab, var(--accent) 4%, var(--bg-elevated));
+        background: color-mix(in oklab, var(--primary) 4%, var(--bg-elevated));
     }
     .vp:hover::before {
         transform: scaleX(1);
@@ -306,7 +306,7 @@ const valueProps = [
         transition: color 200ms ease;
     }
     .vp:hover .vp__idx {
-        color: var(--accent);
+        color: var(--primary);
     }
 
     @media (prefers-reduced-motion: reduce) {
