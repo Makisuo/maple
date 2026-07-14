@@ -110,7 +110,10 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			url: true,
-			routes: domains.api ? [{ pattern: `${domains.api}/*` }] : undefined,
+			// Custom domain (not a zone route): routes don't create DNS records, so
+			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
+			// provision DNS + edge certs automatically.
+			domain: domains.api,
 			// Periodic VCS sync backstop (every 12h) — enqueues a refresh per installation; see worker.ts `scheduled`.
 			crons: ["0 */12 * * *"],
 			env: {

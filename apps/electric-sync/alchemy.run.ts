@@ -43,7 +43,10 @@ export const createElectricSyncWorker = ({ stage, domains }: CreateElectricSyncW
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			url: true,
-			routes: domains.sync ? [{ pattern: `${domains.sync}/*` }] : undefined,
+			// Custom domain (not a zone route): routes don't create DNS records, so
+			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
+			// provision DNS + edge certs automatically.
+			domain: domains.sync,
 			env: {
 				// Auth (same AuthEnv subset the api worker sets; no DB).
 				MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
