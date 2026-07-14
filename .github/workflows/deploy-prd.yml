@@ -1,9 +1,9 @@
 name: Deploy PRD (Cloudflare via Alchemy)
 
+# Manual-only while prd is not yet migrated to alchemy v2 (the stack program
+# fails fast on --stage prd until the maple-prd Hyperdrive is wired by ref).
+# Restore the push-to-main trigger when prd cuts over.
 on:
-    push:
-        branches:
-            - main
     workflow_dispatch:
 
 concurrency:
