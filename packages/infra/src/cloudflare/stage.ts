@@ -5,7 +5,8 @@ export type MapleStage =
 	| { kind: "dev"; name: string }
 
 const PR_STAGE_RE = /^pr-(\d+)$/
-const DEV_STAGE_RE = /^[a-z0-9][a-z0-9-]*$/
+// Underscores allowed so alchemy's default `dev_${USER}` stage parses as a dev stage.
+const DEV_STAGE_RE = /^[a-z0-9][a-z0-9_-]*$/
 
 export interface MapleDomains {
 	web?: string
@@ -102,13 +103,20 @@ export function resolveMapleDomains(stage: MapleStage): MapleDomains {
 		case "stg":
 			return STG_DOMAINS
 		case "pr":
-			// Give PR previews a stable, secret-free web URL so GitHub can attach it
-			// to the PR as a clickable deployment. The default workers.dev URL embeds
-			// the Cloudflare account subdomain, which Infisical masks as a secret —
-			// GitHub then refuses to set the environment URL. A custom domain under the
-			// `maple.dev` zone has no secret in it. api/chat/ingest stay on workers.dev
-			// (the API allows all origins, so cross-origin calls keep working).
-			return { web: `app-pr-${stage.prNumber}.maple.dev` }
+			// Give PR previews stable, secret-free URLs. The default workers.dev URL
+			// embeds the Cloudflare account subdomain, which Infisical masks as a
+			// secret — GitHub then refuses to set the environment URL. Custom domains
+			// under the `maple.dev` zone have no secret in them. They also keep every
+			// inter-app URL a plain string at deploy time, which alchemy v2 requires:
+			// resource attributes like `worker.url` are lazy Outputs that cannot be
+			// string-interpolated into another worker's env. landing/local-ui have no
+			// pr domains (nothing links to them from previews).
+			return {
+				web: `app-pr-${stage.prNumber}.maple.dev`,
+				api: `api-pr-${stage.prNumber}.maple.dev`,
+				chat: `chat-pr-${stage.prNumber}.maple.dev`,
+				sync: `sync-pr-${stage.prNumber}.maple.dev`,
+			}
 		case "dev":
 			return {}
 	}
