@@ -209,7 +209,7 @@ export const formatBackendError = (input: unknown): FormattedError => {
 		if (reasonTag === "TransportError" || reasonTag === "InvalidUrlError") {
 			return {
 				title: "Cannot reach Maple API",
-				description: "Check your network connection and try again.",
+				description: "Check your connection — data will resume once the API is reachable.",
 			}
 		}
 		if (status !== undefined && status >= 500) {
@@ -233,7 +233,7 @@ export const formatBackendError = (input: unknown): FormattedError => {
 		if (/transport error|failed to fetch|load failed|networkerror/i.test(error.message)) {
 			return {
 				title: "Cannot reach Maple API",
-				description: "Check your network connection and try again.",
+				description: "Check your connection — data will resume once the API is reachable.",
 			}
 		}
 		return {
