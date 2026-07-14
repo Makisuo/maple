@@ -33,7 +33,9 @@ const locales = ["en", "ja", "ko"];
 ---
 
 <!doctype html>
-<html lang={currentLocale}>
+<!-- Landing is dark-only: pin the shared theme's dark class (tokens live in
+     @maple/ui/styles/tokens.css; light values exist but are unused here). -->
+<html lang={currentLocale} class="dark">
     <head>
         <meta charset="utf-8" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />

@@ -399,7 +399,7 @@ export const nav_desc_vs_new_relic = () => `OTel-native, predictable pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_desc_vs_dash0 = () => `More signals, deeper tracing`
+export const nav_desc_vs_dash0 = () => `Open source and self-hostable`
 
 
 /**
@@ -479,7 +479,7 @@ export const hero_title_accent = () => `Native to AI.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `Traces, logs, and metrics on OpenTelemetry. Query billions of rows in milliseconds — or let your AI agent do it.`
+export const hero_subtitle = () => `Traces, logs, and metrics over OpenTelemetry, stored in ClickHouse. Sub-second queries across billions of rows — or let your AI agent run them for you.`
 
 
 /**
@@ -503,7 +503,7 @@ export const sov_title = () => `Your data, your instrumentation, your bill.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_lede = () => `Maple is the observability backend you'd build if you weren't trying to extract every dollar. OpenTelemetry in. ClickHouse-grade query speed out. The source on GitHub the whole time.`
+export const sov_lede = () => `Maple is the observability backend you'd build if you weren't optimizing for the invoice. OpenTelemetry in. ClickHouse speed out. The source on GitHub the whole time.`
 
 
 /**
@@ -519,7 +519,7 @@ export const sov_pillar_1_label = () => `Open source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_1_body = () => `Open-source under FSL-1.1. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
+export const sov_pillar_1_body = () => `Source on GitHub under FSL-1.1 — each release becomes Apache 2.0 after two years. Read every line, fork it, self-host on your own boxes if that's what your security review needs.`
 
 
 /**
@@ -551,7 +551,7 @@ export const sov_pillar_3_label = () => `Honest pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_3_body = () => `Pay for the gigabytes you send. No per-host fees. No per-seat fees. The same numbers your invoice shows.`
+export const sov_pillar_3_body = () => `Pay $39/month for 100 GB per signal, then a flat $0.30/GB. No per-host fees. No per-seat fees. The pricing page and your invoice show the same numbers.`
 
 
 /**
@@ -623,7 +623,7 @@ export const logs_title = () => `A log feed that doesn't crater your bill at sca
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const logs_lede = () => `Structured logs streamed straight from OTLP. Severity, service, message, duration. Searchable in seconds, retained for the window you actually care about.`
+export const logs_lede = () => `Structured logs streamed straight from OTLP. Severity, service, message, duration. Searchable in seconds, retained for 30 days on Startup — custom retention on Enterprise.`
 
 
 /**
@@ -671,7 +671,7 @@ export const mcp_title = () => `Your AI agent reads it too.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_lede = () => `Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, propose fixes, open PRs. The transcript on the right is real.`
+export const mcp_lede = () => `Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, and propose fixes. The transcript on the right walks through the exact tool calls an agent makes.`
 
 
 /**
@@ -839,7 +839,7 @@ export const bill_eyebrow = () => `07 · The bill`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_title = () => `We told you it was honest.`
+export const bill_title = () => `The bill, line by line.`
 
 
 /**
@@ -847,7 +847,7 @@ export const bill_title = () => `We told you it was honest.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_lede = () => `Side-by-side, line-item. The questions your finance team will ask, answered before they have to ask.`
+export const bill_lede = () => `Side by side, at list price. The questions your finance team will ask, answered before they have to ask.`
 
 
 /**
@@ -983,7 +983,7 @@ export const bill_v_yes = () => `Yes`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_v_apache = () => `FSL-1.1`
+export const bill_v_apache = () => `FSL-1.1 → Apache 2.0`
 
 
 /**
@@ -1031,7 +1031,7 @@ export const bill_v_first_class = () => `First-class`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_footnote = () => `Competitor numbers are public list prices summarized for comparison. Maple ingest rate is the published flat per-GB. See the calculator for projected monthly cost on your volume.`
+export const bill_footnote = () => `Competitor cells summarize public list prices — check each vendor's pricing page for current numbers. Maple's rate is the published flat per-GB. Use the calculator to project your monthly cost.`
 
 
 /**
@@ -1175,7 +1175,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14-day free trial. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+export const cta_bookend_lede = () => `14-day free trial, card required, no charge until it ends. Self-hosting is supported. The dashboard ships with the same live waterfall you just watched.`
 
 
 /**
@@ -1199,7 +1199,7 @@ export const cta_bookend_secondary = () => `Read the source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const footer_manifesto = () => `Made with love for engineers. Priced with respect for your CFO.`
+export const footer_manifesto = () => `No per-seat fees. No proprietary agents. No black boxes.`
 
 
 /**
@@ -1247,7 +1247,7 @@ export const features_badge = () => `Features`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const features_heading = () => `Everything you need to observe`
+export const features_heading = () => `The debugging workflow, end to end`
 
 
 /**
@@ -1519,7 +1519,7 @@ export const usecases_badge = () => `Use Cases`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_heading = () => `Real-world debugging scenarios`
+export const usecases_heading = () => `Three debugging scenarios, played out`
 
 
 /**
@@ -1551,7 +1551,7 @@ export const usecases_ecommerce_desc = () => `Your flash sale goes live and paym
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ecommerce_result = () => `Root cause in 90 seconds: Stripe timeout, correlated with retry-exhaustion logs.`
+export const usecases_ecommerce_result = () => `In this scenario: a Stripe timeout, correlated with retry-exhaustion logs — root cause in about 90 seconds.`
 
 
 /**
@@ -1623,7 +1623,7 @@ export const usecases_ai_heading = () => `3 AM alert, nobody awake`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ai_desc = () => `An alert fires at 3 AM. Instead of paging your on-call, the MCP agent connects to Maple, investigates the issue, and posts a diagnosis to Slack.`
+export const usecases_ai_desc = () => `An alert fires at 3 AM. Before your on-call is fully awake, an MCP agent connects to Maple, investigates the spike, and posts what it found to Slack.`
 
 
 /**
@@ -1631,7 +1631,7 @@ export const usecases_ai_desc = () => `An alert fires at 3 AM. Instead of paging
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ai_result = () => `MCP agent auto-diagnoses and posts to Slack before anyone wakes up.`
+export const usecases_ai_result = () => `In this scenario, the agent posts its diagnosis to #incidents before anyone wakes up.`
 
 
 /**
@@ -1687,7 +1687,7 @@ export const otel_badge = () => `Built on OpenTelemetry`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_heading = () => `The future of observability is open`
+export const otel_heading = () => `Built on the standard, not around it`
 
 
 /**
@@ -1719,7 +1719,7 @@ export const otel_future_title = () => `Future-proof`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_future_desc = () => `Backed by every major cloud provider and the CNCF. OpenTelemetry is the second most active CNCF project after Kubernetes.`
+export const otel_future_desc = () => `Backed by every major cloud provider. OpenTelemetry graduated from the CNCF in 2026 and is its second most active project after Kubernetes.`
 
 
 /**
@@ -1735,7 +1735,7 @@ export const otel_signals_title = () => `Covers all signals`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_signals_desc = () => `Traces, logs, and metrics from one SDK. No need to cobble together multiple vendor agents and libraries.`
+export const otel_signals_desc = () => `Traces, logs, and metrics from one SDK — no separate vendor agents to install and reconcile per signal.`
 
 
 /**
@@ -1751,7 +1751,7 @@ export const otel_community_title = () => `Community-driven`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_community_desc = () => `Thousands of contributors. Auto-instrumentation for every framework. A thriving ecosystem you can trust.`
+export const otel_community_desc = () => `Thousands of contributors and auto-instrumentation for most major frameworks. The spec is driven by the community, not one vendor's roadmap.`
 
 
 /**
@@ -1767,7 +1767,7 @@ export const tech_badge = () => `Under the hood`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const tech_heading = () => `Built different`
+export const tech_heading = () => `Why queries come back fast`
 
 
 /**
@@ -1783,7 +1783,7 @@ export const tech_columnar_title = () => `Columnar storage`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const tech_columnar_desc = () => `Queries over billions of rows in milliseconds. Powered by a columnar engine designed for observability workloads.`
+export const tech_columnar_desc = () => `A columnar engine built for telemetry. Scans billions of rows and returns in well under a second — no pre-aggregation required.`
 
 
 /**
@@ -1927,7 +1927,7 @@ export const ai_badge = () => `AI Agents`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const ai_heading = () => `Let AI agents fix your issues`
+export const ai_heading = () => `Let an AI agent run the investigation`
 
 
 /**
@@ -1935,7 +1935,7 @@ export const ai_heading = () => `Let AI agents fix your issues`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const ai_desc = () => `Maple has a built-in MCP server and AI agent that can query your traces, logs, errors, and metrics directly. Connect any MCP-compatible client and let agents auto-diagnose production issues.`
+export const ai_desc = () => `Maple has a built-in MCP server and AI agent that query your traces, logs, errors, and metrics directly. Connect any MCP-compatible client and let agents investigate production issues and propose fixes.`
 
 
 /**
@@ -2063,7 +2063,7 @@ export const chat_badge = () => `AI Assistant`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const chat_heading = () => `Ask your data anything`
+export const chat_heading = () => `Ask your telemetry in plain language`
 
 
 /**
@@ -2175,7 +2175,7 @@ export const alert_badge = () => `Alerting`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_heading = () => `Know before your users do`
+export const alert_heading = () => `Alerts with the context attached`
 
 
 /**
@@ -2319,7 +2319,7 @@ export const how_step3_desc = () => `Open the dashboard and start exploring. Eve
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_heading = () => `Ready to observe with clarity?`
+export const bottomcta_heading = () => `See your first trace today.`
 
 
 /**
@@ -2327,7 +2327,7 @@ export const bottomcta_heading = () => `Ready to observe with clarity?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_subtitle = () => `Start sending traces, logs, and metrics in under five minutes.`
+export const bottomcta_subtitle = () => `Add the SDK, point OTLP at Maple, and watch traces arrive — most setups take under five minutes.`
 
 
 /**
@@ -2335,7 +2335,7 @@ export const bottomcta_subtitle = () => `Start sending traces, logs, and metrics
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_tagline = () => `maple.dev — observability, simplified`
+export const bottomcta_tagline = () => `maple.dev — observability on OpenTelemetry`
 
 
 /**
@@ -2639,7 +2639,7 @@ export const pricing_private_channel = () => `Private Channel support`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `Predictable pricing — no usage-based charges`
+export const pricing_no_usage_charges = () => `No per-seat or per-host fees`
 
 
 /**
@@ -2871,7 +2871,7 @@ export const faq_limits_q = () => `What happens if I exceed my plan limits?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_limits_a = () => `We'll notify you as you approach your limits. On the Startup plan, additional usage is billed at transparent per-GB rates with no surprises.`
+export const faq_limits_a = () => `We'll notify you as you approach your included volume. On the Startup plan, additional usage is billed at a flat $0.30 per GB — the same rate shown on this page.`
 
 
 /**
@@ -2919,7 +2919,7 @@ export const faq_selfhost_q = () => `Can I self-host Maple?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_selfhost_a = () => `Yes. Maple's source is available under FSL-1.1, and the project can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience.`
+export const faq_selfhost_a = () => `Yes. Maple's source is available under FSL-1.1 (each release becomes Apache 2.0 after two years), and the project can be self-hosted on your own infrastructure. The cloud plan is available for teams that prefer a managed experience.`
 
 
 /**
@@ -2935,7 +2935,7 @@ export const faq_trial_q = () => `Do you offer a free trial for paid plans?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_trial_a = () => `Yes, all plans include a free trial so you can explore all features before committing.`
+export const faq_trial_a = () => `The Startup plan includes a 14-day free trial. A credit card is required, and you won't be charged until the trial ends. Enterprise plans start with a conversation instead.`
 
 
 /**
@@ -2991,7 +2991,7 @@ export const page_pricing_heading = () => `Simple, transparent pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_subtitle = () => `Transparent, usage-based pricing — no per-seat fees, no hidden costs, no vendor lock-in. Trials available on every plan.`
+export const page_pricing_subtitle = () => `Usage-based pricing with no per-seat fees and no hidden costs. 14-day free trial on the Startup plan.`
 
 
 /**
@@ -4215,7 +4215,7 @@ export const page_dd_heading = () => `Maple vs Datadog`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_subtitle = () => `Datadog is powerful but comes with complex per-host pricing and proprietary agents. Maple delivers the same distributed tracing, logs, and metrics with transparent usage-based pricing, native OpenTelemetry support, and zero vendor lock-in.`
+export const page_dd_subtitle = () => `Datadog is powerful but comes with per-host pricing and proprietary agents. Maple covers distributed tracing, logs, and metrics with a flat per-GB rate, native OpenTelemetry ingest, and source you can read and self-host.`
 
 
 /**
@@ -4255,7 +4255,7 @@ export const page_dd_otel = () => `OpenTelemetry native`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_otel_desc = () => `Built from the ground up on OpenTelemetry standards. No proprietary agents to install or maintain — use the instrumentation you already have.`
+export const page_dd_otel_desc = () => `Built on OpenTelemetry from the start. No proprietary agents to install or maintain — the OTel instrumentation you already have points straight at Maple.`
 
 
 /**
@@ -4287,7 +4287,7 @@ export const page_dd_oss = () => `Open source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_oss_desc = () => `Inspect every line of code, contribute features, and trust that your observability platform has no black boxes.`
+export const page_dd_oss_desc = () => `The source is on GitHub under FSL-1.1, converting to Apache 2.0 over time. Inspect every line, contribute features, and see exactly how your data is handled.`
 
 
 /**

@@ -8,8 +8,11 @@ import {
 	NavigationMenuContent,
 	NavigationMenuLink,
 } from "@maple/ui/components/ui/navigation-menu"
+import { buttonVariants } from "@maple/ui/components/ui/button"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
+import { cn } from "@maple/ui/utils"
 import * as m from "../paraglide/messages"
+import { broadcastSignedIn } from "./auth-signal"
 import { ClerkProvider } from "./ClerkProvider"
 import { formatStars } from "../lib/github-stars"
 import { GithubStarButton, Octocat } from "./GithubStarButton"
@@ -20,7 +23,11 @@ type MenuLink = { href: string; label: () => string; desc: () => string }
 
 function AuthAwareCTA() {
 	const { isSignedIn, isLoaded } = useAuth()
-	return isLoaded && isSignedIn ? m.nav_dashboard() : m.nav_get_started()
+	const signedIn = isLoaded && isSignedIn === true
+	useEffect(() => {
+		broadcastSignedIn(signedIn)
+	}, [signedIn])
+	return signedIn ? m.nav_dashboard() : m.nav_get_started()
 }
 
 function CTAButton() {
@@ -32,7 +39,7 @@ function CTAButton() {
 }
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
-	return <span className="text-[11px] uppercase tracking-wider font-medium text-accent">{children}</span>
+	return <span className="text-[11px] uppercase tracking-wider font-medium text-primary">{children}</span>
 }
 
 function MegaLink({ link }: { link: MenuLink }) {
@@ -41,7 +48,7 @@ function MegaLink({ link }: { link: MenuLink }) {
 			href={link.href}
 			className="group/link flex flex-col items-start gap-0.5 rounded-lg p-2 hover:bg-muted/20"
 		>
-			<span className="text-xs font-medium text-fg transition-colors group-hover/link:text-accent">
+			<span className="text-xs font-medium text-fg transition-colors group-hover/link:text-primary">
 				{link.label()}
 			</span>
 			<span className="text-[11px] leading-snug text-fg-muted">{link.desc()}</span>
@@ -50,28 +57,35 @@ function MegaLink({ link }: { link: MenuLink }) {
 }
 
 /**
- * True while the page's hero CTA (`[data-hero-cta]`) is in the viewport.
- * Pages without a hero CTA report false immediately so the header CTA shows.
+ * True while the header CTA should be collapsed: only on mobile (<sm), and only
+ * while the page's hero CTA (`[data-hero-cta]`) is in the viewport. On sm+ the
+ * header CTA always shows, and pages without a hero CTA always show it too.
  */
-function useHeroCtaVisible() {
-	// Assume visible during SSR/first paint so the header CTA doesn't flash in at the top of the page
-	const [heroCtaVisible, setHeroCtaVisible] = useState(true)
+function useHeaderCtaCollapsed() {
+	const [collapsed, setCollapsed] = useState(false)
 	useEffect(() => {
 		const target = document.querySelector("[data-hero-cta]")
-		if (!target) {
-			setHeroCtaVisible(false)
-			return
-		}
-		const observer = new IntersectionObserver(([entry]) => setHeroCtaVisible(entry.isIntersecting))
+		if (!target) return
+		const desktop = window.matchMedia("(min-width: 640px)")
+		let heroVisible = false
+		const update = () => setCollapsed(heroVisible && !desktop.matches)
+		const observer = new IntersectionObserver(([entry]) => {
+			heroVisible = entry.isIntersecting
+			update()
+		})
 		observer.observe(target)
-		return () => observer.disconnect()
+		desktop.addEventListener("change", update)
+		return () => {
+			observer.disconnect()
+			desktop.removeEventListener("change", update)
+		}
 	}, [])
-	return heroCtaVisible
+	return collapsed
 }
 
 function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number | null }) {
 	const [menuOpen, setMenuOpen] = useState(false)
-	const heroCtaVisible = useHeroCtaVisible()
+	const ctaCollapsed = useHeaderCtaCollapsed()
 	const l = (path: string) => (locale === "en" ? path : `/${locale}${path}`)
 
 	const featureLinks: MenuLink[] = [
@@ -164,8 +178,8 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 			{/* Left group: Logo + Navigation */}
 			<div className="flex items-center gap-1">
 				<a href={l("/")} className="flex items-center gap-3 mr-2">
-					<div className="w-7 h-7 bg-accent flex items-center justify-center">
-						<span className="text-accent-foreground text-sm font-bold">M</span>
+					<div className="w-7 h-7 bg-primary flex items-center justify-center">
+						<span className="text-primary-foreground text-sm font-bold">M</span>
 					</div>
 					<span className="text-fg font-medium text-sm">Maple</span>
 				</a>
@@ -234,7 +248,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 										<span className="text-xs font-medium text-fg">
 											{m.nav_product_footer()}
 										</span>
-										<span className="inline-flex items-center gap-1 text-xs text-accent transition-transform group-hover/cta:translate-x-0.5">
+										<span className="inline-flex items-center gap-1 text-xs text-primary transition-transform group-hover/cta:translate-x-0.5">
 											{m.nav_product_footer_cta()}
 										</span>
 									</NavigationMenuLink>
@@ -278,13 +292,15 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 
 				<a
 					href="https://app.maple.dev"
-					className={`inline-flex h-8 items-center justify-center overflow-hidden whitespace-nowrap rounded-lg bg-primary text-xs font-medium text-primary-foreground transition-all duration-300 hover:bg-primary/80 ${
-						heroCtaVisible
-							? "pointer-events-none max-w-0 px-0 opacity-0 -ml-3 sm:-ml-6"
-							: "max-w-40 px-2.5 opacity-100 ml-0"
-					}`}
-					aria-hidden={heroCtaVisible}
-					tabIndex={heroCtaVisible ? -1 : undefined}
+					className={cn(
+						buttonVariants({ size: "sm" }),
+						"overflow-hidden transition-all duration-300",
+						ctaCollapsed
+							? "pointer-events-none max-w-0 border-0 px-0 opacity-0 -ml-3"
+							: "max-w-40 opacity-100 ml-0",
+					)}
+					aria-hidden={ctaCollapsed}
+					tabIndex={ctaCollapsed ? -1 : undefined}
 				>
 					<CTAButton />
 				</a>
@@ -317,7 +333,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 					</SheetHeader>
 					<nav className="flex flex-col px-4 pb-6">
 						<div className="py-4 border-b border-border">
-							<span className="text-[11px] text-accent uppercase tracking-wider font-medium">
+							<span className="text-[11px] text-primary uppercase tracking-wider font-medium">
 								{m.nav_product()}
 							</span>
 							<div className="mt-3 flex flex-col gap-5">
@@ -382,7 +398,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 							</a>
 							<a
 								href="https://app.maple.dev"
-								className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-all hover:bg-primary/80"
+								className={buttonVariants({ size: "sm" })}
 							>
 								<CTAButton />
 							</a>

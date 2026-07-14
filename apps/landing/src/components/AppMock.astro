@@ -20,12 +20,11 @@ interface MapNode {
     dbSystem?: DbSystem;
     platform?: Platform;
     rps: string;
-    rpsPrefix?: string;
     err?: string;
     avg: string;
     pods?: number;
 }
-interface MapEdge { from: string; to: string; rps?: number; calls: string; hot?: boolean }
+interface MapEdge { from: string; to: string; rps?: number; calls: string; err: string; hot?: boolean }
 
 const MAP_NODE_W = 220;
 const MAP_NODE_H = 62;
@@ -38,22 +37,22 @@ const MAP_ROWS_PER_COL: number[][] = [
 ];
 
 const mapNodes: MapNode[] = [
-    { id: "edge",     label: "edge",         col: 0, row: 0, platform: "cloudflare", rps: "12.4k", err: "0.1", avg: "8ms",   pods: 6  },
-    { id: "checkout", label: "checkout-api", col: 1, row: 0, platform: "kubernetes", rps: "4.2k",  err: "0.3", avg: "24ms",  pods: 12 },
-    { id: "auth",     label: "auth-svc",     col: 2, row: 0, platform: "kubernetes", rps: "4.2k",  err: "0.0", avg: "6ms",   pods: 8  },
-    { id: "pricing",  label: "pricing",      col: 2, row: 1, platform: "kubernetes", hot: true, rps: "2.8k", err: "2.4", avg: "142ms", pods: 4 },
-    { id: "payments", label: "payments",     col: 2, row: 2, platform: "lambda",     rps: "1.1k",  err: "0.5", avg: "38ms" },
-    { id: "redis",    label: "redis",        col: 3, row: 0, db: true, dbSystem: "redis",    rps: "18.2k", avg: "2ms"  },
-    { id: "postgres", label: "postgres",     col: 3, row: 1, db: true, dbSystem: "postgres", rps: "6.4k",  avg: "14ms" },
+    { id: "edge",     label: "edge",         col: 0, row: 0, platform: "cloudflare", rps: "~12.4k", err: "0.1", avg: "8ms",   pods: 6  },
+    { id: "checkout", label: "checkout-api", col: 1, row: 0, platform: "kubernetes", rps: "~4.2k",  err: "0.3", avg: "24ms",  pods: 12 },
+    { id: "auth",     label: "auth-svc",     col: 2, row: 0, platform: "kubernetes", rps: "~4.2k",  err: "0.0", avg: "6ms",   pods: 8  },
+    { id: "pricing",  label: "pricing",      col: 2, row: 1, platform: "kubernetes", hot: true, rps: "~2.8k", err: "2.4", avg: "142ms", pods: 4 },
+    { id: "payments", label: "payments",     col: 2, row: 2, platform: "lambda",     rps: "~1.1k",  err: "0.5", avg: "38ms" },
+    { id: "redis",    label: "redis",        col: 3, row: 0, db: true, dbSystem: "redis",    rps: "~18.2k", err: "0.0", avg: "2ms"  },
+    { id: "postgres", label: "postgres",     col: 3, row: 1, db: true, dbSystem: "postgres", rps: "~6.4k",  err: "0.1", avg: "14ms" },
 ];
 
 const mapEdges: MapEdge[] = [
-    { from: "edge",     to: "checkout", rps: 4200,  calls: "4.2k"  },
-    { from: "checkout", to: "auth",     rps: 4200,  calls: "4.2k"  },
-    { from: "checkout", to: "pricing",  rps: 2800,  calls: "2.8k", hot: true },
-    { from: "checkout", to: "payments", rps: 1100,  calls: "1.1k" },
-    { from: "pricing",  to: "redis",    rps: 12400, calls: "12.4k" },
-    { from: "pricing",  to: "postgres", rps: 6400,  calls: "6.4k"  },
+    { from: "edge",     to: "checkout", rps: 4200,  calls: "~4.2k",  err: "0.3%" },
+    { from: "checkout", to: "auth",     rps: 4200,  calls: "~4.2k",  err: "0.0%" },
+    { from: "checkout", to: "pricing",  rps: 2800,  calls: "~2.8k",  err: "2.4%", hot: true },
+    { from: "checkout", to: "payments", rps: 1100,  calls: "~1.1k",  err: "0.5%" },
+    { from: "pricing",  to: "redis",    rps: 12400, calls: "~12.4k", err: "0.0%" },
+    { from: "pricing",  to: "postgres", rps: 6400,  calls: "~6.4k",  err: "0.1%" },
 ];
 
 // Service-color slot (matches packages/ui/src/lib/colors.ts: hash idx → --service-N)
@@ -111,6 +110,81 @@ const mapEdgeRender = mapEdges.map((e, i) => {
 
 const MAP_VIEW_W = 1020;
 const MAP_VIEW_H = 360;
+
+// ─── Shared row data ────────────────────────────────────────────────────
+// Timestamps mirror the product's trace list ("Jul 14, 06:43:14 PM (12s ago)").
+interface TraceRow {
+    id: string;
+    method: "GET" | "POST" | "PUT";
+    path: string;
+    at: string;
+    services: string[];
+    dur: string;
+    status: string;
+    error?: boolean;
+}
+const traceRows: TraceRow[] = [
+    { id: "cf61c660", method: "POST", path: "/api/checkout",        at: "Jul 14, 06:43:14 PM (11s ago)", services: ["checkout-api", "pricing"], dur: "203.0ms", status: "200" },
+    { id: "b04e6c50", method: "POST", path: "/api/payment/charge",  at: "Jul 14, 06:43:12 PM (13s ago)", services: ["payments", "auth-svc"],    dur: "1.24s",   status: "500", error: true },
+    { id: "40be760a", method: "GET",  path: "/api/products",        at: "Jul 14, 06:43:11 PM (14s ago)", services: ["edge", "checkout-api"],    dur: "45.0ms",  status: "200" },
+    { id: "d9a3b5c7", method: "POST", path: "/api/auth/login",      at: "Jul 14, 06:43:09 PM (16s ago)", services: ["auth-svc"],                dur: "89.0ms",  status: "200" },
+    { id: "61f5f1aa", method: "GET",  path: "/api/users/me",        at: "Jul 14, 06:43:08 PM (17s ago)", services: ["edge", "auth-svc"],        dur: "23.0ms",  status: "200" },
+    { id: "3fd5d93c", method: "PUT",  path: "/api/orders/confirm",  at: "Jul 14, 06:43:05 PM (20s ago)", services: ["checkout-api"],            dur: "156.0ms", status: "200" },
+];
+const methodChip: Record<string, string> = {
+    GET: "bg-severity-debug text-background",
+    POST: "bg-primary text-primary-foreground",
+    PUT: "bg-severity-info text-background",
+};
+
+interface LogRow { level: "INFO" | "WARN" | "ERROR" | "DEBUG"; at: string; svc: string; msg: string }
+const logRows: LogRow[] = [
+    { level: "INFO",  at: "18:40:44.931", svc: "checkout-api", msg: "POST /api/checkout 200 203ms" },
+    { level: "INFO",  at: "18:40:44.898", svc: "checkout-api", msg: 'Order created order_id=ord_8f3a2c' },
+    { level: "WARN",  at: "18:40:44.835", svc: "payments",     msg: "Retry attempt 2/3 for charge txn_9d1e" },
+    { level: "ERROR", at: "18:40:44.755", svc: "payments",     msg: "Connection timeout to stripe after 5000ms" },
+    { level: "INFO",  at: "18:40:44.752", svc: "auth-svc",     msg: "Token validated user_id=usr_2f8a" },
+    { level: "DEBUG", at: "18:40:44.694", svc: "edge",         msg: "Rate limit check passed ip=192.168.1.42" },
+    { level: "INFO",  at: "18:40:44.688", svc: "pricing",      msg: "Stock reserved sku=SKU-1234 qty=2" },
+];
+const levelText: Record<string, string> = {
+    INFO: "text-severity-info",
+    WARN: "text-severity-warn",
+    ERROR: "text-severity-error",
+    DEBUG: "text-severity-debug",
+};
+const levelDot: Record<string, string> = {
+    INFO: "bg-severity-info",
+    WARN: "bg-severity-warn",
+    ERROR: "bg-severity-error",
+    DEBUG: "bg-severity-debug",
+};
+
+// Stacked log histogram: [info, warn, error] heights in % (sums stay < 100)
+const logBars: Array<[number, number, number]> = [
+    [42, 10, 3], [48, 12, 4], [40, 9, 3], [52, 11, 5], [46, 10, 4], [58, 14, 4],
+    [44, 10, 3], [50, 12, 16], [47, 11, 5], [43, 9, 3], [55, 13, 4], [49, 11, 4],
+    [45, 10, 3], [53, 12, 5], [48, 10, 4], [44, 9, 3], [57, 13, 5], [50, 11, 4],
+    [46, 10, 3], [52, 12, 4], [48, 11, 4], [45, 9, 3], [54, 12, 5], [49, 10, 4],
+];
+
+interface ServiceRow { name: string; ns?: string; p50: string; p95: string; p99: string; err: string; hot?: boolean; spark: number[] }
+const serviceRows: ServiceRow[] = [
+    { name: "edge",         ns: "gateway",  p50: "3.1ms",  p95: "9.4ms",   p99: "24.0ms",  err: "0.1%",  spark: [2, 3, 2, 4, 3, 2, 3, 2, 4, 3, 2, 3] },
+    { name: "checkout-api", ns: "api",      p50: "12.0ms", p95: "45.3ms",  p99: "120.0ms", err: "0.3%",  spark: [3, 4, 3, 5, 4, 3, 6, 4, 3, 4, 3, 4] },
+    { name: "auth-svc",     ns: "api",      p50: "2.4ms",  p95: "8.1ms",   p99: "22.0ms",  err: "0.0%",  spark: [1, 1, 2, 1, 1, 2, 1, 1, 1, 2, 1, 1] },
+    { name: "pricing",      ns: "api",      p50: "34.0ms", p95: "142.0ms", p99: "480.0ms", err: "2.4%",  hot: true, spark: [4, 5, 6, 8, 12, 16, 13, 10, 12, 14, 11, 12] },
+    { name: "payments",     ns: "worker",   p50: "56.0ms", p95: "145.0ms", p99: "380.0ms", err: "0.5%",  spark: [3, 4, 5, 4, 6, 5, 4, 5, 6, 5, 4, 5] },
+    { name: "notifier",     ns: "worker",   p50: "5.0ms",  p95: "15.2ms",  p99: "42.0ms",  err: "0.0%",  spark: [1, 2, 1, 1, 2, 1, 2, 1, 1, 1, 2, 1] },
+];
+function sparkPoints(spark: number[]): string {
+    const max = Math.max(...spark, 1);
+    const w = 64;
+    const h = 14;
+    return spark
+        .map((v, i) => `${((i / (spark.length - 1)) * w).toFixed(1)},${(h - 2 - (v / max) * (h - 4)).toFixed(1)}`)
+        .join(" ");
+}
 ---
 
 <div class="app-mock rounded-xl border border-border bg-bg-elevated overflow-hidden">
@@ -119,7 +193,7 @@ const MAP_VIEW_H = 360;
         <div class="w-2.5 h-2.5 bg-border"></div>
         <div class="w-2.5 h-2.5 bg-border"></div>
         <div class="w-2.5 h-2.5 bg-border"></div>
-        <span class="ml-3 text-fg-muted text-[10px]">maple.dev</span>
+        <span class="ml-3 text-fg-muted text-[10px]">app.maple.dev</span>
     </div>
 
     <!-- Hidden radio inputs for tab switching -->
@@ -130,57 +204,112 @@ const MAP_VIEW_H = 360;
     <input type="radio" name={`mock-nav-${uid}`} id={`mock-logs-${uid}`} class="mock-radio mock-radio-logs" />
     <input type="radio" name={`mock-nav-${uid}`} id={`mock-metrics-${uid}`} class="mock-radio mock-radio-metrics" />
 
-    <div class="flex min-h-[340px] md:min-h-[400px]">
-        <!-- Sidebar -->
+    <div class="flex min-h-[340px] md:min-h-[420px]">
+        <!-- Sidebar — mirrors apps/web AppSidebar: org switcher, grouped nav, dashboards, user -->
         <div class="w-40 border-r border-border shrink-0 hidden md:flex flex-col bg-bg">
-            <div class="flex items-center gap-2 px-3 py-3 border-b border-border">
-                <div class="w-5 h-5 bg-accent flex items-center justify-center">
-                    <span class="text-accent-foreground text-[9px] font-bold">M</span>
+            <!-- Org switcher -->
+            <div class="flex items-center gap-2 px-2.5 py-2.5">
+                <div class="w-5 h-5 rounded bg-service-13 flex items-center justify-center shrink-0">
+                    <span class="text-background text-[9px] font-bold">A</span>
                 </div>
-                <span class="text-fg text-[11px] font-medium">Maple</span>
+                <div class="min-w-0 flex-1 leading-none">
+                    <div class="text-fg text-[10px] font-medium truncate">Acme Inc</div>
+                    <div class="text-fg-muted text-[8px] mt-0.5">Organization</div>
+                </div>
+                <svg class="w-2.5 h-2.5 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
             </div>
-            <div class="p-2 text-[9px] text-fg-muted uppercase tracking-wider px-3 pt-3">Navigation</div>
-            <nav class="px-1.5 space-y-0.5 flex-1">
-                <label for={`mock-map-${uid}`} class="mock-nav-map mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
-                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><line x1="7" y1="6" x2="10" y2="11"/><line x1="17" y1="6" x2="14" y2="11"/><line x1="7" y1="18" x2="10" y2="13"/><line x1="17" y1="18" x2="14" y2="13"/></svg>
-                    Service Map
-                </label>
-                <label for={`mock-overview-${uid}`} class="mock-nav-overview mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
-                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <nav class="px-1.5 space-y-0.5">
+                <label for={`mock-overview-${uid}`} class="mock-nav-overview mock-nav-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
                     Overview
                 </label>
-                <label for={`mock-services-${uid}`} class="mock-nav-services mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                <label for={`mock-services-${uid}`} class="mock-nav-services mock-nav-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
                     <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="0"/><rect x="2" y="14" width="20" height="8" rx="0"/><circle cx="6" cy="6" r="1" fill="currentColor"/><circle cx="6" cy="18" r="1" fill="currentColor"/></svg>
                     Services
                 </label>
-                <label for={`mock-traces-${uid}`} class="mock-nav-traces mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                <label for={`mock-map-${uid}`} class="mock-nav-map mock-nav-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                    <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><line x1="7" y1="6" x2="10" y2="11"/><line x1="17" y1="6" x2="14" y2="11"/><line x1="7" y1="18" x2="10" y2="13"/><line x1="17" y1="18" x2="14" y2="13"/></svg>
+                    Service Map
+                </label>
+            </nav>
+            <div class="my-2 mx-3 border-t border-border/60"></div>
+            <nav class="px-1.5 space-y-0.5 flex-1">
+                <label for={`mock-traces-${uid}`} class="mock-nav-traces mock-nav-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
                     <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
                     Traces
                 </label>
-                <label for={`mock-logs-${uid}`} class="mock-nav-logs mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                <label for={`mock-logs-${uid}`} class="mock-nav-logs mock-nav-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
                     <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
                     Logs
                 </label>
-                <label for={`mock-metrics-${uid}`} class="mock-nav-metrics mock-nav-item flex items-center gap-2 px-2 py-1.5 cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
+                <label for={`mock-metrics-${uid}`} class="mock-nav-metrics mock-nav-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-[10px] text-fg-muted hover:text-fg transition-colors">
                     <svg class="w-3 h-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                     Metrics
                 </label>
+                <span class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] text-fg-muted/70">
+                    <svg class="w-3 h-3 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8" fill="currentColor" stroke="none"/></svg>
+                    Replays
+                </span>
+                <span class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] text-fg-muted/70">
+                    <svg class="w-3 h-3 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="18" x2="15" y2="18"/></svg>
+                    Infrastructure
+                </span>
+                <div class="my-2 mx-1.5 border-t border-border/60"></div>
+                <span class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] text-fg-muted/70">
+                    <svg class="w-3 h-3 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    Errors
+                </span>
+                <span class="flex items-center gap-2 px-2 py-1.5 rounded-md text-[10px] text-fg-muted/70">
+                    <svg class="w-3 h-3 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+                    Alerts
+                </span>
             </nav>
+            <!-- User footer -->
+            <div class="flex items-center gap-2 px-2.5 py-2 border-t border-border">
+                <div class="w-4 h-4 rounded-full bg-service-12 shrink-0"></div>
+                <span class="text-[9px] text-fg-muted truncate">jane@acme.dev</span>
+            </div>
         </div>
+
+        <!-- Right column: topbar + views -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <!-- Topbar — collapse toggle · breadcrumb · Connect (matches the product header) -->
+            <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border">
+                <svg class="w-3 h-3 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+                <span class="text-border">|</span>
+                <span class="text-[10px] text-fg font-medium">
+                    <span class="mock-crumb mock-crumb-map">Service Map</span>
+                    <span class="mock-crumb mock-crumb-overview">Overview</span>
+                    <span class="mock-crumb mock-crumb-services">Services</span>
+                    <span class="mock-crumb mock-crumb-traces">Traces</span>
+                    <span class="mock-crumb mock-crumb-logs">Logs</span>
+                    <span class="mock-crumb mock-crumb-metrics">Metrics</span>
+                </span>
+                <span class="ml-auto inline-flex items-center gap-1 rounded-lg bg-primary px-2 py-0.5 text-[9px] font-medium text-primary-foreground">
+                    <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                    Connect
+                </span>
+            </div>
 
         <!-- ===== SERVICE MAP VIEW ===== -->
         <div class="mock-view mock-view-map flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
-            <!-- Header -->
-            <div class="flex items-center justify-between">
+            <!-- Page header -->
+            <div class="flex items-end justify-between gap-2">
                 <div>
-                    <div class="text-[9px] text-fg-muted">Service Map</div>
-                    <div class="text-xs text-fg font-medium">Live dependencies</div>
+                    <div class="font-display text-sm md:text-base text-fg font-semibold leading-tight">Service Map</div>
+                    <div class="text-[9px] text-fg-muted">Visualize service-to-service dependencies and data flow.</div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">production</span>
-                    <span class="inline-flex items-center gap-1.5 text-[9px] text-primary border border-border px-2 py-0.5">
-                        <span class="size-1 rounded-full bg-primary animate-pulse-dot"></span>
-                        live · 60s
+                <div class="flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">production
+                        <svg class="w-2 h-2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                        <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        Last 12 hours
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                        <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                        Reload
                     </span>
                 </div>
             </div>
@@ -189,6 +318,23 @@ const MAP_VIEW_H = 360;
                  inside <foreignObject> so they use the dashboard's exact Tailwind
                  markup (matches apps/web/src/components/service-map/ServiceMapNode.tsx). -->
             <div class="relative rounded-lg border border-border bg-card overflow-hidden">
+                <!-- Canvas toolbar — COLOR BY select + Re-sort, same as the product -->
+                <div class="absolute left-2 top-2 z-10 flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg/90 px-2 py-0.5 text-[8px]">
+                        <span class="text-fg-muted uppercase tracking-wider">Color by</span>
+                        <span class="text-fg font-medium">Service</span>
+                        <svg class="w-2 h-2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border bg-bg/90 px-2 py-0.5 text-[8px] text-fg">
+                        <svg class="w-2 h-2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                        Re-sort
+                    </span>
+                </div>
+                <!-- Zoom controls -->
+                <div class="absolute left-2 bottom-2 z-10 flex flex-col rounded border border-border bg-bg/90 divide-y divide-border text-fg-muted">
+                    <span class="flex items-center justify-center w-4 h-4 text-[9px]">+</span>
+                    <span class="flex items-center justify-center w-4 h-4 text-[9px]">−</span>
+                </div>
                 <svg
                     viewBox={`0 0 ${MAP_VIEW_W} ${MAP_VIEW_H}`}
                     class="block w-full h-auto"
@@ -286,8 +432,8 @@ const MAP_VIEW_H = 360;
                                                 </svg>
                                             )}
                                             <span class="text-xs font-medium text-fg truncate">{n.label}</span>
-                                            {n.db && (
-                                                <span class="ml-auto shrink-0 text-[9px] font-medium tracking-wide text-fg-muted/60 uppercase">db</span>
+                                            {n.dbSystem && (
+                                                <span class={`ml-auto shrink-0 text-[8px] font-semibold tracking-wide uppercase ${n.dbSystem === "redis" ? "text-severity-error" : "text-severity-debug"}`}>{n.dbSystem}</span>
                                             )}
                                         </div>
 
@@ -329,57 +475,105 @@ const MAP_VIEW_H = 360;
                 </svg>
             </div>
 
-            <!-- Legend / status row — same vocabulary as the dashboard footer -->
+            <!-- Status bar — same vocabulary as the product footer: hints · service legend · health legend -->
             <div class="flex items-center justify-between text-[9px] text-fg-muted">
-                <div class="flex items-center gap-3">
-                    <span class="font-medium">Drag to arrange · scroll to zoom</span>
+                <div class="hidden md:flex items-center gap-3 min-w-0">
+                    <span class="whitespace-nowrap">Drag nodes to arrange</span>
                     <span class="opacity-30">|</span>
-                    <span class="inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-severity-info"></span>Healthy</span>
-                    <span class="inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-severity-warn"></span>Degraded</span>
-                    <span class="inline-flex items-center gap-1.5"><span class="size-1.5 rounded-full bg-severity-error"></span>Error</span>
+                    <span class="whitespace-nowrap">Scroll to zoom</span>
+                    <span class="opacity-30 hidden md:inline">|</span>
+                    <span class="hidden md:inline-flex items-center gap-2.5 min-w-0">
+                        {mapOrderedServices.slice(0, 3).map((label) => (
+                            <span class="inline-flex items-center gap-1 whitespace-nowrap"><span class="size-1.5 rounded-full" style={`background-color: ${mapServiceColor(label)}`}></span>{label}</span>
+                        ))}
+                        <span class="whitespace-nowrap">+2 more</span>
+                    </span>
                 </div>
-                <span class="text-severity-warn">pricing · p99 +18% vs 1h ago</span>
+                <div class="flex items-center gap-2.5">
+                    <span class="inline-flex items-center gap-1"><span class="size-1.5 rounded-full bg-severity-info"></span>Healthy</span>
+                    <span class="inline-flex items-center gap-1"><span class="size-1.5 rounded-full bg-severity-warn"></span>Degraded</span>
+                    <span class="inline-flex items-center gap-1"><span class="size-1.5 rounded-full bg-severity-error"></span>Error</span>
+                </div>
             </div>
         </div>
 
         <!-- ===== OVERVIEW VIEW ===== -->
-        <div class="mock-view mock-view-overview flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
-            <!-- Header -->
-            <div class="flex items-center justify-between">
+        <div class="mock-view mock-view-overview flex-1 p-3 md:p-4 space-y-2.5 overflow-hidden">
+            <!-- Page header -->
+            <div class="flex items-end justify-between gap-2">
                 <div>
-                    <div class="text-[9px] text-fg-muted">Overview</div>
-                    <div class="text-xs text-fg font-medium">Dashboard</div>
+                    <div class="font-display text-sm md:text-base text-fg font-semibold leading-tight">Dashboard</div>
+                    <div class="text-[9px] text-fg-muted">Observability overview for your services.</div>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">production</span>
-                    <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
-                </div>
-            </div>
-            <!-- Metric cards (matches real dashboard: Total Logs, Total Traces, Total Metrics, Data Size) -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-border border border-border rounded-lg overflow-hidden">
-                <div class="bg-bg-elevated p-2.5">
-                    <div class="text-[9px] text-fg-muted mb-0.5">Total Traces</div>
-                    <div class="text-base md:text-lg text-fg font-bold">24.3K</div>
-                </div>
-                <div class="bg-bg-elevated p-2.5">
-                    <div class="text-[9px] text-fg-muted mb-0.5">Total Logs</div>
-                    <div class="text-base md:text-lg text-fg font-bold">1.2M</div>
-                </div>
-                <div class="bg-bg-elevated p-2.5">
-                    <div class="text-[9px] text-fg-muted mb-0.5">Total Metrics</div>
-                    <div class="text-base md:text-lg text-fg font-bold">847K</div>
-                </div>
-                <div class="bg-bg-elevated p-2.5">
-                    <div class="text-[9px] text-fg-muted mb-0.5">Data Size</div>
-                    <div class="text-base md:text-lg text-fg font-bold">2.4GB</div>
+                <div class="flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">production
+                        <svg class="w-2 h-2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                        <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        Last 24 hours
+                    </span>
                 </div>
             </div>
-            <!-- 2x2 chart grid (matches real: Request Volume, Error Rate, Latency, Log Volume) -->
-            <div class="grid grid-cols-2 gap-3">
-                <!-- Request Volume -->
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">Request Volume</div>
-                    <div class="flex items-end gap-[3px] h-14">
+            <!-- Alert status strip -->
+            <div class="flex items-center gap-2 rounded-lg border border-border bg-bg px-3 py-1.5">
+                <span class="size-1.5 rounded-full bg-severity-info"></span>
+                <span class="text-[10px] text-fg font-medium">All clear</span>
+                <span class="text-[10px] text-fg-muted">/ 4 rules watching</span>
+            </div>
+            <!-- Health strip: Services · Healthy · Degraded · Unhealthy -->
+            <div class="grid grid-cols-4 gap-px bg-border border border-border rounded-lg overflow-hidden">
+                <div class="bg-bg-elevated px-2.5 py-1.5">
+                    <div class="text-[8px] text-fg-muted">Services</div>
+                    <div class="text-sm text-fg font-bold">22</div>
+                </div>
+                <div class="bg-bg-elevated px-2.5 py-1.5">
+                    <div class="text-[8px] text-fg-muted">Healthy</div>
+                    <div class="text-sm text-fg font-bold">19</div>
+                </div>
+                <div class="bg-bg-elevated px-2.5 py-1.5">
+                    <div class="text-[8px] text-fg-muted">Degraded</div>
+                    <div class="text-sm text-severity-warn font-bold">2</div>
+                </div>
+                <div class="bg-bg-elevated px-2.5 py-1.5">
+                    <div class="text-[8px] text-fg-muted">Unhealthy</div>
+                    <div class="text-sm text-severity-error font-bold">1</div>
+                </div>
+            </div>
+            <!-- Stat cards (matches real dashboard: uppercase label + delta vs prev) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div class="rounded-lg border border-border bg-bg p-2">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-0.5">Total Logs</div>
+                    <div class="text-sm md:text-base text-fg font-bold">6.1M</div>
+                    <div class="text-[8px]"><span class="text-severity-info">↑ 3.7%</span> <span class="text-fg-muted">vs prev</span></div>
+                </div>
+                <div class="rounded-lg border border-border bg-bg p-2">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-0.5">Total Traces</div>
+                    <div class="text-sm md:text-base text-fg font-bold">446.6M</div>
+                    <div class="text-[8px]"><span class="text-severity-info">↑ 0.2%</span> <span class="text-fg-muted">vs prev</span></div>
+                </div>
+                <div class="rounded-lg border border-border bg-bg p-2">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-0.5">Total Metrics</div>
+                    <div class="text-sm md:text-base text-fg font-bold">110.5M</div>
+                    <div class="text-[8px]"><span class="text-severity-error">↓ 12.9%</span> <span class="text-fg-muted">vs prev</span></div>
+                </div>
+                <div class="rounded-lg border border-border bg-bg p-2">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-0.5">Data Size</div>
+                    <div class="text-sm md:text-base text-fg font-bold">172.9 GB</div>
+                    <div class="text-[8px]"><span class="text-severity-error">↓ 1.1%</span> <span class="text-fg-muted">vs prev</span></div>
+                </div>
+            </div>
+            <!-- Chart row (matches real: Request Volume with legend, Error Rate with headline %) -->
+            <div class="grid grid-cols-2 gap-2">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="text-[8px] text-fg-muted uppercase tracking-wider">Request Volume</div>
+                        <div class="flex items-center gap-2">
+                            <span class="flex items-center gap-1 text-[7px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-throughput inline-block"></span>Throughput (/s)</span>
+                            <span class="flex items-center gap-1 text-[7px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-error inline-block"></span>Errors (/s)</span>
+                        </div>
+                    </div>
+                    <div class="flex items-end gap-[3px] h-12">
                         <div class="flex-1 bg-chart-throughput/70 h-[45%]"></div>
                         <div class="flex-1 bg-chart-throughput/70 h-[52%]"></div>
                         <div class="flex-1 bg-chart-throughput/70 h-[68%]"></div>
@@ -394,10 +588,12 @@ const MAP_VIEW_H = 360;
                         <div class="flex-1 bg-chart-throughput h-[70%]"></div>
                     </div>
                 </div>
-                <!-- Error Rate -->
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">Error Rate</div>
-                    <div class="flex items-end gap-[3px] h-14">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="text-[8px] text-fg-muted uppercase tracking-wider">Error Rate</div>
+                        <span class="text-[9px] text-severity-error font-mono font-medium">0.05%</span>
+                    </div>
+                    <div class="flex items-end gap-[3px] h-12">
                         <div class="flex-1 bg-chart-error/50 h-[12%]"></div>
                         <div class="flex-1 bg-chart-error/50 h-[8%]"></div>
                         <div class="flex-1 bg-chart-error/50 h-[15%]"></div>
@@ -413,34 +609,31 @@ const MAP_VIEW_H = 360;
                     </div>
                 </div>
                 <!-- Latency (p50/p95/p99) -->
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="flex items-center justify-between mb-2">
-                        <div class="text-[9px] text-fg-muted">Latency</div>
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="text-[8px] text-fg-muted uppercase tracking-wider">Latency</div>
                         <div class="flex items-center gap-2">
-                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p50 inline-block"></span>p50</span>
-                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p95 inline-block"></span>p95</span>
-                            <span class="flex items-center gap-1 text-[8px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p99 inline-block"></span>p99</span>
+                            <span class="flex items-center gap-1 text-[7px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p50 inline-block"></span>p50</span>
+                            <span class="flex items-center gap-1 text-[7px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p95 inline-block"></span>p95</span>
+                            <span class="flex items-center gap-1 text-[7px] text-fg-muted"><span class="w-1.5 h-1.5 bg-chart-p99 inline-block"></span>p99</span>
                         </div>
                     </div>
-                    <div class="relative h-14">
-                        <!-- p99 (tallest) -->
+                    <div class="relative h-12">
                         <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
                             <div class="flex-1 bg-chart-p99/30 h-[80%]"></div><div class="flex-1 bg-chart-p99/30 h-[75%]"></div><div class="flex-1 bg-chart-p99/30 h-[90%]"></div><div class="flex-1 bg-chart-p99/30 h-[85%]"></div><div class="flex-1 bg-chart-p99/30 h-[70%]"></div><div class="flex-1 bg-chart-p99/30 h-[95%]"></div><div class="flex-1 bg-chart-p99/30 h-[88%]"></div><div class="flex-1 bg-chart-p99/30 h-[78%]"></div><div class="flex-1 bg-chart-p99/30 h-[82%]"></div><div class="flex-1 bg-chart-p99/30 h-[75%]"></div><div class="flex-1 bg-chart-p99/30 h-[80%]"></div><div class="flex-1 bg-chart-p99/30 h-[72%]"></div>
                         </div>
-                        <!-- p95 -->
                         <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
                             <div class="flex-1 bg-chart-p95/40 h-[50%]"></div><div class="flex-1 bg-chart-p95/40 h-[45%]"></div><div class="flex-1 bg-chart-p95/40 h-[58%]"></div><div class="flex-1 bg-chart-p95/40 h-[52%]"></div><div class="flex-1 bg-chart-p95/40 h-[42%]"></div><div class="flex-1 bg-chart-p95/40 h-[65%]"></div><div class="flex-1 bg-chart-p95/40 h-[55%]"></div><div class="flex-1 bg-chart-p95/40 h-[48%]"></div><div class="flex-1 bg-chart-p95/40 h-[50%]"></div><div class="flex-1 bg-chart-p95/40 h-[44%]"></div><div class="flex-1 bg-chart-p95/40 h-[52%]"></div><div class="flex-1 bg-chart-p95/40 h-[40%]"></div>
                         </div>
-                        <!-- p50 (shortest) -->
                         <div class="absolute bottom-0 left-0 right-0 flex items-end gap-[3px] h-full">
                             <div class="flex-1 bg-chart-p50/60 h-[22%]"></div><div class="flex-1 bg-chart-p50/60 h-[20%]"></div><div class="flex-1 bg-chart-p50/60 h-[25%]"></div><div class="flex-1 bg-chart-p50/60 h-[23%]"></div><div class="flex-1 bg-chart-p50/60 h-[18%]"></div><div class="flex-1 bg-chart-p50/60 h-[28%]"></div><div class="flex-1 bg-chart-p50/60 h-[24%]"></div><div class="flex-1 bg-chart-p50/60 h-[21%]"></div><div class="flex-1 bg-chart-p50/60 h-[22%]"></div><div class="flex-1 bg-chart-p50/60 h-[19%]"></div><div class="flex-1 bg-chart-p50/60 h-[24%]"></div><div class="flex-1 bg-chart-p50/60 h-[18%]"></div>
                         </div>
                     </div>
                 </div>
                 <!-- Log Volume -->
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">Log Volume</div>
-                    <div class="flex items-end gap-[3px] h-14">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-wider mb-1.5">Log Volume</div>
+                    <div class="flex items-end gap-[3px] h-12">
                         <div class="flex-1 bg-chart-2/70 h-[70%]"></div>
                         <div class="flex-1 bg-chart-2/70 h-[65%]"></div>
                         <div class="flex-1 bg-chart-2/70 h-[78%]"></div>
@@ -459,66 +652,96 @@ const MAP_VIEW_H = 360;
         </div>
 
         <!-- ===== SERVICES VIEW ===== -->
-        <div class="mock-view mock-view-services flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="text-[9px] text-fg-muted">Services</div>
-                    <div class="text-xs text-fg font-medium">Services</div>
-                </div>
-                <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
-            </div>
-            <!-- Services table -->
-            <div class="rounded-lg border border-border bg-bg overflow-hidden">
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
-                    <span>Service</span><span>Env</span><span>P50</span><span>P95</span><span>P99</span><span class="text-right">Throughput</span>
-                </div>
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">api-gateway</span>
-                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
-                    <span class="text-fg-muted font-mono">12ms</span>
-                    <span class="text-fg-muted font-mono">45ms</span>
-                    <span class="text-fg-muted font-mono">120ms</span>
-                    <span class="text-fg-muted font-mono text-right">1.2K/s</span>
-                </div>
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">auth-service</span>
-                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
-                    <span class="text-fg-muted font-mono">8ms</span>
-                    <span class="text-fg-muted font-mono">22ms</span>
-                    <span class="text-fg-muted font-mono">67ms</span>
-                    <span class="text-fg-muted font-mono text-right">890/s</span>
-                </div>
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">order-service</span>
-                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
-                    <span class="text-fg-muted font-mono">34ms</span>
-                    <span class="text-fg-muted font-mono">89ms</span>
-                    <span class="text-fg-muted font-mono">234ms</span>
-                    <span class="text-fg-muted font-mono text-right">456/s</span>
-                </div>
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">payment-svc</span>
-                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
-                    <span class="text-fg-muted font-mono">56ms</span>
-                    <span class="text-fg-muted font-mono">145ms</span>
-                    <span class="text-fg-muted font-mono">380ms</span>
-                    <span class="text-fg-muted font-mono text-right">234/s</span>
-                </div>
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 border-b border-border hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">notification-svc</span>
-                    <span><span class="text-[8px] px-1.5 py-0.5 bg-yellow-500/10 text-yellow-400">staging</span></span>
-                    <span class="text-fg-muted font-mono">5ms</span>
-                    <span class="text-fg-muted font-mono">15ms</span>
-                    <span class="text-fg-muted font-mono">42ms</span>
-                    <span class="text-fg-muted font-mono text-right">120/s</span>
-                </div>
-                <div class="grid grid-cols-[1fr_80px_60px_60px_60px_80px] gap-0 text-[10px] px-3 py-2 hover:bg-muted/20 items-center">
-                    <span class="text-accent font-medium">inventory-svc</span>
-                    <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">prod</span></span>
-                    <span class="text-fg-muted font-mono">18ms</span>
-                    <span class="text-fg-muted font-mono">52ms</span>
-                    <span class="text-fg-muted font-mono">156ms</span>
-                    <span class="text-fg-muted font-mono text-right">678/s</span>
+        <div class="mock-view mock-view-services flex-1 overflow-hidden">
+            <div class="flex h-full">
+                <!-- Filter rail — matches the product's Services filters -->
+                <aside class="w-[120px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-[0.14em]">Filters</div>
+                    <div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Environment</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm bg-primary shrink-0 flex items-center justify-center"><svg class="w-2 h-2 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><polyline points="20 6 9 17 4 12"/></svg></span>
+                                production
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">17.1M</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                staging
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">395K</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                local
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">14K</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Namespace</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                api
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">4.2M</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                worker
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">676K</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                gateway
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">39K</span>
+                            </label>
+                        </div>
+                    </div>
+                </aside>
+                <div class="flex-1 p-3 md:p-4 space-y-2.5 min-w-0">
+                    <div class="flex items-end justify-between gap-2">
+                        <div>
+                            <div class="font-display text-sm md:text-base text-fg font-semibold leading-tight">Services</div>
+                            <div class="text-[9px] text-fg-muted">Overview of all services with key metrics.</div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                                <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Last 12 hours
+                            </span>
+                            <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                                <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                                Reload
+                            </span>
+                        </div>
+                    </div>
+                    <!-- Services table — Service · P50 · P95 · P99 · Error Rate, grouped by env -->
+                    <div class="rounded-lg border border-border bg-bg overflow-hidden">
+                        <div class="grid grid-cols-[1fr_54px_54px_58px_80px] gap-0 text-[9px] text-fg-muted border-b border-border px-3 py-1.5">
+                            <span>Service</span><span>P50</span><span>P95</span><span>P99</span><span class="text-right">Error Rate</span>
+                        </div>
+                        <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-muted/20">
+                            <span class="text-[8px] px-1.5 py-0.5 rounded-sm bg-primary/15 text-primary font-medium">production</span>
+                            <span class="text-[9px] text-fg-muted">6 services</span>
+                        </div>
+                        {serviceRows.map((s, i) => (
+                            <div class={`grid grid-cols-[1fr_54px_54px_58px_80px] gap-0 text-[10px] px-3 py-1.5 items-center hover:bg-muted/20 ${i < serviceRows.length - 1 ? "border-b border-border" : ""}`}>
+                                <span class="min-w-0">
+                                    <span class="text-primary font-medium block truncate">{s.name}</span>
+                                    {s.ns && <span class="text-[8px] text-fg-muted block leading-tight">{s.ns}</span>}
+                                </span>
+                                <span class="text-fg font-mono text-[9px]">{s.p50}</span>
+                                <span class="text-fg font-mono text-[9px]">{s.p95}</span>
+                                <span class={`font-mono text-[9px] ${s.hot ? "text-severity-warn" : "text-fg"}`}>{s.p99}</span>
+                                <span class="flex items-center justify-end gap-1.5">
+                                    <svg width="40" height="14" viewBox="0 0 64 14" class="shrink-0" aria-hidden="true">
+                                        <polyline points={sparkPoints(s.spark)} fill="none" stroke="var(--chart-error)" stroke-width="1.5" stroke-linejoin="round" opacity={s.hot ? "1" : "0.7"} />
+                                    </svg>
+                                    <span class={`font-mono text-[9px] ${s.hot ? "text-severity-warn" : "text-fg-muted"}`}>{s.err}</span>
+                                </span>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
         </div>
@@ -526,145 +749,112 @@ const MAP_VIEW_H = 360;
         <!-- ===== TRACES VIEW ===== -->
         <div class="mock-view mock-view-traces flex-1 overflow-hidden">
             <div class="flex h-full">
-                <!-- Traces Filter Sidebar -->
-                <aside class="w-[130px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
-                    <!-- Status -->
+                <!-- Filter rail — matches the product's Traces filters -->
+                <aside class="w-[120px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-[0.14em]">Filters</div>
                     <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Status</div>
-                        <div class="space-y-1">
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                Ok
-                                <span class="text-[8px] text-fg-muted/60 ml-auto">5</span>
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                Error
-                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
-                            </label>
-                        </div>
-                    </div>
-                    <div class="border-t border-border"></div>
-                    <!-- Service -->
-                    <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Service</div>
-                        <div class="space-y-1">
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                api-gateway
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                auth-service
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                order-service
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-border shrink-0"></span>
-                                payment-svc
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                inventory-svc
-                            </label>
-                        </div>
-                    </div>
-                    <div class="border-t border-border"></div>
-                    <!-- Duration -->
-                    <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Duration</div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Duration (ms)</div>
                         <div class="flex items-center gap-1">
-                            <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">0ms</span>
+                            <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">0</span>
                             <span class="text-[8px] text-fg-muted">–</span>
-                            <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">5s</span>
+                            <span class="flex-1 rounded-md border border-border bg-bg-elevated px-1.5 py-0.5 text-[9px] text-fg-muted font-mono">24021</span>
                         </div>
-                        <div class="mt-1.5 h-1 bg-bg-elevated border border-border relative">
-                            <div class="absolute inset-y-0 left-[5%] right-[15%] bg-accent/30"></div>
+                        <div class="mt-1 space-y-0.5">
+                            <div class="flex justify-between text-[8px]"><span class="text-fg-muted">p50:</span><span class="text-fg-muted font-mono">123.1ms</span></div>
+                            <div class="flex justify-between text-[8px]"><span class="text-fg-muted">p95:</span><span class="text-fg-muted font-mono">1.40s</span></div>
                         </div>
                     </div>
                     <div class="border-t border-border"></div>
-                    <!-- Method -->
+                    <div class="space-y-1">
+                        <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                            <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                            Has Error
+                            <span class="text-[8px] text-fg-muted ml-auto font-mono">9,010</span>
+                        </label>
+                        <label class="flex items-center gap-1.5 text-[9px] text-fg cursor-default">
+                            <span class="w-2.5 h-2.5 rounded-sm bg-primary shrink-0 flex items-center justify-center"><svg class="w-2 h-2 text-primary-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><polyline points="20 6 9 17 4 12"/></svg></span>
+                            Root Traces Only
+                        </label>
+                    </div>
+                    <div class="border-t border-border"></div>
                     <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Method</div>
-                        <div class="flex flex-wrap gap-1">
-                            <span class="text-[8px] px-1.5 py-0.5 border border-accent/30 bg-accent/10 text-accent">GET</span>
-                            <span class="text-[8px] px-1.5 py-0.5 border border-accent/30 bg-accent/10 text-accent">POST</span>
-                            <span class="text-[8px] px-1.5 py-0.5 border border-border text-fg-muted">PUT</span>
-                            <span class="text-[8px] px-1.5 py-0.5 border border-border text-fg-muted">DELETE</span>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Environment</div>
+                        <div class="space-y-1">
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                production
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">8.1M</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                staging
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">395K</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Namespace</div>
+                        <div class="rounded-md border border-border bg-bg-elevated px-1.5 py-1 text-[8px] text-fg-muted flex items-center gap-1">
+                            <svg class="w-2 h-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            Search namespace.
+                        </div>
+                        <div class="space-y-1 mt-1.5">
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                api
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">4.2M</span>
+                            </label>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                worker
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">676K</span>
+                            </label>
                         </div>
                     </div>
                 </aside>
                 <!-- Traces Content -->
-                <div class="flex-1 p-3 md:p-4 space-y-3 min-w-0">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <div class="text-[9px] text-fg-muted">Traces</div>
-                            <div class="text-xs text-fg font-medium">Traces</div>
-                        </div>
-                        <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 24h</span>
+                <div class="flex-1 p-3 md:p-4 space-y-2.5 min-w-0 flex flex-col">
+                    <div class="flex items-center justify-end gap-1.5">
+                        <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg-muted">
+                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            Advanced Filter
+                            <span class="text-[8px] border border-border rounded px-1 ml-1">F</span>
+                        </span>
+                        <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                            <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                            Last 12 hours
+                        </span>
+                        <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                            <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                            Reload
+                        </span>
                     </div>
                     <!-- Traces table -->
-                    <div class="rounded-lg border border-border bg-bg overflow-hidden">
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
-                            <span>Trace ID</span><span>Root Span</span><span>Services</span><span>Duration</span><span>Spans</span><span>Status</span>
+                    <div class="rounded-lg border border-border bg-bg overflow-hidden flex-1">
+                        <div class="grid grid-cols-[64px_1fr_86px_62px_44px] gap-2 text-[9px] text-fg-muted border-b border-border px-3 py-1.5">
+                            <span>Trace ID</span><span>Root Span</span><span>Services</span><span>Duration</span><span>Status</span>
                         </div>
-                        <!-- Row 1 -->
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">a3f8c1d2</span>
-                            <span class="text-fg truncate">POST /api/checkout</span>
-                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">order</span><span class="text-[8px] text-fg-muted">+2</span></span>
-                            <span class="text-fg-muted font-mono">203ms</span>
-                            <span class="text-fg-muted font-mono">8</span>
-                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
-                        </div>
-                        <!-- Row 2 (error) -->
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border bg-destructive/5 hover:bg-destructive/10 items-center">
-                            <span class="text-accent font-mono text-[9px]">b7e2f9a1</span>
-                            <span class="text-fg truncate">POST /api/payment</span>
-                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">payment</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
-                            <span class="text-fg-muted font-mono">1.2s</span>
-                            <span class="text-fg-muted font-mono">5</span>
-                            <span><span class="text-[8px] px-1.5 py-0.5 bg-red-500/10 text-red-400">Error</span></span>
-                        </div>
-                        <!-- Row 3 -->
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">c4d1e8b3</span>
-                            <span class="text-fg truncate">GET /api/products</span>
-                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">inventory</span></span>
-                            <span class="text-fg-muted font-mono">45ms</span>
-                            <span class="text-fg-muted font-mono">3</span>
-                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
-                        </div>
-                        <!-- Row 4 -->
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">d9a3b5c7</span>
-                            <span class="text-fg truncate">POST /api/auth/login</span>
-                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
-                            <span class="text-fg-muted font-mono">89ms</span>
-                            <span class="text-fg-muted font-mono">4</span>
-                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
-                        </div>
-                        <!-- Row 5 -->
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">e2f6a8d4</span>
-                            <span class="text-fg truncate">GET /api/users/me</span>
-                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">api-gw</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">auth</span></span>
-                            <span class="text-fg-muted font-mono">23ms</span>
-                            <span class="text-fg-muted font-mono">2</span>
-                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
-                        </div>
-                        <!-- Row 6 -->
-                        <div class="grid grid-cols-[70px_1fr_120px_60px_50px_55px] gap-0 text-[10px] px-3 py-1.5 hover:bg-muted/20 items-center">
-                            <span class="text-accent font-mono text-[9px]">f1c5d7e9</span>
-                            <span class="text-fg truncate">PUT /api/orders/confirm</span>
-                            <span class="flex gap-1"><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">order</span><span class="text-[8px] border border-border px-1 py-0.5 text-fg-muted font-mono">notify</span></span>
-                            <span class="text-fg-muted font-mono">156ms</span>
-                            <span class="text-fg-muted font-mono">6</span>
-                            <span><span class="text-[8px] px-1.5 py-0.5 bg-green-500/10 text-green-400">Ok</span></span>
-                        </div>
+                        {traceRows.map((t, i) => (
+                            <div class={`grid grid-cols-[64px_1fr_86px_62px_44px] gap-2 text-[10px] px-3 py-1.5 items-center hover:bg-muted/20 ${t.error ? "bg-destructive/5" : ""} ${i < traceRows.length - 1 ? "border-b border-border" : ""}`}>
+                                <span class="text-primary font-mono text-[9px] underline underline-offset-2 decoration-primary/40">{t.id}</span>
+                                <span class="min-w-0">
+                                    <span class="flex items-center gap-1.5 min-w-0">
+                                        <span class={`text-[7px] font-semibold px-1 py-px rounded-sm shrink-0 ${methodChip[t.method]}`}>{t.method}</span>
+                                        <span class="text-fg truncate font-mono text-[9px]">{t.path}</span>
+                                    </span>
+                                    <span class="text-[8px] text-fg-muted block leading-tight mt-0.5">{t.at}</span>
+                                </span>
+                                <span class="flex gap-1 min-w-0">
+                                    <span class="text-[8px] rounded-sm bg-muted px-1 py-px text-fg font-mono truncate">{t.services[0]}</span>
+                                    {t.services.length > 1 && <span class="text-[8px] text-fg-muted shrink-0">+{t.services.length - 1}</span>}
+                                </span>
+                                <span class="text-fg font-mono text-[9px]">{t.dur}</span>
+                                <span><span class={`text-[8px] font-mono px-1.5 py-px rounded-sm ${t.error ? "bg-severity-error/15 text-severity-error" : "bg-severity-info/15 text-severity-info"}`}>{t.status}</span></span>
+                            </div>
+                        ))}
                     </div>
+                    <div class="text-[9px] text-fg-muted">Showing 100 traces</div>
                 </div>
             </div>
         </div>
@@ -672,171 +862,162 @@ const MAP_VIEW_H = 360;
         <!-- ===== LOGS VIEW ===== -->
         <div class="mock-view mock-view-logs flex-1 overflow-hidden">
             <div class="flex h-full">
-                <!-- Logs Filter Sidebar -->
-                <aside class="w-[130px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
-                    <!-- Level -->
+                <!-- Filter rail — matches the product's Logs filters -->
+                <aside class="w-[120px] shrink-0 border-r border-border bg-bg hidden md:flex flex-col p-2.5 space-y-2.5 overflow-y-auto">
+                    <div class="text-[8px] text-fg-muted uppercase tracking-[0.14em]">Filters</div>
                     <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Level</div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Search</div>
+                        <div class="rounded-md border border-border bg-bg-elevated px-1.5 py-1 text-[8px] text-fg-muted flex items-center gap-1">
+                            <svg class="w-2 h-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            <span class="flex-1">Search log messages</span>
+                            <span class="text-[7px] border border-border rounded px-0.5">/</span>
+                        </div>
+                    </div>
+                    <div class="border-t border-border"></div>
+                    <div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Severity</div>
                         <div class="space-y-1">
-                            <label class="flex items-center gap-1.5 text-[10px] text-blue-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                <span class="size-1.5 rounded-full bg-severity-info shrink-0"></span>
                                 INFO
-                                <span class="text-[8px] text-fg-muted/60 ml-auto">4</span>
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">1.4M</span>
                             </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-yellow-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                <span class="size-1.5 rounded-full bg-severity-warn shrink-0"></span>
                                 WARN
-                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">993K</span>
                             </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-red-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                <span class="size-1.5 rounded-full bg-severity-error shrink-0"></span>
                                 ERROR
-                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">416K</span>
                             </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-gray-400 cursor-default">
-                                <span class="w-2.5 h-2.5 border border-border shrink-0"></span>
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                <span class="size-1.5 rounded-full bg-severity-debug shrink-0"></span>
                                 DEBUG
-                                <span class="text-[8px] text-fg-muted/60 ml-auto">1</span>
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">21K</span>
                             </label>
+                            <span class="text-[8px] text-primary block">Show 1 more</span>
                         </div>
                     </div>
                     <div class="border-t border-border"></div>
-                    <!-- Service -->
                     <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Service</div>
+                        <div class="text-[9px] text-fg mb-1.5 font-medium">Environment</div>
                         <div class="space-y-1">
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                api-gateway
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                production
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">2.7M</span>
                             </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                order-service
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                payment-svc
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-accent/50 bg-accent/30 shrink-0"></span>
-                                auth-service
-                            </label>
-                            <label class="flex items-center gap-1.5 text-[10px] text-fg-muted cursor-default">
-                                <span class="w-2.5 h-2.5 border border-border shrink-0"></span>
-                                inventory-svc
+                            <label class="flex items-center gap-1.5 text-[9px] text-fg-muted cursor-default">
+                                <span class="w-2.5 h-2.5 rounded-sm border border-border shrink-0"></span>
+                                staging
+                                <span class="text-[8px] text-fg-muted ml-auto font-mono">2,972</span>
                             </label>
                         </div>
-                    </div>
-                    <div class="border-t border-border"></div>
-                    <!-- Query -->
-                    <div>
-                        <div class="text-[9px] text-fg-muted uppercase tracking-wider mb-1.5">Query</div>
-                        <div class="border border-border bg-bg-elevated px-1.5 py-1 text-[9px] text-fg-muted font-mono">service:payment*</div>
-                        <div class="text-[8px] text-fg-muted/50 mt-1">Supports regex</div>
                     </div>
                 </aside>
                 <!-- Logs Content -->
-                <div class="flex-1 p-3 md:p-4 space-y-3 min-w-0">
-                    <div class="flex items-center justify-between">
+                <div class="flex-1 p-3 md:p-4 space-y-2.5 min-w-0 flex flex-col">
+                    <div class="flex items-end justify-between gap-2">
                         <div>
-                            <div class="text-[9px] text-fg-muted">Logs</div>
-                            <div class="text-xs text-fg font-medium">Logs</div>
+                            <div class="font-display text-sm md:text-base text-fg font-semibold leading-tight">Logs</div>
+                            <div class="text-[9px]"><span class="text-fg font-medium">2.8M logs</span> <span class="text-fg-muted">in selected range</span></div>
                         </div>
-                        <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 1h</span>
-                    </div>
-                    <div class="rounded-lg border border-border bg-bg overflow-hidden">
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[9px] text-fg-muted border-b border-border bg-muted/30 px-3 py-1.5">
-                            <span>Timestamp</span><span>Service</span><span>Level</span><span>Message</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:23:01.342</span>
-                            <span class="text-fg-muted font-mono text-[9px]">api-gateway</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
-                            <span class="text-fg-muted truncate">POST /api/checkout 200 203ms</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:23:01.298</span>
-                            <span class="text-fg-muted font-mono text-[9px]">order-service</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
-                            <span class="text-fg-muted truncate">Order created order_id=ord_8f3a2c</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:23:01.245</span>
-                            <span class="text-fg-muted font-mono text-[9px]">payment-svc</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-yellow-500/10 text-yellow-400">WARN</span></span>
-                            <span class="text-fg-muted truncate">Retry attempt 2/3 for charge txn_9d1e</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border bg-destructive/5 hover:bg-destructive/10 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:22:58.891</span>
-                            <span class="text-fg-muted font-mono text-[9px]">payment-svc</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-red-500/10 text-red-400">ERROR</span></span>
-                            <span class="text-fg-muted truncate">Connection timeout to stripe after 5000ms</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:22:57.123</span>
-                            <span class="text-fg-muted font-mono text-[9px]">auth-service</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
-                            <span class="text-fg-muted truncate">Token validated user_id=usr_2f8a</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 border-b border-border hover:bg-muted/20 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:22:56.445</span>
-                            <span class="text-fg-muted font-mono text-[9px]">api-gateway</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-gray-500/10 text-gray-400">DEBUG</span></span>
-                            <span class="text-fg-muted truncate">Rate limit check passed ip=192.168.1.42</span>
-                        </div>
-                        <div class="grid grid-cols-[100px_90px_52px_1fr] gap-0 text-[10px] px-3 py-1.5 hover:bg-muted/20 items-center">
-                            <span class="text-fg-muted font-mono text-[9px]">14:22:55.201</span>
-                            <span class="text-fg-muted font-mono text-[9px]">inventory-svc</span>
-                            <span><span class="text-[8px] px-1 py-0.5 bg-blue-500/10 text-blue-400">INFO</span></span>
-                            <span class="text-fg-muted truncate">Stock reserved sku=SKU-1234 qty=2</span>
+                        <div class="flex items-center gap-1.5">
+                            <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                                <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Last 12 hours
+                            </span>
+                            <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                                <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+                                Reload
+                            </span>
                         </div>
                     </div>
+                    <!-- Severity histogram — stacked info/warn/error, like the product -->
+                    <div class="flex items-end gap-[2px] h-9">
+                        {logBars.map(([info, warn, err]) => (
+                            <div class="flex-1 flex flex-col-reverse gap-px h-full justify-start">
+                                <div class="bg-severity-info/80" style={`height: ${info}%`}></div>
+                                <div class="bg-severity-warn/80" style={`height: ${warn}%`}></div>
+                                <div class="bg-severity-error/80" style={`height: ${err}%`}></div>
+                            </div>
+                        ))}
+                    </div>
+                    <!-- Log rows — chevron · level dot+text · time · service · message -->
+                    <div class="rounded-lg border border-border bg-bg overflow-hidden flex-1">
+                        {logRows.map((l, i) => (
+                            <div class={`flex items-center gap-2 text-[10px] px-2.5 py-1.5 hover:bg-muted/20 ${l.level === "ERROR" ? "bg-destructive/5" : ""} ${i < logRows.length - 1 ? "border-b border-border" : ""}`}>
+                                <svg class="w-2 h-2 text-fg-muted shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                                <span class={`flex items-center gap-1 w-11 shrink-0 text-[8px] font-semibold ${levelText[l.level]}`}>
+                                    <span class={`size-1 rounded-full shrink-0 ${levelDot[l.level]}`}></span>
+                                    {l.level}
+                                </span>
+                                <span class="text-fg-muted font-mono text-[9px] shrink-0">{l.at}</span>
+                                <span class="text-fg-muted/70 font-mono text-[9px] w-16 shrink-0 truncate">{l.svc}</span>
+                                <span class="text-fg font-mono text-[9px] truncate">{l.msg}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <div class="text-[9px] text-fg-muted">Showing 100 logs</div>
                 </div>
             </div>
         </div>
 
         <!-- ===== METRICS VIEW ===== -->
-        <div class="mock-view mock-view-metrics flex-1 p-3 md:p-4 space-y-3 overflow-hidden">
-            <div class="flex items-center justify-between">
+        <div class="mock-view mock-view-metrics flex-1 p-3 md:p-4 space-y-2.5 overflow-hidden">
+            <div class="flex items-end justify-between gap-2">
                 <div>
-                    <div class="text-[9px] text-fg-muted">Metrics</div>
-                    <div class="text-xs text-fg font-medium">Metrics</div>
+                    <div class="font-display text-sm md:text-base text-fg font-semibold leading-tight">Metrics</div>
+                    <div class="text-[9px] text-fg-muted">Explore metrics across your services.</div>
                 </div>
-                <span class="text-[9px] text-fg-muted border border-border px-2 py-0.5">Last 6h</span>
+                <div class="flex items-center gap-1.5">
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">production
+                        <svg class="w-2 h-2 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+                    </span>
+                    <span class="inline-flex items-center gap-1 rounded-lg border border-border px-2 py-0.5 text-[9px] text-fg">
+                        <svg class="w-2.5 h-2.5 text-fg-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        Last 6 hours
+                    </span>
+                </div>
             </div>
             <!-- Service detail style: 2x2 chart grid -->
-            <div class="grid grid-cols-2 gap-3">
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">http.server.duration (p95)</div>
-                    <!-- Area chart style with gradient effect -->
-                    <div class="flex items-end gap-[2px] h-16">
+            <div class="grid grid-cols-2 gap-2">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="text-[9px] text-fg-muted font-mono mb-1.5">http.server.duration <span class="text-fg-muted/60">· p95</span></div>
+                    <div class="flex items-end gap-[2px] h-14">
                         <div class="flex-1 bg-chart-p95/50 h-[40%]"></div><div class="flex-1 bg-chart-p95/50 h-[42%]"></div><div class="flex-1 bg-chart-p95/55 h-[48%]"></div><div class="flex-1 bg-chart-p95/55 h-[45%]"></div><div class="flex-1 bg-chart-p95/60 h-[55%]"></div><div class="flex-1 bg-chart-p95/60 h-[52%]"></div><div class="flex-1 bg-chart-p95/65 h-[62%]"></div><div class="flex-1 bg-chart-p95/65 h-[58%]"></div><div class="flex-1 bg-chart-p95/70 h-[70%]"></div><div class="flex-1 bg-chart-p95/70 h-[65%]"></div><div class="flex-1 bg-chart-p95/75 h-[72%]"></div><div class="flex-1 bg-chart-p95/75 h-[68%]"></div><div class="flex-1 bg-chart-p95/80 h-[78%]"></div><div class="flex-1 bg-chart-p95 h-[75%]"></div><div class="flex-1 bg-chart-p95 h-[72%]"></div><div class="flex-1 bg-chart-p95 h-[68%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">http.server.request.count</div>
-                    <div class="flex items-end gap-[2px] h-16">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="text-[9px] text-fg-muted font-mono mb-1.5">http.server.request.count</div>
+                    <div class="flex items-end gap-[2px] h-14">
                         <div class="flex-1 bg-chart-throughput/50 h-[60%]"></div><div class="flex-1 bg-chart-throughput/50 h-[65%]"></div><div class="flex-1 bg-chart-throughput/55 h-[70%]"></div><div class="flex-1 bg-chart-throughput/55 h-[62%]"></div><div class="flex-1 bg-chart-throughput/60 h-[58%]"></div><div class="flex-1 bg-chart-throughput/60 h-[72%]"></div><div class="flex-1 bg-chart-throughput/65 h-[80%]"></div><div class="flex-1 bg-chart-throughput/65 h-[75%]"></div><div class="flex-1 bg-chart-throughput/70 h-[85%]"></div><div class="flex-1 bg-chart-throughput/70 h-[90%]"></div><div class="flex-1 bg-chart-throughput/75 h-[82%]"></div><div class="flex-1 bg-chart-throughput/75 h-[78%]"></div><div class="flex-1 bg-chart-throughput/80 h-[88%]"></div><div class="flex-1 bg-chart-throughput h-[92%]"></div><div class="flex-1 bg-chart-throughput h-[85%]"></div><div class="flex-1 bg-chart-throughput h-[80%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">process.runtime.memory</div>
-                    <div class="flex items-end gap-[2px] h-16">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="text-[9px] text-fg-muted font-mono mb-1.5">process.runtime.memory</div>
+                    <div class="flex items-end gap-[2px] h-14">
                         <div class="flex-1 bg-chart-4/50 h-[50%]"></div><div class="flex-1 bg-chart-4/50 h-[52%]"></div><div class="flex-1 bg-chart-4/55 h-[54%]"></div><div class="flex-1 bg-chart-4/55 h-[56%]"></div><div class="flex-1 bg-chart-4/60 h-[55%]"></div><div class="flex-1 bg-chart-4/60 h-[58%]"></div><div class="flex-1 bg-chart-4/65 h-[60%]"></div><div class="flex-1 bg-chart-4/65 h-[62%]"></div><div class="flex-1 bg-chart-4/70 h-[61%]"></div><div class="flex-1 bg-chart-4/70 h-[64%]"></div><div class="flex-1 bg-chart-4/75 h-[66%]"></div><div class="flex-1 bg-chart-4/75 h-[65%]"></div><div class="flex-1 bg-chart-4/80 h-[68%]"></div><div class="flex-1 bg-chart-4 h-[70%]"></div><div class="flex-1 bg-chart-4 h-[72%]"></div><div class="flex-1 bg-chart-4 h-[71%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
-                <div class="rounded-lg border border-border bg-bg p-3">
-                    <div class="text-[9px] text-fg-muted mb-2">db.client.connections.active</div>
-                    <div class="flex items-end gap-[2px] h-16">
+                <div class="rounded-lg border border-border bg-bg p-2.5">
+                    <div class="text-[9px] text-fg-muted font-mono mb-1.5">db.client.connections.active</div>
+                    <div class="flex items-end gap-[2px] h-14">
                         <div class="flex-1 bg-chart-2/50 h-[30%]"></div><div class="flex-1 bg-chart-2/50 h-[35%]"></div><div class="flex-1 bg-chart-2/55 h-[32%]"></div><div class="flex-1 bg-chart-2/55 h-[38%]"></div><div class="flex-1 bg-chart-2/60 h-[42%]"></div><div class="flex-1 bg-chart-2/60 h-[40%]"></div><div class="flex-1 bg-chart-2/65 h-[45%]"></div><div class="flex-1 bg-chart-2/65 h-[50%]"></div><div class="flex-1 bg-chart-2/70 h-[48%]"></div><div class="flex-1 bg-chart-2/70 h-[52%]"></div><div class="flex-1 bg-chart-2/75 h-[55%]"></div><div class="flex-1 bg-chart-2/75 h-[50%]"></div><div class="flex-1 bg-chart-2/80 h-[48%]"></div><div class="flex-1 bg-chart-2 h-[45%]"></div><div class="flex-1 bg-chart-2 h-[42%]"></div><div class="flex-1 bg-chart-2 h-[40%]"></div>
                     </div>
                     <div class="flex justify-between mt-1"><span class="text-[8px] text-fg-muted">6h ago</span><span class="text-[8px] text-fg-muted">now</span></div>
                 </div>
             </div>
         </div>
+        </div>
     </div>
 </div>
-

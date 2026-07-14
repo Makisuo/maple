@@ -10,7 +10,7 @@ const { competitorName, steps } = Astro.props;
 <section class="py-24 md:py-32">
     <div class="mx-auto max-w-5xl px-6">
         <div class="mb-12">
-            <span class="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent mb-4">
+            <span class="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary mb-4">
                 Migration
             </span>
             <h2 class="font-display text-2xl sm:text-3xl font-bold text-fg tracking-tight">Switch from {competitorName} in minutes</h2>
@@ -19,7 +19,7 @@ const { competitorName, steps } = Astro.props;
         <div class="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
             {steps.map((step, index) => (
                 <div class="bg-bg p-6 md:p-8">
-                    <div class="text-[11px] text-accent font-medium mb-4">{String(index + 1).padStart(2, '0')}</div>
+                    <div class="text-[11px] text-primary font-medium mb-4">{String(index + 1).padStart(2, '0')}</div>
                     <h3 class="text-base font-semibold text-fg mb-2">{step.title}</h3>
                     <p class="text-sm text-fg-muted leading-relaxed">{step.description}</p>
                 </div>

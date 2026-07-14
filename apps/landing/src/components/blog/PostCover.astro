@@ -35,7 +35,7 @@ const aspect =
           : "aspect-[16/9]";
 
 // Icon tint follows the cover surface.
-const tint = isDrench ? "text-primary-foreground" : "text-accent";
+const tint = isDrench ? "text-primary-foreground" : "text-primary";
 const focalClass = [
     "pointer-events-none absolute right-[3%] -top-[4%] aspect-square h-[64%]",
     tint,
@@ -74,12 +74,12 @@ const focalClass = [
         {/* Terminal prompt */}
         <span class="relative z-[2] inline-flex items-center gap-[7px] font-mono text-[11px] tracking-[0.02em]" aria-hidden="true">
             <span class:list={[isDrench ? "text-primary-foreground/60" : "text-fg-muted"]}>~/maple/blog</span>
-            <span class:list={[isDrench ? "text-primary-foreground" : "text-accent"]}>$</span>
+            <span class:list={[isDrench ? "text-primary-foreground" : "text-primary"]}>$</span>
             <span class:list={[isDrench ? "text-primary-foreground/90" : "text-fg/80"]}>cat {category ?? "post"}</span>
             <span
                 class:list={[
                     "inline-block h-[11px] w-[6px] motion-safe:animate-pulse",
-                    isDrench ? "bg-primary-foreground" : "bg-accent",
+                    isDrench ? "bg-primary-foreground" : "bg-primary",
                 ]}
             ></span>
         </span>

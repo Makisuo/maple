@@ -114,15 +114,15 @@ const nodes = [
 		transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
 	}
 	.llb__node:hover {
-		border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
-		background: color-mix(in oklab, var(--accent) 8%, var(--bg-elevated));
+		border-color: color-mix(in oklab, var(--primary) 50%, var(--border));
+		background: color-mix(in oklab, var(--primary) 8%, var(--bg-elevated));
 		transform: translateY(-2px);
 	}
 	.llb__idx {
 		font-family: var(--font-mono);
 		font-size: 9px;
 		letter-spacing: 0.12em;
-		color: var(--accent);
+		color: var(--primary);
 		opacity: 0.85;
 	}
 	.llb__label {
@@ -148,7 +148,7 @@ const nodes = [
 		height: 2px;
 		background-image: linear-gradient(
 			to right,
-			var(--accent) 0 6px,
+			var(--primary) 0 6px,
 			transparent 6px 12px
 		);
 		background-size: 12px 2px;
@@ -171,7 +171,7 @@ const nodes = [
 		overflow: visible;
 	}
 	.llb__looppath {
-		stroke: color-mix(in oklab, var(--accent) 75%, var(--muted-foreground));
+		stroke: color-mix(in oklab, var(--primary) 75%, var(--muted-foreground));
 		stroke-width: 1.5;
 		stroke-dasharray: 7 7;
 		vector-effect: non-scaling-stroke;
@@ -184,8 +184,8 @@ const nodes = [
 		width: 6px;
 		height: 6px;
 		border-radius: 999px;
-		background: var(--accent);
-		box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+		background: var(--primary);
+		box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 18%, transparent);
 	}
 	.llb__end--l {
 		left: 5px;
@@ -203,7 +203,7 @@ const nodes = [
 		font-family: var(--font-mono);
 		font-size: 10.5px;
 		letter-spacing: 0.02em;
-		color: var(--accent);
+		color: var(--primary);
 		white-space: nowrap;
 	}
 
@@ -219,7 +219,7 @@ const nodes = [
 	.llb__cap code {
 		font-family: var(--font-mono);
 		font-size: 11.5px;
-		color: var(--accent);
+		color: var(--primary);
 		background: color-mix(in oklab, var(--bg-elevated) 80%, transparent);
 		border: 1px solid var(--border);
 		padding: 1px 5px;
@@ -265,7 +265,7 @@ const nodes = [
 			position: static;
 			transform: none;
 			display: inline-block;
-			border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border));
+			border: 1px solid color-mix(in oklab, var(--primary) 35%, var(--border));
 		}
 	}
 

@@ -48,15 +48,15 @@ const next = currentIndex >= 0 && currentIndex < sorted.length - 1 ? sorted[curr
 
 <nav class="mt-12 pt-8 border-t border-border flex items-stretch gap-4" aria-label="Page navigation">
     {prev ? (
-        <a href={`/docs/${prev.id}`} class="flex-1 border border-border p-4 hover:border-accent/50 transition-colors group">
+        <a href={`/docs/${prev.id}`} class="flex-1 border border-border p-4 hover:border-primary/50 transition-colors group">
             <span class="text-[9px] text-fg-muted uppercase tracking-wider">Previous</span>
-            <span class="block text-sm text-fg group-hover:text-accent transition-colors mt-1">{prev.data.title}</span>
+            <span class="block text-sm text-fg group-hover:text-primary transition-colors mt-1">{prev.data.title}</span>
         </a>
     ) : <div class="flex-1" />}
     {next ? (
-        <a href={`/docs/${next.id}`} class="flex-1 border border-border p-4 hover:border-accent/50 transition-colors group text-right">
+        <a href={`/docs/${next.id}`} class="flex-1 border border-border p-4 hover:border-primary/50 transition-colors group text-right">
             <span class="text-[9px] text-fg-muted uppercase tracking-wider">Next</span>
-            <span class="block text-sm text-fg group-hover:text-accent transition-colors mt-1">{next.data.title}</span>
+            <span class="block text-sm text-fg group-hover:text-primary transition-colors mt-1">{next.data.title}</span>
         </a>
     ) : <div class="flex-1" />}
 </nav>
