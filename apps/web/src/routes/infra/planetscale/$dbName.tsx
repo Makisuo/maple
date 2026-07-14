@@ -90,7 +90,7 @@ function PlanetScaleDatabasePage() {
 				<div className="space-y-6">
 					<PageHero
 						title={dbName}
-						description="Branch-level health scraped from PlanetScale's metrics endpoints."
+						description="Branch-level health, live from PlanetScale."
 						meta={
 							database ? (
 								<>

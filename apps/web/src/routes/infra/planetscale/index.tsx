@@ -76,7 +76,7 @@ function PlanetScalePage() {
 				<div className="space-y-6">
 					<PageHero
 						title="PlanetScale"
-						description="Database health from the PlanetScale integration — connections, CPU, memory, and replication lag scraped per branch."
+						description="Database health from your PlanetScale organization — connections, CPU, memory, and replication lag for every branch."
 					/>
 					{Result.builder(statusResult)
 						.onInitial(() => (

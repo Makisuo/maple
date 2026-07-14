@@ -68,6 +68,17 @@ const stubPlanetScaleApi = (options?: {
 	 * unknown/bad service tokens) 403, only `token tok_good:*` passes.
 	 */
 	readonly denyBearerMetrics?: boolean
+	/** http_sd payload served by the control-plane SD endpoint (any auth). */
+	readonly sdGroups?: ReadonlyArray<{
+		targets: ReadonlyArray<string>
+		labels?: Record<string, string>
+	}>
+	/**
+	 * Prod-faithful data-plane split: discovered metrics hosts (anything off
+	 * api.planetscale.com) 403 everything but the service-token scheme — the
+	 * behavior that made OAuth-auth'd scrapes fail while the SD probe passed.
+	 */
+	readonly denyDataPlaneBearer?: boolean
 }) => {
 	const organizations = options?.organizations ?? [{ id: "psorg_1", name: "acme" }]
 	const stub = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -91,6 +102,18 @@ const stubPlanetScaleApi = (options?: {
 		const denied = Object.entries(options?.deny ?? {}).find(([needle]) => requestUrl.includes(needle))
 		if (denied) {
 			return new Response("{}", { status: denied[1], headers: { "content-type": "application/json" } })
+		}
+		if (!requestUrl.includes("api.planetscale.com") && options?.denyDataPlaneBearer) {
+			const authorization = headers.get("authorization") ?? ""
+			return authorization.startsWith("token ")
+				? new Response("up 1\n", { status: 200 })
+				: new Response("forbidden", { status: 403 })
+		}
+		if (options?.sdGroups && requestUrl.includes("api.planetscale.com") && requestUrl.includes("/metrics")) {
+			return new Response(JSON.stringify(options.sdGroups), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			})
 		}
 		if (options?.denyBearerMetrics && requestUrl.includes("/metrics")) {
 			const authorization = headers.get("authorization") ?? ""
@@ -307,6 +330,83 @@ describe("PlanetScaleConnectionService", () => {
 			assert.strictEqual(row?.auth_type, "token")
 			assert.isNotNull(row?.auth_credentials_ciphertext)
 			assert.isTrue(row?.enabled)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	it.effect("pauses metrics when the data plane rejects the bearer despite a passing SD probe", () => {
+		const testDb = createTestDb(trackedDbs)
+		const calls: Array<{ url: string; authorization: string | null }> = []
+		// The prod bug: api.planetscale.com's SD endpoint 2xx'd the OAuth bearer,
+		// so the target auto-enabled — but the discovered metrics.psdb.cloud hosts
+		// only accept service tokens and 403'd every actual scrape.
+		const stub = stubPlanetScaleApi({
+			calls,
+			denyDataPlaneBearer: true,
+			sdGroups: [
+				{
+					targets: ["branch-1.metrics.psdb.cloud:443"],
+					labels: { __metrics_path__: "/metrics", planetscale_database_branch_id: "branch-1" },
+				},
+			],
+		})
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const orgId = asOrgId("org_1")
+
+			yield* storeGrant(orgId)
+			const bound = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+
+			// Binding succeeds, but scraping is paused until a service token arrives.
+			assert.isTrue(bound.connected)
+			assert.strictEqual(bound.metricsAuth, "missing")
+			assert.isFalse(bound.scrapeTarget!.enabled)
+			assert.isFalse(bound.detectedPermissions?.readMetricsEndpoints)
+
+			// The verdict came from an actual data-plane scrape probe with the
+			// bearer. (Match on the host: fetch normalizes away the :443 port.)
+			assert.isTrue(
+				calls.some(
+					(call) =>
+						call.url.includes("branch-1.metrics.psdb.cloud") &&
+						call.authorization === "Bearer ps-access-token",
+				),
+			)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	it.effect("keeps oauth metrics enabled when the data-plane scrape accepts the bearer", () => {
+		const testDb = createTestDb(trackedDbs)
+		const calls: Array<{ url: string; authorization: string | null }> = []
+		// Data-plane host answers 200 to the bearer (the stub's default) — the
+		// probe must not pause a working OAuth-auth'd target.
+		const stub = stubPlanetScaleApi({
+			calls,
+			sdGroups: [
+				{
+					targets: ["branch-1.metrics.psdb.cloud:443"],
+					labels: { __metrics_path__: "/metrics", planetscale_database_branch_id: "branch-1" },
+				},
+			],
+		})
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const orgId = asOrgId("org_1")
+
+			yield* storeGrant(orgId)
+			const bound = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+
+			assert.strictEqual(bound.metricsAuth, "oauth")
+			assert.isTrue(bound.scrapeTarget!.enabled)
+			assert.isTrue(bound.detectedPermissions?.readMetricsEndpoints)
+			assert.isTrue(calls.some((call) => call.url.includes("branch-1.metrics.psdb.cloud")))
 		}).pipe(
 			Effect.provideService(FetchHttpClient.Fetch, stub),
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),

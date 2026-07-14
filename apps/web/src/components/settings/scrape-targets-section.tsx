@@ -10,7 +10,6 @@ import type {
 	ScrapeTargetChecksListResponse,
 	ScrapeTargetId,
 	ScrapeTargetResponse,
-	ScrapeTargetType,
 } from "@maple/domain/http"
 import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Exit, Schema } from "effect"
@@ -190,39 +189,21 @@ function scheduledStatus(
 	}
 }
 
-interface SourceCopy {
-	readonly description: string
-	readonly emptyTitle: string
-	readonly emptyDescription: string
-}
+const COPY = {
+	description: "Scrape Prometheus exporters and inspect scheduled scrape health.",
+	emptyTitle: "No scrape targets",
+	emptyDescription: "Add a Prometheus exporter endpoint to start scraping metrics.",
+} as const
 
-const SOURCE_COPY: Record<"all" | ScrapeTargetType, SourceCopy> = {
-	all: {
-		description: "Scrape Prometheus exporters and inspect scheduled scrape health.",
-		emptyTitle: "No scrape targets",
-		emptyDescription: "Add a Prometheus exporter endpoint to start scraping metrics.",
-	},
-	prometheus: {
-		description: "Scrape Prometheus exporters and inspect scheduled scrape health.",
-		emptyTitle: "No scrape targets",
-		emptyDescription: "Add a Prometheus exporter endpoint to start scraping metrics.",
-	},
-	planetscale: {
-		description:
-			"Connect PlanetScale organizations — Maple discovers and scrapes every database branch automatically.",
-		emptyTitle: "No PlanetScale organizations",
-		emptyDescription: "Connect an organization with a service token to start scraping branch metrics.",
-	},
-}
-
+/**
+ * Prometheus scrape-target manager. PlanetScale metrics collection is fully
+ * managed by its integration and never surfaces here — this section only
+ * lists and edits user-created prometheus targets.
+ */
 export function ScrapeTargetsSection({
-	sourceFilter,
+	sourceFilter = "prometheus",
 }: {
-	/**
-	 * Scope this section to one target type (Integrations hub drill-ins):
-	 * filters the list, presets the add dialog, and hides the source selector.
-	 */
-	sourceFilter?: ScrapeTargetType
+	sourceFilter?: "prometheus"
 } = {}) {
 	const [dialogOpen, setDialogOpen] = useState(false)
 	const [isSaving, setIsSaving] = useState(false)
@@ -232,15 +213,9 @@ export function ScrapeTargetsSection({
 	const [selectedTargetId, setSelectedTargetId] = useState<ScrapeTargetId | null>(null)
 
 	const [editingTarget, setEditingTarget] = useState<ScrapeTarget | null>(null)
-	const [formTargetType, setFormTargetType] = useState<ScrapeTargetType>("prometheus")
 	const [formName, setFormName] = useState("")
 	const [formServiceName, setFormServiceName] = useState("")
 	const [formUrl, setFormUrl] = useState("")
-	const [formOrganization, setFormOrganization] = useState("")
-	const [formTokenId, setFormTokenId] = useState("")
-	const [formTokenSecret, setFormTokenSecret] = useState("")
-	const [formIncludeBranches, setFormIncludeBranches] = useState("")
-	const [formExcludeBranches, setFormExcludeBranches] = useState("")
 	const [formInterval, setFormInterval] = useState("15")
 	const [formAuthType, setFormAuthType] = useState<ScrapeAuthType>("none")
 	const [formAuthToken, setFormAuthToken] = useState("")
@@ -269,20 +244,18 @@ export function ScrapeTargetsSection({
 	const targets = Result.builder(listResult)
 		.onSuccess((response) => [...response.targets] as ScrapeTarget[])
 		.orElse(() => [])
-		.filter((target) => !sourceFilter || target.targetType === sourceFilter)
+		.filter((target) => target.targetType === sourceFilter)
 	const selectedTarget = targets.find((target) => target.id === selectedTargetId) ?? null
-	const copy = SOURCE_COPY[sourceFilter ?? "all"]
+	const copy = COPY
 	// When empty, the centered empty state owns the primary action — hide the toolbar row.
 	const isEmpty = Result.isSuccess(listResult) && targets.length === 0
-	const emptyEntry = sourceFilter ? catalogEntry(sourceFilter) : null
+	const emptyEntry = catalogEntry(sourceFilter)
 
 	async function handleProbe(target: ScrapeTarget) {
 		setProbingId(target.id)
 		const result = await probeMutation({
 			params: { targetId: target.id },
-			// Invalidate the list plus the PlanetScale card's status (which surfaces
-			// this target's lastScrapeError/enabled) instead of only refreshing locally.
-			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+			reactivityKeys: ["scrapeTargets"],
 		})
 		if (Exit.isSuccess(result)) {
 			if (result.value.success) {
@@ -297,18 +270,11 @@ export function ScrapeTargetsSection({
 	}
 
 	function openAddDialog() {
-		const targetType = sourceFilter ?? "prometheus"
 		setEditingTarget(null)
-		setFormTargetType(targetType)
 		setFormName("")
 		setFormServiceName("")
 		setFormUrl("")
-		setFormOrganization("")
-		setFormTokenId("")
-		setFormTokenSecret("")
-		setFormIncludeBranches("")
-		setFormExcludeBranches("")
-		setFormInterval(targetType === "planetscale" ? "30" : "15")
+		setFormInterval("15")
 		setFormAuthType("none")
 		setFormAuthToken("")
 		setFormAuthUsername("")
@@ -318,15 +284,9 @@ export function ScrapeTargetsSection({
 
 	function openEditDialog(target: ScrapeTarget) {
 		setEditingTarget(target)
-		setFormTargetType(target.targetType)
 		setFormName(target.name)
 		setFormServiceName(target.serviceName ?? "")
 		setFormUrl(target.url)
-		setFormOrganization(target.organization ?? "")
-		setFormTokenId("")
-		setFormTokenSecret("")
-		setFormIncludeBranches(target.includeBranches.join(", "))
-		setFormExcludeBranches(target.excludeBranches.join(", "))
 		setFormInterval(String(target.scrapeIntervalSeconds))
 		setFormAuthType(target.authType)
 		setFormAuthToken("")
@@ -335,25 +295,7 @@ export function ScrapeTargetsSection({
 		setDialogOpen(true)
 	}
 
-	function selectTargetType(type: ScrapeTargetType) {
-		setFormTargetType(type)
-		setFormInterval(type === "planetscale" ? "30" : "15")
-	}
-
-	// Managed rows (provisioned by the PlanetScale integration) resolve auth from
-	// the org's OAuth grant — the edit dialog must not flip them back to "token"
-	// or ask for credentials.
-	const isManagedPlanetScaleAuth = editingTarget?.authType === "planetscale_oauth"
-
 	function buildAuthCredentials(): string | null {
-		if (formTargetType === "planetscale") {
-			if (isManagedPlanetScaleAuth) return null
-			if (!formTokenId.trim() || !formTokenSecret.trim()) return null
-			return JSON.stringify({
-				tokenId: formTokenId.trim(),
-				tokenSecret: formTokenSecret.trim(),
-			})
-		}
 		if (formAuthType === "bearer") {
 			if (!formAuthToken.trim()) return null
 			return JSON.stringify({ token: formAuthToken.trim() })
@@ -368,35 +310,21 @@ export function ScrapeTargetsSection({
 		return null
 	}
 
-	function parseBranchList(value: string): string[] {
-		return value
-			.split(",")
-			.map((entry) => entry.trim())
-			.filter((entry) => entry.length > 0)
-	}
-
 	async function handleSave() {
-		const isPlanetScale = formTargetType === "planetscale"
-		if (!formName.trim() || (isPlanetScale ? !formOrganization.trim() : !formUrl.trim())) {
-			toast.error(isPlanetScale ? "Name and organization are required" : "Name and URL are required")
+		if (!formName.trim() || !formUrl.trim()) {
+			toast.error("Name and URL are required")
 			return
 		}
 
 		let parsedInterval: ScrapeIntervalSeconds
 		try {
-			parsedInterval = asScrapeIntervalSeconds(
-				Number.parseInt(formInterval, 10) || (isPlanetScale ? 30 : 15),
-			)
+			parsedInterval = asScrapeIntervalSeconds(Number.parseInt(formInterval, 10) || 15)
 		} catch {
 			toast.error("Scrape interval must be an integer from 5 to 300 seconds")
 			return
 		}
 
 		const authCredentials = buildAuthCredentials()
-		if (isPlanetScale && !editingTarget && authCredentials === null) {
-			toast.error("Service token ID and secret are required")
-			return
-		}
 
 		setIsSaving(true)
 
@@ -407,22 +335,11 @@ export function ScrapeTargetsSection({
 					name: formName.trim(),
 					scrapeIntervalSeconds: parsedInterval,
 					serviceName: formServiceName.trim() || null,
-					...(isPlanetScale
-						? {
-								organization: formOrganization.trim(),
-								authType: isManagedPlanetScaleAuth
-									? ("planetscale_oauth" as const)
-									: ("token" as const),
-								includeBranches: parseBranchList(formIncludeBranches),
-								excludeBranches: parseBranchList(formExcludeBranches),
-							}
-						: {
-								url: formUrl.trim(),
-								authType: formAuthType,
-							}),
+					url: formUrl.trim(),
+					authType: formAuthType,
 					...(authCredentials !== null ? { authCredentials } : {}),
 				}),
-				reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+				reactivityKeys: ["scrapeTargets"],
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Scrape target updated")
@@ -436,21 +353,11 @@ export function ScrapeTargetsSection({
 					name: formName.trim(),
 					scrapeIntervalSeconds: parsedInterval,
 					serviceName: formServiceName.trim() || null,
-					...(isPlanetScale
-						? {
-								targetType: "planetscale" as const,
-								organization: formOrganization.trim(),
-								authType: "token" as const,
-								includeBranches: parseBranchList(formIncludeBranches),
-								excludeBranches: parseBranchList(formExcludeBranches),
-							}
-						: {
-								url: formUrl.trim(),
-								authType: formAuthType,
-							}),
+					url: formUrl.trim(),
+					authType: formAuthType,
 					...(authCredentials !== null ? { authCredentials } : {}),
 				}),
-				reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+				reactivityKeys: ["scrapeTargets"],
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Scrape target created")
@@ -467,7 +374,7 @@ export function ScrapeTargetsSection({
 		setDeleteConfirmTarget(null)
 		const result = await deleteMutation({
 			params: { targetId },
-			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+			reactivityKeys: ["scrapeTargets"],
 		})
 		if (Exit.isSuccess(result)) {
 			toast.success("Scrape target deleted")
@@ -484,7 +391,7 @@ export function ScrapeTargetsSection({
 			payload: new UpdateScrapeTargetRequest({
 				enabled: !target.enabled,
 			}),
-			reactivityKeys: ["scrapeTargets", "planetscaleIntegrationStatus"],
+			reactivityKeys: ["scrapeTargets"],
 		})
 		if (!Exit.isSuccess(result)) {
 			toast.error("Failed to update scrape target")
@@ -541,7 +448,6 @@ export function ScrapeTargetsSection({
 									selected={target.id === selectedTarget?.id}
 									toggling={togglingId === target.id}
 									probing={probingId === target.id}
-									hideTypeBadge={sourceFilter === "planetscale"}
 									onSelect={setSelectedTargetId}
 									onProbe={handleProbe}
 									onToggle={handleToggleEnabled}

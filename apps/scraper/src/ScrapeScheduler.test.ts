@@ -451,6 +451,24 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
+	it.effect("backs off a target whose credential is rejected (403) instead of hammering it", () =>
+		Effect.gen(function* () {
+			// Prod scenario: PlanetScale's metrics.psdb.cloud rejects an OAuth
+			// bearer with 403 on every scrape — the loop must escalate its delay
+			// exactly like a rate limit, not retry every interval forever.
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.scrapeImpl = () => Effect.succeed(proxyResponse({ status: 403, body: "forbidden" }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			// Exponential backoff off a 10s base: scrapes at t=0, 10, 30 (next is
+			// t=70, outside the window). A fixed interval would have fired 7 times.
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+			assert.include(harness.reportedResults[0]?.error ?? "", "HTTP 403")
+		}),
+	)
+
 	it.effect("honors a longer Retry-After before the next scrape", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10)])
@@ -588,40 +606,58 @@ describe("sendResultsInChunks", () => {
 })
 
 describe("nextScrapeDelayMs", () => {
-	const ok: ScrapeOutcome = { error: null, rateLimited: false, retryAfterMs: null }
+	const ok: ScrapeOutcome = { error: null, rateLimited: false, authFailed: false, retryAfterMs: null }
 	const limited = (retryAfterMs: number | null = null): ScrapeOutcome => ({
 		error: "target returned HTTP 429",
 		rateLimited: true,
+		authFailed: false,
 		retryAfterMs,
 	})
+	const authRejected: ScrapeOutcome = {
+		error: "target returned HTTP 403",
+		rateLimited: false,
+		authFailed: true,
+		retryAfterMs: null,
+	}
 
 	it("holds the base interval on a healthy scrape, ignoring the counter", () => {
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 5_000, outcome: ok, consecutiveRateLimits: 3 }), 5_000)
+		assert.strictEqual(nextScrapeDelayMs({ baseMs: 5_000, outcome: ok, consecutiveBackoffs: 3 }), 5_000)
 	})
 
 	it("escalates exponentially while rate-limited", () => {
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveRateLimits: 0 }), 10_000)
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveRateLimits: 1 }), 20_000)
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveRateLimits: 3 }), 80_000)
+		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 0 }), 10_000)
+		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 1 }), 20_000)
+		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 3 }), 80_000)
+	})
+
+	it("escalates exponentially on a rejected credential (401/403) too", () => {
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: authRejected, consecutiveBackoffs: 1 }),
+			20_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 60_000, outcome: authRejected, consecutiveBackoffs: 5 }),
+			Duration.toMillis(Duration.minutes(5)),
+		)
 	})
 
 	it("caps the backoff at 5 minutes", () => {
 		assert.strictEqual(
-			nextScrapeDelayMs({ baseMs: 60_000, outcome: limited(), consecutiveRateLimits: 5 }),
+			nextScrapeDelayMs({ baseMs: 60_000, outcome: limited(), consecutiveBackoffs: 5 }),
 			Duration.toMillis(Duration.minutes(5)),
 		)
 	})
 
 	it("honors Retry-After when it exceeds the exponential backoff", () => {
 		assert.strictEqual(
-			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(120_000), consecutiveRateLimits: 0 }),
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(120_000), consecutiveBackoffs: 0 }),
 			120_000,
 		)
 	})
 
 	it("prefers the exponential backoff when Retry-After is shorter", () => {
 		assert.strictEqual(
-			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(5_000), consecutiveRateLimits: 2 }),
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(5_000), consecutiveBackoffs: 2 }),
 			40_000,
 		)
 	})
