@@ -29,7 +29,7 @@ export const createLandingWorker = ({ stage, domains }: CreateLandingWorkerOptio
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			// The `assets` prop auto-adds the ASSETS binding `src/worker.ts` reads.
 			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
-			compatibility: { flags: ["nodejs_compat"] },
+			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			url: true,
 			domain: domains.landing,
