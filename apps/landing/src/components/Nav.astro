@@ -1,5 +1,4 @@
 ---
-import * as m from "../paraglide/messages";
 import { NavBar } from "./NavBar"
 import { getGitHubStars } from "../lib/github-stars"
 
@@ -7,15 +6,7 @@ const locale = Astro.currentLocale ?? "en";
 const stars = await getGitHubStars();
 ---
 
-<!--
-   Announcement bar.
-   Solid bg-bg (no backdrop-blur). Amber stays as identity.
--->
-<div class="fixed top-0 left-0 right-0 z-50 bg-bg text-primary text-[10px] tracking-wider uppercase text-center py-1.5 border-b border-border">
-    <span class="opacity-70">{m.nav_announcement()}</span><a href="https://app.maple.dev" class="underline underline-offset-4 decoration-primary/40 hover:decoration-primary transition-colors">{m.nav_announcement_link()}</a>
-</div>
-
-<nav id="main-nav" class="fixed top-[28px] left-0 right-0 z-50 border-b border-border bg-bg transition-colors duration-200">
+<nav id="main-nav" class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg transition-colors duration-200">
     <div class="mx-auto max-w-6xl px-6 h-14 flex items-center">
         <NavBar locale={locale} stars={stars} client:load />
     </div>

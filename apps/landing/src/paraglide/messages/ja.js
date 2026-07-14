@@ -47,22 +47,6 @@ export const cta_see_full_story = () => `詳細を見る →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement = () => `Mapleが利用可能になりました — `
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `無料トライアルを開始する`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const nav_features = () => `機能`
 
 

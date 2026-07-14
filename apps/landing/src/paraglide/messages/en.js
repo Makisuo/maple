@@ -47,22 +47,6 @@ export const cta_see_full_story = () => `See the full story →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement = () => `Maple is live · `
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `start your free trial`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const nav_features = () => `Features`
 
 
