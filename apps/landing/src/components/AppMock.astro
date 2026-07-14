@@ -385,18 +385,6 @@ function sparkPoints(spark: number[]): string {
                         );
                     })}
 
-                    <!-- Edge labels — "~calls err%" chips riding each link, like the product -->
-                    {mapEdgeRender.filter((e) => e.hot || e.rps! >= 4200).map((e) => {
-                        const label = `${e.calls} ${e.err}`;
-                        const w = label.length * 5.4 + 12;
-                        return (
-                            <g>
-                                <rect x={e.labelX - w / 2} y={e.labelY - 8} width={w} height={16} rx="4" fill="var(--card)" stroke="var(--border)" stroke-width="1" />
-                                <text x={e.labelX} y={e.labelY + 3} text-anchor="middle" class="svc-map-edge-label" fill={e.hot ? "var(--severity-warn)" : undefined}>{label}</text>
-                            </g>
-                        );
-                    })}
-
                     <!-- Nodes — exact ServiceMapNode.tsx markup inside foreignObject -->
                     {mapNodes.map((n) => {
                         const x = MAP_COL_X[n.col];
