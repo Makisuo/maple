@@ -35,6 +35,7 @@ export interface CreateChatFlueWorkerOptions {
 	mapleApiUrl: string
 }
 
+
 /**
  * Deploy the Flue chat worker (`apps/chat-flue`) via alchemy, consistent with
  * the rest of the stack.
@@ -99,11 +100,6 @@ export const createChatFlueWorker = ({ stage, domains, mapleApiUrl }: CreateChat
 			url: true,
 			domain: domains.chat,
 			env: {
-				// Workers AI. v2 has no bare `Ai()` binding descriptor — an AI Gateway
-				// resource is the only way to emit the `{ type: "ai" }` binding for an
-				// async worker. The gateway itself is unused at runtime (the emitted
-				// binding carries no gateway id); it exists so `env.AI` keeps working.
-				AI: Cloudflare.AI.Gateway("chat-flue-ai"),
 				FLUE_MAPLE_CHAT_AGENT: chatAgent,
 				FLUE_TRIAGE_WORKFLOW: triageWorkflow,
 				FLUE_REGISTRY: registry,
@@ -123,6 +119,15 @@ export const createChatFlueWorker = ({ stage, domains, mapleApiUrl }: CreateChat
 				...optionalSecret("CLERK_JWT_KEY"),
 			},
 		})
+
+		// v1 `Ai()` equivalent: a bare Workers AI (`{ type: "ai" }`) binding,
+		// attached as raw binding metadata the same way the env binder does
+		// internally. alchemy v2 only emits this binding type for
+		// `Cloudflare.AI.Gateway` resources, but a Gateway is a real cloud
+		// resource we don't use — planning it needs the AI Gateway API permission
+		// on the deploy token, which CI's scoped token lacks. Revisit if v2 grows
+		// a bare Ai binding descriptor.
+		yield* worker.bind("AI", { bindings: [{ type: "ai", name: "AI" }] })
 
 		return worker
 	})
