@@ -42,6 +42,20 @@
 	display: none;
 }
 
+/* Topbar breadcrumb follows the active tab */
+.app-mock .mock-crumb {
+	display: none;
+}
+
+.app-mock:has(.mock-radio-map:checked) .mock-crumb-map,
+.app-mock:has(.mock-radio-overview:checked) .mock-crumb-overview,
+.app-mock:has(.mock-radio-services:checked) .mock-crumb-services,
+.app-mock:has(.mock-radio-traces:checked) .mock-crumb-traces,
+.app-mock:has(.mock-radio-logs:checked) .mock-crumb-logs,
+.app-mock:has(.mock-radio-metrics:checked) .mock-crumb-metrics {
+	display: inline;
+}
+
 .app-mock:has(.mock-radio-map:checked) .mock-view-map,
 .app-mock:has(.mock-radio-overview:checked) .mock-view-overview,
 .app-mock:has(.mock-radio-services:checked) .mock-view-services,
