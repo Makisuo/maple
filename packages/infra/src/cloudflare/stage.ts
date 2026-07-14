@@ -125,6 +125,30 @@ export function resolveMapleDomains(stage: MapleStage): MapleDomains {
 	}
 }
 
+/**
+ * Dashboard-managed Hyperdrive configs, bound by ID (v1's `HyperdriveRef`).
+ * The origin/credentials are managed in the Cloudflare dashboard — deploys
+ * never see or rewrite the database connection. Stages returning undefined
+ * get an alchemy-managed per-branch Hyperdrive pushed from MAPLE_PG_URL.
+ * Config IDs are not secrets.
+ */
+export function resolveHyperdriveRefId(stage: MapleStage): string | undefined {
+	switch (stage.kind) {
+		case "prd":
+			// `maple-prd` — origin: PlanetScale `main` branch.
+			return "ad4c487838594b89810b23e5fb14e129"
+		case "stg":
+			// TEMPORARY: staging shares prod's `maple-prd` config (owner decision,
+			// 2026-07-14) — stg workers therefore read/write the PRODUCTION
+			// database and the stg alerting crons overlap prod's. Replace with a
+			// dedicated `maple-stg` config (PlanetScale `stg` branch) ASAP.
+			return "ad4c487838594b89810b23e5fb14e129"
+		case "pr":
+		case "dev":
+			return undefined
+	}
+}
+
 export function resolveHyperdriveName(stage: MapleStage): string {
 	switch (stage.kind) {
 		case "prd":

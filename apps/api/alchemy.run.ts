@@ -7,6 +7,7 @@ import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	resolveDeploymentEnvironment,
 	resolveHyperdriveName,
+	resolveHyperdriveRefId,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
 
@@ -37,40 +38,50 @@ export interface CreateMapleApiOptions {
 
 export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
-		// Managed Hyperdrive: the origin is pushed from MAPLE_PG_URL (a standard
-		// Postgres connection string, direct port 5432) — the same env var the CI
-		// `drizzle-kit migrate` step + import scripts use. Cloudflare Hyperdrive
-		// needs a STRUCTURED origin (discrete host/user/…), not a URL, so we parse
-		// it here. Schema migrations run in CI before deploy, never at boot.
+		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
-		// NOTE: prd is guarded off in the root alchemy.run.ts — v1 bound the
-		// dashboard-managed `maple-prd` Hyperdrive by name via HyperdriveRef, which
-		// has no alchemy v2 equivalent yet.
-		const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
-		const mapleDb = yield* Cloudflare.Hyperdrive.Connection("maple-db", {
-			name: resolveHyperdriveName(stage),
-			origin: {
-				scheme: "postgres",
-				host: pgUrl.hostname,
-				port: Number(pgUrl.port || "5432"),
-				// Connect-time db (`postgres`, the PlanetScale cluster default), not the
-				// PS resource name.
-				database: pgUrl.pathname.replace(/^\//, "") || "postgres",
-				user: decodeURIComponent(pgUrl.username),
-				password: Redacted.make(decodeURIComponent(pgUrl.password)),
-			},
-			// Read-after-write everywhere (alert state CAS, dashboard versioning) —
-			// revisit caching once read paths that tolerate staleness are identified.
-			caching: { disabled: true },
-			dev: {
-				scheme: "postgres",
-				host: "localhost",
-				port: 5499,
-				database: "maple",
-				user: "maple",
-				password: Redacted.make("maple"),
-			},
-		})
+		// - stg/prd bind a DASHBOARD-MANAGED config by ID (v1's `HyperdriveRef`,
+		//   which v2 lacks — the binding is attached as raw `{ type: "hyperdrive",
+		//   id }` metadata after the Worker exists, see below). Origin/credentials
+		//   live only in the Cloudflare dashboard; deploys never see them and
+		//   MAPLE_PG_URL is not required.
+		//
+		// - pr/dev stages get an alchemy-MANAGED per-branch Hyperdrive whose origin
+		//   is pushed from MAPLE_PG_URL (a standard Postgres connection string,
+		//   direct port 5432) — the same env var the CI `drizzle-kit migrate` step
+		//   + import scripts use. Cloudflare Hyperdrive needs a STRUCTURED origin
+		//   (discrete host/user/…), not a URL, so we parse it here. Schema
+		//   migrations run in CI before deploy, never at boot.
+		const hyperdriveRefId = resolveHyperdriveRefId(stage)
+		const mapleDb = hyperdriveRefId
+			? undefined
+			: yield* Effect.gen(function* () {
+					const pgUrl = new URL(requireEnv("MAPLE_PG_URL"))
+					return yield* Cloudflare.Hyperdrive.Connection("maple-db", {
+						name: resolveHyperdriveName(stage),
+						origin: {
+							scheme: "postgres",
+							host: pgUrl.hostname,
+							port: Number(pgUrl.port || "5432"),
+							// Connect-time db (`postgres`, the PlanetScale cluster default),
+							// not the PS resource name.
+							database: pgUrl.pathname.replace(/^\//, "") || "postgres",
+							user: decodeURIComponent(pgUrl.username),
+							password: Redacted.make(decodeURIComponent(pgUrl.password)),
+						},
+						// Read-after-write everywhere (alert state CAS, dashboard versioning) —
+						// revisit caching once read paths that tolerate staleness are identified.
+						caching: { disabled: true },
+						dev: {
+							scheme: "postgres",
+							host: "localhost",
+							port: 5499,
+							database: "maple",
+							user: "maple",
+							password: Redacted.make("maple"),
+						},
+					})
+				})
 
 		const mcpSessions = yield* Cloudflare.KV.Namespace("MCP_SESSIONS", {
 			title: resolveWorkerName("mcp-sessions", stage),
@@ -117,7 +128,8 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 			// Periodic VCS sync backstop (every 12h) — enqueues a refresh per installation; see worker.ts `scheduled`.
 			crons: ["0 */12 * * *"],
 			env: {
-				MAPLE_DB: mapleDb,
+				// Ref stages attach MAPLE_DB via worker.bind below.
+				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
 				MCP_SESSIONS: mcpSessions,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
@@ -188,6 +200,15 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 			},
 		})
 
+		if (hyperdriveRefId) {
+			// v1 `HyperdriveRef` equivalent: bind the dashboard-managed config by ID
+			// as raw binding metadata (same mechanism the env binder uses). No cloud
+			// resource is created and the origin credentials stay in the dashboard.
+			yield* worker.bind("MAPLE_DB", {
+				bindings: [{ type: "hyperdrive", name: "MAPLE_DB", id: hyperdriveRefId }],
+			})
+		}
+
 		// Attach the api worker as the vcs-sync queue consumer (v1 `eventSources`).
 		yield* Cloudflare.Queues.Consumer("vcs-sync-consumer", {
 			queueId: vcsSyncQueue.queueId,
@@ -200,5 +221,6 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 			},
 		})
 
+		// `db` is undefined on ref stages — alerting resolves the same ref itself.
 		return { worker, db: mapleDb }
 	})

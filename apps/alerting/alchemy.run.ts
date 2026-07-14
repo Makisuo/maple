@@ -6,6 +6,7 @@ import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	resolveDeploymentEnvironment,
+	resolveHyperdriveRefId,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
 
@@ -30,11 +31,13 @@ const optionalSecret = (key: string): Record<string, Redacted.Redacted<string>> 
 export interface CreateAlertingWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
-	mapleDb: Cloudflare.Hyperdrive.Connection
+	/** Managed per-branch Hyperdrive from the api factory; undefined on ref stages (stg/prd). */
+	mapleDb: Cloudflare.Hyperdrive.Connection | undefined
 }
 
 export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOptions) =>
 	Effect.gen(function* () {
+		const hyperdriveRefId = resolveHyperdriveRefId(stage)
 		// Cross-script binding to the AI triage Workflow hosted by the api worker —
 		// the error/anomaly ticks enqueue triage runs when incidents open. The
 		// first arg is the physical workflow name; `scriptName` makes this a
@@ -58,7 +61,8 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 			url: false,
 			crons: ["* * * * *", "*/5 * * * *", "*/15 * * * *", "0 * * * *", "0 9 * * *"],
 			env: {
-				MAPLE_DB: mapleDb,
+				// Ref stages attach MAPLE_DB via worker.bind below.
+				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
 				EMAIL: Cloudflare.Email.SendEmail("email", {
 					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
@@ -108,6 +112,14 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
 			},
 		})
+
+		if (hyperdriveRefId) {
+			// v1 `HyperdriveRef` equivalent: bind the dashboard-managed config by ID
+			// (see apps/api/alchemy.run.ts for the full rationale).
+			yield* worker.bind("MAPLE_DB", {
+				bindings: [{ type: "hyperdrive", name: "MAPLE_DB", id: hyperdriveRefId }],
+			})
+		}
 
 		return worker
 	})

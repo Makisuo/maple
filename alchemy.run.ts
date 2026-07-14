@@ -39,15 +39,6 @@ export default Alchemy.Stack(
 	},
 	Effect.gen(function* () {
 		const stage = parseMapleStage(yield* Alchemy.Stage)
-		if (stage.kind === "prd") {
-			return yield* Effect.die(
-				new Error(
-					"prd is not migrated to alchemy v2 yet: v2 has no HyperdriveRef equivalent " +
-						"for the dashboard-managed `maple-prd` Hyperdrive. Deploy prd from a v1 checkout.",
-				),
-			)
-		}
-
 		const domains = resolveMapleDomains(stage)
 
 		const apiUrl = resolveUrl(domains.api, "MAPLE_API_BASE_URL")
