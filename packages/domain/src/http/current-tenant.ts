@@ -32,21 +32,3 @@ export class Authorization extends HttpApiMiddleware.Service<
 		bearer: HttpApiSecurity.bearer,
 	},
 }) {}
-
-/**
- * Server-to-server auth for internal endpoints (the chat-flue `submit_diagnosis`
- * write, etc.). Verifies the internal-service bearer token rather than a Clerk
- * session, but provides the same {@link Context} so handlers read the tenant
- * uniformly. The implementation lives in `apps/api` (InternalServiceAuthorizationLayer).
- */
-export class InternalServiceAuthorization extends HttpApiMiddleware.Service<
-	InternalServiceAuthorization,
-	{
-		provides: Context
-	}
->()("InternalServiceAuthorization", {
-	error: UnauthorizedError,
-	security: {
-		bearer: HttpApiSecurity.bearer,
-	},
-}) {}

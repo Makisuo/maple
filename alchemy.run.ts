@@ -48,11 +48,14 @@ export default Alchemy.Stack(
 		// back to a caller-supplied env var or the public Maple ingest endpoint.
 		const ingestUrl = resolveUrl(domains.ingest, "VITE_INGEST_URL", "https://ingest.maple.dev")
 
-		// chat-flue deploys before api so api can service-bind the real worker (the
-		// v1 WorkerStub cycle-breaker is gone — chat-flue's api URL is now static).
-		const chatFlue = yield* createChatFlueWorker({ stage, domains, mapleApiUrl: apiUrl })
-
-		const { worker: api, db: mapleDb } = yield* createMapleApi({ stage, domains, chatFlue })
+		// Deploy the API RPC surface before switching chat-flue to it. The reverse
+		// CHAT_FLUE binding is attached after chat deploys, which breaks the resource
+		// cycle without an HTTP fallback or a placeholder Worker.
+		const { worker: api, db: mapleDb } = yield* createMapleApi({ stage, domains })
+		const chatFlue = yield* createChatFlueWorker({ stage, domains, mapleApiRpc: api })
+		yield* api.bind("CHAT_FLUE", {
+			bindings: [{ type: "service", name: "CHAT_FLUE", service: chatFlue.workerName }],
+		})
 
 		// Standalone ElectricSQL shape-proxy worker (DB-free); its public origin is
 		// baked into the web build (VITE_ELECTRIC_SYNC_URL).

@@ -7,6 +7,7 @@
 		"./anticipated-errors": "./src/anticipated-errors.ts",
 		"./billing": "./src/billing.ts",
 		"./http": "./src/http/index.ts",
+		"./internal-rpc": "./src/internal-rpc.ts",
 		"./primitives": "./src/primitives.ts",
 		"./query-engine": "./src/query-engine.ts",
 		"./recommendations": "./src/recommendations.ts",

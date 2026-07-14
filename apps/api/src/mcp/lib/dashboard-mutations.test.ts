@@ -12,20 +12,12 @@
 
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
-import { HttpServerRequest } from "effect/unstable/http"
-import {
-	DashboardDocument,
-	DashboardId,
-	IsoDateTimeString,
-	OrgId,
-	UserId,
-} from "@maple/domain/http"
+import { DashboardDocument, DashboardId, IsoDateTimeString, OrgId, UserId } from "@maple/domain/http"
 import { DashboardPersistenceService } from "@/services/DashboardPersistenceService"
-import { AuthService } from "@/services/AuthService"
-import { ApiKeysService } from "@/services/ApiKeysService"
 import { Env } from "@/lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { withDashboardMutation } from "./dashboard-mutations"
+import { CurrentMcpTenant } from "./query-warehouse"
 import { registerUpdateDashboardTool } from "@/mcp/tools/update-dashboard"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "@/mcp/tools/types"
 
@@ -33,9 +25,8 @@ const trackedDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(trackedDbs))
 
-// The dashboard-mutation tools resolve their tenant from the inbound HTTP
-// request. We take the internal-service auth branch (a `maple_svc_` bearer +
-// `x-org-id`), which only needs `Env`, so no API key / session plumbing.
+// MCP transport authentication resolves the tenant before dispatch. Tool tests
+// inject that already-resolved context directly, matching both HTTP and RPC.
 const INTERNAL_TOKEN = "test-internal-token"
 const ORG = "org_no_tags"
 
@@ -55,33 +46,16 @@ const testConfig = () =>
 		}),
 	)
 
-const requestLayer = Layer.succeed(
-	HttpServerRequest.HttpServerRequest,
-	HttpServerRequest.fromWeb(
-		new Request("http://api.localhost/mcp", {
-			method: "POST",
-			headers: {
-				authorization: `Bearer maple_svc_${INTERNAL_TOKEN}`,
-				"x-org-id": ORG,
-			},
-		}),
-	),
-)
-
 const makeLayer = (testDb: TestDb) =>
 	Layer.mergeAll(
 		DashboardPersistenceService.layer,
-		AuthService.layer,
-		ApiKeysService.layer,
-		requestLayer,
-	).pipe(
-		Layer.provide(testDb.layer),
-		// `provideMerge` so `Env` is both satisfied for the services above and
-		// exposed in the output — `withDashboardMutation` → `resolveTenant` reads
-		// `Env` directly from the outer context.
-		Layer.provideMerge(Env.layer),
-		Layer.provide(testConfig()),
-	)
+		Layer.succeed(CurrentMcpTenant, {
+			orgId: Schema.decodeUnknownSync(OrgId)(ORG),
+			userId: Schema.decodeUnknownSync(UserId)("internal-service"),
+			roles: [],
+			authMode: "self_hosted",
+		}),
+	).pipe(Layer.provide(testDb.layer), Layer.provideMerge(Env.layer), Layer.provide(testConfig()))
 
 const asDashboardId = Schema.decodeUnknownSync(DashboardId)
 const asIsoDateTimeString = Schema.decodeUnknownSync(IsoDateTimeString)

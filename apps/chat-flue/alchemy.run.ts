@@ -10,6 +10,7 @@ import {
 	resolveDeploymentEnvironment,
 	resolveWorkerName,
 } from "@maple/infra/cloudflare"
+import type { MapleApiWorker } from "../api/alchemy.run.ts"
 
 const requireEnv = (key: string): string => {
 	const value = process.env[key]?.trim()
@@ -32,9 +33,9 @@ const optionalSecret = (key: string): Record<string, Redacted.Redacted<string>> 
 export interface CreateChatFlueWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
-	mapleApiUrl: string
+	/** API worker deployed first, then bound privately for schemaless RPC. */
+	mapleApiRpc: MapleApiWorker
 }
-
 
 /**
  * Deploy the Flue chat worker (`apps/chat-flue`) via alchemy, consistent with
@@ -53,7 +54,7 @@ export interface CreateChatFlueWorkerOptions {
  * Manual fallback (Flue-native): `cd apps/chat-flue && bun run build &&
  * wrangler deploy --config dist/maple_chat_flue/wrangler.json`.
  */
-export const createChatFlueWorker = ({ stage, domains, mapleApiUrl }: CreateChatFlueWorkerOptions) =>
+export const createChatFlueWorker = ({ stage, domains, mapleApiRpc }: CreateChatFlueWorkerOptions) =>
 	Effect.gen(function* () {
 		// Flue generates the Worker entrypoint + DO classes; build before deploy.
 		const build = yield* Command.Build("chat-flue-build", {
@@ -109,7 +110,7 @@ export const createChatFlueWorker = ({ stage, domains, mapleApiUrl }: CreateChat
 				FLUE_MAPLE_CHAT_AGENT: chatAgent,
 				FLUE_TRIAGE_WORKFLOW: triageWorkflow,
 				FLUE_REGISTRY: registry,
-				MAPLE_API_URL: mapleApiUrl,
+				MAPLE_API_RPC: mapleApiRpc,
 				INTERNAL_SERVICE_TOKEN: Redacted.make(requireEnv("INTERNAL_SERVICE_TOKEN")),
 				// OpenTelemetry → Maple ingest. Provide the internal-org ingest key so
 				// chat-flue spans land beside `maple-api`; telemetry no-ops when unset.

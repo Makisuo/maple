@@ -1,7 +1,7 @@
 # Copy to `.dev.vars` for `flue dev`. Do not commit `.dev.vars`.
 
 # Shared secret for Maple internal-service auth. Must match apps/api's
-# INTERNAL_SERVICE_TOKEN — the Flue agent sends `Bearer maple_svc_<token>`.
+# INTERNAL_SERVICE_TOKEN — authenticates API → Flue private workflow routes.
 INTERNAL_SERVICE_TOKEN="dev-internal-service-token"
 
 # Optional Workers AI model override (provider id `cloudflare` + @cf model id).

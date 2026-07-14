@@ -1,7 +1,9 @@
 import path from "node:path"
 import * as Cloudflare from "alchemy/Cloudflare"
+import type { Rpc } from "alchemy/Rpc"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
+import type { MapleApiRpcShape } from "@maple/domain/internal-rpc"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
@@ -32,11 +34,12 @@ const optionalSecret = (key: string): Record<string, Redacted.Redacted<string>> 
 export interface CreateMapleApiOptions {
 	stage: MapleStage
 	domains: MapleDomains
-	/** The chat-flue worker, service-bound as CHAT_FLUE (hosts the Flue `triage` workflow). */
-	chatFlue: Cloudflare.Worker
 }
 
-export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptions) =>
+/** Alchemy resource type carried across the chat-flue service binding. */
+export type MapleApiWorker = Cloudflare.Worker & Rpc<MapleApiRpcShape>
+
+export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 	Effect.gen(function* () {
 		// MAPLE_DB Hyperdrive comes in two flavors:
 		//
@@ -115,7 +118,7 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 			name: resolveWorkerName("vcs-sync", stage),
 		})
 
-		const worker = yield* Cloudflare.Worker("api", {
+		const worker = (yield* Cloudflare.Worker("api", {
 			name: resolveWorkerName("api", stage),
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
@@ -136,7 +139,6 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
-				CHAT_FLUE: chatFlue,
 				EMAIL: Cloudflare.Email.SendEmail("email", {
 					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
 				}),
@@ -201,7 +203,7 @@ export const createMapleApi = ({ stage, domains, chatFlue }: CreateMapleApiOptio
 				...optionalPlain("PLANETSCALE_OAUTH_TOKEN_INFO_URL"),
 				...optionalPlain("MAPLE_PLANETSCALE_API_BASE_URL"),
 			},
-		})
+		})) as MapleApiWorker
 
 		if (hyperdriveRefId) {
 			// v1 `HyperdriveRef` equivalent: bind the dashboard-managed config by ID
