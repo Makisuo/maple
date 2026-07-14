@@ -62,7 +62,10 @@ export function parseMapleStage(stage: string): MapleStage {
 	}
 
 	if (DEV_STAGE_RE.test(normalized)) {
-		return { kind: "dev", name: normalized }
+		// Underscores are accepted (alchemy's default stage is `dev_${USER}`) but
+		// normalized to hyphens: `name` flows into Cloudflare worker/Hyperdrive
+		// names, which only allow [a-z0-9-].
+		return { kind: "dev", name: normalized.replaceAll("_", "-") }
 	}
 
 	throw new Error(
