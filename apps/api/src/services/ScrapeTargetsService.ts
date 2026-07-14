@@ -845,8 +845,10 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				let scrapeUrl = row.value.url
 				if (row.value.targetType === "planetscale") {
 					// Resolve the per-branch endpoint from the discovery cache. The
-					// scrape itself carries the auth header too — PlanetScale's docs
-					// only auth the SD call, but sending it is harmless if unneeded.
+					// scrape carries the same auth header as the SD call — required
+					// there too: metrics.psdb.cloud accepts service tokens but rejects
+					// OAuth bearers with 403, which is why finalize only enables
+					// bearer-auth targets that passed a data-plane scrape probe.
 					const subTargets = yield* discovery.discover(row.value)
 					const match = subTargets.find((entry) => entry.subTargetKey === subTargetKey)
 					if (!match) {

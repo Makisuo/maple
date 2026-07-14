@@ -1,6 +1,8 @@
 import { appendFileSync } from "node:fs"
 import * as Alchemy from "alchemy"
 import * as Cloudflare from "alchemy/Cloudflare"
+import * as Output from "alchemy/Output"
+import * as RemovalPolicy from "alchemy/RemovalPolicy"
 import * as Effect from "effect/Effect"
 import { formatMapleStage, parseMapleStage, resolveMapleDomains } from "@maple/infra/cloudflare"
 import { createAlertingWorker } from "./apps/alerting/alchemy.run.ts"
@@ -27,6 +29,70 @@ if (!process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_DEFAULT_ACCOUNT
 const resolveUrl = (domain: string | undefined, envKey: string, fallback = ""): string =>
 	domain ? `https://${domain}` : process.env[envKey]?.trim() || fallback
 
+const requireEnv = (key: string): string => {
+	const value = process.env[key]?.trim()
+	if (!value) {
+		throw new Error(`Missing required deployment env: ${key}`)
+	}
+	return value
+}
+
+const createProductionSharedResources = (stage: ReturnType<typeof parseMapleStage>) =>
+	Effect.gen(function* () {
+		// Bootstrap these account/zone-wide resources in production first. Other
+		// stages keep their existing bindings until the production state has been
+		// deployed, after which they can safely resolve these logical IDs via ref().
+		if (stage.kind !== "prd") {
+			return {}
+		}
+
+		const emailRouting = yield* Cloudflare.Email.Routing("email-routing-maple-dev", {
+			zone: "maple.dev",
+		}).pipe(RemovalPolicy.retain())
+		const sendingSubdomain = yield* Cloudflare.Email.SendingSubdomain("email-sending-noreply", {
+			zoneId: emailRouting.zoneId,
+			name: "noreply.maple.dev",
+		}).pipe(RemovalPolicy.retain())
+
+		const ingestEndpoint = (process.env.MAPLE_ENDPOINT?.trim() || "https://ingest.maple.dev").replace(
+			/\/+$/,
+			"",
+		)
+		const headers = { authorization: `Bearer ${requireEnv("MAPLE_OTEL_INGEST_KEY")}` }
+		const tracesDestination = yield* Cloudflare.Workers.ObservabilityDestination(
+			"workers-observability-traces",
+			{
+				name: "maple-workers-traces",
+				url: `${ingestEndpoint}/v1/traces`,
+				headers,
+				logpushDataset: "opentelemetry-traces",
+				enabled: true,
+			},
+		).pipe(RemovalPolicy.retain())
+		const logsDestination = yield* Cloudflare.Workers.ObservabilityDestination(
+			"workers-observability-logs",
+			{
+				name: "maple-workers-logs",
+				url: `${ingestEndpoint}/v1/logs`,
+				headers,
+				logpushDataset: "opentelemetry-logs",
+				enabled: true,
+			},
+		).pipe(RemovalPolicy.retain())
+
+		// The binding descriptor is lazy so enabling the sending subdomain is an
+		// explicit dependency of both Workers that send transactional email.
+		const emailBinding = sendingSubdomain.enabled.pipe(
+			Output.mapEffect(() =>
+				Cloudflare.Email.SendEmail("email", {
+					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+				}),
+			),
+		)
+
+		return { emailBinding, logsDestination, tracesDestination }
+	})
+
 export default Alchemy.Stack(
 	"maple",
 	{
@@ -40,6 +106,7 @@ export default Alchemy.Stack(
 	Effect.gen(function* () {
 		const stage = parseMapleStage(yield* Alchemy.Stage)
 		const domains = resolveMapleDomains(stage)
+		const shared = yield* createProductionSharedResources(stage)
 
 		const apiUrl = resolveUrl(domains.api, "MAPLE_API_BASE_URL")
 		const chatUrl = resolveUrl(domains.chat, "MAPLE_CHAT_BASE_URL")
@@ -51,8 +118,18 @@ export default Alchemy.Stack(
 		// Deploy the API RPC surface before switching chat-flue to it. The reverse
 		// CHAT_FLUE binding is attached after chat deploys, which breaks the resource
 		// cycle without an HTTP fallback or a placeholder Worker.
-		const { worker: api, db: mapleDb } = yield* createMapleApi({ stage, domains })
-		const chatFlue = yield* createChatFlueWorker({ stage, domains, mapleApiRpc: api })
+		const { worker: api, db: mapleDb } = yield* createMapleApi({
+			stage,
+			domains,
+			emailBinding: shared.emailBinding,
+		})
+		const chatFlue = yield* createChatFlueWorker({
+			stage,
+			domains,
+			mapleApiRpc: api,
+			logsDestination: shared.logsDestination,
+			tracesDestination: shared.tracesDestination,
+		})
 		yield* api.bind("CHAT_FLUE", {
 			bindings: [{ type: "service", name: "CHAT_FLUE", service: chatFlue.workerName }],
 		})
@@ -74,7 +151,12 @@ export default Alchemy.Stack(
 
 		const localUi = yield* createLocalUiWorker({ stage, domains })
 
-		const alerting = yield* createAlertingWorker({ stage, domains, mapleDb })
+		const alerting = yield* createAlertingWorker({
+			stage,
+			domains,
+			mapleDb,
+			emailBinding: shared.emailBinding,
+		})
 
 		const summary = {
 			stage: formatMapleStage(stage),

@@ -35,6 +35,10 @@ export interface CreateChatFlueWorkerOptions {
 	domains: MapleDomains
 	/** API worker deployed first, then bound privately for schemaless RPC. */
 	mapleApiRpc: MapleApiWorker
+	/** Production-owned OTLP log destination; non-production temporarily uses the legacy slug. */
+	logsDestination?: Cloudflare.Workers.ObservabilityDestination
+	/** Production-owned OTLP trace destination; non-production temporarily uses the legacy slug. */
+	tracesDestination?: Cloudflare.Workers.ObservabilityDestination
 }
 
 /**
@@ -54,7 +58,13 @@ export interface CreateChatFlueWorkerOptions {
  * Manual fallback (Flue-native): `cd apps/chat-flue && bun run build &&
  * wrangler deploy --config dist/maple_chat_flue/wrangler.json`.
  */
-export const createChatFlueWorker = ({ stage, domains, mapleApiRpc }: CreateChatFlueWorkerOptions) =>
+export const createChatFlueWorker = ({
+	stage,
+	domains,
+	mapleApiRpc,
+	logsDestination,
+	tracesDestination,
+}: CreateChatFlueWorkerOptions) =>
 	Effect.gen(function* () {
 		// Flue generates the Worker entrypoint + DO classes; build before deploy.
 		const build = yield* Command.Build("chat-flue-build", {
@@ -88,15 +98,18 @@ export const createChatFlueWorker = ({ stage, domains, mapleApiRpc }: CreateChat
 			compatibility: { date: "2026-06-01", flags: ["nodejs_compat"] },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			// Workers Observability. `traces.enabled` is required for the `tracing.enterSpan`
-			// custom spans in src/agents/maple-chat.ts to emit; the `"maple"` destination
-			// forwards both logs and traces over Cloudflare's native pipeline → Maple ingest
-			// (the same path the existing auto-spans use, unlike the @flue/opentelemetry
-			// export which doesn't flush reliably from DO isolates). `"maple"` is the
-			// account-level telemetry destination id.
+			// custom spans in src/agents/maple-chat.ts to emit. Production uses one
+			// Alchemy-owned destination per signal; non-production temporarily keeps
+			// the legacy account-level `"maple"` destination until the production
+			// resources have been bootstrapped and can be referenced from prd state.
 			observability: {
 				enabled: true,
-				logs: { enabled: true, invocationLogs: true, destinations: ["maple"] },
-				traces: { enabled: true, destinations: ["maple"] },
+				logs: {
+					enabled: true,
+					invocationLogs: true,
+					destinations: [logsDestination?.slug ?? "maple"],
+				},
+				traces: { enabled: true, destinations: [tracesDestination?.slug ?? "maple"] },
 			},
 			url: true,
 			domain: domains.chat,
