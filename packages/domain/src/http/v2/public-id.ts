@@ -153,7 +153,16 @@ export const decodePublicId = (prefix: string, publicId: string): string | null 
  * error middleware surfaces as an `invalid_request_error`.
  */
 export const PublicId = <S extends Schema.Codec<any, string>>(prefix: string, internal: S) =>
-	Schema.String.pipe(
+	// Annotate the *encoded* base string: the OpenAPI schema renders the wire
+	// form, and annotations on the transformation node above are dropped in the
+	// encoded projection — so `description`/`examples`/`format` must live here to
+	// surface in `/v2/docs`. Metadata only; decoding/encoding is unchanged.
+	Schema.String.annotate({
+		title: "Public ID",
+		description: `Opaque, prefixed public object ID (e.g. \`${prefix}_4CzLmR8pTqVn6yWjZ2xK\`). A reversible base58 encoding of the internal ID — treat it as an opaque string.`,
+		examples: [`${prefix}_4CzLmR8pTqVn6yWjZ2xK`],
+		format: "maple.public_id",
+	}).pipe(
 		Schema.decodeTo(Schema.String, {
 			decode: SchemaGetter.transformOrFail((publicId: string) => {
 				const internalId = decodePublicId(prefix, publicId)

@@ -11,7 +11,9 @@ import { Schema } from "effect"
 /** ISO-8601 UTC timestamp on the v2 wire (e.g. `2026-07-15T12:34:56.000Z`). */
 export const Timestamp = Schema.String.annotate({
 	title: "Timestamp",
-	description: "ISO-8601 UTC timestamp",
+	description: "ISO-8601 UTC timestamp, e.g. `2026-07-15T12:34:56.000Z`.",
+	examples: ["2026-07-15T12:34:56.000Z"],
+	format: "date-time",
 })
 
 /** Convert service-layer epoch-ms to the v2 wire timestamp. */
@@ -29,19 +31,48 @@ export const ListQuery = Schema.Struct({
 		Schema.NumberFromString.check(
 			Schema.isInt(),
 			Schema.isBetween({ minimum: 1, maximum: LIST_LIMIT_MAX }),
-		),
+		).annotate({
+			title: "Limit",
+			description: `Maximum number of objects to return, between 1 and ${LIST_LIMIT_MAX}. Defaults to ${LIST_LIMIT_DEFAULT}.`,
+			examples: [LIST_LIMIT_DEFAULT],
+		}),
 	),
-	cursor: Schema.optional(Schema.String),
+	cursor: Schema.optional(
+		Schema.String.annotate({
+			title: "Cursor",
+			description:
+				"Opaque pagination cursor. Pass the `next_cursor` from a previous response to fetch the following page. Omit for the first page.",
+			examples: ["off_1k"],
+		}),
+	),
+}).annotate({
+	identifier: "ListQuery",
+	title: "List query",
+	description: "Cursor-pagination query parameters shared by every v2 list endpoint.",
 })
 export type ListQuery = Schema.Schema.Type<typeof ListQuery>
 
 /** Stripe-style list envelope: `{ object: "list", data, has_more, next_cursor }`. */
 export const ListOf = <S extends Schema.Top>(item: S) =>
 	Schema.Struct({
-		object: Schema.Literal("list"),
-		data: Schema.Array(item),
-		has_more: Schema.Boolean,
-		next_cursor: Schema.NullOr(Schema.String),
+		object: Schema.Literal("list").annotate({
+			description: 'Always `"list"` for a list response.',
+			examples: ["list"],
+		}),
+		data: Schema.Array(item).annotate({
+			description: "The page of objects, newest first.",
+		}),
+		has_more: Schema.Boolean.annotate({
+			description: "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+			examples: [true],
+		}),
+		next_cursor: Schema.NullOr(Schema.String).annotate({
+			description: "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+			examples: ["off_1k"],
+		}),
+	}).annotate({
+		title: "List",
+		description: "Cursor-paginated list envelope wrapping a page of objects.",
 	})
 
 /**

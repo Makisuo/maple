@@ -1,4 +1,4 @@
-import { HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
+import { HttpApiMiddleware, HttpApiSecurity, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { Context } from "../current-tenant"
 import { V2AuthenticationError, V2InvalidRequestError, V2PermissionError } from "./errors"
@@ -19,7 +19,15 @@ export class AuthorizationV2 extends HttpApiMiddleware.Service<
 >()("AuthorizationV2", {
 	error: [V2AuthenticationError, V2PermissionError],
 	security: {
-		bearer: HttpApiSecurity.bearer,
+		bearer: HttpApiSecurity.bearer.pipe(
+			HttpApiSecurity.annotateMerge(
+				OpenApi.annotations({
+					description:
+						"Authenticate every request with a Bearer token: `Authorization: Bearer <token>`. Accepts a Maple API key (`maple_ak_…`) or a dashboard session token (Clerk / self-hosted JWT). API keys may be restricted with scopes — see the `Scope` schema.",
+					format: "maple_ak_… API key or session JWT",
+				}),
+			),
+		),
 	},
 }) {}
 
@@ -37,7 +45,13 @@ export const V2Scope = Schema.String.check(
 	Schema.isPattern(/^([a-z][a-z0-9_]*:(read|write)|\*)$/, {
 		description: 'scope like "dashboards:read", "alert_rules:write", or "*"',
 	}),
-)
+).annotate({
+	identifier: "Scope",
+	title: "Scope",
+	description:
+		"Permission grant on a restricted API key. Grammar: `<family>:read`, `<family>:write`, or `*` (all). The family is the first path segment under `/v2` (e.g. `api_keys`, `dashboards`, `alert_rules`). `write` implies `read`; a key with no scopes has full access.",
+	examples: ["api_keys:read", "dashboards:write", "*"],
+})
 export type V2Scope = Schema.Schema.Type<typeof V2Scope>
 
 export interface RequiredScope {

@@ -3,8 +3,6 @@ import type { ApiKeyCreatedResponse, ApiKeyResponse } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import {
 	MapleApiV2,
-	V2ApiKey,
-	V2ApiKeyWithSecret,
 	isoTimestamp,
 	isoTimestampOrNull,
 	notFound,
@@ -12,6 +10,7 @@ import {
 	permissionError,
 	serviceUnavailable,
 } from "@maple/domain/http/v2"
+import type { V2ApiKey, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { ApiKeysService } from "../../services/ApiKeysService"
 import { AuthService } from "../../services/AuthService"
@@ -37,26 +36,27 @@ type ApiKeyFields = Pick<
 	| "createdByEmail"
 >
 
-const toV2ApiKey = (key: ApiKeyFields): V2ApiKey =>
-	new V2ApiKey({
-		id: key.id,
-		object: "api_key",
-		name: key.name,
-		description: key.description,
-		key_prefix: key.keyPrefix,
-		kind: key.kind,
-		scopes: key.scopes,
-		revoked: key.revoked,
-		revoked_at: isoTimestampOrNull(key.revokedAt),
-		last_used_at: isoTimestampOrNull(key.lastUsedAt),
-		expires_at: isoTimestampOrNull(key.expiresAt),
-		created_at: isoTimestamp(key.createdAt),
-		created_by: key.createdBy,
-		created_by_email: key.createdByEmail,
-	})
+const toV2ApiKey = (key: ApiKeyFields): V2ApiKey => ({
+	id: key.id,
+	object: "api_key",
+	name: key.name,
+	description: key.description,
+	key_prefix: key.keyPrefix,
+	kind: key.kind,
+	scopes: key.scopes,
+	revoked: key.revoked,
+	revoked_at: isoTimestampOrNull(key.revokedAt),
+	last_used_at: isoTimestampOrNull(key.lastUsedAt),
+	expires_at: isoTimestampOrNull(key.expiresAt),
+	created_at: isoTimestamp(key.createdAt),
+	created_by: key.createdBy,
+	created_by_email: key.createdByEmail,
+})
 
-const toV2ApiKeyWithSecret = (key: ApiKeyCreatedResponse): V2ApiKeyWithSecret =>
-	new V2ApiKeyWithSecret({ ...toV2ApiKey(key), secret: key.secret })
+const toV2ApiKeyWithSecret = (key: ApiKeyCreatedResponse): V2ApiKeyWithSecret => ({
+	...toV2ApiKey(key),
+	secret: key.secret,
+})
 
 /** Service tagged errors → v2 envelope errors. */
 const mapServiceError = (error: { readonly _tag: string; readonly message: string }) =>
