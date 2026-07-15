@@ -487,32 +487,10 @@ export function ScrapeTargetsSection({
 						<DialogDescription>
 							{editingTarget
 								? "Update the scrape target configuration."
-								: formTargetType === "planetscale"
-									? "Connect a PlanetScale organization. Maple discovers every database branch's metrics endpoint and scrapes them automatically."
-									: "Enter the URL of a Prometheus exporter endpoint. Maple will periodically scrape this endpoint for metrics."}
+								: "Enter the URL of a Prometheus exporter endpoint. Maple will periodically scrape this endpoint for metrics."}
 						</DialogDescription>
 					</DialogHeader>
 					<div className="space-y-4 px-6 py-2">
-						{!editingTarget && !sourceFilter && (
-							<div className="space-y-2">
-								<Label>Source</Label>
-								<Select
-									items={{ prometheus: "Prometheus endpoint", planetscale: "PlanetScale" }}
-									value={formTargetType}
-									onValueChange={(val: string | null) =>
-										selectTargetType((val as ScrapeTargetType | null) ?? "prometheus")
-									}
-								>
-									<SelectTrigger className="w-full">
-										<SelectValue placeholder="Select source" />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="prometheus">Prometheus endpoint</SelectItem>
-										<SelectItem value="planetscale">PlanetScale</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-						)}
 						<div className="space-y-2">
 							<Label htmlFor="scrape-name">Name</Label>
 							<Input
@@ -535,101 +513,15 @@ export function ScrapeTargetsSection({
 								empty.
 							</p>
 						</div>
-						{formTargetType === "prometheus" ? (
-							<div className="space-y-2">
-								<Label htmlFor="scrape-url">URL</Label>
-								<Input
-									id="scrape-url"
-									placeholder="e.g. https://myapp.com:9090/metrics"
-									value={formUrl}
-									onChange={(e) => setFormUrl(e.target.value)}
-								/>
-							</div>
-						) : (
-							<>
-								<div className="space-y-2">
-									<Label htmlFor="scrape-org">Organization</Label>
-									<Input
-										id="scrape-org"
-										placeholder="e.g. my-planetscale-org"
-										value={formOrganization}
-										onChange={(e) => setFormOrganization(e.target.value)}
-									/>
-									<p className="text-muted-foreground text-xs">
-										Your PlanetScale organization name as it appears in the dashboard URL.
-									</p>
-								</div>
-								{isManagedPlanetScaleAuth ? (
-									<p className="text-muted-foreground text-xs">
-										Authentication is managed by the PlanetScale integration — this target
-										scrapes with the connected organization&apos;s OAuth authorization, no
-										credentials to enter.
-									</p>
-								) : (
-									<>
-										<div className="space-y-2">
-											<Label htmlFor="scrape-token-id">Service Token ID</Label>
-											<Input
-												id="scrape-token-id"
-												placeholder={
-													editingTarget?.hasCredentials
-														? "Leave blank to keep existing"
-														: "Enter service token ID"
-												}
-												value={formTokenId}
-												onChange={(e) => setFormTokenId(e.target.value)}
-											/>
-										</div>
-										<div className="space-y-2">
-											<Label htmlFor="scrape-token-secret">Service Token Secret</Label>
-											<Input
-												id="scrape-token-secret"
-												type="password"
-												placeholder={
-													editingTarget?.hasCredentials
-														? "Leave blank to keep existing"
-														: "Enter service token secret"
-												}
-												value={formTokenSecret}
-												onChange={(e) => setFormTokenSecret(e.target.value)}
-											/>
-											<p className="text-muted-foreground text-xs">
-												Create a service token with the{" "}
-												<span className="font-mono">read_metrics_endpoints</span>{" "}
-												organization permission.
-											</p>
-										</div>
-									</>
-								)}
-								<div className="space-y-2">
-									<Label htmlFor="scrape-include-branches">Include branches (optional)</Label>
-									<Input
-										id="scrape-include-branches"
-										placeholder="e.g. main, stg"
-										value={formIncludeBranches}
-										onChange={(e) => setFormIncludeBranches(e.target.value)}
-									/>
-									<p className="text-muted-foreground text-xs">
-										Comma-separated branch globs. When set, only matching branches are
-										scraped. Leave blank to scrape all branches.
-									</p>
-								</div>
-								<div className="space-y-2">
-									<Label htmlFor="scrape-exclude-branches">Exclude branches (optional)</Label>
-									<Input
-										id="scrape-exclude-branches"
-										placeholder="e.g. pr-*"
-										value={formExcludeBranches}
-										onChange={(e) => setFormExcludeBranches(e.target.value)}
-									/>
-									<p className="text-muted-foreground text-xs">
-										Comma-separated branch globs to skip — e.g.{" "}
-										<span className="font-mono">pr-*</span> to avoid scraping PR-preview
-										branches (a common source of PlanetScale rate-limit 429s).
-									</p>
-								</div>
-							</>
-						)}
+						<div className="space-y-2">
+							<Label htmlFor="scrape-url">URL</Label>
+							<Input
+								id="scrape-url"
+								placeholder="e.g. https://myapp.com:9090/metrics"
+								value={formUrl}
+								onChange={(e) => setFormUrl(e.target.value)}
+							/>
+						</div>
 						<div className="space-y-2">
 							<Label htmlFor="scrape-interval">Scrape Interval (seconds)</Label>
 							<Input
@@ -641,31 +533,29 @@ export function ScrapeTargetsSection({
 								onChange={(e) => setFormInterval(e.target.value)}
 							/>
 						</div>
-						{formTargetType === "prometheus" && (
-							<div className="space-y-2">
-								<Label>Authentication</Label>
-								<Select
-									items={{ none: "None", bearer: "Bearer Token", basic: "Basic Auth" }}
-									value={formAuthType}
-									onValueChange={(val: string | null) => {
-										setFormAuthType((val as ScrapeAuthType | null) ?? "none")
-										setFormAuthToken("")
-										setFormAuthUsername("")
-										setFormAuthPassword("")
-									}}
-								>
-									<SelectTrigger className="w-full">
-										<SelectValue placeholder="Select auth type" />
-									</SelectTrigger>
-									<SelectContent>
-										<SelectItem value="none">None</SelectItem>
-										<SelectItem value="bearer">Bearer Token</SelectItem>
-										<SelectItem value="basic">Basic Auth</SelectItem>
-									</SelectContent>
-								</Select>
-							</div>
-						)}
-						{formTargetType === "prometheus" && formAuthType === "bearer" && (
+						<div className="space-y-2">
+							<Label>Authentication</Label>
+							<Select
+								items={{ none: "None", bearer: "Bearer Token", basic: "Basic Auth" }}
+								value={formAuthType}
+								onValueChange={(val: string | null) => {
+									setFormAuthType((val as ScrapeAuthType | null) ?? "none")
+									setFormAuthToken("")
+									setFormAuthUsername("")
+									setFormAuthPassword("")
+								}}
+							>
+								<SelectTrigger className="w-full">
+									<SelectValue placeholder="Select auth type" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="none">None</SelectItem>
+									<SelectItem value="bearer">Bearer Token</SelectItem>
+									<SelectItem value="basic">Basic Auth</SelectItem>
+								</SelectContent>
+							</Select>
+						</div>
+						{formAuthType === "bearer" && (
 							<div className="space-y-2">
 								<Label htmlFor="scrape-auth-token">Bearer Token</Label>
 								<Input
@@ -681,7 +571,7 @@ export function ScrapeTargetsSection({
 								/>
 							</div>
 						)}
-						{formTargetType === "prometheus" && formAuthType === "basic" && (
+						{formAuthType === "basic" && (
 							<>
 								<div className="space-y-2">
 									<Label htmlFor="scrape-auth-username">Username</Label>
@@ -774,7 +664,6 @@ function ScrapeTargetRow({
 	selected,
 	toggling,
 	probing,
-	hideTypeBadge,
 	onSelect,
 	onProbe,
 	onToggle,
@@ -785,8 +674,6 @@ function ScrapeTargetRow({
 	selected: boolean
 	toggling: boolean
 	probing: boolean
-	/** The PlanetScale drill-in shows only planetscale targets — the badge is noise there. */
-	hideTypeBadge?: boolean
 	onSelect: (targetId: ScrapeTargetId) => void
 	onProbe: (target: ScrapeTarget) => void
 	onToggle: (target: ScrapeTarget) => void
@@ -829,21 +716,6 @@ function ScrapeTargetRow({
 					<Badge variant={status.badgeVariant} className="shrink-0">
 						{status.label}
 					</Badge>
-					{target.targetType === "planetscale" && !hideTypeBadge && (
-						<Badge variant="outline" className="shrink-0">
-							PlanetScale
-						</Badge>
-					)}
-					{target.managedBy && (
-						<Tooltip>
-							<TooltipTrigger render={<span className="shrink-0" />}>
-								<Badge variant="outline">Managed</Badge>
-							</TooltipTrigger>
-							<TooltipContent>
-								Provisioned by the PlanetScale integration — edit it from the integration card.
-							</TooltipContent>
-						</Tooltip>
-					)}
 					{target.serviceName && (
 						<Badge variant="outline" className="shrink-0">
 							{target.serviceName}
@@ -856,11 +728,7 @@ function ScrapeTargetRow({
 					)}
 				</div>
 				<div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-					<span className="max-w-[280px] truncate font-mono">
-						{target.targetType === "planetscale"
-							? (target.organization ?? hostnameFromUrl(target.url))
-							: hostnameFromUrl(target.url)}
-					</span>
+					<span className="max-w-[280px] truncate font-mono">{hostnameFromUrl(target.url)}</span>
 					<span>{target.scrapeIntervalSeconds}s interval</span>
 					<span>{status.detail}</span>
 					{target.lastScrapeAt && (
@@ -1088,25 +956,7 @@ function ScrapeTargetDetails({
 					</div>
 					<div className="divide-y rounded-md border bg-background/35 text-xs">
 						<DetailRow label="Service" value={target.serviceName ?? target.name} />
-						{target.targetType === "planetscale" ? (
-							<>
-								<DetailRow label="Organization" value={target.organization ?? "-"} />
-								{target.includeBranches.length > 0 && (
-									<DetailRow
-										label="Include branches"
-										value={<span className="font-mono">{target.includeBranches.join(", ")}</span>}
-									/>
-								)}
-								{target.excludeBranches.length > 0 && (
-									<DetailRow
-										label="Exclude branches"
-										value={<span className="font-mono">{target.excludeBranches.join(", ")}</span>}
-									/>
-								)}
-							</>
-						) : (
-							<DetailRow label="Instance" value={hostnameFromUrl(target.url)} />
-						)}
+						<DetailRow label="Instance" value={hostnameFromUrl(target.url)} />
 						<DetailRow
 							label="Auth"
 							value={AUTH_TYPE_LABELS[target.authType] ?? target.authType}
