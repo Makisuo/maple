@@ -1,4 +1,5 @@
 import { MapleApi } from "@maple/domain/http"
+import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Layer } from "effect"
 import { HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
@@ -9,6 +10,8 @@ import { HttpAlertsLive } from "./routes/alerts.http"
 import { HttpAnomaliesLive } from "./routes/anomalies.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
+import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
+import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
 import { HttpDashboardsLive } from "./routes/dashboards.http"
@@ -44,6 +47,7 @@ import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
+import { ApiAuthorizationV2Layer } from "./services/ApiAuthorizationV2Layer"
 import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { DashboardPersistenceService } from "./services/DashboardPersistenceService"
@@ -89,6 +93,11 @@ const McpGetFallback = HttpRouter.use((router) =>
 // client browser.
 const DocsRoute = HttpApiScalar.layerCdn(MapleApi, {
 	path: "/docs",
+})
+
+// Public v2 API reference (only v2 groups — the internal v1 surface stays on /docs).
+const DocsV2Route = HttpApiScalar.layerCdn(MapleApiV2, {
+	path: "/v2/docs",
 })
 
 const InfraLive = Env.layer
@@ -264,8 +273,14 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	),
 )
 
+const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
+	Layer.provide(HttpV2ApiKeysLive),
+	Layer.provide(V2SchemaErrorsLive),
+)
+
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
+	ApiV2Routes,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
 	PlanetScaleWebhookRouter,
@@ -276,6 +291,7 @@ export const AllRoutes = Layer.mergeAll(
 	HealthRouter,
 	McpGetFallback,
 	DocsRoute,
+	DocsV2Route,
 ).pipe(
 	Layer.provideMerge(
 		HttpRouter.cors({
@@ -289,7 +305,7 @@ export const AllRoutes = Layer.mergeAll(
 	),
 )
 
-export const ApiAuthLive = ApiAuthorizationLayer.pipe(
+export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizationV2Layer).pipe(
 	Layer.provideMerge(ApiKeysService.layer),
 	Layer.provideMerge(Env.layer),
 )

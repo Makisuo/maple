@@ -12,6 +12,8 @@ export class ApiKeyResponse extends Schema.Class<ApiKeyResponse>("ApiKeyResponse
 	description: Schema.NullOr(Schema.String),
 	keyPrefix: Schema.String,
 	kind: ApiKeyKind,
+	// v2 scope strings; null = legacy full access.
+	scopes: Schema.NullOr(Schema.Array(Schema.String)),
 	revoked: Schema.Boolean,
 	revokedAt: Schema.NullOr(Schema.Number),
 	lastUsedAt: Schema.NullOr(Schema.Number),
@@ -27,6 +29,7 @@ export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("
 	description: Schema.NullOr(Schema.String),
 	keyPrefix: Schema.String,
 	kind: ApiKeyKind,
+	scopes: Schema.NullOr(Schema.Array(Schema.String)),
 	revoked: Schema.Boolean,
 	revokedAt: Schema.NullOr(Schema.Number),
 	lastUsedAt: Schema.NullOr(Schema.Number),
@@ -46,6 +49,7 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 	description: Schema.optional(Schema.String),
 	expiresInSeconds: Schema.optional(Schema.Number),
 	kind: Schema.optional(ApiKeyKind),
+	scopes: Schema.optional(Schema.Array(Schema.String)),
 }) {}
 
 export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(

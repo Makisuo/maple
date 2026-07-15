@@ -22,6 +22,8 @@ interface ResolvedApiKey {
 	readonly userId: UserId
 	readonly keyId: ApiKeyId
 	readonly metadataJson: string | null
+	/** v2 scope strings; null = legacy full access. */
+	readonly scopes: ReadonlyArray<string> | null
 }
 
 const decodeApiKeyIdSync = Schema.decodeUnknownSync(ApiKeyId)
@@ -40,6 +42,7 @@ const rowToResponse = (row: typeof apiKeys.$inferSelect): ApiKeyResponse =>
 		description: row.description ?? null,
 		keyPrefix: row.keyPrefix,
 		kind: row.kind,
+		scopes: row.scopes ?? null,
 		revoked: row.revoked,
 		revokedAt: dateToMs(row.revokedAt),
 		lastUsedAt: dateToMs(row.lastUsedAt),
@@ -79,6 +82,11 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			return yield* Effect.fail(new ApiKeyNotFoundError({ keyId, message: "API key not found" }))
 		})
 
+		const get = Effect.fn("ApiKeysService.get")(function* (orgId: OrgId, keyId: ApiKeyId) {
+			const row = yield* requireById(orgId, keyId)
+			return rowToResponse(row)
+		})
+
 		const list = Effect.fn("ApiKeysService.list")(function* (orgId: OrgId) {
 			const rows = yield* database
 				.execute((db) =>
@@ -103,6 +111,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				description?: string
 				expiresInSeconds?: number
 				kind?: ApiKeyKind
+				scopes?: ReadonlyArray<string> | null
 				createdByEmail?: string | null
 			},
 		) {
@@ -113,6 +122,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			const now = yield* Clock.currentTimeMillis
 			const expiresAt = params.expiresInSeconds ? now + params.expiresInSeconds * 1000 : undefined
 			const kind: ApiKeyKind = params.kind ?? "standard"
+			const scopes = params.scopes == null ? null : [...params.scopes]
 			const createdByEmail = params.createdByEmail ?? null
 
 			yield* database
@@ -125,6 +135,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 						keyHash,
 						keyPrefix,
 						kind,
+						scopes,
 						expiresAt: msToDate(expiresAt),
 						createdAt: new Date(now),
 						createdBy: userId,
@@ -139,6 +150,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				description: params.description ?? null,
 				keyPrefix,
 				kind,
+				scopes,
 				revoked: false,
 				revokedAt: null,
 				lastUsedAt: null,
@@ -183,6 +195,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 							keyHash,
 							keyPrefix,
 							kind: existing.kind,
+							scopes: existing.scopes ?? null,
 							expiresAt: null,
 							createdAt: new Date(now),
 							createdBy: userId,
@@ -202,6 +215,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				description: existing.description ?? null,
 				keyPrefix,
 				kind: existing.kind,
+				scopes: existing.scopes ?? null,
 				revoked: false,
 				revokedAt: null,
 				lastUsedAt: null,
@@ -251,6 +265,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				keyId: decodeApiKeyIdSync(row.value.id),
 				metadataJson:
 					row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
+				scopes: row.value.scopes ?? null,
 			} satisfies ResolvedApiKey)
 		})
 
@@ -278,6 +293,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 		})
 
 		return {
+			get,
 			list,
 			create,
 			roll,
