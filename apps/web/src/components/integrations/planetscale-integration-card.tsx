@@ -25,11 +25,10 @@ import { toast } from "sonner"
 import { CheckIcon, CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatRelativeTime } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { ScrapeTargetsSection } from "@/components/settings/scrape-targets-section"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
 import { IntegrationEmptyState } from "./integration-empty-state"
+import { PlanetScaleMetricsHealth } from "./planetscale-metrics-health"
 
 const PLANETSCALE_ENTRY = catalogEntry("planetscale")
 
@@ -43,9 +42,9 @@ const parsePatternList = (value: string): string[] =>
 /**
  * First-class PlanetScale connection card: authorize Maple's OAuth application
  * in a popup, pick the PlanetScale organization (auto-bound when the grant
- * reaches exactly one), and Maple provisions the managed branch-metrics scrape
- * target, polls database inventory, and proxies query insights. The managed
- * scrape target's per-branch health renders below via the shared list.
+ * reaches exactly one), and Maple collects branch metrics, polls database
+ * inventory, and proxies query insights automatically. Collection health shows
+ * as a single status row — the machinery stays out of the UI.
  */
 export function PlanetScaleIntegrationCard() {
 	const statusQuery = MapleApiAtomClient.query("integrations", "planetscaleStatus", {
@@ -204,7 +203,7 @@ export function PlanetScaleIntegrationCard() {
 				description="Authorize Maple in PlanetScale and databases, branches, query insights, and webhooks connect instantly. Branch metrics take one more paste: a read-only service token, since PlanetScale only exposes its metrics endpoints to service tokens."
 				features={[
 					"Databases appear on the service map with live health",
-					"Branch metrics scraped automatically, no agent required",
+					"Branch metrics collected automatically — nothing to run",
 					"Branch filters keep preview branches out",
 				]}
 				footer="You'll authorize Maple in a PlanetScale popup; a read_metrics_endpoints service token completes metrics afterwards."
@@ -249,22 +248,6 @@ export function PlanetScaleIntegrationCard() {
 									</>
 								)}
 							</p>
-							{target ? (
-								<p className="mt-1 text-xs text-muted-foreground">
-									{target.lastScrapeAt ? (
-										<>
-											Last scrape{" "}
-											{formatRelativeTime(new Date(target.lastScrapeAt).toISOString())} ·
-											every {target.scrapeIntervalSeconds}s
-										</>
-									) : (
-										"First scrape starts within a minute."
-									)}
-									{target.excludeBranches.length > 0 ? (
-										<> · excluding {target.excludeBranches.join(", ")}</>
-									) : null}
-								</p>
-							) : null}
 						</div>
 					</div>
 
@@ -291,6 +274,10 @@ export function PlanetScaleIntegrationCard() {
 					/>
 				) : null}
 
+				{status && target ? (
+					<PlanetScaleMetricsHealth target={target} metricsAuth={status.metricsAuth} />
+				) : null}
+
 				{missingDatabasesPermission ? (
 					<div className="border-t border-border/60 p-4">
 						<Alert variant="warning">
@@ -306,23 +293,9 @@ export function PlanetScaleIntegrationCard() {
 					</div>
 				) : null}
 
-				{target?.lastScrapeError && status?.metricsAuth !== "missing" ? (
-					<div className="border-t border-border/60 p-4">
-						<Alert variant="warning">
-							<CircleWarningIcon />
-							<AlertTitle>Metrics collection degraded</AlertTitle>
-							<AlertDescription className="font-mono text-xs">
-								{target.lastScrapeError}
-							</AlertDescription>
-						</Alert>
-					</div>
-				) : null}
 			</div>
 
 			<PlanetScaleWebhookSetup />
-
-			{/* The managed target's per-branch scrape health, via the shared scrape-target list. */}
-			<ScrapeTargetsSection sourceFilter="planetscale" />
 
 			{/* Re-binding to another org the grant covers — finalize is an upsert. */}
 			<Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -330,8 +303,8 @@ export function PlanetScaleIntegrationCard() {
 					<DialogHeader>
 						<DialogTitle>Change PlanetScale organization</DialogTitle>
 						<DialogDescription>
-							Pick another organization the authorization covers. The managed scrape target
-							follows the new organization.
+							Pick another organization the authorization covers. Metrics collection follows
+							automatically.
 						</DialogDescription>
 					</DialogHeader>
 					<DialogPanel>
@@ -571,7 +544,7 @@ function PlanetScaleOrgPicker(props: {
 					autoComplete="off"
 				/>
 				<p className="text-xs text-muted-foreground">
-					Glob patterns for branches to skip — keeps preview branches from being scraped.
+					Glob patterns for branches to skip — keeps preview branches out of your metrics.
 				</p>
 			</div>
 			<DialogFooter>

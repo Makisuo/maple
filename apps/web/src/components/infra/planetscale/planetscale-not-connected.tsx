@@ -21,9 +21,9 @@ export function PlanetScaleNotConnected() {
 				</EmptyMedia>
 				<EmptyTitle>Connect PlanetScale to see database health</EmptyTitle>
 				<EmptyDescription>
-					Authorize your PlanetScale organization with one click and Maple continuously scrapes
-					every branch&apos;s metrics — connections, CPU, memory, replication lag — with no agent to
-					run.
+					Authorize your PlanetScale organization with one click and Maple tracks every
+					branch&apos;s health — connections, CPU, memory, replication lag — with nothing to
+					install.
 				</EmptyDescription>
 			</EmptyHeader>
 			<EmptyContent>

@@ -25,6 +25,7 @@ import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
+import { HttpSdResponse, subTargetsFromGroup } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
@@ -128,25 +129,25 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const apiBase = env.MAPLE_PLANETSCALE_API_BASE_URL.replace(/\/$/, "")
 
 		/**
-		 * GET a management-API path with the given Authorization header (an OAuth
-		 * bearer or a service-token scheme). Returns the HTTP status;
+		 * GET an absolute URL with the given Authorization header (an OAuth bearer
+		 * or a service-token scheme). Returns the HTTP status and body text;
 		 * network-level failures surface as IntegrationsUpstreamError.
 		 */
-		const probeStatus = Effect.fn("PlanetScaleConnectionService.probeStatus")(function* (
-			path: string,
+		const probeUrl = Effect.fn("PlanetScaleConnectionService.probeUrl")(function* (
+			url: string,
 			authorization: string,
 		) {
 			return yield* Effect.gen(function* () {
-				const request = HttpClientRequest.get(`${apiBase}${path}`).pipe(
+				const request = HttpClientRequest.get(url).pipe(
 					HttpClientRequest.setHeaders({
 						Authorization: authorization,
 						Accept: "application/json",
 					}),
 				)
 				const res = yield* httpClient.execute(request)
-				// Drain the body so the connection is released.
-				yield* res.text
-				return res.status
+				// Read (and thereby drain) the body so the connection is released.
+				const text = yield* res.text
+				return { status: res.status, text }
 			}).pipe(
 				Effect.mapError(
 					(error) =>
@@ -166,6 +167,65 @@ export class PlanetScaleConnectionService extends Context.Service<
 			)
 		})
 
+		/** GET a management-API path; returns only the HTTP status. */
+		const probeStatus = Effect.fn("PlanetScaleConnectionService.probeStatus")(function* (
+			path: string,
+			authorization: string,
+		) {
+			const response = yield* probeUrl(`${apiBase}${path}`, authorization)
+			return response.status
+		})
+
+		const decodeHttpSd = Schema.decodeUnknownEffect(Schema.fromJsonString(HttpSdResponse))
+
+		/**
+		 * Whether the bearer can perform an ACTUAL branch-metrics scrape. The SD
+		 * endpoint on api.planetscale.com accepting the bearer proves nothing
+		 * about the data plane: the discovered hosts (metrics.psdb.cloud) only
+		 * document service-token auth and reject OAuth bearers with 403. Probe one
+		 * discovered endpoint with the bearer so `readMetricsEndpoints` reflects
+		 * scraping, not listing. Inconclusive outcomes (no branches discovered
+		 * yet, transport blip, undecodable payload) keep the control-plane answer
+		 * instead of pausing a possibly-working target.
+		 */
+		const probeDataPlaneScrape = Effect.fn("PlanetScaleConnectionService.probeDataPlaneScrape")(
+			function* (organization: string, bearer: string) {
+				const org = encodeURIComponent(organization)
+				const outcome: "ok" | "rejected" | "inconclusive" = yield* Effect.gen(function* () {
+					const sd = yield* probeUrl(`${apiBase}/v1/organizations/${org}/metrics`, bearer)
+					if (sd.status === 401 || sd.status === 403) return "rejected" as const
+					if (sd.status < 200 || sd.status >= 300) return "inconclusive" as const
+
+					const groups = yield* decodeHttpSd(sd.text).pipe(
+						Effect.catch(() => Effect.succeed(null)),
+					)
+					if (groups === null) return "inconclusive" as const
+
+					// subTargetsFromGroup already SSRF-validates the discovered URLs.
+					const first = groups.flatMap((group) => subTargetsFromGroup(group).ok)[0]
+					if (first === undefined) return "inconclusive" as const
+
+					const scrape = yield* probeUrl(first.url, bearer)
+					return scrape.status >= 200 && scrape.status < 300
+						? ("ok" as const)
+						: ("rejected" as const)
+				}).pipe(
+					Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
+						Effect.logWarning("PlanetScale data-plane scrape probe failed; keeping SD result").pipe(
+							Effect.annotateLogs({ organization, error: error.message }),
+							Effect.as("inconclusive" as const),
+						),
+					),
+				)
+				if (outcome !== "ok") {
+					yield* Effect.logInfo("PlanetScale data-plane scrape probe outcome").pipe(
+						Effect.annotateLogs({ organization, outcome }),
+					)
+				}
+				return outcome
+			},
+		)
+
 		const probePermissions = Effect.fn("PlanetScaleConnectionService.probePermissions")(function* (
 			organization: string,
 			accessToken: string,
@@ -181,9 +241,13 @@ export class PlanetScaleConnectionService extends Context.Service<
 				{ concurrency: 3 },
 			)
 			const ok = (status: number) => status >= 200 && status < 300
+			// The SD listing passing is necessary but not sufficient for scraping —
+			// confirm against the data plane before declaring the bearer scrape-capable.
+			const readMetricsEndpoints =
+				ok(metricsStatus) && (yield* probeDataPlaneScrape(organization, bearer)) !== "rejected"
 			const permissions: PlanetScaleDetectedPermissions = {
 				readOrganization: ok(orgStatus),
-				readMetricsEndpoints: ok(metricsStatus),
+				readMetricsEndpoints,
 				readDatabases: ok(databasesStatus),
 			}
 			return { permissions, orgStatus, metricsStatus }
@@ -248,9 +312,9 @@ export class PlanetScaleConnectionService extends Context.Service<
 			const discoveryConfig = target ? decodeDiscoveryConfig(target.discoveryConfigJson) : null
 			// How scraping authenticates: a stored service token wins; grant-resolved
 			// bearer auth counts only while the target is enabled (finalize disables
-			// it when the bearer probe failed — PlanetScale's metrics endpoints only
-			// document service-token auth); anything else means scraping is paused
-			// until a token is added.
+			// it unless the bearer passed an end-to-end data-plane scrape probe —
+			// PlanetScale's metrics endpoints only document service-token auth);
+			// anything else means scraping is paused until a token is added.
 			const metricsAuth =
 				target === null
 					? ("missing" as const)
@@ -367,11 +431,12 @@ export class PlanetScaleConnectionService extends Context.Service<
 				)
 			}
 
-			// Probe what the grant can do against this org. The metrics endpoints
-			// only document service-token auth, so a failing bearer probe does NOT
-			// block the binding — inventory/insights/webhooks work on the grant, and
-			// scraping stays paused until a service token is added via
-			// setMetricsToken (the card's follow-up step).
+			// Probe what the grant can do against this org (readMetricsEndpoints
+			// requires an actual data-plane scrape to pass — see probePermissions).
+			// The metrics endpoints only document service-token auth, so a failing
+			// bearer probe does NOT block the binding — inventory/insights/webhooks
+			// work on the grant, and scraping stays paused until a service token is
+			// added via setMetricsToken (the card's follow-up step).
 			const { permissions } = yield* probePermissions(organization, accessToken)
 
 			// Attribution comes from the grant, so finalize behaves identically when

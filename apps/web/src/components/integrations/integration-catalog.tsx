@@ -60,7 +60,7 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		id: "planetscale",
 		name: "PlanetScale",
 		description:
-			"Authorize your organization with one click — Maple discovers and scrapes every database branch.",
+			"Authorize your organization with one click — Maple tracks every database branch automatically.",
 		icon: PlanetScaleIcon,
 		// PlanetScale's mark is monochrome — neutral wash that works in both themes.
 		accent: "#8B8B8B",

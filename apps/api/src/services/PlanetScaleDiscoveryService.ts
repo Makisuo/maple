@@ -34,13 +34,13 @@ type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 export interface PlanetScaleSubTarget {
 	/** Concrete per-branch scrape URL (`https://{host}{__metrics_path__}`). */
 	readonly url: string
-	/** Stable discriminator: `planetscale_database_branch_id` SD label, falling back to `host:port`. */
+	/** Stable discriminator: `planetscale_database_branch_id` SD label, falling back to `host:port` + metrics path. */
 	readonly subTargetKey: string
 	/** SD labels minus `__`-prefixed Prometheus meta labels. */
 	readonly labels: Record<string, string>
 }
 
-const HttpSdResponse = Schema.Array(
+export const HttpSdResponse = Schema.Array(
 	Schema.Struct({
 		targets: Schema.Array(Schema.String),
 		labels: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
@@ -74,7 +74,7 @@ const toUpstreamError = (message: string, status?: number) =>
 	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
 
 /** Convert one http_sd group into sub-targets, dropping SSRF-invalid hosts. */
-const subTargetsFromGroup = (group: {
+export const subTargetsFromGroup = (group: {
 	readonly targets: ReadonlyArray<string>
 	readonly labels?: Record<string, string> | undefined
 }): { readonly ok: Array<PlanetScaleSubTarget>; readonly dropped: Array<string> } => {
@@ -97,12 +97,15 @@ const subTargetsFromGroup = (group: {
 			dropped.push(url)
 			continue
 		}
+		// The no-branch-id fallback keys on host + path (not bare host): groups
+		// that differ only by `__metrics_path__` are distinct endpoints, and a
+		// host-only key would silently collapse them away in dedupe.
 		const subTargetKey =
 			branchId && group.targets.length === 1
 				? branchId
 				: branchId
 					? `${branchId}:${hostPort}`
-					: hostPort
+					: `${hostPort}${path}`
 		ok.push({ url, subTargetKey, labels })
 	}
 	return { ok, dropped }
@@ -112,9 +115,10 @@ const subTargetsFromGroup = (group: {
  * Collapse sub-targets sharing a `subTargetKey` (last wins). The scraper keys
  * one scrape-loop fiber per `(targetId, subTargetKey)`, so duplicate keys would
  * each fork a fiber that the scheduler can't track — a runaway scrape loop.
- * Two entries with the same key resolve to the same logical endpoint, so
- * collapsing them is lossless. Happens when an http_sd payload exposes several
- * groups that fall back to the same host key (no `planetscale_database_branch_id`).
+ * Two entries with the same key resolve to the same scrape URL (the fallback
+ * key is host + path), so collapsing them is lossless. Happens when an http_sd
+ * payload exposes several groups that fall back to the same host+path key
+ * (no `planetscale_database_branch_id`).
  */
 const dedupeBySubTargetKey = (
 	entries: ReadonlyArray<PlanetScaleSubTarget>,
@@ -276,6 +280,24 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				const converted = subTargetsFromGroup(group)
 				collected.push(...converted.ok)
 				dropped.push(...converted.dropped)
+			}
+
+			// Track label drift: PlanetScale documents `planetscale_database_branch_id`
+			// on every group, and its absence forces the host+path fallback key (losing
+			// per-branch attribution). Log the label keys actually seen so a rename on
+			// their side is diagnosable from prod logs.
+			const missingBranchLabel = groups.filter(
+				(group) => (group.labels ?? {}).planetscale_database_branch_id === undefined,
+			)
+			if (missingBranchLabel.length > 0) {
+				yield* Effect.logInfo("PlanetScale http_sd groups missing the branch-id label").pipe(
+					Effect.annotateLogs({
+						scrapeTargetId: row.id,
+						groupsMissingLabel: missingBranchLabel.length,
+						groupsTotal: groups.length,
+						observedLabelKeys: Object.keys(missingBranchLabel[0]?.labels ?? {}).join(", "),
+					}),
+				)
 			}
 			if (dropped.length > 0) {
 				yield* Effect.logWarning(

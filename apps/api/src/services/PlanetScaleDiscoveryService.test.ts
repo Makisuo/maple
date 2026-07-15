@@ -168,7 +168,7 @@ describe("PlanetScaleDiscoveryService", () => {
 
 			// Prod hazard: an http_sd payload with several groups that carry no
 			// `planetscale_database_branch_id`, so subTargetKey falls back to the
-			// shared host. Without dedup these become N rows with the SAME
+			// shared host+path. Without dedup these become N rows with the SAME
 			// (id, subTargetKey) and the scraper forks a leaking loop fiber per row.
 			const DUP_HOST_PAYLOAD = [
 				{ targets: ["metrics.psdb.cloud:443"], labels: { planetscale_database: "mydb" } },
@@ -184,8 +184,44 @@ describe("PlanetScaleDiscoveryService", () => {
 			)
 
 			assert.strictEqual(entries.length, 1)
-			assert.strictEqual(entries[0]?.subTargetKey, "metrics.psdb.cloud:443")
+			assert.strictEqual(entries[0]?.subTargetKey, "metrics.psdb.cloud:443/metrics")
 			assert.strictEqual(entries[0]?.url, "https://metrics.psdb.cloud:443/metrics")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("keeps branch-id-less groups distinct when they differ only by metrics path", () => {
+		const testDb = createTestDb(trackedDbs)
+		const recorded: Array<RecordedRequest> = []
+		return Effect.gen(function* () {
+			const discovery = yield* PlanetScaleDiscoveryService
+			const row = yield* createPlanetScaleTargetRow("my-org")
+
+			// Same host, distinct `__metrics_path__` per group, no branch-id label —
+			// a bare-host fallback key would collapse these to ONE endpoint and
+			// silently drop the other's metrics.
+			const PATH_ONLY_PAYLOAD = [
+				{ targets: ["metrics.psdb.cloud:443"], labels: { __metrics_path__: "/metrics/db-a" } },
+				{ targets: ["metrics.psdb.cloud:443"], labels: { __metrics_path__: "/metrics/db-b" } },
+			]
+
+			const entries = yield* discovery.discover(row).pipe(
+				Effect.provideService(
+					FetchHttpClient.Fetch,
+					stubFetch(recorded, () => Response.json(PATH_ONLY_PAYLOAD)),
+				),
+			)
+
+			assert.deepStrictEqual(
+				entries.map((entry) => entry.subTargetKey),
+				["metrics.psdb.cloud:443/metrics/db-a", "metrics.psdb.cloud:443/metrics/db-b"],
+			)
+			assert.deepStrictEqual(
+				entries.map((entry) => entry.url),
+				[
+					"https://metrics.psdb.cloud:443/metrics/db-a",
+					"https://metrics.psdb.cloud:443/metrics/db-b",
+				],
+			)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
