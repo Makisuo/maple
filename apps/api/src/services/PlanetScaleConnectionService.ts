@@ -179,14 +179,14 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const decodeHttpSd = Schema.decodeUnknownEffect(Schema.fromJsonString(HttpSdResponse))
 
 		/**
-		 * Whether the bearer can perform an ACTUAL branch-metrics scrape. The SD
-		 * endpoint on api.planetscale.com accepting the bearer proves nothing
-		 * about the data plane: the discovered hosts (metrics.psdb.cloud) only
-		 * document service-token auth and reject OAuth bearers with 403. Probe one
-		 * discovered endpoint with the bearer so `readMetricsEndpoints` reflects
-		 * scraping, not listing. Inconclusive outcomes (no branches discovered
-		 * yet, transport blip, undecodable payload) keep the control-plane answer
-		 * instead of pausing a possibly-working target.
+		 * Whether an ACTUAL branch-metrics scrape works. The SD endpoint on
+		 * api.planetscale.com accepting the credential proves nothing about the
+		 * data plane: metrics.psdb.cloud authenticates with the signed `?sig=&exp=`
+		 * URL params minted in the SD response, so we probe a discovered endpoint
+		 * via its `signedUrl` and let `readMetricsEndpoints` reflect scraping, not
+		 * listing. Inconclusive outcomes (no branches discovered yet, transport
+		 * blip, undecodable payload) keep the control-plane answer instead of
+		 * pausing a possibly-working target.
 		 */
 		const probeDataPlaneScrape = Effect.fn("PlanetScaleConnectionService.probeDataPlaneScrape")(
 			function* (organization: string, bearer: string) {
@@ -205,7 +205,8 @@ export class PlanetScaleConnectionService extends Context.Service<
 					const first = groups.flatMap((group) => subTargetsFromGroup(group).ok)[0]
 					if (first === undefined) return "inconclusive" as const
 
-					const scrape = yield* probeUrl(first.url, bearer)
+					// signedUrl carries the `?sig=&exp=` params the data plane requires.
+					const scrape = yield* probeUrl(first.signedUrl, bearer)
 					return scrape.status >= 200 && scrape.status < 300
 						? ("ok" as const)
 						: ("rejected" as const)

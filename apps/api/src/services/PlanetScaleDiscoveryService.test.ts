@@ -225,6 +225,59 @@ describe("PlanetScaleDiscoveryService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
+	it.effect("promotes __param_* meta labels to signed scrape-url query params", () => {
+		const testDb = createTestDb(trackedDbs)
+		const recorded: Array<RecordedRequest> = []
+		return Effect.gen(function* () {
+			const discovery = yield* PlanetScaleDiscoveryService
+			const row = yield* createPlanetScaleTargetRow("my-org")
+
+			// PlanetScale authenticates the metrics data plane with a signed, expiring
+			// URL: the http_sd group carries `__param_sig`/`__param_exp`, which
+			// Prometheus promotes to `?sig=&exp=` on the scrape URL. Dropping them
+			// yields `403 invalid signature` on every scrape (the real prod outage).
+			const SIGNED_PAYLOAD = [
+				{
+					targets: ["metrics.psdb.cloud"],
+					labels: {
+						__metrics_path__: "/metrics/branch/3a1nf2gvu9rf",
+						__scheme__: "https",
+						__param_sig: "abc-_signature123",
+						__param_exp: "1784238737",
+						planetscale_branch_name: "main",
+						planetscale_database_name: "mydb",
+					},
+				},
+			]
+
+			const entries = yield* discovery.discover(row).pipe(
+				Effect.provideService(
+					FetchHttpClient.Fetch,
+					stubFetch(recorded, () => Response.json(SIGNED_PAYLOAD)),
+				),
+			)
+
+			assert.strictEqual(entries.length, 1)
+			// Base url + fiber-identity key stay param-free so identity is stable as
+			// PlanetScale rotates the signature each refresh.
+			assert.strictEqual(entries[0]?.url, "https://metrics.psdb.cloud/metrics/branch/3a1nf2gvu9rf")
+			assert.strictEqual(
+				entries[0]?.subTargetKey,
+				"metrics.psdb.cloud/metrics/branch/3a1nf2gvu9rf",
+			)
+			// signedUrl carries the auth params the data plane actually verifies.
+			assert.strictEqual(
+				entries[0]?.signedUrl,
+				"https://metrics.psdb.cloud/metrics/branch/3a1nf2gvu9rf?sig=abc-_signature123&exp=1784238737",
+			)
+			// The signed params must never leak into the metric labels.
+			assert.deepStrictEqual(entries[0]?.labels, {
+				planetscale_branch_name: "main",
+				planetscale_database_name: "mydb",
+			})
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
 	it.effect("caches discovery for the TTL and refreshes after it elapses", () => {
 		const testDb = createTestDb(trackedDbs)
 		const recorded: Array<RecordedRequest> = []
