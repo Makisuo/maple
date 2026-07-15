@@ -49,7 +49,7 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 	description: Schema.optional(Schema.String),
 	expiresInSeconds: Schema.optional(Schema.Number),
 	kind: Schema.optional(ApiKeyKind),
-	scopes: Schema.optional(Schema.Array(Schema.String)),
+	scopes: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
 export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(
