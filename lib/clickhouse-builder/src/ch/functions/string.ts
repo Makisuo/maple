@@ -1,4 +1,4 @@
-import { defineFn, compileFnCall } from "../define-fn"
+import { defineFn, defineCondFn, compileFnCall } from "../define-fn"
 import type { Expr } from "../expr"
 
 // ---------------------------------------------------------------------------
@@ -12,6 +12,14 @@ export const positionCaseInsensitive = defineFn<[Expr<string>, Expr<string>], nu
 	"positionCaseInsensitive",
 )
 export const left_ = defineFn<[Expr<string>, Expr<number>], string>("left")
+
+/**
+ * `hasToken(haystack, token)` — true when `token` occurs as a whole token of
+ * `haystack` (separators are non-alphanumeric ASCII). Backed by `tokenbf_v1`
+ * skip indexes for granule pruning. Whole-token semantics ≠ substring `ILIKE`;
+ * see `body-search.ts` in the query engine for the safe-token derivation.
+ */
+export const hasToken = defineCondFn<[Expr<string>, Expr<string>]>("hasToken")
 
 // ---------------------------------------------------------------------------
 // Mixed Expr + literal args (compileFnCall wrappers)

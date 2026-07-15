@@ -76,6 +76,8 @@ export {
 	position_ as position,
 	left_ as left,
 	length_ as length,
+	lower_ as lower,
+	hasToken,
 	replaceOne,
 	extract_ as extract,
 	concat,
@@ -108,6 +110,7 @@ export {
 	arrayStringConcat,
 	arrayFilter,
 	arrayJoin,
+	has,
 	// Map
 	mapContains,
 	mapGet,

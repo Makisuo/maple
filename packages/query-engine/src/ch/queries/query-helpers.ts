@@ -149,6 +149,11 @@ type TracesBaseWhereColumns = Pick<
 export function tracesBaseWhereConditions(
 	$: ColumnAccessor<TracesBaseWhereColumns>,
 	opts: TracesBaseWhereOpts,
+	config?: {
+		/** Emit `idx_*_attr_items` pre-filters for equality filters. Set only when
+		 * reading the raw `traces` table, which carries those indexes. */
+		itemsIndex?: boolean
+	},
 ): Array<CH.Condition | undefined> {
 	const mm = opts.matchModes
 	const conditions: Array<CH.Condition | undefined> = [
@@ -215,12 +220,12 @@ export function tracesBaseWhereConditions(
 	}
 	if (opts.attributeFilters) {
 		for (const af of opts.attributeFilters) {
-			conditions.push(buildAttrFilterCondition(af, "SpanAttributes"))
+			conditions.push(buildAttrFilterCondition(af, "SpanAttributes", { itemsIndex: config?.itemsIndex }))
 		}
 	}
 	if (opts.resourceAttributeFilters) {
 		for (const rf of opts.resourceAttributeFilters) {
-			conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
+			conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes", { itemsIndex: config?.itemsIndex }))
 		}
 	}
 	if (opts.excludedServiceNames?.length) {

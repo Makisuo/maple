@@ -4,6 +4,7 @@ import { migration_0004_service_namespace_projections } from "./0004_service_nam
 import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_error_columns"
 import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
 import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hyperdrive"
+import { migration_0008_body_and_attr_indexes } from "./0008_body_and_attr_indexes"
 import { migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -18,14 +19,27 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7])
-		expect(migrations.at(-1)).toBe(migration_0007_db_namespace_hyperdrive)
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+		expect(migrations.at(-1)).toBe(migration_0008_body_and_attr_indexes)
 	})
 
 	it("adds alert_checks error columns as idempotent ALTERs", () => {
 		for (const statement of migration_0005_alert_checks_error_columns.statements) {
 			expect(statement).toContain("ALTER TABLE alert_checks ADD COLUMN IF NOT EXISTS")
 		}
+	})
+
+	it("adds body + attribute skip indexes as new-parts-only ADD INDEX statements", () => {
+		const sql = migration_0008_body_and_attr_indexes.statements.join("\n")
+		expect(sql).toContain(
+			"ALTER TABLE logs ADD INDEX IF NOT EXISTS idx_body_tokens lower(Body) TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1",
+		)
+		expect(sql).toContain(
+			"ALTER TABLE traces ADD INDEX IF NOT EXISTS idx_span_attr_items arrayMap((k, v) -> concat(k, '=', v), mapKeys(SpanAttributes), mapValues(SpanAttributes)) TYPE bloom_filter(0.01) GRANULARITY 1",
+		)
+		// Must NOT materialize — that would exceed the Worker subrequest budget on
+		// billion-row parts; indexes apply to new parts and backfill via TTL churn.
+		expect(sql).not.toContain("MATERIALIZE INDEX")
 	})
 
 	it("rebuilds namespace-aware log aggregates and recreates affected materialized views", () => {

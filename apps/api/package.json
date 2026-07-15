@@ -20,6 +20,7 @@
 		"tinybird:build": "tinybird build",
 		"tinybird:deploy": "tinybird deploy",
 		"bench:fetch": "bun run scripts/bench-queries.ts fetch",
+		"bench:suite": "bun run scripts/bench-queries.ts suite",
 		"bench:run": "bun run scripts/bench-queries.ts run",
 		"bench:inspect": "bun run scripts/bench-queries.ts inspect",
 		"bench:compare": "bun run scripts/bench-queries.ts compare",
