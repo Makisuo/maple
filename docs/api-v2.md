@@ -6,10 +6,10 @@ The **executable contract is the spec**: `MapleApiV2` in `packages/domain/src/ht
 
 ## Architecture: two tiers
 
-| Tier | Transport | Consumers | Docs | Stability |
+| Tier             | Transport                                                       | Consumers                            | Docs                        | Stability                                    |
 |---|---|---|---|---|
-| **Public API** | `MapleApiV2` HttpApi at `/v2/...` | Customers, agents/MCP, the dashboard | `/v2/docs` (OpenAPI/Scalar) | Committed; changes are additive or versioned |
-| **Internal RPC** | Effect RPC (`effect/unstable/rpc`) `RpcGroup`s served at `/rpc` | The dashboard only | none (private) | None; changes freely |
+| **Public API**   | `MapleApiV2` HttpApi at `/v2/...`                               | Customers, agents/MCP, the dashboard | `/v2/docs` (OpenAPI/Scalar) | Committed; changes are additive or versioned |
+| **Internal RPC** | Effect RPC (`effect/unstable/rpc`) `RpcGroup`s served at `/rpc` | The dashboard only                   | none (private)              | None; changes freely                         |
 
 Dashboard-only operations — billing checkout/portal, onboarding state, demo seeding, AI chat apply, digest subscription, AI-triage settings, integration OAuth flows (Slack/Cloudflare/PlanetScale/GitHub), raw warehouse queries, and the error-agent claim/heartbeat/release loop — live in the internal RPC tier. They use the same tenant resolution and org scoping but are **not** HTTP API groups and never appear in the public OpenAPI. Everything else is public API, and the dashboard consumes the same `/v2` endpoints customers do.
 
@@ -35,7 +35,7 @@ POST   /v2/traces/search         complex reads are POST .../search
 
 Every v2 object has a prefixed public ID (`key_4CzLmR…`, `dash_…`, `alrt_…`). Public IDs are opaque; internally they are a reversible base58 encoding of the internal ID, computed at the API boundary (`packages/domain/src/http/v2/public-id.ts` — the prefix registry lives there and is the single source of truth). No database migration: rows keep their raw UUIDs / internal strings.
 
-Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping); `evt` and `we` are reserved for events/webhooks.
+Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping); `evt` and `we` are reserved for events/webhooks.
 
 Exception: Clerk-issued `org_…` / `user_…` IDs are already prefixed public IDs and pass through unchanged.
 
@@ -54,10 +54,10 @@ Every list endpoint accepts `limit` (1–100, default 20) and an opaque `cursor`
 
 ```json
 {
-  "object": "list",
-  "data": [{ "...": "..." }],
-  "has_more": true,
-  "next_cursor": "off_1k"
+	"object": "list",
+	"data": [{ "...": "..." }],
+	"has_more": true,
+	"next_cursor": "off_1k"
 }
 ```
 
@@ -69,12 +69,12 @@ Every error response body is exactly:
 
 ```json
 {
-  "error": {
-    "type": "not_found_error",
-    "code": "resource_missing",
-    "message": "API key not found",
-    "param": "id"
-  }
+	"error": {
+		"type": "not_found_error",
+		"code": "resource_missing",
+		"message": "API key not found",
+		"param": "id"
+	}
 }
 ```
 
@@ -122,27 +122,27 @@ Stripe-style `expand[]` is deliberately omitted: responses embed the small, alwa
 
 Implemented in phases; the pilot (`api_keys`) ships first and proves every convention.
 
-| Resource | Endpoints | Backing v1 group / service |
+| Resource             | Endpoints                                                                                          | Backing v1 group / service               |
 |---|---|---|
-| `api_keys` ✅ pilot | list/create/retrieve/roll/revoke, `scopes` param | `apiKeys` / `ApiKeysService` |
-| `ingest_keys` | retrieve, `POST …/public/roll`, `POST …/private/roll` | `ingestKeys` |
-| `dashboards` | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + perses import | `dashboards` |
-| `alert_rules` | CRUD + `test` + `preview` + `checks` | `alerts` |
-| `alert_destinations` | CRUD + `test` | `alerts` |
-| `alert_incidents` | list/retrieve | `alerts` |
-| `error_issues` | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity` | `errors` |
-| `investigations` | list/retrieve/create/status | `investigations` |
-| `anomalies` | incidents list/retrieve/resolve/link-issue + settings | `anomalies` |
-| `recommendations` | list + dismiss/reopen | `recommendationIssues` |
-| `scrape_targets` | CRUD + `probe` + `checks` | `scrapeTargets` |
-| `attribute_mappings` | CRUD | `ingestAttributeMappings` |
-| `session_replays` | list/retrieve + events/transcript/for-trace | `sessionReplays` |
-| `organization` | retrieve/update settings (incl. ClickHouse BYOC), delete | `organizations`, `orgClickHouseSettings` |
-| `traces` | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability` |
-| `logs` | `POST /v2/logs/search`, `GET /v2/logs/{id}` | `queryEngine` |
-| `metrics` | `GET /v2/metrics`, `POST /v2/metrics/timeseries` | `queryEngine` |
-| `services` | `GET /v2/services`, `GET /v2/services/{name}`, `GET /v2/service_map` | `queryEngine` |
-| `query` | `POST /v2/query` — query-builder execution; raw SQL org-gated | `queryEngine` |
+| `api_keys` ✅ pilot  | list/create/retrieve/roll/revoke, `scopes` param                                                   | `apiKeys` / `ApiKeysService`             |
+| `ingest_keys`        | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
+| `dashboards` ✅      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import         | `dashboards`                             |
+| `alert_rules`        | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
+| `alert_destinations` | CRUD + `test`                                                                                      | `alerts`                                 |
+| `alert_incidents`    | list/retrieve                                                                                      | `alerts`                                 |
+| `error_issues`       | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity`           | `errors`                                 |
+| `investigations`     | list/retrieve/create/status                                                                        | `investigations`                         |
+| `anomalies`          | incidents list/retrieve/resolve/link-issue + settings                                              | `anomalies`                              |
+| `recommendations`    | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
+| `scrape_targets`     | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
+| `attribute_mappings` | CRUD                                                                                               | `ingestAttributeMappings`                |
+| `session_replays`    | list/retrieve + events/transcript/for-trace                                                        | `sessionReplays`                         |
+| `organization`       | retrieve/update settings (incl. ClickHouse BYOC), delete                                           | `organizations`, `orgClickHouseSettings` |
+| `traces`             | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
+| `logs`               | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
+| `metrics`            | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
+| `services`           | `GET /v2/services`, `GET /v2/services/{name}`, `GET /v2/service_map`                               | `queryEngine`                            |
+| `query`              | `POST /v2/query` — query-builder execution; raw SQL org-gated                                      | `queryEngine`                            |
 
 The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare/PlanetScale infra) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
 

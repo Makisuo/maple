@@ -22,6 +22,7 @@ export const PublicIdPrefixes = {
 	apiKey: "key",
 	dashboard: "dash",
 	dashboardVersion: "dbv",
+	dashboardTemplate: "dtpl",
 	alertRule: "alrt",
 	alertDestination: "dest",
 	alertIncident: "inc",
@@ -162,19 +163,21 @@ export const PublicId = <S extends Schema.Codec<any, string>>(prefix: string, in
 		description: `Opaque, prefixed public object ID (e.g. \`${prefix}_4CzLmR8pTqVn6yWjZ2xK\`). A reversible base58 encoding of the internal ID — treat it as an opaque string.`,
 		examples: [`${prefix}_4CzLmR8pTqVn6yWjZ2xK`],
 		format: "maple.public_id",
-	}).pipe(
-		Schema.decodeTo(Schema.String, {
-			decode: SchemaGetter.transformOrFail((publicId: string) => {
-				const internalId = decodePublicId(prefix, publicId)
-				return internalId === null
-					? Effect.fail(
-							new SchemaIssue.InvalidValue(Option.some(publicId), {
-								message: `Invalid ID: expected an ID with prefix "${prefix}_"`,
-							}),
-						)
-					: Effect.succeed(internalId)
+	})
+		.pipe(
+			Schema.decodeTo(Schema.String, {
+				decode: SchemaGetter.transformOrFail((publicId: string) => {
+					const internalId = decodePublicId(prefix, publicId)
+					return internalId === null
+						? Effect.fail(
+								new SchemaIssue.InvalidValue(Option.some(publicId), {
+									message: `Invalid ID: expected an ID with prefix "${prefix}_"`,
+								}),
+							)
+						: Effect.succeed(internalId)
+				}),
+				encode: SchemaGetter.transform((internalId: string) => encodePublicId(prefix, internalId)),
 			}),
-			encode: SchemaGetter.transform((internalId: string) => encodePublicId(prefix, internalId)),
-		}),
-		Schema.decodeTo(internal),
-	).annotate({ title: `Public ID (${prefix}_…)` })
+			Schema.decodeTo(internal),
+		)
+		.annotate({ title: `Public ID (${prefix}_…)` })

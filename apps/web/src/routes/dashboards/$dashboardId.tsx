@@ -185,110 +185,110 @@ function DashboardViewPage() {
 				urlValues={urlVariableValues}
 				onValueChange={handleVariableChange}
 			>
-			<DashboardActionsProvider
-				dashboardId={dashboardId}
-				mode={mode}
-				readOnly={readOnly || isPreviewing}
-				store={{
-					addWidget,
-					removeWidget,
-					restoreWidget,
-					cloneWidget,
-					updateWidgetDisplay,
-					updateWidget,
-					updateWidgetLayouts,
-					autoLayoutWidgets,
-				}}
-			>
-				<DashboardRefreshBridge>
-					<DashboardLayout
-						breadcrumbs={[
-							{ label: "Dashboards", href: "/dashboards" },
-							{ label: activeDashboard.name },
-						]}
-						titleContent={
-							<InlineEditableTitle
-								value={activeDashboard.name}
-								readOnly={readOnly || isPreviewing}
-								onChange={(name) => updateDashboard(dashboardId, { name })}
-							/>
-						}
-						headerActions={
-							<DashboardToolbar
-								dashboard={activeDashboard}
-								onToggleEdit={handleToggleEdit}
-								onAddWidget={() => setChartPickerOpen(true)}
-								onOpenHistory={openHistory}
-							/>
-						}
-						rightSidebar={
-							historyPanelOpen ? (
-								<HistoryPanelMount
-									dashboardId={dashboardId}
-									onClose={() => {
-										setHistoryPanelOpen(false)
-										setPreviewed(null)
-									}}
+				<DashboardActionsProvider
+					dashboardId={dashboardId}
+					mode={mode}
+					readOnly={readOnly || isPreviewing}
+					store={{
+						addWidget,
+						removeWidget,
+						restoreWidget,
+						cloneWidget,
+						updateWidgetDisplay,
+						updateWidget,
+						updateWidgetLayouts,
+						autoLayoutWidgets,
+					}}
+				>
+					<DashboardRefreshBridge>
+						<DashboardLayout
+							breadcrumbs={[
+								{ label: "Dashboards", href: "/dashboards" },
+								{ label: activeDashboard.name },
+							]}
+							titleContent={
+								<InlineEditableTitle
+									value={activeDashboard.name}
+									readOnly={readOnly || isPreviewing}
+									onChange={(name) => updateDashboard(dashboardId, { name })}
 								/>
-							) : undefined
-						}
-					>
-						{persistenceError && (
-							<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-								{persistenceError}. Dashboard editing is temporarily disabled.
-							</div>
-						)}
+							}
+							headerActions={
+								<DashboardToolbar
+									dashboard={activeDashboard}
+									onToggleEdit={handleToggleEdit}
+									onAddWidget={() => setChartPickerOpen(true)}
+									onOpenHistory={openHistory}
+								/>
+							}
+							rightSidebar={
+								historyPanelOpen ? (
+									<HistoryPanelMount
+										dashboardId={dashboardId}
+										onClose={() => {
+											setHistoryPanelOpen(false)
+											setPreviewed(null)
+										}}
+									/>
+								) : undefined
+							}
+						>
+							{persistenceError && (
+								<div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+									{persistenceError}. Dashboard editing is temporarily disabled.
+								</div>
+							)}
 
-						{isPreviewing && previewed ? (
-							<PreviewedCanvas
-								dashboardId={dashboardId}
-								preview={previewed}
-								onCancel={() => setPreviewed(null)}
-								onRestored={() => setPreviewed(null)}
+							{isPreviewing && previewed ? (
+								<PreviewedCanvas
+									dashboardId={dashboardId}
+									preview={previewed}
+									onCancel={() => setPreviewed(null)}
+									onRestored={() => setPreviewed(null)}
+								/>
+							) : activeDashboard.widgets.length === 0 && mode === "view" ? (
+								<div className="flex flex-col items-center justify-center py-24 gap-4">
+									<div className="flex gap-2">
+										<div className="size-8 rounded bg-primary/15" />
+										<div className="size-8 rounded bg-primary/10" />
+										<div className="size-8 rounded bg-primary/15" />
+									</div>
+									<div className="flex flex-col items-center gap-1">
+										<p className="text-sm font-medium text-foreground">No widgets yet</p>
+										<p className="text-xs text-muted-foreground">
+											Add charts, stats, and tables to build your dashboard.
+										</p>
+									</div>
+									<button
+										type="button"
+										disabled={readOnly}
+										className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
+										onClick={() => {
+											navigate({
+												to: "/dashboards/$dashboardId",
+												params: { dashboardId },
+												search: (prev) => ({
+													...pickVariableParams(prev),
+													mode: "edit" as const,
+												}),
+											})
+											setChartPickerOpen(true)
+										}}
+									>
+										Add your first widget
+									</button>
+								</div>
+							) : (
+								<DashboardCanvas widgets={activeDashboard.widgets} />
+							)}
+
+							<WidgetPickerWithActions
+								open={readOnly || isPreviewing ? false : chartPickerOpen}
+								onOpenChange={readOnly || isPreviewing ? () => undefined : setChartPickerOpen}
 							/>
-						) : activeDashboard.widgets.length === 0 && mode === "view" ? (
-							<div className="flex flex-col items-center justify-center py-24 gap-4">
-								<div className="flex gap-2">
-									<div className="size-8 rounded bg-primary/15" />
-									<div className="size-8 rounded bg-primary/10" />
-									<div className="size-8 rounded bg-primary/15" />
-								</div>
-								<div className="flex flex-col items-center gap-1">
-									<p className="text-sm font-medium text-foreground">No widgets yet</p>
-									<p className="text-xs text-muted-foreground">
-										Add charts, stats, and tables to build your dashboard.
-									</p>
-								</div>
-								<button
-									type="button"
-									disabled={readOnly}
-									className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50"
-									onClick={() => {
-										navigate({
-											to: "/dashboards/$dashboardId",
-											params: { dashboardId },
-											search: (prev) => ({
-												...pickVariableParams(prev),
-												mode: "edit" as const,
-											}),
-										})
-										setChartPickerOpen(true)
-									}}
-								>
-									Add your first widget
-								</button>
-							</div>
-						) : (
-							<DashboardCanvas widgets={activeDashboard.widgets} />
-						)}
-
-						<WidgetPickerWithActions
-							open={readOnly || isPreviewing ? false : chartPickerOpen}
-							onOpenChange={readOnly || isPreviewing ? () => undefined : setChartPickerOpen}
-						/>
-					</DashboardLayout>
-				</DashboardRefreshBridge>
-			</DashboardActionsProvider>
+						</DashboardLayout>
+					</DashboardRefreshBridge>
+				</DashboardActionsProvider>
 			</DashboardVariablesProvider>
 		</DashboardTimeRangeWrapper>
 	)
@@ -300,7 +300,7 @@ function HistoryPanelMount({ dashboardId, onClose }: { dashboardId: DashboardId;
 
 	const onPreview = (versionId: DashboardVersionId) => {
 		if (!Result.isSuccess(result)) return
-		const version = result.value.versions.find((v) => v.id === versionId)
+		const version = result.value.data.find((v) => v.id === versionId)
 		if (!version) return
 		setPreviewed({
 			versionId: version.id,

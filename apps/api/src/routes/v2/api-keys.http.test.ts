@@ -8,8 +8,10 @@ import { Env } from "../../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
 import { ApiKeysService } from "../../services/ApiKeysService"
 import { AuthService } from "../../services/AuthService"
+import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
 import { HttpV2ApiKeysLive } from "./api-keys.http"
+import { HttpV2DashboardsLive } from "./dashboards.http"
 import { V2SchemaErrorsLive } from "./error-envelope"
 
 /**
@@ -40,12 +42,14 @@ const testConfig = () =>
 const makeHarness = () => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
-	const servicesLive = Layer.mergeAll(ApiKeysService.layer, AuthService.layer).pipe(
-		Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)),
-	)
+	const servicesLive = Layer.mergeAll(
+		ApiKeysService.layer,
+		AuthService.layer,
+		DashboardPersistenceService.layer,
+	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
-		Layer.provide(HttpV2ApiKeysLive),
+		Layer.provide(Layer.mergeAll(HttpV2ApiKeysLive, HttpV2DashboardsLive)),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(servicesLive),

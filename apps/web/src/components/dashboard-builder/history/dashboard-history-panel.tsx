@@ -21,7 +21,7 @@ export function DashboardHistoryPanel({
 }: DashboardHistoryPanelProps) {
 	const result = useDashboardVersions(dashboardId)
 
-	const versions = useMemo(() => (Result.isSuccess(result) ? [...result.value.versions] : []), [result])
+	const versions = useMemo(() => (Result.isSuccess(result) ? [...result.value.data] : []), [result])
 
 	const isLoading = !Result.isSuccess(result) && !Result.isFailure(result)
 	const isError = Result.isFailure(result)

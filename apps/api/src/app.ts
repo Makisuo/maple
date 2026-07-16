@@ -11,6 +11,7 @@ import { HttpAnomaliesLive } from "./routes/anomalies.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
 import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
+import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
 import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
@@ -274,7 +275,7 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 )
 
 const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
-	Layer.provide(HttpV2ApiKeysLive),
+	Layer.provide(Layer.mergeAll(HttpV2ApiKeysLive, HttpV2DashboardsLive)),
 	Layer.provide(V2SchemaErrorsLive),
 )
 

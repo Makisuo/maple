@@ -20,6 +20,9 @@ const benchSearchSchema = Schema.Struct({
 	// Number of `service.namespace` groups to spread services across (0 = none,
 	// which keeps the perf-bench path identical to today). e.g. ?groups=4
 	groups: Schema.optional(Schema.Number),
+	// Declutter paths: low-traffic threshold (% of peak) and focused service.
+	minTraffic: Schema.optional(Schema.Number),
+	focus: Schema.optional(Schema.String),
 })
 
 export const Route = effectRoute(createFileRoute("/service-map-bench"))({
@@ -42,6 +45,8 @@ function ServiceMapBenchPage() {
 		rps: (search.rps as BenchRps | undefined) ?? DEFAULT_BENCH_PARAMS.rps,
 		seed: search.seed ?? DEFAULT_BENCH_PARAMS.seed,
 		groups: search.groups ?? DEFAULT_BENCH_PARAMS.groups,
+		minTraffic: search.minTraffic ?? DEFAULT_BENCH_PARAMS.minTraffic,
+		focus: search.focus ?? DEFAULT_BENCH_PARAMS.focus,
 	}
 
 	return (

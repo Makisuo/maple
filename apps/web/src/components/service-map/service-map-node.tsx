@@ -360,11 +360,75 @@ function ServiceNode({ data }: { data: ServiceNodeData }) {
 	)
 }
 
+/**
+ * A collapsed namespace, folded into a single node. Tinted with the same hue as
+ * the namespace's dotted box so it reads as "that box, minimized". Clicking it
+ * expands the namespace again (wired in the view's node-click handler).
+ */
+function NamespaceAggregateNode({ data }: { data: ServiceNodeData }) {
+	const { label, throughput, errorRate, avgLatencyMs, selected, nsMemberCount, colorMode } = data
+	const color = getServiceMapNodeColor(data, colorMode ?? "service")
+
+	return (
+		<>
+			<Handles />
+			<div
+				className="flex w-[220px] cursor-pointer overflow-hidden rounded-r-lg border border-dashed bg-card transition-[border-color,box-shadow] duration-150"
+				style={{
+					backgroundImage: `linear-gradient(${withAlpha(color, 0.1)}, ${withAlpha(color, 0.1)})`,
+					borderColor: selected ? color : withAlpha(color, 0.55),
+					boxShadow: selected ? `0 0 0 3px ${withAlpha(color, 0.16)}` : undefined,
+				}}
+				title="Collapsed namespace — click to expand"
+			>
+				<div className="w-[3px] shrink-0" style={{ backgroundColor: color }} />
+
+				<div className="flex min-w-0 flex-1 flex-col gap-2 px-3 py-2.5">
+					<div className="flex items-center gap-1.5">
+						<div
+							className={cn("h-1.5 w-1.5 shrink-0 rounded-full", getHealthDotClass(errorRate))}
+						/>
+						<span className="truncate text-xs font-semibold uppercase tracking-wider text-foreground">
+							{label}
+						</span>
+						<span
+							className="ml-auto shrink-0 text-[9px] font-semibold uppercase tracking-wide"
+							style={{ color }}
+						>
+							{nsMemberCount ?? 0} services
+						</span>
+					</div>
+
+					<div className="flex gap-4">
+						<MetricCell label="req/s" value={formatRate(throughput)} />
+						<MetricCell
+							label="err%"
+							value={`${(errorRate * 100).toFixed(1)}%`}
+							valueClassName={errorRateClass(errorRate)}
+						/>
+						<MetricCell label="avg" value={formatLatency(avgLatencyMs)} />
+					</div>
+				</div>
+			</div>
+		</>
+	)
+}
+
 interface ServiceMapNodeProps {
 	data: ServiceNodeData
 }
 
 export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapNodeProps) {
-	if (data.kind === "database") return <DatabaseNode data={data} />
-	return <ServiceNode data={data} />
+	const card =
+		data.kind === "database" ? (
+			<DatabaseNode data={data} />
+		) : data.kind === "namespaceAggregate" ? (
+			<NamespaceAggregateNode data={data} />
+		) : (
+			<ServiceNode data={data} />
+		)
+	// Focus dim-mode: fade non-neighbors without moving them.
+	return (
+		<div className={cn("transition-opacity duration-200", data.dimmed && "opacity-25")}>{card}</div>
+	)
 })

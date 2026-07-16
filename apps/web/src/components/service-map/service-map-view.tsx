@@ -17,7 +17,8 @@ import "@xyflow/react/dist/style.css"
 
 import { Result, useAtom, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { serviceMapLayoutAtomFamily } from "@/atoms/service-map-layout-atoms"
+import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-layout-atoms"
+import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-atoms"
 import { Link } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
 import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
@@ -42,15 +43,14 @@ import {
 	EmptyTitle,
 } from "@maple/ui/components/ui/empty"
 import { Button } from "@maple/ui/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
 import { formatBucketLabel } from "@/lib/format"
 import {
 	ArrowRightIcon,
-	ArrowRotateAnticlockwiseIcon,
 	CloudflareIcon,
 	CubeIcon,
 	ExternalLinkIcon,
+	MagnifierIcon,
 	NetworkNodesIcon,
 	PlanetScaleIcon,
 	XmarkIcon,
@@ -81,6 +81,8 @@ import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 import { ServiceMapNode } from "./service-map-node"
 import { ServiceMapLoading } from "./service-map-loading"
 import { ServiceMapEdge } from "./service-map-edge"
+import { ServiceMapToolbar } from "./service-map-toolbar"
+import { applyDeclutter, type DeclutterFocus, type DeclutterState } from "./service-map-declutter"
 import { NamespaceGroupNode, type NamespaceGroupData } from "./service-map-namespace-group"
 import { layoutServiceMapWithElk, type ElkLayoutResult } from "./service-map-elk"
 import {
@@ -96,6 +98,8 @@ import {
 	CLOUDFLARE_COLOR,
 	computeNodePositions,
 	DB_NODE_PREFIX,
+	isNsAggregateId,
+	NS_AGGREGATE_PREFIX,
 	parseDbNodeId,
 	getPlatformColor,
 	getServiceMapNodeColor,
@@ -184,6 +188,8 @@ interface ServiceDetailPanelProps {
 	colorMode: ServiceMapColorMode
 	/** Cloudflare direct-integration analytics overlaid onto this instrumented Worker, if matched. */
 	cloudflare?: CloudflareNodeMetrics
+	/** Focus the map on this service's neighborhood. */
+	onFocus: () => void
 	onClose: () => void
 }
 
@@ -197,6 +203,7 @@ function ServiceDetailPanel({
 	platforms,
 	colorMode,
 	cloudflare,
+	onFocus,
 	onClose,
 }: ServiceDetailPanelProps) {
 	const overview = overviews.find((o) => o.serviceName === serviceId)
@@ -240,6 +247,14 @@ function ServiceDetailPanel({
 					</div>
 				</div>
 				<div className="flex items-center gap-2 shrink-0">
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						onClick={onFocus}
+						title="Focus the map on this service's neighborhood"
+					>
+						<MagnifierIcon size={13} />
+					</Button>
 					<Link
 						to="/services/$serviceName"
 						params={{ serviceName: serviceId }}
@@ -1420,6 +1435,9 @@ interface ServiceMapViewProps {
 	endTime: string
 	/** Deployment environment to scope the map to; `undefined` = all environments. */
 	deploymentEnv?: string
+	/** Controlled focus state (kept in the route's URL search params). */
+	focus?: DeclutterFocus | null
+	onFocusChange?: (focus: DeclutterFocus | null) => void
 }
 
 // --- Debug Layout Sliders ---
@@ -1499,20 +1517,22 @@ function LayoutDebugPanel({
 
 /**
  * Run ELK's async layout whenever the topology/namespace/config key changes,
- * returning the result once it resolves for the CURRENT key (null while pending
- * or when disabled, so callers fall back to the synchronous layout). One effect:
- * this is genuine synchronization with an external, imperative async layout
- * engine — not derivable render state. Reads live nodes/edges through refs so the
- * effect only re-fires on the stable string key, not on array identity churn.
+ * returning the result once it resolves for the CURRENT key (`layout` is null
+ * while pending, so callers fall back to the synchronous layout). `settled`
+ * flips once the current key has resolved — success OR failure — so the reveal
+ * gate never pins the skeleton on a layout error (the sync fallback positions
+ * are already final in that case). One effect: this is genuine synchronization
+ * with an external, imperative async layout engine — not derivable render
+ * state. Reads live nodes/edges through refs so the effect only re-fires on the
+ * stable string key, not on array identity churn.
  */
 function useElkLayout(
 	rawNodes: Node<ServiceNodeData>[],
 	flowEdges: Edge<ServiceEdgeData>[],
-	enabled: boolean,
 	config: LayoutConfig,
 	key: string,
-): ElkLayoutResult | null {
-	const [state, setState] = useState<{ key: string; layout: ElkLayoutResult } | null>(null)
+): { layout: ElkLayoutResult | null; settled: boolean } {
+	const [state, setState] = useState<{ key: string; layout: ElkLayoutResult | null } | null>(null)
 	const nodesRef = useRef(rawNodes)
 	nodesRef.current = rawNodes
 	const edgesRef = useRef(flowEdges)
@@ -1521,24 +1541,22 @@ function useElkLayout(
 	configRef.current = config
 
 	useEffect(() => {
-		if (!enabled) {
-			setState(null)
-			return
-		}
 		let cancelled = false
 		layoutServiceMapWithElk(nodesRef.current, edgesRef.current, configRef.current)
 			.then((layout) => {
 				if (!cancelled) setState({ key, layout })
 			})
 			.catch((error) => {
-				if (!cancelled) console.error("Service map ELK layout failed", error)
+				console.error("Service map ELK layout failed", error)
+				if (!cancelled) setState({ key, layout: null })
 			})
 		return () => {
 			cancelled = true
 		}
-	}, [enabled, key])
+	}, [key])
 
-	return state?.key === key ? state.layout : null
+	const current = state?.key === key ? state : null
+	return { layout: current?.layout ?? null, settled: current != null }
 }
 
 export function ServiceMapCanvas({
@@ -1558,6 +1576,9 @@ export function ServiceMapCanvas({
 	endTime,
 	deploymentEnv,
 	layoutKey,
+	focus: focusProp,
+	onFocusChange,
+	minTrafficPctOverride,
 }: {
 	edges: ServiceEdge[]
 	dbEdges: ServiceDbEdge[]
@@ -1589,12 +1610,24 @@ export function ServiceMapCanvas({
 	// component renders without a Clerk session (e.g. the /service-map-bench
 	// perf harness, which runs in self-hosted mode with no ClerkProvider).
 	layoutKey: string
+	/**
+	 * Controlled focus (the route keeps it in URL search params). When omitted,
+	 * focus falls back to local state (bench harness / embedding contexts).
+	 */
+	focus?: DeclutterFocus | null
+	onFocusChange?: (focus: DeclutterFocus | null) => void
+	/** Forces the low-traffic threshold, bypassing stored prefs (bench harness). */
+	minTrafficPctOverride?: number
 }) {
 	const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null)
 	const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>({ ...DEFAULT_LAYOUT_CONFIG })
 	const [colorMode, setColorMode] = useState<ServiceMapColorMode>("service")
 
 	const [layout, setLayout] = useAtom(serviceMapLayoutAtomFamily(layoutKey))
+	const [viewPrefs, setViewPrefs] = useAtom(serviceMapViewPrefsAtomFamily(layoutKey))
+	const [internalFocus, setInternalFocus] = useState<DeclutterFocus | null>(null)
+	const focus = focusProp !== undefined ? focusProp : internalFocus
+	const setFocus = onFocusChange ?? setInternalFocus
 
 	// Stable registry that edges publish their geometry into and the single
 	// particle canvas reads each frame. Created once per canvas instance.
@@ -1617,7 +1650,7 @@ export function ServiceMapCanvas({
 			planetscaleDatabases,
 			planetscaleStats,
 		})
-		// Service legend should only include real services, not synthetic db: nodes
+		// Service legend / focus targets only include real services, not synthetic db: nodes
 		const allServices = Array.from(
 			new Set(nodes.filter((n) => !n.id.startsWith(DB_NODE_PREFIX)).map((n) => n.id)),
 		).toSorted()
@@ -1654,24 +1687,66 @@ export function ServiceMapCanvas({
 		return m
 	}, [rawNodes])
 
+	// Declutter stage: collapse namespaces → focus subgraph → traffic filter.
+	// Everything downstream (topology key, ELK, persisted positions, particles,
+	// minimap, namespace boxes) operates on the EFFECTIVE graph, so declutter
+	// changes that alter the node set naturally re-key the layout signature while
+	// focus-dim (topology unchanged) costs no re-layout.
+	const minTrafficPct = minTrafficPctOverride ?? viewPrefs.minTrafficPct
+	const declutterState: DeclutterState = useMemo(
+		() => ({
+			minTrafficPct,
+			focus,
+			collapsedNamespaces: viewPrefs.collapsedNamespaces,
+		}),
+		[minTrafficPct, viewPrefs.collapsedNamespaces, focus],
+	)
+	const exemptIds = useMemo(
+		() => (selectedServiceId ? new Set([selectedServiceId]) : new Set<string>()),
+		[selectedServiceId],
+	)
+	const declutter = useMemo(
+		() => applyDeclutter(rawNodes, flowEdges, declutterState, exemptIds),
+		[rawNodes, flowEdges, declutterState, exemptIds],
+	)
+	const effectiveNodes = declutter.nodes
+	const effectiveEdges = declutter.edges
+
+	// A focus target that no longer exists (service renamed / aged out of the
+	// window) silently clears — the vanished focus chip is the feedback.
+	useEffect(() => {
+		if (declutter.focusMissing) setFocus(null)
+	}, [declutter.focusMissing, setFocus])
+
+	// Collapse and focus-hide can remove the selected node — drop the selection
+	// (the traffic filter alone never does; the selection is exempt).
+	useEffect(() => {
+		if (selectedServiceId && !effectiveNodes.some((n) => n.id === selectedServiceId)) {
+			setSelectedServiceId(null)
+		}
+	}, [selectedServiceId, effectiveNodes])
+
 	// Positions depend ONLY on topology + layout config. Memoize the expensive
 	// hierarchical layout on a topology key so metric refreshes (new array
 	// identities, same shape) don't re-run barycenter sweeps. The memo body runs
 	// each render but short-circuits on an unchanged key.
-	const topoKey = useMemo(() => topologyKey(rawNodes, flowEdges), [rawNodes, flowEdges])
+	const topoKey = useMemo(() => topologyKey(effectiveNodes, effectiveEdges), [effectiveNodes, effectiveEdges])
 	// Namespace assignment is part of node DATA, not topology, so it isn't covered
 	// by topoKey. Fold a namespace signature into the cache key so re-bucketing
 	// happens when a service's namespace changes even if the shape is unchanged.
 	const nsKey = useMemo(
 		() =>
-			rawNodes
+			effectiveNodes
 				.map((n) => (n.data.namespace ? `${n.id}=${n.data.namespace}` : ""))
 				.filter(Boolean)
 				.sort()
 				.join(","),
-		[rawNodes],
+		[effectiveNodes],
 	)
-	const layoutSignature = `${topoKey}|${nsKey}|${JSON.stringify(layoutConfig)}`
+	// The trailing `elk2` is a layout-engine version token: bumping it invalidates
+	// persisted drag snapshots captured against a previous engine's base positions
+	// (mixing the two scatters nodes). elk2 = always-on ELK for flat graphs.
+	const layoutSignature = `${topoKey}|${nsKey}|${JSON.stringify(layoutConfig)}|elk2`
 
 	// Persisted drag positions / viewport are absolute coordinates tied to a
 	// specific layout. Honour them ONLY while their captured signature still
@@ -1682,9 +1757,11 @@ export function ServiceMapCanvas({
 	// memo key), so ordinary refreshes keep manual arrangements.
 	const persisted = useMemo(
 		() =>
-			layout.signature === layoutSignature
-				? layout
-				: { positions: {}, viewport: null, signature: layoutSignature },
+			layout.snapshots.find((s) => s.signature === layoutSignature) ?? {
+				signature: layoutSignature,
+				positions: {},
+				viewport: null,
+			},
 		[layout, layoutSignature],
 	)
 	// Mirror the live signature into a ref so drag/viewport persistence callbacks
@@ -1692,13 +1769,17 @@ export function ServiceMapCanvas({
 	const sigRef = useRef(layoutSignature)
 	sigRef.current = layoutSignature
 
-	// When namespaces are defined, ELK's layered/compound layout (async) produces
-	// the final node positions. Until it resolves we fall back to the synchronous
-	// swimlane layout below so first paint is instant; without namespaces ELK is
-	// skipped entirely (identical to today, perf bench unaffected). Edges always
-	// render as smooth-step curves (ELK is used for positions only).
-	const hasNamespaces = useMemo(() => rawNodes.some((n) => Boolean(n.data.namespace)), [rawNodes])
-	const elk = useElkLayout(rawNodes, flowEdges, hasNamespaces, layoutConfig, layoutSignature)
+	// ELK's layered layout (async, in a web worker) produces the final node
+	// positions for ALL graphs. Until it resolves for the current signature we
+	// fall back to the synchronous layout below (also the terminal fallback if
+	// ELK errors). Edges always render as smooth-step curves (ELK is positions
+	// only).
+	const { layout: elk, settled: elkSettled } = useElkLayout(
+		effectiveNodes,
+		effectiveEdges,
+		layoutConfig,
+		layoutSignature,
+	)
 
 	const layoutCacheRef = useRef<{ key: string; positions: Map<string, { x: number; y: number }> } | null>(
 		null,
@@ -1707,15 +1788,16 @@ export function ServiceMapCanvas({
 		if (layoutCacheRef.current?.key !== layoutSignature) {
 			layoutCacheRef.current = {
 				key: layoutSignature,
-				positions: computeNodePositions(rawNodes, flowEdges, layoutConfig),
+				positions: computeNodePositions(effectiveNodes, effectiveEdges, layoutConfig),
 			}
 		}
 		const positions = elk?.positions ?? layoutCacheRef.current.positions
-		return rawNodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }))
-	}, [rawNodes, flowEdges, layoutConfig, layoutSignature, elk])
+		return effectiveNodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }))
+	}, [effectiveNodes, effectiveEdges, layoutConfig, layoutSignature, elk])
 
-	// Merge layout positions with selection + color-mode state. Persisted drag
-	// positions (keyed by node id) override the deterministic auto-layout.
+	// Merge layout positions with selection + color-mode + focus-dim state.
+	// Persisted drag positions (keyed by node id) override the deterministic
+	// auto-layout.
 	const nodesWithSelection = useMemo(() => {
 		return layoutedNodes.map((node) => ({
 			...node,
@@ -1724,9 +1806,21 @@ export function ServiceMapCanvas({
 				...node.data,
 				selected: node.id === selectedServiceId,
 				colorMode,
+				dimmed: declutter.dimmedNodeIds.has(node.id),
 			},
 		}))
-	}, [layoutedNodes, selectedServiceId, colorMode, persisted.positions])
+	}, [layoutedNodes, selectedServiceId, colorMode, persisted.positions, declutter.dimmedNodeIds])
+
+	// Edges leaving the focus neighborhood render near-invisible (and stop
+	// claiming particle budget) — flagged via edge data.
+	const renderedEdges = useMemo(() => {
+		if (declutter.dimmedEdgeIds.size === 0) return effectiveEdges
+		return effectiveEdges.map((edge) =>
+			declutter.dimmedEdgeIds.has(edge.id)
+				? { ...edge, data: { ...edge.data!, dimmed: true } }
+				: edge,
+		)
+	}, [effectiveEdges, declutter.dimmedEdgeIds])
 
 	// Track nodes with full ReactFlow state (dimensions, positions from drag, etc.)
 	const [nodes, setNodes] = useState(nodesWithSelection)
@@ -1756,19 +1850,38 @@ export function ServiceMapCanvas({
 	const rfInstance = useRef<ReactFlowInstance | null>(null)
 	const hasFitView = useRef(persisted.viewport != null)
 
+	// Capture the saved camera AT THE MOMENT a signature becomes live. onMoveEnd
+	// persists programmatic camera moves too, so by the time ELK resolves for a
+	// declutter change the new signature often already has a (stale, pre-layout)
+	// viewport stamped on it — deciding from `persisted.viewport` then would skip
+	// the refit and strand the re-laid-out graph off-camera.
+	const viewportAtSigSwitchRef = useRef<{ x: number; y: number; zoom: number } | null>(
+		persisted.viewport,
+	)
+	const prevSigForViewportRef = useRef(layoutSignature)
+	if (prevSigForViewportRef.current !== layoutSignature) {
+		prevSigForViewportRef.current = layoutSignature
+		viewportAtSigSwitchRef.current = persisted.viewport
+	}
+
 	// ELK repositions every node when it resolves (positions, not dimensions, so
-	// onNodesChange's measure-based fit won't fire). Refit once per ELK result —
-	// unless the user has a saved camera — after the new positions paint.
+	// onNodesChange's measure-based fit won't fire). Once per ELK result, after
+	// the new positions paint: restore the camera the user saved for this exact
+	// layout, or fit the fresh layout into view.
 	const elkFitKeyRef = useRef<string | null>(null)
 	useEffect(() => {
-		if (!elk || persisted.viewport != null) return
+		if (!elk) return
 		if (elkFitKeyRef.current === layoutSignature) return
 		elkFitKeyRef.current = layoutSignature
+		const savedViewport = viewportAtSigSwitchRef.current
 		const raf = requestAnimationFrame(() =>
-			requestAnimationFrame(() => rfInstance.current?.fitView({ duration: 300 })),
+			requestAnimationFrame(() => {
+				if (savedViewport) rfInstance.current?.setViewport(savedViewport)
+				else rfInstance.current?.fitView({ duration: 300 })
+			}),
 		)
 		return () => cancelAnimationFrame(raf)
-	}, [elk, layoutSignature, persisted.viewport])
+	}, [elk, layoutSignature])
 
 	const onNodesChange = useCallback(
 		(changes: NodeChange[]) => {
@@ -1797,16 +1910,15 @@ export function ServiceMapCanvas({
 					c.type === "position" && c.dragging === false && c.position != null,
 			)
 			if (dragEnds.length > 0) {
-				setLayout((prev) => {
-					// Drop a stale base so we don't merge new drags onto positions from
-					// a different layout; stamp the current signature.
-					const base = prev.signature === sigRef.current ? prev.positions : {}
-					const positions = { ...base }
-					for (const c of dragEnds) {
-						positions[c.id] = { x: c.position!.x, y: c.position!.y }
-					}
-					return { ...prev, positions, signature: sigRef.current }
-				})
+				setLayout((prev) =>
+					upsertSnapshot(prev, sigRef.current, (snap) => {
+						const positions = { ...snap.positions }
+						for (const c of dragEnds) {
+							positions[c.id] = { x: c.position!.x, y: c.position!.y }
+						}
+						return { ...snap, positions }
+					}),
+				)
 			}
 		},
 		[setLayout],
@@ -1814,22 +1926,29 @@ export function ServiceMapCanvas({
 
 	const onMoveEnd = useCallback(
 		(_: unknown, viewport: Viewport) => {
-			setLayout((prev) => {
-				// If the stored layout predates the current signature, drop its stale
-				// positions rather than reviving them alongside the new viewport.
-				const positions = prev.signature === sigRef.current ? prev.positions : {}
-				return { ...prev, positions, viewport, signature: sigRef.current }
-			})
+			setLayout((prev) => upsertSnapshot(prev, sigRef.current, (snap) => ({ ...snap, viewport })))
 		},
 		[setLayout],
 	)
 
-	const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
-		// Namespace boxes are non-selectable, but guard anyway so a stray click
-		// never selects a synthetic group node.
-		if (node.type === "namespaceGroup") return
-		setSelectedServiceId((prev) => (prev === node.id ? null : node.id))
-	}, [])
+	const handleNodeClick = useCallback(
+		(_: React.MouseEvent, node: Node) => {
+			// Namespace boxes are non-selectable, but guard anyway so a stray click
+			// never selects a synthetic group node.
+			if (node.type === "namespaceGroup") return
+			// Clicking a collapsed-namespace aggregate expands it back into services.
+			if (isNsAggregateId(node.id)) {
+				const ns = decodeURIComponent(node.id.slice(NS_AGGREGATE_PREFIX.length))
+				setViewPrefs((prev) => ({
+					...prev,
+					collapsedNamespaces: prev.collapsedNamespaces.filter((n) => n !== ns),
+				}))
+				return
+			}
+			setSelectedServiceId((prev) => (prev === node.id ? null : node.id))
+		},
+		[setViewPrefs],
+	)
 
 	const handlePaneClick = useCallback(() => {
 		setSelectedServiceId(null)
@@ -1843,7 +1962,11 @@ export function ServiceMapCanvas({
 	const resortFitPending = useRef(false)
 	const handleResort = useCallback(() => {
 		resortFitPending.current = true
-		setLayout({ positions: {}, viewport: null, signature: sigRef.current })
+		// Drop only the CURRENT signature's snapshot — other declutter states keep
+		// their manual arrangements.
+		setLayout((prev) => ({
+			snapshots: prev.snapshots.filter((s) => s.signature !== sigRef.current),
+		}))
 	}, [setLayout])
 
 	useEffect(() => {
@@ -1870,6 +1993,16 @@ export function ServiceMapCanvas({
 	// its own commit, collapsing the burst. The ~1-frame lag is imperceptible and the
 	// boxes still settle tight around the nodes.
 	const deferredNodes = useDeferredValue(nodes)
+	const handleCollapseNamespace = useCallback(
+		(ns: string) => {
+			setViewPrefs((prev) =>
+				prev.collapsedNamespaces.includes(ns)
+					? prev
+					: { ...prev, collapsedNamespaces: [...prev.collapsedNamespaces, ns] },
+			)
+		},
+		[setViewPrefs],
+	)
 	const namespaceGroupNodes = useMemo<Node<NamespaceGroupData>[]>(() => {
 		const extents = new Map<string, { minX: number; minY: number; maxX: number; maxY: number }>()
 		for (const node of deferredNodes) {
@@ -1897,7 +2030,11 @@ export function ServiceMapCanvas({
 				id: nsGroupId(ns),
 				type: "namespaceGroup",
 				position: { x: ext.minX - NS_PADDING_X, y: ext.minY - (NS_LABEL_HEIGHT + NS_PADDING_Y) },
-				data: { label: ns, hue: getValueHue(ns) ?? 0 },
+				data: {
+					label: ns,
+					hue: getValueHue(ns) ?? 0,
+					onCollapse: () => handleCollapseNamespace(ns),
+				},
 				draggable: false,
 				selectable: false,
 				focusable: false,
@@ -1919,22 +2056,57 @@ export function ServiceMapCanvas({
 			})
 		}
 		return boxes
-	}, [deferredNodes])
+	}, [deferredNodes, handleCollapseNamespace])
 
 	// Boxes first so they paint behind the service nodes. The service nodes use the
 	// LIVE `nodes` (must stay current); only the derived boxes run a frame behind.
 	const renderedNodes = useMemo(() => [...namespaceGroupNodes, ...nodes], [namespaceGroupNodes, nodes])
 
-	// Hold the skeleton until the first layout for the initial data is FINAL, so the
-	// graph paints once in its settled positions instead of jumping. Without
-	// namespaces the synchronous layout is already final; with namespaces the async
-	// ELK swimlane pass repositions every node, so wait for `elk` to resolve before
-	// revealing. Reveal once, then never fall back to the skeleton — later
+	// Hold the skeleton until the first layout for the initial data is FINAL, so
+	// the graph paints once in its settled positions instead of jumping. The
+	// async ELK pass repositions every node, so wait for it to settle (resolve or
+	// fail — a failure means the sync fallback positions ARE final) before
+	// revealing — but never for more than a grace period: on a cold dev server /
+	// slow network the worker chunk can take seconds to arrive, and a usable
+	// sync-layout graph beats a skeleton (ELK repositions + refits when it
+	// lands). Reveal once, then never fall back to the skeleton — later
 	// refresh-driven ELK recomputes keep showing the current graph.
 	const revealedRef = useRef(false)
-	if (!hasNamespaces || elk != null) revealedRef.current = true
+	const [revealGraceExpired, setRevealGraceExpired] = useState(false)
+	useEffect(() => {
+		if (revealedRef.current) return
+		const timer = setTimeout(() => setRevealGraceExpired(true), 2000)
+		return () => clearTimeout(timer)
+	}, [])
+	if (elkSettled || revealGraceExpired) revealedRef.current = true
 
 	if (nodes.length === 0) {
+		// The graph exists but declutter hid everything — offer a reset instead of
+		// the "no instrumentation" empty state.
+		if (rawNodes.length > 0) {
+			return (
+				<div className="flex h-full items-center justify-center">
+					<div className="space-y-3 text-center">
+						<p className="text-sm font-medium text-foreground">
+							Everything is hidden by the current filters
+						</p>
+						<p className="text-xs text-muted-foreground">
+							{rawNodes.length} services are below the traffic threshold or outside the focus.
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={() => {
+								setViewPrefs((prev) => ({ ...prev, minTrafficPct: 0 }))
+								setFocus(null)
+							}}
+						>
+							Reset filters
+						</Button>
+					</div>
+				</div>
+			)
+		}
 		return <ServiceMapEmptyState />
 	}
 
@@ -1949,42 +2121,24 @@ export function ServiceMapCanvas({
 					<div className="flex flex-col h-full">
 						<div className="flex-1 min-h-0 relative">
 							<LayoutDebugPanel config={layoutConfig} onChange={setLayoutConfig} />
-							<div className="absolute top-2 left-2 z-50 flex items-center gap-2">
-								<div className="flex items-center gap-2 bg-card/90 backdrop-blur-sm border border-border rounded-md px-2 py-1">
-									<span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-										Color by
-									</span>
-									<Select
-										value={colorMode}
-										onValueChange={(v) => setColorMode(v as ServiceMapColorMode)}
-									>
-										<SelectTrigger
-											size="sm"
-											className="h-6 min-w-0 text-[11px] capitalize border-0 bg-transparent px-1.5"
-										>
-											<SelectValue />
-										</SelectTrigger>
-										<SelectContent>
-											<SelectItem value="service">Service</SelectItem>
-											<SelectItem value="health">Health</SelectItem>
-											<SelectItem value="platform">Platform</SelectItem>
-										</SelectContent>
-									</Select>
-								</div>
-								<button
-									type="button"
-									onClick={handleResort}
-									title="Re-sort — discard manual positions and auto-arrange"
-									className="flex h-[34px] items-center gap-1.5 bg-card/90 backdrop-blur-sm border border-border rounded-md px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
-								>
-									<ArrowRotateAnticlockwiseIcon size={12} />
-									Re-sort
-								</button>
-							</div>
+							<ServiceMapToolbar
+								colorMode={colorMode}
+								onColorModeChange={setColorMode}
+								onResort={handleResort}
+								services={services}
+								focus={focus}
+								onFocusChange={setFocus}
+								minTrafficPct={minTrafficPct}
+								onMinTrafficPctChange={(pct) =>
+									setViewPrefs((prev) => ({ ...prev, minTrafficPct: pct }))
+								}
+								hiddenNodeCount={declutter.hiddenNodeCount}
+								hiddenEdgeCount={declutter.hiddenEdgeCount}
+							/>
 							<ParticleRegistryProvider value={registry}>
 								<ReactFlow
 									nodes={renderedNodes}
-									edges={flowEdges}
+									edges={renderedEdges}
 									onNodesChange={onNodesChange}
 									onNodeClick={handleNodeClick}
 									onPaneClick={handlePaneClick}
@@ -1999,7 +2153,9 @@ export function ServiceMapCanvas({
 									nodesConnectable={false}
 									connectOnClick={false}
 									elementsSelectable={false}
-									minZoom={0.1}
+									// 0.05 lets fitView frame very large graphs (hundreds of
+									// services) instead of clipping at the zoom floor.
+									minZoom={0.05}
 									maxZoom={2}
 									proOptions={{ hideAttribution: true }}
 								>
@@ -2144,6 +2300,9 @@ export function ServiceMapCanvas({
 								colorMode={colorMode}
 								cloudflare={cloudflareOverlayByService.get(selectedServiceId)}
 								durationSeconds={durationSeconds}
+								onFocus={() =>
+									setFocus({ serviceId: selectedServiceId, hops: 1, mode: "dim" })
+								}
 								onClose={() => setSelectedServiceId(null)}
 							/>
 						)
@@ -2161,7 +2320,7 @@ export function ServiceMapCanvas({
 	)
 }
 
-export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMapViewProps) {
+export function ServiceMapView({ startTime, endTime, deploymentEnv, focus, onFocusChange }: ServiceMapViewProps) {
 	const orgId = useMapleOrganizationId()
 	const infraEnabled = useInfraEnabled()
 	const durationSeconds = useMemo(() => {
@@ -2332,6 +2491,8 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv }: ServiceMap
 					endTime={endTime}
 					deploymentEnv={deploymentEnv}
 					layoutKey={orgId ?? "default"}
+					focus={focus}
+					onFocusChange={onFocusChange}
 				/>
 			),
 		)

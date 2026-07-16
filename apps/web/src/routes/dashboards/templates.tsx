@@ -1,9 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Exit, Schema } from "effect"
 import { toast } from "sonner"
-import { DashboardTemplateInstantiateRequest, DashboardTemplateId } from "@maple/domain/http"
+import { DashboardTemplateId } from "@maple/domain/http"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { useDashboardMutationSync } from "@/hooks/use-dashboard-store"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TemplatePicker } from "@/components/dashboard-builder/templates/template-picker"
 import { Button } from "@maple/ui/components/ui/button"
@@ -18,25 +19,28 @@ export const Route = createFileRoute("/dashboards/templates")({
 function TemplatesPage() {
 	const navigate = useNavigate()
 	const listResult = useAtomValue(
-		MapleApiAtomClient.query("dashboards", "listTemplates", {
+		MapleApiV2AtomClient.query("dashboards", "listTemplates", {
+			query: {},
 			reactivityKeys: ["dashboard-templates"],
 		}),
 	)
-	const instantiate = useAtomSet(MapleApiAtomClient.mutation("dashboards", "instantiateTemplate"), {
+	const instantiate = useAtomSet(MapleApiV2AtomClient.mutation("dashboards", "instantiateTemplate"), {
 		mode: "promiseExit",
 	})
+	const { prepareForMutation, reconcileTxid } = useDashboardMutationSync()
 
 	const submitting = false
-	const templates = Result.isSuccess(listResult) ? listResult.value.templates : []
+	const templates = Result.isSuccess(listResult) ? listResult.value.data : []
 	const failed = Result.isFailure(listResult)
 
 	const handleUse = async (templateId: string, parameters: Record<string, string>) => {
 		try {
+			prepareForMutation()
 			const result = await instantiate({
 				params: { templateId: asTemplateId(templateId) },
-				payload: new DashboardTemplateInstantiateRequest({
+				payload: {
 					...(Object.keys(parameters).length > 0 && { parameters }),
-				}),
+				},
 				reactivityKeys: ["dashboards"],
 			})
 
@@ -46,6 +50,7 @@ function TemplatesPage() {
 			}
 
 			const dashboard = result.value
+			void reconcileTxid(dashboard.txid)
 			toast.success(`Dashboard "${dashboard.name}" created`)
 			navigate({
 				to: "/dashboards/$dashboardId",

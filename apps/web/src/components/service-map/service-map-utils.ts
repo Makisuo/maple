@@ -8,7 +8,7 @@ import type {
 } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
-import { getServiceColor } from "@maple/ui/colors"
+import { getServiceColor, getValueHue } from "@maple/ui/colors"
 import { getDbNodeColor, PLANETSCALE_COLOR, resolveDbNodePresentation } from "./service-map-db"
 
 interface ServiceNodeInfra {
@@ -16,7 +16,7 @@ interface ServiceNodeInfra {
 	workloadCount: number
 }
 
-type ServiceNodeKind = "service" | "database"
+type ServiceNodeKind = "service" | "database" | "namespaceAggregate"
 
 export type ServiceMapColorMode = "service" | "health" | "platform"
 
@@ -78,6 +78,10 @@ export interface ServiceNodeData {
 	colorMode?: ServiceMapColorMode
 	/** OTel `service.namespace`, when defined. Drives namespace-cluster layout + dotted boxes. */
 	namespace?: string
+	/** For `namespaceAggregate` nodes: number of services collapsed into this node. */
+	nsMemberCount?: number
+	/** Rendered at reduced opacity (focus mode dims non-neighbors). */
+	dimmed?: boolean
 	[key: string]: unknown
 }
 
@@ -115,6 +119,12 @@ export function getServiceMapNodeColor(
 	if (data.kind === "database") {
 		return data.planetscale ? PLANETSCALE_COLOR : getDbNodeColor(data.dbSystem, data.dbNamespace ?? "")
 	}
+	if (data.kind === "namespaceAggregate") {
+		// Match the dotted namespace box's hue so the collapsed node reads as
+		// "that box, folded up" — except in health mode, where health wins.
+		if (mode === "health") return getHealthColor(data.errorRate)
+		return `oklch(0.66 0.12 ${getValueHue(data.label) ?? 0})`
+	}
 	switch (mode) {
 		case "health":
 			return getHealthColor(data.errorRate)
@@ -135,6 +145,8 @@ export interface ServiceEdgeData {
 	avgDurationMs: number
 	p95DurationMs: number
 	hasSampling: boolean
+	/** Rendered near-invisible (focus mode dims edges leaving the neighborhood). */
+	dimmed?: boolean
 	[key: string]: unknown
 }
 
@@ -145,10 +157,15 @@ const encodeIdComponent = (raw: string): string => encodeURIComponent(raw)
 
 export const dbNodeId = (system: string, namespace: string) =>
 	`${DB_NODE_PREFIX}${encodeIdComponent(system)}:${encodeIdComponent(namespace)}`
-const edgeIdFor = (source: string, target: string) =>
+export const edgeIdFor = (source: string, target: string) =>
 	`${EDGE_ID_PREFIX}${encodeIdComponent(source)}:${encodeIdComponent(target)}`
 
 export const isDbNodeId = (id: string) => id.startsWith(DB_NODE_PREFIX)
+
+/** Synthetic node id prefix for a collapsed namespace's aggregate node. */
+export const NS_AGGREGATE_PREFIX = "nsagg:"
+export const nsAggregateId = (namespace: string) => `${NS_AGGREGATE_PREFIX}${encodeIdComponent(namespace)}`
+export const isNsAggregateId = (id: string) => id.startsWith(NS_AGGREGATE_PREFIX)
 
 /**
  * Inverse of {@link dbNodeId}. Both components are URI-encoded, so the first

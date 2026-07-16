@@ -18,13 +18,7 @@ import {
 	DialogPanel,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@maple/ui/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
@@ -53,7 +47,10 @@ type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]["value"]
  * with live /v2 route groups belong here — append as groups ship (dashboards,
  * alert_rules, error_issues, traces per docs/api-v2.md).
  */
-const SCOPE_FAMILIES = [{ id: "api_keys", label: "API keys" }] as const
+const SCOPE_FAMILIES = [
+	{ id: "api_keys", label: "API keys" },
+	{ id: "dashboards", label: "Dashboards" },
+] as const
 
 type ScopeLevel = "none" | "read" | "write"
 type AccessMode = "full" | "restricted"
@@ -189,7 +186,10 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 							<div className="space-y-1.5">
 								<Label htmlFor="api-key-expiration">Expiration</Label>
 								<Select
-									items={EXPIRATION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+									items={EXPIRATION_OPTIONS.map((o) => ({
+										value: o.value,
+										label: o.label,
+									}))}
 									value={expiration}
 									onValueChange={(value) => setExpiration(value as ExpirationValue)}
 								>
@@ -226,7 +226,9 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 												key={family.id}
 												className="flex items-center justify-between gap-3"
 											>
-												<span className="text-foreground text-sm">{family.label}</span>
+												<span className="text-foreground text-sm">
+													{family.label}
+												</span>
 												<ToggleGroup
 													value={[scopeLevels[family.id] ?? "none"]}
 													onValueChange={(values) => {
@@ -252,8 +254,8 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 											</div>
 										))}
 										<p className="text-muted-foreground text-xs">
-											Write includes read. Scopes are fixed at creation — roll the key to
-											change access.
+											Write includes read. Scopes are fixed at creation — roll the key
+											to change access.
 										</p>
 									</div>
 								) : (

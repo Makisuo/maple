@@ -1,8 +1,14 @@
 import { memo, useEffect, useId } from "react"
 import { getSmoothStepPath, type EdgeProps } from "@xyflow/react"
-import { getServiceColor } from "@maple/ui/colors"
+import { getServiceColor, getValueHue } from "@maple/ui/colors"
 import { getDbNodeColor } from "./service-map-db"
-import { isDbNodeId, parseDbNodeId, type ServiceEdgeData } from "./service-map-utils"
+import {
+	isDbNodeId,
+	isNsAggregateId,
+	NS_AGGREGATE_PREFIX,
+	parseDbNodeId,
+	type ServiceEdgeData,
+} from "./service-map-utils"
 import { useParticleRegistry } from "./service-map-particles"
 
 // Db endpoints (`db:<system>:<namespace>` ids) resolve to their brand color per
@@ -10,6 +16,16 @@ import { useParticleRegistry } from "./service-map-particles"
 const dbEndpointColor = (nodeId: string): string => {
 	const { dbSystem, dbNamespace } = parseDbNodeId(nodeId)
 	return getDbNodeColor(dbSystem, dbNamespace)
+}
+
+const endpointColor = (nodeId: string): string => {
+	if (isDbNodeId(nodeId)) return dbEndpointColor(nodeId)
+	if (isNsAggregateId(nodeId)) {
+		// Collapsed-namespace aggregate: match the namespace box / aggregate card hue.
+		const ns = decodeURIComponent(nodeId.slice(NS_AGGREGATE_PREFIX.length))
+		return `oklch(0.66 0.12 ${getValueHue(ns) ?? 0})`
+	}
+	return getServiceColor(nodeId)
 }
 
 function getStrokeWidth(callCount: number): number {
@@ -61,6 +77,7 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 	const callsPerSecond = edgeData?.callsPerSecond ?? 0
 	const errorRate = edgeData?.errorRate ?? 0
 	const hasSampling = edgeData?.hasSampling ?? false
+	const dimmed = edgeData?.dimmed === true
 
 	const [edgePath, labelX, labelY] = getSmoothStepPath({
 		sourceX,
@@ -72,21 +89,30 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 		borderRadius: 12,
 	})
 
-	const sourceColor = isDbNodeId(source) ? dbEndpointColor(source) : getServiceColor(source)
-	const targetColor = isDbNodeId(target) ? dbEndpointColor(target) : getServiceColor(target)
+	const sourceColor = endpointColor(source)
+	const targetColor = endpointColor(target)
 	const sw = getStrokeWidth(callCount)
-	const i = getEdgeIntensity(callsPerSecond)
+	// Dimmed edges (focus mode) drop to a faint trace so the neighborhood pops.
+	const i = dimmed ? 0 : getEdgeIntensity(callsPerSecond)
+	const dimFactor = dimmed ? 0.18 : 1
 
 	const gradientId = `grad-${id}-${uniqueId}`.replace(/[^a-zA-Z0-9-_]/g, "_")
 
 	// Publish geometry into the registry so the shared particle canvas can animate
 	// traffic along this edge. Re-runs only when the path / color / rate changes.
+	// Dimmed edges publish a zero rate so the global particle budget flows to the
+	// focused neighborhood instead of the faded background.
 	const registry = useParticleRegistry()
 	useEffect(() => {
 		if (!registry) return
-		registry.set(id, { pathString: edgePath, sourceColor, callsPerSecond, strokeWidth: sw })
+		registry.set(id, {
+			pathString: edgePath,
+			sourceColor,
+			callsPerSecond: dimmed ? 0 : callsPerSecond,
+			strokeWidth: sw,
+		})
 		return () => registry.remove(id)
-	}, [registry, id, edgePath, sourceColor, callsPerSecond, sw])
+	}, [registry, id, edgePath, sourceColor, callsPerSecond, sw, dimmed])
 
 	return (
 		<>
@@ -111,7 +137,7 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 				fill="none"
 				stroke={`url(#${gradientId})`}
 				strokeWidth={sw * 3 + 12}
-				strokeOpacity={0.03 + i * 0.05}
+				strokeOpacity={(0.03 + i * 0.05) * dimFactor}
 				strokeLinecap="round"
 			/>
 
@@ -121,7 +147,7 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 				fill="none"
 				stroke={`url(#${gradientId})`}
 				strokeWidth={sw + 4}
-				strokeOpacity={0.12 + i * 0.15}
+				strokeOpacity={(0.12 + i * 0.15) * dimFactor}
 			/>
 
 			{/* Layer 2: Tube core — hollow interior matching the canvas background
@@ -131,7 +157,7 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 				fill="none"
 				style={{ stroke: "var(--service-map-edge-core)" }}
 				strokeWidth={sw}
-				strokeOpacity={0.5 + i * 0.2}
+				strokeOpacity={(0.5 + i * 0.2) * dimFactor}
 				className="react-flow__edge-path"
 			/>
 
@@ -141,10 +167,12 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 				fill="none"
 				stroke={`url(#${gradientId})`}
 				strokeWidth={Math.max(1, sw * 0.4)}
-				strokeOpacity={0.15 + i * 0.25}
+				strokeOpacity={(0.15 + i * 0.25) * dimFactor}
 			/>
 
-			{/* Layer 4: Label — offset vertically based on edge direction to reduce overlap */}
+			{/* Layer 4: Label — offset vertically based on edge direction to reduce
+			    overlap. Hidden entirely on dimmed edges so the focus reads clean. */}
+			{dimmed ? null : (
 			<foreignObject
 				x={labelX - 40}
 				y={labelY + (targetY > sourceY ? -16 : 4) - 12}
@@ -180,6 +208,7 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 					</span>
 				</div>
 			</foreignObject>
+			)}
 		</>
 	)
 })

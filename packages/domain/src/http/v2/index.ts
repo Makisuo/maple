@@ -1,6 +1,7 @@
 export * from "./api"
 export * from "./api-keys"
 export * from "./auth"
+export * from "./dashboards"
 export * from "./envelopes"
 export * from "./errors"
 export * from "./public-id"

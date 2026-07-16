@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
+import { V2DashboardMutation } from "./dashboards"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
 import { decodeOffsetCursor, encodeOffsetCursor, isoTimestamp, paginateArray } from "./envelopes"
 import { notFound, permissionError, V2NotFoundError } from "./errors"
@@ -85,6 +86,69 @@ describe("V2ApiKey wire format", () => {
 				txid: "not-a-txid",
 			}),
 		).toThrow()
+	})
+})
+
+describe("V2Dashboard wire format", () => {
+	it("encodes public IDs and recursively snake_cases the dashboard document", () => {
+		const decoded = Schema.decodeUnknownSync(V2DashboardMutation)({
+			id: encodePublicId("dash", UUID),
+			object: "dashboard",
+			name: "Operations",
+			description: null,
+			tags: ["production"],
+			time_range: {
+				type: "absolute",
+				start_time: "2026-07-15T00:00:00.000Z",
+				end_time: "2026-07-16T00:00:00.000Z",
+			},
+			widgets: [
+				{
+					id: "widget-1",
+					visualization: "line",
+					data_source: {
+						endpoint: "queryBuilderTimeseries",
+						params: { start_time: "now-1h", nested_filter: { attribute_key: "service.name" } },
+						transform: { field_map: { value: "requests" } },
+					},
+					display: {
+						chart_id: "requests",
+						x_axis: { visible: true },
+						list_root_only: true,
+					},
+					layout: { x: 0, y: 0, w: 6, h: 4, min_w: 2 },
+				},
+			],
+			variables: [
+				{
+					type: "query",
+					name: "service",
+					include_all: true,
+					source: { kind: "attribute", scope: "resource", attribute_key: "service.name" },
+				},
+			],
+			created_at: "2026-07-15T00:00:00.000Z",
+			updated_at: "2026-07-16T00:00:00.000Z",
+			txid: "81234",
+		})
+
+		expect(decoded.id).toBe(UUID)
+		expect(decoded.timeRange.type).toBe("absolute")
+		expect(decoded.widgets[0]?.dataSource.transform?.fieldMap).toEqual({ value: "requests" })
+		expect(decoded.widgets[0]?.dataSource.params).toEqual({
+			startTime: "now-1h",
+			nestedFilter: { attributeKey: "service.name" },
+		})
+
+		const wire = Schema.encodeSync(V2DashboardMutation)(decoded)
+		expect(wire.id).toMatch(/^dash_/)
+		expect(wire.time_range).toHaveProperty("start_time")
+		expect(wire.widgets[0]?.data_source.transform).toHaveProperty("field_map")
+		expect(wire.widgets[0]?.data_source.params).toHaveProperty("nested_filter.attribute_key")
+		expect(wire.widgets[0]?.layout).toHaveProperty("min_w")
+		expect(wire.variables[0]).toHaveProperty("include_all")
+		expect(wire.variables[0]?.source).toHaveProperty("attribute_key")
+		expect(wire.txid).toBe("81234")
 	})
 })
 

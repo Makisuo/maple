@@ -16,6 +16,7 @@ import { ArrowPathIcon, HistoryIcon } from "@/components/icons"
 import { formatRelativeTime } from "@/lib/format"
 import { buildRestorePayload, useRestoreDashboardVersion } from "./use-dashboard-history"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
+import { useDashboardMutationSync } from "@/hooks/use-dashboard-store"
 
 interface PreviewBannerProps {
 	dashboardId: DashboardId
@@ -28,12 +29,15 @@ export function PreviewBanner({ dashboardId, preview, onCancel, onRestored }: Pr
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 	const restore = useRestoreDashboardVersion()
+	const { prepareForMutation, reconcileTxid } = useDashboardMutationSync()
 
 	const performRestore = async () => {
 		setPending(true)
 		try {
+			prepareForMutation()
 			const result = await restore(buildRestorePayload(dashboardId, preview.versionId) as never)
 			if (Exit.isSuccess(result)) {
+				void reconcileTxid(result.value.txid)
 				toast.success(`Restored from v${preview.versionNumber}`)
 				setConfirmOpen(false)
 				onRestored()

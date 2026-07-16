@@ -34,7 +34,7 @@ Browser (apps/web)
   TanStack DB collections, one set per active org
     read:  ShapeStream → GET {VITE_ELECTRIC_SYNC_URL}/api/sync/shape?shape=<name>&offset=…&handle=…
            (mapleShapeFetch injects the Clerk / self-hosted bearer)
-    write: existing typed HTTP endpoints on apps/api (Electric is read-path only)
+    write: typed HTTP endpoints on apps/api (dashboards use public `/v2`; Electric is read-path only)
 
 apps/electric-sync Worker — /api/sync/shape  (src/routes/shape.http.ts, a raw HttpRouter)
   a standalone, DB-free worker (deploys independently of apps/api)
@@ -196,6 +196,7 @@ green (and the worker 503s) until the token lands in Infisical.
 ## Status / remaining work
 
 **Done and verified**
+
 - Infra: docker `electric` + `wal_level=logical`; `0009_electric_publication`
   (applies via both `drizzle-kit migrate` and the PGlite test path — see
   `packages/db/src/migrations.test.ts`), with later publication migrations for
@@ -207,7 +208,8 @@ green (and the worker 503s) until the token lands in Infisical.
   error issues `heartbeat`/`assign`/`setSeverity`.
 - **`@maple/effect-db`** package (typecheck-clean) + **dashboards** collection
   refactored onto `createEffectCollection` + the `useDashboardStore` collection
-  path, proven against a live Electric 1.6.2 instance locally.
+  path, with writes migrated to `/v2/dashboards` and reconciled by returned txid;
+  proven against a live Electric 1.6.2 instance locally.
 - **Alerts + error-issue read consumers (Phase 6):** `collections/alerts.ts` +
   `collections/errors.ts` (read-only collections; client-side live-query joins
   `alert_rules ⟕ alert_rule_states` and `error_issues ⟕ actors ⟕ open_error_incidents`);
@@ -221,6 +223,7 @@ green (and the worker 503s) until the token lands in Infisical.
   drift re-fetches instead of getting stuck.
 
 **Remaining (follow-ups)**
+
 - **Live smoke of alerts + errors:** the mappers/joins/timestamps typecheck and
   unit-test green, but the end-to-end sync for these two verticals still needs the
   docker-Electric smoke (verify each list streams in scoped to the org and
@@ -232,4 +235,3 @@ green (and the worker 503s) until the token lands in Infisical.
 - **Row-volume check** before enabling error-issue/alert-incident sync: confirm
   per-org non-archived `error_issues` and `alert_incidents` counts are bounded; if
   not, add an archival tick or keep terminal-state tabs on paged effect-atom reads.
-```
