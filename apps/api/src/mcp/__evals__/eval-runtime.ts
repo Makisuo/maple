@@ -1,10 +1,11 @@
 import { ConfigProvider, Effect, Layer, ManagedRuntime, Schema } from "effect"
-import { HttpServerRequest } from "effect/unstable/http"
+import { OrgId, UserId } from "@maple/domain/http"
 import { MainLive } from "@/app"
 import { Env } from "@/lib/Env"
 import { WorkerEnvironment } from "@/lib/WorkerEnvironment"
 import { createTestDb } from "@/lib/test-pglite"
 import { mapleToolDefinitions } from "@/mcp/tools/registry"
+import { CurrentMcpTenant } from "@/mcp/lib/query-warehouse"
 import { FIXTURES } from "./utils"
 
 const INTERNAL_TOKEN = "eval-internal-token"
@@ -36,8 +37,8 @@ export interface EvalRuntime {
  * test config (mirrors apps/api `getMapleAgentSetup`/buildSetup, swapping Hyperdrive→PGlite).
  * The warehouse client must be faked separately via `installFakeWarehouse` —
  * this runtime uses the REAL WarehouseQueryService. The returned `requestLayer`
- * carries an internal-service-token request so tool handlers resolve the tenant
- * without exercising Clerk/API-key auth.
+ * carries the already-resolved MCP tenant, matching the post-auth dispatcher
+ * context shared by HTTP and RPC.
  */
 export const makeEvalRuntime = (): EvalRuntime => {
 	const testDb = createTestDb()
@@ -57,17 +58,12 @@ export const makeEvalRuntime = (): EvalRuntime => {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const runtime = ManagedRuntime.make(layer as any) as ManagedRuntime.ManagedRuntime<any, never>
 
-	const requestLayer = Layer.succeed(
-		HttpServerRequest.HttpServerRequest,
-		HttpServerRequest.fromWeb(
-			new Request("https://maple.eval/mcp", {
-				headers: {
-					Authorization: `Bearer maple_svc_${INTERNAL_TOKEN}`,
-					"X-Org-Id": FIXTURES.orgId,
-				},
-			}),
-		),
-	)
+	const requestLayer = Layer.succeed(CurrentMcpTenant, {
+		orgId: Schema.decodeUnknownSync(OrgId)(FIXTURES.orgId),
+		userId: Schema.decodeUnknownSync(UserId)("internal-service"),
+		roles: [],
+		authMode: "self_hosted",
+	})
 
 	return {
 		runtime,

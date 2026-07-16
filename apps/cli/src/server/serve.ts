@@ -26,6 +26,7 @@ export interface AssetResolver {
 export interface ServerOptions {
 	readonly port: number
 	readonly dataDir: string
+	readonly configFile?: string
 	/** Serves the bundled SPA; omit to disable the UI (API-only). */
 	readonly assets?: AssetResolver
 }
@@ -246,7 +247,7 @@ const failIfError = (response: Response): Effect.Effect<Response, IngestRejected
 			const body = (yield* Effect.promise(() => response.clone().text())).trim()
 			const message = body.length > 0 ? body : `HTTP ${response.status}`
 			yield* Effect.annotateCurrentSpan({ "error.type": `HTTP ${response.status}` })
-			return yield* Effect.fail(new IngestRejected({ response, status: response.status, message }))
+			return yield* new IngestRejected({ response, status: response.status, message })
 		}
 		return response
 	})
@@ -335,7 +336,11 @@ export const startServer = (
 	options: ServerOptions,
 ): Effect.Effect<{ readonly port: number }, ChdbError, Scope.Scope> =>
 	Effect.gen(function* () {
-		const db = yield* acquireChdb({ dataDir: options.dataDir, schemaSql })
+		const db = yield* acquireChdb({
+			dataDir: options.dataDir,
+			schemaSql,
+			configFile: options.configFile,
+		})
 		// A dedicated runtime carrying the OTel tracer for per-request spans: the
 		// Bun.serve handler runs outside Effect, so each request's span effect is
 		// run through this runtime. Disposed on scope close, which flushes any
@@ -353,7 +358,7 @@ export const startServer = (
 					fetch: makeFetch(db, options, runSpan),
 				}),
 			),
-			(s) => Effect.sync(() => s.stop(true)),
+			(s) => Effect.promise(() => s.stop(true)),
 		)
 		return { port: server.port ?? options.port }
 	})

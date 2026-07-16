@@ -1,0 +1,1 @@
+ALTER TABLE "cloudflare_analytics_state" ADD COLUMN "live_scripts_json" text;

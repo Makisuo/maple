@@ -294,6 +294,7 @@ export {
 	arrayOf,
 	arrayStringConcat,
 	arrayFilter,
+	arrayJoin,
 	mapContains,
 	mapGet,
 	mapKeys,

@@ -74,6 +74,31 @@ export const encodeEvalPoints = (obs: ReadonlyArray<BucketGroupObs>): Timeseries
  * its absence means `null`. `hasData` is derived purely from the sample count,
  * matching the original evaluate logic.
  */
+/**
+ * Decode encoded eval points into flat per-(bucket, group) observations,
+ * preserving bucket order. Same iteration as {@link decodeEvalPoints} but keeps
+ * the bucket on each observation — used by the preview/`evaluateSeries` path,
+ * which charts the per-window values instead of reducing them to a scalar.
+ */
+export const decodeEvalSeries = (points: ReadonlyArray<TimeseriesPoint>): BucketGroupObs[] => {
+	const series: BucketGroupObs[] = []
+	for (const point of points) {
+		for (const [key, num] of Object.entries(point.series)) {
+			if (!key.startsWith(CNT_PREFIX)) continue
+			const groupKey = key.slice(CNT_PREFIX.length)
+			const valKey = VAL_PREFIX + groupKey
+			const hasValue = Object.prototype.hasOwnProperty.call(point.series, valKey)
+			series.push({
+				bucket: point.bucket,
+				groupKey,
+				value: hasValue ? point.series[valKey]! : null,
+				sampleCount: num,
+			})
+		}
+	}
+	return series
+}
+
 export const decodeEvalPoints = (
 	points: ReadonlyArray<TimeseriesPoint>,
 ): Map<string, Array<ReducibleObs>> => {

@@ -28,6 +28,7 @@ export interface ServiceOverviewOutput {
 	readonly commitSha: string
 	readonly throughput: number
 	readonly errorCount: number
+	readonly estimatedErrorCount: number
 	readonly spanCount: number
 	readonly p50LatencyMs: number
 	readonly p95LatencyMs: number
@@ -44,6 +45,7 @@ export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
 			commitSha: $.CommitSha,
 			throughput: CH.count(),
 			errorCount: CH.countIf($.StatusCode.eq("Error")),
+			estimatedErrorCount: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
 			spanCount: CH.count(),
 			p50LatencyMs: CH.quantile(0.5)($.Duration).div(1000000),
 			p95LatencyMs: CH.quantile(0.95)($.Duration).div(1000000),

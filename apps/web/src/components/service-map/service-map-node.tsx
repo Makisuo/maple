@@ -12,7 +12,7 @@ import {
 	ServerIcon,
 } from "@/components/icons"
 import type { ServicePlatform } from "@/api/warehouse/service-map"
-import { getDbDescriptor, withAlpha } from "./service-map-db"
+import { resolveDbNodePresentation, resolvePlanetScaleDbPresentation, withAlpha } from "./service-map-db"
 import { getServiceMapNodeColor, type ServiceNodeData } from "./service-map-utils"
 
 function getPlatformIcon(platform: ServicePlatform | undefined): {
@@ -132,8 +132,16 @@ const Handles = () => (
  * infrastructure dependencies stand out from application services on the map.
  */
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
-	const { label, throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, selected } = data
-	const { category, Icon, label: systemLabel, color, branded } = getDbDescriptor(dbSystem)
+	const { throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, dbNamespace, selected, planetscale } =
+		data
+	// Named databases show their identity as the title; the system name takes over
+	// the small badge slot (the generic node keeps the coarse category). Databases
+	// behind Cloudflare Hyperdrive collapse to a single "Hyperdrive"-branded node;
+	// databases matched against the org's PlanetScale inventory are branded as
+	// PlanetScale (and show its live health chips below the trace metrics).
+	const { title, badge, Icon, systemLabel, color, branded } = planetscale
+		? resolvePlanetScaleDbPresentation(dbSystem, dbNamespace, planetscale.kind)
+		: resolveDbNodePresentation(dbSystem, dbNamespace)
 
 	return (
 		<>
@@ -167,12 +175,12 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 								<p>{systemLabel}</p>
 							</TooltipContent>
 						</Tooltip>
-						<span className="truncate text-xs font-medium text-foreground">{label}</span>
+						<span className="truncate text-xs font-medium text-foreground">{title}</span>
 						<span
 							className="ml-auto shrink-0 text-[9px] font-semibold uppercase tracking-wide"
 							style={{ color }}
 						>
-							{category}
+							{badge}
 						</span>
 					</div>
 
@@ -187,6 +195,39 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 						<MetricCell label="avg" value={formatLatency(avgLatencyMs)} />
 						<MetricCell label="p95" value={formatLatency(p95LatencyMs ?? 0)} />
 					</div>
+
+					{/* PlanetScale live health (scraped branch metrics, window rollup) */}
+					{planetscale?.stats ? (
+						<div className="flex gap-4">
+							<MetricCell label="conns" value={formatRate(planetscale.stats.connectionsAvg)} />
+							<MetricCell
+								label="cpu"
+								value={`${planetscale.stats.cpuMaxPercent.toFixed(0)}%`}
+								valueClassName={
+									planetscale.stats.cpuMaxPercent > 80
+										? "text-severity-error"
+										: planetscale.stats.cpuMaxPercent > 60
+											? "text-severity-warn"
+											: undefined
+								}
+							/>
+							<MetricCell
+								label="lag"
+								value={
+									planetscale.stats.replicaLagMaxSeconds >= 1
+										? `${planetscale.stats.replicaLagMaxSeconds.toFixed(1)}s`
+										: `${Math.round(planetscale.stats.replicaLagMaxSeconds * 1000)}ms`
+								}
+								valueClassName={
+									planetscale.stats.replicaLagMaxSeconds > 10
+										? "text-severity-error"
+										: planetscale.stats.replicaLagMaxSeconds > 1
+											? "text-severity-warn"
+											: undefined
+								}
+							/>
+						</div>
+					) : null}
 				</div>
 			</div>
 		</>
@@ -326,5 +367,6 @@ interface ServiceMapNodeProps {
 }
 
 export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapNodeProps) {
-	return data.kind === "database" ? <DatabaseNode data={data} /> : <ServiceNode data={data} />
+	if (data.kind === "database") return <DatabaseNode data={data} />
+	return <ServiceNode data={data} />
 })

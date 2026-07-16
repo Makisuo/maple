@@ -14,6 +14,8 @@ import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
 import { Badge, badgeVariants } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
+import { useIsMobile } from "@maple/ui/hooks/use-media-query"
 import { formatDuration } from "@/lib/format"
 import { getServiceLegendColor } from "@maple/ui/lib/colors"
 import { type Span, type SpanNode, type SpanHierarchyResponse } from "@/api/warehouse/traces"
@@ -213,6 +215,21 @@ function TraceDetailContent({
 		[data.spans],
 	)
 
+	const isMobile = useIsMobile()
+
+	// Shared by both layouts below so the tabs keep their state across a breakpoint change.
+	const traceViewTabs = (
+		<TraceViewTabs
+			rootSpans={data.rootSpans}
+			spans={data.spans}
+			totalDurationMs={data.totalDurationMs}
+			traceStartTime={traceStartTime}
+			services={services}
+			selectedSpanId={selectedSpan?.spanId}
+			onSelectSpan={handleSelectSpan}
+		/>
+	)
+
 	const rootSpan = data.rootSpans[0]
 	const rootHttpInfo = rootSpan ? getHttpInfo(rootSpan) : null
 	const deploymentEnv = rootSpan?.resourceAttributes?.["deployment.environment"]
@@ -252,39 +269,49 @@ function TraceDetailContent({
 			}
 		>
 			<div className="flex flex-1 flex-col gap-y-3 min-h-0">
-				<div className="flex flex-wrap items-center gap-2 shrink-0">
-					<span className="text-xs text-muted-foreground">Services:</span>
-					{services.map((service: string) => (
-						<Badge
-							key={service}
-							variant="outline"
-							className="font-mono text-xs"
-							style={{ color: getServiceLegendColor(service, services) }}
-						>
-							{service}
+				{/*
+				 * Each label stays glued to its value in its own group, so wrapping can never strand a
+				 * "Duration:" at the end of one line and its badge at the start of the next.
+				 */}
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
+					<div className="flex min-w-0 flex-wrap items-center gap-2">
+						<span className="text-xs text-muted-foreground">Services:</span>
+						{services.map((service: string) => (
+							<Badge
+								key={service}
+								variant="outline"
+								className="font-mono text-xs"
+								style={{ color: getServiceLegendColor(service, services) }}
+							>
+								{service}
+							</Badge>
+						))}
+					</div>
+
+					<div className="flex items-center gap-2">
+						<span className="text-xs text-muted-foreground">Duration:</span>
+						<Badge variant="secondary" className="font-mono text-xs">
+							{formatDuration(data.totalDurationMs)}
 						</Badge>
-					))}
+					</div>
 
-					<span className="ml-4 text-xs text-muted-foreground">Duration:</span>
-					<Badge variant="secondary" className="font-mono text-xs">
-						{formatDuration(data.totalDurationMs)}
-					</Badge>
-
-					<span className="ml-4 text-xs text-muted-foreground">Status:</span>
-					<Badge
-						variant="secondary"
-						className={
-							hasError
-								? "bg-severity-error/15 text-severity-error"
-								: "bg-severity-info/15 text-severity-info"
-						}
-					>
-						{hasError ? "Error" : "OK"}
-					</Badge>
+					<div className="flex items-center gap-2">
+						<span className="text-xs text-muted-foreground">Status:</span>
+						<Badge
+							variant="secondary"
+							className={
+								hasError
+									? "bg-severity-error/15 text-severity-error"
+									: "bg-severity-info/15 text-severity-info"
+							}
+						>
+							{hasError ? "Error" : "OK"}
+						</Badge>
+					</div>
 
 					{rootHttpInfo?.statusCode != null && (
-						<>
-							<span className="ml-4 text-xs text-muted-foreground">HTTP:</span>
+						<div className="flex items-center gap-2">
+							<span className="text-xs text-muted-foreground">HTTP:</span>
 							<Badge
 								variant="secondary"
 								className={
@@ -299,12 +326,12 @@ function TraceDetailContent({
 							>
 								{rootHttpInfo.statusCode}
 							</Badge>
-						</>
+						</div>
 					)}
 
 					{deploymentEnv && (
-						<>
-							<span className="ml-4 text-xs text-muted-foreground">Environment:</span>
+						<div className="flex items-center gap-2">
+							<span className="text-xs text-muted-foreground">Environment:</span>
 							<Badge
 								variant="secondary"
 								className={
@@ -315,12 +342,12 @@ function TraceDetailContent({
 							>
 								{deploymentEnv}
 							</Badge>
-						</>
+						</div>
 					)}
 
 					{commitSha && (
-						<>
-							<span className="ml-4 text-xs text-muted-foreground">Commit:</span>
+						<div className="flex min-w-0 items-center gap-2">
+							<span className="text-xs text-muted-foreground">Commit:</span>
 							<CommitShaHoverCard
 								sha={commitSha}
 								copy={{ value: commitSha, label: "commit SHA" }}
@@ -331,42 +358,66 @@ function TraceDetailContent({
 							>
 								{commitSha.slice(0, 7)}
 							</CommitShaHoverCard>
-						</>
+						</div>
 					)}
 
-					<span className="ml-4 text-xs text-muted-foreground">Trace ID:</span>
-					<TraceIdBadge traceId={traceId} size="default" className="text-xs max-w-[10rem]" />
+					<div className="flex min-w-0 items-center gap-2">
+						<span className="shrink-0 text-xs text-muted-foreground">Trace ID:</span>
+						<TraceIdBadge traceId={traceId} size="default" className="text-xs max-w-[10rem]" />
+					</div>
 				</div>
 
-				<ResizablePanelGroup
-					orientation="horizontal"
-					className="flex-1 min-h-0 rounded-md border overflow-hidden"
-				>
-					<ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
-						<TraceViewTabs
-							rootSpans={data.rootSpans}
-							spans={data.spans}
-							totalDurationMs={data.totalDurationMs}
-							traceStartTime={traceStartTime}
-							services={services}
-							selectedSpanId={selectedSpan?.spanId}
-							onSelectSpan={handleSelectSpan}
-						/>
-					</ResizablePanel>
+				{isMobile ? (
+					// A 60/40 side-by-side split leaves each pane ~150px on a phone. Give the waterfall
+					// the full width and float the span detail over it instead.
+					<>
+						<div className="flex-1 min-h-0 rounded-md border overflow-hidden">
+							{traceViewTabs}
+						</div>
+						<Sheet
+							open={selectedSpan != null}
+							onOpenChange={(open) => {
+								if (!open) handleCloseSpanDetails()
+							}}
+						>
+							<SheetContent side="bottom" className="h-[80svh] p-0" showCloseButton={false}>
+								<SheetHeader className="sr-only">
+									<SheetTitle>Span details</SheetTitle>
+									<SheetDescription>Details for the selected span.</SheetDescription>
+								</SheetHeader>
+								{selectedSpan && (
+									<SpanDetailPanel
+										span={selectedSpan}
+										services={services}
+										onClose={handleCloseSpanDetails}
+									/>
+								)}
+							</SheetContent>
+						</Sheet>
+					</>
+				) : (
+					<ResizablePanelGroup
+						orientation="horizontal"
+						className="flex-1 min-h-0 rounded-md border overflow-hidden"
+					>
+						<ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
+							{traceViewTabs}
+						</ResizablePanel>
 
-					{selectedSpan && (
-						<>
-							<ResizableHandle withHandle />
-							<ResizablePanel defaultSize={40} minSize={25}>
-								<SpanDetailPanel
-									span={selectedSpan}
-									services={services}
-									onClose={handleCloseSpanDetails}
-								/>
-							</ResizablePanel>
-						</>
-					)}
-				</ResizablePanelGroup>
+						{selectedSpan && (
+							<>
+								<ResizableHandle withHandle />
+								<ResizablePanel defaultSize={40} minSize={25}>
+									<SpanDetailPanel
+										span={selectedSpan}
+										services={services}
+										onClose={handleCloseSpanDetails}
+									/>
+								</ResizablePanel>
+							</>
+						)}
+					</ResizablePanelGroup>
+				)}
 			</div>
 		</DashboardLayout>
 	)

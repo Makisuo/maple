@@ -1,3 +1,4 @@
+import { optionalRedacted, optionalString, stringWithDefault } from "@maple/effect-cloudflare/config-helpers"
 import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 
 /** Fatal misconfiguration discovered at startup — surfaces as a tagged defect in the Cause. */
@@ -55,24 +56,25 @@ export interface EnvShape {
 	 * `wrangler dev --env-file` it would hijack wrangler's control-plane calls too.
 	 */
 	readonly MAPLE_CLOUDFLARE_API_BASE_URL: string
+	/** Base URL for PlanetScale's management API (overridable for tests). */
+	readonly MAPLE_PLANETSCALE_API_BASE_URL: string
+	readonly PLANETSCALE_OAUTH_CLIENT_ID: Option.Option<string>
+	/** Required alongside the client id — PlanetScale OAuth apps are confidential clients. */
+	readonly PLANETSCALE_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
+	readonly PLANETSCALE_OAUTH_AUTHORIZE_URL: string
+	readonly PLANETSCALE_OAUTH_TOKEN_URL: string
+	/** OAuth token introspection (`/oauth/token/info`) — consulted when the v1 API rejects a fresh token. */
+	readonly PLANETSCALE_OAUTH_TOKEN_INFO_URL: string
+	/**
+	 * Space-delimited, resource-prefixed OAuth scopes requested at authorize time
+	 * (e.g. `organization:read_databases`). PlanetScale REQUIRES an explicit scope
+	 * param — the scopes configured on the OAuth app are the allowed maximum, not
+	 * an implicit default — so omitting it fails the authorize with `invalid_scope`.
+	 * The default matches the scopes the Maple OAuth app is provisioned with; each
+	 * request may only name a subset of them.
+	 */
+	readonly PLANETSCALE_OAUTH_SCOPES: string
 }
-
-const stringWithDefault = (key: string, fallback: string) =>
-	Config.string(key).pipe(Config.withDefault(fallback))
-
-const optionalString = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(s) : Option.none())),
-		),
-	)
-
-const optionalRedacted = (key: string) =>
-	Config.option(Config.string(key)).pipe(
-		Config.map((opt) =>
-			Option.flatMap(opt, (s) => (s.trim().length > 0 ? Option.some(Redacted.make(s)) : Option.none())),
-		),
-	)
 
 const portConfig = Config.number("PORT").pipe(Config.withDefault(3472))
 
@@ -124,16 +126,27 @@ const envConfig = Config.all({
 	// Cloudflare OAuth scope ids are DOT-delimited (mirroring API-token permission names;
 	// registry: GET /client/v4/oauth/scopes). The client may only request scopes it was
 	// created with — keep the OAuth client's granted set in sync with this list.
-	// `offline_access` is added/removed automatically by Cloudflare based on the client's
-	// grant types, so it must not be listed.
-	// The analytics scopes (account-analytics.read = GraphQL Analytics, zone.read = zone
-	// discovery) power the edge-metrics poller. Every id below was verified verbatim against
-	// the live scope registry (GET /client/v4/oauth/scopes, 2026-07-03). The remaining ops
-	// requirement is on the CLIENT side: the registered OAuth client must have all of these
-	// granted, or connects fail with invalid_scope.
+	// `offline_access` is deliberately NOT in this list: it is not a data scope (nothing gates or
+	// stores on it), it is the request flag that makes Cloudflare issue a refresh token. The
+	// client's Refresh Token grant only makes it *available*; it must still be *requested*, so
+	// `startConnect` appends it to the authorize request instead of carrying it here. (Enabling the
+	// grant without requesting the scope was the 31h-outage root cause: access-token-only
+	// connections that die at the ~16h expiry.)
+	// The analytics scopes power the edge-metrics poller. There are THREE distinct ones and they
+	// are NOT interchangeable (Cloudflare authorizes account- vs zone-scoped GraphQL datasets
+	// separately):
+	//   - account-analytics.read → account-scoped datasets (workersInvocationsAdaptive = Workers)
+	//   - analytics.read          → zone-scoped datasets (httpRequestsAdaptiveGroups = HTTP/zone traffic)
+	//   - zone.read               → zone discovery only (REST /zones listing); does NOT grant analytics
+	// zone.read is enough to LIST zones but NOT to read their analytics — the zone GraphQL query
+	// returns "not authorized" without analytics.read (that was the original bug: workers ingested
+	// fine while every zone query was rejected). Every id below is verified verbatim against the
+	// live scope registry (GET /client/v4/oauth/scopes). The registered OAuth client must have all
+	// of these granted, or connects fail with invalid_scope — and existing users must reconnect to
+	// pick up a newly-added scope.
 	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
 		"CLOUDFLARE_OAUTH_SCOPES",
-		"account-settings.read account-analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
+		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
 	),
 	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",
@@ -150,6 +163,41 @@ const envConfig = Config.all({
 	MAPLE_CLOUDFLARE_API_BASE_URL: stringWithDefault(
 		"MAPLE_CLOUDFLARE_API_BASE_URL",
 		"https://api.cloudflare.com/client/v4",
+	),
+	MAPLE_PLANETSCALE_API_BASE_URL: stringWithDefault(
+		"MAPLE_PLANETSCALE_API_BASE_URL",
+		"https://api.planetscale.com",
+	),
+	PLANETSCALE_OAUTH_CLIENT_ID: optionalString("PLANETSCALE_OAUTH_CLIENT_ID"),
+	PLANETSCALE_OAUTH_CLIENT_SECRET: optionalRedacted("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+	// CANONICAL authorize host per PlanetScale's own OAuth discovery doc
+	// (https://auth.planetscale.com/.well-known/oauth-authorization-server →
+	// authorization_endpoint). Their public docs cite auth.planetscale.com/oauth/authorize
+	// instead — that alias renders a working consent screen but emits codes whose
+	// resulting tokens the v1 API rejects with 401 `invalid_token` even though
+	// /oauth/token/info introspects them as valid (verified live 2026-07-13).
+	PLANETSCALE_OAUTH_AUTHORIZE_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_AUTHORIZE_URL",
+		"https://app.planetscale.com/oauth/authorize",
+	),
+	PLANETSCALE_OAUTH_TOKEN_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_TOKEN_URL",
+		"https://auth.planetscale.com/oauth/token",
+	),
+	PLANETSCALE_OAUTH_TOKEN_INFO_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_TOKEN_INFO_URL",
+		"https://auth.planetscale.com/oauth/token/info",
+	),
+	// PlanetScale scopes are resource-prefixed (`<resource>:<action>`) and MUST be
+	// sent in the authorize request — the app's configured scopes are the allowed
+	// maximum, not an implicit default, so an absent scope param 302s to
+	// `invalid_scope` ("The requested scope is invalid, unknown, or malformed").
+	// The resource prefix is load-bearing: the same action name (e.g. `read_backups`,
+	// `read_branches`) exists at multiple resource levels, so an unprefixed scope is
+	// ambiguous. Default = the scopes the Maple OAuth app is provisioned with.
+	PLANETSCALE_OAUTH_SCOPES: stringWithDefault(
+		"PLANETSCALE_OAUTH_SCOPES",
+		"user:read_organizations organization:read_organization organization:read_databases organization:read_branches organization:read_backups organization:read_comments organization:read_deploy_requests branch:read_branch",
 	),
 })
 

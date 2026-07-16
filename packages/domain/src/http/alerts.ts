@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { QueryEngineAlertReducer } from "../query-engine"
+import { QueryEngineAlertReducer, QueryEngineNoDataBehavior } from "../query-engine"
 import {
 	AlertDeliveryEventId,
 	AlertDestinationId,
@@ -10,6 +10,7 @@ import {
 	HazelChannelId,
 	HazelOrganizationId,
 	IsoDateTimeString,
+	PostgresTransactionId,
 	RoleName,
 	UserId,
 } from "../primitives"
@@ -24,6 +25,7 @@ export const AlertDestinationType = Schema.Literals([
 	"hazel",
 	"hazel-oauth",
 	"discord",
+	"email",
 ]).annotate({
 	identifier: "@maple/AlertDestinationType",
 	title: "Alert Destination Type",
@@ -129,6 +131,18 @@ export const AlertEvaluationStatus = Schema.Literals(["breached", "healthy", "sk
 })
 export type AlertEvaluationStatus = Schema.Schema.Type<typeof AlertEvaluationStatus>
 
+/**
+ * Status of a recorded check row in the audit trail. Superset of
+ * {@link AlertEvaluationStatus}: `"error"` marks a scheduler tick whose query
+ * failed outright — no observation was produced, only an error message.
+ * Kept separate so the evaluation state machine stays a closed 3-state union.
+ */
+export const AlertCheckStatus = Schema.Literals(["breached", "healthy", "skipped", "error"]).annotate({
+	identifier: "@maple/AlertCheckStatus",
+	title: "Alert Check Status",
+})
+export type AlertCheckStatus = Schema.Schema.Type<typeof AlertCheckStatus>
+
 const ChannelLabel = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
@@ -204,6 +218,27 @@ export class DiscordAlertDestinationConfig extends Schema.Class<DiscordAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export const MAX_EMAIL_RECIPIENTS = 10
+
+/**
+ * Recipients are workspace members, referenced by user id. The server resolves
+ * each id to the member's email via the auth provider (Clerk) at save time, so
+ * clients can never route alerts to arbitrary addresses.
+ */
+const MemberUserIdList = Schema.Array(NonEmptyString).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_EMAIL_RECIPIENTS),
+)
+
+export class EmailAlertDestinationConfig extends Schema.Class<EmailAlertDestinationConfig>(
+	"EmailAlertDestinationConfig",
+)({
+	type: Schema.Literal("email"),
+	name: ChannelLabel,
+	memberUserIds: MemberUserIdList,
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationCreateRequest = Schema.Union([
 	SlackAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
@@ -211,6 +246,7 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	DiscordAlertDestinationConfig,
+	EmailAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<typeof AlertDestinationCreateRequest>
 
@@ -269,6 +305,14 @@ export class UpdateDiscordAlertDestinationConfig extends Schema.Class<UpdateDisc
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailAlertDestinationConfig>(
+	"UpdateEmailAlertDestinationConfig",
+)({
+	name: OptionalNonEmptyString,
+	memberUserIds: Schema.optionalKey(MemberUserIdList),
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationUpdateRequest = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("slack"),
@@ -294,6 +338,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
 		type: Schema.Literal("discord"),
 		...UpdateDiscordAlertDestinationConfig.fields,
 	}),
+	Schema.Struct({
+		type: Schema.Literal("email"),
+		...UpdateEmailAlertDestinationConfig.fields,
+	}),
 ])
 export type AlertDestinationUpdateRequest = Schema.Schema.Type<typeof AlertDestinationUpdateRequest>
 
@@ -306,6 +354,8 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	enabled: Schema.Boolean,
 	summary: Schema.String,
 	channelLabel: Schema.NullOr(Schema.String),
+	/** Selected workspace-member recipients (email destinations only). */
+	memberUserIds: Schema.NullOr(Schema.Array(Schema.String)),
 	lastTestedAt: Schema.NullOr(IsoDateTimeString),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,
@@ -419,13 +469,21 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	rawQuerySql: Schema.NullOr(Schema.String),
 	rawQueryReducer: Schema.NullOr(QueryEngineAlertReducer),
 	destinationIds: Schema.Array(AlertDestinationId),
+	/** What the evaluator does when the window has no data: skip the check or treat it as zero. */
+	noDataBehavior: QueryEngineNoDataBehavior,
 	/** Most recent evaluation error for this rule, surfaced from `alertRuleStates.lastError`. */
 	lastEvaluationError: Schema.NullOr(Schema.String),
 	lastEvaluatedAt: Schema.NullOr(IsoDateTimeString),
+	/** Last time the scheduler picked this rule up for evaluation. */
+	lastScheduledAt: Schema.NullOr(IsoDateTimeString),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
 	createdBy: UserId,
 	updatedBy: UserId,
+	// Postgres txid of the write, present only on create/update responses so the
+	// web's ElectricSQL alert_rules collection can resolve optimistic state on the
+	// exact synced transaction. Absent on list/read responses.
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>("AlertRuleUpsertRequest")({
@@ -464,6 +522,8 @@ export class AlertRulesListResponse extends Schema.Class<AlertRulesListResponse>
 export class AlertRuleDeleteResponse extends Schema.Class<AlertRuleDeleteResponse>("AlertRuleDeleteResponse")(
 	{
 		id: AlertRuleId,
+		// Txid of the delete, for the Electric alert_rules collection's onDelete.
+		txid: Schema.optionalKey(PostgresTransactionId),
 	},
 ) {}
 
@@ -480,6 +540,65 @@ export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>("
 	thresholdUpper: Schema.NullOr(Schema.Number),
 	comparator: AlertComparator,
 	reason: Schema.String,
+}) {}
+
+export class AlertRulePreviewRequest extends Schema.Class<AlertRulePreviewRequest>("AlertRulePreviewRequest")(
+	{
+		rule: AlertRuleUpsertRequest,
+		startTime: IsoDateTimeString,
+		endTime: IsoDateTimeString,
+	},
+) {}
+
+/**
+ * One evaluator-faithful data point: what the scheduler would have observed for
+ * this group in the window ending at `bucket`, and the verdict
+ * `applyEvaluationLogic` would have produced (before consecutive-breach counting).
+ */
+export class AlertRulePreviewPoint extends Schema.Class<AlertRulePreviewPoint>("AlertRulePreviewPoint")({
+	bucket: IsoDateTimeString,
+	value: Schema.NullOr(Schema.Number),
+	sampleCount: Schema.Number,
+	status: AlertEvaluationStatus,
+	/**
+	 * The trailing in-progress window: evaluated over less than a full
+	 * `windowMinutes`, so its value may still move as data arrives.
+	 */
+	provisional: Schema.optionalKey(Schema.Boolean),
+}) {}
+
+export class AlertRulePreviewSeries extends Schema.Class<AlertRulePreviewSeries>("AlertRulePreviewSeries")({
+	groupKey: Schema.String,
+	points: Schema.Array(AlertRulePreviewPoint),
+}) {}
+
+/** A span during which the rule's state machine would have held an open incident. */
+export class AlertRulePreviewFiringSpan extends Schema.Class<AlertRulePreviewFiringSpan>(
+	"AlertRulePreviewFiringSpan",
+)({
+	groupKey: Schema.String,
+	start: IsoDateTimeString,
+	end: IsoDateTimeString,
+}) {}
+
+/**
+ * Evaluator-faithful preview of an alert rule over a time range: the exact
+ * per-window observations the scheduler computes (tumbling `windowMinutes`
+ * buckets — the live scheduler slides every tick, so `wouldFire` spans are an
+ * approximation between bucket boundaries).
+ */
+export class AlertRulePreviewResponse extends Schema.Class<AlertRulePreviewResponse>(
+	"AlertRulePreviewResponse",
+)({
+	bucketSeconds: Schema.Number,
+	windowMinutes: Schema.Number,
+	threshold: Schema.Number,
+	thresholdUpper: Schema.NullOr(Schema.Number),
+	comparator: AlertComparator,
+	/** Set when the requested range was clamped to the preview bucket cap. */
+	truncatedToStart: Schema.NullOr(IsoDateTimeString),
+	series: Schema.Array(AlertRulePreviewSeries),
+	wouldFire: Schema.Array(AlertRulePreviewFiringSpan),
 }) {}
 
 export class AlertIncidentDocument extends Schema.Class<AlertIncidentDocument>("AlertIncidentDocument")({
@@ -587,6 +706,7 @@ export class AlertDeliveryError extends Schema.TaggedErrorClass<AlertDeliveryErr
 	{
 		message: Schema.String,
 		destinationType: Schema.optionalKey(AlertDestinationType),
+		cause: Schema.optionalKey(Schema.Defect()),
 	},
 	{ httpApiStatus: 502 },
 ) {}
@@ -611,7 +731,7 @@ export type AlertIncidentTransition = Schema.Schema.Type<typeof AlertIncidentTra
 export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertCheckDocument")({
 	timestamp: IsoDateTimeString,
 	groupKey: Schema.String,
-	status: AlertEvaluationStatus,
+	status: AlertCheckStatus,
 	signalType: AlertSignalType,
 	comparator: AlertComparator,
 	threshold: Schema.Number,
@@ -626,6 +746,10 @@ export class AlertCheckDocument extends Schema.Class<AlertCheckDocument>("AlertC
 	incidentId: Schema.NullOr(AlertIncidentId),
 	incidentTransition: AlertIncidentTransition,
 	evaluationDurationMs: Schema.Number,
+	/** Populated on `status: "error"` rows — why the evaluation failed. */
+	errorMessage: Schema.NullOr(Schema.String),
+	/** Failure category (e.g. "validation", "tinybird_quota") on `status: "error"` rows. */
+	errorCategory: Schema.NullOr(Schema.String),
 }) {}
 
 export class AlertChecksListResponse extends Schema.Class<AlertChecksListResponse>("AlertChecksListResponse")(
@@ -635,10 +759,10 @@ export class AlertChecksListResponse extends Schema.Class<AlertChecksListRespons
 ) {}
 
 export const ListRuleChecksQuery = Schema.Struct({
-	groupKey: Schema.optional(Schema.String),
-	since: Schema.optional(IsoDateTimeString),
-	until: Schema.optional(IsoDateTimeString),
-	limit: Schema.optional(
+	groupKey: Schema.optionalKey(Schema.String),
+	since: Schema.optionalKey(IsoDateTimeString),
+	until: Schema.optionalKey(IsoDateTimeString),
+	limit: Schema.optionalKey(
 		Schema.NumberFromString.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 2000 })),
 	),
 })
@@ -734,6 +858,21 @@ export class AlertsApiGroup extends HttpApiGroup.make("alerts")
 			success: AlertEvaluationResult,
 			error: [
 				AlertForbiddenError,
+				AlertValidationError,
+				AlertPersistenceError,
+				AlertNotFoundError,
+				AlertDeliveryError,
+				...warehouseHttpErrors,
+			],
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("previewRule", "/rules/preview", {
+			payload: AlertRulePreviewRequest,
+			success: AlertRulePreviewResponse,
+			// No AlertForbiddenError: preview is read-only (unlike testRule, which can
+			// send notifications), so it is not admin-gated.
+			error: [
 				AlertValidationError,
 				AlertPersistenceError,
 				AlertNotFoundError,

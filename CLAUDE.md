@@ -145,6 +145,8 @@ Pattern (see `apps/api/src/routes/query-engine.http.ts` and `apps/api/src/servic
 
 Never use raw `fetch()` calls to `/v0/sql` — always go through `warehouse.sqlQuery()` with a DSL-compiled query.
 
+**ClickHouse 64-bit ints decode as strings (BYO-CH).** ClickHouse `FORMAT JSON` serializes `UInt64`/`Int64` columns (the result of `count()`, `sum()`, `uniqExact()`, …) as JSON **strings**, while managed Tinybird returns them as numbers. A BYO-ClickHouse org reads its own ClickHouse, so those columns arrive as strings. Any DSL query whose numeric outputs flow into a runtime `Schema.Number` (a `Schema.Class` constructor or an HTTP response encode) **must attach a `rowSchema`** built with `CH.CHNumber` (`Schema.Union([Schema.Finite, Schema.FiniteFromString])`) so `decodeRows` coerces them centrally — pass it as the third arg to `CH.compile(query, params, { rowSchema })`. Without it the string trips a `ParseError` that surfaces as a bare, message-less 500 for BYO-CH orgs only. See `cloudflareUsageRowSchema` and the `*OutputSchema` definitions in `packages/query-engine/src/ch/queries/service-map.ts`.
+
 **Trace annotations on `WarehouseQueryService.executeSql`:** every SQL execution leaves a span carrying `db.query.text` (full SQL up to 16 KB), `db.query.length`, `db.query.fingerprint` (stable hash with literals normalized), `db.query.truncated`, `db.duration_ms`, `db.system.name`, `result.rowCount`, `orgId`, `tenant.userId`, `query.context`, and `query.profile`. When debugging slow queries, pull a trace and filter on these. (Spans recorded before 2026-06 carry the legacy `db.statement*`/`db.system` spellings; warehouse read paths coalesce both.)
 
 ## Environment Variables
@@ -204,11 +206,13 @@ Use `/Users/maki/Documents/superwall/app` as the reference implementation for Ef
 
 End-user and platform documentation lives in `docs/`:
 
+- `docs/api-v2.md` — The v2 public API spec (Stripe-style conventions: prefixed public IDs, list/error envelopes, scoped API keys, `/v2` + `/v2/docs`) and its rollout phases
 - `docs/sampling-throughput.md` — How Maple handles sampling-aware throughput metrics
 - `docs/persistence.md` — Database persistence and migration operations
 - `docs/sst-fork-workflow.md` — Running maple against a local SST fork, syncing with upstream, and opening PRs from fork branches
 - `docs/local-mode.md` — Local mode (single Bun-compiled `maple` binary from `apps/cli`: CLI + OTLP-ingest/query server + bundled UI, talking to embedded chDB via `bun:ffi`→libchdb), the `/local/query` contract, dev workflow, and the 2-file release bundle
 - `docs/tinybird-pr-branches.md` — Per-PR ephemeral Tinybird branches for preview deploys (`--last-partition` data, branch lifecycle wired into `deploy-pr-preview.yml`)
+- `docs/otel-spec/` — Source-linked internal map of the OpenTelemetry specifications (traces, metrics, logs, OTLP, semconv, resource/config, propagation, stability, profiles/compat), snapshotted at spec v1.58.0. Use it for ingest-gateway OTLP-server compliance, self-instrumentation best practices, and UI data-semantics questions; start at `docs/otel-spec/README.md`
 
 ## Self-Observability (Trace Loop Prevention)
 

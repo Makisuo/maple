@@ -14,6 +14,7 @@ import { createHash } from "node:crypto"
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { CHDB_VERSION } from "../version"
+import { durableRemove, durableWrite } from "./durable-files"
 
 export interface StoreMarker {
 	/** libchdb version that created the store (e.g. "v26.1.0"); "dev" in dev builds. */
@@ -61,6 +62,12 @@ export const markStoreClosed = (dataDir: string): void => {
 	}
 }
 
+/** Durably clear the clean-shutdown sentinel for a restore transaction. */
+export const markStoreClosedDurable = async (dataDir: string): Promise<void> => {
+	const path = storeOpenMarkerPath(dataDir)
+	if (existsSync(path)) await durableRemove(path)
+}
+
 /** True when the store holds data AND was not cleanly closed (the sentinel
  *  survives). Gated on `storeHasData`: a marker over an empty store means a
  *  fresh open that never persisted anything — safe to reopen. */
@@ -88,6 +95,14 @@ export const readMarker = (dataDir: string): StoreMarker | null => {
 /** Serialize a marker for the current build. */
 export const storeMarkerJson = (maple: string, now: string, schema: string): string =>
 	`${JSON.stringify({ chdb: CHDB_VERSION, maple, createdAt: now, schema } satisfies StoreMarker, null, 2)}\n`
+
+/** Atomically and durably stamp the store version after a live restore swap. */
+export const writeStoreMarkerDurable = async (
+	dataDir: string,
+	maple: string,
+	now: string,
+	schema: string,
+): Promise<void> => durableWrite(storeMarkerPath(dataDir), storeMarkerJson(maple, now, schema))
 
 /**
  * Stable fingerprint of the bundled schema DDL. Comments and whitespace are

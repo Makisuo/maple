@@ -14,12 +14,14 @@ import {
 	decodeEvalPoints,
 	makeQueryEngineEvaluate,
 	makeQueryEngineEvaluateRawSql,
+	makeQueryEngineEvaluateSeries,
 	makeQueryEngineExecute,
 	msToTinybirdDateTime,
 	reducePerGroupObservations,
 	toEpochMs,
 	validateEvaluate,
 	withTimeout,
+	type BucketGroupObs,
 	type GroupedAlertObservation,
 	type QueryEngineDirectError,
 	type QueryEngineRawSqlEvaluateRequest,
@@ -64,6 +66,16 @@ export interface QueryEngineServiceShape {
 		request: QueryEngineRawSqlEvaluateRequest,
 	) => Effect.Effect<ReadonlyArray<GroupedAlertObservation>, QueryEngineRouteError>
 	/**
+	 * Evaluate an alert query and return the per-(bucket, group) observations
+	 * instead of a reduced scalar per group. One bucket == one evaluation window,
+	 * so the series is exactly what the scheduler would have observed per tick.
+	 * Uncached — backs the ad-hoc rule preview chart.
+	 */
+	readonly evaluateSeries: (
+		tenant: TenantContext,
+		request: QueryEngineEvaluateRequest,
+	) => Effect.Effect<ReadonlyArray<BucketGroupObs>, QueryEngineRouteError>
+	/**
 	 * Edge-cache a direct-route query keyed by `(orgId, routeName, payload)`.
 	 * `ttlSeconds` defaults to 15s (fits "current health" routes like
 	 * `serviceOverview`); pass a longer TTL for slow-moving routes whose payload
@@ -88,6 +100,7 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 			const executeImpl = makeQueryEngineExecute(warehouse)
 			const evaluateImpl = makeQueryEngineEvaluate(warehouse)
 			const evaluateRawSqlImpl = makeQueryEngineEvaluateRawSql(warehouse)
+			const evaluateSeriesImpl = makeQueryEngineEvaluateSeries(warehouse)
 			// Off by default. Live measurement showed routing alert evaluation
 			// through the bucket cache is a NET REGRESSION: each eval fans out into
 			// ~3 warehouse queries (the flux tail + alignment gaps become separate
@@ -382,10 +395,20 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 					),
 				)
 
+			const evaluateSeries = (tenant: TenantContext, request: QueryEngineEvaluateRequest) =>
+				withTimeout(
+					evaluateSeriesImpl(tenant, request).pipe(
+						Effect.withSpan("QueryEngineService.evaluateSeries", {
+							attributes: { orgId: tenant.orgId },
+						}),
+					),
+				)
+
 			return {
 				execute,
 				evaluate: cachedEvaluate,
 				evaluateRawSql,
+				evaluateSeries,
 				cachedDirect,
 			} satisfies QueryEngineServiceShape
 		}),

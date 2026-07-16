@@ -57,6 +57,55 @@
       "when": 1783200003000,
       "tag": "0007_slippery_winter_soldier",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783200004000,
+      "tag": "0008_elite_butterfly",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783200005000,
+      "tag": "0009_electric_publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783377967610,
+      "tag": "0010_huge_dexter_bennett",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783377967700,
+      "tag": "0011_electric_publication_wave1",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783775467529,
+      "tag": "0012_cute_veda",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784112584278,
+      "tag": "0013_sour_dagger",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784159565663,
+      "tag": "0014_electric_publication_api_keys",
+      "breakpoints": true
     }
   ]
 }

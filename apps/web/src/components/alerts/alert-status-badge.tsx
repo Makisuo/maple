@@ -1,6 +1,14 @@
 import { cn } from "@maple/ui/utils"
 
-export type AlertStatusState = "firing" | "ok" | "disabled" | "resolved" | "pending"
+export type AlertStatusState =
+	| "firing"
+	| "ok"
+	| "disabled"
+	| "resolved"
+	| "pending"
+	| "error"
+	| "stale"
+	| "no-data"
 
 const toneByState: Record<AlertStatusState, { dot: string; text: string; label: string }> = {
 	firing: { dot: "bg-destructive", text: "text-destructive font-medium", label: "Firing" },
@@ -8,6 +16,9 @@ const toneByState: Record<AlertStatusState, { dot: string; text: string; label: 
 	disabled: { dot: "bg-muted-foreground", text: "text-muted-foreground", label: "Disabled" },
 	resolved: { dot: "bg-success", text: "text-success", label: "Resolved" },
 	pending: { dot: "bg-warning", text: "text-warning", label: "Pending" },
+	error: { dot: "bg-warning", text: "text-warning font-medium", label: "Error" },
+	stale: { dot: "bg-warning", text: "text-warning", label: "Stale" },
+	"no-data": { dot: "bg-muted-foreground", text: "text-muted-foreground", label: "No data" },
 }
 
 export function AlertStatusBadge({

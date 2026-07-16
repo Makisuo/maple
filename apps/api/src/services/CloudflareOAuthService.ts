@@ -32,8 +32,8 @@ const deriveCodeChallenge = (verifier: string): string =>
 
 interface ResolvedCloudflareOAuthConfig {
 	readonly clientId: string
-	/** null for a public (PKCE-only) client — Cloudflare's default for third-party SaaS apps. */
-	readonly clientSecret: string | null
+	/** null for a public (PKCE-only) client — Cloudflare's default for third-party SaaS apps. Redacted until the wire. */
+	readonly clientSecret: Redacted.Redacted<string> | null
 	readonly authorizeUrl: string
 	readonly tokenUrl: string
 	readonly revokeUrl: string
@@ -58,7 +58,7 @@ const resolveConfig = Effect.fn("CloudflareOAuthService.resolveConfig")(
 			clientId,
 			clientSecret: Option.match(env.CLOUDFLARE_OAUTH_CLIENT_SECRET, {
 				onNone: () => null,
-				onSome: (value) => Redacted.value(value),
+				onSome: (value) => value,
 			}),
 			authorizeUrl: env.CLOUDFLARE_OAUTH_AUTHORIZE_URL,
 			tokenUrl: env.CLOUDFLARE_OAUTH_TOKEN_URL,
@@ -140,7 +140,7 @@ export class CloudflareOAuthService extends Context.Service<
 				.postForm(config.revokeUrl, {
 					token,
 					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: config.clientSecret } : {}),
+					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
 				})
 				.pipe(Effect.ignore)
 
@@ -170,11 +170,16 @@ export class CloudflareOAuthService extends Context.Service<
 				}),
 			)
 
+			// Cloudflare issues a refresh token only when `offline_access` is REQUESTED here — the
+			// client's Refresh Token grant merely makes it available. It is not a data scope, so it
+			// stays out of CLOUDFLARE_OAUTH_SCOPES (capability gating/storage) and is appended only to
+			// the authorize request. Omitting it silently yields access-token-only connections that
+			// die at the ~16h expiry (the 31h outage).
 			const params = new URLSearchParams({
 				client_id: config.clientId,
 				redirect_uri: options.callbackUrl,
 				response_type: "code",
-				scope: config.scopes,
+				scope: `${config.scopes} offline_access`,
 				state,
 				code_challenge: deriveCodeChallenge(codeVerifier),
 				code_challenge_method: "S256",
@@ -241,6 +246,25 @@ export class CloudflareOAuthService extends Context.Service<
 				tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
 			const orgId = decodeOrgId(stateRow.orgId)
 			yield* Effect.annotateCurrentSpan({ orgId })
+
+			// A background poller must renew indefinitely; a connection with no refresh token silently
+			// dies at the ~16h access-token expiry and disables every state row (the 31h outage).
+			// Refuse it loudly at connect time instead of storing a doomed connection. Best-effort
+			// revoke the just-issued access token first — it is never persisted, so this is the only
+			// moment we can invalidate it upstream (mirrors the multi-account refusal above).
+			if (!tokenResponse.refresh_token) {
+				yield* Effect.logWarning(
+					"Cloudflare OAuth token exchange returned no refresh token — refusing connection",
+					{ orgId, expiresAt },
+				)
+				yield* revokeToken(config, tokenResponse.access_token)
+				return yield* Effect.fail(
+					new IntegrationsValidationError({
+						message:
+							"Cloudflare returned no refresh token, so this connection would stop working within a day. Confirm the OAuth app grants ‘offline_access’, then reconnect.",
+					}),
+				)
+			}
 
 			yield* oauth.upsertConnection(orgId, currentTime, {
 				externalUserId: account.id,

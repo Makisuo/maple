@@ -25,13 +25,16 @@ import { toast } from "sonner"
 
 import {
 	ArrowRotateClockwiseIcon,
+	ChartLineIcon,
 	CheckIcon,
 	ChevronDownIcon,
 	CircleCheckIcon,
 	CircleWarningIcon,
 	ClockIcon,
+	DatabaseIcon,
 	ExternalLinkIcon,
 	GithubIcon,
+	HistoryIcon,
 	LoaderIcon,
 	TrashIcon,
 } from "@/components/icons"
@@ -385,6 +388,23 @@ function NotConnectedState({ busy, onConnect }: { busy: boolean; onConnect: () =
 			iconClassName="text-foreground"
 			title="Connect your GitHub organization"
 			description="Install the Maple GitHub App to sync repositories and commit history across your org. Track one branch per repo — backfill runs in the background once connected."
+			features={[
+				{
+					icon: ChartLineIcon,
+					title: "Deploy markers",
+					description: "Commits appear on service charts, so metric shifts line up with deploys.",
+				},
+				{
+					icon: HistoryIcon,
+					title: "Commit context",
+					description: "Commit SHAs on traces resolve to message, author, and a GitHub link.",
+				},
+				{
+					icon: DatabaseIcon,
+					title: "Org-wide sync",
+					description: "One tracked branch per repo, with history backfilled automatically.",
+				},
+			]}
 			footer="You'll choose which repositories to share during install."
 		>
 			<Button onClick={onConnect} disabled={busy}>

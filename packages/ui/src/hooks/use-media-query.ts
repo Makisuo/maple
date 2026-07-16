@@ -2,12 +2,13 @@
 
 import { useCallback, useSyncExternalStore } from "react"
 
+/** Mirrors Tailwind's default scale — `md:` etc. must resolve to the same px here as in CSS. */
 const BREAKPOINTS = {
 	"2xl": 1536,
 	"3xl": 1600,
 	"4xl": 2000,
 	lg: 1024,
-	md: 800,
+	md: 768,
 	sm: 640,
 	xl: 1280,
 } as const

@@ -3,6 +3,7 @@
 	"private": true,
 	"type": "module",
 	"exports": {
+		"./styles/tokens.css": "./src/styles/tokens.css",
 		"./utils": "./src/lib/utils.ts",
 		"./colors": "./src/lib/colors.ts",
 		"./types": "./src/lib/types.ts",

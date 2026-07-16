@@ -1,9 +1,8 @@
-import { toast } from "sonner"
 import { Link } from "@tanstack/react-router"
 import { ClockIcon, CopyIcon, ExternalLinkIcon, LinkIcon, PulseIcon } from "@/components/icons"
 
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
 import { CopyableValue } from "@/components/attributes"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { encodeLogKey } from "@/lib/log-key"
 import { buildLogJsonPayload } from "./log-raw-panel"
@@ -20,7 +19,8 @@ interface LogMetaStripProps {
 }
 
 export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMetaStripProps) {
-	const clipboard = useClipboard()
+	const linkCopy = useCopyToClipboard("Log link")
+	const jsonCopy = useCopyToClipboard("Log JSON")
 
 	return (
 		<div className="flex items-center gap-2 overflow-x-auto border-b px-4 py-1.5 text-xs shrink-0 whitespace-nowrap">
@@ -71,10 +71,7 @@ export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMeta
 
 				<button
 					type="button"
-					onClick={() => {
-						clipboard.copy(`${window.location.origin}/logs/${encodeLogKey(log)}`)
-						toast.success("Log link copied to clipboard")
-					}}
+					onClick={() => linkCopy.copy(`${window.location.origin}/logs/${encodeLogKey(log)}`)}
 					className="flex shrink-0 items-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
 					title="Copy a shareable link to this log"
 					aria-label="Copy shareable link"
@@ -84,10 +81,7 @@ export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMeta
 
 				<button
 					type="button"
-					onClick={() => {
-						clipboard.copy(buildLogJsonPayload(log))
-						toast.success("Copied log as JSON")
-					}}
+					onClick={() => jsonCopy.copy(buildLogJsonPayload(log))}
 					className="flex shrink-0 items-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
 					title="Copy entire log as JSON"
 					aria-label="Copy log as JSON"

@@ -1,7 +1,9 @@
-import { connectMcpServer, type McpServerConnection } from "@flue/runtime"
+import type { McpServerConnection, ToolDefinition } from "@flue/runtime"
+import type { InternalMcpToolResult } from "@maple/domain/internal-rpc"
 import type { ChatFlueEnv } from "./env.ts"
+import { mapleApiRpc } from "./api-rpc.ts"
 
-/** Prefix `connectMcpServer` adapts MCP tool names with: `mcp__<server>__<tool>`. */
+/** Prefix retained for parity with Flue's MCP HTTP adapter. */
 const MCP_PREFIX = "mcp__maple__"
 
 /** Strip the `mcp__maple__` prefix to recover the registry tool name. */
@@ -14,45 +16,89 @@ export const filterMcpTools = <T extends { name: string }>(
 	allowlist: ReadonlySet<string>,
 ): T[] => tools.filter((tool) => allowlist.has(baseToolName(tool.name)))
 
-/** Default MCP request timeout (ms): an unreachable endpoint fails fast rather than hanging the turn. */
+/** Default internal RPC timeout (ms): an unavailable API fails the turn promptly. */
 export const MCP_DEFAULT_TIMEOUT_MS = 12_000
 
 export interface ConnectMapleMcpOptions {
 	/** If set, keep only tools whose base name is in this allowlist (e.g. the triage subset). */
 	allowlist?: ReadonlySet<string>
-	/** MCP request timeout in ms. Defaults to {@link MCP_DEFAULT_TIMEOUT_MS}. */
+	/** Worker RPC timeout in ms. Defaults to {@link MCP_DEFAULT_TIMEOUT_MS}. */
 	timeoutMs?: number
 }
 
+const sanitizeToolNamePart = (value: string): string =>
+	value.replace(/[^A-Za-z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "unnamed"
+
+const normalizeInputSchema = (schema: Record<string, unknown>): Record<string, unknown> => ({
+	...schema,
+	type: schema.type ?? "object",
+	properties: schema.properties ?? {},
+})
+
+const formatResult = (result: InternalMcpToolResult): string =>
+	result.content
+		.map((entry) => entry.text)
+		.filter(Boolean)
+		.join("\n\n") || "(MCP tool returned no content)"
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> => {
+	let timeout: ReturnType<typeof setTimeout> | undefined
+	try {
+		return await Promise.race([
+			promise,
+			new Promise<never>((_, reject) => {
+				timeout = setTimeout(
+					() => reject(new Error(`${operation} timed out after ${timeoutMs}ms`)),
+					timeoutMs,
+				)
+			}),
+		])
+	} finally {
+		if (timeout !== undefined) clearTimeout(timeout)
+	}
+}
+
 /**
- * Connect to Maple's MCP server with internal-service auth. The tenant rides
- * out-of-band in `x-org-id` (never trusted from model/tool output); the contract
- * is apps/api/src/mcp/lib/resolve-tenant.ts. Tools arrive adapted as
- * `mcp__maple__<tool>`; an optional `allowlist` narrows them by base name.
- *
- * The caller owns the returned connection's lifecycle and must `close()` it.
+ * Adapt API Worker RPC descriptors into the same ordinary Flue tools that the
+ * former streamable-HTTP MCP connection returned. The service binding itself
+ * authenticates the Worker-to-Worker hop; org scope is explicit and validated
+ * again by the API boundary.
  */
 export const connectMapleMcp = async (
 	env: ChatFlueEnv,
 	orgId: string,
 	options: ConnectMapleMcpOptions = {},
 ): Promise<McpServerConnection> => {
-	// Fail fast rather than sending `Bearer maple_svc_` (empty): an empty token
-	// would match an empty server-side INTERNAL_SERVICE_TOKEN via the constant-time
-	// compare in apps/api resolve-tenant.ts. Callers already tolerate a throw.
-	const token = env.INTERNAL_SERVICE_TOKEN
-	if (!token) throw new Error("INTERNAL_SERVICE_TOKEN is not configured")
+	const timeoutMs = options.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS
+	const api = mapleApiRpc(env)
+	const descriptors = await withTimeout(api.listMcpTools(), timeoutMs, "listMcpTools")
+	const seen = new Set<string>()
+	const tools: ToolDefinition[] = descriptors.map((descriptor) => {
+		const name = `${MCP_PREFIX}${sanitizeToolNamePart(descriptor.name)}`
+		if (seen.has(name)) throw new Error(`Maple RPC tools produced duplicate tool name "${name}"`)
+		seen.add(name)
 
-	const maple = await connectMcpServer("maple", {
-		url: new URL("/mcp", env.MAPLE_API_URL).toString(),
-		transport: "streamable-http",
-		headers: {
-			Authorization: `Bearer maple_svc_${token}`,
-			"x-org-id": orgId,
-		},
-		timeoutMs: options.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS,
+		return {
+			name,
+			description: `MCP tool "${descriptor.name}" from server "maple". ${descriptor.description}`,
+			parameters: normalizeInputSchema(descriptor.inputSchema),
+			execute: async (input, signal) => {
+				if (signal?.aborted) throw new Error("Operation aborted")
+				const result = await withTimeout(
+					api.callMcpTool({ orgId, name: descriptor.name, input }),
+					timeoutMs,
+					`callMcpTool(${descriptor.name})`,
+				)
+				const text = formatResult(result)
+				if (result.isError) throw new Error(text)
+				return text
+			},
+		}
 	})
 
-	if (!options.allowlist) return maple
-	return { ...maple, tools: filterMcpTools(maple.tools, options.allowlist) }
+	return {
+		name: "maple",
+		tools: options.allowlist ? filterMcpTools(tools, options.allowlist) : tools,
+		close: async () => undefined,
+	}
 }

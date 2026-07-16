@@ -21,7 +21,9 @@ import { highlightCode } from "@/lib/sugar-high"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
 import { captureChatReferrer } from "@/components/chat/auto-contexts"
+import { GlobalChatSheet } from "@/components/chat/global-chat-sheet"
 import { GlobalShortcuts } from "@/components/command-palette/global-shortcuts"
+import { UnitflowDevtools } from "@/components/devtools/unitflow-devtools"
 
 const PUBLIC_PATHS = new Set(["/sign-in", "/sign-up", "/org-required", "/service-map-bench"])
 
@@ -69,7 +71,13 @@ function AppFrame() {
 		>
 			<Outlet />
 			<Toaster />
-			{!PUBLIC_PATHS.has(pathname) && <GlobalShortcuts />}
+			{!PUBLIC_PATHS.has(pathname) && (
+				<>
+					<GlobalShortcuts />
+					<GlobalChatSheet />
+				</>
+			)}
+			{import.meta.env.DEV && <UnitflowDevtools />}
 		</AttributesProvider>
 	)
 }
@@ -124,15 +132,7 @@ function ClerkReverseRedirects() {
 		if (!isSignedIn || !orgId || isCustomerLoading) return
 		if (customerError || !isUsableCustomer(customer)) return
 		setKnownSelectedPlan(selectedPlan)
-	}, [
-		isSignedIn,
-		orgId,
-		isCustomerLoading,
-		customerError,
-		customer,
-		selectedPlan,
-		setKnownSelectedPlan,
-	])
+	}, [isSignedIn, orgId, isCustomerLoading, customerError, customer, selectedPlan, setKnownSelectedPlan])
 
 	if (isSignedIn && pathname === "/sign-in") {
 		const target = getRedirectTarget(searchStr)

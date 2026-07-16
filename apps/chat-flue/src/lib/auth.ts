@@ -107,7 +107,8 @@ const SERVICE_TOKEN_PREFIX = "maple_svc_"
 /**
  * Verify an internal-service-token request (apps/api → chat-flue server-to-server,
  * e.g. the headless triage workflow). The bearer value must equal
- * `maple_svc_<INTERNAL_SERVICE_TOKEN>` — the same scheme the MCP connection uses
+ * `maple_svc_<INTERNAL_SERVICE_TOKEN>` — the API uses this private route to start
+ * Flue workflows over its service binding.
  * (see lib/mcp.ts). Constant-time compared; fails closed when the token is unset.
  */
 export const verifyInternalServiceToken = (request: Request, env: ChatFlueEnv): boolean => {

@@ -27,7 +27,7 @@ const sections = featureCategories
             <!-- Header row -->
             <div class="grid grid-cols-[1fr_100px_100px] sm:grid-cols-[1fr_140px_140px] border-b border-border px-4 pb-3 pt-3">
                 <span class="text-[10px] uppercase tracking-wider text-fg-muted">Feature</span>
-                <span class="text-[10px] uppercase tracking-wider text-accent text-center">Maple</span>
+                <span class="text-[10px] uppercase tracking-wider text-primary text-center">Maple</span>
                 <span class="text-[10px] uppercase tracking-wider text-fg-muted text-center">{competitorName}</span>
             </div>
 
@@ -36,7 +36,7 @@ const sections = featureCategories
                     {/* Category header */}
                     {section.name && (
                         <div class:list={[
-                            "px-4 py-3 border-l-2 border-l-accent bg-accent/5",
+                            "px-4 py-3 border-l-2 border-l-primary bg-primary/5",
                             sectionIndex > 0 && "border-t border-border",
                         ]}>
                             <span class="text-[11px] font-semibold text-fg uppercase tracking-wider">{section.name}</span>
@@ -54,7 +54,7 @@ const sections = featureCategories
                                 !isLast && "border-b border-border",
                             ]}>
                                 <span class="py-4 text-sm text-fg">{featureName}</span>
-                                <div class="py-4 flex items-center justify-center bg-accent/5">
+                                <div class="py-4 flex items-center justify-center bg-primary/5">
                                     {typeof feature.maple === "boolean" ? (
                                         feature.maple ? (
                                             <svg class="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>

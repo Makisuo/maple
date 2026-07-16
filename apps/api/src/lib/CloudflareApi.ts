@@ -16,6 +16,7 @@
 import { API, T, type DefaultErrors } from "@distilled.cloud/cloudflare"
 import * as Accounts from "@distilled.cloud/cloudflare/accounts"
 import { fromOAuth, type Credentials } from "@distilled.cloud/cloudflare/Credentials"
+import * as Workers from "@distilled.cloud/cloudflare/workers"
 import * as Zones from "@distilled.cloud/cloudflare/zones"
 import { IntegrationsRevokedError, IntegrationsUpstreamError } from "@maple/domain/http"
 import { Effect, Layer, Schema, Stream } from "effect"
@@ -160,6 +161,32 @@ export const listZones: (
 		name: zone.name,
 		status: zone.status ?? null,
 	}))
+})
+
+// Script enumeration is bounded like zone discovery: the poller only needs a membership set to
+// filter stale scriptName dimensions, so a pathological account can't fan out unbounded work.
+const MAX_SCRIPTS = 1000
+
+/**
+ * List the account's live Worker script names. Used by the analytics poller to drop GraphQL
+ * invocation groups for deleted scripts (e.g. torn-down PR preview workers whose crons kept the
+ * scriptName dimension alive) — GraphQL happily returns whatever ran in the window, deleted or not.
+ */
+export const listWorkerScripts: (
+	accessToken: string,
+	accountId: string,
+	apiBaseUrl?: string,
+) => Effect.Effect<ReadonlyArray<string>, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.listWorkerScripts",
+)(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+	const scripts = yield* runMapped(
+		accessToken,
+		Workers.listScripts.items({ accountId }).pipe(Stream.take(MAX_SCRIPTS), Stream.runCollect),
+		apiBaseUrl,
+	)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.script_count", scripts.length)
+	return scripts.flatMap((script) => (script.id == null || script.id === "" ? [] : [script.id]))
 })
 
 // ---------------------------------------------------------------------------

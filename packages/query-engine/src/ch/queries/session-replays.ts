@@ -24,7 +24,7 @@ import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromQuery, type ColumnAccessor, type CHQuery } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { SessionReplays, SessionReplayEvents, TraceDetailSpans } from "../tables"
-import { sessionActivityAggregateQuery } from "./session-events"
+import { sessionActivityAggregateQuery, sessionEventMatchQuery } from "./session-events"
 
 // argMax(value, ordering) — finalize a ReplacingMergeTree column to its latest
 // version. Generic per call site, so declared here rather than via defineFn.
@@ -70,6 +70,24 @@ export interface SessionReplaysListOpts {
 	 *  scans session_events — the default list never does). */
 	activeTimeMinMs?: number
 	activeTimeMaxMs?: number
+	// Event refinement: narrow the list to sessions whose distilled `session_events`
+	// match these predicates (INNER JOIN semi-join via `sessionEventMatchQuery`).
+	// Setting any of these is what powers the `search_sessions` MCP tool's "by what
+	// happened inside" filtering; when all are unset the query never touches
+	// session_events (the web `listReplays` path is unchanged). `matchCount` on the
+	// output is populated only when an event predicate is present.
+	/** Event type: navigation / click / input / console / network / error. */
+	eventType?: string
+	/** Console/error level (e.g. "error", "warn"). */
+	eventLevel?: string
+	/** Match network events with status >= this (e.g. 500). */
+	eventMinStatus?: number
+	/** Substring match on the event URL (page or request). */
+	eventUrlSearch?: string
+	/** Substring match on console/error message text. */
+	eventMessageSearch?: string
+	/** Only sessions that observed this trace id in an event. */
+	eventTraceId?: string
 	limit?: number
 	offset?: number
 }
@@ -91,6 +109,9 @@ export interface SessionReplaysListOutput {
 	readonly clickCount: number
 	readonly errorCount: number
 	readonly traceCount: number
+	/** Count of distilled events matching the event predicates. Present only when an
+	 *  `event*` filter is set (the event INNER JOIN selects it); absent otherwise. */
+	readonly matchCount?: number
 }
 
 // Return type is annotated (not inferred) because the duration/active filters
@@ -104,6 +125,13 @@ export function sessionReplaysListQuery(
 	const limit = opts.limit ?? 50
 	const needsDurationFilter = opts.durationMinMs != null || opts.durationMaxMs != null
 	const needsActiveFilter = opts.activeTimeMinMs != null || opts.activeTimeMaxMs != null
+	const needsEventFilter =
+		opts.eventType != null ||
+		opts.eventLevel != null ||
+		opts.eventMinStatus != null ||
+		opts.eventUrlSearch != null ||
+		opts.eventMessageSearch != null ||
+		opts.eventTraceId != null
 
 	const base = from(SessionReplays)
 		.select(($) => ({
@@ -142,6 +170,75 @@ export function sessionReplaysListQuery(
 			CH.when(opts.cursor, (v: string) => $.StartTime.lt(v)),
 		])
 		.groupBy("sessionId")
+
+	// Event refinement path. When any `event*` predicate is set, INNER JOIN the
+	// grouped session_events match subquery onto the session list — narrowing to
+	// sessions that contain a matching event and surfacing its `matchCount` — and,
+	// if active-time bounds are set, additionally LEFT JOIN the activity aggregate.
+	// Handled entirely here (and returning) so the no-event branches below keep
+	// their exact compiled SQL: the web `listReplays` path never sets event filters,
+	// so it is byte-for-byte unchanged.
+	if (needsEventFilter) {
+		const eventMatch = sessionEventMatchQuery({
+			type: opts.eventType,
+			level: opts.eventLevel,
+			minStatus: opts.eventMinStatus,
+			urlSearch: opts.eventUrlSearch,
+			messageSearch: opts.eventMessageSearch,
+			traceId: opts.eventTraceId,
+		})
+		// The accumulator is typed `any` because each conditional join widens the
+		// builder's Join type, which TS can't thread through the `if (needsActiveFilter)`
+		// re-assignment. The public return type is annotated on the function signature.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		let joined: any = fromQuery(base, "s").innerJoinQuery(eventMatch, "e", (s: any, e: any) =>
+			s.sessionId.eq(e.sessionId),
+		)
+		if (needsActiveFilter) {
+			joined = joined.leftJoinQuery(
+				sessionActivityAggregateQuery(),
+				"a",
+				(s: any, a: any) => s.sessionId.eq(a.sessionId),
+			)
+		}
+		return joined
+			.select(($: any) => ({
+				sessionId: $.sessionId,
+				startTime: $.startTime,
+				endTime: $.endTime,
+				durationMs: $.durationMs,
+				status: $.status,
+				userId: $.userId,
+				urlInitial: $.urlInitial,
+				browserName: $.browserName,
+				osName: $.osName,
+				deviceType: $.deviceType,
+				country: $.country,
+				serviceName: $.serviceName,
+				pageViews: $.pageViews,
+				clickCount: $.clickCount,
+				errorCount: $.errorCount,
+				traceCount: $.traceCount,
+				matchCount: $.e.matchCount,
+			}))
+			.where(($: any) => {
+				const conds = [
+					opts.durationMinMs != null ? $.durationMs.gte(opts.durationMinMs) : undefined,
+					opts.durationMaxMs != null ? $.durationMs.lte(opts.durationMaxMs) : undefined,
+				]
+				if (needsActiveFilter) {
+					// See the active-only branch below for why NULL activity coalesces to 0.
+					const activeMs = CH.coalesce($.a.activeTimeMs, CH.lit(0))
+					if (opts.activeTimeMinMs != null) conds.push(activeMs.gte(opts.activeTimeMinMs))
+					if (opts.activeTimeMaxMs != null) conds.push(activeMs.lte(opts.activeTimeMaxMs))
+				}
+				return conds
+			})
+			.orderBy(["startTime", "desc"])
+			.limit(limit)
+			.offset(opts.offset ?? 0)
+			.format("JSON")
+	}
 
 	// Fast path: no post-aggregate filters → the original grouped query, untouched
 	// (never reads session_events).

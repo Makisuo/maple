@@ -19,6 +19,6 @@ export type { MapleBrowserHandle } from "./init"
  */
 export const MapleBrowser: {
 	init: (config: import("./config").MapleBrowserConfig) => MapleBrowserHandle
-	/** Attach (or replace) the user id on the active session. Safe to call repeatedly. */
-	identify: (userId: string) => void
+	/** Attach, replace, or clear the user id on the active session. Safe to call repeatedly. */
+	identify: (userId?: string | null) => void
 } = { init, identify }

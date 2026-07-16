@@ -29,7 +29,7 @@ import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "e
 import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
 import { makeExpandMacros } from "./raw-sql"
-import { encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
+import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
 // `computeBucketSeconds` from here; the implementation now lives in the pure
@@ -1341,19 +1341,32 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		if (request.query.kind === "attributeKeys") {
 			const scope = resolveAttributeScope(request.query.source, request.query.scope)
+			// Per-metric scoping reads the raw metric table (the hourly rollup has no
+			// MetricName column). Requires both metricName and metricType; otherwise
+			// fall back to the org-wide rollup.
+			const metricScoped =
+				request.query.source === "metrics" && request.query.metricName && request.query.metricType
+					? { metricName: request.query.metricName, metricType: request.query.metricType }
+					: undefined
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.attributeKeysQuery({
-					scope,
-					limit: request.query.limit,
-				}),
+				metricScoped
+					? CH.metricScopedAttributeKeysQuery({
+							metricType: metricScoped.metricType,
+							limit: request.query.limit,
+						})
+					: CH.attributeKeysQuery({
+							scope,
+							limit: request.query.limit,
+						}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
 					endTime: request.endTime,
+					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
 				},
-				"attributeKeys",
+				metricScoped ? "attributeKeys:metric" : "attributeKeys",
 				"discovery",
 			)
 
@@ -1524,6 +1537,11 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 
 		// ---- Attribute Values ----
 		if (request.query.kind === "attributeValues") {
+			// Per-metric scoping reads the raw metric table (see attributeKeys above).
+			const metricScoped =
+				request.query.source === "metrics" && request.query.metricName && request.query.metricType
+					? { metricName: request.query.metricName, metricType: request.query.metricType }
+					: undefined
 			const queryFn = Match.value(request.query.scope).pipe(
 				Match.when("resource", () => CH.resourceAttributeValuesQuery),
 				Match.when("log", () => CH.logAttributeValuesQuery),
@@ -1533,9 +1551,20 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
-				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
-				`attributeValues:${request.query.scope}`,
+				metricScoped
+					? CH.metricScopedAttributeValuesQuery({
+							metricType: metricScoped.metricType,
+							attributeKey: request.query.attributeKey,
+							limit: request.query.limit,
+						})
+					: queryFn({ attributeKey: request.query.attributeKey, limit: request.query.limit }),
+				{
+					orgId: tenant.orgId,
+					startTime: request.startTime,
+					endTime: request.endTime,
+					...(metricScoped ? { metricName: metricScoped.metricName } : {}),
+				},
+				metricScoped ? "attributeValues:metric-scoped" : `attributeValues:${request.query.scope}`,
 				"discovery",
 			)
 			return new QueryEngineExecuteResponse({
@@ -1943,6 +1972,52 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 		const result = reducePerGroupObservations(byGroup, request.reducer)
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 		return result
+	})
+
+/**
+ * Like `makeQueryEngineEvaluate`, but returns the per-(bucket, group)
+ * observations instead of reducing each group to a scalar. Backs the alert
+ * rule preview chart: each bucket is one evaluation window, so the series is
+ * exactly the sequence of observations the scheduler would have produced.
+ *
+ * Deliberately NOT routed through the bucket cache — preview requests are
+ * ad-hoc form states and would only pollute it (see the eval-bucket-cache
+ * regression note in QueryEngineService).
+ */
+export const makeQueryEngineEvaluateSeries = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
+	Effect.fn("QueryEngineService.evaluateSeries")(function* (
+		tenant: T,
+		request: QueryEngineEvaluateRequest,
+	): Effect.fn.Return<
+		ReadonlyArray<BucketGroupObs>,
+		QueryEngineValidationError | QueryEngineExecutionError | WarehouseError
+	> {
+		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+		yield* Effect.annotateCurrentSpan("query.source", request.query.source)
+		yield* Effect.annotateCurrentSpan("query.kind", request.query.kind)
+
+		yield* validateEvaluate(request)
+
+		if (
+			request.query.kind !== "timeseries" ||
+			(request.query.source !== "traces" &&
+				request.query.source !== "metrics" &&
+				request.query.source !== "logs")
+		) {
+			return yield* new QueryEngineValidationError({
+				message: "Unsupported alert evaluation query",
+				details: ["Alert evaluation supports traces, logs, and metrics timeseries queries only"],
+			})
+		}
+
+		const startMs = toEpochMs(request.startTime)
+		const endMs = toEpochMs(request.endTime)
+		const bucketSeconds = request.query.bucketSeconds ?? computeBucketSeconds(startMs, endMs)
+
+		const points = yield* computeEvaluateBuckets(warehouse, tenant, request, bucketSeconds)
+		const series = decodeEvalSeries(points)
+		yield* Effect.annotateCurrentSpan("result.pointCount", series.length)
+		return series
 	})
 
 const RawSqlAlertRowSchema = Schema.Struct({

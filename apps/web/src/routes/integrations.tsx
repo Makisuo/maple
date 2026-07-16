@@ -6,6 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { CloudflareAccountCard } from "@/components/integrations/cloudflare-account-card"
 import { GithubIntegrationCard } from "@/components/integrations/github-integration-card"
 import { HazelIntegrationCard } from "@/components/integrations/hazel-integration-card"
+import { PlanetScaleIntegrationCard } from "@/components/integrations/planetscale-integration-card"
 import {
 	IntegrationCatalog,
 	IntegrationIconPlate,
@@ -97,7 +98,7 @@ function IntegrationsPage() {
 				) : integration === "github" ? (
 					<GithubIntegrationCard />
 				) : integration === "planetscale" ? (
-					<ScrapeTargetsSection sourceFilter="planetscale" />
+					<PlanetScaleIntegrationCard />
 				) : (
 					// prometheus + warpstream share the generic scrape-target flow
 					<ScrapeTargetsSection sourceFilter="prometheus" />

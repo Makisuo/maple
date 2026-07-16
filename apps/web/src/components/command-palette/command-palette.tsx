@@ -16,7 +16,15 @@ import {
 	CommandShortcut,
 } from "@maple/ui/components/ui/command"
 import { Kbd } from "@maple/ui/components/ui/kbd"
-import { GearIcon, GridSquareCirclePlusIcon, KeyboardIcon, MoonIcon, SunIcon } from "@/components/icons"
+import {
+	ChatBubbleSparkleIcon,
+	GearIcon,
+	GridSquareCirclePlusIcon,
+	KeyboardIcon,
+	MoonIcon,
+	SunIcon,
+} from "@/components/icons"
+import { openGlobalChat } from "@/components/chat/global-chat-sheet"
 import {
 	investigateNavItems,
 	mainNavItems,
@@ -24,7 +32,7 @@ import {
 	visibleSignalsNavItems,
 } from "@/components/dashboard/nav-items"
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
-import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 
 const MAX_RESULTS = 12
@@ -103,7 +111,7 @@ function PaletteContent({
 
 	// These hooks live here (inside the open-gated popup) so the dashboards
 	// query only fires once the palette is first opened.
-	const { dashboards } = useDashboardStore()
+	const { dashboards } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 	const infraEnabled = useInfraEnabled()
 
@@ -173,6 +181,15 @@ function PaletteContent({
 
 		const isDark = theme === "dark"
 		const actions: PaletteEntry[] = [
+			{
+				id: "action:ask-maple-ai",
+				title: "Ask Maple AI",
+				group: "Actions",
+				keywords: "chat ai assistant maple ask question",
+				icon: ChatBubbleSparkleIcon,
+				run: openGlobalChat,
+				shortcut: "C",
+			},
 			{
 				id: "action:toggle-theme",
 				title: isDark ? "Switch to light mode" : "Switch to dark mode",

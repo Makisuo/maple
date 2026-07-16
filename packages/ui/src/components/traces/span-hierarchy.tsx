@@ -66,9 +66,10 @@ export function SpanHierarchy() {
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden rounded-md border">
-			<div className="flex shrink-0 items-center border-b bg-muted/30 px-2 py-1.5 text-xs font-medium text-muted-foreground">
+			{/* @container/row must match SpanRow's, so header and rows drop the Duration bar together */}
+			<div className="@container/row flex shrink-0 items-center border-b bg-muted/30 px-2 py-1.5 text-xs font-medium text-muted-foreground">
 				{/* Left section header */}
-				<div className="flex items-center gap-2 flex-1 min-w-0">
+				<div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
 					<div className="flex items-center gap-0.5">
 						<Button
 							variant="ghost"
@@ -76,7 +77,7 @@ export function SpanHierarchy() {
 							className="h-5 px-1.5 text-[10px]"
 							onClick={() => setExpandedSpans(collectAllCollapsibleIds(rootSpans))}
 						>
-							Expand all
+							Expand<span className="hidden @min-[480px]/row:inline">&nbsp;all</span>
 						</Button>
 						<Button
 							variant="ghost"
@@ -84,13 +85,13 @@ export function SpanHierarchy() {
 							className="h-5 px-1.5 text-[10px]"
 							onClick={() => setExpandedSpans(new Set())}
 						>
-							Collapse all
+							Collapse<span className="hidden @min-[480px]/row:inline">&nbsp;all</span>
 						</Button>
 					</div>
 				</div>
 				{/* Right section header (fixed widths matching rows) */}
 				<div className="flex items-center gap-2 shrink-0 ml-2">
-					<span className="w-48 text-center">Duration</span>
+					<span className="hidden w-48 text-center @min-[560px]/row:block">Duration</span>
 					<span className="w-16 text-right">Time</span>
 					<span className="w-14 text-center">Status</span>
 				</div>

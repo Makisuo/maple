@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import type { DashboardId, DashboardVersionId } from "@maple/domain/http"
 import { Result } from "@/lib/effect-atom"
 import { HistoryIcon, XmarkIcon } from "@/components/icons"
 import { useDashboardVersions } from "./use-dashboard-history"
@@ -6,9 +7,9 @@ import { VersionListItem } from "./version-list-item"
 import type { PreviewedVersion } from "@/atoms/dashboard-history-atoms"
 
 interface DashboardHistoryPanelProps {
-	dashboardId: string
+	dashboardId: DashboardId
 	previewed: PreviewedVersion | null
-	onPreview: (versionId: string) => void
+	onPreview: (versionId: DashboardVersionId) => void
 	onClose: () => void
 }
 

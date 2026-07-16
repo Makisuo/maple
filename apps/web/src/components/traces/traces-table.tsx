@@ -76,6 +76,61 @@ function HttpStatusBadge({ statusCode }: { statusCode: number }) {
 
 const ROW_HEIGHT = 44
 
+const HEADER_CELL_CLASS = "h-10 px-2 text-left align-middle font-medium text-muted-foreground"
+
+/**
+ * Column layout, shared by the real table, the loading skeleton and the empty state so the three
+ * can't drift apart.
+ *
+ * `responsive` drops a column when the table gets too narrow to hold it, protecting Root Span — the
+ * only column that identifies the row, and the only one that flexes. Thresholds are *container*
+ * queries against `@container/page` (declared by PageLayout.Content), not viewport media queries:
+ * two sidebars can take 512px, so viewport width says little about what the table actually gets.
+ * At a 768px viewport the table has ~480px, which a `md:` media query would wrongly call roomy.
+ *
+ * Budget: Trace ID (100) + Status (80) are always on, leaving `container - 180` for Root Span.
+ * Duration (100) joins at 480 and Services (160) at 680, each keeping Root Span at ≥200px.
+ */
+interface TraceColumnLayout {
+	readonly id: string
+	readonly header: string
+	readonly skeleton: string
+	readonly width?: number
+	/** Applied to both the th and the td — keep it a literal so Tailwind's scanner sees it. */
+	readonly responsive?: string
+	readonly cellClass?: string
+}
+
+const TRACE_COLUMNS: readonly TraceColumnLayout[] = [
+	{ id: "traceId", header: "Trace ID", width: 100, skeleton: "w-16" },
+	// No width: under table-fixed the unsized column absorbs whatever the sized ones leave.
+	{ id: "rootSpan", header: "Root Span", skeleton: "w-40" },
+	{
+		id: "services",
+		header: "Services",
+		width: 160,
+		skeleton: "w-24",
+		responsive: "hidden @min-[680px]/page:table-cell",
+	},
+	{
+		id: "durationMs",
+		header: "Duration",
+		width: 100,
+		skeleton: "w-16",
+		responsive: "hidden @min-[480px]/page:table-cell",
+	},
+	{ id: "status", header: "Status", width: 80, skeleton: "w-12" },
+]
+
+const COLUMN_LAYOUT: ReadonlyMap<string, TraceColumnLayout> = new Map(
+	TRACE_COLUMNS.map((column) => [column.id, column]),
+)
+
+function columnClasses(columnId: string): { responsive?: string; cellClass?: string } {
+	const layout = COLUMN_LAYOUT.get(columnId)
+	return { responsive: layout?.responsive, cellClass: layout?.cellClass }
+}
+
 interface TracesTableProps {
 	filters?: TracesSearchParams
 }
@@ -84,44 +139,31 @@ function LoadingState() {
 	return (
 		<div className="flex-1 min-h-0 flex flex-col gap-4">
 			<div className="rounded-md border">
-				<table className="w-full caption-bottom text-sm">
+				<table className="w-full table-fixed caption-bottom text-sm">
 					<thead className="[&_tr]:border-b">
 						<tr className="border-b transition-colors hover:bg-muted/50">
-							<th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[100px]">
-								Trace ID
-							</th>
-							<th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">
-								Root Span
-							</th>
-							<th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[160px]">
-								Services
-							</th>
-							<th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[100px]">
-								Duration
-							</th>
-							<th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-[80px]">
-								Status
-							</th>
+							{TRACE_COLUMNS.map((column) => (
+								<th
+									key={column.id}
+									className={`${HEADER_CELL_CLASS} ${column.responsive ?? ""}`}
+									style={{ width: column.width }}
+								>
+									{column.header}
+								</th>
+							))}
 						</tr>
 					</thead>
 					<tbody className="[&_tr:last-child]:border-0">
 						{Array.from({ length: 10 }).map((_, i) => (
 							<tr key={i} className="border-b transition-colors">
-								<td className="p-2 align-middle">
-									<Skeleton className="h-4 w-16" />
-								</td>
-								<td className="p-2 align-middle">
-									<Skeleton className="h-4 w-40" />
-								</td>
-								<td className="p-2 align-middle">
-									<Skeleton className="h-4 w-24" />
-								</td>
-								<td className="p-2 align-middle">
-									<Skeleton className="h-4 w-16" />
-								</td>
-								<td className="p-2 align-middle">
-									<Skeleton className="h-4 w-12" />
-								</td>
+								{TRACE_COLUMNS.map((column) => (
+									<td
+										key={column.id}
+										className={`p-2 align-middle ${column.responsive ?? ""}`}
+									>
+										<Skeleton className={`h-4 ${column.skeleton}`} />
+									</td>
+								))}
 							</tr>
 						))}
 					</tbody>
@@ -171,12 +213,29 @@ function TracesTableView({
 							spanKind={row.original.rootSpan.kind}
 							textClassName="text-xs"
 						/>
-						<span className="text-[10px] text-muted-foreground">
-							{formatTimestampInTimezone(row.original.startTime, {
+						{/*
+						 * One slot, two sub-lines — switched at the same 480px the Duration column
+						 * uses, so exactly one of them shows the duration. While Duration is hidden
+						 * the absolute timestamp gives way to it (the more useful of the two at a
+						 * glance); the full timestamp stays available on the tooltip.
+						 */}
+						<span
+							className="truncate text-[10px] text-muted-foreground"
+							title={formatTimestampInTimezone(row.original.startTime, {
 								timeZone: effectiveTimezone,
-							})}{" "}
+							})}
+						>
+							<span className="hidden @min-[480px]/page:inline">
+								{formatTimestampInTimezone(row.original.startTime, {
+									timeZone: effectiveTimezone,
+								})}{" "}
+							</span>
 							<span className="text-muted-foreground/60">
 								({formatRelativeTime(row.original.startTime)})
+							</span>
+							<span className="@min-[480px]/page:hidden">
+								{" · "}
+								{formatDuration(row.original.durationMs)}
 							</span>
 						</span>
 					</div>
@@ -187,10 +246,15 @@ function TracesTableView({
 				header: "Services",
 				size: 160,
 				cell: ({ row }) => (
-					<div className="flex flex-wrap gap-1">
+					<div className="flex min-w-0 flex-wrap gap-1">
 						{row.original.services.slice(0, 3).map((service: string) => (
-							<Badge key={service} variant="outline" className="font-mono text-[10px]">
-								{service}
+							<Badge
+								key={service}
+								variant="outline"
+								className="max-w-full font-mono text-[10px]"
+								title={service}
+							>
+								<span className="truncate">{service}</span>
 							</Badge>
 						))}
 						{row.original.services.length > 3 && (
@@ -270,17 +334,14 @@ function TracesTableView({
 					<table className="w-full caption-bottom text-sm">
 						<thead className="[&_tr]:border-b">
 							<tr className="border-b transition-colors hover:bg-muted/50">
-								<th
-									className="h-10 px-2 text-left align-middle font-medium text-muted-foreground"
-									colSpan={5}
-								>
+								<th className={HEADER_CELL_CLASS} colSpan={TRACE_COLUMNS.length}>
 									<span className="sr-only">Trace columns</span>
 								</th>
 							</tr>
 						</thead>
 						<tbody>
 							<tr>
-								<td colSpan={5} className="h-24 text-center">
+								<td colSpan={TRACE_COLUMNS.length} className="h-24 text-center">
 									No traces found
 								</td>
 							</tr>
@@ -296,16 +357,20 @@ function TracesTableView({
 			className={`flex-1 min-h-0 flex flex-col gap-4 transition-opacity ${waiting ? "opacity-50" : ""}`}
 		>
 			<div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-auto rounded-md border">
-				<table className="w-full caption-bottom text-sm" aria-label="Traces">
+				{/*
+				 * table-fixed makes the declared column widths authoritative. Under auto layout a long
+				 * service badge grew Services well past its 160px and starved Root Span down to ~50px;
+				 * fixed layout pins the sized columns and hands the remainder to Root Span, which is the
+				 * only column that should flex.
+				 */}
+				<table className="w-full table-fixed caption-bottom text-sm" aria-label="Traces">
 					<thead className="[&_tr]:border-b sticky top-0 z-10 bg-background">
 						{table.getHeaderGroups().map((headerGroup) => (
 							<tr key={headerGroup.id} className="border-b transition-colors hover:bg-muted/50">
 								{headerGroup.headers.map((header) => (
 									<th
 										key={header.id}
-										className={`h-10 px-2 text-left align-middle font-medium text-muted-foreground ${
-											header.id === "services" ? "hidden md:table-cell" : ""
-										}`}
+										className={`${HEADER_CELL_CLASS} ${columnClasses(header.id).responsive ?? ""}`}
 										style={{
 											width: header.getSize() !== 150 ? header.getSize() : undefined,
 										}}
@@ -342,16 +407,17 @@ function TracesTableView({
 										}
 									}}
 								>
-									{row.getVisibleCells().map((cell) => (
-										<td
-											key={cell.id}
-											className={`p-2 align-middle [&:has([role=checkbox])]:pr-0 ${
-												cell.column.id === "services" ? "hidden md:table-cell" : ""
-											}${cell.column.id === "rootSpan" ? " max-w-0" : ""}`}
-										>
-											{flexRender(cell.column.columnDef.cell, cell.getContext())}
-										</td>
-									))}
+									{row.getVisibleCells().map((cell) => {
+										const { responsive, cellClass } = columnClasses(cell.column.id)
+										return (
+											<td
+												key={cell.id}
+												className={`p-2 align-middle [&:has([role=checkbox])]:pr-0 ${responsive ?? ""} ${cellClass ?? ""}`}
+											>
+												{flexRender(cell.column.columnDef.cell, cell.getContext())}
+											</td>
+										)
+									})}
 								</tr>
 							)
 						})}
@@ -369,7 +435,10 @@ function TracesTableView({
 						)}
 						{isFetchingNextPage && (
 							<tr className="border-b transition-colors">
-								<td colSpan={5} className="p-2 text-center text-sm text-muted-foreground">
+								<td
+									colSpan={TRACE_COLUMNS.length}
+									className="p-2 text-center text-sm text-muted-foreground"
+								>
 									Loading more traces…
 								</td>
 							</tr>

@@ -5,6 +5,7 @@ import {
 	AlertRuleTestRequest,
 	AlertRuleUpsertRequest,
 	DiscordAlertDestinationConfig,
+	EmailAlertDestinationConfig,
 	HazelAlertDestinationConfig,
 	HazelChannelId,
 	HazelOAuthAlertDestinationConfig,
@@ -439,86 +440,6 @@ export function isRulePreviewReady(form: RuleFormState): boolean {
 	return deriveRuleQueryIssues(form).length === 0
 }
 
-/**
- * Map a built-in signal type to the custom-chart preview's source/metric/
- * filters. `builder_query` and `raw_query` return null — the builder preview
- * runs the draft through `getQueryBuilderTimeseries` (the dashboard chart
- * path) instead, and raw SQL has no structured preview.
- */
-export function signalToQueryParams(form: RuleFormState): {
-	source: "traces" | "logs" | "metrics"
-	metric: string
-	filters: Record<string, unknown>
-	apdexThresholdMs?: number
-} | null {
-	const baseFilters = form.serviceNames.length === 1 ? { serviceName: form.serviceNames[0] } : {}
-
-	switch (form.signalType) {
-		case "error_rate":
-			return {
-				source: "traces",
-				metric: "error_rate",
-				filters: { ...baseFilters, rootSpansOnly: true },
-			}
-		case "p95_latency":
-			return {
-				source: "traces",
-				metric: "p95_duration",
-				filters: { ...baseFilters, rootSpansOnly: true },
-			}
-		case "p99_latency":
-			return {
-				source: "traces",
-				metric: "p99_duration",
-				filters: { ...baseFilters, rootSpansOnly: true },
-			}
-		case "throughput":
-			return { source: "traces", metric: "count", filters: { ...baseFilters, rootSpansOnly: true } }
-		case "apdex":
-			return {
-				source: "traces",
-				metric: "apdex",
-				filters: { ...baseFilters, rootSpansOnly: true },
-				apdexThresholdMs: parsePositiveNumber(form.apdexThresholdMs, 500),
-			}
-		case "metric": {
-			if (!form.metricName.trim() || !form.metricType) return null
-			return {
-				source: "metrics",
-				metric: form.metricAggregation,
-				filters: {
-					metricName: form.metricName.trim(),
-					metricType: form.metricType,
-					...baseFilters,
-				},
-			}
-		}
-		case "builder_query":
-		case "raw_query":
-			return null
-	}
-}
-
-/** Flatten timeseries points into chart-ready rows, scoped to selected services. */
-export function flattenAlertChartData(
-	points: { bucket: string; series: Record<string, number> }[],
-	serviceNames: readonly string[],
-): Record<string, unknown>[] {
-	return points.map((point) => {
-		const base: Record<string, unknown> = { bucket: point.bucket }
-		if (serviceNames.length > 1) {
-			for (const svc of serviceNames) {
-				if (svc in point.series) base[svc] = point.series[svc]
-			}
-		} else if (serviceNames.length === 1) {
-			base[serviceNames[0]!] = point.series[serviceNames[0]!] ?? 0
-		} else {
-			Object.assign(base, point.series)
-		}
-		return base
-	})
-}
-
 /* -------------------------------------------------------------------------- */
 /*  Destination Form Helpers                                                  */
 /* -------------------------------------------------------------------------- */
@@ -539,7 +460,11 @@ export type DestinationFormState = {
 	hazelOrganizationLogoUrl: string | null
 	hazelChannelId: string
 	hazelChannelName: string
+	/** Selected workspace-member recipients (email type only). */
+	memberUserIds: string[]
 }
+
+export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
 	return {
@@ -557,6 +482,7 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
+		memberUserIds: [],
 	}
 }
 
@@ -576,6 +502,7 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
+		memberUserIds: destination.memberUserIds != null ? [...destination.memberUserIds] : [],
 	}
 }
 
@@ -640,6 +567,13 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
 				enabled: form.enabled,
 				webhookUrl: form.webhookUrl.trim(),
 			})
+		case "email":
+			return new EmailAlertDestinationConfig({
+				type: "email",
+				name: form.name.trim(),
+				enabled: form.enabled,
+				memberUserIds: form.memberUserIds,
+			})
 	}
 }
 
@@ -701,6 +635,13 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
 				enabled: form.enabled,
 				webhookUrl: form.webhookUrl.trim() || undefined,
 			}
+		case "email":
+			return {
+				type: "email",
+				name: form.name.trim() || undefined,
+				enabled: form.enabled,
+				memberUserIds: form.memberUserIds.length > 0 ? form.memberUserIds : undefined,
+			}
 	}
 }
 
@@ -712,8 +653,8 @@ export function buildRuleToggleRequest(rule: AlertRuleDocument): AlertRuleUpsert
 	return new AlertRuleUpsertRequest({
 		...rule,
 		enabled: !rule.enabled,
-		serviceNames: rule.serviceNames?.length > 0 ? [...rule.serviceNames] : undefined,
-		excludeServiceNames: rule.excludeServiceNames?.length > 0 ? [...rule.excludeServiceNames] : undefined,
+		serviceNames: [...rule.serviceNames],
+		excludeServiceNames: [...rule.excludeServiceNames],
 		metricName: rule.metricName ?? null,
 		metricType: rule.metricType ?? null,
 		metricAggregation: rule.metricAggregation ?? null,

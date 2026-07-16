@@ -29,6 +29,8 @@ import {
 	IssueEscalationPolicyDocument,
 	IssueEscalationPolicyRule,
 	type IssueEscalationPolicyUpsertRequest,
+	IssueListCursor,
+	type IssueListCursorFields,
 	type IssueKind,
 	type IssueSeverity,
 	type IssueSeveritySource,
@@ -70,6 +72,7 @@ import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage
 import { escalationDedupeKey, escalationReasonFor } from "../lib/issue-severity"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
+import { readTxid, txidColumn } from "../lib/electric-txid"
 import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
@@ -77,6 +80,7 @@ import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
+const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
@@ -207,6 +211,7 @@ export interface ErrorsServiceShape {
 			readonly startTime?: string
 			readonly endTime?: string
 			readonly limit?: number
+			readonly cursor?: IssueListCursorFields
 		},
 	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError>
 	readonly getIssue: (
@@ -1026,15 +1031,29 @@ const make: Effect.Effect<
 				const startMs = parseWarehouseDateTime(opts.startTime)
 				if (Number.isFinite(startMs)) conditions.push(gt(errorIssues.lastSeenAt, new Date(startMs)))
 			}
+			if (opts.cursor) {
+				// Keyset continuation: strictly after the last row of the previous
+				// page in (lastSeenAt desc, id desc) order.
+				const cursorSeenAt = new Date(opts.cursor.lastSeenAt)
+				const keyset = or(
+					lt(errorIssues.lastSeenAt, cursorSeenAt),
+					and(eq(errorIssues.lastSeenAt, cursorSeenAt), lt(errorIssues.id, opts.cursor.id)),
+				)
+				if (keyset) conditions.push(keyset)
+			}
 
-			const rows = yield* dbExecute((db) =>
+			const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500)
+			// Fetch one extra row: its presence means another page exists.
+			const fetched = yield* dbExecute((db) =>
 				db
 					.select()
 					.from(errorIssues)
 					.where(and(...conditions))
-					.orderBy(desc(errorIssues.lastSeenAt))
-					.limit(opts.limit ?? 100),
+					.orderBy(desc(errorIssues.lastSeenAt), desc(errorIssues.id))
+					.limit(limit + 1),
 			)
+			const hasMore = fetched.length > limit
+			const rows = hasMore ? fetched.slice(0, limit) : fetched
 
 			const issueIds = rows.map((r) => r.id)
 			const openSet = yield* issuesWithOpenIncidents(orgId, issueIds)
@@ -1044,8 +1063,19 @@ const make: Effect.Effect<
 			)
 
 			const issuesResult = rows.map((r) => rowToIssue(r, openSet.has(r.id), actorMap))
-			yield* Effect.annotateCurrentSpan("issueCount", issuesResult.length)
-			return new ErrorIssuesListResponse({ issues: issuesResult })
+			yield* Effect.annotateCurrentSpan({ issueCount: issuesResult.length, hasMore })
+			const lastRow = rows.at(-1)
+			return new ErrorIssuesListResponse(
+				hasMore && lastRow
+					? {
+							issues: issuesResult,
+							nextCursor: encodeIssueListCursor({
+								lastSeenAt: lastRow.lastSeenAt.getTime(),
+								id: decodeErrorIssueIdSync(lastRow.id),
+							}),
+						}
+					: { issues: issuesResult },
+			)
 		},
 	)
 
@@ -1250,8 +1280,7 @@ const make: Effect.Effect<
 
 		if (actorId) yield* touchActor(orgId, actorId, timestamp)
 
-		const next = yield* requireIssue(orgId, row.id)
-		return next
+		return yield* requireIssue(orgId, row.id)
 	})
 
 	const transitionIssue: ErrorsServiceShape["transitionIssue"] = Effect.fn("ErrorsService.transitionIssue")(
@@ -1404,7 +1433,7 @@ const make: Effect.Effect<
 				previous - (dateToMs(current.claimedAt) ?? previous),
 			)
 			const leaseExpiresAt = timestamp + leaseMs
-			yield* dbExecute((db) =>
+			const heartbeatRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
 					.set({ leaseExpiresAt: new Date(leaseExpiresAt), updatedAt: new Date(timestamp) })
@@ -1414,11 +1443,14 @@ const make: Effect.Effect<
 							eq(errorIssues.id, issueId),
 							eq(errorIssues.leaseHolderActorId, actorId),
 						),
-					),
+					)
+					.returning(txidColumn),
 			)
 			yield* touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
-			return yield* hydrateIssue(orgId, next)
+			const doc = yield* hydrateIssue(orgId, next)
+			const txid = readTxid(heartbeatRows)
+			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		},
 	)
 
@@ -1479,11 +1511,12 @@ const make: Effect.Effect<
 					)
 				}
 			}
-			yield* dbExecute((db) =>
+			const assignedRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
 					.set({ assignedActorId: toActorId, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId))),
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
+					.returning(txidColumn),
 			)
 			yield* recordEvent(orgId, issueId, byActorId, "assignment", {
 				payload: {
@@ -1494,7 +1527,9 @@ const make: Effect.Effect<
 			})
 			yield* touchActor(orgId, byActorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
-			return yield* hydrateIssue(orgId, next)
+			const doc = yield* hydrateIssue(orgId, next)
+			const txid = readTxid(assignedRows)
+			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		},
 	)
 
@@ -1553,11 +1588,12 @@ const make: Effect.Effect<
 				return yield* hydrateIssue(orgId, current)
 			}
 
-			yield* dbExecute((db) =>
+			const severityRows = yield* dbExecute((db) =>
 				db
 					.update(errorIssues)
 					.set({ severity, severitySource: nextSource, updatedAt: new Date(timestamp) })
-					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId))),
+					.where(and(eq(errorIssues.orgId, orgId), eq(errorIssues.id, issueId)))
+					.returning(txidColumn),
 			)
 
 			if (current.severity !== severity) {
@@ -1579,7 +1615,9 @@ const make: Effect.Effect<
 
 			yield* touchActor(orgId, actorId, timestamp)
 			const next = yield* requireIssue(orgId, issueId)
-			return yield* hydrateIssue(orgId, next)
+			const doc = yield* hydrateIssue(orgId, next)
+			const txid = readTxid(severityRows)
+			return txid === undefined ? doc : new ErrorIssueDocument({ ...doc, txid })
 		},
 	)
 

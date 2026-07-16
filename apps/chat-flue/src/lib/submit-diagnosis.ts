@@ -1,6 +1,7 @@
 import type { ToolDefinition } from "@flue/runtime"
 import type { ChatFlueEnv } from "./env.ts"
 import { AiTriageResultSchema, type AiTriageResult } from "./triage-result.ts"
+import { mapleApiRpc } from "./api-rpc.ts"
 
 /** Marker the `submit_diagnosis` tool returns; the web renders it as the report card. */
 export const DIAGNOSIS_STATUS = "diagnosis" as const
@@ -33,23 +34,7 @@ export const buildSubmitDiagnosisTool = (
 		"Record your structured diagnosis for THIS investigation. Call it exactly once, after you have gathered evidence, with your final assessment (summary, suspectedCause, severityAssessment, affectedScope, evidence, suggestedActions, confidence). It persists the report and renders it for the user. After calling it, stop unless the user asks a follow-up question.",
 	parameters: AiTriageResultSchema,
 	execute: async (report) => {
-		const url = new URL(
-			`/api/internal/investigations/${investigationId}/diagnosis`,
-			env.MAPLE_API_URL,
-		).toString()
-		const res = await fetch(url, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				Authorization: `Bearer maple_svc_${env.INTERNAL_SERVICE_TOKEN}`,
-				"x-org-id": orgId,
-			},
-			body: JSON.stringify({ report }),
-		})
-		if (!res.ok) {
-			const detail = await res.text().catch(() => "")
-			throw new Error(`submit_diagnosis failed (${res.status}): ${detail.slice(0, 200)}`)
-		}
+		await mapleApiRpc(env).submitDiagnosis({ orgId, investigationId, report })
 		return JSON.stringify({ status: DIAGNOSIS_STATUS, report } satisfies DiagnosisMarker)
 	},
 })

@@ -107,6 +107,7 @@ export {
 	arrayOf,
 	arrayStringConcat,
 	arrayFilter,
+	arrayJoin,
 	// Map
 	mapContains,
 	mapGet,

@@ -19,6 +19,9 @@ export { compilePipeQuery, type PipeCompiledQuery } from "./pipe-dispatch"
 // Tables
 export * as tables from "./tables"
 
+// Shared row-schema codecs (ClickHouse `FORMAT JSON` 64-bit-int-as-string coercion).
+export { CHNumber } from "./schema"
+
 // Queries — Traces
 export {
 	tracesTimeseriesQuery,
@@ -48,6 +51,10 @@ export {
 	resourceAttributeValuesQuery,
 	logAttributeValuesQuery,
 	metricAttributeValuesQuery,
+	metricScopedAttributeKeysQuery,
+	metricScopedAttributeValuesQuery,
+	type MetricScopedAttributeKeysOpts,
+	type MetricScopedAttributeValuesOpts,
 	type AttributeKeysQueryOpts,
 	type AttributeKeysOutput,
 	type AttributeValuesOpts,
@@ -118,13 +125,12 @@ export {
 // Queries — Session Events (distilled stream)
 export {
 	sessionTranscriptQuery,
-	searchSessionsByEventQuery,
+	sessionEventMatchQuery,
 	sessionActivityQuery,
 	sessionActivityAggregateQuery,
 	IDLE_GAP_THRESHOLD_MS,
 	type SessionTranscriptOutput,
-	type SearchSessionsByEventOpts,
-	type SearchSessionsByEventOutput,
+	type SessionEventMatchOpts,
 	type SessionActivityOpts,
 	type SessionActivityOutput,
 } from "./queries/session-events"
@@ -286,8 +292,101 @@ export {
 export {
 	CLOUDFLARE_USAGE_METRIC_NAMES,
 	cloudflareUsageQuery,
+	cloudflareUsageRowSchema,
 	type CloudflareUsageOutput,
 } from "./queries/cloudflare-usage"
+
+// Queries — Cloudflare service-map stats (per-zone / per-Worker node rollups)
+export {
+	cloudflareServiceCountersRowSchema,
+	cloudflareServiceCountersSQL,
+	cloudflareServiceLatencyRowSchema,
+	cloudflareServiceLatencySQL,
+	type CloudflareServiceCountersOutput,
+	type CloudflareServiceLatencyOutput,
+} from "./queries/cloudflare-map"
+
+// Queries — PlanetScale service-map stats (per-database / per-branch rollups)
+export {
+	planetscaleBranchConnectionsRowSchema,
+	planetscaleBranchConnectionsSQL,
+	planetscaleBranchGaugesSQL,
+	planetscaleBranchStatsRowSchema,
+	planetscaleConnectionsRowSchema,
+	planetscaleConnectionsSQL,
+	planetscaleDatabaseStatsRowSchema,
+	planetscaleGaugesSQL,
+	type PlanetScaleBranchConnectionsOutput,
+	type PlanetScaleBranchStatsOutput,
+	type PlanetScaleConnectionsOutput,
+	type PlanetScaleDatabaseStatsOutput,
+} from "./queries/planetscale-map"
+
+// Queries — PlanetScale infrastructure page (per-database timeseries)
+export {
+	planetscaleInfraTimeseriesRowSchema,
+	planetscaleInfraTimeseriesSQL,
+	type PlanetScaleInfraTimeseriesOutput,
+} from "./queries/planetscale-infra"
+
+// Queries — Cloudflare infrastructure page (per-zone HTTP + per-Worker rollups & timeseries)
+export {
+	cloudflareZoneCountersRowSchema,
+	cloudflareZoneCountersSQL,
+	cloudflareZoneLatencyRowSchema,
+	cloudflareZoneLatencySQL,
+	cloudflareZoneTimeseriesRowSchema,
+	cloudflareZoneTimeseriesSQL,
+	cloudflareZoneStatusTimeseriesRowSchema,
+	cloudflareZoneStatusTimeseriesSQL,
+	cloudflareZoneCacheTimeseriesRowSchema,
+	cloudflareZoneCacheTimeseriesSQL,
+	cloudflareZoneLatencyTimeseriesRowSchema,
+	cloudflareZoneLatencyTimeseriesSQL,
+	cloudflareWorkerCountersRowSchema,
+	cloudflareWorkerCountersSQL,
+	cloudflareWorkerLatencyRowSchema,
+	cloudflareWorkerLatencySQL,
+	cloudflareWorkerTimeseriesRowSchema,
+	cloudflareWorkerTimeseriesSQL,
+	type CloudflareZoneCountersOutput,
+	type CloudflareZoneLatencyOutput,
+	type CloudflareZoneTimeseriesOutput,
+	type CloudflareZoneStatusTimeseriesOutput,
+	type CloudflareZoneCacheTimeseriesOutput,
+	type CloudflareZoneLatencyTimeseriesOutput,
+	type CloudflareWorkerCountersOutput,
+	type CloudflareWorkerLatencyOutput,
+	type CloudflareWorkerTimeseriesOutput,
+} from "./queries/cloudflare-infra"
+
+// Queries — Cloudflare infrastructure page, extended datasets (hosts, firewall, DNS, platform)
+export {
+	cloudflareZoneHostBreakdownRowSchema,
+	cloudflareZoneHostBreakdownSQL,
+	cloudflareZoneHostTimeseriesRowSchema,
+	cloudflareZoneHostTimeseriesSQL,
+	cloudflareZoneFirewallTimeseriesRowSchema,
+	cloudflareZoneFirewallTimeseriesSQL,
+	cloudflareZoneFirewallTopRowSchema,
+	cloudflareZoneFirewallTopSQL,
+	cloudflareZoneDnsTimeseriesRowSchema,
+	cloudflareZoneDnsTimeseriesSQL,
+	cloudflareZoneDnsBreakdownRowSchema,
+	cloudflareZoneDnsBreakdownSQL,
+	cloudflareQueueGaugesRowSchema,
+	cloudflareQueueGaugesSQL,
+	cloudflareDurableObjectCountersRowSchema,
+	cloudflareDurableObjectCountersSQL,
+	type CloudflareZoneHostBreakdownOutput,
+	type CloudflareZoneHostTimeseriesOutput,
+	type CloudflareZoneFirewallTimeseriesOutput,
+	type CloudflareZoneFirewallTopOutput,
+	type CloudflareZoneDnsTimeseriesOutput,
+	type CloudflareZoneDnsBreakdownOutput,
+	type CloudflareQueueGaugesOutput,
+	type CloudflareDurableObjectCountersOutput,
+} from "./queries/cloudflare-infra-extended"
 
 // Queries — Internal observability (Maple's own self-instrumentation)
 export {

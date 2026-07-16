@@ -91,3 +91,5 @@ All options for `Maple.layer()` (server and browser entry points). The Cloudflar
 | `shutdownTimeout`       | `Duration.Input`          | No                         | Graceful shutdown timeout                                            |
 
 > In Effect 3, duration fields use the `Duration.DurationInput` type instead of `Duration.Input`.
+
+Browser-only options — `replay` (built-in rrweb session replay, on by default) and `emitSessionMeta` — are documented in [Session Replay & Sessions](/docs/sdks/effect-client#session-replay--sessions) on the Browser page.

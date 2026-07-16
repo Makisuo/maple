@@ -329,6 +329,7 @@ export interface ServiceOverviewOutput {
 	readonly commitSha: string
 	readonly throughput: number
 	readonly errorCount: number
+	readonly estimatedErrorCount: number
 	readonly spanCount: number
 	readonly p50LatencyMs: number
 	readonly p95LatencyMs: number

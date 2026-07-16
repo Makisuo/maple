@@ -5,7 +5,6 @@ import { devtools } from "@tanstack/devtools-vite"
 import tanstackRouter from "@tanstack/router-plugin/vite"
 import viteReact from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
-import alchemy from "alchemy/cloudflare/vite"
 import { siblingUrl } from "../../packages/infra/src/dev-urls.ts"
 
 const envDir = path.resolve(import.meta.dirname, "../..")
@@ -17,6 +16,7 @@ export default defineConfig(({ mode }) => {
 		process.env.VITE_API_BASE_URL ??= siblingUrl("api")
 		process.env.VITE_INGEST_URL ??= siblingUrl("ingest")
 		process.env.VITE_FLUE_CHAT_URL ??= siblingUrl("chat-flue")
+		process.env.VITE_ELECTRIC_SYNC_URL ??= siblingUrl("electric-sync")
 	}
 
 	if (!process.env.VITE_MAPLE_AUTH_MODE) {
@@ -38,6 +38,7 @@ export default defineConfig(({ mode }) => {
 		"VITE_API_BASE_URL",
 		"VITE_INGEST_URL",
 		"VITE_FLUE_CHAT_URL",
+		"VITE_ELECTRIC_SYNC_URL",
 		"VITE_MAPLE_AUTH_MODE",
 		"VITE_CLERK_PUBLISHABLE_KEY",
 		"VITE_MAPLE_INGEST_KEY",
@@ -69,7 +70,6 @@ export default defineConfig(({ mode }) => {
 			tanstackRouter({ target: "react", autoCodeSplitting: false }),
 			tailwindcss(),
 			viteReact(),
-			...(process.env.ALCHEMY_ROOT ? [alchemy({ configPath: "./wrangler.jsonc" })] : []),
 		],
 	}
 })

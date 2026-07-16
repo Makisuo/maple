@@ -11,8 +11,7 @@ import {
 	ChevronUpIcon,
 	CopyIcon,
 } from "@/components/icons"
-import { toast } from "sonner"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Alert, AlertTitle, AlertDescription } from "@maple/ui/components/ui/alert"
@@ -59,6 +58,10 @@ const kindLabels: Record<string, string> = {
 	SPAN_KIND_INTERNAL: "Internal",
 }
 
+/**
+ * Label/value row that survives a narrow panel: the label holds its width, the value takes the rest
+ * and ellipsises. Values are click-to-copy, so a truncated display still yields the full string.
+ */
 function PlatformRow({
 	label,
 	children,
@@ -157,15 +160,12 @@ What could be causing this error and how can I fix it?`
 }
 
 function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSectionProps) {
-	const clipboard = useClipboard()
+	const promptCopy = useCopyToClipboard("Error prompt")
 	const [expanded, setExpanded] = useState(false)
 	const isLong = message.length > 120 || message.includes("\n")
 
-	const handleCopyPrompt = async () => {
-		const prompt = formatErrorPrompt({ message, serviceName, spanName, attributes })
-		await clipboard.copy(prompt)
-		toast.success("Copied error prompt to clipboard")
-	}
+	const handleCopyPrompt = () =>
+		promptCopy.copy(formatErrorPrompt({ message, serviceName, spanName, attributes }))
 
 	return (
 		<Alert variant="error" className="mx-3 my-2 rounded-md border-destructive/30">
@@ -377,7 +377,7 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 
 			{/* Cloud platform summary (Cloudflare, Vercel, …) */}
 			{platform && (
-				<div className="border-b px-3 py-2 text-xs shrink-0 space-y-1.5">
+				<div className="@container/platform border-b px-3 py-2 text-xs shrink-0 space-y-1.5">
 					<div className="flex items-center gap-1.5">
 						<platform.Icon size={12} className={cn("shrink-0", platform.accentClassName)} />
 						<span className="font-medium">{platform.label}</span>
@@ -393,7 +393,8 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 							</Badge>
 						)}
 					</div>
-					<div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+					{/* Two columns only once the panel is wide enough for them to hold real values. */}
+					<div className="grid grid-cols-1 gap-x-4 gap-y-1 text-[11px] @min-[22rem]/platform:grid-cols-2">
 						{platform.edge && (
 							<PlatformRow label="Edge">
 								<span className="inline-flex items-center gap-1">
@@ -407,7 +408,7 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 							<PlatformRow
 								key={field.label}
 								label={field.label}
-								className={field.wide ? "col-span-2" : undefined}
+								className={field.wide ? "@min-[22rem]/platform:col-span-2" : undefined}
 							>
 								{field.copyable ? (
 									<CopyableValue value={field.value}>
@@ -434,7 +435,9 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 
 			{/* Tabs content */}
 			<Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
-				<TabsList variant="underline" className="shrink-0 px-4">
+				{/* TabsList is w-fit, so in a narrow panel it would overflow and the last tab would be
+				    clipped out of reach — cap it and let it scroll instead. */}
+				<TabsList variant="underline" className="shrink-0 max-w-full overflow-x-auto px-4">
 					<TabsTrigger value="details">
 						<CircleInfoIcon size={14} /> Details
 					</TabsTrigger>
@@ -460,25 +463,19 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 							<div className="space-y-1">
 								<h4 className="text-xs font-medium text-muted-foreground">Timing</h4>
 								<div className="rounded-md border p-2 space-y-1 text-xs">
-									<div className="flex justify-between">
-										<span className="text-muted-foreground">Start Time</span>
-										<span className="font-mono">
-											<CopyableValue value={span.startTime}>
-												{formatTimestampInTimezone(span.startTime, {
-													timeZone: effectiveTimezone,
-													withMilliseconds: true,
-												})}
-											</CopyableValue>
-										</span>
-									</div>
-									<div className="flex justify-between">
-										<span className="text-muted-foreground">Duration</span>
-										<span className="font-mono">
-											<CopyableValue value={formatDuration(span.durationMs)}>
-												{formatDuration(span.durationMs)}
-											</CopyableValue>
-										</span>
-									</div>
+									<PlatformRow label="Start Time">
+										<CopyableValue value={span.startTime}>
+											{formatTimestampInTimezone(span.startTime, {
+												timeZone: effectiveTimezone,
+												withMilliseconds: true,
+											})}
+										</CopyableValue>
+									</PlatformRow>
+									<PlatformRow label="Duration">
+										<CopyableValue value={formatDuration(span.durationMs)}>
+											{formatDuration(span.durationMs)}
+										</CopyableValue>
+									</PlatformRow>
 								</div>
 							</div>
 
@@ -486,27 +483,18 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 							<div className="space-y-1">
 								<h4 className="text-xs font-medium text-muted-foreground">Identifiers</h4>
 								<div className="rounded-md border p-2 space-y-1 text-xs">
-									<div className="flex justify-between">
-										<span className="text-muted-foreground">Span ID</span>
-										<span className="font-mono">
-											<CopyableValue value={span.spanId}>{span.spanId}</CopyableValue>
-										</span>
-									</div>
-									<div className="flex justify-between">
-										<span className="text-muted-foreground">Trace ID</span>
-										<span className="font-mono">
-											<CopyableValue value={span.traceId}>{span.traceId}</CopyableValue>
-										</span>
-									</div>
+									<PlatformRow label="Span ID">
+										<CopyableValue value={span.spanId}>{span.spanId}</CopyableValue>
+									</PlatformRow>
+									<PlatformRow label="Trace ID">
+										<CopyableValue value={span.traceId}>{span.traceId}</CopyableValue>
+									</PlatformRow>
 									{span.parentSpanId && (
-										<div className="flex justify-between">
-											<span className="text-muted-foreground">Parent Span ID</span>
-											<span className="font-mono">
-												<CopyableValue value={span.parentSpanId}>
-													{span.parentSpanId}
-												</CopyableValue>
-											</span>
-										</div>
+										<PlatformRow label="Parent Span ID">
+											<CopyableValue value={span.parentSpanId}>
+												{span.parentSpanId}
+											</CopyableValue>
+										</PlatformRow>
 									)}
 								</div>
 							</div>
