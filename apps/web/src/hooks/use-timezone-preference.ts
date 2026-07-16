@@ -1,3 +1,4 @@
+import { makeTimeZoneId, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { useAtom } from "@/lib/effect-atom"
 import { useCallback, useEffect, useMemo } from "react"
 import {
@@ -10,8 +11,8 @@ import {
 	timezonePreferenceAtom,
 } from "@/atoms/timezone-preference-atoms"
 
-function listSupportedTimeZones(): string[] {
-	const fallback = Array.from(new Set(["UTC", getBrowserTimeZone()]))
+function listSupportedTimeZones(): TimeZoneId[] {
+	const fallback = Array.from(new Set<TimeZoneId>([makeTimeZoneId("UTC"), getBrowserTimeZone()]))
 
 	if (typeof Intl.supportedValuesOf !== "function") {
 		return fallback
@@ -19,7 +20,7 @@ function listSupportedTimeZones(): string[] {
 
 	try {
 		const values = Intl.supportedValuesOf("timeZone")
-		return values.length > 0 ? values : fallback
+		return values.length > 0 ? values.map(makeTimeZoneId) : fallback
 	} catch {
 		return fallback
 	}

@@ -1,11 +1,10 @@
 import { Atom } from "@/lib/effect-atom"
 import { Schema } from "effect"
+import { browserTimeZoneId, makeTimeZoneId, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { localStorageRuntime } from "@/lib/services/common/storage-runtime"
 
 export const TIMEZONE_STORAGE_KEY = "maple.preferences.timezone"
 export const SYSTEM_VALUE = "__system__"
-
-const DEFAULT_TIMEZONE = "UTC"
 
 export function isValidIanaTimeZone(value: string): boolean {
 	if (value.trim().length === 0) return false
@@ -18,26 +17,17 @@ export function isValidIanaTimeZone(value: string): boolean {
 	}
 }
 
-export function getBrowserTimeZone(): string {
-	try {
-		const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
-		if (zone && isValidIanaTimeZone(zone)) {
-			return zone
-		}
-	} catch {
-		// fall through to UTC
-	}
-
-	return DEFAULT_TIMEZONE
+export function getBrowserTimeZone(): TimeZoneId {
+	return browserTimeZoneId()
 }
 
-export function resolveEffectiveTimezone(stored: string): string {
+export function resolveEffectiveTimezone(stored: string): TimeZoneId {
 	if (stored === SYSTEM_VALUE) {
 		return getBrowserTimeZone()
 	}
 
 	if (isValidIanaTimeZone(stored)) {
-		return stored
+		return makeTimeZoneId(stored)
 	}
 
 	return getBrowserTimeZone()

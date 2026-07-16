@@ -8,6 +8,32 @@ import { getBrowserTimeZone, TIMEZONE_STORAGE_KEY } from "@/atoms/timezone-prefe
 import { localStorageRuntime } from "@/lib/services/common/storage-runtime"
 import { useTimezonePreference } from "./use-timezone-preference"
 
+// Bun's jsdom environment provides sessionStorage but not localStorage; the
+// preference atom persists through `localStorage`, so install an in-memory
+// fake before the (lazy) storage layer first reads it.
+class MemoryStorage implements Storage {
+	#map = new Map<string, string>()
+	get length() {
+		return this.#map.size
+	}
+	clear() {
+		this.#map.clear()
+	}
+	getItem(key: string) {
+		return this.#map.get(key) ?? null
+	}
+	key(index: number) {
+		return [...this.#map.keys()][index] ?? null
+	}
+	removeItem(key: string) {
+		this.#map.delete(key)
+	}
+	setItem(key: string, value: string) {
+		this.#map.set(key, String(value))
+	}
+}
+Object.defineProperty(window, "localStorage", { value: new MemoryStorage(), configurable: true })
+
 function createWrapper() {
 	const registry = Registry.make()
 	registry.mount(localStorageRuntime)
@@ -61,11 +87,12 @@ describe("useTimezonePreference", () => {
 		render(<Probe />, { wrapper: createWrapper() })
 
 		window.localStorage.setItem(TIMEZONE_STORAGE_KEY, "America/Los_Angeles")
+		// No `storageArea`: jsdom's StorageEvent requires a native Storage
+		// instance, and the hook's listener only reads `key`/`newValue`.
 		window.dispatchEvent(
 			new StorageEvent("storage", {
 				key: TIMEZONE_STORAGE_KEY,
 				newValue: JSON.stringify("America/Los_Angeles"),
-				storageArea: window.localStorage,
 			}),
 		)
 

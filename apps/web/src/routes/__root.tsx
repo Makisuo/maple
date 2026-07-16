@@ -15,6 +15,8 @@ import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { Toaster } from "@maple/ui/components/ui/sonner"
 import { AttributesProvider } from "@maple/ui/components/attributes"
+import { TimeDisplayProvider } from "@maple/ui/lib/time-display-context"
+import { useTimezonePreference } from "@/hooks/use-timezone-preference"
 import { BootSplash } from "@/components/boot-splash"
 import { renderAttributeValue } from "@/components/attributes/commit-sha-attribute"
 import { highlightCode } from "@/lib/sugar-high"
@@ -60,25 +62,28 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext }>()({
 
 function AppFrame() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname })
+	const { effectiveTimezone } = useTimezonePreference()
 	useEffect(() => {
 		captureChatReferrer(pathname)
 	}, [pathname])
 	return (
-		<AttributesProvider
-			notifyCopied={notifyCopied}
-			highlightJson={highlightCode}
-			renderValue={renderAttributeValue}
-		>
-			<Outlet />
-			<Toaster />
-			{!PUBLIC_PATHS.has(pathname) && (
-				<>
-					<GlobalShortcuts />
-					<GlobalChatSheet />
-				</>
-			)}
-			{import.meta.env.DEV && <UnitflowDevtools />}
-		</AttributesProvider>
+		<TimeDisplayProvider timeZone={effectiveTimezone}>
+			<AttributesProvider
+				notifyCopied={notifyCopied}
+				highlightJson={highlightCode}
+				renderValue={renderAttributeValue}
+			>
+				<Outlet />
+				<Toaster />
+				{!PUBLIC_PATHS.has(pathname) && (
+					<>
+						<GlobalShortcuts />
+						<GlobalChatSheet />
+					</>
+				)}
+				{import.meta.env.DEV && <UnitflowDevtools />}
+			</AttributesProvider>
+		</TimeDisplayProvider>
 	)
 }
 
