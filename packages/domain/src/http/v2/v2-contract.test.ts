@@ -147,7 +147,9 @@ describe("V2Dashboard wire format", () => {
 		expect(wire.widgets[0]?.data_source.params).toHaveProperty("nested_filter.attribute_key")
 		expect(wire.widgets[0]?.layout).toHaveProperty("min_w")
 		expect(wire.variables[0]).toHaveProperty("include_all")
-		expect(wire.variables[0]?.source).toHaveProperty("attribute_key")
+		const variable = wire.variables[0]
+		if (variable?.type !== "query") throw new Error("Expected a query dashboard variable")
+		expect(variable.source).toHaveProperty("attribute_key")
 		expect(wire.txid).toBe("81234")
 	})
 })
