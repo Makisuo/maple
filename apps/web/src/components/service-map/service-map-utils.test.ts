@@ -84,6 +84,77 @@ describe("buildFlowElements", () => {
 		expect(dbEdge!.source).toBe("api")
 	})
 
+	it("attaches resolved hyperdrive configs to the Hyperdrive node and draws a dashed origin edge", () => {
+		const result = buildFlowElements({
+			edges: [baseEdge()],
+			dbEdges: [
+				baseDbEdge({ dbSystem: "postgresql", dbNamespace: "hyperdrive" }),
+				baseDbEdge({ sourceService: "worker", dbSystem: "mysql", dbNamespace: "maple" }),
+			],
+			serviceOverviews: [baseOverview()],
+			durationSeconds: 60,
+			planetscaleDatabases: new Map([
+				["maple", { name: "maple", kind: "mysql", branchCount: 1, branches: [] }],
+			]),
+			hyperdriveConfigs: [
+				{
+					id: "a".repeat(32),
+					name: "maple-db",
+					originHost: "aws.connect.psdb.cloud",
+					originPort: 3306,
+					originScheme: "mysql",
+					originDatabase: "maple",
+					originUser: "reader",
+				},
+			],
+		})
+
+		const hyperdriveNode = result.nodes.find((n) => n.id === dbNodeId("postgresql", "hyperdrive"))
+		expect(hyperdriveNode).toBeDefined()
+		const data = hyperdriveNode!.data as ServiceNodeData
+		expect(data.hyperdrive).toHaveLength(1)
+		expect(data.hyperdrive![0]!.matched).toEqual({ name: "maple", kind: "mysql" })
+
+		// Other db nodes stay clean.
+		const psNode = result.nodes.find((n) => n.id === dbNodeId("mysql", "maple"))
+		expect((psNode!.data as ServiceNodeData).hyperdrive).toBeUndefined()
+
+		const originEdge = result.edges.find((e) => e.data?.relation === "hyperdrive-origin")
+		expect(originEdge).toBeDefined()
+		expect(originEdge!.source).toBe(dbNodeId("postgresql", "hyperdrive"))
+		expect(originEdge!.target).toBe(dbNodeId("mysql", "maple"))
+		expect(originEdge!.data!.callCount).toBe(0)
+	})
+
+	it("skips the dashed origin edge when the matched PlanetScale node is not on the map", () => {
+		const result = buildFlowElements({
+			edges: [baseEdge()],
+			dbEdges: [baseDbEdge({ dbSystem: "postgresql", dbNamespace: "hyperdrive" })],
+			serviceOverviews: [baseOverview()],
+			durationSeconds: 60,
+			planetscaleDatabases: new Map([
+				["maple", { name: "maple", kind: "mysql", branchCount: 1, branches: [] }],
+			]),
+			hyperdriveConfigs: [
+				{
+					id: "a".repeat(32),
+					name: "maple-db",
+					originHost: "aws.connect.psdb.cloud",
+					originPort: 3306,
+					originScheme: "mysql",
+					originDatabase: "maple",
+					originUser: "reader",
+				},
+			],
+		})
+
+		// The panel data is still attached…
+		const hyperdriveNode = result.nodes.find((n) => n.id === dbNodeId("postgresql", "hyperdrive"))
+		expect((hyperdriveNode!.data as ServiceNodeData).hyperdrive).toHaveLength(1)
+		// …but no synthetic edge points at a node that doesn't exist.
+		expect(result.edges.some((e) => e.data?.relation === "hyperdrive-origin")).toBe(false)
+	})
+
 	it("attaches platform info to service nodes", () => {
 		const platforms = new Map<string, ServicePlatform>([
 			["api", "cloudflare"],

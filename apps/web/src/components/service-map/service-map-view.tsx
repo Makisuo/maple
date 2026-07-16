@@ -115,6 +115,7 @@ import {
 	type ServiceMapColorMode,
 	type ServiceNodeData,
 } from "./service-map-utils"
+import type { HyperdriveConfigInput, HyperdriveNodeInfo } from "./service-map-hyperdrive"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
 
@@ -771,6 +772,8 @@ interface DatabaseDetailPanelProps {
 	dbNamespace: string
 	/** Set when this database matched the org's PlanetScale inventory. */
 	planetscale?: PlanetScaleNodeMetrics
+	/** On the collapsed Hyperdrive node: configs resolved against the PlanetScale inventory. */
+	hyperdrive?: ReadonlyArray<HyperdriveNodeInfo>
 	dbEdges: ServiceDbEdge[]
 	durationSeconds: number
 	startTime: string
@@ -1143,10 +1146,94 @@ function PlanetScaleSection({
 	)
 }
 
+/**
+ * Hyperdrive resolution in the database detail panel: the org's Hyperdrive
+ * configs with the origin database each one fronts. Configs whose origin matched
+ * the PlanetScale inventory link through to the infra page.
+ */
+function HyperdriveSection({ configs }: { configs: ReadonlyArray<HyperdriveNodeInfo> }) {
+	return (
+		<div className="space-y-3">
+			<div className="h-px bg-border" />
+			<div className="flex items-center gap-1.5">
+				<CloudflareIcon size={12} className="shrink-0 text-muted-foreground" />
+				<h4 className="text-[10px] font-medium tracking-widest text-muted-foreground/60 uppercase">
+					Hyperdrive Configs
+				</h4>
+				<span className="ml-auto text-[10px] text-muted-foreground">
+					{configs.length} config{configs.length === 1 ? "" : "s"}
+				</span>
+			</div>
+			<div className="space-y-1.5">
+				{configs.map((config) => (
+					<div
+						key={config.id}
+						className="rounded-md border border-border bg-card px-2.5 py-2 text-xs"
+					>
+						<div className="flex items-center justify-between gap-2">
+							<div className="flex min-w-0 items-center gap-1.5">
+								<span className="truncate font-medium text-foreground">{config.name}</span>
+								<span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
+									{config.originScheme}
+								</span>
+							</div>
+							<span
+								className="shrink-0 font-mono text-[10px] text-muted-foreground/60"
+								title={config.id}
+							>
+								{config.id.slice(0, 8)}
+							</span>
+						</div>
+						<div className="mt-1.5 flex items-center gap-1.5 text-[11px]">
+							<ArrowRightIcon size={10} className="shrink-0 text-muted-foreground/60" />
+							{config.matched ? (
+								<Link
+									to="/infra/planetscale/$dbName"
+									params={{ dbName: config.matched.name }}
+									className="flex min-w-0 items-center gap-1.5 text-foreground hover:underline"
+								>
+									<PlanetScaleIcon size={11} className="shrink-0 text-muted-foreground" />
+									<span className="truncate font-mono">{config.matched.name}</span>
+									<span className="shrink-0 text-[10px] text-muted-foreground">
+										{config.matched.kind === "postgresql" ? "Postgres" : "MySQL"} on
+										PlanetScale
+									</span>
+								</Link>
+							) : config.isPlanetScaleHost ? (
+								<span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+									<PlanetScaleIcon size={11} className="shrink-0" />
+									<span className="truncate font-mono">{config.originDatabase}</span>
+									<span className="shrink-0 text-[10px]">
+										PlanetScale (not in inventory)
+									</span>
+								</span>
+							) : (
+								<span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+									<span className="truncate font-mono">{config.originDatabase}</span>
+									{config.originHost ? (
+										<span className="truncate text-[10px] text-muted-foreground/60">
+											{config.originHost}
+										</span>
+									) : (
+										<span className="shrink-0 text-[10px] text-muted-foreground/60">
+											private origin
+										</span>
+									)}
+								</span>
+							)}
+						</div>
+					</div>
+				))}
+			</div>
+		</div>
+	)
+}
+
 function DatabaseDetailPanel({
 	dbSystem,
 	dbNamespace,
 	planetscale,
+	hyperdrive,
 	dbEdges,
 	durationSeconds,
 	startTime,
@@ -1286,6 +1373,10 @@ function DatabaseDetailPanel({
 							</div>
 						</div>
 					</div>
+
+					{hyperdrive && hyperdrive.length > 0 ? (
+						<HyperdriveSection configs={hyperdrive} />
+					) : null}
 
 					{planetscale ? (
 						<PlanetScaleSection
@@ -1566,6 +1657,7 @@ export function ServiceMapCanvas({
 	faasNames,
 	planetscaleDatabases,
 	planetscaleStats,
+	hyperdriveConfigs,
 	platforms,
 	runtimes,
 	overviews,
@@ -1596,6 +1688,8 @@ export function ServiceMapCanvas({
 	>
 	/** PlanetScale scraped-metric rollups, one per database. */
 	planetscaleStats: PlanetScaleDatabaseStat[]
+	/** Cloudflare Hyperdrive config inventory (empty when not connected). */
+	hyperdriveConfigs?: ReadonlyArray<HyperdriveConfigInput>
 	platforms: Map<string, ServicePlatform>
 	runtimes: Map<string, string>
 	overviews: ServiceOverview[]
@@ -1649,6 +1743,7 @@ export function ServiceMapCanvas({
 			faasNames,
 			planetscaleDatabases,
 			planetscaleStats,
+			hyperdriveConfigs,
 		})
 		// Service legend / focus targets only include real services, not synthetic db: nodes
 		const allServices = Array.from(
@@ -1662,6 +1757,7 @@ export function ServiceMapCanvas({
 		faasNames,
 		planetscaleDatabases,
 		planetscaleStats,
+		hyperdriveConfigs,
 		platforms,
 		runtimes,
 		overviews,
@@ -1683,6 +1779,15 @@ export function ServiceMapCanvas({
 		const m = new Map<string, PlanetScaleNodeMetrics>()
 		for (const n of rawNodes) {
 			if (n.data.planetscale) m.set(n.id, n.data.planetscale)
+		}
+		return m
+	}, [rawNodes])
+
+	// Hyperdrive config resolution attached to the collapsed Hyperdrive node(s).
+	const hyperdriveOverlayByNode = useMemo(() => {
+		const m = new Map<string, ReadonlyArray<HyperdriveNodeInfo>>()
+		for (const n of rawNodes) {
+			if (n.data.hyperdrive) m.set(n.id, n.data.hyperdrive)
 		}
 		return m
 	}, [rawNodes])
@@ -2282,6 +2387,7 @@ export function ServiceMapCanvas({
 							<DatabaseDetailPanel
 								{...parseDbNodeId(selectedServiceId)}
 								planetscale={planetscaleOverlayByNode.get(selectedServiceId)}
+								hyperdrive={hyperdriveOverlayByNode.get(selectedServiceId)}
 								dbEdges={dbEdges}
 								durationSeconds={durationSeconds}
 								startTime={startTime}
@@ -2360,6 +2466,11 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv, focus, onFoc
 			reactivityKeys: ["planetscaleIntegrationStatus"],
 		}),
 	)
+	const hyperdriveInventoryResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "cloudflareHyperdrives", {
+			reactivityKeys: ["cloudflareIntegrationStatus"],
+		}),
+	)
 	const platformsResult = useRefreshableAtomValue(getServicePlatformsResultAtom(mapInput))
 
 	// Node DATA that streams in after the canvas mounts and refines nodes in place
@@ -2397,6 +2508,21 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv, focus, onFoc
 		}
 		return map
 	}, [planetscaleInventoryResult])
+	const hyperdriveConfigs = useMemo<ReadonlyArray<HyperdriveConfigInput>>(
+		() =>
+			Result.isSuccess(hyperdriveInventoryResult)
+				? hyperdriveInventoryResult.value.configs.map((config) => ({
+						id: config.id,
+						name: config.name,
+						originHost: config.originHost,
+						originPort: config.originPort,
+						originScheme: config.originScheme,
+						originDatabase: config.originDatabase,
+						originUser: config.originUser,
+					}))
+				: [],
+		[hyperdriveInventoryResult],
+	)
 	const platforms = useMemo(() => {
 		const map = new Map<string, ServicePlatform>()
 		if (Result.isSuccess(platformsResult)) {
@@ -2481,6 +2607,7 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv, focus, onFoc
 					faasNames={faasNames}
 					planetscaleDatabases={planetscaleDatabases}
 					planetscaleStats={planetscaleStats}
+					hyperdriveConfigs={hyperdriveConfigs}
 					platforms={platforms}
 					runtimes={runtimes}
 					overviews={overviews}

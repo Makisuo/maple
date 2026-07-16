@@ -2,6 +2,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	CloudflareDisconnectResponse,
+	CloudflareHyperdrivesResponse,
 	CloudflareStartConnectResponse,
 	CloudflareTopTrafficResponse,
 	CloudflareTopTrafficRow,
@@ -201,6 +202,25 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
 						return yield* cloudflareAnalytics.getUsage(tenant.orgId)
+					}),
+				)
+				// No admin gate — any org member may read the inventory (service map needs it).
+				// Not connected / never discovered simply reads as an empty config list.
+				.handle("cloudflareHyperdrives", () =>
+					Effect.gen(function* () {
+						const tenant = yield* CurrentTenant.Context
+						const rows = yield* cloudflareAnalytics.listHyperdriveConfigs(tenant.orgId)
+						return new CloudflareHyperdrivesResponse({
+							configs: rows.map((row) => ({
+								id: row.configId,
+								name: row.name,
+								originHost: row.originHost,
+								originPort: row.originPort,
+								originScheme: row.originScheme,
+								originDatabase: row.originDatabase,
+								originUser: row.originUser,
+							})),
+						})
 					}),
 				)
 				.handle("cloudflareTopTraffic", ({ payload }) =>

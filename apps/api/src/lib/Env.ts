@@ -144,9 +144,13 @@ const envConfig = Config.all({
 	// live scope registry (GET /client/v4/oauth/scopes). The registered OAuth client must have all
 	// of these granted, or connects fail with invalid_scope — and existing users must reconnect to
 	// pick up a newly-added scope.
+	// query-cache.read is the registry id for "Hyperdrive Read" (Hyperdrive's original product
+	// name was "query cache" — the id never migrated). It powers the Hyperdrive config inventory
+	// behind the service map; pre-existing grants without it degrade open (discovery logs a
+	// warning, analytics keep flowing) until the user reconnects.
 	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
 		"CLOUDFLARE_OAUTH_SCOPES",
-		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
+		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write query-cache.read",
 	),
 	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",

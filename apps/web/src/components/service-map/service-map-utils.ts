@@ -1,4 +1,5 @@
 import type { Node, Edge } from "@xyflow/react"
+import { HYPERDRIVE_DB_NAMESPACE } from "@maple/domain/tinybird/db-query-shape-sql"
 import type {
 	CloudflareService,
 	PlanetScaleDatabaseStat,
@@ -10,6 +11,7 @@ import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { getServiceColor, getValueHue } from "@maple/ui/colors"
 import { getDbNodeColor, PLANETSCALE_COLOR, resolveDbNodePresentation } from "./service-map-db"
+import { matchHyperdriveConfigs, type HyperdriveConfigInput, type HyperdriveNodeInfo } from "./service-map-hyperdrive"
 
 interface ServiceNodeInfra {
 	podCount: number
@@ -75,6 +77,8 @@ export interface ServiceNodeData {
 	cloudflare?: CloudflareNodeMetrics
 	/** Overlaid onto DB nodes matched against the org's PlanetScale inventory. */
 	planetscale?: PlanetScaleNodeMetrics
+	/** On the collapsed Hyperdrive node: the org's configs resolved against the PlanetScale inventory. */
+	hyperdrive?: ReadonlyArray<HyperdriveNodeInfo>
 	colorMode?: ServiceMapColorMode
 	/** OTel `service.namespace`, when defined. Drives namespace-cluster layout + dotted boxes. */
 	namespace?: string
@@ -147,6 +151,11 @@ export interface ServiceEdgeData {
 	hasSampling: boolean
 	/** Rendered near-invisible (focus mode dims edges leaving the neighborhood). */
 	dimmed?: boolean
+	/**
+	 * Synthetic structural relation (no traffic): a dashed "fronts this database"
+	 * edge from the Hyperdrive node to its matched PlanetScale node.
+	 */
+	relation?: "hyperdrive-origin"
 	[key: string]: unknown
 }
 
@@ -244,6 +253,8 @@ export interface BuildFlowElementsInput {
 	>
 	/** PlanetScale scraped-metric rollups, one per database. */
 	planetscaleStats?: PlanetScaleDatabaseStat[]
+	/** Cloudflare Hyperdrive config inventory (resolves the collapsed Hyperdrive node's origins). */
+	hyperdriveConfigs?: ReadonlyArray<HyperdriveConfigInput>
 }
 
 /**
@@ -265,6 +276,7 @@ export function buildFlowElements({
 	faasNames,
 	planetscaleDatabases,
 	planetscaleStats = [],
+	hyperdriveConfigs = [],
 }: BuildFlowElementsInput): { nodes: Node<ServiceNodeData>[]; edges: Edge<ServiceEdgeData>[] } {
 	const services = deriveServiceList(edges, serviceOverviews)
 
@@ -372,14 +384,27 @@ export function buildFlowElements({
 		}
 	}
 
+	// Hyperdrive config inventory resolved against the PlanetScale inventory —
+	// attached to the collapsed Hyperdrive node(s) so the detail panel can show
+	// what actually sits behind the proxy. Computed once; empty stays undefined.
+	const hyperdriveInfo =
+		hyperdriveConfigs.length > 0
+			? matchHyperdriveConfigs(hyperdriveConfigs, planetscaleDatabases ?? new Map())
+			: []
+
 	for (const [nodeId, agg] of dbAgg) {
 		const planetscale = planetscaleFor(agg.dbSystem, agg.dbNamespace)
+		const hyperdrive =
+			agg.dbNamespace === HYPERDRIVE_DB_NAMESPACE && hyperdriveInfo.length > 0
+				? hyperdriveInfo
+				: undefined
 		flowNodes.push({
 			id: nodeId,
 			type: "serviceNode",
 			position: { x: 0, y: 0 },
 			data: {
 				planetscale,
+				hyperdrive,
 				// Named databases show their identity; the generic node keeps the system;
 				// Hyperdrive-fronted databases collapse to a single "Hyperdrive" node.
 				label: resolveDbNodePresentation(agg.dbSystem, agg.dbNamespace).title,
@@ -461,6 +486,51 @@ export function buildFlowElements({
 				hasSampling: e.hasSampling,
 			},
 		})
+	}
+
+	// Synthetic dashed "fronts this database" edges: a Hyperdrive node connects to
+	// each PlanetScale node its matched configs resolve to — purely structural
+	// (zero traffic), and only when BOTH nodes already exist on the map.
+	if (hyperdriveInfo.some((info) => info.matched !== undefined)) {
+		const psNodeByName = new Map<string, string>()
+		for (const [nodeId, agg] of dbAgg) {
+			if (
+				agg.dbNamespace !== "" &&
+				agg.dbNamespace !== HYPERDRIVE_DB_NAMESPACE &&
+				PLANETSCALE_SYSTEMS.has(agg.dbSystem.toLowerCase())
+			) {
+				psNodeByName.set(agg.dbNamespace.toLowerCase(), nodeId)
+			}
+		}
+		const seenOriginEdges = new Set<string>()
+		for (const [nodeId, agg] of dbAgg) {
+			if (agg.dbNamespace !== HYPERDRIVE_DB_NAMESPACE) continue
+			for (const info of hyperdriveInfo) {
+				if (info.matched === undefined) continue
+				const target = psNodeByName.get(info.matched.name.toLowerCase())
+				if (target === undefined || target === nodeId) continue
+				const edgeId = edgeIdFor(nodeId, target)
+				if (seenOriginEdges.has(edgeId)) continue
+				seenOriginEdges.add(edgeId)
+				flowEdges.push({
+					id: edgeId,
+					source: nodeId,
+					target,
+					type: "serviceEdge",
+					data: {
+						callCount: 0,
+						callsPerSecond: 0,
+						estimatedCallsPerSecond: 0,
+						errorCount: 0,
+						errorRate: 0,
+						avgDurationMs: 0,
+						p95DurationMs: 0,
+						hasSampling: false,
+						relation: "hyperdrive-origin",
+					},
+				})
+			}
+		}
 	}
 
 	return { nodes: flowNodes, edges: flowEdges }

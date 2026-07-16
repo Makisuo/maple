@@ -78,6 +78,9 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 	const errorRate = edgeData?.errorRate ?? 0
 	const hasSampling = edgeData?.hasSampling ?? false
 	const dimmed = edgeData?.dimmed === true
+	// Structural relation edge (e.g. Hyperdrive → its origin database): no traffic
+	// flows on it, so it renders as a thin dashed line — no tube, label, or particles.
+	const isRelation = edgeData?.relation !== undefined
 
 	const [edgePath, labelX, labelY] = getSmoothStepPath({
 		sourceX,
@@ -104,7 +107,7 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 	// focused neighborhood instead of the faded background.
 	const registry = useParticleRegistry()
 	useEffect(() => {
-		if (!registry) return
+		if (!registry || isRelation) return
 		registry.set(id, {
 			pathString: edgePath,
 			sourceColor,
@@ -112,7 +115,37 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 			strokeWidth: sw,
 		})
 		return () => registry.remove(id)
-	}, [registry, id, edgePath, sourceColor, callsPerSecond, sw, dimmed])
+	}, [registry, id, edgePath, sourceColor, callsPerSecond, sw, dimmed, isRelation])
+
+	if (isRelation) {
+		return (
+			<>
+				<defs>
+					<linearGradient
+						id={gradientId}
+						gradientUnits="userSpaceOnUse"
+						x1={sourceX}
+						y1={sourceY}
+						x2={targetX}
+						y2={targetY}
+					>
+						<stop offset="0%" stopColor={sourceColor} />
+						<stop offset="100%" stopColor={targetColor} />
+					</linearGradient>
+				</defs>
+				<path
+					d={edgePath}
+					fill="none"
+					stroke={`url(#${gradientId})`}
+					strokeWidth={1.5}
+					strokeOpacity={0.55 * dimFactor}
+					strokeDasharray="4 4"
+					strokeLinecap="round"
+					className="react-flow__edge-path"
+				/>
+			</>
+		)
+	}
 
 	return (
 		<>
