@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
+import { V2AlertDestinationCreateParams } from "./alert-destinations"
+import { V2AlertIncident } from "./alert-incidents"
+import { V2AlertRule, V2AlertRuleMutationResponse } from "./alert-rules"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2DashboardMutation } from "./dashboards"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
@@ -151,6 +154,136 @@ describe("V2Dashboard wire format", () => {
 		if (variable?.type !== "query") throw new Error("Expected a query dashboard variable")
 		expect(variable.source).toHaveProperty("attribute_key")
 		expect(wire.txid).toBe("81234")
+	})
+})
+
+describe("V2 alerts wire format", () => {
+	const DEST_UUID = "7c6b5a49-3821-4e0f-9d8c-7b6a59483726"
+	const INCIDENT_UUID = "9e8d7c6b-5a49-4382-a1e0-f9d8c7b6a594"
+
+	const ruleWire = {
+		id: encodePublicId("alrt", UUID),
+		object: "alert_rule",
+		name: "Checkout error rate",
+		notes: null,
+		notification_template: null,
+		enabled: true,
+		severity: "critical",
+		service_names: ["checkout"],
+		exclude_service_names: [],
+		tags: ["payments"],
+		group_by: null,
+		signal_type: "error_rate",
+		comparator: "gt",
+		threshold: 0.05,
+		threshold_upper: null,
+		window_minutes: 5,
+		minimum_sample_count: 50,
+		consecutive_breaches_required: 2,
+		consecutive_healthy_required: 3,
+		renotify_interval_minutes: 60,
+		metric_name: null,
+		metric_type: null,
+		metric_aggregation: null,
+		apdex_threshold_ms: null,
+		query_builder_draft: { queries: [{ signalType: "traces", attributeKey: "service.name" }] },
+		raw_query_sql: null,
+		raw_query_reducer: null,
+		destination_ids: [encodePublicId("dest", DEST_UUID)],
+		no_data_behavior: "skip",
+		last_evaluation_error: null,
+		last_evaluated_at: null,
+		last_scheduled_at: null,
+		created_at: "2026-07-15T00:00:00.000Z",
+		updated_at: "2026-07-15T00:00:00.000Z",
+		created_by: "user_123",
+		updated_by: "user_123",
+	}
+
+	it("encodes snake_case fields with alrt_/dest_ public IDs and passes the draft through verbatim", () => {
+		const rule = Schema.decodeUnknownSync(V2AlertRule)(ruleWire)
+		expect(rule.id).toBe(UUID)
+		expect(rule.destination_ids).toEqual([DEST_UUID])
+
+		const wire = Schema.encodeSync(V2AlertRule)(rule)
+		expect(wire.id).toBe(encodePublicId("alrt", UUID))
+		expect(wire.destination_ids[0]).toMatch(/^dest_/)
+		expect("signalType" in wire).toBe(false)
+		// The query-builder draft is opaque: its camelCase keys survive untouched.
+		expect(wire.query_builder_draft).toEqual({
+			queries: [{ signalType: "traces", attributeKey: "service.name" }],
+		})
+	})
+
+	it("keeps txid on rule mutation responses but out of the base resource", () => {
+		const mutation = Schema.decodeUnknownSync(V2AlertRuleMutationResponse)({ ...ruleWire, txid: "81234" })
+		expect(Schema.encodeSync(V2AlertRuleMutationResponse)(mutation).txid).toBe("81234")
+		const base = Schema.decodeUnknownSync(V2AlertRule)(ruleWire)
+		expect("txid" in Schema.encodeSync(V2AlertRule)(base)).toBe(false)
+	})
+
+	it("rejects wrong-prefix rule IDs", () => {
+		expect(() =>
+			Schema.decodeUnknownSync(V2AlertRule)({ ...ruleWire, id: encodePublicId("dash", UUID) }),
+		).toThrow()
+	})
+
+	it("decodes destination create params per union arm and rejects mismatched configs", () => {
+		const slack = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
+			type: "slack",
+			name: "On-call",
+			webhook_url: "https://hooks.slack.com/services/T/B/X",
+			channel_label: "#incidents",
+		})
+		expect(slack.type).toBe("slack")
+
+		const email = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
+			type: "email",
+			name: "Leads",
+			member_user_ids: ["user_1", "user_2"],
+		})
+		expect(email.type).toBe("email")
+
+		// A pagerduty destination has no webhook_url — the discriminant must match its arm.
+		expect(() =>
+			Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
+				type: "pagerduty",
+				name: "PD",
+				webhook_url: "https://hooks.slack.com/services/T/B/X",
+			}),
+		).toThrow()
+	})
+
+	it("encodes incidents with inc_/alrt_ public IDs", () => {
+		const incident = Schema.decodeUnknownSync(V2AlertIncident)({
+			id: encodePublicId("inc", INCIDENT_UUID),
+			object: "alert_incident",
+			rule_id: encodePublicId("alrt", UUID),
+			rule_name: "Checkout error rate",
+			group_key: null,
+			signal_type: "error_rate",
+			severity: "critical",
+			status: "open",
+			comparator: "gt",
+			threshold: 0.05,
+			threshold_upper: null,
+			first_triggered_at: "2026-07-15T09:10:00.000Z",
+			last_triggered_at: "2026-07-15T09:40:00.000Z",
+			resolved_at: null,
+			last_observed_value: 0.09,
+			last_sample_count: 132,
+			dedupe_key: "rule:__total__",
+			last_delivered_event_type: "trigger",
+			last_notified_at: null,
+			error_issue_id: null,
+		})
+		expect(incident.id).toBe(INCIDENT_UUID)
+		expect(incident.rule_id).toBe(UUID)
+
+		const wire = Schema.encodeSync(V2AlertIncident)(incident)
+		expect(wire.id).toMatch(/^inc_/)
+		expect(wire.rule_id).toMatch(/^alrt_/)
+		expect("ruleId" in wire).toBe(false)
 	})
 })
 

@@ -50,6 +50,9 @@ type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]["value"]
 const SCOPE_FAMILIES = [
 	{ id: "api_keys", label: "API keys" },
 	{ id: "dashboards", label: "Dashboards" },
+	{ id: "alert_rules", label: "Alert rules" },
+	{ id: "alert_destinations", label: "Alert destinations" },
+	{ id: "alert_incidents", label: "Alert incidents" },
 ] as const
 
 type ScopeLevel = "none" | "read" | "write"

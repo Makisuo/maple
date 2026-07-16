@@ -1,4 +1,7 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
+import { V2AlertDestinationsApiGroup } from "./alert-destinations"
+import { V2AlertIncidentsApiGroup } from "./alert-incidents"
+import { V2AlertRulesApiGroup } from "./alert-rules"
 import { V2ApiKeysApiGroup } from "./api-keys"
 import { V2DashboardsApiGroup } from "./dashboards"
 
@@ -17,6 +20,9 @@ import { V2DashboardsApiGroup } from "./dashboards"
 export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2ApiKeysApiGroup)
 	.add(V2DashboardsApiGroup)
+	.add(V2AlertRulesApiGroup)
+	.add(V2AlertDestinationsApiGroup)
+	.add(V2AlertIncidentsApiGroup)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Maple API",

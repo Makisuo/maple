@@ -10,6 +10,9 @@ import { HttpAlertsLive } from "./routes/alerts.http"
 import { HttpAnomaliesLive } from "./routes/anomalies.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
+import { HttpV2AlertDestinationsLive } from "./routes/v2/alert-destinations.http"
+import { HttpV2AlertIncidentsLive } from "./routes/v2/alert-incidents.http"
+import { HttpV2AlertRulesLive } from "./routes/v2/alert-rules.http"
 import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
 import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
 import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
@@ -275,7 +278,15 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 )
 
 const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
-	Layer.provide(Layer.mergeAll(HttpV2ApiKeysLive, HttpV2DashboardsLive)),
+	Layer.provide(
+		Layer.mergeAll(
+			HttpV2ApiKeysLive,
+			HttpV2DashboardsLive,
+			HttpV2AlertRulesLive,
+			HttpV2AlertDestinationsLive,
+			HttpV2AlertIncidentsLive,
+		),
+	),
 	Layer.provide(V2SchemaErrorsLive),
 )
 

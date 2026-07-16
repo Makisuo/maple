@@ -10,9 +10,8 @@ import { ApiKeysService } from "../../services/ApiKeysService"
 import { AuthService } from "../../services/AuthService"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
-import { HttpV2ApiKeysLive } from "./api-keys.http"
-import { HttpV2DashboardsLive } from "./dashboards.http"
 import { V2SchemaErrorsLive } from "./error-envelope"
+import { AlertsServiceStubLayer, AllV2GroupLayersLive } from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -43,8 +42,9 @@ const makeHarness = () => {
 	).pipe(Layer.provideMerge(Layer.mergeAll(envLive, testDb.layer)))
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
-		Layer.provide(Layer.mergeAll(HttpV2ApiKeysLive, HttpV2DashboardsLive)),
+		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(V2SchemaErrorsLive),
+		Layer.provide(AlertsServiceStubLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(servicesLive),
 	)
