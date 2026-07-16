@@ -5,11 +5,12 @@ import { cn } from "@maple/ui/utils"
 import { Input } from "@maple/ui/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
 
+const COMMIT_DEBOUNCE_MS = 400
+
 interface DurationRangeFilterProps {
 	minValue: number | undefined
 	maxValue: number | undefined
-	onMinChange: (value: number | undefined) => void
-	onMaxChange: (value: number | undefined) => void
+	onRangeChange: (min: number | undefined, max: number | undefined) => void
 	durationStats?: {
 		minDurationMs: number
 		maxDurationMs: number
@@ -22,54 +23,72 @@ interface DurationRangeFilterProps {
 export function DurationRangeFilter({
 	minValue,
 	maxValue,
-	onMinChange,
-	onMaxChange,
+	onRangeChange,
 	durationStats,
 	defaultOpen = false,
 }: DurationRangeFilterProps) {
 	const hasActiveRange = minValue !== undefined || maxValue !== undefined
 	const [isOpen, setIsOpen] = React.useState(defaultOpen || hasActiveRange)
 
-	const handleMinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const val = e.target.value
-		onMinChange(val === "" ? undefined : Number(val))
+	// Inputs edit a local draft; the URL (and the queries behind it) only
+	// updates after a pause in typing, or immediately for preset clicks.
+	const [draft, setDraft] = React.useState({ min: toText(minValue), max: toText(maxValue) })
+	const [prevRange, setPrevRange] = React.useState({ minValue, maxValue })
+	if (prevRange.minValue !== minValue || prevRange.maxValue !== maxValue) {
+		setPrevRange({ minValue, maxValue })
+		setDraft({ min: toText(minValue), max: toText(maxValue) })
 	}
 
-	const handleMaxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const val = e.target.value
-		onMaxChange(val === "" ? undefined : Number(val))
+	const commitTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+	const cancelPendingCommit = () => {
+		if (commitTimer.current !== undefined) {
+			clearTimeout(commitTimer.current)
+			commitTimer.current = undefined
+		}
+	}
+
+	const handleDraftChange = (next: { min: string; max: string }) => {
+		setDraft(next)
+		cancelPendingCommit()
+		commitTimer.current = setTimeout(() => {
+			commitTimer.current = undefined
+			onRangeChange(fromText(next.min), fromText(next.max))
+		}, COMMIT_DEBOUNCE_MS)
+	}
+
+	const applyRange = (min: number | undefined, max: number | undefined) => {
+		cancelPendingCommit()
+		setDraft({ min: toText(min), max: toText(max) })
+		onRangeChange(min, max)
 	}
 
 	const applyPreset = (minMs: number) => {
-		if (minValue === Math.round(minMs) && maxValue === undefined) {
-			onMinChange(undefined)
+		const rounded = Math.round(minMs)
+		if (minValue === rounded && maxValue === undefined) {
+			applyRange(undefined, undefined)
 			return
 		}
-		onMinChange(Math.round(minMs))
-		onMaxChange(undefined)
+		applyRange(rounded, undefined)
 	}
 
-	const clearRange = () => {
-		onMinChange(undefined)
-		onMaxChange(undefined)
-	}
-
-	const presets: Array<{ key: string; label: string; minMs: number }> = []
+	const presets: Array<{ key: string; label: string; minMs: number; value: string }> = []
 	if (durationStats && durationStats.p50DurationMs > 0) {
 		presets.push({
 			key: "p50",
-			label: `> p50 · ${formatDuration(durationStats.p50DurationMs)}`,
+			label: "> p50",
 			minMs: durationStats.p50DurationMs,
+			value: formatDuration(durationStats.p50DurationMs),
 		})
 	}
 	if (durationStats && durationStats.p95DurationMs > 0) {
 		presets.push({
 			key: "p95",
-			label: `> p95 · ${formatDuration(durationStats.p95DurationMs)}`,
+			label: "> p95",
 			minMs: durationStats.p95DurationMs,
+			value: formatDuration(durationStats.p95DurationMs),
 		})
 	}
-	presets.push({ key: "1s", label: "> 1s", minMs: 1000 })
+	presets.push({ key: "1s", label: "> 1s", minMs: 1000, value: "" })
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={setIsOpen}>
@@ -86,13 +105,13 @@ export function DurationRangeFilter({
 								className="rounded-xs hover:text-muted-foreground"
 								onClick={(e) => {
 									e.stopPropagation()
-									clearRange()
+									applyRange(undefined, undefined)
 								}}
 								onKeyDown={(e) => {
 									if (e.key === "Enter" || e.key === " ") {
 										e.preventDefault()
 										e.stopPropagation()
-										clearRange()
+										applyRange(undefined, undefined)
 									}
 								}}
 							>
@@ -105,7 +124,7 @@ export function DurationRangeFilter({
 			</CollapsibleTrigger>
 			<CollapsibleContent className="pb-3">
 				<div className="space-y-2">
-					<div className="flex flex-wrap gap-1">
+					<div>
 						{presets.map((preset) => {
 							const isActive = minValue === Math.round(preset.minMs) && maxValue === undefined
 							return (
@@ -114,13 +133,14 @@ export function DurationRangeFilter({
 									type="button"
 									onClick={() => applyPreset(preset.minMs)}
 									className={cn(
-										"h-6 rounded-sm border px-1.5 text-xs tabular-nums transition-colors",
+										"flex w-full items-center justify-between rounded-sm px-1.5 py-1 text-xs transition-colors",
 										isActive
-											? "border-primary/40 bg-primary/10 text-foreground"
-											: "border-border text-muted-foreground hover:bg-muted hover:text-foreground",
+											? "bg-primary/10 text-foreground"
+											: "text-muted-foreground hover:bg-muted hover:text-foreground",
 									)}
 								>
-									{preset.label}
+									<span>{preset.label}</span>
+									<span className="tabular-nums">{preset.value}</span>
 								</button>
 							)
 						})}
@@ -130,20 +150,22 @@ export function DurationRangeFilter({
 							aria-label="Min duration (ms)"
 							type="number"
 							min={0}
-							className="h-7 text-xs"
-							placeholder={durationStats ? String(Math.floor(durationStats.minDurationMs)) : "0"}
-							value={minValue ?? ""}
-							onChange={handleMinChange}
+							size="sm"
+							className="text-xs"
+							placeholder="0"
+							value={draft.min}
+							onChange={(e) => handleDraftChange({ ...draft, min: e.target.value })}
 						/>
 						<span className="text-xs text-muted-foreground">–</span>
 						<Input
 							aria-label="Max duration (ms)"
 							type="number"
 							min={0}
-							className="h-7 text-xs"
-							placeholder={durationStats ? String(Math.ceil(durationStats.maxDurationMs)) : "max"}
-							value={maxValue ?? ""}
-							onChange={handleMaxChange}
+							size="sm"
+							className="text-xs"
+							placeholder="max"
+							value={draft.max}
+							onChange={(e) => handleDraftChange({ ...draft, max: e.target.value })}
 						/>
 						<span className="text-xs text-muted-foreground">ms</span>
 					</div>
@@ -151,6 +173,16 @@ export function DurationRangeFilter({
 			</CollapsibleContent>
 		</Collapsible>
 	)
+}
+
+function toText(value: number | undefined): string {
+	return value === undefined ? "" : String(value)
+}
+
+function fromText(text: string): number | undefined {
+	if (text.trim() === "") return undefined
+	const value = Number(text)
+	return Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
 function formatRange(minValue: number | undefined, maxValue: number | undefined): string {
