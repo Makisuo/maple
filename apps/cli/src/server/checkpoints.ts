@@ -31,13 +31,188 @@ const OPERATION_FORMAT_VERSION = 1
 const RESTORE_TRANSACTION_FORMAT_VERSION = 1
 const RESET_TRANSACTION_FORMAT_VERSION = 1
 const CHECKPOINT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const RESETTABLE_CHDB_ENTRIES = new Set(["data", "metadata", "store", "tmp"])
+const RESETTABLE_CHDB_ENTRIES = new Set(["data", "metadata", "status", "store", "tmp"])
 export const CHECKPOINT_REOPEN_PROBE_ENV = "MAPLE_INTERNAL_CHECKPOINT_REOPEN_DATA_DIR"
 
-export class CheckpointError extends Schema.TaggedErrorClass<CheckpointError>()(
-	"@maple/cli/CheckpointError",
-	{ message: Schema.String },
+const CheckpointUuid = Schema.String.check(Schema.isPattern(CHECKPOINT_ID))
+
+// Plain-string validation helpers used by the archive seams (pins, maintenance
+// lock, deterministic scratch dirs), which deal in journal-recorded string ids
+// rather than the branded checkpoint schema types above.
+const validateId = (value: string, kind: string): string => {
+	if (!CHECKPOINT_ID.test(value)) throw new Error(`invalid ${kind} ID: ${value}`)
+	return value.toLowerCase()
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const requiredString = (record: Record<string, unknown>, key: string): string => {
+	const value = record[key]
+	if (typeof value !== "string" || value.length === 0) throw new Error(`invalid ${key}`)
+	return value
+}
+
+export const CheckpointId = CheckpointUuid.pipe(Schema.brand("@maple/cli/CheckpointId"))
+export type CheckpointId = Schema.Schema.Type<typeof CheckpointId>
+
+export const CheckpointOperationId = CheckpointUuid.pipe(Schema.brand("@maple/cli/CheckpointOperationId"))
+export type CheckpointOperationId = Schema.Schema.Type<typeof CheckpointOperationId>
+
+export const CheckpointQuarantineId = CheckpointUuid.pipe(Schema.brand("@maple/cli/CheckpointQuarantineId"))
+export type CheckpointQuarantineId = Schema.Schema.Type<typeof CheckpointQuarantineId>
+
+const IsoDateTime = Schema.String.check(
+	Schema.makeFilter((value: string) => Number.isFinite(Date.parse(value)), {
+		description: "Expected an ISO date-time string",
+	}),
+)
+const NonNegativeInt = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+const CheckpointValidationSchema = Schema.Struct({
+	validatedAt: IsoDateTime,
+	traces: NonNegativeInt,
+	logs: NonNegativeInt,
+	metricsSum: NonNegativeInt,
+	metricsGauge: NonNegativeInt,
+	metricsHistogram: NonNegativeInt,
+	metricsExponentialHistogram: NonNegativeInt,
+	materializedViews: NonNegativeInt,
+})
+
+export type CheckpointValidation = Schema.Schema.Type<typeof CheckpointValidationSchema>
+
+const CheckpointManifestSchema = Schema.Struct({
+	formatVersion: Schema.Literal(MANIFEST_FORMAT_VERSION),
+	checkpointId: CheckpointId,
+	operationId: CheckpointOperationId,
+	mapleVersion: Schema.String,
+	chdbVersion: Schema.String,
+	schemaFingerprint: Schema.String,
+	createdAt: IsoDateTime,
+	sourceDataDir: Schema.String,
+	backupRelativePath: Schema.String,
+	backupBytes: NonNegativeInt,
+	validation: CheckpointValidationSchema,
+})
+
+export type CheckpointManifest = Schema.Schema.Type<typeof CheckpointManifestSchema>
+
+const CheckpointStateSchema = Schema.Struct({
+	formatVersion: Schema.Literal(STATE_FORMAT_VERSION),
+	revision: CheckpointOperationId,
+	current: CheckpointId,
+	previous: Schema.NullOr(CheckpointId),
+	committedAt: IsoDateTime,
+})
+
+export type CheckpointState = Schema.Schema.Type<typeof CheckpointStateSchema>
+
+const CheckpointOperationPhase = Schema.Literals([
+	"intent",
+	"backup-complete",
+	"manifest-complete",
+	"pointer-complete",
+	"retention-complete",
+])
+const RestoreTransactionPhase = Schema.Literals([
+	"intent",
+	"restore-ready",
+	"old-quarantined",
+	"new-live",
+	"markers-committed",
+])
+const ResetTransactionPhase = Schema.Literals(["intent", "live-cleared", "markers-cleared"])
+const ResetTarget = Schema.Literals(["data", "metadata", "status", "store", "tmp"])
+
+const CheckpointOperationSchema = Schema.Struct({
+	formatVersion: Schema.Literal(OPERATION_FORMAT_VERSION),
+	operationId: CheckpointOperationId,
+	checkpointId: CheckpointId,
+	baseRevision: Schema.NullOr(CheckpointOperationId),
+	baseCurrent: Schema.NullOr(CheckpointId),
+	basePrevious: Schema.NullOr(CheckpointId),
+	phase: CheckpointOperationPhase,
+	startedAt: IsoDateTime,
+})
+
+type CheckpointOperation = Schema.Schema.Type<typeof CheckpointOperationSchema>
+
+const MaintenanceOwnerSchema = Schema.Struct({
+	formatVersion: Schema.Literal(1),
+	operationId: CheckpointOperationId,
+	pid: NonNegativeInt,
+	startedAt: IsoDateTime,
+})
+
+type MaintenanceOwner = Schema.Schema.Type<typeof MaintenanceOwnerSchema>
+
+const RestoreTransactionSchema = Schema.Struct({
+	formatVersion: Schema.Literal(RESTORE_TRANSACTION_FORMAT_VERSION),
+	operationId: CheckpointOperationId,
+	checkpointId: CheckpointId,
+	quarantineId: CheckpointQuarantineId,
+	phase: RestoreTransactionPhase,
+	createdAt: IsoDateTime,
+	validation: Schema.NullOr(CheckpointValidationSchema),
+})
+
+type RestoreTransaction = Schema.Schema.Type<typeof RestoreTransactionSchema>
+
+const ResetTransactionSchema = Schema.Struct({
+	formatVersion: Schema.Literal(RESET_TRANSACTION_FORMAT_VERSION),
+	operationId: CheckpointOperationId,
+	dataDir: Schema.String,
+	targets: Schema.Array(ResetTarget),
+	phase: ResetTransactionPhase,
+	createdAt: IsoDateTime,
+})
+
+type ResetTransaction = Schema.Schema.Type<typeof ResetTransactionSchema>
+
+const RetirementRecordSchema = Schema.Struct({
+	formatVersion: Schema.Literal(1),
+	retirementId: CheckpointOperationId,
+	checkpointId: CheckpointId,
+	stateRevision: CheckpointOperationId,
+})
+
+const RestoreReadySchema = Schema.Struct({
+	formatVersion: Schema.Literal(1),
+	operationId: CheckpointOperationId,
+	checkpointId: CheckpointId,
+})
+
+const checkpointErrorFields = {
+	dataDir: Schema.String,
+	operationId: CheckpointOperationId,
+	message: Schema.String,
+	cause: Schema.String,
+}
+
+export class CheckpointCreateError extends Schema.TaggedErrorClass<CheckpointCreateError>()(
+	"@maple/cli/CheckpointCreateError",
+	{ ...checkpointErrorFields, checkpointId: CheckpointId },
 ) {}
+
+export class CheckpointRecoveryError extends Schema.TaggedErrorClass<CheckpointRecoveryError>()(
+	"@maple/cli/CheckpointRecoveryError",
+	checkpointErrorFields,
+) {}
+
+export class CheckpointResetError extends Schema.TaggedErrorClass<CheckpointResetError>()(
+	"@maple/cli/CheckpointResetError",
+	checkpointErrorFields,
+) {}
+
+export class CheckpointRestoreError extends Schema.TaggedErrorClass<CheckpointRestoreError>()(
+	"@maple/cli/CheckpointRestoreError",
+	{ ...checkpointErrorFields, selector: Schema.String },
+) {}
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+const errorCause = (error: unknown): string =>
+	error instanceof Error ? (error.stack ?? error.message) : String(error)
 
 export interface CheckpointOptions {
 	readonly dataDir: string
@@ -45,87 +220,12 @@ export interface CheckpointOptions {
 	readonly faults?: DurabilityFaults
 }
 
-export interface CheckpointValidation {
-	readonly validatedAt: string
-	readonly traces: number
-	readonly logs: number
-	readonly metricsSum: number
-	readonly metricsGauge: number
-	readonly metricsHistogram: number
-	readonly metricsExponentialHistogram: number
-	readonly materializedViews: number
-}
-
-export interface CheckpointManifest {
-	readonly formatVersion: 1
-	readonly checkpointId: string
-	readonly operationId: string
-	readonly mapleVersion: string
-	readonly chdbVersion: string
-	readonly schemaFingerprint: string
-	readonly createdAt: string
-	readonly sourceDataDir: string
-	readonly backupRelativePath: string
-	readonly backupBytes: number
-	readonly validation: CheckpointValidation
-}
-
-export interface CheckpointState {
-	readonly formatVersion: 1
-	readonly revision: string
-	readonly current: string
-	readonly previous: string | null
-	readonly committedAt: string
-}
-
 export interface ResolvedCheckpoint {
-	readonly checkpointId: string
+	readonly checkpointId: CheckpointId
 	readonly snapshotDir: string
 	readonly backupDir: string
 	readonly backupSqlPath: string
 	readonly manifest: CheckpointManifest
-}
-
-interface CheckpointOperation {
-	readonly formatVersion: 1
-	readonly operationId: string
-	readonly checkpointId: string
-	readonly baseRevision: string | null
-	readonly baseCurrent: string | null
-	readonly basePrevious: string | null
-	readonly phase:
-		| "intent"
-		| "backup-complete"
-		| "manifest-complete"
-		| "pointer-complete"
-		| "retention-complete"
-	readonly startedAt: string
-}
-
-interface MaintenanceOwner {
-	readonly formatVersion: 1
-	readonly operationId: string
-	readonly pid: number
-	readonly startedAt: string
-}
-
-interface RestoreTransaction {
-	readonly formatVersion: 1
-	readonly operationId: string
-	readonly checkpointId: string
-	readonly quarantineId: string
-	readonly phase: "intent" | "restore-ready" | "old-quarantined" | "new-live" | "markers-committed"
-	readonly createdAt: string
-	readonly validation: CheckpointValidation | null
-}
-
-interface ResetTransaction {
-	readonly formatVersion: 1
-	readonly operationId: string
-	readonly dataDir: string
-	readonly targets: ReadonlyArray<string>
-	readonly phase: "intent" | "live-cleared" | "markers-cleared"
-	readonly createdAt: string
 }
 
 export interface RestoreRecoveryFaults {
@@ -156,62 +256,62 @@ export const checkpointPinsRoot = (dataDir: string): string => join(checkpointRo
 export const checkpointQuarantineRoot = (dataDir: string): string =>
 	join(checkpointRoot(dataDir), "quarantine")
 export const checkpointRetiringRoot = (dataDir: string): string => join(checkpointRoot(dataDir), "retiring")
-export const checkpointSnapshotDir = (dataDir: string, checkpointId: string): string =>
-	join(checkpointSnapshotsRoot(dataDir), validateId(checkpointId, "checkpoint"))
+
+const decodeCheckpointId = Schema.decodeUnknownSync(CheckpointId)
+const decodeCheckpointOperationId = Schema.decodeUnknownSync(CheckpointOperationId)
+const decodeCheckpointQuarantineId = Schema.decodeUnknownSync(CheckpointQuarantineId)
+
+const validateCheckpointId = (value: unknown, kind = "checkpoint"): CheckpointId => {
+	try {
+		return decodeCheckpointId(value)
+	} catch {
+		throw new Error(`invalid ${kind} ID: ${String(value)}`)
+	}
+}
+
+const validateOperationId = (value: unknown, kind = "operation"): CheckpointOperationId => {
+	try {
+		return decodeCheckpointOperationId(value)
+	} catch {
+		throw new Error(`invalid ${kind} ID: ${String(value)}`)
+	}
+}
+
+const validateQuarantineId = (value: unknown): CheckpointQuarantineId => {
+	try {
+		return decodeCheckpointQuarantineId(value)
+	} catch {
+		throw new Error(`invalid quarantine ID: ${String(value)}`)
+	}
+}
+
+export const checkpointSnapshotDir = (dataDir: string, checkpointId: CheckpointId): string =>
+	join(checkpointSnapshotsRoot(dataDir), checkpointId)
 
 const maintenanceLockPath = (dataDir: string): string => `${resolve(dataDir)}.maple-maintenance-lock`
 export const restoreTransactionPath = (dataDir: string): string =>
 	`${resolve(dataDir)}.restore-transaction.json`
 export const resetTransactionPath = (dataDir: string): string => `${resolve(dataDir)}.reset-transaction.json`
-export const restoreRootPath = (dataDir: string, operationId: string): string =>
-	`${resolve(dataDir)}.restore-${validateId(operationId, "restore operation")}`
-export const restoreDataPath = (dataDir: string, operationId: string): string =>
+export const restoreRootPath = (dataDir: string, operationId: CheckpointOperationId): string =>
+	`${resolve(dataDir)}.restore-${operationId}`
+export const restoreDataPath = (dataDir: string, operationId: CheckpointOperationId): string =>
 	join(restoreRootPath(dataDir, operationId), "data")
-export const restoreQuarantinePath = (dataDir: string, operationId: string, quarantineId: string): string =>
-	`${resolve(dataDir)}.quarantine-${validateId(operationId, "restore operation")}-${validateId(
-		quarantineId,
-		"quarantine",
-	)}`
-const operationDir = (dataDir: string, operationId: string): string =>
-	join(checkpointOperationsRoot(dataDir), `checkpoint-${validateId(operationId, "operation")}`)
-const operationPath = (dataDir: string, operationId: string): string =>
+export const restoreQuarantinePath = (
+	dataDir: string,
+	operationId: CheckpointOperationId,
+	quarantineId: CheckpointQuarantineId,
+): string => `${resolve(dataDir)}.quarantine-${operationId}-${quarantineId}`
+const operationDir = (dataDir: string, operationId: CheckpointOperationId): string =>
+	join(checkpointOperationsRoot(dataDir), `checkpoint-${operationId}`)
+const operationPath = (dataDir: string, operationId: CheckpointOperationId): string =>
 	join(operationDir(dataDir, operationId), "intent.json")
-const snapshotManifestPath = (dataDir: string, checkpointId: string): string =>
+const snapshotManifestPath = (dataDir: string, checkpointId: CheckpointId): string =>
 	join(checkpointSnapshotDir(dataDir, checkpointId), "manifest.json")
-const snapshotBackupDir = (dataDir: string, checkpointId: string): string =>
+const snapshotBackupDir = (dataDir: string, checkpointId: CheckpointId): string =>
 	join(checkpointSnapshotDir(dataDir, checkpointId), "backup")
-const snapshotBackupRelativePath = (checkpointId: string): string =>
-	`snapshots/${validateId(checkpointId, "checkpoint")}/backup`
-const snapshotBackupSqlPath = (checkpointId: string): string =>
+const snapshotBackupRelativePath = (checkpointId: CheckpointId): string => `snapshots/${checkpointId}/backup`
+const snapshotBackupSqlPath = (checkpointId: CheckpointId): string =>
 	`backups/${snapshotBackupRelativePath(checkpointId)}`
-
-const validateId = (value: string, kind: string): string => {
-	if (!CHECKPOINT_ID.test(value)) throw new Error(`invalid ${kind} ID: ${value}`)
-	return value.toLowerCase()
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null && !Array.isArray(value)
-
-const requiredString = (record: Record<string, unknown>, key: string): string => {
-	const value = record[key]
-	if (typeof value !== "string" || value.length === 0) throw new Error(`invalid ${key}`)
-	return value
-}
-
-const requiredCount = (record: Record<string, unknown>, key: string): number => {
-	const value = record[key]
-	if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-		throw new Error(`invalid ${key}`)
-	}
-	return value
-}
-
-const requiredIso = (record: Record<string, unknown>, key: string): string => {
-	const value = requiredString(record, key)
-	if (!Number.isFinite(Date.parse(value))) throw new Error(`invalid ${key}`)
-	return value
-}
 
 const assertContained = (root: string, candidate: string, label: string): string => {
 	const absoluteRoot = resolve(root)
@@ -313,29 +413,65 @@ export const writeBackupConfig = (path: string, sourceDataDir?: string): void =>
 	)
 }
 
-export class LocalQueryError extends Error {
-	readonly status: number
-	readonly detail: string
+export class LocalQueryError extends Schema.TaggedErrorClass<LocalQueryError>()(
+	"@maple/cli/LocalQueryError",
+	{
+		status: NonNegativeInt,
+		detail: Schema.String,
+		message: Schema.String,
+		cause: Schema.String,
+	},
+) {}
 
-	constructor(status: number, detail: string) {
-		super(`local query failed (${status})${detail ? `: ${detail}` : ""}`)
-		this.name = "LocalQueryError"
-		this.status = status
-		this.detail = detail
-	}
-}
-
-const postLocalQuery = async (port: number, sql: string): Promise<unknown> => {
-	const response = await fetch(`http://127.0.0.1:${port}/local/query`, {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ sql }),
+const localQueryError = (status: number, detail: string, cause = detail): LocalQueryError =>
+	new LocalQueryError({
+		status,
+		detail,
+		message: `local query failed (${status})${detail ? `: ${detail}` : ""}`,
+		cause,
 	})
-	if (!response.ok) {
-		const detail = await response.text().catch(() => "")
-		throw new LocalQueryError(response.status, detail)
-	}
-	return response.json()
+
+const postLocalQuery = (port: number, sql: string): Effect.Effect<unknown, LocalQueryError> => {
+	const url = `http://127.0.0.1:${port}/local/query`
+	return Effect.gen(function* () {
+		const response = yield* Effect.tryPromise({
+			try: (signal) =>
+				fetch(url, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ sql }),
+					signal,
+				}),
+			catch: (error) => localQueryError(0, errorMessage(error), errorCause(error)),
+		})
+		yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
+		if (!response.ok) {
+			const detail = yield* Effect.tryPromise({
+				try: () => response.text(),
+				catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
+			})
+			return yield* localQueryError(response.status, detail)
+		}
+		return yield* Effect.tryPromise({
+			try: () => response.json() as Promise<unknown>,
+			catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
+		})
+	}).pipe(
+		Effect.timeout("30 seconds"),
+		Effect.catchTag("TimeoutError", () =>
+			Effect.fail(localQueryError(0, "local checkpoint query timed out after 30 seconds")),
+		),
+		Effect.withSpan("CheckpointService.postLocalQuery", {
+			kind: "client",
+			attributes: {
+				"peer.service": "maple-local",
+				"http.request.method": "POST",
+				"server.address": "127.0.0.1",
+				"server.port": port,
+				"url.full": url,
+			},
+		}),
+	)
 }
 
 export const isMissingBackupConfigurationError = (error: unknown): boolean => {
@@ -356,16 +492,25 @@ export const isMissingBackupConfigurationError = (error: unknown): boolean => {
 	return backupSpecific
 }
 
+const JsonRow = Schema.Record(Schema.String, Schema.Unknown)
+const decodeJsonRow = Schema.decodeUnknownSync(JsonRow)
+
 const readJsonRows = (text: string): ReadonlyArray<Record<string, unknown>> =>
 	text
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line.length > 0)
-		.map((line) => JSON.parse(line) as Record<string, unknown>)
+		.map((line) => {
+			try {
+				return decodeJsonRow(JSON.parse(line) as unknown)
+			} catch (error) {
+				throw new Error(`invalid JSONEachRow result: ${errorMessage(error)}`)
+			}
+		})
 
 const countFrom = (rows: ReadonlyArray<Record<string, unknown>>): number => {
 	const row = rows[0]
-	if (!row) return 0
+	if (!row) throw new Error("count query returned no rows")
 	const value = row["count()"] ?? row.count
 	const count = typeof value === "number" ? value : Number(value ?? 0)
 	if (!Number.isSafeInteger(count) || count < 0) throw new Error(`invalid count result: ${value}`)
@@ -430,16 +575,10 @@ const dirSize = async (path: string): Promise<number> => {
 }
 
 const parseValidation = (value: unknown): CheckpointValidation => {
-	if (!isRecord(value)) throw new Error("invalid validation")
-	return {
-		validatedAt: requiredIso(value, "validatedAt"),
-		traces: requiredCount(value, "traces"),
-		logs: requiredCount(value, "logs"),
-		metricsSum: requiredCount(value, "metricsSum"),
-		metricsGauge: requiredCount(value, "metricsGauge"),
-		metricsHistogram: requiredCount(value, "metricsHistogram"),
-		metricsExponentialHistogram: requiredCount(value, "metricsExponentialHistogram"),
-		materializedViews: requiredCount(value, "materializedViews"),
+	try {
+		return Schema.decodeUnknownSync(CheckpointValidationSchema)(value)
+	} catch (error) {
+		throw new Error(`invalid checkpoint validation: ${errorMessage(error)}`)
 	}
 }
 
@@ -494,38 +633,26 @@ const validateRestoredDatabaseInFreshProcess = (
 
 export const parseCheckpointManifest = (
 	value: unknown,
-	expectedCheckpointId?: string,
+	expectedCheckpointId?: CheckpointId,
 	expectedSourceDataDir?: string,
 ): CheckpointManifest => {
-	if (!isRecord(value) || value.formatVersion !== MANIFEST_FORMAT_VERSION) {
-		throw new Error("unsupported or malformed checkpoint manifest")
+	let manifest: CheckpointManifest
+	try {
+		manifest = Schema.decodeUnknownSync(CheckpointManifestSchema)(value)
+	} catch (error) {
+		throw new Error(`unsupported or malformed checkpoint manifest: ${errorMessage(error)}`)
 	}
-	const checkpointId = validateId(requiredString(value, "checkpointId"), "checkpoint")
-	if (expectedCheckpointId && checkpointId !== validateId(expectedCheckpointId, "checkpoint")) {
+	if (expectedCheckpointId && manifest.checkpointId !== expectedCheckpointId) {
 		throw new Error("checkpoint manifest ID does not match its snapshot directory")
 	}
-	const operationId = validateId(requiredString(value, "operationId"), "operation")
-	const sourceDataDir = requiredString(value, "sourceDataDir")
-	if (!isAbsolute(sourceDataDir)) throw new Error("checkpoint sourceDataDir must be absolute")
-	if (expectedSourceDataDir && resolve(sourceDataDir) !== resolve(expectedSourceDataDir)) {
+	if (!isAbsolute(manifest.sourceDataDir)) {
+		throw new Error("checkpoint sourceDataDir must be absolute")
+	}
+	if (expectedSourceDataDir && resolve(manifest.sourceDataDir) !== resolve(expectedSourceDataDir)) {
 		throw new Error("checkpoint sourceDataDir does not match its configured owner")
 	}
-	const backupRelativePath = requiredString(value, "backupRelativePath")
-	if (backupRelativePath !== snapshotBackupRelativePath(checkpointId)) {
+	if (manifest.backupRelativePath !== snapshotBackupRelativePath(manifest.checkpointId)) {
 		throw new Error("checkpoint backup path does not match its immutable ID")
-	}
-	const manifest: CheckpointManifest = {
-		formatVersion: 1,
-		checkpointId,
-		operationId,
-		mapleVersion: requiredString(value, "mapleVersion"),
-		chdbVersion: requiredString(value, "chdbVersion"),
-		schemaFingerprint: requiredString(value, "schemaFingerprint"),
-		createdAt: requiredIso(value, "createdAt"),
-		sourceDataDir,
-		backupRelativePath,
-		backupBytes: requiredCount(value, "backupBytes"),
-		validation: parseValidation(value.validation),
 	}
 	if (manifest.chdbVersion !== CHDB_VERSION) {
 		throw new Error(
@@ -541,30 +668,16 @@ export const parseCheckpointManifest = (
 }
 
 export const parseCheckpointState = (value: unknown): CheckpointState => {
-	if (!isRecord(value) || value.formatVersion !== STATE_FORMAT_VERSION) {
-		throw new Error("unsupported or malformed checkpoint state")
+	let state: CheckpointState
+	try {
+		state = Schema.decodeUnknownSync(CheckpointStateSchema)(value)
+	} catch (error) {
+		throw new Error(`unsupported or malformed checkpoint state: ${errorMessage(error)}`)
 	}
-	const current = validateId(requiredString(value, "current"), "current checkpoint")
-	const previousValue = value.previous
-	const previous =
-		previousValue === null
-			? null
-			: validateId(
-					typeof previousValue === "string"
-						? previousValue
-						: (() => {
-								throw new Error("invalid previous checkpoint")
-							})(),
-					"previous checkpoint",
-				)
-	if (previous === current) throw new Error("checkpoint current and previous IDs must differ")
-	return {
-		formatVersion: 1,
-		revision: validateId(requiredString(value, "revision"), "state revision"),
-		current,
-		previous,
-		committedAt: requiredIso(value, "committedAt"),
+	if (state.previous === state.current) {
+		throw new Error("checkpoint current and previous IDs must differ")
 	}
+	return state
 }
 
 const readStateFileOptional = async (dataDir: string): Promise<CheckpointState | null> => {
@@ -625,23 +738,25 @@ export const readCheckpointState = async (dataDir: string): Promise<CheckpointSt
 	return state
 }
 
-const resolveCheckpointById = async (dataDir: string, checkpointId: string): Promise<ResolvedCheckpoint> => {
+const resolveCheckpointById = async (
+	dataDir: string,
+	checkpointId: CheckpointId,
+): Promise<ResolvedCheckpoint> => {
 	await assertCheckpointInfrastructureSafe(dataDir)
-	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
-	const snapshotDir = checkpointSnapshotDir(dataDir, validatedCheckpointId)
+	const snapshotDir = checkpointSnapshotDir(dataDir, checkpointId)
 	const snapshotsRoot = checkpointSnapshotsRoot(dataDir)
 	await assertNoSymlink(checkpointRoot(dataDir), snapshotsRoot)
 	await assertNoSymlink(snapshotsRoot, snapshotDir)
-	await assertNoSymlink(snapshotsRoot, snapshotManifestPath(dataDir, validatedCheckpointId))
-	await assertNoSymlink(snapshotsRoot, snapshotBackupDir(dataDir, validatedCheckpointId))
+	await assertNoSymlink(snapshotsRoot, snapshotManifestPath(dataDir, checkpointId))
+	await assertNoSymlink(snapshotsRoot, snapshotBackupDir(dataDir, checkpointId))
 	await assertRealDirectory(snapshotDir, "checkpoint snapshot")
-	await assertRealFile(snapshotManifestPath(dataDir, validatedCheckpointId), "checkpoint manifest")
+	await assertRealFile(snapshotManifestPath(dataDir, checkpointId), "checkpoint manifest")
 	const manifest = parseCheckpointManifest(
-		JSON.parse(await readFile(snapshotManifestPath(dataDir, validatedCheckpointId), "utf8")),
-		validatedCheckpointId,
+		JSON.parse(await readFile(snapshotManifestPath(dataDir, checkpointId), "utf8")),
+		checkpointId,
 		dataDir,
 	)
-	const backupDir = snapshotBackupDir(dataDir, validatedCheckpointId)
+	const backupDir = snapshotBackupDir(dataDir, checkpointId)
 	await assertRealDirectory(backupDir, "checkpoint backup")
 	const actualBackupBytes = await dirSize(backupDir)
 	if (actualBackupBytes !== manifest.backupBytes) {
@@ -650,33 +765,29 @@ const resolveCheckpointById = async (dataDir: string, checkpointId: string): Pro
 		)
 	}
 	return {
-		checkpointId: validatedCheckpointId,
+		checkpointId,
 		snapshotDir,
 		backupDir,
-		backupSqlPath: snapshotBackupSqlPath(validatedCheckpointId),
+		backupSqlPath: snapshotBackupSqlPath(checkpointId),
 		manifest,
 	}
 }
 
 export const resolveCheckpoint = async (
 	dataDir: string,
-	selector: "current" | "previous" | string = "current",
+	selector: "current" | "previous" | CheckpointId = "current",
 	knownState?: CheckpointState,
 ): Promise<ResolvedCheckpoint> => {
 	const state = knownState ?? (await readCheckpointState(dataDir))
 	const checkpointId =
-		selector === "current"
-			? state.current
-			: selector === "previous"
-				? state.previous
-				: validateId(selector, "checkpoint")
+		selector === "current" ? state.current : selector === "previous" ? state.previous : selector
 	if (!checkpointId) throw new Error("no previous checkpoint is selected")
 	return resolveCheckpointById(dataDir, checkpointId)
 }
 
 export const readCheckpointManifest = async (
 	dataDir: string,
-	selector: "current" | "previous" | string = "current",
+	selector: "current" | "previous" | CheckpointId = "current",
 ): Promise<CheckpointManifest> => (await resolveCheckpoint(dataDir, selector)).manifest
 
 const restoreResolvedInto = async (
@@ -730,7 +841,7 @@ export const withRestoredCheckpoint = async <A>(
 		readonly beforeRestore?: (scratchDataDir: string) => void | Promise<void>
 	},
 	use: (restored: {
-		readonly checkpointId: string
+		readonly checkpointId: CheckpointId
 		readonly manifest: CheckpointManifest
 		readonly scratchDataDir: string
 		readonly db: Chdb
@@ -791,33 +902,8 @@ export const withRestoredCheckpoint = async <A>(
 }
 
 const parseOperation = (value: unknown): CheckpointOperation => {
-	if (!isRecord(value) || value.formatVersion !== OPERATION_FORMAT_VERSION) {
-		throw new Error("unsupported or malformed checkpoint operation")
-	}
-	const phase = requiredString(value, "phase")
-	if (
-		![
-			"intent",
-			"backup-complete",
-			"manifest-complete",
-			"pointer-complete",
-			"retention-complete",
-		].includes(phase)
-	) {
-		throw new Error("invalid checkpoint operation phase")
-	}
-	const baseRevision =
-		value.baseRevision === null
-			? null
-			: validateId(requiredString(value, "baseRevision"), "base state revision")
-	const baseCurrent =
-		value.baseCurrent === null
-			? null
-			: validateId(requiredString(value, "baseCurrent"), "base current checkpoint")
-	const basePrevious =
-		value.basePrevious === null
-			? null
-			: validateId(requiredString(value, "basePrevious"), "base previous checkpoint")
+	const operation = Schema.decodeUnknownSync(CheckpointOperationSchema)(value)
+	const { baseRevision, baseCurrent, basePrevious } = operation
 	if ((baseRevision === null) !== (baseCurrent === null)) {
 		throw new Error("checkpoint operation has an inconsistent base state")
 	}
@@ -827,16 +913,7 @@ const parseOperation = (value: unknown): CheckpointOperation => {
 	if (baseCurrent !== null && baseCurrent === basePrevious) {
 		throw new Error("checkpoint operation base current and previous must differ")
 	}
-	return {
-		formatVersion: 1,
-		operationId: validateId(requiredString(value, "operationId"), "operation"),
-		checkpointId: validateId(requiredString(value, "checkpointId"), "checkpoint"),
-		baseRevision,
-		baseCurrent,
-		basePrevious,
-		phase: phase as CheckpointOperation["phase"],
-		startedAt: requiredIso(value, "startedAt"),
-	}
+	return operation
 }
 
 const writeOperation = async (
@@ -848,7 +925,7 @@ const writeOperation = async (
 const preserveCompletedOperation = async (
 	dataDir: string,
 	operationDirPath: string,
-	operationId: string,
+	operationId: CheckpointOperationId,
 	faults: DurabilityFaults = {},
 ): Promise<void> => {
 	const quarantineRoot = checkpointQuarantineRoot(dataDir)
@@ -857,10 +934,7 @@ const preserveCompletedOperation = async (
 		await assertRealDirectory(quarantineRoot, "checkpoint quarantine")
 	}
 	await ensurePrivateDirectory(quarantineRoot)
-	const preserved = join(
-		quarantineRoot,
-		`completed-operation-${validateId(operationId, "operation")}-${randomUUID()}`,
-	)
+	const preserved = join(quarantineRoot, `completed-operation-${operationId}-${randomUUID()}`)
 	await durableRename(operationDirPath, preserved, faults)
 	await faults.afterCompletedOperationPreserved?.(preserved)
 }
@@ -874,7 +948,10 @@ const processIsAlive = (pid: number): boolean => {
 	}
 }
 
-const acquireMaintenance = async (dataDir: string, operationId: string): Promise<() => Promise<void>> => {
+const acquireMaintenance = async (
+	dataDir: string,
+	operationId: CheckpointOperationId,
+): Promise<() => Promise<void>> => {
 	const lockPath = maintenanceLockPath(dataDir)
 	if (existsSync(lockPath)) await assertRealDirectory(lockPath, "maintenance lock")
 	try {
@@ -885,14 +962,9 @@ const acquireMaintenance = async (dataDir: string, operationId: string): Promise
 		try {
 			const ownerPath = join(lockPath, "owner.json")
 			await assertRealFile(ownerPath, "maintenance lock owner")
-			const parsed = JSON.parse(readFileSync(ownerPath, "utf8")) as unknown
-			if (!isRecord(parsed) || parsed.formatVersion !== 1) throw new Error("malformed owner")
-			owner = {
-				formatVersion: 1,
-				operationId: validateId(requiredString(parsed, "operationId"), "operation"),
-				pid: requiredCount(parsed, "pid"),
-				startedAt: requiredIso(parsed, "startedAt"),
-			}
+			owner = Schema.decodeUnknownSync(MaintenanceOwnerSchema)(
+				JSON.parse(readFileSync(ownerPath, "utf8")),
+			)
 		} catch {
 			throw new Error(`maintenance lock is present but ownership is uncertain: ${lockPath}`)
 		}
@@ -913,18 +985,30 @@ const acquireMaintenance = async (dataDir: string, operationId: string): Promise
 	return async () => {
 		const ownerPath = join(lockPath, "owner.json")
 		await assertRealFile(ownerPath, "maintenance lock owner")
-		const current = JSON.parse(await readFile(ownerPath, "utf8")) as unknown
-		if (
-			!isRecord(current) ||
-			requiredString(current, "operationId") !== operationId ||
-			current.pid !== process.pid
-		) {
+		const current = Schema.decodeUnknownSync(MaintenanceOwnerSchema)(
+			JSON.parse(await readFile(ownerPath, "utf8")),
+		)
+		if (current.operationId !== operationId || current.pid !== process.pid) {
 			throw new Error(`maintenance lock ownership changed unexpectedly: ${lockPath}`)
 		}
 		await rm(lockPath, { recursive: true })
 		await syncDirectory(dirname(lockPath))
 	}
 }
+
+const withMaintenance = <A, E>(
+	dataDir: string,
+	operationId: CheckpointOperationId,
+	onAcquireError: (error: unknown) => E,
+	use: () => Effect.Effect<A, E>,
+): Effect.Effect<A, E> =>
+	Effect.acquireRelease(
+		Effect.tryPromise({
+			try: () => acquireMaintenance(dataDir, operationId),
+			catch: onAcquireError,
+		}),
+		(release) => Effect.promise(release),
+	).pipe(Effect.flatMap(use), Effect.scoped, Effect.uninterruptible)
 
 export const reconcileCheckpointOperations = async (
 	dataDir: string,
@@ -956,7 +1040,10 @@ export const reconcileCheckpointOperations = async (
 	if (!entry.isDirectory() || !entry.name.startsWith("checkpoint-")) {
 		throw new Error(`unrecognized checkpoint operation debris: ${join(operationsRoot, entry.name)}`)
 	}
-	const entryOperationId = validateId(entry.name.slice("checkpoint-".length), "operation directory")
+	const entryOperationId = validateOperationId(
+		entry.name.slice("checkpoint-".length),
+		"operation directory",
+	)
 	const entryDir = join(operationsRoot, entry.name)
 	const intentPath = join(entryDir, "intent.json")
 	await assertNoSymlink(operationsRoot, entryDir)
@@ -1059,7 +1146,7 @@ export const reconcileCheckpointOperations = async (
 	await durableRename(entryDir, join(quarantine, "operation"))
 }
 
-const hasPins = async (dataDir: string, checkpointId: string): Promise<boolean> => {
+const hasPins = async (dataDir: string, checkpointId: CheckpointId): Promise<boolean> => {
 	const path = join(checkpointPinsRoot(dataDir), checkpointId)
 	try {
 		await assertNoSymlink(checkpointRoot(dataDir), checkpointPinsRoot(dataDir))
@@ -1106,7 +1193,7 @@ export const acquireCheckpointPin = async (
 	const validatedPinId = validateId(pinId, "pin")
 	// A pin on a checkpoint that does not resolve cannot protect anything; force
 	// the caller to pin real, validated state.
-	await resolveCheckpoint(dataDir, validatedCheckpointId)
+	await resolveCheckpoint(dataDir, validateCheckpointId(validatedCheckpointId))
 	const pinsRoot = checkpointPinsRoot(dataDir)
 	const pinDir = join(pinsRoot, validatedCheckpointId)
 	await ensurePrivateDirectory(pinsRoot)
@@ -1208,7 +1295,7 @@ export const withMaintenanceLock = async <A>(
 	operationId: string,
 	fn: () => A | Promise<A>,
 ): Promise<A> => {
-	const release = await acquireMaintenance(dataDir, validateId(operationId, "operation"))
+	const release = await acquireMaintenance(dataDir, validateOperationId(operationId))
 	try {
 		return await fn()
 	} finally {
@@ -1218,31 +1305,29 @@ export const withMaintenanceLock = async <A>(
 
 export const retireCheckpointIfEligible = async (
 	dataDir: string,
-	checkpointId: string | null,
+	checkpointId: CheckpointId | null,
 	state: CheckpointState,
-	retirementId: string = randomUUID(),
+	retirementId: CheckpointOperationId = newCheckpointOperationId(),
 	faults: DurabilityFaults = {},
 ): Promise<string | null> => {
 	if (!checkpointId || state.current === checkpointId || state.previous === checkpointId) return null
-	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
-	if (await hasPins(dataDir, validatedCheckpointId)) return null
-	const validatedRetirementId = validateId(retirementId, "retirement")
+	if (await hasPins(dataDir, checkpointId)) return null
 	const retirementRoot = checkpointRetiringRoot(dataDir)
-	const retirement = join(retirementRoot, `retirement-${validatedRetirementId}`)
+	const retirement = join(retirementRoot, `retirement-${retirementId}`)
 	const retirementIntent = join(retirement, "intent.json")
 	const retirementComplete = join(retirement, "complete.json")
-	const retiredSnapshot = join(retirement, validatedCheckpointId)
+	const retiredSnapshot = join(retirement, checkpointId)
 	if (existsSync(checkpointRetiringRoot(dataDir))) {
 		await assertNoSymlink(checkpointRoot(dataDir), retirementRoot)
 		await assertRealDirectory(retirementRoot, "checkpoint retirement root")
 	}
 	if (!existsSync(retirement)) {
-		await resolveCheckpoint(dataDir, validatedCheckpointId, state)
+		await resolveCheckpoint(dataDir, checkpointId, state)
 		await ensurePrivateDirectory(retirement)
 		await durableJson(retirementIntent, {
 			formatVersion: 1,
-			retirementId: validatedRetirementId,
-			checkpointId: validatedCheckpointId,
+			retirementId,
+			checkpointId,
 			stateRevision: state.revision,
 		})
 		await faults.afterRetirementIntent?.(retirement)
@@ -1251,13 +1336,13 @@ export const retireCheckpointIfEligible = async (
 		await assertRealDirectory(retirement, "checkpoint retirement")
 		await assertNoSymlink(retirement, retirementIntent)
 		await assertRealFile(retirementIntent, "checkpoint retirement intent")
-		const parsed = JSON.parse(await readFile(retirementIntent, "utf8")) as unknown
+		const parsed = Schema.decodeUnknownSync(RetirementRecordSchema)(
+			JSON.parse(await readFile(retirementIntent, "utf8")),
+		)
 		if (
-			!isRecord(parsed) ||
-			parsed.formatVersion !== 1 ||
-			validateId(requiredString(parsed, "retirementId"), "retirement") !== validatedRetirementId ||
-			validateId(requiredString(parsed, "checkpointId"), "checkpoint") !== validatedCheckpointId ||
-			validateId(requiredString(parsed, "stateRevision"), "state revision") !== state.revision
+			parsed.retirementId !== retirementId ||
+			parsed.checkpointId !== checkpointId ||
+			parsed.stateRevision !== state.revision
 		) {
 			throw new Error(`checkpoint retirement identity mismatch: ${retirement}`)
 		}
@@ -1265,25 +1350,22 @@ export const retireCheckpointIfEligible = async (
 	if (existsSync(retirementComplete)) {
 		await assertNoSymlink(retirement, retirementComplete)
 		await assertRealFile(retirementComplete, "checkpoint retirement completion")
-		const complete = JSON.parse(await readFile(retirementComplete, "utf8")) as unknown
+		const complete = Schema.decodeUnknownSync(RetirementRecordSchema)(
+			JSON.parse(await readFile(retirementComplete, "utf8")),
+		)
 		if (
-			!isRecord(complete) ||
-			complete.formatVersion !== 1 ||
-			validateId(requiredString(complete, "retirementId"), "retirement") !== validatedRetirementId ||
-			validateId(requiredString(complete, "checkpointId"), "checkpoint") !== validatedCheckpointId ||
-			validateId(requiredString(complete, "stateRevision"), "state revision") !== state.revision
+			complete.retirementId !== retirementId ||
+			complete.checkpointId !== checkpointId ||
+			complete.stateRevision !== state.revision
 		) {
 			throw new Error(`checkpoint retirement completion identity mismatch: ${retirement}`)
 		}
-		if (
-			existsSync(checkpointSnapshotDir(dataDir, validatedCheckpointId)) ||
-			existsSync(retiredSnapshot)
-		) {
+		if (existsSync(checkpointSnapshotDir(dataDir, checkpointId)) || existsSync(retiredSnapshot)) {
 			throw new Error("completed checkpoint retirement still has snapshot data")
 		}
 		return retirement
 	}
-	const source = checkpointSnapshotDir(dataDir, validatedCheckpointId)
+	const source = checkpointSnapshotDir(dataDir, checkpointId)
 	const sourceExists = existsSync(source)
 	const retiredExists = existsSync(retiredSnapshot)
 	if (sourceExists && retiredExists) {
@@ -1301,8 +1383,8 @@ export const retireCheckpointIfEligible = async (
 	}
 	await durableJson(retirementComplete, {
 		formatVersion: 1,
-		retirementId: validatedRetirementId,
-		checkpointId: validatedCheckpointId,
+		retirementId,
+		checkpointId,
 		stateRevision: state.revision,
 	})
 	await faults.afterRetirementComplete?.(retirement)
@@ -1326,13 +1408,13 @@ const removeCompletedRetirement = async (
 	await assertNoSymlink(retirement, complete)
 	await assertRealFile(intent, "checkpoint retirement intent")
 	await assertRealFile(complete, "checkpoint retirement completion")
-	const intentValue = JSON.parse(await readFile(intent, "utf8")) as unknown
-	const completeValue = JSON.parse(await readFile(complete, "utf8")) as unknown
-	if (
-		!isRecord(intentValue) ||
-		!isRecord(completeValue) ||
-		JSON.stringify(intentValue) !== JSON.stringify(completeValue)
-	) {
+	const intentValue = Schema.decodeUnknownSync(RetirementRecordSchema)(
+		JSON.parse(await readFile(intent, "utf8")),
+	)
+	const completeValue = Schema.decodeUnknownSync(RetirementRecordSchema)(
+		JSON.parse(await readFile(complete, "utf8")),
+	)
+	if (JSON.stringify(intentValue) !== JSON.stringify(completeValue)) {
 		throw new Error(`checkpoint retirement records do not match: ${retirement}`)
 	}
 	const cleanup = `${retirement}.cleanup-${randomUUID()}`
@@ -1343,190 +1425,180 @@ const removeCompletedRetirement = async (
 	await faults.afterRetirementCleanupRemoval?.(cleanup)
 }
 
-export const createCheckpoint = (
-	options: CheckpointOptions,
-): Effect.Effect<
-	{
-		readonly checkpointId: string
-		readonly path: string
-		readonly state: CheckpointState
-		readonly manifest: CheckpointManifest
-	},
-	CheckpointError
-> =>
-	Effect.tryPromise({
-		try: async () => {
-			const operationId = randomUUID()
-			const checkpointId = randomUUID()
-			const release = await acquireMaintenance(options.dataDir, operationId)
-			try {
-				assertCheckpointRootSafe(options.dataDir)
-				await assertCheckpointInfrastructureSafe(options.dataDir)
-				assertNoLegacyLayout(options.dataDir)
-				await reconcileCheckpointOperations(options.dataDir, options.faults)
-				const oldState = await readStateFileOptional(options.dataDir)
-				if (!oldState && (await checkpointLikePaths(options.dataDir)).length > 0) {
-					throw new Error(
-						"checkpoint state is missing while checkpoint data exists; refusing to infer selection",
-					)
-				}
-				if (oldState) {
-					await resolveCheckpoint(options.dataDir, oldState.current, oldState)
-					if (oldState.previous) {
-						await resolveCheckpoint(options.dataDir, oldState.previous, oldState)
-					}
-				}
-				for (const path of [
-					checkpointRoot(options.dataDir),
-					checkpointSnapshotsRoot(options.dataDir),
-					checkpointOperationsRoot(options.dataDir),
-					checkpointPinsRoot(options.dataDir),
-					checkpointQuarantineRoot(options.dataDir),
-					checkpointRetiringRoot(options.dataDir),
-				]) {
-					await ensurePrivateDirectory(path)
-				}
-				const startedAt = new Date().toISOString()
-				let operation: CheckpointOperation = {
-					formatVersion: 1,
-					operationId,
-					checkpointId,
-					baseRevision: oldState?.revision ?? null,
-					baseCurrent: oldState?.current ?? null,
-					basePrevious: oldState?.previous ?? null,
-					phase: "intent",
-					startedAt,
-				}
-				await writeOperation(options.dataDir, operation, options.faults)
-				const snapshot = checkpointSnapshotDir(options.dataDir, checkpointId)
-				await assertNoSymlink(checkpointSnapshotsRoot(options.dataDir), snapshot)
-				await mkdir(snapshot, { mode: 0o700 })
-				try {
-					await postLocalQuery(
-						options.port,
-						`BACKUP DATABASE default TO Disk('default', '${snapshotBackupSqlPath(checkpointId)}')`,
-					)
-				} catch (error) {
-					if (isMissingBackupConfigurationError(error)) {
+export const createCheckpoint = Effect.fn("CheckpointService.create")(function* (options: CheckpointOptions) {
+	const operationId = newCheckpointOperationId()
+	const checkpointId = newCheckpointId()
+	const createError = (error: unknown): CheckpointCreateError =>
+		new CheckpointCreateError({
+			dataDir: resolve(options.dataDir),
+			operationId,
+			checkpointId,
+			message: errorMessage(error),
+			cause: errorCause(error),
+		})
+	yield* Effect.annotateCurrentSpan({
+		"maple.checkpoint.operation_id": operationId,
+		"maple.checkpoint.id": checkpointId,
+	})
+	return yield* withMaintenance(options.dataDir, operationId, createError, () =>
+		Effect.gen(function* () {
+			const prepared = yield* Effect.tryPromise({
+				try: async () => {
+					assertCheckpointRootSafe(options.dataDir)
+					await assertCheckpointInfrastructureSafe(options.dataDir)
+					assertNoLegacyLayout(options.dataDir)
+					await reconcileCheckpointOperations(options.dataDir, options.faults)
+					const oldState = await readStateFileOptional(options.dataDir)
+					if (!oldState && (await checkpointLikePaths(options.dataDir)).length > 0) {
 						throw new Error(
-							"checkpoints require the local server to be started with `--chdb-config-file` " +
-								"pointing at a ClickHouse backups config",
-							{ cause: error },
+							"checkpoint state is missing while checkpoint data exists; refusing to infer selection",
 						)
 					}
-					throw error
-				}
-				await syncTree(snapshotBackupDir(options.dataDir, checkpointId))
-				operation = { ...operation, phase: "backup-complete" }
-				await writeOperation(options.dataDir, operation, options.faults)
-				const provisionalManifest: CheckpointManifest = {
-					formatVersion: 1,
-					checkpointId,
-					operationId,
-					mapleVersion: MAPLE_VERSION,
-					chdbVersion: CHDB_VERSION,
-					schemaFingerprint: SCHEMA_FINGERPRINT,
-					createdAt: startedAt,
-					sourceDataDir: resolve(options.dataDir),
-					backupRelativePath: snapshotBackupRelativePath(checkpointId),
-					backupBytes: await dirSize(snapshotBackupDir(options.dataDir, checkpointId)),
-					validation: {
-						validatedAt: startedAt,
-						traces: 0,
-						logs: 0,
-						metricsSum: 0,
-						metricsGauge: 0,
-						metricsHistogram: 0,
-						metricsExponentialHistogram: 0,
-						materializedViews: 0,
-					},
-				}
-				const provisional: ResolvedCheckpoint = {
-					checkpointId,
-					snapshotDir: snapshot,
-					backupDir: snapshotBackupDir(options.dataDir, checkpointId),
-					backupSqlPath: snapshotBackupSqlPath(checkpointId),
-					manifest: provisionalManifest,
-				}
-				const validation = await withRestoredCheckpoint(
-					provisional,
-					{ cleanup: "always" },
-					(restored) => restored.validation,
-				)
-				const manifest: CheckpointManifest = { ...provisionalManifest, validation }
-				await durableJson(
-					snapshotManifestPath(options.dataDir, checkpointId),
-					manifest,
-					options.faults,
-				)
-				await syncDirectory(snapshot)
-				operation = { ...operation, phase: "manifest-complete" }
-				await writeOperation(options.dataDir, operation, options.faults)
-				const state: CheckpointState = {
-					formatVersion: 1,
-					revision: operationId,
-					current: checkpointId,
-					previous: oldState?.current ?? null,
-					committedAt: new Date().toISOString(),
-				}
-				await durableJson(checkpointStatePath(options.dataDir), state, options.faults)
-				operation = { ...operation, phase: "pointer-complete" }
-				await writeOperation(options.dataDir, operation, options.faults)
-				const retirement = await retireCheckpointIfEligible(
-					options.dataDir,
-					oldState?.previous ?? null,
-					state,
-					operationId,
-					options.faults,
-				)
-				operation = { ...operation, phase: "retention-complete" }
-				await writeOperation(options.dataDir, operation, options.faults)
-				await removeCompletedRetirement(retirement, options.faults)
-				await preserveCompletedOperation(
-					options.dataDir,
-					operationDir(options.dataDir, operationId),
-					operationId,
-					options.faults,
-				)
-				return { checkpointId, path: snapshot, state, manifest }
-			} finally {
-				await release()
-			}
-		},
-		catch: (error) =>
-			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
-	})
+					if (oldState) {
+						await resolveCheckpoint(options.dataDir, oldState.current, oldState)
+						if (oldState.previous) {
+							await resolveCheckpoint(options.dataDir, oldState.previous, oldState)
+						}
+					}
+					for (const path of [
+						checkpointRoot(options.dataDir),
+						checkpointSnapshotsRoot(options.dataDir),
+						checkpointOperationsRoot(options.dataDir),
+						checkpointPinsRoot(options.dataDir),
+						checkpointQuarantineRoot(options.dataDir),
+						checkpointRetiringRoot(options.dataDir),
+					]) {
+						await ensurePrivateDirectory(path)
+					}
+					const startedAt = new Date().toISOString()
+					let operation: CheckpointOperation = {
+						formatVersion: 1,
+						operationId,
+						checkpointId,
+						baseRevision: oldState?.revision ?? null,
+						baseCurrent: oldState?.current ?? null,
+						basePrevious: oldState?.previous ?? null,
+						phase: "intent",
+						startedAt,
+					}
+					await writeOperation(options.dataDir, operation, options.faults)
+					const snapshot = checkpointSnapshotDir(options.dataDir, checkpointId)
+					await assertNoSymlink(checkpointSnapshotsRoot(options.dataDir), snapshot)
+					await mkdir(snapshot, { mode: 0o700 })
+					return { oldState, operation, snapshot, startedAt }
+				},
+				catch: createError,
+			})
+			yield* postLocalQuery(
+				options.port,
+				`BACKUP DATABASE default TO Disk('default', '${snapshotBackupSqlPath(checkpointId)}')`,
+			).pipe(
+				Effect.mapError((error) =>
+					createError(
+						isMissingBackupConfigurationError(error)
+							? new Error(
+									"checkpoints require the local server to be started with `--chdb-config-file` " +
+										"pointing at a ClickHouse backups config",
+									{ cause: error },
+								)
+							: error,
+					),
+				),
+			)
+			return yield* Effect.tryPromise({
+				try: async () => {
+					const { oldState, snapshot, startedAt } = prepared
+					let { operation } = prepared
+					await syncTree(snapshotBackupDir(options.dataDir, checkpointId))
+					operation = { ...operation, phase: "backup-complete" }
+					await writeOperation(options.dataDir, operation, options.faults)
+					const provisionalManifest: CheckpointManifest = {
+						formatVersion: 1,
+						checkpointId,
+						operationId,
+						mapleVersion: MAPLE_VERSION,
+						chdbVersion: CHDB_VERSION,
+						schemaFingerprint: SCHEMA_FINGERPRINT,
+						createdAt: startedAt,
+						sourceDataDir: resolve(options.dataDir),
+						backupRelativePath: snapshotBackupRelativePath(checkpointId),
+						backupBytes: await dirSize(snapshotBackupDir(options.dataDir, checkpointId)),
+						validation: {
+							validatedAt: startedAt,
+							traces: 0,
+							logs: 0,
+							metricsSum: 0,
+							metricsGauge: 0,
+							metricsHistogram: 0,
+							metricsExponentialHistogram: 0,
+							materializedViews: 0,
+						},
+					}
+					const provisional: ResolvedCheckpoint = {
+						checkpointId,
+						snapshotDir: snapshot,
+						backupDir: snapshotBackupDir(options.dataDir, checkpointId),
+						backupSqlPath: snapshotBackupSqlPath(checkpointId),
+						manifest: provisionalManifest,
+					}
+					const validation = await withRestoredCheckpoint(
+						provisional,
+						{ cleanup: "always" },
+						(restored) => restored.validation,
+					)
+					const manifest: CheckpointManifest = { ...provisionalManifest, validation }
+					await durableJson(
+						snapshotManifestPath(options.dataDir, checkpointId),
+						manifest,
+						options.faults,
+					)
+					await syncDirectory(snapshot)
+					operation = { ...operation, phase: "manifest-complete" }
+					await writeOperation(options.dataDir, operation, options.faults)
+					const state: CheckpointState = {
+						formatVersion: 1,
+						revision: operationId,
+						current: checkpointId,
+						previous: oldState?.current ?? null,
+						committedAt: new Date().toISOString(),
+					}
+					await durableJson(checkpointStatePath(options.dataDir), state, options.faults)
+					operation = { ...operation, phase: "pointer-complete" }
+					await writeOperation(options.dataDir, operation, options.faults)
+					const retirement = await retireCheckpointIfEligible(
+						options.dataDir,
+						oldState?.previous ?? null,
+						state,
+						operationId,
+						options.faults,
+					)
+					operation = { ...operation, phase: "retention-complete" }
+					await writeOperation(options.dataDir, operation, options.faults)
+					await removeCompletedRetirement(retirement, options.faults)
+					await preserveCompletedOperation(
+						options.dataDir,
+						operationDir(options.dataDir, operationId),
+						operationId,
+						options.faults,
+					)
+					return { checkpointId, path: snapshot, state, manifest }
+				},
+				catch: createError,
+			})
+		}),
+	)
+})
 
 const parseResetTransaction = (value: unknown, expectedDataDir: string): ResetTransaction => {
-	if (!isRecord(value) || value.formatVersion !== RESET_TRANSACTION_FORMAT_VERSION) {
-		throw new Error("unsupported or malformed reset transaction")
-	}
-	const phase = requiredString(value, "phase")
-	if (!["intent", "live-cleared", "markers-cleared"].includes(phase)) {
-		throw new Error("invalid reset transaction phase")
-	}
-	const dataDir = requiredString(value, "dataDir")
+	const transaction = Schema.decodeUnknownSync(ResetTransactionSchema)(value)
+	const { dataDir, targets } = transaction
 	if (!isAbsolute(dataDir) || resolve(dataDir) !== resolve(expectedDataDir)) {
 		throw new Error("reset transaction data directory does not match its configured owner")
 	}
-	if (!Array.isArray(value.targets)) throw new Error("invalid reset transaction targets")
-	const targets = value.targets.map((target) => {
-		if (typeof target !== "string" || !RESETTABLE_CHDB_ENTRIES.has(target)) {
-			throw new Error(`unsafe reset transaction target: ${String(target)}`)
-		}
-		return target
-	})
 	if (new Set(targets).size !== targets.length || [...targets].sort().join("\0") !== targets.join("\0")) {
 		throw new Error("reset transaction targets must be unique and sorted")
 	}
-	return {
-		formatVersion: 1,
-		operationId: validateId(requiredString(value, "operationId"), "reset operation"),
-		dataDir: resolve(dataDir),
-		targets,
-		phase: phase as ResetTransaction["phase"],
-		createdAt: requiredIso(value, "createdAt"),
-	}
+	return transaction
 }
 
 const readResetTransaction = async (dataDir: string): Promise<ResetTransaction | null> => {
@@ -1542,6 +1614,17 @@ const readResetTransaction = async (dataDir: string): Promise<ResetTransaction |
 
 const writeResetTransaction = async (dataDir: string, transaction: ResetTransaction): Promise<void> =>
 	durableJson(resetTransactionPath(dataDir), transaction)
+
+const assertResetTarget = async (
+	path: string,
+	target: Schema.Schema.Type<typeof ResetTarget>,
+): Promise<void> => {
+	if (target === "status") {
+		await assertRealFile(path, "reset target status")
+	} else {
+		await assertRealDirectory(path, `reset target ${target}`)
+	}
+}
 
 const reconcileResetTransactionUnlocked = async (
 	dataDir: string,
@@ -1559,8 +1642,8 @@ const reconcileResetTransactionUnlocked = async (
 		for (const target of transaction.targets) {
 			const path = join(live, target)
 			if (!existsSync(path)) continue
-			await assertRealDirectory(path, `reset target ${target}`)
-			await rm(path, { recursive: true })
+			await assertResetTarget(path, target)
+			await rm(path, { recursive: target !== "status" })
 			await syncDirectory(live)
 			await faults.afterResetEntryRemoval?.(target)
 		}
@@ -1598,12 +1681,12 @@ const reconcileResetTransactionUnlocked = async (
 
 const beginResetTransactionUnlocked = async (
 	dataDir: string,
-	operationId: string,
+	operationId: CheckpointOperationId,
 	faults: RestoreRecoveryFaults = {},
 ): Promise<void> => {
 	await assertCheckpointInfrastructureSafe(dataDir)
 	const live = resolve(dataDir)
-	const targets: string[] = []
+	const targets: Array<Schema.Schema.Type<typeof ResetTarget>> = []
 	const unknown: string[] = []
 	if (existsSync(live)) {
 		await assertRealDirectory(live, "live data directory")
@@ -1614,10 +1697,11 @@ const beginResetTransactionUnlocked = async (
 				unknown.push(join(live, entry.name))
 				continue
 			}
-			if (!entry.isDirectory() || entry.isSymbolicLink()) {
-				throw new Error(`reset target is not a real chDB directory: ${join(live, entry.name)}`)
+			const validType = entry.name === "status" ? entry.isFile() : entry.isDirectory()
+			if (!validType || entry.isSymbolicLink()) {
+				throw new Error(`reset target has an unsafe chDB entry type: ${join(live, entry.name)}`)
 			}
-			targets.push(entry.name)
+			targets.push(Schema.decodeUnknownSync(ResetTarget)(entry.name))
 		}
 	}
 	if (unknown.length > 0) {
@@ -1627,7 +1711,7 @@ const beginResetTransactionUnlocked = async (
 	}
 	const transaction: ResetTransaction = {
 		formatVersion: 1,
-		operationId: validateId(operationId, "reset operation"),
+		operationId,
 		dataDir: live,
 		targets: targets.sort(),
 		phase: "intent",
@@ -1639,22 +1723,7 @@ const beginResetTransactionUnlocked = async (
 }
 
 const parseRestoreTransaction = (value: unknown): RestoreTransaction => {
-	if (!isRecord(value) || value.formatVersion !== RESTORE_TRANSACTION_FORMAT_VERSION) {
-		throw new Error("unsupported or malformed restore transaction")
-	}
-	const phase = requiredString(value, "phase")
-	if (!["intent", "restore-ready", "old-quarantined", "new-live", "markers-committed"].includes(phase)) {
-		throw new Error("invalid restore transaction phase")
-	}
-	return {
-		formatVersion: 1,
-		operationId: validateId(requiredString(value, "operationId"), "restore operation"),
-		checkpointId: validateId(requiredString(value, "checkpointId"), "checkpoint"),
-		quarantineId: validateId(requiredString(value, "quarantineId"), "quarantine"),
-		phase: phase as RestoreTransaction["phase"],
-		createdAt: requiredIso(value, "createdAt"),
-		validation: value.validation === null ? null : parseValidation(value.validation),
-	}
+	return Schema.decodeUnknownSync(RestoreTransactionSchema)(value)
 }
 
 const readRestoreTransaction = async (dataDir: string): Promise<RestoreTransaction | null> => {
@@ -1670,7 +1739,7 @@ const readRestoreTransaction = async (dataDir: string): Promise<RestoreTransacti
 const writeRestoreTransaction = async (dataDir: string, transaction: RestoreTransaction) =>
 	durableJson(restoreTransactionPath(dataDir), transaction)
 
-const restoreReadyPath = (dataDir: string, operationId: string): string =>
+const restoreReadyPath = (dataDir: string, operationId: CheckpointOperationId): string =>
 	join(restoreDataPath(dataDir, operationId), ".maple-restore-ready.json")
 
 const readyIdentityMatches = (dataDir: string, transaction: RestoreTransaction): boolean => {
@@ -1683,10 +1752,10 @@ const readyIdentityMatches = (dataDir: string, transaction: RestoreTransaction):
 		try {
 			const info = lstatSync(path)
 			if (info.isSymbolicLink() || !info.isFile()) return false
-			const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown
+			const parsed = Schema.decodeUnknownSync(RestoreReadySchema)(
+				JSON.parse(readFileSync(path, "utf8")),
+			)
 			if (
-				isRecord(parsed) &&
-				parsed.formatVersion === 1 &&
 				parsed.operationId === transaction.operationId &&
 				parsed.checkpointId === transaction.checkpointId
 			) {
@@ -1844,69 +1913,83 @@ const reconcileRestoreTransactionUnlocked = async (
 	)
 }
 
-export const reconcileCheckpointRecovery = (
+export const reconcileCheckpointRecovery = Effect.fn("CheckpointService.reconcileRecovery")(function* (
 	dataDir: string,
 	faults: RestoreRecoveryFaults = {},
-): Effect.Effect<void, CheckpointError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const operationId = randomUUID()
-			const release = await acquireMaintenance(dataDir, operationId)
-			try {
+) {
+	const operationId = newCheckpointOperationId()
+	const recoveryError = (error: unknown): CheckpointRecoveryError =>
+		new CheckpointRecoveryError({
+			dataDir: resolve(dataDir),
+			operationId,
+			message: errorMessage(error),
+			cause: errorCause(error),
+		})
+	yield* Effect.annotateCurrentSpan("maple.checkpoint.operation_id", operationId)
+	return yield* withMaintenance(dataDir, operationId, recoveryError, () =>
+		Effect.tryPromise({
+			try: async () => {
 				const resetReconciled = await reconcileResetTransactionUnlocked(dataDir, faults)
 				if (!resetReconciled) await reconcileRestoreTransactionUnlocked(dataDir, faults)
-			} finally {
-				await release()
-			}
-		},
-		catch: (error) =>
-			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
-	})
+			},
+			catch: recoveryError,
+		}),
+	)
+})
 
 /**
  * Explicitly remove the live chDB store while preserving the checkpoint
  * registry below `<dataDir>/backups`. The maintenance lock serializes this
  * destructive operation with checkpoint, restore, and archive work.
  */
-export const resetLiveStorePreservingCheckpoints = (
+export const resetLiveStorePreservingCheckpoints = Effect.fn("CheckpointService.reset")(function* (
 	dataDir: string,
 	faults: RestoreRecoveryFaults = {},
-): Effect.Effect<void, CheckpointError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const operationId = randomUUID()
-			const release = await acquireMaintenance(dataDir, operationId)
-			try {
+) {
+	const operationId = newCheckpointOperationId()
+	const resetError = (error: unknown): CheckpointResetError =>
+		new CheckpointResetError({
+			dataDir: resolve(dataDir),
+			operationId,
+			message: errorMessage(error),
+			cause: errorCause(error),
+		})
+	yield* Effect.annotateCurrentSpan("maple.checkpoint.operation_id", operationId)
+	return yield* withMaintenance(dataDir, operationId, resetError, () =>
+		Effect.tryPromise({
+			try: async () => {
 				const resetReconciled = await reconcileResetTransactionUnlocked(dataDir, faults)
 				if (!resetReconciled) {
 					await reconcileRestoreTransactionUnlocked(dataDir)
 					await beginResetTransactionUnlocked(dataDir, operationId, faults)
 				}
-			} finally {
-				await release()
-			}
-		},
-		catch: (error) =>
-			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
-	})
+			},
+			catch: resetError,
+		}),
+	)
+})
 
-export const restoreCheckpoint = (
+export const restoreCheckpoint = Effect.fn("CheckpointService.restore")(function* (
 	dataDir: string,
-	selector: "current" | "previous" | string = "current",
-): Effect.Effect<
-	{
-		readonly checkpointId: string
-		readonly quarantinePath: string
-		readonly validation: CheckpointValidation
-	},
-	CheckpointError
-> =>
-	Effect.tryPromise({
-		try: async () => {
-			const operationId = randomUUID()
-			const quarantineId = randomUUID()
-			const release = await acquireMaintenance(dataDir, operationId)
-			try {
+	selector: "current" | "previous" | CheckpointId = "current",
+) {
+	const operationId = newCheckpointOperationId()
+	const quarantineId = newCheckpointQuarantineId()
+	const restoreError = (error: unknown): CheckpointRestoreError =>
+		new CheckpointRestoreError({
+			dataDir: resolve(dataDir),
+			operationId,
+			selector,
+			message: errorMessage(error),
+			cause: errorCause(error),
+		})
+	yield* Effect.annotateCurrentSpan({
+		"maple.checkpoint.operation_id": operationId,
+		"maple.checkpoint.selector": selector,
+	})
+	return yield* withMaintenance(dataDir, operationId, restoreError, () =>
+		Effect.tryPromise({
+			try: async () => {
 				await reconcileResetTransactionUnlocked(dataDir)
 				await reconcileRestoreTransactionUnlocked(dataDir)
 				const resolvedCheckpoint = await resolveCheckpoint(dataDir, selector)
@@ -1937,6 +2020,9 @@ export const restoreCheckpoint = (
 					restoreData,
 					restoringProcessValidation,
 				)
+				if (!validationCountsMatch(resolvedCheckpoint.manifest.validation, validation)) {
+					throw new Error("restored checkpoint counts do not match its signed manifest")
+				}
 				await cp(checkpointRoot(dataDir), join(restoreData, "backups"), {
 					recursive: true,
 					force: false,
@@ -1957,17 +2043,23 @@ export const restoreCheckpoint = (
 					quarantinePath,
 					validation,
 				}
-			} finally {
-				await release()
-			}
-		},
-		catch: (error) =>
-			new CheckpointError({ message: error instanceof Error ? error.message : String(error) }),
-	})
+			},
+			catch: restoreError,
+		}),
+	)
+})
 
 // Test helper: assert generated operation IDs remain unique and valid without
 // exposing an override in production command paths.
-export const newCheckpointId = (): string => validateId(randomUUID(), "checkpoint")
+export const newCheckpointId = (): CheckpointId => validateCheckpointId(randomUUID())
+export const newCheckpointOperationId = (): CheckpointOperationId => validateOperationId(randomUUID())
+export const newCheckpointQuarantineId = (): CheckpointQuarantineId => validateQuarantineId(randomUUID())
+export const parseCheckpointId = (value: unknown): CheckpointId => validateCheckpointId(value)
+
+// Archive seams record checkpoint selectors as plain journal strings; parse
+// them back into the typed selector accepted by `resolveCheckpoint`.
+export const parseCheckpointSelector = (value: string): "current" | "previous" | CheckpointId =>
+	value === "current" || value === "previous" ? value : validateCheckpointId(value)
 
 // Refuse pre-existing symlink roots even before an operation allocates paths.
 export const assertCheckpointRootSafe = (dataDir: string): void => {

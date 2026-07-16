@@ -112,7 +112,7 @@ interface FlowSpanNodeProps {
 }
 
 export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodeProps) {
-	const { span, services, isSelected, count, aggregatedDuration } = data
+	const { span, isSelected, count, aggregatedDuration } = data
 
 	if (span.isMissing) {
 		return (
@@ -174,7 +174,7 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 	// Only fall back to HTTP status >= 500 when OTel status is not explicitly "Ok"
 	const isError = span.statusCode === "Error" || (span.statusCode !== "Ok" && (httpInfo?.isError ?? false))
 
-	const colorStyle = isError ? {} : getSpanColorStyle(span.spanName, span.serviceName, services)
+	const colorStyle = isError ? {} : getSpanColorStyle(span.spanName, span.serviceName)
 
 	// Get the appropriate icon for this span. Platform spans get the provider mark
 	// (unless erroring or a cache span, which keep their more specific icons).

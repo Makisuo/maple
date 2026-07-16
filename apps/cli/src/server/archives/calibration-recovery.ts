@@ -31,6 +31,7 @@ import {
 	assertCheckpointPinIdentity,
 	checkpointRoot,
 	checkpointSnapshotDir,
+	parseCheckpointId,
 	pinFilePath,
 	releaseCheckpointPin,
 	resolveCheckpoint,
@@ -273,7 +274,7 @@ const removeOwnedDir = async (root: string, dir: string, label: string): Promise
 const isInertIntentWithRetiredCheckpoint = (prior: CalibrationRecoveryRecord): boolean => {
 	if (prior.phase !== "intent" || prior.pinPath !== null) return false
 	const checkpointOwner = checkpointRoot(prior.boundRoots.dataDir)
-	const snapshot = checkpointSnapshotDir(prior.boundRoots.dataDir, prior.checkpointId)
+	const snapshot = checkpointSnapshotDir(prior.boundRoots.dataDir, parseCheckpointId(prior.checkpointId))
 	if (classifyArchivePathSync(checkpointOwner, snapshot, "calibration source checkpoint") !== "absent") {
 		return false
 	}
@@ -323,7 +324,7 @@ export const reconcileCalibration = async (
 	// claims (C2). A stale/foreign fingerprint refuses to reconcile (preserve).
 	let resolved
 	try {
-		resolved = await resolveCheckpoint(prior.boundRoots.dataDir, prior.checkpointId)
+		resolved = await resolveCheckpoint(prior.boundRoots.dataDir, parseCheckpointId(prior.checkpointId))
 	} catch (error) {
 		// At intent, no allocation has been authorized yet. If normal checkpoint
 		// retention removed the still-unpinned source and every exact derived

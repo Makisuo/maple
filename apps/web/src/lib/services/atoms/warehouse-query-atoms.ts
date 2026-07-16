@@ -21,8 +21,8 @@ import {
 import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
+	getMetricSparklines,
 	getMetricAttributeValues,
-	getMetricTimeSeries,
 	getMetricsSummary,
 	listMetrics,
 } from "@/api/warehouse/metrics"
@@ -81,6 +81,7 @@ import {
 	listTraces,
 } from "@/api/warehouse/traces"
 import { getQueryBuilderTimeseries } from "@/api/warehouse/query-builder-timeseries"
+import { getQueryBuilderBreakdown } from "@/api/warehouse/query-builder-breakdown"
 import {
 	getReplay,
 	getReplayEvents,
@@ -281,8 +282,8 @@ export const getMetricsSummaryResultAtom = makeQueryAtomFamily(getMetricsSummary
 	staleTime: 60_000,
 })
 
-export const getMetricTimeSeriesResultAtom = makeQueryAtomFamily(getMetricTimeSeries, {
-	staleTime: 30_000,
+export const getMetricSparklinesResultAtom = makeQueryAtomFamily(getMetricSparklines, {
+	staleTime: 60_000,
 })
 
 export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAttributeKeys, {
@@ -425,6 +426,10 @@ export const getCustomChartTimeSeriesResultAtom = makeQueryAtomFamily(getCustomC
 })
 
 export const getQueryBuilderTimeseriesResultAtom = makeQueryAtomFamily(getQueryBuilderTimeseries, {
+	staleTime: 30_000,
+})
+
+export const getQueryBuilderBreakdownResultAtom = makeQueryAtomFamily(getQueryBuilderBreakdown, {
 	staleTime: 30_000,
 })
 

@@ -1,7 +1,12 @@
 import { Result } from "@/lib/effect-atom"
 import { useNavigate } from "@tanstack/react-router"
 
-import { FilterSection, SearchableFilterSection, SingleCheckboxFilter } from "./filter-section"
+import {
+	FilterSection,
+	SearchableFilterSection,
+	SingleCheckboxFilter,
+	serviceColorMap,
+} from "./filter-section"
 import { DurationRangeFilter } from "./duration-range-filter"
 import { Route } from "@/routes/traces"
 import { Separator } from "@maple/ui/components/ui/separator"
@@ -14,7 +19,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={5} />
@@ -48,7 +52,7 @@ function TracesFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 
@@ -112,6 +116,7 @@ function TracesFilterSidebarView({
 							options={facets.services ?? []}
 							selected={filters.services ?? []}
 							onChange={(val) => onFilterChange("services", val)}
+							colorMap={serviceColorMap(facets.services ?? [])}
 						/>
 
 						<Separator className="my-2" />

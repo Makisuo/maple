@@ -29,6 +29,7 @@ import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
 import { OptionalStringArrayParam } from "@/lib/search-params"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 // A stable empty releases array for the non-success render branches. Minting a
 // fresh `[]` in the `.orElse` below would give `useCommitMarkers`' `useMemo` a new
@@ -156,7 +157,15 @@ function ServiceDetailContent() {
 	return (
 		<DashboardLayout
 			breadcrumbs={[{ label: "Services", href: "/services" }, { label: serviceName }]}
-			title={serviceName}
+			titleContent={
+				<h1
+					className="font-display flex items-center gap-2.5 truncate text-3xl leading-[1.1] font-semibold tracking-tight"
+					title={serviceName}
+				>
+					<ServiceDot serviceName={serviceName} className="size-3" />
+					<span className="truncate">{serviceName}</span>
+				</h1>
+			}
 			headerActions={
 				<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 					{/* View switch lives inline with other page controls so it reads as a

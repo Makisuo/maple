@@ -7,7 +7,7 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import { cn } from "@maple/ui/utils"
 
 import { ChevronDownIcon } from "@/components/icons"
-import { FilterSection } from "@/components/filters/filter-section"
+import { FilterSection, serviceColorMap } from "@/components/filters/filter-section"
 import {
 	FilterSidebarBody,
 	FilterSidebarFrame,
@@ -145,6 +145,7 @@ export function AnomaliesFilterSidebar({
 							options={facets.services}
 							selected={[...(filters.services ?? [])]}
 							onChange={(val) => onChange("services", val.length === 0 ? undefined : val)}
+							colorMap={serviceColorMap(facets.services)}
 						/>
 						<Separator className="my-2" />
 					</>

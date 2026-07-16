@@ -56,6 +56,7 @@ import {
 } from "../server/archives/calibration-recovery"
 import {
 	acquireCheckpointPin,
+	parseCheckpointSelector,
 	resolveCheckpoint,
 	withMaintenanceLock,
 	withRestoredCheckpoint,
@@ -1058,7 +1059,7 @@ const runCalibrationMatrix = async (
 	}
 	const session = await withMaintenanceLock(dataDir, operationId, async () => {
 		await reconcileCalibration(archiveDir, roots)
-		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+		const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
 		const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
 		await writeCalibrationRecord(archiveDir, {
 			phase: "intent",
@@ -1456,7 +1457,7 @@ export const archiveCalibrateSession = Command.make("calibrate-session", {
 				try: () =>
 					withMaintenanceLock(dataDir, operationId, async () => {
 						await reconcileCalibration(archiveDir, roots)
-						const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+						const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
 						const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
 						await writeCalibrationRecord(archiveDir, {
 							phase: "intent",
@@ -1615,7 +1616,7 @@ const runCalibrateSample = async (
 			},
 		)
 		await cleanupCalibrationSample(session)
-		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+		const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
 		const liveFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
 		if (liveFingerprint !== checkpointManifestFingerprint) {
 			throw new Error("calibration child checkpoint fingerprint changed; refusing")

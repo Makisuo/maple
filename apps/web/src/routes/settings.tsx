@@ -38,8 +38,15 @@ export const Route = effectRoute(createFileRoute("/settings"))({
 export function SettingsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const { visibleSections, visibleItems, isAdmin, canAccessDataPlatform, canAccessAi, isLoading } =
-		useVisibleSettingsSections()
+	const {
+		visibleSections,
+		visibleItems,
+		isAdmin,
+		canAccessDataPlatform,
+		canAccessAi,
+		isCustomerLoading,
+		isLoading,
+	} = useVisibleSettingsSections()
 
 	// Pre-hub deep links: these tabs moved to the Integrations hub.
 	if (search.tab === "connectors" || search.tab === "integrations") {
@@ -54,7 +61,13 @@ export function SettingsPage() {
 		navigate({ search: { tab } })
 	}
 
-	if (isLoading) {
+	// `data-platform` is the only tab whose visibility depends on the billing
+	// customer, so deep-linking there while it loads would briefly show the first
+	// tab before flipping. Hold the skeleton just for that case; every other tab
+	// renders as soon as the session resolves.
+	const waitingForGatedTab = search.tab === "data-platform" && isCustomerLoading
+
+	if (isLoading || waitingForGatedTab) {
 		return (
 			<DashboardLayout
 				breadcrumbs={[{ label: "Settings" }]}

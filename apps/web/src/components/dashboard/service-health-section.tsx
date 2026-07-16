@@ -33,6 +33,7 @@ import {
 	type LatencyBaselineSignal,
 	type ServiceHealth,
 } from "./service-health"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 const MAX_ROWS = 7
 
@@ -342,6 +343,7 @@ function ServiceHealthRow({
 					style={{ backgroundColor: HEALTH_DOT_COLOR[health] }}
 				/>
 				<div className="flex min-w-0 flex-1 items-center gap-2">
+					<ServiceDot serviceName={service.serviceName} className="size-1.5" />
 					<span className="truncate text-sm font-medium text-foreground">
 						{service.serviceName}
 					</span>

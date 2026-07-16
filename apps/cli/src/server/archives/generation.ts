@@ -7,6 +7,7 @@ import { CHDB_VERSION, MAPLE_VERSION } from "../../version"
 import { SCHEMA_FINGERPRINT } from "../serve"
 import {
 	acquireCheckpointPin,
+	parseCheckpointSelector,
 	checkpointPinsRoot,
 	releaseCheckpointPin,
 	resolveCheckpoint,
@@ -361,7 +362,7 @@ export const createArchiveGeneration = async (
 		await reconcileArchiveGeneration(dataDir, archiveDir, tuning.scratchRoot, faults)
 		// Step 2: resolve and validate the checkpoint so its immutable backup size
 		// can be included in scratch-volume capacity planning. This is read-only.
-		const resolved = await resolveCheckpoint(dataDir, checkpointSelector)
+		const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
 		// Reject impossible archive and scratch capacity before pointer/base reads
 		// or creation of a durable intent/pin. A failed preflight leaves no new
 		// operation for reconciliation to clean up.

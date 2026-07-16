@@ -26,7 +26,7 @@ export interface BestTool {
 export const lastUpdated = "June 2026"
 
 export const methodology =
-	"We build Maple, so we list it first — but this is an honest roundup, not a sales page. " +
+	"We build Maple, so it sits at #1 — factor that bias in; the rest of the list is played straight. " +
 	"Every tool here is open source or source-available — you can read the code and self-host all of " +
 	"them — and we note each one's license. We weighed how natively each one speaks OpenTelemetry, " +
 	"whether it unifies traces, logs, and metrics in one place, and how much operational work a small " +
@@ -39,7 +39,7 @@ export const bestObservabilityTools: BestTool[] = [
 		name: "Maple",
 		slug: "maple",
 		url: "https://maple.dev",
-		bestFor: "OpenTelemetry-native teams who want AI-agent workflows and honest pricing",
+		bestFor: "OpenTelemetry-native teams who want AI-agent workflows and flat per-GB pricing",
 		license: "Source-available (FSL-1.1 → Apache 2.0)",
 		summary:
 			"Maple is an OpenTelemetry-native observability platform built on ClickHouse, covering traces, logs, metrics, and browser session replay in one app. It ships a first-class MCP server so AI agents can search traces, find errors, and propose fixes, and it prices on usage instead of per-host or per-seat. Its source is available under FSL-1.1 (which converts to Apache 2.0), so you can read it, fork it, and self-host.",
@@ -188,6 +188,6 @@ export const listicleFaqs: Array<{ question: string; answer: string }> = [
 	},
 	{
 		question: "Which open-source tool is best for AI agents?",
-		answer: "Maple ships a first-class MCP (Model Context Protocol) server, so compatible AI agents can list services, search traces, find errors, and propose fixes directly against your telemetry — the most complete AI-agent story among the tools here.",
+		answer: "Maple ships a first-class MCP (Model Context Protocol) server, so compatible AI agents can list services, search traces, find errors, and propose fixes against your telemetry from one backend. Grafana also offers an official MCP server for its stack; with the LGTM setup the agent works across separate data stores.",
 	},
 ]

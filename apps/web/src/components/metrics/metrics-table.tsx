@@ -12,6 +12,7 @@ import { type Metric, type ListMetricsInput } from "@/api/warehouse/metrics"
 import { listMetricsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 function formatNumber(num: number): string {
 	if (num >= 1_000_000) {
@@ -41,8 +42,7 @@ function formatTimeAgo(timestamp: string): string {
 interface MetricsTableProps {
 	search: string
 	metricType: ListMetricsInput["metricType"] | null
-	selectedMetric: Metric | null
-	onSelectMetric: (metric: Metric | null) => void
+	onOpenMetric: (metric: Metric) => void
 	startTime?: string
 	endTime?: string
 }
@@ -91,14 +91,7 @@ const PAGE_SIZE = 100
 // to detect more pages, so the displayed cap is 999.
 const MAX_LIMIT = 1000
 
-export function MetricsTable({
-	search,
-	metricType,
-	selectedMetric,
-	onSelectMetric,
-	startTime,
-	endTime,
-}: MetricsTableProps) {
+export function MetricsTable({ search, metricType, onOpenMetric, startTime, endTime }: MetricsTableProps) {
 	const [limit, setLimit] = useState(PAGE_SIZE)
 	const requestLimit = Math.min(limit + 1, MAX_LIMIT)
 
@@ -163,16 +156,11 @@ export function MetricsTable({
 					</TableHeader>
 					<TableBody>
 						{metrics.map((metric) => {
-							const isSelected =
-								selectedMetric?.metricName === metric.metricName &&
-								selectedMetric?.metricType === metric.metricType &&
-								selectedMetric?.serviceName === metric.serviceName
-
 							return (
 								<TableRow
 									key={`${metric.metricName}-${metric.metricType}-${metric.serviceName}`}
-									className={`cursor-pointer ${isSelected ? "bg-muted" : "hover:bg-muted/50"}`}
-									onClick={() => onSelectMetric(isSelected ? null : metric)}
+									className="cursor-pointer hover:bg-muted/50"
+									onClick={() => onOpenMetric(metric)}
 								>
 									<TableCell>
 										<div className="flex min-w-0 flex-col gap-0.5">
@@ -195,6 +183,7 @@ export function MetricsTable({
 									<TableCell className="hidden md:table-cell">
 										{metric.serviceName ? (
 											<Badge variant="outline" className="font-mono text-[10px]">
+												<ServiceDot serviceName={metric.serviceName} className="size-1.5" />
 												{metric.serviceName}
 											</Badge>
 										) : (

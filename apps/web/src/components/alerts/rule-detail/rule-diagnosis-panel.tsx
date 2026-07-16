@@ -82,11 +82,23 @@ export function RuleDiagnosisPanel({
 	const [expanded, setExpanded] = useState<boolean | null>(null)
 	const isOpen = expanded ?? hasProblems
 
+	// When something's wrong, lead with the stage(s) that broke — the passing
+	// steps are noise you're not looking at. They fold behind a disclosure.
+	const problemStages = useMemo(
+		() => stages.filter((s) => s.status === "fail" || s.status === "warn"),
+		[stages],
+	)
+	const [showAll, setShowAll] = useState(false)
+	const hasHiddenSteps = hasProblems && problemStages.length < stages.length
+	const visibleStages = showAll || !hasProblems ? stages : problemStages
+	const passingCount = useMemo(() => stages.filter((s) => s.status === "pass").length, [stages])
+	const hiddenCount = stages.length - problemStages.length
+
 	return (
 		<Card className="overflow-hidden">
 			<button
 				type="button"
-				className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+				className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left"
 				onClick={() => setExpanded(!isOpen)}
 			>
 				<div className="flex min-w-0 items-center gap-2.5">
@@ -105,7 +117,7 @@ export function RuleDiagnosisPanel({
 			</button>
 
 			{isOpen && (
-				<div className="border-t px-4 py-3">
+				<div className="border-t px-4 py-2.5">
 					{groupKeys.length > 0 && (
 						<div className="mb-3 flex items-center gap-2">
 							<span className="text-xs text-muted-foreground">Group</span>
@@ -116,16 +128,35 @@ export function RuleDiagnosisPanel({
 							/>
 						</div>
 					)}
-					<ol className="space-y-1.5">
-						{stages.map((stage) => (
+					<ol className="space-y-1">
+						{visibleStages.map((stage) => (
 							<DiagnosisStageRow key={stage.id} stage={stage} onToggleEnabled={onToggleEnabled} />
 						))}
 					</ol>
+					{hasHiddenSteps && (
+						<button
+							type="button"
+							onClick={() => setShowAll((v) => !v)}
+							className="mt-1.5 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+						>
+							<ChevronDownIcon
+								size={13}
+								className={cn("shrink-0 transition-transform", showAll && "rotate-180")}
+							/>
+							{showAll
+								? "Show only issues"
+								: passingCount === hiddenCount
+									? `${passingCount} ${passingCount === 1 ? "check" : "checks"} passing`
+									: `Show ${hiddenCount} more ${hiddenCount === 1 ? "step" : "steps"}`}
+						</button>
+					)}
 				</div>
 			)}
 		</Card>
 	)
 }
+
+const EVIDENCE_CAP = 4
 
 function DiagnosisStageRow({
 	stage,
@@ -136,12 +167,16 @@ function DiagnosisStageRow({
 }) {
 	const problematic = stage.status === "fail" || stage.status === "warn"
 	const [open, setOpen] = useState<boolean | null>(null)
+	const [showAllEvidence, setShowAllEvidence] = useState(false)
 	const showEvidence = (open ?? problematic) && stage.evidence.length > 0
+	// A chatty stage shouldn't blow out the panel height — cap it, reveal on demand.
+	const evidence = showAllEvidence ? stage.evidence : stage.evidence.slice(0, EVIDENCE_CAP)
+	const hiddenEvidence = stage.evidence.length - evidence.length
 
 	return (
 		<li
 			className={cn(
-				"rounded-md px-2 py-1.5",
+				"rounded-md px-2 py-1",
 				stage.status === "fail" && "bg-destructive/5",
 				stage.status === "warn" && "bg-warning/5",
 			)}
@@ -169,11 +204,22 @@ function DiagnosisStageRow({
 			</div>
 			{showEvidence && (
 				<ul className="mt-1 space-y-0.5 pl-[26px]">
-					{stage.evidence.map((line) => (
+					{evidence.map((line) => (
 						<li key={line} className="break-words text-xs text-muted-foreground">
 							{line}
 						</li>
 					))}
+					{hiddenEvidence > 0 && (
+						<li>
+							<button
+								type="button"
+								onClick={() => setShowAllEvidence(true)}
+								className="text-xs text-muted-foreground/80 underline-offset-2 hover:text-foreground hover:underline"
+							>
+								+{hiddenEvidence} more
+							</button>
+						</li>
+					)}
 				</ul>
 			)}
 		</li>

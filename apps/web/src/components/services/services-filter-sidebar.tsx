@@ -1,4 +1,4 @@
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { useNavigate } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -14,7 +14,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={2} />
@@ -29,14 +28,14 @@ export function ServicesFilterSidebar() {
 		search.timePreset ?? "12h",
 	)
 
-	const facetsResult = useRefreshableAtomValue(
-		getServicesFacetsResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-			},
-		}),
-	)
+	const facetsAtom = getServicesFacetsResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+		},
+	})
+	const facetsResult = useRefreshableAtomValue(facetsAtom)
+	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
 		navigate({
@@ -62,7 +61,7 @@ export function ServicesFilterSidebar() {
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} onRetry={refreshFacets} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 

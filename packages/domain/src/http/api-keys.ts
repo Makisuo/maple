@@ -1,6 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { ApiKeyId, UserId } from "../primitives"
+import { ApiKeyId, PostgresTransactionId, UserId } from "../primitives"
 import { Authorization } from "./current-tenant"
 
 export const ApiKeyKind = Schema.Literals(["standard", "mcp"])
@@ -12,6 +12,8 @@ export class ApiKeyResponse extends Schema.Class<ApiKeyResponse>("ApiKeyResponse
 	description: Schema.NullOr(Schema.String),
 	keyPrefix: Schema.String,
 	kind: ApiKeyKind,
+	// v2 scope strings; null = legacy full access.
+	scopes: Schema.NullOr(Schema.Array(Schema.String)),
 	revoked: Schema.Boolean,
 	revokedAt: Schema.NullOr(Schema.Number),
 	lastUsedAt: Schema.NullOr(Schema.Number),
@@ -19,6 +21,8 @@ export class ApiKeyResponse extends Schema.Class<ApiKeyResponse>("ApiKeyResponse
 	createdAt: Schema.Number,
 	createdBy: UserId,
 	createdByEmail: Schema.NullOr(Schema.String),
+	/** Postgres transaction id for Electric/TanStack DB reconciliation on mutation responses. */
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("ApiKeyCreatedResponse")({
@@ -27,6 +31,7 @@ export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("
 	description: Schema.NullOr(Schema.String),
 	keyPrefix: Schema.String,
 	kind: ApiKeyKind,
+	scopes: Schema.NullOr(Schema.Array(Schema.String)),
 	revoked: Schema.Boolean,
 	revokedAt: Schema.NullOr(Schema.Number),
 	lastUsedAt: Schema.NullOr(Schema.Number),
@@ -35,6 +40,8 @@ export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("
 	createdBy: UserId,
 	createdByEmail: Schema.NullOr(Schema.String),
 	secret: Schema.String,
+	/** Postgres transaction id for Electric/TanStack DB reconciliation. */
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class ApiKeysListResponse extends Schema.Class<ApiKeysListResponse>("ApiKeysListResponse")({
@@ -46,6 +53,7 @@ export class CreateApiKeyRequest extends Schema.Class<CreateApiKeyRequest>("Crea
 	description: Schema.optional(Schema.String),
 	expiresInSeconds: Schema.optional(Schema.Number),
 	kind: Schema.optional(ApiKeyKind),
+	scopes: Schema.optionalKey(Schema.Array(Schema.String)),
 }) {}
 
 export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersistenceError>()(

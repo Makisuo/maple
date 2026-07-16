@@ -6,6 +6,7 @@ import {
 	ErrorPersistenceError,
 	IssueEscalationPolicyRule,
 	IssueEscalationPolicyUpsertRequest,
+	IssueListCursor,
 	OrgId,
 	UserId,
 } from "@maple/domain/http"
@@ -518,6 +519,71 @@ describe("ErrorsService.setSeverity", () => {
 				[alertIssueId],
 			)
 			assert.strictEqual(alerts.issues[0]?.kind, "alert")
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("listIssues paginates with a keyset cursor", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const now = yield* Clock.currentTimeMillis
+			// 5 issues with strictly decreasing lastSeenAt so page order is stable.
+			const ids: Array<ErrorIssueId> = []
+			for (let i = 0; i < 5; i++) {
+				const id = asIssueId(randomUUID())
+				ids.push(id)
+				yield* seedIssue(id, { lastSeenAt: new Date(now - i * 60_000) })
+			}
+
+			const page1 = yield* errors.listIssues(ORG, { limit: 2 })
+			assert.deepStrictEqual(
+				page1.issues.map((i) => i.id),
+				[ids[0], ids[1]],
+			)
+			assert.isString(page1.nextCursor)
+
+			const cursor1 = Schema.decodeUnknownSync(IssueListCursor)(page1.nextCursor)
+			const page2 = yield* errors.listIssues(ORG, { limit: 2, cursor: cursor1 })
+			assert.deepStrictEqual(
+				page2.issues.map((i) => i.id),
+				[ids[2], ids[3]],
+			)
+			assert.isString(page2.nextCursor)
+
+			const cursor2 = Schema.decodeUnknownSync(IssueListCursor)(page2.nextCursor)
+			const page3 = yield* errors.listIssues(ORG, { limit: 2, cursor: cursor2 })
+			assert.deepStrictEqual(
+				page3.issues.map((i) => i.id),
+				[ids[4]],
+			)
+			assert.isUndefined(page3.nextCursor)
+
+			// The wire cursor is opaque base64url and round-trips through the codec.
+			assert.notInclude(page1.nextCursor, "{")
+			assert.strictEqual(Schema.encodeSync(IssueListCursor)(cursor1), page1.nextCursor)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("listIssues pages tie-broken by id when lastSeenAt collides", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const now = yield* Clock.currentTimeMillis
+			const sameInstant = new Date(now)
+			const ids = ["cccc", "bbbb", "aaaa"].map((prefix) =>
+				asIssueId(`${prefix}${randomUUID().slice(4)}`),
+			)
+			for (const id of ids) {
+				yield* seedIssue(id, { lastSeenAt: sameInstant })
+			}
+
+			const page1 = yield* errors.listIssues(ORG, { limit: 2 })
+			const page2 = yield* errors.listIssues(ORG, {
+				limit: 2,
+				cursor: Schema.decodeUnknownSync(IssueListCursor)(page1.nextCursor),
+			})
+			const seen = [...page1.issues, ...page2.issues].map((i) => i.id)
+			// Every issue appears exactly once across pages — no skips, no repeats.
+			assert.deepStrictEqual([...seen].sort(), [...ids].sort())
+			assert.strictEqual(new Set(seen).size, ids.length)
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 })

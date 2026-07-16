@@ -5,7 +5,7 @@ import { Badge } from "../ui/badge"
 import { Button } from "../ui/button"
 import { cn } from "../../lib/utils"
 import { formatDuration } from "../../lib/format"
-import { getServiceLegendColor } from "../../lib/colors"
+import { getServiceColor } from "../../lib/colors"
 import { getCacheInfo, cacheResultStyles } from "../../lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "../../lib/http"
 import { getCloudPlatform, outcomeBadgeStyle } from "../../lib/cloud-platforms"
@@ -17,7 +17,6 @@ interface SpanRowProps {
 	span: SpanNode
 	totalDurationMs: number
 	traceStartTime: string
-	services: string[]
 	expanded: boolean
 	onToggle: (span: SpanNode) => void
 	isSelected?: boolean
@@ -42,7 +41,6 @@ function SpanRowImpl({
 	span,
 	totalDurationMs,
 	traceStartTime,
-	services,
 	expanded,
 	onToggle,
 	isSelected,
@@ -54,11 +52,11 @@ function SpanRowImpl({
 		return (
 			<div
 				className={cn(
-					"group flex items-center border-b border-dashed py-1.5 px-2 bg-muted/30",
+					"@container/row group flex items-center border-b border-dashed py-1.5 px-2 bg-muted/30",
 					isSelected && "bg-primary/5 border-l-2 border-l-primary",
 				)}
 			>
-				<div className="flex items-center gap-2 flex-1 min-w-0">
+				<div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
 					{span.depth > 0 && <div style={{ width: `${span.depth * 24}px` }} className="shrink-0" />}
 
 					{hasChildren ? (
@@ -94,7 +92,7 @@ function SpanRowImpl({
 				</div>
 
 				<div className="flex items-center gap-2 shrink-0 ml-2">
-					<div className="w-48" />
+					<div className="hidden w-48 @min-[560px]/row:block" />
 					<span
 						className="w-16 text-right font-mono text-[10px] text-muted-foreground/50 truncate"
 						title={span.spanId}
@@ -133,7 +131,7 @@ function SpanRowImpl({
 	return (
 		<div
 			className={cn(
-				"group flex items-center border-b py-1.5 hover:bg-muted/50 cursor-pointer px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+				"@container/row group flex items-center border-b py-1.5 hover:bg-muted/50 cursor-pointer px-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
 				span.statusCode === "Error" && "bg-destructive/5",
 				isSelected && "bg-primary/5 border-l-2 border-l-primary",
 			)}
@@ -148,7 +146,8 @@ function SpanRowImpl({
 			}}
 		>
 			{/* Left section: Toggle + Service + Kind + Span Name (variable width) */}
-			<div className="@container flex items-center gap-2 flex-1 min-w-0">
+			{/* overflow-hidden so the shrink-0 children clip rather than paint over the right section */}
+			<div className="@container flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
 				{/* Indentation spacer based on depth */}
 				{span.depth > 0 && <div style={{ width: `${span.depth * 24}px` }} className="shrink-0" />}
 
@@ -177,7 +176,7 @@ function SpanRowImpl({
 							aria-label={platform.label}
 						/>
 					)}
-					<span style={{ color: getServiceLegendColor(span.serviceName, services) }}>
+					<span style={{ color: getServiceColor(span.serviceName) }}>
 						{span.serviceName}
 					</span>
 					<span className="text-muted-foreground">·</span>
@@ -228,6 +227,7 @@ function SpanRowImpl({
 					leftPercent={leftPercent}
 					widthPercent={Math.max(widthPercent, 1)}
 					color={barColor}
+					className="hidden @min-[560px]/row:flex"
 				/>
 
 				<span className="w-16 text-right font-mono text-xs text-muted-foreground">

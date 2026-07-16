@@ -81,6 +81,17 @@ export type IngestKeyId = Schema.Schema.Type<typeof IngestKeyId>
 export const ApiKeyId = MapleUuidId("@maple/ApiKeyId", "API Key ID")
 export type ApiKeyId = Schema.Schema.Type<typeof ApiKeyId>
 
+export const PostgresTransactionId = Schema.String.check(Schema.isTrimmed(), Schema.isPattern(/^\d+$/)).pipe(
+	Schema.brand("@maple/PostgresTransactionId"),
+	Schema.annotate({
+		identifier: "@maple/PostgresTransactionId",
+		title: "Postgres Transaction ID",
+		description:
+			"Internal Postgres transaction identifier encoded as an unsigned decimal string. Maple uses it to reconcile ElectricSQL state; API consumers should treat it as opaque.",
+	}),
+)
+export type PostgresTransactionId = Schema.Schema.Type<typeof PostgresTransactionId>
+
 export const ScrapeTargetId = MapleUuidId("@maple/ScrapeTargetId", "Scrape Target ID")
 export type ScrapeTargetId = Schema.Schema.Type<typeof ScrapeTargetId>
 

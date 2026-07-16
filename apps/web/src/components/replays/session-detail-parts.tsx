@@ -1,8 +1,8 @@
 import * as React from "react"
 import { motion, useReducedMotion } from "motion/react"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon, CopyIcon, CheckIcon } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { formatRelativeTime, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
 
@@ -26,22 +26,13 @@ export function Reveal({ children, delay = 0 }: { children: React.ReactNode; del
 }
 
 export function CopyButton({ value, label }: { value: string; label?: string }) {
-	const { copy } = useClipboard()
-	const [copied, setCopied] = React.useState(false)
-
-	const onCopy = React.useCallback(() => {
-		void copy(value)
-			.then(() => {
-				setCopied(true)
-				window.setTimeout(() => setCopied(false), 1200)
-			})
-			.catch(() => {})
-	}, [copy, value])
+	// Silent: the inline check icon is the feedback.
+	const { copied, copy } = useCopyToClipboard(label ?? "Value", { silent: true })
 
 	return (
 		<button
 			type="button"
-			onClick={onCopy}
+			onClick={() => copy(value)}
 			aria-label={label ?? "Copy"}
 			title={copied ? "Copied" : (label ?? "Copy")}
 			className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-colors hover:bg-background hover:text-foreground"

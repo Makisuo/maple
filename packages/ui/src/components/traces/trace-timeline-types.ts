@@ -10,7 +10,6 @@ export interface TimelineBar {
 	isError: boolean
 	isCollapsed: boolean
 	childCount: number
-	serviceIndex: number
 	fill: string
 	borderColor: string
 	hasChildren: boolean

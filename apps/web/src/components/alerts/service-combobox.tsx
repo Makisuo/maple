@@ -10,6 +10,7 @@ import {
 	ComboboxItem,
 	ComboboxList,
 } from "@maple/ui/components/ui/combobox"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 interface ServiceComboboxProps {
 	serviceNames: string[]
@@ -47,7 +48,10 @@ export function ServiceCombobox({
 				className={cn(disabled && "pointer-events-none opacity-60")}
 			>
 				{serviceNames.map((name) => (
-					<ComboboxChip key={name}>{name}</ComboboxChip>
+					<ComboboxChip key={name}>
+						<ServiceDot serviceName={name} className="size-1.5" />
+						{name}
+					</ComboboxChip>
 				))}
 				<ComboboxChipsInput
 					placeholder={
@@ -61,6 +65,7 @@ export function ServiceCombobox({
 				<ComboboxList>
 					{options.map((svc) => (
 						<ComboboxItem key={svc} value={svc}>
+							<ServiceDot serviceName={svc} className="size-1.5" />
 							{svc}
 						</ComboboxItem>
 					))}

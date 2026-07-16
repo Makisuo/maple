@@ -101,7 +101,7 @@ const stars = await getGitHubStars();
 
         <!-- Bottom bar -->
         <div class="mt-12 pt-6 border-t border-border flex flex-col sm:flex-row items-center sm:justify-between gap-4">
-            <p class="text-fg-muted text-[10px]">&copy; {m.footer_copyright()}</p>
+            <p class="text-fg-muted text-[10px]">{m.footer_copyright()}</p>
             <div class="flex items-center gap-4">
                 <a href={l("/privacy")} class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_privacy()}</a>
                 <a href={l("/terms")} class="text-fg-muted text-[10px] hover:text-foreground transition-colors">{m.footer_terms()}</a>

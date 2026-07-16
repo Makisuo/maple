@@ -7,6 +7,8 @@ import { isActivePlanSubscription } from "@maple/domain/billing"
 import {
 	AttachResult,
 	BillingCustomer,
+	BillingInvoice,
+	BillingInvoicesResponse,
 	BillingUpstreamError,
 	BillingUsage,
 	CatalogPlan,
@@ -144,6 +146,18 @@ const decodeUpstream = <S extends Schema.Top>(
 		),
 	)
 
+// Pull the `invoices` array off a raw expanded `getOrCreateCustomer` response.
+// Exported for tests. Autumn omits the key for a customer with no invoices, so
+// an absent/null field decodes as an empty list rather than a 502.
+export const decodeInvoices = (
+	response: unknown,
+): Effect.Effect<BillingInvoicesResponse, BillingUpstreamError> => {
+	const invoices = (response as { invoices?: unknown } | null)?.invoices ?? []
+	return decodeUpstream(Schema.Array(BillingInvoice), invoices).pipe(
+		Effect.map((decoded) => new BillingInvoicesResponse({ invoices: decoded })),
+	)
+}
+
 // Enrich checkout (attach) with Clerk-resolved identity so the customer is
 // identified before Stripe and the buyer's email is pre-filled. Ported verbatim
 // from the retired proxy's ENRICHED_ROUTES handling.
@@ -207,6 +221,23 @@ export const HttpBillingLive = HttpApiBuilder.group(MapleApi, "billing", (handle
 					)
 					const response = yield* ensureOk(result)
 					return yield* decodeUpstream(BillingUsage, response)
+				}),
+			)
+			// Invoices ride along on getOrCreateCustomer via `expand`, but through a
+			// dedicated endpoint (not the cached hot-path customer read): the customer
+			// atom is fetched on every page and edge-cached 5 min, while the invoice
+			// list is a settings-only read where an "open" invoice must show promptly.
+			.handle("listInvoices", () =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const result = yield* callAutumn(
+						"getOrCreateCustomer",
+						{ expand: ["invoices"] },
+						tenant.orgId,
+					)
+					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
+					const response = yield* ensureOk(result)
+					return yield* decodeInvoices(response)
 				}),
 			)
 			.handle("attach", ({ payload }) =>

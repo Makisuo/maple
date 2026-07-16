@@ -2,10 +2,10 @@ import { Link } from "@tanstack/react-router"
 import type { ErrorIssueSampleTrace } from "@maple/domain/http"
 import { Empty, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
-import { getServiceColorClass } from "@maple/ui/lib/colors"
 import { cn } from "@maple/ui/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 interface IssueOccurrencesTableProps {
 	traces: ReadonlyArray<ErrorIssueSampleTrace>
@@ -43,13 +43,7 @@ export function IssueOccurrencesTable({ traces }: IssueOccurrencesTableProps) {
 						</TableCell>
 						<TableCell>
 							<span className="inline-flex items-center gap-1.5">
-								<span
-									aria-hidden
-									className={cn(
-										"size-1.5 shrink-0 rounded-full",
-										getServiceColorClass(trace.serviceName),
-									)}
-								/>
+								<ServiceDot serviceName={trace.serviceName} className="size-1.5" />
 								<span>{trace.serviceName}</span>
 							</span>
 						</TableCell>

@@ -1,5 +1,5 @@
 import { describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Exit, Option } from "effect"
 import { deepStrictEqual, match, ok, rejects, strictEqual, throws } from "node:assert"
 import {
 	existsSync,
@@ -17,12 +17,17 @@ import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import {
 	assertCheckpointRootSafe,
+	type CheckpointId,
+	type CheckpointOperationId,
+	type CheckpointQuarantineId,
 	checkpointRoot,
 	checkpointSnapshotDir,
 	checkpointStatePath,
 	isMissingBackupConfigurationError,
 	LocalQueryError,
 	newCheckpointId,
+	newCheckpointOperationId,
+	newCheckpointQuarantineId,
 	parseCheckpointManifest,
 	parseCheckpointState,
 	readCheckpointState,
@@ -62,8 +67,8 @@ const withDataDir = async (run: (dataDir: string) => Promise<void> | void): Prom
 }
 
 const manifest = (
-	checkpointId: string,
-	operationId = newCheckpointId(),
+	checkpointId: CheckpointId,
+	operationId = newCheckpointOperationId(),
 	sourceDataDir = "/tmp/maple-data",
 ): Record<string, unknown> => ({
 	formatVersion: 1,
@@ -94,7 +99,11 @@ describe("fresh-process checkpoint reopen probe", () => {
 	})
 })
 
-const writeSnapshot = (dataDir: string, checkpointId: string, operationId = newCheckpointId()): void => {
+const writeSnapshot = (
+	dataDir: string,
+	checkpointId: CheckpointId,
+	operationId = newCheckpointOperationId(),
+): void => {
 	const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
 	mkdirSync(join(snapshot, "backup"), { recursive: true })
 	writeFileSync(join(snapshot, "backup", "data.bin"), "backup")
@@ -105,9 +114,9 @@ const writeSnapshot = (dataDir: string, checkpointId: string, operationId = newC
 
 const writeState = (
 	dataDir: string,
-	current: string,
-	previous: string | null = null,
-	revision = newCheckpointId(),
+	current: CheckpointId,
+	previous: CheckpointId | null = null,
+	revision = newCheckpointOperationId(),
 ): void => {
 	mkdirSync(checkpointRoot(dataDir), { recursive: true })
 	writeFileSync(
@@ -124,13 +133,13 @@ const writeState = (
 
 const writeCheckpointOperation = (
 	dataDir: string,
-	operationId: string,
-	checkpointId: string,
+	operationId: CheckpointOperationId,
+	checkpointId: CheckpointId,
 	phase: "intent" | "backup-complete" | "manifest-complete" | "pointer-complete" | "retention-complete",
 	base: {
-		readonly revision: string | null
-		readonly current: string | null
-		readonly previous: string | null
+		readonly revision: CheckpointOperationId | null
+		readonly current: CheckpointId | null
+		readonly previous: CheckpointId | null
 	} = { revision: null, current: null, previous: null },
 ): string => {
 	const dir = join(checkpointRoot(dataDir), "operations", `checkpoint-${operationId}`)
@@ -164,9 +173,9 @@ const restoreValidation = {
 
 const writeRestoreTransaction = (
 	dataDir: string,
-	operationId: string,
-	checkpointId: string,
-	quarantineId: string,
+	operationId: CheckpointOperationId,
+	checkpointId: CheckpointId,
+	quarantineId: CheckpointQuarantineId,
 	phase: "intent" | "restore-ready" | "old-quarantined" | "new-live" | "markers-committed",
 ): void => {
 	writeFileSync(
@@ -183,7 +192,11 @@ const writeRestoreTransaction = (
 	)
 }
 
-const writeRestoreReady = (dataDir: string, operationId: string, checkpointId: string): void => {
+const writeRestoreReady = (
+	dataDir: string,
+	operationId: CheckpointOperationId,
+	checkpointId: CheckpointId,
+): void => {
 	const restoreData = restoreDataPath(dataDir, operationId)
 	mkdirSync(restoreData, { recursive: true })
 	writeFileSync(
@@ -243,14 +256,14 @@ describe("checkpoint IDs and strict parsers", () => {
 					...manifest(id),
 					validation: { ...(manifest(id).validation as object), logs: -1 },
 				}),
-			/invalid logs/,
+			/validation.*logs|greater than or equal to 0/s,
 		)
 	})
 
 	it("accepts versioned current/previous state and rejects malformed selection", () => {
 		const current = newCheckpointId()
 		const previous = newCheckpointId()
-		const revision = newCheckpointId()
+		const revision = newCheckpointOperationId()
 		deepStrictEqual(
 			parseCheckpointState({
 				formatVersion: 1,
@@ -376,7 +389,7 @@ describe("checkpoint state resolution", () => {
 describe("checkpoint reconciliation and retention", () => {
 	it("quarantines only an exactly owned incomplete operation and preserves its bytes", async () => {
 		await withDataDir(async (dataDir) => {
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
 			const snapshot = checkpointSnapshotDir(dataDir, checkpointId)
 			mkdirSync(join(snapshot, "backup"), { recursive: true })
@@ -424,8 +437,8 @@ describe("checkpoint reconciliation and retention", () => {
 
 	it("rejects mismatched operation directory and intent identities without mutation", async () => {
 		await withDataDir(async (dataDir) => {
-			const directoryId = newCheckpointId()
-			const intentId = newCheckpointId()
+			const directoryId = newCheckpointOperationId()
+			const intentId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
 			const directory = writeCheckpointOperation(dataDir, directoryId, checkpointId, "backup-complete")
 			const intent = JSON.parse(readFileSync(join(directory, "intent.json"), "utf8"))
@@ -439,7 +452,7 @@ describe("checkpoint reconciliation and retention", () => {
 
 	it("publishes a completed first checkpoint after an interrupted pointer update", async () => {
 		await withDataDir(async (dataDir) => {
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
 			writeSnapshot(dataDir, checkpointId, operationId)
 			writeCheckpointOperation(dataDir, operationId, checkpointId, "manifest-complete")
@@ -458,12 +471,12 @@ describe("checkpoint reconciliation and retention", () => {
 		await withDataDir(async (dataDir) => {
 			const oldCurrent = newCheckpointId()
 			const oldPrevious = newCheckpointId()
-			const baseRevision = newCheckpointId()
+			const baseRevision = newCheckpointOperationId()
 			writeSnapshot(dataDir, oldCurrent)
 			writeSnapshot(dataDir, oldPrevious)
 			writeState(dataDir, oldCurrent, oldPrevious, baseRevision)
 
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
 			writeSnapshot(dataDir, checkpointId, operationId)
 			writeCheckpointOperation(dataDir, operationId, checkpointId, "manifest-complete", {
@@ -493,7 +506,7 @@ describe("checkpoint reconciliation and retention", () => {
 				const current = newCheckpointId()
 				const previous = newCheckpointId()
 				const old = newCheckpointId()
-				const retirementId = newCheckpointId()
+				const retirementId = newCheckpointOperationId()
 				writeSnapshot(dataDir, current)
 				writeSnapshot(dataDir, previous)
 				writeSnapshot(dataDir, old)
@@ -527,8 +540,8 @@ describe("checkpoint reconciliation and retention", () => {
 			await withDataDir(async (dataDir) => {
 				const oldCurrent = newCheckpointId()
 				const oldPrevious = newCheckpointId()
-				const baseRevision = newCheckpointId()
-				const operationId = newCheckpointId()
+				const baseRevision = newCheckpointOperationId()
+				const operationId = newCheckpointOperationId()
 				const checkpointId = newCheckpointId()
 				writeSnapshot(dataDir, oldCurrent)
 				writeSnapshot(dataDir, oldPrevious)
@@ -568,8 +581,8 @@ describe("checkpoint reconciliation and retention", () => {
 			await withDataDir(async (dataDir) => {
 				const oldCurrent = newCheckpointId()
 				const oldPrevious = newCheckpointId()
-				const baseRevision = newCheckpointId()
-				const operationId = newCheckpointId()
+				const baseRevision = newCheckpointOperationId()
+				const operationId = newCheckpointOperationId()
 				const checkpointId = newCheckpointId()
 				writeSnapshot(dataDir, oldCurrent)
 				writeSnapshot(dataDir, checkpointId, operationId)
@@ -657,6 +670,7 @@ describe("live-store reset safety", () => {
 			mkdirSync(join(dataDir, "tmp"), { recursive: true })
 			writeFileSync(join(dataDir, "store", "part.bin"), "live")
 			writeFileSync(join(dataDir, "metadata", "table.sql"), "live")
+			writeFileSync(join(dataDir, "status"), "live")
 			writeFileSync(join(dataDir, "tmp", "scratch.bin"), "live")
 			writeFileSync(storeMarkerPath(dataDir), "{}")
 			writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
@@ -667,6 +681,7 @@ describe("live-store reset safety", () => {
 			ok(existsSync(checkpointSnapshotDir(dataDir, checkpointId)))
 			ok(!existsSync(join(dataDir, "store")))
 			ok(!existsSync(join(dataDir, "metadata")))
+			ok(!existsSync(join(dataDir, "status")))
 			ok(!existsSync(join(dataDir, "tmp")))
 			ok(!existsSync(storeMarkerPath(dataDir)))
 			ok(!existsSync(storeOpenMarkerPath(dataDir)))
@@ -724,6 +739,7 @@ describe("live-store reset safety", () => {
 					mkdirSync(join(dataDir, entry), { recursive: true })
 					writeFileSync(join(dataDir, entry, "live.bin"), "live")
 				}
+				writeFileSync(join(dataDir, "status"), "live")
 				writeFileSync(storeMarkerPath(dataDir), "{}")
 				writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
 				let injected = false
@@ -741,7 +757,7 @@ describe("live-store reset safety", () => {
 				)
 				await Effect.runPromise(reconcileCheckpointRecovery(dataDir))
 
-				for (const entry of ["data", "metadata", "store", "tmp"]) {
+				for (const entry of ["data", "metadata", "status", "store", "tmp"]) {
 					ok(!existsSync(join(dataDir, entry)), `${boundary}: ${entry}`)
 				}
 				strictEqual((await readCheckpointState(dataDir)).current, checkpointId)
@@ -761,7 +777,7 @@ describe("live-store reset safety", () => {
 				resetTransactionPath(dataDir),
 				`${JSON.stringify({
 					formatVersion: 1,
-					operationId: newCheckpointId(),
+					operationId: newCheckpointOperationId(),
 					dataDir,
 					targets: ["../outside-reset"],
 					phase: "intent",
@@ -769,7 +785,12 @@ describe("live-store reset safety", () => {
 				})}\n`,
 			)
 
-			await rejects(Effect.runPromise(reconcileCheckpointRecovery(dataDir)), /unsafe reset/)
+			const exit = await Effect.runPromise(Effect.exit(reconcileCheckpointRecovery(dataDir)))
+			ok(Exit.isFailure(exit))
+			const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
+			ok(failure)
+			strictEqual(failure._tag, "@maple/cli/CheckpointRecoveryError")
+			match(failure.message, /targets|outside-reset/)
 			strictEqual(readFileSync(join(outside, "preserve"), "utf8"), "outside")
 			ok(existsSync(resetTransactionPath(dataDir)))
 		})
@@ -786,9 +807,9 @@ describe("live restore transaction reconciliation", () => {
 
 	it("preserves an interrupted pre-ready restore and leaves the old live store selected", async () => {
 		await withDataDir(async (dataDir) => {
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
-			const quarantineId = newCheckpointId()
+			const quarantineId = newCheckpointQuarantineId()
 			writeFileSync(join(dataDir, "old-live"), "old")
 			writeRestoreTransaction(dataDir, operationId, checkpointId, quarantineId, "intent")
 			mkdirSync(restoreDataPath(dataDir, operationId), { recursive: true })
@@ -815,9 +836,9 @@ describe("live restore transaction reconciliation", () => {
 
 	it("resumes from restore-ready through quarantine, swap, durable markers, and completion", async () => {
 		await withDataDir(async (dataDir) => {
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
-			const quarantineId = newCheckpointId()
+			const quarantineId = newCheckpointQuarantineId()
 			const quarantine = restoreQuarantinePath(dataDir, operationId, quarantineId)
 			writeFileSync(join(dataDir, "old-live"), "old")
 			writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
@@ -839,9 +860,9 @@ describe("live restore transaction reconciliation", () => {
 
 	it("infers the recorded rename boundary from exact topology and completes idempotently", async () => {
 		await withDataDir(async (dataDir) => {
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
-			const quarantineId = newCheckpointId()
+			const quarantineId = newCheckpointQuarantineId()
 			const quarantine = restoreQuarantinePath(dataDir, operationId, quarantineId)
 			writeFileSync(join(dataDir, "old-live"), "old")
 			writeRestoreReady(dataDir, operationId, checkpointId)
@@ -872,9 +893,9 @@ describe("live restore transaction reconciliation", () => {
 		]
 		for (const boundary of boundaries) {
 			await withDataDir(async (dataDir) => {
-				const operationId = newCheckpointId()
+				const operationId = newCheckpointOperationId()
 				const checkpointId = newCheckpointId()
-				const quarantineId = newCheckpointId()
+				const quarantineId = newCheckpointQuarantineId()
 				const quarantine = restoreQuarantinePath(dataDir, operationId, quarantineId)
 				writeFileSync(join(dataDir, "old-live"), "old")
 				writeFileSync(storeOpenMarkerPath(dataDir), "999\n")
@@ -907,7 +928,7 @@ describe("live restore transaction reconciliation", () => {
 			ok(existsSync(restoreTransactionPath(dataDir)))
 			rmSync(restoreTransactionPath(dataDir))
 
-			const debris = `${dataDir}.restore-${newCheckpointId()}`
+			const debris = `${dataDir}.restore-${newCheckpointOperationId()}`
 			mkdirSync(debris)
 			await rejects(
 				Effect.runPromise(reconcileCheckpointRecovery(dataDir)),
@@ -926,9 +947,9 @@ describe("live restore transaction reconciliation", () => {
 			strictEqual(readFileSync(outside, "utf8"), "{}")
 		})
 		await withDataDir(async (dataDir) => {
-			const operationId = newCheckpointId()
+			const operationId = newCheckpointOperationId()
 			const checkpointId = newCheckpointId()
-			const quarantineId = newCheckpointId()
+			const quarantineId = newCheckpointQuarantineId()
 			const outside = join(dirname(dataDir), "outside-restore")
 			mkdirSync(outside)
 			writeFileSync(join(outside, "sentinel"), "preserve")
@@ -943,17 +964,20 @@ describe("live restore transaction reconciliation", () => {
 
 describe("backup configuration classification", () => {
 	it("classifies only backup-specific errors", () => {
+		const queryError = (detail: string) =>
+			new LocalQueryError({
+				status: 500,
+				detail,
+				message: `local query failed (500): ${detail}`,
+				cause: detail,
+			})
 		ok(
 			isMissingBackupConfigurationError(
-				new LocalQueryError(500, "INVALID_CONFIG_PARAMETER: backups.allowed_disk is not set"),
+				queryError("INVALID_CONFIG_PARAMETER: backups.allowed_disk is not set"),
 			),
 		)
-		ok(
-			isMissingBackupConfigurationError(
-				new LocalQueryError(500, "Disk default is not allowed for backups"),
-			),
-		)
-		ok(!isMissingBackupConfigurationError(new LocalQueryError(500, "INVALID_CONFIG_PARAMETER")))
+		ok(isMissingBackupConfigurationError(queryError("Disk default is not allowed for backups")))
+		ok(!isMissingBackupConfigurationError(queryError("INVALID_CONFIG_PARAMETER")))
 		ok(!isMissingBackupConfigurationError(new Error("UNKNOWN_TABLE")))
 		ok(!isMissingBackupConfigurationError(new Error("connection refused")))
 	})

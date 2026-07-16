@@ -1,3 +1,4 @@
+import { PostgresTransactionId } from "@maple/domain"
 import { sql } from "drizzle-orm"
 
 /**
@@ -27,5 +28,9 @@ export const txidColumn = {
  * optional response field; without it the client simply drops optimistic state
  * on the next synced update rather than on the precise transaction.
  */
-export const readTxid = (rows: ReadonlyArray<{ readonly txid?: string | null }>): string | undefined =>
-	rows[0]?.txid ?? undefined
+export const readTxid = (
+	rows: ReadonlyArray<{ readonly txid?: string | null }>,
+): PostgresTransactionId | undefined => {
+	const txid = rows[0]?.txid
+	return txid == null ? undefined : PostgresTransactionId.make(txid)
+}

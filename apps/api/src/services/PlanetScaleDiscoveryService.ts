@@ -20,10 +20,14 @@ type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
 /**
  * Resolves PlanetScale `planetscale`-type scrape targets into their concrete
  * per-database-branch scrape endpoints via PlanetScale's Prometheus http_sd
- * discovery API (`GET /v1/organizations/{org}/metrics`). Managed targets
- * (`authType "planetscale_oauth"`) authenticate with the org's OAuth grant
- * (`Authorization: Bearer …`); manual escape-hatch targets keep the service
- * token scheme (`Authorization: token {ID}:{SECRET}`).
+ * discovery API (`GET /v1/organizations/{org}/metrics`). The Authorization
+ * header authenticates the DISCOVERY call only: managed targets
+ * (`authType "planetscale_oauth"`) use the org's OAuth grant
+ * (`Authorization: Bearer …`), manual escape-hatch targets the service-token
+ * scheme (`Authorization: token {ID}:{SECRET}`). The metrics DATA PLANE
+ * (`metrics.psdb.cloud`) does not use that header at all — it authenticates
+ * with a signed, expiring URL (`?sig=…&exp=…`) that the SD response mints per
+ * branch (see {@link subTargetsFromGroup} / {@link PlanetScaleSubTarget.signedUrl}).
  *
  * Discovery results are cached in-memory per target with a 10-minute TTL
  * (PlanetScale's documented refresh cadence). On refresh failure stale entries
@@ -32,15 +36,27 @@ type ScrapeTargetRow = typeof scrapeTargets.$inferSelect
  */
 
 export interface PlanetScaleSubTarget {
-	/** Concrete per-branch scrape URL (`https://{host}{__metrics_path__}`). */
+	/**
+	 * Per-branch scrape endpoint WITHOUT auth params (`https://{host}{__metrics_path__}`).
+	 * Stable across discovery refreshes, so it's the scraper-facing target url
+	 * (fiber identity + `instance` label). NOT fetched directly — see `signedUrl`.
+	 */
 	readonly url: string
-	/** Stable discriminator: `planetscale_database_branch_id` SD label, falling back to `host:port`. */
+	/**
+	 * `url` plus PlanetScale's signed, expiring auth query params (`?sig=…&exp=…`),
+	 * promoted from the http_sd `__param_*` meta labels. This is the URL that
+	 * actually authenticates against the metrics data plane; fetching `url`
+	 * without them returns `403 invalid signature`. Equals `url` when the SD group
+	 * carried no `__param_*` labels.
+	 */
+	readonly signedUrl: string
+	/** Stable discriminator: `planetscale_database_branch_id` SD label, falling back to `host:port` + metrics path. */
 	readonly subTargetKey: string
 	/** SD labels minus `__`-prefixed Prometheus meta labels. */
 	readonly labels: Record<string, string>
 }
 
-const HttpSdResponse = Schema.Array(
+export const HttpSdResponse = Schema.Array(
 	Schema.Struct({
 		targets: Schema.Array(Schema.String),
 		labels: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
@@ -74,17 +90,26 @@ const toUpstreamError = (message: string, status?: number) =>
 	new ScrapeTargetUpstreamError({ message, ...(status === undefined ? {} : { status }) })
 
 /** Convert one http_sd group into sub-targets, dropping SSRF-invalid hosts. */
-const subTargetsFromGroup = (group: {
+export const subTargetsFromGroup = (group: {
 	readonly targets: ReadonlyArray<string>
 	readonly labels?: Record<string, string> | undefined
 }): { readonly ok: Array<PlanetScaleSubTarget>; readonly dropped: Array<string> } => {
 	const sdLabels = group.labels ?? {}
 	const scheme = sdLabels.__scheme__ ?? "https"
 	const path = sdLabels.__metrics_path__ ?? "/metrics"
+	// PlanetScale authenticates the metrics data plane with a signed, expiring URL
+	// (`?sig=…&exp=…`) minted per branch in the http_sd response — NOT the discovery
+	// credential (the service token / OAuth bearer only auths the SD listing).
+	// Prometheus convention promotes `__param_<name>` meta labels to `?<name>=`
+	// query params on the scrape URL; forward them or every scrape returns
+	// `403 invalid signature`.
 	const labels: Record<string, string> = {}
+	const authParams = new URLSearchParams()
 	for (const [key, value] of Object.entries(sdLabels)) {
-		if (!key.startsWith("__")) labels[key] = value
+		if (key.startsWith("__param_")) authParams.set(key.slice("__param_".length), value)
+		else if (!key.startsWith("__")) labels[key] = value
 	}
+	const query = authParams.toString()
 	const branchId = sdLabels.planetscale_database_branch_id
 
 	const ok: Array<PlanetScaleSubTarget> = []
@@ -97,13 +122,18 @@ const subTargetsFromGroup = (group: {
 			dropped.push(url)
 			continue
 		}
+		// The no-branch-id fallback keys on host + path (not bare host): groups
+		// that differ only by `__metrics_path__` are distinct endpoints, and a
+		// host-only key would silently collapse them away in dedupe. The signed
+		// `?sig=&exp=` params are deliberately excluded from the key so per-branch
+		// fiber identity stays stable as PlanetScale rotates them each refresh.
 		const subTargetKey =
 			branchId && group.targets.length === 1
 				? branchId
 				: branchId
 					? `${branchId}:${hostPort}`
-					: hostPort
-		ok.push({ url, subTargetKey, labels })
+					: `${hostPort}${path}`
+		ok.push({ url, signedUrl: query ? `${url}?${query}` : url, subTargetKey, labels })
 	}
 	return { ok, dropped }
 }
@@ -112,9 +142,10 @@ const subTargetsFromGroup = (group: {
  * Collapse sub-targets sharing a `subTargetKey` (last wins). The scraper keys
  * one scrape-loop fiber per `(targetId, subTargetKey)`, so duplicate keys would
  * each fork a fiber that the scheduler can't track — a runaway scrape loop.
- * Two entries with the same key resolve to the same logical endpoint, so
- * collapsing them is lossless. Happens when an http_sd payload exposes several
- * groups that fall back to the same host key (no `planetscale_database_branch_id`).
+ * Two entries with the same key resolve to the same scrape URL (the fallback
+ * key is host + path), so collapsing them is lossless. Happens when an http_sd
+ * payload exposes several groups that fall back to the same host+path key
+ * (no `planetscale_database_branch_id`).
  */
 const dedupeBySubTargetKey = (
 	entries: ReadonlyArray<PlanetScaleSubTarget>,
@@ -276,6 +307,24 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 				const converted = subTargetsFromGroup(group)
 				collected.push(...converted.ok)
 				dropped.push(...converted.dropped)
+			}
+
+			// Track label drift: PlanetScale documents `planetscale_database_branch_id`
+			// on every group, and its absence forces the host+path fallback key (losing
+			// per-branch attribution). Log the label keys actually seen so a rename on
+			// their side is diagnosable from prod logs.
+			const missingBranchLabel = groups.filter(
+				(group) => (group.labels ?? {}).planetscale_database_branch_id === undefined,
+			)
+			if (missingBranchLabel.length > 0) {
+				yield* Effect.logInfo("PlanetScale http_sd groups missing the branch-id label").pipe(
+					Effect.annotateLogs({
+						scrapeTargetId: row.id,
+						groupsMissingLabel: missingBranchLabel.length,
+						groupsTotal: groups.length,
+						observedLabelKeys: Object.keys(missingBranchLabel[0]?.labels ?? {}).join(", "),
+					}),
+				)
 			}
 			if (dropped.length > 0) {
 				yield* Effect.logWarning(

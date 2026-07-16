@@ -5,6 +5,7 @@ import {
 	AlertRuleTestRequest,
 	AlertRuleUpsertRequest,
 	DiscordAlertDestinationConfig,
+	EmailAlertDestinationConfig,
 	HazelAlertDestinationConfig,
 	HazelChannelId,
 	HazelOAuthAlertDestinationConfig,
@@ -459,7 +460,11 @@ export type DestinationFormState = {
 	hazelOrganizationLogoUrl: string | null
 	hazelChannelId: string
 	hazelChannelName: string
+	/** Selected workspace-member recipients (email type only). */
+	memberUserIds: string[]
 }
+
+export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
 	return {
@@ -477,6 +482,7 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
+		memberUserIds: [],
 	}
 }
 
@@ -496,6 +502,7 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
+		memberUserIds: destination.memberUserIds != null ? [...destination.memberUserIds] : [],
 	}
 }
 
@@ -560,6 +567,13 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
 				enabled: form.enabled,
 				webhookUrl: form.webhookUrl.trim(),
 			})
+		case "email":
+			return new EmailAlertDestinationConfig({
+				type: "email",
+				name: form.name.trim(),
+				enabled: form.enabled,
+				memberUserIds: form.memberUserIds,
+			})
 	}
 }
 
@@ -620,6 +634,13 @@ export function buildDestinationUpdatePayload(form: DestinationFormState): Alert
 				name: form.name.trim() || undefined,
 				enabled: form.enabled,
 				webhookUrl: form.webhookUrl.trim() || undefined,
+			}
+		case "email":
+			return {
+				type: "email",
+				name: form.name.trim() || undefined,
+				enabled: form.enabled,
+				memberUserIds: form.memberUserIds.length > 0 ? form.memberUserIds : undefined,
 			}
 	}
 }

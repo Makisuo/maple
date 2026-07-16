@@ -122,7 +122,7 @@ export function FlamegraphMinimap({
 					const isError = bar.span.statusCode === "Error"
 					const colorStyle = isError
 						? { backgroundColor: "var(--destructive)" }
-						: getSpanColorStyle(bar.span.spanName, bar.span.serviceName, services)
+						: getSpanColorStyle(bar.span.spanName, bar.span.serviceName)
 
 					return (
 						<div

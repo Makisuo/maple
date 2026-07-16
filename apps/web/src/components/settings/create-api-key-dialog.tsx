@@ -1,9 +1,11 @@
-import { useAtomRefresh, useAtomSet } from "@/lib/effect-atom"
+import { useAtomSet } from "@/lib/effect-atom"
 import { useState } from "react"
 import { Exit } from "effect"
-import { CreateApiKeyRequest, type ApiKeyKind } from "@maple/domain/http"
+import type { ApiKeyKind } from "@maple/domain/http"
+import type { V2ApiKeyWithSecret, V2Scope } from "@maple/domain/http/v2"
 import { toast } from "sonner"
 
+import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
 import { Label } from "@maple/ui/components/ui/label"
@@ -16,7 +18,17 @@ import {
 	DialogPanel,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@maple/ui/components/ui/select"
+import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
+import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { buildApiKeyCreatePayload } from "./api-key-create-payload"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
 
 interface CreateApiKeyDialogProps {
@@ -26,32 +38,67 @@ interface CreateApiKeyDialogProps {
 	kind?: ApiKeyKind
 }
 
+const EXPIRATION_OPTIONS = [
+	{ value: "never", label: "Never" },
+	{ value: "7", label: "7 days" },
+	{ value: "30", label: "30 days" },
+	{ value: "90", label: "90 days" },
+	{ value: "365", label: "1 year" },
+] as const
+
+type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]["value"]
+
+/**
+ * v2 scope families the dashboard can mint restricted keys for. Only families
+ * with live /v2 route groups belong here — append as groups ship (dashboards,
+ * alert_rules, error_issues, traces per docs/api-v2.md).
+ */
+const SCOPE_FAMILIES = [{ id: "api_keys", label: "API keys" }] as const
+
+type ScopeLevel = "none" | "read" | "write"
+type AccessMode = "full" | "restricted"
+
+const defaultScopeLevels = (): Record<string, ScopeLevel> =>
+	Object.fromEntries(SCOPE_FAMILIES.map((f) => [f.id, "none"]))
+
+const scopesFromLevels = (levels: Record<string, ScopeLevel>): Array<V2Scope> =>
+	SCOPE_FAMILIES.flatMap((f) => {
+		const level = levels[f.id]
+		return level === "read" || level === "write" ? [`${f.id}:${level}` as V2Scope] : []
+	})
+
 export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: CreateApiKeyDialogProps) {
 	const [newName, setNewName] = useState("")
 	const [newDescription, setNewDescription] = useState("")
+	const [expiration, setExpiration] = useState<ExpirationValue>("never")
+	const [accessMode, setAccessMode] = useState<AccessMode>("full")
+	const [scopeLevels, setScopeLevels] = useState<Record<string, ScopeLevel>>(defaultScopeLevels)
 	const [isCreating, setIsCreating] = useState(false)
-	const [newSecret, setNewSecret] = useState<string | null>(null)
+	const [createdKey, setCreatedKey] = useState<V2ApiKeyWithSecret | null>(null)
 
-	const listQueryAtom = MapleApiAtomClient.query("apiKeys", "list", {})
-	const refreshKeys = useAtomRefresh(listQueryAtom)
-	const createMutation = useAtomSet(MapleApiAtomClient.mutation("apiKeys", "create"), {
+	const { prepareForMutation, reconcileTxid } = useApiKeyMutationSync()
+	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("apiKeys", "create"), {
 		mode: "promiseExit",
 	})
 
+	const restrictedScopes = accessMode === "restricted" ? scopesFromLevels(scopeLevels) : undefined
+	const missingScopes = accessMode === "restricted" && restrictedScopes?.length === 0
+	const canCreate = newName.trim().length > 0 && !missingScopes && !isCreating
+
 	async function handleCreate() {
-		if (!newName.trim()) return
+		if (!canCreate) return
 		setIsCreating(true)
+		prepareForMutation()
 		const result = await createMutation({
-			payload: new CreateApiKeyRequest({
-				name: newName.trim(),
-				description: newDescription.trim() || undefined,
-				kind,
+			payload: buildApiKeyCreatePayload(newName, newDescription, kind, {
+				...(expiration !== "never" ? { expiresInSeconds: Number(expiration) * 86_400 } : {}),
+				...(restrictedScopes !== undefined ? { scopes: restrictedScopes } : {}),
 			}),
 		})
 		if (Exit.isSuccess(result)) {
-			setNewSecret(result.value.secret)
-			refreshKeys()
+			setCreatedKey(result.value)
 			onCreated?.(result.value.secret)
+			void reconcileTxid(result.value.txid)
 		} else {
 			toast.error("Failed to create API key")
 		}
@@ -66,13 +113,16 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 		onOpenChange(false)
 		setNewName("")
 		setNewDescription("")
-		setNewSecret(null)
+		setExpiration("never")
+		setAccessMode("full")
+		setScopeLevels(defaultScopeLevels())
+		setCreatedKey(null)
 	}
 
 	return (
 		<Dialog open={open} onOpenChange={handleClose}>
 			<DialogContent>
-				{newSecret ? (
+				{createdKey ? (
 					<>
 						<DialogHeader>
 							<DialogTitle>API key created</DialogTitle>
@@ -80,12 +130,24 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 								Copy your API key now. You won't be able to see it again.
 							</DialogDescription>
 						</DialogHeader>
-						<DialogPanel>
-							<ApiKeySecretReveal secret={newSecret} />
+						<DialogPanel className="space-y-3">
+							<div className="flex flex-wrap items-center gap-1.5">
+								<span className="text-foreground text-sm font-medium">{createdKey.name}</span>
+								<code className="text-muted-foreground font-mono text-[11px] tracking-tight">
+									{createdKey.key_prefix}…
+								</code>
+								{createdKey.scopes !== null &&
+									createdKey.scopes.map((scope) => (
+										<Badge key={scope} variant="outline" size="sm" className="font-mono">
+											{scope}
+										</Badge>
+									))}
+							</div>
+							<ApiKeySecretReveal secret={createdKey.secret} />
 						</DialogPanel>
 						<DialogFooter>
 							<Button variant="outline" onClick={() => handleClose(false)}>
-								Close
+								Done
 							</Button>
 						</DialogFooter>
 					</>
@@ -97,7 +159,7 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 								API keys are used to authenticate with the Maple API and MCP server.
 							</DialogDescription>
 						</DialogHeader>
-						<DialogPanel className="space-y-3">
+						<DialogPanel className="space-y-4">
 							<div className="space-y-1.5">
 								<Label htmlFor="api-key-name">Name</Label>
 								<Input
@@ -106,7 +168,7 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 									value={newName}
 									onChange={(e) => setNewName(e.target.value)}
 									onKeyDown={(e) => {
-										if (e.key === "Enter" && newName.trim()) {
+										if (e.key === "Enter" && canCreate) {
 											void handleCreate()
 										}
 									}}
@@ -124,12 +186,88 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 									onChange={(e) => setNewDescription(e.target.value)}
 								/>
 							</div>
+							<div className="space-y-1.5">
+								<Label htmlFor="api-key-expiration">Expiration</Label>
+								<Select
+									items={EXPIRATION_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+									value={expiration}
+									onValueChange={(value) => setExpiration(value as ExpirationValue)}
+								>
+									<SelectTrigger id="api-key-expiration" className="w-full">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{EXPIRATION_OPTIONS.map((option) => (
+											<SelectItem key={option.value} value={option.value}>
+												{option.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-2">
+								<Label>Access</Label>
+								<ToggleGroup
+									value={[accessMode]}
+									onValueChange={(values) => {
+										const next = values[0]
+										if (next === "full" || next === "restricted") setAccessMode(next)
+									}}
+									variant="outline"
+									size="sm"
+								>
+									<ToggleGroupItem value="full">Full access</ToggleGroupItem>
+									<ToggleGroupItem value="restricted">Restricted</ToggleGroupItem>
+								</ToggleGroup>
+								{accessMode === "restricted" ? (
+									<div className="space-y-2 pt-1">
+										{SCOPE_FAMILIES.map((family) => (
+											<div
+												key={family.id}
+												className="flex items-center justify-between gap-3"
+											>
+												<span className="text-foreground text-sm">{family.label}</span>
+												<ToggleGroup
+													value={[scopeLevels[family.id] ?? "none"]}
+													onValueChange={(values) => {
+														const next = values[0]
+														if (
+															next === "none" ||
+															next === "read" ||
+															next === "write"
+														) {
+															setScopeLevels((current) => ({
+																...current,
+																[family.id]: next,
+															}))
+														}
+													}}
+													variant="outline"
+													size="sm"
+												>
+													<ToggleGroupItem value="none">None</ToggleGroupItem>
+													<ToggleGroupItem value="read">Read</ToggleGroupItem>
+													<ToggleGroupItem value="write">Write</ToggleGroupItem>
+												</ToggleGroup>
+											</div>
+										))}
+										<p className="text-muted-foreground text-xs">
+											Write includes read. Scopes are fixed at creation — roll the key to
+											change access.
+										</p>
+									</div>
+								) : (
+									<p className="text-muted-foreground text-xs">
+										Full access to the organization's API.
+									</p>
+								)}
+							</div>
 						</DialogPanel>
 						<DialogFooter>
 							<Button variant="outline" onClick={() => handleClose(false)}>
 								Cancel
 							</Button>
-							<Button onClick={handleCreate} disabled={!newName.trim() || isCreating}>
+							<Button onClick={handleCreate} disabled={!canCreate}>
 								{isCreating ? "Creating..." : "Create"}
 							</Button>
 						</DialogFooter>

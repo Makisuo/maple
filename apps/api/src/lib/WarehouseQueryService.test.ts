@@ -590,3 +590,25 @@ describe("WarehouseUpstreamError surfaces transient classification", () => {
 		assert.strictEqual(err.upstreamStatus, 503)
 	})
 })
+
+describe("isEmptyJsonBodyError (empty Tinybird body ⇒ zero rows)", () => {
+	// The Tinybird SDK's sql() parses the response body as JSON; a successful (2xx) query that
+	// matches zero rows can return an empty body, throwing `SyntaxError: "Unexpected end of JSON
+	// input"`. That must be treated as zero rows so alert rules (and every sqlQuery caller) hit the
+	// no-data path instead of surfacing a spurious WarehouseClientError.
+	it("treats an empty-body SyntaxError as zero rows", () => {
+		assert.isTrue(__testables.isEmptyJsonBodyError(new SyntaxError("Unexpected end of JSON input")))
+	})
+
+	it("does NOT swallow an HTML-error-page SyntaxError", () => {
+		// "Unexpected token < in JSON" means Tinybird returned an HTML error page — a real failure
+		// that must keep propagating as a WarehouseClientError, not be silently treated as zero rows.
+		assert.isFalse(__testables.isEmptyJsonBodyError(new SyntaxError("Unexpected token < in JSON")))
+	})
+
+	it("ignores non-SyntaxError failures", () => {
+		assert.isFalse(__testables.isEmptyJsonBodyError(new Error("Unexpected end of JSON input")))
+		assert.isFalse(__testables.isEmptyJsonBodyError("Unexpected end of JSON input"))
+		assert.isFalse(__testables.isEmptyJsonBodyError(null))
+	})
+})

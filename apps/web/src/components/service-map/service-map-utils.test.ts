@@ -240,46 +240,35 @@ describe("computeNodePositions namespace clustering", () => {
 })
 
 describe("getServiceMapNodeColor", () => {
-	const services = ["api", "auth", "worker"]
-
 	it("colors database nodes with the dedicated db palette regardless of mode", () => {
 		const dbData = { label: "clickhouse", kind: "database" as const, errorRate: 0 }
-		expect(getServiceMapNodeColor(dbData, services, "service")).toBe(
-			getServiceMapNodeColor(dbData, services, "health"),
+		expect(getServiceMapNodeColor(dbData, "service")).toBe(
+			getServiceMapNodeColor(dbData, "health"),
 		)
-		expect(getServiceMapNodeColor(dbData, services, "platform")).toBe(
-			getServiceMapNodeColor(dbData, services, "service"),
+		expect(getServiceMapNodeColor(dbData, "platform")).toBe(
+			getServiceMapNodeColor(dbData, "service"),
 		)
 	})
 
 	it("returns severity colors in health mode based on error-rate buckets", () => {
 		const base = { label: "api", kind: "service" as const, platform: undefined }
-		expect(getServiceMapNodeColor({ ...base, errorRate: 0.06 }, services, "health")).toBe(
+		expect(getServiceMapNodeColor({ ...base, errorRate: 0.06 }, "health")).toBe(
 			"var(--severity-error)",
 		)
-		expect(getServiceMapNodeColor({ ...base, errorRate: 0.02 }, services, "health")).toBe(
+		expect(getServiceMapNodeColor({ ...base, errorRate: 0.02 }, "health")).toBe(
 			"var(--severity-warn)",
 		)
-		expect(getServiceMapNodeColor({ ...base, errorRate: 0 }, services, "health")).toBe(
+		expect(getServiceMapNodeColor({ ...base, errorRate: 0 }, "health")).toBe(
 			"var(--severity-info)",
 		)
 	})
 
 	it("derives platform colors in platform mode", () => {
-		const k8s = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0, platform: "kubernetes" },
-			services,
-			"platform",
+		const k8s = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0, platform: "kubernetes" }, "platform",
 		)
-		const cf = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0, platform: "cloudflare" },
-			services,
-			"platform",
+		const cf = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0, platform: "cloudflare" }, "platform",
 		)
-		const unknown = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0, platform: undefined },
-			services,
-			"platform",
+		const unknown = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0, platform: undefined }, "platform",
 		)
 		expect(k8s).toBe(getPlatformColor("kubernetes"))
 		expect(cf).toBe(getPlatformColor("cloudflare"))
@@ -288,15 +277,9 @@ describe("getServiceMapNodeColor", () => {
 	})
 
 	it("falls back to per-service legend color in service mode", () => {
-		const apiColor = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0 },
-			services,
-			"service",
+		const apiColor = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0 }, "service",
 		)
-		const authColor = getServiceMapNodeColor(
-			{ label: "auth", kind: "service", errorRate: 0 },
-			services,
-			"service",
+		const authColor = getServiceMapNodeColor({ label: "auth", kind: "service", errorRate: 0 }, "service",
 		)
 		expect(apiColor).not.toBe(authColor)
 	})

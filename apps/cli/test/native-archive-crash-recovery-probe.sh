@@ -115,8 +115,8 @@ spawn_and_kill() {
 		>"$ROOT/worker-$boundary.out" 2>&1 &
 	local pid=$!
 	# Wait for the durable paused marker (the boundary was reached).
-	local i
-	for i in $(seq 1 300); do
+	local _i
+	for _i in $(seq 1 300); do
 		[ -f "$marker/paused" ] && break
 		kill -0 "$pid" 2>/dev/null || { echo "      worker exited before marker (see $ROOT/worker-$boundary.out)" >&2; return 1; }
 		sleep 0.1

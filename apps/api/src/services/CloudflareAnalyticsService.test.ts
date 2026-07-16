@@ -116,7 +116,11 @@ const httpData = {
 						count: 10,
 						avg: { sampleInterval: 10 },
 						sum: { edgeResponseBytes: 5000, visits: 8 },
-						dimensions: { datetimeFiveMinutes: BUCKET, cacheStatus: "hit", edgeResponseStatus: 200 },
+						dimensions: {
+							datetimeFiveMinutes: BUCKET,
+							cacheStatus: "hit",
+							edgeResponseStatus: 200,
+						},
 					},
 				],
 				latency: [
@@ -145,8 +149,17 @@ const workersData = {
 				invocations: [
 					{
 						sum: { requests: 42, errors: 2, subrequests: 5 },
-						quantiles: { cpuTimeP50: 1500, cpuTimeP99: 9000, durationP50: 0.002, durationP99: 0.05 },
-						dimensions: { datetimeFiveMinutes: BUCKET, scriptName: "my-worker", status: "success" },
+						quantiles: {
+							cpuTimeP50: 1500,
+							cpuTimeP99: 9000,
+							durationP50: 0.002,
+							durationP99: 0.05,
+						},
+						dimensions: {
+							datetimeFiveMinutes: BUCKET,
+							scriptName: "my-worker",
+							status: "success",
+						},
 					},
 				],
 			},
@@ -235,7 +248,12 @@ const mockCloudflareFetch =
 		if (url.includes("/zones")) {
 			if (options.zonesStatus) {
 				return jsonResponse(
-					{ success: false, errors: [{ code: 10000, message: "Authentication error" }], messages: [], result: null },
+					{
+						success: false,
+						errors: [{ code: 10000, message: "Authentication error" }],
+						messages: [],
+						result: null,
+					},
 					options.zonesStatus,
 				)
 			}
@@ -272,7 +290,11 @@ const makeWarehouseStub = (
 	queryStub?: CompiledQueryStub,
 ): WarehouseQueryServiceShape =>
 	({
-		ingest: (tenant: { orgId: string }, datasource: string, rows: ReadonlyArray<MetricSumRow | MetricGaugeRow>) =>
+		ingest: (
+			tenant: { orgId: string },
+			datasource: string,
+			rows: ReadonlyArray<MetricSumRow | MetricGaugeRow>,
+		) =>
 			Effect.sync(() => {
 				captured.push({ datasource, orgId: tenant.orgId, rows: [...rows] })
 			}),
@@ -311,7 +333,9 @@ const makeLayer = (
 		Layer.provideMerge(Layer.succeed(WarehouseQueryService, makeWarehouseStub(captured, queryStub))),
 		Layer.provideMerge(testDb.layer),
 		Layer.provideMerge(Env.layer),
-		Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromUnknown({ ...baseConfig, ...configOverrides }))),
+		Layer.provideMerge(
+			ConfigProvider.layer(ConfigProvider.fromUnknown({ ...baseConfig, ...configOverrides })),
+		),
 		Layer.provideMerge(Layer.succeed(FetchHttpClient.Fetch, mockCloudflareFetch(fetchOptions))),
 		// Disable the distilled retry policy: its backoff sleeps never resolve under the
 		// TestClock, so a retryable failure would hang the suite instead of failing the test.
@@ -349,9 +373,7 @@ const seedConnection = (scope: string = ANALYTICS_SCOPE) =>
  * write-ready org whose gateway-written metrics land in its own CH. Override
  * either to simulate schema drift / a disconnected cluster.
  */
-const seedByoClickHouse = (
-	overrides: { syncStatus?: string; schemaVersion?: string | null } = {},
-) =>
+const seedByoClickHouse = (overrides: { syncStatus?: string; schemaVersion?: string | null } = {}) =>
 	Effect.gen(function* () {
 		const database = yield* Database
 		yield* database.execute((db) =>
@@ -403,7 +425,8 @@ const flattenOtlp = (calls: ReadonlyArray<OtlpCall>): FlatMetric[] => {
 	const out: FlatMetric[] = []
 	for (const call of calls) {
 		for (const rm of call.payload.resourceMetrics) {
-			const serviceName = rm.resource.attributes.find((a) => a.key === "service.name")?.value.stringValue ?? ""
+			const serviceName =
+				rm.resource.attributes.find((a) => a.key === "service.name")?.value.stringValue ?? ""
 			for (const sm of rm.scopeMetrics) {
 				for (const metric of sm.metrics) {
 					const kind = metric.sum ? "sum" : "gauge"
@@ -507,8 +530,12 @@ describe("CloudflareAnalyticsService", () => {
 			const workerRequests = metrics.find((m) => m.name === "cloudflare.worker.requests")
 			assert.strictEqual(workerRequests!.value, 42)
 
-			assert.isDefined(metrics.find((m) => m.name === "cloudflare.http.edge.ttfb" && m.kind === "gauge"))
-			assert.isDefined(metrics.find((m) => m.name === "cloudflare.worker.cpu_time" && m.kind === "gauge"))
+			assert.isDefined(
+				metrics.find((m) => m.name === "cloudflare.http.edge.ttfb" && m.kind === "gauge"),
+			)
+			assert.isDefined(
+				metrics.find((m) => m.name === "cloudflare.worker.cpu_time" && m.kind === "gauge"),
+			)
 			// Every gateway POST is authenticated with the org's public ingest key (which routes
 			// the org to its own warehouse — managed Tinybird or BYO ClickHouse).
 			assert.isAbove(otlpCalls.length, 0)
@@ -738,7 +765,9 @@ describe("CloudflareAnalyticsService", () => {
 			assert.include(httpRow!.lastError ?? "", "quota exceeded")
 			assert.strictEqual(httpRow!.watermarkAt?.getTime(), T0 - 30 * MIN)
 			assert.strictEqual(captured.length, 0)
-		}).pipe(Effect.provide(makeLayer(testDb, captured, { graphqlErrors: [{ message: "quota exceeded" }] })))
+		}).pipe(
+			Effect.provide(makeLayer(testDb, captured, { graphqlErrors: [{ message: "quota exceeded" }] })),
+		)
 	})
 
 	it.effect("pollOrg surfaces a zone authz failure as an observable failure, not just a DB write", () => {
@@ -851,6 +880,131 @@ describe("CloudflareAnalyticsService", () => {
 		)
 	})
 
+	it.effect(
+		"a plan-gated 'does not have access to the path' error disables the dataset without telemetry",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			return Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				yield* seedConnection()
+				for (const dataset of ["http_requests", "firewall_events"]) {
+					yield* seedStateRow({
+						dataset,
+						zoneId: ZONE_ID,
+						zoneName: ZONE_NAME,
+						watermarkAt: new Date(T0 - 30 * MIN),
+						settingsFetchedAt: new Date(T0 - 5 * MIN),
+					})
+				}
+				const service = yield* CloudflareAnalyticsService
+				const summary = yield* service.pollOrg(ORG)
+				// Cloudflare gates firewall_events behind the zone's plan ("does not have access to the
+				// path ... access controls"). That is an expected per-plan degradation — the dataset must
+				// be quietly disabled (like a "not enabled" error), NOT raised as an AnalyticsPollError.
+				assert.strictEqual(summary.failures.length, 0)
+				const rows = yield* loadStateRows
+				const firewall = rows.find((r) => r.dataset === "firewall_events" && r.zoneId === ZONE_ID)
+				const http = rows.find((r) => r.dataset === "http_requests" && r.zoneId === ZONE_ID)
+				assert.isFalse(firewall!.enabled, "plan-gated dataset must be disabled")
+				// The clean sibling wasn't the problem — Cloudflare voids the whole batch's `data` when one
+				// selection is gated. It must not be dragged into a "carried no data" failure.
+				assert.isTrue(http!.enabled, "clean sibling must stay enabled")
+			}).pipe(
+				Effect.provide(
+					makeLayer(testDb, captured, {
+						graphqlErrors: [
+							{
+								message:
+									"zone 'z' does not have access to the path. Refer to this page for more details about access controls: https://developers.cloudflare.com/analytics/graphql-api/errors/",
+								path: ["viewer", "zones", 0, "firewall"],
+							},
+						],
+					}),
+				),
+			)
+		},
+	)
+
+	it.effect("a genuine error alongside a plan-gated one still fails the clean siblings", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			for (const dataset of ["http_requests", "firewall_events"]) {
+				yield* seedStateRow({
+					dataset,
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					watermarkAt: new Date(T0 - 30 * MIN),
+					settingsFetchedAt: new Date(T0 - 5 * MIN),
+				})
+			}
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			// firewall is plan-gated (disabled), but the batch also carried a genuine "quota exceeded"
+			// error. Because not ALL errors are plan-gating, the clean sibling (http) must still surface
+			// a failure — the plan-gating skip must never swallow a real outage.
+			const rows = yield* loadStateRows
+			const firewall = rows.find((r) => r.dataset === "firewall_events" && r.zoneId === ZONE_ID)
+			assert.isFalse(firewall!.enabled)
+			assert.isAbove(summary.failures.length, 0)
+			assert.isTrue(summary.failures.some((failure) => failure.message.includes("quota exceeded")))
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [
+						{
+							message: "zone 'z' does not have access to the path. access controls",
+							path: ["viewer", "zones", 0, "firewall"],
+						},
+						{ message: "quota exceeded" },
+					],
+				}),
+			),
+		)
+	})
+
+	it.effect("a plan-gated latency field on http_requests downgrades quantiles instead of disabling", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			yield* seedStateRow({
+				dataset: "http_requests",
+				zoneId: ZONE_ID,
+				zoneName: ZONE_NAME,
+				watermarkAt: new Date(T0 - 30 * MIN),
+				settingsFetchedAt: new Date(T0 - 5 * MIN),
+			})
+			const service = yield* CloudflareAnalyticsService
+			const summary = yield* service.pollOrg(ORG)
+			// Only the timing-quantile field is gated ("does not have access to the field
+			// 'edgetimetofirstbytemsp50'"). The counters (requests/errors) still work, so the dataset
+			// must stay enabled and merely drop quantiles — NOT be wholesale-disabled — with no telemetry.
+			assert.strictEqual(summary.failures.length, 0)
+			const http = (yield* loadStateRows).find(
+				(r) => r.dataset === "http_requests" && r.zoneId === ZONE_ID,
+			)
+			assert.isTrue(http!.enabled, "counters still work — dataset must stay enabled")
+			assert.isFalse(http!.quantilesAvailable, "gated latency field must downgrade quantiles")
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, captured, {
+					graphqlErrors: [
+						{
+							message:
+								"zone 'z' does not have access to the field 'edgetimetofirstbytemsp50' from the path",
+							path: ["viewer", "zones", 0, "groups"],
+						},
+					],
+				}),
+			),
+		)
+	})
+
 	it.effect("pollOrg records a zones-list auth failure, disables rows, and holds watermarks", () => {
 		const testDb = createTestDb(trackedDbs)
 		const captured: CapturedIngest[] = []
@@ -869,7 +1023,10 @@ describe("CloudflareAnalyticsService", () => {
 			const summary = yield* service.pollOrg(ORG)
 			// A 401 on the zones list means Cloudflare no longer honors the token: the tick
 			// aborts before any GraphQL/ingest work and flags the org for reconnect.
-			assert.strictEqual(summary.skipped, "zone discovery failed: @maple/http/errors/IntegrationsRevokedError")
+			assert.strictEqual(
+				summary.skipped,
+				"zone discovery failed: @maple/http/errors/IntegrationsRevokedError",
+			)
 			assert.strictEqual(summary.callsMade, 0)
 			assert.strictEqual(summary.rowsIngested, 0)
 
@@ -958,7 +1115,11 @@ describe("CloudflareAnalyticsService", () => {
 				lastSuccessAt: new Date(T0 - 5 * MIN),
 				watermarkAt: new Date(T0 - 15 * MIN),
 			})
-			yield* seedStateRow({ dataset: "workers_invocations", lastError: "boom", lastErrorAt: new Date(T0) })
+			yield* seedStateRow({
+				dataset: "workers_invocations",
+				lastError: "boom",
+				lastErrorAt: new Date(T0),
+			})
 			const service = yield* CloudflareAnalyticsService
 			const status = yield* service.getStatus(ORG)
 			assert.strictEqual(status.zones.length, 1)
@@ -975,71 +1136,84 @@ describe("CloudflareAnalyticsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
-	it.effect("getIntegrationStatus returns a disconnected status and ignores state rows when not connected", () => {
-		const testDb = createTestDb(trackedDbs)
-		const captured: CapturedIngest[] = []
-		return Effect.gen(function* () {
-			// A leftover state row must not leak into the response once the OAuth connection is gone —
-			// getIntegrationStatus short-circuits before reading analytics state.
-			yield* seedStateRow({ dataset: "http_requests", zoneId: ZONE_ID, zoneName: ZONE_NAME })
-			const service = yield* CloudflareAnalyticsService
-			const status = yield* service.getIntegrationStatus(ORG)
-			assert.isFalse(status.connected)
-			assert.strictEqual(status.accountId, null)
-			assert.strictEqual(status.accountName, null)
-			assert.strictEqual(status.connectedByUserId, null)
-			assert.strictEqual(status.scope, null)
-			assert.isFalse(status.analyticsCapable)
-			assert.deepStrictEqual(status.zones, [])
-			assert.strictEqual(status.workers, null)
-		}).pipe(Effect.provide(makeLayer(testDb, captured)))
-	})
+	it.effect(
+		"getIntegrationStatus returns a disconnected status and ignores state rows when not connected",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			return Effect.gen(function* () {
+				// A leftover state row must not leak into the response once the OAuth connection is gone —
+				// getIntegrationStatus short-circuits before reading analytics state.
+				yield* seedStateRow({ dataset: "http_requests", zoneId: ZONE_ID, zoneName: ZONE_NAME })
+				const service = yield* CloudflareAnalyticsService
+				const status = yield* service.getIntegrationStatus(ORG)
+				assert.isFalse(status.connected)
+				assert.strictEqual(status.accountId, null)
+				assert.strictEqual(status.accountName, null)
+				assert.strictEqual(status.connectedByUserId, null)
+				assert.strictEqual(status.scope, null)
+				assert.isFalse(status.analyticsCapable)
+				assert.deepStrictEqual(status.zones, [])
+				assert.strictEqual(status.workers, null)
+			}).pipe(Effect.provide(makeLayer(testDb, captured)))
+		},
+	)
 
-	it.effect("getIntegrationStatus merges the OAuth connection with analytics state for a connected org", () => {
-		const testDb = createTestDb(trackedDbs)
-		const captured: CapturedIngest[] = []
-		return Effect.gen(function* () {
-			yield* seedConnection()
-			yield* seedStateRow({
-				dataset: "http_requests",
-				zoneId: ZONE_ID,
-				zoneName: ZONE_NAME,
-				lastSuccessAt: new Date(T0 - 5 * MIN),
-				watermarkAt: new Date(T0 - 15 * MIN),
-			})
-			yield* seedStateRow({ dataset: "workers_invocations", lastError: "boom", lastErrorAt: new Date(T0) })
-			const service = yield* CloudflareAnalyticsService
-			const status = yield* service.getIntegrationStatus(ORG)
-			assert.isTrue(status.connected)
-			assert.strictEqual(status.accountId, ACCOUNT_ID)
-			assert.strictEqual(status.accountName, "Test Account")
-			assert.strictEqual(status.connectedByUserId, "user_1")
-			assert.strictEqual(status.scope, ANALYTICS_SCOPE)
-			// Full analytics scope → the card unlocks the analytics UI.
-			assert.isTrue(status.analyticsCapable)
-			assert.strictEqual(status.zones.length, 1)
-			assert.strictEqual(status.zones[0]?.id, ZONE_ID)
-			assert.strictEqual(status.zones[0]?.name, ZONE_NAME)
-			assert.strictEqual(status.zones[0]?.lastSyncedAt, T0 - 5 * MIN)
-			assert.strictEqual(status.workers?.lastError, "boom")
-		}).pipe(Effect.provide(makeLayer(testDb, captured)))
-	})
+	it.effect(
+		"getIntegrationStatus merges the OAuth connection with analytics state for a connected org",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			return Effect.gen(function* () {
+				yield* seedConnection()
+				yield* seedStateRow({
+					dataset: "http_requests",
+					zoneId: ZONE_ID,
+					zoneName: ZONE_NAME,
+					lastSuccessAt: new Date(T0 - 5 * MIN),
+					watermarkAt: new Date(T0 - 15 * MIN),
+				})
+				yield* seedStateRow({
+					dataset: "workers_invocations",
+					lastError: "boom",
+					lastErrorAt: new Date(T0),
+				})
+				const service = yield* CloudflareAnalyticsService
+				const status = yield* service.getIntegrationStatus(ORG)
+				assert.isTrue(status.connected)
+				assert.strictEqual(status.accountId, ACCOUNT_ID)
+				assert.strictEqual(status.accountName, "Test Account")
+				assert.strictEqual(status.connectedByUserId, "user_1")
+				assert.strictEqual(status.scope, ANALYTICS_SCOPE)
+				// Full analytics scope → the card unlocks the analytics UI.
+				assert.isTrue(status.analyticsCapable)
+				assert.strictEqual(status.zones.length, 1)
+				assert.strictEqual(status.zones[0]?.id, ZONE_ID)
+				assert.strictEqual(status.zones[0]?.name, ZONE_NAME)
+				assert.strictEqual(status.zones[0]?.lastSyncedAt, T0 - 5 * MIN)
+				assert.strictEqual(status.workers?.lastError, "boom")
+			}).pipe(Effect.provide(makeLayer(testDb, captured)))
+		},
+	)
 
-	it.effect("getIntegrationStatus reports analyticsCapable=false and null workers for a scope-limited token", () => {
-		const testDb = createTestDb(trackedDbs)
-		const captured: CapturedIngest[] = []
-		return Effect.gen(function* () {
-			// Connected, but the token lacks analytics.read — connected yet not analytics-capable,
-			// and with no workers state row the workers block maps to null.
-			yield* seedConnection("account-settings.read workers-scripts.read")
-			const service = yield* CloudflareAnalyticsService
-			const status = yield* service.getIntegrationStatus(ORG)
-			assert.isTrue(status.connected)
-			assert.isFalse(status.analyticsCapable)
-			assert.deepStrictEqual(status.zones, [])
-			assert.strictEqual(status.workers, null)
-		}).pipe(Effect.provide(makeLayer(testDb, captured)))
-	})
+	it.effect(
+		"getIntegrationStatus reports analyticsCapable=false and null workers for a scope-limited token",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			return Effect.gen(function* () {
+				// Connected, but the token lacks analytics.read — connected yet not analytics-capable,
+				// and with no workers state row the workers block maps to null.
+				yield* seedConnection("account-settings.read workers-scripts.read")
+				const service = yield* CloudflareAnalyticsService
+				const status = yield* service.getIntegrationStatus(ORG)
+				assert.isTrue(status.connected)
+				assert.isFalse(status.analyticsCapable)
+				assert.deepStrictEqual(status.zones, [])
+				assert.strictEqual(status.workers, null)
+			}).pipe(Effect.provide(makeLayer(testDb, captured)))
+		},
+	)
 
 	it.effect("getUsage folds warehouse rows into per-service usage", () => {
 		const testDb = createTestDb(trackedDbs)

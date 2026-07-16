@@ -153,6 +153,23 @@ C2="$(checkpoint)"
 jq -e --arg c "$C2" --arg p "$C1" \
 	'.formatVersion == 1 and .current == $c and .previous == $p' \
 	"$DATA/backups/state.json" >/dev/null
+
+# Restore must reject before allocating a transaction or mutating the live
+# process when the server PID is active.
+state_before_running_restore="$(cat "$DATA/backups/state.json")"
+set +e
+"$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C1" --yes \
+	>"$ROOT/restore-while-running.out" 2>&1
+running_restore_status=$?
+set -e
+[[ "$running_restore_status" -ne 0 ]] || fail "restore while server was running unexpectedly succeeded"
+grep -q 'maple is running' "$ROOT/restore-while-running.out" ||
+	fail "restore while running was not actionable: $(cat "$ROOT/restore-while-running.out")"
+[[ "$(cat "$DATA/backups/state.json")" == "$state_before_running_restore" ]] ||
+	fail "restore while running changed checkpoint state"
+[[ ! -e "${DATA}.restore-transaction.json" ]] ||
+	fail "restore while running allocated a restore transaction"
+assert_counts 2
 stop_server
 
 "$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C1" --yes >/dev/null
@@ -179,6 +196,19 @@ set -e
 grep -q 'was not cleanly closed' "$ROOT/default-dirty.out" ||
 	fail "default dirty-store failure was not actionable: $(cat "$ROOT/default-dirty.out")"
 [[ -f "$DATA/backups/state.json" ]] || fail "default dirty-store failure removed checkpoints"
+
+# Explicit dirty-store wipe clears live telemetry while preserving the exact
+# checkpoint registry. Restore C2 afterwards so the remaining recovery paths
+# continue from a known two-row store.
+start_server wipe
+assert_counts 0
+stop_server
+jq -e --arg c "$C2" --arg p "$C1" \
+	'.current == $c and .previous == $p' "$DATA/backups/state.json" >/dev/null
+"$MAPLE" restore --data-dir "$DATA" --checkpoint-id "$C2" --yes >/dev/null
+start_server fail
+assert_counts 2
+kill_server
 start_server restore-checkpoint
 assert_counts 2
 

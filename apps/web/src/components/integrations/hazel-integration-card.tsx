@@ -5,7 +5,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { toast } from "sonner"
 
-import { HazelIcon, LoaderIcon } from "@/components/icons"
+import { BellIcon, ConnectionIcon, HazelIcon, LoaderIcon, ShieldIcon } from "@/components/icons"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { HAZEL_ACCENT, IntegrationIconPlate } from "./integration-catalog"
@@ -85,6 +85,23 @@ export function HazelIntegrationCard() {
 				accent={HAZEL_ACCENT}
 				title="Connect Hazel"
 				description="Forward Maple alerts into a Hazel workspace via OAuth. Once connected, create a Hazel destination to pick which workspace receives notifications."
+				features={[
+					{
+						icon: BellIcon,
+						title: "Alert delivery",
+						description: "Fired alerts post straight into a Hazel channel.",
+					},
+					{
+						icon: ConnectionIcon,
+						title: "Channel routing",
+						description: "Each destination picks the workspace and channel that gets notified.",
+					},
+					{
+						icon: ShieldIcon,
+						title: "Escalations",
+						description: "Use Hazel as a step in escalation policies.",
+					},
+				]}
 				footer="You'll authorize Maple in your Hazel workspace."
 			>
 				<Button onClick={handleConnect} disabled={busy !== null}>

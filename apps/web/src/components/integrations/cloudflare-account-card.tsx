@@ -9,7 +9,14 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { toast } from "sonner"
 
-import { CircleWarningIcon, CloudflareIcon, LoaderIcon } from "@/components/icons"
+import {
+	BoltIcon,
+	CircleWarningIcon,
+	CloudflareIcon,
+	GlobeIcon,
+	LoaderIcon,
+	ShieldIcon,
+} from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { formatNumber } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -246,9 +253,21 @@ export function CloudflareAccountCard() {
 				title="Connect your Cloudflare account"
 				description="See traffic and Workers analytics from your Cloudflare account in Maple — connect once, nothing to configure in the Cloudflare dashboard."
 				features={[
-					"Zone traffic analytics, streamed in",
-					"Workers request volume across every script",
-					"Nothing to configure in the Cloudflare dashboard",
+					{
+						icon: GlobeIcon,
+						title: "Zone analytics",
+						description: "Traffic, cache hit rate, and errors for every zone under Infrastructure.",
+					},
+					{
+						icon: BoltIcon,
+						title: "Workers on the map",
+						description: "Scripts join the service map with request volume and errors.",
+					},
+					{
+						icon: ShieldIcon,
+						title: "DNS & security",
+						description: "DNS records, hosts, and WAF activity per zone.",
+					},
 				]}
 				footer="You'll authorize Maple in a Cloudflare popup."
 			>

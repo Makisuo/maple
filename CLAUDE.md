@@ -206,6 +206,7 @@ Use `/Users/maki/Documents/superwall/app` as the reference implementation for Ef
 
 End-user and platform documentation lives in `docs/`:
 
+- `docs/api-v2.md` — The v2 public API spec (Stripe-style conventions: prefixed public IDs, list/error envelopes, scoped API keys, `/v2` + `/v2/docs`) and its rollout phases
 - `docs/sampling-throughput.md` — How Maple handles sampling-aware throughput metrics
 - `docs/persistence.md` — Database persistence and migration operations
 - `docs/sst-fork-workflow.md` — Running maple against a local SST fork, syncing with upstream, and opening PRs from fork branches

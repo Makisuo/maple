@@ -1,13 +1,12 @@
 import { memo, useEffect, useId } from "react"
 import { getSmoothStepPath, type EdgeProps } from "@xyflow/react"
-import { getServiceLegendColor } from "@maple/ui/colors"
+import { getServiceColor } from "@maple/ui/colors"
 import { getDbNodeColor } from "./service-map-db"
 import { isDbNodeId, parseDbNodeId, type ServiceEdgeData } from "./service-map-utils"
 import { useParticleRegistry } from "./service-map-particles"
 
-// `getServiceLegendColor` cannot produce a stable color from `db:<system>:<namespace>`
-// ids that aren't in the services list, so resolve db endpoints to their brand color
-// (per system — Hyperdrive-collapsed nodes get the Cloudflare orange instead).
+// Db endpoints (`db:<system>:<namespace>` ids) resolve to their brand color per
+// system — Hyperdrive-collapsed nodes get the Cloudflare orange instead.
 const dbEndpointColor = (nodeId: string): string => {
 	const { dbSystem, dbNamespace } = parseDbNodeId(nodeId)
 	return getDbNodeColor(dbSystem, dbNamespace)
@@ -62,7 +61,6 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 	const callsPerSecond = edgeData?.callsPerSecond ?? 0
 	const errorRate = edgeData?.errorRate ?? 0
 	const hasSampling = edgeData?.hasSampling ?? false
-	const services = edgeData?.services ?? []
 
 	const [edgePath, labelX, labelY] = getSmoothStepPath({
 		sourceX,
@@ -74,8 +72,8 @@ export const ServiceMapEdge = memo(function ServiceMapEdge({
 		borderRadius: 12,
 	})
 
-	const sourceColor = isDbNodeId(source) ? dbEndpointColor(source) : getServiceLegendColor(source, services)
-	const targetColor = isDbNodeId(target) ? dbEndpointColor(target) : getServiceLegendColor(target, services)
+	const sourceColor = isDbNodeId(source) ? dbEndpointColor(source) : getServiceColor(source)
+	const targetColor = isDbNodeId(target) ? dbEndpointColor(target) : getServiceColor(target)
 	const sw = getStrokeWidth(callCount)
 	const i = getEdgeIntensity(callsPerSecond)
 

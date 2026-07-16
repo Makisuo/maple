@@ -198,7 +198,8 @@ green (and the worker 503s) until the token lands in Infisical.
 **Done and verified**
 - Infra: docker `electric` + `wal_level=logical`; `0009_electric_publication`
   (applies via both `drizzle-kit migrate` and the PGlite test path — see
-  `packages/db/src/migrations.test.ts`).
+  `packages/db/src/migrations.test.ts`), with later publication migrations for
+  wave-1 control-plane tables and `api_keys`.
 - Shape proxy with org-scoping + client-param pinning, extracted into the
   standalone `apps/electric-sync` worker (`src/routes/shape.http.ts`; the
   security-critical pinning is unit-tested in `src/routes/shape.test.ts`).

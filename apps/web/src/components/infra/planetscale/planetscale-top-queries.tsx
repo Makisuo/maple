@@ -6,7 +6,7 @@ import { cn } from "@maple/ui/lib/utils"
 import { Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { planetscaleQueryInsightsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatLatency, formatNumber } from "@/lib/format"
+import { formatLatency, formatNumber, formatRelativeTime } from "@/lib/format"
 
 /** Warehouse "YYYY-MM-DD HH:mm:ss" → epoch ms (values are UTC). */
 const warehouseTimeToMs = (value: string): number => new Date(`${value.replace(" ", "T")}Z`).getTime()
@@ -103,6 +103,11 @@ export function PlanetScaleTopQueries({
 							{formatNumber(row.rowsReadPerQuery)} rows read/query
 						</span>
 						{row.statementType ? <span className="uppercase">{row.statementType}</span> : null}
+						{row.lastRunAt !== null ? (
+							<span className="ml-auto font-mono tabular-nums text-muted-foreground/70">
+								last run {formatRelativeTime(new Date(row.lastRunAt).toISOString())}
+							</span>
+						) : null}
 					</div>
 				</div>
 			))}

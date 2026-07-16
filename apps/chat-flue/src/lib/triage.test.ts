@@ -55,15 +55,35 @@ describe("mcp tool filtering", () => {
 		expect(kept).toEqual(["mcp__maple__search_traces", "mcp__maple__find_errors"])
 	})
 
-	it("connectMapleMcp fails fast (no empty bearer) when the token is unset", async () => {
+	it("connectMapleMcp discovers tools over the API Worker binding", async () => {
+		const calls: unknown[] = []
 		const env: ChatFlueEnv = {
 			AI: { run: async () => ({}) },
-			MAPLE_API_URL: "http://maple-test.invalid",
+			MAPLE_API_RPC: {
+				listMcpTools: async () => [
+					{
+						name: "search_traces",
+						description: "Search traces",
+						inputSchema: { type: "object", properties: {} },
+					},
+				],
+				callMcpTool: async (request: unknown) => {
+					calls.push(request)
+					return { content: [{ type: "text", text: "ok" }] }
+				},
+			} as never,
 			INTERNAL_SERVICE_TOKEN: "",
 		}
-		await expect(connectMapleMcp(env, "org_1")).rejects.toThrow(
-			"INTERNAL_SERVICE_TOKEN is not configured",
-		)
+		const connection = await connectMapleMcp(env, "org_1")
+		expect(connection.tools.map((tool) => tool.name)).toEqual(["mcp__maple__search_traces"])
+		expect(await connection.tools[0]!.execute({ service: "checkout" })).toBe("ok")
+		expect(calls).toEqual([
+			{
+				orgId: "org_1",
+				name: "search_traces",
+				input: { service: "checkout" },
+			},
+		])
 	})
 })
 

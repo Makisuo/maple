@@ -4,6 +4,7 @@ import {
 	metricsTimeseriesQuery,
 	metricsTimeseriesRateQuery,
 	metricsBreakdownQuery,
+	metricsSparklinesQuery,
 	listMetricsQuery,
 	metricsSummaryQuery,
 } from "./metrics"
@@ -265,6 +266,48 @@ describe("metricsTimeseriesRateQuery", () => {
 // ---------------------------------------------------------------------------
 // metricsBreakdownQuery
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// metricsSparklinesQuery
+// ---------------------------------------------------------------------------
+
+describe("metricsSparklinesQuery", () => {
+	it("compiles a batched IN query grouped per metric and bucket", () => {
+		const q = metricsSparklinesQuery({
+			metricType: "gauge",
+			metricNames: ["cpu.utilization", "memory.usage"],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM metrics_gauge")
+		expect(sql).toContain("MetricName IN ('cpu.utilization', 'memory.usage')")
+		expect(sql).toContain("MetricName AS metricName")
+		expect(sql).toContain("avg(Value) AS avgValue")
+		expect(sql).toContain("sum(Value) AS sumValue")
+		expect(sql).toContain("count() AS dataPointCount")
+		expect(sql).toContain("GROUP BY bucket, metricName")
+		expect(sql).toContain("ORDER BY bucket ASC")
+		expect(sql).toContain("FORMAT JSON")
+	})
+
+	it("uses histogram aggregate expressions for histogram tables", () => {
+		const q = metricsSparklinesQuery({
+			metricType: "histogram",
+			metricNames: ["http.server.duration"],
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("FROM metrics_histogram")
+		expect(sql).toContain("sum(Sum) / sum(Count)")
+		expect(sql).toContain("sum(Count) AS dataPointCount")
+	})
+
+	it("scopes to org and time range", () => {
+		const q = metricsSparklinesQuery({ metricType: "sum", metricNames: ["calls"] })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("TimeUnix >=")
+		expect(sql).toContain("TimeUnix <=")
+	})
+})
 
 describe("metricsBreakdownQuery", () => {
 	it("compiles value breakdown", () => {

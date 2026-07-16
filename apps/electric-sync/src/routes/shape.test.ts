@@ -12,6 +12,7 @@ describe("isShapeName", () => {
 		assert.isTrue(isShapeName("alert_rules"))
 		assert.isTrue(isShapeName("error_issues"))
 		assert.isTrue(isShapeName("open_error_incidents"))
+		assert.isTrue(isShapeName("api_keys"))
 		assert.isFalse(isShapeName("users"))
 		assert.isFalse(isShapeName("dashboards; drop table"))
 		assert.isFalse(isShapeName(null))
@@ -111,6 +112,19 @@ describe("buildUpstreamShapeUrl", () => {
 		assert.notInclude(columns, "secret_tag")
 	})
 
+	it("projects only safe API-key display fields", () => {
+		const { params } = parse(buildUpstreamShapeUrl({ ...base, shape: "api_keys" }))
+		const columns = params.get("columns")?.split(",") ?? []
+		assert.strictEqual(params.get("table"), "api_keys")
+		assert.strictEqual(params.get("where"), `"org_id" = $1`)
+		assert.include(columns, "id")
+		assert.include(columns, "org_id")
+		assert.include(columns, "key_prefix")
+		assert.include(columns, "scopes")
+		assert.notInclude(columns, "key_hash")
+		assert.notInclude(columns, "metadata_json")
+	})
+
 	it("omits the columns param for shapes that sync every column", () => {
 		const { params } = parse(buildUpstreamShapeUrl({ ...base, shape: "scrape_target_checks" }))
 		assert.isNull(params.get("columns"))
@@ -164,10 +178,7 @@ describe("shapeResponseHeaders", () => {
 			shapeResponseHeaders({ vary: "Accept-Encoding" }).vary,
 			"Accept-Encoding, Authorization",
 		)
-		assert.strictEqual(
-			shapeResponseHeaders({ vary: "authorization" }).vary,
-			"authorization",
-		)
+		assert.strictEqual(shapeResponseHeaders({ vary: "authorization" }).vary, "authorization")
 		// A pre-existing wildcard already defeats shared caching — leave it be.
 		assert.strictEqual(shapeResponseHeaders({ vary: "*" }).vary, "*")
 	})
@@ -180,10 +191,7 @@ describe("shapeResponseHeaders", () => {
 	})
 
 	it("leaves no-store / already-private live responses untouched", () => {
-		assert.strictEqual(
-			shapeResponseHeaders({ "cache-control": "no-store" })["cache-control"],
-			"no-store",
-		)
+		assert.strictEqual(shapeResponseHeaders({ "cache-control": "no-store" })["cache-control"], "no-store")
 		assert.strictEqual(
 			shapeResponseHeaders({ "cache-control": "private, max-age=5" })["cache-control"],
 			"private, max-age=5",

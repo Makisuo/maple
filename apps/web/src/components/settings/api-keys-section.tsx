@@ -1,7 +1,7 @@
-import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { useAtomSet } from "@/lib/effect-atom"
 import { useState, type ReactNode } from "react"
 import { Exit } from "effect"
-import type { ApiKeyId, ApiKeyResponse } from "@maple/domain/http"
+import type { V2ApiKey } from "@maple/domain/http/v2"
 import { toast } from "sonner"
 import { cn } from "@maple/ui/lib/utils"
 
@@ -25,25 +25,32 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@maple/ui/components/ui/dropdown-menu"
-import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyMedia,
+	EmptyTitle,
+} from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import {
 	AlertWarningIcon,
 	ArrowPathIcon,
-	CopyIcon,
 	DotsVerticalIcon,
 	KeyIcon,
 	PlusIcon,
 	SquareTerminalIcon,
 	TrashIcon,
 } from "@/components/icons"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useApiKeyMutationSync, useApiKeysList } from "@/hooks/use-api-keys"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { CreateApiKeyDialog } from "./create-api-key-dialog"
 import { RollApiKeyDialog } from "./roll-api-key-dialog"
 
-type ApiKey = ApiKeyResponse
+type ApiKey = V2ApiKey
 
-function formatDate(timestamp: number | null): string {
+function formatDate(timestamp: string | null): string {
 	if (!timestamp) return "Never"
 	try {
 		return new Date(timestamp).toLocaleDateString("en-US", {
@@ -56,9 +63,11 @@ function formatDate(timestamp: number | null): string {
 	}
 }
 
-function formatRelative(timestamp: number | null): string | null {
+function formatRelative(timestamp: string | null): string | null {
 	if (!timestamp) return null
-	const diff = Date.now() - timestamp
+	const parsed = Date.parse(timestamp)
+	if (!Number.isFinite(parsed)) return null
+	const diff = Date.now() - parsed
 	const sec = Math.max(0, Math.floor(diff / 1000))
 	if (sec < 60) return "just now"
 	const min = Math.floor(sec / 60)
@@ -76,25 +85,19 @@ function formatRelative(timestamp: number | null): string | null {
 export function ApiKeysSection() {
 	const [createOpen, setCreateOpen] = useState(false)
 	const [revokeOpen, setRevokeOpen] = useState(false)
-	const [revokingKeyId, setRevokingKeyId] = useState<ApiKeyId | null>(null)
+	const [revokingKey, setRevokingKey] = useState<ApiKey | null>(null)
 	const [isRevoking, setIsRevoking] = useState(false)
 	const [rollOpen, setRollOpen] = useState(false)
-	const [rollingKey, setRollingKey] = useState<ApiKeyResponse | null>(null)
+	const [rollingKey, setRollingKey] = useState<ApiKey | null>(null)
 
-	const listQueryAtom = MapleApiAtomClient.query("apiKeys", "list", {})
-	const listResult = useAtomValue(listQueryAtom)
-	const refreshKeys = useAtomRefresh(listQueryAtom)
-
-	const revokeMutation = useAtomSet(MapleApiAtomClient.mutation("apiKeys", "revoke"), {
+	const { keys, isLoading, isError } = useApiKeysList()
+	const { prepareForMutation, reconcileTxid } = useApiKeyMutationSync()
+	const revokeMutation = useAtomSet(MapleApiV2AtomClient.mutation("apiKeys", "revoke"), {
 		mode: "promiseExit",
 	})
 
-	const keys = Result.builder(listResult)
-		.onSuccess((response) => response.keys)
-		.orElse(() => [])
-
-	function openRevokeDialog(keyId: ApiKeyId) {
-		setRevokingKeyId(keyId)
+	function openRevokeDialog(key: ApiKey) {
+		setRevokingKey(key)
 		setRevokeOpen(true)
 	}
 
@@ -104,18 +107,20 @@ export function ApiKeysSection() {
 	}
 
 	async function handleRevoke() {
-		if (!revokingKeyId) return
+		if (!revokingKey) return
 		setIsRevoking(true)
-		const result = await revokeMutation({ params: { keyId: revokingKeyId } })
+		prepareForMutation()
+		const result = await revokeMutation({ params: { id: revokingKey.id } })
 		if (Exit.isSuccess(result)) {
 			toast.success("API key revoked")
-			refreshKeys()
+			void reconcileTxid(result.value.txid)
 		} else {
 			toast.error("Failed to revoke API key")
 		}
 		setIsRevoking(false)
 		setRevokeOpen(false)
-		setRevokingKeyId(null)
+		// Keep `revokingKey` set so the dialog copy doesn't swap to the generic
+		// fallback while the close animation plays; the next open overwrites it.
 	}
 
 	const activeKeys = keys.filter((k) => !k.revoked)
@@ -164,13 +169,23 @@ export function ApiKeysSection() {
 					</div>
 				</CardHeader>
 				<CardContent>
-					{Result.isInitial(listResult) ? (
+					{isLoading ? (
 						<div className="space-y-2">
 							<Skeleton className="h-[68px] w-full" />
 							<Skeleton className="h-[68px] w-full" />
 						</div>
-					) : !Result.isSuccess(listResult) ? (
-						<p className="text-sm text-muted-foreground">Failed to load API keys</p>
+					) : isError ? (
+						<Empty className="py-8">
+							<EmptyHeader>
+								<EmptyMedia variant="icon">
+									<AlertWarningIcon size={16} />
+								</EmptyMedia>
+								<EmptyTitle>Couldn't load API keys</EmptyTitle>
+								<EmptyDescription>
+									Something went wrong while loading your keys. Reload the page to try again.
+								</EmptyDescription>
+							</EmptyHeader>
+						</Empty>
 					) : keys.length === 0 ? (
 						<Empty className="py-8">
 							<EmptyHeader>
@@ -182,6 +197,12 @@ export function ApiKeysSection() {
 									Create an API key to authenticate with the Maple API and MCP server.
 								</EmptyDescription>
 							</EmptyHeader>
+							<EmptyContent>
+								<Button size="sm" onClick={() => setCreateOpen(true)}>
+									<PlusIcon data-icon="inline-start" size={14} />
+									Create key
+								</Button>
+							</EmptyContent>
 						</Empty>
 					) : (
 						<div className="space-y-4">
@@ -192,7 +213,7 @@ export function ApiKeysSection() {
 											key={key.id}
 											apiKey={key}
 											onRoll={() => openRollDialog(key)}
-											onRevoke={() => openRevokeDialog(key.id)}
+											onRevoke={() => openRevokeDialog(key)}
 										/>
 									))}
 								</div>
@@ -218,18 +239,9 @@ export function ApiKeysSection() {
 				</CardContent>
 			</Card>
 
-			<CreateApiKeyDialog
-				open={createOpen}
-				onOpenChange={setCreateOpen}
-				onCreated={() => refreshKeys()}
-			/>
+			<CreateApiKeyDialog open={createOpen} onOpenChange={setCreateOpen} />
 
-			<RollApiKeyDialog
-				open={rollOpen}
-				onOpenChange={setRollOpen}
-				apiKey={rollingKey}
-				onRolled={() => refreshKeys()}
-			/>
+			<RollApiKeyDialog open={rollOpen} onOpenChange={setRollOpen} apiKey={rollingKey} />
 
 			<AlertDialog open={revokeOpen} onOpenChange={setRevokeOpen}>
 				<AlertDialogContent>
@@ -239,8 +251,18 @@ export function ApiKeysSection() {
 						</AlertDialogMedia>
 						<AlertDialogTitle>Revoke API key?</AlertDialogTitle>
 						<AlertDialogDescription>
-							This action cannot be undone. Any integrations using this key will stop working
-							immediately.
+							{revokingKey ? (
+								<>
+									<span className="text-foreground font-medium">{revokingKey.name}</span> (
+									<span className="font-mono text-xs">{revokingKey.key_prefix}</span>) will stop
+									working immediately. This action cannot be undone.
+								</>
+							) : (
+								<>
+									This action cannot be undone. Any integrations using this key will stop
+									working immediately.
+								</>
+							)}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
@@ -266,8 +288,14 @@ function ApiKeyListItem({
 }) {
 	const isMcp = apiKey.kind === "mcp"
 	const Icon = isMcp ? SquareTerminalIcon : KeyIcon
-	const relativeLastUsed = formatRelative(apiKey.lastUsedAt)
-	const expiresInPast = apiKey.expiresAt !== null && apiKey.expiresAt < Date.now()
+	const relativeLastUsed = formatRelative(apiKey.last_used_at)
+	const expiresAt = apiKey.expires_at === null ? null : Date.parse(apiKey.expires_at)
+	const expiresInPast = expiresAt !== null && Number.isFinite(expiresAt) && expiresAt < Date.now()
+	const expiresSoon =
+		expiresAt !== null &&
+		Number.isFinite(expiresAt) &&
+		!expiresInPast &&
+		expiresAt - Date.now() < 7 * 86_400_000
 
 	// Type-coded icon tile: emerald for standard keys (live credential), blue for MCP
 	// (agent/machine type). Revoked keys desaturate to neutral so dead keys read as dead.
@@ -276,15 +304,6 @@ function ApiKeyListItem({
 		: isMcp
 			? "bg-info/10 text-info border-info/30"
 			: "bg-success/10 text-success border-success/30"
-
-	async function handleCopyPrefix() {
-		try {
-			await navigator.clipboard.writeText(apiKey.keyPrefix)
-			toast.success("Key prefix copied to clipboard")
-		} catch {
-			toast.error("Failed to copy key prefix")
-		}
-	}
 
 	return (
 		<div
@@ -323,31 +342,46 @@ function ApiKeyListItem({
 
 				<div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pt-0.5">
 					<code className="text-foreground/55 font-mono text-[11px] tracking-tight">
-						{apiKey.keyPrefix}
+						{apiKey.key_prefix}
 					</code>
 					<MetaDot />
-					<MetaSpan label="Created">{formatDate(apiKey.createdAt)}</MetaSpan>
-					{apiKey.createdByEmail && (
+					{apiKey.scopes === null ? (
+						<span className="text-muted-foreground/60 text-[11px]">Full access</span>
+					) : (
+						apiKey.scopes.map((scope) => (
+							<code
+								key={scope}
+								className="text-foreground/70 border-border bg-muted/40 border px-1 font-mono text-[10px] tracking-tight"
+							>
+								{scope}
+							</code>
+						))
+					)}
+					<MetaDot />
+					<MetaSpan label="Created">{formatDate(apiKey.created_at)}</MetaSpan>
+					{apiKey.created_by_email && (
 						<>
 							<MetaDot />
 							<MetaSpan label="by" className="max-w-[14rem] truncate">
-								{apiKey.createdByEmail}
+								{apiKey.created_by_email}
 							</MetaSpan>
 						</>
 					)}
-					{apiKey.lastUsedAt && (
+					{apiKey.last_used_at && (
 						<>
 							<MetaDot />
-							<MetaSpan label="Last used" title={formatDate(apiKey.lastUsedAt)}>
-								{relativeLastUsed ?? formatDate(apiKey.lastUsedAt)}
+							<MetaSpan label="Last used" title={formatDate(apiKey.last_used_at)}>
+								{relativeLastUsed ?? formatDate(apiKey.last_used_at)}
 							</MetaSpan>
 						</>
 					)}
-					{apiKey.expiresAt && (
+					{apiKey.expires_at && (
 						<>
 							<MetaDot />
 							<MetaSpan label={expiresInPast ? "Expired" : "Expires"}>
-								{formatDate(apiKey.expiresAt)}
+								<span className={expiresSoon ? "text-warning-foreground" : undefined}>
+									{formatDate(apiKey.expires_at)}
+								</span>
 							</MetaSpan>
 						</>
 					)}
@@ -364,10 +398,6 @@ function ApiKeyListItem({
 							<DotsVerticalIcon size={14} />
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
-							<DropdownMenuItem onClick={handleCopyPrefix}>
-								<CopyIcon size={14} />
-								Copy key prefix
-							</DropdownMenuItem>
 							{onRoll && (
 								<DropdownMenuItem onClick={onRoll}>
 									<ArrowPathIcon size={14} />

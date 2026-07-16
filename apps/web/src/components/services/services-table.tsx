@@ -28,6 +28,7 @@ import {
 	getServiceOverviewResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { ServicesSearchParams } from "@/routes/services/index"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 function formatLatency(ms: number): string {
 	if (ms == null || Number.isNaN(ms)) {
@@ -388,9 +389,10 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 																	filters,
 																	service.environment,
 																)}
-																className="font-medium text-primary hover:underline"
+																className="inline-flex items-center gap-1.5 font-medium text-primary hover:underline"
 																onClick={(e) => e.stopPropagation()}
 															>
+																<ServiceDot serviceName={service.serviceName} />
 																{service.serviceName}
 															</Link>
 															{service.serviceNamespace ? (
@@ -512,8 +514,9 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 											className="flex min-h-11 items-center justify-between gap-3 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
 										>
 											<div className="min-w-0 flex-1">
-												<div className="truncate text-sm font-medium text-primary">
-													{service.serviceName}
+												<div className="flex items-center gap-1.5 text-sm font-medium text-primary">
+													<ServiceDot serviceName={service.serviceName} />
+													<span className="truncate">{service.serviceName}</span>
 												</div>
 												{service.serviceNamespace ? (
 													<div className="truncate text-xs text-muted-foreground">

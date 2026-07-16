@@ -15,6 +15,7 @@ import {
 	IsoDateTimeString,
 	OrgId,
 	PortableDashboardDocument,
+	type PostgresTransactionId,
 	UserId,
 } from "@maple/domain/http"
 import { dashboards, dashboardVersions, type DashboardVersionRow } from "@maple/db"
@@ -416,7 +417,7 @@ export class DashboardPersistenceService extends Context.Service<
 
 					const current = yield* loadCurrent(orgId, dashboard.id)
 
-					let txid: string | undefined
+					let txid: PostgresTransactionId | undefined
 					if (current === null) {
 						txid = yield* insertNew(orgId, userId, dashboard, createdAt, updatedAt, payloadJson)
 					} else {
@@ -567,6 +568,8 @@ export class DashboardPersistenceService extends Context.Service<
 					)
 				}
 
+				const txid = readTxid(rows)
+
 				// Drop history rows when the dashboard is deleted — they're tied to
 				// a dashboard that no longer exists.
 				yield* database
@@ -584,7 +587,7 @@ export class DashboardPersistenceService extends Context.Service<
 
 				return new DashboardDeleteResponse({
 					id: decodeDashboardIdSync(deleted.value.id),
-					...(deleted.value.txid !== undefined && { txid: deleted.value.txid }),
+					...(txid !== undefined && { txid }),
 				})
 			})
 

@@ -8,7 +8,7 @@ import type {
 } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
-import { getServiceLegendColor } from "@maple/ui/colors"
+import { getServiceColor } from "@maple/ui/colors"
 import { getDbNodeColor, PLANETSCALE_COLOR, resolveDbNodePresentation } from "./service-map-db"
 
 interface ServiceNodeInfra {
@@ -64,7 +64,6 @@ export interface ServiceNodeData {
 	errorRate: number
 	avgLatencyMs: number
 	p95LatencyMs?: number
-	services: string[]
 	selected: boolean
 	infra?: ServiceNodeInfra
 	platform?: ServicePlatform
@@ -111,7 +110,6 @@ export function getServiceMapNodeColor(
 		ServiceNodeData,
 		"label" | "kind" | "errorRate" | "platform" | "dbSystem" | "dbNamespace" | "planetscale"
 	>,
-	services: string[],
 	mode: ServiceMapColorMode,
 ): string {
 	if (data.kind === "database") {
@@ -124,7 +122,7 @@ export function getServiceMapNodeColor(
 			return getPlatformColor(data.platform)
 		case "service":
 		default:
-			return getServiceLegendColor(data.label, services)
+			return getServiceColor(data.label)
 	}
 }
 
@@ -137,7 +135,6 @@ export interface ServiceEdgeData {
 	avgDurationMs: number
 	p95DurationMs: number
 	hasSampling: boolean
-	services: string[]
 	[key: string]: unknown
 }
 
@@ -328,7 +325,6 @@ export function buildFlowElements({
 				samplingWeight: overview?.samplingWeight ?? 1,
 				errorRate: overview?.errorRate ?? 0,
 				avgLatencyMs: overview?.p50LatencyMs ?? 0,
-				services,
 				selected: false,
 				infra,
 				platform: platforms?.get(service),
@@ -378,7 +374,6 @@ export function buildFlowElements({
 				errorRate: agg.callCount > 0 ? agg.errorCount / agg.callCount : 0,
 				avgLatencyMs: agg.callCount > 0 ? agg.durationSumMs / agg.callCount : 0,
 				p95LatencyMs: agg.maxP95,
-				services,
 				selected: false,
 				dbSystem: agg.dbSystem,
 				dbNamespace: agg.dbNamespace,
@@ -428,7 +423,6 @@ export function buildFlowElements({
 			avgDurationMs: edge.avgDurationMs,
 			p95DurationMs: edge.p95DurationMs,
 			hasSampling: edge.hasSampling,
-			services,
 		},
 	}))
 
@@ -448,7 +442,6 @@ export function buildFlowElements({
 				avgDurationMs: e.avgDurationMs,
 				p95DurationMs: e.p95DurationMs,
 				hasSampling: e.hasSampling,
-				services,
 			},
 		})
 	}

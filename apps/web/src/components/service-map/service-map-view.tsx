@@ -23,7 +23,7 @@ import { formatBackendError } from "@/lib/error-messages"
 import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
 import { cn } from "@maple/ui/utils"
-import { getServiceLegendColor, getValueHue } from "@maple/ui/colors"
+import { getServiceColor, getValueHue } from "@maple/ui/colors"
 import {
 	ChartContainer,
 	ChartTooltip,
@@ -175,7 +175,6 @@ function getHealthDotClass(errorRate: number): string {
 
 interface ServiceDetailPanelProps {
 	serviceId: string
-	services: string[]
 	edges: ServiceEdge[]
 	overviews: ServiceOverview[]
 	workloads: ServiceWorkload[]
@@ -190,7 +189,6 @@ interface ServiceDetailPanelProps {
 
 function ServiceDetailPanel({
 	serviceId,
-	services,
 	edges,
 	overviews,
 	workloads,
@@ -210,7 +208,6 @@ function ServiceDetailPanel({
 			errorRate,
 			platform: platforms.get(serviceId),
 		},
-		services,
 		colorMode,
 	)
 
@@ -395,10 +392,7 @@ function ServiceDetailPanel({
 									</h4>
 									<div className="space-y-1.5">
 										{dependencies.map((dep) => {
-											const depColor = getServiceLegendColor(
-												dep.targetService,
-												services,
-											)
+											const depColor = getServiceColor(dep.targetService)
 											const depErrorRate = dep.errorRate
 											const isError = depErrorRate > 0.05
 											const safeDuration = Math.max(durationSeconds, 1)
@@ -464,10 +458,7 @@ function ServiceDetailPanel({
 									</h4>
 									<div className="space-y-1.5">
 										{calledBy.map((caller) => {
-											const callerColor = getServiceLegendColor(
-												caller.sourceService,
-												services,
-											)
+											const callerColor = getServiceColor(caller.sourceService)
 											const callerErrorRate = caller.errorRate
 											const safeDuration = Math.max(durationSeconds, 1)
 											const callerReqPerSec = caller.hasSampling
@@ -766,7 +757,6 @@ interface DatabaseDetailPanelProps {
 	/** Set when this database matched the org's PlanetScale inventory. */
 	planetscale?: PlanetScaleNodeMetrics
 	dbEdges: ServiceDbEdge[]
-	services: string[]
 	durationSeconds: number
 	startTime: string
 	endTime: string
@@ -1143,7 +1133,6 @@ function DatabaseDetailPanel({
 	dbNamespace,
 	planetscale,
 	dbEdges,
-	services,
 	durationSeconds,
 	startTime,
 	endTime,
@@ -1375,7 +1364,7 @@ function DatabaseDetailPanel({
 							</h4>
 							<div className="space-y-1.5">
 								{callers.map((caller) => {
-									const callerColor = getServiceLegendColor(caller.sourceService, services)
+									const callerColor = getServiceColor(caller.sourceService)
 									const safeDuration = Math.max(durationSeconds, 1)
 									const reqPerSec = caller.hasSampling
 										? caller.estimatedCallCount / safeDuration
@@ -2020,7 +2009,7 @@ export function ServiceMapCanvas({
 										nodeColor={(node: Node) => {
 											if (node.type === "namespaceGroup") return "transparent"
 											const data = node.data as ServiceNodeData
-											return getServiceMapNodeColor(data, data.services, colorMode)
+											return getServiceMapNodeColor(data, colorMode)
 										}}
 										nodeComponent={ServiceMiniMapNode}
 										nodeStrokeWidth={0}
@@ -2049,7 +2038,6 @@ export function ServiceMapCanvas({
 												style={{
 													backgroundColor: getServiceMapNodeColor(
 														{ label: service, kind: "service", errorRate: 0 },
-														services,
 														"service",
 													),
 												}}
@@ -2078,7 +2066,6 @@ export function ServiceMapCanvas({
 																			kind: "service",
 																			errorRate: 0,
 																		},
-																		services,
 																		"service",
 																	),
 																}}
@@ -2140,7 +2127,6 @@ export function ServiceMapCanvas({
 								{...parseDbNodeId(selectedServiceId)}
 								planetscale={planetscaleOverlayByNode.get(selectedServiceId)}
 								dbEdges={dbEdges}
-								services={services}
 								durationSeconds={durationSeconds}
 								startTime={startTime}
 								endTime={endTime}
@@ -2150,7 +2136,6 @@ export function ServiceMapCanvas({
 						) : (
 							<ServiceDetailPanel
 								serviceId={selectedServiceId}
-								services={services}
 								edges={serviceEdges}
 								overviews={overviews}
 								workloads={workloads}

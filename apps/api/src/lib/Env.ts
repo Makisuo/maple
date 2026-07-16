@@ -63,6 +63,8 @@ export interface EnvShape {
 	readonly PLANETSCALE_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly PLANETSCALE_OAUTH_AUTHORIZE_URL: string
 	readonly PLANETSCALE_OAUTH_TOKEN_URL: string
+	/** OAuth token introspection (`/oauth/token/info`) — consulted when the v1 API rejects a fresh token. */
+	readonly PLANETSCALE_OAUTH_TOKEN_INFO_URL: string
 	/**
 	 * Space-delimited, resource-prefixed OAuth scopes requested at authorize time
 	 * (e.g. `organization:read_databases`). PlanetScale REQUIRES an explicit scope
@@ -168,13 +170,23 @@ const envConfig = Config.all({
 	),
 	PLANETSCALE_OAUTH_CLIENT_ID: optionalString("PLANETSCALE_OAUTH_CLIENT_ID"),
 	PLANETSCALE_OAUTH_CLIENT_SECRET: optionalRedacted("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+	// CANONICAL authorize host per PlanetScale's own OAuth discovery doc
+	// (https://auth.planetscale.com/.well-known/oauth-authorization-server →
+	// authorization_endpoint). Their public docs cite auth.planetscale.com/oauth/authorize
+	// instead — that alias renders a working consent screen but emits codes whose
+	// resulting tokens the v1 API rejects with 401 `invalid_token` even though
+	// /oauth/token/info introspects them as valid (verified live 2026-07-13).
 	PLANETSCALE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"PLANETSCALE_OAUTH_AUTHORIZE_URL",
-		"https://auth.planetscale.com/oauth/authorize",
+		"https://app.planetscale.com/oauth/authorize",
 	),
 	PLANETSCALE_OAUTH_TOKEN_URL: stringWithDefault(
 		"PLANETSCALE_OAUTH_TOKEN_URL",
 		"https://auth.planetscale.com/oauth/token",
+	),
+	PLANETSCALE_OAUTH_TOKEN_INFO_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_TOKEN_INFO_URL",
+		"https://auth.planetscale.com/oauth/token/info",
 	),
 	// PlanetScale scopes are resource-prefixed (`<resource>:<action>`) and MUST be
 	// sent in the authorize request — the app's configured scopes are the allowed

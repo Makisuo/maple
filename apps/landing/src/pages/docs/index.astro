@@ -90,7 +90,7 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
         <header class="docs-index__head">
             <div class="docs-index__prompt">
                 <span class="text-fg-muted">~/maple/docs</span>
-                <span class="text-accent">$</span>
+                <span class="text-primary">$</span>
                 <span class="text-fg-muted">ls -la</span>
                 <span class="docs-index__caret" aria-hidden="true"></span>
             </div>
@@ -302,7 +302,7 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
         display: inline-block;
         width: 7px;
         height: 11px;
-        background: var(--accent);
+        background: var(--primary);
         animation: caret-blink 1.05s steps(1) infinite;
     }
     .docs-index__title {
@@ -376,14 +376,14 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
     .docs-index__sec-tile {
         width: 22px;
         height: 22px;
-        background: var(--accent-foreground);
-        color: var(--accent);
+        background: var(--primary-foreground);
+        color: var(--primary);
         display: flex;
         align-items: center;
         justify-content: center;
     }
     .docs-index__band .docs-index__sec-tile :global(svg) {
-        color: var(--accent);
+        color: var(--primary);
     }
     .docs-index__sec-title {
         font-family: var(--font-display);
@@ -410,8 +410,8 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
         font-size: 11px;
         margin-left: auto;
         padding: 5px 10px;
-        background: color-mix(in oklab, var(--accent-foreground) 14%, transparent);
-        border: 1px solid color-mix(in oklab, var(--accent-foreground) 25%, transparent);
+        background: color-mix(in oklab, var(--primary-foreground) 14%, transparent);
+        border: 1px solid color-mix(in oklab, var(--primary-foreground) 25%, transparent);
         white-space: nowrap;
     }
 
@@ -438,13 +438,13 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
         font-family: var(--font-mono);
         font-size: 12px;
         padding: 1px 5px;
-        background: color-mix(in oklab, var(--accent-foreground) 14%, transparent);
-        border: 1px solid color-mix(in oklab, var(--accent-foreground) 22%, transparent);
+        background: color-mix(in oklab, var(--primary-foreground) 14%, transparent);
+        border: 1px solid color-mix(in oklab, var(--primary-foreground) 22%, transparent);
     }
     .docs-index__sec-lede--dark :global(code) {
         background: var(--bg-elevated);
         border-color: var(--border);
-        color: var(--accent);
+        color: var(--primary);
     }
 
     /* ── Section 02 dark head spacing ─────────────────────── */
@@ -508,7 +508,7 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
         justify-content: center;
         width: 100%;
         opacity: 0.85;
-        color: var(--accent);
+        color: var(--primary);
         transition: opacity 160ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
     }
     .docs-row__icon :global(svg) {
@@ -555,7 +555,7 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
     /* Amber-band hover: cream brightens */
     .docs-index__band .docs-row:hover {
         padding-left: 12px;
-        background: color-mix(in oklab, var(--accent-foreground) 8%, transparent);
+        background: color-mix(in oklab, var(--primary-foreground) 8%, transparent);
     }
     .docs-index__band .docs-row:hover .docs-row__tree,
     .docs-index__band .docs-row:hover .docs-row__arrow {
@@ -568,12 +568,12 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
     /* Dark hover: amber accent */
     .docs-row--dark:hover {
         padding-left: 12px;
-        background: color-mix(in oklab, var(--accent) 6%, transparent);
+        background: color-mix(in oklab, var(--primary) 6%, transparent);
     }
     .docs-row--dark:hover .docs-row__tree,
     .docs-row--dark:hover .docs-row__arrow,
     .docs-row--dark:hover .docs-row__title {
-        color: var(--accent);
+        color: var(--primary);
     }
     .docs-row--dark:hover .docs-row__tree,
     .docs-row--dark:hover .docs-row__arrow {
@@ -603,7 +603,7 @@ const renderTree = (i: number, last: number) => (i === last ? "└──" : "├
         text-decoration: none;
     }
     .docs-index__rail-link:hover {
-        color: var(--accent);
+        color: var(--primary);
     }
 
     /* ── Responsive: collapse desc + meta on small ────────── */

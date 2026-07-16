@@ -1,12 +1,13 @@
 import { useState } from "react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomValue, useAtomRefresh } from "@/lib/effect-atom"
 
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { ErrorState } from "@/components/common/error-state"
 import { HostDetailHeader, HostDetailHeaderLoading } from "@/components/infra/host-detail-header"
 import { MetricStrip } from "@/components/infra/host-detail-chart"
 import { HostMetadataPanel } from "@/components/infra/host-metadata-panel"
@@ -39,11 +40,11 @@ function HostDetailPageContent() {
 	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, preset)
 	const bucketSeconds = bucketSecondsFor(preset)
 
-	const summaryResult = useAtomValue(
-		hostDetailSummaryResultAtom({
-			data: { hostName, startTime, endTime },
-		}),
-	)
+	const summaryAtom = hostDetailSummaryResultAtom({
+		data: { hostName, startTime, endTime },
+	})
+	const summaryResult = useAtomValue(summaryAtom)
+	const refreshSummary = useAtomRefresh(summaryAtom)
 
 	const summary = Result.builder(summaryResult)
 		.onSuccess((r) => r.data)
@@ -75,7 +76,14 @@ function HostDetailPageContent() {
 			<div className="space-y-8">
 				{Result.builder(summaryResult)
 					.onInitial(() => <HostDetailHeaderLoading />)
-					.onError(() => <HostDetailHeader summary={null} hostName={hostName} />)
+					.onError((error) => (
+						<ErrorState
+							variant="inline"
+							error={error}
+							title="Failed to load host summary"
+							onRetry={refreshSummary}
+						/>
+					))
 					.onSuccess((r) => <HostDetailHeader summary={r.data} hostName={hostName} />)
 					.render()}
 

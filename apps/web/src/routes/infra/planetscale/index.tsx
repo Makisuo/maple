@@ -11,11 +11,14 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero } from "@/components/infra/primitives/page-hero"
 import { StatRail, StatRailItem } from "@/components/infra/primitives/stat-rail"
-import { PlanetScaleDatabaseTable } from "@/components/infra/planetscale/planetscale-database-table"
+import {
+	PlanetScaleDatabaseTable,
+	PlanetScaleDatabaseTableLoading,
+} from "@/components/infra/planetscale/planetscale-database-table"
 import { PlanetScaleNotConnected } from "@/components/infra/planetscale/planetscale-not-connected"
 import { getServiceMapPlanetScaleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatNumber } from "@/lib/format"
+import { formatNumber, formatRelativeTime } from "@/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -76,7 +79,7 @@ function PlanetScalePage() {
 				<div className="space-y-6">
 					<PageHero
 						title="PlanetScale"
-						description="Database health from the PlanetScale integration — connections, CPU, memory, and replication lag scraped per branch."
+						description="Database health from your PlanetScale organization — connections, CPU, memory, and replication lag for every branch."
 					/>
 					{Result.builder(statusResult)
 						.onInitial(() => (
@@ -88,7 +91,13 @@ function PlanetScalePage() {
 						.onError((err) => <QueryErrorState error={err} />)
 						.onSuccess((status) => {
 							if (!status.connected) return <PlanetScaleNotConnected />
-							return <PlanetScaleData startTime={startTime} endTime={endTime} />
+							return (
+								<PlanetScaleData
+									startTime={startTime}
+									endTime={endTime}
+									lastInventoryError={status.lastInventoryError}
+								/>
+							)
 						})
 						.render()}
 				</div>
@@ -97,7 +106,19 @@ function PlanetScalePage() {
 	)
 }
 
-function PlanetScaleData({ startTime, endTime }: { startTime: string; endTime: string }) {
+// Inventory refreshes every few minutes — older than this and the database
+// list is likely out of date (poller stalled, token revoked).
+const INVENTORY_STALE_MS = 15 * 60 * 1000
+
+function PlanetScaleData({
+	startTime,
+	endTime,
+	lastInventoryError,
+}: {
+	startTime: string
+	endTime: string
+	lastInventoryError: string | null
+}) {
 	const inventoryResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
 			reactivityKeys: ["planetscaleIntegrationStatus"],
@@ -131,14 +152,26 @@ function PlanetScaleData({ startTime, endTime }: { startTime: string; endTime: s
 		.onInitial(() => (
 			<div className="space-y-4">
 				<Skeleton className="h-28 w-full" />
-				<Skeleton className="h-64 w-full" />
+				<PlanetScaleDatabaseTableLoading />
 			</div>
 		))
 		.onError((err) => <QueryErrorState error={err} />)
 		.onSuccess((inventory) => {
 			const branchTotal = inventory.databases.reduce((sum, db) => sum + db.branches.length, 0)
+			const inventoryStale =
+				inventory.lastInventoryAt !== null &&
+				Date.now() - inventory.lastInventoryAt > INVENTORY_STALE_MS
 			return (
 				<div className="space-y-6">
+					{lastInventoryError !== null || inventoryStale ? (
+						<p className="text-xs text-severity-warn">
+							{lastInventoryError !== null
+								? "Inventory refresh failing — the database list may be out of date."
+								: `Inventory last refreshed ${formatRelativeTime(
+										new Date(inventory.lastInventoryAt ?? 0).toISOString(),
+									)} — the database list may be out of date.`}
+						</p>
+					) : null}
 					{Result.isFailure(statsResult) ? (
 						<QueryErrorState
 							error={statsResult.cause}
@@ -165,7 +198,11 @@ function PlanetScaleData({ startTime, endTime }: { startTime: string; endTime: s
 							connecting.
 						</p>
 					) : (
-						<PlanetScaleDatabaseTable databases={inventory.databases} statsByName={statsByName} />
+						<PlanetScaleDatabaseTable
+							databases={inventory.databases}
+							statsByName={statsByName}
+							waiting={Boolean(statsResult.waiting)}
+						/>
 					)}
 				</div>
 			)

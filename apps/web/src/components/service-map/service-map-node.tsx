@@ -243,7 +243,6 @@ function ServiceNode({ data }: { data: ServiceNodeData }) {
 		samplingWeight,
 		errorRate,
 		avgLatencyMs,
-		services,
 		selected,
 		infra,
 		platform,
@@ -253,7 +252,6 @@ function ServiceNode({ data }: { data: ServiceNodeData }) {
 	const runtimeInfo = formatRuntimeLabel(runtime)
 	const accentColor = getServiceMapNodeColor(
 		{ label, kind: "service", errorRate, platform },
-		services,
 		colorMode ?? "service",
 	)
 

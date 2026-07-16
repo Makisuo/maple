@@ -338,4 +338,4 @@ export const maybeNotifyUpdate: Effect.Effect<void, never, MapleConfig> = Effect
 	if (latest && isNewer(MAPLE_VERSION, latest)) {
 		yield* Effect.sync(() => printNotice(MAPLE_VERSION, stripV(latest)))
 	}
-}).pipe(Effect.catch(() => Effect.void))
+})

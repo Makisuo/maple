@@ -1,14 +1,7 @@
 import { useCallback, useRef } from "react"
 import { useNavigate } from "@tanstack/react-router"
-import {
-	GlobeIcon,
-	ComputerIcon,
-	MobileIcon,
-	ClockIcon,
-	PulseIcon,
-	CircleWarningIcon,
-	EyeIcon,
-} from "@/components/icons"
+import { GlobeIcon, ClockIcon, PulseIcon, CircleWarningIcon, EyeIcon } from "@/components/icons"
+import { browserIconFor, deviceIconFor } from "./session-icons"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { formatDuration, gradientFor, hostFromUrl } from "./replay-format"
 
@@ -61,11 +54,6 @@ function identity(session: SessionRow): { label: string; initial: string; gradie
 	}
 }
 
-function isMobileDevice(deviceType: string): boolean {
-	const d = deviceType.toLowerCase()
-	return d === "mobile" || d === "tablet" || d === "phone"
-}
-
 interface SessionsListProps {
 	sessions: ReadonlyArray<SessionRow>
 	/** Fetch the next page — invoked when the bottom sentinel scrolls into view. */
@@ -76,7 +64,12 @@ interface SessionsListProps {
 	loadingMore?: boolean
 }
 
-export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMore = false }: SessionsListProps) {
+export function SessionsList({
+	sessions,
+	onReachEnd,
+	hasMore = false,
+	loadingMore = false,
+}: SessionsListProps) {
 	const navigate = useNavigate()
 
 	// Auto-load the next page when the bottom sentinel nears the viewport. Guards
@@ -137,7 +130,8 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 			{sessions.map((session) => {
 				const id = identity(session)
 				const isActive = session.status === "active"
-				const DeviceIcon = isMobileDevice(session.deviceType) ? MobileIcon : ComputerIcon
+				const BrowserIcon = browserIconFor(session.browserName)
+				const DeviceIcon = deviceIconFor(session.deviceType)
 				return (
 					<button
 						type="button"
@@ -186,11 +180,17 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 									</span>
 								</span>
 								<span className="hidden items-center gap-1.5 @2xl:flex">
-									<DeviceIcon className="size-3.5 shrink-0 opacity-60" />
+									<BrowserIcon className="size-3.5 shrink-0" />
 									<span className="truncate">
 										{session.browserName || "Unknown"}
 										{session.osName ? ` · ${session.osName}` : ""}
 									</span>
+								</span>
+								<span
+									className="hidden shrink-0 @2xl:block"
+									title={session.deviceType || "desktop"}
+								>
+									<DeviceIcon className="size-3.5 opacity-60" />
 								</span>
 								{session.country && (
 									<span className="hidden truncate @3xl:inline">{session.country}</span>

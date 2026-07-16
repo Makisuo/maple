@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui
 import { ChevronDownIcon, ChevronUpIcon, ChevronExpandYIcon } from "@/components/icons"
 import { formatLatency } from "@/lib/format"
 import { DependencyTypeBadge, type DependencyKind } from "./dependency-type-badge"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 export interface DependencyRow {
 	id: string
@@ -164,8 +165,11 @@ export function DependencyTable({ serviceName, rows, startTime, endTime, timePre
 											<div className="flex items-center gap-2.5 min-w-0">
 												<DependencyTypeBadge kind={row.kind} />
 												<div className="flex min-w-0 flex-col leading-tight">
-													<span className="truncate text-[12.5px] text-foreground">
-														{row.name}
+													<span className="flex items-center gap-1.5 truncate text-[12.5px] text-foreground">
+														{row.kind === "service" && (
+															<ServiceDot serviceName={row.name} className="size-1.5" />
+														)}
+														<span className="truncate">{row.name}</span>
 													</span>
 													{row.subtitle ? (
 														<span className="truncate text-[10px] text-muted-foreground/60">

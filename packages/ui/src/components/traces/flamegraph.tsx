@@ -8,7 +8,7 @@ import { FlamegraphTooltipContent } from "./flamegraph-tooltip"
 import { FlamegraphMinimap } from "./flamegraph-minimap"
 import { cn } from "../../lib/utils"
 import { formatDuration } from "../../lib/format"
-import { getSpanColorStyle, getServiceLegendColor } from "../../lib/colors"
+import { getSpanColorStyle, getServiceColor } from "../../lib/colors"
 import type { SpanNode } from "../../lib/types"
 
 interface FlamegraphProps {
@@ -223,7 +223,7 @@ export function Flamegraph({
 						const colorStyle =
 							bar.span.statusCode === "Error"
 								? {}
-								: getSpanColorStyle(bar.span.spanName, bar.span.serviceName, services)
+								: getSpanColorStyle(bar.span.spanName, bar.span.serviceName)
 
 						return (
 							<Tooltip key={bar.span.spanId}>
@@ -268,7 +268,6 @@ export function Flamegraph({
 								<TooltipContent side="top" className="max-w-sm">
 									<FlamegraphTooltipContent
 										span={bar.span}
-										services={services}
 										totalDurationMs={totalDurationMs}
 										traceStartTime={traceStartTime}
 									/>
@@ -299,7 +298,7 @@ export function Flamegraph({
 						<div key={service} className="flex items-center gap-1.5">
 							<div
 								className="h-2.5 w-2.5"
-								style={{ backgroundColor: getServiceLegendColor(service, services) }}
+								style={{ backgroundColor: getServiceColor(service) }}
 							/>
 							<span className="font-medium">{service}</span>
 						</div>

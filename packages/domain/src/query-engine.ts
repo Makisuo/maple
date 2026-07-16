@@ -195,6 +195,19 @@ export const MetricsBreakdownQuery = Schema.Struct({
 })
 export type MetricsBreakdownQuery = Schema.Schema.Type<typeof MetricsBreakdownQuery>
 
+// Batched preview series for the metrics-explorer browse grid: one query
+// returns a small timeseries per metric name (matched with `MetricName IN`),
+// so a page of sparkline cards costs one scan per metric type instead of one
+// query per card.
+export const MetricsSparklinesQuery = Schema.Struct({
+	kind: Schema.Literal("sparklines"),
+	source: Schema.Literal("metrics"),
+	metricType: MetricType,
+	metricNames: Schema.Array(MetricName),
+	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+})
+export type MetricsSparklinesQuery = Schema.Schema.Type<typeof MetricsSparklinesQuery>
+
 export const TracesListQuery = Schema.Struct({
 	kind: Schema.Literal("list"),
 	source: Schema.Literal("traces"),
@@ -318,6 +331,7 @@ export const QuerySpec = Schema.Union([
 	TracesBreakdownQuery,
 	LogsBreakdownQuery,
 	MetricsBreakdownQuery,
+	MetricsSparklinesQuery,
 	TracesListQuery,
 	LogsListQuery,
 	AttributeKeysQuery,
@@ -381,6 +395,20 @@ export const AttributeValueItem = Schema.Struct({
 })
 export type AttributeValueItem = Schema.Schema.Type<typeof AttributeValueItem>
 
+export const SparklinePoint = Schema.Struct({
+	bucket: Schema.String,
+	avgValue: Schema.Number,
+	sumValue: Schema.Number,
+	dataPointCount: Schema.Number,
+})
+export type SparklinePoint = Schema.Schema.Type<typeof SparklinePoint>
+
+export const SparklineSeries = Schema.Struct({
+	metricName: Schema.String,
+	points: Schema.Array(SparklinePoint),
+})
+export type SparklineSeries = Schema.Schema.Type<typeof SparklineSeries>
+
 export const QueryEngineResult = Schema.Union([
 	Schema.Struct({
 		kind: Schema.Literal("timeseries"),
@@ -421,6 +449,11 @@ export const QueryEngineResult = Schema.Union([
 		kind: Schema.Literal("count"),
 		source: Schema.Literal("logs"),
 		data: Schema.Struct({ total: Schema.Number }),
+	}),
+	Schema.Struct({
+		kind: Schema.Literal("sparklines"),
+		source: Schema.Literal("metrics"),
+		data: Schema.Array(SparklineSeries),
 	}),
 ])
 export type QueryEngineResult = Schema.Schema.Type<typeof QueryEngineResult>

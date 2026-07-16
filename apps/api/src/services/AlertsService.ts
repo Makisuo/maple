@@ -121,7 +121,9 @@ import {
 	PAGERDUTY_ROUTING_KEY_PATTERN,
 	verifyPagerDutyRoutingKey,
 } from "./AlertDeliveryDispatch"
+import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
+import { OrgMembersService, type OrgMember } from "./OrgMembersService"
 import { describeCause } from "./ErrorsService"
 import { HazelOAuthService } from "./HazelOAuthService"
 import { QueryEngineService } from "./QueryEngineService"
@@ -456,6 +458,29 @@ const validateDestinationUrl = (rawUrl: string, field: string): Effect.Effect<st
 		Effect.mapError((error) => makeValidationError(`${field}: ${error.message}`, [], error)),
 	)
 
+/** Resolved member recipients — display label from names, address in channelLabel. */
+const summarizeMembers = (members: ReadonlyArray<OrgMember>): string => {
+	const first = members[0]
+	if (first === undefined) return "Email"
+	const label = first.name ?? first.email
+	return members.length === 1 ? label : `${label} +${members.length - 1} more`
+}
+
+const emailPublicConfig = (members: ReadonlyArray<OrgMember>): DestinationPublicConfig => ({
+	summary: summarizeMembers(members),
+	channelLabel: members[0]?.email ?? null,
+	memberUserIds: members.map((member) => member.userId),
+})
+
+const emailSecretConfig = (members: ReadonlyArray<OrgMember>): DestinationSecretConfig => ({
+	type: "email" as const,
+	members: members.map((member) => ({
+		userId: member.userId,
+		email: member.email,
+		name: member.name,
+	})),
+})
+
 const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, AlertValidationError> =>
 	parseBase64Aes256GcmKey(raw, (message) =>
 		makeValidationError(
@@ -507,7 +532,9 @@ const parseSecretConfig = (json: string): Effect.Effect<DestinationSecretConfig,
 
 type StoredDeliveryPayloadType = Schema.Schema.Type<typeof StoredDeliveryPayloadSchema>
 
-const parseDeliveryPayload = (value: unknown): Effect.Effect<StoredDeliveryPayloadType, AlertValidationError> =>
+const parseDeliveryPayload = (
+	value: unknown,
+): Effect.Effect<StoredDeliveryPayloadType, AlertValidationError> =>
 	Schema.decodeUnknownEffect(StoredDeliveryPayloadSchema)(value).pipe(
 		Effect.mapError((cause) => makeValidationError("Stored delivery payload is invalid", [], cause)),
 	)
@@ -518,7 +545,12 @@ const summarizeWebhookUrl = (url: string) =>
 		onSome: (parsed) => `POST ${parsed.host}`,
 	})
 
-const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationPublicConfig =>
+// Email requires resolving member ids → emails via the auth provider first, so
+// its public/secret configs are built inline (emailPublicConfig/emailSecretConfig)
+// after that effect — the type excludes it here, like hazel-oauth below.
+const buildPublicConfig = (
+	request: Exclude<AlertDestinationCreateRequest, { readonly type: "email" }>,
+): DestinationPublicConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
 			slack: (r) => ({
@@ -557,7 +589,7 @@ const buildPublicConfig = (request: AlertDestinationCreateRequest): DestinationP
 // secret config is built inline after that side effect — the type excludes it
 // here so this stays a pure, total function over the remaining variants.
 const buildSecretConfig = (
-	request: Exclude<AlertDestinationCreateRequest, { readonly type: "hazel-oauth" }>,
+	request: Exclude<AlertDestinationCreateRequest, { readonly type: "hazel-oauth" | "email" }>,
 ): DestinationSecretConfig =>
 	Match.value(request).pipe(
 		Match.discriminatorsExhaustive("type")({
@@ -587,16 +619,16 @@ const buildSecretConfig = (
 	)
 
 const safeParsePublicConfig = (row: AlertDestinationRow): DestinationPublicConfig =>
-	Option.getOrElse(Schema.decodeUnknownOption(PublicConfigFromJson)(JSON.stringify(row.configJson)), () => ({
-		summary: "Invalid destination config",
-		channelLabel: null,
-	}))
+	Option.getOrElse(
+		Schema.decodeUnknownOption(PublicConfigFromJson)(JSON.stringify(row.configJson)),
+		() => ({
+			summary: "Invalid destination config",
+			channelLabel: null,
+		}),
+	)
 
 const safeParseStringArray = (value: unknown): ReadonlyArray<string> =>
-	Option.getOrElse(
-		Schema.decodeUnknownOption(StringArraySchema)(value),
-		() => [] as ReadonlyArray<string>,
-	)
+	Option.getOrElse(Schema.decodeUnknownOption(StringArraySchema)(value), () => [] as ReadonlyArray<string>)
 
 const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (rule: {
 	readonly signalType: AlertSignalType
@@ -835,6 +867,7 @@ const rowToDestinationDocument = (row: AlertDestinationRow, publicConfig: Destin
 		enabled: row.enabled,
 		summary: publicConfig.summary,
 		channelLabel: publicConfig.channelLabel,
+		memberUserIds: publicConfig.memberUserIds != null ? [...publicConfig.memberUserIds] : null,
 		lastTestedAt: toIso(row.lastTestedAt),
 		lastTestError: row.lastTestError,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
@@ -1081,6 +1114,21 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const warehouse = yield* WarehouseQueryService
 			const runtime = yield* AlertRuntime
 			const hazelOAuth = yield* HazelOAuthService
+			const email = yield* EmailService
+			const orgMembers = yield* OrgMembersService
+
+			const resolveEmailMembers = (
+				orgId: OrgId,
+				memberUserIds: ReadonlyArray<string>,
+			): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
+				orgMembers.resolveMembers(orgId, memberUserIds).pipe(
+					Effect.mapError((error) => makeValidationError(error.message, error.unknownUserIds ?? [])),
+					Effect.flatMap((members) =>
+						members.length === 0
+							? Effect.fail(makeValidationError("At least one workspace member is required"))
+							: Effect.succeed(members),
+					),
+				)
 			const encryptionKey = yield* parseEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
 			)
@@ -1425,7 +1473,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						"@maple/http/errors/QueryEngineExecutionError": (e) =>
 							Effect.fail(makeDeliveryError(e.message, undefined, e)),
 						"@maple/http/errors/QueryEngineTimeoutError": (e) =>
-							Effect.fail(makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e)),
+							Effect.fail(
+								makeDeliveryError(e.message ?? "Alert evaluation timed out", undefined, e),
+							),
 					}),
 				)
 
@@ -1649,6 +1699,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			const composeChatUrl = (context: DispatchContext): string =>
 				buildAlertChatUrl(env.MAPLE_APP_BASE_URL, context)
 
+			const sendEmail = (to: string, subject: string, html: string) =>
+				email
+					.send(to, subject, html)
+					.pipe(Effect.mapError((error) => makeDeliveryError(error.message, "email")))
+
 			const dispatchDelivery = (
 				context: DispatchContext,
 				payloadJson: string,
@@ -1660,6 +1715,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					deliveryTimeoutMs(),
 					context.linkUrl,
 					composeChatUrl(context),
+					{ sendEmail },
 				)
 
 			const buildPayload = (context: DeliveryPayloadContext) => ({
@@ -1880,32 +1936,43 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					yield* validateDestinationUrl(request.webhookUrl, "webhookUrl")
 				}
 				const destinationId = decodeAlertDestinationIdSync(makeUuid())
-				const publicConfig = buildPublicConfig(request)
-				const secretConfig: DestinationSecretConfig =
-					request.type === "hazel-oauth"
-						? yield* hazelOAuth
-								.createChannelWebhook(orgId, {
-									channelId: request.hazelChannelId.trim(),
-									name: request.name.trim(),
-								})
-								.pipe(
-									Effect.map((webhook) => ({
-										type: "hazel-oauth" as const,
-										hazelOrganizationId: request.hazelOrganizationId.trim(),
-										hazelOrganizationName: request.hazelOrganizationName.trim(),
-										hazelChannelId: request.hazelChannelId.trim(),
-										hazelChannelName: request.hazelChannelName.trim(),
-										webhookId: webhook.id,
-										webhookUrl: webhook.webhookUrl,
-										webhookToken: webhook.token,
-									})),
-									Effect.mapError((error) =>
-										makeValidationError(
-											`Could not provision Hazel channel webhook: ${error.message}`,
+				let publicConfig: DestinationPublicConfig
+				let secretConfig: DestinationSecretConfig
+				if (request.type === "email") {
+					// Email recipients are workspace members: resolve the selected ids
+					// to emails via the auth provider so clients can never route alerts
+					// to arbitrary addresses.
+					const members = yield* resolveEmailMembers(orgId, request.memberUserIds)
+					publicConfig = emailPublicConfig(members)
+					secretConfig = emailSecretConfig(members)
+				} else {
+					publicConfig = buildPublicConfig(request)
+					secretConfig =
+						request.type === "hazel-oauth"
+							? yield* hazelOAuth
+									.createChannelWebhook(orgId, {
+										channelId: request.hazelChannelId.trim(),
+										name: request.name.trim(),
+									})
+									.pipe(
+										Effect.map((webhook) => ({
+											type: "hazel-oauth" as const,
+											hazelOrganizationId: request.hazelOrganizationId.trim(),
+											hazelOrganizationName: request.hazelOrganizationName.trim(),
+											hazelChannelId: request.hazelChannelId.trim(),
+											hazelChannelName: request.hazelChannelName.trim(),
+											webhookId: webhook.id,
+											webhookUrl: webhook.webhookUrl,
+											webhookToken: webhook.token,
+										})),
+										Effect.mapError((error) =>
+											makeValidationError(
+												`Could not provision Hazel channel webhook: ${error.message}`,
+											),
 										),
-									),
-								)
-						: buildSecretConfig(request)
+									)
+							: buildSecretConfig(request)
+				}
 				if (secretConfig.type === "pagerduty") {
 					yield* validatePagerDutyKey(secretConfig.integrationKey)
 				}
@@ -2151,6 +2218,30 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											? hydrated.secretConfig.webhookUrl
 											: ""),
 								} satisfies DestinationSecretConfig,
+							}),
+						email: (r) =>
+							Effect.gen(function* () {
+								// Member ids supplied → re-resolve via the auth provider and
+								// replace wholesale; omitted (or empty) → keep the stored
+								// recipient snapshot.
+								const supplied =
+									r.memberUserIds != null && r.memberUserIds.length > 0
+										? r.memberUserIds
+										: null
+								if (supplied === null) {
+									return {
+										nextPublicConfig: hydrated.publicConfig,
+										nextSecretConfig:
+											hydrated.secretConfig.type === "email"
+												? hydrated.secretConfig
+												: emailSecretConfig([]),
+									}
+								}
+								const members = yield* resolveEmailMembers(orgId, supplied)
+								return {
+									nextPublicConfig: emailPublicConfig(members),
+									nextSecretConfig: emailSecretConfig(members),
+								}
 							}),
 					}),
 				)
@@ -2737,7 +2828,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										...normalized,
 										serviceName: svcName,
 									})
-									if (perServicePlan.query == null || perServicePlan.sampleCountStrategy == null) {
+									if (
+										perServicePlan.query == null ||
+										perServicePlan.sampleCountStrategy == null
+									) {
 										return
 									}
 									const observations = yield* queryEngine
@@ -2872,7 +2966,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					}
 					if (openStart != null) {
 						wouldFire.push(
-							new AlertRulePreviewFiringSpan({ groupKey, start: iso(openStart), end: iso(endMs) }),
+							new AlertRulePreviewFiringSpan({
+								groupKey,
+								start: iso(openStart),
+								end: iso(endMs),
+							}),
 						)
 					}
 					series.push(new AlertRulePreviewSeries({ groupKey, points }))
@@ -4060,7 +4158,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								eq(alertRules.id, ruleId),
 								or(
 									isNull(alertRules.lastScheduledAt),
-									lt(alertRules.lastScheduledAt, new Date(timestamp - SCHEDULER_LOCK_TTL_MS)),
+									lt(
+										alertRules.lastScheduledAt,
+										new Date(timestamp - SCHEDULER_LOCK_TTL_MS),
+									),
 								),
 							),
 						)

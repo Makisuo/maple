@@ -13,7 +13,7 @@ import { clampPriority, shortIssueId } from "./issue-id"
 import { PriorityBarsIcon, WorkflowRingIcon } from "@/components/icons"
 import { formatNumber } from "@/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
-import { getServiceColorClass } from "@maple/ui/lib/colors"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -176,13 +176,7 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 					)}
 					title={issue.serviceName}
 				>
-					<span
-						aria-hidden
-						className={cn(
-							"size-1.5 shrink-0 rounded-full",
-							getServiceColorClass(issue.serviceName),
-						)}
-					/>
+					<ServiceDot serviceName={issue.serviceName} className="size-1.5" />
 					<span className="max-w-[120px] truncate">{issue.serviceName}</span>
 				</span>
 
