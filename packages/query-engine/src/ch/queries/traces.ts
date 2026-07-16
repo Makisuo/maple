@@ -244,7 +244,8 @@ function buildWhereConditions(
 	$: ColumnAccessor<typeof Traces.columns>,
 	opts: TracesQueryOpts,
 ): Array<CH.Condition | undefined> {
-	return tracesBaseWhereConditions($, opts)
+	// Reads the raw `traces` table → its `idx_*_attr_items` blooms can prune.
+	return tracesBaseWhereConditions($, opts, { itemsIndex: true })
 }
 
 // ---------------------------------------------------------------------------
@@ -691,6 +692,7 @@ function spanSearchFrom<Name extends string>(
 	opts: SpanSearchOpts,
 	limit: number,
 	offset: number,
+	itemsIndex: boolean,
 ) {
 	const q = from(source)
 		.select(($) => ({
@@ -706,7 +708,7 @@ function spanSearchFrom<Name extends string>(
 			timestamp: CH.toString_($.Timestamp),
 		}))
 		.where(($) => [
-			...tracesBaseWhereConditions($, opts),
+			...tracesBaseWhereConditions($, opts, { itemsIndex }),
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 		])
 		.orderBy(["timestamp", "desc"])
@@ -720,11 +722,14 @@ export function spanSearchQuery(opts: SpanSearchOpts) {
 	const limit = opts.limit ?? 20
 	const offset = opts.offset ?? 0
 
+	// `trace_detail_spans` (the traceId path) has no `idx_*_attr_items` and is
+	// already pruned to a single trace by its (OrgId, TraceId, SpanId) sort key,
+	// so the pre-filter is only worthwhile on the raw `traces` scan.
 	if (opts.traceId) {
-		return spanSearchFrom(TraceDetailSpans, opts, limit, offset)
+		return spanSearchFrom(TraceDetailSpans, opts, limit, offset, false)
 	}
 
-	return spanSearchFrom(Traces, opts, limit, offset)
+	return spanSearchFrom(Traces, opts, limit, offset, true)
 }
 
 // ---------------------------------------------------------------------------

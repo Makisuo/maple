@@ -39,6 +39,8 @@ import {
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { CH } from "@maple/query-engine"
+import { buildSuite } from "./bench/suite"
+import { parseTableMap, remapTables } from "./bench/table-map"
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -82,6 +84,13 @@ class InvalidDurationError extends Schema.TaggedErrorClass<InvalidDurationError>
 	"@maple/api/scripts/bench-queries/InvalidDurationError",
 	{
 		input: Schema.String,
+		message: Schema.String,
+	},
+) {}
+
+class RegressionThresholdError extends Schema.TaggedErrorClass<RegressionThresholdError>()(
+	"@maple/api/scripts/bench-queries/RegressionThresholdError",
+	{
 		message: Schema.String,
 	},
 ) {}
@@ -598,7 +607,7 @@ const fetchHandler = Effect.fn("bench.fetch")(function* (config: FetchConfig) {
 		() => `apps/api/scripts/.bench/queries-${timestampSlug()}.json`,
 	)
 	const output: FetchOutput = {
-		fetchedAt: now.toISOString(),
+		fetchedAt: new Date(nowMs).toISOString(),
 		source: host,
 		criteria: {
 			orgId,
@@ -636,6 +645,108 @@ const fetchHandler = Effect.fn("bench.fetch")(function* (config: FetchConfig) {
 		),
 	)
 	yield* Console.log(`\nWrote ${outputPath}`)
+})
+
+// Non-empty sentinels so the point-lookup and service-scoped cases keep their
+// query SHAPE (right table + filter) even when the user doesn't pass real
+// values. They match zero rows, so timing for those two cases is only
+// representative once real values are supplied — the handler warns when unset.
+const SUITE_PLACEHOLDER_TRACE_ID = "REPLACE_WITH_REAL_TRACE_ID"
+const SUITE_PLACEHOLDER_SERVICE = "REPLACE_WITH_REAL_SERVICE"
+
+interface SuiteConfig {
+	readonly org: Option.Option<string>
+	readonly since: string
+	readonly traceId: string
+	readonly service: string
+	readonly search: string
+	readonly attrKey: string
+	readonly attrValue: string
+	readonly attrScope: string
+	readonly tableMap: Option.Option<string>
+	readonly out: Option.Option<string>
+}
+
+// Compile the committed suite into a `fetch`-shaped JSON file so the existing
+// `run` / `inspect` / `compare` commands replay it unchanged. For the sort-key
+// A/B spike, run this twice with different `--table-map` targets and diff the
+// two `run` outputs.
+const suiteHandler = Effect.fn("bench.suite")(function* (config: SuiteConfig) {
+	const sinceMs = yield* parseRelativeDuration(config.since)
+	const nowMs = yield* Clock.currentTimeMillis
+	const startTime = formatCHDateTime(new Date(nowMs - sinceMs))
+	const endTime = formatCHDateTime(new Date(nowMs))
+	const orgId = Option.getOrElse(config.org, () => "internal")
+
+	const tableMap = yield* Effect.try({
+		try: () =>
+			parseTableMap(Option.match(config.tableMap, { onNone: () => [], onSome: (s) => s.split(",") })),
+		catch: (cause) => new MissingConfigError({ what: "--table-map", message: String(cause) }),
+	})
+
+	const cases = buildSuite({
+		traceId: config.traceId,
+		serviceName: config.service,
+		searchTerm: config.search,
+		attrKey: config.attrKey,
+		attrValue: config.attrValue,
+		attrScope: config.attrScope,
+	})
+
+	const samples: ReadonlyArray<Sample> = cases.map((c) => ({
+		fingerprint: c.name,
+		context: c.name,
+		profile: c.profile,
+		sampleSql: remapTables(c.compile({ orgId, startTime, endTime }), tableMap),
+		sampleCount: 0,
+		p50DurationMs: 0,
+		p95DurationMs: 0,
+		p99DurationMs: 0,
+		maxDurationMs: 0,
+	}))
+
+	const remapNote = Option.match(config.tableMap, {
+		onNone: () => "",
+		onSome: (s) => `  table-map: ${s}`,
+	})
+	const source = `suite (org=${orgId}, window=${config.since})${remapNote}`
+	const outputPath = Option.getOrElse(
+		config.out,
+		() => `apps/api/scripts/.bench/suite-${timestampSlug()}.json`,
+	)
+	const output: FetchOutput = {
+		fetchedAt: new Date(nowMs).toISOString(),
+		source,
+		criteria: { orgId, startTime, endTime, topN: cases.length },
+		samples,
+	}
+	yield* writeJsonFile(outputPath, output)
+
+	yield* Console.log(
+		renderTable(
+			`Benchmark suite (${cases.length} cases)`,
+			[
+				{ header: "case", width: 28 },
+				{ header: "profile", width: 12 },
+				{ header: "description", width: 56 },
+			],
+			cases.map((c) => [c.name, c.profile, c.description]),
+		),
+	)
+	yield* Console.log(`  org: ${orgId}   window: ${startTime} → ${endTime} (${config.since})${remapNote}`)
+
+	const placeholders: string[] = []
+	if (config.traceId === SUITE_PLACEHOLDER_TRACE_ID) placeholders.push("--trace-id (trace_point_lookup)")
+	if (config.service === SUITE_PLACEHOLDER_SERVICE) placeholders.push("--service (service_span_search)")
+	if (placeholders.length > 0) {
+		yield* Console.log(
+			`  ⚠ using placeholder ${placeholders.join(" and ")} — those cases match 0 rows; ` +
+				"pass real values for representative timing.",
+		)
+	}
+
+	yield* Console.log(`\nWrote ${outputPath}`)
+	yield* Console.log(`  Replay:  bun run scripts/bench-queries.ts run ${outputPath}`)
 })
 
 const stripTrailingSemi = (sql: string) => sql.replace(/;\s*$/, "")
@@ -871,6 +982,7 @@ const inspectHandler = Effect.fn("bench.inspect")(function* (config: { readonly 
 const compareHandler = Effect.fn("bench.compare")(function* (config: {
 	readonly baseline: string
 	readonly candidate: string
+	readonly maxRegressionPct: Option.Option<number>
 }) {
 	const a = yield* readJsonFile<RunOutput>(config.baseline)
 	const b = yield* readJsonFile<RunOutput>(config.candidate)
@@ -915,6 +1027,33 @@ const compareHandler = Effect.fn("bench.compare")(function* (config: {
 			rows,
 		),
 	)
+
+	// Optional CI gate: fail if any case's candidate p95 regresses beyond the
+	// threshold vs the baseline. Cases missing from either side are ignored.
+	if (Option.isSome(config.maxRegressionPct)) {
+		const limit = config.maxRegressionPct.value
+		const regressions = a.results.flatMap((aResult) => {
+			const bResult = bByFp.get(aResult.fingerprint)
+			if (!bResult) return []
+			const base = aResult.aggregates.p95WallMs
+			const cand = bResult.aggregates.p95WallMs
+			if (!Number.isFinite(base) || !Number.isFinite(cand) || base <= 0) return []
+			const pct = ((cand - base) / base) * 100
+			return pct > limit ? [{ name: aResult.context || aResult.fingerprint, pct }] : []
+		})
+		if (regressions.length > 0) {
+			const detail = regressions
+				.map((r) => `  ${r.name}: +${r.pct.toFixed(1)}% p95 (limit +${limit}%)`)
+				.join("\n")
+			yield* Console.log(`\n${regressions.length} case(s) regressed beyond +${limit}%:\n${detail}`)
+			return yield* Effect.fail(
+				new RegressionThresholdError({
+					message: `${regressions.length} case(s) exceeded the +${limit}% p95 regression threshold`,
+				}),
+			)
+		}
+		yield* Console.log(`\nNo case regressed beyond +${limit}% p95.`)
+	}
 })
 
 // ---------------------------------------------------------------------------
@@ -968,13 +1107,62 @@ const compareCommand = Command.make(
 	{
 		baseline: Argument.string("baseline").pipe(Argument.withDescription("Baseline results JSON")),
 		candidate: Argument.string("candidate").pipe(Argument.withDescription("Candidate results JSON")),
+		maxRegressionPct: Flag.integer("max-regression-pct").pipe(
+			Flag.withDescription("Exit non-zero if any case's p95 regresses beyond this percent"),
+			Flag.optional,
+		),
 	},
 	compareHandler,
 ).pipe(Command.withDescription("Diff two run outputs (p95 wall, read bytes, memory)"))
 
+const suiteCommand = Command.make(
+	"suite",
+	{
+		org: Flag.string("org").pipe(Flag.withDescription("Org id to scope the queries (default: internal)"), Flag.optional),
+		since: Flag.string("since").pipe(
+			Flag.withDescription("Time window the queries scan, e.g. 24h or 7d"),
+			Flag.withDefault("24h"),
+		),
+		traceId: Flag.string("trace-id").pipe(
+			Flag.withDescription("Existing trace id for the point-lookup case (pass a real one for meaningful timing)"),
+			Flag.withDefault(SUITE_PLACEHOLDER_TRACE_ID),
+		),
+		service: Flag.string("service").pipe(
+			Flag.withDescription("Service name for the service-scoped canary (pass a real one for meaningful timing)"),
+			Flag.withDefault(SUITE_PLACEHOLDER_SERVICE),
+		),
+		search: Flag.string("search").pipe(
+			Flag.withDescription("Body-search phrase (an interior token engages the pre-filter, e.g. 'user login failed')"),
+			Flag.withDefault("user login failed"),
+		),
+		attrKey: Flag.string("attr-key").pipe(
+			Flag.withDescription("Attribute key for the equality/contains filter cases"),
+			Flag.withDefault("http.request.method"),
+		),
+		attrValue: Flag.string("attr-value").pipe(
+			Flag.withDescription("Attribute value for the equality/contains filter cases"),
+			Flag.withDefault("GET"),
+		),
+		attrScope: Flag.string("attr-scope").pipe(
+			Flag.withDescription("Attribute scope for the autocomplete case (span|resource|log)"),
+			Flag.withDefault("span"),
+		),
+		tableMap: Flag.string("table-map").pipe(
+			Flag.withDescription("Comma-separated FROM/JOIN rewrites for A/B, e.g. traces=traces_t2,logs=logs_l2"),
+			Flag.optional,
+		),
+		out: Flag.string("out").pipe(Flag.withDescription("Output JSON path"), Flag.optional),
+	},
+	suiteHandler,
+).pipe(
+	Command.withDescription(
+		"Compile the committed DSL benchmark suite into a fetch-shaped JSON for `run`/`compare`",
+	),
+)
+
 const rootCommand = Command.make("bench-queries").pipe(
 	Command.withDescription("Measure ClickHouse query performance"),
-	Command.withSubcommands([fetchCommand, runCommand, inspectCommand, compareCommand]),
+	Command.withSubcommands([fetchCommand, suiteCommand, runCommand, inspectCommand, compareCommand]),
 )
 
 const BenchLive = Layer.mergeAll(ClickHouse.layer, Tinybird.layer)

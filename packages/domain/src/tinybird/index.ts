@@ -29,5 +29,8 @@ export * from "./materializations"
 // Export shared DB query-shape SQL fragments (label/key derivation)
 export * from "./db-query-shape-sql"
 
+// Export shared skip-index expressions (kept in sync with query-engine predicates)
+export * from "./index-exprs"
+
 // Export TTL override helpers for BYO Tinybird raw retention
 export * from "./ttl-override"
