@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { useOptionalPageRefreshContext } from "@/components/time-range-picker/page-refresh-context"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { relativeToAbsolute } from "@/lib/time-utils"
 
 interface UseTableRefreshTimeRangeOptions {
@@ -34,6 +35,7 @@ export function useTableRefreshTimeRange({
 	defaultRange = "12h",
 }: UseTableRefreshTimeRangeOptions): TimeRange {
 	const baseRange = useEffectiveTimeRange(startTime, endTime, timePreset ?? defaultRange)
+	const { timeZone } = useTimeFormat()
 	const pageRefresh = useOptionalPageRefreshContext()
 	const refreshVersion = pageRefresh?.refreshVersion ?? 0
 	const lastRefreshVersion = React.useRef(refreshVersion)
@@ -63,7 +65,7 @@ export function useTableRefreshTimeRange({
 	if (pageRefresh && refreshVersion !== lastRefreshVersion.current) {
 		lastRefreshVersion.current = refreshVersion
 		if (relativePreset) {
-			const nextRange = relativeToAbsolute(relativePreset)
+			const nextRange = relativeToAbsolute(relativePreset, timeZone)
 			if (nextRange) {
 				setRefreshedRange(nextRange)
 			}

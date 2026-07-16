@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react"
 import { relativeToAbsolute } from "@/lib/time-utils"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { cn } from "@maple/ui/utils"
 
 interface ShorthandInputProps {
@@ -9,11 +10,12 @@ interface ShorthandInputProps {
 export function ShorthandInput({ onApply }: ShorthandInputProps) {
 	const [value, setValue] = useState("")
 	const [error, setError] = useState(false)
+	const { timeZone } = useTimeFormat()
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent<HTMLInputElement>) => {
 			if (e.key === "Enter") {
-				const range = relativeToAbsolute(value)
+				const range = relativeToAbsolute(value, timeZone)
 				if (range) {
 					onApply(range, value.toLowerCase(), `Last ${value.toLowerCase()}`)
 					setValue("")
@@ -23,7 +25,7 @@ export function ShorthandInput({ onApply }: ShorthandInputProps) {
 				}
 			}
 		},
-		[value, onApply],
+		[value, onApply, timeZone],
 	)
 
 	const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {

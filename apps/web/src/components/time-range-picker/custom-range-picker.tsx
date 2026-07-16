@@ -2,33 +2,49 @@ import { useState } from "react"
 import { Calendar } from "@maple/ui/components/ui/calendar"
 import { Button } from "@maple/ui/components/ui/button"
 import { Input } from "@maple/ui/components/ui/input"
-import { format, parse, isValid, setHours, setMinutes } from "date-fns"
+import { parse, isValid } from "date-fns"
 import type { DateRange } from "react-day-picker"
-import { formatForTinybird } from "@/lib/time-utils"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import type { TimeZoneId } from "@/hooks/use-time-format"
+import {
+	wallClockCalendarDay,
+	wallClockTimeInput,
+	wallClockToWarehouse,
+	warehouseToWallClock,
+} from "@/lib/time-range-tz"
 
 interface CustomRangePickerProps {
 	startTime?: string
 	endTime?: string
+	/** The display timezone the picked calendar day + time is interpreted in. */
+	timeZone: TimeZoneId
 	onApply: (range: { startTime: string; endTime: string }) => void
 	onCancel: () => void
 }
 
-export function CustomRangePicker({ startTime, endTime, onApply, onCancel }: CustomRangePickerProps) {
-	// Stored times are tz-less UTC warehouse strings; normalize to explicit UTC
-	// before constructing Dates or the value shifts by the local offset.
+export function CustomRangePicker({
+	startTime,
+	endTime,
+	timeZone,
+	onApply,
+	onCancel,
+}: CustomRangePickerProps) {
+	// Stored times are tz-less UTC warehouse strings; read them back as wall-clock
+	// in the selected zone so the calendar day + time inputs reflect what the user
+	// will actually query (rather than shifting by the browser offset).
 	const [dateRange, setDateRange] = useState<DateRange | undefined>(() => {
-		const from = startTime ? new Date(normalizeTimestampInput(startTime)) : undefined
-		const to = endTime ? new Date(normalizeTimestampInput(endTime)) : undefined
+		const from = startTime
+			? wallClockCalendarDay(warehouseToWallClock(startTime, timeZone))
+			: undefined
+		const to = endTime ? wallClockCalendarDay(warehouseToWallClock(endTime, timeZone)) : undefined
 		return from || to ? { from, to } : undefined
 	})
 
 	const [startTimeInput, setStartTimeInput] = useState(() => {
-		return startTime ? format(new Date(normalizeTimestampInput(startTime)), "HH:mm") : "00:00"
+		return startTime ? wallClockTimeInput(warehouseToWallClock(startTime, timeZone)) : "00:00"
 	})
 
 	const [endTimeInput, setEndTimeInput] = useState(() => {
-		return endTime ? format(new Date(normalizeTimestampInput(endTime)), "HH:mm") : "23:59"
+		return endTime ? wallClockTimeInput(warehouseToWallClock(endTime, timeZone)) : "23:59"
 	})
 
 	const handleApply = () => {
@@ -37,12 +53,32 @@ export function CustomRangePicker({ startTime, endTime, onApply, onCancel }: Cus
 		const [startHour, startMin] = startTimeInput.split(":").map(Number)
 		const [endHour, endMin] = endTimeInput.split(":").map(Number)
 
-		let startDate = setHours(setMinutes(dateRange.from, startMin || 0), startHour || 0)
-		let endDate = setHours(setMinutes(dateRange.to, endMin || 0), endHour || 0)
+		// Interpret each picked calendar day + HH:mm as wall-clock in `timeZone`,
+		// then convert to the UTC warehouse string.
+		const startWarehouse = wallClockToWarehouse(
+			{
+				year: dateRange.from.getFullYear(),
+				month: dateRange.from.getMonth(),
+				day: dateRange.from.getDate(),
+				hours: startHour || 0,
+				minutes: startMin || 0,
+			},
+			timeZone,
+		)
+		const endWarehouse = wallClockToWarehouse(
+			{
+				year: dateRange.to.getFullYear(),
+				month: dateRange.to.getMonth(),
+				day: dateRange.to.getDate(),
+				hours: endHour || 0,
+				minutes: endMin || 0,
+			},
+			timeZone,
+		)
 
 		onApply({
-			startTime: formatForTinybird(startDate),
-			endTime: formatForTinybird(endDate),
+			startTime: startWarehouse,
+			endTime: endWarehouse,
 		})
 	}
 

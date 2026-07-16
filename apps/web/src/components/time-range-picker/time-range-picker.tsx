@@ -5,6 +5,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@maple/ui/components/ui
 import { ClockIcon } from "@/components/icons"
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
 import { useRecentlyUsedTimes, type RecentTimeRange } from "@/hooks/use-recently-used-times"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { formatTimeRangeDisplay, presetLabel, relativeToAbsolute, type TimePreset } from "@/lib/time-utils"
 
 import { CustomRangePicker } from "./custom-range-picker"
@@ -12,7 +13,7 @@ import { PresetList } from "./preset-list"
 import { QuickSelectGrid } from "./quick-select-grid"
 import { RecentlyUsed } from "./recently-used"
 import { ShorthandInput } from "./shorthand-input"
-import { TimezoneDisplay } from "./timezone-display"
+import { TimezoneCombobox } from "./timezone-combobox"
 import type { TimeRangePickerProps, TimeRangeTab } from "./types"
 
 export function TimeRangePicker({
@@ -25,12 +26,15 @@ export function TimeRangePicker({
 	const [open, setOpen] = useState(false)
 	const [tab, setTab] = useState<TimeRangeTab>("relative")
 	const { recentTimes, addRecentTime } = useRecentlyUsedTimes()
+	const { timeZone } = useTimeFormat()
 
 	// Only the page-level picker opts in (hotkey prop) so secondary pickers
 	// (e.g. the widget builder's) don't double-register "D".
 	useAppHotkey("time.open", () => setOpen(true), { enabled: hotkey })
 
-	const displayText = presetValue ? presetLabel(presetValue) : formatTimeRangeDisplay(startTime, endTime)
+	const displayText = presetValue
+		? presetLabel(presetValue)
+		: formatTimeRangeDisplay(startTime, endTime, timeZone)
 
 	const handlePresetSelect = useCallback(
 		(preset: TimePreset) => {
@@ -75,7 +79,7 @@ export function TimeRangePicker({
 	const handleRecentSelect = useCallback(
 		(item: RecentTimeRange) => {
 			// Refresh the time range based on the relative value
-			const range = relativeToAbsolute(item.value)
+			const range = relativeToAbsolute(item.value, timeZone)
 			if (range) {
 				onChange({ ...range, presetValue: item.value })
 				addRecentTime({
@@ -88,7 +92,7 @@ export function TimeRangePicker({
 			}
 			setOpen(false)
 		},
-		[onChange, addRecentTime],
+		[onChange, addRecentTime, timeZone],
 	)
 
 	const handleCustomApply = useCallback(
@@ -131,12 +135,18 @@ export function TimeRangePicker({
 				}
 			>
 				{tab === "custom" ? (
-					<CustomRangePicker
-						startTime={startTime}
-						endTime={endTime}
-						onApply={handleCustomApply}
-						onCancel={() => setTab("relative")}
-					/>
+					<div className="-m-4 flex flex-col">
+						<div className="p-4">
+							<CustomRangePicker
+								startTime={startTime}
+								endTime={endTime}
+								timeZone={timeZone}
+								onApply={handleCustomApply}
+								onCancel={() => setTab("relative")}
+							/>
+						</div>
+						<TimezoneCombobox />
+					</div>
 				) : (
 					<div className="flex flex-col">
 						<div className="flex items-stretch">
@@ -160,7 +170,7 @@ export function TimeRangePicker({
 								)}
 							</div>
 						</div>
-						<TimezoneDisplay />
+						<TimezoneCombobox />
 					</div>
 				)}
 			</PopoverContent>

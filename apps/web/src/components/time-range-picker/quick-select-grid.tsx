@@ -1,10 +1,12 @@
 import { QUICK_SELECT_OPTIONS, relativeToAbsolute } from "@/lib/time-utils"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 interface QuickSelectGridProps {
 	onSelect: (range: { startTime: string; endTime: string }, value: string, label: string) => void
 }
 
 export function QuickSelectGrid({ onSelect }: QuickSelectGridProps) {
+	const { timeZone } = useTimeFormat()
 	return (
 		<div className="space-y-2">
 			<div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/80">
@@ -16,7 +18,7 @@ export function QuickSelectGrid({ onSelect }: QuickSelectGridProps) {
 						key={option.value}
 						type="button"
 						onClick={() => {
-							const range = relativeToAbsolute(option.value)
+							const range = relativeToAbsolute(option.value, timeZone)
 							if (range) {
 								onSelect(range, option.value, option.label)
 							}

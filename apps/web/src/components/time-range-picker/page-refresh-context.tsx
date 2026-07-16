@@ -1,5 +1,7 @@
 import * as React from "react"
 
+import type { TimeZoneId } from "@maple/ui/lib/time-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { relativeToAbsolute } from "@/lib/time-utils"
 
 export interface RelativeRefreshRange {
@@ -22,10 +24,13 @@ interface PageRefreshProviderProps {
 
 const PageRefreshContext = React.createContext<PageRefreshContextValue | null>(null)
 
-export function resolveRelativeRefreshRange(timePreset?: string): RelativeRefreshRange | null {
+export function resolveRelativeRefreshRange(
+	timePreset?: string,
+	timeZone?: TimeZoneId,
+): RelativeRefreshRange | null {
 	if (!timePreset) return null
 
-	const range = relativeToAbsolute(timePreset)
+	const range = relativeToAbsolute(timePreset, timeZone)
 	if (!range) return null
 
 	return {
@@ -43,8 +48,9 @@ export function PageRefreshProvider({
 	const [isReloading, setIsReloading] = React.useState(false)
 	const reloadTimeoutRef = React.useRef<ReturnType<typeof setTimeout>>(null)
 
+	const { timeZone } = useTimeFormat()
 	const reload = React.useCallback(() => {
-		const relativeRange = resolveRelativeRefreshRange(timePreset)
+		const relativeRange = resolveRelativeRefreshRange(timePreset, timeZone)
 		if (relativeRange) {
 			onRelativeRangeRefresh?.(relativeRange)
 		}
@@ -53,7 +59,7 @@ export function PageRefreshProvider({
 		if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current)
 		setIsReloading(true)
 		reloadTimeoutRef.current = setTimeout(() => setIsReloading(false), 600)
-	}, [timePreset, onRelativeRangeRefresh])
+	}, [timePreset, timeZone, onRelativeRangeRefresh])
 
 	React.useEffect(() => {
 		return () => {

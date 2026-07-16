@@ -1,4 +1,6 @@
-import { subMinutes, subHours, subDays, subWeeks, subMonths, startOfDay, format } from "date-fns"
+import { subMinutes, subHours, subDays, subWeeks, subMonths, startOfDay } from "date-fns"
+import { TZDate } from "@date-fns/tz"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
 // Format date for Tinybird/ClickHouse DateTime compatibility
@@ -26,13 +28,27 @@ const TIME_UNITS: Record<string, (date: Date, amount: number) => Date> = {
 	mo: subMonths,
 }
 
-export function relativeToAbsolute(shorthand: string): { startTime: string; endTime: string } | null {
+/**
+ * Midnight that starts "today" — in `timeZone` when given (via `TZDate` on the
+ * zone's calendar day), otherwise the browser-local day (unchanged legacy path).
+ */
+function startOfToday(now: Date, timeZone?: TimeZoneId): Date {
+	if (!timeZone) return startOfDay(now)
+	const zonedNow = new TZDate(now.getTime(), timeZone)
+	const midnight = new TZDate(zonedNow.getFullYear(), zonedNow.getMonth(), zonedNow.getDate(), 0, 0, 0, timeZone)
+	return new Date(midnight.getTime())
+}
+
+export function relativeToAbsolute(
+	shorthand: string,
+	timeZone?: TimeZoneId,
+): { startTime: string; endTime: string } | null {
 	const trimmed = shorthand.trim().toLowerCase()
 	const now = new Date()
 
 	if (trimmed === "today") {
 		return {
-			startTime: formatForTinybird(startOfDay(now)),
+			startTime: formatForTinybird(startOfToday(now, timeZone)),
 			endTime: formatForTinybird(now),
 		}
 	}
@@ -79,7 +95,11 @@ export function presetLabel(shorthand: string): string {
 	return `Last ${amount} ${amount === 1 ? singular : plural}`
 }
 
-export function formatTimeRangeDisplay(startTime?: string, endTime?: string): string {
+export function formatTimeRangeDisplay(
+	startTime: string | undefined,
+	endTime: string | undefined,
+	timeZone: TimeZoneId,
+): string {
 	if (!startTime && !endTime) {
 		return "Last 12 hours"
 	}
@@ -108,7 +128,7 @@ export function formatTimeRangeDisplay(startTime?: string, endTime?: string): st
 		return `Last ${Math.round(days / 30)} month${Math.round(days / 30) !== 1 ? "s" : ""}`
 	}
 
-	return `${format(start, "MMM d, HH:mm")} - ${format(end, "MMM d, HH:mm")}`
+	return `${formatDateTime(start, { timeZone })} - ${formatDateTime(end, { timeZone })}`
 }
 
 export const PRESET_OPTIONS: TimePreset[] = [
@@ -179,17 +199,6 @@ export const QUICK_SELECT_OPTIONS: QuickSelectOption[] = [
 	{ label: "2mo", value: "2mo" },
 	{ label: "today", value: "today" },
 ]
-
-export function getTimezoneDisplay(): string {
-	const offset = new Date().getTimezoneOffset()
-	const hours = Math.abs(Math.floor(offset / 60))
-	const sign = offset <= 0 ? "+" : "-"
-	return `UTC${sign}${hours}`
-}
-
-export function getTimezoneAbbr(): string {
-	return Intl.DateTimeFormat().resolvedOptions().timeZone
-}
 
 const CACHE_SNAP_INTERVAL_S = 15
 

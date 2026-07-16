@@ -1,5 +1,6 @@
 import { useMemo } from "react"
 import { useOptionalPageRefreshContext } from "@/components/time-range-picker/page-refresh-context"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { relativeToAbsolute } from "@/lib/time-utils"
 
 interface TimeRange {
@@ -23,14 +24,15 @@ export function useEffectiveTimeRange(
 ): TimeRange {
 	const pageRefresh = useOptionalPageRefreshContext()
 	const refreshVersion = pageRefresh?.refreshVersion ?? 0
+	const { timeZone } = useTimeFormat()
 
 	return useMemo(() => {
 		if (startTime && endTime) {
 			return { startTime, endTime }
 		}
-		const resolved = relativeToAbsolute(defaultRange)
+		const resolved = relativeToAbsolute(defaultRange, timeZone)
 		if (resolved) return resolved
-		return relativeToAbsolute("12h")!
+		return relativeToAbsolute("12h", timeZone)!
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [startTime, endTime, defaultRange, refreshVersion])
+	}, [startTime, endTime, defaultRange, refreshVersion, timeZone])
 }

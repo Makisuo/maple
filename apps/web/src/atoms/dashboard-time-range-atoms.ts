@@ -1,6 +1,7 @@
 import { type ReactNode, createElement, useCallback, useMemo } from "react"
 import { Atom, ScopedAtom, useAtom } from "@/lib/effect-atom"
 import { useOptionalPageRefreshContext } from "@/components/time-range-picker/page-refresh-context"
+import { useTimeFormat, type TimeZoneId } from "@/hooks/use-time-format"
 import type { TimeRange } from "@/components/dashboard-builder/types"
 import { relativeToAbsolute } from "@/lib/time-utils"
 
@@ -8,11 +9,11 @@ type ResolvedTimeRange = { startTime: string; endTime: string }
 
 const DEFAULT_RELATIVE_FALLBACK = "1h"
 
-function resolveTimeRange(timeRange: TimeRange): ResolvedTimeRange | null {
+function resolveTimeRange(timeRange: TimeRange, timeZone: TimeZoneId): ResolvedTimeRange | null {
 	if (timeRange.type === "absolute") {
 		return { startTime: timeRange.startTime, endTime: timeRange.endTime }
 	}
-	const resolved = relativeToAbsolute(timeRange.value)
+	const resolved = relativeToAbsolute(timeRange.value, timeZone)
 	if (resolved) return resolved
 
 	if (import.meta.env.DEV) {
@@ -20,7 +21,7 @@ function resolveTimeRange(timeRange: TimeRange): ResolvedTimeRange | null {
 			`[resolveTimeRange] Invalid relative time range value "${timeRange.value}", falling back to "${DEFAULT_RELATIVE_FALLBACK}"`,
 		)
 	}
-	return relativeToAbsolute(DEFAULT_RELATIVE_FALLBACK)
+	return relativeToAbsolute(DEFAULT_RELATIVE_FALLBACK, timeZone)
 }
 
 function timeRangesEqual(a: TimeRange, b: TimeRange): boolean {
@@ -49,10 +50,11 @@ export function useDashboardTimeRange() {
 	// so they are unaffected (the explicit useRefreshableAtomValue refresh still
 	// re-runs their queries).
 	const refreshVersion = useOptionalPageRefreshContext()?.refreshVersion ?? 0
+	const { timeZone } = useTimeFormat()
 	const resolvedTimeRange = useMemo(
-		() => resolveTimeRange(timeRange),
+		() => resolveTimeRange(timeRange, timeZone),
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[timeRange, refreshVersion],
+		[timeRange, refreshVersion, timeZone],
 	)
 
 	// Skip atom writes when the new range is structurally equal to the current
