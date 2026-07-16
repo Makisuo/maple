@@ -107,6 +107,25 @@ describe("applyDeclutter — traffic filter", () => {
 		expect(result.edges).toHaveLength(2)
 		expect(result.nodes).toHaveLength(5)
 	})
+
+	it("never hides structural relation edges (they carry no traffic by definition)", () => {
+		const { nodes, edges } = graph()
+		// e.g. the Hyperdrive → origin-database link: zero traffic, pure structure.
+		edges.push(
+			edge("hot-dst", "cold-dst", {
+				callCount: 0,
+				callsPerSecond: 0,
+				estimatedCallsPerSecond: 0,
+				relation: "hyperdrive-origin",
+			}),
+		)
+		const result = applyDeclutter(nodes, edges, state({ minTrafficPct: 5 }))
+		expect(result.edges.map((e) => e.id)).toContain(edgeIdFor("hot-dst", "cold-dst"))
+		// Its endpoint stays connected — kept edges never dangle.
+		expect(result.nodes.map((n) => n.id)).toContain("cold-dst")
+		// The zero-traffic TRAFFIC edge is still filtered as before.
+		expect(result.edges.map((e) => e.id)).not.toContain(edgeIdFor("cold-src", "cold-dst"))
+	})
 })
 
 describe("applyDeclutter — focus", () => {

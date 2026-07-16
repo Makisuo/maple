@@ -291,7 +291,12 @@ export function applyDeclutter(
 			hadEdges.add(e.target)
 		}
 
-		const keptEdges = outEdges.filter((e) => (e.data?.callsPerSecond ?? 0) >= threshold)
+		// Structural relation edges (e.g. Hyperdrive → its origin database) carry no
+		// traffic by definition, so the traffic threshold never applies to them —
+		// keeping one also keeps its endpoints connected below, never dangling.
+		const keptEdges = outEdges.filter(
+			(e) => e.data?.relation !== undefined || (e.data?.callsPerSecond ?? 0) >= threshold,
+		)
 		hiddenEdgeCount = outEdges.length - keptEdges.length
 
 		if (hiddenEdgeCount > 0) {
