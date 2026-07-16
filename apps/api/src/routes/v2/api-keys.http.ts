@@ -10,7 +10,7 @@ import {
 	permissionError,
 	serviceUnavailable,
 } from "@maple/domain/http/v2"
-import type { V2ApiKey, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
+import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { ApiKeysService } from "../../services/ApiKeysService"
 import { AuthService } from "../../services/AuthService"
@@ -55,7 +55,13 @@ const toV2ApiKey = (key: ApiKeyFields): V2ApiKey => ({
 
 const toV2ApiKeyWithSecret = (key: ApiKeyCreatedResponse): V2ApiKeyWithSecret => ({
 	...toV2ApiKey(key),
+	...(key.txid !== undefined ? { txid: key.txid } : {}),
 	secret: key.secret,
+})
+
+const toV2ApiKeyMutationResponse = (key: ApiKeyResponse): V2ApiKeyMutationResponse => ({
+	...toV2ApiKey(key),
+	...(key.txid !== undefined ? { txid: key.txid } : {}),
 })
 
 /** Service tagged errors → v2 envelope errors. */
@@ -127,7 +133,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const revoked = yield* apiKeysService
 						.revoke(tenant.orgId, params.id)
 						.pipe(Effect.mapError(mapServiceError))
-					return toV2ApiKey(revoked)
+					return toV2ApiKeyMutationResponse(revoked)
 				}),
 			)
 	}),

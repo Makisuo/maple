@@ -21,6 +21,8 @@ export class ApiKeyResponse extends Schema.Class<ApiKeyResponse>("ApiKeyResponse
 	createdAt: Schema.Number,
 	createdBy: UserId,
 	createdByEmail: Schema.NullOr(Schema.String),
+	/** Postgres transaction id for Electric/TanStack DB reconciliation on mutation responses. */
+	txid: Schema.optionalKey(Schema.String),
 }) {}
 
 export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("ApiKeyCreatedResponse")({
@@ -38,6 +40,8 @@ export class ApiKeyCreatedResponse extends Schema.Class<ApiKeyCreatedResponse>("
 	createdBy: UserId,
 	createdByEmail: Schema.NullOr(Schema.String),
 	secret: Schema.String,
+	/** Postgres transaction id for Electric/TanStack DB reconciliation. */
+	txid: Schema.optionalKey(Schema.String),
 }) {}
 
 export class ApiKeysListResponse extends Schema.Class<ApiKeysListResponse>("ApiKeysListResponse")({

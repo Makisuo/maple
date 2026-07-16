@@ -203,10 +203,7 @@ describe("GithubProvider.webhookToJobs", () => {
 			// Push payloads carry no avatar URL — the provider derives one from the
 			// committer login against the commit's own host (here github.com), so the
 			// dashboard never has to patch a null avatar.
-			assert.strictEqual(
-				job.commits[0]!.authorAvatarUrl,
-				"https://github.com/octocat.png?size=64",
-			)
+			assert.strictEqual(job.commits[0]!.authorAvatarUrl, "https://github.com/octocat.png?size=64")
 		}).pipe(Effect.provide(providerLayer())),
 	)
 
@@ -233,10 +230,7 @@ describe("GithubProvider.webhookToJobs", () => {
 			})
 			const job = jobs[0]!
 			if (job.kind !== "push") return assert.fail("expected a push job")
-			assert.strictEqual(
-				job.commits[0]!.authorAvatarUrl,
-				"https://github.acme.com/octocat.png?size=64",
-			)
+			assert.strictEqual(job.commits[0]!.authorAvatarUrl, "https://github.acme.com/octocat.png?size=64")
 		}).pipe(Effect.provide(providerLayer())),
 	)
 
@@ -819,7 +813,6 @@ describe("VcsRepository", () => {
 					authoredAt: null,
 					committedAt: 123,
 					htmlUrl: `https://github.com/octo/repo/commit/${SHA}`,
-					branch: "main",
 				},
 			])
 			assert.strictEqual(count, 1)
@@ -846,18 +839,7 @@ describe("VcsRepository", () => {
 						(id, org_id, provider, external_installation_id, account_login, account_type,
 						 external_account_id, repository_selection, status, installed_by_user_id, created_at, updated_at)
 					 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), now())`,
-					[
-						randomUUID(),
-						"org_x",
-						"github",
-						"55",
-						"octo",
-						"team",
-						"1",
-						"all",
-						"active",
-						"user_1",
-					],
+					[randomUUID(), "org_x", "github", "55", "octo", "team", "1", "all", "active", "user_1"],
 				),
 			)
 			const exit = yield* repo.resolveInstallation("github", "55").pipe(Effect.exit)
@@ -1055,7 +1037,6 @@ describe("VcsRepository", () => {
 					authoredAt: null,
 					committedAt: 1,
 					htmlUrl: `https://github.com/o/r/commit/${SHA_X}`,
-					branch: "main",
 				},
 			])
 			const r = yield* repoFor(repo, orgId, "7")
@@ -1115,7 +1096,6 @@ describe("VcsRepository", () => {
 					authoredAt: null,
 					committedAt: 1,
 					htmlUrl: `https://github.com/o/r/commit/${UPPER}`,
-					branch: "main",
 				},
 			])
 			// Stored lowercased → found by the lowercase form.
@@ -1213,6 +1193,10 @@ describe("VcsSyncService orchestrator", () => {
 							branches: opts.branches ?? [],
 							truncated: opts.branchesTruncated ?? false,
 						}),
+			fetchCommit: (_installation, _repo, sha) =>
+				Effect.succeed(
+					Option.fromUndefinedOr(opts.commits?.find((candidate) => candidate.sha === sha)),
+				),
 		}
 		const registry = Layer.succeed(VcsProviderRegistry, {
 			ids: ["github"],
@@ -1495,7 +1479,11 @@ describe("VcsSyncService orchestrator", () => {
 			assert.strictEqual(backfills[0]!.kind === "sync-commits" ? backfills[0]!.branch : "", "main")
 		}).pipe(
 			Effect.provide(
-				orchestratorLayer(testDb, { sent, repos: oneRepo, branches: [{ name: "main", headSha: null }] }),
+				orchestratorLayer(testDb, {
+					sent,
+					repos: oneRepo,
+					branches: [{ name: "main", headSha: null }],
+				}),
 			),
 		)
 	})
@@ -2228,7 +2216,9 @@ describe("VcsSyncService orchestrator", () => {
 			// …and reaches back exactly one window from the enqueue moment.
 			assert.ok(backfill.sinceMs >= before - BACKFILL_WINDOW_MS)
 			assert.ok(backfill.sinceMs <= after - BACKFILL_WINDOW_MS)
-		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, branches: [{ name: "main", headSha: null }] })))
+		}).pipe(
+			Effect.provide(orchestratorLayer(testDb, { sent, branches: [{ name: "main", headSha: null }] })),
+		)
 	})
 
 	// A continuation must carry the original walk's `sinceMs` (and branch) unchanged —
@@ -2712,7 +2702,6 @@ describe("git SHA validation (branded type)", () => {
 					authoredAt: null,
 					committedAt: 1,
 					htmlUrl: "https://example.com",
-					branch: "main",
 				},
 			]).pipe(Effect.exit)
 			assert.ok(Exit.isFailure(exit))

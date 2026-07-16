@@ -52,6 +52,27 @@ describe("CompiledQuery.decodeRows", () => {
 			}
 		}),
 	)
+
+	it.effect("applies a declared row schema to compiled UNION queries", () =>
+		Effect.gen(function* () {
+			const table = CH.table("events", { OrgId: CH.string, Count: CH.uint64 })
+			const selectCount = () =>
+				CH.from(table)
+					.select(($) => ({ count: $.Count }))
+					.where(($) => [$.OrgId.eq("org")])
+			const compiled = CH.compileUnion(
+				CH.unionAll(selectCount(), selectCount()).format("JSON"),
+				{},
+				{
+					rowSchema: Schema.Struct({ count: RowNumber }),
+				},
+			)
+
+			const rows = yield* compiled.decodeRows([{ count: "42" }])
+
+			expect(rows).toEqual([{ count: 42 }])
+		}),
+	)
 })
 
 describe("CompiledQuery.decodeFirstRow", () => {

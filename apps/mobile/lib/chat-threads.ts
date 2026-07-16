@@ -3,19 +3,24 @@
 // conversations offline.
 
 import AsyncStorage from "@react-native-async-storage/async-storage"
-import type { UIMessage } from "./chat-types"
-import type { AlertContext } from "./alert-context"
+import { Schema } from "effect"
+import { UIMessageSchema, type UIMessage } from "./chat-types"
+import { AlertContextSchema } from "./alert-context"
 
 const THREADS_KEY = "maple.chat.threads.v1"
 const messagesKey = (threadId: string) => `maple.chat.messages.v1.${threadId}`
 
-export interface ThreadSummary {
-	threadId: string
-	title: string
-	lastMessagePreview: string
-	lastMessageAt: number
-	alertContext?: AlertContext
-}
+const ThreadSummarySchema = Schema.Struct({
+	threadId: Schema.String,
+	title: Schema.String,
+	lastMessagePreview: Schema.String,
+	lastMessageAt: Schema.Number,
+	alertContext: Schema.optionalKey(AlertContextSchema),
+})
+export type ThreadSummary = typeof ThreadSummarySchema.Type
+
+const decodeThreadIndex = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(ThreadSummarySchema)))
+const decodeMessages = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Array(UIMessageSchema)))
 
 type Listener = (threads: ThreadSummary[]) => void
 
@@ -26,9 +31,10 @@ async function loadIndex(): Promise<ThreadSummary[]> {
 	if (cache) return cache
 	try {
 		const raw = await AsyncStorage.getItem(THREADS_KEY)
-		cache = raw ? (JSON.parse(raw) as ThreadSummary[]) : []
+		cache = raw ? [...decodeThreadIndex(raw)] : []
 	} catch {
 		cache = []
+		await AsyncStorage.removeItem(THREADS_KEY).catch(() => undefined)
 	}
 	return cache
 }
@@ -76,8 +82,9 @@ export async function loadMessages(threadId: string): Promise<UIMessage[]> {
 	try {
 		const raw = await AsyncStorage.getItem(messagesKey(threadId))
 		if (!raw) return []
-		return JSON.parse(raw) as UIMessage[]
+		return [...decodeMessages(raw)]
 	} catch {
+		await AsyncStorage.removeItem(messagesKey(threadId)).catch(() => undefined)
 		return []
 	}
 }

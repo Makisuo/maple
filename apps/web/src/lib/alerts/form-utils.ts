@@ -579,69 +579,93 @@ export function buildDestinationCreatePayload(form: DestinationFormState): Alert
 
 export function buildDestinationUpdatePayload(form: DestinationFormState): AlertDestinationUpdateRequest {
 	switch (form.type) {
-		case "slack":
+		case "slack": {
+			const name = form.name.trim()
+			const channelLabel = form.channelLabel.trim()
+			const webhookUrl = form.webhookUrl.trim()
 			return {
 				type: "slack",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				channelLabel: form.channelLabel.trim() || undefined,
-				webhookUrl: form.webhookUrl.trim() || undefined,
+				...(channelLabel ? { channelLabel } : {}),
+				...(webhookUrl ? { webhookUrl } : {}),
 			}
-		case "pagerduty":
+		}
+		case "pagerduty": {
+			const name = form.name.trim()
+			const integrationKey = form.integrationKey.trim()
 			return {
 				type: "pagerduty",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				integrationKey: form.integrationKey.trim() || undefined,
+				...(integrationKey ? { integrationKey } : {}),
 			}
-		case "webhook":
+		}
+		case "webhook": {
+			const name = form.name.trim()
+			const url = form.url.trim()
+			const signingSecret = form.signingSecret.trim()
 			return {
 				type: "webhook",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				url: form.url.trim() || undefined,
-				signingSecret: form.signingSecret.trim() || undefined,
+				...(url ? { url } : {}),
+				...(signingSecret ? { signingSecret } : {}),
 			}
-		case "hazel":
+		}
+		case "hazel": {
+			const name = form.name.trim()
+			const webhookUrl = form.hazelWebhookUrl.trim()
+			const signingSecret = form.signingSecret.trim()
 			return {
 				type: "hazel",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				webhookUrl: form.hazelWebhookUrl.trim() || undefined,
-				signingSecret: form.signingSecret.trim() || undefined,
+				...(webhookUrl ? { webhookUrl } : {}),
+				...(signingSecret ? { signingSecret } : {}),
 			}
-		case "hazel-oauth":
+		}
+		case "hazel-oauth": {
+			const name = form.name.trim()
+			const organizationId = form.hazelOrganizationId.trim()
+			const organizationName = form.hazelOrganizationName.trim()
+			const logoUrl = form.hazelOrganizationLogoUrl?.trim()
+			const channelId = form.hazelChannelId.trim()
+			const channelName = form.hazelChannelName.trim()
 			return {
 				type: "hazel-oauth",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				hazelOrganizationId: form.hazelOrganizationId.trim()
-					? asHazelOrganizationId(form.hazelOrganizationId.trim())
-					: undefined,
-				hazelOrganizationName: form.hazelOrganizationName.trim() || undefined,
-				hazelOrganizationLogoUrl:
-					form.hazelOrganizationLogoUrl === null
-						? null
-						: form.hazelOrganizationLogoUrl.trim() || undefined,
-				hazelChannelId: form.hazelChannelId.trim()
-					? asHazelChannelId(form.hazelChannelId.trim())
-					: undefined,
-				hazelChannelName: form.hazelChannelName.trim() || undefined,
+				...(organizationId ? { hazelOrganizationId: asHazelOrganizationId(organizationId) } : {}),
+				...(organizationName ? { hazelOrganizationName: organizationName } : {}),
+				...(form.hazelOrganizationLogoUrl === null
+					? { hazelOrganizationLogoUrl: null }
+					: logoUrl
+						? { hazelOrganizationLogoUrl: logoUrl }
+						: {}),
+				...(channelId ? { hazelChannelId: asHazelChannelId(channelId) } : {}),
+				...(channelName ? { hazelChannelName: channelName } : {}),
 			}
-		case "discord":
+		}
+		case "discord": {
+			const name = form.name.trim()
+			const webhookUrl = form.webhookUrl.trim()
 			return {
 				type: "discord",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				webhookUrl: form.webhookUrl.trim() || undefined,
+				...(webhookUrl ? { webhookUrl } : {}),
 			}
-		case "email":
+		}
+		case "email": {
+			const name = form.name.trim()
 			return {
 				type: "email",
-				name: form.name.trim() || undefined,
+				...(name ? { name } : {}),
 				enabled: form.enabled,
-				memberUserIds: form.memberUserIds.length > 0 ? form.memberUserIds : undefined,
+				...(form.memberUserIds.length > 0 ? { memberUserIds: form.memberUserIds } : {}),
 			}
+		}
 	}
 }
 

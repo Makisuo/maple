@@ -317,7 +317,6 @@ describe("GithubConnectService", () => {
 					authoredAt: null,
 					committedAt: 1,
 					htmlUrl: `https://github.com/octo/repo/commit/${SHA}`,
-					branch: "main",
 				},
 			])
 
@@ -482,7 +481,6 @@ describe("GithubConnectService", () => {
 							authoredAt: null,
 							committedAt: 1,
 							htmlUrl: `https://github.com/octo/r/commit/${sha}`,
-							branch: "main",
 						},
 					])
 				yield* seedCommit("7", SHA_7)
@@ -553,7 +551,6 @@ describe("GithubConnectService", () => {
 					authoredAt: null,
 					committedAt: 1,
 					htmlUrl: `https://github.com/octo/repo/commit/${SHA}`,
-					branch: "main",
 				},
 			])
 

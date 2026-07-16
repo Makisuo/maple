@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
+import { Etag } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
+import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform"
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Env } from "../../lib/Env"
@@ -49,6 +52,7 @@ const makeHarness = () => {
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(servicesLive),
+		Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeHttpPlatform.layer, Etag.layer)),
 	)
 
 	const { handler, dispose: disposeHandler } = HttpRouter.toWebHandler(routes, {

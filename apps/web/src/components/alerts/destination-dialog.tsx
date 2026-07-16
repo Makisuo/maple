@@ -16,7 +16,9 @@ import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { HazelChannelsListResponse } from "@maple/domain/http"
 import { Exit } from "effect"
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { toast } from "sonner"
+import { useMountEffect } from "@/hooks/use-mount-effect"
 import { Button } from "@maple/ui/components/ui/button"
 import {
 	Dialog,
@@ -78,9 +80,7 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 		case "email":
 			// The current selection is prefilled when editing, so a member is
 			// always required.
-			return (
-				form.memberUserIds.length > 0 && form.memberUserIds.length <= MAX_EMAIL_MEMBER_RECIPIENTS
-			)
+			return form.memberUserIds.length > 0 && form.memberUserIds.length <= MAX_EMAIL_MEMBER_RECIPIENTS
 		default:
 			return true
 	}
@@ -322,7 +322,7 @@ function HazelOAuthFields({
 	const organizationsFailed = Result.isFailure(organizationsResult)
 	const channelsFailed = Result.isFailure(channelsResult)
 
-	useEffect(() => {
+	useMountEffect(() => {
 		function onMessage(event: MessageEvent) {
 			if (event.data && event.data.type === "maple:integration:hazel") {
 				// Bust by toggling form state so the reactivity-keyed atoms refetch.
@@ -331,7 +331,7 @@ function HazelOAuthFields({
 		}
 		window.addEventListener("message", onMessage)
 		return () => window.removeEventListener("message", onMessage)
-	}, [onFormChange])
+	})
 
 	async function handleConnect() {
 		// Open the popup synchronously to satisfy popup-blocker user-gesture rules,
@@ -354,10 +354,14 @@ function HazelOAuthFields({
 
 	async function handleDisconnect() {
 		setBusy(true)
-		await disconnect({
+		const result = await disconnect({
 			reactivityKeys: ["hazelIntegrationStatus", "hazelOrganizations", "hazelChannels"],
 		})
 		setBusy(false)
+		if (Exit.isFailure(result)) {
+			toast.error("Couldn't disconnect Hazel. Please try again.")
+			return
+		}
 		onFormChange((current) => ({
 			...current,
 			hazelOrganizationId: "",

@@ -1,17 +1,20 @@
-export interface AlertContext {
-	ruleId: string
-	ruleName: string
-	incidentId: string | null
-	eventType: string
-	signalType: string
-	severity: string
-	comparator: string
-	threshold: number
-	value: number | null
-	windowMinutes: number
-	groupKey: string | null
-	sampleCount: number | null
-}
+import { Schema } from "effect"
+
+export const AlertContextSchema = Schema.Struct({
+	ruleId: Schema.String,
+	ruleName: Schema.String,
+	incidentId: Schema.NullOr(Schema.String),
+	eventType: Schema.String,
+	signalType: Schema.String,
+	severity: Schema.String,
+	comparator: Schema.String,
+	threshold: Schema.Number,
+	value: Schema.NullOr(Schema.Number),
+	windowMinutes: Schema.Number,
+	groupKey: Schema.NullOr(Schema.String),
+	sampleCount: Schema.NullOr(Schema.Number),
+})
+export type AlertContext = typeof AlertContextSchema.Type
 
 const BASE64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
@@ -61,30 +64,10 @@ function base64Decode(input: string): string {
 	return str
 }
 
-function isAlertContext(value: unknown): value is AlertContext {
-	if (!value || typeof value !== "object") return false
-	const v = value as Record<string, unknown>
-	if (typeof v.ruleId !== "string") return false
-	if (typeof v.ruleName !== "string") return false
-	if (v.incidentId !== null && typeof v.incidentId !== "string") return false
-	if (typeof v.eventType !== "string") return false
-	if (typeof v.signalType !== "string") return false
-	if (typeof v.severity !== "string") return false
-	if (typeof v.comparator !== "string") return false
-	if (typeof v.threshold !== "number") return false
-	if (v.value !== null && typeof v.value !== "number") return false
-	if (typeof v.windowMinutes !== "number") return false
-	if (v.groupKey !== null && typeof v.groupKey !== "string") return false
-	if (v.sampleCount !== null && typeof v.sampleCount !== "number") return false
-	return true
-}
-
 export function decodeAlertContextFromSearchParam(raw: string): AlertContext | undefined {
 	try {
 		const json = base64Decode(raw)
-		const parsed = JSON.parse(json) as unknown
-		if (!isAlertContext(parsed)) return undefined
-		return parsed
+		return Schema.decodeUnknownSync(Schema.fromJsonString(AlertContextSchema))(json)
 	} catch {
 		return undefined
 	}

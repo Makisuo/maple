@@ -18,7 +18,13 @@ import {
 	getErrorsSummary,
 	getErrorsTimeseries,
 } from "@/api/warehouse/errors"
-import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
+import {
+	getLog,
+	getLogAttributeKeys,
+	getLogsFacetValues,
+	getLogsFacets,
+	listLogs,
+} from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
 	getMetricAttributeValues,
@@ -198,7 +204,11 @@ export const getTracesFacetValuesResultAtom = makeQueryAtomFamily(getTracesFacet
 	staleTime: 30_000,
 })
 
-export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy)
+export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy, {
+	// A trace is immutable once ingested. Keep the hierarchy warm while users
+	// move between the waterfall and span detail panels.
+	staleTime: 60_000,
+})
 
 export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
 	staleTime: 30_000,

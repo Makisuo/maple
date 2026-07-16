@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useMemo, useRef, useState, type ReactNode } from "react"
 import { Exit } from "effect"
+import { ChatApplyRequest } from "@maple/domain/http"
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { toast } from "sonner"
 import { useAtomSet } from "@/lib/effect-atom"
@@ -105,7 +106,13 @@ interface ChatConversationProps {
 	readOnly?: boolean
 }
 
-export function ChatConversation({
+export function ChatConversation(props: ChatConversationProps) {
+	// A tab is a conversation identity. Remounting the session gives every
+	// conversation fresh local UI state without prop-change reset effects.
+	return <ChatConversationSession key={props.tabId} {...props} />
+}
+
+function ChatConversationSession({
 	tabId,
 	isActive,
 	onFirstMessage,
@@ -124,9 +131,6 @@ export function ChatConversation({
 		[referrerPath],
 	)
 	const [dismissed, setDismissed] = useState<Set<string>>(() => new Set())
-	useEffect(() => {
-		setDismissed(new Set())
-	}, [referrerPath])
 	const activeContexts = useMemo(
 		() => derivedContexts.filter((c) => !dismissed.has(c.id)),
 		[derivedContexts, dismissed],
@@ -161,7 +165,10 @@ export function ChatConversation({
 		return base
 	}, [mode, investigationContext, widgetFixContext, activeContexts, referrerPath])
 
-	const { messages, status, isLoading, sendMessage } = useFlueChat({ tabId, context })
+	const { messages, status, isLoading, responseSettled, settleResponse, sendMessage } = useFlueChat({
+		tabId,
+		context,
+	})
 
 	// Apply an approved proposal via Maple's authenticated API (propose-then-apply).
 	const applyProposal = useAtomSet(MapleApiAtomClient.mutation("chat", "apply"), {
@@ -177,7 +184,7 @@ export function ChatConversation({
 			return next
 		})
 	const handleApprove = async (toolCallId: string, tool: string, input: unknown) => {
-		const exit = await applyProposal({ payload: { tool, input } })
+		const exit = await applyProposal({ payload: new ChatApplyRequest({ tool, input }) })
 		if (Exit.isSuccess(exit)) {
 			if (exit.value.isError) {
 				toast.error(exit.value.content || `Couldn't apply ${tool}`)
@@ -190,25 +197,8 @@ export function ChatConversation({
 		}
 	}
 
-	const [hasSettled, setHasSettled] = useState(false)
-	useEffect(() => {
-		setHasSettled(false)
-	}, [tabId])
-	useEffect(() => {
-		if (messages.length > 0) {
-			setHasSettled(true)
-			return
-		}
-		const t = setTimeout(() => setHasSettled(true), 600)
-		return () => clearTimeout(t)
-	}, [messages.length, tabId])
-
-	useEffect(() => {
-		onLoadingChange?.(tabId, isLoading)
-	}, [tabId, isLoading, onLoadingChange])
-	useEffect(() => {
-		return () => onLoadingChange?.(tabId, false)
-	}, [tabId, onLoadingChange])
+	const [emptyHistorySettled, setEmptyHistorySettled] = useState(false)
+	const hasSettled = messages.length > 0 || emptyHistorySettled
 	const isInvestigationMode = mode === "investigation" && !!investigationContext
 	const isWidgetFixMode = mode === "widget-fix" && !!widgetFixContext
 	const suggestions = useMemo(() => {
@@ -235,6 +225,18 @@ export function ChatConversation({
 
 	return (
 		<div className="flex h-full flex-col">
+			{responseSettled ? <ResponseSettleTrigger onSettle={settleResponse} /> : null}
+			{messages.length === 0 && !emptyHistorySettled ? (
+				<ConversationSettleTrigger onSettle={() => setEmptyHistorySettled(true)} />
+			) : null}
+			{onLoadingChange ? (
+				<LoadingReporter
+					key={`${tabId}:${isLoading}`}
+					tabId={tabId}
+					isLoading={isLoading}
+					onChange={onLoadingChange}
+				/>
+			) : null}
 			{shouldAutoSendWidgetFix ? (
 				<WidgetFixAutoSendTrigger onFire={() => handleSend(widgetFixAutoPrompt)} />
 			) : null}
@@ -262,8 +264,9 @@ export function ChatConversation({
 									Ready to investigate
 								</p>
 								<p className="max-w-sm text-sm text-muted-foreground">
-									The {investigationNoun(investigationContext!.kind)} above is attached to every message
-									in this thread. Start with a suggestion or ask your own question.
+									The {investigationNoun(investigationContext!.kind)} above is attached to
+									every message in this thread. Start with a suggestion or ask your own
+									question.
 								</p>
 							</div>
 						) : isWidgetFixMode ? (
@@ -501,6 +504,35 @@ export function ChatConversation({
 function WidgetFixAutoSendTrigger({ onFire }: { onFire: () => void }) {
 	useMountEffect(() => {
 		onFire()
+	})
+	return null
+}
+
+function ConversationSettleTrigger({ onSettle }: { onSettle: () => void }) {
+	useMountEffect(() => {
+		const timeout = window.setTimeout(onSettle, 600)
+		return () => window.clearTimeout(timeout)
+	})
+	return null
+}
+
+function ResponseSettleTrigger({ onSettle }: { onSettle: () => void }) {
+	useMountEffect(onSettle)
+	return null
+}
+
+function LoadingReporter({
+	tabId,
+	isLoading,
+	onChange,
+}: {
+	tabId: string
+	isLoading: boolean
+	onChange: (tabId: string, loading: boolean) => void
+}) {
+	useMountEffect(() => {
+		onChange(tabId, isLoading)
+		return isLoading ? () => onChange(tabId, false) : undefined
 	})
 	return null
 }

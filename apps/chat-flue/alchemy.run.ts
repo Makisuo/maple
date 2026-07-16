@@ -130,6 +130,7 @@ export const createChatFlueWorker = ({
 				...optionalSecret("MAPLE_INGEST_KEY"),
 				...optionalPlain("MAPLE_ENDPOINT"),
 				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+				...optionalPlain("COMMIT_SHA"),
 				...optionalPlain("MAPLE_CHAT_MODEL"),
 				...optionalPlain("MAPLE_TRIAGE_MODEL"),
 				...optionalPlain("MAPLE_AUTH_MODE", "self_hosted"),

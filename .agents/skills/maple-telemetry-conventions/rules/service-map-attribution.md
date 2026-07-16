@@ -93,6 +93,7 @@ Keep these names consistent across services to avoid edge fragmentation on the m
 | `cloudflare-logpush` | Cloudflare logpush source |
 | `clerk` | Clerk auth |
 | `autumn` | Autumn metering |
+| `cloudflare-email` | Cloudflare Email Routing binding |
 
 Add new peers to this list as they're introduced — single source of truth.
 

@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, type PlatformError, Schema } from "effect"
+import { Clock, Config, Context, Effect, Layer, Option, type PlatformError, Redacted, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -20,6 +20,16 @@ interface StoredConfig {
 	latestKnownVersion?: string
 }
 
+const StoredConfigSchema = Schema.Struct({
+	apiUrl: Schema.optionalKey(Schema.String),
+	token: Schema.optionalKey(Schema.String),
+	orgId: Schema.optionalKey(Schema.String),
+	defaultMode: Schema.optionalKey(Schema.Literals(["local", "remote"])),
+	lastUpdateCheck: Schema.optionalKey(Schema.String),
+	latestKnownVersion: Schema.optionalKey(Schema.String),
+})
+const decodeStoredConfig = Schema.decodeUnknownEffect(StoredConfigSchema)
+
 /** Malformed on-disk config JSON. Caught immediately by `Effect.orElseSucceed`
  *  (a bad/unreadable file falls back to an empty config), but typed so the error
  *  channel isn't a bare `Error`. */
@@ -37,12 +47,12 @@ const readStored = (fs: FileSystem): Effect.Effect<StoredConfig> =>
 	fs.readFileString(CONFIG_PATH).pipe(
 		Effect.flatMap((raw) =>
 			Effect.try({
-				try: (): StoredConfig => {
-					const parsed = JSON.parse(raw) as unknown
-					return typeof parsed === "object" && parsed !== null ? (parsed as StoredConfig) : {}
-				},
+				try: () => JSON.parse(raw) as unknown,
 				catch: () => new ConfigParseError({ message: "invalid config" }),
-			}),
+			}).pipe(
+				Effect.flatMap(decodeStoredConfig),
+				Effect.mapError(() => new ConfigParseError({ message: "invalid config" })),
+			),
 		),
 		// Missing/unreadable/invalid file → empty config. The CLI still works in
 		// local mode (auto-detect) and `maple login` will create the file.
@@ -66,7 +76,7 @@ export interface MapleConfigShape {
 	/** Remote API base URL (env `MAPLE_API_URL` overrides the stored value). */
 	readonly apiUrl: string | undefined
 	/** Remote bearer token (env `MAPLE_API_TOKEN` overrides the stored value). */
-	readonly token: string | undefined
+	readonly token: Option.Option<Redacted.Redacted<string>>
 	readonly orgId: string | undefined
 	/** Local binary base URL (env `MAPLE_LOCAL_URL`, else the default). */
 	readonly localUrl: string
@@ -94,14 +104,18 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 	make: Effect.gen(function* () {
 		const fs = yield* FileSystem
 		const stored = yield* readStored(fs)
-		const env = process.env
+		const envApiUrl = yield* Config.option(Config.string("MAPLE_API_URL"))
+		const envToken = yield* Config.option(Config.redacted("MAPLE_API_TOKEN"))
+		const envOrgId = yield* Config.option(Config.string("MAPLE_ORG_ID"))
+		const envLocalUrl = yield* Config.option(Config.string("MAPLE_LOCAL_URL"))
+		const storedToken = Option.map(Option.fromUndefinedOr(stored.token), Redacted.make)
 		return {
-			apiUrl: env.MAPLE_API_URL ?? stored.apiUrl,
-			token: env.MAPLE_API_TOKEN ?? stored.token,
-			orgId: env.MAPLE_ORG_ID ?? stored.orgId,
-			localUrl: env.MAPLE_LOCAL_URL ?? DEFAULT_LOCAL_URL,
+			apiUrl: Option.getOrElse(envApiUrl, () => stored.apiUrl),
+			token: Option.orElse(envToken, () => storedToken),
+			orgId: Option.getOrElse(envOrgId, () => stored.orgId),
+			localUrl: Option.getOrElse(envLocalUrl, () => DEFAULT_LOCAL_URL),
 			defaultMode: stored.defaultMode,
-			defaultApiUrl: env.MAPLE_API_URL ?? DEFAULT_API_URL,
+			defaultApiUrl: Option.getOrElse(envApiUrl, () => DEFAULT_API_URL),
 			lastUpdateCheck: stored.lastUpdateCheck,
 			latestKnownVersion: stored.latestKnownVersion,
 			write: (next) => writeMerged(fs, (cur) => ({ ...cur, ...next })),

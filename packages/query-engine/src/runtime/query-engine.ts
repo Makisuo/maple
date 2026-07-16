@@ -124,6 +124,52 @@ const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
 const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
 const QUERY_ENGINE_TIMEOUT = Duration.seconds(30)
 
+/**
+ * Runtime queries deliberately preserve their query-specific inferred row
+ * types, but ClickHouse JSON encodes UInt64/Int64 aggregates as strings. This
+ * shared boundary schema coerces every numeric field emitted by the runtime
+ * query set while retaining all non-numeric columns unchanged.
+ *
+ * Keep this list aligned with the aggregate aliases in `../ch/queries`. Using
+ * optional keys lets one schema cover the heterogeneous query union without
+ * weakening validation for fields that are present.
+ */
+const queryEngineRowSchema = Schema.StructWithRest(
+	Schema.Struct({
+		apdexScore: Schema.optionalKey(CH.CHNumber),
+		avgDuration: Schema.optionalKey(CH.CHNumber),
+		avgValue: Schema.optionalKey(CH.CHNumber),
+		count: Schema.optionalKey(CH.CHNumber),
+		dataPointCount: Schema.optionalKey(CH.CHNumber),
+		durationMs: Schema.optionalKey(CH.CHNumber),
+		errorRate: Schema.optionalKey(CH.CHNumber),
+		estimatedSpanCount: Schema.optionalKey(CH.CHNumber),
+		hasError: Schema.optionalKey(CH.CHNumber),
+		increaseValue: Schema.optionalKey(CH.CHNumber),
+		maxDurationMs: Schema.optionalKey(CH.CHNumber),
+		maxValue: Schema.optionalKey(CH.CHNumber),
+		minDurationMs: Schema.optionalKey(CH.CHNumber),
+		minValue: Schema.optionalKey(CH.CHNumber),
+		p50Duration: Schema.optionalKey(CH.CHNumber),
+		p50DurationMs: Schema.optionalKey(CH.CHNumber),
+		p95Duration: Schema.optionalKey(CH.CHNumber),
+		p95DurationMs: Schema.optionalKey(CH.CHNumber),
+		p99Duration: Schema.optionalKey(CH.CHNumber),
+		rateValue: Schema.optionalKey(CH.CHNumber),
+		samples: Schema.optionalKey(CH.CHNumber),
+		satisfiedCount: Schema.optionalKey(CH.CHNumber),
+		sumValue: Schema.optionalKey(CH.CHNumber),
+		toleratingCount: Schema.optionalKey(CH.CHNumber),
+		total: Schema.optionalKey(CH.CHNumber),
+		usageCount: Schema.optionalKey(CH.CHNumber),
+		value: Schema.optionalKey(CH.CHNumber),
+	}),
+	[Schema.Record(Schema.String, Schema.Unknown)],
+)
+
+const queryEngineCompiledRowSchema = <Output extends Record<string, any>>() =>
+	queryEngineRowSchema as CH.CompiledQueryRowSchema<Output>
+
 export const withTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 	effect.pipe(
 		Effect.timeoutOrElse({
@@ -347,41 +393,43 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
 	},
 )
 
-const validateMetricsAttributeFilters = Effect.fn(
-	"QueryEngineService.validateMetricsAttributeFilters",
-)(function* (query: QuerySpec): Effect.fn.Return<void, QueryEngineValidationError> {
-	if (query.source !== "metrics") return
-	if (query.kind !== "timeseries" && query.kind !== "breakdown") return
+const validateMetricsAttributeFilters = Effect.fn("QueryEngineService.validateMetricsAttributeFilters")(
+	function* (query: QuerySpec): Effect.fn.Return<void, QueryEngineValidationError> {
+		if (query.source !== "metrics") return
+		if (query.kind !== "timeseries" && query.kind !== "breakdown") return
 
-	// `groupBy` is an array for timeseries, a single literal for breakdown.
-	const groupBy = query.groupBy
-	const wantsAttribute = Array.isArray(groupBy) ? groupBy.includes("attribute") : groupBy === "attribute"
-	const wantsResourceAttribute = Array.isArray(groupBy)
-		? groupBy.includes("resource_attribute")
-		: groupBy === "resource_attribute"
-	if (wantsAttribute && !query.filters.groupByAttributeKey) {
-		// Mirror the traces guard: never silently downgrade an attribute grouping
-		// to a service grouping — the agent asked for a label breakdown.
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy=attribute requires filters.groupByAttributeKey"],
-		})
-	}
-	if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
-		})
-	}
-	if (wantsAttribute && wantsResourceAttribute) {
-		// The metrics queries carry a single attributeValue group column — one
-		// attribute dimension per query.
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy cannot combine attribute and resource_attribute"],
-		})
-	}
-})
+		// `groupBy` is an array for timeseries, a single literal for breakdown.
+		const groupBy = query.groupBy
+		const wantsAttribute = Array.isArray(groupBy)
+			? groupBy.includes("attribute")
+			: groupBy === "attribute"
+		const wantsResourceAttribute = Array.isArray(groupBy)
+			? groupBy.includes("resource_attribute")
+			: groupBy === "resource_attribute"
+		if (wantsAttribute && !query.filters.groupByAttributeKey) {
+			// Mirror the traces guard: never silently downgrade an attribute grouping
+			// to a service grouping — the agent asked for a label breakdown.
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy=attribute requires filters.groupByAttributeKey"],
+			})
+		}
+		if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
+			})
+		}
+		if (wantsAttribute && wantsResourceAttribute) {
+			// The metrics queries carry a single attributeValue group column — one
+			// attribute dimension per query.
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy cannot combine attribute and resource_attribute"],
+			})
+		}
+	},
+)
 
 const validatePointBudget = Effect.fn("QueryEngineService.validatePointBudget")(function* (
 	request: QueryEngineExecuteRequest,
@@ -682,7 +730,9 @@ const executeCHQuery = Effect.fnUntraced(function* <
 	profile: QueryProfileName = "aggregation",
 	settings?: WarehouseQuerySettings,
 ) {
-	const compiled = CH.compile(query, params)
+	const compiled = CH.compile(query, params, {
+		rowSchema: queryEngineCompiledRowSchema<Output>(),
+	})
 	return yield* annotateWarehouseError(
 		warehouse.compiledQuery(tenant, compiled, { profile, context, settings }),
 		context,
@@ -702,7 +752,9 @@ const executeCHUnionQuery = Effect.fnUntraced(function* <
 	context: string,
 	profile: QueryProfileName = "aggregation",
 ) {
-	const compiled = CH.compileUnion(query, params)
+	const compiled = CH.compileUnion(query, params, {
+		rowSchema: queryEngineCompiledRowSchema<Output>(),
+	})
 	return yield* annotateWarehouseError(
 		warehouse.compiledQuery(tenant, compiled, { profile, context }),
 		context,
@@ -1100,6 +1152,9 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						startTime: request.startTime,
 						endTime: request.endTime,
 						bucketSeconds: bucketSeconds!,
+					},
+					{
+						rowSchema: queryEngineCompiledRowSchema<CH.MetricsRateTimeseriesOutput>(),
 					},
 				)
 				const rateResult = yield* annotateWarehouseError(

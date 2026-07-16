@@ -8,11 +8,7 @@ import { makeQueryEngineEvaluate, makeQueryEngineEvaluateSeries } from "@maple/q
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
-import {
-	EdgeCacheService,
-	BucketCacheService,
-	type EdgeCacheServiceShape,
-} from "@maple/query-engine/caching"
+import { EdgeCacheService, BucketCacheService, type EdgeCacheServiceShape } from "@maple/query-engine/caching"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 
 const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
@@ -254,12 +250,16 @@ describe("QueryEngineService.evaluate via bucket cache", () => {
 
 // Records the `ttlSeconds` of every getOrCompute call so we can assert the
 // per-route TTL reaches the edge cache (and that omitting it defaults to 15s).
-const makeRecordingEdge = (
-	calls: Array<{ bucket: string; ttlSeconds: number }>,
-): EdgeCacheServiceShape => ({
+const makeRecordingEdge = (calls: Array<{ bucket: string; ttlSeconds: number }>): EdgeCacheServiceShape => ({
 	getOrCompute: (options, compute) => {
-		calls.push({ bucket: options.bucket, ttlSeconds: options.ttlSeconds })
-		return Effect.map(compute, (value) => ({ value, hit: false }))
+		return Effect.map(compute, (value) => {
+			calls.push({
+				bucket: options.bucket,
+				ttlSeconds:
+					typeof options.ttlSeconds === "function" ? options.ttlSeconds(value) : options.ttlSeconds,
+			})
+			return { value, hit: false }
+		})
 	},
 	invalidate: () => Effect.void,
 	rawGet: () => Effect.succeed(Option.none()),

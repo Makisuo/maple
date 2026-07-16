@@ -23,11 +23,12 @@ import { telemetryEnv } from "./lib/telemetry-env.ts"
 // registered UNCONDITIONALLY (below): those lines reach Workers Observability logs
 // (→ Maple) and are the primary signal for the "chat did nothing" failure mode,
 // regardless of whether the OTel export is on.
-const env = await telemetryEnv();
+const env = await telemetryEnv()
 const tracerProvider = setupTelemetry({
 	ingestKey: env.MAPLE_INGEST_KEY,
 	endpoint: env.MAPLE_ENDPOINT,
 	environment: env.MAPLE_ENVIRONMENT,
+	serviceVersion: env.COMMIT_SHA,
 })
 
 // Structured error + per-turn outcome logging — registered for EVERY isolate,

@@ -172,13 +172,13 @@ interface QueryLogEntry {
 interface ClickHouseConfig {
 	readonly url: string
 	readonly user: string
-	readonly password: string
+	readonly password: Redacted.Redacted<string>
 	readonly database: string
 }
 
 interface TinybirdConfig {
 	readonly host: string
-	readonly token: string
+	readonly token: Redacted.Redacted<string>
 	readonly internalOrgId: string
 }
 
@@ -205,12 +205,12 @@ export class BenchConfig extends Context.Service<BenchConfig, BenchConfigShape>(
 			url: stripTrailingSlash(url),
 			user: chUser,
 			database: chDatabase,
-			password: Option.match(chPassword, { onNone: () => "", onSome: Redacted.value }),
+			password: Option.getOrElse(chPassword, () => Redacted.make("")),
 		}))
 
 		const tinybird = Option.zipWith(tbHost, tbToken, (host, token) => ({
 			host: stripTrailingSlash(host),
-			token: Redacted.value(token),
+			token,
 			internalOrgId,
 		}))
 
@@ -260,7 +260,7 @@ export class ClickHouse extends Context.Service<ClickHouse, ClickHouseShape>()("
 		})
 
 		const authHeader = (cfg: ClickHouseConfig) =>
-			`Basic ${Buffer.from(`${cfg.user}:${cfg.password}`).toString("base64")}`
+			`Basic ${Buffer.from(`${cfg.user}:${Redacted.value(cfg.password)}`).toString("base64")}`
 
 		const run = Effect.fn("ClickHouse.run")(function* (
 			sql: string,
@@ -376,7 +376,8 @@ export class Tinybird extends Context.Service<Tinybird, TinybirdShape>()("bench/
 			const cfg = yield* requireConfig
 			const url = `${cfg.host}/v0/sql?q=${encodeURIComponent(sql)}`
 			const response = yield* Effect.tryPromise({
-				try: (signal) => fetch(url, { headers: { Authorization: `Bearer ${cfg.token}` }, signal }),
+				try: (signal) =>
+					fetch(url, { headers: { Authorization: `Bearer ${Redacted.value(cfg.token)}` }, signal }),
 				catch: (cause) => new HttpRequestError({ url: cfg.host, message: String(cause) }),
 			})
 			const text = yield* Effect.tryPromise({
@@ -687,49 +688,47 @@ const benchmarkSample = Effect.fn("bench.sample")(function* (
 			{ discard: true },
 		)
 
-		const runs: RunMetrics[] = yield* Effect.forEach(
-			Array.from({ length: runsPerQuery }),
-			() =>
-				Effect.gen(function* () {
-					const res = yield* ch.run(replaySql)
-					if (res.status !== 200) {
-						return yield* Effect.fail(
-							new UpstreamStatusError({
-								source: "ClickHouse",
-								status: res.status,
-								message: res.body.slice(0, 200),
-							}),
-						)
-					}
-					const log = yield* ch.queryLog(res.queryId)
-					const fromSummary = (key: string) =>
-						Option.match(res.summary, {
-							onNone: () => null,
-							onSome: (s) => (s[key] !== undefined ? Number(s[key]) : null),
-						})
-					return {
-						wallMs: res.wallMs,
-						serverElapsedMs: Option.match(log, {
-							onNone: () => {
-								const ns = fromSummary("elapsed_ns")
-								return ns == null ? null : ns / 1e6
-							},
-							onSome: (l) => l.queryDurationMs,
+		const runs: RunMetrics[] = yield* Effect.forEach(Array.from({ length: runsPerQuery }), () =>
+			Effect.gen(function* () {
+				const res = yield* ch.run(replaySql)
+				if (res.status !== 200) {
+					return yield* Effect.fail(
+						new UpstreamStatusError({
+							source: "ClickHouse",
+							status: res.status,
+							message: res.body.slice(0, 200),
 						}),
-						readRows: Option.match(log, {
-							onNone: () => fromSummary("read_rows"),
-							onSome: (l) => l.readRows,
-						}),
-						readBytes: Option.match(log, {
-							onNone: () => fromSummary("read_bytes"),
-							onSome: (l) => l.readBytes,
-						}),
-						memoryUsage: Option.match(log, {
-							onNone: () => null,
-							onSome: (l) => l.memoryUsage,
-						}),
-					} satisfies RunMetrics
-				}),
+					)
+				}
+				const log = yield* ch.queryLog(res.queryId)
+				const fromSummary = (key: string) =>
+					Option.match(res.summary, {
+						onNone: () => null,
+						onSome: (s) => (s[key] !== undefined ? Number(s[key]) : null),
+					})
+				return {
+					wallMs: res.wallMs,
+					serverElapsedMs: Option.match(log, {
+						onNone: () => {
+							const ns = fromSummary("elapsed_ns")
+							return ns == null ? null : ns / 1e6
+						},
+						onSome: (l) => l.queryDurationMs,
+					}),
+					readRows: Option.match(log, {
+						onNone: () => fromSummary("read_rows"),
+						onSome: (l) => l.readRows,
+					}),
+					readBytes: Option.match(log, {
+						onNone: () => fromSummary("read_bytes"),
+						onSome: (l) => l.readBytes,
+					}),
+					memoryUsage: Option.match(log, {
+						onNone: () => null,
+						onSome: (l) => l.memoryUsage,
+					}),
+				} satisfies RunMetrics
+			}),
 		)
 
 		const wallValues = runs.map((r) => r.wallMs)

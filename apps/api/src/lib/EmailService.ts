@@ -49,15 +49,18 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 
 			const isConfigured = binding !== undefined
 
-			const send = Effect.fn("EmailService.send")(function* (
+			const send = Effect.fn("EmailService.send", { kind: "client" })(function* (
 				to: string,
 				subject: string,
 				html: string,
 				replyTo?: string,
 			) {
-				// PII: never stamp recipient/reply-to addresses on spans or logs
-				yield* Effect.annotateCurrentSpan("email.subject", subject)
-				yield* Effect.annotateCurrentSpan("email.provider", "cloudflare")
+				// PII: never stamp recipient/reply-to addresses on spans or logs.
+				yield* Effect.annotateCurrentSpan({
+					"peer.service": "cloudflare-email",
+					"email.provider": "cloudflare",
+					"email.subject": subject,
+				})
 
 				if (binding === undefined) {
 					return yield* Effect.fail(
@@ -102,7 +105,7 @@ export class EmailService extends Context.Service<EmailService, EmailServiceShap
 
 				yield* Effect.annotateCurrentSpan("email.message_id", result.messageId)
 				yield* Effect.logInfo("Email sent successfully").pipe(
-					Effect.annotateLogs({ subject, messageId: result.messageId }),
+					Effect.annotateLogs({ messageId: result.messageId }),
 				)
 			})
 

@@ -1,9 +1,21 @@
-import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Ref, Result, Schedule, Semaphore } from "effect"
+import {
+	Cause,
+	Clock,
+	Context,
+	Duration,
+	Effect,
+	Fiber,
+	Layer,
+	Ref,
+	Result,
+	Schedule,
+	Semaphore,
+} from "effect"
 import { ScrapeResultReport, type InternalScrapeTarget } from "@maple/domain/http"
 import { ApiClient, ApiRequestError } from "./ApiClient"
 import { convertFamiliesToOtlp } from "./prometheus/otlp"
 import { parsePrometheusText } from "./prometheus/parser"
-import { OtlpIngest } from "./OtlpIngest"
+import { OtlpIngest, OtlpIngestError } from "./OtlpIngest"
 import { ScraperEnv } from "./Env"
 
 interface SchedulerStats {
@@ -53,8 +65,7 @@ export interface ScrapeOutcome {
 }
 
 /** A scrape outcome that must escalate the delay instead of holding cadence. */
-export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
-	outcome.rateLimited || outcome.authFailed
+export const shouldBackOff = (outcome: ScrapeOutcome): boolean => outcome.rateLimited || outcome.authFailed
 
 /**
  * The target period before a target's next scrape. The happy path returns the
@@ -259,14 +270,22 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								retryAfterMs: null,
 							} satisfies ScrapeOutcome
 						}).pipe(
-							Effect.catch((error) =>
-								Effect.succeed<ScrapeOutcome>({
-									error: error.message,
-									rateLimited: false,
-									authFailed: false,
-									retryAfterMs: null,
-								}),
-							),
+							Effect.catchTags({
+								"@maple/scraper/ApiRequestError": (error) =>
+									Effect.succeed<ScrapeOutcome>({
+										error: error.message,
+										rateLimited: false,
+										authFailed: false,
+										retryAfterMs: null,
+									}),
+								"@maple/scraper/OtlpIngestError": (error: OtlpIngestError) =>
+									Effect.succeed<ScrapeOutcome>({
+										error: error.message,
+										rateLimited: error.status === 429 || error.status === 503,
+										authFailed: error.status === 401 || error.status === 403,
+										retryAfterMs: null,
+									}),
+							}),
 							Effect.catchDefect((defect) =>
 								Effect.succeed<ScrapeOutcome>({
 									error: Cause.pretty(Cause.die(defect)),
@@ -383,8 +402,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 
 				yield* Effect.forEach(
 					current,
-					([id, entry]) =>
-						next.has(id) ? Effect.void : Fiber.interrupt(entry.fiber),
+					([id, entry]) => (next.has(id) ? Effect.void : Fiber.interrupt(entry.fiber)),
 					{ discard: true },
 				)
 

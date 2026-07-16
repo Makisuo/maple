@@ -2,7 +2,13 @@ import { Exit, Option } from "effect"
 import { Fragment, useState, type Dispatch, type SetStateAction } from "react"
 import { toast } from "sonner"
 
-import type { AlertDeliveryEventDocument, AlertDestinationDocument } from "@maple/domain/http"
+import type {
+	AlertDeliveryEventDocument,
+	AlertDestinationCreateRequest,
+	AlertDestinationDocument,
+	AlertDestinationId,
+	AlertDestinationUpdateRequest,
+} from "@maple/domain/http"
 
 import { DestinationCard } from "@/components/alerts/destination-card"
 import { DestinationDialog } from "@/components/alerts/destination-dialog"
@@ -55,12 +61,24 @@ export interface DestinationManager {
 }
 
 export function useDestinationManager(): DestinationManager {
-	const createDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "createDestination"), {
+	const createDestinationRaw = useAtomSet(MapleApiAtomClient.mutation("alerts", "createDestination"), {
 		mode: "promiseExit",
 	})
-	const updateDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateDestination"), {
+	const updateDestinationRaw = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateDestination"), {
 		mode: "promiseExit",
 	})
+	// Effect v4 beta.93's AtomResultFn setter collapses a union payload to its
+	// final member. The endpoint and builders retain the full discriminated
+	// unions; widen only that incorrectly-collapsed setter parameter here.
+	const createDestination = createDestinationRaw as unknown as (request: {
+		readonly payload: AlertDestinationCreateRequest
+		readonly reactivityKeys?: ReadonlyArray<unknown> | Readonly<Record<string, ReadonlyArray<unknown>>>
+	}) => ReturnType<typeof createDestinationRaw>
+	const updateDestination = updateDestinationRaw as unknown as (request: {
+		readonly params: { readonly destinationId: AlertDestinationId }
+		readonly payload: AlertDestinationUpdateRequest
+		readonly reactivityKeys?: ReadonlyArray<unknown> | Readonly<Record<string, ReadonlyArray<unknown>>>
+	}) => ReturnType<typeof updateDestinationRaw>
 	const deleteDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "deleteDestination"), {
 		mode: "promiseExit",
 	})
@@ -86,11 +104,11 @@ export function useDestinationManager(): DestinationManager {
 		const result = editing
 			? await updateDestination({
 					params: { destinationId: editing.id },
-					payload: buildDestinationUpdatePayload(form) as never,
+					payload: buildDestinationUpdatePayload(form),
 					reactivityKeys: ["alertDestinations"],
 				})
 			: await createDestination({
-					payload: buildDestinationCreatePayload(form) as never,
+					payload: buildDestinationCreatePayload(form),
 					reactivityKeys: ["alertDestinations"],
 				})
 
@@ -122,7 +140,7 @@ export function useDestinationManager(): DestinationManager {
 		nextForm.enabled = !destination.enabled
 		const result = await updateDestination({
 			params: { destinationId: destination.id },
-			payload: buildDestinationUpdatePayload(nextForm) as never,
+			payload: buildDestinationUpdatePayload(nextForm),
 			reactivityKeys: ["alertDestinations"],
 		})
 		if (!Exit.isSuccess(result)) {
@@ -222,7 +240,9 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 									<CircleWarningIcon size={18} />
 								</EmptyMedia>
 								<EmptyTitle>Failed to load alert destinations</EmptyTitle>
-								<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
+								<EmptyDescription>
+									Refresh the page or check your connection.
+								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					) : destinations.length === 0 ? (
@@ -269,7 +289,8 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 					<div>
 						<h2 className="text-lg font-semibold">Delivery log</h2>
 						<p className="text-muted-foreground text-sm">
-							Every queued, retried, and completed notification attempt across alert destinations.
+							Every queued, retried, and completed notification attempt across alert
+							destinations.
 						</p>
 					</div>
 
@@ -286,7 +307,9 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 									<CircleWarningIcon size={18} />
 								</EmptyMedia>
 								<EmptyTitle>Failed to load delivery history</EmptyTitle>
-								<EmptyDescription>Refresh the page or check your connection.</EmptyDescription>
+								<EmptyDescription>
+									Refresh the page or check your connection.
+								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
 					) : deliveryEvents.length === 0 ? (
@@ -357,7 +380,10 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 															)}
 														>
 															<span
-																className={cn("size-1.5 rounded-full", ev.dot)}
+																className={cn(
+																	"size-1.5 rounded-full",
+																	ev.dot,
+																)}
 															/>
 															{ev.label}
 														</span>

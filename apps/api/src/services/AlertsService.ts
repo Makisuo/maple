@@ -26,7 +26,6 @@ import {
 	AlertCheckDocument,
 	AlertChecksListResponse,
 	AlertCheckStatus as AlertCheckStatusSchema,
-	AlertEvaluationStatus as AlertEvaluationStatusSchema,
 	AlertIncidentDocument,
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
@@ -242,6 +241,8 @@ interface DeliveryAttemptFailure {
 }
 
 const MAX_DELIVERY_ATTEMPTS = 5
+/** Bound immediate notification and audit-ingest fan-out per scheduler tick. */
+const MAX_OUTBOUND_CONCURRENCY = 5
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
 // group-by rule opening hundreds of incidents can't stall the per-minute tick.
 const ISSUE_UPSERTS_PER_TICK = 50
@@ -299,7 +300,6 @@ const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestination
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
-const decodeAlertEvaluationStatusSync = Schema.decodeUnknownSync(AlertEvaluationStatusSchema)
 const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
 const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
@@ -1122,7 +1122,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				memberUserIds: ReadonlyArray<string>,
 			): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
 				orgMembers.resolveMembers(orgId, memberUserIds).pipe(
-					Effect.mapError((error) => makeValidationError(error.message, error.unknownUserIds ?? [])),
+					Effect.mapError((error) =>
+						makeValidationError(error.message, error.unknownUserIds ?? []),
+					),
 					Effect.flatMap((members) =>
 						members.length === 0
 							? Effect.fail(makeValidationError("At least one workspace member is required"))
@@ -2715,7 +2717,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								linkUrl: resolveNotificationLinkUrl(normalized, null),
 								sentAtMs,
 							}),
-						{ concurrency: "unbounded" },
+						{ concurrency: MAX_OUTBOUND_CONCURRENCY },
 					)
 				}
 
@@ -4558,7 +4560,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									),
 									Effect.ignore,
 								),
-						{ concurrency: "unbounded" },
+						{ concurrency: MAX_OUTBOUND_CONCURRENCY },
 					)
 				}
 

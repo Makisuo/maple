@@ -242,6 +242,7 @@ export function compileCH<
 export function compileUnion<Output extends Record<string, any>, Params extends Record<string, any>>(
 	union: CHUnionQuery<Output>,
 	params: Params,
+	options?: { readonly rowSchema?: CompiledQueryRowSchema<Output> },
 ): CompiledQuery<Output> {
 	const state = union._state
 
@@ -272,7 +273,7 @@ export function compileUnion<Output extends Record<string, any>, Params extends 
 	}
 
 	return {
-		...makeCompiledQuery<Output>(sql),
+		...makeCompiledQuery<Output>(sql, options?.rowSchema),
 	}
 }
 

@@ -2408,7 +2408,7 @@ describe("AlertsService evaluation error persistence", () => {
 		rows: ReadonlyArray<Record<string, unknown>>
 		ingested: Array<Record<string, unknown>>
 	}): WarehouseQueryServiceShape => {
-		const sqlQueryStub = () =>
+		const sqlQueryStub = (): Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseQueryError> =>
 			state.failing
 				? Effect.fail(
 						new WarehouseQueryError({

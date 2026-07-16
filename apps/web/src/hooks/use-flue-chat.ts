@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useFlueAgent, type AgentStatus, type UIMessage } from "@flue/react"
 import type { ChatStatus } from "@/components/ai-elements/types"
 import {
@@ -22,8 +22,15 @@ export interface UseFlueChatResult {
 	status: ChatStatus
 	error: Error | undefined
 	isLoading: boolean
+	responseSettled: boolean
+	settleResponse: () => void
 	sendMessage: (text: string) => void
 }
+
+export const isResponseSettled = (status: AgentStatus): boolean => status === "idle" || status === "error"
+
+export const isFlueChatLoading = (status: AgentStatus, pendingResponse: boolean): boolean =>
+	status === "submitted" || status === "streaming" || (pendingResponse && status === "connecting")
 
 /** Flue's `idle`/`connecting` have no composer equivalent — treat them as ready. */
 const toChatStatus = (status: AgentStatus): ChatStatus => {
@@ -52,36 +59,28 @@ const toChatStatus = (status: AgentStatus): ChatStatus => {
  * and merge them back into the rendered transcript.
  */
 export function useFlueChat({ tabId, context }: UseFlueChatOptions): UseFlueChatResult {
-	const orgId = useMapleOrganizationId();
+	const orgId = useMapleOrganizationId()
 	const conversationId = orgId ? `${orgId}:${tabId}` : undefined
 	const agent = useFlueAgent({ name: AGENT_NAME, id: conversationId, history: "all" })
 
-	// Client-owned user messages (Flue never streams them back). Reload from storage
-	// whenever the addressed conversation changes.
-	const [userLog, setUserLog] = useState<UserLogEntry[]>(() => loadUserLog(conversationId))
-	useEffect(() => {
-		setUserLog(loadUserLog(conversationId))
-	}, [conversationId])
+	// Keep the local override scoped to its conversation. When Clerk resolves an
+	// org (or the addressed conversation changes), the persisted log is selected
+	// directly instead of synchronizing mirrored state in an effect.
+	const persistedUserLog = useMemo(() => loadUserLog(conversationId), [conversationId])
+	const [userLogOverride, setUserLogOverride] = useState<{
+		readonly conversationId: string | undefined
+		readonly entries: UserLogEntry[]
+	} | null>(null)
+	const userLog =
+		userLogOverride !== null && userLogOverride.conversationId === conversationId
+			? userLogOverride.entries
+			: persistedUserLog
 
 	const messages = useMemo(() => mergeUserMessages(agent.messages, userLog), [agent.messages, userLog])
-
-	// On a fresh (dormant) conversation, the first send schedules a stream reconnect,
-	// so Flue flips to `connecting` while the backend cold-starts — which the SDK does
-	// not count as activity. Track that we're awaiting a reply so the "Thinking…"
-	// indicator (and the disabled composer) survive that gap. Cleared when the turn
-	// settles; kept through mid-stream reconnect blips by not clearing on `streaming`.
 	const [pendingResponse, setPendingResponse] = useState(false)
-	useEffect(() => {
-		setPendingResponse(false)
-	}, [conversationId])
-	useEffect(() => {
-		if (agent.status === "idle" || agent.status === "error") setPendingResponse(false)
-	}, [agent.status])
-
-	const isLoading =
-		agent.status === "submitted" ||
-		agent.status === "streaming" ||
-		(pendingResponse && agent.status === "connecting")
+	const responseSettled = isResponseSettled(agent.status)
+	const settleResponse = useCallback(() => setPendingResponse(false), [])
+	const isLoading = isFlueChatLoading(agent.status, pendingResponse)
 
 	const sendMessage = useCallback(
 		(text: string) => {
@@ -93,18 +92,16 @@ export function useFlueChat({ tabId, context }: UseFlueChatOptions): UseFlueChat
 			const outgoing = block ? wrapContextPreamble(block, trimmed) : trimmed
 			// Anchor this message before the assistant turn(s) it will trigger.
 			const turnsBefore = agent.messages.filter((message) => message.role === "assistant").length
+			const next: UserLogEntry[] = [
+				...userLog,
+				{ id: `${conversationId}:user:${userLog.length}`, text: trimmed, turnsBefore },
+			]
+			saveUserLog(conversationId, next)
+			setUserLogOverride({ conversationId, entries: next })
 			setPendingResponse(true)
-			setUserLog((prev) => {
-				const next: UserLogEntry[] = [
-					...prev,
-					{ id: `${conversationId}:user:${prev.length}`, text: trimmed, turnsBefore },
-				]
-				saveUserLog(conversationId, next)
-				return next
-			})
 			void agent.sendMessage(outgoing)
 		},
-		[agent, context, conversationId, userLog.length],
+		[agent, context, conversationId, userLog],
 	)
 
 	return {
@@ -112,6 +109,8 @@ export function useFlueChat({ tabId, context }: UseFlueChatOptions): UseFlueChat
 		status: toChatStatus(agent.status),
 		error: agent.error,
 		isLoading,
+		responseSettled,
+		settleResponse,
 		sendMessage,
 	}
 }

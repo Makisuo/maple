@@ -18,6 +18,32 @@ export interface TelemetryConfig {
 	endpoint?: string
 	/** Deployment environment label (`development` / `production` / …). */
 	environment?: string
+	/** Deployed commit or release identifier. */
+	serviceVersion?: string
+}
+
+export function telemetryResourceAttributes(
+	config: Pick<TelemetryConfig, "environment" | "serviceVersion">,
+	instanceId: string,
+): Record<string, string> {
+	const attributes: Record<string, string> = {
+		[ATTR_SERVICE_NAME]: CHAT_FLUE_SERVICE_NAME,
+		"service.namespace": "backend",
+		"service.instance.id": instanceId,
+		"cloud.provider": "cloudflare",
+		"cloud.platform": "cloudflare.workers",
+		"process.runtime.name": "workerd",
+		"maple.sdk.type": "flue",
+		"vcs.repository.url.full": "https://github.com/Makisuo/maple",
+	}
+	const serviceVersion = config.serviceVersion?.trim() || "dev"
+	const environment = config.environment?.trim() || "development"
+	attributes["service.version"] = serviceVersion
+	// Dual-emit: Tinybird MVs pre-extract the legacy `deployment.environment`;
+	// keep both it and the OTel-canonical `.name` until the MVs coalesce them.
+	attributes["deployment.environment"] = environment
+	attributes["deployment.environment.name"] = environment
+	return attributes
 }
 
 /**
@@ -46,20 +72,7 @@ export function setupTelemetry(config: TelemetryConfig): BasicTracerProvider | u
 
 	const endpoint = config.endpoint?.trim() || DEFAULT_ENDPOINT
 
-	const attributes: Record<string, string> = {
-		[ATTR_SERVICE_NAME]: CHAT_FLUE_SERVICE_NAME,
-		"service.namespace": "backend",
-		"service.instance.id": crypto.randomUUID(),
-		"maple.sdk.type": "flue",
-		"vcs.repository.url.full": "https://github.com/Makisuo/maple",
-	}
-	if (config.environment) {
-		// Dual-emit: Tinybird MVs pre-extract the legacy `deployment.environment`;
-		// keep both it and the OTel-canonical `.name` until the MVs coalesce them
-		// (matches `packages/browser/src/tracing.ts`).
-		attributes["deployment.environment"] = config.environment
-		attributes["deployment.environment.name"] = config.environment
-	}
+	const attributes = telemetryResourceAttributes(config, crypto.randomUUID())
 
 	const exporter = new OTLPTraceExporter({
 		url: `${endpoint}/v1/traces`,

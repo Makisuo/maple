@@ -107,9 +107,20 @@ export const V2ApiKey = Schema.Struct({
 })
 export type V2ApiKey = Schema.Schema.Type<typeof V2ApiKey>
 
+const MutationTxidFields = {
+	txid: Schema.optionalKey(
+		Schema.String.annotate({
+			description:
+				"Internal Postgres transaction identifier used by the Maple dashboard to reconcile ElectricSQL state. API consumers should ignore this field.",
+			examples: ["81234"],
+		}),
+	),
+}
+
 /** Returned only by create/roll — the one time the secret is visible. */
 export const V2ApiKeyWithSecret = Schema.Struct({
 	...V2ApiKey.fields,
+	...MutationTxidFields,
 	secret: Schema.String.annotate({
 		description:
 			"The full API key secret. **Returned only once**, in the create and roll responses — it cannot be retrieved later. Store it securely.",
@@ -123,11 +134,32 @@ export const V2ApiKeyWithSecret = Schema.Struct({
 	examples: [
 		wireExample({
 			...apiKeyExample,
+			txid: "81234",
 			secret: "maple_ak_9f2cB1x8Kt7pQ2wR5vN0sL3dJ6hM4gY9",
 		}),
 	],
 })
 export type V2ApiKeyWithSecret = Schema.Schema.Type<typeof V2ApiKeyWithSecret>
+
+/** Returned by revoke: the final resource plus the Electric reconciliation token. */
+export const V2ApiKeyMutationResponse = Schema.Struct({
+	...V2ApiKey.fields,
+	...MutationTxidFields,
+}).annotate({
+	identifier: "ApiKeyMutationResponse",
+	title: "API Key mutation response",
+	description:
+		"The final API key state after a mutation. The optional `txid` is an internal dashboard reconciliation token; API consumers should ignore it.",
+	examples: [
+		wireExample({
+			...apiKeyExample,
+			revoked: true,
+			revoked_at: "2026-07-16T12:00:00.000Z",
+			txid: "81234",
+		}),
+	],
+})
+export type V2ApiKeyMutationResponse = Schema.Schema.Type<typeof V2ApiKeyMutationResponse>
 
 export const V2ApiKeyCreateParams = Schema.Struct({
 	name: Schema.String.check(Schema.isMinLength(1)).annotate({
@@ -244,7 +276,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 	.add(
 		HttpApiEndpoint.delete("revoke", "/:id", {
 			params: { id: ApiKeyPublicId },
-			success: V2ApiKey,
+			success: V2ApiKeyMutationResponse,
 			error: [...commonErrors, V2PermissionError, V2NotFoundError],
 		}).annotateMerge(
 			OpenApi.annotations({

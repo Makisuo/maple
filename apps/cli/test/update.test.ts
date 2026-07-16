@@ -1,6 +1,17 @@
 import { describe, it } from "@effect/vitest"
-import { strictEqual } from "node:assert"
-import { CHECK_TTL_MS, isNewer, shouldCheck, stripV, targetTripleFor } from "../src/core/update"
+import { Effect } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
+import { match, ok, strictEqual } from "node:assert"
+import {
+	CHECK_TTL_MS,
+	fetchLatestTag,
+	fetchText,
+	isNewer,
+	shouldCheck,
+	stripV,
+	targetTripleFor,
+	downloadTo,
+} from "../src/core/update"
 
 describe("stripV", () => {
 	it("drops a leading v", () => {
@@ -78,4 +89,96 @@ describe("shouldCheck", () => {
 		const exactlyTtl = new Date(now - CHECK_TTL_MS).toISOString()
 		strictEqual(shouldCheck(exactlyTtl, now), true)
 	})
+})
+
+describe("fetchLatestTag", () => {
+	it.effect("uses an interruptible request and returns the published tag", () =>
+		Effect.gen(function* () {
+			let signal: AbortSignal | undefined
+			const fetchStub: typeof globalThis.fetch = async (_input, init) => {
+				signal = init?.signal ?? undefined
+				return Response.json({ tag_name: "v1.2.3" })
+			}
+
+			strictEqual(
+				yield* fetchLatestTag().pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub)),
+				"v1.2.3",
+			)
+			ok(signal instanceof AbortSignal)
+		}),
+	)
+
+	it.effect("maps GitHub failures to UpdateError", () =>
+		Effect.gen(function* () {
+			const fetchStub: typeof globalThis.fetch = async () =>
+				new Response("busy", { status: 503, statusText: "Busy" })
+
+			const error = yield* fetchLatestTag().pipe(
+				Effect.provideService(FetchHttpClient.Fetch, fetchStub),
+				Effect.flip,
+			)
+
+			strictEqual(error._tag, "@maple/cli/UpdateError")
+			match(error.message, /GitHub API returned 503 Busy/)
+		}),
+	)
+
+	it.effect("rejects an empty release tag", () =>
+		Effect.gen(function* () {
+			const fetchStub: typeof globalThis.fetch = async () => Response.json({ tag_name: "   " })
+			const error = yield* fetchLatestTag().pipe(
+				Effect.provideService(FetchHttpClient.Fetch, fetchStub),
+				Effect.flip,
+			)
+
+			match(error.message, /did not include a release tag/)
+		}),
+	)
+
+	it.live("aborts a stalled latest-release request on timeout", () =>
+		Effect.gen(function* () {
+			let signal: AbortSignal | undefined
+			const fetchStub: typeof globalThis.fetch = (_input, init) =>
+				new Promise((_resolve, reject) => {
+					signal = init?.signal ?? undefined
+					signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+				})
+			const error = yield* fetchLatestTag(10).pipe(
+				Effect.provideService(FetchHttpClient.Fetch, fetchStub),
+				Effect.flip,
+			)
+
+			strictEqual(signal?.aborted, true)
+			match(error.message, /timed out after 10ms/)
+		}),
+	)
+
+	it.live("aborts stalled release asset and checksum requests", () =>
+		Effect.gen(function* () {
+			const signals: AbortSignal[] = []
+			const fetchStub: typeof globalThis.fetch = (_input, init) =>
+				new Promise((_resolve, reject) => {
+					const signal = init?.signal
+					if (signal) signals.push(signal)
+					signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")))
+				})
+			const runTimed = <A>(effect: Effect.Effect<A, unknown>) =>
+				effect.pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub), Effect.flip)
+
+			const downloadError = yield* runTimed(
+				downloadTo("https://releases.test/bundle.tar.gz", "/tmp/maple-test-bundle", "25 millis"),
+			)
+			const checksumError = yield* runTimed(
+				fetchText("https://releases.test/bundle.tar.gz.sha256", "25 millis"),
+			)
+
+			strictEqual(signals.length, 2)
+			strictEqual(
+				signals.every((signal) => signal.aborted),
+				true,
+			)
+			match(String(downloadError), /download timed out/)
+			match(String(checksumError), /request timed out/)
+		}),
+	)
 })

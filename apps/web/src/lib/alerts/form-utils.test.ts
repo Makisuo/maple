@@ -1,15 +1,63 @@
-import { AlertRuleDocument } from "@maple/domain/http"
+import { AlertDestinationUpdateRequest, AlertRuleDocument } from "@maple/domain/http"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
 	buildRuleRequest,
 	buildRuleToggleRequest,
+	buildDestinationUpdatePayload,
+	defaultDestinationForm,
 	defaultRuleForm,
 	deriveRuleQueryIssues,
 	domainThresholdToForm,
 	formThresholdToDomain,
 	rawSqlHasValueColumn,
 } from "./form-utils"
+
+const encodeDestinationUpdate = Schema.encodeUnknownSync(AlertDestinationUpdateRequest)
+
+describe("destination updates", () => {
+	it("omits blank optional fields instead of encoding present undefined values", () => {
+		const payload = buildDestinationUpdatePayload({
+			...defaultDestinationForm("slack"),
+			name: "  Existing destination  ",
+			enabled: false,
+		})
+
+		expect(payload).toEqual({ type: "slack", name: "Existing destination", enabled: false })
+		expect(Object.hasOwn(payload, "channelLabel")).toBe(false)
+		expect(Object.hasOwn(payload, "webhookUrl")).toBe(false)
+		expect(() => encodeDestinationUpdate(payload)).not.toThrow()
+	})
+
+	it("preserves an explicit null Hazel logo while omitting other blank fields", () => {
+		const payload = buildDestinationUpdatePayload({
+			...defaultDestinationForm("hazel-oauth"),
+			name: "Hazel",
+			hazelOrganizationLogoUrl: null,
+		})
+
+		expect(payload).toEqual({
+			type: "hazel-oauth",
+			name: "Hazel",
+			enabled: true,
+			hazelOrganizationLogoUrl: null,
+		})
+		expect(() => encodeDestinationUpdate(payload)).not.toThrow()
+	})
+
+	it.each([
+		["pagerduty", ["name", "integrationKey"]],
+		["webhook", ["name", "url", "signingSecret"]],
+		["hazel", ["name", "webhookUrl", "signingSecret"]],
+		["discord", ["name", "webhookUrl"]],
+		["email", ["name", "memberUserIds"]],
+	] as const)("omits every blank optional field for %s updates", (type, omittedKeys) => {
+		const payload = buildDestinationUpdatePayload(defaultDestinationForm(type))
+
+		for (const key of omittedKeys) expect(Object.hasOwn(payload, key)).toBe(false)
+		expect(() => encodeDestinationUpdate(payload)).not.toThrow()
+	})
+})
 
 describe("rule notes", () => {
 	it("defaults to an empty note", () => {

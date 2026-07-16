@@ -11,6 +11,7 @@ import {
 } from "@maple/domain/http"
 import { and, eq, inArray } from "drizzle-orm"
 import { Clock, Context, Data, Effect, Layer, Redacted } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import {
 	buildAlertChatUrl,
 	dispatchDelivery as dispatchDeliveryImpl,
@@ -32,6 +33,8 @@ import { Env } from "../lib/Env"
  */
 
 const DELIVERY_TIMEOUT_MS = 15_000
+/** Bound outbound fan-out so one policy cannot exhaust Worker subrequests. */
+const MAX_DELIVERY_CONCURRENCY = 5
 
 class NotificationDispatchError extends Data.TaggedError("@maple/api/services/NotificationDispatchError")<{
 	readonly message: string
@@ -86,6 +89,7 @@ const make: Effect.Effect<
 	const database = yield* Database
 	const env = yield* Env
 	const email = yield* EmailService
+	const fetchImpl = yield* FetchHttpClient.Fetch
 
 	const encryptionKey = yield* parseBase64Aes256GcmKey(
 		Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -182,7 +186,7 @@ const make: Effect.Effect<
 		const result = yield* dispatchDeliveryImpl(
 			context,
 			payloadJson,
-			globalThis.fetch,
+			fetchImpl,
 			DELIVERY_TIMEOUT_MS,
 			request.linkUrl,
 			chatUrl,
@@ -249,7 +253,7 @@ const make: Effect.Effect<
 							"@maple/http/errors/AlertDeliveryError": () => Effect.succeed("failed" as const),
 						}),
 					),
-				{ concurrency: "unbounded" },
+				{ concurrency: MAX_DELIVERY_CONCURRENCY },
 			)
 
 			return {

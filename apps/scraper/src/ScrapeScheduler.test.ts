@@ -46,9 +46,11 @@ const TARGET_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const GAUGE_BODY = "# TYPE up gauge\nup 1\n"
 
 /** Build a proxy response, defaulting the rate-limit hint absent. */
-const proxyResponse = (
-	fields: { status: number; body: string; retryAfterSeconds?: number | null },
-): ScrapeProxyResponse => ({
+const proxyResponse = (fields: {
+	status: number
+	body: string
+	retryAfterSeconds?: number | null
+}): ScrapeProxyResponse => ({
 	status: fields.status,
 	body: fields.body,
 	retryAfterSeconds: fields.retryAfterSeconds ?? null,
@@ -256,6 +258,34 @@ describe("ScrapeScheduler", () => {
 		}),
 	)
 
+	it.effect("backs off when the ingest gateway rate-limits metric exports", () =>
+		Effect.gen(function* () {
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.ingestImpl = () =>
+				Effect.fail(new OtlpIngestError({ message: "ingest gateway returned HTTP 429", status: 429 }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+			assert.include(harness.reportedResults[0]?.error ?? "", "HTTP 429")
+		}),
+	)
+
+	it.effect("backs off when the ingest gateway rejects the ingest key", () =>
+		Effect.gen(function* () {
+			const harness = makeHarness([mkTarget(TARGET_A, 10)])
+			harness.ingestImpl = () =>
+				Effect.fail(new OtlpIngestError({ message: "ingest gateway returned HTTP 403", status: 403 }))
+			yield* startScheduler.pipe(Effect.provide(harnessLayer(harness)))
+
+			yield* TestClock.adjust(Duration.seconds(60))
+
+			assert.strictEqual(harness.scrapeCalls.length, 3)
+			assert.include(harness.reportedResults[0]?.error ?? "", "HTTP 403")
+		}),
+	)
+
 	it.effect("one failing target does not stop the others", () =>
 		Effect.gen(function* () {
 			const harness = makeHarness([mkTarget(TARGET_A, 10), mkTarget(TARGET_B, 10)])
@@ -313,10 +343,7 @@ describe("ScrapeScheduler", () => {
 				harness.subCalls.filter((c) => c.subTargetKey === "branch-2").length,
 				branch2AfterRemoval,
 			)
-			assert.isAbove(
-				harness.subCalls.filter((c) => c.subTargetKey === "branch-1").length,
-				branch1,
-			)
+			assert.isAbove(harness.subCalls.filter((c) => c.subTargetKey === "branch-1").length, branch1)
 		}),
 	)
 
@@ -625,9 +652,18 @@ describe("nextScrapeDelayMs", () => {
 	})
 
 	it("escalates exponentially while rate-limited", () => {
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 0 }), 10_000)
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 1 }), 20_000)
-		assert.strictEqual(nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 3 }), 80_000)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 0 }),
+			10_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 1 }),
+			20_000,
+		)
+		assert.strictEqual(
+			nextScrapeDelayMs({ baseMs: 10_000, outcome: limited(), consecutiveBackoffs: 3 }),
+			80_000,
+		)
 	})
 
 	it("escalates exponentially on a rejected credential (401/403) too", () => {

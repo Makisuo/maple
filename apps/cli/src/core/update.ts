@@ -13,7 +13,8 @@
 // rename swaps the directory entry, so the running process keeps its old inode
 // while new invocations pick up the new binary. Keep the triple/URL logic here
 // in sync with install.sh.
-import { Clock, Effect, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Option, Schema } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
 import { realpathSync } from "node:fs"
 import { chmod, mkdir, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
@@ -29,6 +30,9 @@ export class UpdateError extends Schema.TaggedErrorClass<UpdateError>()("@maple/
 
 const REPO = "Makisuo/maple"
 const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`
+const RELEASE_FETCH_TIMEOUT = "30 seconds"
+const GitHubReleaseResponse = Schema.Struct({ tag_name: Schema.String })
+const decodeGitHubReleaseResponse = Schema.decodeUnknownEffect(GitHubReleaseResponse)
 /** Throttle window for the startup check — hit GitHub at most once per day. */
 export const CHECK_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -102,32 +106,51 @@ const resolveTarget: Effect.Effect<string, UpdateError> = Effect.suspend(() => {
 			)
 })
 
-/** Fetch the latest release tag from the GitHub API (keeps the leading "v" for
- *  URL building). Bounded by `timeoutMs` via AbortController. */
+/** Fetch the latest release tag from the GitHub API (keeps the leading "v" for URL building). */
 export const fetchLatestTag = (timeoutMs = 5000): Effect.Effect<string, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const controller = new AbortController()
-			const timer = setTimeout(() => controller.abort(), timeoutMs)
-			try {
+	Effect.gen(function* () {
+		const fetchImpl = yield* FetchHttpClient.Fetch
+		const responseBody = yield* Effect.tryPromise({
+			try: async (signal) => {
 				// GitHub rejects requests without a User-Agent; Accept pins the API version.
-				const res = await fetch(LATEST_API, {
+				const res = await fetchImpl(LATEST_API, {
 					headers: { "User-Agent": "maple-cli", Accept: "application/vnd.github+json" },
-					signal: controller.signal,
+					signal,
 				})
 				if (!res.ok) throw new Error(`GitHub API returned ${res.status} ${res.statusText}`)
-				const body = (await res.json()) as { tag_name?: string }
-				if (!body.tag_name) throw new Error("no published release found")
-				return body.tag_name
-			} finally {
-				clearTimeout(timer)
-			}
-		},
-		catch: (e) =>
-			new UpdateError({
-				message: `could not check for updates: ${e instanceof Error ? e.message : String(e)}`,
-			}),
-	})
+				return await res.json()
+			},
+			catch: (e) =>
+				new UpdateError({
+					message: `could not check for updates: ${e instanceof Error ? e.message : String(e)}`,
+				}),
+		})
+		const body = yield* decodeGitHubReleaseResponse(responseBody).pipe(
+			Effect.mapError(
+				(error) =>
+					new UpdateError({
+						message: `could not check for updates: invalid response (${error.message})`,
+					}),
+			),
+		)
+		const tag = body.tag_name.trim()
+		if (!tag) {
+			return yield* new UpdateError({
+				message: "could not check for updates: GitHub API response did not include a release tag",
+			})
+		}
+		return tag
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: Duration.millis(timeoutMs),
+			orElse: () =>
+				Effect.fail(
+					new UpdateError({
+						message: `could not check for updates: timed out after ${timeoutMs}ms`,
+					}),
+				),
+		}),
+	)
 
 /** Directory holding the running `maple` binary and its sibling `libchdb.so`
  *  (the symlink on PATH resolves here). */
@@ -143,29 +166,52 @@ const mapFsError = (e: unknown, installDir: string): UpdateError => {
 	return new UpdateError({ message: e instanceof Error ? e.message : String(e) })
 }
 
-const downloadTo = (url: string, dest: string): Effect.Effect<void, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const res = await fetch(url, { headers: { "User-Agent": "maple-cli" } })
-			if (!res.ok) throw new Error(`download failed (${res.status} ${res.statusText}) for ${url}`)
-			// NB: `Bun.write(dest, res)` (writing the Response directly) hangs
-			// indefinitely on GitHub's redirect-backed release-asset streams — it
-			// never resolves. Buffer the body first, then write the bytes.
-			const body = await res.arrayBuffer()
-			await Bun.write(dest, body)
-		},
-		catch: (e) => new UpdateError({ message: e instanceof Error ? e.message : String(e) }),
-	})
+export const downloadTo = (
+	url: string,
+	dest: string,
+	timeout: Duration.Input = RELEASE_FETCH_TIMEOUT,
+): Effect.Effect<void, UpdateError> =>
+	Effect.gen(function* () {
+		const fetchImpl = yield* FetchHttpClient.Fetch
+		return yield* Effect.tryPromise({
+			try: async (signal) => {
+				const res = await fetchImpl(url, { headers: { "User-Agent": "maple-cli" }, signal })
+				if (!res.ok) throw new Error(`download failed (${res.status} ${res.statusText}) for ${url}`)
+				// NB: `Bun.write(dest, res)` (writing the Response directly) hangs
+				// indefinitely on GitHub's redirect-backed release-asset streams — it
+				// never resolves. Buffer the body first, then write the bytes.
+				const body = await res.arrayBuffer()
+				await Bun.write(dest, body)
+			},
+			catch: (e) => new UpdateError({ message: e instanceof Error ? e.message : String(e) }),
+		})
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: timeout,
+			orElse: () => Effect.fail(new UpdateError({ message: `download timed out for ${url}` })),
+		}),
+	)
 
-const fetchText = (url: string): Effect.Effect<string, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const res = await fetch(url, { headers: { "User-Agent": "maple-cli" } })
-			if (!res.ok) throw new Error(`could not fetch ${url} (${res.status} ${res.statusText})`)
-			return await res.text()
-		},
-		catch: (e) => new UpdateError({ message: e instanceof Error ? e.message : String(e) }),
-	})
+export const fetchText = (
+	url: string,
+	timeout: Duration.Input = RELEASE_FETCH_TIMEOUT,
+): Effect.Effect<string, UpdateError> =>
+	Effect.gen(function* () {
+		const fetchImpl = yield* FetchHttpClient.Fetch
+		return yield* Effect.tryPromise({
+			try: async (signal) => {
+				const res = await fetchImpl(url, { headers: { "User-Agent": "maple-cli" }, signal })
+				if (!res.ok) throw new Error(`could not fetch ${url} (${res.status} ${res.statusText})`)
+				return await res.text()
+			},
+			catch: (e) => new UpdateError({ message: e instanceof Error ? e.message : String(e) }),
+		})
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: timeout,
+			orElse: () => Effect.fail(new UpdateError({ message: `request timed out for ${url}` })),
+		}),
+	)
 
 const sha256File = (path: string): Effect.Effect<string, UpdateError> =>
 	Effect.tryPromise({

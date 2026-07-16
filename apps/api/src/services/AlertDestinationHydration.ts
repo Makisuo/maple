@@ -77,7 +77,7 @@ const parsePublicConfig = <E>(
 	row: AlertDestinationRow,
 	onError: () => E,
 ): Effect.Effect<DestinationPublicConfig, E> =>
-	Schema.decodeUnknownEffect(PublicConfigFromJson)(row.configJson).pipe(Effect.mapError(onError))
+	Schema.decodeUnknownEffect(DestinationPublicConfigSchema)(row.configJson).pipe(Effect.mapError(onError))
 
 const parseSecretConfig = <E>(json: string, onError: () => E): Effect.Effect<DestinationSecretConfig, E> =>
 	Schema.decodeUnknownEffect(SecretConfigFromJson)(json).pipe(Effect.mapError(onError))

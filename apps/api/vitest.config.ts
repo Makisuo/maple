@@ -15,6 +15,11 @@ export default defineConfig({
 	test: {
 		environment: "node",
 		include: ["src/**/*.test.ts"],
+		// PGlite boots a WASM Postgres instance per test. Running DB-heavy files in
+		// parallel makes the instances contend until otherwise-correct tests hit the
+		// timeout (the failing file varies by run). Keep this package file-serial;
+		// Effect-level concurrency inside each suite remains available.
+		maxWorkers: 1,
 		// Generous timeouts: the DB-backed suites boot a fresh PGlite (WASM) per
 		// test and some retry tests run real exponential backoff. Under CI's
 		// parallel `turbo test`, CPU starvation stretches these past the 5s
