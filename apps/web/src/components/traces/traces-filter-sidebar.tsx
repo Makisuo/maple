@@ -60,16 +60,6 @@ function TracesFilterSidebarView({
 				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
-						<DurationRangeFilter
-							minValue={filters.minDurationMs}
-							maxValue={filters.maxDurationMs}
-							onMinChange={(val) => onFilterChange("minDurationMs", val)}
-							onMaxChange={(val) => onFilterChange("maxDurationMs", val)}
-							durationStats={facets.durationStats}
-						/>
-
-						<Separator className="my-2" />
-
 						<SingleCheckboxFilter
 							title="Has Error"
 							checked={filters.hasError ?? false}
@@ -126,6 +116,16 @@ function TracesFilterSidebarView({
 							options={facets.spanNames ?? []}
 							selected={filters.spanNames ?? []}
 							onChange={(val) => onFilterChange("spanNames", val)}
+						/>
+
+						<Separator className="my-2" />
+
+						<DurationRangeFilter
+							minValue={filters.minDurationMs}
+							maxValue={filters.maxDurationMs}
+							onMinChange={(val) => onFilterChange("minDurationMs", val)}
+							onMaxChange={(val) => onFilterChange("maxDurationMs", val)}
+							durationStats={facets.durationStats}
 						/>
 
 						{(facets.httpMethods?.length ?? 0) > 0 && (
