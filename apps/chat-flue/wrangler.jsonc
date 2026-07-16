@@ -21,10 +21,7 @@
 			"new_sqlite_classes": ["FlueRegistry", "FlueMapleChatAgent", "FlueTriageWorkflow"],
 		},
 	],
-	"vars": {
-		// Maple API worker that hosts the MCP server at `/mcp`.
-		"MAPLE_API_URL": "http://localhost:3472",
-	},
+	"services": [{ "binding": "MAPLE_API_RPC", "service": "maple-api" }],
 	// Workers Observability — `traces.enabled` is required for `tracing.enterSpan`
 	// custom spans; the "maple" destination forwards logs + traces to Maple ingest.
 	// The real deploy is Alchemy-owned (alchemy.run.ts sets this too); kept here in

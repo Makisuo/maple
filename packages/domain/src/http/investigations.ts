@@ -2,7 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { ErrorIssueId, InvestigationId, IsoDateTimeString, UserId } from "../primitives"
 import { AiTriageIncidentKind, AiTriageResult } from "./ai-triage"
-import { Authorization, InternalServiceAuthorization } from "./current-tenant"
+import { Authorization } from "./current-tenant"
 import { IssueSeverity } from "./errors"
 
 // ---------------------------------------------------------------------------
@@ -181,8 +181,8 @@ const InvestigationsListQuery = Schema.Struct({
 })
 
 // ---------------------------------------------------------------------------
-// API group (user-facing; the internal `submit_diagnosis` write is a separate
-// service-token-guarded router in apps/api, not part of this Clerk-authed group)
+// API group (user-facing; diagnosis submission crosses the internal Worker RPC
+// boundary and is not part of this Clerk-authenticated HTTP group)
 // ---------------------------------------------------------------------------
 
 export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
@@ -217,23 +217,3 @@ export class InvestigationApiGroup extends HttpApiGroup.make("investigations")
 	)
 	.prefix("/api/investigations")
 	.middleware(Authorization) {}
-
-// ---------------------------------------------------------------------------
-// Internal API group (server-to-server). The chat-flue `submit_diagnosis` tool
-// posts the structured report here once the investigate agent finishes its pass.
-// Guarded by the internal-service token (not Clerk) via InternalServiceAuthorization;
-// the framework handles param/payload decode (400), auth (401), and the declared
-// error → status mapping (404/503) — no manual response wiring in the handler.
-// ---------------------------------------------------------------------------
-
-export class InvestigationsInternalApiGroup extends HttpApiGroup.make("investigationsInternal")
-	.add(
-		HttpApiEndpoint.post("submitDiagnosis", "/:id/diagnosis", {
-			params: { id: InvestigationId },
-			payload: SubmitDiagnosisRequest,
-			success: InvestigationDocument,
-			error: [InvestigationNotFoundError, InvestigationPersistenceError],
-		}),
-	)
-	.prefix("/api/internal/investigations")
-	.middleware(InternalServiceAuthorization) {}

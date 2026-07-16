@@ -151,10 +151,10 @@ export function healthRank(health: ServiceHealth): number {
 }
 
 /**
- * Key for matching a baseline row to an overview row. Must mirror the
- * `${serviceName}::${serviceNamespace}::${environment}` grouping key used by
- * `aggregateByServiceEnvironment` in `@/api/warehouse/services` — a mismatch
- * silently (and fail-safely) reverts that service to absolute thresholds.
+ * Key for matching a baseline row to an overview row. Overview metrics collapse
+ * namespace variants by service name + environment, then retain the dominant
+ * namespace for this baseline lookup. A mismatch silently (and fail-safely)
+ * reverts that service to absolute thresholds.
  */
 export function baselineKey(serviceName: string, serviceNamespace: string, environment: string): string {
 	return `${serviceName}::${serviceNamespace}::${environment}`

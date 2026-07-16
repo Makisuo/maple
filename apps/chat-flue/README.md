@@ -11,8 +11,8 @@ the architecture before the full rebuild. See the plan at
 
 | File                                | Role                                                                                                                                                                         |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/agents/maple-chat.ts`          | The addressable chat agent. `export const route` exposes it at `POST/GET /agents/maple-chat/:id`; Workers AI model + `connectMcpServer` → Maple MCP tools (`mcp__maple__*`). |
-| `src/lib/env.ts`                    | Worker bindings/vars (`AI`, `MAPLE_API_URL`, `INTERNAL_SERVICE_TOKEN`).                                                                                                      |
+| `src/agents/maple-chat.ts`          | The addressable chat agent. `export const route` exposes it at `POST/GET /agents/maple-chat/:id`; Workers AI model + API Worker RPC → Maple MCP tools (`mcp__maple__*`). |
+| `src/lib/env.ts`                    | Worker bindings/vars (`AI`, `MAPLE_API_RPC`, `INTERNAL_SERVICE_TOKEN`).                                                                                                      |
 | `src/lib/org.ts`                    | Recovers `orgId` from the `"<orgId>:<tabId>"` instance id.                                                                                                                   |
 | `flue.config.ts` / `wrangler.jsonc` | Flue + Cloudflare build config (Workers AI `AI` binding, DO migrations).                                                                                                     |
 
@@ -60,7 +60,7 @@ bun run connect          # flue connect maple-chat local
 - [x] `bun run build` (`flue build --target cloudflare`) discovers `maple-chat` and generates a valid worker (AI binding + `FlueMapleChatAgent`/`FlueRegistry` DOs).
 - [x] `flue dev` boots the worker on the Cloudflare target.
 - [x] A prompt runs end-to-end on **Workers AI** (`@cf/moonshotai/kimi-k2.6`): `POST /agents/maple-chat/<orgId>:<tab>?wait=result` → HTTP 200 with the model's reply (~1.5s). The binding path works; the legacy-parity kimi model is live.
-- [ ] A prompt calls `mcp__maple__search_traces` against `apps/api` — **needs a `flue dev` restart** so it loads `.dev.vars` (`INTERNAL_SERVICE_TOKEN`), plus a running `apps/api` and a real org id.
+- [ ] A prompt calls `mcp__maple__search_traces` through the `MAPLE_API_RPC` service binding, with a running `apps/api` and a real org id.
 - [ ] A browser page streams the agent's events via `@flue/sdk` (`agents.send` + `agents.stream`).
 - [ ] Tool-calling quality across the full tool set is acceptable on the chosen model.
 

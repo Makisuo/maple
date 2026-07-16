@@ -17,6 +17,7 @@ import {
 	KeyIcon,
 	ServerIcon,
 	ShieldIcon,
+	SquareTerminalIcon,
 	UserIcon,
 	type IconComponent,
 } from "@/components/icons"
@@ -27,6 +28,7 @@ export const settingsTabValues = [
 	"members",
 	"ingestion",
 	"api-keys",
+	"developer",
 	"mcp",
 	"notifications",
 	"escalations",
@@ -41,6 +43,7 @@ export const settingsTabLabels: Record<SettingsTab, string> = {
 	members: "Members",
 	ingestion: "Ingestion",
 	"api-keys": "API Keys",
+	developer: "API Reference",
 	mcp: "MCP",
 	notifications: "Notifications",
 	escalations: "Escalations",
@@ -86,7 +89,8 @@ const navSections: SettingsNavSection[] = [
 		items: [
 			{ id: "ingestion", label: "Ingestion", icon: ServerIcon },
 			{ id: "api-keys", label: "API Keys", icon: KeyIcon },
-			{ id: "mcp", label: "MCP", icon: CodeIcon },
+			{ id: "developer", label: "API Reference", icon: CodeIcon },
+			{ id: "mcp", label: "MCP", icon: SquareTerminalIcon },
 		],
 		links: [{ id: "integrations", label: "Integrations", icon: GridIcon, to: "/integrations" }],
 	},
@@ -143,6 +147,7 @@ export function useVisibleSettingsSections() {
 			isAdmin: true,
 			canAccessDataPlatform: true,
 			canAccessAi: true,
+			isCustomerLoading: false,
 			isLoading: false,
 		}
 	}
@@ -171,7 +176,13 @@ export function useVisibleSettingsSections() {
 		isAdmin,
 		canAccessDataPlatform,
 		canAccessAi,
-		isLoading: Result.isInitial(sessionResult) || (isAdmin && isCustomerLoading),
+		isCustomerLoading,
+		// The shell only waits on the (fast) session query. The billing customer —
+		// dominated by an upstream Autumn round-trip — keeps loading in the
+		// background; `canAccessDataPlatform` stays false until it resolves, so the
+		// "Data Platform" nav item just appears when ready (same as /integrations),
+		// instead of blocking the whole page behind it.
+		isLoading: Result.isInitial(sessionResult),
 	}
 }
 

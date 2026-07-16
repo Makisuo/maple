@@ -374,6 +374,49 @@ export function metricsTimeseriesRateQuery(
 }
 
 // ---------------------------------------------------------------------------
+// Sparklines query — batched preview series for the metrics browse grid
+// ---------------------------------------------------------------------------
+
+export interface MetricsSparklinesOpts {
+	metricType: MetricType
+	/** Matched with `MetricName IN (...)` — one query covers a whole grid page. */
+	metricNames: ReadonlyArray<string>
+}
+
+export interface MetricsSparklinesOutput {
+	readonly bucket: string
+	readonly metricName: string
+	readonly avgValue: number
+	readonly sumValue: number
+	readonly dataPointCount: number
+}
+
+export function metricsSparklinesQuery(opts: MetricsSparklinesOpts) {
+	const { tbl, isHistogram } = resolveMetricTable(opts.metricType)
+
+	return from(tbl as typeof MetricsSum)
+		.select(($) => {
+			const exprs = metricsSelectExprs($, isHistogram)
+			return {
+				bucket: CH.toStartOfInterval($.TimeUnix, param.int("bucketSeconds")),
+				metricName: $.MetricName,
+				avgValue: exprs.avgValue,
+				sumValue: exprs.sumValue,
+				dataPointCount: exprs.dataPointCount,
+			}
+		})
+		.where(($) => [
+			$.MetricName.in_(...opts.metricNames),
+			$.OrgId.eq(param.string("orgId")),
+			$.TimeUnix.gte(param.dateTime("startTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.groupBy("bucket", "metricName")
+		.orderBy(["bucket", "asc"])
+		.format("JSON")
+}
+
+// ---------------------------------------------------------------------------
 // Breakdown query
 // ---------------------------------------------------------------------------
 

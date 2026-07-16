@@ -1,10 +1,10 @@
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { useCallback, useRef, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { XmarkIcon, MagnifierIcon } from "@/components/icons"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { FilterSection, SearchableFilterSection } from "@/components/filters/filter-section"
+import { FilterSection, SearchableFilterSection, serviceColorMap } from "@/components/filters/filter-section"
 import { Route } from "@/routes/logs"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { Kbd } from "@maple/ui/components/ui/kbd"
@@ -23,7 +23,6 @@ import {
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
 import { SEVERITY_COLORS } from "@maple/ui/lib/severity"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} />
@@ -55,14 +54,14 @@ export function LogsFilterSidebar() {
 		[navigate],
 	)
 
-	const facetsResult = useAtomValue(
-		getLogsFacetsResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-			},
-		}),
-	)
+	const facetsAtom = getLogsFacetsResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+		},
+	})
+	const facetsResult = useAtomValue(facetsAtom)
+	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
 		navigate({
@@ -94,7 +93,7 @@ export function LogsFilterSidebar() {
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} onRetry={refreshFacets} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 			const hasFacets =
@@ -104,7 +103,7 @@ export function LogsFilterSidebar() {
 				(facets.namespaces?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<div className="pb-3">
@@ -184,6 +183,7 @@ export function LogsFilterSidebar() {
 								options={facets.services}
 								selected={search.services ?? []}
 								onChange={(val) => updateFilter("services", val)}
+								colorMap={serviceColorMap(facets.services)}
 							/>
 						)}
 

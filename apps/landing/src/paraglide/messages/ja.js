@@ -47,22 +47,6 @@ export const cta_see_full_story = () => `詳細を見る →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement = () => `Mapleが利用可能になりました — `
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `無料トライアルを開始する`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const nav_features = () => `機能`
 
 
@@ -415,7 +399,7 @@ export const nav_desc_vs_new_relic = () => `OTelネイティブ、明朗な料�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_desc_vs_dash0 = () => `より多くのシグナルと深いトレース`
+export const nav_desc_vs_dash0 = () => `オープンソースでセルフホスト可能`
 
 
 /**
@@ -495,7 +479,7 @@ export const hero_title_accent = () => `AIネイティブ。`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `OpenTelemetry上のトレース、ログ、メトリクス。数十億行をミリ秒でクエリ — またはAIエージェントにお任せください。`
+export const hero_subtitle = () => `OpenTelemetryで受け取るトレース、ログ、メトリクスをClickHouseに保存。数十億行を1秒未満でクエリ — AIエージェントに任せることも。`
 
 
 /**
@@ -519,7 +503,7 @@ export const sov_title = () => `Your data, your instrumentation, your bill.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_lede = () => `Maple is the observability backend you'd build if you weren't trying to extract every dollar. OpenTelemetry in. ClickHouse-grade query speed out. The source on GitHub the whole time.`
+export const sov_lede = () => `Mapleは、請求書のために最適化しないならこう作るはず、というオブザーバビリティバックエンドです。OpenTelemetryで受け取り、ClickHouseの速度で返す。ソースは常にGitHubに。`
 
 
 /**
@@ -535,7 +519,7 @@ export const sov_pillar_1_label = () => `Open source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_1_body = () => `Open-source under FSL-1.1. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
+export const sov_pillar_1_body = () => `ソースはFSL-1.1でGitHubに公開 — 各リリースは2年後にApache 2.0になります。全行を読み、フォークし、セキュリティレビューが求めるなら自社サーバーでセルフホストできます。`
 
 
 /**
@@ -567,7 +551,7 @@ export const sov_pillar_3_label = () => `Honest pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_3_body = () => `Pay for the gigabytes you send. No per-host fees. No per-seat fees. The same numbers your invoice shows.`
+export const sov_pillar_3_body = () => `月額$39で各シグナル100 GBを含み、超過分は一律$0.30/GB。ホスト課金もシート課金もありません。料金ページと請求書は同じ数字を示します。`
 
 
 /**
@@ -639,7 +623,7 @@ export const logs_title = () => `A log feed that doesn't crater your bill at sca
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const logs_lede = () => `Structured logs streamed straight from OTLP. Severity, service, message, duration. Searchable in seconds, retained for the window you actually care about.`
+export const logs_lede = () => `OTLPから直接ストリーミングされる構造化ログ。重大度、サービス、メッセージ、所要時間。数秒で検索可能、Startupプランでは30日間保持 — Enterpriseではカスタム保持期間。`
 
 
 /**
@@ -687,7 +671,7 @@ export const mcp_title = () => `Your AI agent reads it too.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_lede = () => `Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, propose fixes, open PRs. The transcript on the right is real.`
+export const mcp_lede = () => `Mapleはファーストクラスの MCPサーバーを同梱。対応エージェントはサービス一覧、トレース検索、エラー検出、修正提案が可能です。右のトランスクリプトは、エージェントが実行するツール呼び出しの流れをそのまま示したものです。`
 
 
 /**
@@ -855,7 +839,7 @@ export const bill_eyebrow = () => `07 · The bill`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_title = () => `We told you it was honest.`
+export const bill_title = () => `請求書を、1行ずつ。`
 
 
 /**
@@ -863,7 +847,7 @@ export const bill_title = () => `We told you it was honest.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_lede = () => `Side-by-side, line-item. The questions your finance team will ask, answered before they have to ask.`
+export const bill_lede = () => `定価ベースで並べて比較。財務チームが聞いてくる質問に、聞かれる前に答えます。`
 
 
 /**
@@ -999,7 +983,7 @@ export const bill_v_yes = () => `Yes`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_v_apache = () => `FSL-1.1`
+export const bill_v_apache = () => `FSL-1.1 → Apache 2.0`
 
 
 /**
@@ -1047,7 +1031,7 @@ export const bill_v_first_class = () => `First-class`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_footnote = () => `Competitor numbers are public list prices summarized for comparison. Maple ingest rate is the published flat per-GB. See the calculator for projected monthly cost on your volume.`
+export const bill_footnote = () => `競合セルは公開定価の要約です — 最新の数字は各ベンダーの料金ページでご確認ください。Mapleのレートは公表されている一律GB単価です。月額コストの試算には計算ツールをご利用ください。`
 
 
 /**
@@ -1191,7 +1175,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14-day free trial. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+export const cta_bookend_lede = () => `14日間の無料トライアル(カード登録必須、終了まで課金なし)。セルフホストにも対応。ダッシュボードには、いま見たものと同じライブウォーターフォールが付属します。`
 
 
 /**
@@ -1215,7 +1199,7 @@ export const cta_bookend_secondary = () => `Read the source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const footer_manifesto = () => `Made with love for engineers. Priced with respect for your CFO.`
+export const footer_manifesto = () => `シート課金なし。独自エージェントなし。ブラックボックスなし。`
 
 
 /**
@@ -1263,7 +1247,7 @@ export const features_badge = () => `機能`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const features_heading = () => `観測に必要なすべて`
+export const features_heading = () => `デバッグのワークフローを、端から端まで`
 
 
 /**
@@ -1466,19 +1450,61 @@ export const features_col_p99 = () => `P99`
 export const features_col_throughput = () => `スループット`
 
 
-export { features_errors_badge } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_badge = () => `エラートラッキング`
 
-export { features_errors_heading } from "./en.js"
 
-export { features_errors_desc } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_heading = () => `エラーをグループ化し、追跡し、体系的に修正`
 
-export { features_col_error_type } from "./en.js"
 
-export { features_col_count } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_desc = () => `エラーは全サービス横断でタイプ別に自動グループ化。時系列の傾向と影響サービスを確認し、サンプルトレースから根本原因まで掘り下げられます。`
 
-export { features_col_services } from "./en.js"
 
-export { features_col_last_seen } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_error_type = () => `エラータイプ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_count = () => `件数`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_services = () => `サービス`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_last_seen = () => `最終発生`
+
 
 /**
  * 
@@ -1493,7 +1519,7 @@ export const usecases_badge = () => `ユースケース`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_heading = () => `実際のデバッグシナリオ`
+export const usecases_heading = () => `3つのデバッグシナリオの実際`
 
 
 /**
@@ -1525,7 +1551,7 @@ export const usecases_ecommerce_desc = () => `フラッシュセールが始ま�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ecommerce_result = () => `90秒で根本原因を特定: Stripeタイムアウト、リトライ消耗ログと相関。`
+export const usecases_ecommerce_result = () => `このシナリオでは:Stripeのタイムアウトをリトライ枯渇ログと突き合わせ、約90秒で根本原因に到達。`
 
 
 /**
@@ -1597,7 +1623,7 @@ export const usecases_ai_heading = () => `午前3時のアラート、誰も起�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ai_desc = () => `午前3時にアラートが発生。オンコールを呼ぶ代わりに、MCPエージェントがMapleに接続し、問題を調査し、Slackに診断結果を投稿。`
+export const usecases_ai_desc = () => `午前3時にアラートが発火。オンコール担当が目を覚ます前に、MCPエージェントがMapleに接続してスパイクを調査し、結果をSlackに投稿します。`
 
 
 /**
@@ -1605,7 +1631,7 @@ export const usecases_ai_desc = () => `午前3時にアラートが発生。オ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ai_result = () => `MCPエージェントが自動診断し、誰よりも早くSlackに投稿。`
+export const usecases_ai_result = () => `このシナリオでは、誰かが起きる前にエージェントが診断を#incidentsに投稿します。`
 
 
 /**
@@ -1661,7 +1687,7 @@ export const otel_badge = () => `OpenTelemetry上に構築`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_heading = () => `オブザーバビリティの未来はオープン`
+export const otel_heading = () => `標準を回避せず、標準の上に`
 
 
 /**
@@ -1693,7 +1719,7 @@ export const otel_future_title = () => `将来を見据えた設計`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_future_desc = () => `すべての主要クラウドプロバイダーとCNCFが支援。OpenTelemetryはKubernetesに次ぐCNCFで最も活発なプロジェクトです。`
+export const otel_future_desc = () => `すべての主要クラウドプロバイダーが支持。OpenTelemetryは2026年にCNCFを卒業し、Kubernetesに次いで2番目にアクティブなプロジェクトです。`
 
 
 /**
@@ -1709,7 +1735,7 @@ export const otel_signals_title = () => `すべてのシグナルをカバー`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_signals_desc = () => `一つのSDKでトレース、ログ、メトリクス。複数のベンダーエージェントやライブラリを組み合わせる必要はありません。`
+export const otel_signals_desc = () => `トレース、ログ、メトリクスを1つのSDKから — シグナルごとにベンダーエージェントを入れて整合させる必要はありません。`
 
 
 /**
@@ -1725,7 +1751,7 @@ export const otel_community_title = () => `コミュニティ主導`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_community_desc = () => `数千人のコントリビューター。あらゆるフレームワークの自動計装。信頼できる活気あるエコシステム。`
+export const otel_community_desc = () => `数千人のコントリビューターと、主要フレームワークの自動計装。仕様は1ベンダーのロードマップではなくコミュニティが動かしています。`
 
 
 /**
@@ -1741,7 +1767,7 @@ export const tech_badge = () => `技術基盤`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const tech_heading = () => `他とは違う設計`
+export const tech_heading = () => `クエリが速く返る理由`
 
 
 /**
@@ -1757,7 +1783,7 @@ export const tech_columnar_title = () => `カラムナストレージ`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const tech_columnar_desc = () => `数十億行のクエリをミリ秒で実行。オブザーバビリティワークロード向けに設計されたカラムナエンジンで駆動。`
+export const tech_columnar_desc = () => `テレメトリのために作られた列指向エンジン。数十億行をスキャンして1秒未満で返します — 事前集計は不要。`
 
 
 /**
@@ -1872,9 +1898,21 @@ export const tech_ingestion_rate = () => `取り込みレート`
 export const tech_avg_latency = () => `平均レイテンシ`
 
 
-export { tech_connectors_title } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const tech_connectors_title = () => `OTLPの先へ`
 
-export { tech_connectors_desc } from "./en.js"
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const tech_connectors_desc = () => `OpenTelemetryのシグナルに加えて、Cloudflare LogpushやPrometheusのスクレイプターゲットからもデータを取り込めます。`
+
 
 /**
  * 
@@ -1889,7 +1927,7 @@ export const ai_badge = () => `AIエージェント`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const ai_heading = () => `AIエージェントが問題を解決`
+export const ai_heading = () => `調査はAIエージェントに任せる`
 
 
 /**
@@ -1897,7 +1935,7 @@ export const ai_heading = () => `AIエージェントが問題を解決`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const ai_desc = () => `Mapleにはトレース、ログ、エラー、メトリクスを直接クエリできる組み込みMCPサーバーとAIエージェントがあります。MCP対応クライアントを接続して、本番環境の問題を自動診断。`
+export const ai_desc = () => `Mapleには、トレース、ログ、エラー、メトリクスを直接クエリできるMCPサーバーとAIエージェントが組み込まれています。MCP対応クライアントを接続すれば、エージェントが本番の問題を調査し修正を提案します。`
 
 
 /**
@@ -2012,55 +2050,205 @@ export const ai_any_mcp = () => `任意のMCPクライアント`
 export const ai_open_protocol = () => `オープンプロトコル`
 
 
-export { chat_badge } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_badge = () => `AIアシスタント`
 
-export { chat_heading } from "./en.js"
 
-export { chat_desc } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_heading = () => `テレメトリに自然な言葉で質問`
 
-export { chat_user_label } from "./en.js"
 
-export { chat_user_msg } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_desc = () => `トレース、ログ、メトリクスを理解する組み込みのAIアシスタント。自然な言葉で質問すると、該当データへの直接リンク付きで回答します。`
 
-export { chat_assistant_label } from "./en.js"
 
-export { chat_response_1 } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_user_label = () => `あなた`
 
-export { chat_response_2 } from "./en.js"
 
-export { chat_trace_link } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_user_msg = () => `直近1時間のpayment-serviceのレイテンシスパイクの原因は?`
 
-export { dashboard_badge } from "./en.js"
 
-export { dashboard_heading } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_assistant_label = () => `Maple AI`
 
-export { dashboard_desc } from "./en.js"
 
-export { dashboard_ai_label } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_response_1 = () => `14:12 UTCに始まるレイテンシスパイクを検出しました。P95は140msから890msに上昇しています。`
 
-export { dashboard_ai_text } from "./en.js"
 
-export { alert_badge } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_response_2 = () => `根本原因:チェックアウトフローの遅いDBクエリ3件(平均720ms)。コネクションプールが上限(20/20)に達していました。`
 
-export { alert_heading } from "./en.js"
 
-export { alert_rules_title } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_trace_link = () => `トレース f7e8d9c0 を表示`
 
-export { alert_rules_desc } from "./en.js"
 
-export { alert_route_title } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_badge = () => `ダッシュボード`
 
-export { alert_route_desc } from "./en.js"
 
-export { alert_firing } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_heading = () => `ストーリーを語るダッシュボードを`
 
-export { alert_triggered_ago } from "./en.js"
 
-export { alert_view } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_desc = () => `ウィジェットをドラッグ&ドロップし、プリセットから選び、あるいはAIにサービスに合ったチャートを提案させる。JSONとしてエクスポート・共有できます。`
 
-export { alert_acknowledge } from "./en.js"
 
-export { alert_webhook_note } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_ai_label = () => `AI提案`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_ai_text = () => `payment-serviceのP95レイテンシチャートを追加`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_badge = () => `アラート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_heading = () => `コンテキスト付きのアラート`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_rules_title = () => `アラートルール`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_rules_desc = () => `エラー率、P95/P99レイテンシ、Apdex、スループット、カスタムメトリクス、カスタムクエリの7種類の組み込みシグナル。重大度レベル、インシデント追跡、自動解決付き。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_route_title = () => `どこへでもルーティング`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_route_desc = () => `アラートをSlack、Discord、PagerDuty、任意のWebhookへ。チームが普段いる場所に通知が届きます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_firing = () => `発火中`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_triggered_ago = () => `34秒前に発火`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_view = () => `Mapleで表示`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_acknowledge = () => `確認`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_webhook_note = () => `+ 任意のカスタムWebhookエンドポイント`
+
 
 /**
  * 
@@ -2131,7 +2319,7 @@ export const how_step3_desc = () => `ダッシュボードを開いて探索開�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_heading = () => `明確な観測を始めませんか？`
+export const bottomcta_heading = () => `今日、最初のトレースを。`
 
 
 /**
@@ -2139,7 +2327,7 @@ export const bottomcta_heading = () => `明確な観測を始めませんか？`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_subtitle = () => `5分以内でトレース、ログ、メトリクスの送信を開始。`
+export const bottomcta_subtitle = () => `SDKを追加し、OTLPをMapleに向ければトレースが届きます — 多くのセットアップは5分以内です。`
 
 
 /**
@@ -2147,7 +2335,7 @@ export const bottomcta_subtitle = () => `5分以内でトレース、ログ、�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_tagline = () => `maple.dev — オブザーバビリティ、シンプルに`
+export const bottomcta_tagline = () => `maple.dev — OpenTelemetryの上のオブザーバビリティ`
 
 
 /**
@@ -2451,7 +2639,7 @@ export const pricing_private_channel = () => `プライベートチャネルサ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `予測可能な料金 — 従量課金なし`
+export const pricing_no_usage_charges = () => `シート課金・ホスト課金なし`
 
 
 /**
@@ -2614,11 +2802,29 @@ export const pricing_metrics = () => `メトリクス`
 export const pricing_start_trial = (params) => `${params.duration}日間の無料トライアルを開始`
 
 
-export { pricing_calc_label } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_calc_label = () => `コスト計算ツール`
 
-export { pricing_calc_heading } from "./en.js"
 
-export { pricing_calc_sub } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_calc_heading = () => `請求額を試算`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_calc_sub = () => `月間ボリュームをスライダーで設定し、Mapleのコストを他ベンダーと比較できます。`
+
 
 /**
  * 
@@ -2665,7 +2871,7 @@ export const faq_limits_q = () => `プランの制限を超えた場合は？`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_limits_a = () => `制限に近づくと通知します。Startupプランでは、追加使用量は透明なGB単価で課金されます。`
+export const faq_limits_a = () => `含まれる容量に近づくと通知します。Startupプランでは、超過分はこのページに表示されているのと同じ一律$0.30/GBで課金されます。`
 
 
 /**
@@ -2713,7 +2919,7 @@ export const faq_selfhost_q = () => `Mapleをセルフホストできますか�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_selfhost_a = () => `はい。MapleのソースコードはFSL-1.1の下で公開されており、自社インフラでセルフホスト可能です。マネージド体験を希望するチーム向けにクラウドプランもご用意しています。`
+export const faq_selfhost_a = () => `はい。MapleのソースはFSL-1.1(各リリースは2年後にApache 2.0になります)で公開されており、自社インフラでセルフホストできます。マネージドを好むチームにはクラウドプランもあります。`
 
 
 /**
@@ -2729,7 +2935,7 @@ export const faq_trial_q = () => `有料プランに無料トライアルはあ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_trial_a = () => `はい、すべてのプランに無料トライアルが含まれており、コミット前にすべての機能をお試しいただけます。`
+export const faq_trial_a = () => `Startupプランには14日間の無料トライアルが含まれます。クレジットカードの登録が必要ですが、トライアル終了までは課金されません。Enterpriseプランはまずご相談から。`
 
 
 /**
@@ -2785,7 +2991,7 @@ export const page_pricing_heading = () => `シンプルで透明な料金体系`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_subtitle = () => `透明な従量課金 — ユーザー単価課金なし、隠れたコストなし、ベンダーロックインなし。すべてのプランでトライアル利用可能。`
+export const page_pricing_subtitle = () => `シート課金なし、隠れコストなしの従量課金。Startupプランには14日間の無料トライアル付き。`
 
 
 /**
@@ -4009,7 +4215,7 @@ export const page_dd_heading = () => `Maple vs Datadog`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_subtitle = () => `Datadogは強力ですが、複雑なホスト単価課金とプロプライエタリエージェントが伴います。Mapleは同じ分散トレーシング、ログ、メトリクスを透明な従量課金、ネイティブOpenTelemetryサポート、ゼロベンダーロックインで提供。`
+export const page_dd_subtitle = () => `Datadogは強力ですが、ホスト単位の課金と独自エージェントが伴います。Mapleは分散トレーシング、ログ、メトリクスを、一律のGB単価、ネイティブなOpenTelemetry取り込み、読めてセルフホストできるソースコードで提供します。`
 
 
 /**
@@ -4049,7 +4255,7 @@ export const page_dd_otel = () => `OpenTelemetryネイティブ`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_otel_desc = () => `OpenTelemetry標準の上にゼロから構築。プロプライエタリエージェントのインストールや保守不要 — 既存の計装をそのまま使用。`
+export const page_dd_otel_desc = () => `最初からOpenTelemetryの上に構築。インストールや保守が必要な独自エージェントはなく、既存のOTel計装をそのままMapleに向けられます。`
 
 
 /**
@@ -4081,7 +4287,7 @@ export const page_dd_oss = () => `ソースコード公開`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_oss_desc = () => `すべてのコードを検査、機能を貢献、ブラックボックスのないオブザーバビリティプラットフォームを信頼。`
+export const page_dd_oss_desc = () => `ソースはFSL-1.1でGitHubに公開され、時間の経過とともにApache 2.0へ移行します。全行を検査し、機能をコントリビュートし、データがどう扱われるかを正確に確認できます。`
 
 
 /**

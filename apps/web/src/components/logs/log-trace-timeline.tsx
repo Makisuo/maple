@@ -8,6 +8,7 @@ import type { SpanHierarchyResponse } from "@/api/warehouse/traces"
 import { listLogsResultAtom, getSpanHierarchyResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { computeTraceTimeWindow } from "@/lib/trace-time-window"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 function formatRelativeMs(ms: number): string {
 	if (ms < 1) return "+0ms"
@@ -154,8 +155,9 @@ export function LogTraceTimeline({ currentLog, onLogSelect }: LogTraceTimelinePr
 													{formatRelativeMs(relativeMs)}
 												</span>
 												{log.serviceName !== currentLog.serviceName && (
-													<span className="text-[10px] text-muted-foreground/60 truncate max-w-[72px] shrink-0">
-														{log.serviceName}
+													<span className="flex max-w-[72px] shrink-0 items-center gap-1 truncate text-[10px] text-muted-foreground/60">
+														<ServiceDot serviceName={log.serviceName} className="size-1.5" />
+														<span className="truncate">{log.serviceName}</span>
 													</span>
 												)}
 												<span

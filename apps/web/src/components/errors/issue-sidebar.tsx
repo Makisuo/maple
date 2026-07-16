@@ -2,7 +2,6 @@ import type { ErrorIssueDocument, IssueSeverity, WorkflowState } from "@maple/do
 import { Button } from "@maple/ui/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { cn } from "@maple/ui/lib/utils"
-import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 import { PRIORITY_LABEL, PriorityBarsIcon } from "@/components/icons"
 import { formatRelativeTime } from "@/lib/format"
@@ -14,6 +13,7 @@ import { IssueNotesCallout } from "./issue-notes-callout"
 import { LeaseHud } from "./lease-hud"
 import { SEVERITY_LABEL, SEVERITY_ORDER, SEVERITY_SOURCE_LABEL, SEVERITY_TONE } from "./severity-badge"
 import { StateSelect } from "./state-select"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 type Busy = "state" | "claim" | "release" | "heartbeat" | "comment" | "severity" | null
 
@@ -95,13 +95,7 @@ export function IssueSidebar({
 				</Row>
 				<Row label="Service" title={issue.serviceName}>
 					<span className="flex min-w-0 items-center gap-2">
-						<span
-							aria-hidden
-							className={cn(
-								"size-1.5 shrink-0 rounded-full",
-								getServiceColorClass(issue.serviceName),
-							)}
-						/>
+						<ServiceDot serviceName={issue.serviceName} className="size-1.5" />
 						<span className="truncate text-sm text-foreground">{issue.serviceName}</span>
 					</span>
 				</Row>

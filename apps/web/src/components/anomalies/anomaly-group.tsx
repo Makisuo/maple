@@ -1,11 +1,11 @@
 import { useCallback, useMemo, useState } from "react"
 import type { AnomalyIncidentDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
-import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 import { AnomalyRow } from "./anomaly-row"
 import { SEVERITY_TONE } from "./anomaly-format"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 export type AnomalyGroupKey = "critical" | "warning" | "resolved"
 
@@ -96,13 +96,7 @@ export function AnomalyGroup({
 						<div key={cluster.key + cluster.incidents[0]!.id}>
 							{cluster.incidents.length >= 2 ? (
 								<div className="flex h-7 items-center gap-1.5 border-b border-border/40 bg-muted/20 pl-5 text-[11px] text-muted-foreground">
-									<span
-										aria-hidden
-										className={cn(
-											"size-1.5 shrink-0 rounded-full",
-											getServiceColorClass(cluster.serviceName),
-										)}
-									/>
+									<ServiceDot serviceName={cluster.serviceName} className="size-1.5" />
 									<span className="font-medium text-foreground/80">
 										{cluster.serviceName}
 									</span>

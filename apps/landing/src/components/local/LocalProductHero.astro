@@ -213,8 +213,8 @@ const stats = [
 		display: inline-flex;
 		align-items: center;
 		gap: 7px;
-		border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border));
-		background: color-mix(in oklab, var(--accent) 8%, var(--card));
+		border: 1px solid color-mix(in oklab, var(--primary) 35%, var(--border));
+		background: color-mix(in oklab, var(--primary) 8%, var(--card));
 		border-radius: 999px;
 		padding: 3px 11px 3px 9px;
 		font-family: var(--font-mono);
@@ -222,24 +222,24 @@ const stats = [
 		font-weight: 500;
 		letter-spacing: 0.14em;
 		text-transform: uppercase;
-		color: var(--accent);
+		color: var(--primary);
 	}
 	.lph__badge-dot {
 		width: 6px;
 		height: 6px;
 		border-radius: 999px;
-		background: var(--accent);
-		box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 60%, transparent);
+		background: var(--primary);
+		box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 60%, transparent);
 		animation: lph-ping 2.4s ease-out infinite;
 	}
 
 	.lph__hl-word {
-		color: var(--accent);
+		color: var(--primary);
 		font-style: italic;
 	}
 	.lph__hl {
 		font-family: var(--font-mono);
-		color: var(--accent);
+		color: var(--primary);
 	}
 
 	/* ── Copyable install one-liner ─────────────────────────── */
@@ -265,7 +265,7 @@ const stats = [
 		top: 0;
 		bottom: 0;
 		width: 2px;
-		background: var(--accent);
+		background: var(--primary);
 	}
 	.lph__install code {
 		font-family: var(--font-mono);
@@ -277,7 +277,7 @@ const stats = [
 		white-space: nowrap;
 	}
 	.lph__prompt {
-		color: var(--accent);
+		color: var(--primary);
 		user-select: none;
 	}
 	.lph__copy {
@@ -294,8 +294,8 @@ const stats = [
 		transition: color 140ms ease, border-color 140ms ease;
 	}
 	.lph__copy:hover {
-		color: var(--accent);
-		border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
+		color: var(--primary);
+		border-color: color-mix(in oklab, var(--primary) 50%, var(--border));
 	}
 	.lph__copy.is-done {
 		color: var(--chart-3);
@@ -382,7 +382,7 @@ const stats = [
 	}
 	.lph__row--amber .lph__row-val,
 	.lph__row--amber {
-		color: var(--accent);
+		color: var(--primary);
 	}
 	.lph__row--green .lph__row-val,
 	.lph__row--green {
@@ -398,12 +398,25 @@ const stats = [
 		width: 7px;
 		height: 1em;
 		margin-top: 4px;
-		background: var(--accent);
+		background: var(--primary);
 		vertical-align: -0.15em;
 		opacity: 0;
 		animation:
 			lph-caret-in 1ms linear calc(var(--stream-lead) + 8 * var(--stream-step)) forwards,
-			caret-blink 1.05s steps(1) calc(var(--stream-lead) + 8 * var(--stream-step)) infinite;
+			lph-caret-blink 1.05s steps(1) calc(var(--stream-lead) + 8 * var(--stream-step)) infinite;
+	}
+
+	/* Terminal-style 50/50 blink — scoped so it can't bind to the shared
+	   @theme caret-blink (which eases with a different rhythm). */
+	@keyframes lph-caret-blink {
+		0%,
+		49% {
+			opacity: 1;
+		}
+		50%,
+		100% {
+			opacity: 0;
+		}
 	}
 
 	/* ── Stat strip ─────────────────────────────────────────── */
@@ -475,7 +488,7 @@ const stats = [
 	}
 	@keyframes lph-ping {
 		0% {
-			box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
+			box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent);
 		}
 		70%,
 		100% {

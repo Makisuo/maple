@@ -1,7 +1,6 @@
 import { useMemo } from "react"
-import { toast } from "sonner"
 import { CopyIcon } from "@/components/icons"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { highlightCode } from "@/lib/sugar-high"
 import type { Log } from "@/api/warehouse/logs"
 
@@ -30,7 +29,7 @@ interface LogRawPanelProps {
 
 /** Raw JSON payload of a log, with a copy-to-clipboard control. */
 export function LogRawPanel({ log }: LogRawPanelProps) {
-	const clipboard = useClipboard()
+	const { copy } = useCopyToClipboard("Log JSON")
 	const jsonPayload = buildLogJsonPayload(log)
 	const highlighted = useMemo(() => highlightCode(jsonPayload), [jsonPayload])
 
@@ -40,10 +39,7 @@ export function LogRawPanel({ log }: LogRawPanelProps) {
 				<span className="text-xs font-medium text-muted-foreground">JSON Payload</span>
 				<button
 					type="button"
-					onClick={() => {
-						clipboard.copy(jsonPayload)
-						toast.success("Copied log as JSON")
-					}}
+					onClick={() => copy(jsonPayload)}
 					className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
 				>
 					<CopyIcon size={10} />

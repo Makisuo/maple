@@ -52,7 +52,7 @@ const isPreviewQueryReady = (form: RuleFormState): boolean => {
  * (rootSpansOnly, exclude-services), same no-data semantics.
  */
 export function useAlertRulePreview(
-	form: RuleFormState,
+	form: RuleFormState | null,
 	range?: { startTime: string; endTime: string },
 ): AlertRulePreviewState {
 	// Callers that own a page-level time window (the rule detail page) pass it in;
@@ -65,7 +65,7 @@ export function useAlertRulePreview(
 	const deferredForm = useDeferredValue(form)
 
 	const payload = useMemo(() => {
-		if (!isPreviewQueryReady(deferredForm)) return null
+		if (deferredForm === null || !isPreviewQueryReady(deferredForm)) return null
 		try {
 			// The upsert schema requires a non-empty name; the preview doesn't care,
 			// so substitute a placeholder while the user hasn't typed one yet.
@@ -100,8 +100,9 @@ export function useAlertRulePreview(
 
 	return useMemo(() => {
 		if (!payload) {
-			// Unpreviewable state: surface the compile issue inline when there is one.
-			const issues = deriveRuleQueryIssues(deferredForm)
+			// No form yet (rule still resolving) is not an authoring error — stay clean.
+			// A present-but-unpreviewable form surfaces its compile issue inline.
+			const issues = deferredForm === null ? [] : deriveRuleQueryIssues(deferredForm)
 			return { preview: null, previewLoading: false, previewError: issues[0] ?? null }
 		}
 		return Result.builder(result)

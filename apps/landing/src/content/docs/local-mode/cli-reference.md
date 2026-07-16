@@ -40,19 +40,35 @@ Local mode only. `maple start` is the long-lived process that owns the embedded 
 
 Start the local ingest + query server (embedded ClickHouse via chDB).
 
-| Flag                 | Default         | Description                                                                         |
-| -------------------- | --------------- | ----------------------------------------------------------------------------------- |
-| `--port <int>`       | `4318`          | Port for OTLP/HTTP ingest, the query API, and the bundled UI                        |
-| `--data-dir <path>`  | `~/.maple/data` | Embedded ClickHouse data directory                                                  |
-| `--offline`          | `false`         | Serve the UI bundled in this binary (from `127.0.0.1`) instead of `local.maple.dev` |
-| `--background`, `-d` | `false`         | Run detached (logs to `~/.maple/maple.log`); stop with `maple stop`                 |
-| `--reset`            | `false`         | Wipe the existing store before starting — use after an incompatible upgrade         |
+| Flag                                                | Default         | Description                                                                         |
+| --------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------- |
+| `--port <int>`                                      | `4318`          | Port for OTLP/HTTP ingest, the query API, and the bundled UI                        |
+| `--data-dir <path>`                                 | `~/.maple/data` | Embedded ClickHouse data directory                                                  |
+| `--chdb-config-file <path>`                         |                 | Optional ClickHouse config file passed to embedded chDB                             |
+| `--offline`                                         | `false`         | Serve the UI bundled in this binary (from `127.0.0.1`) instead of `local.maple.dev` |
+| `--background`, `-d`                                | `false`         | Run detached (logs to `~/.maple/maple.log`); stop with `maple stop`                 |
+| `--reset`                                           | `false`         | Wipe live chDB data while preserving checkpoints                                    |
+| `--on-dirty-store <wipe\|fail\|restore-checkpoint>` | `fail`          | Recovery policy when the store was not cleanly closed                               |
 
 ```bash
 maple start                    # foreground, UI from local.maple.dev
 maple start --offline          # foreground, bundled UI, no internet needed
 maple start -d --port 4400     # detached on a custom port
 ```
+
+Detached startup forwards the selected `--on-dirty-store` policy unchanged to
+the foreground child. Before any reset, compatibility check, dirty-store
+decision, or data-directory creation, startup reconciles a recorded reset or
+checkpoint-restore transaction. Ambiguous, malformed, or conflicting
+transaction state fails closed and prints the preserved paths.
+
+The default dirty-store policy is `fail`, so an unclean shutdown never silently
+deletes telemetry. Choose `restore-checkpoint` to recover the selected
+checkpoint, or explicitly choose `wipe` to discard only live chDB data.
+Checkpoint snapshots, pins, operation evidence, and quarantine state under
+`<data-dir>/backups` are preserved by both `--reset` and explicit wipe.
+Schema-incompatible stores also fail closed until an operator explicitly
+resets live data.
 
 ### `maple stop`
 
@@ -64,12 +80,95 @@ Stop a running `maple start` server (reads the PID file beside the data dir).
 
 ### `maple reset`
 
-Delete the local chDB store so the next `maple start` bootstraps fresh. Refuses to run while a server still owns the store.
+Delete live chDB data so the next `maple start` bootstraps fresh. The checkpoint
+registry under `<data-dir>/backups` is preserved. Refuses to run while a server
+still owns the store.
+
+Reset is journaled beside the data directory and removes only the chDB-owned
+top-level directories produced by the bundled native build (`data`, `metadata`,
+`store`, and `tmp`). If any other entry exists, reset preserves everything and
+fails with the unrecognized paths so an operator can inspect them. Startup
+finishes an interrupted recorded reset before it evaluates store compatibility
+or cleanliness.
 
 | Flag                | Default         | Description                  |
 | ------------------- | --------------- | ---------------------------- |
-| `--data-dir <path>` | `~/.maple/data` | Store to delete              |
+| `--data-dir <path>` | `~/.maple/data` | Store whose live data clears |
 | `--yes`, `-y`       | `false`         | Skip the confirmation prompt |
+
+### `maple checkpoint`
+
+Create and validate a restorable checkpoint of the local chDB store. The running
+server must have been started with a chDB config that allows ClickHouse backups:
+
+```xml
+<clickhouse>
+  <backups>
+    <allowed_disk>default</allowed_disk>
+    <allowed_path>backups</allowed_path>
+  </backups>
+</clickhouse>
+```
+
+```bash
+maple start --chdb-config-file ./chdb-backups.xml
+maple checkpoint
+```
+
+Every completed checkpoint receives an immutable UUID and is written under:
+
+```text
+<data-dir>/backups/
+  state.json
+  snapshots/<checkpoint-id>/
+    backup/
+    manifest.json
+  operations/
+  pins/
+  quarantine/
+  retiring/
+```
+
+`state.json` is the only authority for the selected `current` and `previous`
+IDs. Maple writes and syncs a strict versioned manifest only after restoring
+the native backup into one sacrificial chDB and validating all six raw telemetry
+tables. It then selects the snapshot with a synced atomic state-file
+replacement. A third checkpoint retires the old previous snapshot only when it
+is complete, compatible, unreferenced, and unpinned; uncertain state is
+preserved.
+
+The earlier unreleased `backups/{building,current,previous}` preview layout is
+not inferred or deleted. If it is present without a valid new state pointer,
+checkpoint commands fail closed and report the paths for operator inspection.
+Missing, malformed, incompatible, incomplete, or symlinked checkpoint state is
+also rejected rather than guessed.
+
+### `maple restore`
+
+Restore the local chDB store from the last promoted checkpoint. Refuses to run
+while a server still owns the store. The existing store is moved aside for
+quarantine rather than deleted.
+
+| Flag                     | Default          | Description                         |
+| ------------------------ | ---------------- | ----------------------------------- |
+| `--data-dir <path>`      | `~/.maple/data`  | Store to restore                    |
+| `--checkpoint-id <uuid>` | selected current | Restore one immutable checkpoint ID |
+| `--yes`, `-y`            | `false`          | Skip the confirmation prompt        |
+
+Restore uses a collision-resistant working path and quarantine, and records a
+durable sibling transaction before changing the live directory. Reconciliation
+can resume the recorded quarantine, live swap, and marker-update boundaries
+idempotently. The displaced live store is never deleted. Unrecorded or
+mismatched restore-like paths fail closed without mutation.
+
+```bash
+maple restore --yes
+maple restore --checkpoint-id 01234567-89ab-4cde-8fab-0123456789ab --yes
+```
+
+Checkpoint and restore operations share one maintenance lock. A live owner is
+reported as busy; uncertain ownership is preserved and blocks destructive
+maintenance.
 
 ## Services
 
@@ -329,7 +428,7 @@ The on-disk config at `~/.maple/config.json` stores `apiUrl`, `token`, `orgId`, 
 
 **`maple is already running (PID …)`.** A server already owns this data dir. Stop it with `maple stop`, or start a second instance on another port and data dir: `maple start --port 4400 --data-dir ~/.maple/data-2`.
 
-**Incompatible store after an upgrade.** If a new binary refuses to open an older store (`the local store … is incompatible`), wipe it with `maple reset`, or start fresh in one step with `maple start --reset`.
+**Incompatible store after an upgrade.** If a new binary refuses to open an older store (`the local store … is incompatible`), explicitly clear live data with `maple reset --yes`, or start fresh in one step with `maple start --reset`. Both preserve the checkpoint registry; incompatible checkpoints remain preserved and fail closed until deliberately handled.
 
 **Browser asks to "access devices on your local network" (or CORS errors).** The default dashboard at `local.maple.dev` is a public origin reaching your loopback server, which trips Chrome's Private Network Access gate. Run `maple start --offline` to serve the dashboard same-origin from `127.0.0.1` — no prompt, no internet needed.
 

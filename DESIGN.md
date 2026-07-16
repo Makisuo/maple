@@ -4,8 +4,8 @@ description: Open-source OpenTelemetry observability platform — terminal-nativ
 colors:
     primary: "oklch(0.714 0.154 59)"
     primary-foreground: "oklch(0.207 0.008 67)"
-    primary-light: "oklch(0.59 0.14 242)"
-    primary-light-foreground: "oklch(0.98 0.01 237)"
+    primary-light: "oklch(0.66 0.16 59)"
+    primary-light-foreground: "oklch(0.21 0.008 67)"
     background: "oklch(0.207 0.008 67)"
     foreground: "oklch(0.91 0.016 74)"
     card: "oklch(0.224 0.009 75)"
@@ -147,12 +147,16 @@ The shared visual posture is **Linear / Vercel / Axiom adjacent**: compact app s
 
 ## 2. Colors: The Operator Palette
 
-The palette is **theme-divergent on purpose**. Light mode anchors on a vivid blue primary (`oklch(0.59 0.14 242)`); dark mode rebases on a warm amber-gold primary (`oklch(0.714 0.154 59)`). Both are correct — neither is the "true" Maple color. The dark theme is canonical for the frontmatter (matches `<body class="dark">`); light tokens travel alongside in the `.dark` ↔ `:root` swap.
+The palette is **theme-tuned, same hue**. Both themes anchor on Maple's warm amber (hue ~59): dark mode uses `oklch(0.714 0.154 59)`, light mode the same hue tuned slightly deeper (`oklch(0.66 0.16 59)`) so it reads on a white canvas. The dark theme is canonical for the frontmatter (matches `<body class="dark">`); light tokens travel alongside in the `.dark` ↔ `:root` swap.
+
+### Token source of truth
+
+All shared design tokens (color, radius, fonts, severity/service/chart palettes, the `@theme inline` mapping) live in **`packages/ui/src/styles/tokens.css`** and are imported by both `apps/web` and `apps/landing` via `@import "@maple/ui/styles/tokens.css"` (after `@import "tailwindcss"`). Apps must never re-declare a shared token name — `bun run check:tokens` fails CI if they do. App-local tokens stay in the apps: web's Sugar High `--sh-*` set, landing's marketing set (`--bg-elevated`, `--bg-deep`, `--amber-deep`, `--amber-soft`). Landing is dark-only: it pins `class="dark"` on `<html>` instead of maintaining its own token copy. The ReactFlow controls chrome (flat, square corners, `border-radius: 0`) is part of the shared file — the product rendering is the reference for landing mockups.
 
 ### Primary
 
 - **Amber Signal** (`oklch(0.714 0.154 59)`, dark canonical): the accent used on primary actions, the active sidebar item, `chart-1` / `chart-p95`, and severity-warn. Warm enough to read at low ambient light without burning. (Note: `chart-throughput` used to share this hue, but was split to purple — `oklch(0.66 0.14 290)` — so the built-in alert signal chips can distinguish throughput from p95.)
-- **Blue Beacon** (`oklch(0.59 0.14 242)`, light counterpart): the same role under light theme. Vivid blue, full chroma at a mid-lightness — feels appropriate in daylight, would feel hostile in a dim room (hence the swap).
+- **Amber Signal, daylight cut** (`oklch(0.66 0.16 59)`, light counterpart): the same role and hue under light theme, a touch deeper and more chromatic so it holds contrast on white. (An earlier draft used a blue light primary; it shipped briefly as stale shadcn tokens and was rebased to amber.)
 
 ### Secondary: Severity Ramp (the system's loudest semantic color)
 

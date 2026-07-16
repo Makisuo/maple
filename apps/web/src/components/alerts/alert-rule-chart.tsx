@@ -62,12 +62,12 @@ interface AlertRuleChartProps {
 }
 
 const SINGLE_KEY = "value"
-const CHART_HEIGHT = 240
+const CHART_HEIGHT = 300
 
 type ChartPoint = { t: number } & Record<string, number | null>
 type SignalSource = "preview" | "checks" | "none"
-const Y_AXIS_WIDTH = 62
-const PLOT_RIGHT = 8
+const Y_AXIS_WIDTH = 72
+const PLOT_RIGHT = 12
 const RAIL_CELLS = 60
 
 type RailStatus = "breached" | "error" | "skipped" | "healthy" | "empty"
@@ -506,7 +506,7 @@ export function AlertRuleChart({
 				{isMultiSeries && (
 					<Legend
 						verticalAlign="top"
-						height={28}
+						height={32}
 						iconType="circle"
 						iconSize={8}
 						wrapperStyle={{ overflowX: "auto", overflowY: "hidden", whiteSpace: "nowrap" }}
@@ -514,17 +514,14 @@ export function AlertRuleChart({
 					/>
 				)}
 
+				{/* Dashed threshold line(s) only — the labels live in the caption below
+				    the plot so they can't clip at the right edge or collide with the
+				    legend/series. */}
 				<ReferenceLine
 					y={threshold}
 					stroke="var(--destructive)"
 					strokeDasharray="6 4"
 					strokeWidth={1.5}
-					label={{
-						value: `Threshold ${formatSignalValue(signalType, threshold)}`,
-						position: "insideTopRight",
-						fill: "var(--destructive)",
-						fontSize: 11,
-					}}
 				/>
 				{thresholdUpper != null && (
 					<ReferenceLine
@@ -532,12 +529,6 @@ export function AlertRuleChart({
 						stroke="var(--destructive)"
 						strokeDasharray="6 4"
 						strokeWidth={1.5}
-						label={{
-							value: `Upper ${formatSignalValue(signalType, thresholdUpper)}`,
-							position: "insideBottomRight",
-							fill: "var(--destructive)",
-							fontSize: 11,
-						}}
 					/>
 				)}
 
@@ -585,6 +576,28 @@ export function AlertRuleChart({
 	return (
 		<div className={cn("space-y-2", className)}>
 			{chartArea}
+
+			{hasSignal && (
+				<div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+					<span
+						aria-hidden
+						className="inline-block h-0 w-4 shrink-0 border-t-[1.5px] border-dashed border-destructive"
+					/>
+					<span>
+						{thresholdUpper != null
+							? "Threshold range "
+							: breachBelow
+								? "Breach below "
+								: "Breach above "}
+						<span className="font-mono font-medium text-foreground">
+							{formatSignalValue(signalType, threshold)}
+							{thresholdUpper != null
+								? ` – ${formatSignalValue(signalType, thresholdUpper)}`
+								: ""}
+						</span>
+					</span>
+				</div>
+			)}
 
 			{hasSignal && error != null && source === "checks" && (
 				<p className="text-[11px] text-muted-foreground">

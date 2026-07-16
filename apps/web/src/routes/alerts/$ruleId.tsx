@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
@@ -23,7 +24,6 @@ import {
 	signalLabels,
 	comparatorLabels,
 	formatSignalValue,
-	defaultRuleForm,
 	ruleToFormState,
 	formatAlertDateTimeFull,
 	formatAlertDuration,
@@ -225,7 +225,9 @@ function RuleDetailContent() {
 		[startTime, endTime],
 	)
 
-	const formState = useMemo(() => (rule ? ruleToFormState(rule) : defaultRuleForm()), [rule])
+	// null until the rule resolves — keeps the chart from firing a throwaway preview
+	// for the default form (and flashing a wrong chart) before we know the real rule.
+	const formState = useMemo(() => (rule ? ruleToFormState(rule) : null), [rule])
 	const { preview, previewLoading, previewError } = useAlertRulePreview(formState, {
 		startTime,
 		endTime,
@@ -243,9 +245,15 @@ function RuleDetailContent() {
 			<DashboardLayout
 				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}
 			>
-				<div className="space-y-4">
-					<Skeleton className="h-12 w-1/3" />
-					<Skeleton className="h-48 w-full" />
+				{/* Mirror the settled Overview rhythm so the first paint doesn't snap. */}
+				<div className="space-y-6">
+					<Skeleton className="h-14 w-full" />
+					<div className="space-y-2">
+						<Skeleton className="h-3.5 w-40" />
+						<Skeleton className="h-[300px] w-full" />
+					</div>
+					<Skeleton className="h-52 w-full" />
+					<Skeleton className="h-64 w-full" />
 				</div>
 			</DashboardLayout>
 		)
@@ -265,7 +273,7 @@ function RuleDetailContent() {
 						<EmptyTitle>Failed to load alert rule</EmptyTitle>
 						<EmptyDescription>
 							{Result.builder(rulesResult)
-								.onError((error) => error.message)
+								.onError((error) => formatBackendError(error).description)
 								.orElse(() => undefined) ?? "Try refreshing or check API logs."}
 						</EmptyDescription>
 					</EmptyHeader>
@@ -421,7 +429,11 @@ function RuleDetailContent() {
 						/>
 					</div>
 
-					{overviewIncident ? (
+					{/* Reserve the slot while incidents sync so the card doesn't pop in
+					    and shove Configuration + Checks down once it resolves. */}
+					{Result.isInitial(incidentsResult) ? (
+						<Skeleton className="h-40 w-full" />
+					) : overviewIncident ? (
 						<AiTriageCard
 							incidentKind="alert"
 							incidentId={overviewIncident.id}
@@ -575,7 +587,7 @@ function RuleDetailContent() {
 										</EmptyMedia>
 										<EmptyTitle>Failed to load checks</EmptyTitle>
 										<EmptyDescription>
-											{error.message ?? "Try refreshing or check API logs."}
+											{formatBackendError(error).description}
 										</EmptyDescription>
 									</EmptyHeader>
 									<Button variant="outline" size="sm" onClick={() => refreshChecks()}>
@@ -612,7 +624,7 @@ function RuleDetailContent() {
 								</EmptyMedia>
 								<EmptyTitle>Failed to load incidents</EmptyTitle>
 								<EmptyDescription>
-									{error.message ?? "Try refreshing or check API logs."}
+									{formatBackendError(error).description}
 								</EmptyDescription>
 							</EmptyHeader>
 							<Button variant="outline" size="sm" onClick={() => refreshIncidents()}>
@@ -621,7 +633,7 @@ function RuleDetailContent() {
 						</Empty>
 					))
 					.onSuccess(() => (
-						<div className="space-y-6">
+						<div className="space-y-6 content-enter">
 							<div className="flex items-center justify-between">
 								<div>
 									<h2 className="text-lg font-semibold">History</h2>
@@ -875,6 +887,38 @@ function ConfigRow({ label, children, wide }: { label: string; children: React.R
 	)
 }
 
+/**
+ * Signed distance of an observed value from its threshold — the "how far over"
+ * that a bare value/threshold pair leaves the reader to compute. Tinted red on a
+ * breach, muted otherwise; hidden when there's no gap.
+ */
+function CheckDelta({
+	signalType,
+	observed,
+	threshold,
+	breached,
+}: {
+	signalType: AlertRuleDocument["signalType"]
+	observed: number
+	threshold: number
+	breached: boolean
+}) {
+	const delta = observed - threshold
+	if (!Number.isFinite(delta) || delta === 0) return null
+	const sign = delta > 0 ? "+" : "−"
+	return (
+		<span
+			className={cn(
+				"rounded px-1 py-px font-mono text-[10px] tabular-nums",
+				breached ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
+			)}
+		>
+			{sign}
+			{formatSignalValue(signalType, Math.abs(delta))}
+		</span>
+	)
+}
+
 type CheckStatusFilter = "all" | "breached" | "healthy" | "skipped" | "error"
 
 function ChecksPanel({
@@ -910,6 +954,10 @@ function ChecksPanel({
 		if (statusFilter === "all") return checks
 		return checks.filter((c) => c.status === statusFilter)
 	}, [checks, statusFilter])
+
+	// Ungrouped rules evaluate a single "all" series, so a Group column is a wall
+	// of "all" — only show it when the rule actually fans out per group.
+	const isGrouped = (rule.groupBy?.length ?? 0) > 0
 
 	if (loading) {
 		return (
@@ -979,14 +1027,12 @@ function ChecksPanel({
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead className="w-[180px]">Time</TableHead>
+							<TableHead className="w-[170px]">Time</TableHead>
 							<TableHead className="w-[110px]">Status</TableHead>
-							<TableHead className="w-[110px]">Value</TableHead>
-							<TableHead className="w-[110px]">Threshold</TableHead>
+							<TableHead>Value / threshold</TableHead>
 							<TableHead className="w-[90px]">Samples</TableHead>
-							<TableHead>Group</TableHead>
+							{isGrouped && <TableHead className="w-[160px]">Group</TableHead>}
 							<TableHead className="w-[140px]">Incident</TableHead>
-							<TableHead className="w-[80px]">Eval ms</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -1006,8 +1052,17 @@ function ChecksPanel({
 											? "text-muted-foreground"
 											: ""
 							return (
-								<TableRow key={`${check.timestamp}-${check.groupKey}`}>
-									<TableCell className="font-mono text-xs">
+								<TableRow
+									key={`${check.timestamp}-${check.groupKey}`}
+									className={cn(
+										check.status === "breached" && "bg-destructive/[0.04]",
+										check.status === "error" && "bg-warning/[0.05]",
+									)}
+								>
+									<TableCell
+										className="font-mono text-xs"
+										title={`Evaluated in ${check.evaluationDurationMs}ms`}
+									>
 										{new Date(check.timestamp).toLocaleString()}
 									</TableCell>
 									<TableCell>
@@ -1024,27 +1079,46 @@ function ChecksPanel({
 											}
 										/>
 									</TableCell>
-									<TableCell className="font-mono tabular-nums">
+									<TableCell>
 										{check.status === "error" ? (
 											<span
-												className="block max-w-[260px] truncate font-sans text-destructive text-xs"
+												className="block max-w-[320px] truncate text-destructive text-xs"
 												title={check.errorMessage ?? undefined}
 											>
 												{check.errorMessage ?? "Evaluation failed"}
 											</span>
 										) : check.observedValue == null ? (
-											"—"
+											<span className="text-muted-foreground">—</span>
 										) : (
-											formatSignalValue(rule.signalType, check.observedValue)
+											<div className="flex items-baseline gap-2">
+												<span
+													className={cn(
+														"font-mono font-medium tabular-nums",
+														check.status === "breached" && "text-destructive",
+													)}
+												>
+													{formatSignalValue(rule.signalType, check.observedValue)}
+												</span>
+												<span className="font-mono text-xs text-muted-foreground/60 tabular-nums">
+													/ {formatSignalValue(rule.signalType, check.threshold)}
+												</span>
+												<CheckDelta
+													signalType={rule.signalType}
+													observed={check.observedValue}
+													threshold={check.threshold}
+													breached={check.status === "breached"}
+												/>
+											</div>
 										)}
 									</TableCell>
-									<TableCell className="font-mono tabular-nums text-muted-foreground">
-										{formatSignalValue(rule.signalType, check.threshold)}
+									<TableCell className="tabular-nums text-muted-foreground">
+										{check.sampleCount}
 									</TableCell>
-									<TableCell className="tabular-nums">{check.sampleCount}</TableCell>
-									<TableCell className="font-mono text-muted-foreground">
-										{check.groupKey || "all"}
-									</TableCell>
+									{isGrouped && (
+										<TableCell className="font-mono text-muted-foreground">
+											{check.groupKey || "all"}
+										</TableCell>
+									)}
 									<TableCell>
 										{check.incidentTransition === "none" ? (
 											<span className="text-muted-foreground">–</span>
@@ -1056,9 +1130,6 @@ function ChecksPanel({
 												{check.incidentTransition}
 											</Badge>
 										)}
-									</TableCell>
-									<TableCell className="tabular-nums text-muted-foreground">
-										{check.evaluationDurationMs}
 									</TableCell>
 								</TableRow>
 							)

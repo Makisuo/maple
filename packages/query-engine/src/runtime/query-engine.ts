@@ -733,7 +733,7 @@ const tracesAggregateValueForMetric = (
 ): number => Number(row[tracesMetricFieldMap[metric]])
 
 const metricsAggregateValueForMetric = (
-	metric: Extract<QuerySpec, { source: "metrics" }>["metric"],
+	metric: Extract<QuerySpec, { source: "metrics"; metric: string }>["metric"],
 	row: {
 		readonly avgValue?: number
 		readonly minValue?: number
@@ -1183,6 +1183,70 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					kind: "timeseries",
 					source: "metrics",
 					data,
+				},
+			})
+		}
+
+		if (request.query.source === "metrics" && request.query.kind === "sparklines") {
+			const metricNames = [...new Set(request.query.metricNames)]
+			if (metricNames.length > 50) {
+				return yield* new QueryEngineValidationError({
+					message: "Too many metrics in one sparklines request",
+					details: ["metricNames must contain at most 50 names per request"],
+				})
+			}
+			if (metricNames.length === 0) {
+				return new QueryEngineExecuteResponse({
+					result: { kind: "sparklines", source: "metrics", data: [] },
+				})
+			}
+
+			const sparklineBucketSeconds =
+				request.query.bucketSeconds ?? computeBucketSeconds(range.startMs, range.endMs)
+			yield* Effect.annotateCurrentSpan("query.bucketSeconds", sparklineBucketSeconds)
+			yield* Effect.annotateCurrentSpan("query.metricCount", metricNames.length)
+
+			const rows = yield* executeCHQuery(
+				warehouse,
+				tenant,
+				CH.metricsSparklinesQuery({
+					metricType: request.query.metricType,
+					metricNames,
+				}),
+				{
+					orgId: tenant.orgId,
+					startTime: request.startTime,
+					endTime: request.endTime,
+					bucketSeconds: sparklineBucketSeconds,
+				},
+				"metricsSparklines",
+			)
+
+			// Numbers are coerced here (not via a rowSchema) because BYO-ClickHouse
+			// serializes 64-bit aggregates as JSON strings.
+			const pointsByMetric = new Map<
+				string,
+				Array<{ bucket: string; avgValue: number; sumValue: number; dataPointCount: number }>
+			>()
+			for (const row of rows) {
+				const points = pointsByMetric.get(row.metricName) ?? []
+				if (points.length === 0) pointsByMetric.set(row.metricName, points)
+				points.push({
+					bucket: String(row.bucket),
+					avgValue: Number(row.avgValue),
+					sumValue: Number(row.sumValue),
+					dataPointCount: Number(row.dataPointCount),
+				})
+			}
+
+			return new QueryEngineExecuteResponse({
+				result: {
+					kind: "sparklines",
+					source: "metrics",
+					data: metricNames.map((metricName) => ({
+						metricName,
+						points: pointsByMetric.get(metricName) ?? [],
+					})),
 				},
 			})
 		}

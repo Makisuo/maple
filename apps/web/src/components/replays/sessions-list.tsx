@@ -1,14 +1,7 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useRef } from "react"
 import { useNavigate } from "@tanstack/react-router"
-import {
-	GlobeIcon,
-	ComputerIcon,
-	MobileIcon,
-	ClockIcon,
-	PulseIcon,
-	CircleWarningIcon,
-	EyeIcon,
-} from "@/components/icons"
+import { GlobeIcon, ClockIcon, PulseIcon, CircleWarningIcon, EyeIcon } from "@/components/icons"
+import { browserIconFor, deviceIconFor } from "./session-icons"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { formatDuration, gradientFor, hostFromUrl } from "./replay-format"
 
@@ -61,11 +54,6 @@ function identity(session: SessionRow): { label: string; initial: string; gradie
 	}
 }
 
-function isMobileDevice(deviceType: string): boolean {
-	const d = deviceType.toLowerCase()
-	return d === "mobile" || d === "tablet" || d === "phone"
-}
-
 interface SessionsListProps {
 	sessions: ReadonlyArray<SessionRow>
 	/** Fetch the next page — invoked when the bottom sentinel scrolls into view. */
@@ -76,21 +64,33 @@ interface SessionsListProps {
 	loadingMore?: boolean
 }
 
-export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMore = false }: SessionsListProps) {
+export function SessionsList({
+	sessions,
+	onReachEnd,
+	hasMore = false,
+	loadingMore = false,
+}: SessionsListProps) {
 	const navigate = useNavigate()
 
 	// Auto-load the next page when the bottom sentinel nears the viewport. Guards
 	// live in refs so the observer is created once yet always reads fresh values;
 	// appending a full page pushes the sentinel out of view and re-arms it.
-	const sentinelRef = useRef<HTMLDivElement | null>(null)
 	const onReachEndRef = useRef(onReachEnd)
 	onReachEndRef.current = onReachEnd
 	const canLoadRef = useRef(false)
 	canLoadRef.current = hasMore && !loadingMore
+	const observerRef = useRef<IntersectionObserver | null>(null)
 
-	useEffect(() => {
-		const el = sentinelRef.current
-		if (!el) return
+	// Attach the observer via a callback ref so it follows the sentinel's
+	// existence: the sentinel only renders while `hasMore`, so a mount with
+	// hasMore=false that later flips true (a live append while this branch stays
+	// mounted) would never arm a mount-time observer, silently stopping paging.
+	const sentinelRef = useCallback((el: HTMLDivElement | null) => {
+		observerRef.current?.disconnect()
+		if (!el) {
+			observerRef.current = null
+			return
+		}
 		const observer = new IntersectionObserver(
 			(entries) => {
 				if (entries[0]?.isIntersecting && canLoadRef.current) {
@@ -100,7 +100,7 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 			{ rootMargin: "400px 0px" },
 		)
 		observer.observe(el)
-		return () => observer.disconnect()
+		observerRef.current = observer
 	}, [])
 
 	if (sessions.length === 0) {
@@ -126,11 +126,12 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 	}
 
 	return (
-		<div className="space-y-2">
+		<div className="@container space-y-2">
 			{sessions.map((session) => {
 				const id = identity(session)
 				const isActive = session.status === "active"
-				const DeviceIcon = isMobileDevice(session.deviceType) ? MobileIcon : ComputerIcon
+				const BrowserIcon = browserIconFor(session.browserName)
+				const DeviceIcon = deviceIconFor(session.deviceType)
 				return (
 					<button
 						type="button"
@@ -142,46 +143,70 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 								search: { t: session.startTime },
 							})
 						}
-						className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-accent/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:gap-4"
+						className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-left transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-accent/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @2xl:gap-4 @2xl:px-4"
 					>
 						<div
-							className={`grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-br ${id.gradient} text-sm font-semibold text-white shadow-sm`}
+							className={`grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br ${id.gradient} text-sm font-semibold text-white shadow-sm @2xl:size-10`}
 						>
 							{id.initial}
 						</div>
 
 						<div className="min-w-0 flex-1">
 							<div className="flex items-center gap-2">
-								<span className="max-w-[16rem] truncate text-sm font-medium">{id.label}</span>
+								<span className="min-w-0 truncate text-sm font-medium @2xl:max-w-[16rem]">
+									{id.label}
+								</span>
 								<StatusDot active={isActive} />
-								<span className="font-mono text-xs text-muted-foreground">
+								<span className="hidden shrink-0 font-mono text-xs text-muted-foreground @2xl:inline">
 									{session.sessionId.slice(0, 8)} · {formatDuration(session.durationMs)}
+								</span>
+								{/* On phones the right-hand columns are gone, so the timestamp
+								    anchors the top-right corner of the stacked row. */}
+								<span
+									className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground @2xl:hidden"
+									title={absoluteTs(session.startTime)}
+								>
+									{formatRelative(session.startTime)}
 								</span>
 							</div>
 							<div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+								<span className="shrink-0 font-mono @2xl:hidden">
+									{session.sessionId.slice(0, 8)} · {formatDuration(session.durationMs)}
+								</span>
 								<span className="flex min-w-0 items-center gap-1.5">
 									<GlobeIcon className="size-3.5 shrink-0 opacity-60" />
-									<span className="max-w-[18rem] truncate">
+									<span className="min-w-0 truncate @2xl:max-w-[18rem]">
 										{hostFromUrl(session.urlInitial)}
 									</span>
 								</span>
-								<span className="hidden items-center gap-1.5 sm:flex">
-									<DeviceIcon className="size-3.5 shrink-0 opacity-60" />
+								<span className="hidden items-center gap-1.5 @2xl:flex">
+									<BrowserIcon className="size-3.5 shrink-0" />
 									<span className="truncate">
 										{session.browserName || "Unknown"}
 										{session.osName ? ` · ${session.osName}` : ""}
 									</span>
 								</span>
+								<span
+									className="hidden shrink-0 @2xl:block"
+									title={session.deviceType || "desktop"}
+								>
+									<DeviceIcon className="size-3.5 opacity-60" />
+								</span>
 								{session.country && (
-									<span className="hidden truncate md:inline">{session.country}</span>
+									<span className="hidden truncate @3xl:inline">{session.country}</span>
 								)}
 							</div>
+							{(session.traceCount > 0 || session.errorCount > 0) && (
+								<div className="mt-1.5 flex items-center gap-2 @2xl:hidden">
+									<SessionBadges session={session} />
+								</div>
+							)}
 						</div>
 
-						<div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground sm:gap-2.5">
+						<div className="hidden shrink-0 items-center gap-2.5 text-xs text-muted-foreground @2xl:flex">
 							{/* Click/page-view counts are low-signal — drop them on phones and
 							    keep the load-bearing trace/error badges. */}
-							<span className="hidden items-center gap-2.5 sm:flex">
+							<span className="flex items-center gap-2.5">
 								<Stat
 									icon={<PulseIcon className="size-3.5" />}
 									value={session.clickCount}
@@ -193,28 +218,20 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 									title="page views"
 								/>
 							</span>
-							{session.traceCount > 0 && (
-								<span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 font-medium tabular-nums text-primary">
-									{session.traceCount} trace{session.traceCount === 1 ? "" : "s"}
-								</span>
-							)}
-							{session.errorCount > 0 && (
-								<span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 font-medium tabular-nums text-destructive">
-									<CircleWarningIcon className="size-3" />
-									{session.errorCount}
-								</span>
-							)}
+							<SessionBadges session={session} />
 						</div>
 
-						<div className="flex shrink-0 items-center gap-2 sm:gap-3">
+						<div className="hidden shrink-0 items-center gap-3 @2xl:flex">
 							<span
 								className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-muted-foreground"
 								title={absoluteTs(session.startTime)}
 							>
-								<ClockIcon className="hidden size-3.5 opacity-60 sm:inline" />
+								<ClockIcon className="size-3.5 opacity-60" />
 								{formatRelative(session.startTime)}
 							</span>
-							{/* Tap affordance: hover-revealed on desktop, always shown on touch. */}
+							{/* Tap affordance: hover-revealed on desktop. Phones skip it —
+							    the whole card is the tap target and the stacked row needs
+							    every horizontal pixel. */}
 							<span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
 								<PlayGlyph />
 							</span>
@@ -232,6 +249,24 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 				</div>
 			)}
 		</div>
+	)
+}
+
+function SessionBadges({ session }: { session: SessionRow }) {
+	return (
+		<>
+			{session.traceCount > 0 && (
+				<span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-xs font-medium tabular-nums text-primary">
+					{session.traceCount} trace{session.traceCount === 1 ? "" : "s"}
+				</span>
+			)}
+			{session.errorCount > 0 && (
+				<span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 text-xs font-medium tabular-nums text-destructive">
+					<CircleWarningIcon className="size-3" />
+					{session.errorCount}
+				</span>
+			)}
+		</>
 	)
 }
 

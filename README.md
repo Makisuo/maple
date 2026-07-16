@@ -97,26 +97,38 @@ Services:
 
 ## Cloudflare Deploy (Alchemy)
 
-Deployments are per-app Alchemy runs pinned to Cloudflare Workers + D1:
+Deployments run on **Alchemy v2** (Effect-based): the root `alchemy.run.ts` exports a
+single `Alchemy.Stack("maple", …)` whose program composes per-app factories:
 
-- `apps/api/alchemy.run.ts` — D1 database `MAPLE_DB` + api Worker with all env bindings
-- `apps/landing/alchemy.run.ts` — Astro build + Worker serving static assets
-- `apps/web/alchemy.run.ts` — TanStack Start app via the `Vite()` resource
+- `apps/api/alchemy.run.ts` — Hyperdrive (PlanetScale Postgres) `MAPLE_DB`, KV, queue,
+  workflows + api Worker with all env bindings
+- `apps/alerting/alchemy.run.ts` — cron-driven alerting Worker (cross-script workflow ref)
+- `apps/chat-flue/alchemy.run.ts` — Flue chat Worker (prebuilt bundle, Durable Objects, AI)
+- `apps/electric-sync/alchemy.run.ts` — ElectricSQL shape-proxy Worker
+- `apps/web/alchemy.run.ts` / `apps/landing/alchemy.run.ts` / `apps/local-ui/alchemy.run.ts`
+  — static builds via `Command.Build` + asset-serving Workers
 
-Stage grammar is `prd` / `stg` / `pr-<number>`, resolved via `@maple/infra/cloudflare` (`parseMapleStage`, `resolveMapleDomains`, `resolveWorkerName`, `resolveD1Name`).
+Stage grammar is `prd` / `stg` / `pr-<number>` / dev names, resolved via
+`@maple/infra/cloudflare` (`parseMapleStage`, `resolveMapleDomains`, `resolveWorkerName`,
+`resolveHyperdriveName`, `resolveHyperdriveRefId`). stg/prd bind the dashboard-managed
+Hyperdrive by config ID (`resolveHyperdriveRefId`) — origin credentials never touch a
+deploy and `MAPLE_PG_URL` is only needed for pr/dev stages, whose per-branch Hyperdrive
+alchemy manages itself.
 
 Run locally:
 
 ```bash
-bun run alchemy:deploy:prd
 bun run alchemy:deploy:stg
 PR_NUMBER=123 bun run alchemy:deploy:pr
 ```
 
+The first v2 deploy against a stage with live v1-created resources needs `--adopt`
+(the pr script passes it already); v1 state is incompatible and simply abandoned —
+never run a v1 `alchemy destroy` against a live stage.
+
 Tear down:
 
 ```bash
-bun run alchemy:destroy:prd
 bun run alchemy:destroy:stg
 PR_NUMBER=123 bun run alchemy:destroy:pr
 ```
@@ -139,10 +151,8 @@ Secrets source model (CI):
     - GitHub repo **secret** `INFISICAL_MACHINE_IDENTITY_ID` (the machine identity ID)
 - Infisical environments (`prod`, `staging`, `dev` — mapped from the old Doppler
   `prd`/`stg`/`pr` configs) must define:
-    - `ALCHEMY_PASSWORD`
-    - `ALCHEMY_STATE_TOKEN`
     - `CLOUDFLARE_API_TOKEN`
-    - `CLOUDFLARE_DEFAULT_ACCOUNT_ID`
+    - `CLOUDFLARE_DEFAULT_ACCOUNT_ID` (bridged to alchemy v2's `CLOUDFLARE_ACCOUNT_ID` in the root `alchemy.run.ts`; `ALCHEMY_PASSWORD`/`ALCHEMY_STATE_TOKEN` were v1-only and are no longer read)
     - `TINYBIRD_HOST`
     - `TINYBIRD_TOKEN`
     - `EMAIL_FROM` (sender address on an onboarded Cloudflare Email Service domain; delivery uses the `EMAIL` worker binding, no API key)

@@ -1,7 +1,12 @@
 import { Result } from "@/lib/effect-atom"
 import { useNavigate } from "@tanstack/react-router"
 
-import { FilterSection, SearchableFilterSection, SingleCheckboxFilter } from "./filter-section"
+import {
+	FilterSection,
+	SearchableFilterSection,
+	SingleCheckboxFilter,
+	serviceColorMap,
+} from "./filter-section"
 import { DurationRangeFilter } from "./duration-range-filter"
 import { Route } from "@/routes/traces"
 import { Separator } from "@maple/ui/components/ui/separator"
@@ -14,7 +19,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={5} />
@@ -24,6 +28,7 @@ interface TracesFilterSidebarViewProps {
 	facetsResult: Result.Result<TracesFacetsResponse, unknown>
 	filters: TracesSearchParams
 	onFilterChange: <K extends keyof TracesSearchParams>(key: K, value: TracesSearchParams[K]) => void
+	onDurationRangeChange: (min: number | undefined, max: number | undefined) => void
 	onClearFilters: () => void
 }
 
@@ -31,6 +36,7 @@ function TracesFilterSidebarView({
 	facetsResult,
 	filters,
 	onFilterChange,
+	onDurationRangeChange,
 	onClearFilters,
 }: TracesFilterSidebarViewProps) {
 	const hasActiveFilters =
@@ -48,24 +54,14 @@ function TracesFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
-						<DurationRangeFilter
-							minValue={filters.minDurationMs}
-							maxValue={filters.maxDurationMs}
-							onMinChange={(val) => onFilterChange("minDurationMs", val)}
-							onMaxChange={(val) => onFilterChange("maxDurationMs", val)}
-							durationStats={facets.durationStats}
-						/>
-
-						<Separator className="my-2" />
-
 						<SingleCheckboxFilter
 							title="Has Error"
 							checked={filters.hasError ?? false}
@@ -112,6 +108,7 @@ function TracesFilterSidebarView({
 							options={facets.services ?? []}
 							selected={filters.services ?? []}
 							onChange={(val) => onFilterChange("services", val)}
+							colorMap={serviceColorMap(facets.services ?? [])}
 						/>
 
 						<Separator className="my-2" />
@@ -121,6 +118,15 @@ function TracesFilterSidebarView({
 							options={facets.spanNames ?? []}
 							selected={filters.spanNames ?? []}
 							onChange={(val) => onFilterChange("spanNames", val)}
+						/>
+
+						<Separator className="my-2" />
+
+						<DurationRangeFilter
+							minValue={filters.minDurationMs}
+							maxValue={filters.maxDurationMs}
+							onRangeChange={onDurationRangeChange}
+							durationStats={facets.durationStats}
 						/>
 
 						{(facets.httpMethods?.length ?? 0) > 0 && (
@@ -172,6 +178,17 @@ export function TracesFilterSidebar({ facetsResult }: TracesFilterSidebarProps) 
 		})
 	}
 
+	const onDurationRangeChange = (min: number | undefined, max: number | undefined) => {
+		navigate({
+			search: (prev) => ({
+				...prev,
+				minDurationMs: min,
+				maxDurationMs: max,
+			}),
+			replace: true,
+		})
+	}
+
 	const onClearFilters = () => {
 		navigate({
 			search: {
@@ -186,6 +203,7 @@ export function TracesFilterSidebar({ facetsResult }: TracesFilterSidebarProps) 
 			facetsResult={facetsResult}
 			filters={search}
 			onFilterChange={onFilterChange}
+			onDurationRangeChange={onDurationRangeChange}
 			onClearFilters={onClearFilters}
 		/>
 	)

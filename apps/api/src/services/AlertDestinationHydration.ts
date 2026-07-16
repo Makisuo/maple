@@ -10,6 +10,7 @@ const DestinationPublicConfigSchema = Schema.Struct({
 	hazelOrganizationLogoUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
 	hazelChannelId: Schema.optionalKey(Schema.String),
 	hazelChannelName: Schema.optionalKey(Schema.String),
+	memberUserIds: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 
 const DestinationSecretConfigSchema = Schema.Union([
@@ -44,6 +45,18 @@ const DestinationSecretConfigSchema = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("discord"),
 		webhookUrl: Schema.String,
+	}),
+	Schema.Struct({
+		type: Schema.Literal("email"),
+		// Snapshot of the selected workspace members, resolved from the auth
+		// provider at save time.
+		members: Schema.Array(
+			Schema.Struct({
+				userId: Schema.String,
+				email: Schema.String,
+				name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+			}),
+		),
 	}),
 ])
 

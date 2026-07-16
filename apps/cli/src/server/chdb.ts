@@ -81,7 +81,30 @@ export interface ChdbOptions {
 	readonly dataDir: string
 	/** Full DDL applied once at open (idempotent `IF NOT EXISTS`). */
 	readonly schemaSql: string
+	/** Optional ClickHouse config file passed through to chDB. */
+	readonly configFile?: string
+	/** Apply the Maple schema after connect. Defaults to true. */
+	readonly bootstrapSchema?: boolean
 }
+
+/** Build the embedded ClickHouse argv. Keep table metadata loading and restore
+ * work serialized:
+ * chDB v26.1.0 can otherwise fail nondeterministically while its loader resolves
+ * Maple's materialized-view dependency graph (`recursive_mutex lock failed` /
+ * `ASYNC_LOAD_WAIT_FAILED`). `async_load_databases=0` waits for loading, but it
+ * does not make the loader pools single-threaded. RESTORE uses a separate
+ * 16-thread pool by default and can trip the same invalid recursive-mutex state
+ * while restoring that dependency graph. */
+export const chdbArgv = (options: Pick<ChdbOptions, "dataDir" | "configFile">): string[] => [
+	"clickhouse",
+	"--async_load_databases=0",
+	"--async_load_system_database=0",
+	"--tables_loader_foreground_pool_size=1",
+	"--tables_loader_background_pool_size=1",
+	"--restore_threads=1",
+	`--path=${options.dataDir}`,
+	...(options.configFile ? [`--config-file=${options.configFile}`] : []),
+]
 
 /**
  * A live chDB connection. `query` runs read SQL and returns the raw result
@@ -101,38 +124,32 @@ export class Chdb {
 
 	static open(options: ChdbOptions): Chdb {
 		const sym = symbols()
-		// `--async_load_databases=0`: make chdb_connect BLOCK until every persisted
-		// table has finished loading before it returns. chDB v26.1.0 defaults this to
-		// true, so connect returns while the existing tables (our ~30 MVs feeding
-		// MergeTree targets) are still loading on background loader threads — and the
-		// `#bootstrap` DDL we run immediately after (`CREATE TABLE IF NOT EXISTS …`)
-		// then races the concurrent load of the same table, tripping a
-		// `recursive_mutex lock failed: Invalid argument` → `ASYNC_LOAD_WAIT_FAILED`
-		// → chdb_connect returns NULL. Most visible after an unclean kill, when more
-		// load/merge work is still in flight on reopen. Waiting serializes load before
-		// bootstrap and removes the race. (`--async_load_system_database=0` is already
-		// the default in this build; set for symmetry / future-proofing.)
-		const args = [
-			"clickhouse",
-			"--async_load_databases=0",
-			"--async_load_system_database=0",
-			`--path=${options.dataDir}`,
-		]
+		const args = chdbArgv(options)
 		const argBufs = args.map(cstr)
 		const argv = new BigUint64Array(args.length)
 		argBufs.forEach((b, i) => {
 			argv[i] = BigInt(ptr(b))
 		})
 		const connPtrPtr = sym.chdb_connect(args.length, ptr(argv))
-		if (!connPtrPtr) throw new Error(Chdb.#connectFailure(options.dataDir, "chdb_connect returned NULL"))
+		if (!connPtrPtr) {
+			throw new Error(
+				Chdb.#connectFailure(options.dataDir, "chdb_connect returned NULL", options.configFile),
+			)
+		}
 		// chdb_connect returns chdb_connection* (a double pointer); chdb_query
 		// wants chdb_connection — dereference once.
 		const conn = read.ptr(connPtrPtr, 0) as Pointer
 		if (!conn)
-			throw new Error(Chdb.#connectFailure(options.dataDir, "chdb_connect produced a NULL connection"))
+			throw new Error(
+				Chdb.#connectFailure(
+					options.dataDir,
+					"chdb_connect produced a NULL connection",
+					options.configFile,
+				),
+			)
 
 		const db = new Chdb(sym, connPtrPtr, conn)
-		db.#bootstrap(options.schemaSql)
+		if (options.bootstrapSchema !== false) db.#bootstrap(options.schemaSql)
 		return db
 	}
 
@@ -141,7 +158,13 @@ export class Chdb {
 	// kill); point the user at the recovery path rather than the raw libchdb
 	// message. A failure over an empty dir is a different problem (missing/broken
 	// libchdb), so keep the generic message there.
-	static #connectFailure(dataDir: string, raw: string): string {
+	static #connectFailure(dataDir: string, raw: string, configFile?: string): string {
+		if (configFile) {
+			return (
+				`${raw} while loading the explicit chDB config at ${configFile}. ` +
+				"The existing store was not modified; correct or remove the config before retrying."
+			)
+		}
 		if (!storeHasData(dataDir)) return raw
 		return (
 			`${raw} — the local store at ${dataDir} could not be opened ` +

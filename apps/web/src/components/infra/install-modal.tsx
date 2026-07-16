@@ -1,6 +1,5 @@
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useMemo, useState } from "react"
-import { toast } from "sonner"
 
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -21,6 +20,7 @@ import {
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 import { CheckIcon, CopyIcon, EyeIcon } from "@/components/icons"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 
@@ -58,7 +58,7 @@ function helmCommand(token: string) {
 }
 
 export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
-	const [copied, setCopied] = useState(false)
+	const { copied, copy } = useCopyToClipboard("Install command")
 	const [revealed, setRevealed] = useState(false)
 
 	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
@@ -79,16 +79,9 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 		[revealed, snippet, token],
 	)
 
-	async function handleCopy() {
+	function handleCopy() {
 		if (!snippet) return
-		try {
-			await navigator.clipboard.writeText(snippet)
-			setCopied(true)
-			toast.success("Install command copied")
-			setTimeout(() => setCopied(false), 2000)
-		} catch {
-			toast.error("Failed to copy")
-		}
+		copy(snippet)
 	}
 
 	return (

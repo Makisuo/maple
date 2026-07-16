@@ -3,16 +3,17 @@
 # executable plus libchdb. No Rust/cargo involved.
 #
 # Pipeline:
-#   1. Build the lightweight SPA (`apps/local-ui` → its `dist/`).
-#   2. Inline that dist into apps/cli/src/server/ui-embed.gen.ts so
+#   1. Build the workspace packages consumed through gitignored `dist/` paths.
+#   2. Build the lightweight SPA (`apps/local-ui` → its `dist/`).
+#   3. Inline that dist into apps/cli/src/server/ui-embed.gen.ts so
 #      `bun build --compile` bakes the SPA into the binary.
-#   3. Compile apps/cli (the CLI + the OTLP-ingest/query server) into a single
+#   4. Compile apps/cli (the CLI + the OTLP-ingest/query server) into a single
 #      executable with `bun build --compile`. The schema artifacts and SPA are
 #      embedded; the OTLP encoders run in-process; chDB is reached via bun:ffi.
-#   4. Download libchdb (v26.1.0, matching what we test against) for the host
+#   5. Download libchdb (v26.1.0, matching what we test against) for the host
 #      platform and place it beside the binary. At runtime `maple` dlopens the
 #      sibling libchdb (resolved relative to its own path) — no rpath tricks.
-#   5. Restore the committed ui-embed.gen.ts stub so the tree stays clean.
+#   6. Restore the committed ui-embed.gen.ts stub so the tree stays clean.
 #
 # The distributable is a 2-file bundle: `maple` + `libchdb.so`. Keep them in the
 # same directory.
@@ -33,15 +34,14 @@ MAPLE_BUILD_VERSION="${MAPLE_BUILD_VERSION:-$(git -C "$REPO_ROOT" describe --tag
 
 mkdir -p "$OUT_DIR"
 
-# apps/cli imports `@maple-dev/effect-sdk/server`, which is published from its
-# built `dist/` (tsdown) — and `lib/effect-sdk/dist` is gitignored. A fresh
-# checkout / CI only runs `bun install`, so the dist won't exist and
-# `bun build --compile` fails to resolve the import. Build it first.
-echo "==> Building @maple-dev/effect-sdk (telemetry SDK consumed by the CLI)"
-bun --filter @maple-dev/effect-sdk build
+# Several workspace packages are published from gitignored `dist/` directories.
+# A fresh checkout / CI only runs `bun install`, so build the repository's
+# canonical prerequisite set before local-ui or the CLI resolves those imports.
+echo "==> Building workspace prerequisites"
+bun run alchemy:build-deps
 
 echo "==> Building local-ui SPA"
-bun --filter @maple/local-ui build
+bun run --filter @maple/local-ui build
 
 echo "==> Inlining SPA into ui-embed.gen.ts"
 restore_stub() { git -C "$REPO_ROOT" checkout -- "$UI_EMBED" 2>/dev/null || true; }

@@ -119,6 +119,11 @@ const SHORTCUTS = {
 		label: "Seek forward 5s",
 		group: "Session Replay",
 	},
+	"chat.quickOpen": {
+		combo: "C",
+		label: "Open AI chat",
+		group: "Chat",
+	},
 	"chat.newTab": {
 		combo: "Mod+Shift+O",
 		label: "New chat tab",

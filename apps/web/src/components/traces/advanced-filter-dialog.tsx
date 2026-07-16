@@ -95,6 +95,7 @@ export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDi
 						dataSource="traces"
 						autocompleteScope="trace_search"
 						maxSuggestions={20}
+						highlight
 						onChange={setValue}
 						placeholder='service.name = "checkout" AND attr.http.route != "/health"'
 						textareaClassName="font-mono text-sm leading-relaxed resize-y min-h-[200px]"

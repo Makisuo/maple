@@ -11,6 +11,7 @@ import {
 	subscribeSelfHostedAuthChanges,
 } from "./lib/services/common/self-hosted-auth"
 import { router, type RouterAuthContext } from "./router"
+import { AppErrorBoundary } from "./components/app-error-boundary"
 import { BootSplash } from "./components/boot-splash"
 import { appRegistry } from "./lib/registry"
 import { clearChunkReloadGuard, shouldAttemptChunkReload } from "./lib/chunk-reload"
@@ -155,6 +156,7 @@ const app = isClerkAuthEnabled ? (
 		publishableKey={clerkPublishableKey}
 		signInUrl={clerkSignInUrl}
 		signUpUrl={clerkSignUpUrl}
+		signUpFallbackRedirectUrl="/quick-start"
 		afterSignOutUrl={clerkSignInUrl}
 	>
 		<ClerkAuthBridge />
@@ -164,4 +166,8 @@ const app = isClerkAuthEnabled ? (
 	<SelfHostedInnerApp />
 )
 
-ReactDOM.createRoot(root).render(<StrictMode>{app}</StrictMode>)
+ReactDOM.createRoot(root).render(
+	<StrictMode>
+		<AppErrorBoundary>{app}</AppErrorBoundary>
+	</StrictMode>,
+)

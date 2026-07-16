@@ -16,6 +16,7 @@
 import { API, T, type DefaultErrors } from "@distilled.cloud/cloudflare"
 import * as Accounts from "@distilled.cloud/cloudflare/accounts"
 import { fromOAuth, type Credentials } from "@distilled.cloud/cloudflare/Credentials"
+import * as Hyperdrive from "@distilled.cloud/cloudflare/hyperdrive"
 import * as Workers from "@distilled.cloud/cloudflare/workers"
 import * as Zones from "@distilled.cloud/cloudflare/zones"
 import { IntegrationsRevokedError, IntegrationsUpstreamError } from "@maple/domain/http"
@@ -308,6 +309,59 @@ export const deleteObservabilityDestination: (
 		)
 	},
 )
+
+export interface CloudflareHyperdriveConfig {
+	readonly id: string
+	readonly name: string
+	readonly origin: {
+		/** Null for the VPC-service origin variant, which has no public host. */
+		readonly host: string | null
+		/** Null for the Access-client and VPC origin variants. */
+		readonly port: number | null
+		readonly database: string
+		readonly scheme: string
+		readonly user: string | null
+	}
+}
+
+// Config enumeration is bounded like zones/scripts: the map only needs the org's origin set,
+// so a pathological account can't fan out unbounded work.
+const MAX_HYPERDRIVE_CONFIGS = 200
+
+/**
+ * List the account's Hyperdrive configs. Used by the analytics poller's discovery pass so the
+ * service map can resolve what actually sits behind the collapsed Hyperdrive node (the origin
+ * database — e.g. a PlanetScale database). The `origin` union (standard / Access-client / VPC
+ * service) is normalized to nullable host/port.
+ */
+export const listHyperdriveConfigs: (
+	accessToken: string,
+	accountId: string,
+	apiBaseUrl?: string,
+) => Effect.Effect<ReadonlyArray<CloudflareHyperdriveConfig>, CloudflareApiError, never> = Effect.fn(
+	"CloudflareApi.listHyperdriveConfigs",
+)(function* (accessToken: string, accountId: string, apiBaseUrl?: string) {
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.account_id", accountId)
+	const configs = yield* runMapped(
+		accessToken,
+		Hyperdrive.listConfigs
+			.items({ accountId })
+			.pipe(Stream.take(MAX_HYPERDRIVE_CONFIGS), Stream.runCollect),
+		apiBaseUrl,
+	)
+	yield* Effect.annotateCurrentSpan("maple.cloudflare.hyperdrive_config_count", configs.length)
+	return configs.map((config) => ({
+		id: config.id,
+		name: config.name,
+		origin: {
+			host: "host" in config.origin ? config.origin.host : null,
+			port: "port" in config.origin ? config.origin.port : null,
+			database: config.origin.database,
+			scheme: config.origin.scheme,
+			user: config.origin.user ?? null,
+		},
+	}))
+})
 
 // ---------------------------------------------------------------------------
 // GraphQL Analytics (the raw escape hatch the module doc-comment anticipates)

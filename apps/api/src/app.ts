@@ -1,4 +1,5 @@
 import { MapleApi } from "@maple/domain/http"
+import { MapleApiV2 } from "@maple/domain/http/v2"
 import { Layer } from "effect"
 import { HttpMiddleware, HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiScalar } from "effect/unstable/httpapi"
@@ -9,6 +10,12 @@ import { HttpAlertsLive } from "./routes/alerts.http"
 import { HttpAnomaliesLive } from "./routes/anomalies.http"
 import { HttpErrorsLive } from "./routes/errors.http"
 import { HttpApiKeysLive } from "./routes/api-keys.http"
+import { HttpV2AlertDestinationsLive } from "./routes/v2/alert-destinations.http"
+import { HttpV2AlertIncidentsLive } from "./routes/v2/alert-incidents.http"
+import { HttpV2AlertRulesLive } from "./routes/v2/alert-rules.http"
+import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
+import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
+import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
 import { HttpDashboardsLive } from "./routes/dashboards.http"
@@ -16,7 +23,6 @@ import { HttpDemoLive } from "./routes/demo.http"
 import { HttpDigestLive } from "./routes/digest.http"
 import { HttpIntegrationsLive, IntegrationsCallbackRouter } from "./routes/integrations.http"
 import { HttpInvestigationsLive } from "./routes/investigations.http"
-import { HttpInvestigationsInternalLive } from "./routes/investigations-internal.http"
 import { HttpIngestAttributeMappingsLive } from "./routes/ingest-attribute-mappings.http"
 import { HttpIngestKeysLive } from "./routes/ingest-keys.http"
 import { HttpObservabilityLive } from "./routes/observability.http"
@@ -24,6 +30,7 @@ import { HttpOnboardingLive } from "./routes/onboarding.http"
 import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
+import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -44,7 +51,7 @@ import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
-import { InternalServiceAuthorizationLayer } from "./services/InternalServiceAuthorizationLayer"
+import { ApiAuthorizationV2Layer } from "./services/ApiAuthorizationV2Layer"
 import { CloudflareAnalyticsService } from "./services/CloudflareAnalyticsService"
 import { CloudflareOAuthService } from "./services/CloudflareOAuthService"
 import { CloudflareObservabilityService } from "./services/CloudflareObservabilityService"
@@ -53,6 +60,7 @@ import { DemoService } from "./services/DemoService"
 import { DigestService } from "./services/DigestService"
 import { OnboardingService } from "./services/OnboardingService"
 import { EmailService } from "./lib/EmailService"
+import { OrgMembersService } from "./services/OrgMembersService"
 import { Env } from "./lib/Env"
 import { IngestAttributeMappingService } from "./services/IngestAttributeMappingService"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
@@ -61,7 +69,10 @@ import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
+import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
+import { PlanetScaleOAuthService } from "./services/PlanetScaleOAuthService"
+import { PlanetScaleService } from "./services/PlanetScaleService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
 import { WarehouseQueryService } from "./lib/WarehouseQueryService"
 import { OAuthStateRepository } from "./services/OAuthStateRepository"
@@ -89,7 +100,22 @@ const DocsRoute = HttpApiScalar.layerCdn(MapleApi, {
 	path: "/docs",
 })
 
+// Public v2 API reference (only v2 groups — the internal v1 surface stays on /docs).
+const DocsV2Route = HttpApiScalar.layerCdn(MapleApiV2, {
+	path: "/v2/docs",
+})
+
 const InfraLive = Env.layer
+
+// PlanetScale layer composition: the OAuth grant (token lifecycle) feeds
+// discovery, scrape-time auth, the org binding, and the inventory poller.
+// Compose each wired layer once so memoization resolves them to single
+// instances (one discovery cache, one refresh single-flight).
+const PlanetScaleOAuthLive = PlanetScaleOAuthService.layer
+const PlanetScaleDiscoveryLive = PlanetScaleDiscoveryService.layer.pipe(Layer.provide(PlanetScaleOAuthLive))
+const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
+	Layer.provide(Layer.mergeAll(PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
+)
 
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
@@ -101,10 +127,13 @@ const CoreServicesLive = Layer.mergeAll(
 	OrgIngestKeysService.layer,
 	OrgClickHouseSettingsService.layer,
 	OrganizationService.layer,
-	// Shared with ScrapeTargetsService via layer memoization so the proxy and
-	// the internal target list resolve sub-targets from one discovery cache.
-	PlanetScaleDiscoveryService.layer,
-	ScrapeTargetsService.layer.pipe(Layer.provide(PlanetScaleDiscoveryService.layer)),
+	PlanetScaleOAuthLive,
+	PlanetScaleDiscoveryLive,
+	ScrapeTargetsLive,
+	PlanetScaleConnectionService.layer.pipe(
+		Layer.provide(Layer.mergeAll(ScrapeTargetsLive, PlanetScaleOAuthLive)),
+	),
+	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,
 ).pipe(Layer.provideMerge(InfraLive))
 
@@ -137,11 +166,25 @@ const QueryEngineServiceLive = QueryEngineService.layer.pipe(
 	Layer.provideMerge(BucketCacheServiceLive),
 )
 
+const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
+
+const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(Env.layer))
+
 const AlertsServiceLive = AlertsService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, QueryEngineServiceLive, AlertRuntime.layer)),
+	Layer.provideMerge(
+		Layer.mergeAll(
+			CoreServicesLive,
+			QueryEngineServiceLive,
+			AlertRuntime.layer,
+			EmailServiceLive,
+			OrgMembersServiceLive,
+		),
+	),
 )
 
-const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(Layer.provideMerge(CoreServicesLive))
+const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, EmailServiceLive)),
+)
 
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provideMerge(
@@ -168,8 +211,6 @@ const AnomalyDetectionServiceLive = AnomalyDetectionService.layer.pipe(
 const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
-
-const EmailServiceLive = EmailService.layer.pipe(Layer.provide(Env.layer))
 
 const DigestServiceLive = DigestService.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EmailServiceLive)),
@@ -216,15 +257,7 @@ export const MainLive = Layer.mergeAll(
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	Layer.provide(HttpAuthPublicLive),
 	Layer.provide(HttpAuthLive),
-	Layer.provide(
-		Layer.mergeAll(
-			HttpAiTriageLive,
-			HttpAnomaliesLive,
-			HttpChatLive,
-			HttpInvestigationsLive,
-			HttpInvestigationsInternalLive,
-		),
-	),
+	Layer.provide(Layer.mergeAll(HttpAiTriageLive, HttpAnomaliesLive, HttpChatLive, HttpInvestigationsLive)),
 	Layer.provide(HttpApiKeysLive),
 	Layer.provide(Layer.mergeAll(HttpBillingLive, HttpBillingPublicLive)),
 	Layer.provide(HttpAlertsLive),
@@ -250,10 +283,25 @@ const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
 	),
 )
 
+const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
+	Layer.provide(
+		Layer.mergeAll(
+			HttpV2ApiKeysLive,
+			HttpV2DashboardsLive,
+			HttpV2AlertRulesLive,
+			HttpV2AlertDestinationsLive,
+			HttpV2AlertIncidentsLive,
+		),
+	),
+	Layer.provide(V2SchemaErrorsLive),
+)
+
 export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
+	ApiV2Routes,
 	IntegrationsCallbackRouter,
 	OAuthDiscoveryRouter,
+	PlanetScaleWebhookRouter,
 	PrometheusScrapeProxyRouter,
 	ScraperInternalRouter,
 	VcsWebhookRouter,
@@ -261,6 +309,7 @@ export const AllRoutes = Layer.mergeAll(
 	HealthRouter,
 	McpGetFallback,
 	DocsRoute,
+	DocsV2Route,
 ).pipe(
 	Layer.provideMerge(
 		HttpRouter.cors({
@@ -274,17 +323,8 @@ export const AllRoutes = Layer.mergeAll(
 	),
 )
 
-export const ApiAuthLive = ApiAuthorizationLayer.pipe(
+export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizationV2Layer).pipe(
 	Layer.provideMerge(ApiKeysService.layer),
-	Layer.provideMerge(Env.layer),
-)
-
-// Internal-service-token middleware (the chat-flue `submit_diagnosis` write).
-// Mirrors ApiAuthLive; AuthService/ApiKeysService/Env are layer-memoized, so this
-// shares instances with MainLive rather than constructing duplicates.
-export const InternalServiceAuthLive = InternalServiceAuthorizationLayer.pipe(
-	Layer.provideMerge(ApiKeysService.layer),
-	Layer.provideMerge(AuthService.layer),
 	Layer.provideMerge(Env.layer),
 )
 

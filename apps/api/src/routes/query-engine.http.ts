@@ -18,7 +18,9 @@ import {
 	ServiceApdexResponse,
 	ServiceDependenciesResponse,
 	ServiceDbEdgesResponse,
+	PlanetScaleInfraTimeseriesResponse,
 	ServiceCloudflareStatsResponse,
+	ServicePlanetScaleStatsResponse,
 	CloudflareInfraZonesResponse,
 	CloudflareInfraZoneTimeseriesResponse,
 	CloudflareInfraZoneDetailResponse,
@@ -72,11 +74,16 @@ import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
-// classes per failure mode). This identity combinator threads that typed error
-// channel through unchanged so HTTP status mapping stays accurate — every
-// endpoint declares the full set via `warehouseHttpErrors`.
-const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, _context: string): Effect.Effect<A, E, R> =>
-	effect
+// classes per failure mode). The typed error channel threads through unchanged
+// so HTTP status mapping stays accurate — every endpoint declares the full set
+// via `warehouseHttpErrors`; on failure the context string lands on the route
+// span so a failed request names which sub-query broke.
+const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string): Effect.Effect<A, E, R> =>
+	effect.pipe(
+		Effect.tapError(() =>
+			Effect.annotateCurrentSpan({ "maple.query_engine.failed_step": context }),
+		),
+	)
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -614,6 +621,114 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						}
 					})
 					return new ServiceCloudflareStatsResponse({ data })
+				}),
+			)
+			.handle("servicePlanetScaleStats", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const byBranch = payload.database !== undefined
+					const params = {
+						orgId: tenant.orgId,
+						startTime: payload.startTime,
+						endTime: payload.endTime,
+						...(payload.database !== undefined ? { database: payload.database } : {}),
+					}
+					// Utilization gauges + the two-level connections rollup run
+					// concurrently, then merge by database(+branch). Routed through the
+					// org's configured warehouse like the metric explorer reads the same
+					// scraped `planetscale_*` metrics.
+					const gaugesCompiled = byBranch
+						? CH.compile(CH.planetscaleBranchGaugesSQL(), params, {
+								rowSchema: CH.planetscaleBranchStatsRowSchema,
+							})
+						: CH.compile(CH.planetscaleGaugesSQL(), params, {
+								rowSchema: CH.planetscaleDatabaseStatsRowSchema,
+							})
+					const connectionsCompiled = byBranch
+						? CH.compile(CH.planetscaleBranchConnectionsSQL(), params, {
+								rowSchema: CH.planetscaleBranchConnectionsRowSchema,
+							})
+						: CH.compile(CH.planetscaleConnectionsSQL(), params, {
+								rowSchema: CH.planetscaleConnectionsRowSchema,
+							})
+					const [gaugeRows, connectionRows] = yield* Effect.all(
+						[
+							mapExecError(
+								warehouse.compiledQuery(tenant, gaugesCompiled, {
+									profile: "aggregation",
+									context: "planetscaleServiceGauges",
+								}),
+								"planetscaleServiceGauges query failed",
+							),
+							mapExecError(
+								warehouse.compiledQuery(tenant, connectionsCompiled, {
+									profile: "aggregation",
+									context: "planetscaleServiceConnections",
+								}),
+								"planetscaleServiceConnections query failed",
+							),
+						],
+						{ concurrency: 2 },
+					)
+					const keyOf = (row: { database: string; branch?: string }) =>
+						byBranch ? `${row.database} ${row.branch ?? ""}` : row.database
+					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
+					const seen = new Set<string>()
+					type MergedStatsRow = {
+							readonly database: string
+							readonly branch?: string
+							readonly cpuMaxPercent: number
+							readonly memMaxPercent: number
+							readonly replicaLagMaxSeconds: number
+							readonly connectionsAvg: number
+							readonly connectionsMax: number
+						}
+						const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
+						const key = keyOf(row)
+						seen.add(key)
+						const connections = connectionsByKey.get(key)
+						return {
+							...row,
+							connectionsAvg: connections?.connectionsAvg ?? 0,
+							connectionsMax: connections?.connectionsMax ?? 0,
+						}
+					})
+					// Databases with connection samples but no utilization gauges still
+					// deserve a row (e.g. filtered scrape sets).
+					for (const row of connectionRows) {
+						if (seen.has(keyOf(row))) continue
+						data.push({
+							...row,
+							cpuMaxPercent: 0,
+							memMaxPercent: 0,
+							replicaLagMaxSeconds: 0,
+						})
+					}
+					return new ServicePlanetScaleStatsResponse({ data })
+				}),
+			)
+			.handle("planetscaleInfraTimeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.compile(
+						CH.planetscaleInfraTimeseriesSQL(),
+						{
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							bucketSeconds: Math.max(60, Math.floor(payload.bucketSeconds)),
+							database: payload.database,
+						},
+						{ rowSchema: CH.planetscaleInfraTimeseriesRowSchema },
+					)
+					const rows = yield* mapExecError(
+						warehouse.compiledQuery(tenant, compiled, {
+							profile: "aggregation",
+							context: "planetscaleInfraTimeseries",
+						}),
+						"planetscaleInfraTimeseries query failed",
+					)
+					return new PlanetScaleInfraTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
 				}),
 			)
 			.handle("cloudflareInfraZones", ({ payload }) =>
@@ -1493,39 +1608,58 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						// multiple queries, otherwise we keep the raw group names from the query
 						// engine result so single-query widgets render naturally.
 						type Point = { bucket: string; series: Record<string, number> }
-						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
+						type QueryOutcome = {
+							warnings: string[]
+							entry: { name: string; points: Point[] } | null
+						}
 
-						yield* Effect.forEach(enabledQueries, (query) =>
-							Effect.gen(function* () {
-								const built = buildTimeseriesQuerySpec(query)
-								for (const w of built.warnings) allWarnings.push(`${query.name}: ${w}`)
+						// Execute each query concurrently (independent warehouse round-trips)
+						// but collect positionally: Effect.forEach returns results in input
+						// order regardless of concurrency, so series naming/merge order stays
+						// deterministic instead of depending on which query finishes first.
+						const outcomes: QueryOutcome[] = yield* Effect.forEach(
+							enabledQueries,
+							(query) =>
+								Effect.gen(function* () {
+									const built = buildTimeseriesQuerySpec(query)
+									const warnings = built.warnings.map((w) => `${query.name}: ${w}`)
 
-								if (!built.query) {
-									if (built.error) allWarnings.push(`${query.name}: ${built.error}`)
-									return
-								}
+									if (!built.query) {
+										if (built.error) warnings.push(`${query.name}: ${built.error}`)
+										return { warnings, entry: null }
+									}
 
-								const request = new QueryEngineExecuteRequest({
-									startTime: payload.startTime,
-									endTime: payload.endTime,
-									query: built.query,
-								})
+									const request = new QueryEngineExecuteRequest({
+										startTime: payload.startTime,
+										endTime: payload.endTime,
+										query: built.query,
+									})
 
-								const response = yield* queryEngine.execute(tenant, request)
-								if (response.result.kind !== "timeseries") {
-									allWarnings.push(`${query.name}: unexpected non-timeseries result`)
-									return
-								}
+									const response = yield* queryEngine.execute(tenant, request)
+									if (response.result.kind !== "timeseries") {
+										warnings.push(`${query.name}: unexpected non-timeseries result`)
+										return { warnings, entry: null }
+									}
 
-								perQueryPoints.push({
-									name: query.legend?.trim() || query.name,
-									points: response.result.data.map((p) => ({
-										bucket: p.bucket,
-										series: { ...p.series },
-									})),
-								})
-							}),
+									return {
+										warnings,
+										entry: {
+											name: query.legend?.trim() || query.name,
+											points: response.result.data.map((p) => ({
+												bucket: p.bucket,
+												series: { ...p.series },
+											})),
+										},
+									}
+								}),
+							{ concurrency: 4 },
 						)
+
+						const perQueryPoints: Array<{ name: string; points: Point[] }> = []
+						for (const outcome of outcomes) {
+							allWarnings.push(...outcome.warnings)
+							if (outcome.entry) perQueryPoints.push(outcome.entry)
+						}
 
 						const multiQuery = perQueryPoints.length > 1
 						const rowsByBucket = new Map<string, Record<string, number>>()
@@ -2407,7 +2541,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						"rawSql query failed",
 					)
 
-					const records = rows as ReadonlyArray<Record<string, unknown>>
+					const records = rows
 					const columns = records.length > 0 ? Object.keys(records[0]) : []
 
 					return new RawSqlExecuteResponse({

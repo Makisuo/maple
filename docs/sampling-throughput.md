@@ -69,7 +69,7 @@ When sampling is detected for a service:
 ## Limitations
 
 - **Edge throughput** -- service-to-service call counts on the service map use the same per-row `SampleRate` weighting. The edge label shows `~` when sampling is active.
-- **Error rate is not extrapolated** -- error rate is computed as `errorCount / spanCount` from the spans Maple actually receives. This ratio is generally representative, but could skew if sampling is correlated with error status.
+- **Error rate** -- sampled error spans use the same per-row weights as throughput. Maple computes `sumIf(SampleRate, StatusCode = 'Error') / sum(SampleRate)`, so mixed sampling rates do not over-represent aggressively retained errors. If an upstream sampler does not report reliable inclusion weights, exact pre-sampling error rates still require SpanMetrics.
 
 ## For best results
 

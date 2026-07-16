@@ -282,6 +282,43 @@ export class ServiceCloudflareStatsResponse extends Schema.Class<ServiceCloudfla
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+// PlanetScale scraped-metrics rollups for the service map: one row per
+// database (or per branch of one database when `database` is set), overlaid
+// onto trace-derived DB nodes. Same conventions as ServiceCloudflareStats —
+// no `deploymentEnv` (scraped metrics carry none), generic record rows,
+// gauges + connections merged server-side.
+export class ServicePlanetScaleStatsRequest extends Schema.Class<ServicePlanetScaleStatsRequest>(
+	"ServicePlanetScaleStatsRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	/** When set, returns per-branch rows scoped to this database. */
+	database: Schema.optional(Schema.String),
+}) {}
+
+export class ServicePlanetScaleStatsResponse extends Schema.Class<ServicePlanetScaleStatsResponse>(
+	"ServicePlanetScaleStatsResponse",
+)({
+	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
+// PlanetScale infrastructure page (/infra/planetscale): bucketed per-database
+// health timeseries from the scraped metrics.
+export class PlanetScaleInfraTimeseriesRequest extends Schema.Class<PlanetScaleInfraTimeseriesRequest>(
+	"PlanetScaleInfraTimeseriesRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	bucketSeconds: Schema.Number,
+	database: Schema.String,
+}) {}
+
+export class PlanetScaleInfraTimeseriesResponse extends Schema.Class<PlanetScaleInfraTimeseriesResponse>(
+	"PlanetScaleInfraTimeseriesResponse",
+)({
+	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+
 // Cloudflare infrastructure page (/infra/cloudflare): per-zone HTTP edge
 // analytics and per-Worker invocation analytics from the direct-integration
 // poller's metrics. Same conventions as ServiceCloudflareStats — no
@@ -1477,6 +1514,20 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceCloudflareStats", "/service-cloudflare-stats", {
 			payload: ServiceCloudflareStatsRequest,
 			success: ServiceCloudflareStatsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("servicePlanetScaleStats", "/service-planetscale-stats", {
+			payload: ServicePlanetScaleStatsRequest,
+			success: ServicePlanetScaleStatsResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("planetscaleInfraTimeseries", "/planetscale-infra-timeseries", {
+			payload: PlanetScaleInfraTimeseriesRequest,
+			success: PlanetScaleInfraTimeseriesResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

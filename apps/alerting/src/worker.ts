@@ -19,6 +19,9 @@ import {
 	OnboardingService,
 	OrgClickHouseSettingsService,
 	OrgIngestKeysService,
+	OrgMembersService,
+	PlanetScaleOAuthService,
+	PlanetScaleService,
 	QueryEngineService,
 	ServiceMapRollupService,
 	WarehouseQueryService,
@@ -65,6 +68,14 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const HazelOAuthServiceLive = HazelOAuthService.layer.pipe(Layer.provide(BaseLive))
 
+	// EmailService resolves the Cloudflare Email Service `EMAIL` binding from
+	// WorkerEnvironment (delivery binding) in addition to EnvLive (EMAIL_FROM).
+	const EmailServiceLive = EmailService.layer.pipe(
+		Layer.provide(Layer.mergeAll(EnvLive, WorkerEnvironment.layer)),
+	)
+
+	const OrgMembersServiceLive = OrgMembersService.layer.pipe(Layer.provide(EnvLive))
+
 	// WorkerEnvironment is merged in so the incident-open issue-hub hook can see
 	// the cross-script AI_TRIAGE_WORKFLOW binding (absent → triage marked failed).
 	// AlertRuntime is a Context.Reference with defaults, so it needs no wiring here.
@@ -75,13 +86,15 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				QueryEngineServiceLive,
 				WarehouseQueryServiceLive,
 				HazelOAuthServiceLive,
+				EmailServiceLive,
+				OrgMembersServiceLive,
 				WorkerEnvironment.layer,
 			),
 		),
 	)
 
 	const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, HazelOAuthServiceLive)),
+		Layer.provide(Layer.mergeAll(BaseLive, HazelOAuthServiceLive, EmailServiceLive)),
 	)
 
 	const EscalationServiceLive = EscalationService.layer.pipe(
@@ -111,12 +124,6 @@ const buildLayer = (_env: Record<string, unknown>) => {
 				WorkerEnvironment.layer,
 			),
 		),
-	)
-
-	// EmailService now resolves the Cloudflare Email Service `EMAIL` binding from
-	// WorkerEnvironment (delivery binding) in addition to EnvLive (EMAIL_FROM).
-	const EmailServiceLive = EmailService.layer.pipe(
-		Layer.provide(Layer.mergeAll(EnvLive, WorkerEnvironment.layer)),
 	)
 
 	const DigestServiceLive = DigestService.layer.pipe(
@@ -151,10 +158,17 @@ const buildLayer = (_env: Record<string, unknown>) => {
 		),
 	)
 
+	const PlanetScaleOAuthServiceLive = PlanetScaleOAuthService.layer.pipe(Layer.provide(BaseLive))
+
+	const PlanetScaleServiceLive = PlanetScaleService.layer.pipe(
+		Layer.provide(Layer.mergeAll(BaseLive, PlanetScaleOAuthServiceLive)),
+	)
+
 	return Layer.mergeAll(
 		AlertsServiceLive,
 		AnomalyDetectionServiceLive,
 		CloudflareAnalyticsServiceLive,
+		PlanetScaleServiceLive,
 		DigestServiceLive,
 		OnboardingEmailServiceLive,
 		ErrorsServiceLive,
@@ -188,10 +202,7 @@ const alertTick = Effect.gen(function* () {
 			deliveryFailureCount: result.deliveryFailureCount,
 		}),
 	)
-}).pipe(
-	Effect.withSpan("alerting.scheduler_tick"),
-	catchTickFailure("Alerting worker tick failed"),
-)
+}).pipe(Effect.withSpan("alerting.scheduler_tick"), catchTickFailure("Alerting worker tick failed"))
 
 const errorTick = Effect.gen(function* () {
 	const errors = yield* ErrorsService
@@ -208,10 +219,7 @@ const errorTick = Effect.gen(function* () {
 			retentionRan: result.retentionRan,
 		}),
 	)
-}).pipe(
-	Effect.withSpan("alerting.error_tick"),
-	catchTickFailure("Errors worker tick failed"),
-)
+}).pipe(Effect.withSpan("alerting.error_tick"), catchTickFailure("Errors worker tick failed"))
 
 const escalationTick = Effect.gen(function* () {
 	const escalations = yield* EscalationService
@@ -227,10 +235,7 @@ const escalationTick = Effect.gen(function* () {
 			}),
 		)
 	}
-}).pipe(
-	Effect.withSpan("alerting.escalation_tick"),
-	catchTickFailure("Escalation tick failed"),
-)
+}).pipe(Effect.withSpan("alerting.escalation_tick"), catchTickFailure("Escalation tick failed"))
 
 const digestTick = Effect.gen(function* () {
 	const digest = yield* DigestService
@@ -242,10 +247,7 @@ const digestTick = Effect.gen(function* () {
 			skipped: result.skipped,
 		}),
 	)
-}).pipe(
-	Effect.withSpan("alerting.digest_tick"),
-	catchTickFailure("Digest tick failed"),
-)
+}).pipe(Effect.withSpan("alerting.digest_tick"), catchTickFailure("Digest tick failed"))
 
 const onboardingTick = Effect.gen(function* () {
 	const onboardingEmails = yield* OnboardingEmailService
@@ -259,10 +261,7 @@ const onboardingTick = Effect.gen(function* () {
 			skipped: result.skipped,
 		}),
 	)
-}).pipe(
-	Effect.withSpan("alerting.onboarding_tick"),
-	catchTickFailure("Onboarding tick failed"),
-)
+}).pipe(Effect.withSpan("alerting.onboarding_tick"), catchTickFailure("Onboarding tick failed"))
 
 const serviceMapRollupTick = Effect.gen(function* () {
 	const rollup = yield* ServiceMapRollupService
@@ -295,10 +294,7 @@ const anomalyTick = Effect.gen(function* () {
 			orgFailures: result.orgFailures,
 		}),
 	)
-}).pipe(
-	Effect.withSpan("alerting.anomaly_tick"),
-	catchTickFailure("Anomaly detection tick failed"),
-)
+}).pipe(Effect.withSpan("alerting.anomaly_tick"), catchTickFailure("Anomaly detection tick failed"))
 
 const cloudflareAnalyticsTick = Effect.gen(function* () {
 	const analytics = yield* CloudflareAnalyticsService
@@ -317,6 +313,21 @@ const cloudflareAnalyticsTick = Effect.gen(function* () {
 	catchTickFailure("Cloudflare analytics tick failed"),
 )
 
+const planetScaleTick = Effect.gen(function* () {
+	const planetscale = yield* PlanetScaleService
+	const result = yield* planetscale.pollAllOrgs()
+	if (result.orgs > 0) {
+		yield* Effect.logInfo("PlanetScale poll tick complete").pipe(
+			Effect.annotateLogs({
+				orgs: result.orgs,
+				refreshed: result.refreshed,
+				skipped: result.skipped,
+				failures: result.failures,
+			}),
+		)
+	}
+}).pipe(Effect.withSpan("alerting.planetscale_tick"), catchTickFailure("PlanetScale poll tick failed"))
+
 interface ScheduledEventLike {
 	readonly cron: string
 }
@@ -333,7 +344,10 @@ export default {
 	): Promise<void> {
 		const program = Match.value(event.cron).pipe(
 			Match.when("*/5 * * * *", () =>
-				Effect.all([anomalyTick, cloudflareAnalyticsTick], { concurrency: 2, discard: true }),
+				Effect.all([anomalyTick, cloudflareAnalyticsTick, planetScaleTick], {
+					concurrency: 3,
+					discard: true,
+				}),
 			),
 			Match.when("*/15 * * * *", () => digestTick),
 			Match.when("0 * * * *", () => serviceMapRollupTick),

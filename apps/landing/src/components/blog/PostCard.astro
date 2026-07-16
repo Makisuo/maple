@@ -21,7 +21,7 @@ const isF = variant === "featured";
     data-astro-prefetch
     class:list={[
         "group flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-[border-color,transform] duration-200",
-        "hover:-translate-y-0.5 hover:border-accent/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+        "hover:-translate-y-0.5 hover:border-primary/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:transition-none motion-reduce:hover:translate-y-0",
         isF && "md:flex-row md:items-stretch",
     ]}
 >
@@ -38,7 +38,7 @@ const isF = variant === "featured";
     <div class:list={["flex flex-1 flex-col gap-2.5 p-[18px] pb-5", isF && "md:justify-center md:gap-3.5 md:p-9"]}>
         <div class="flex flex-wrap items-center gap-[7px] font-mono text-[11px] tabular-nums tracking-[0.02em] text-fg-muted">
             {isF && (
-                <span class="border border-accent/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-accent">
+                <span class="border border-primary/40 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.16em] text-primary">
                     featured
                 </span>
             )}
@@ -55,7 +55,7 @@ const isF = variant === "featured";
 
         <h3
             class:list={[
-                "font-display font-semibold leading-[1.25] tracking-[-0.015em] text-balance text-foreground transition-colors group-hover:text-accent",
+                "font-display font-semibold leading-[1.25] tracking-[-0.015em] text-balance text-foreground transition-colors group-hover:text-primary",
                 "line-clamp-2 text-[17px]",
                 isF && "md:line-clamp-3 md:text-[clamp(24px,2.6vw,34px)] md:leading-[1.1]",
             ]}
@@ -68,7 +68,7 @@ const isF = variant === "featured";
             ]}
         >{description}</p>
 
-        <span class="mt-auto inline-flex items-center gap-[7px] pt-1.5 font-mono text-xs text-fg/70 transition-colors group-hover:text-accent">
+        <span class="mt-auto inline-flex items-center gap-[7px] pt-1.5 font-mono text-xs text-fg/70 transition-colors group-hover:text-primary">
             read post
             <span class="transition-transform duration-200 group-hover:translate-x-1 motion-reduce:transition-none" aria-hidden="true">→</span>
         </span>

@@ -2,7 +2,6 @@ import { Link } from "@tanstack/react-router"
 import type { AnomalyIncidentDocument } from "@maple/domain/http"
 import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/lib/utils"
-import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 import { LinkIcon } from "@/components/icons"
 import { shortIssueId } from "@/components/errors/issue-id"
@@ -16,6 +15,7 @@ import {
 	severityToneFor,
 	TRIAGE_STATUS_CHIP,
 } from "./anomaly-format"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 export function AnomalySidebar({
 	incident,
@@ -79,13 +79,7 @@ export function AnomalySidebar({
 				</Row>
 				<Row label="Service" title={incident.serviceName}>
 					<span className="flex min-w-0 items-center gap-2">
-						<span
-							aria-hidden
-							className={cn(
-								"size-1.5 shrink-0 rounded-full",
-								getServiceColorClass(incident.serviceName),
-							)}
-						/>
+						<ServiceDot serviceName={incident.serviceName} className="size-1.5" />
 						<span className="truncate text-sm text-foreground">{incident.serviceName}</span>
 					</span>
 				</Row>

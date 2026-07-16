@@ -1,7 +1,7 @@
 import { useAtomSet } from "@/lib/effect-atom"
 import { useState } from "react"
 import { Exit } from "effect"
-import type { ApiKeyResponse } from "@maple/domain/http"
+import type { V2ApiKey } from "@maple/domain/http/v2"
 import { toast } from "sonner"
 
 import { Button } from "@maple/ui/components/ui/button"
@@ -14,13 +14,14 @@ import {
 	DialogPanel,
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
 
 interface RollApiKeyDialogProps {
 	open: boolean
 	onOpenChange: (open: boolean) => void
-	apiKey: ApiKeyResponse | null
+	apiKey: V2ApiKey | null
 	onRolled?: () => void
 }
 
@@ -28,17 +29,20 @@ export function RollApiKeyDialog({ open, onOpenChange, apiKey, onRolled }: RollA
 	const [isRolling, setIsRolling] = useState(false)
 	const [newSecret, setNewSecret] = useState<string | null>(null)
 
-	const rollMutation = useAtomSet(MapleApiAtomClient.mutation("apiKeys", "roll"), {
+	const { prepareForMutation, reconcileTxid } = useApiKeyMutationSync()
+	const rollMutation = useAtomSet(MapleApiV2AtomClient.mutation("apiKeys", "roll"), {
 		mode: "promiseExit",
 	})
 
 	async function handleRoll() {
 		if (!apiKey) return
 		setIsRolling(true)
-		const result = await rollMutation({ params: { keyId: apiKey.id } })
+		prepareForMutation()
+		const result = await rollMutation({ params: { id: apiKey.id } })
 		if (Exit.isSuccess(result)) {
 			setNewSecret(result.value.secret)
 			onRolled?.()
+			void reconcileTxid(result.value.txid)
 		} else {
 			toast.error("Failed to roll API key")
 		}

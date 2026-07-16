@@ -8,7 +8,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 import { Separator } from "@maple/ui/components/ui/separator"
 import type { PodFacetsResponse, NodeFacetsResponse, WorkloadFacetsResponse } from "@maple/domain/http"
 
@@ -56,12 +55,12 @@ export function PodsFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <FilterSidebarLoading sectionCount={6} />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facetsResponse, result) => {
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection
@@ -211,12 +210,12 @@ export function NodesFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <FilterSidebarLoading sectionCount={3} />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facetsResponse, result) => {
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection
@@ -291,12 +290,12 @@ export function WorkloadsFilterSidebarView({
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <FilterSidebarLoading sectionCount={4} />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facetsResponse, result) => {
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection

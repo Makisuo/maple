@@ -5,6 +5,7 @@ import {
 	CUSTOMER_CACHE_BUCKET,
 	CUSTOMER_CACHE_TTL_SECONDS,
 	CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS,
+	decodeInvoices,
 	readCustomerCached,
 	responseHasActivePlan,
 } from "./billing.http"
@@ -134,6 +135,60 @@ describe("readCustomerCached", () => {
 			const run = Effect.succeed({ statusCode: 200, response: { error: "autumn_api_error" } })
 			yield* readCustomerCached(cache, ORG, run)
 			assert.deepStrictEqual(puts, [CUSTOMER_CACHE_UNSETTLED_TTL_SECONDS])
+		}),
+	)
+})
+
+describe("decodeInvoices", () => {
+	it.effect("decodes the invoices array off an expanded customer response", () =>
+		Effect.gen(function* () {
+			const decoded = yield* decodeInvoices({
+				id: ORG,
+				subscriptions: [],
+				invoices: [
+					{
+						stripeId: "in_123",
+						planIds: ["startup"],
+						processorType: "stripe",
+						status: "paid",
+						total: 42.3,
+						currency: "usd",
+						createdAt: 1_750_000_000_000,
+						hostedInvoiceUrl: "https://invoice.stripe.com/i/in_123",
+					},
+					// Draft invoice: no hosted URL yet; unknown status must not fail decoding.
+					{
+						stripeId: "in_456",
+						planIds: [],
+						status: "some_future_status",
+						total: 0,
+						currency: "usd",
+						createdAt: 1_751_000_000_000,
+						hostedInvoiceUrl: null,
+					},
+				],
+			})
+			assert.strictEqual(decoded.invoices.length, 2)
+			assert.strictEqual(decoded.invoices[0]?.stripeId, "in_123")
+			assert.strictEqual(decoded.invoices[0]?.total, 42.3)
+			assert.strictEqual(decoded.invoices[1]?.status, "some_future_status")
+			assert.isNull(decoded.invoices[1]?.hostedInvoiceUrl)
+		}),
+	)
+
+	it.effect("decodes an absent/null invoices key as an empty list", () =>
+		Effect.gen(function* () {
+			const missing = yield* decodeInvoices({ id: ORG, subscriptions: [] })
+			assert.deepStrictEqual([...missing.invoices], [])
+			const nulled = yield* decodeInvoices({ id: ORG, invoices: null })
+			assert.deepStrictEqual([...nulled.invoices], [])
+		}),
+	)
+
+	it.effect("fails with BillingUpstreamError on a malformed invoice entry", () =>
+		Effect.gen(function* () {
+			const exit = yield* Effect.exit(decodeInvoices({ invoices: [{ status: "paid" }] }))
+			assert.isTrue(exit._tag === "Failure")
 		}),
 	)
 })

@@ -9,6 +9,7 @@ import {
 	type FilterOption,
 } from "@/components/filters/filter-section"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
+import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
 import { Route } from "@/routes/replays"
 import {
 	InputGroup,
@@ -25,7 +26,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 interface ReplaysFacetItem {
 	readonly name: string
@@ -111,7 +111,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <FilterSidebarLoading sectionCount={5} />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} />)
 		.onSuccess((facets, result) => {
 			const services = withSelected(facets.services, search.service)
 			const browsers = withSelected(facets.browsers, search.browser)
@@ -126,7 +126,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 				facets.errorCount > 0
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<UserIdFilter value={search.userId} onApply={setUserId} />
@@ -180,6 +180,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 									options={browsers}
 									selected={search.browser ? [search.browser] : []}
 									onChange={(vals) => setSingle("browser", vals)}
+									getOptionIcon={browserIconFor}
 								/>
 							</>
 						)}
@@ -192,6 +193,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 									options={devices}
 									selected={search.deviceType ? [search.deviceType] : []}
 									onChange={(vals) => setSingle("deviceType", vals)}
+									getOptionIcon={deviceIconFor}
 								/>
 							</>
 						)}
@@ -250,7 +252,10 @@ function UserIdFilter({ value, onApply }: UserIdFilterProps) {
 				onApply(text.trim() || undefined)
 			}}
 		>
-			<Label htmlFor="replays-user-filter" className="mb-2 block text-sm font-medium text-muted-foreground">
+			<Label
+				htmlFor="replays-user-filter"
+				className="mb-2 block text-sm font-medium text-muted-foreground"
+			>
 				User
 			</Label>
 			<InputGroup>

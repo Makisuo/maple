@@ -84,6 +84,77 @@ describe("buildFlowElements", () => {
 		expect(dbEdge!.source).toBe("api")
 	})
 
+	it("attaches resolved hyperdrive configs to the Hyperdrive node and draws a dashed origin edge", () => {
+		const result = buildFlowElements({
+			edges: [baseEdge()],
+			dbEdges: [
+				baseDbEdge({ dbSystem: "postgresql", dbNamespace: "hyperdrive" }),
+				baseDbEdge({ sourceService: "worker", dbSystem: "mysql", dbNamespace: "maple" }),
+			],
+			serviceOverviews: [baseOverview()],
+			durationSeconds: 60,
+			planetscaleDatabases: new Map([
+				["maple", { name: "maple", kind: "mysql", branchCount: 1, branches: [] }],
+			]),
+			hyperdriveConfigs: [
+				{
+					id: "a".repeat(32),
+					name: "maple-db",
+					originHost: "aws.connect.psdb.cloud",
+					originPort: 3306,
+					originScheme: "mysql",
+					originDatabase: "maple",
+					originUser: "reader",
+				},
+			],
+		})
+
+		const hyperdriveNode = result.nodes.find((n) => n.id === dbNodeId("postgresql", "hyperdrive"))
+		expect(hyperdriveNode).toBeDefined()
+		const data = hyperdriveNode!.data as ServiceNodeData
+		expect(data.hyperdrive).toHaveLength(1)
+		expect(data.hyperdrive![0]!.matched).toEqual({ name: "maple", kind: "mysql" })
+
+		// Other db nodes stay clean.
+		const psNode = result.nodes.find((n) => n.id === dbNodeId("mysql", "maple"))
+		expect((psNode!.data as ServiceNodeData).hyperdrive).toBeUndefined()
+
+		const originEdge = result.edges.find((e) => e.data?.relation === "hyperdrive-origin")
+		expect(originEdge).toBeDefined()
+		expect(originEdge!.source).toBe(dbNodeId("postgresql", "hyperdrive"))
+		expect(originEdge!.target).toBe(dbNodeId("mysql", "maple"))
+		expect(originEdge!.data!.callCount).toBe(0)
+	})
+
+	it("skips the dashed origin edge when the matched PlanetScale node is not on the map", () => {
+		const result = buildFlowElements({
+			edges: [baseEdge()],
+			dbEdges: [baseDbEdge({ dbSystem: "postgresql", dbNamespace: "hyperdrive" })],
+			serviceOverviews: [baseOverview()],
+			durationSeconds: 60,
+			planetscaleDatabases: new Map([
+				["maple", { name: "maple", kind: "mysql", branchCount: 1, branches: [] }],
+			]),
+			hyperdriveConfigs: [
+				{
+					id: "a".repeat(32),
+					name: "maple-db",
+					originHost: "aws.connect.psdb.cloud",
+					originPort: 3306,
+					originScheme: "mysql",
+					originDatabase: "maple",
+					originUser: "reader",
+				},
+			],
+		})
+
+		// The panel data is still attached…
+		const hyperdriveNode = result.nodes.find((n) => n.id === dbNodeId("postgresql", "hyperdrive"))
+		expect((hyperdriveNode!.data as ServiceNodeData).hyperdrive).toHaveLength(1)
+		// …but no synthetic edge points at a node that doesn't exist.
+		expect(result.edges.some((e) => e.data?.relation === "hyperdrive-origin")).toBe(false)
+	})
+
 	it("attaches platform info to service nodes", () => {
 		const platforms = new Map<string, ServicePlatform>([
 			["api", "cloudflare"],
@@ -240,46 +311,35 @@ describe("computeNodePositions namespace clustering", () => {
 })
 
 describe("getServiceMapNodeColor", () => {
-	const services = ["api", "auth", "worker"]
-
 	it("colors database nodes with the dedicated db palette regardless of mode", () => {
 		const dbData = { label: "clickhouse", kind: "database" as const, errorRate: 0 }
-		expect(getServiceMapNodeColor(dbData, services, "service")).toBe(
-			getServiceMapNodeColor(dbData, services, "health"),
+		expect(getServiceMapNodeColor(dbData, "service")).toBe(
+			getServiceMapNodeColor(dbData, "health"),
 		)
-		expect(getServiceMapNodeColor(dbData, services, "platform")).toBe(
-			getServiceMapNodeColor(dbData, services, "service"),
+		expect(getServiceMapNodeColor(dbData, "platform")).toBe(
+			getServiceMapNodeColor(dbData, "service"),
 		)
 	})
 
 	it("returns severity colors in health mode based on error-rate buckets", () => {
 		const base = { label: "api", kind: "service" as const, platform: undefined }
-		expect(getServiceMapNodeColor({ ...base, errorRate: 0.06 }, services, "health")).toBe(
+		expect(getServiceMapNodeColor({ ...base, errorRate: 0.06 }, "health")).toBe(
 			"var(--severity-error)",
 		)
-		expect(getServiceMapNodeColor({ ...base, errorRate: 0.02 }, services, "health")).toBe(
+		expect(getServiceMapNodeColor({ ...base, errorRate: 0.02 }, "health")).toBe(
 			"var(--severity-warn)",
 		)
-		expect(getServiceMapNodeColor({ ...base, errorRate: 0 }, services, "health")).toBe(
+		expect(getServiceMapNodeColor({ ...base, errorRate: 0 }, "health")).toBe(
 			"var(--severity-info)",
 		)
 	})
 
 	it("derives platform colors in platform mode", () => {
-		const k8s = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0, platform: "kubernetes" },
-			services,
-			"platform",
+		const k8s = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0, platform: "kubernetes" }, "platform",
 		)
-		const cf = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0, platform: "cloudflare" },
-			services,
-			"platform",
+		const cf = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0, platform: "cloudflare" }, "platform",
 		)
-		const unknown = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0, platform: undefined },
-			services,
-			"platform",
+		const unknown = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0, platform: undefined }, "platform",
 		)
 		expect(k8s).toBe(getPlatformColor("kubernetes"))
 		expect(cf).toBe(getPlatformColor("cloudflare"))
@@ -288,15 +348,9 @@ describe("getServiceMapNodeColor", () => {
 	})
 
 	it("falls back to per-service legend color in service mode", () => {
-		const apiColor = getServiceMapNodeColor(
-			{ label: "api", kind: "service", errorRate: 0 },
-			services,
-			"service",
+		const apiColor = getServiceMapNodeColor({ label: "api", kind: "service", errorRate: 0 }, "service",
 		)
-		const authColor = getServiceMapNodeColor(
-			{ label: "auth", kind: "service", errorRate: 0 },
-			services,
-			"service",
+		const authColor = getServiceMapNodeColor({ label: "auth", kind: "service", errorRate: 0 }, "service",
 		)
 		expect(apiColor).not.toBe(authColor)
 	})

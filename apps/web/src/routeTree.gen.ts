@@ -19,7 +19,6 @@ import { Route as SelectPlanRouteImport } from './routes/select-plan'
 import { Route as QuickStartRouteImport } from './routes/quick-start'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
-import { Route as MetricsRouteImport } from './routes/metrics'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as DeveloperRouteImport } from './routes/developer'
@@ -29,6 +28,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
 import { Route as ServicesIndexRouteImport } from './routes/services/index'
 import { Route as ReplaysIndexRouteImport } from './routes/replays/index'
+import { Route as MetricsIndexRouteImport } from './routes/metrics/index'
 import { Route as LogsIndexRouteImport } from './routes/logs/index'
 import { Route as InfraIndexRouteImport } from './routes/infra/index'
 import { Route as ErrorsIndexRouteImport } from './routes/errors/index'
@@ -40,6 +40,7 @@ import { Route as ServicesServiceNameRouteImport } from './routes/services/$serv
 import { Route as ReplaysPreviewRouteImport } from './routes/replays/preview'
 import { Route as ReplaysSessionIdRouteImport } from './routes/replays/$sessionId'
 import { Route as RecommendationsRecommendationKeyRouteImport } from './routes/recommendations/$recommendationKey'
+import { Route as MetricsMetricNameRouteImport } from './routes/metrics/$metricName'
 import { Route as LogsLogIdRouteImport } from './routes/logs/$logId'
 import { Route as InvestigationsIdRouteImport } from './routes/investigations/$id'
 import { Route as InfraHostNameRouteImport } from './routes/infra/$hostName'
@@ -49,8 +50,10 @@ import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards/$
 import { Route as AnomaliesIncidentIdRouteImport } from './routes/anomalies/$incidentId'
 import { Route as AlertsCreateRouteImport } from './routes/alerts/create'
 import { Route as AlertsRuleIdRouteImport } from './routes/alerts/$ruleId'
+import { Route as InfraPlanetscaleIndexRouteImport } from './routes/infra/planetscale/index'
 import { Route as InfraCloudflareIndexRouteImport } from './routes/infra/cloudflare/index'
 import { Route as ErrorsIssuesIndexRouteImport } from './routes/errors/issues/index'
+import { Route as InfraPlanetscaleDbNameRouteImport } from './routes/infra/planetscale/$dbName'
 import { Route as InfraCloudflareZoneNameRouteImport } from './routes/infra/cloudflare/$zoneName'
 import { Route as ErrorsIssuesIssueIdRouteImport } from './routes/errors/issues/$issueId'
 import { Route as AlertsIncidentsIncidentIdRouteImport } from './routes/alerts/incidents/$incidentId'
@@ -112,11 +115,6 @@ const OrgRequiredRoute = OrgRequiredRouteImport.update({
   path: '/org-required',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MetricsRoute = MetricsRouteImport.update({
-  id: '/metrics',
-  path: '/metrics',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -160,6 +158,11 @@ const ServicesIndexRoute = ServicesIndexRouteImport.update({
 const ReplaysIndexRoute = ReplaysIndexRouteImport.update({
   id: '/replays/',
   path: '/replays/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MetricsIndexRoute = MetricsIndexRouteImport.update({
+  id: '/metrics/',
+  path: '/metrics/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LogsIndexRoute = LogsIndexRouteImport.update({
@@ -218,6 +221,11 @@ const RecommendationsRecommendationKeyRoute =
     path: '/recommendations/$recommendationKey',
     getParentRoute: () => rootRouteImport,
   } as any)
+const MetricsMetricNameRoute = MetricsMetricNameRouteImport.update({
+  id: '/metrics/$metricName',
+  path: '/metrics/$metricName',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LogsLogIdRoute = LogsLogIdRouteImport.update({
   id: '/logs/$logId',
   path: '/logs/$logId',
@@ -263,6 +271,11 @@ const AlertsRuleIdRoute = AlertsRuleIdRouteImport.update({
   path: '/alerts/$ruleId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InfraPlanetscaleIndexRoute = InfraPlanetscaleIndexRouteImport.update({
+  id: '/infra/planetscale/',
+  path: '/infra/planetscale/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InfraCloudflareIndexRoute = InfraCloudflareIndexRouteImport.update({
   id: '/infra/cloudflare/',
   path: '/infra/cloudflare/',
@@ -271,6 +284,11 @@ const InfraCloudflareIndexRoute = InfraCloudflareIndexRouteImport.update({
 const ErrorsIssuesIndexRoute = ErrorsIssuesIndexRouteImport.update({
   id: '/errors/issues/',
   path: '/errors/issues/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfraPlanetscaleDbNameRoute = InfraPlanetscaleDbNameRouteImport.update({
+  id: '/infra/planetscale/$dbName',
+  path: '/infra/planetscale/$dbName',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InfraCloudflareZoneNameRoute = InfraCloudflareZoneNameRouteImport.update({
@@ -339,7 +357,6 @@ export interface FileRoutesByFullPath {
   '/developer': typeof DeveloperRoute
   '/integrations': typeof IntegrationsRoute
   '/mcp': typeof McpRoute
-  '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
   '/quick-start': typeof QuickStartRoute
@@ -359,6 +376,7 @@ export interface FileRoutesByFullPath {
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
+  '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
   '/replays/preview': typeof ReplaysPreviewRoute
@@ -370,14 +388,17 @@ export interface FileRoutesByFullPath {
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
   '/logs/': typeof LogsIndexRoute
+  '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
+  '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
+  '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
@@ -393,7 +414,6 @@ export interface FileRoutesByTo {
   '/developer': typeof DeveloperRoute
   '/integrations': typeof IntegrationsRoute
   '/mcp': typeof McpRoute
-  '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
   '/quick-start': typeof QuickStartRoute
@@ -413,6 +433,7 @@ export interface FileRoutesByTo {
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
+  '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
   '/replays/preview': typeof ReplaysPreviewRoute
@@ -424,14 +445,17 @@ export interface FileRoutesByTo {
   '/errors': typeof ErrorsIndexRoute
   '/infra': typeof InfraIndexRoute
   '/logs': typeof LogsIndexRoute
+  '/metrics': typeof MetricsIndexRoute
   '/replays': typeof ReplaysIndexRoute
   '/services': typeof ServicesIndexRoute
   '/traces': typeof TracesIndexRoute
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
+  '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
   '/errors/issues': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare': typeof InfraCloudflareIndexRoute
+  '/infra/planetscale': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
@@ -448,7 +472,6 @@ export interface FileRoutesById {
   '/developer': typeof DeveloperRoute
   '/integrations': typeof IntegrationsRoute
   '/mcp': typeof McpRoute
-  '/metrics': typeof MetricsRoute
   '/org-required': typeof OrgRequiredRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
   '/quick-start': typeof QuickStartRoute
@@ -468,6 +491,7 @@ export interface FileRoutesById {
   '/infra/$hostName': typeof InfraHostNameRoute
   '/investigations/$id': typeof InvestigationsIdRoute
   '/logs/$logId': typeof LogsLogIdRoute
+  '/metrics/$metricName': typeof MetricsMetricNameRoute
   '/recommendations/$recommendationKey': typeof RecommendationsRecommendationKeyRoute
   '/replays/$sessionId': typeof ReplaysSessionIdRoute
   '/replays/preview': typeof ReplaysPreviewRoute
@@ -479,14 +503,17 @@ export interface FileRoutesById {
   '/errors/': typeof ErrorsIndexRoute
   '/infra/': typeof InfraIndexRoute
   '/logs/': typeof LogsIndexRoute
+  '/metrics/': typeof MetricsIndexRoute
   '/replays/': typeof ReplaysIndexRoute
   '/services/': typeof ServicesIndexRoute
   '/traces/': typeof TracesIndexRoute
   '/alerts/incidents/$incidentId': typeof AlertsIncidentsIncidentIdRoute
   '/errors/issues/$issueId': typeof ErrorsIssuesIssueIdRoute
   '/infra/cloudflare/$zoneName': typeof InfraCloudflareZoneNameRoute
+  '/infra/planetscale/$dbName': typeof InfraPlanetscaleDbNameRoute
   '/errors/issues/': typeof ErrorsIssuesIndexRoute
   '/infra/cloudflare/': typeof InfraCloudflareIndexRoute
+  '/infra/planetscale/': typeof InfraPlanetscaleIndexRoute
   '/dashboards/$dashboardId_/widgets/$widgetId': typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   '/infra/kubernetes/nodes/$nodeName': typeof InfraKubernetesNodesNodeNameRoute
   '/infra/kubernetes/pods/$podName': typeof InfraKubernetesPodsPodNameRoute
@@ -504,7 +531,6 @@ export interface FileRouteTypes {
     | '/developer'
     | '/integrations'
     | '/mcp'
-    | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
     | '/quick-start'
@@ -524,6 +550,7 @@ export interface FileRouteTypes {
     | '/infra/$hostName'
     | '/investigations/$id'
     | '/logs/$logId'
+    | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
     | '/replays/preview'
@@ -535,14 +562,17 @@ export interface FileRouteTypes {
     | '/errors/'
     | '/infra/'
     | '/logs/'
+    | '/metrics/'
     | '/replays/'
     | '/services/'
     | '/traces/'
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/infra/cloudflare/$zoneName'
+    | '/infra/planetscale/$dbName'
     | '/errors/issues/'
     | '/infra/cloudflare/'
+    | '/infra/planetscale/'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
@@ -558,7 +588,6 @@ export interface FileRouteTypes {
     | '/developer'
     | '/integrations'
     | '/mcp'
-    | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
     | '/quick-start'
@@ -578,6 +607,7 @@ export interface FileRouteTypes {
     | '/infra/$hostName'
     | '/investigations/$id'
     | '/logs/$logId'
+    | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
     | '/replays/preview'
@@ -589,14 +619,17 @@ export interface FileRouteTypes {
     | '/errors'
     | '/infra'
     | '/logs'
+    | '/metrics'
     | '/replays'
     | '/services'
     | '/traces'
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/infra/cloudflare/$zoneName'
+    | '/infra/planetscale/$dbName'
     | '/errors/issues'
     | '/infra/cloudflare'
+    | '/infra/planetscale'
     | '/dashboards/$dashboardId/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
@@ -612,7 +645,6 @@ export interface FileRouteTypes {
     | '/developer'
     | '/integrations'
     | '/mcp'
-    | '/metrics'
     | '/org-required'
     | '/query-builder-lab'
     | '/quick-start'
@@ -632,6 +664,7 @@ export interface FileRouteTypes {
     | '/infra/$hostName'
     | '/investigations/$id'
     | '/logs/$logId'
+    | '/metrics/$metricName'
     | '/recommendations/$recommendationKey'
     | '/replays/$sessionId'
     | '/replays/preview'
@@ -643,14 +676,17 @@ export interface FileRouteTypes {
     | '/errors/'
     | '/infra/'
     | '/logs/'
+    | '/metrics/'
     | '/replays/'
     | '/services/'
     | '/traces/'
     | '/alerts/incidents/$incidentId'
     | '/errors/issues/$issueId'
     | '/infra/cloudflare/$zoneName'
+    | '/infra/planetscale/$dbName'
     | '/errors/issues/'
     | '/infra/cloudflare/'
+    | '/infra/planetscale/'
     | '/dashboards/$dashboardId_/widgets/$widgetId'
     | '/infra/kubernetes/nodes/$nodeName'
     | '/infra/kubernetes/pods/$podName'
@@ -667,7 +703,6 @@ export interface RootRouteChildren {
   DeveloperRoute: typeof DeveloperRoute
   IntegrationsRoute: typeof IntegrationsRoute
   McpRoute: typeof McpRoute
-  MetricsRoute: typeof MetricsRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
   QuickStartRoute: typeof QuickStartRoute
@@ -687,6 +722,7 @@ export interface RootRouteChildren {
   InfraHostNameRoute: typeof InfraHostNameRoute
   InvestigationsIdRoute: typeof InvestigationsIdRoute
   LogsLogIdRoute: typeof LogsLogIdRoute
+  MetricsMetricNameRoute: typeof MetricsMetricNameRoute
   RecommendationsRecommendationKeyRoute: typeof RecommendationsRecommendationKeyRoute
   ReplaysSessionIdRoute: typeof ReplaysSessionIdRoute
   ReplaysPreviewRoute: typeof ReplaysPreviewRoute
@@ -698,14 +734,17 @@ export interface RootRouteChildren {
   ErrorsIndexRoute: typeof ErrorsIndexRoute
   InfraIndexRoute: typeof InfraIndexRoute
   LogsIndexRoute: typeof LogsIndexRoute
+  MetricsIndexRoute: typeof MetricsIndexRoute
   ReplaysIndexRoute: typeof ReplaysIndexRoute
   ServicesIndexRoute: typeof ServicesIndexRoute
   TracesIndexRoute: typeof TracesIndexRoute
   AlertsIncidentsIncidentIdRoute: typeof AlertsIncidentsIncidentIdRoute
   ErrorsIssuesIssueIdRoute: typeof ErrorsIssuesIssueIdRoute
   InfraCloudflareZoneNameRoute: typeof InfraCloudflareZoneNameRoute
+  InfraPlanetscaleDbNameRoute: typeof InfraPlanetscaleDbNameRoute
   ErrorsIssuesIndexRoute: typeof ErrorsIssuesIndexRoute
   InfraCloudflareIndexRoute: typeof InfraCloudflareIndexRoute
+  InfraPlanetscaleIndexRoute: typeof InfraPlanetscaleIndexRoute
   DashboardsDashboardIdWidgetsWidgetIdRoute: typeof DashboardsDashboardIdWidgetsWidgetIdRoute
   InfraKubernetesNodesNodeNameRoute: typeof InfraKubernetesNodesNodeNameRoute
   InfraKubernetesPodsPodNameRoute: typeof InfraKubernetesPodsPodNameRoute
@@ -787,13 +826,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgRequiredRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/metrics': {
-      id: '/metrics'
-      path: '/metrics'
-      fullPath: '/metrics'
-      preLoaderRoute: typeof MetricsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/mcp': {
       id: '/mcp'
       path: '/mcp'
@@ -855,6 +887,13 @@ declare module '@tanstack/react-router' {
       path: '/replays'
       fullPath: '/replays/'
       preLoaderRoute: typeof ReplaysIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/metrics/': {
+      id: '/metrics/'
+      path: '/metrics'
+      fullPath: '/metrics/'
+      preLoaderRoute: typeof MetricsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/logs/': {
@@ -934,6 +973,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RecommendationsRecommendationKeyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/metrics/$metricName': {
+      id: '/metrics/$metricName'
+      path: '/metrics/$metricName'
+      fullPath: '/metrics/$metricName'
+      preLoaderRoute: typeof MetricsMetricNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/logs/$logId': {
       id: '/logs/$logId'
       path: '/logs/$logId'
@@ -997,6 +1043,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AlertsRuleIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/infra/planetscale/': {
+      id: '/infra/planetscale/'
+      path: '/infra/planetscale'
+      fullPath: '/infra/planetscale/'
+      preLoaderRoute: typeof InfraPlanetscaleIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/infra/cloudflare/': {
       id: '/infra/cloudflare/'
       path: '/infra/cloudflare'
@@ -1009,6 +1062,13 @@ declare module '@tanstack/react-router' {
       path: '/errors/issues'
       fullPath: '/errors/issues/'
       preLoaderRoute: typeof ErrorsIssuesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/infra/planetscale/$dbName': {
+      id: '/infra/planetscale/$dbName'
+      path: '/infra/planetscale/$dbName'
+      fullPath: '/infra/planetscale/$dbName'
+      preLoaderRoute: typeof InfraPlanetscaleDbNameRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/infra/cloudflare/$zoneName': {
@@ -1091,7 +1151,6 @@ const rootRouteChildren: RootRouteChildren = {
   DeveloperRoute: DeveloperRoute,
   IntegrationsRoute: IntegrationsRoute,
   McpRoute: McpRoute,
-  MetricsRoute: MetricsRoute,
   OrgRequiredRoute: OrgRequiredRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,
   QuickStartRoute: QuickStartRoute,
@@ -1111,6 +1170,7 @@ const rootRouteChildren: RootRouteChildren = {
   InfraHostNameRoute: InfraHostNameRoute,
   InvestigationsIdRoute: InvestigationsIdRoute,
   LogsLogIdRoute: LogsLogIdRoute,
+  MetricsMetricNameRoute: MetricsMetricNameRoute,
   RecommendationsRecommendationKeyRoute: RecommendationsRecommendationKeyRoute,
   ReplaysSessionIdRoute: ReplaysSessionIdRoute,
   ReplaysPreviewRoute: ReplaysPreviewRoute,
@@ -1122,14 +1182,17 @@ const rootRouteChildren: RootRouteChildren = {
   ErrorsIndexRoute: ErrorsIndexRoute,
   InfraIndexRoute: InfraIndexRoute,
   LogsIndexRoute: LogsIndexRoute,
+  MetricsIndexRoute: MetricsIndexRoute,
   ReplaysIndexRoute: ReplaysIndexRoute,
   ServicesIndexRoute: ServicesIndexRoute,
   TracesIndexRoute: TracesIndexRoute,
   AlertsIncidentsIncidentIdRoute: AlertsIncidentsIncidentIdRoute,
   ErrorsIssuesIssueIdRoute: ErrorsIssuesIssueIdRoute,
   InfraCloudflareZoneNameRoute: InfraCloudflareZoneNameRoute,
+  InfraPlanetscaleDbNameRoute: InfraPlanetscaleDbNameRoute,
   ErrorsIssuesIndexRoute: ErrorsIssuesIndexRoute,
   InfraCloudflareIndexRoute: InfraCloudflareIndexRoute,
+  InfraPlanetscaleIndexRoute: InfraPlanetscaleIndexRoute,
   DashboardsDashboardIdWidgetsWidgetIdRoute:
     DashboardsDashboardIdWidgetsWidgetIdRoute,
   InfraKubernetesNodesNodeNameRoute: InfraKubernetesNodesNodeNameRoute,

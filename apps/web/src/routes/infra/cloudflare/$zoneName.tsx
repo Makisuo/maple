@@ -137,7 +137,7 @@ function ZoneDetailContent({
 		.onSuccess((detail, result) => {
 			if (detail.statusBuckets.length === 0 && !result.waiting) {
 				return (
-					<Empty className="py-16">
+					<Empty className="py-16 content-enter">
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<CloudflareIcon size={16} />
@@ -159,7 +159,7 @@ function ZoneDetailContent({
 			const errorRate = requests > 0 ? errors5xx / requests : 0
 
 			return (
-				<div className={`space-y-6 transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-6 content-enter ${result.waiting ? "opacity-60" : ""}`}>
 					<StatRail>
 						<StatRailItem eyebrow="Edge requests" value={formatNumber(requests)} compact />
 						<StatRailItem

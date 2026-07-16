@@ -1,6 +1,12 @@
 import { makeResolveTenant } from "@maple/auth"
 import { Effect, Layer, Option, Redacted } from "effect"
-import { FetchHttpClient, HttpClient, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import {
+	FetchHttpClient,
+	HttpClient,
+	HttpRouter,
+	HttpServerRequest,
+	HttpServerResponse,
+} from "effect/unstable/http"
 import { SyncConfig } from "../config"
 
 /**
@@ -37,6 +43,29 @@ const SHAPES = {
 	error_issues: { table: "error_issues", extraWhere: `"archived_at" IS NULL` },
 	actors: { table: "actors" },
 	open_error_incidents: { table: "error_incidents", extraWhere: `"status" = 'open'` },
+	// API key hashes and agent metadata are authentication material/internal
+	// configuration and must never reach the browser. The dashboard needs only
+	// the safe display fields below; `id` + `org_id` are required for identity
+	// and tenant scoping.
+	api_keys: {
+		table: "api_keys",
+		columns: [
+			"id",
+			"org_id",
+			"name",
+			"description",
+			"key_prefix",
+			"revoked",
+			"revoked_at",
+			"last_used_at",
+			"expires_at",
+			"scopes",
+			"kind",
+			"created_at",
+			"created_by",
+			"created_by_email",
+		],
+	},
 	// `config_json` holds only public config (summary / channel label / hazel
 	// metadata); the encrypted webhook secrets live in separate `secret_*` columns
 	// that MUST NOT reach the browser, so the projection drops them (and the
@@ -86,7 +115,14 @@ export const isShapeName = (value: string | null): value is ShapeName =>
 //     warns about ("proxy/CDN is serving a stale cached response and ignoring
 //     cache-buster query params"). They only affect caching, never the shape
 //     definition or org scope, so forwarding them is safe.
-const CLIENT_PASSTHROUGH_PARAMS = ["offset", "handle", "live", "cursor", "expired_handle", "cache-buster"] as const
+const CLIENT_PASSTHROUGH_PARAMS = [
+	"offset",
+	"handle",
+	"live",
+	"cursor",
+	"expired_handle",
+	"cache-buster",
+] as const
 
 // Upstream response headers that must not survive re-wrapping: the platform
 // re-encodes and re-chunks the streamed body, so a stale content-encoding /
@@ -102,7 +138,10 @@ const appendVary = (existing: string | undefined, header: string): string => {
 	const trimmed = existing?.trim()
 	if (!trimmed) return header
 	if (trimmed === "*") return trimmed
-	const tokens = trimmed.split(",").map((t) => t.trim()).filter(Boolean)
+	const tokens = trimmed
+		.split(",")
+		.map((t) => t.trim())
+		.filter(Boolean)
 	if (tokens.some((t) => t.toLowerCase() === header.toLowerCase())) return tokens.join(", ")
 	return [...tokens, header].join(", ")
 }
@@ -123,9 +162,7 @@ const appendVary = (existing: string | undefined, header: string): string => {
  * We also drop content-encoding/content-length, which misdescribe the re-wrapped
  * body. Effect lowercases header keys, so we match on lowercase names.
  */
-export const shapeResponseHeaders = (
-	upstream: Readonly<Record<string, string>>,
-): Record<string, string> => {
+export const shapeResponseHeaders = (upstream: Readonly<Record<string, string>>): Record<string, string> => {
 	const headers: Record<string, string> = { ...upstream }
 	for (const key of STRIPPED_UPSTREAM_HEADERS) delete headers[key]
 

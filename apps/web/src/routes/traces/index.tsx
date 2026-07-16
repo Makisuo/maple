@@ -115,7 +115,7 @@ export function TracesPage() {
 					breadcrumbs={[{ label: "Traces" }]}
 					filterSidebar={<TracesFilterSidebar facetsResult={facetsResult} />}
 					headerActions={
-						<div className="flex items-center gap-2">
+						<div className="flex flex-wrap items-center gap-2">
 							<AdvancedFilterDialog
 								initialValue={search.whereClause ?? ""}
 								onApply={handleApplyWhereClause}

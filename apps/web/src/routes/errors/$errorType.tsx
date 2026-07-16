@@ -1,12 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
-import { toast } from "sonner"
 import { formatDistanceToNow, format } from "date-fns"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { ErrorState } from "@/components/common/error-state"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
@@ -23,6 +23,7 @@ import {
 	inferBucketSeconds,
 	inferRangeMs,
 } from "@/lib/format"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -75,6 +76,8 @@ function ErrorDetailContent() {
 	// Prefer the human label passed from the list; fall back to the hash.
 	const displayLabel = search.label ?? fingerprintHash
 	const navigate = useNavigate({ from: Route.fullPath })
+	const messageCopy = useCopyToClipboard("Error message")
+	const promptCopy = useCopyToClipboard("Agent prompt")
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -97,40 +100,40 @@ function ErrorDetailContent() {
 
 	const bucketSeconds = computeBucketSeconds(effectiveStartTime, effectiveEndTime)
 
-	const errorResult = useRefreshableAtomValue(
-		getErrorsByTypeResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				services: search.services,
-				fingerprintHashes: [fingerprintHash],
-			},
-		}),
-	)
+	const errorAtom = getErrorsByTypeResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			services: search.services,
+			fingerprintHashes: [fingerprintHash],
+		},
+	})
+	const errorResult = useRefreshableAtomValue(errorAtom)
+	const refreshError = useAtomRefresh(errorAtom)
 
-	const tracesResult = useRefreshableAtomValue(
-		getErrorDetailTracesResultAtom({
-			data: {
-				fingerprintHash,
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				services: search.services,
-				limit: 20,
-			},
-		}),
-	)
+	const tracesAtom = getErrorDetailTracesResultAtom({
+		data: {
+			fingerprintHash,
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			services: search.services,
+			limit: 20,
+		},
+	})
+	const tracesResult = useRefreshableAtomValue(tracesAtom)
+	const refreshTraces = useAtomRefresh(tracesAtom)
 
-	const timeseriesResult = useRefreshableAtomValue(
-		getErrorsTimeseriesResultAtom({
-			data: {
-				fingerprintHash,
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				services: search.services,
-				bucketSeconds,
-			},
-		}),
-	)
+	const timeseriesAtom = getErrorsTimeseriesResultAtom({
+		data: {
+			fingerprintHash,
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			services: search.services,
+			bucketSeconds,
+		},
+	})
+	const timeseriesResult = useRefreshableAtomValue(timeseriesAtom)
+	const refreshTimeseries = useAtomRefresh(timeseriesAtom)
 
 	const statsSection = Result.builder(errorResult)
 		.onInitial(() => (
@@ -144,14 +147,21 @@ function ErrorDetailContent() {
 				))}
 			</div>
 		))
-		.onError(() => null)
+		.onError((error) => (
+			<ErrorState
+				variant="inline"
+				error={error}
+				title="Failed to load error details"
+				onRetry={refreshError}
+			/>
+		))
 		.onSuccess((data: { data: ErrorByType[] }) => {
 			const error = data.data[0]
 			if (!error) return null
 
 			return (
 				<div
-					className={`grid grid-cols-2 gap-4 lg:grid-cols-4 transition-opacity ${errorResult.waiting ? "opacity-60" : ""}`}
+					className={`grid grid-cols-2 gap-4 lg:grid-cols-4 content-enter ${errorResult.waiting ? "opacity-60" : ""}`}
 				>
 					<StatCard label="Total Occurrences" value={formatNumber(error.count)} />
 					<StatCard
@@ -177,13 +187,15 @@ function ErrorDetailContent() {
 				<Skeleton className="h-20 w-full" />
 			</div>
 		))
+		// Same query as the stats section — its failure already renders there,
+		// so don't repeat the error for this section.
 		.onError(() => null)
 		.onSuccess((data: { data: ErrorByType[] }) => {
 			const error = data.data[0]
 			if (!error) return null
 
 			return (
-				<div className="space-y-2">
+				<div className="space-y-2 content-enter">
 					<h3 className="text-sm font-semibold">Error Message</h3>
 					<div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
 						<pre className="text-sm font-mono whitespace-pre-wrap break-all">
@@ -193,31 +205,32 @@ function ErrorDetailContent() {
 							<button
 								type="button"
 								className="text-xs text-primary hover:underline"
-								onClick={() => {
-									navigator.clipboard.writeText(error.sampleMessage)
-									toast.success("Error message copied to clipboard")
-								}}
+								onClick={() => messageCopy.copy(error.sampleMessage)}
 							>
 								Copy error message
 							</button>
 							<button
 								type="button"
 								className="text-xs text-primary hover:underline"
-								onClick={() => {
-									navigator.clipboard.writeText(
+								onClick={() =>
+									promptCopy.copy(
 										formatAgentDebugPrompt({
 											fingerprintHash,
 											label: displayLabel,
-											serviceName: search.services?.length === 1 ? search.services[0] : null,
+											serviceName:
+												search.services?.length === 1 ? search.services[0] : null,
 											message: error.sampleMessage,
 											occurrenceCount: error.count,
 											affectedServicesCount: error.affectedServicesCount,
 											firstSeen: error.firstSeen.toISOString(),
 											lastSeen: error.lastSeen.toISOString(),
 										}),
+										{
+											successMessage:
+												"Agent prompt copied — paste it into your MCP agent",
+										},
 									)
-									toast.success("Copied agent prompt — paste it into your MCP agent")
-								}}
+								}
 							>
 								Copy agent prompt
 							</button>
@@ -235,7 +248,12 @@ function ErrorDetailContent() {
 				<Skeleton className="h-[160px] w-full" />
 			</div>
 		))
-		.onError(() => null)
+		.onError((error) => (
+			<div className="space-y-2">
+				<h3 className="text-sm font-semibold">Error Frequency</h3>
+				<ErrorState variant="inline" error={error} onRetry={refreshTimeseries} />
+			</div>
+		))
 		.onSuccess((data: { data: ErrorsTimeseriesItem[] }) => {
 			const chartData = data.data.map((item) => ({
 				bucket: toIsoBucket(item.bucket),
@@ -249,7 +267,7 @@ function ErrorDetailContent() {
 
 			return (
 				<div
-					className={`space-y-2 transition-opacity ${timeseriesResult.waiting ? "opacity-60" : ""}`}
+					className={`space-y-2 content-enter ${timeseriesResult.waiting ? "opacity-60" : ""}`}
 				>
 					<h3 className="text-sm font-semibold">Error Frequency</h3>
 					<ChartContainer config={chartConfig} className="h-[160px] w-full">
@@ -320,15 +338,16 @@ function ErrorDetailContent() {
 				</div>
 			</div>
 		))
-		.onError(() => (
-			<div className="rounded-md border border-destructive/50 bg-destructive/10 p-4">
-				<p className="text-sm text-destructive">Failed to load sample traces</p>
+		.onError((error) => (
+			<div className="space-y-2">
+				<h3 className="text-sm font-semibold">Sample Traces</h3>
+				<ErrorState variant="inline" error={error} onRetry={refreshTraces} />
 			</div>
 		))
 		.onSuccess((data: { data: ErrorDetailTrace[] }) => {
 			if (data.data.length === 0) {
 				return (
-					<div className="space-y-2">
+					<div className="space-y-2 content-enter">
 						<h3 className="text-sm font-semibold">Sample Traces</h3>
 						<p className="text-sm text-muted-foreground">
 							No traces found for this error in the selected time range.
@@ -338,7 +357,7 @@ function ErrorDetailContent() {
 			}
 
 			return (
-				<div className={`space-y-2 transition-opacity ${tracesResult.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-2 content-enter ${tracesResult.waiting ? "opacity-60" : ""}`}>
 					<div className="flex items-center justify-between">
 						<h3 className="text-sm font-semibold">Sample Traces</h3>
 						<span className="text-xs text-muted-foreground">

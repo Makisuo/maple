@@ -131,7 +131,7 @@ const GOLDEN_ANGLE = 137.508
  * rotating the hue by the golden angle and alternating lightness in "rings",
  * so even 50 series stay visually separable. Mid-tone L/C keeps the generated
  * colors legible on both light and dark backgrounds (mirrors
- * {@link getServiceLegendColor} in `colors.ts`).
+ * {@link getServiceColor} in `colors.ts`).
  */
 export function getSeriesColorByIndex(index: number): string {
 	const i = Math.max(0, Math.floor(index))

@@ -59,7 +59,6 @@ export function TraceDetailView({ traceId, onBack }: TraceDetailViewProps) {
 						{selectedSpan ? (
 							<SpanDetailPanel
 								span={selectedSpan}
-								services={data.services}
 								onClose={() => setSelectedSpan(undefined)}
 							/>
 						) : null}

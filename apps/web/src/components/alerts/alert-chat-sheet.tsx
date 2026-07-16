@@ -1,13 +1,7 @@
 import { Link } from "@tanstack/react-router"
 
 import { Button } from "@maple/ui/components/ui/button"
-import {
-	Sheet,
-	SheetDescription,
-	SheetHeader,
-	SheetPopup,
-	SheetTitle,
-} from "@maple/ui/components/ui/sheet"
+import { Sheet, SheetDescription, SheetHeader, SheetPopup, SheetTitle } from "@maple/ui/components/ui/sheet"
 import { ExternalLinkIcon } from "@/components/icons"
 
 import { ChatConversation } from "@/components/chat/chat-conversation"
@@ -17,10 +11,7 @@ import {
 	signalLabel,
 	type AlertContext,
 } from "@/components/chat/alert-context"
-import {
-	alertContextToInvestigation,
-	investigationTabId,
-} from "@/components/chat/investigation-context"
+import { alertContextToInvestigation, investigationTabId } from "@/components/chat/investigation-context"
 
 export interface AlertChatSheetProps {
 	open: boolean
@@ -47,25 +38,29 @@ export function AlertChatSheet({ open, onOpenChange, alertContext }: AlertChatSh
 				<SheetPopup
 					side="right"
 					className="w-[calc(100%-(--spacing(12)))] sm:max-w-2xl"
-					closeProps={{ className: "absolute end-12 top-4 z-10" }}
+					closeProps={{ className: "absolute end-3 top-5 z-10" }}
 				>
-					<SheetHeader className="flex flex-row items-start justify-between gap-3 border-b pb-4">
+					<SheetHeader className="flex flex-row items-start justify-between gap-3 border-b pe-14 pb-4">
 						<div className="min-w-0 space-y-1">
 							<SheetTitle className="truncate text-base">{alertContext.ruleName}</SheetTitle>
 							<SheetDescription>
 								Discuss this {signalLabel(alertContext.signalType)} alert with Maple AI.
 							</SheetDescription>
 						</div>
-						<Button size="sm" variant="ghost" render={
-							<Link
-								to="/chat"
-								search={{
-									mode: "alert",
-									alert: encodeAlertContextToSearchParam(alertContext),
-									tab: investigationTabId(investigation),
-								}}
-							/>
-						}>
+						<Button
+							size="sm"
+							variant="ghost"
+							render={
+								<Link
+									to="/chat"
+									search={{
+										mode: "alert",
+										alert: encodeAlertContextToSearchParam(alertContext),
+										tab: investigationTabId(investigation),
+									}}
+								/>
+							}
+						>
 							Open full page
 							<ExternalLinkIcon className="size-3.5" />
 						</Button>

@@ -1,6 +1,8 @@
-import { spawnSync } from "node:child_process"
 import path from "node:path"
-import { Assets, Worker } from "alchemy/cloudflare"
+import * as Cloudflare from "alchemy/Cloudflare"
+import * as Command from "alchemy/Command"
+import * as Output from "alchemy/Output"
+import * as Effect from "effect/Effect"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	resolveWorkerName,
@@ -13,32 +15,25 @@ export interface CreateLandingWorkerOptions {
 	domains: MapleDomains
 }
 
-export const createLandingWorker = async ({ stage, domains }: CreateLandingWorkerOptions) => {
-	const isDestroy = process.argv.some((arg) => arg === "destroy")
-	if (!isDestroy) {
-		const build = spawnSync("bun", ["run", "build"], {
-			stdio: "inherit",
+export const createLandingWorker = ({ stage, domains }: CreateLandingWorkerOptions) =>
+	Effect.gen(function* () {
+		// Astro static build (memoized on the app's source files, skipped on destroy).
+		const build = yield* Command.Build("landing-build", {
+			command: "bun run build",
 			cwd: import.meta.dirname,
-			env: process.env,
+			outdir: "dist",
 		})
-		if (build.status !== 0) {
-			throw new Error(`landing build failed with exit code ${build.status ?? "unknown"}`)
-		}
-	}
 
-	const worker = await Worker("landing", {
-		name: resolveWorkerName("landing", stage),
-		cwd: import.meta.dirname,
-		entrypoint: path.join(import.meta.dirname, "src", "worker.ts"),
-		compatibility: "node",
-		placement: CLOUDFLARE_WORKER_PLACEMENT,
-		url: true,
-		adopt: true,
-		domains: domains.landing ? [{ domainName: domains.landing, adopt: true }] : undefined,
-		bindings: {
-			ASSETS: await Assets({ path: path.join(import.meta.dirname, "dist") }),
-		},
+		const worker = yield* Cloudflare.Worker<{}, Cloudflare.AssetsWithHash>("landing", {
+			name: resolveWorkerName("landing", stage),
+			main: path.join(import.meta.dirname, "src", "worker.ts"),
+			// The `assets` prop auto-adds the ASSETS binding `src/worker.ts` reads.
+			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
+			compatibility: { date: "2026-04-08", flags: ["nodejs_compat"] },
+			placement: CLOUDFLARE_WORKER_PLACEMENT,
+			url: true,
+			domain: domains.landing,
+		})
+
+		return worker
 	})
-
-	return worker
-}

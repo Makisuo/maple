@@ -42,14 +42,12 @@ export interface LayoutResult {
 export function layoutSpans(
 	rootSpans: SpanNode[],
 	expandedSpanIds: Set<string>,
-	services: string[],
 	colorBy: ColorByField,
 ): LayoutResult {
 	const bars: TimelineBar[] = []
 	const barIndexBySpanId = new Map<string, number>()
 	let currentRow = 0
 	const statusPreset = isStatusCodePreset(colorBy)
-	const colorByService = colorBy.kind === "preset" && colorBy.key === "service"
 
 	function visit(node: SpanNode) {
 		const startMs = new Date(node.startTime).getTime()
@@ -57,11 +55,9 @@ export function layoutSpans(
 		const hasChildren = node.children.length > 0
 		const isCollapsed = hasChildren && !expandedSpanIds.has(node.spanId)
 		const isError = node.statusCode === "Error"
-		const serviceIndex = services.indexOf(node.serviceName)
 
 		const value = resolveColorValue(node, colorBy)
-		const indexHint = colorByService && value ? services.indexOf(value) : undefined
-		const hue = getValueHue(value, indexHint, services.length)
+		const hue = getValueHue(value)
 
 		const bar: TimelineBar = {
 			span: node,
@@ -73,7 +69,6 @@ export function layoutSpans(
 			isError,
 			isCollapsed,
 			childCount: isCollapsed ? countDescendants(node) : 0,
-			serviceIndex,
 			fill: barFillFromHue(hue, isError, statusPreset),
 			borderColor: barBorderFromHue(hue, isError, statusPreset),
 			hasChildren,
@@ -306,7 +301,6 @@ export interface UseTraceTimelineOptions {
 	rootSpans: SpanNode[]
 	totalDurationMs: number
 	traceStartTime: string
-	services: string[]
 	colorBy: ColorByField
 	/** Keep this span's ancestor chain expanded so auto-collapse never hides it. */
 	keepVisibleSpanId?: string
@@ -331,7 +325,6 @@ export function useTraceTimeline({
 	rootSpans,
 	totalDurationMs,
 	traceStartTime,
-	services,
 	colorBy,
 	keepVisibleSpanId,
 }: UseTraceTimelineOptions): UseTraceTimelineResult {
@@ -404,8 +397,8 @@ export function useTraceTimeline({
 
 	// Layout bars
 	const { bars, totalRows, barIndexBySpanId, parentIndexById } = React.useMemo(
-		() => layoutSpans(rootSpans, state.expandedSpanIds, services, colorBy),
-		[rootSpans, state.expandedSpanIds, services, colorBy],
+		() => layoutSpans(rootSpans, state.expandedSpanIds, colorBy),
+		[rootSpans, state.expandedSpanIds, colorBy],
 	)
 
 	// Viewport derived values

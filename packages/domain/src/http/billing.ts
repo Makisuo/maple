@@ -104,6 +104,28 @@ export class CatalogPlansResponse extends Schema.Class<CatalogPlansResponse>("Ca
 	plans: Schema.Array(CatalogPlan),
 }) {}
 
+// ---- Invoices (getOrCreateCustomer with expand: ["invoices"]) ----
+
+export class BillingInvoice extends Schema.Class<BillingInvoice>("BillingInvoice")({
+	stripeId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+	planIds: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+	// Stripe invoice status: "paid" | "open" | "draft" | "void" | "uncollectible"
+	// — kept as a plain string so an unknown status can't fail decoding.
+	status: Schema.String,
+	// Dollars, not cents (matches previewAttach totals).
+	total: Schema.Number,
+	currency: Schema.String,
+	createdAt: Schema.Number,
+	// Stripe-hosted invoice page (view/PDF). Absent for draft invoices.
+	hostedInvoiceUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
+}) {}
+
+export class BillingInvoicesResponse extends Schema.Class<BillingInvoicesResponse>(
+	"BillingInvoicesResponse",
+)({
+	invoices: Schema.Array(BillingInvoice),
+}) {}
+
 // ---- Usage (aggregateEvents) ----
 
 export class BillingUsageFeature extends Schema.Class<BillingUsageFeature>("BillingUsageFeature")({
@@ -184,6 +206,12 @@ export class BillingApiGroup extends HttpApiGroup.make("billing")
 		HttpApiEndpoint.get("getUsage", "/usage", {
 			query: BillingUsageQuery,
 			success: BillingUsage,
+			error: BillingUpstreamError,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.get("listInvoices", "/invoices", {
+			success: BillingInvoicesResponse,
 			error: BillingUpstreamError,
 		}),
 	)

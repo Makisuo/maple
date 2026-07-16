@@ -1,6 +1,5 @@
 import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { toast } from "sonner"
 
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
@@ -8,7 +7,7 @@ import { CheckIcon, CopyIcon } from "@/components/icons"
 import type { VcsCommitDetailResponse } from "@maple/domain/http"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@maple/ui/components/ui/hover-card"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { cn } from "@maple/ui/utils"
 
 // A full 40-hex git SHA. Telemetry `deployment.commit_sha` is unguarded OTel
@@ -78,7 +77,7 @@ export function CommitShaHoverCard({
 	anchor,
 }: CommitShaHoverCardProps) {
 	const isFullSha = FULL_SHA.test(sha)
-	const clipboard = useClipboard()
+	const shaCopy = useCopyToClipboard(copy?.label ?? "Value")
 	// Once armed we keep it armed: the in-flight/cached result should survive the
 	// cursor leaving, so a re-hover is instant.
 	const [armed, setArmed] = useState(false)
@@ -91,16 +90,7 @@ export function CommitShaHoverCard({
 		[],
 	)
 
-	const handleCopy = copy
-		? async () => {
-				try {
-					await clipboard.copy(copy.value)
-					toast.success(`${copy.label} copied to clipboard`)
-				} catch {
-					toast.error(`Failed to copy ${copy.label}`)
-				}
-			}
-		: undefined
+	const handleCopy = copy ? () => shaCopy.copy(copy.value) : undefined
 
 	// Non-resolvable SHA (short/tag/arbitrary telemetry): no card, no fetch. Still
 	// copyable where a copy affordance was requested.
@@ -230,7 +220,7 @@ function CommitCard({ commit, compact = false }: { commit: VcsCommitDetailRespon
 
 	const pad = compact ? "p-2.5" : "p-3.5"
 	return (
-		<div className="flex flex-col divide-y divide-foreground/10">
+		<div className="flex flex-col divide-y divide-foreground/10 content-enter">
 			<div className={cn("flex flex-col gap-1.5", pad)}>
 				<p
 					className={cn(
@@ -345,7 +335,7 @@ function CommitListRowLink({ commit }: { commit: VcsCommitDetailResponse }) {
 	const author = commit.authorLogin ?? commit.authorName ?? "Unknown author"
 	const profileHref = commit.authorLogin ? hrefFromOrigin(commit.htmlUrl, commit.authorLogin) : null
 	return (
-		<div className="flex items-center gap-2.5 px-2.5 py-2">
+		<div className="flex items-center gap-2.5 px-2.5 py-2 content-enter">
 			<CommitAvatar url={commit.authorAvatarUrl} name={author} href={profileHref} compact />
 			<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
 				<a
@@ -436,32 +426,13 @@ function ExternalText({
 // The short SHA, rendered as a copy button (copies the full SHA). Replaces the
 // bare badge so the value is actually useful instead of just decorative.
 function CopyableSha({ sha }: { sha: string }) {
-	const clipboard = useClipboard()
-	const [copied, setCopied] = useState(false)
-	const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-	useEffect(
-		() => () => {
-			if (resetTimer.current) clearTimeout(resetTimer.current)
-		},
-		[],
-	)
-
-	const handleCopy = async () => {
-		try {
-			await clipboard.copy(sha)
-			setCopied(true)
-			if (resetTimer.current) clearTimeout(resetTimer.current)
-			resetTimer.current = setTimeout(() => setCopied(false), 1200)
-		} catch {
-			toast.error("Failed to copy commit SHA")
-		}
-	}
+	// Silent: the inline check icon is the feedback.
+	const { copied, copy } = useCopyToClipboard("Commit SHA", { silent: true })
 
 	return (
 		<button
 			type="button"
-			onClick={handleCopy}
+			onClick={() => copy(sha)}
 			aria-label="Copy commit SHA"
 			className="group inline-flex items-center gap-1.5 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground/80 transition-colors hover:bg-muted/70"
 		>

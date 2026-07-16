@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 
 import { ChevronExpandYIcon } from "../icons"
 import { Button } from "../ui/button"
-import { getServiceLegendColor } from "../../lib/colors"
+import { getServiceColor } from "../../lib/colors"
 import { useContainerSize } from "../../hooks/use-container-size"
 import { useTraceView } from "./trace-view-context"
 import { useTraceTimeline } from "./use-trace-timeline"
@@ -72,7 +72,6 @@ export function TraceTimeline() {
 		rootSpans,
 		totalDurationMs,
 		traceStartTime,
-		services,
 		colorBy,
 		keepVisibleSpanId: selectedSpanId,
 	})
@@ -330,7 +329,6 @@ export function TraceTimeline() {
 						rootSpans={rootSpans}
 						traceStartMs={traceStartMs}
 						traceEndMs={traceEndMs}
-						services={services}
 						colorBy={colorBy}
 						viewport={state.viewport}
 						onViewportChange={handleMinimapViewportChange}
@@ -380,7 +378,6 @@ export function TraceTimeline() {
 									sidebarWidth={sidebarWidth}
 									timelineWidthPx={timelineWidthPx}
 									viewport={state.viewport}
-									services={services}
 									selected={selectedSpanId === id}
 									focused={state.focusedIndex === vi.index}
 									hovered={hoveredSpanId === id}
@@ -451,7 +448,7 @@ export function TraceTimeline() {
 						<div key={service} className="flex items-center gap-1">
 							<div
 								className="size-2 shrink-0"
-								style={{ backgroundColor: getServiceLegendColor(service, services) }}
+								style={{ backgroundColor: getServiceColor(service) }}
 							/>
 							<span className="font-medium">{service}</span>
 						</div>
@@ -478,7 +475,6 @@ export function TraceTimeline() {
 						<div className="bg-popover text-popover-foreground border border-border shadow-lg p-2.5 max-w-sm">
 							<TraceTimelineTooltipContent
 								span={hoveredSpan}
-								services={services}
 								totalDurationMs={totalDurationMs}
 								traceStartTime={traceStartTime}
 							/>

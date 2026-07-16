@@ -11,15 +11,16 @@ import {
 } from "@maple/domain/http"
 import {
 	BILLING_CUSTOMER_KEY,
+	BILLING_INVOICES_KEY,
 	BILLING_PLANS_KEY,
 	attachMutation,
 	openCustomerPortalMutation,
 	previewAttachMutation,
 } from "@/lib/services/atoms/billing-atoms"
 
-// attach / openCustomerPortal change the customer and its per-plan eligibility,
-// so they invalidate both the customer and the plan catalog.
-const MUTATION_KEYS = [BILLING_CUSTOMER_KEY, BILLING_PLANS_KEY]
+// attach / openCustomerPortal change the customer, its per-plan eligibility, and
+// can produce a new invoice — invalidate customer, plan catalog, and invoices.
+const MUTATION_KEYS = [BILLING_CUSTOMER_KEY, BILLING_PLANS_KEY, BILLING_INVOICES_KEY]
 
 function unwrap<A>(exit: Exit.Exit<A, unknown>): A {
 	if (Exit.isSuccess(exit)) return exit.value

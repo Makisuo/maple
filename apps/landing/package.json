@@ -26,7 +26,6 @@
 		"@types/react": "catalog:react",
 		"@types/react-dom": "catalog:react",
 		"@xyflow/react": "catalog:ui",
-		"alchemy": "^0.93.12",
 		"astro": "^5.17.1",
 		"autumn-js": "^1.2.29",
 		"class-variance-authority": "catalog:ui",

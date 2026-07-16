@@ -7,6 +7,7 @@ import {
 	DashboardTemplateParameterKey,
 	DashboardVersionId,
 	IsoDateTimeString,
+	PostgresTransactionId,
 	UserId,
 } from "../primitives"
 import { Authorization } from "./current-tenant"
@@ -311,7 +312,7 @@ export class DashboardDocument extends Schema.Class<DashboardDocument>("Dashboar
 	// optimistic state on the exact synced transaction. Never persisted into
 	// `payload_json` (stripped at the storage boundary) and never present on
 	// list/read responses.
-	txid: Schema.optionalKey(Schema.String),
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class DashboardsListResponse extends Schema.Class<DashboardsListResponse>("DashboardsListResponse")({
@@ -338,14 +339,14 @@ export class DashboardPersesImportResponse extends Schema.Class<DashboardPersesI
 	dashboard: DashboardDocument,
 	warnings: Schema.Array(Schema.String),
 	// Txid of the import write, for the Electric collection's onInsert handler.
-	txid: Schema.optionalKey(Schema.String),
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class DashboardDeleteResponse extends Schema.Class<DashboardDeleteResponse>("DashboardDeleteResponse")(
 	{
 		id: DashboardId,
 		// Txid of the delete, for the Electric collection's onDelete handler.
-		txid: Schema.optionalKey(Schema.String),
+		txid: Schema.optionalKey(PostgresTransactionId),
 	},
 ) {}
 

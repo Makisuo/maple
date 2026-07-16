@@ -40,6 +40,7 @@ vi.mock("./alerts", () => ({
 	createAlertIncidentsCollection: collectionStub,
 	createAlertDestinationsCollection: collectionStub,
 }))
+vi.mock("./api-keys", () => ({ createApiKeysCollection: collectionStub }))
 vi.mock("./dashboards", () => ({ createDashboardsCollection: collectionStub }))
 vi.mock("./errors", () => ({
 	createErrorIssuesCollection: collectionStub,
@@ -121,6 +122,7 @@ describe("org-collections bounded self-heal", () => {
 
 		// No live queries attached → nothing to wait for.
 		expect(asStub(first.dashboards).cleanup).toHaveBeenCalledTimes(1)
+		expect(asStub(first.apiKeys).cleanup).toHaveBeenCalledTimes(1)
 		expect(asStub(first.alertRules).cleanup).toHaveBeenCalledTimes(1)
 		// The new org's live set is untouched.
 		expect(asStub(second.dashboards).cleanup).not.toHaveBeenCalled()

@@ -13,7 +13,7 @@ import {
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 import { cn } from "@maple/ui/utils"
-import { getServiceLegendColor } from "@maple/ui/colors"
+import { getServiceColor } from "@maple/ui/colors"
 
 // --- TYPES ---
 
@@ -56,7 +56,7 @@ function getHealthDotClass(errorRate: number): string {
 const MockNode = memo(function MockNode({ data }: NodeProps<Node>) {
 	const mockData = data as unknown as MockNodeData
 	const { label, throughput, errorRate, avgLatencyMs, services } = mockData
-	const accentColor = getServiceLegendColor(label, services)
+	const accentColor = getServiceColor(label)
 
 	return (
 		<>
@@ -170,8 +170,8 @@ const MockEdge = memo(function MockEdge({
 		borderRadius: 12,
 	})
 
-	const sourceColor = getServiceLegendColor(source, services)
-	const targetColor = getServiceLegendColor(target, services)
+	const sourceColor = getServiceColor(source)
+	const targetColor = getServiceColor(target)
 	const sw = getStrokeWidth(callCount)
 	const i = getEdgeIntensity(callsPerSecond)
 

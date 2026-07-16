@@ -260,7 +260,7 @@ function QueryBuilderAtomResults({ input }: { input: QueryBuilderTimeseriesInput
 					).slice(0, 6)
 
 					return (
-						<div className="space-y-2 border p-2">
+						<div className="space-y-2 border p-2 content-enter">
 							<div className="flex flex-wrap items-center gap-2">
 								<Badge variant="outline" className="font-mono">
 									Combined result

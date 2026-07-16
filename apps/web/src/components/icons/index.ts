@@ -38,6 +38,7 @@ export {
 	PulseIcon,
 	RadioCheckedIcon,
 	SidebarLeftIcon,
+	TabletIcon,
 	TextWrapIcon,
 	ThumbtackIcon,
 	XmarkIcon,
@@ -62,15 +63,18 @@ export { CirclePercentageIcon } from "./circle-percentage"
 export { CircleQuestionIcon } from "./circle-question"
 export { ClickhouseIcon } from "./clickhouse"
 export { CloudflareIcon } from "./cloudflare"
+export { ChromeIcon } from "./chrome"
 export { CornerDownLeftIcon } from "./corner-down-left"
 export { CreditCardIcon } from "./credit-card"
 export { CubeIcon } from "./cube"
 export { DiscordIcon } from "./discord"
 export { DotsVerticalIcon } from "./dots-vertical"
 export { DownloadIcon } from "./download"
+export { EdgeIcon } from "./edge"
 export { EnvelopeIcon } from "./envelope"
 export { ExternalLinkIcon } from "./external-link"
 export { FileIcon } from "./file"
+export { FirefoxIcon } from "./firefox"
 export { FloppyDiskIcon } from "./floppy-disk"
 export { FolderIcon } from "./folder"
 export { FolderOpenIcon } from "./folder-open"
@@ -104,6 +108,7 @@ export { MysqlIcon } from "./mysql"
 export { NatsIcon } from "./nats"
 export { NodejsIcon } from "./nodejs"
 export { OpenjdkIcon } from "./openjdk"
+export { OperaIcon } from "./opera"
 export { PaletteIcon } from "./palette"
 export { PaperPlaneIcon } from "./paper-plane"
 export { PencilIcon } from "./pencil"
@@ -117,6 +122,7 @@ export { PriorityBarsIcon, PRIORITY_LABEL } from "./priority-bars"
 export type { PriorityLevel } from "./priority-bars"
 export { RedisIcon } from "./redis"
 export { RocketIcon } from "./rocket"
+export { SafariIcon } from "./safari"
 export { ServerIcon } from "./server"
 export { ShieldIcon } from "./shield"
 export { SlidersIcon } from "./sliders"

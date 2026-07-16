@@ -59,6 +59,8 @@ describe("bundled migrations", () => {
 		// Wave 1 (0011_electric_publication_wave1)
 		"alert_destinations",
 		"scrape_target_checks",
+		// API-key live reads (0014_electric_publication_api_keys)
+		"api_keys",
 	]
 
 	it(

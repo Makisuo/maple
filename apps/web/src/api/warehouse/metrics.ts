@@ -1,17 +1,14 @@
-import { QueryEngineExecuteRequest, type MetricType } from "@maple/query-engine"
+import { QueryEngineExecuteRequest } from "@maple/query-engine"
 import { Clock, Effect, Schema } from "effect"
 import { ListMetricsRequest, MetricName, MetricsSummaryRequest, ServiceName } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { mapleApiClientLayer } from "@/lib/registry"
 import {
 	WarehouseDateTimeString,
-	WarehouseQueryError,
 	decodeInput,
 	executeQueryEngine,
 	extractAttributeValues,
 	runWarehouseQuery,
 } from "@/api/warehouse/effect-utils"
-import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
 
 const MetricTypeSchema = Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])
 
@@ -89,154 +86,69 @@ const listMetricsEffect = Effect.fn("QueryEngine.listMetrics")(function* ({
 	}
 })
 
-const GetMetricTimeSeriesInputSchema = Schema.Struct({
-	metricName: MetricName,
+const GetMetricSparklinesInputSchema = Schema.Struct({
 	metricType: MetricTypeSchema,
-	service: Schema.optional(ServiceName),
+	// The runtime rejects requests with more than 50 names.
+	metricNames: Schema.Array(MetricName),
 	startTime: Schema.optional(WarehouseDateTimeString),
 	endTime: Schema.optional(WarehouseDateTimeString),
 	bucketSeconds: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
 })
 
-export type GetMetricTimeSeriesInput = (typeof GetMetricTimeSeriesInputSchema)["Encoded"]
+export type GetMetricSparklinesInput = (typeof GetMetricSparklinesInputSchema)["Encoded"]
 
-interface MetricTimeSeriesPoint {
+export interface MetricSparklinePoint {
 	bucket: string
-	serviceName: string
-	attributeValue: string
 	avgValue: number
-	minValue: number
-	maxValue: number
 	sumValue: number
 	dataPointCount: number
 }
 
-export interface MetricTimeSeriesResponse {
-	data: MetricTimeSeriesPoint[]
+export function getMetricSparklines({ data }: { data: GetMetricSparklinesInput }) {
+	return getMetricSparklinesEffect({ data })
 }
 
-function toMessage(cause: unknown, fallback: string): string {
-	return cause instanceof Error ? cause.message : fallback
-}
-
-function executeMetricsQueryEngine(payload: QueryEngineExecuteRequest) {
-	return Effect.gen(function* () {
-		const client = yield* MapleApiAtomClient
-		return yield* client.queryEngine.execute({
-			payload: new QueryEngineExecuteRequest(payload),
-		})
-	}).pipe(
-		Effect.provide(mapleApiClientLayer),
-		Effect.mapError(
-			(cause) =>
-				new WarehouseQueryError({
-					operation: "queryEngine.execute",
-					message: toMessage(cause, "Metrics query engine request failed"),
-					cause,
-				}),
-		),
-	)
-}
-
-export function getMetricTimeSeries({ data }: { data: GetMetricTimeSeriesInput }) {
-	return getMetricTimeSeriesEffect({ data })
-}
-
-const getMetricTimeSeriesEffect = Effect.fn("QueryEngine.getMetricTimeSeries")(function* ({
+const getMetricSparklinesEffect = Effect.fn("QueryEngine.getMetricSparklines")(function* ({
 	data,
 }: {
-	data: GetMetricTimeSeriesInput
+	data: GetMetricSparklinesInput
 }) {
-	const input = yield* decodeInput(GetMetricTimeSeriesInputSchema, data, "getMetricTimeSeries")
+	const input = yield* decodeInput(GetMetricSparklinesInputSchema, data, "getMetricSparklines")
 
-	const bucketSeconds = input.bucketSeconds ?? computeBucketSeconds(input.startTime, input.endTime)
+	if (input.metricNames.length === 0) {
+		return { data: [] as Array<{ metricName: string; points: MetricSparklinePoint[] }> }
+	}
 
-	const makeRequest = (metric: string) =>
+	const fallback = defaultTimeRange(yield* Clock.currentTimeMillis)
+	const response = yield* executeQueryEngine(
+		"queryEngine.getMetricSparklines",
 		new QueryEngineExecuteRequest({
-			startTime: input.startTime ?? "2020-01-01 00:00:00",
-			endTime: input.endTime ?? "2099-12-31 23:59:59",
+			startTime: input.startTime ?? fallback.startTime,
+			endTime: input.endTime ?? fallback.endTime,
 			query: {
-				kind: "timeseries" as const,
+				kind: "sparklines" as const,
 				source: "metrics" as const,
-				metric: metric as any,
-				groupBy: ["service"],
-				filters: {
-					metricName: input.metricName,
-					metricType: input.metricType as MetricType,
-					serviceName: input.service,
-				},
-				bucketSeconds,
-			},
-		})
-
-	// The five aggregation queries fan out concurrently; wrap them in their own
-	// span so the per-metric work is traceable and annotated, rather than landing
-	// untracked under the parent. orgId is resolved server-side (not available
-	// here), so we annotate the metric identifiers we do have.
-	const [avgRes, sumRes, minRes, maxRes, countRes] = yield* Effect.all(
-		[
-			executeMetricsQueryEngine(makeRequest("avg")),
-			executeMetricsQueryEngine(makeRequest("sum")),
-			executeMetricsQueryEngine(makeRequest("min")),
-			executeMetricsQueryEngine(makeRequest("max")),
-			executeMetricsQueryEngine(makeRequest("count")),
-		],
-		{ concurrency: 5 },
-	).pipe(
-		Effect.withSpan("warehouse.metrics.getMetricTimeSeries", {
-			attributes: {
-				metricName: input.metricName,
 				metricType: input.metricType,
-				...(input.service ? { service: input.service } : {}),
-				aggregations: "avg,sum,min,max,count",
-				bucketSeconds,
+				metricNames: input.metricNames,
+				bucketSeconds: input.bucketSeconds,
 			},
 		}),
 	)
 
-	// Build a map of bucket::service -> { avg, sum, min, max, count }
-	const valueMap = new Map<string, MetricTimeSeriesPoint>()
+	const result = response.result
+	if (result.kind !== "sparklines") return { data: [] }
 
-	const processResult = (
-		res: typeof avgRes,
-		field: keyof Pick<
-			MetricTimeSeriesPoint,
-			"avgValue" | "sumValue" | "minValue" | "maxValue" | "dataPointCount"
-		>,
-	) => {
-		if (res.result.kind !== "timeseries") return
-		for (const point of res.result.data) {
-			const bucket = point.bucket
-			for (const [serviceName, value] of Object.entries(point.series)) {
-				const key = `${bucket}::${serviceName}`
-				let row = valueMap.get(key)
-				if (!row) {
-					row = {
-						bucket,
-						serviceName,
-						attributeValue: "",
-						avgValue: 0,
-						minValue: 0,
-						maxValue: 0,
-						sumValue: 0,
-						dataPointCount: 0,
-					}
-					valueMap.set(key, row)
-				}
-				;(row as any)[field] = Number(value)
-			}
-		}
+	return {
+		data: result.data.map((series) => ({
+			metricName: series.metricName,
+			points: series.points.map((point) => ({
+				bucket: point.bucket,
+				avgValue: point.avgValue,
+				sumValue: point.sumValue,
+				dataPointCount: point.dataPointCount,
+			})),
+		})),
 	}
-
-	processResult(avgRes, "avgValue")
-	processResult(sumRes, "sumValue")
-	processResult(minRes, "minValue")
-	processResult(maxRes, "maxValue")
-	processResult(countRes, "dataPointCount")
-
-	const rows = Array.from(valueMap.values()).toSorted((a, b) => a.bucket.localeCompare(b.bucket))
-
-	return { data: rows }
 })
 
 const GetMetricsSummaryInputSchema = Schema.Struct({

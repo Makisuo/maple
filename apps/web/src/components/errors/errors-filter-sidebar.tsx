@@ -1,9 +1,9 @@
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { useNavigate } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { FilterSection, SingleCheckboxFilter } from "@/components/traces/filter-section"
+import { FilterSection, SingleCheckboxFilter, serviceColorMap } from "@/components/traces/filter-section"
 import { Route } from "@/routes/errors/index"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -14,7 +14,6 @@ import {
 	FilterSidebarHeader,
 	FilterSidebarLoading,
 } from "@/components/filters/filter-sidebar"
-import { formatBackendError } from "@/lib/error-messages"
 
 function LoadingState() {
 	return <FilterSidebarLoading sectionCount={3} />
@@ -29,16 +28,16 @@ export function ErrorsFilterSidebar() {
 		search.timePreset ?? "12h",
 	)
 
-	const facetsResult = useRefreshableAtomValue(
-		getErrorsFacetsResultAtom({
-			data: {
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				showSpam: search.showSpam,
-				rootOnly: search.rootOnly !== false,
-			},
-		}),
-	)
+	const facetsAtom = getErrorsFacetsResultAtom({
+		data: {
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			showSpam: search.showSpam,
+			rootOnly: search.rootOnly !== false,
+		},
+	})
+	const facetsResult = useRefreshableAtomValue(facetsAtom)
+	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
 		navigate({
@@ -67,7 +66,7 @@ export function ErrorsFilterSidebar() {
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <FilterSidebarError message={formatBackendError(error).description} />)
+		.onError((error) => <FilterSidebarError error={error} onRetry={refreshFacets} />)
 		.onSuccess((facetsResponse, result) => {
 			const facets = facetsResponse.data
 			const hasFacets =
@@ -76,7 +75,7 @@ export function ErrorsFilterSidebar() {
 				(facets.errorTypes?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<SingleCheckboxFilter
@@ -109,6 +108,7 @@ export function ErrorsFilterSidebar() {
 									options={facets.services}
 									selected={search.services ?? []}
 									onChange={(val) => updateFilter("services", val)}
+									colorMap={serviceColorMap(facets.services)}
 								/>
 								<Separator className="my-2" />
 							</>

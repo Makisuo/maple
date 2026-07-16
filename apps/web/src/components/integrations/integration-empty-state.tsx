@@ -1,8 +1,9 @@
 import type React from "react"
 
+import { motion, useReducedMotion } from "motion/react"
+
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { cn } from "@maple/ui/lib/utils"
-import { CheckIcon } from "@/components/icons"
 import { IntegrationIconPlate } from "./integration-catalog"
 
 /**
@@ -41,10 +42,88 @@ function IntegrationEmptyMedia({
 	)
 }
 
+/** One value-prop tile in the not-connected feature grid. */
+export interface IntegrationFeature {
+	icon: React.ComponentType<{ size?: number; className?: string }>
+	title: string
+	description: string
+}
+
+const GRID_VARIANTS = {
+	hidden: {},
+	show: {
+		transition: { staggerChildren: 0.05, delayChildren: 0.05 },
+	},
+}
+
+const ITEM_VARIANTS = {
+	hidden: { opacity: 0, y: 6 },
+	show: {
+		opacity: 1,
+		y: 0,
+		transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
+	},
+}
+
+/**
+ * The what-you-get grid: one quiet tile per feature, brand-tinted glyph chip,
+ * title, one-line description. Informational only — no hover/click affordances.
+ */
+function FeatureGrid({
+	features,
+	accent,
+	monochrome,
+}: {
+	features: ReadonlyArray<IntegrationFeature>
+	accent: string
+	/** Monochrome brand marks (GitHub) have a near-invisible accent on one theme — tint neutrally. */
+	monochrome: boolean
+}) {
+	const reduceMotion = useReducedMotion()
+	// Same fallback rule as IntegrationIconPlate: a mark that needed a color override
+	// has an accent too dark/light to tint with, so derive the chip wash from the
+	// theme-aware neutral instead.
+	const wash = monochrome ? "var(--muted-foreground)" : accent
+	return (
+		<motion.ul
+			className="grid w-full max-w-2xl grid-cols-1 gap-2 text-left sm:grid-cols-3"
+			variants={GRID_VARIANTS}
+			initial={reduceMotion ? false : "hidden"}
+			animate="show"
+		>
+			{features.map((feature) => {
+				const Icon = feature.icon
+				return (
+					<motion.li
+						key={feature.title}
+						variants={ITEM_VARIANTS}
+						className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/50 p-3"
+					>
+						<div className="flex items-center gap-2">
+							<span
+								className="flex size-6 shrink-0 items-center justify-center rounded-md"
+								style={{
+									background: `color-mix(in srgb, ${wash} 12%, transparent)`,
+									color: monochrome ? "var(--foreground)" : accent,
+								}}
+								aria-hidden
+							>
+								<Icon size={13} />
+							</span>
+							<span className="font-medium text-sm">{feature.title}</span>
+						</div>
+						<p className="text-xs text-muted-foreground">{feature.description}</p>
+					</motion.li>
+				)
+			})}
+		</motion.ul>
+	)
+}
+
 /**
  * The shared integration empty state — one shape for every drill-in's not-connected /
- * no-items view: brand triple-stacked icon, title, description, optional value bullets,
- * a primary action, and optional helper text. Keeps GitHub/Hazel/Cloudflare/scrape aligned.
+ * no-items view: brand triple-stacked icon, title, description, optional feature
+ * tiles, a primary action, and optional helper text. Keeps GitHub/Hazel/Cloudflare/scrape aligned.
  */
 export function IntegrationEmptyState({
 	icon,
@@ -62,8 +141,8 @@ export function IntegrationEmptyState({
 	iconClassName?: string
 	title: string
 	description: React.ReactNode
-	/** Optional value-prop bullets (GitHub-style), each with a leading check. */
-	features?: ReadonlyArray<string>
+	/** Optional value-prop tiles rendered as a feature grid between the copy and the action. */
+	features?: ReadonlyArray<IntegrationFeature>
 	/** Primary action(s). */
 	children?: React.ReactNode
 	/** Helper text shown under the action. */
@@ -79,14 +158,7 @@ export function IntegrationEmptyState({
 			</EmptyHeader>
 
 			{features && features.length > 0 ? (
-				<ul className="flex w-full max-w-sm flex-col gap-2 text-left text-sm text-muted-foreground">
-					{features.map((feature) => (
-						<li key={feature} className="flex items-start gap-2">
-							<CheckIcon size={16} className="mt-0.5 shrink-0 text-success-foreground" />
-							<span>{feature}</span>
-						</li>
-					))}
-				</ul>
+				<FeatureGrid features={features} accent={accent} monochrome={iconClassName != null} />
 			) : null}
 
 			{children || footer ? (

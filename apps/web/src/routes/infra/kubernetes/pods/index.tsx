@@ -197,7 +197,7 @@ function PodsPageContent() {
 
 							return (
 								<div
-									className={`space-y-4 transition-opacity ${
+									className={`space-y-4 content-enter ${
 										result.waiting ? "opacity-60" : ""
 									}`}
 								>

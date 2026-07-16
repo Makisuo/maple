@@ -9,7 +9,7 @@ import { metrics, query } from "./commands/data"
 import { timeseries, breakdown, compare } from "./commands/analytics"
 import { login, logout, whoami } from "./commands/auth"
 import { use } from "./commands/config"
-import { start, stop, reset } from "./commands/server"
+import { start, stop, reset, checkpoint, restore } from "./commands/server"
 import { update } from "./commands/update"
 
 // One CLI, two backends. Every query command bottoms out at the shared
@@ -46,6 +46,8 @@ export const cli = Command.make("maple").pipe(
 		start,
 		stop,
 		reset,
+		checkpoint,
+		restore,
 		// Self-update
 		update,
 		// Services

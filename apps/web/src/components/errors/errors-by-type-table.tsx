@@ -1,4 +1,4 @@
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Fragment, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { formatDistanceToNow, format } from "date-fns"
@@ -130,7 +130,7 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 						}
 
 						return (
-							<div className="rounded-md border bg-background divide-y">
+							<div className="rounded-md border bg-background divide-y content-enter">
 								{traces.map((trace) => (
 									<Link
 										key={trace.traceId}
@@ -222,11 +222,13 @@ function LoadingState() {
 export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 	const [expandedError, setExpandedError] = useState<string | null>(null)
 
-	const errorsResult = useRefreshableAtomValue(getErrorsByTypeResultAtom({ data: filters }))
+	const errorsAtom = getErrorsByTypeResultAtom({ data: filters })
+	const errorsResult = useRefreshableAtomValue(errorsAtom)
+	const refreshErrors = useAtomRefresh(errorsAtom)
 
 	return Result.builder(errorsResult)
 		.onInitial(() => <LoadingState />)
-		.onError((error) => <QueryErrorState error={error} />)
+		.onError((error) => <QueryErrorState error={error} onRetry={refreshErrors} />)
 		.onSuccess((response, result) => {
 			const errors = response.data ?? []
 
@@ -235,7 +237,7 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 			}
 
 			return (
-				<div className={`space-y-4 ${result.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-4 content-enter ${result.waiting ? "opacity-60" : ""}`}>
 					<div className="rounded-md border overflow-auto">
 						<Table>
 							<TableHeader>

@@ -16,8 +16,11 @@ import { useBillingActions } from "@/hooks/use-billing-actions"
 import { getLegacyPlanInfo, getTrialStatus, type TrialStatus } from "@/lib/billing/plan-gating"
 import { getPlanLimits, type PlanLimits } from "@/lib/billing/plans"
 import type { AggregatedUsage } from "@/lib/billing/usage"
+import { estimateCycleCost } from "@/lib/billing/cost-estimate"
 import { UsageMeters } from "./usage-meters"
 import { PricingCards } from "./pricing-cards"
+import { CostBreakdown, CostBreakdownSkeleton } from "./cost-breakdown"
+import { InvoicesSection } from "./invoices-section"
 
 function limitsFromCustomer(balances: BillingCustomer["balances"]): PlanLimits | null {
 	if (!balances) return null
@@ -178,6 +181,9 @@ export function BillingSection() {
 	const usageTotal = Result.isSuccess(usageResult) ? usageResult.value.total : undefined
 
 	const isLoading = Result.isInitial(customerResult) || Result.isInitial(usageResult)
+	// The estimate also needs the plan catalog (for base price + overage rates);
+	// without it a legacy-looking partial estimate would flash during load.
+	const isCostLoading = isLoading || Result.isInitial(plansResult)
 
 	const trial = getTrialStatus(customer)
 	const { isLegacy } = getLegacyPlanInfo(customer, plans)
@@ -193,6 +199,11 @@ export function BillingSection() {
 		const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
 		return `${format(startOfMonth, "MMM d")} – ${format(now, "MMM d, yyyy")}`
 	}, [customer])
+
+	const costEstimate = useMemo(
+		() => estimateCycleCost({ customer, plans, usage: usageTotal }),
+		[customer, plans, usageTotal],
+	)
 
 	const limits = limitsFromCustomer(customer?.balances) ?? getPlanLimits("starter")
 	const usage: AggregatedUsage = {
@@ -219,10 +230,32 @@ export function BillingSection() {
 				</div>
 			</section>
 
+			{(isCostLoading || costEstimate !== null) && (
+				<section className="mt-12">
+					<SectionHeader title="Estimated costs" subtitle={billingPeriodLabel} />
+					<div className="mt-3">
+						{isCostLoading || !costEstimate ? (
+							<CostBreakdownSkeleton />
+						) : (
+							<CostBreakdown estimate={costEstimate} />
+						)}
+					</div>
+				</section>
+			)}
+
 			<section className="mt-12">
 				<SectionHeader title="Plans" />
 				<div className="mt-5">
 					<PricingCards />
+				</div>
+			</section>
+
+			<section className="mt-12">
+				<SectionHeader title="Invoices" />
+				<div className="mt-3">
+					<InvoicesSection
+						onManageBilling={() => openCustomerPortal({ returnUrl: window.location.href })}
+					/>
 				</div>
 			</section>
 		</div>
