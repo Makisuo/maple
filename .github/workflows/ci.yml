@@ -30,6 +30,18 @@ jobs:
 
             - run: bun turbo typecheck test build --filter='!@maple/ingest'
 
+    oxlint:
+        name: Oxlint
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - run: bun install --frozen-lockfile
+
+            - run: bunx oxlint --ignore-pattern '.context/**'
+
     knip:
         name: Knip
         runs-on: ubuntu-latest

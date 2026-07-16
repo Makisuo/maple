@@ -46,6 +46,97 @@
 			"rules": {
 				"no-restricted-imports": "off"
 			}
+		},
+		{
+			"files": ["apps/web/src/**/*.ts", "apps/web/src/**/*.tsx", "packages/ui/src/**/*.ts", "packages/ui/src/**/*.tsx"],
+			"rules": {
+				"no-restricted-properties": [
+					"error",
+					{
+						"object": null,
+						"property": "toLocaleString",
+						"message": "Timezone-unsafe. Dates: use useTimeFormat() (apps/web) or the @maple/ui/lib/time-format formatters. Numbers: use formatNumber() from the package's lib/format. See CLAUDE.md > Time & timezone formatting."
+					},
+					{
+						"object": null,
+						"property": "toLocaleDateString",
+						"message": "Timezone-unsafe. Use useTimeFormat() (apps/web) or @maple/ui/lib/time-format formatters. See CLAUDE.md > Time & timezone formatting."
+					},
+					{
+						"object": null,
+						"property": "toLocaleTimeString",
+						"message": "Timezone-unsafe. Use useTimeFormat() (apps/web) or @maple/ui/lib/time-format formatters. See CLAUDE.md > Time & timezone formatting."
+					},
+					{
+						"object": null,
+						"property": "toDateString",
+						"message": "Timezone-unsafe. Use useTimeFormat() (apps/web) or @maple/ui/lib/time-format formatters. See CLAUDE.md > Time & timezone formatting."
+					},
+					{
+						"object": null,
+						"property": "toTimeString",
+						"message": "Timezone-unsafe. Use useTimeFormat() (apps/web) or @maple/ui/lib/time-format formatters. See CLAUDE.md > Time & timezone formatting."
+					},
+					{
+						"object": "Intl",
+						"property": "DateTimeFormat",
+						"message": "Do not construct Intl.DateTimeFormat directly for display — it defaults to the browser timezone. Use useTimeFormat() (apps/web) or @maple/ui/lib/time-format formatters, which require a branded TimeZoneId. See CLAUDE.md > Time & timezone formatting."
+					}
+				],
+				"no-restricted-imports": [
+					"warn",
+					{
+						"paths": [
+							{
+								"name": "react",
+								"importNames": ["useEffect"],
+								"message": "Do not use useEffect. Use useMountEffect for mount-only external sync, derive state inline, use event handlers, or use TanStack Query. See /no-use-effect. Bump to 'error' once all existing call sites are refactored."
+							},
+							{
+								"name": "date-fns",
+								"importNames": ["format", "formatDate"],
+								"message": "date-fns format renders in the browser timezone. Use useTimeFormat() (apps/web) or @maple/ui/lib/time-format formatters. See CLAUDE.md > Time & timezone formatting."
+							},
+							{
+								"name": "@maple/ui/lib/time-format",
+								"importNames": ["makeTimeZoneId"],
+								"message": "makeTimeZoneId is reserved for the timezone-preference system (apps/web/src/atoms/timezone-preference-atoms.ts). Obtain a TimeZoneId via useTimeFormat()/useTimezonePreference() instead of constructing one."
+							}
+						]
+					}
+				]
+			}
+		},
+		{
+			"files": [
+				"packages/ui/src/lib/time-format.ts",
+				"packages/ui/src/lib/time-display-context.tsx",
+				"packages/ui/src/components/ui/calendar.tsx",
+				"apps/web/src/lib/timezone-format.ts",
+				"apps/web/src/atoms/timezone-preference-atoms.ts",
+				"apps/web/src/**/*.test.ts",
+				"apps/web/src/**/*.test.tsx",
+				"packages/ui/src/**/*.test.ts",
+				"packages/ui/src/**/*.test.tsx"
+			],
+			"rules": {
+				"no-restricted-properties": "off"
+			}
+		},
+		{
+			"files": [
+				"packages/ui/src/lib/time-format.ts",
+				"packages/ui/src/lib/time-display-context.tsx",
+				"apps/web/src/atoms/timezone-preference-atoms.ts",
+				"apps/web/src/hooks/use-timezone-preference.ts",
+				"apps/web/src/**/*.test.ts",
+				"apps/web/src/**/*.test.tsx",
+				"packages/ui/src/**/*.test.ts",
+				"packages/ui/src/**/*.test.tsx"
+			],
+			"rules": {
+				"no-restricted-imports": "off"
+			}
 		}
 	],
 	"ignorePatterns": [".context"]

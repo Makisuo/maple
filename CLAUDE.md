@@ -202,6 +202,16 @@ Use `/Users/maki/Documents/superwall/app` as the reference implementation for Ef
 
 - **Span Status Codes:** Use title case (`"Ok"`, `"Error"`, `"Unset"`), not uppercase
 
+## Time & Timezone Formatting
+
+The dashboard has a user-selectable timezone (picker in the time range selector; persisted via `timezonePreferenceAtom`). Every absolute date/time shown in `apps/web` or `packages/ui` MUST respect it:
+
+- **Format only through** `useTimeFormat()` (`apps/web/src/hooks/use-time-format.ts`) in React components, or the pure formatters in `@maple/ui/lib/time-format` when outside React. Every formatter requires a branded `TimeZoneId` — obtainable only from the preference system (`useTimeFormat().timeZone`, `useTimezonePreference().effectiveTimezone`, `resolveEffectiveTimezone`). Never construct one yourself; `makeTimeZoneId` is import-banned outside the preference system.
+- **Banned for display** (oxlint enforces in `apps/web/src` + `packages/ui/src`): `toLocaleString`, `toLocaleDateString`, `toLocaleTimeString`, `toDateString`, `toTimeString`, direct `Intl.DateTimeFormat` construction, and date-fns `format`/`formatDate`.
+- **Numbers** use `formatNumber()` from the package's `lib/format`, not `toLocaleString()`.
+- **Exempt:** relative times (`formatRelativeTime`, `formatDistanceToNow`) and duration offsets (trace waterfall) — they are timezone-independent.
+- **Queries stay UTC.** The warehouse wire format (`YYYY-MM-DD HH:mm:ss`, UTC) is unchanged; only display and time-range *construction* (custom range picker, `"today"` preset) are timezone-aware.
+
 ## Documentation
 
 End-user and platform documentation lives in `docs/`:
