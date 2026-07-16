@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "motion/react"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { GlobeIcon, ClockIcon, CopyIcon, CheckIcon } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { formatRelativeTime, gradientFor, hostFromUrl } from "./replay-format"
 import { parseChTimestampMs } from "./replay-timeline"
 
@@ -76,6 +77,7 @@ export function SessionIdentityHeader({
 	startTime: string
 	isActive: boolean
 }) {
+	const { formatDateTime } = useTimeFormat()
 	const startedEpoch = parseChTimestampMs(startTime)
 	const startedValid = Number.isFinite(startedEpoch)
 	return (
@@ -106,7 +108,7 @@ export function SessionIdentityHeader({
 							<span className="opacity-40">·</span>
 							<span
 								className="inline-flex shrink-0 items-center gap-1.5"
-								title={new Date(startedEpoch).toLocaleString()}
+								title={formatDateTime(startedEpoch, { year: true, seconds: true })}
 							>
 								<ClockIcon className="size-3 shrink-0 opacity-70" />
 								{formatRelativeTime(startedEpoch)}

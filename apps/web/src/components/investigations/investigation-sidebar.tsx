@@ -9,6 +9,7 @@ import { ArrowPathIcon, ArrowRightIcon } from "@/components/icons"
 import { ConfidenceMeter, EYEBROW } from "@/components/ai-triage/ai-triage-card"
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/components/errors/severity-badge"
 import { formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import type { InvestigationSubject } from "./subject"
 
 export interface InvestigationSidebarProps {
@@ -36,6 +37,7 @@ export function InvestigationSidebar({
 	rerunning,
 	canRun,
 }: InvestigationSidebarProps) {
+	const { formatDateTime } = useTimeFormat()
 	const investigatedAt = run?.completedAt ?? run?.createdAt ?? null
 	const services = result ? [...new Set(result.evidence.flatMap((e) => e.relatedServices))] : []
 
@@ -111,7 +113,10 @@ export function InvestigationSidebar({
 
 			{investigatedAt ? (
 				<Group label="Timing">
-					<Row label="Investigated" title={new Date(investigatedAt).toLocaleString()}>
+					<Row
+						label="Investigated"
+						title={formatDateTime(investigatedAt, { year: true, seconds: true })}
+					>
 						<span className="text-right text-sm tabular-nums text-foreground">
 							{formatRelativeTime(investigatedAt)}
 						</span>

@@ -1,4 +1,5 @@
 import { Result, useAtomValue, useAtomRefresh } from "@/lib/effect-atom"
+import { formatCount } from "@/lib/format"
 import { PlusIcon, ChartLineIcon, ChartBarIcon, ChartBarTrendUpIcon } from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -16,7 +17,7 @@ function formatNumber(num: number): string {
 	if (num >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
 	}
-	return num.toLocaleString()
+	return formatCount(num)
 }
 
 const cardConfig = [

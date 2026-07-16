@@ -1,7 +1,9 @@
 import type { ErrorIssueEventDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { ActorChip } from "./actor-chip"
 import { formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 const EVENT_LABEL: Record<ErrorIssueEventDocument["type"], string> = {
 	created: "Created",
@@ -50,7 +52,7 @@ function payloadString(value: unknown): string | null {
 	}
 }
 
-function renderPayload(event: ErrorIssueEventDocument): string | null {
+function renderPayload(event: ErrorIssueEventDocument, timeZone: TimeZoneId): string | null {
 	const p = event.payload
 	switch (event.type) {
 		case "comment":
@@ -64,7 +66,9 @@ function renderPayload(event: ErrorIssueEventDocument): string | null {
 		}
 		case "claim": {
 			const expires = payloadString(p.leaseExpiresAt)
-			return expires ? `lease expires at ${new Date(Number(expires)).toISOString()}` : null
+			return expires
+				? `lease expires at ${formatDateTime(Number(expires), { timeZone, year: true, seconds: true })}`
+				: null
 		}
 		case "state_change": {
 			return payloadString(p.note)
@@ -98,6 +102,8 @@ function renderPayload(event: ErrorIssueEventDocument): string | null {
 }
 
 export function IssueTimeline({ events }: { events: ReadonlyArray<ErrorIssueEventDocument> }) {
+	const { timeZone } = useTimeFormat()
+
 	if (events.length === 0) {
 		return <div className="py-6 text-center text-sm text-muted-foreground">No events recorded yet.</div>
 	}
@@ -105,7 +111,7 @@ export function IssueTimeline({ events }: { events: ReadonlyArray<ErrorIssueEven
 	return (
 		<ol className="relative ml-16 border-l border-border/60">
 			{events.map((event) => {
-				const body = renderPayload(event)
+				const body = renderPayload(event, timeZone)
 				return (
 					<li key={event.id} className="relative py-3 pl-4">
 						<span className="absolute -left-16 top-4 w-12 text-right text-[11px] tabular-nums text-muted-foreground">

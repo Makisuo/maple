@@ -7,7 +7,8 @@ import {
 	ChartTooltipContent,
 } from "@maple/ui/components/ui/chart"
 import { cn } from "@maple/ui/lib/utils"
-import { formatBucketLabel } from "@/lib/format"
+import { formatCount } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 interface TimeseriesPoint {
 	bucket: string
@@ -24,6 +25,7 @@ const CHART_CONFIG: ChartConfig = {
 }
 
 export function IssueOccurrenceSparkline({ data, className }: IssueOccurrenceSparklineProps) {
+	const { formatBucketLabel } = useTimeFormat()
 	const sorted = React.useMemo<Array<TimeseriesPoint>>(() => {
 		return data
 			.map((point) => ({ bucket: point.bucket, count: point.count }))
@@ -83,7 +85,7 @@ export function IssueOccurrenceSparkline({ data, className }: IssueOccurrenceSpa
 									/>
 									<span className="text-muted-foreground">Occurrences</span>
 									<span className="font-mono font-medium tabular-nums">
-										{typeof value === "number" ? value.toLocaleString() : String(value)}
+										{typeof value === "number" ? formatCount(value) : String(value)}
 									</span>
 								</span>
 							)}

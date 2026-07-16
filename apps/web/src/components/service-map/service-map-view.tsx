@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState, useCallback } from "react"
+import { formatCount } from "@/lib/format"
 import {
 	ReactFlow,
 	Controls,
@@ -44,7 +45,7 @@ import {
 import { Button } from "@maple/ui/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"
-import { formatBucketLabel } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import {
 	ArrowRightIcon,
 	ArrowRotateAnticlockwiseIcon,
@@ -800,7 +801,7 @@ function pickDbSummaryBucketSeconds(durationSeconds: number): number {
 function formatCompactCount(value: number): string {
 	if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
 	if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
-	return value.toLocaleString()
+	return formatCount(value)
 }
 
 function formatQueryLabel(value: string): string {
@@ -816,6 +817,7 @@ function DbQueryActivityChart({
 	response: ServiceDbQuerySummaryResponse | null
 	waiting: boolean
 }) {
+	const { formatBucketLabel } = useTimeFormat()
 	const data = useMemo(
 		() =>
 			(response?.timeseries ?? []).map((point) => ({

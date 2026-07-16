@@ -1,4 +1,5 @@
 import { Result } from "@/lib/effect-atom"
+import { formatCount } from "@/lib/format"
 import { FileIcon, GridSquareCirclePlusIcon, ChartLineIcon, DatabaseIcon } from "@/components/icons"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -15,7 +16,7 @@ function formatNumber(num: number): string {
 	if (num >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
 	}
-	return num.toLocaleString()
+	return formatCount(num)
 }
 
 function formatBytes(bytes: number): string {

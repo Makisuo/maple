@@ -1,4 +1,5 @@
 import { AlertRuleDocument } from "@maple/domain/http"
+import { makeTimeZoneId } from "@maple/ui/lib/time-format"
 import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
@@ -77,6 +78,7 @@ const diagnose = (overrides: Partial<DiagnosisInput> = {}) =>
 		destinations: [],
 		deliveryEvents: [],
 		now: NOW,
+		timeZone: makeTimeZoneId("UTC"),
 		...overrides,
 	})
 

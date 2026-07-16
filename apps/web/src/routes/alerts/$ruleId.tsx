@@ -33,6 +33,7 @@ import {
 } from "@/lib/alerts/form-utils"
 import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
 import { useAlertRuleStates } from "@/hooks/use-alert-rule-states"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import {
 	AlertRuleId,
 	IsoDateTimeString,
@@ -109,6 +110,7 @@ function RuleDetailContent() {
 	const ruleId = asAlertRuleId(ruleIdParam)
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const { timeZone } = useTimeFormat()
 
 	// Page-level time window (24h default), shared by the chart, checks, and the
 	// header timeline strip — the standard services/errors wiring.
@@ -237,7 +239,7 @@ function RuleDetailContent() {
 	// preset label (falling back to the same "24h" the header + data window use).
 	const rangeLabel =
 		search.startTime && search.endTime
-			? formatTimeRangeDisplay(search.startTime, search.endTime)
+			? formatTimeRangeDisplay(search.startTime, search.endTime, timeZone)
 			: presetLabel(search.timePreset ?? "24h")
 
 	if (Result.isInitial(rulesResult)) {
@@ -764,7 +766,7 @@ function RuleDetailContent() {
 														</div>
 													</TableCell>
 													<TableCell className="text-xs">
-														{formatAlertDateTimeFull(incident.firstTriggeredAt)}
+														{formatAlertDateTimeFull(incident.firstTriggeredAt, timeZone)}
 													</TableCell>
 													<TableCell>
 														<span
@@ -934,6 +936,7 @@ function ChecksPanel({
 	statusFilter: CheckStatusFilter
 	setStatusFilter: (v: CheckStatusFilter) => void
 }) {
+	const { formatDateTime } = useTimeFormat()
 	const totals = useMemo(() => {
 		let breached = 0
 		let healthy = 0
@@ -1063,7 +1066,7 @@ function ChecksPanel({
 										className="font-mono text-xs"
 										title={`Evaluated in ${check.evaluationDurationMs}ms`}
 									>
-										{new Date(check.timestamp).toLocaleString()}
+										{formatDateTime(check.timestamp, { year: true, seconds: true })}
 									</TableCell>
 									<TableCell>
 										<AlertStatusBadge

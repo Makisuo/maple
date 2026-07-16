@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { formatCount } from "@/lib/format"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -20,7 +21,7 @@ function formatNumber(num: number): string {
 	if (num >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
 	}
-	return num.toLocaleString()
+	return formatCount(num)
 }
 
 function formatTimeAgo(timestamp: string): string {

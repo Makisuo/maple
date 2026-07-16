@@ -6,7 +6,8 @@ import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 import { LinkIcon } from "@/components/icons"
 import { shortIssueId } from "@/components/errors/issue-id"
-import { formatRelativeTime } from "@/lib/format"
+import { formatCount, formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import {
 	deviation,
 	formatSignalValue,
@@ -35,6 +36,7 @@ export function AnomalySidebar({
 	const dev = deviation(incident)
 	const triageChip = TRIAGE_STATUS_CHIP[incident.triageStatus]
 	const fmt = (value: number) => formatSignalValue(incident.signalType, value)
+	const { formatDateTime } = useTimeFormat()
 
 	return (
 		<div className="flex h-full w-72 shrink-0 flex-col overflow-y-auto border-l bg-card/30">
@@ -144,7 +146,7 @@ export function AnomalySidebar({
 				</Row>
 				<Row label="Samples">
 					<span className="font-mono text-sm tabular-nums text-muted-foreground">
-						{incident.lastSampleCount.toLocaleString()}
+						{formatCount(incident.lastSampleCount)}
 					</span>
 				</Row>
 			</SidebarGroup>
@@ -192,26 +194,38 @@ export function AnomalySidebar({
 			) : null}
 
 			<SidebarGroup label="Timing">
-				<Row label="First triggered" title={new Date(incident.firstTriggeredAt).toLocaleString()}>
+				<Row
+					label="First triggered"
+					title={formatDateTime(incident.firstTriggeredAt, { year: true, seconds: true })}
+				>
 					<span className="text-right text-sm tabular-nums text-foreground">
 						{formatRelativeTime(incident.firstTriggeredAt)}
 					</span>
 				</Row>
 				{incident.reopenCount > 0 && incident.lastReopenedAt !== null ? (
-					<Row label="Reopened" title={new Date(incident.lastReopenedAt).toLocaleString()}>
+					<Row
+						label="Reopened"
+						title={formatDateTime(incident.lastReopenedAt, { year: true, seconds: true })}
+					>
 						<span className="text-right text-sm tabular-nums text-muted-foreground">
 							{formatRelativeTime(incident.lastReopenedAt)}
 							{incident.reopenCount > 1 ? ` (×${incident.reopenCount})` : ""}
 						</span>
 					</Row>
 				) : null}
-				<Row label="Last triggered" title={new Date(incident.lastTriggeredAt).toLocaleString()}>
+				<Row
+					label="Last triggered"
+					title={formatDateTime(incident.lastTriggeredAt, { year: true, seconds: true })}
+				>
 					<span className="text-right text-sm tabular-nums text-foreground">
 						{formatRelativeTime(incident.lastTriggeredAt)}
 					</span>
 				</Row>
 				{incident.resolvedAt !== null ? (
-					<Row label="Resolved" title={new Date(incident.resolvedAt).toLocaleString()}>
+					<Row
+						label="Resolved"
+						title={formatDateTime(incident.resolvedAt, { year: true, seconds: true })}
+					>
 						<span className="text-right text-sm tabular-nums text-muted-foreground">
 							{formatRelativeTime(incident.resolvedAt)}
 						</span>

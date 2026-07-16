@@ -6,6 +6,7 @@ import { getServiceColorClass } from "@maple/ui/lib/colors"
 import { shortIssueId } from "@/components/errors/issue-id"
 import { LinkIcon } from "@/components/icons"
 import { formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import {
 	deviation,
 	formatSignalValue,
@@ -31,6 +32,7 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 	const triageChip = TRIAGE_STATUS_CHIP[incident.triageStatus]
 	const compact = variant === "compact"
 	const activeFingerprints = incident.fingerprints.filter((f) => f.resolvedAt === null).length
+	const { formatDateTime } = useTimeFormat()
 
 	return (
 		<div
@@ -160,7 +162,7 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 
 			<span
 				className="relative z-10 w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
-				title={`Started ${new Date(incident.firstTriggeredAt).toLocaleString()}`}
+				title={`Started ${formatDateTime(incident.firstTriggeredAt, { year: true, seconds: true })}`}
 			>
 				{formatRelativeTime(incident.firstTriggeredAt)}
 			</span>

@@ -32,8 +32,7 @@ import type { SpanNode, SpanDetailResult } from "@/api/warehouse/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getSpanDetailResultAtom, listLogsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@/components/attributes"
-import { useTimezonePreference } from "@/hooks/use-timezone-preference"
-import { formatTimestampInTimezone } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { getActiveInfraCorrelations } from "@/components/infra/infra-correlations"
 import { InfraCorrelationPanel, infraCorrelationWindow } from "@/components/infra/infra-correlation-panel"
@@ -88,8 +87,9 @@ const severityStyles: Record<string, string> = {
 	FATAL: "text-severity-fatal",
 }
 
-function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onClick?: (log: Log) => void }) {
+function LogEntry({ log, onClick }: { log: Log; onClick?: (log: Log) => void }) {
 	const severityStyle = severityStyles[log.severityText] ?? "text-severity-trace"
+	const { formatTimestamp } = useTimeFormat()
 
 	return (
 		<div
@@ -97,7 +97,7 @@ function LogEntry({ log, timeZone, onClick }: { log: Log; timeZone: string; onCl
 			onClick={() => onClick?.(log)}
 		>
 			<div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-1">
-				<span>{formatTimestampInTimezone(log.timestamp, { timeZone })}</span>
+				<span>{formatTimestamp(log.timestamp)}</span>
 				<Badge variant="outline" className={cn("text-[10px] px-1 py-0", severityStyle)}>
 					{log.severityText}
 				</Badge>
@@ -204,7 +204,7 @@ function ErrorSection({ message, serviceName, spanName, attributes }: ErrorSecti
 	)
 }
 
-function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: string; timeZone: string }) {
+function SpanLogs({ traceId, spanId }: { traceId: string; spanId: string }) {
 	const [selectedLog, setSelectedLog] = useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = useState(false)
 
@@ -252,7 +252,6 @@ function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: stri
 								<LogEntry
 									key={`${log.timestamp}-${i}`}
 									log={log}
-									timeZone={timeZone}
 									onClick={handleLogClick}
 								/>
 							))}
@@ -266,7 +265,7 @@ function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: stri
 }
 
 export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProps) {
-	const { effectiveTimezone } = useTimezonePreference()
+	const { formatTimestamp } = useTimeFormat()
 	const cacheInfo = getCacheInfo(span.spanAttributes)
 	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
 	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
@@ -465,10 +464,7 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 								<div className="rounded-md border p-2 space-y-1 text-xs">
 									<PlatformRow label="Start Time">
 										<CopyableValue value={span.startTime}>
-											{formatTimestampInTimezone(span.startTime, {
-												timeZone: effectiveTimezone,
-												withMilliseconds: true,
-											})}
+											{formatTimestamp(span.startTime, { withMilliseconds: true })}
 										</CopyableValue>
 									</PlatformRow>
 									<PlatformRow label="Duration">
@@ -546,7 +542,7 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 
 				<TabsContent value="logs" className="flex-1 min-h-0 mt-0">
 					<ScrollArea className="h-full">
-						<SpanLogs traceId={span.traceId} spanId={span.spanId} timeZone={effectiveTimezone} />
+						<SpanLogs traceId={span.traceId} spanId={span.spanId} />
 					</ScrollArea>
 				</TabsContent>
 

@@ -1,6 +1,7 @@
 import type { BaseComponentProps } from "@json-render/react"
+import { formatCount } from "@/lib/format"
 import { SeverityBadge } from "@maple/ui/components/logs/severity-badge"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 interface LogListProps {
 	logs: Array<{
@@ -16,18 +17,19 @@ interface LogListProps {
 
 export function LogList({ props }: BaseComponentProps<LogListProps>) {
 	const { logs, totalCount } = props
+	const { formatTimeOfDay } = useTimeFormat()
 
 	return (
 		<div className="space-y-1">
 			{totalCount != null && (
 				<p className="text-[10px] text-muted-foreground">
-					{totalCount.toLocaleString()} total logs
+					{formatCount(totalCount)} total logs
 					{totalCount > logs.length && ` (showing ${logs.length})`}
 				</p>
 			)}
 			<div className="max-h-[300px] space-y-0.5 overflow-y-auto">
 				{logs.map((log) => {
-					const time = new Date(normalizeTimestampInput(log.timestamp)).toLocaleTimeString()
+					const time = formatTimeOfDay(log.timestamp, { withSeconds: true })
 					return (
 						<div
 							key={`${log.timestamp}-${log.body.slice(0, 30)}`}

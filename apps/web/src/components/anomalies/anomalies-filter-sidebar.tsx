@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import { formatCount } from "@/lib/format"
 import type { AnomalyIncidentDocument, AnomalySignalType } from "@maple/domain/http"
 import { Checkbox } from "@maple/ui/components/ui/checkbox"
 import { Label } from "@maple/ui/components/ui/label"
@@ -62,7 +63,7 @@ function LabeledFilterSection<T extends string>({
 								<span className="truncate">{option.label}</span>
 							</Label>
 							<span className="text-xs text-muted-foreground tabular-nums">
-								{option.count.toLocaleString()}
+								{formatCount(option.count)}
 							</span>
 						</div>
 					))}

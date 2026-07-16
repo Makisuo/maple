@@ -2,7 +2,7 @@ import * as React from "react"
 
 import type { BaseChartProps } from "../_shared/chart-types"
 import { cn } from "../../../lib/utils"
-import { formatNumber, formatValueByUnit } from "../../../lib/format"
+import { formatCount, formatNumber, formatValueByUnit } from "../../../lib/format"
 import { pieSampleData } from "../_shared/sample-data"
 import { resolveSeriesColor } from "../../../lib/semantic-series-colors"
 import { bucketCategorical, MAX_CATEGORICAL, OTHER_COLOR, OTHER_LABEL } from "../_shared/bucket-series"
@@ -44,7 +44,7 @@ function fmtValue(value: number, unit?: string): string {
  */
 function fmtCenterTotal(value: number, unit?: string): string {
 	if (!unit && Number.isInteger(value) && Math.abs(value) < 10_000) {
-		return value.toLocaleString()
+		return formatCount(value)
 	}
 	return fmtValue(value, unit)
 }

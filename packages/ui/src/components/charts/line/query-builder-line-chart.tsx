@@ -17,7 +17,9 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "../../ui/chart"
-import { formatValueByUnit, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+import { formatValueByUnit, inferBucketSeconds, inferRangeMs } from "../../../lib/format"
+import { formatBucketLabel } from "../../../lib/time-format"
+import { useTimeDisplay } from "../../../lib/time-display-context"
 
 const fallbackData: Record<string, unknown>[] = [
 	{ bucket: "2026-01-01T00:00:00Z", A: 12, B: 8 },
@@ -62,6 +64,8 @@ export function QueryBuilderLineChart({
 	syncId,
 	thresholds,
 }: BaseChartProps) {
+	const { timeZone } = useTimeDisplay()
+
 	const { chartData, seriesDefinitions } = React.useMemo(() => {
 		const source = Array.isArray(data) && data.length > 0 ? data : fallbackData
 		const rawSeriesKeys: string[] = []
@@ -230,7 +234,7 @@ export function QueryBuilderLineChart({
 						tickLine={false}
 						axisLine={false}
 						tickMargin={8}
-						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick")}
+						tickFormatter={(value) => formatBucketLabel(value, axisContext, "tick", timeZone)}
 					/>
 					<YAxis
 						tickLine={false}
@@ -254,7 +258,7 @@ export function QueryBuilderLineChart({
 									labelFormatter={(_, payload) => {
 										if (!payload?.[0]?.payload?.bucket) return ""
 										const bucket = payload[0].payload.bucket
-										return formatBucketLabel(bucket, axisContext, "tooltip")
+										return formatBucketLabel(bucket, axisContext, "tooltip", timeZone)
 									}}
 									formatter={(value, name, item) => {
 										const nameStr = String(name)

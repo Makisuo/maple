@@ -5,6 +5,8 @@ import type {
 	AlertIncidentDocument,
 	AlertRuleDocument,
 } from "@maple/domain/http"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
+
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
 import { comparatorLabels, formatSignalValue } from "@/lib/alerts/form-utils"
 import { staleThresholdMs } from "@/lib/alerts/rule-status"
@@ -41,6 +43,8 @@ export interface DiagnosisInput {
 	/** Delivery events pre-filtered to this rule, newest first. */
 	readonly deliveryEvents: ReadonlyArray<AlertDeliveryEventDocument>
 	readonly now: number
+	/** Display timezone for absolute timestamps in evidence lines. */
+	readonly timeZone: TimeZoneId
 	/** Grouped rules: diagnose one group; defaults to the worst one. */
 	readonly selectedGroupKey?: string
 }
@@ -123,8 +127,12 @@ export function buildDiagnosis(input: DiagnosisInput): DiagnosisStage[] {
 				? `Last evaluated ${relative(now, referenceMs)} — expected roughly every minute`
 				: `Last evaluated ${relative(now, referenceMs)}`,
 			evidence: [
-				evaluatedAt != null ? `Last evaluation: ${new Date(evaluatedAt).toLocaleString()}` : null,
-				scheduledAt != null ? `Last scheduled: ${new Date(scheduledAt).toLocaleString()}` : null,
+				evaluatedAt != null
+					? `Last evaluation: ${formatDateTime(evaluatedAt, { timeZone: input.timeZone, year: true, seconds: true })}`
+					: null,
+				scheduledAt != null
+					? `Last scheduled: ${formatDateTime(scheduledAt, { timeZone: input.timeZone, year: true, seconds: true })}`
+					: null,
 			].filter((line): line is string => line != null),
 		})
 	}

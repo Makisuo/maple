@@ -5,6 +5,7 @@ import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import * as RechartsPrimitive from "recharts"
 
 import { cn } from "../../lib/utils"
+import { formatCount } from "../../lib/format"
 import { sanitizeCssIdentifier, validateCssColor } from "../../lib/sanitizers"
 
 // Format: { THEME_NAME: CSS_SELECTOR }
@@ -448,7 +449,7 @@ function ChartTooltipContent({
 														</div>
 														{item.value && (
 															<span className="text-foreground font-mono font-medium tabular-nums">
-																{item.value.toLocaleString()}
+																{typeof item.value === "number" ? formatCount(item.value) : item.value}
 															</span>
 														)}
 													</div>

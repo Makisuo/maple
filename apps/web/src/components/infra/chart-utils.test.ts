@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
+import { browserTimeZoneId } from "@maple/ui/lib/time-format"
 import { formatSeconds, formatValueWithUnit, isoToLabel, makeBucketLabeler, transformRows } from "./chart-utils"
+
+const TZ = browserTimeZoneId()
 
 describe("formatValueWithUnit", () => {
 	it("renders a percentage with a % sign", () => {
@@ -48,21 +51,25 @@ describe("formatSeconds", () => {
 describe("makeBucketLabeler", () => {
 	it("uses plain time-of-day labels while the buckets span a single day", () => {
 		const buckets = ["2026-07-03T10:00:00Z", "2026-07-03T22:00:00Z"]
-		const label = makeBucketLabeler(buckets)
-		expect(label(buckets[0]!)).toBe(isoToLabel(buckets[0]!))
+		const label = makeBucketLabeler(buckets, TZ)
+		expect(label(buckets[0]!)).toBe(isoToLabel(buckets[0]!, TZ))
 		expect(label(buckets[0]!)).not.toMatch(/Jul/)
 	})
 
 	it("prefixes the date once the buckets cross 24h", () => {
 		const buckets = ["2026-07-01T10:00:00Z", "2026-07-04T10:00:00Z"]
-		const label = makeBucketLabeler(buckets)
+		const label = makeBucketLabeler(buckets, TZ)
 		const iso = "2026-07-03T14:35:00Z"
-		const expectedDate = new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-		expect(label(iso)).toBe(`${expectedDate}, ${isoToLabel(iso)}`)
+		// Multi-day labels carry a "MMM d, …" date prefix and differ from the
+		// bare time-of-day used within a single day.
+		expect(label(iso)).toMatch(/^[A-Z][a-z]{2} \d{1,2}, /)
+		expect(label(iso)).not.toBe(isoToLabel(iso, TZ))
 	})
 
 	it("falls back to time-of-day for empty or unparsable input", () => {
-		expect(makeBucketLabeler([])("2026-07-03T14:35:00Z")).toBe(isoToLabel("2026-07-03T14:35:00Z"))
+		expect(makeBucketLabeler([], TZ)("2026-07-03T14:35:00Z")).toBe(
+			isoToLabel("2026-07-03T14:35:00Z", TZ),
+		)
 	})
 })
 
@@ -72,7 +79,7 @@ describe("transformRows", () => {
 			{ bucket: "2026-07-01T10:00:00Z", attributeValue: "a", value: 1 },
 			{ bucket: "2026-07-04T10:00:00Z", attributeValue: "a", value: 2 },
 		]
-		const { data } = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket)))
+		const { data } = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket), TZ))
 		expect(data[0]?.time).toMatch(/^[A-Z][a-z]{2} \d{1,2}, /)
 		expect(data[1]?.time).toMatch(/^[A-Z][a-z]{2} \d{1,2}, /)
 		expect(data[0]?.time).not.toBe(data[1]?.time)

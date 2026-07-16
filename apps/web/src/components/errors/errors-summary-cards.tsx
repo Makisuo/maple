@@ -1,4 +1,5 @@
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
+import { formatCount } from "@/lib/format"
 import { CircleWarningIcon, CirclePercentageIcon, ServerIcon, PulseIcon } from "@/components/icons"
 import { ErrorState } from "@/components/common/error-state"
 
@@ -15,7 +16,7 @@ function formatNumber(num: number): string {
 	if (num >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
 	}
-	return num.toLocaleString()
+	return formatCount(num)
 }
 
 function formatPercentage(rate: number): string {

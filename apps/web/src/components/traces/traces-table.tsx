@@ -8,9 +8,8 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { type Trace } from "@/api/warehouse/traces"
 import type { TracesSearchParams } from "@/routes/traces"
-import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { QueryErrorState } from "@/components/common/query-error-state"
-import { formatTimestampInTimezone } from "@/lib/timezone-format"
 import { formatRelativeTime } from "@/lib/format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { useInfiniteTraces, FETCH_THRESHOLD } from "@/hooks/use-infinite-traces"
@@ -181,7 +180,7 @@ function TracesTableView({
 	waiting,
 	onTraceClick,
 }: TracesTableViewProps) {
-	const { effectiveTimezone } = useTimezonePreference()
+	const { formatTimestamp } = useTimeFormat()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
 
 	const columns = React.useMemo<ColumnDef<Trace>[]>(
@@ -221,14 +220,10 @@ function TracesTableView({
 						 */}
 						<span
 							className="truncate text-[10px] text-muted-foreground"
-							title={formatTimestampInTimezone(row.original.startTime, {
-								timeZone: effectiveTimezone,
-							})}
+							title={formatTimestamp(row.original.startTime)}
 						>
 							<span className="hidden @min-[480px]/page:inline">
-								{formatTimestampInTimezone(row.original.startTime, {
-									timeZone: effectiveTimezone,
-								})}{" "}
+								{formatTimestamp(row.original.startTime)}{" "}
 							</span>
 							<span className="text-muted-foreground/60">
 								({formatRelativeTime(row.original.startTime)})
@@ -285,7 +280,7 @@ function TracesTableView({
 					),
 			},
 		],
-		[effectiveTimezone],
+		[formatTimestamp],
 	)
 
 	const table = useReactTable({

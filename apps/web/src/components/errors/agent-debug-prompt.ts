@@ -1,4 +1,5 @@
 import type { ErrorIssueDocument } from "@maple/domain/http"
+import { formatCount } from "@/lib/format"
 
 export interface AgentDebugPromptInput {
 	/** Stable error identity — the input to the `error_detail` MCP tool. */
@@ -59,7 +60,7 @@ export function formatAgentDebugPrompt(input: AgentDebugPromptInput): string {
 			typeof affectedServicesCount === "number" && affectedServicesCount > 1
 				? ` across ${affectedServicesCount} services`
 				: ""
-		lines.push(`**Occurrences:** ${occurrenceCount.toLocaleString()}${across}${seen}`)
+		lines.push(`**Occurrences:** ${formatCount(occurrenceCount)}${across}${seen}`)
 	}
 
 	if (message) {

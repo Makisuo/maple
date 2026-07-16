@@ -1,9 +1,10 @@
 import { Link } from "@tanstack/react-router"
 import { SeverityBadge } from "@maple/ui/components/logs/severity-badge"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import type { InlineLogData } from "./types"
 
 export function InlineLog({ data }: { data: InlineLogData }) {
+	const { formatTimeOfDay } = useTimeFormat()
 	return (
 		<div className="my-1 flex items-start gap-1.5 rounded-lg border border-border/40 bg-muted/30 px-3 py-2 text-[11px]">
 			<SeverityBadge severity={data.severity} className="shrink-0" />
@@ -13,7 +14,7 @@ export function InlineLog({ data }: { data: InlineLogData }) {
 			</span>
 			{data.timestamp && (
 				<span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-					{new Date(normalizeTimestampInput(data.timestamp)).toLocaleTimeString()}
+					{formatTimeOfDay(data.timestamp, { withSeconds: true })}
 				</span>
 			)}
 			{data.traceId && (

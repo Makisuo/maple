@@ -15,6 +15,7 @@ import type {
 	CloudflareZoneStatusBucket,
 } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
 import {
 	CACHE_STATUS_COLORS,
@@ -61,14 +62,15 @@ export interface StackedBreakdownChartProps {
 
 export function StackedBreakdownChart({ title, rows, colors, order, syncId }: StackedBreakdownChartProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
+	const { timeZone } = useTimeFormat()
 	const { data, series } = useMemo(() => {
-		const transformed = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket)))
+		const transformed = transformRows(rows, makeBucketLabeler(rows.map((r) => r.bucket), timeZone))
 		const rank = new Map(order.map((name, idx) => [name, idx]))
 		const sorted = [...transformed.series].sort(
 			(a, b) => (rank.get(a) ?? order.length) - (rank.get(b) ?? order.length) || a.localeCompare(b),
 		)
 		return { data: transformed.data, series: sorted }
-	}, [rows, order])
+	}, [rows, order, timeZone])
 
 	const seriesColor = (name: string) => colors[name] ?? FALLBACK_SERIES_COLOR
 
@@ -257,8 +259,9 @@ export function CloudflareZoneLatencyChart({
 	buckets: ReadonlyArray<CloudflareZoneLatencyBucket>
 	syncId?: string
 }) {
+	const { timeZone } = useTimeFormat()
 	const { data, activeSeries } = useMemo(() => {
-		const labeler = makeBucketLabeler(buckets.map((b) => b.bucket))
+		const labeler = makeBucketLabeler(buckets.map((b) => b.bucket), timeZone)
 		const points = buckets.map((b) => ({
 			bucket: b.bucket,
 			time: labeler(b.bucket),
@@ -268,7 +271,7 @@ export function CloudflareZoneLatencyChart({
 		// whole series at 0 — drop those lines instead of plotting a floor.
 		const active = LATENCY_SERIES.filter((s) => buckets.some((b) => b[s.key] > 0))
 		return { data: points, activeSeries: active }
-	}, [buckets])
+	}, [buckets, timeZone])
 
 	const config = useMemo<ChartConfig>(
 		() => Object.fromEntries(activeSeries.map((s) => [s.key, { label: s.label, color: s.color }])),

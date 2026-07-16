@@ -23,7 +23,7 @@ import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
-import { formatRelativeTime } from "@/lib/format"
+import { formatCount, formatRelativeTime } from "@/lib/format"
 
 type IssueKind = RecommendationIssue["kind"]
 type IssueStatus = RecommendationIssue["status"]
@@ -283,7 +283,7 @@ export function RecommendedMappingsSection() {
 									<div className="relative flex w-32 shrink-0 items-center justify-end">
 										<span
 											className="text-muted-foreground text-xs whitespace-nowrap tabular-nums transition-opacity group-hover:opacity-0"
-											title={`${issue.usageCount.toLocaleString()} spans · 24h`}
+											title={`${formatCount(issue.usageCount)} spans · 24h`}
 										>
 											{formatRelativeTime(issue.openedAt)}
 										</span>

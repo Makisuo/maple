@@ -12,7 +12,8 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { getCustomChartTimeSeriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { computeBucketSeconds } from "@/api/warehouse/timeseries-utils"
-import { formatBucketLabel, formatNumber, inferBucketSeconds, inferRangeMs } from "@/lib/format"
+import { formatNumber, inferBucketSeconds, inferRangeMs } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { formatForTinybird } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import type { LogsSearchParams } from "@/routes/logs"
@@ -39,6 +40,7 @@ interface LogsVolumeChartProps {
 }
 
 export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartProps) {
+	const { formatBucketLabel } = useTimeFormat()
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		filters?.startTime,
 		filters?.endTime,

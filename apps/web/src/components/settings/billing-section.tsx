@@ -1,5 +1,4 @@
 import { useMemo, type ReactNode } from "react"
-import { format } from "date-fns"
 import type { BillingCustomer } from "@maple/domain/http"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
@@ -13,6 +12,7 @@ import {
 	billingUsageAtom,
 } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { getLegacyPlanInfo, getTrialStatus, type TrialStatus } from "@/lib/billing/plan-gating"
 import { getPlanLimits, type PlanLimits } from "@/lib/billing/plans"
 import type { AggregatedUsage } from "@/lib/billing/usage"
@@ -84,6 +84,7 @@ function SubscriptionStrip({
 	isLoading: boolean
 	onManageBilling: () => void
 }) {
+	const { formatDateTime } = useTimeFormat()
 	if (isLoading) {
 		return (
 			<div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-3">
@@ -142,7 +143,8 @@ function SubscriptionStrip({
 			)}
 			{isTrialing && trialEndsAt && (
 				<p className="mt-3 text-xs text-muted-foreground">
-					Card charges when trial ends on {format(trialEndsAt, "MMM d")}. Cancel anytime before to
+					Card charges when trial ends on {formatDateTime(trialEndsAt, { dateOnly: true })}. Cancel
+					anytime before to
 					avoid charges.
 				</p>
 			)}
@@ -168,6 +170,7 @@ function UsageSkeleton() {
 }
 
 export function BillingSection() {
+	const { formatDateTime } = useTimeFormat()
 	const customerResult = useAtomValue(billingCustomerAtom)
 	const plansResult = useAtomValue(billingPlansAtom)
 	const usageResult = useAtomValue(billingUsageAtom)
@@ -187,12 +190,12 @@ export function BillingSection() {
 		if (activeSub?.currentPeriodStart && activeSub?.currentPeriodEnd) {
 			const start = new Date(activeSub.currentPeriodStart)
 			const end = new Date(activeSub.currentPeriodEnd)
-			return `${format(start, "MMM d")} – ${format(end, "MMM d, yyyy")}`
+			return `${formatDateTime(start, { dateOnly: true })} – ${formatDateTime(end, { dateOnly: true, year: true })}`
 		}
 		const now = new Date()
 		const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-		return `${format(startOfMonth, "MMM d")} – ${format(now, "MMM d, yyyy")}`
-	}, [customer])
+		return `${formatDateTime(startOfMonth, { dateOnly: true })} – ${formatDateTime(now, { dateOnly: true, year: true })}`
+	}, [customer, formatDateTime])
 
 	const limits = limitsFromCustomer(customer?.balances) ?? getPlanLimits("starter")
 	const usage: AggregatedUsage = {

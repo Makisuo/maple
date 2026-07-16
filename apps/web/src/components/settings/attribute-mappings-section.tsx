@@ -61,6 +61,7 @@ import {
 	TrashIcon,
 } from "@/components/icons"
 import { formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
 	ingestAttributeMappingsListAtom,
@@ -95,6 +96,7 @@ const SOURCE_CONTEXT_ICON: Record<IngestMappingSourceContext, IconComponent> = {
 }
 
 export function AttributeMappingsSection() {
+	const { formatDateTime } = useTimeFormat()
 	const [dialogOpen, setDialogOpen] = useState(false)
 	const [isSaving, setIsSaving] = useState(false)
 	const [togglingId, setTogglingId] = useState<IngestAttributeMappingId | null>(null)
@@ -355,7 +357,7 @@ export function AttributeMappingsSection() {
 											/>
 											<span
 												className="text-muted-foreground w-20 text-right text-xs whitespace-nowrap tabular-nums transition-opacity group-hover:opacity-0"
-												title={new Date(mapping.createdAt).toLocaleString()}
+												title={formatDateTime(mapping.createdAt, { year: true, seconds: true })}
 											>
 												{formatRelativeTime(mapping.createdAt)}
 											</span>

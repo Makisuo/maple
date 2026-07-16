@@ -50,6 +50,7 @@ import {
 } from "@/lib/query-builder/model"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { AutocompleteValuesProvider, useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 type DataSource = QueryBuilderDataSource
 type QueryDraft = QueryBuilderQueryDraft
@@ -331,6 +332,7 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 	const [queries, setQueries] = React.useState<QueryDraft[]>([createQuery(0), createQuery(1)])
 	const [formulas, setFormulas] = React.useState<FormulaDraft[]>([createFormula(0, ["A", "B"])])
 	const [lastRunAt, setLastRunAt] = React.useState<string | null>(null)
+	const { formatTimeOfDay } = useTimeFormat()
 	const [submittedInput, setSubmittedInput] = React.useState<QueryBuilderTimeseriesInput | null>(null)
 	const [noQueriesError, setNoQueriesError] = React.useState<string | null>(null)
 
@@ -474,8 +476,8 @@ function QueryBuilderLabInner({ startTime, endTime }: QueryBuilderLabProps) {
 
 		setNoQueriesError(null)
 		setSubmittedInput({ startTime, endTime, queries, formulas, debug: true })
-		setLastRunAt(new Date().toLocaleTimeString())
-	}, [endTime, formulas, queries, startTime])
+		setLastRunAt(formatTimeOfDay(new Date(), { withSeconds: true }))
+	}, [endTime, formulas, queries, startTime, formatTimeOfDay])
 
 	return (
 		<Card className="py-0">

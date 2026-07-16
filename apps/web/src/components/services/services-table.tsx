@@ -1,4 +1,5 @@
 import React from "react"
+import { formatCount } from "@/lib/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Link, useNavigate } from "@tanstack/react-router"
 
@@ -47,12 +48,12 @@ function formatThroughput(rate: number): string {
 		return "0/s"
 	}
 	if (rate >= 1000) {
-		return `${(rate / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })}k/s`
+		return `${formatCount(rate / 1000, 1)}k/s`
 	}
 	if (rate >= 1) {
-		return `${rate.toLocaleString(undefined, { maximumFractionDigits: 1 })}/s`
+		return `${formatCount(rate, 1)}/s`
 	}
-	return `${rate.toLocaleString(undefined, { maximumFractionDigits: 3 })}/s`
+	return `${formatCount(rate, 3)}/s`
 }
 
 function errorRateToneClass(rate: number): string {

@@ -13,7 +13,9 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "../../ui/chart"
-import { formatErrorRate, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+import { formatErrorRate, inferBucketSeconds, inferRangeMs } from "../../../lib/format"
+import { formatBucketLabel } from "../../../lib/time-format"
+import { useTimeDisplay } from "../../../lib/time-display-context"
 
 const VALUE_KEYS = ["errorRate"]
 
@@ -30,6 +32,7 @@ export function ErrorRateAreaChart({
 	overlay,
 	yAxisWidth,
 }: BaseChartProps) {
+	const { timeZone } = useTimeDisplay()
 	const id = useId()
 	const gradientId = `errorRateGradient-${id.replace(/:/g, "")}`
 	const fadedGradientId = `errorRateGradientFaded-${id.replace(/:/g, "")}`
@@ -74,7 +77,7 @@ export function ErrorRateAreaChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
-					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
+					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick", timeZone)}
 				/>
 				<YAxis
 					tickLine={false}
@@ -91,7 +94,7 @@ export function ErrorRateAreaChart({
 								labelFormatter={(_, payload) => {
 									if (!payload?.[0]?.payload?.bucket) return ""
 									const bucket = payload[0].payload.bucket as string
-									return formatBucketLabel(bucket, axisContext, "tooltip")
+									return formatBucketLabel(bucket, axisContext, "tooltip", timeZone)
 								}}
 								formatter={(value, name, item) => {
 									const nameStr = String(name)

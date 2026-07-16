@@ -1,4 +1,5 @@
 import { useId, useMemo } from "react"
+import { formatCount } from "@/lib/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
 
@@ -19,11 +20,13 @@ import {
 	CHART_GRID_DASH,
 	COLOR_PALETTE,
 	formatValueWithUnit,
+	isoToLabel,
 	transformRows,
 	UNNAMED_SERIES_KEY,
 } from "./chart-utils"
 import { InfraTooltipItem } from "./chart-tooltip"
 import { formatBackendError } from "@/lib/error-messages"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 interface HostDetailChartProps {
 	hostName: string
@@ -93,8 +96,12 @@ interface ChartViewProps {
 
 function ChartView({ rows, unit, metric, seriesLabel, waiting, syncId }: ChartViewProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
+	const { timeZone } = useTimeFormat()
 
-	const { data, series } = useMemo(() => transformRows(rows), [rows])
+	const { data, series } = useMemo(
+		() => transformRows(rows, (iso) => isoToLabel(iso, timeZone)),
+		[rows, timeZone],
+	)
 
 	// Series names can contain dots/slashes (container names, mount points),
 	// which are invalid in a raw `var(--color-…)` reference — colour series
@@ -142,7 +149,7 @@ function ChartView({ rows, unit, metric, seriesLabel, waiting, syncId }: ChartVi
 	const tickFormatter = (v: number) => {
 		if (unit === "percent") return `${Math.round(v * 100)}%`
 		if (unit === "bytes_per_second") return formatBytesPerSecond(v)
-		return v.toLocaleString(undefined, { maximumFractionDigits: 2 })
+		return formatCount(v, 2)
 	}
 
 	const isStacked = metric === "cpu" || metric === "memory"

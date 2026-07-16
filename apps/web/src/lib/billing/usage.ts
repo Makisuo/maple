@@ -18,7 +18,9 @@ export function formatUsage(gb: number): string {
 	return `${gb.toFixed(2)} GB`
 }
 
+const usageCountFormatter = new Intl.NumberFormat("en-US")
+
 /** Format a raw count for display: "0", "1,234", "1,200,000". */
 export function formatCount(value: number): string {
-	return Math.max(0, Math.round(value)).toLocaleString("en-US")
+	return usageCountFormatter.format(Math.max(0, Math.round(value)))
 }

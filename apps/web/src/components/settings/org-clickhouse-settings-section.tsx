@@ -33,6 +33,8 @@ import {
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { OrgClickHouseSettingsUpsertRequest } from "@maple/domain/http"
 import { DataPlatformUsageSection } from "@/components/settings/data-platform-usage-section"
+import { useTimeFormat } from "@/hooks/use-time-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 
 function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
 	if (Exit.isSuccess(exit)) return fallback
@@ -41,21 +43,10 @@ function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string
 	return formatted.description || formatted.title || fallback
 }
 
-const syncDateFormatter = new Intl.DateTimeFormat("en-US", {
-	month: "short",
-	day: "numeric",
-	year: "numeric",
-	hour: "numeric",
-	minute: "2-digit",
-})
-
-function formatSyncDate(value: string | null): string {
+function formatSyncDate(value: string | null, timeZone: TimeZoneId): string {
 	if (!value) return "Never"
-	try {
-		return syncDateFormatter.format(new Date(value))
-	} catch {
-		return value
-	}
+	const formatted = formatDateTime(value, { timeZone, year: true })
+	return formatted === "-" ? value : formatted
 }
 
 function shortRevision(rev: string | null): string {
@@ -69,6 +60,7 @@ interface OrgClickHouseSettingsSectionProps {
 }
 
 export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgClickHouseSettingsSectionProps) {
+	const { timeZone } = useTimeFormat()
 	const [chUrl, setChUrl] = useState("")
 	const [chUser, setChUser] = useState("default")
 	const [chPassword, setChPassword] = useState("")
@@ -381,7 +373,7 @@ export function OrgClickHouseSettingsSection({ isAdmin, hasEntitlement }: OrgCli
 							<div className="grid grid-cols-2 gap-3 rounded-lg border px-4 py-3 text-sm sm:grid-cols-4">
 								<div>
 									<p className="text-muted-foreground text-xs">Last applied</p>
-									<p>{formatSyncDate(settings?.lastSyncAt ?? null)}</p>
+									<p>{formatSyncDate(settings?.lastSyncAt ?? null, timeZone)}</p>
 								</div>
 								<div>
 									<p className="text-muted-foreground text-xs">Applied version</p>

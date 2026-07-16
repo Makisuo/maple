@@ -46,6 +46,8 @@ import {
 	EnvelopeIcon,
 	AlertWarningIcon,
 } from "@/components/icons"
+import { useTimeFormat } from "@/hooks/use-time-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 
 function getInitials(firstName?: string | null, lastName?: string | null) {
 	const first = firstName?.[0] ?? ""
@@ -53,14 +55,8 @@ function getInitials(firstName?: string | null, lastName?: string | null) {
 	return (first + last).toUpperCase() || "?"
 }
 
-const dateFormatter = new Intl.DateTimeFormat("en-US", {
-	month: "short",
-	day: "numeric",
-	year: "numeric",
-})
-
-function formatDate(date: Date) {
-	return dateFormatter.format(date)
+function formatDate(date: Date, timeZone: TimeZoneId) {
+	return formatDateTime(date, { timeZone, dateOnly: true, year: true })
 }
 
 function roleBadge(role: string) {
@@ -71,6 +67,7 @@ function roleBadge(role: string) {
 }
 
 export function MembersSection() {
+	const { timeZone } = useTimeFormat()
 	const { orgRole, userId } = useAuth()
 	const { organization, memberships, invitations, isLoaded } = useOrganization({
 		memberships: { infinite: true },
@@ -270,7 +267,7 @@ export function MembersSection() {
 											</TableCell>
 											<TableCell>{roleBadge(member.role)}</TableCell>
 											<TableCell className="text-muted-foreground text-xs">
-												{formatDate(member.createdAt)}
+												{formatDate(member.createdAt, timeZone)}
 											</TableCell>
 											{isAdmin && (
 												<TableCell>

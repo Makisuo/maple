@@ -13,7 +13,7 @@ import { type GetMetricTimeSeriesInput, type MetricTimeSeriesResponse } from "@/
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getMetricTimeSeriesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { formatBackendError } from "@/lib/error-messages"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 const chartConfig = {
 	avgValue: {
@@ -41,6 +41,7 @@ export function MetricsVolumeChart({
 	startTime,
 	endTime,
 }: MetricsVolumeChartProps) {
+	const { formatTimeOfDay } = useTimeFormat()
 	const chartResult = useAtomValue(
 		metricName && metricType
 			? getMetricTimeSeriesResultAtom({
@@ -101,10 +102,7 @@ export function MetricsVolumeChart({
 		})
 		.onSuccess((response) => {
 			const chartData = response.data.map((point) => ({
-				time: new Date(normalizeTimestampInput(point.bucket)).toLocaleTimeString("en-US", {
-					hour: "2-digit",
-					minute: "2-digit",
-				}),
+				time: formatTimeOfDay(point.bucket),
 				avgValue: point.avgValue,
 				dataPointCount: point.dataPointCount,
 			}))

@@ -1,10 +1,12 @@
 import { useState } from "react"
+import { formatCount } from "@/lib/format"
 import { toast } from "sonner"
 import type { CatalogPlan, CatalogPlanItem } from "@maple/domain/http"
 
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
 
 type Plan = CatalogPlan
@@ -104,7 +106,7 @@ function formatIncludedUsage(item: PlanItem): string {
 	if (item.included != null) {
 		// browser_sessions is metered by count, not bytes — everything else is GB.
 		const unit = item.featureId === "browser_sessions" ? "sessions" : "GB"
-		return `${Number(item.included).toLocaleString()} ${unit}`
+		return `${formatCount(Number(item.included))} ${unit}`
 	}
 	return ""
 }
@@ -209,6 +211,7 @@ interface CheckoutPreview {
 }
 
 export function PricingCards() {
+	const { formatDateTime } = useTimeFormat()
 	const plansResult = useAtomValue(billingPlansAtom)
 	const customerResult = useAtomValue(billingCustomerAtom)
 	const { attach, previewAttach } = useBillingActions()
@@ -628,7 +631,10 @@ export function PricingCards() {
 									Then{" "}
 									{formatCurrency(confirmDialog.nextCycle.total, confirmDialog.currency)}{" "}
 									starting{" "}
-									{new Date(confirmDialog.nextCycle.starts_at).toLocaleDateString()}
+									{formatDateTime(confirmDialog.nextCycle.starts_at, {
+										dateOnly: true,
+										year: true,
+									})}
 								</p>
 							)}
 						</div>

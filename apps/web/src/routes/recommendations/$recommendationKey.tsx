@@ -13,7 +13,8 @@ import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
-import { formatRelativeTime } from "@/lib/format"
+import { formatCount, formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -229,7 +230,7 @@ function DetailView({
 					</Badge>
 				</div>
 			}
-			description={`Opened ${formatRelativeTime(issue.openedAt)} · ${issue.usageCount.toLocaleString()} spans · 24h`}
+			description={`Opened ${formatRelativeTime(issue.openedAt)} · ${formatCount(issue.usageCount)} spans · 24h`}
 			rightSidebar={
 				<DetailSidebar
 					issue={issue}
@@ -320,7 +321,7 @@ function ChangeBreakdown({ issue }: { issue: RecommendationIssue }) {
 						</code>
 					</div>
 					<span className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">
-						{issue.usageCount.toLocaleString()} spans · 24h
+						{formatCount(issue.usageCount)} spans · 24h
 					</span>
 				</div>
 				{issue.canonicalKey ? (
@@ -454,6 +455,7 @@ function DetailSidebar({
 	onDismiss: () => void
 	onReopen: () => void
 }) {
+	const { formatDateTime } = useTimeFormat()
 	const kindBadge = KIND_BADGE[issue.kind]
 	const mode = issue.kind === "rename" ? MODE.auto : MODE.manual
 	const ModeIcon = mode.icon
@@ -475,9 +477,12 @@ function DetailSidebar({
 					</Badge>
 				</Row>
 				<Row label="Spans">
-					<span className="tabular-nums text-foreground">{issue.usageCount.toLocaleString()}</span>
+					<span className="tabular-nums text-foreground">{formatCount(issue.usageCount)}</span>
 				</Row>
-				<Row label="Opened" title={new Date(issue.openedAt).toLocaleString()}>
+				<Row
+					label="Opened"
+					title={formatDateTime(issue.openedAt, { year: true, seconds: true })}
+				>
 					<span className="tabular-nums text-muted-foreground">
 						{formatRelativeTime(issue.openedAt)}
 					</span>

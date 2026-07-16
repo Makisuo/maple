@@ -29,7 +29,31 @@ export function formatNumber(num: number): string {
 	if (num >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
 	}
-	return num.toLocaleString()
+	return formatCount(num)
+}
+
+const countFormatterCache = new Map<number, Intl.NumberFormat>()
+
+/**
+ * Format a full-precision, grouped number (e.g. "1,234,567"). Unlike
+ * {@link formatNumber} this never abbreviates — use it for exact counts,
+ * totals, and sample counts in tables and tooltips.
+ *
+ * Byte-identical to the locale-default number formatting it replaces: with no
+ * cap it matches default grouping; with a cap it applies `maximumFractionDigits`.
+ * Formatters are cached per fraction-digit setting.
+ */
+export function formatCount(num: number, maximumFractionDigits?: number): string {
+	const key = maximumFractionDigits ?? -1
+	let formatter = countFormatterCache.get(key)
+	if (!formatter) {
+		formatter =
+			maximumFractionDigits === undefined
+				? new Intl.NumberFormat()
+				: new Intl.NumberFormat(undefined, { maximumFractionDigits })
+		countFormatterCache.set(key, formatter)
+	}
+	return formatter.format(num)
 }
 
 /**
@@ -94,58 +118,6 @@ export function inferRangeMs(data: Array<Record<string, unknown>>): number {
 
 	if (bucketTimes.length < 2) return 0
 	return Math.max(...bucketTimes) - Math.min(...bucketTimes)
-}
-
-/**
- * Format a bucket timestamp label that adapts based on the overall time range:
- * - >= 24h with daily buckets: "Feb 14"
- * - >= 24h with sub-day buckets: "Feb 14, 02:00 PM"
- * - 30min - 24h: "02:00 PM"
- * - <= 30min: "02:00:30 PM"
- */
-export function formatBucketLabel(
-	value: unknown,
-	context: { rangeMs: number; bucketSeconds: number | undefined },
-	mode: "tick" | "tooltip",
-): string {
-	if (typeof value !== "string") return ""
-
-	const date = new Date(normalizeTimestampInput(value))
-	if (Number.isNaN(date.getTime())) return value
-
-	const includeDate = context.rangeMs >= 24 * 60 * 60 * 1000 || (context.bucketSeconds ?? 0) >= 24 * 60 * 60
-	const includeSeconds = context.rangeMs <= 30 * 60 * 1000 && !includeDate
-
-	if (mode === "tooltip") {
-		return date.toLocaleString(undefined, {
-			year: includeDate ? "numeric" : undefined,
-			month: includeDate ? "short" : undefined,
-			day: includeDate ? "numeric" : undefined,
-			hour: "2-digit",
-			minute: "2-digit",
-			second: includeSeconds ? "2-digit" : undefined,
-		})
-	}
-
-	if (includeDate) {
-		if ((context.bucketSeconds ?? 0) >= 24 * 60 * 60) {
-			return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-		}
-		return date.toLocaleString(undefined, {
-			month: "short",
-			day: "numeric",
-			hour: "2-digit",
-			minute: "2-digit",
-		})
-	}
-
-	return date
-		.toLocaleTimeString(undefined, {
-			hour: "2-digit",
-			minute: "2-digit",
-			second: includeSeconds ? "2-digit" : undefined,
-		})
-		.replace(/^24:/, "00:")
 }
 
 /**

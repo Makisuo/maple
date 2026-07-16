@@ -3,14 +3,13 @@ import { ClockIcon, CopyIcon, ExternalLinkIcon, LinkIcon, PulseIcon } from "@/co
 
 import { CopyableValue } from "@/components/attributes"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
-import { formatTimestampInTimezone } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { encodeLogKey } from "@/lib/log-key"
 import { buildLogJsonPayload } from "./log-raw-panel"
 import type { Log } from "@/api/warehouse/logs"
 
 interface LogMetaStripProps {
 	log: Log
-	timeZone: string
 	/**
 	 * Show the "Open full page" link. `true` in the drawer; `false` on the
 	 * standalone `/logs/$logId` page, where the link would point at itself.
@@ -18,9 +17,10 @@ interface LogMetaStripProps {
 	showOpenFullPage?: boolean
 }
 
-export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMetaStripProps) {
+export function LogMetaStrip({ log, showOpenFullPage = true }: LogMetaStripProps) {
 	const linkCopy = useCopyToClipboard("Log link")
 	const jsonCopy = useCopyToClipboard("Log JSON")
+	const { formatTimestamp } = useTimeFormat()
 
 	return (
 		<div className="flex items-center gap-2 overflow-x-auto border-b px-4 py-1.5 text-xs shrink-0 whitespace-nowrap">
@@ -28,10 +28,7 @@ export function LogMetaStrip({ log, timeZone, showOpenFullPage = true }: LogMeta
 				<ClockIcon size={12} className="text-muted-foreground" />
 				<span className="font-mono">
 					<CopyableValue value={log.timestamp}>
-						{formatTimestampInTimezone(log.timestamp, {
-							timeZone,
-							withMilliseconds: true,
-						})}
+						{formatTimestamp(log.timestamp, { withMilliseconds: true })}
 					</CopyableValue>
 				</span>
 			</div>

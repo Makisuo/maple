@@ -2,8 +2,8 @@ import type { ErrorIncidentDocument } from "@maple/domain/http"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { cn } from "@maple/ui/lib/utils"
-import { formatRelativeTime } from "@/lib/format"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { formatCount, formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 interface IssueIncidentsTableProps {
 	incidents: ReadonlyArray<ErrorIncidentDocument>
@@ -16,6 +16,8 @@ const REASON_LABEL: Record<ErrorIncidentDocument["reason"], string> = {
 }
 
 export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
+	const { formatDateTime } = useTimeFormat()
+
 	if (incidents.length === 0) {
 		return (
 			<Empty>
@@ -80,22 +82,24 @@ export function IssueIncidentsTable({ incidents }: IssueIncidentsTableProps) {
 							</TableCell>
 							<TableCell
 								className="tabular-nums text-muted-foreground"
-								title={new Date(
-									normalizeTimestampInput(incident.firstTriggeredAt),
-								).toLocaleString()}
+								title={formatDateTime(incident.firstTriggeredAt, {
+									year: true,
+									seconds: true,
+								})}
 							>
 								{formatRelativeTime(incident.firstTriggeredAt)}
 							</TableCell>
 							<TableCell
 								className="tabular-nums"
-								title={new Date(
-									normalizeTimestampInput(incident.lastTriggeredAt),
-								).toLocaleString()}
+								title={formatDateTime(incident.lastTriggeredAt, {
+									year: true,
+									seconds: true,
+								})}
 							>
 								{formatRelativeTime(incident.lastTriggeredAt)}
 							</TableCell>
 							<TableCell className="text-right font-mono tabular-nums">
-								{incident.occurrenceCount.toLocaleString()}
+								{formatCount(incident.occurrenceCount)}
 							</TableCell>
 						</TableRow>
 					)

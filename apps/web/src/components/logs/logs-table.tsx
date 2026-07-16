@@ -10,9 +10,8 @@ import { LogDetailSheet } from "./log-detail-sheet"
 import { LogRowExpanded } from "./log-row-expanded"
 import { LogsTableToolbar } from "./logs-table-toolbar"
 import type { LogsSearchParams } from "@/routes/logs"
-import { useTimezonePreference } from "@/hooks/use-timezone-preference"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { useLogsViewPreferences, type LogsDensity } from "@/hooks/use-logs-view-preferences"
-import { formatCompactTimeInTimezone } from "@/lib/timezone-format"
 import { getSeverityColor } from "@maple/ui/lib/severity"
 import { isDialogOpen } from "@/lib/keyboard"
 import { useInfiniteLogs, FETCH_THRESHOLD } from "@/hooks/use-infinite-logs"
@@ -67,7 +66,6 @@ interface LogRowProps {
 	log: Log
 	index: number
 	top: number
-	timeZone: string
 	isSelected: boolean
 	isFocused: boolean
 	isExpanded: boolean
@@ -86,7 +84,6 @@ const LogRow = React.memo(function LogRow({
 	log,
 	index,
 	top,
-	timeZone,
 	isSelected,
 	isFocused,
 	isExpanded,
@@ -98,6 +95,7 @@ const LogRow = React.memo(function LogRow({
 	onClick,
 	onToggleExpand,
 }: LogRowProps) {
+	const { formatCompactTime } = useTimeFormat()
 	const all = React.useMemo(() => pickImportantAttributes(log, Number.POSITIVE_INFINITY), [log])
 	// Every important (non-pinned) attribute is shown inline — the row scrolls
 	// horizontally to reach them rather than clipping behind a "+N".
@@ -175,7 +173,7 @@ const LogRow = React.memo(function LogRow({
 					{log.severityText}
 				</span>
 				<span className="shrink-0 w-24 text-muted-foreground tabular-nums">
-					{formatCompactTimeInTimezone(log.timestamp, { timeZone })}
+					{formatCompactTime(log.timestamp)}
 				</span>
 				<span className="shrink-0 w-[120px] truncate text-muted-foreground/60 hidden md:inline-block">
 					{log.serviceName}
@@ -297,7 +295,6 @@ function LogsTableView({
 	const [sheetOpen, setSheetOpen] = React.useState(false)
 	const [expandedRows, setExpandedRows] = React.useState<ReadonlySet<number>>(() => new Set())
 	const [contentWidth, setContentWidth] = React.useState<number | null>(null)
-	const { effectiveTimezone } = useTimezonePreference()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
 	const pinnedKey = pinnedColumns.join(" ")
 
@@ -464,7 +461,6 @@ function LogsTableView({
 										log={log}
 										index={virtualRow.index}
 										top={virtualRow.start}
-										timeZone={effectiveTimezone}
 										isSelected={isSelected}
 										isFocused={virtualRow.index === focusedIndex}
 										isExpanded={expandedRows.has(virtualRow.index)}

@@ -10,6 +10,8 @@ import {
 	EyeIcon,
 } from "@/components/icons"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { formatDuration, gradientFor, hostFromUrl } from "./replay-format"
 
 export interface SessionRow {
@@ -34,7 +36,7 @@ function parseTs(startTime: string): number {
 	return Date.parse(normalizeTimestampInput(startTime))
 }
 
-function formatRelative(startTime: string): string {
+function formatRelative(startTime: string, timeZone: TimeZoneId): string {
 	const parsed = parseTs(startTime)
 	if (Number.isNaN(parsed)) return startTime
 	const s = Math.round((Date.now() - parsed) / 1000)
@@ -44,12 +46,14 @@ function formatRelative(startTime: string): string {
 	const h = Math.floor(m / 60)
 	if (h < 24) return `${h}h ago`
 	const d = Math.floor(h / 24)
-	return d < 7 ? `${d}d ago` : new Date(parsed).toLocaleDateString()
+	return d < 7 ? `${d}d ago` : formatDateTime(parsed, { timeZone, dateOnly: true, year: true })
 }
 
-function absoluteTs(startTime: string): string {
+function absoluteTs(startTime: string, timeZone: TimeZoneId): string {
 	const parsed = parseTs(startTime)
-	return Number.isNaN(parsed) ? startTime : new Date(parsed).toLocaleString()
+	return Number.isNaN(parsed)
+		? startTime
+		: formatDateTime(parsed, { timeZone, year: true, seconds: true })
 }
 
 function identity(session: SessionRow): { label: string; initial: string; gradient: string } {
@@ -78,6 +82,7 @@ interface SessionsListProps {
 
 export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMore = false }: SessionsListProps) {
 	const navigate = useNavigate()
+	const { timeZone } = useTimeFormat()
 
 	// Auto-load the next page when the bottom sentinel nears the viewport. Guards
 	// live in refs so the observer is created once yet always reads fresh values;
@@ -170,9 +175,9 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 								    anchors the top-right corner of the stacked row. */}
 								<span
 									className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground @2xl:hidden"
-									title={absoluteTs(session.startTime)}
+									title={absoluteTs(session.startTime, timeZone)}
 								>
-									{formatRelative(session.startTime)}
+									{formatRelative(session.startTime, timeZone)}
 								</span>
 							</div>
 							<div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
@@ -224,10 +229,10 @@ export function SessionsList({ sessions, onReachEnd, hasMore = false, loadingMor
 						<div className="hidden shrink-0 items-center gap-3 @2xl:flex">
 							<span
 								className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-muted-foreground"
-								title={absoluteTs(session.startTime)}
+								title={absoluteTs(session.startTime, timeZone)}
 							>
 								<ClockIcon className="size-3.5 opacity-60" />
-								{formatRelative(session.startTime)}
+								{formatRelative(session.startTime, timeZone)}
 							</span>
 							{/* Tap affordance: hover-revealed on desktop. Phones skip it —
 							    the whole card is the tap target and the stacked row needs

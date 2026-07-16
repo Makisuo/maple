@@ -29,6 +29,13 @@ import {
 	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
 import type { QueryEngineAlertReducer } from "@maple/query-engine"
+import {
+	formatDateTime,
+	formatDayHeading,
+	formatTimeOfDay,
+	zonedDayKey,
+	type TimeZoneId,
+} from "@maple/ui/lib/time-format"
 import { Cause, Exit, Option, Schema } from "effect"
 import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
 import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
@@ -704,48 +711,25 @@ export function computeIncidentStats(incidents: AlertIncidentDocument[]) {
 /*  Shared Formatters                                                         */
 /* -------------------------------------------------------------------------- */
 
-export function formatAlertDateTime(value: string | null): string {
+export function formatAlertDateTime(value: string | null, timeZone: TimeZoneId): string {
 	if (!value) return "Never"
-	return new Date(value).toLocaleString(undefined, {
-		month: "short",
-		day: "numeric",
-		year: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-	})
+	return formatDateTime(value, { timeZone, year: true })
 }
 
-export function formatAlertDateTimeFull(value: string | null): string {
+export function formatAlertDateTimeFull(value: string | null, timeZone: TimeZoneId): string {
 	if (!value) return "—"
-	return new Date(value).toLocaleString(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
-	})
+	return formatDateTime(value, { timeZone, seconds: true })
 }
 
 /** Time of day only (`03:10 PM`) — used where a day header already carries the date. */
-export function formatAlertTime(value: string | null): string {
+export function formatAlertTime(value: string | null, timeZone: TimeZoneId): string {
 	if (!value) return "—"
-	return new Date(value).toLocaleTimeString(undefined, {
-		hour: "2-digit",
-		minute: "2-digit",
-	})
+	return formatTimeOfDay(value, { timeZone })
 }
 
-const startOfLocalDay = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-
-/** Day-bucket heading: `Today` / `Yesterday` / `Jun 4, 2026`. */
-function formatAlertDayHeading(value: string): string {
-	const date = new Date(value)
-	const today = startOfLocalDay(new Date())
-	const target = startOfLocalDay(date)
-	const dayMs = 86_400_000
-	if (target === today) return "Today"
-	if (target === today - dayMs) return "Yesterday"
-	return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+/** Day-bucket heading: `Today` / `Yesterday` / `Jun 4, 2026`, with the day computed in `timeZone`. */
+function formatAlertDayHeading(value: string, timeZone: TimeZoneId): string {
+	return formatDayHeading(value, { timeZone })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -789,16 +773,20 @@ export interface DeliveryEventDayGroup {
  */
 export function groupDeliveryEventsByDay(
 	events: ReadonlyArray<AlertDeliveryEventDocument>,
+	timeZone: TimeZoneId,
 ): DeliveryEventDayGroup[] {
 	const groups: DeliveryEventDayGroup[] = []
 	for (const event of events) {
-		const d = new Date(event.scheduledAt)
-		const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+		const key = zonedDayKey(event.scheduledAt, timeZone)
 		const last = groups[groups.length - 1]
 		if (last && last.key === key) {
 			last.events.push(event)
 		} else {
-			groups.push({ key, label: formatAlertDayHeading(event.scheduledAt), events: [event] })
+			groups.push({
+				key,
+				label: formatAlertDayHeading(event.scheduledAt, timeZone),
+				events: [event],
+			})
 		}
 	}
 	return groups

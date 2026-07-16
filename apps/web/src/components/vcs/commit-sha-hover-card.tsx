@@ -8,6 +8,8 @@ import type { VcsCommitDetailResponse } from "@maple/domain/http"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@maple/ui/components/ui/hover-card"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
+import { useTimeFormat } from "@/hooks/use-time-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { cn } from "@maple/ui/utils"
 
 // A full 40-hex git SHA. Telemetry `deployment.commit_sha` is unguarded OTel
@@ -206,6 +208,7 @@ function CommitPlain({ sha, compact = false }: { sha: string; compact?: boolean 
 }
 
 function CommitCard({ commit, compact = false }: { commit: VcsCommitDetailResponse; compact?: boolean }) {
+	const { timeZone } = useTimeFormat()
 	// A git message is a subject line, then an optional body after a blank line.
 	const newlineIdx = commit.message.indexOf("\n")
 	const title = newlineIdx === -1 ? commit.message : commit.message.slice(0, newlineIdx)
@@ -250,7 +253,7 @@ function CommitCard({ commit, compact = false }: { commit: VcsCommitDetailRespon
 				</div>
 				<div className="flex items-center justify-between gap-2 text-muted-foreground">
 					<CopyableSha sha={commit.sha} />
-					<span title={formatExact(commit.committedAt)} className="cursor-default">
+					<span title={formatExact(commit.committedAt, timeZone)} className="cursor-default">
 						{formatRelative(commit.committedAt)}
 					</span>
 				</div>
@@ -331,6 +334,7 @@ function CommitListRowResolved({ sha }: { sha: string }) {
 // profile, the subject → the commit. The row itself has no hover affordance, so
 // the second line (author · sha · age) stays plain text.
 function CommitListRowLink({ commit }: { commit: VcsCommitDetailResponse }) {
+	const { timeZone } = useTimeFormat()
 	const title = firstLine(commit.message)
 	const author = commit.authorLogin ?? commit.authorName ?? "Unknown author"
 	const profileHref = commit.authorLogin ? hrefFromOrigin(commit.htmlUrl, commit.authorLogin) : null
@@ -351,7 +355,7 @@ function CommitListRowLink({ commit }: { commit: VcsCommitDetailResponse }) {
 					<span className="min-w-0 truncate">{author}</span>
 					<span className="shrink-0 font-mono">{commit.sha.slice(0, 7)}</span>
 					<span
-						title={formatExact(commit.committedAt)}
+						title={formatExact(commit.committedAt, timeZone)}
 						className="ml-auto shrink-0 tabular-nums text-muted-foreground/80"
 					>
 						{formatRelative(commit.committedAt, { short: true })}
@@ -595,8 +599,8 @@ function describeError(error: unknown): {
 // Absolute timestamp for the title tooltip on a relative age — e.g.
 // "Jun 27, 2026, 3:42 PM". The relative label stays the at-a-glance value; the
 // exact time is one hover away.
-function formatExact(epochMs: number): string {
-	return new Date(epochMs).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+function formatExact(epochMs: number, timeZone: TimeZoneId): string {
+	return formatDateTime(epochMs, { timeZone, year: true })
 }
 
 /**

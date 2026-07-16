@@ -22,7 +22,7 @@ import {
 } from "@/components/anomalies/anomaly-format"
 import { SEVERITY_LABEL, SEVERITY_TONE } from "@/components/errors/severity-badge"
 import { comparatorLabels, signalLabels } from "@/lib/alerts/form-utils"
-import { formatRelativeTime } from "@/lib/format"
+import { formatCount, formatRelativeTime } from "@/lib/format"
 
 /** A coloured pill (severity / status) — `tone` is the Tailwind class set for a Badge. */
 export interface TokenBadge {
@@ -104,7 +104,7 @@ export function subjectFromAlertContext(
 		{ label: "Window", value: `${alert.windowMinutes}min` },
 	]
 	if (alert.groupKey) signalRows.push({ label: "Group", value: alert.groupKey, mono: true, title: alert.groupKey })
-	if (alert.sampleCount !== null) signalRows.push({ label: "Samples", value: alert.sampleCount.toLocaleString() })
+	if (alert.sampleCount !== null) signalRows.push({ label: "Samples", value: formatCount(alert.sampleCount) })
 
 	return {
 		kind: "alert",
@@ -153,7 +153,7 @@ export function subjectFromAnomaly(incident: AnomalyIncidentDocument): Investiga
 		{ key: "observed", label: "Observed", value: fmt(incident.lastObservedValue) },
 		{ key: "baseline", label: "Baseline", value: fmt(incident.baselineMedian) },
 		{ key: "deviation", label: "Deviation", value: dev.label },
-		{ key: "samples", label: "Samples", value: incident.lastSampleCount.toLocaleString() },
+		{ key: "samples", label: "Samples", value: formatCount(incident.lastSampleCount) },
 	]
 
 	const entityLinks: EntityLink[] = [{ label: "View anomaly", href: `/anomalies/${incident.id}` }]
@@ -191,7 +191,7 @@ export function subjectFromAnomaly(incident: AnomalyIncidentDocument): Investiga
 					{ label: "Observed", value: fmt(incident.lastObservedValue), mono: true },
 					{ label: "Baseline", value: fmt(incident.baselineMedian), mono: true },
 					{ label: "Threshold", value: fmt(incident.thresholdValue), mono: true },
-					{ label: "Samples", value: incident.lastSampleCount.toLocaleString() },
+					{ label: "Samples", value: formatCount(incident.lastSampleCount) },
 				],
 			},
 			{
@@ -243,7 +243,7 @@ export function subjectFromError(
 	issue: ErrorIssueDocument,
 	opts?: { totalInWindow?: number; latestIncidentId?: string | null },
 ): InvestigationSubject {
-	const occurrences = issue.occurrenceCount.toLocaleString()
+	const occurrences = formatCount(issue.occurrenceCount)
 	const title = issue.exceptionType || "Unknown error"
 
 	return {
@@ -264,7 +264,7 @@ export function subjectFromError(
 			label: "Occurrences",
 			primary: occurrences,
 			secondary:
-				opts?.totalInWindow !== undefined ? `${opts.totalInWindow.toLocaleString()} in window` : "total events",
+				opts?.totalInWindow !== undefined ? `${formatCount(opts.totalInWindow)} in window` : "total events",
 		},
 		groups: [
 			{

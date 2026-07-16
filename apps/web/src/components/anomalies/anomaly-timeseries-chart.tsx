@@ -7,8 +7,8 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "@maple/ui/components/ui/chart"
-import { formatBucketLabel } from "@maple/ui/lib/format"
 import { cn } from "@maple/ui/lib/utils"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 import { formatSignalValue } from "./anomaly-format"
 
@@ -26,6 +26,7 @@ export function AnomalyTimeseriesChart({
 	timeseries: AnomalyIncidentTimeseriesResponse
 	className?: string
 }) {
+	const { formatBucketLabel } = useTimeFormat()
 	const { signalType, baselineMedian, thresholdValue } = timeseries
 	const stroke = SEVERITY_STROKE[incident.severity]
 

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react"
+import { formatCount } from "@/lib/format"
 
 import { useMountEffect } from "@/hooks/use-mount-effect"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
@@ -91,12 +92,12 @@ export function ReplaysToolbar({
 				<Stat label="sessions" value={totalSessions} />
 				<span className="flex items-center gap-1.5 whitespace-nowrap">
 					<span className="size-1.5 rounded-full bg-success" />
-					<span className="font-medium tabular-nums">{activeSessions.toLocaleString()}</span>
+					<span className="font-medium tabular-nums">{formatCount(activeSessions)}</span>
 					<span className="text-muted-foreground">active</span>
 				</span>
 				<span className="flex items-center gap-1.5 whitespace-nowrap">
 					<span className={cn("font-medium tabular-nums", errorSessions > 0 && "text-destructive")}>
-						{errorSessions.toLocaleString()}
+						{formatCount(errorSessions)}
 					</span>
 					<span className="text-muted-foreground">with errors</span>
 				</span>
@@ -108,7 +109,7 @@ export function ReplaysToolbar({
 function Stat({ label, value }: { label: string; value: number }) {
 	return (
 		<span className="flex items-center gap-1.5 whitespace-nowrap">
-			<span className="font-medium tabular-nums">{value.toLocaleString()}</span>
+			<span className="font-medium tabular-nums">{formatCount(value)}</span>
 			<span className="text-muted-foreground">{label}</span>
 		</span>
 	)

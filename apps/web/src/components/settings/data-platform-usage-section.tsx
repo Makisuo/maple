@@ -1,4 +1,5 @@
 import type { ReactNode } from "react"
+import { formatCount } from "@/lib/format"
 import { Result } from "@/lib/effect-atom"
 import { ChartLineIcon, DatabaseIcon, FileIcon, GridSquareCirclePlusIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
@@ -16,7 +17,7 @@ function formatNumber(num: number): string {
 	if (num >= 1_000_000_000) return `${(num / 1_000_000_000).toFixed(2)}B`
 	if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`
 	if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`
-	return num.toLocaleString()
+	return formatCount(num)
 }
 
 function formatBytes(bytes: number): string {

@@ -3,6 +3,8 @@ import { useMemo } from "react"
 import type { AlertIncidentDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/utils"
 
+import { useTimeFormat } from "@/hooks/use-time-format"
+
 /**
  * Fixed-bucket strip of a rule's incident history over a time range: red where
  * an incident was firing (bright while still open), green otherwise. Used at
@@ -26,6 +28,7 @@ export function IncidentTimelineStrip({
 	showAxisLabels?: boolean
 	className?: string
 }) {
+	const { formatDateTime } = useTimeFormat()
 	const segments = useMemo(
 		() =>
 			incidents.map((incident) => ({
@@ -64,19 +67,10 @@ export function IncidentTimelineStrip({
 			</div>
 			{showAxisLabels && !compact && (
 				<div className="flex justify-between font-mono text-[11px] text-muted-foreground">
-					<span>{formatEdge(range.min)}</span>
-					<span>{formatEdge(range.max)}</span>
+					<span>{formatDateTime(range.min)}</span>
+					<span>{formatDateTime(range.max)}</span>
 				</div>
 			)}
 		</div>
 	)
-}
-
-function formatEdge(ms: number): string {
-	return new Date(ms).toLocaleString(undefined, {
-		month: "short",
-		day: "numeric",
-		hour: "2-digit",
-		minute: "2-digit",
-	})
 }

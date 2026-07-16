@@ -5,13 +5,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getServiceColorClass } from "@maple/ui/lib/colors"
 import { cn } from "@maple/ui/lib/utils"
 import { formatRelativeTime } from "@/lib/format"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 interface IssueOccurrencesTableProps {
 	traces: ReadonlyArray<ErrorIssueSampleTrace>
 }
 
 export function IssueOccurrencesTable({ traces }: IssueOccurrencesTableProps) {
+	const { formatDateTime } = useTimeFormat()
+
 	if (traces.length === 0) {
 		return (
 			<Empty>
@@ -37,7 +39,7 @@ export function IssueOccurrencesTable({ traces }: IssueOccurrencesTableProps) {
 					<TableRow key={`${trace.traceId}-${trace.spanId}`}>
 						<TableCell
 							className="tabular-nums text-muted-foreground"
-							title={new Date(normalizeTimestampInput(trace.timestamp)).toLocaleString()}
+							title={formatDateTime(trace.timestamp, { year: true, seconds: true })}
 						>
 							{formatRelativeTime(trace.timestamp)}
 						</TableCell>

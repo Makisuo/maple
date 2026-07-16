@@ -26,7 +26,7 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "@maple/ui/components/ui/chart"
-import { formatBucketLabel } from "@maple/ui/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/utils"
 import { SERIES_COLORS } from "./chart-colors"
@@ -106,6 +106,8 @@ export function AlertRuleChart({
 	error,
 	className,
 }: AlertRuleChartProps) {
+	const { formatBucketLabel } = useTimeFormat()
+
 	// The preview series is the preferred source; when it's empty/unavailable the
 	// recorded checks become the series instead, so a rule whose preview fails
 	// still gets a chart from its evaluation history.
@@ -243,7 +245,7 @@ export function AlertRuleChart({
 	const formatTime = React.useCallback(
 		(value: number, mode: "tick" | "tooltip") =>
 			formatBucketLabel(new Date(value).toISOString(), axisContext, mode),
-		[axisContext],
+		[axisContext, formatBucketLabel],
 	)
 
 	const chartConfig: ChartConfig = React.useMemo(() => {

@@ -12,7 +12,9 @@ import {
 	ChartTooltip,
 	ChartTooltipContent,
 } from "../../ui/chart"
-import { formatLatency, inferBucketSeconds, inferRangeMs, formatBucketLabel } from "../../../lib/format"
+import { formatLatency, inferBucketSeconds, inferRangeMs } from "../../../lib/format"
+import { formatBucketLabel } from "../../../lib/time-format"
+import { useTimeDisplay } from "../../../lib/time-display-context"
 
 const VALUE_KEYS = ["p99LatencyMs", "p95LatencyMs", "p50LatencyMs"]
 
@@ -31,6 +33,7 @@ export function LatencyLineChart({
 	overlay,
 	yAxisWidth,
 }: BaseChartProps) {
+	const { timeZone } = useTimeDisplay()
 	const chartData = data ?? latencyTimeSeriesData
 
 	const {
@@ -61,7 +64,7 @@ export function LatencyLineChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
-					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
+					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick", timeZone)}
 				/>
 				<YAxis
 					tickLine={false}
@@ -77,7 +80,7 @@ export function LatencyLineChart({
 								labelFormatter={(_, payload) => {
 									if (!payload?.[0]?.payload?.bucket) return ""
 									const bucket = payload[0].payload.bucket as string
-									return formatBucketLabel(bucket, axisContext, "tooltip")
+									return formatBucketLabel(bucket, axisContext, "tooltip", timeZone)
 								}}
 								formatter={(value, name, item) => {
 									const nameStr = String(name)

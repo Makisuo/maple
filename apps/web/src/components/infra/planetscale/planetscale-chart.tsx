@@ -11,6 +11,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { PlanetScaleInfraTimeseriesRow } from "@/api/warehouse/planetscale-infra"
 import { formatNumber } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler } from "../chart-utils"
 import { formatPercent } from "../format"
 
@@ -52,10 +53,11 @@ export function PlanetScaleChart({
 	waiting?: boolean
 	syncId?: string
 }) {
+	const { timeZone } = useTimeFormat()
 	const data = useMemo(() => {
-		const labeler = makeBucketLabeler(buckets.map((row) => row.bucket))
+		const labeler = makeBucketLabeler(buckets.map((row) => row.bucket), timeZone)
 		return buckets.map((row) => ({ time: labeler(row.bucket), value: row[metric] }))
-	}, [buckets, metric])
+	}, [buckets, metric, timeZone])
 
 	const config = useMemo<ChartConfig>(
 		() => ({ value: { label: METRIC_LABELS[metric], color: METRIC_COLORS[metric] } }),

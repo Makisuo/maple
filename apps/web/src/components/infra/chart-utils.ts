@@ -3,6 +3,8 @@
 // share the row→series transform, palette, grid/empty conventions, and the
 // unit-aware value formatting used by tooltips, legend chips, and axes.
 
+import { formatCount } from "@/lib/format"
+import { formatBucketLabel, formatTimeOfDay, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { formatBytesPerSecond, formatLoad, formatPercent } from "./format"
 
 export const COLOR_PALETTE = [
@@ -43,7 +45,7 @@ export function formatValueWithUnit(value: number, unit: ChartUnit): string {
 		case "percent":
 			return formatPercent(value)
 		case "cores":
-			return `${value.toLocaleString(undefined, { maximumFractionDigits: 3 })} cores`
+			return `${formatCount(value, 3)} cores`
 		case "seconds":
 			return formatSeconds(value)
 		case "load":
@@ -68,18 +70,20 @@ export interface TransformedPoint extends Record<string, string | number> {
 	time: string
 }
 
-/** Axis label for a bucket timestamp ("14:35"). */
-export function isoToLabel(iso: string): string {
-	const d = new Date(iso)
-	return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+/** Axis label for a bucket timestamp ("02:35 PM") in `timeZone`. */
+export function isoToLabel(iso: string, timeZone: TimeZoneId): string {
+	return formatTimeOfDay(iso, { timeZone })
 }
 
 /**
  * Window-aware axis labeler: plain time-of-day while the plotted buckets span
  * a single day, "Jul 3, 02:35 PM" once they cross 24h — the multi-day presets
- * (4d/10d/6w/…) make bare times ambiguous.
+ * (4d/10d/6w/…) make bare times ambiguous. Renders in `timeZone`.
  */
-export function makeBucketLabeler(bucketIsos: ReadonlyArray<string>): (iso: string) => string {
+export function makeBucketLabeler(
+	bucketIsos: ReadonlyArray<string>,
+	timeZone: TimeZoneId,
+): (iso: string) => string {
 	let min = Number.POSITIVE_INFINITY
 	let max = Number.NEGATIVE_INFINITY
 	for (const iso of bucketIsos) {
@@ -89,17 +93,18 @@ export function makeBucketLabeler(bucketIsos: ReadonlyArray<string>): (iso: stri
 			max = Math.max(max, ms)
 		}
 	}
-	if (max - min <= 24 * 60 * 60 * 1000) return isoToLabel
-	return (iso) => {
-		const d = new Date(iso)
-		return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${isoToLabel(iso)}`
-	}
+	if (max - min <= 24 * 60 * 60 * 1000) return (iso) => isoToLabel(iso, timeZone)
+	// Multi-day: reuse the shared warehouse bucket formatter, which adds the date
+	// once the span crosses 24h ("Jul 3, 02:35 PM") — same tick as every other
+	// timeseries chart.
+	const rangeMs = max - min
+	return (iso) => formatBucketLabel(iso, { rangeMs, bucketSeconds: undefined }, "tick", timeZone)
 }
 
 /** Pivot long-form `{bucket, attributeValue, value}` rows into per-bucket points keyed by series. */
 export function transformRows(
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>,
-	labeler: (iso: string) => string = isoToLabel,
+	labeler: (iso: string) => string,
 ): { data: TransformedPoint[]; series: string[] } {
 	const seriesSet = new Set<string>()
 	const byBucket = new Map<string, TransformedPoint>()

@@ -4,6 +4,8 @@ import { Exit } from "effect"
 import type { V2ApiKey } from "@maple/domain/http/v2"
 import { toast } from "sonner"
 import { cn } from "@maple/ui/lib/utils"
+import { useTimeFormat } from "@/hooks/use-time-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 
 import { Button } from "@maple/ui/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
@@ -50,17 +52,10 @@ import { RollApiKeyDialog } from "./roll-api-key-dialog"
 
 type ApiKey = V2ApiKey
 
-function formatDate(timestamp: string | null): string {
+function formatDate(timestamp: string | null, timeZone: TimeZoneId): string {
 	if (!timestamp) return "Never"
-	try {
-		return new Date(timestamp).toLocaleDateString("en-US", {
-			month: "short",
-			day: "numeric",
-			year: "numeric",
-		})
-	} catch {
-		return "Unknown"
-	}
+	const formatted = formatDateTime(timestamp, { timeZone, dateOnly: true, year: true })
+	return formatted === "-" ? "Unknown" : formatted
 }
 
 function formatRelative(timestamp: string | null): string | null {
@@ -286,6 +281,7 @@ function ApiKeyListItem({
 	onRoll?: () => void
 	onRevoke?: () => void
 }) {
+	const { timeZone } = useTimeFormat()
 	const isMcp = apiKey.kind === "mcp"
 	const Icon = isMcp ? SquareTerminalIcon : KeyIcon
 	const relativeLastUsed = formatRelative(apiKey.last_used_at)
@@ -358,7 +354,7 @@ function ApiKeyListItem({
 						))
 					)}
 					<MetaDot />
-					<MetaSpan label="Created">{formatDate(apiKey.created_at)}</MetaSpan>
+					<MetaSpan label="Created">{formatDate(apiKey.created_at, timeZone)}</MetaSpan>
 					{apiKey.created_by_email && (
 						<>
 							<MetaDot />
@@ -370,8 +366,8 @@ function ApiKeyListItem({
 					{apiKey.last_used_at && (
 						<>
 							<MetaDot />
-							<MetaSpan label="Last used" title={formatDate(apiKey.last_used_at)}>
-								{relativeLastUsed ?? formatDate(apiKey.last_used_at)}
+							<MetaSpan label="Last used" title={formatDate(apiKey.last_used_at, timeZone)}>
+								{relativeLastUsed ?? formatDate(apiKey.last_used_at, timeZone)}
 							</MetaSpan>
 						</>
 					)}
@@ -380,7 +376,7 @@ function ApiKeyListItem({
 							<MetaDot />
 							<MetaSpan label={expiresInPast ? "Expired" : "Expires"}>
 								<span className={expiresSoon ? "text-warning-foreground" : undefined}>
-									{formatDate(apiKey.expires_at)}
+									{formatDate(apiKey.expires_at, timeZone)}
 								</span>
 							</MetaSpan>
 						</>

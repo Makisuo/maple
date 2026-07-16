@@ -5,8 +5,8 @@ import { cn } from "@maple/ui/lib/utils"
 import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 import { PRIORITY_LABEL, PriorityBarsIcon } from "@/components/icons"
-import { formatRelativeTime } from "@/lib/format"
-import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { formatCount, formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 import { ActorChip } from "./actor-chip"
 import { clampPriority, shortIssueId } from "./issue-id"
@@ -43,6 +43,7 @@ export function IssueSidebar({
 	const priority = clampPriority(issue.priority)
 	const isTerminal = issue.workflowState === "cancelled" || issue.workflowState === "done"
 	const canClaim = !issue.leaseHolder && !isTerminal
+	const { formatDateTime } = useTimeFormat()
 
 	return (
 		<div className="flex h-full w-72 shrink-0 flex-col overflow-y-auto border-l bg-card/30">
@@ -153,17 +154,17 @@ export function IssueSidebar({
 			<SidebarGroup label="Activity">
 				<Row label="Events (total)">
 					<span className="text-right tabular-nums text-foreground">
-						{issue.occurrenceCount.toLocaleString()}
+						{formatCount(issue.occurrenceCount)}
 					</span>
 				</Row>
 				<Row label="Events (window)">
 					<span className="text-right tabular-nums text-foreground">
-						{totalInWindow.toLocaleString()}
+						{formatCount(totalInWindow)}
 					</span>
 				</Row>
 				<Row
 					label="First seen"
-					title={new Date(normalizeTimestampInput(issue.firstSeenAt)).toLocaleString()}
+					title={formatDateTime(issue.firstSeenAt, { year: true, seconds: true })}
 				>
 					<span className="text-right tabular-nums text-muted-foreground">
 						{formatRelativeTime(issue.firstSeenAt)}
@@ -171,7 +172,7 @@ export function IssueSidebar({
 				</Row>
 				<Row
 					label="Last seen"
-					title={new Date(normalizeTimestampInput(issue.lastSeenAt)).toLocaleString()}
+					title={formatDateTime(issue.lastSeenAt, { year: true, seconds: true })}
 				>
 					<span className="text-right tabular-nums text-foreground">
 						{formatRelativeTime(issue.lastSeenAt)}

@@ -22,6 +22,7 @@ import {
 	type DestinationFormState,
 } from "@/lib/alerts/form-utils"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -184,6 +185,7 @@ export function useDestinationManager(): DestinationManager {
  * "Add destination" action drives the same dialog.
  */
 export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationManager; isAdmin: boolean }) {
+	const { timeZone } = useTimeFormat()
 	const { result: destinationsResult } = useAlertDestinationsList()
 	const deliveryEventsResult = useAtomValue(
 		MapleApiAtomClient.query("alerts", "listDeliveryEvents", { reactivityKeys: ["alertDeliveryEvents"] }),
@@ -195,7 +197,7 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 	const deliveryEvents = Result.builder(deliveryEventsResult)
 		.onSuccess((response) => [...response.events] as AlertDeliveryEventDocument[])
 		.orElse(() => [])
-	const deliveryEventGroups = groupDeliveryEventsByDay(deliveryEvents)
+	const deliveryEventGroups = groupDeliveryEventsByDay(deliveryEvents, timeZone)
 
 	return (
 		<>
@@ -398,10 +400,10 @@ export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationMa
 																render={<span />}
 																className="cursor-default text-muted-foreground tabular-nums"
 															>
-																{formatAlertTime(event.scheduledAt)}
+																{formatAlertTime(event.scheduledAt, timeZone)}
 															</TooltipTrigger>
 															<TooltipContent>
-																{formatAlertDateTime(event.scheduledAt)}
+																{formatAlertDateTime(event.scheduledAt, timeZone)}
 															</TooltipContent>
 														</Tooltip>
 													</TableCell>

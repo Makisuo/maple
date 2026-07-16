@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import { formatCount } from "@/lib/format"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Result, useAtomValue, useAtomSet, useAtomRefresh } from "@/lib/effect-atom"
@@ -394,7 +395,7 @@ function DashboardContent({
 							<>
 								Total{" "}
 								<span className="font-medium text-foreground tabular-nums">
-									{totalVolume.toLocaleString()}
+									{formatCount(totalVolume)}
 								</span>
 							</>
 						))

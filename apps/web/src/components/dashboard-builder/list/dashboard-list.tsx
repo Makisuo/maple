@@ -34,6 +34,8 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import type { Dashboard, DashboardWidget } from "@/components/dashboard-builder/types"
 import type { DashboardSortOption } from "@/atoms/dashboard-preferences-atoms"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 
 const SORT_LABELS: Record<DashboardSortOption, string> = {
 	updated: "Recently Updated",
@@ -43,7 +45,7 @@ const SORT_LABELS: Record<DashboardSortOption, string> = {
 	widgets: "Most Widgets",
 }
 
-function formatTimeAgo(dateStr: string): string {
+function formatTimeAgo(dateStr: string, timeZone: TimeZoneId): string {
 	const now = Date.now()
 	const then = new Date(normalizeTimestampInput(dateStr)).getTime()
 	const diffMs = now - then
@@ -54,7 +56,7 @@ function formatTimeAgo(dateStr: string): string {
 	if (diffHours < 24) return `${diffHours}h ago`
 	const diffDays = Math.floor(diffHours / 24)
 	if (diffDays < 30) return `${diffDays}d ago`
-	return new Date(normalizeTimestampInput(dateStr)).toLocaleDateString()
+	return formatDateTime(dateStr, { timeZone, dateOnly: true, year: true })
 }
 
 function DashboardPreview({ widgets }: { widgets: DashboardWidget[] }) {
@@ -304,6 +306,7 @@ function DashboardCard({
 	onDelete: (dashboard: Dashboard) => void
 	onToggleFavorite: (id: string) => void
 }) {
+	const { timeZone } = useTimeFormat()
 	return (
 		<div
 			role="button"
@@ -358,7 +361,7 @@ function DashboardCard({
 						{dashboard.widgets.length} widget
 						{dashboard.widgets.length !== 1 ? "s" : ""}
 					</span>
-					<span>Updated {formatTimeAgo(dashboard.updatedAt)}</span>
+					<span>Updated {formatTimeAgo(dashboard.updatedAt, timeZone)}</span>
 				</div>
 				{dashboard.tags && dashboard.tags.length > 0 && (
 					<div className="flex items-center gap-1 mt-0.5">

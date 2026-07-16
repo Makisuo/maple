@@ -1,4 +1,5 @@
 import { useId, useMemo } from "react"
+import { formatCount } from "@/lib/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts"
 
@@ -28,11 +29,13 @@ import {
 	COLOR_PALETTE,
 	formatSeconds,
 	formatValueWithUnit,
+	isoToLabel,
 	transformRows,
 	UNNAMED_SERIES_KEY,
 } from "./chart-utils"
 import { InfraTooltipItem } from "./chart-tooltip"
 import { formatBackendError } from "@/lib/error-messages"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 const CHART_HEIGHT = 280
 
@@ -73,7 +76,11 @@ interface ChartViewProps {
 
 function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting, syncId }: ChartViewProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
-	const { data, series } = useMemo(() => transformRows(rows), [rows])
+	const { timeZone } = useTimeFormat()
+	const { data, series } = useMemo(
+		() => transformRows(rows, (iso) => isoToLabel(iso, timeZone)),
+		[rows, timeZone],
+	)
 
 	// Series names can contain dots/slashes (container names, pod names),
 	// which are invalid in a raw `var(--color-…)` reference — colour series
@@ -121,7 +128,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 	const tickFormatter = (v: number) => {
 		if (unit === "percent") return `${Math.round(v * 100)}%`
 		if (unit === "seconds") return formatSeconds(v)
-		return v.toLocaleString(undefined, { maximumFractionDigits: 3 })
+		return formatCount(v, 3)
 	}
 
 	const margin = { top: 12, right: 12, left: 0, bottom: 0 }

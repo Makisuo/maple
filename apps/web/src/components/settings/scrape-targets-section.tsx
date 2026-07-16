@@ -72,6 +72,8 @@ import {
 } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { formatDuration, formatNumber, formatRelativeTime } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { diagnoseScrapeError } from "@/lib/scrape-error-diagnosis"
 import { catalogEntry } from "../integrations/integration-catalog"
 import { IntegrationEmptyState } from "../integrations/integration-empty-state"
@@ -100,14 +102,8 @@ function formatOptionalCount(value: number | null): string {
 	return formatNumber(Math.round(value))
 }
 
-function formatDateTime(value: string): string {
-	return new Date(value).toLocaleString(undefined, {
-		month: "short",
-		day: "2-digit",
-		hour: "2-digit",
-		minute: "2-digit",
-		second: "2-digit",
-	})
+function formatTargetDateTime(value: string, timeZone: TimeZoneId): string {
+	return formatDateTime(value, { timeZone, seconds: true })
 }
 
 function hostnameFromUrl(value: string): string {
@@ -858,6 +854,7 @@ function ScrapeTargetDetails({
 	onEdit: (target: ScrapeTarget) => void
 	onDelete: (target: ScrapeTarget) => void
 }) {
+	const { timeZone } = useTimeFormat()
 	const { result: checksResult } = useScrapeTargetChecks(target.id, 20)
 	const checks = checksFromResult(checksResult)
 	const latestCheck = checks.at(0) ?? null
@@ -982,8 +979,8 @@ function ScrapeTargetDetails({
 							value={AUTH_TYPE_LABELS[target.authType] ?? target.authType}
 						/>
 						<DetailRow label="Target ID" value={<span className="font-mono">{target.id}</span>} />
-						<DetailRow label="Created" value={formatDateTime(target.createdAt)} />
-						<DetailRow label="Updated" value={formatDateTime(target.updatedAt)} />
+						<DetailRow label="Created" value={formatTargetDateTime(target.createdAt, timeZone)} />
+						<DetailRow label="Updated" value={formatTargetDateTime(target.updatedAt, timeZone)} />
 					</div>
 					{labels.length > 0 && (
 						<div className="flex flex-wrap gap-1.5 pt-1">
@@ -1036,6 +1033,7 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function ChecksTable({ result, checks }: { result: ScrapeTargetChecksResult; checks: ScrapeTargetCheck[] }) {
+	const { timeZone } = useTimeFormat()
 	if (Result.isInitial(result)) {
 		return (
 			<div className="space-y-2">
@@ -1075,7 +1073,7 @@ function ChecksTable({ result, checks }: { result: ScrapeTargetChecksResult; che
 						className="grid grid-cols-[minmax(100px,1fr)_64px_70px_72px] items-center gap-2 px-3 py-2 text-xs"
 					>
 						<div className="min-w-0">
-							<div className="truncate font-mono">{formatDateTime(check.timestamp)}</div>
+							<div className="truncate font-mono">{formatTargetDateTime(check.timestamp, timeZone)}</div>
 							{check.message && (
 								<Tooltip>
 									<TooltipTrigger

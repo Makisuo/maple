@@ -9,7 +9,8 @@ import {
 } from "@maple/ui/components/ui/chart"
 import { VerticalGradient } from "@maple/ui/components/charts/_shared/svg-patterns"
 import { resolveSeriesColor } from "@maple/ui/lib/semantic-series-colors"
-import { formatValueByUnit, formatBucketLabel, inferBucketSeconds, inferRangeMs } from "@maple/ui/lib/format"
+import { formatValueByUnit, inferBucketSeconds, inferRangeMs } from "@maple/ui/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 /** Sanitize a series key into a valid CSS variable segment */
 function cssKey(name: string): string {
@@ -25,6 +26,7 @@ interface QueryChartProps {
 }
 
 export function QueryChart({ props }: BaseComponentProps<QueryChartProps>) {
+	const { formatBucketLabel } = useTimeFormat()
 	const { data, metric, unit } = props
 	const id = useId()
 	const cleanId = id.replace(/:/g, "")

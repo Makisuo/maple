@@ -1,7 +1,8 @@
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
+import { formatCount } from "@/lib/format"
 import { Fragment, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { formatDistanceToNow, format } from "date-fns"
+import { formatDistanceToNow } from "date-fns"
 import { ArrowRightIcon, ChevronDownIcon, ChevronRightIcon } from "@/components/icons"
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
@@ -16,6 +17,7 @@ import {
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 function formatNumber(num: number): string {
 	if (num >= 1_000_000) {
@@ -24,7 +26,7 @@ function formatNumber(num: number): string {
 	if (num >= 1_000) {
 		return `${(num / 1_000).toFixed(1)}K`
 	}
-	return num.toLocaleString()
+	return formatCount(num)
 }
 
 function formatTimeAgo(date: Date): string {
@@ -41,6 +43,7 @@ interface ErrorsByTypeTableProps {
 }
 
 function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filters: GetErrorsByTypeInput }) {
+	const { formatDateTime } = useTimeFormat()
 	const detailResult = useRefreshableAtomValue(
 		getErrorDetailTracesResultAtom({
 			data: {
@@ -66,11 +69,15 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 				<div className="grid grid-cols-2 gap-4">
 					<div>
 						<p className="text-xs font-medium text-muted-foreground mb-1">First Seen</p>
-						<p className="text-sm">{format(errorRow.firstSeen, "MMM d, yyyy HH:mm:ss")}</p>
+						<p className="text-sm">
+							{formatDateTime(errorRow.firstSeen, { year: true, seconds: true })}
+						</p>
 					</div>
 					<div>
 						<p className="text-xs font-medium text-muted-foreground mb-1">Last Seen</p>
-						<p className="text-sm">{format(errorRow.lastSeen, "MMM d, yyyy HH:mm:ss")}</p>
+						<p className="text-sm">
+							{formatDateTime(errorRow.lastSeen, { year: true, seconds: true })}
+						</p>
 					</div>
 				</div>
 

@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
-import { formatDistanceToNow, format } from "date-fns"
+import { formatDistanceToNow } from "date-fns"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -16,13 +16,8 @@ import {
 	ChartTooltipContent,
 	type ChartConfig,
 } from "@maple/ui/components/ui/chart"
-import {
-	formatDuration,
-	formatNumber,
-	formatBucketLabel,
-	inferBucketSeconds,
-	inferRangeMs,
-} from "@/lib/format"
+import { formatDuration, formatNumber, inferBucketSeconds, inferRangeMs } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
@@ -76,6 +71,7 @@ function ErrorDetailContent() {
 	// Prefer the human label passed from the list; fall back to the hash.
 	const displayLabel = search.label ?? fingerprintHash
 	const navigate = useNavigate({ from: Route.fullPath })
+	const { formatBucketLabel, formatDateTime } = useTimeFormat()
 	const messageCopy = useCopyToClipboard("Error message")
 	const promptCopy = useCopyToClipboard("Agent prompt")
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
@@ -167,12 +163,12 @@ function ErrorDetailContent() {
 					<StatCard
 						label="First Seen"
 						value={formatDistanceToNow(error.firstSeen, { addSuffix: true })}
-						sub={format(error.firstSeen, "MMM d, yyyy HH:mm:ss")}
+						sub={formatDateTime(error.firstSeen, { year: true, seconds: true })}
 					/>
 					<StatCard
 						label="Last Seen"
 						value={formatDistanceToNow(error.lastSeen, { addSuffix: true })}
-						sub={format(error.lastSeen, "MMM d, yyyy HH:mm:ss")}
+						sub={formatDateTime(error.lastSeen, { year: true, seconds: true })}
 					/>
 					<StatCard label="Affected Services" value={String(error.affectedServicesCount)} />
 				</div>

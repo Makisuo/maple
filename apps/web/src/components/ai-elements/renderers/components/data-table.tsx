@@ -1,4 +1,5 @@
 import type { BaseComponentProps } from "@json-render/react"
+import { formatCount } from "@/lib/format"
 
 interface DataTableProps {
 	headers: string[]
@@ -9,8 +10,8 @@ interface DataTableProps {
 function maybeFormatNumber(value: string): string {
 	const num = Number(value)
 	if (value.trim() !== "" && !Number.isNaN(num) && Number.isFinite(num)) {
-		if (Number.isInteger(num)) return num.toLocaleString()
-		return num.toLocaleString(undefined, { maximumFractionDigits: 4 })
+		if (Number.isInteger(num)) return formatCount(num)
+		return formatCount(num, 4)
 	}
 	return value
 }

@@ -11,6 +11,7 @@ import { cn } from "@maple/ui/lib/utils"
 
 import type { CloudflareZoneTimeseriesRow } from "@/api/warehouse/cloudflare-infra"
 import { formatNumber } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { formatPercent } from "../format"
 import {
 	CHART_EMPTY_MESSAGE,
@@ -73,6 +74,7 @@ function metricValue(agg: ZoneAgg, metric: CloudflareZoneMetric): number {
  * average of ratios.
  */
 export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId }: CloudflareZoneChartProps) {
+	const { timeZone } = useTimeFormat()
 	const { data, series } = useMemo(() => {
 		const topSet = new Set(topZones)
 		const byBucketZone = new Map<string, Map<string, ZoneAgg>>()
@@ -96,7 +98,7 @@ export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId
 				longForm.push({ bucket, attributeValue: zone, value: metricValue(agg, metric) })
 			}
 		}
-		const labeler = makeBucketLabeler([...byBucketZone.keys()])
+		const labeler = makeBucketLabeler([...byBucketZone.keys()], timeZone)
 		const transformed = transformRows(longForm, labeler)
 		// Draw order = legend order: hottest zone first, the pooled remainder last.
 		const present = new Set(transformed.series)
@@ -105,7 +107,7 @@ export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId
 			...(present.has(OTHER_ZONES_SERIES) ? [OTHER_ZONES_SERIES] : []),
 		]
 		return { data: transformed.data, series: ordered }
-	}, [buckets, metric, topZones])
+	}, [buckets, metric, topZones, timeZone])
 
 	// Zone names contain dots (`example.com`), which are invalid in a raw
 	// `var(--color-…)` reference — colour series directly instead of via the

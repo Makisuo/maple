@@ -16,10 +16,12 @@ import {
 import {
 	inferBucketSeconds,
 	inferRangeMs,
-	formatBucketLabel,
 	bucketIntervalLabel,
 	formatThroughput,
+	formatCount,
 } from "../../../lib/format"
+import { formatBucketLabel } from "../../../lib/time-format"
+import { useTimeDisplay } from "../../../lib/time-display-context"
 
 const VALUE_KEYS = ["throughput"]
 
@@ -33,6 +35,7 @@ export function ThroughputAreaChart({
 	overlay,
 	yAxisWidth,
 }: BaseChartProps) {
+	const { timeZone } = useTimeDisplay()
 	const id = useId()
 	const gradientId = `throughputGradient-${id.replace(/:/g, "")}`
 	const fadedGradientId = `throughputGradientFaded-${id.replace(/:/g, "")}`
@@ -144,7 +147,7 @@ export function ThroughputAreaChart({
 					tickLine={false}
 					axisLine={false}
 					tickMargin={8}
-					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick")}
+					tickFormatter={(v) => formatBucketLabel(v, axisContext, "tick", timeZone)}
 				/>
 				<YAxis
 					tickLine={false}
@@ -160,7 +163,7 @@ export function ThroughputAreaChart({
 								labelFormatter={(_, payload) => {
 									if (!payload?.[0]?.payload?.bucket) return ""
 									const bucket = payload[0].payload.bucket as string
-									return formatBucketLabel(bucket, axisContext, "tooltip")
+									return formatBucketLabel(bucket, axisContext, "tooltip", timeZone)
 								}}
 								formatter={(value, name, item) => {
 									const nameStr = String(name)
@@ -184,7 +187,7 @@ export function ThroughputAreaChart({
 												/>
 												<span className="text-muted-foreground">Errors</span>
 												<span className="font-mono font-medium">
-													{Number(value).toLocaleString()}
+													{formatCount(Number(value))}
 													{rateLabel}
 												</span>
 											</span>
@@ -200,7 +203,7 @@ export function ThroughputAreaChart({
 												/>
 												<span className="text-muted-foreground">Traced</span>
 												<span className="font-mono font-medium">
-													{Number(value).toLocaleString()}
+													{formatCount(Number(value))}
 													{rateLabel}
 												</span>
 											</span>
@@ -219,7 +222,7 @@ export function ThroughputAreaChart({
 											</span>
 											<span className="font-mono font-medium">
 												{isSampled ? "~" : ""}
-												{Number(value).toLocaleString()}
+												{formatCount(Number(value))}
 												{rateLabel}
 											</span>
 										</span>

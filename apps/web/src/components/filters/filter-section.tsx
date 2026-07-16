@@ -1,4 +1,5 @@
 import * as React from "react"
+import { formatCount } from "@/lib/format"
 import { ChevronDownIcon, XmarkIcon, MagnifierIcon } from "@/components/icons"
 
 import { cn } from "@maple/ui/utils"
@@ -136,7 +137,7 @@ function FilterSectionBase({
 									<span className="truncate">{option.name}</span>
 								</Label>
 								<span className="text-xs text-muted-foreground tabular-nums">
-									{option.count.toLocaleString()}
+									{formatCount(option.count)}
 								</span>
 							</div>
 						))
@@ -187,7 +188,7 @@ export function SingleCheckboxFilter({ title, checked, onChange, count }: Single
 				{title}
 			</Label>
 			{count !== undefined && (
-				<span className="text-xs text-muted-foreground tabular-nums">{count.toLocaleString()}</span>
+				<span className="text-xs text-muted-foreground tabular-nums">{formatCount(count)}</span>
 			)}
 		</div>
 	)

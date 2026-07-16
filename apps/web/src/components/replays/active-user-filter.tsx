@@ -1,4 +1,5 @@
 import { XmarkIcon } from "@/components/icons"
+import { formatCount } from "@/lib/format"
 import { gradientFor } from "./replay-format"
 
 interface ActiveUserFilterProps {
@@ -32,7 +33,7 @@ export function ActiveUserFilter({ userId, count, onClear }: ActiveUserFilterPro
 					</span>
 				</div>
 				<span className="text-xs text-muted-foreground tabular-nums">
-					{count.toLocaleString()} session{count === 1 ? "" : "s"} loaded
+					{formatCount(count)} session{count === 1 ? "" : "s"} loaded
 				</span>
 			</div>
 			<button

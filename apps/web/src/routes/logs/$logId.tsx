@@ -16,8 +16,7 @@ import { getLogResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { decodeLogKey, encodeLogKey, type LogKey } from "@/lib/log-key"
 import type { GetLogInput, GetLogResult } from "@/api/warehouse/logs"
-import { useTimezonePreference } from "@/hooks/use-timezone-preference"
-import { formatTimestampInTimezone } from "@/lib/timezone-format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 
 // Breadcrumb root shared by every state of this page.
 const LOGS_BREADCRUMB = { label: "Logs", href: "/logs" } as const
@@ -53,7 +52,7 @@ export const Route = effectRoute(createFileRoute("/logs/$logId"), ({ params }) =
 function LogDetailPage() {
 	const { logId } = Route.useParams()
 	const navigate = useNavigate({ from: Route.fullPath })
-	const { effectiveTimezone } = useTimezonePreference()
+	const { formatTimestamp } = useTimeFormat()
 
 	const key = decodeLogKey(logId)
 	const result = useAtomValue(
@@ -128,8 +127,7 @@ function LogDetailPage() {
 				<DashboardLayout
 					breadcrumbs={[LOGS_BREADCRUMB, { label: bodyExcerpt(log.body) }]}
 					title="Log detail"
-					description={`${log.serviceName} · ${formatTimestampInTimezone(log.timestamp, {
-						timeZone: effectiveTimezone,
+					description={`${log.serviceName} · ${formatTimestamp(log.timestamp, {
 						withMilliseconds: true,
 					})}`}
 				>
@@ -137,7 +135,7 @@ function LogDetailPage() {
 						{/* Hero + meta as one card, mirroring the drawer's stacked top section. */}
 						<div className="overflow-hidden rounded-md border">
 							<LogHeroHeader log={log} showClose={false} />
-							<LogMetaStrip log={log} timeZone={effectiveTimezone} showOpenFullPage={false} />
+							<LogMetaStrip log={log} showOpenFullPage={false} />
 							{showErrorBanner && <LogErrorBanner log={log} />}
 						</div>
 

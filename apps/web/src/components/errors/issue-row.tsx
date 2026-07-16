@@ -11,13 +11,15 @@ import { WorkflowStatePopover } from "./workflow-state-popover"
 import type { IssueMutations } from "./use-issue-mutations"
 import { clampPriority, shortIssueId } from "./issue-id"
 import { PriorityBarsIcon, WorkflowRingIcon } from "@/components/icons"
-import { formatNumber } from "@/lib/format"
+import { formatCount, formatNumber } from "@/lib/format"
+import { useTimeFormat } from "@/hooks/use-time-format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
+import { formatDateTime, type TimeZoneId } from "@maple/ui/lib/time-format"
 import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000
 
-function formatLastSeen(iso: string): string {
+function formatLastSeen(iso: string, timeZone: TimeZoneId): string {
 	const d = new Date(normalizeTimestampInput(iso))
 	if (Number.isNaN(d.getTime())) return iso
 	const diffMs = Date.now() - d.getTime()
@@ -26,11 +28,7 @@ function formatLastSeen(iso: string): string {
 	if (diffMs < 86_400_000) return `${Math.floor(diffMs / 3_600_000)}h`
 	if (diffMs < WEEK_MS) return `${Math.floor(diffMs / 86_400_000)}d`
 	const sameYear = d.getFullYear() === new Date().getFullYear()
-	return d.toLocaleDateString(undefined, {
-		month: "short",
-		day: "numeric",
-		year: sameYear ? undefined : "numeric",
-	})
+	return formatDateTime(d, { timeZone, dateOnly: true, year: !sameYear })
 }
 
 export interface SelectToggleEvent {
@@ -53,6 +51,7 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 	const holderOrAssignee = issue.leaseHolder ?? issue.assignedActor
 	const id = shortIssueId(issue.id)
 	const href = `/errors/issues/${issue.id}`
+	const { timeZone, formatDateTime: formatDateTimeTz } = useTimeFormat()
 
 	return (
 		<IssueContextMenu
@@ -188,7 +187,7 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 
 				<span
 					className="relative z-10 hidden shrink-0 text-right text-xs tabular-nums text-muted-foreground md:inline-block md:w-[88px]"
-					title={`${issue.occurrenceCount.toLocaleString()} events`}
+					title={`${formatCount(issue.occurrenceCount)} events`}
 				>
 					{formatNumber(issue.occurrenceCount)} events
 				</span>
@@ -199,9 +198,9 @@ export function IssueRow({ issue, mutations, selected, focused, onSelectToggle, 
 
 				<span
 					className="relative z-10 w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
-					title={`Last seen ${new Date(normalizeTimestampInput(issue.lastSeenAt)).toLocaleString()}`}
+					title={`Last seen ${formatDateTimeTz(issue.lastSeenAt, { year: true, seconds: true })}`}
 				>
-					{formatLastSeen(issue.lastSeenAt)}
+					{formatLastSeen(issue.lastSeenAt, timeZone)}
 				</span>
 			</div>
 		</IssueContextMenu>
