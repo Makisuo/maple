@@ -23,6 +23,7 @@ import type { EffectRouterContext } from "@effect-router/core"
 import { captureChatReferrer } from "@/components/chat/auto-contexts"
 import { GlobalChatSheet } from "@/components/chat/global-chat-sheet"
 import { GlobalShortcuts } from "@/components/command-palette/global-shortcuts"
+import { IdleRoutePrefetch } from "@/components/performance/idle-route-prefetch"
 
 const UnitflowDevtools = import.meta.env.DEV
 	? lazy(() =>
@@ -107,6 +108,7 @@ const AppFrame = memo(function AppFrame() {
 		>
 			<Outlet />
 			<Toaster />
+			{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
 			{!PUBLIC_PATHS.has(pathname) && (
 				<>
 					<GlobalShortcuts />
