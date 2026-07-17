@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { memo, useEffect } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 import {
@@ -58,7 +58,10 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext }>()({
 	component: RootComponent,
 })
 
-function AppFrame() {
+// Memoized so root-level churn (Clerk session touches, customer-query state
+// transitions in ClerkReverseRedirects) stops here instead of cascading into
+// the entire route tree on every commit.
+const AppFrame = memo(function AppFrame() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname })
 	useEffect(() => {
 		captureChatReferrer(pathname)
@@ -80,7 +83,7 @@ function AppFrame() {
 			{import.meta.env.DEV && <UnitflowDevtools />}
 		</AttributesProvider>
 	)
-}
+})
 
 function getRedirectTarget(searchStr: string, fallback = "/") {
 	const params = new URLSearchParams(searchStr)

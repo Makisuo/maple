@@ -1,5 +1,5 @@
 import { Link, useNavigate, createFileRoute } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Option, Schema } from "effect"
@@ -130,40 +130,55 @@ function ServiceDetailContent() {
 		search.timePreset ?? "12h",
 	)
 
-	const handleTimeChange = (
-		range: {
-			startTime?: string
-			endTime?: string
-			presetValue?: string
+	const handleTimeChange = useCallback(
+		(
+			range: {
+				startTime?: string
+				endTime?: string
+				presetValue?: string
+			},
+			options?: { replace?: boolean },
+		) => {
+			navigate({
+				replace: options?.replace,
+				search: (prev: Record<string, unknown>) => applyTimeRangeSearch(prev, range),
+			})
 		},
-		options?: { replace?: boolean },
-	) => {
-		navigate({
-			replace: options?.replace,
-			search: (prev: Record<string, unknown>) => applyTimeRangeSearch(prev, range),
-		})
-	}
+		[navigate],
+	)
 
 	const activeTab: ServiceDetailTabValue = search.tab ?? "overview"
-	const handleTabChange = (value: unknown) => {
-		const next = Option.getOrElse(decodeServiceDetailTab(value), (): ServiceDetailTabValue => "overview")
-		navigate({
-			replace: true,
-			search: (prev: Record<string, unknown>) => ({
-				...prev,
-				tab: next === "overview" ? undefined : next,
-			}),
-		})
-	}
+	const handleTabChange = useCallback(
+		(value: unknown) => {
+			const next = Option.getOrElse(
+				decodeServiceDetailTab(value),
+				(): ServiceDetailTabValue => "overview",
+			)
+			navigate({
+				replace: true,
+				search: (prev: Record<string, unknown>) => ({
+					...prev,
+					tab: next === "overview" ? undefined : next,
+				}),
+			})
+		},
+		[navigate],
+	)
 
-	const handleEnvironmentChange = (environment: string | undefined) => {
-		navigate({
-			search: (prev: Record<string, unknown>) => ({
-				...prev,
-				environments: environment ? [environment] : undefined,
-			}),
-		})
-	}
+	const handleEnvironmentChange = useCallback(
+		(environment: string | undefined) => {
+			navigate({
+				search: (prev: Record<string, unknown>) => ({
+					...prev,
+					environments: environment ? [environment] : undefined,
+				}),
+			})
+		},
+		[navigate],
+	)
+
+	const handleShowDependencies = useCallback(() => handleTabChange("dependencies"), [handleTabChange])
+	const handleShowOperations = useCallback(() => handleTabChange("operations"), [handleTabChange])
 
 	return (
 		<DashboardLayout
@@ -255,8 +270,8 @@ function ServiceDetailContent() {
 					effectiveStartTime={effectiveStartTime}
 					effectiveEndTime={effectiveEndTime}
 					environments={search.environments}
-					onShowDependencies={() => handleTabChange("dependencies")}
-					onShowOperations={() => handleTabChange("operations")}
+					onShowDependencies={handleShowDependencies}
+					onShowOperations={handleShowOperations}
 				/>
 			)}
 			{activeTab === "operations" && (
@@ -416,30 +431,34 @@ function OverviewTab({
 	// Commit deploy markers (dashed verticals + labels) drawn over every chart.
 	// Derived from the overview's release timeline and snapped onto the chart's
 	// own bucket grid so each marker sits on an x-tick.
-	const releases = Result.builder(overviewResult)
-		.onSuccess((response) => response.releases)
-		.orElse(() => EMPTY_RELEASES)
+	const releases = useMemo(
+		() =>
+			Result.builder(overviewResult)
+				.onSuccess((response) => response.releases)
+				.orElse(() => EMPTY_RELEASES),
+		[overviewResult],
+	)
 	const chartBuckets = useMemo(() => detailPoints.map((point) => String(point.bucket)), [detailPoints])
 	const commitMarkers = useCommitMarkers(releases, chartBuckets)
 
-	const widgetData: Record<string, Record<string, unknown>[]> = {
-		latency: detailPoints,
-		throughput: detailPoints,
-		"error-rate": detailPoints,
-		apdex: detailPoints,
-	}
-
-	const metrics = SERVICE_CHARTS.map((chart) => ({
-		id: chart.id,
-		chartId: chart.chartId,
-		title: chart.title,
-		layout: chart.layout,
-		data: widgetData[chart.id] ?? [],
-		legend: chart.legend,
-		tooltip: chart.tooltip,
-		rateMode: chart.rateMode,
-		isLoading: isDetailLoading,
-	}))
+	// Stable identity so the memoized chart components under MetricsGrid skip
+	// rerenders when this tab rerenders for unrelated reasons (sibling panel
+	// atoms settling, root-level churn).
+	const metrics = useMemo(
+		() =>
+			SERVICE_CHARTS.map((chart) => ({
+				id: chart.id,
+				chartId: chart.chartId,
+				title: chart.title,
+				layout: chart.layout,
+				data: detailPoints,
+				legend: chart.legend,
+				tooltip: chart.tooltip,
+				rateMode: chart.rateMode,
+				isLoading: isDetailLoading,
+			})),
+		[detailPoints, isDetailLoading],
+	)
 
 	return (
 		<div className="flex flex-col gap-3">

@@ -1,5 +1,5 @@
 import { ClerkProvider, useAuth } from "@clerk/clerk-react"
-import { StrictMode, useCallback, useEffect, useRef, useState } from "react"
+import { StrictMode, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ReactDOM from "react-dom/client"
 import { EffectRouterProvider } from "@effect-router/core/react"
 import { apiBaseUrl } from "./lib/services/common/api-base-url"
@@ -96,6 +96,14 @@ function useClerkAuthSettled() {
 	return { settled, isSignedIn, orgId }
 }
 
+// Memoized so ClerkInnerApp's rerenders (one per Clerk-internal emit — session
+// touches, token refreshes) stop here: rerendering EffectRouterProvider
+// rerenders the entire match tree, so without this every Clerk emit was a
+// full-app render.
+const RouterShell = memo(function RouterShell({ context }: { context: { auth: RouterAuthContext } }) {
+	return <EffectRouterProvider router={router} registry={appRegistry} context={context} />
+})
+
 function ClerkInnerApp() {
 	const { settled, isSignedIn, orgId } = useClerkAuthSettled()
 	const isRouterMountedRef = useRef(false)
@@ -111,15 +119,17 @@ function ClerkInnerApp() {
 		router.invalidate()
 	}, [settled, isSignedIn, orgId])
 
+	// Stable identity across Clerk session touches that don't change
+	// sign-in/org, so EffectRouterProvider doesn't see a new context prop on
+	// every Clerk-internal update.
+	const context = useMemo(
+		() => ({ auth: { isAuthenticated: !!isSignedIn, orgId } }),
+		[isSignedIn, orgId],
+	)
+
 	if (!settled) return <BootSplash />
 
-	return (
-		<EffectRouterProvider
-			router={router}
-			registry={appRegistry}
-			context={{ auth: { isAuthenticated: !!isSignedIn, orgId } }}
-		/>
-	)
+	return <RouterShell context={context} />
 }
 
 function SelfHostedInnerApp() {
@@ -144,11 +154,13 @@ function SelfHostedInnerApp() {
 		router.invalidate()
 	}, [auth])
 
-	if (!auth) {
+	const context = useMemo(() => (auth ? { auth } : null), [auth])
+
+	if (!context) {
 		return <BootSplash />
 	}
 
-	return <EffectRouterProvider router={router} registry={appRegistry} context={{ auth }} />
+	return <RouterShell context={context} />
 }
 
 const app = isClerkAuthEnabled ? (
