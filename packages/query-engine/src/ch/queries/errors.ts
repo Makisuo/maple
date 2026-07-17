@@ -326,11 +326,20 @@ export interface TraceTimeProbeOutput {
  * no `ORDER BY` and `LIMIT 1`, ClickHouse reads ~one granule per partition and
  * stops — far cheaper than the full `spanHierarchyQuery` projection. The caller
  * then derives a ±1h window so the real query can prune partitions.
+ *
+ * Even the probe pays the every-partition seek when unbounded, so callers
+ * should first try `narrowByTime: true` with a recent `startTime` lower bound
+ * (pruning to the last few partitions) and only fall back to the unbounded
+ * probe when the trace is older than that window.
  */
-export function traceTimeProbeQuery(opts: { traceId: string }) {
+export function traceTimeProbeQuery(opts: { traceId: string; narrowByTime?: boolean }) {
 	return from(TraceDetailSpans)
 		.select(($) => ({ timestamp: $.Timestamp }))
-		.where(($) => [$.TraceId.eq(opts.traceId), $.OrgId.eq(param.string("orgId"))])
+		.where(($) => [
+			$.TraceId.eq(opts.traceId),
+			$.OrgId.eq(param.string("orgId")),
+			CH.whenTrue(!!opts.narrowByTime, () => $.Timestamp.gte(param.dateTime("startTime"))),
+		])
 		.limit(1)
 		.format("JSON")
 }

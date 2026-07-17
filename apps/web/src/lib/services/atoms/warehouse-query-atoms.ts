@@ -199,7 +199,11 @@ export const getTracesFacetValuesResultAtom = makeQueryAtomFamily(getTracesFacet
 	staleTime: 30_000,
 })
 
-export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy)
+// Trace spans are near-immutable once ingested — keep the most expensive
+// detail query warm across back-navigation instead of refetching every mount.
+export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy, {
+	staleTime: 60_000,
+})
 
 export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
 	staleTime: 30_000,
