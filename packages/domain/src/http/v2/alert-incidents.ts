@@ -145,7 +145,7 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 				identifier: "listAlertIncidents",
 				summary: "List alert incidents",
 				description:
-					"Returns your organization's alert incidents, most recently triggered first, optionally filtered by `status` or `rule_id`. Cursor-paginated. Requires the `alert_incidents:read` scope.",
+					"Returns your organization's alert incidents, most recently triggered first, optionally filtered by `status` or `rule_id`. Cursor-paginated. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -159,11 +159,11 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 				identifier: "getAlertIncident",
 				summary: "Retrieve an alert incident",
 				description:
-					"Returns a single alert incident by its `inc_…` ID. Requires the `alert_incidents:read` scope.",
+					"Returns a single alert incident by its `inc_…` ID. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
-	.prefix("/v2/alert_incidents")
+	.prefix("/v2/alerts/incidents")
 	.middleware(AuthorizationV2)
 	.middleware(V2SchemaErrors)
 	.annotateMerge(

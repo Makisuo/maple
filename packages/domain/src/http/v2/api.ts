@@ -3,7 +3,11 @@ import { V2AlertDestinationsApiGroup } from "./alert-destinations"
 import { V2AlertIncidentsApiGroup } from "./alert-incidents"
 import { V2AlertRulesApiGroup } from "./alert-rules"
 import { V2ApiKeysApiGroup } from "./api-keys"
+import { V2AttributeMappingsApiGroup } from "./attribute-mappings"
 import { V2DashboardsApiGroup } from "./dashboards"
+import { V2IngestKeysApiGroup } from "./ingest-keys"
+import { V2RecommendationsApiGroup } from "./recommendations"
+import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 
 /**
  * The Maple v2 public API (see docs/api-v2.md).
@@ -23,6 +27,10 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2AlertRulesApiGroup)
 	.add(V2AlertDestinationsApiGroup)
 	.add(V2AlertIncidentsApiGroup)
+	.add(V2IngestKeysApiGroup)
+	.add(V2AttributeMappingsApiGroup)
+	.add(V2ScrapeTargetsApiGroup)
+	.add(V2RecommendationsApiGroup)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Maple API",
@@ -32,7 +40,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 				"The Maple public API is a resource-oriented REST interface for everything the dashboard can do.",
 				"It follows Stripe's design philosophy, modernized where useful:",
 				"",
-				"- **Resources** are plural nouns under `/v2` (`/v2/api_keys`). Non-CRUD verbs are sub-resource POSTs (`/v2/api_keys/{id}/roll`).",
+				"- **Resources** are plural nouns under `/v2` (`/v2/api_keys`). Related resources share a product namespace (`/v2/alerts/rules`, `/v2/alerts/destinations`). Non-CRUD verbs are sub-resource POSTs (`/v2/api_keys/{id}/roll`).",
 				"- **Object IDs** are opaque, prefixed strings (`key_…`, `dash_…`) — reversible encodings of internal IDs.",
 				"- **Wire format** is snake_case JSON with an `object` type field on every resource and ISO-8601 UTC timestamps.",
 				'- **Lists** use cursor pagination and a uniform `{ object: "list", data, has_more, next_cursor }` envelope.',

@@ -357,7 +357,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				identifier: "listAlertDestinations",
 				summary: "List alert destinations",
 				description:
-					"Returns your organization's alert destinations, most recently created first. Cursor-paginated. Requires the `alert_destinations:read` scope.",
+					"Returns your organization's alert destinations, most recently created first. Cursor-paginated. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -371,7 +371,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				identifier: "createAlertDestination",
 				summary: "Create an alert destination",
 				description:
-					"Creates a notification channel that alert rules can deliver to. The request body is discriminated on `type`; channel secrets are write-only. Requires an org-admin role and the `alert_destinations:write` scope.",
+					"Creates a notification channel that alert rules can deliver to. The request body is discriminated on `type`; channel secrets are write-only. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -385,7 +385,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				identifier: "getAlertDestination",
 				summary: "Retrieve an alert destination",
 				description:
-					"Returns a single alert destination by its `dest_…` ID. Requires the `alert_destinations:read` scope.",
+					"Returns a single alert destination by its `dest_…` ID. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -400,7 +400,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				identifier: "updateAlertDestination",
 				summary: "Update an alert destination",
 				description:
-					"Updates a destination's configuration. `type` must match the destination's existing type; omitted fields are unchanged. Requires an org-admin role and the `alert_destinations:write` scope.",
+					"Updates a destination's configuration. `type` must match the destination's existing type; omitted fields are unchanged. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -414,7 +414,7 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				identifier: "deleteAlertDestination",
 				summary: "Delete an alert destination",
 				description:
-					"Permanently deletes a destination. Fails with a `conflict_error` if any alert rule still references it — detach it from those rules first. Requires an org-admin role and the `alert_destinations:write` scope.",
+					"Permanently deletes a destination. Fails with a `conflict_error` if any alert rule still references it — detach it from those rules first. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -428,11 +428,11 @@ export class V2AlertDestinationsApiGroup extends HttpApiGroup.make("alertDestina
 				identifier: "testAlertDestination",
 				summary: "Test an alert destination",
 				description:
-					"Sends a test notification through the destination and reports the delivery outcome. Requires an org-admin role and the `alert_destinations:write` scope.",
+					"Sends a test notification through the destination and reports the delivery outcome. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
-	.prefix("/v2/alert_destinations")
+	.prefix("/v2/alerts/destinations")
 	.middleware(AuthorizationV2)
 	.middleware(V2SchemaErrors)
 	.annotateMerge(

@@ -637,7 +637,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "listAlertRules",
 				summary: "List alert rules",
 				description:
-					"Returns your organization's alert rules, most recently created first. Cursor-paginated. Requires the `alert_rules:read` scope.",
+					"Returns your organization's alert rules, most recently created first. Cursor-paginated. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -651,7 +651,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "createAlertRule",
 				summary: "Create an alert rule",
 				description:
-					"Creates an alert rule. Referenced `destination_ids` must exist. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Creates an alert rule. Referenced `destination_ids` must exist. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -664,7 +664,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 			OpenApi.annotations({
 				identifier: "getAlertRule",
 				summary: "Retrieve an alert rule",
-				description: "Returns a single alert rule by its `alrt_…` ID. Requires the `alert_rules:read` scope.",
+				description: "Returns a single alert rule by its `alrt_…` ID. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -679,7 +679,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "updateAlertRule",
 				summary: "Update an alert rule",
 				description:
-					"Updates an alert rule. Omitted fields are left unchanged — `{\"enabled\": false}` pauses a rule without touching its condition. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Updates an alert rule. Omitted fields are left unchanged — `{\"enabled\": false}` pauses a rule without touching its condition. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -693,7 +693,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "deleteAlertRule",
 				summary: "Delete an alert rule",
 				description:
-					"Permanently deletes an alert rule and its incident history linkage. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Permanently deletes an alert rule and its incident history linkage. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -707,7 +707,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "testAlertRule",
 				summary: "Test an alert rule",
 				description:
-					"Evaluates a rule definition once against live data without saving it, optionally delivering a test notification. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Evaluates a rule definition once against live data without saving it, optionally delivering a test notification. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -721,7 +721,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "previewAlertRule",
 				summary: "Preview an alert rule",
 				description:
-					"Replays a rule definition over a historical range and returns the per-window observations and would-have-fired spans. Read-only (sends nothing). Requires the `alert_rules:write` scope (the request carries a rule definition).",
+					"Replays a rule definition over a historical range and returns the per-window observations and would-have-fired spans. Read-only (sends nothing). Requires the `alerts:write` scope (the request carries a rule definition).",
 			}),
 		),
 	)
@@ -736,11 +736,11 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "listAlertRuleChecks",
 				summary: "List a rule's checks",
 				description:
-					"Returns the rule's recorded evaluations (its audit trail), newest first, optionally filtered by group key and time range. Requires the `alert_rules:read` scope.",
+					"Returns the rule's recorded evaluations (its audit trail), newest first, optionally filtered by group key and time range. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
-	.prefix("/v2/alert_rules")
+	.prefix("/v2/alerts/rules")
 	.middleware(AuthorizationV2)
 	.middleware(V2SchemaErrors)
 	.annotateMerge(

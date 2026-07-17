@@ -44,15 +44,18 @@ type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]["value"]
 
 /**
  * v2 scope families the dashboard can mint restricted keys for. Only families
- * with live /v2 route groups belong here — append as groups ship (dashboards,
- * alert_rules, error_issues, traces per docs/api-v2.md).
+ * with live /v2 route groups belong here — append as groups ship (error_issues,
+ * traces per docs/api-v2.md). A family is the first path segment under /v2, so
+ * the /v2/alerts/* namespace (rules, destinations, incidents) is one family.
  */
 const SCOPE_FAMILIES = [
 	{ id: "api_keys", label: "API keys" },
 	{ id: "dashboards", label: "Dashboards" },
-	{ id: "alert_rules", label: "Alert rules" },
-	{ id: "alert_destinations", label: "Alert destinations" },
-	{ id: "alert_incidents", label: "Alert incidents" },
+	{ id: "alerts", label: "Alerts" },
+	{ id: "ingest_keys", label: "Ingest keys" },
+	{ id: "attribute_mappings", label: "Attribute mappings" },
+	{ id: "scrape_targets", label: "Scrape targets" },
+	{ id: "recommendations", label: "Recommendations" },
 ] as const
 
 type ScopeLevel = "none" | "read" | "write"

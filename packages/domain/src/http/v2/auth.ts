@@ -43,7 +43,7 @@ export class V2SchemaErrors extends HttpApiMiddleware.Service<V2SchemaErrors>()(
 /** Scope string grammar: `<family>:read`, `<family>:write`, or `*`. */
 export const V2Scope = Schema.String.check(
 	Schema.isPattern(/^([a-z][a-z0-9_]*:(read|write)|\*)$/, {
-		description: 'scope like "dashboards:read", "alert_rules:write", or "*"',
+		description: 'scope like "dashboards:read", "alerts:write", or "*"',
 	}),
 ).annotate({
 	identifier: "Scope",

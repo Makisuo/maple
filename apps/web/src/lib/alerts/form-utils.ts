@@ -374,7 +374,7 @@ export function deriveRuleQueryIssues(form: RuleFormState): string[] {
 }
 
 /**
- * Assemble the v2 `POST /v2/alert_rules` body from the form. Field names are
+ * Assemble the v2 `POST /v2/alerts/rules` body from the form. Field names are
  * the v2 snake_case wire spelling; IDs stay the internal branded values — the
  * derived client's `PublicId` codecs encode them to `alrt_…`/`dest_…` on the
  * wire. `query_builder_draft` is passed verbatim (opaque passthrough, validated

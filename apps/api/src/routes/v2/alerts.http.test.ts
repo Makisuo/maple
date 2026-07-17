@@ -20,7 +20,7 @@ import { HazelOAuthService } from "../../services/HazelOAuthService"
 import { OrgMembersService } from "../../services/OrgMembersService"
 import { QueryEngineService } from "../../services/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AllV2GroupLayersLive } from "./v2-test-support"
+import { AllV2GroupLayersLive, ConfigResourceServiceStubsLayer } from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -107,6 +107,7 @@ const makeHarness = () => {
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
+		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(servicesLive),
@@ -155,13 +156,9 @@ const makeHarness = () => {
 describe("v2 alerts over HTTP", () => {
 	it("supports destination + rule CRUD with v2 wire conventions", async () => {
 		const harness = makeHarness()
-		const key = await harness.bootstrapKey([
-			"alert_rules:write",
-			"alert_destinations:write",
-			"alert_incidents:read",
-		])
+		const key = await harness.bootstrapKey(["alerts:write"])
 
-		const destCreated = await harness.request("POST", "/v2/alert_destinations", key.secret, {
+		const destCreated = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
 			type: "webhook",
 			name: "Ops hook",
 			url: "https://example.com/hooks/maple",
@@ -176,7 +173,7 @@ describe("v2 alerts over HTTP", () => {
 
 		const destId: string = destCreated.body.id
 
-		const ruleCreated = await harness.request("POST", "/v2/alert_rules", key.secret, {
+		const ruleCreated = await harness.request("POST", "/v2/alerts/rules", key.secret, {
 			name: "Checkout error rate",
 			severity: "critical",
 			signal_type: "error_rate",
@@ -196,18 +193,18 @@ describe("v2 alerts over HTTP", () => {
 
 		const ruleId: string = ruleCreated.body.id
 
-		const listed = await harness.request("GET", "/v2/alert_rules?limit=1", key.secret)
+		const listed = await harness.request("GET", "/v2/alerts/rules?limit=1", key.secret)
 		expect(listed.status).toBe(200)
 		expect(listed.body).toMatchObject({ object: "list", has_more: false, next_cursor: null })
 		expect(listed.body.data[0].id).toBe(ruleId)
 		expect("txid" in listed.body.data[0]).toBe(false)
 
-		const retrieved = await harness.request("GET", `/v2/alert_rules/${ruleId}`, key.secret)
+		const retrieved = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(retrieved.status).toBe(200)
 		expect(retrieved.body.name).toBe("Checkout error rate")
 
 		// PATCH is a true partial update: pausing the rule keeps the condition.
-		const patched = await harness.request("PATCH", `/v2/alert_rules/${ruleId}`, key.secret, {
+		const patched = await harness.request("PATCH", `/v2/alerts/rules/${ruleId}`, key.secret, {
 			enabled: false,
 		})
 		expect(patched.status).toBe(200)
@@ -216,42 +213,42 @@ describe("v2 alerts over HTTP", () => {
 		expect(patched.body.tags).toEqual(["payments"])
 		expect(patched.body.txid).toMatch(/^\d+$/)
 
-		const checks = await harness.request("GET", `/v2/alert_rules/${ruleId}/checks`, key.secret)
+		const checks = await harness.request("GET", `/v2/alerts/rules/${ruleId}/checks`, key.secret)
 		expect(checks.status).toBe(200)
 		expect(checks.body).toMatchObject({ object: "list", data: [], has_more: false })
 
-		const incidents = await harness.request("GET", "/v2/alert_incidents", key.secret)
+		const incidents = await harness.request("GET", "/v2/alerts/incidents", key.secret)
 		expect(incidents.status).toBe(200)
 		expect(incidents.body).toMatchObject({ object: "list", data: [] })
 
 		// A destination referenced by a rule cannot be deleted.
-		const conflicted = await harness.request("DELETE", `/v2/alert_destinations/${destId}`, key.secret)
+		const conflicted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(conflicted.status).toBe(409)
 		expect(conflicted.body.error).toMatchObject({ type: "conflict_error", code: "resource_in_use" })
 
-		const ruleDeleted = await harness.request("DELETE", `/v2/alert_rules/${ruleId}`, key.secret)
+		const ruleDeleted = await harness.request("DELETE", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(ruleDeleted.status).toBe(200)
 		expect(ruleDeleted.body).toMatchObject({ id: ruleId, object: "alert_rule", deleted: true })
 
-		const destDeleted = await harness.request("DELETE", `/v2/alert_destinations/${destId}`, key.secret)
+		const destDeleted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(destDeleted.status).toBe(200)
 		expect(destDeleted.body).toMatchObject({ id: destId, object: "alert_destination", deleted: true })
 
-		const missing = await harness.request("GET", `/v2/alert_rules/${ruleId}`, key.secret)
+		const missing = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "resource_missing" })
 
 		await harness.dispose()
 	})
 
-	it("enforces per-family scopes and rejects malformed ids", async () => {
+	it("enforces the alerts scope family and rejects malformed ids", async () => {
 		const harness = makeHarness()
-		const readOnly = await harness.bootstrapKey(["alert_rules:read"])
+		const readOnly = await harness.bootstrapKey(["alerts:read"])
 
-		const list = await harness.request("GET", "/v2/alert_rules", readOnly.secret)
+		const list = await harness.request("GET", "/v2/alerts/rules", readOnly.secret)
 		expect(list.status).toBe(200)
 
-		const create = await harness.request("POST", "/v2/alert_rules", readOnly.secret, {
+		const create = await harness.request("POST", "/v2/alerts/rules", readOnly.secret, {
 			name: "Denied",
 			severity: "warning",
 			signal_type: "error_rate",
@@ -263,12 +260,17 @@ describe("v2 alerts over HTTP", () => {
 		expect(create.status).toBe(403)
 		expect(create.body.error).toMatchObject({ type: "permission_error", code: "insufficient_scope" })
 
-		// Scope families are independent: alert_rules:read grants nothing on destinations.
-		const destinations = await harness.request("GET", "/v2/alert_destinations", readOnly.secret)
-		expect(destinations.status).toBe(403)
-		expect(destinations.body.error).toMatchObject({ type: "permission_error", code: "insufficient_scope" })
+		// The /v2/alerts/* namespace is one scope family: alerts:read spans all three groups...
+		const destinations = await harness.request("GET", "/v2/alerts/destinations", readOnly.secret)
+		expect(destinations.status).toBe(200)
 
-		const malformed = await harness.request("GET", "/v2/alert_rules/dash_notARuleId", readOnly.secret)
+		// ...but another family's scope grants nothing here.
+		const foreign = await harness.bootstrapKey(["dashboards:read"])
+		const denied = await harness.request("GET", "/v2/alerts/destinations", foreign.secret)
+		expect(denied.status).toBe(403)
+		expect(denied.body.error).toMatchObject({ type: "permission_error", code: "insufficient_scope" })
+
+		const malformed = await harness.request("GET", "/v2/alerts/rules/dash_notARuleId", readOnly.secret)
 		expect(malformed.status).toBe(400)
 		expect(malformed.body.error).toMatchObject({ type: "invalid_request_error" })
 
