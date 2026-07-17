@@ -92,7 +92,22 @@ function clamp01(value: number): number {
 const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
 const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
 
-export function AlertRuleChart({
+// Recharts reconciliation cost is linear in plotted points, and beyond ~1
+// point per 2 horizontal pixels extra points are invisible at our widths.
+// Tooltip/rail/band data stays computed from the full series.
+const MAX_PLOTTED_POINTS = 720
+
+function downsample(rows: ChartPoint[]): ChartPoint[] {
+	if (rows.length <= MAX_PLOTTED_POINTS) return rows
+	const stride = Math.ceil(rows.length / MAX_PLOTTED_POINTS)
+	const out: ChartPoint[] = []
+	for (let i = 0; i < rows.length; i += stride) out.push(rows[i]!)
+	const last = rows[rows.length - 1]!
+	if (out[out.length - 1] !== last) out.push(last)
+	return out
+}
+
+export const AlertRuleChart = React.memo(function AlertRuleChart({
 	preview,
 	checks = NO_CHECKS,
 	incidents = NO_INCIDENTS,
@@ -181,7 +196,7 @@ export function AlertRuleChart({
 					if (last && bucket.x1 <= last.x2 + 1) last.x2 = bucket.x2
 					else noDataBands.push({ x1: bucket.x1, x2: bucket.x2 })
 				}
-				const rows = Array.from(byT.values()).sort((a, b) => a.t - b.t)
+				const rows = downsample(Array.from(byT.values()).sort((a, b) => a.t - b.t))
 				return {
 					chartData: rows,
 					seriesKeys: single ? [SINGLE_KEY] : keys,
@@ -195,13 +210,15 @@ export function AlertRuleChart({
 			}
 
 			if (checks.length > 0) {
-				const rows: ChartPoint[] = checks
-					.map((check) => ({
-						t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
-						[SINGLE_KEY]: check.observedValue,
-					}))
-					.filter((row) => Number.isFinite(row.t))
-					.sort((a, b) => a.t - b.t)
+				const rows: ChartPoint[] = downsample(
+					checks
+						.map((check) => ({
+							t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
+							[SINGLE_KEY]: check.observedValue,
+						}))
+						.filter((row) => Number.isFinite(row.t))
+						.sort((a, b) => a.t - b.t),
+				)
 				return {
 					chartData: rows,
 					seriesKeys: [SINGLE_KEY],
@@ -647,7 +664,7 @@ export function AlertRuleChart({
 			)}
 		</div>
 	)
-}
+})
 
 function Placeholder({
 	children,

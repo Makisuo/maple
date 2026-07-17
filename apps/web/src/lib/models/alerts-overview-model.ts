@@ -41,6 +41,16 @@ import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
+/**
+ * Oldest resolved incident the overview still processes — the widest window any
+ * consumer renders (the summary strip's 30d "Triggered" count). The synced
+ * collection holds the org's full incident history; without this cutoff every
+ * derivation re-sorts and re-groups an ever-growing set, which is what
+ * gradually locked up the tab during long firing stretches. Open incidents are
+ * always kept.
+ */
+const INCIDENT_WINDOW_MS = 30 * DAY_MS
+
 /** How often the wall-clock input of the staleness derivation advances. */
 const CLOCK_TICK = "30 seconds"
 
@@ -98,7 +108,10 @@ export const deriveOverview = (inputs: OverviewInputs): AlertsOverviewReady => {
 	// ISO timestamps order lexicographically; newest first, as the server lists do.
 	const byIsoDesc = (a: string, b: string) => (a < b ? 1 : a > b ? -1 : 0)
 	const rules = [...inputs.rules].sort((a, b) => byIsoDesc(a.updatedAt, b.updatedAt))
-	const incidents = [...inputs.incidents].sort((a, b) => byIsoDesc(a.lastTriggeredAt, b.lastTriggeredAt))
+	const incidentCutoff = now - INCIDENT_WINDOW_MS
+	const incidents = inputs.incidents
+		.filter((incident) => incident.status === "open" || Date.parse(incident.lastTriggeredAt) >= incidentCutoff)
+		.sort((a, b) => byIsoDesc(a.lastTriggeredAt, b.lastTriggeredAt))
 
 	const openIncidents = incidents.filter((incident) => incident.status === "open")
 	const incidentsByRule = groupByRuleId(incidents)

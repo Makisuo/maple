@@ -39,6 +39,7 @@ import {
 	IsoDateTimeString,
 	type AiTriageResult,
 	type AlertCheckDocument,
+	type AlertDestinationDocument,
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
@@ -78,6 +79,13 @@ import { formatSql } from "@/lib/sql-format"
 
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
+
+// Shared loading/error fallbacks, so the derived lists keep one stable
+// identity until their Result actually changes.
+const NO_RULES: ReadonlyArray<AlertRuleDocument> = []
+const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
+const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
+const NO_DESTINATIONS: ReadonlyArray<AlertDestinationDocument> = []
 
 // Decode the raw `$ruleId` URL segment into its branded id once, at the route
 // boundary, so the branded value threads through the checks/states queries
@@ -145,18 +153,37 @@ function RuleDetailContent() {
 	})
 	const { result: checksResult, refresh: refreshChecks } = useAlertRuleChecks(ruleId, since, until)
 
-	const rules = Result.builder(rulesResult)
-		.onSuccess((response) => response.rules)
-		.orElse(() => [])
-	const allIncidents = Result.builder(incidentsResult)
-		.onSuccess((response) => response.incidents)
-		.orElse(() => [])
-	const checks = Result.builder(checksResult)
-		.onSuccess((response) => response.checks)
-		.orElse(() => [])
-	const destinations = Result.builder(destinationsResult)
-		.onSuccess((response) => response.destinations)
-		.orElse(() => [])
+	// Memoized (with a shared empty-array fallback) so the identities only
+	// change when the underlying Result does — these feed memo chains below
+	// (diagnosis, chart) that must hold across unrelated renders.
+	const rules = useMemo(
+		() =>
+			Result.builder(rulesResult)
+				.onSuccess((response) => response.rules)
+				.orElse(() => NO_RULES),
+		[rulesResult],
+	)
+	const allIncidents = useMemo(
+		() =>
+			Result.builder(incidentsResult)
+				.onSuccess((response) => response.incidents)
+				.orElse(() => NO_INCIDENTS),
+		[incidentsResult],
+	)
+	const checks = useMemo(
+		() =>
+			Result.builder(checksResult)
+				.onSuccess((response) => response.checks)
+				.orElse(() => NO_CHECKS),
+		[checksResult],
+	)
+	const destinations = useMemo(
+		() =>
+			Result.builder(destinationsResult)
+				.onSuccess((response) => response.destinations)
+				.orElse(() => NO_DESTINATIONS),
+		[destinationsResult],
+	)
 	const ruleDeliveryEvents = useMemo(
 		() =>
 			Result.builder(deliveryEventsResult)
@@ -177,6 +204,23 @@ function RuleDetailContent() {
 					return dateB - dateA
 				}),
 		[allIncidents, ruleId],
+	)
+
+	// Memoized so RuleDiagnosisPanel's buildDiagnosis memo can hold — a fresh
+	// filter() identity here recomputed the whole diagnosis every render.
+	const openRuleIncidents = useMemo(
+		() => ruleIncidents.filter((i) => i.status === "open"),
+		[ruleIncidents],
+	)
+
+	// Wall clock for the diagnosis's relative-time labels. Deliberately NOT a
+	// live ticker: it refreshes only when the diagnosis's data inputs change
+	// (while firing, Electric pushes a state row every evaluation ≈1/min). A
+	// per-render Date.now() defeated the buildDiagnosis memo entirely.
+	const diagnosisNow = useMemo(
+		() => Date.now(),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[ruleStates, ruleIncidents, checks, ruleDeliveryEvents],
 	)
 
 	const activeTab: RuleDetailTab = (tabValues as readonly string[]).includes(search.tab ?? "")
@@ -333,7 +377,7 @@ function RuleDetailContent() {
 		}
 	}
 
-	const isFiring = ruleIncidents.some((i) => i.status === "open")
+	const isFiring = openRuleIncidents.length > 0
 	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
 
 	const stickyContent = (
@@ -399,10 +443,10 @@ function RuleDetailContent() {
 						rule={rule}
 						states={ruleStates}
 						checks={checks}
-						openIncidents={ruleIncidents.filter((i) => i.status === "open")}
+						openIncidents={openRuleIncidents}
 						destinations={destinations}
 						deliveryEvents={ruleDeliveryEvents}
-						now={Date.now()}
+						now={diagnosisNow}
 						onToggleEnabled={() => void handleToggleEnabled()}
 					/>
 					<div className="space-y-2">

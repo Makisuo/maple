@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { Exit } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
@@ -102,8 +102,12 @@ const OverviewBody = View.make(AlertsOverviewModel, ({ overview, toggleRule, tog
  * Everything below is pure presentation over the derived overview: URL-backed
  * filters, search, the session/destination atoms, and the toggle mutation are
  * view concerns and stay here.
+ *
+ * Memoized so app-shell renders (Clerk session touches, dialogs, sidebar) stop
+ * at this boundary: `data` only changes identity when the model re-derives,
+ * and `onToggleRule` is the runtime's stable fire callback.
  */
-function AlertsOverviewContent({
+const AlertsOverviewContent = memo(function AlertsOverviewContent({
 	data,
 	onToggleRule,
 	toggleState,
@@ -376,11 +380,11 @@ function AlertsOverviewContent({
 							value: triggeredInWindow,
 							hint: triggeredInWindow === 1 ? "incident" : "incidents",
 						},
-						{ label: "Avg MTTR", value: mttr, hint: "across resolved" },
+						{ label: "Avg MTTR", value: mttr, hint: "resolved · 30d" },
 						{ label: "Rules enabled", value: enabledRules, hint: `of ${rules.length} total` },
 					]}
 				/>
 			</div>
 		</div>
 	)
-}
+})
