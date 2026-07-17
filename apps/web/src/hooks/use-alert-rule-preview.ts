@@ -1,14 +1,15 @@
 import { useDeferredValue, useMemo } from "react"
 import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { IsoDateTimeString, isRangeComparator, type AlertRulePreviewResponse } from "@maple/domain/http"
+import type { V2AlertRulePreviewParams } from "@maple/domain/http/v2"
 import {
-	AlertRulePreviewRequest,
-	IsoDateTimeString,
-	isRangeComparator,
-	type AlertRulePreviewResponse,
-} from "@maple/domain/http"
-import { buildRuleRequest, deriveRuleQueryIssues, type RuleFormState } from "@/lib/alerts/form-utils"
+	buildRuleCreateParamsV2,
+	deriveRuleQueryIssues,
+	v2PreviewToResponse,
+	type RuleFormState,
+} from "@/lib/alerts/form-utils"
 import { mapBuilderChartFailure } from "@/lib/alerts/preview-failure"
 import { formatBackendError } from "@/lib/error-messages"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
@@ -52,7 +53,7 @@ const isPreviewQueryReady = (form: RuleFormState): boolean => {
  * (rootSpansOnly, exclude-services), same no-data semantics.
  */
 export function useAlertRulePreview(
-	form: RuleFormState,
+	form: RuleFormState | null,
 	range?: { startTime: string; endTime: string },
 ): AlertRulePreviewState {
 	// Callers that own a page-level time window (the rule detail page) pass it in;
@@ -64,32 +65,27 @@ export function useAlertRulePreview(
 	// Defer per-keystroke form edits so preview requests trail the typing.
 	const deferredForm = useDeferredValue(form)
 
-	const payload = useMemo(() => {
-		if (!isPreviewQueryReady(deferredForm)) return null
-		try {
-			// The upsert schema requires a non-empty name; the preview doesn't care,
-			// so substitute a placeholder while the user hasn't typed one yet.
-			const rule = buildRuleRequest(
-				deferredForm.name.trim().length > 0
-					? deferredForm
-					: { ...deferredForm, name: "Untitled rule" },
-			)
-			return new AlertRulePreviewRequest({
-				rule,
-				startTime: IsoDateTimeString.make(
-					new Date(normalizeTimestampInput(startTime)).toISOString(),
-				),
-				endTime: IsoDateTimeString.make(new Date(normalizeTimestampInput(endTime)).toISOString()),
-			})
-		} catch {
-			// A mid-edit form state the request schema rejects — no request.
-			return null
+	const payload = useMemo((): V2AlertRulePreviewParams | null => {
+		if (deferredForm === null || !isPreviewQueryReady(deferredForm)) return null
+		// The rule params require a non-empty name; the preview doesn't care,
+		// so substitute a placeholder while the user hasn't typed one yet.
+		const rule = buildRuleCreateParamsV2(
+			deferredForm.name.trim().length > 0
+				? deferredForm
+				: { ...deferredForm, name: "Untitled rule" },
+		)
+		return {
+			rule,
+			start_time: IsoDateTimeString.make(
+				new Date(normalizeTimestampInput(startTime)).toISOString(),
+			),
+			end_time: IsoDateTimeString.make(new Date(normalizeTimestampInput(endTime)).toISOString()),
 		}
 	}, [deferredForm, startTime, endTime])
 
 	const result = useAtomValue(
 		payload
-			? MapleApiAtomClient.query("alerts", "previewRule", {
+			? MapleApiV2AtomClient.query("alertRules", "preview", {
 					payload,
 					reactivityKeys: ["alertPreview"],
 					// Idle TTL so abandoned keystroke variants don't accumulate.
@@ -100,14 +96,15 @@ export function useAlertRulePreview(
 
 	return useMemo(() => {
 		if (!payload) {
-			// Unpreviewable state: surface the compile issue inline when there is one.
-			const issues = deriveRuleQueryIssues(deferredForm)
+			// No form yet (rule still resolving) is not an authoring error — stay clean.
+			// A present-but-unpreviewable form surfaces its compile issue inline.
+			const issues = deferredForm === null ? [] : deriveRuleQueryIssues(deferredForm)
 			return { preview: null, previewLoading: false, previewError: issues[0] ?? null }
 		}
 		return Result.builder(result)
 			.onSuccess(
 				(response): AlertRulePreviewState => ({
-					preview: response as AlertRulePreviewResponse,
+					preview: v2PreviewToResponse(response),
 					previewLoading: false,
 					previewError: null,
 				}),

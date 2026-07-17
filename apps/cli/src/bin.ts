@@ -9,6 +9,7 @@ import { Mode } from "./core/mode"
 import { TelemetryLayer } from "./core/telemetry"
 import { maybeNotifyUpdate } from "./core/update"
 import { WarehouseExecutorFromMode } from "./core/warehouse"
+import { CHECKPOINT_REOPEN_PROBE_ENV, validateCheckpointDataDir } from "./server/checkpoints"
 import { MAPLE_VERSION } from "./version"
 
 // WarehouseExecutorFromMode needs Mode (which needs MapleConfig). provideMerge
@@ -26,15 +27,31 @@ const MainLayer = WarehouseExecutorFromMode.pipe(
 // (network is hit at most once per 24h), so the latency cost is negligible.
 //
 // `cli.argv` records the sub-command + flags so one root span per invocation
-// ties a command to the warehouse queries it runs. TelemetryLayer is provided
-// OUTERMOST (after MainLayer), not merged into it: the OTLP tracer's batch
-// exporter flushes when its layer scope closes, and only the outermost provide's
-// scope is the runtime's main scope that `BunRuntime.runMain` closes on exit.
-// Merging it into MainLayer leaves spans unflushed for short-lived commands.
-maybeNotifyUpdate.pipe(
-	Effect.flatMap(() => Command.run(cli, { version: MAPLE_VERSION })),
-	Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
-	Effect.provide(MainLayer),
-	Effect.provide(TelemetryLayer),
-	BunRuntime.runMain,
-)
+// ties a command to the warehouse queries it runs. A single merged layer keeps
+// both layer lifecycles in the runtime's main scope, so telemetry flushes when
+// `BunRuntime.runMain` closes that scope for short-lived commands.
+const RuntimeLayer = Layer.merge(MainLayer, TelemetryLayer)
+
+const checkpointProbeDataDir = process.env[CHECKPOINT_REOPEN_PROBE_ENV]
+
+if (checkpointProbeDataDir !== undefined) {
+	// Private re-exec path used by checkpoint restore. It intentionally bypasses
+	// CLI dispatch, update checks, telemetry, and schema bootstrap: success means
+	// this new process loaded the persisted restored representation and queried
+	// its core tables before closing chDB cleanly.
+	try {
+		process.stdout.write(`${JSON.stringify(validateCheckpointDataDir(checkpointProbeDataDir))}\n`)
+	} catch (error) {
+		process.stderr.write(
+			`checkpoint reopen probe failed: ${error instanceof Error ? error.message : String(error)}\n`,
+		)
+		process.exitCode = 1
+	}
+} else {
+	maybeNotifyUpdate.pipe(
+		Effect.flatMap(() => Command.run(cli, { version: MAPLE_VERSION })),
+		Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
+		Effect.provide(RuntimeLayer),
+		BunRuntime.runMain,
+	)
+}

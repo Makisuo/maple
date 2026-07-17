@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
-import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 import { Fragment, useMemo, useState } from "react"
@@ -8,6 +8,8 @@ import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -24,12 +26,10 @@ import {
 	signalLabels,
 	comparatorLabels,
 	formatSignalValue,
-	defaultRuleForm,
 	ruleToFormState,
 	formatAlertDateTimeFull,
 	formatAlertDuration,
 	computeIncidentStats,
-	buildRuleToggleRequest,
 	getExitErrorMessage,
 } from "@/lib/alerts/form-utils"
 import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
@@ -39,6 +39,7 @@ import {
 	IsoDateTimeString,
 	type AiTriageResult,
 	type AlertCheckDocument,
+	type AlertDestinationDocument,
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
@@ -78,6 +79,13 @@ import { formatSql } from "@/lib/sql-format"
 
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
+
+// Shared loading/error fallbacks, so the derived lists keep one stable
+// identity until their Result actually changes.
+const NO_RULES: ReadonlyArray<AlertRuleDocument> = []
+const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
+const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
+const NO_DESTINATIONS: ReadonlyArray<AlertDestinationDocument> = []
 
 // Decode the raw `$ruleId` URL segment into its branded id once, at the route
 // boundary, so the branded value threads through the checks/states queries
@@ -133,34 +141,49 @@ function RuleDetailContent() {
 	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
 	const ruleStates = useAlertRuleStates(ruleId)
 	const { result: destinationsResult } = useAlertDestinationsList()
+	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
+	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
 		MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),
 	)
-	const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), {
+	const updateRule = useAtomSet(MapleApiV2AtomClient.mutation("alertRules", "update"), {
 		mode: "promiseExit",
 	})
-	const checksQueryAtom = MapleApiAtomClient.query("alerts", "listRuleChecks", {
-		params: { ruleId },
-		query: { since, until },
-		reactivityKeys: ["alertChecks", ruleId, since, until],
-	})
-	const checksResult = useAtomValue(checksQueryAtom)
-	const refreshChecks = useAtomRefresh(checksQueryAtom)
+	const { result: checksResult, refresh: refreshChecks } = useAlertRuleChecks(ruleId, since, until)
 
-	const rules = Result.builder(rulesResult)
-		.onSuccess((response) => response.rules)
-		.orElse(() => [])
-	const allIncidents = Result.builder(incidentsResult)
-		.onSuccess((response) => response.incidents)
-		.orElse(() => [])
-	const checks = Result.builder(checksResult)
-		.onSuccess((response) => response.checks)
-		.orElse(() => [])
-	const destinations = Result.builder(destinationsResult)
-		.onSuccess((response) => response.destinations)
-		.orElse(() => [])
+	// Memoized (with a shared empty-array fallback) so the identities only
+	// change when the underlying Result does — these feed memo chains below
+	// (diagnosis, chart) that must hold across unrelated renders.
+	const rules = useMemo(
+		() =>
+			Result.builder(rulesResult)
+				.onSuccess((response) => response.rules)
+				.orElse(() => NO_RULES),
+		[rulesResult],
+	)
+	const allIncidents = useMemo(
+		() =>
+			Result.builder(incidentsResult)
+				.onSuccess((response) => response.incidents)
+				.orElse(() => NO_INCIDENTS),
+		[incidentsResult],
+	)
+	const checks = useMemo(
+		() =>
+			Result.builder(checksResult)
+				.onSuccess((response) => response.checks)
+				.orElse(() => NO_CHECKS),
+		[checksResult],
+	)
+	const destinations = useMemo(
+		() =>
+			Result.builder(destinationsResult)
+				.onSuccess((response) => response.destinations)
+				.orElse(() => NO_DESTINATIONS),
+		[destinationsResult],
+	)
 	const ruleDeliveryEvents = useMemo(
 		() =>
 			Result.builder(deliveryEventsResult)
@@ -181,6 +204,23 @@ function RuleDetailContent() {
 					return dateB - dateA
 				}),
 		[allIncidents, ruleId],
+	)
+
+	// Memoized so RuleDiagnosisPanel's buildDiagnosis memo can hold — a fresh
+	// filter() identity here recomputed the whole diagnosis every render.
+	const openRuleIncidents = useMemo(
+		() => ruleIncidents.filter((i) => i.status === "open"),
+		[ruleIncidents],
+	)
+
+	// Wall clock for the diagnosis's relative-time labels. Deliberately NOT a
+	// live ticker: it refreshes only when the diagnosis's data inputs change
+	// (while firing, Electric pushes a state row every evaluation ≈1/min). A
+	// per-render Date.now() defeated the buildDiagnosis memo entirely.
+	const diagnosisNow = useMemo(
+		() => Date.now(),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[ruleStates, ruleIncidents, checks, ruleDeliveryEvents],
 	)
 
 	const activeTab: RuleDetailTab = (tabValues as readonly string[]).includes(search.tab ?? "")
@@ -226,7 +266,9 @@ function RuleDetailContent() {
 		[startTime, endTime],
 	)
 
-	const formState = useMemo(() => (rule ? ruleToFormState(rule) : defaultRuleForm()), [rule])
+	// null until the rule resolves — keeps the chart from firing a throwaway preview
+	// for the default form (and flashing a wrong chart) before we know the real rule.
+	const formState = useMemo(() => (rule ? ruleToFormState(rule) : null), [rule])
 	const { preview, previewLoading, previewError } = useAlertRulePreview(formState, {
 		startTime,
 		endTime,
@@ -244,9 +286,15 @@ function RuleDetailContent() {
 			<DashboardLayout
 				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}
 			>
-				<div className="space-y-4">
-					<Skeleton className="h-12 w-1/3" />
-					<Skeleton className="h-48 w-full" />
+				{/* Mirror the settled Overview rhythm so the first paint doesn't snap. */}
+				<div className="space-y-6">
+					<Skeleton className="h-14 w-full" />
+					<div className="space-y-2">
+						<Skeleton className="h-3.5 w-40" />
+						<Skeleton className="h-[300px] w-full" />
+					</div>
+					<Skeleton className="h-52 w-full" />
+					<Skeleton className="h-64 w-full" />
 				</div>
 			</DashboardLayout>
 		)
@@ -318,8 +366,8 @@ function RuleDetailContent() {
 	async function handleToggleEnabled() {
 		if (!rule) return
 		const result = await updateRule({
-			params: { ruleId: rule.id },
-			payload: buildRuleToggleRequest(rule),
+			params: { id: rule.id },
+			payload: { enabled: !rule.enabled },
 			reactivityKeys: ["alertRules"],
 		})
 		if (!Exit.isSuccess(result)) {
@@ -329,7 +377,7 @@ function RuleDetailContent() {
 		}
 	}
 
-	const isFiring = ruleIncidents.some((i) => i.status === "open")
+	const isFiring = openRuleIncidents.length > 0
 	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
 
 	const stickyContent = (
@@ -395,10 +443,10 @@ function RuleDetailContent() {
 						rule={rule}
 						states={ruleStates}
 						checks={checks}
-						openIncidents={ruleIncidents.filter((i) => i.status === "open")}
+						openIncidents={openRuleIncidents}
 						destinations={destinations}
 						deliveryEvents={ruleDeliveryEvents}
-						now={Date.now()}
+						now={diagnosisNow}
 						onToggleEnabled={() => void handleToggleEnabled()}
 					/>
 					<div className="space-y-2">
@@ -422,7 +470,11 @@ function RuleDetailContent() {
 						/>
 					</div>
 
-					{overviewIncident ? (
+					{/* Reserve the slot while incidents sync so the card doesn't pop in
+					    and shove Configuration + Checks down once it resolves. */}
+					{Result.isInitial(incidentsResult) ? (
+						<Skeleton className="h-40 w-full" />
+					) : overviewIncident ? (
 						<AiTriageCard
 							incidentKind="alert"
 							incidentId={overviewIncident.id}
@@ -622,7 +674,7 @@ function RuleDetailContent() {
 						</Empty>
 					))
 					.onSuccess(() => (
-						<div className="space-y-6">
+						<div className="space-y-6 content-enter">
 							<div className="flex items-center justify-between">
 								<div>
 									<h2 className="text-lg font-semibold">History</h2>
@@ -876,6 +928,38 @@ function ConfigRow({ label, children, wide }: { label: string; children: React.R
 	)
 }
 
+/**
+ * Signed distance of an observed value from its threshold — the "how far over"
+ * that a bare value/threshold pair leaves the reader to compute. Tinted red on a
+ * breach, muted otherwise; hidden when there's no gap.
+ */
+function CheckDelta({
+	signalType,
+	observed,
+	threshold,
+	breached,
+}: {
+	signalType: AlertRuleDocument["signalType"]
+	observed: number
+	threshold: number
+	breached: boolean
+}) {
+	const delta = observed - threshold
+	if (!Number.isFinite(delta) || delta === 0) return null
+	const sign = delta > 0 ? "+" : "−"
+	return (
+		<span
+			className={cn(
+				"rounded px-1 py-px font-mono text-[10px] tabular-nums",
+				breached ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground",
+			)}
+		>
+			{sign}
+			{formatSignalValue(signalType, Math.abs(delta))}
+		</span>
+	)
+}
+
 type CheckStatusFilter = "all" | "breached" | "healthy" | "skipped" | "error"
 
 function ChecksPanel({
@@ -911,6 +995,10 @@ function ChecksPanel({
 		if (statusFilter === "all") return checks
 		return checks.filter((c) => c.status === statusFilter)
 	}, [checks, statusFilter])
+
+	// Ungrouped rules evaluate a single "all" series, so a Group column is a wall
+	// of "all" — only show it when the rule actually fans out per group.
+	const isGrouped = (rule.groupBy?.length ?? 0) > 0
 
 	if (loading) {
 		return (
@@ -980,14 +1068,12 @@ function ChecksPanel({
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead className="w-[180px]">Time</TableHead>
+							<TableHead className="w-[170px]">Time</TableHead>
 							<TableHead className="w-[110px]">Status</TableHead>
-							<TableHead className="w-[110px]">Value</TableHead>
-							<TableHead className="w-[110px]">Threshold</TableHead>
+							<TableHead>Value / threshold</TableHead>
 							<TableHead className="w-[90px]">Samples</TableHead>
-							<TableHead>Group</TableHead>
+							{isGrouped && <TableHead className="w-[160px]">Group</TableHead>}
 							<TableHead className="w-[140px]">Incident</TableHead>
-							<TableHead className="w-[80px]">Eval ms</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -1007,8 +1093,17 @@ function ChecksPanel({
 											? "text-muted-foreground"
 											: ""
 							return (
-								<TableRow key={`${check.timestamp}-${check.groupKey}`}>
-									<TableCell className="font-mono text-xs">
+								<TableRow
+									key={`${check.timestamp}-${check.groupKey}`}
+									className={cn(
+										check.status === "breached" && "bg-destructive/[0.04]",
+										check.status === "error" && "bg-warning/[0.05]",
+									)}
+								>
+									<TableCell
+										className="font-mono text-xs"
+										title={`Evaluated in ${check.evaluationDurationMs}ms`}
+									>
 										{new Date(check.timestamp).toLocaleString()}
 									</TableCell>
 									<TableCell>
@@ -1025,27 +1120,46 @@ function ChecksPanel({
 											}
 										/>
 									</TableCell>
-									<TableCell className="font-mono tabular-nums">
+									<TableCell>
 										{check.status === "error" ? (
 											<span
-												className="block max-w-[260px] truncate font-sans text-destructive text-xs"
+												className="block max-w-[320px] truncate text-destructive text-xs"
 												title={check.errorMessage ?? undefined}
 											>
 												{check.errorMessage ?? "Evaluation failed"}
 											</span>
 										) : check.observedValue == null ? (
-											"—"
+											<span className="text-muted-foreground">—</span>
 										) : (
-											formatSignalValue(rule.signalType, check.observedValue)
+											<div className="flex items-baseline gap-2">
+												<span
+													className={cn(
+														"font-mono font-medium tabular-nums",
+														check.status === "breached" && "text-destructive",
+													)}
+												>
+													{formatSignalValue(rule.signalType, check.observedValue)}
+												</span>
+												<span className="font-mono text-xs text-muted-foreground/60 tabular-nums">
+													/ {formatSignalValue(rule.signalType, check.threshold)}
+												</span>
+												<CheckDelta
+													signalType={rule.signalType}
+													observed={check.observedValue}
+													threshold={check.threshold}
+													breached={check.status === "breached"}
+												/>
+											</div>
 										)}
 									</TableCell>
-									<TableCell className="font-mono tabular-nums text-muted-foreground">
-										{formatSignalValue(rule.signalType, check.threshold)}
+									<TableCell className="tabular-nums text-muted-foreground">
+										{check.sampleCount}
 									</TableCell>
-									<TableCell className="tabular-nums">{check.sampleCount}</TableCell>
-									<TableCell className="font-mono text-muted-foreground">
-										{check.groupKey || "all"}
-									</TableCell>
+									{isGrouped && (
+										<TableCell className="font-mono text-muted-foreground">
+											{check.groupKey || "all"}
+										</TableCell>
+									)}
 									<TableCell>
 										{check.incidentTransition === "none" ? (
 											<span className="text-muted-foreground">–</span>
@@ -1057,9 +1171,6 @@ function ChecksPanel({
 												{check.incidentTransition}
 											</Badge>
 										)}
-									</TableCell>
-									<TableCell className="tabular-nums text-muted-foreground">
-										{check.evaluationDurationMs}
 									</TableCell>
 								</TableRow>
 							)

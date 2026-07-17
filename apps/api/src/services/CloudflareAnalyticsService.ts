@@ -40,9 +40,11 @@ import {
 import * as CH from "@maple/query-engine/ch"
 import {
 	cloudflareAnalyticsState,
+	cloudflareHyperdriveConfigs,
 	oauthConnections,
 	type CloudflareAnalyticsStateInsert,
 	type CloudflareAnalyticsStateRow,
+	type CloudflareHyperdriveConfigRow,
 } from "@maple/db"
 import { and, eq, gt, inArray, isNull, lt, or } from "drizzle-orm"
 import {
@@ -62,9 +64,11 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import type { TenantContext } from "./AuthService"
 import {
 	graphqlQuery,
+	listHyperdriveConfigs as listAccountHyperdriveConfigs,
 	listWorkerScripts,
 	listZones,
 	type CloudflareGraphqlError,
+	type CloudflareHyperdriveConfig,
 	type CloudflareZone,
 } from "../lib/CloudflareApi"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
@@ -359,8 +363,7 @@ const queueBacklogDataset: DatasetDef = {
 				}),
 			),
 		),
-	settingsNode: (decoded) =>
-		decoded.viewer.accounts?.[0]?.settings?.queueBacklogAdaptiveGroups ?? null,
+	settingsNode: (decoded) => decoded.viewer.accounts?.[0]?.settings?.queueBacklogAdaptiveGroups ?? null,
 }
 
 const queueConsumersDataset: DatasetDef = {
@@ -437,21 +440,45 @@ const graphqlErrorCode = (error: CloudflareGraphqlError): string | null => {
 	return null
 }
 
+// Cloudflare gates analytics datasets/fields by plan tier. A query for a dataset (or field) the
+// zone's plan doesn't include comes back as an "access controls" / "does not have access to the
+// path|field" GraphQL error (sometimes also tagged extensions.code:"authz"). These are expected
+// per-plan degradations, not incidents — they must route to the quiet `disabled` /
+// `quantiles-unavailable` paths rather than raising `AnalyticsPollError`.
+const isPlanGatedMessage = (message: string): boolean => {
+	const lower = message.toLowerCase()
+	return (
+		lower.includes("does not have access to the path") ||
+		lower.includes("does not have access to the field") ||
+		lower.includes("access controls")
+	)
+}
+
 const classifyGraphqlErrors = (
 	errors: ReadonlyArray<CloudflareGraphqlError>,
 	quantileNeedles: ReadonlyArray<string>,
 ): GraphqlErrorKind => {
 	const messages = errors.map((error) => error.message.toLowerCase())
-	// Plan lacks the dataset's timing-quantile fields → the query referenced an unknown field.
-	// Degrade to counters-only instead of erroring forever.
+	// Plan lacks the dataset's timing-quantile fields → the query referenced an "unknown"/"cannot
+	// query" field, or Cloudflare reports the plan "does not have access to the field". Degrade to
+	// counters-only instead of erroring forever.
 	if (
 		messages.some(
 			(message) =>
-				(message.includes("unknown") || message.includes("cannot query")) &&
+				(message.includes("unknown") ||
+					message.includes("cannot query") ||
+					message.includes("does not have access to the field")) &&
 				quantileNeedles.some((needle) => message.includes(needle)),
 		)
 	) {
 		return "quantiles-unavailable"
+	}
+	// Plan lacks the whole dataset/path → an "access controls" / "does not have access to the path"
+	// error. Expected per-plan gating: quietly disable the dataset (stops polling until a settings
+	// change / reconnect re-enables it) rather than raising. Checked BEFORE the authz-code branch
+	// because Cloudflare tags some plan-gating errors with extensions.code:"authz".
+	if (messages.some(isPlanGatedMessage)) {
+		return "disabled"
 	}
 	// extensions.code carries Cloudflare's machine-readable classification ("authz" on permission
 	// failures); the message substrings are only a fallback for errors that omit it.
@@ -865,6 +892,10 @@ export interface CloudflareAnalyticsServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<CloudflareIntegrationStatus, IntegrationsPersistenceError>
 	readonly getUsage: (orgId: OrgId) => Effect.Effect<CloudflareUsageResponse, IntegrationsPersistenceError>
+	/** Non-deleted Hyperdrive config inventory rows, refreshed by the hourly discovery pass. */
+	readonly listHyperdriveConfigs: (
+		orgId: OrgId,
+	) => Effect.Effect<ReadonlyArray<CloudflareHyperdriveConfigRow>, IntegrationsPersistenceError>
 	/** Recovery hook for reconnect — see the implementation below for why this exists. */
 	readonly resetOrgState: (orgId: OrgId) => Effect.Effect<void, IntegrationsPersistenceError>
 }
@@ -1117,9 +1148,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			const seen = new Set(zones.map((zone) => zone.id))
 			const vanished = rows.filter(
 				(row) =>
-					DATASET_BY_ID.get(row.dataset)?.scope === "zone" &&
-					row.enabled &&
-					!seen.has(row.zoneId),
+					DATASET_BY_ID.get(row.dataset)?.scope === "zone" && row.enabled && !seen.has(row.zoneId),
 			)
 			yield* updateRows(
 				vanished.map((row) => row.id),
@@ -1386,13 +1415,21 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const rowIds = part.rows.map((row) => row.id)
 				let kind = classifyGraphqlErrors(partErrors, part.dataset.quantileNeedles)
 				// Disabling is destructive (the dataset stops polling until settings/reconnect
-				// re-enable it), so a "disabled"-shaped error that ISN'T attributable to this
-				// part's own selection must not cascade across a batched document — one ambiguous
-				// error would silently kill every healthy sibling dataset. With a single part the
-				// attribution is unambiguous (exactly the old single-dataset behavior); otherwise
-				// degrade to a retryable failure and let a properly-attributed error (or the
-				// settings probe) do the disabling.
+				// re-enable it), so a "disabled"-shaped error that ISN'T attributable to this part's
+				// own selection must not cascade across a batched document — one ambiguous error would
+				// silently kill every healthy sibling dataset. With a single part the attribution is
+				// unambiguous (exactly the old single-dataset behavior); otherwise:
+				//   • expected plan-gating ("does not have access to the path/field" / "access
+				//     controls") → skip this part silently and retry next round (no disable, no
+				//     telemetry). Cloudflare voids the whole batched document when any one selection is
+				//     gated, so an unattributed gating error tells us nothing about THIS part — treating
+				//     it as a failure is exactly what floods the error pipeline with expected noise.
+				//   • anything else → degrade to a retryable failure and let a properly-attributed
+				//     error (or the settings probe) do the disabling.
 				if (kind === "disabled" && attributed.length === 0 && item.parts.length > 1) {
+					if (partErrors.some((error) => isPlanGatedMessage(error.message))) {
+						continue
+					}
 					kind = "other"
 				}
 				if (kind === "quantiles-unavailable") {
@@ -1427,6 +1464,15 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// next round. A null data with NO errors is an upstream contract break.
 				if (result.errors.length === 0) {
 					return yield* Effect.fail(decodeError("batched"))
+				}
+				// When every error that nulled `data` is expected per-plan gating, the clean sibling
+				// parts weren't the problem — Cloudflare just voids the whole batch when one selection
+				// is plan-gated. Don't fail them (and don't emit `AnalyticsPollError` telemetry); treat
+				// them like the errorless case above — they didn't advance, retry next round. The
+				// gated part itself is handled by its own classification (disabled/quantiles), and once
+				// it disables, later rounds stop voiding the batch.
+				if (result.errors.every((error) => isPlanGatedMessage(error.message))) {
+					return results
 				}
 				for (const part of cleanParts) {
 					results.push({
@@ -1509,6 +1555,95 @@ export class CloudflareAnalyticsService extends Context.Service<
 				results.push({ part, outcome: { kind: "advanced", ingested: countsByPart.get(part) ?? 0 } })
 			}
 			return results
+		})
+
+		// ------------------------------------------------------------------
+		// Hyperdrive config inventory (discovery-cadence, service-map consumer)
+		// ------------------------------------------------------------------
+
+		/**
+		 * Upsert the org's Hyperdrive configs by `(orgId, configId)` and soft-delete rows whose
+		 * config disappeared upstream — mirrors the PlanetScale inventory reconcile so identity
+		 * is kept if a config re-appears.
+		 */
+		const reconcileHyperdriveConfigs = Effect.fn(
+			"CloudflareAnalyticsService.reconcileHyperdriveConfigs",
+		)(function* (orgId: OrgId, configs: ReadonlyArray<CloudflareHyperdriveConfig>, now: number) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"maple.cloudflare.hyperdrive_config_count": configs.length,
+			})
+			const existingRows = yield* dbExecute((db) =>
+				db
+					.select()
+					.from(cloudflareHyperdriveConfigs)
+					.where(eq(cloudflareHyperdriveConfigs.orgId, orgId)),
+			)
+			const existingByConfigId = new Map(existingRows.map((row) => [row.configId, row]))
+			const upstreamIds = new Set(configs.map((config) => config.id))
+
+			yield* Effect.forEach(
+				configs,
+				(config) => {
+					const values = {
+						name: config.name,
+						originHost: config.origin.host,
+						originPort: config.origin.port,
+						originScheme: config.origin.scheme,
+						originDatabase: config.origin.database,
+						originUser: config.origin.user,
+						deletedAt: null,
+						updatedAt: new Date(now),
+					}
+					const existing = existingByConfigId.get(config.id)
+					return existing !== undefined
+						? dbExecute((db) =>
+								db
+									.update(cloudflareHyperdriveConfigs)
+									.set(values)
+									.where(eq(cloudflareHyperdriveConfigs.id, existing.id)),
+							)
+						: dbExecute((db) =>
+								db.insert(cloudflareHyperdriveConfigs).values({
+									id: randomUUID(),
+									orgId,
+									configId: config.id,
+									createdAt: new Date(now),
+									...values,
+								}),
+							)
+				},
+				{ concurrency: 4, discard: true },
+			)
+
+			yield* Effect.forEach(
+				existingRows.filter((row) => !upstreamIds.has(row.configId) && row.deletedAt === null),
+				(row) =>
+					dbExecute((db) =>
+						db
+							.update(cloudflareHyperdriveConfigs)
+							.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
+							.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
+					),
+				{ concurrency: 4, discard: true },
+			)
+		})
+
+		const listHyperdriveConfigsForOrg = Effect.fn(
+			"CloudflareAnalyticsService.listHyperdriveConfigs",
+		)(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
+			return yield* dbExecute((db) =>
+				db
+					.select()
+					.from(cloudflareHyperdriveConfigs)
+					.where(
+						and(
+							eq(cloudflareHyperdriveConfigs.orgId, orgId),
+							isNull(cloudflareHyperdriveConfigs.deletedAt),
+						),
+					),
+			)
 		})
 
 		// ------------------------------------------------------------------
@@ -1608,6 +1743,22 @@ export class CloudflareAnalyticsService extends Context.Service<
 							updatedAt: new Date(now),
 						})
 					}
+					// Hyperdrive config inventory rides the same discovery TTL. It only feeds the
+					// service map's "what sits behind Hyperdrive" resolution, so a failure (typically
+					// a pre-hyperdrive-scope grant surfacing as IntegrationsRevokedError) degrades
+					// open — log and keep the last-known rows, never disable the org's analytics.
+					const hyperdriveResult = yield* Effect.result(
+						listAccountHyperdriveConfigs(accessToken, accountId, apiBaseUrl),
+					)
+					if (Result.isFailure(hyperdriveResult)) {
+						yield* Effect.logWarning("cloudflare-analytics hyperdrive discovery failed", {
+							orgId,
+							errorTag: hyperdriveResult.failure._tag,
+							error: hyperdriveResult.failure.message,
+						})
+					} else {
+						yield* reconcileHyperdriveConfigs(orgId, hyperdriveResult.success, now)
+					}
 				} else {
 					rows = yield* loadStateRows(orgId)
 				}
@@ -1706,7 +1857,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 												yield* recordOrgError(orgId, failure.message, now, {
 													disable: failure.disable,
 												})
-												for (const row of rows) if (failure.disable) row.enabled = false
+												for (const row of rows)
+													if (failure.disable) row.enabled = false
 											} else {
 												yield* recordError(failure.rowIds, failure.message, now, {
 													disable: failure.disable,
@@ -1815,7 +1967,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 												...list,
 												{
 													orgId: decodeOrgId(row.orgId),
-													skipped: "org poll failed — see the warning log for the cause",
+													skipped:
+														"org poll failed — see the warning log for the cause",
 													callsMade: 0,
 													rowsIngested: 0,
 													failures: [],
@@ -2094,6 +2247,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			getStatus,
 			getIntegrationStatus,
 			getUsage,
+			listHyperdriveConfigs: listHyperdriveConfigsForOrg,
 			resetOrgState,
 		} satisfies CloudflareAnalyticsServiceShape
 	}),

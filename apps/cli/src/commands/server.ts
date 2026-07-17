@@ -13,11 +13,18 @@ import {
 	isStoreDirty,
 	storeMarkerJson,
 	storeMarkerPath,
-	storeOpenMarkerPath,
 } from "../server/store-version"
+import {
+	createCheckpoint,
+	parseCheckpointId,
+	reconcileCheckpointRecovery,
+	resetLiveStorePreservingCheckpoints,
+	restoreCheckpoint,
+} from "../server/checkpoints"
 import { resolveUiAssets } from "../server/ui-assets"
 import { amber, bold, cyan, dim, green, underline } from "../lib/style"
 import { MAPLE_VERSION } from "../version"
+import { buildDetachedChildArgs, type DirtyStorePolicy } from "./server-args"
 
 /** A `maple start`/`maple stop` failure. The message is shown to the user and
  *  the process exits non-zero — same role the old `process.exit(1)` paths had,
@@ -104,6 +111,12 @@ const dataDirFlag = Flag.optional(
 	),
 )
 
+const chdbConfigFileFlag = Flag.optional(
+	Flag.string("chdb-config-file").pipe(
+		Flag.withDescription("Optional ClickHouse config file passed to embedded chDB"),
+	),
+)
+
 const backgroundFlag = Flag.boolean("background").pipe(
 	Flag.withAlias("d"),
 	Flag.withDescription("Run the server detached (logs to ~/.maple/maple.log); stop with `maple stop`"),
@@ -112,15 +125,26 @@ const backgroundFlag = Flag.boolean("background").pipe(
 
 const resetFlag = Flag.boolean("reset").pipe(
 	Flag.withDescription(
-		"Wipe the existing store (~/.maple/data) before starting — use after an incompatible upgrade",
+		"Wipe live chDB data before starting while preserving checkpoints — use after an incompatible upgrade",
 	),
 	Flag.withDefault(false),
+)
+
+const onDirtyStoreFlag = Flag.choice("on-dirty-store", ["wipe", "fail", "restore-checkpoint"]).pipe(
+	Flag.withDescription("Recovery policy when the local chDB store was not cleanly closed"),
+	Flag.withDefault("fail" as const),
 )
 
 const yesFlag = Flag.boolean("yes").pipe(
 	Flag.withAlias("y"),
 	Flag.withDescription("Skip the confirmation prompt"),
 	Flag.withDefault(false),
+)
+
+const checkpointIdFlag = Flag.optional(
+	Flag.string("checkpoint-id").pipe(
+		Flag.withDescription("Restore one immutable checkpoint ID instead of the selected current"),
+	),
 )
 
 const offlineFlag = Flag.boolean("offline").pipe(
@@ -149,24 +173,27 @@ const probeHealth = (addr: string): Effect.Effect<boolean> =>
  * file; we poll `/health` until it binds, then print a summary and return so the
  * parent process exits.
  */
-const startDetached = (port: number, dataDir: string, offline: boolean): Effect.Effect<void, ServerError> =>
+const startDetached = (
+	port: number,
+	dataDir: string,
+	offline: boolean,
+	chdbConfigFile: string | undefined,
+	onDirtyStore: DirtyStorePolicy,
+): Effect.Effect<void, ServerError> =>
 	Effect.gen(function* () {
 		const logPath = logFilePath(dataDir)
 		// Rebuild the command explicitly rather than slicing argv: a Bun-compiled
 		// binary injects a virtual `/$bunfs/...` entrypoint at argv[1] that must
 		// not be forwarded. In dev (`bun run src/bin.ts`) argv[1] is the real
 		// script and Bun needs it; in the compiled binary execPath alone suffices.
-		const entry = process.argv[1]
-		const runtimeArgs = entry && !entry.startsWith("/$bunfs") ? [entry] : []
-		const childArgs = [
-			...runtimeArgs,
-			"start",
-			"--port",
-			String(port),
-			"--data-dir",
+		const childArgs = buildDetachedChildArgs({
+			entry: process.argv[1],
+			port,
 			dataDir,
-			...(offline ? ["--offline"] : []),
-		]
+			offline,
+			chdbConfigFile,
+			onDirtyStore,
+		})
 
 		const child = yield* Effect.try({
 			try: () => {
@@ -214,9 +241,11 @@ const startDetached = (port: number, dataDir: string, offline: boolean): Effect.
 export const start = Command.make("start", {
 	port,
 	dataDir: dataDirFlag,
+	chdbConfigFile: chdbConfigFileFlag,
 	background: backgroundFlag,
 	offline: offlineFlag,
 	reset: resetFlag,
+	onDirtyStore: onDirtyStoreFlag,
 }).pipe(
 	Command.withDescription("Start the local ingest + query server (embedded ClickHouse via chDB)"),
 	Command.withHandler(
@@ -234,12 +263,18 @@ export const start = Command.make("start", {
 			}
 			if (Option.isSome(existingPid)) yield* fs.remove(pidPath, { force: true }).pipe(Effect.ignore) // stale
 
+			// A restore transaction lives beside dataDir and must be reconciled
+			// before reset, compatibility, dirty-store, or directory creation logic.
+			yield* reconcileCheckpointRecovery(dataDir).pipe(
+				Effect.mapError((e) => new ServerError({ message: e.message })),
+			)
+
 			// `--reset`: wipe the store (and its version marker) so we bootstrap fresh.
-			// The escape hatch when an existing store is from an incompatible build.
+			// Preserve the checkpoint registry under dataDir/backups.
 			if (a.reset) {
-				yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
+				yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
+					Effect.mapError((e) => new ServerError({ message: e.message })),
+				)
 			}
 
 			yield* fs.makeDirectory(dataDir, { recursive: true })
@@ -262,43 +297,71 @@ export const start = Command.make("start", {
 			// which we cannot catch. Auto-wipe and bootstrap fresh instead of walking
 			// into the crash. (`--reset` already wiped above, so the marker is gone.)
 			if (isStoreDirty(dataDir)) {
-				yield* Effect.sync(() =>
-					process.stderr.write(
-						amber(
-							"⚠ the local store was left inconsistent by an unclean shutdown — " +
-								"wiping it and starting fresh (local telemetry data is discarded)\n",
+				if (a.onDirtyStore === "fail") {
+					return yield* new ServerError({
+						message:
+							`the local store at ${prettyPath(dataDir)} was not cleanly closed. ` +
+							`Run \`${bold("maple restore --yes")}\` to restore from the last checkpoint, ` +
+							`or \`${bold("maple start --reset")}\` to wipe it.`,
+					})
+				}
+				if (a.onDirtyStore === "restore-checkpoint") {
+					yield* Effect.sync(() =>
+						process.stderr.write(
+							amber(
+								"⚠ the local store was left inconsistent by an unclean shutdown — " +
+									"restoring the last checkpoint\n",
+							),
 						),
-					),
-				)
-				yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.makeDirectory(dataDir, { recursive: true })
+					)
+					const restored = yield* restoreCheckpoint(dataDir).pipe(
+						Effect.mapError((e) => new ServerError({ message: e.message })),
+					)
+					yield* Effect.sync(() =>
+						process.stderr.write(
+							`${green("✓")} restored checkpoint; quarantined dirty store at ${prettyPath(restored.quarantinePath)}\n`,
+						),
+					)
+				} else {
+					yield* Effect.sync(() =>
+						process.stderr.write(
+							amber(
+								"⚠ the local store was left inconsistent by an unclean shutdown — " +
+									"explicit wipe selected; discarding live telemetry while preserving checkpoints\n",
+							),
+						),
+					)
+					yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
+						Effect.mapError((e) => new ServerError({ message: e.message })),
+					)
+					yield* fs.makeDirectory(dataDir, { recursive: true })
+				}
 			}
 
 			// A store bootstrapped from an older bundled schema can't be evolved in
 			// place: `CREATE … IF NOT EXISTS` is a no-op on existing tables, so a
 			// column added to the schema (e.g. ServiceNamespace on trace_list_mv)
 			// never lands and facet queries referencing it fail. Rebuild from the
-			// current schema. Safe to auto-wipe — local telemetry is ephemeral and
-			// re-ingested — and only triggers once per schema change.
+			// current schema. Do not silently delete telemetry or checkpoints:
+			// require an explicit reset, which preserves the checkpoint registry.
 			if (isSchemaStale(dataDir, SCHEMA_FINGERPRINT)) {
-				yield* Effect.sync(() =>
-					process.stderr.write(
-						amber(
-							"⚠ the local store was built from an older schema — " +
-								"rebuilding it from the current schema (local telemetry data is discarded)\n",
-						),
-					),
-				)
-				yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-				yield* fs.makeDirectory(dataDir, { recursive: true })
+				return yield* new ServerError({
+					message:
+						`the local store at ${prettyPath(dataDir)} was built from an older schema. ` +
+						`Maple preserved it and its checkpoints; explicitly rebuild live data with ` +
+						`\`${bold("maple start --reset")}\` or \`${bold("maple reset --yes")}\`.`,
+				})
 			}
 
 			// Detached: spawn the same command without --background and exit.
-			if (a.background) return yield* startDetached(a.port, dataDir, a.offline)
+			if (a.background)
+				return yield* startDetached(
+					a.port,
+					dataDir,
+					a.offline,
+					Option.getOrUndefined(a.chdbConfigFile),
+					a.onDirtyStore,
+				)
 
 			yield* Effect.sync(() =>
 				process.stderr.write(
@@ -312,7 +375,7 @@ export const start = Command.make("start", {
 			// `Effect.never`, closing the scope and running finalizers in reverse
 			// registration order: remove PID → stop server → close chDB → print the
 			// stopped notice.
-			yield* Effect.scoped(
+			return yield* Effect.scoped(
 				Effect.gen(function* () {
 					// Only announce "stopped" if we actually started. The finalizer is
 					// registered up front so it fires on the SIGINT/SIGTERM shutdown, but
@@ -325,7 +388,12 @@ export const start = Command.make("start", {
 						}),
 					)
 
-					const { port: boundPort } = yield* startServer({ port: a.port, dataDir, assets }).pipe(
+					const { port: boundPort } = yield* startServer({
+						port: a.port,
+						dataDir,
+						configFile: Option.getOrUndefined(a.chdbConfigFile),
+						assets,
+					}).pipe(
 						Effect.mapError((e) => new ServerError({ message: `failed to start: ${e.message}` })),
 					)
 					started = true
@@ -357,7 +425,7 @@ export const start = Command.make("start", {
 						process.stdout.write(startBanner(addr, dataDir, dashboardUrl, a.offline)),
 					)
 
-					yield* Effect.never
+					return yield* Effect.never
 				}),
 			)
 		}),
@@ -408,7 +476,7 @@ export const stop = Command.make("stop", { dataDir: dataDirFlag }).pipe(
 
 export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag }).pipe(
 	Command.withDescription(
-		"Delete the local chDB store (~/.maple/data) so the next `maple start` bootstraps fresh",
+		"Delete live chDB data while preserving checkpoints so the next start bootstraps fresh",
 	),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
@@ -427,18 +495,97 @@ export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag 
 			if (!a.yes) {
 				yield* Effect.sync(() =>
 					process.stderr.write(
-						`This permanently deletes the local store at ${bold(prettyPath(dataDir))}.\n` +
+						`This permanently deletes live telemetry at ${bold(prettyPath(dataDir))}.\n` +
+							`The checkpoint registry under its backups directory is preserved.\n` +
 							`Re-run with ${bold("maple reset --yes")} to confirm.\n`,
 					),
 				)
 				return
 			}
 
-			yield* fs.remove(dataDir, { recursive: true, force: true }).pipe(Effect.ignore)
-			yield* fs.remove(storeMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
-			yield* fs.remove(storeOpenMarkerPath(dataDir), { force: true }).pipe(Effect.ignore)
+			yield* resetLiveStorePreservingCheckpoints(dataDir).pipe(
+				Effect.mapError((e) => new ServerError({ message: e.message })),
+			)
 			yield* Effect.sync(() =>
-				process.stderr.write(`${green("✓")} reset — removed ${prettyPath(dataDir)}\n`),
+				process.stderr.write(
+					`${green("✓")} reset — cleared live data and preserved checkpoints at ${prettyPath(dataDir)}\n`,
+				),
+			)
+		}),
+	),
+)
+
+export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, port }).pipe(
+	Command.withDescription("Create and validate a restorable checkpoint of the local chDB store"),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			const dataDir = Option.getOrUndefined(a.dataDir) ?? defaultDataDir()
+			const result = yield* createCheckpoint({ dataDir, port: a.port }).pipe(
+				Effect.mapError((e) => new ServerError({ message: e.message })),
+			)
+			yield* Effect.sync(() =>
+				process.stdout.write(
+					`${green("✓")} checkpoint created\n` +
+						`  ${dim("id")}        ${result.checkpointId}\n` +
+						`  ${dim("path")}      ${prettyPath(result.path)}\n` +
+						`  ${dim("traces")}    ${result.manifest.validation.traces}\n` +
+						`  ${dim("logs")}      ${result.manifest.validation.logs}\n` +
+						`  ${dim("metrics")}   ${result.manifest.validation.metricsSum}\n` +
+						`  ${dim("views")}     ${result.manifest.validation.materializedViews}\n`,
+				),
+			)
+		}),
+	),
+)
+
+export const restore = Command.make("restore", {
+	dataDir: dataDirFlag,
+	checkpointId: checkpointIdFlag,
+	yes: yesFlag,
+}).pipe(
+	Command.withDescription("Restore the local chDB store from the last promoted checkpoint"),
+	Command.withHandler(
+		Effect.fnUntraced(function* (a) {
+			const fs = yield* FileSystem
+			const dataDir = Option.getOrUndefined(a.dataDir) ?? defaultDataDir()
+
+			const pidOpt = yield* readPid(fs, pidFilePath(dataDir))
+			if (Option.isSome(pidOpt) && isProcessAlive(pidOpt.value)) {
+				return yield* new ServerError({
+					message: `maple is running (PID ${pidOpt.value}) — stop it first with \`maple stop\``,
+				})
+			}
+
+			if (!a.yes) {
+				yield* Effect.sync(() =>
+					process.stderr.write(
+						`This replaces the local store at ${bold(prettyPath(dataDir))} with the last checkpoint.\n` +
+							`The existing store is moved aside for quarantine, not deleted.\n` +
+							`Re-run with ${bold("maple restore --yes")} to confirm.\n`,
+					),
+				)
+				return
+			}
+
+			const rawCheckpointId = Option.getOrUndefined(a.checkpointId)
+			const checkpointId = yield* Effect.try({
+				try: () => (rawCheckpointId === undefined ? "current" : parseCheckpointId(rawCheckpointId)),
+				catch: (error) =>
+					new ServerError({ message: error instanceof Error ? error.message : String(error) }),
+			})
+			const result = yield* restoreCheckpoint(dataDir, checkpointId).pipe(
+				Effect.mapError((e) => new ServerError({ message: e.message })),
+			)
+			yield* Effect.sync(() =>
+				process.stderr.write(
+					`${green("✓")} restored checkpoint\n` +
+						`  ${dim("id")}         ${result.checkpointId}\n` +
+						`  ${dim("quarantine")} ${prettyPath(result.quarantinePath)}\n` +
+						`  ${dim("traces")}     ${result.validation.traces}\n` +
+						`  ${dim("logs")}       ${result.validation.logs}\n` +
+						`  ${dim("metrics")}    ${result.validation.metricsSum}\n` +
+						`  ${dim("views")}      ${result.validation.materializedViews}\n`,
+				),
 			)
 		}),
 	),

@@ -1,19 +1,23 @@
 import * as React from "react"
 
+import { cn } from "../../lib/utils"
+
 const TOTAL_BLOCKS = 27
 
 interface PixelDurationBarProps {
 	leftPercent: number
 	widthPercent: number
 	color: string
+	className?: string
 }
 
-function PixelDurationBarImpl({ leftPercent, widthPercent, color }: PixelDurationBarProps) {
+function PixelDurationBarImpl({ leftPercent, widthPercent, color, className }: PixelDurationBarProps) {
 	const spanStart = leftPercent
 	const spanEnd = leftPercent + widthPercent
 
+	// Fixed-size blocks, so this bar can't shrink to fit — callers hide it when the row is narrow.
 	return (
-		<div className="flex items-center gap-0.5 w-48">
+		<div className={cn("flex items-center gap-0.5 w-48", className)}>
 			{Array.from({ length: TOTAL_BLOCKS }, (_, i) => {
 				const blockStart = (i / TOTAL_BLOCKS) * 100
 				const blockEnd = ((i + 1) / TOTAL_BLOCKS) * 100

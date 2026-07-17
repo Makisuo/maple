@@ -844,9 +844,12 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 
 				let scrapeUrl = row.value.url
 				if (row.value.targetType === "planetscale") {
-					// Resolve the per-branch endpoint from the discovery cache. The
-					// scrape itself carries the auth header too — PlanetScale's docs
-					// only auth the SD call, but sending it is harmless if unneeded.
+					// Resolve the per-branch endpoint from the discovery cache and use
+					// its SIGNED url: PlanetScale authenticates the metrics data plane
+					// with the short-lived `?sig=&exp=` params minted in the SD response,
+					// not the Authorization header (that only auths the discovery
+					// listing). The header built below is still sent but the data plane
+					// ignores it.
 					const subTargets = yield* discovery.discover(row.value)
 					const match = subTargets.find((entry) => entry.subTargetKey === subTargetKey)
 					if (!match) {
@@ -857,7 +860,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 							}),
 						)
 					}
-					scrapeUrl = match.url
+					scrapeUrl = match.signedUrl
 				}
 
 				const headers = yield* authHeadersForRow(row.value)

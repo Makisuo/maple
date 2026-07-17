@@ -47,6 +47,7 @@ describe("ApiKeysService.roll", () => {
 				description: "deploys",
 				kind: "mcp",
 			})
+			assert.match(created.txid ?? "", /^\d+$/)
 
 			const rolled = yield* svc.roll(orgId, asUserId("user_b"), created.id, {
 				createdByEmail: "roller@example.com",
@@ -61,6 +62,7 @@ describe("ApiKeysService.roll", () => {
 			assert.strictEqual(rolled.revoked, false)
 			assert.strictEqual(rolled.lastUsedAt, null)
 			assert.strictEqual(rolled.expiresAt, null)
+			assert.match(rolled.txid ?? "", /^\d+$/)
 
 			const { keys } = yield* svc.list(orgId)
 			const oldRow = keys.find((k) => k.id === created.id)
@@ -98,6 +100,21 @@ describe("ApiKeysService.roll", () => {
 			assert.isTrue(Exit.isFailure(exit))
 			const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
 			assert.instanceOf(failure, ApiKeyNotFoundError)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("returns a reconciliation txid when revoking", () => {
+		const testDb = createTestDb(trackedDbs)
+
+		return Effect.gen(function* () {
+			const svc = yield* ApiKeysService
+			const orgId = asOrgId("org_a")
+			const created = yield* svc.create(orgId, asUserId("user_a"), { name: "temp" })
+
+			const revoked = yield* svc.revoke(orgId, created.id)
+
+			assert.strictEqual(revoked.revoked, true)
+			assert.match(revoked.txid ?? "", /^\d+$/)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 })

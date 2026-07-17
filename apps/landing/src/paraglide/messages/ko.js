@@ -47,22 +47,6 @@ export const cta_see_full_story = () => `전체 스토리 보기 →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement = () => `Maple이 출시되었습니다 — `
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const nav_announcement_link = () => `무료 평가판 시작하기`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const nav_features = () => `기능`
 
 
@@ -415,7 +399,7 @@ export const nav_desc_vs_new_relic = () => `OTel 네이티브, 예측 가능한 
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const nav_desc_vs_dash0 = () => `더 많은 시그널과 깊은 트레이싱`
+export const nav_desc_vs_dash0 = () => `오픈소스, 셀프 호스팅 가능`
 
 
 /**
@@ -495,7 +479,7 @@ export const hero_title_accent = () => `AI 네이티브.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `OpenTelemetry 기반의 트레이스, 로그, 메트릭. 수십억 행을 밀리초 단위로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
+export const hero_subtitle = () => `OpenTelemetry로 받는 트레이스, 로그, 메트릭을 ClickHouse에 저장. 수십억 행을 1초 미만으로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
 
 
 /**
@@ -519,7 +503,7 @@ export const sov_title = () => `Your data, your instrumentation, your bill.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_lede = () => `Maple is the observability backend you'd build if you weren't trying to extract every dollar. OpenTelemetry in. ClickHouse-grade query speed out. The source on GitHub the whole time.`
+export const sov_lede = () => `Maple은 청구서를 위해 최적화하지 않는다면 직접 만들었을 법한 옵저버빌리티 백엔드입니다. OpenTelemetry로 받고, ClickHouse 속도로 응답하며, 소스는 언제나 GitHub에 있습니다.`
 
 
 /**
@@ -535,7 +519,7 @@ export const sov_pillar_1_label = () => `Open source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_1_body = () => `Open-source under FSL-1.1. Read every line. Fork it. Self-host on your own boxes if that's what your security review needs.`
+export const sov_pillar_1_body = () => `소스는 FSL-1.1로 GitHub에 공개 — 각 릴리스는 2년 후 Apache 2.0이 됩니다. 모든 코드를 읽고, 포크하고, 보안 검토가 요구한다면 자체 서버에서 셀프 호스팅하세요.`
 
 
 /**
@@ -567,7 +551,7 @@ export const sov_pillar_3_label = () => `Honest pricing`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_pillar_3_body = () => `Pay for the gigabytes you send. No per-host fees. No per-seat fees. The same numbers your invoice shows.`
+export const sov_pillar_3_body = () => `월 $39에 시그널당 100 GB 포함, 초과분은 일률 $0.30/GB. 호스트 요금도 시트 요금도 없습니다. 가격 페이지와 청구서의 숫자가 같습니다.`
 
 
 /**
@@ -639,7 +623,7 @@ export const logs_title = () => `A log feed that doesn't crater your bill at sca
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const logs_lede = () => `Structured logs streamed straight from OTLP. Severity, service, message, duration. Searchable in seconds, retained for the window you actually care about.`
+export const logs_lede = () => `OTLP에서 바로 스트리밍되는 구조화 로그. 심각도, 서비스, 메시지, 소요 시간. 수초 내 검색 가능, Startup 플랜은 30일 보존 — Enterprise는 맞춤형 보존.`
 
 
 /**
@@ -687,7 +671,7 @@ export const mcp_title = () => `Your AI agent reads it too.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_lede = () => `Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, propose fixes, open PRs. The transcript on the right is real.`
+export const mcp_lede = () => `Maple은 퍼스트클래스 MCP 서버를 내장합니다. 호환 에이전트는 서비스 목록 조회, 트레이스 검색, 에러 탐지, 수정 제안을 할 수 있습니다. 오른쪽 트랜스크립트는 에이전트가 실행하는 도구 호출 과정을 그대로 보여줍니다.`
 
 
 /**
@@ -855,7 +839,7 @@ export const bill_eyebrow = () => `07 · The bill`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_title = () => `We told you it was honest.`
+export const bill_title = () => `청구서를 한 줄씩.`
 
 
 /**
@@ -863,7 +847,7 @@ export const bill_title = () => `We told you it was honest.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_lede = () => `Side-by-side, line-item. The questions your finance team will ask, answered before they have to ask.`
+export const bill_lede = () => `정가 기준으로 나란히 비교. 재무팀이 물어볼 질문에 미리 답합니다.`
 
 
 /**
@@ -999,7 +983,7 @@ export const bill_v_yes = () => `Yes`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_v_apache = () => `FSL-1.1`
+export const bill_v_apache = () => `FSL-1.1 → Apache 2.0`
 
 
 /**
@@ -1047,7 +1031,7 @@ export const bill_v_first_class = () => `First-class`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_footnote = () => `Competitor numbers are public list prices summarized for comparison. Maple ingest rate is the published flat per-GB. See the calculator for projected monthly cost on your volume.`
+export const bill_footnote = () => `경쟁사 셀은 공개 정가 요약입니다 — 최신 숫자는 각 벤더의 가격 페이지에서 확인하세요. Maple 요금은 공표된 일률 GB 단가입니다. 월 비용 추정은 계산기를 이용하세요.`
 
 
 /**
@@ -1191,7 +1175,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14-day free trial. Self-host is supported. The dashboard ships with the same live waterfall you just watched.`
+export const cta_bookend_lede = () => `14일 무료 체험(카드 등록 필요, 종료 전까지 과금 없음). 셀프 호스팅 지원. 대시보드에는 방금 본 것과 동일한 라이브 워터폴이 포함됩니다.`
 
 
 /**
@@ -1215,7 +1199,7 @@ export const cta_bookend_secondary = () => `Read the source`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const footer_manifesto = () => `Made with love for engineers. Priced with respect for your CFO.`
+export const footer_manifesto = () => `시트 요금 없음. 독점 에이전트 없음. 블랙박스 없음.`
 
 
 /**
@@ -1263,7 +1247,7 @@ export const features_badge = () => `기능`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const features_heading = () => `관측에 필요한 모든 것`
+export const features_heading = () => `디버깅 워크플로를 처음부터 끝까지`
 
 
 /**
@@ -1466,19 +1450,61 @@ export const features_col_p99 = () => `P99`
 export const features_col_throughput = () => `처리량`
 
 
-export { features_errors_badge } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_badge = () => `에러 트래킹`
 
-export { features_errors_heading } from "./en.js"
 
-export { features_errors_desc } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_heading = () => `에러를 그룹화하고 추적하고 체계적으로 수정`
 
-export { features_col_error_type } from "./en.js"
 
-export { features_col_count } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_errors_desc = () => `에러는 모든 서비스에 걸쳐 유형별로 자동 그룹화됩니다. 시간 흐름에 따른 추세와 영향받는 서비스를 확인하고, 샘플 트레이스로 파고들어 근본 원인을 찾으세요.`
 
-export { features_col_services } from "./en.js"
 
-export { features_col_last_seen } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_error_type = () => `에러 유형`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_count = () => `건수`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_services = () => `서비스`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const features_col_last_seen = () => `마지막 발생`
+
 
 /**
  * 
@@ -1493,7 +1519,7 @@ export const usecases_badge = () => `사용 사례`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_heading = () => `실제 디버깅 시나리오`
+export const usecases_heading = () => `세 가지 디버깅 시나리오의 실제`
 
 
 /**
@@ -1525,7 +1551,7 @@ export const usecases_ecommerce_desc = () => `플래시 세일이 시작되고 �
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ecommerce_result = () => `90초 만에 근본 원인 파악: Stripe 타임아웃, 재시도 소진 로그와 상관.`
+export const usecases_ecommerce_result = () => `이 시나리오에서는: Stripe 타임아웃을 재시도 소진 로그와 연관 지어 약 90초 만에 근본 원인 도달.`
 
 
 /**
@@ -1597,7 +1623,7 @@ export const usecases_ai_heading = () => `새벽 3시 알림, 아무도 깨어 �
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ai_desc = () => `새벽 3시에 알림 발생. 온콜을 호출하는 대신 MCP 에이전트가 Maple에 접속하여 문제를 조사하고 Slack에 진단 결과를 게시.`
+export const usecases_ai_desc = () => `새벽 3시에 알림이 발생합니다. 온콜 담당자가 잠에서 깨기 전에 MCP 에이전트가 Maple에 연결해 급증을 조사하고 결과를 Slack에 게시합니다.`
 
 
 /**
@@ -1605,7 +1631,7 @@ export const usecases_ai_desc = () => `새벽 3시에 알림 발생. 온콜을 �
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const usecases_ai_result = () => `MCP 에이전트가 자동 진단하고 누구보다 먼저 Slack에 게시.`
+export const usecases_ai_result = () => `이 시나리오에서는 누군가 일어나기 전에 에이전트가 진단을 #incidents에 게시합니다.`
 
 
 /**
@@ -1661,7 +1687,7 @@ export const otel_badge = () => `OpenTelemetry 기반`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_heading = () => `옵저버빌리티의 미래는 오픈`
+export const otel_heading = () => `표준을 우회하지 않고, 표준 위에`
 
 
 /**
@@ -1693,7 +1719,7 @@ export const otel_future_title = () => `미래 대비 설계`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_future_desc = () => `모든 주요 클라우드 프로바이더와 CNCF가 지원. OpenTelemetry는 Kubernetes 다음으로 가장 활발한 CNCF 프로젝트입니다.`
+export const otel_future_desc = () => `모든 주요 클라우드 프로바이더가 지원. OpenTelemetry는 2026년 CNCF를 졸업했으며 Kubernetes 다음으로 활발한 프로젝트입니다.`
 
 
 /**
@@ -1709,7 +1735,7 @@ export const otel_signals_title = () => `모든 신호 커버`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_signals_desc = () => `하나의 SDK로 트레이스, 로그, 메트릭. 여러 벤더 에이전트와 라이브러리를 조합할 필요 없음.`
+export const otel_signals_desc = () => `하나의 SDK로 트레이스, 로그, 메트릭 — 시그널마다 벤더 에이전트를 설치하고 맞출 필요가 없습니다.`
 
 
 /**
@@ -1725,7 +1751,7 @@ export const otel_community_title = () => `커뮤니티 주도`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const otel_community_desc = () => `수천 명의 기여자. 모든 프레임워크의 자동 계측. 신뢰할 수 있는 활발한 생태계.`
+export const otel_community_desc = () => `수천 명의 컨트리뷰터와 주요 프레임워크 자동 계측. 사양은 한 벤더의 로드맵이 아니라 커뮤니티가 이끕니다.`
 
 
 /**
@@ -1741,7 +1767,7 @@ export const tech_badge = () => `기술 기반`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const tech_heading = () => `다르게 설계됨`
+export const tech_heading = () => `쿼리가 빨리 돌아오는 이유`
 
 
 /**
@@ -1757,7 +1783,7 @@ export const tech_columnar_title = () => `컨럼나 스토리지`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const tech_columnar_desc = () => `수십억 행의 쿼리를 밀리초 단위로 실행. 옵저버빌리티 워크로드를 위해 설계된 컨럼나 엔진으로 구동.`
+export const tech_columnar_desc = () => `텔레메트리를 위해 만들어진 컬럼 지향 엔진. 수십억 행을 스캔해 1초 미만에 반환합니다 — 사전 집계 불필요.`
 
 
 /**
@@ -1872,9 +1898,21 @@ export const tech_ingestion_rate = () => `수집 속도`
 export const tech_avg_latency = () => `평균 레이턴시`
 
 
-export { tech_connectors_title } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const tech_connectors_title = () => `OTLP 그 너머`
 
-export { tech_connectors_desc } from "./en.js"
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const tech_connectors_desc = () => `OpenTelemetry 시그널과 함께 Cloudflare Logpush와 Prometheus 스크레이프 대상에서도 데이터를 가져올 수 있습니다.`
+
 
 /**
  * 
@@ -1889,7 +1927,7 @@ export const ai_badge = () => `AI 에이전트`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const ai_heading = () => `AI 에이전트가 문제를 해결`
+export const ai_heading = () => `조사는 AI 에이전트에게`
 
 
 /**
@@ -1897,7 +1935,7 @@ export const ai_heading = () => `AI 에이전트가 문제를 해결`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const ai_desc = () => `Maple에는 트레이스, 로그, 에러, 메트릭을 직접 쿼리할 수 있는 내장 MCP 서버와 AI 에이전트가 있습니다. MCP 호환 클라이언트를 연결하여 프로덕션 문제를 자동 진단.`
+export const ai_desc = () => `Maple에는 트레이스, 로그, 에러, 메트릭을 직접 쿼리하는 MCP 서버와 AI 에이전트가 내장되어 있습니다. MCP 호환 클라이언트를 연결하면 에이전트가 프로덕션 문제를 조사하고 수정을 제안합니다.`
 
 
 /**
@@ -2012,55 +2050,205 @@ export const ai_any_mcp = () => `모든 MCP 클라이언트`
 export const ai_open_protocol = () => `오픈 프로토콜`
 
 
-export { chat_badge } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_badge = () => `AI 어시스턴트`
 
-export { chat_heading } from "./en.js"
 
-export { chat_desc } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_heading = () => `텔레메트리에 일상 언어로 질문`
 
-export { chat_user_label } from "./en.js"
 
-export { chat_user_msg } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_desc = () => `트레이스, 로그, 메트릭을 이해하는 내장 AI 어시스턴트. 일상 언어로 질문하면 관련 데이터로 바로 연결되는 링크와 함께 답합니다.`
 
-export { chat_assistant_label } from "./en.js"
 
-export { chat_response_1 } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_user_label = () => `나`
 
-export { chat_response_2 } from "./en.js"
 
-export { chat_trace_link } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_user_msg = () => `지난 1시간 동안 payment-service의 레이턴시 급증 원인은?`
 
-export { dashboard_badge } from "./en.js"
 
-export { dashboard_heading } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_assistant_label = () => `Maple AI`
 
-export { dashboard_desc } from "./en.js"
 
-export { dashboard_ai_label } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_response_1 = () => `14:12 UTC에 시작된 레이턴시 급증을 발견했습니다. P95가 140ms에서 890ms로 뛰었습니다.`
 
-export { dashboard_ai_text } from "./en.js"
 
-export { alert_badge } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_response_2 = () => `근본 원인: 체크아웃 플로우의 느린 DB 쿼리 3건(평균 720ms). 커넥션 풀이 최대치(20/20)에 도달했습니다.`
 
-export { alert_heading } from "./en.js"
 
-export { alert_rules_title } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const chat_trace_link = () => `트레이스 f7e8d9c0 보기`
 
-export { alert_rules_desc } from "./en.js"
 
-export { alert_route_title } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_badge = () => `대시보드`
 
-export { alert_route_desc } from "./en.js"
 
-export { alert_firing } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_heading = () => `스토리를 전하는 대시보드`
 
-export { alert_triggered_ago } from "./en.js"
 
-export { alert_view } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_desc = () => `위젯을 드래그 앤 드롭하고, 프리셋에서 고르거나, AI가 서비스에 맞는 차트를 제안하게 하세요. JSON으로 내보내고 공유할 수 있습니다.`
 
-export { alert_acknowledge } from "./en.js"
 
-export { alert_webhook_note } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_ai_label = () => `AI 제안`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const dashboard_ai_text = () => `payment-service의 P95 레이턴시 차트 추가`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_badge = () => `알림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_heading = () => `컨텍스트가 붙어 있는 알림`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_rules_title = () => `알림 규칙`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_rules_desc = () => `에러율, P95/P99 레이턴시, Apdex, 처리량, 커스텀 메트릭, 커스텀 쿼리 등 7가지 내장 시그널 유형. 심각도 레벨, 인시던트 추적, 자동 해결 포함.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_route_title = () => `어디로든 라우팅`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_route_desc = () => `알림을 Slack, Discord, PagerDuty 또는 임의의 웹훅으로 보내세요. 팀이 이미 일하는 곳으로 알림이 갑니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_firing = () => `발생 중`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_triggered_ago = () => `34초 전 발생`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_view = () => `Maple에서 보기`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_acknowledge = () => `확인`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_webhook_note = () => `+ 임의의 커스텀 웹훅 엔드포인트`
+
 
 /**
  * 
@@ -2131,7 +2319,7 @@ export const how_step3_desc = () => `대시보드를 열고 탐색 시작. 모�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_heading = () => `명확한 관측을 시작하시겠습니까?`
+export const bottomcta_heading = () => `오늘 첫 트레이스를 확인하세요.`
 
 
 /**
@@ -2139,7 +2327,7 @@ export const bottomcta_heading = () => `명확한 관측을 시작하시겠습�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_subtitle = () => `5분 이내에 트레이스, 로그, 메트릭 전송 시작.`
+export const bottomcta_subtitle = () => `SDK를 추가하고 OTLP를 Maple로 향하게 하면 트레이스가 도착합니다 — 대부분 5분 이내에 설정됩니다.`
 
 
 /**
@@ -2147,7 +2335,7 @@ export const bottomcta_subtitle = () => `5분 이내에 트레이스, 로그, �
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bottomcta_tagline = () => `maple.dev — 옵저버빌리티, 심플하게`
+export const bottomcta_tagline = () => `maple.dev — OpenTelemetry 위의 옵저버빌리티`
 
 
 /**
@@ -2451,7 +2639,7 @@ export const pricing_private_channel = () => `전용 채널 지원`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `예측 가능한 요금 — 종량 과금 없음`
+export const pricing_no_usage_charges = () => `시트·호스트 요금 없음`
 
 
 /**
@@ -2614,11 +2802,29 @@ export const pricing_metrics = () => `메트릭`
 export const pricing_start_trial = (params) => `${params.duration}일 무료 체험 시작`
 
 
-export { pricing_calc_label } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_calc_label = () => `비용 계산기`
 
-export { pricing_calc_heading } from "./en.js"
 
-export { pricing_calc_sub } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_calc_heading = () => `청구액 추정`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_calc_sub = () => `월간 볼륨을 슬라이드로 조정해 Maple 비용을 다른 벤더와 비교하세요.`
+
 
 /**
  * 
@@ -2665,7 +2871,7 @@ export const faq_limits_q = () => `플랜 한도를 초과하면 어떻게 되�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_limits_a = () => `한도에 근접하면 알려드립니다. Startup 플랜에서는 추가 사용량이 투명한 GB당 요금으로 과금됩니다.`
+export const faq_limits_a = () => `포함 용량에 근접하면 알려드립니다. Startup 플랜에서 초과 사용량은 이 페이지에 표시된 것과 동일한 일률 $0.30/GB로 과금됩니다.`
 
 
 /**
@@ -2713,7 +2919,7 @@ export const faq_selfhost_q = () => `Maple을 셀프 호스팅할 수 있나요?
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_selfhost_a = () => `네. Maple의 소스는 FSL-1.1 라이선스 하에 공개되어 있으며 자체 인프라에서 셀프 호스팅 가능합니다. 관리형 경험을 원하는 팀을 위한 클라우드 플랜도 제공됩니다.`
+export const faq_selfhost_a = () => `네. Maple의 소스는 FSL-1.1(각 릴리스는 2년 후 Apache 2.0이 됩니다)로 공개되어 있으며 자체 인프라에서 셀프 호스팅할 수 있습니다. 관리형을 선호하는 팀을 위한 클라우드 플랜도 있습니다.`
 
 
 /**
@@ -2729,7 +2935,7 @@ export const faq_trial_q = () => `유료 플랜에 무료 체험이 있나요?`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const faq_trial_a = () => `네, 모든 플랜에는 무료 체험이 포함되어 있어 커밋 전에 모든 기능을 탐색할 수 있습니다.`
+export const faq_trial_a = () => `Startup 플랜에는 14일 무료 체험이 포함됩니다. 신용카드 등록이 필요하지만 체험 종료 전까지는 과금되지 않습니다. Enterprise 플랜은 상담으로 시작합니다.`
 
 
 /**
@@ -2785,7 +2991,7 @@ export const page_pricing_heading = () => `심플하고 투명한 요금`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_pricing_subtitle = () => `투명한 종량 과금 — 사용자당 요금 없음, 숨겨진 비용 없음, 벤더 락인 없음. 모든 플랜에 평가판 제공.`
+export const page_pricing_subtitle = () => `시트 요금 없음, 숨은 비용 없는 사용량 기반 요금제. Startup 플랜은 14일 무료 체험 제공.`
 
 
 /**
@@ -4009,7 +4215,7 @@ export const page_dd_heading = () => `Maple vs Datadog`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_subtitle = () => `Datadog은 강력하지만 복잡한 호스트당 과금과 독점 에이전트가 따릅니다. Maple은 동일한 분산 트레이싱, 로그, 메트릭을 투명한 종량 과금, 네이티브 OpenTelemetry 지원, 제로 벤더 락인으로 제공합니다.`
+export const page_dd_subtitle = () => `Datadog은 강력하지만 호스트 단위 과금과 독점 에이전트가 따라옵니다. Maple은 분산 트레이싱, 로그, 메트릭을 일률 GB 단가, 네이티브 OpenTelemetry 수집, 읽고 셀프 호스팅할 수 있는 소스 코드로 제공합니다.`
 
 
 /**
@@ -4049,7 +4255,7 @@ export const page_dd_otel = () => `OpenTelemetry 네이티브`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_otel_desc = () => `OpenTelemetry 표준 위에 처음부터 구축. 독점 에이전트 설치나 유지보수 불필요 — 기존 계측 그대로 사용.`
+export const page_dd_otel_desc = () => `처음부터 OpenTelemetry 위에 구축. 설치하거나 유지할 독점 에이전트가 없습니다 — 이미 보유한 OTel 계측을 그대로 Maple로 향하게 하세요.`
 
 
 /**
@@ -4081,7 +4287,7 @@ export const page_dd_oss = () => `소스 공개`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const page_dd_oss_desc = () => `모든 코드를 검사하고, 기능을 기여하고, 블랙박스 없는 옵저버빌리티 플랫폼을 신뢰.`
+export const page_dd_oss_desc = () => `소스는 FSL-1.1로 GitHub에 공개되며 시간이 지나면 Apache 2.0으로 전환됩니다. 모든 코드를 검토하고, 기능을 기여하고, 데이터가 어떻게 처리되는지 정확히 확인하세요.`
 
 
 /**

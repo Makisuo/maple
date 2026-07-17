@@ -159,7 +159,7 @@ function NodesPageContent() {
 
 							if (nodes.length === 0 && !hasAnyFilter) {
 								return (
-									<Empty className="py-16">
+									<Empty className="py-16 content-enter">
 										<EmptyHeader>
 											<EmptyMedia variant="icon">
 												<ServerIcon size={16} />
@@ -176,7 +176,7 @@ function NodesPageContent() {
 
 							return (
 								<div
-									className={`space-y-4 transition-opacity ${
+									className={`space-y-4 content-enter ${
 										result.waiting ? "opacity-60" : ""
 									}`}
 								>

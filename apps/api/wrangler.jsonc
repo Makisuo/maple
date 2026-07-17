@@ -27,6 +27,7 @@
 			"id": "00000000000000000000000000000000",
 		},
 	],
+	"services": [{ "binding": "CHAT_FLUE", "service": "maple-chat-flue" }],
 	// Cloudflare Email Service (Email Sending). `remote: true` routes sends through
 	// the real Cloudflare sender even under local dev. (Mirrored in alchemy.run.ts
 	// for deploy.) Pure `bun dev` (non-wrangler) has no EMAIL binding → sends skip.

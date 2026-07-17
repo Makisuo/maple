@@ -18,8 +18,8 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
 import {
-	buildRuleRequest,
-	buildRuleTestRequest,
+	buildRuleCreateParamsV2,
+	buildRuleTestParamsV2,
 	deriveRuleQueryIssues,
 	getExitErrorMessage,
 	isRangeComparator,
@@ -30,7 +30,7 @@ import {
 import { applyTemplate } from "@/lib/alerts/templates"
 import type { WidgetAlertPrefillNotice } from "@/lib/alerts/widget-prefill"
 import { Result, useAtomSet } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useAlertRulesList } from "@/hooks/use-alerts-list"
 
 export function AlertCreateFormSurface({
@@ -51,13 +51,13 @@ export function AlertCreateFormSurface({
 	autocompleteValues: ReturnType<typeof useAutocompleteValuesContext>
 }) {
 	const navigate = useNavigate({ from: "/alerts/create" })
-	const createRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "createRule"), {
+	const createRule = useAtomSet(MapleApiV2AtomClient.mutation("alertRules", "create"), {
 		mode: "promiseExit",
 	})
-	const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), {
+	const updateRule = useAtomSet(MapleApiV2AtomClient.mutation("alertRules", "update"), {
 		mode: "promiseExit",
 	})
-	const testRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "testRule"), {
+	const testRule = useAtomSet(MapleApiV2AtomClient.mutation("alertRules", "test"), {
 		mode: "promiseExit",
 	})
 
@@ -98,10 +98,10 @@ export function AlertCreateFormSurface({
 
 	async function handleSave() {
 		setSavingRule(true)
-		const payload = buildRuleRequest(ruleForm)
+		const payload = buildRuleCreateParamsV2(ruleForm)
 		const result = editingRule
 			? await updateRule({
-					params: { ruleId: editingRule.id },
+					params: { id: editingRule.id },
 					payload,
 					reactivityKeys: ["alertRules"],
 				})
@@ -124,11 +124,16 @@ export function AlertCreateFormSurface({
 		const setLoading = sendNotification ? setSendingTestNotification : setPreviewingRule
 		setLoading(true)
 		const result = await testRule({
-			payload: buildRuleTestRequest(ruleForm, sendNotification),
+			payload: buildRuleTestParamsV2(ruleForm, sendNotification),
 			reactivityKeys: ["alertDeliveryEvents"],
 		})
 		if (Exit.isSuccess(result)) {
-			setPreviewResult(result.value)
+			setPreviewResult({
+				status: result.value.status,
+				value: result.value.value,
+				sampleCount: result.value.sample_count,
+				reason: result.value.reason,
+			})
 			toast.success(sendNotification ? "Preview ran and sent a test notification" : "Preview updated")
 		} else {
 			toast.error(getExitErrorMessage(result, "Failed to preview rule"))

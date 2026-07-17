@@ -4,7 +4,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { XmarkIcon, MagnifierIcon } from "@/components/icons"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
-import { FilterSection, SearchableFilterSection } from "@/components/filters/filter-section"
+import { FilterSection, SearchableFilterSection, serviceColorMap } from "@/components/filters/filter-section"
 import { Route } from "@/routes/logs"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { Kbd } from "@maple/ui/components/ui/kbd"
@@ -103,7 +103,7 @@ export function LogsFilterSidebar() {
 				(facets.namespaces?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<div className="pb-3">
@@ -183,6 +183,7 @@ export function LogsFilterSidebar() {
 								options={facets.services}
 								selected={search.services ?? []}
 								onChange={(val) => updateFilter("services", val)}
+								colorMap={serviceColorMap(facets.services)}
 							/>
 						)}
 

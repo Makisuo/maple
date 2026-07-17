@@ -578,7 +578,7 @@ function TraceSpanLane({
 			const spans: ReadonlyArray<SpanRow> = res.spans
 			if (spans.length === 0) {
 				return (
-					<div className="bg-muted/10 px-3 py-2 text-[11px] text-muted-foreground">
+					<div className="bg-muted/10 px-3 py-2 text-[11px] text-muted-foreground content-enter">
 						No spans found for this trace.
 					</div>
 				)
@@ -588,7 +588,7 @@ function TraceSpanLane({
 					spanOffset(a, seek.recordingStartEpochMs) - spanOffset(b, seek.recordingStartEpochMs),
 			)
 			return (
-				<div className="max-h-56 space-y-px overflow-y-auto bg-muted/10 py-1">
+				<div className="max-h-56 space-y-px overflow-y-auto bg-muted/10 py-1 content-enter">
 					{sorted.map((span) => (
 						<SpanRowItem key={span.spanId} span={span} seek={seek} />
 					))}

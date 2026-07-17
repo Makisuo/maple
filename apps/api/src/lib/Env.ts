@@ -63,6 +63,8 @@ export interface EnvShape {
 	readonly PLANETSCALE_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly PLANETSCALE_OAUTH_AUTHORIZE_URL: string
 	readonly PLANETSCALE_OAUTH_TOKEN_URL: string
+	/** OAuth token introspection (`/oauth/token/info`) — consulted when the v1 API rejects a fresh token. */
+	readonly PLANETSCALE_OAUTH_TOKEN_INFO_URL: string
 	/**
 	 * Space-delimited, resource-prefixed OAuth scopes requested at authorize time
 	 * (e.g. `organization:read_databases`). PlanetScale REQUIRES an explicit scope
@@ -142,9 +144,13 @@ const envConfig = Config.all({
 	// live scope registry (GET /client/v4/oauth/scopes). The registered OAuth client must have all
 	// of these granted, or connects fail with invalid_scope — and existing users must reconnect to
 	// pick up a newly-added scope.
+	// query-cache.read is the registry id for "Hyperdrive Read" (Hyperdrive's original product
+	// name was "query cache" — the id never migrated). It powers the Hyperdrive config inventory
+	// behind the service map; pre-existing grants without it degrade open (discovery logs a
+	// warning, analytics keep flowing) until the user reconnects.
 	CLOUDFLARE_OAUTH_SCOPES: stringWithDefault(
 		"CLOUDFLARE_OAUTH_SCOPES",
-		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write",
+		"account-settings.read account-analytics.read analytics.read zone.read workers-observability.write workers-observability-telemetry.write workers-scripts.read workers-scripts.write query-cache.read",
 	),
 	CLOUDFLARE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"CLOUDFLARE_OAUTH_AUTHORIZE_URL",
@@ -168,13 +174,23 @@ const envConfig = Config.all({
 	),
 	PLANETSCALE_OAUTH_CLIENT_ID: optionalString("PLANETSCALE_OAUTH_CLIENT_ID"),
 	PLANETSCALE_OAUTH_CLIENT_SECRET: optionalRedacted("PLANETSCALE_OAUTH_CLIENT_SECRET"),
+	// CANONICAL authorize host per PlanetScale's own OAuth discovery doc
+	// (https://auth.planetscale.com/.well-known/oauth-authorization-server →
+	// authorization_endpoint). Their public docs cite auth.planetscale.com/oauth/authorize
+	// instead — that alias renders a working consent screen but emits codes whose
+	// resulting tokens the v1 API rejects with 401 `invalid_token` even though
+	// /oauth/token/info introspects them as valid (verified live 2026-07-13).
 	PLANETSCALE_OAUTH_AUTHORIZE_URL: stringWithDefault(
 		"PLANETSCALE_OAUTH_AUTHORIZE_URL",
-		"https://auth.planetscale.com/oauth/authorize",
+		"https://app.planetscale.com/oauth/authorize",
 	),
 	PLANETSCALE_OAUTH_TOKEN_URL: stringWithDefault(
 		"PLANETSCALE_OAUTH_TOKEN_URL",
 		"https://auth.planetscale.com/oauth/token",
+	),
+	PLANETSCALE_OAUTH_TOKEN_INFO_URL: stringWithDefault(
+		"PLANETSCALE_OAUTH_TOKEN_INFO_URL",
+		"https://auth.planetscale.com/oauth/token/info",
 	),
 	// PlanetScale scopes are resource-prefixed (`<resource>:<action>`) and MUST be
 	// sent in the authorize request — the app's configured scopes are the allowed

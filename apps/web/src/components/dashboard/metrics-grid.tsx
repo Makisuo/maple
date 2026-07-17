@@ -89,13 +89,12 @@ export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisW
 								contentClassName={overlay ? "flex-1 min-h-0 p-2 overflow-visible" : undefined}
 							>
 								{item.error ? (
-									<div className="flex h-full items-center px-3">
-										<ErrorState
-											variant="inline"
-											error={item.error.error}
-											onRetry={item.error.onRetry}
-										/>
-									</div>
+									<ErrorState
+										variant="panel"
+										className="border-0"
+										error={item.error.error}
+										onRetry={item.error.onRetry}
+									/>
 								) : item.isLoading ? (
 									<ChartSkeleton variant={entry.category} />
 								) : (

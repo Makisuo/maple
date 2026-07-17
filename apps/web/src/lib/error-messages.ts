@@ -65,8 +65,48 @@ const unwrap = (error: unknown): unknown => {
 	return error
 }
 
+export interface V2ErrorInfo {
+	readonly type: string
+	readonly code: string
+	readonly message: string
+}
+
+/**
+ * Extract the v2 API error envelope (`{ error: { type, code, message } }`)
+ * from a failure, unwrapping Cause/Exit first. Returns null for anything that
+ * isn't a v2-shaped error, so callers can fall through to the v1 handling.
+ */
+export const v2ErrorInfo = (input: unknown): V2ErrorInfo | null => {
+	const error = unwrap(input)
+	if (typeof error !== "object" || error === null || !("error" in error)) return null
+	const body = (error as { error: unknown }).error
+	const type = stringField(body, "type")
+	const code = stringField(body, "code")
+	const message = stringField(body, "message")
+	if (type === undefined || code === undefined || message === undefined) return null
+	return { type, code, message }
+}
+
+const V2_ERROR_TITLES: Record<string, string> = {
+	invalid_request_error: "Invalid request",
+	authentication_error: "Not authorized",
+	permission_error: "Not authorized",
+	not_found_error: "Not found",
+	conflict_error: "Conflict",
+	rate_limit_error: "Rate limited",
+	api_error: "Server error",
+}
+
 export const formatBackendError = (input: unknown): FormattedError => {
 	const error = unwrap(input)
+
+	const v2 = v2ErrorInfo(error)
+	if (v2 !== null) {
+		return {
+			title: V2_ERROR_TITLES[v2.type] ?? "Something went wrong",
+			description: v2.message,
+		}
+	}
 
 	if (hasTag(error)) {
 		switch (error._tag) {
@@ -209,7 +249,7 @@ export const formatBackendError = (input: unknown): FormattedError => {
 		if (reasonTag === "TransportError" || reasonTag === "InvalidUrlError") {
 			return {
 				title: "Cannot reach Maple API",
-				description: "Check your network connection and try again.",
+				description: "Check your connection — data will resume once the API is reachable.",
 			}
 		}
 		if (status !== undefined && status >= 500) {
@@ -228,6 +268,14 @@ export const formatBackendError = (input: unknown): FormattedError => {
 	}
 
 	if (error instanceof Error) {
+		// Transport-level failures carry request URLs in their message — swap the
+		// internals for actionable copy.
+		if (/transport error|failed to fetch|load failed|networkerror/i.test(error.message)) {
+			return {
+				title: "Cannot reach Maple API",
+				description: "Check your connection — data will resume once the API is reachable.",
+			}
+		}
 		return {
 			title: "Something went wrong",
 			description: error.message || "An unexpected error occurred.",

@@ -41,31 +41,44 @@ export interface ScrapeOutcome {
 	readonly samplesPostMetricRelabeling?: number
 	/** Upstream signalled a rate limit (HTTP 429/503) — back off before retrying. */
 	readonly rateLimited: boolean
+	/**
+	 * Upstream rejected the credential (HTTP 401/403) — back off like a rate
+	 * limit: the failure won't clear until the org's auth is fixed, so retrying
+	 * every interval just hammers the target (prod hit this with PlanetScale
+	 * rejecting OAuth bearers on metrics.psdb.cloud every 60s).
+	 */
+	readonly authFailed: boolean
 	/** Upstream `Retry-After` translated to ms, when present. */
 	readonly retryAfterMs: number | null
 }
+
+/** A scrape outcome that must escalate the delay instead of holding cadence. */
+export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
+	outcome.rateLimited || outcome.authFailed
 
 /**
  * The target period before a target's next scrape. The happy path returns the
  * configured interval; the caller ({@link ScrapeScheduler}'s target loop)
  * subtracts the scrape's own elapsed time so the happy-path cadence stays
- * start-to-start. A rate-limited scrape escalates exponentially — honoring
- * `Retry-After` when it is longer — capped at {@link MAX_BACKOFF_MS} so the
- * target keeps probing for recovery; that delay runs from scrape end.
+ * start-to-start. A rate-limited or auth-rejected scrape escalates
+ * exponentially — honoring `Retry-After` when it is longer — capped at
+ * {@link MAX_BACKOFF_MS} so the target keeps probing for recovery (an auth fix
+ * needs no restart: the credential is resolved server-side per scrape); that
+ * delay runs from scrape end.
  */
 export const nextScrapeDelayMs = ({
 	baseMs,
 	outcome,
-	consecutiveRateLimits,
+	consecutiveBackoffs,
 }: {
 	readonly baseMs: number
 	readonly outcome: ScrapeOutcome
-	readonly consecutiveRateLimits: number
+	readonly consecutiveBackoffs: number
 }): number => {
-	if (!outcome.rateLimited) return baseMs
-	// exponential is always >= baseMs (consecutiveRateLimits >= 0), so baseMs
+	if (!shouldBackOff(outcome)) return baseMs
+	// exponential is always >= baseMs (consecutiveBackoffs >= 0), so baseMs
 	// never needs to be a floor here.
-	const exponential = baseMs * 2 ** consecutiveRateLimits
+	const exponential = baseMs * 2 ** consecutiveBackoffs
 	const retryAfter = outcome.retryAfterMs ?? 0
 	return Math.min(MAX_BACKOFF_MS, Math.max(exponential, retryAfter))
 }
@@ -191,10 +204,12 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							const response = yield* api.scrapeTarget(target.id, target.subTargetKey)
 							if (response.status < 200 || response.status >= 300) {
 								// A non-2xx is a recorded failure, not an Effect error: only
-								// 429/503 trigger backoff, and we need the Retry-After hint.
+								// 429/503 (rate limit) and 401/403 (rejected credential)
+								// trigger backoff, and we need the Retry-After hint.
 								return {
 									error: `target returned HTTP ${response.status}`,
 									rateLimited: response.status === 429 || response.status === 503,
+									authFailed: response.status === 401 || response.status === 403,
 									retryAfterMs:
 										response.retryAfterSeconds !== null
 											? response.retryAfterSeconds * 1000
@@ -240,6 +255,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 									converted.dataPointCounts.gauge +
 									converted.dataPointCounts.histogram,
 								rateLimited: false,
+								authFailed: false,
 								retryAfterMs: null,
 							} satisfies ScrapeOutcome
 						}).pipe(
@@ -247,6 +263,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								Effect.succeed<ScrapeOutcome>({
 									error: error.message,
 									rateLimited: false,
+									authFailed: false,
 									retryAfterMs: null,
 								}),
 							),
@@ -254,6 +271,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 								Effect.succeed<ScrapeOutcome>({
 									error: Cause.pretty(Cause.die(defect)),
 									rateLimited: false,
+									authFailed: false,
 									retryAfterMs: null,
 								}),
 							),
@@ -285,35 +303,41 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 				)
 
 			// Scrape, then sleep before the next pass. The happy path holds the
-			// configured interval; a 429/503 escalates the delay (see
-			// nextScrapeDelayMs) so the target backs off and self-recovers instead
-			// of hammering a rate-limited upstream every interval.
+			// configured interval; a 429/503 (rate limit) or 401/403 (rejected
+			// credential) escalates the delay (see nextScrapeDelayMs) so the target
+			// backs off and self-recovers instead of hammering the upstream every
+			// interval.
 			const targetLoop = (target: InternalScrapeTarget) => {
 				const baseMs = target.scrapeIntervalSeconds * 1000
-				const loop = (consecutiveRateLimits: number): Effect.Effect<never> =>
+				const loop = (consecutiveBackoffs: number): Effect.Effect<never> =>
 					Effect.gen(function* () {
 						const startedAt = yield* Clock.currentTimeMillis
 						const outcome = yield* scrapeOnce(target)
 						const elapsedMs = (yield* Clock.currentTimeMillis) - startedAt
-						const delayMs = nextScrapeDelayMs({ baseMs, outcome, consecutiveRateLimits })
-						if (outcome.rateLimited) {
-							yield* Effect.logWarning("Scrape rate-limited, backing off").pipe(
+						const backingOff = shouldBackOff(outcome)
+						const delayMs = nextScrapeDelayMs({ baseMs, outcome, consecutiveBackoffs })
+						if (backingOff) {
+							yield* Effect.logWarning(
+								outcome.authFailed
+									? "Scrape auth rejected, backing off"
+									: "Scrape rate-limited, backing off",
+							).pipe(
 								Effect.annotateLogs({
 									targetId: target.id,
 									orgId: target.orgId,
 									...(target.subTargetKey ? { subTargetKey: target.subTargetKey } : {}),
 									delayMs,
 									retryAfterMs: outcome.retryAfterMs,
-									consecutiveRateLimits: consecutiveRateLimits + 1,
+									consecutiveBackoffs: consecutiveBackoffs + 1,
 								}),
 							)
 						}
 						// Happy path: subtract the scrape's own elapsed time so cadence
 						// stays start-to-start (matching the old Schedule.fixed). Backoff
 						// runs the full delay from scrape end so Retry-After is honored.
-						const sleepMs = outcome.rateLimited ? delayMs : Math.max(0, delayMs - elapsedMs)
+						const sleepMs = backingOff ? delayMs : Math.max(0, delayMs - elapsedMs)
 						yield* Effect.sleep(Duration.millis(sleepMs))
-						return yield* loop(outcome.rateLimited ? consecutiveRateLimits + 1 : 0)
+						return yield* loop(backingOff ? consecutiveBackoffs + 1 : 0)
 					})
 				// Plain targets have nothing to de-sync against; only stagger the
 				// branches of a discovered (PlanetScale) target so they spread across

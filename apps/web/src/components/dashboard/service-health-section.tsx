@@ -33,6 +33,7 @@ import {
 	type LatencyBaselineSignal,
 	type ServiceHealth,
 } from "./service-health"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 const MAX_ROWS = 7
 
@@ -214,7 +215,7 @@ export function ServiceHealthOverview(props: ServiceHealthProps) {
 		.onSuccess((response, result) => {
 			const counts = countByHealth(enrichServices(response.data, openIncidents, baselineMap))
 			return (
-				<section className={cn("mb-4 space-y-3", result.waiting && "opacity-60 transition-opacity")}>
+				<section className={cn("mb-4 space-y-3 content-enter", result.waiting && "opacity-60")}>
 					{banner}
 					<StatRail>
 						<StatRailItem
@@ -293,7 +294,7 @@ export function ServiceHealthList(props: ServiceHealthProps) {
 		.onSuccess((response, result) => {
 			const rows = enrichServices(response.data, openIncidents, baselineMap).slice(0, MAX_ROWS)
 			return (
-				<section className={cn("mt-4 space-y-3", result.waiting && "opacity-60 transition-opacity")}>
+				<section className={cn("mt-4 space-y-3 content-enter", result.waiting && "opacity-60")}>
 					{header}
 					<Card className="overflow-hidden p-0">
 						{rows.length === 0 ? (
@@ -342,6 +343,7 @@ function ServiceHealthRow({
 					style={{ backgroundColor: HEALTH_DOT_COLOR[health] }}
 				/>
 				<div className="flex min-w-0 flex-1 items-center gap-2">
+					<ServiceDot serviceName={service.serviceName} className="size-1.5" />
 					<span className="truncate text-sm font-medium text-foreground">
 						{service.serviceName}
 					</span>

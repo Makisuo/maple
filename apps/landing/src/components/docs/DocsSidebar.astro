@@ -53,7 +53,7 @@ const universalGroups = orderGroups(groupBy(universalDocs), [...UNIVERSAL_GROUP_
                 <div class="mb-5">
                     <h3 class="flex items-center gap-1.5 text-[10px] text-fg/75 uppercase tracking-wider font-semibold mb-2 px-2">
                         {hasCategoryIcon(groupName) && (
-                            <DocsCategoryIcon name={groupName} class="w-3 h-3 shrink-0 text-accent/80" />
+                            <DocsCategoryIcon name={groupName} class="w-3 h-3 shrink-0 text-primary/80" />
                         )}
                         {groupName}
                     </h3>
@@ -67,7 +67,7 @@ const universalGroups = orderGroups(groupBy(universalDocs), [...UNIVERSAL_GROUP_
                                         class:list={[
                                             "block py-1.5 px-2 text-xs transition-colors",
                                             isActive
-                                                ? "text-accent bg-accent/5 border-l-2 border-accent"
+                                                ? "text-primary bg-primary/5 border-l-2 border-primary"
                                                 : "text-fg-muted hover:text-fg",
                                         ]}
                                     >
@@ -97,7 +97,7 @@ const universalGroups = orderGroups(groupBy(universalDocs), [...UNIVERSAL_GROUP_
         <div class="mb-5">
             <h3 class="flex items-center gap-1.5 text-[10px] text-fg/75 uppercase tracking-wider font-semibold mb-2 px-2">
                 {hasCategoryIcon(groupName) && (
-                    <DocsCategoryIcon name={groupName} class="w-3 h-3 shrink-0 text-accent/80" />
+                    <DocsCategoryIcon name={groupName} class="w-3 h-3 shrink-0 text-primary/80" />
                 )}
                 {groupName}
             </h3>
@@ -111,7 +111,7 @@ const universalGroups = orderGroups(groupBy(universalDocs), [...UNIVERSAL_GROUP_
                                 class:list={[
                                     "block py-1.5 px-2 text-xs transition-colors",
                                     isActive
-                                        ? "text-accent bg-accent/5 border-l-2 border-accent"
+                                        ? "text-primary bg-primary/5 border-l-2 border-primary"
                                         : "text-fg-muted hover:text-fg",
                                 ]}
                             >

@@ -27,6 +27,7 @@ declare global {
 	interface Window {
 		__smBench?: {
 			ready: boolean
+			readyMs: number | null
 			run: (opts?: { durationMs?: number; pan?: boolean }) => Promise<Metrics>
 		}
 	}
@@ -81,6 +82,12 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 	const idle = await page.evaluate(() => window.__smBench!.run({ durationMs: 4000, pan: false }))
 	const pan = await page.evaluate(() => window.__smBench!.run({ durationMs: 4000, pan: true }))
 
+	// Time-to-ready includes the async worker-ELK layout pass — tracked (not
+	// gated: CI runners are too noisy) so layout-cost regressions are visible.
+	const readyMs = await page.evaluate(() => window.__smBench!.readyMs)
+	console.log("[perf] readyMs:", readyMs)
+	test.info().annotations.push({ type: "perf-ready-ms", description: String(readyMs) })
+
 	// Surfaced in CI output + attached to the report for before/after tracking.
 	console.log("[perf] idle:", JSON.stringify(idle))
 	console.log("[perf] pan: ", JSON.stringify(pan))
@@ -113,4 +120,19 @@ test("service map renders filter/SMIL-free and animates smoothly under heavy tra
 		expect(pan.fps, "pan fps").toBeGreaterThan(35)
 		expect(pan.frameP95, "pan p95 frame time (ms)").toBeLessThan(70)
 	}
+})
+
+test("low-traffic filter actually removes edges from the DOM", async ({ page }) => {
+	await page.goto(BENCH_URL)
+	await page.waitForFunction(() => window.__smBench?.ready === true, undefined, { timeout: 60_000 })
+	const baselineEdges = await page.evaluate(() => document.querySelectorAll(".react-flow__edge").length)
+
+	// The bench generator draws edge rates uniformly from [50, 500] rps, so a
+	// realistic 1–5% threshold filters nothing — use 50% of peak to cut ~half.
+	await page.goto(`${BENCH_URL}&minTraffic=50`)
+	await page.waitForFunction(() => window.__smBench?.ready === true, undefined, { timeout: 60_000 })
+	const filteredEdges = await page.evaluate(() => document.querySelectorAll(".react-flow__edge").length)
+
+	expect(filteredEdges, "filtered graph has fewer edges").toBeLessThan(baselineEdges)
+	expect(filteredEdges, "filtered graph still has edges").toBeGreaterThan(0)
 })

@@ -1,20 +1,27 @@
 import { HttpServerRequest } from "effect/unstable/http"
 import type { WarehouseQueryName } from "@maple/domain"
-import { Effect } from "effect"
+import { Context, Effect } from "effect"
 import { resolveMcpTenantContext } from "@/mcp/lib/resolve-tenant"
+import type { TenantContext } from "@/lib/tenant-context"
 import { toMcpQueryError } from "@/mcp/lib/map-warehouse-error"
 import { McpAuthMissingError } from "@/mcp/tools/types"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import { WarehouseExecutor } from "@maple/query-engine/observability"
 import { makeWarehouseExecutorFromTenant } from "@/lib/WarehouseQueryService"
 
-export const resolveTenant = Effect.gen(function* () {
+export class CurrentMcpTenant extends Context.Service<CurrentMcpTenant, TenantContext>()(
+	"@maple/api/mcp/CurrentMcpTenant",
+) {}
+
+export const resolveHttpMcpTenant = Effect.gen(function* () {
 	const req = yield* HttpServerRequest.HttpServerRequest
 	const nativeReq = yield* HttpServerRequest.toWeb(req).pipe(
 		Effect.mapError((e) => new McpAuthMissingError({ message: `Failed to read request: ${e.message}` })),
 	)
 	return yield* resolveMcpTenantContext(nativeReq)
 })
+
+export const resolveTenant = CurrentMcpTenant
 
 /** Infrastructure binding: resolves tenant and provides WarehouseExecutor layer. */
 export const withTenantExecutor = <A, E>(effect: Effect.Effect<A, E, WarehouseExecutor>) =>

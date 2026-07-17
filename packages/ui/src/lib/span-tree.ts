@@ -133,8 +133,20 @@ export function buildSpanTree(spans: Span[]): SpanNode[] {
 		setDepth(root, 0)
 	}
 
+	// Parse each node's startTime once — comparator-side `new Date(...)` costs
+	// O(n log n) parses on 5k-span traces.
+	const epochs = new Map<SpanNode, number>()
+	const epochOf = (node: SpanNode): number => {
+		let epoch = epochs.get(node)
+		if (epoch === undefined) {
+			epoch = new Date(node.startTime).getTime()
+			epochs.set(node, epoch)
+		}
+		return epoch
+	}
+
 	function sortChildren(node: SpanNode) {
-		node.children.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+		node.children.sort((a, b) => epochOf(a) - epochOf(b))
 		for (const child of node.children) {
 			sortChildren(child)
 		}
@@ -144,7 +156,7 @@ export function buildSpanTree(spans: Span[]): SpanNode[] {
 		sortChildren(root)
 	}
 
-	rootSpans.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+	rootSpans.sort((a, b) => epochOf(a) - epochOf(b))
 	return rootSpans
 }
 
@@ -166,16 +178,15 @@ export function buildTraceDetail(rows: ReadonlyArray<SpanHierarchyRow>): TraceDe
 	const rootSpans = buildSpanTree(spans)
 	const totalDurationMs = spans.length > 0 ? Math.max(...spans.map((span) => span.durationMs)) : 0
 	const services = Array.from(new Set(spans.map((span) => span.serviceName).filter(Boolean)))
-	const traceStartTime =
-		spans.length > 0
-			? spans.reduce(
-					(earliest, span) =>
-						new Date(span.startTime).getTime() < new Date(earliest).getTime()
-							? span.startTime
-							: earliest,
-					spans[0].startTime,
-				)
-			: new Date().toISOString()
+	let traceStartTime = spans.length > 0 ? spans[0].startTime : new Date().toISOString()
+	let earliestEpoch = new Date(traceStartTime).getTime()
+	for (const span of spans) {
+		const epoch = new Date(span.startTime).getTime()
+		if (epoch < earliestEpoch) {
+			earliestEpoch = epoch
+			traceStartTime = span.startTime
+		}
+	}
 
 	return { spans, rootSpans, totalDurationMs, services, traceStartTime }
 }

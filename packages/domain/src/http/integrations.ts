@@ -364,6 +364,33 @@ export class PlanetScaleDatabasesResponse extends Schema.Class<PlanetScaleDataba
 }) {}
 
 /**
+ * One Hyperdrive config from the org's polled Cloudflare inventory. The origin fields
+ * identify what actually sits behind the service map's collapsed Hyperdrive node —
+ * the web client matches `originDatabase` against the PlanetScale inventory.
+ */
+export class CloudflareHyperdriveConfigSummary extends Schema.Class<CloudflareHyperdriveConfigSummary>(
+	"CloudflareHyperdriveConfigSummary",
+)({
+	/** Cloudflare's 32-hex Hyperdrive config id. */
+	id: Schema.String,
+	name: Schema.String,
+	/** Null for the VPC-service origin variant (no public host). */
+	originHost: Schema.NullOr(Schema.String),
+	/** Null for the Access-client and VPC origin variants. */
+	originPort: Schema.NullOr(Schema.Number),
+	/** "mysql" | "postgres" | "postgresql". */
+	originScheme: Schema.String,
+	originDatabase: Schema.String,
+	originUser: Schema.NullOr(Schema.String),
+}) {}
+
+export class CloudflareHyperdrivesResponse extends Schema.Class<CloudflareHyperdrivesResponse>(
+	"CloudflareHyperdrivesResponse",
+)({
+	configs: Schema.Array(CloudflareHyperdriveConfigSummary),
+}) {}
+
+/**
  * Manual webhook setup material (admin-only): the endpoint path to register in
  * PlanetScale's per-database webhook settings, and the HMAC secret Maple
  * verifies deliveries with.
@@ -695,6 +722,14 @@ export class IntegrationsApiGroup extends HttpApiGroup.make("integrations")
 		HttpApiEndpoint.delete("cloudflareDisconnect", "/cloudflare", {
 			success: CloudflareDisconnectResponse,
 			error: [IntegrationsForbiddenError, IntegrationsPersistenceError],
+		}),
+	)
+	.add(
+		// The org's polled Hyperdrive config inventory — consumed by the service map to
+		// resolve which origin database (e.g. PlanetScale) sits behind the Hyperdrive node.
+		HttpApiEndpoint.get("cloudflareHyperdrives", "/cloudflare/hyperdrive", {
+			success: CloudflareHyperdrivesResponse,
+			error: IntegrationsPersistenceError,
 		}),
 	)
 	.add(

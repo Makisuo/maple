@@ -66,7 +66,7 @@ export function ServicesFilterSidebar() {
 			const facets = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						{(facets.environments.length ?? 0) > 0 && (

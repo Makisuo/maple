@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { ChevronDownIcon, ChevronRightIcon } from "../icons"
 import { cn } from "../../lib/utils"
-import { getServiceLegendColor } from "../../lib/colors"
+import { getServiceColor } from "../../lib/colors"
 import { formatDuration } from "../../lib/format"
 import { getCacheInfo } from "../../lib/cache"
 import type { TimelineBar, ViewportState } from "./trace-timeline-types"
@@ -16,7 +16,6 @@ interface TraceTimelineRowProps {
 	/** Measured px width of the timeline column — decides which in-bar labels fit. */
 	timelineWidthPx: number
 	viewport: ViewportState
-	services: string[]
 	selected: boolean
 	focused: boolean
 	hovered: boolean
@@ -36,7 +35,6 @@ function TraceTimelineRowImpl({
 	sidebarWidth,
 	timelineWidthPx,
 	viewport,
-	services,
 	selected,
 	focused,
 	hovered,
@@ -114,7 +112,7 @@ function TraceTimelineRowImpl({
 				</span>
 				<span
 					className="truncate text-[10px] shrink-0"
-					style={{ color: getServiceLegendColor(bar.span.serviceName, services) }}
+					style={{ color: getServiceColor(bar.span.serviceName) }}
 				>
 					{bar.span.serviceName}
 				</span>

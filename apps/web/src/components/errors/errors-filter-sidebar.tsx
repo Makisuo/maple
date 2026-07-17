@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
-import { FilterSection, SingleCheckboxFilter } from "@/components/traces/filter-section"
+import { FilterSection, SingleCheckboxFilter, serviceColorMap } from "@/components/traces/filter-section"
 import { Route } from "@/routes/errors/index"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { getErrorsFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -75,7 +75,7 @@ export function ErrorsFilterSidebar() {
 				(facets.errorTypes?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<SingleCheckboxFilter
@@ -108,6 +108,7 @@ export function ErrorsFilterSidebar() {
 									options={facets.services}
 									selected={search.services ?? []}
 									onChange={(val) => updateFilter("services", val)}
+									colorMap={serviceColorMap(facets.services)}
 								/>
 								<Separator className="my-2" />
 							</>

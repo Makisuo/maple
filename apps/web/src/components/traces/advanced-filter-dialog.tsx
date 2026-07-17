@@ -12,6 +12,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Kbd } from "@maple/ui/components/ui/kbd"
 import { MagnifierIcon } from "@/components/icons"
 import { WhereClauseEditor } from "@/components/query-builder/where-clause-editor"
+import { useAutocompleteValuesContextOptional } from "@/hooks/use-autocomplete-values"
 import { useAppHotkey } from "@/hooks/use-app-hotkey"
 
 interface AdvancedFilterDialogProps {
@@ -20,8 +21,16 @@ interface AdvancedFilterDialogProps {
 }
 
 export function AdvancedFilterDialog({ initialValue, onApply }: AdvancedFilterDialogProps) {
-	const [open, setOpen] = React.useState(false)
+	const [open, setOpenState] = React.useState(false)
 	const [value, setValue] = React.useState(initialValue)
+	const autocompleteValues = useAutocompleteValuesContextOptional()
+
+	// Kick off the lazy autocomplete fetches while the dialog animates open so
+	// values are ready by the time the editor is focused.
+	const setOpen = (next: boolean) => {
+		if (next) autocompleteValues?.activate?.()
+		setOpenState(next)
+	}
 
 	React.useEffect(() => {
 		if (open) {

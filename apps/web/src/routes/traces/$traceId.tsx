@@ -11,19 +11,17 @@ import { TraceReplayLink } from "@/components/replays/trace-replay-link"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { TraceViewTabs } from "@maple/ui/components/traces/trace-view-tabs"
 import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
-import { Badge, badgeVariants } from "@maple/ui/components/ui/badge"
+import { TraceAnatomyStrip } from "@/components/traces/trace-anatomy-strip"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
-import { formatDuration } from "@/lib/format"
-import { getServiceLegendColor } from "@maple/ui/lib/colors"
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
+import { useIsMobile } from "@maple/ui/hooks/use-media-query"
 import { type Span, type SpanNode, type SpanHierarchyResponse } from "@/api/warehouse/traces"
 import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { findSpanById } from "@maple/ui/components/traces/flow-utils"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { TraceIdBadge } from "@/components/traces/trace-id-badge"
-import { CommitShaHoverCard } from "@/components/vcs/commit-sha-hover-card"
 import { getHttpInfo } from "@maple/ui/lib/http"
-import { cn } from "@maple/ui/utils"
 
 const TraceDetailSearchSchema = Schema.Struct({
 	spanId: Schema.optional(Schema.String),
@@ -72,10 +70,14 @@ function TraceDetailPage() {
 				description="Loading trace details..."
 			>
 				<div className="space-y-4">
-					<div className="flex gap-2">
-						<Skeleton className="h-5 w-20" />
-						<Skeleton className="h-5 w-20" />
-						<Skeleton className="h-5 w-20" />
+					<div className="space-y-2">
+						<Skeleton className="h-8 w-32" />
+						<Skeleton className="h-1.5 w-full rounded-full" />
+						<div className="flex gap-4">
+							<Skeleton className="h-4 w-24" />
+							<Skeleton className="h-4 w-24" />
+							<Skeleton className="h-4 w-24" />
+						</div>
 					</div>
 					<div className="rounded-md border">
 						{Array.from({ length: 5 }).map((_, i) => (
@@ -213,6 +215,21 @@ function TraceDetailContent({
 		[data.spans],
 	)
 
+	const isMobile = useIsMobile()
+
+	// Shared by both layouts below so the tabs keep their state across a breakpoint change.
+	const traceViewTabs = (
+		<TraceViewTabs
+			rootSpans={data.rootSpans}
+			spans={data.spans}
+			totalDurationMs={data.totalDurationMs}
+			traceStartTime={traceStartTime}
+			services={services}
+			selectedSpanId={selectedSpan?.spanId}
+			onSelectSpan={handleSelectSpan}
+		/>
+	)
+
 	const rootSpan = data.rootSpans[0]
 	const rootHttpInfo = rootSpan ? getHttpInfo(rootSpan) : null
 	const deploymentEnv = rootSpan?.resourceAttributes?.["deployment.environment"]
@@ -244,129 +261,77 @@ function TraceDetailContent({
 					</h1>
 				) : undefined
 			}
-			description={`${data.spans.length} spans across ${services.length} service${services.length !== 1 ? "s" : ""}`}
 			headerActions={
 				<div className="flex items-center gap-2">
 					<TraceReplayLink traceId={traceId} />
 				</div>
 			}
 		>
-			<div className="flex flex-1 flex-col gap-y-3 min-h-0">
-				<div className="flex flex-wrap items-center gap-2 shrink-0">
-					<span className="text-xs text-muted-foreground">Services:</span>
-					{services.map((service: string) => (
-						<Badge
-							key={service}
-							variant="outline"
-							className="font-mono text-xs"
-							style={{ color: getServiceLegendColor(service, services) }}
+			<div className="flex flex-1 flex-col gap-y-3 min-h-0 content-enter">
+				<TraceAnatomyStrip
+					spans={data.spans}
+					totalDurationMs={data.totalDurationMs}
+					traceId={traceId}
+					hasError={hasError}
+					httpStatusCode={rootHttpInfo?.statusCode}
+					deploymentEnv={deploymentEnv}
+					commitSha={commitSha}
+				/>
+
+				{isMobile ? (
+					// A 60/40 side-by-side split leaves each pane ~150px on a phone. Give the waterfall
+					// the full width and float the span detail over it instead.
+					<>
+						<div className="flex-1 min-h-0 rounded-md border overflow-hidden">
+							{traceViewTabs}
+						</div>
+						<Sheet
+							open={selectedSpan != null}
+							onOpenChange={(open) => {
+								if (!open) handleCloseSpanDetails()
+							}}
 						>
-							{service}
-						</Badge>
-					))}
-
-					<span className="ml-4 text-xs text-muted-foreground">Duration:</span>
-					<Badge variant="secondary" className="font-mono text-xs">
-						{formatDuration(data.totalDurationMs)}
-					</Badge>
-
-					<span className="ml-4 text-xs text-muted-foreground">Status:</span>
-					<Badge
-						variant="secondary"
-						className={
-							hasError
-								? "bg-severity-error/15 text-severity-error"
-								: "bg-severity-info/15 text-severity-info"
-						}
-					>
-						{hasError ? "Error" : "OK"}
-					</Badge>
-
-					{rootHttpInfo?.statusCode != null && (
-						<>
-							<span className="ml-4 text-xs text-muted-foreground">HTTP:</span>
-							<Badge
-								variant="secondary"
-								className={
-									rootHttpInfo.statusCode >= 500
-										? "bg-severity-error/15 text-severity-error"
-										: rootHttpInfo.statusCode >= 400
-											? "bg-severity-warn/15 text-severity-warn"
-											: rootHttpInfo.statusCode >= 300
-												? "bg-chart-p50/15 text-chart-p50"
-												: "bg-severity-info/15 text-severity-info"
-								}
-							>
-								{rootHttpInfo.statusCode}
-							</Badge>
-						</>
-					)}
-
-					{deploymentEnv && (
-						<>
-							<span className="ml-4 text-xs text-muted-foreground">Environment:</span>
-							<Badge
-								variant="secondary"
-								className={
-									deploymentEnv === "production"
-										? "bg-severity-warn/15 text-severity-warn"
-										: "bg-chart-p50/15 text-chart-p50"
-								}
-							>
-								{deploymentEnv}
-							</Badge>
-						</>
-					)}
-
-					{commitSha && (
-						<>
-							<span className="ml-4 text-xs text-muted-foreground">Commit:</span>
-							<CommitShaHoverCard
-								sha={commitSha}
-								copy={{ value: commitSha, label: "commit SHA" }}
-								className={cn(
-									badgeVariants({ variant: "outline" }),
-									"max-w-full font-mono text-xs",
+							<SheetContent side="bottom" className="h-[80svh] p-0" showCloseButton={false}>
+								<SheetHeader className="sr-only">
+									<SheetTitle>Span details</SheetTitle>
+									<SheetDescription>Details for the selected span.</SheetDescription>
+								</SheetHeader>
+								{selectedSpan && (
+									<SpanDetailPanel
+										span={selectedSpan}
+										onClose={handleCloseSpanDetails}
+										traceStartTime={traceStartTime}
+										totalDurationMs={data.totalDurationMs}
+									/>
 								)}
-							>
-								{commitSha.slice(0, 7)}
-							</CommitShaHoverCard>
-						</>
-					)}
+							</SheetContent>
+						</Sheet>
+					</>
+				) : (
+					<ResizablePanelGroup
+						orientation="horizontal"
+						className="flex-1 min-h-0 rounded-md border overflow-hidden"
+					>
+						<ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
+							{traceViewTabs}
+						</ResizablePanel>
 
-					<span className="ml-4 text-xs text-muted-foreground">Trace ID:</span>
-					<TraceIdBadge traceId={traceId} size="default" className="text-xs max-w-[10rem]" />
-				</div>
-
-				<ResizablePanelGroup
-					orientation="horizontal"
-					className="flex-1 min-h-0 rounded-md border overflow-hidden"
-				>
-					<ResizablePanel defaultSize={selectedSpan ? 60 : 100} minSize={40}>
-						<TraceViewTabs
-							rootSpans={data.rootSpans}
-							spans={data.spans}
-							totalDurationMs={data.totalDurationMs}
-							traceStartTime={traceStartTime}
-							services={services}
-							selectedSpanId={selectedSpan?.spanId}
-							onSelectSpan={handleSelectSpan}
-						/>
-					</ResizablePanel>
-
-					{selectedSpan && (
-						<>
-							<ResizableHandle withHandle />
-							<ResizablePanel defaultSize={40} minSize={25}>
-								<SpanDetailPanel
-									span={selectedSpan}
-									services={services}
-									onClose={handleCloseSpanDetails}
-								/>
-							</ResizablePanel>
-						</>
-					)}
-				</ResizablePanelGroup>
+						{selectedSpan && (
+							<>
+								<ResizableHandle withHandle />
+								<ResizablePanel defaultSize={40} minSize={25}>
+									<SpanDetailPanel
+										span={selectedSpan}
+										onClose={handleCloseSpanDetails}
+										traceStartTime={traceStartTime}
+										totalDurationMs={data.totalDurationMs}
+										className="panel-enter"
+									/>
+								</ResizablePanel>
+							</>
+						)}
+					</ResizablePanelGroup>
+				)}
 			</div>
 		</DashboardLayout>
 	)

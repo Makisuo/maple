@@ -1,7 +1,8 @@
-import { DashboardDocument, DashboardId, DashboardUpsertRequest } from "@maple/domain/http"
+import { DashboardDocument, DashboardId } from "@maple/domain/http"
+import type { V2DashboardUpdateParams } from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
 import type { Dashboard } from "@/components/dashboard-builder/types"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { createSyncedCollection } from "./shape-fetch"
 
 /**
@@ -80,11 +81,20 @@ export const rowToDashboard = (row: DashboardRow): Dashboard | null => {
 }
 
 /**
- * Builds the upsert payload from a row's optimistic `payload_json`. The stored
+ * Builds the v2 PATCH payload from a row's optimistic `payload_json`. The stored
  * payload never carries `txid` (the API strips it), so nothing to omit here.
  */
-const rowToUpsertRequest = (row: DashboardRow): DashboardUpsertRequest =>
-	new DashboardUpsertRequest({ dashboard: decodeDashboardDocument(row.payload_json) })
+const rowToUpdateRequest = (row: DashboardRow): V2DashboardUpdateParams => {
+	const dashboard = decodeDashboardDocument(row.payload_json)
+	return {
+		name: dashboard.name,
+		description: dashboard.description ?? null,
+		tags: dashboard.tags ?? [],
+		timeRange: dashboard.timeRange,
+		widgets: dashboard.widgets,
+		variables: dashboard.variables ?? [],
+	}
+}
 
 // The API attaches a txid on every successful dashboard write (readTxid over the
 // mutating statement), but `txid` is `Schema.optionalKey` on the response types,
@@ -103,7 +113,7 @@ const requireTxid = (txid: string | undefined): Effect.Effect<number> =>
  * shape stream, and the write handlers are Effect programs run on the shared
  * {@link mapleRuntime} (traced + backoff + stale-cache self-heal). The id embeds
  * the org so a switch mints a fresh collection (discarding the previous org's
- * shape handle/offset) rather than colliding. Writes go through the existing HTTP
+ * shape handle/offset) rather than colliding. Writes go through the public v2 HTTP
  * API and return the Postgres txid, which TanStack DB awaits on the shape stream
  * before dropping optimistic state.
  */
@@ -115,20 +125,20 @@ export const createDashboardsCollection = (orgId: string) =>
 		getKey: (row) => row.id,
 		onUpdate: ({ transaction }) =>
 			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
+				const client = yield* MapleApiV2AtomClient
 				const { modified } = transaction.mutations[0]
-				const result = yield* client.dashboards.upsert({
-					params: { dashboardId: asDashboardId(modified.id) },
-					payload: rowToUpsertRequest(modified),
+				const result = yield* client.dashboards.update({
+					params: { id: asDashboardId(modified.id) },
+					payload: rowToUpdateRequest(modified),
 				})
 				return { txid: yield* requireTxid(result.txid) }
 			}),
 		onDelete: ({ transaction }) =>
 			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
+				const client = yield* MapleApiV2AtomClient
 				const { original } = transaction.mutations[0]
 				const result = yield* client.dashboards.delete({
-					params: { dashboardId: asDashboardId(original.id) },
+					params: { id: asDashboardId(original.id) },
 				})
 				return { txid: yield* requireTxid(result.txid) }
 			}),

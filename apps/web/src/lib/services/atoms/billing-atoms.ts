@@ -7,6 +7,7 @@ import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 export const BILLING_CUSTOMER_KEY = "billingCustomer"
 export const BILLING_PLANS_KEY = "billingPlans"
 export const BILLING_USAGE_KEY = "billingUsage"
+export const BILLING_INVOICES_KEY = "billingInvoices"
 
 // Read atoms. Transient token-settle 401s are retried by the shared client
 // (atom-client.ts scopes a 401 retry to /api/billing/*), and effect-atom
@@ -25,6 +26,10 @@ export const billingPlansAtom = MapleApiAtomClient.query("billingPublic", "listP
 export const billingUsageAtom = MapleApiAtomClient.query("billing", "getUsage", {
 	query: { featureId: ["logs", "traces", "metrics", "browser_sessions"], range: "1bc" },
 	reactivityKeys: [BILLING_USAGE_KEY],
+})
+
+export const billingInvoicesAtom = MapleApiAtomClient.query("billing", "listInvoices", {
+	reactivityKeys: [BILLING_INVOICES_KEY],
 })
 
 // Mutations.

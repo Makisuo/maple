@@ -1,7 +1,8 @@
 import { useSearch } from "@tanstack/react-router"
 import { useMemo } from "react"
 
-import type { AlertDestinationDocument, AlertRuleDocument, DashboardDocument } from "@maple/domain/http"
+import type { AlertDestinationDocument, AlertRuleDocument } from "@maple/domain/http"
+import type { Dashboard } from "@/components/dashboard-builder/types"
 
 import { AlertCreateFormSurface } from "@/components/alerts/alert-create-form-surface"
 import { useAutocompleteValuesContext } from "@/hooks/use-autocomplete-values"
@@ -13,9 +14,9 @@ import {
 	resolveWidgetAlertPrefill,
 	type WidgetAlertPrefillNotice,
 } from "@/lib/alerts/widget-prefill"
-import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useAlertDestinationsList, useAlertRulesList } from "@/hooks/use-alerts-list"
+import { Result } from "@/lib/effect-atom"
+import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 
 type AlertCreateSearchValue = {
 	serviceName?: string
@@ -34,9 +35,6 @@ type InitialRuleDraft = {
 	showTemplatesInitially: boolean
 }
 
-/** Stand-in subscription when the dashboards lookup fallback isn't needed. */
-const idleDashboardsAtom = Atom.make(Result.initial())
-
 export function AlertCreatePageContent() {
 	const search = useSearch({ from: "/alerts/create" }) as AlertCreateSearchValue
 
@@ -51,15 +49,14 @@ export function AlertCreatePageContent() {
 	const needsDashboards =
 		!search.ruleId && chartContext == null && Boolean(search.dashboardId || search.widgetId)
 
-	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", {
-		reactivityKeys: ["alertRules"],
-	})
-	const dashboardsQueryAtom = MapleApiAtomClient.query("dashboards", "list", {
-		reactivityKeys: ["dashboards"],
-	})
 	const { result: destinationsResult } = useAlertDestinationsList()
-	const rulesResult = useAtomValue(rulesQueryAtom)
-	const dashboardsResult = useAtomValue(needsDashboards ? dashboardsQueryAtom : idleDashboardsAtom)
+	const { result: rulesResult } = useAlertRulesList()
+	const { dashboards, isLoading: dashboardsLoading, isError: dashboardsError } = useDashboardsRead()
+	const dashboardsResult = useMemo(() => {
+		if (!needsDashboards || dashboardsLoading) return Result.initial(dashboardsLoading)
+		if (dashboardsError) return Result.fail(new Error("Dashboard sync failed"))
+		return Result.success({ dashboards })
+	}, [needsDashboards, dashboardsLoading, dashboardsError, dashboards])
 
 	const autocompleteValues = useAutocompleteValuesContext()
 	const serviceNameOptions = autocompleteValues.traces.services ?? []
@@ -104,7 +101,7 @@ export function deriveInitialRuleDraft({
 	rulesResult: Result.Result<{ rules: readonly AlertRuleDocument[] }, unknown>
 	dashboardsResult: Result.Result<
 		{
-			dashboards: readonly DashboardDocument[]
+			dashboards: readonly Dashboard[]
 		},
 		unknown
 	>

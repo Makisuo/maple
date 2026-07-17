@@ -22,7 +22,7 @@ export const buildPredictionToolSet = (): ToolSet =>
 /**
  * Like `buildPredictionToolSet` but with a real `execute` that runs the tool
  * handler through the given runtime (which must provide the app services) and a
- * request layer (which carries the tenant). Mirrors
+ * request layer (which carries the resolved tenant). Mirrors
  * apps/chat-agent/src/services/direct-tools.ts `createMapleAiTools`, but the
  * runtime is wired with a FAKE warehouse for full-execution evals.
  */

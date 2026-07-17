@@ -1,17 +1,23 @@
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
-import { Badge } from "@maple/ui/components/ui/badge"
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@maple/ui/components/ui/select"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
-import { cn } from "@maple/ui/lib/utils"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { PageHero, HeroChip } from "@/components/infra/primitives/page-hero"
+import { PlanetScaleBranchTable } from "@/components/infra/planetscale/planetscale-branch-table"
 import { PlanetScaleChart } from "@/components/infra/planetscale/planetscale-chart"
 import { PlanetScaleTopQueries } from "@/components/infra/planetscale/planetscale-top-queries"
 import { chartBucketSeconds } from "@/components/infra/cloudflare/constants"
@@ -20,7 +26,6 @@ import {
 	planetscaleInfraTimeseriesResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { formatNumber } from "@/lib/format"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -36,9 +41,6 @@ export const Route = effectRoute(createFileRoute("/infra/planetscale/$dbName"))(
 	component: PlanetScaleDatabasePage,
 	validateSearch: Schema.toStandardSchemaV1(planetscaleDbSearchSchema),
 })
-
-const formatLag = (seconds: number) =>
-	seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`
 
 function PlanetScaleDatabasePage() {
 	const { dbName } = Route.useParams()
@@ -90,7 +92,7 @@ function PlanetScaleDatabasePage() {
 				<div className="space-y-6">
 					<PageHero
 						title={dbName}
-						description="Branch-level health scraped from PlanetScale's metrics endpoints."
+						description="Branch-level health, live from PlanetScale."
 						meta={
 							database ? (
 								<>
@@ -98,6 +100,7 @@ function PlanetScaleDatabasePage() {
 										{database.kind === "postgresql" ? "Postgres" : "MySQL / Vitess"}
 									</HeroChip>
 									{database.region ? <HeroChip>{database.region}</HeroChip> : null}
+									{database.plan ? <HeroChip>{database.plan}</HeroChip> : null}
 									<HeroChip>
 										{database.branches.length} branch
 										{database.branches.length === 1 ? "" : "es"}
@@ -153,6 +156,18 @@ function PlanetScaleDatabaseData({
 		return map
 	}, [inventoryResult, database])
 
+	// Query-insights branch switcher: ready branches only, production first.
+	// undefined = let the API resolve the production branch.
+	const [insightsBranch, setInsightsBranch] = useState<string | undefined>(undefined)
+	const insightsBranches = useMemo(
+		() =>
+			[...branchInfoByName.entries()]
+				.filter(([, info]) => info.ready)
+				.sort(([, a], [, b]) => Number(b.production) - Number(a.production))
+				.map(([name]) => name),
+		[branchInfoByName],
+	)
+
 	const buckets = Result.builder(timeseriesResult)
 		.onSuccess((r) => r.buckets)
 		.orElse(() => [])
@@ -195,70 +210,43 @@ function PlanetScaleDatabaseData({
 			) : branchStats.length > 0 ? (
 				<div className="space-y-2">
 					<h2 className="text-sm font-medium text-foreground">Branches</h2>
-					<div className="overflow-hidden rounded-lg border border-border/60">
-						<div className="grid grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))] gap-2 border-b border-border/60 bg-muted/40 px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-							<span>Branch</span>
-							<span className="text-right">Connections</span>
-							<span className="text-right">CPU (max)</span>
-							<span className="text-right">Memory (max)</span>
-							<span className="text-right">Replica lag</span>
-						</div>
-						{branchStats.map((row) => {
-							const info = branchInfoByName.get(row.branch)
-							return (
-								<div
-									key={row.branch}
-									className="grid grid-cols-[minmax(0,2fr)_repeat(4,minmax(0,1fr))] items-center gap-2 border-b border-border/40 px-3 py-2.5 text-xs last:border-b-0"
-								>
-									<span className="flex min-w-0 items-center gap-2">
-										<span className="truncate font-mono text-foreground">{row.branch}</span>
-										{info?.production ? (
-											<Badge variant="outline" className="shrink-0">
-												production
-											</Badge>
-										) : null}
-									</span>
-									<span className="text-right font-mono tabular-nums">
-										{formatNumber(row.connectionsAvg)}
-									</span>
-									<span
-										className={cn(
-											"text-right font-mono tabular-nums",
-											row.cpuMaxPercent > 80
-												? "text-severity-error"
-												: row.cpuMaxPercent > 60
-													? "text-severity-warn"
-													: undefined,
-										)}
-									>
-										{row.cpuMaxPercent.toFixed(0)}%
-									</span>
-									<span className="text-right font-mono tabular-nums">
-										{row.memMaxPercent.toFixed(0)}%
-									</span>
-									<span
-										className={cn(
-											"text-right font-mono tabular-nums",
-											row.replicaLagMaxSeconds > 10
-												? "text-severity-error"
-												: row.replicaLagMaxSeconds > 1
-													? "text-severity-warn"
-													: undefined,
-										)}
-									>
-										{formatLag(row.replicaLagMaxSeconds)}
-									</span>
-								</div>
-							)
-						})}
-					</div>
+					<PlanetScaleBranchTable
+						branches={branchStats}
+						branchInfoByName={branchInfoByName}
+						waiting={Boolean(branchStatsResult.waiting)}
+					/>
 				</div>
 			) : null}
 
 			<div className="space-y-2">
-				<h2 className="text-sm font-medium text-foreground">Top Queries (PlanetScale Insights)</h2>
+				<div className="flex items-center justify-between gap-3">
+					<h2 className="text-sm font-medium text-foreground">
+						Top Queries (PlanetScale Insights)
+					</h2>
+					{insightsBranches.length > 1 ? (
+						<Select
+							items={Object.fromEntries(insightsBranches.map((name) => [name, name]))}
+							value={insightsBranch ?? insightsBranches[0] ?? null}
+							onValueChange={(value: string | null) =>
+								setInsightsBranch(value ?? undefined)
+							}
+						>
+							<SelectTrigger size="sm" className="w-44 font-mono text-xs">
+								<SelectValue placeholder="Branch" />
+							</SelectTrigger>
+							<SelectContent>
+								{insightsBranches.map((name) => (
+									<SelectItem key={name} value={name}>
+										{name}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					) : null}
+				</div>
 				<PlanetScaleTopQueries
 					database={database}
+					branch={insightsBranch}
 					startTime={startTime}
 					endTime={endTime}
 					limit={12}

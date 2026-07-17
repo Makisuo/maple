@@ -12,6 +12,7 @@ import {
 	type AlertRulesCollection,
 	type AlertRuleStatesCollection,
 } from "./alerts"
+import { createApiKeysCollection, type ApiKeysCollection } from "./api-keys"
 import { createDashboardsCollection, type DashboardsCollection } from "./dashboards"
 import {
 	createActorsCollection,
@@ -32,6 +33,7 @@ import { createScrapeTargetChecksCollection, type ScrapeTargetChecksCollection }
 export type OrgCollections = {
 	readonly orgId: string
 	readonly generation: number
+	readonly apiKeys: ApiKeysCollection
 	readonly dashboards: DashboardsCollection
 	readonly alertRules: AlertRulesCollection
 	readonly alertRuleStates: AlertRuleStatesCollection
@@ -190,6 +192,7 @@ const cleanupCollectionWhenIdle = (collection: SyncedCollectionLifecycle): void 
 
 /** Tears down a superseded set as each collection drains (see cleanupCollectionWhenIdle). */
 const scheduleOrgCollectionsCleanup = (collections: OrgCollections): void => {
+	cleanupCollectionWhenIdle(collections.apiKeys)
 	cleanupCollectionWhenIdle(collections.dashboards)
 	cleanupCollectionWhenIdle(collections.alertRules)
 	cleanupCollectionWhenIdle(collections.alertRuleStates)
@@ -218,6 +221,7 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 	current = {
 		orgId,
 		generation,
+		apiKeys: createApiKeysCollection(orgId),
 		dashboards: createDashboardsCollection(orgId),
 		alertRules: createAlertRulesCollection(orgId),
 		alertRuleStates: createAlertRuleStatesCollection(orgId),

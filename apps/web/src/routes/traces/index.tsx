@@ -109,13 +109,16 @@ export function TracesPage() {
 	}
 
 	return (
-		<AutocompleteValuesProvider startTime={effectiveStartTime} endTime={effectiveEndTime}>
+		// lazy: the ~4 autocomplete warehouse queries (logs facets + attribute
+		// keys) are only needed by the advanced-filter editor, which calls
+		// activate() on focus/open — don't fire them on every page mount.
+		<AutocompleteValuesProvider lazy startTime={effectiveStartTime} endTime={effectiveEndTime}>
 			<PageRefreshProvider timePreset={search.timePreset ?? "12h"}>
 				<DashboardLayout
 					breadcrumbs={[{ label: "Traces" }]}
 					filterSidebar={<TracesFilterSidebar facetsResult={facetsResult} />}
 					headerActions={
-						<div className="flex items-center gap-2">
+						<div className="flex flex-wrap items-center gap-2">
 							<AdvancedFilterDialog
 								initialValue={search.whereClause ?? ""}
 								onApply={handleApplyWhereClause}

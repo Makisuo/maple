@@ -75,14 +75,35 @@ export const changes = <T extends object>(
 		Effect.acquireRelease(
 			Effect.sync(() => {
 				if (startSync) collection.startSyncImmediate()
+				let closed = false
+				let scheduled = false
 				const offer = () => Queue.offerUnsafe(queue, snapshot(collection))
-				const subscription = collection.subscribeChanges(offer)
-				const offStatus = collection.on("status:change", offer)
+				// A sync transaction that touches N rows fires N change callbacks;
+				// snapshotting each one queues N O(collection) `toArray` copies and N
+				// downstream recomputations for what is one observable state change.
+				// Coalesce same-tick bursts into a single microtask-deferred snapshot.
+				const offerCoalesced = () => {
+					if (scheduled) return
+					scheduled = true
+					queueMicrotask(() => {
+						scheduled = false
+						if (!closed) offer()
+					})
+				}
+				const subscription = collection.subscribeChanges(offerCoalesced)
+				const offStatus = collection.on("status:change", offerCoalesced)
 				offer()
-				return { subscription, offStatus }
+				return {
+					subscription,
+					offStatus,
+					markClosed: () => {
+						closed = true
+					},
+				}
 			}),
-			({ offStatus, subscription }) =>
+			({ markClosed, offStatus, subscription }) =>
 				Effect.sync(() => {
+					markClosed()
 					offStatus()
 					subscription.unsubscribe()
 				}),

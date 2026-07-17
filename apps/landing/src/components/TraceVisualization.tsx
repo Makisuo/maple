@@ -203,7 +203,7 @@ function Waterfall({
 							key={s.spanId}
 							onClick={() => onSelectSpan(s)}
 							className={`flex items-center px-4 py-1.5 text-[10px] transition-colors cursor-pointer ${
-								isSelected ? "bg-primary/5 border-l-2 border-l-accent" : "hover:bg-muted/20"
+								isSelected ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-muted/20"
 							}`}
 						>
 							<div
@@ -272,7 +272,7 @@ export function TraceVisualization() {
 					<div className="flex items-center gap-2 text-[10px] text-muted-foreground">
 						<span>Traces</span>
 						<span className="text-muted-foreground">/</span>
-						<span className="text-accent font-mono">a3f8c1d2</span>
+						<span className="text-primary font-mono">a3f8c1d2</span>
 					</div>
 					<span className="text-[9px] text-muted-foreground border border-border px-2 py-0.5 font-mono">
 						a3f8c1d2e5b7f901
@@ -306,7 +306,7 @@ export function TraceVisualization() {
 						onClick={() => setTab(t)}
 						className={`text-[10px] px-3 py-2 border-b-2 transition-colors ${
 							tab === t
-								? "text-foreground font-medium border-accent"
+								? "text-foreground font-medium border-primary"
 								: "text-muted-foreground border-transparent hover:text-foreground"
 						}`}
 					>

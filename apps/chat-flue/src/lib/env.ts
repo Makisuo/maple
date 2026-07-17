@@ -4,9 +4,9 @@ import type { CloudflareAIBinding } from "@flue/runtime/cloudflare"
 export interface ChatFlueEnv {
 	/** Workers AI binding. Backs the `cloudflare/*` model provider (env.AI.run). */
 	AI: CloudflareAIBinding
-	/** Base URL of the Maple API worker that hosts the MCP server (`/mcp`). */
-	MAPLE_API_URL: string
-	/** Shared secret for Maple internal-service auth (`Bearer maple_svc_<token>`). */
+	/** Private service binding to the Maple API's schemaless RPC surface. */
+	MAPLE_API_RPC: Service
+	/** Shared secret used to authenticate the API's private Flue workflow calls. */
 	INTERNAL_SERVICE_TOKEN: string
 	/** Optional Workers AI model override, e.g. `cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast`. */
 	MAPLE_CHAT_MODEL?: string

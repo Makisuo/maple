@@ -1,39 +1,47 @@
 import {
+	AlertCheckDocument,
 	AlertDestinationDocument,
 	AlertIncidentDocument,
 	AlertRuleDocument,
-	AlertRuleTestRequest,
-	AlertRuleUpsertRequest,
-	DiscordAlertDestinationConfig,
-	HazelAlertDestinationConfig,
+	AlertRulePreviewFiringSpan,
+	AlertRulePreviewPoint,
+	AlertRulePreviewResponse,
+	AlertRulePreviewSeries,
 	HazelChannelId,
-	HazelOAuthAlertDestinationConfig,
 	HazelOrganizationId,
-	PagerDutyAlertDestinationConfig,
-	SlackAlertDestinationConfig,
-	WebhookAlertDestinationConfig,
+	IsoDateTimeString,
 	type AlertComparator,
 	type AlertDeliveryEventDocument,
 	type AlertDeliveryStatus,
-	type AlertDestinationCreateRequest,
 	type AlertDestinationId,
 	type AlertDestinationType,
-	type AlertDestinationUpdateRequest,
 	type AlertEventType,
 	type AlertMetricAggregation,
 	type AlertMetricType,
-	type AlertRuleTestRequest as AlertRuleTestRequestType,
 	type AlertSeverity,
 	type AlertSignalType,
 	type QueryBuilderQueryDraftPayload,
 } from "@maple/domain/http"
+import type {
+	V2AlertCheck,
+	V2AlertDestinationCreateParams,
+	V2AlertDestinationUpdateParams,
+	V2AlertRuleCreateParams,
+	V2AlertRulePreviewResult,
+	V2AlertRuleTestParams,
+} from "@maple/domain/http/v2"
 import type { QueryEngineAlertReducer } from "@maple/query-engine"
 import { Cause, Exit, Option, Schema } from "effect"
+import { v2ErrorInfo } from "@/lib/error-messages"
 import { buildTimeseriesQuerySpec, createQueryDraft } from "@/lib/query-builder/model"
 import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
 const asHazelChannelId = Schema.decodeUnknownSync(HazelChannelId)
+
+// v2 timestamps arrive as plain ISO strings; the v1 domain documents brand them.
+const asIso = (value: string) => IsoDateTimeString.make(value)
+const asIsoOrNull = (value: string | null) => (value === null ? null : asIso(value))
 
 export type RuleFormState = {
 	name: string
@@ -134,6 +142,10 @@ export { destinationTypeLabels } from "@/components/alerts/destination-provider"
 export function getExitErrorMessage(exit: Exit.Exit<unknown, unknown>, fallback: string): string {
 	if (Exit.isSuccess(exit)) return fallback
 	const failure = Option.getOrUndefined(Exit.findErrorOption(exit))
+	// v2 error envelope ({ error: { type, code, message } }) — the message is the
+	// server's human-readable explanation (validation details included).
+	const v2 = v2ErrorInfo(failure)
+	if (v2 !== null && v2.message.trim().length > 0) return v2.message
 	if (failure instanceof Error && failure.message.trim().length > 0) return failure.message
 	if (
 		typeof failure === "object" &&
@@ -361,7 +373,14 @@ export function deriveRuleQueryIssues(form: RuleFormState): string[] {
 	return issues
 }
 
-export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
+/**
+ * Assemble the v2 `POST /v2/alert_rules` body from the form. Field names are
+ * the v2 snake_case wire spelling; IDs stay the internal branded values — the
+ * derived client's `PublicId` codecs encode them to `alrt_…`/`dest_…` on the
+ * wire. `query_builder_draft` is passed verbatim (opaque passthrough, validated
+ * server-side against the full draft schema).
+ */
+export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateParams {
 	const signalType = form.signalType
 	const queryOwnsScope = signalType === "builder_query" || signalType === "raw_query"
 	const notificationTitle = form.notificationTitle.trim()
@@ -373,53 +392,53 @@ export function buildRuleRequest(form: RuleFormState): AlertRuleUpsertRequest {
 					...(notificationBody.length > 0 ? { body: notificationBody } : {}),
 				}
 			: null
-	return new AlertRuleUpsertRequest({
+	return {
 		name: form.name.trim(),
 		notes: form.notes.trim() || null,
 		enabled: form.enabled,
 		severity: form.severity,
 		tags: form.tags,
-		serviceNames: queryOwnsScope ? [] : form.serviceNames.filter((s) => s.trim().length > 0),
-		excludeServiceNames: queryOwnsScope
+		service_names: queryOwnsScope ? [] : form.serviceNames.filter((s) => s.trim().length > 0),
+		exclude_service_names: queryOwnsScope
 			? []
 			: form.excludeServiceNames.filter((s) => s.trim().length > 0),
-		groupBy: queryOwnsScope ? null : form.groupBy.length > 0 ? form.groupBy : null,
-		signalType,
+		group_by: queryOwnsScope ? null : form.groupBy.length > 0 ? form.groupBy : null,
+		signal_type: signalType,
 		comparator: form.comparator,
 		threshold: formThresholdToDomain(signalType, form.threshold),
-		thresholdUpper: isRangeComparator(form.comparator)
+		threshold_upper: isRangeComparator(form.comparator)
 			? Number.isFinite(Number(form.thresholdUpper))
 				? formThresholdToDomain(signalType, form.thresholdUpper)
 				: null
 			: null,
-		windowMinutes: parsePositiveNumber(form.windowMinutes, 5),
-		minimumSampleCount: parseNonNegativeNumber(form.minimumSampleCount, 0),
-		consecutiveBreachesRequired: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
-		consecutiveHealthyRequired: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
-		renotifyIntervalMinutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
-		metricName: signalType === "metric" ? form.metricName.trim() || null : null,
-		metricType: signalType === "metric" ? form.metricType : null,
-		metricAggregation: signalType === "metric" ? form.metricAggregation : null,
-		apdexThresholdMs: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
-		queryBuilderDraft: signalType === "builder_query" ? buildQueryDraftFromForm(form) : null,
-		rawQuerySql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,
-		rawQueryReducer: signalType === "raw_query" ? form.rawQueryReducer : null,
+		window_minutes: parsePositiveNumber(form.windowMinutes, 5),
+		minimum_sample_count: parseNonNegativeNumber(form.minimumSampleCount, 0),
+		consecutive_breaches_required: parsePositiveNumber(form.consecutiveBreachesRequired, 2),
+		consecutive_healthy_required: parsePositiveNumber(form.consecutiveHealthyRequired, 2),
+		renotify_interval_minutes: parsePositiveNumber(form.renotifyIntervalMinutes, 30),
+		metric_name: signalType === "metric" ? form.metricName.trim() || null : null,
+		metric_type: signalType === "metric" ? form.metricType : null,
+		metric_aggregation: signalType === "metric" ? form.metricAggregation : null,
+		apdex_threshold_ms: signalType === "apdex" ? parsePositiveNumber(form.apdexThresholdMs, 500) : null,
+		query_builder_draft: signalType === "builder_query" ? buildQueryDraftFromForm(form) : null,
+		raw_query_sql: signalType === "raw_query" ? form.rawQuerySql.trim() || null : null,
+		raw_query_reducer: signalType === "raw_query" ? form.rawQueryReducer : null,
 		// Dedupe so the same destination is never persisted twice (e.g. when editing a
 		// rule that already had duplicates). The server is authoritative (normalizeRule),
 		// but keeping the request clean avoids a needless write-then-normalize round trip.
-		destinationIds: [...new Set(form.destinationIds)],
-		notificationTemplate,
-	})
+		destination_ids: [...new Set(form.destinationIds)],
+		notification_template: notificationTemplate,
+	}
 }
 
-export function buildRuleTestRequest(
+export function buildRuleTestParamsV2(
 	form: RuleFormState,
 	sendNotification: boolean,
-): AlertRuleTestRequestType {
-	return new AlertRuleTestRequest({
-		rule: buildRuleRequest(form),
-		sendNotification,
-	})
+): V2AlertRuleTestParams {
+	return {
+		rule: buildRuleCreateParamsV2(form),
+		send_notification: sendNotification,
+	}
 }
 
 export function isRulePreviewReady(form: RuleFormState): boolean {
@@ -459,7 +478,11 @@ export type DestinationFormState = {
 	hazelOrganizationLogoUrl: string | null
 	hazelChannelId: string
 	hazelChannelName: string
+	/** Selected workspace-member recipients (email type only). */
+	memberUserIds: string[]
 }
+
+export const MAX_EMAIL_MEMBER_RECIPIENTS = 10
 
 export function defaultDestinationForm(type: AlertDestinationType = "slack"): DestinationFormState {
 	return {
@@ -477,6 +500,7 @@ export function defaultDestinationForm(type: AlertDestinationType = "slack"): De
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
+		memberUserIds: [],
 	}
 }
 
@@ -496,149 +520,236 @@ export function destinationToFormState(destination: AlertDestinationDocument): D
 		hazelOrganizationLogoUrl: null,
 		hazelChannelId: "",
 		hazelChannelName: "",
+		memberUserIds: destination.memberUserIds != null ? [...destination.memberUserIds] : [],
 	}
 }
 
-export function buildDestinationCreatePayload(form: DestinationFormState): AlertDestinationCreateRequest {
+export function buildDestinationCreateParamsV2(form: DestinationFormState): V2AlertDestinationCreateParams {
 	switch (form.type) {
 		case "slack": {
 			const channelLabel = form.channelLabel.trim()
-			return new SlackAlertDestinationConfig({
+			return {
 				type: "slack",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				webhookUrl: form.webhookUrl.trim(),
-				...(channelLabel ? { channelLabel } : {}),
-			})
+				webhook_url: form.webhookUrl.trim(),
+				...(channelLabel ? { channel_label: channelLabel } : {}),
+			}
 		}
 		case "pagerduty":
-			return new PagerDutyAlertDestinationConfig({
+			return {
 				type: "pagerduty",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				integrationKey: form.integrationKey.trim(),
-			})
+				integration_key: form.integrationKey.trim(),
+			}
 		case "webhook": {
 			const signingSecret = form.signingSecret.trim()
-			return new WebhookAlertDestinationConfig({
+			return {
 				type: "webhook",
 				name: form.name.trim(),
 				enabled: form.enabled,
 				url: form.url.trim(),
-				...(signingSecret ? { signingSecret } : {}),
-			})
+				...(signingSecret ? { signing_secret: signingSecret } : {}),
+			}
 		}
 		case "hazel": {
 			const signingSecret = form.signingSecret.trim()
-			return new HazelAlertDestinationConfig({
+			return {
 				type: "hazel",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				webhookUrl: form.hazelWebhookUrl.trim(),
-				...(signingSecret ? { signingSecret } : {}),
-			})
+				webhook_url: form.hazelWebhookUrl.trim(),
+				...(signingSecret ? { signing_secret: signingSecret } : {}),
+			}
 		}
 		case "hazel-oauth": {
 			const logoUrl = form.hazelOrganizationLogoUrl
-			return new HazelOAuthAlertDestinationConfig({
+			return {
 				type: "hazel-oauth",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				hazelOrganizationId: asHazelOrganizationId(form.hazelOrganizationId.trim()),
-				hazelOrganizationName: form.hazelOrganizationName.trim(),
+				hazel_organization_id: asHazelOrganizationId(form.hazelOrganizationId.trim()),
+				hazel_organization_name: form.hazelOrganizationName.trim(),
 				...(logoUrl !== null && logoUrl.trim().length > 0
-					? { hazelOrganizationLogoUrl: logoUrl.trim() }
+					? { hazel_organization_logo_url: logoUrl.trim() }
 					: {}),
-				hazelChannelId: asHazelChannelId(form.hazelChannelId.trim()),
-				hazelChannelName: form.hazelChannelName.trim(),
-			})
+				hazel_channel_id: asHazelChannelId(form.hazelChannelId.trim()),
+				hazel_channel_name: form.hazelChannelName.trim(),
+			}
 		}
 		case "discord":
-			return new DiscordAlertDestinationConfig({
+			return {
 				type: "discord",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				webhookUrl: form.webhookUrl.trim(),
-			})
+				webhook_url: form.webhookUrl.trim(),
+			}
+		case "email":
+			return {
+				type: "email",
+				name: form.name.trim(),
+				enabled: form.enabled,
+				member_user_ids: form.memberUserIds,
+			}
 	}
 }
 
-export function buildDestinationUpdatePayload(form: DestinationFormState): AlertDestinationUpdateRequest {
+/**
+ * v2 PATCH semantics: omitted keys are left unchanged, so blank form fields
+ * (secrets the user didn't re-enter) are dropped from the payload entirely.
+ */
+export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2AlertDestinationUpdateParams {
+	const name = form.name.trim()
 	switch (form.type) {
-		case "slack":
+		case "slack": {
+			const channelLabel = form.channelLabel.trim()
+			const webhookUrl = form.webhookUrl.trim()
 			return {
 				type: "slack",
-				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				channelLabel: form.channelLabel.trim() || undefined,
-				webhookUrl: form.webhookUrl.trim() || undefined,
+				...(name ? { name } : {}),
+				...(channelLabel ? { channel_label: channelLabel } : {}),
+				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
 			}
-		case "pagerduty":
+		}
+		case "pagerduty": {
+			const integrationKey = form.integrationKey.trim()
 			return {
 				type: "pagerduty",
-				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				integrationKey: form.integrationKey.trim() || undefined,
+				...(name ? { name } : {}),
+				...(integrationKey ? { integration_key: integrationKey } : {}),
 			}
-		case "webhook":
+		}
+		case "webhook": {
+			const url = form.url.trim()
+			const signingSecret = form.signingSecret.trim()
 			return {
 				type: "webhook",
-				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				url: form.url.trim() || undefined,
-				signingSecret: form.signingSecret.trim() || undefined,
+				...(name ? { name } : {}),
+				...(url ? { url } : {}),
+				...(signingSecret ? { signing_secret: signingSecret } : {}),
 			}
-		case "hazel":
+		}
+		case "hazel": {
+			const webhookUrl = form.hazelWebhookUrl.trim()
+			const signingSecret = form.signingSecret.trim()
 			return {
 				type: "hazel",
-				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				webhookUrl: form.hazelWebhookUrl.trim() || undefined,
-				signingSecret: form.signingSecret.trim() || undefined,
+				...(name ? { name } : {}),
+				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
+				...(signingSecret ? { signing_secret: signingSecret } : {}),
 			}
-		case "hazel-oauth":
+		}
+		case "hazel-oauth": {
+			const organizationId = form.hazelOrganizationId.trim()
+			const organizationName = form.hazelOrganizationName.trim()
+			const channelId = form.hazelChannelId.trim()
+			const channelName = form.hazelChannelName.trim()
 			return {
 				type: "hazel-oauth",
-				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				hazelOrganizationId: form.hazelOrganizationId.trim()
-					? asHazelOrganizationId(form.hazelOrganizationId.trim())
-					: undefined,
-				hazelOrganizationName: form.hazelOrganizationName.trim() || undefined,
-				hazelOrganizationLogoUrl:
-					form.hazelOrganizationLogoUrl === null
-						? null
-						: form.hazelOrganizationLogoUrl.trim() || undefined,
-				hazelChannelId: form.hazelChannelId.trim()
-					? asHazelChannelId(form.hazelChannelId.trim())
-					: undefined,
-				hazelChannelName: form.hazelChannelName.trim() || undefined,
+				...(name ? { name } : {}),
+				...(organizationId ? { hazel_organization_id: asHazelOrganizationId(organizationId) } : {}),
+				...(organizationName ? { hazel_organization_name: organizationName } : {}),
+				...(form.hazelOrganizationLogoUrl === null
+					? { hazel_organization_logo_url: null }
+					: form.hazelOrganizationLogoUrl.trim()
+						? { hazel_organization_logo_url: form.hazelOrganizationLogoUrl.trim() }
+						: {}),
+				...(channelId ? { hazel_channel_id: asHazelChannelId(channelId) } : {}),
+				...(channelName ? { hazel_channel_name: channelName } : {}),
 			}
-		case "discord":
+		}
+		case "discord": {
+			const webhookUrl = form.webhookUrl.trim()
 			return {
 				type: "discord",
-				name: form.name.trim() || undefined,
 				enabled: form.enabled,
-				webhookUrl: form.webhookUrl.trim() || undefined,
+				...(name ? { name } : {}),
+				...(webhookUrl ? { webhook_url: webhookUrl } : {}),
+			}
+		}
+		case "email":
+			return {
+				type: "email",
+				enabled: form.enabled,
+				...(name ? { name } : {}),
+				...(form.memberUserIds.length > 0 ? { member_user_ids: form.memberUserIds } : {}),
 			}
 	}
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Rule Toggle Helper                                                        */
+/*  v2 Response Mappers                                                       */
 /* -------------------------------------------------------------------------- */
 
-export function buildRuleToggleRequest(rule: AlertRuleDocument): AlertRuleUpsertRequest {
-	return new AlertRuleUpsertRequest({
-		...rule,
-		enabled: !rule.enabled,
-		serviceNames: [...rule.serviceNames],
-		excludeServiceNames: [...rule.excludeServiceNames],
-		metricName: rule.metricName ?? null,
-		metricType: rule.metricType ?? null,
-		metricAggregation: rule.metricAggregation ?? null,
-		apdexThresholdMs: rule.apdexThresholdMs ?? null,
-		destinationIds: [...rule.destinationIds],
+/**
+ * v2 wire types keep snake_case property names after decode, while everything
+ * downstream of the preview/checks fetches (charts, diagnosis, breach stats)
+ * consumes the camelCase domain documents. These two mappers are the inverse of
+ * the server's `toV2Rule`/`toV2Check` and confine the spelling difference to
+ * the fetch boundary.
+ */
+export function v2PreviewToResponse(result: V2AlertRulePreviewResult): AlertRulePreviewResponse {
+	return new AlertRulePreviewResponse({
+		bucketSeconds: result.bucket_seconds,
+		windowMinutes: result.window_minutes,
+		threshold: result.threshold,
+		thresholdUpper: result.threshold_upper,
+		comparator: result.comparator,
+		truncatedToStart: asIsoOrNull(result.truncated_to_start),
+		series: result.series.map(
+			(series) =>
+				new AlertRulePreviewSeries({
+					groupKey: series.group_key,
+					points: series.points.map(
+						(point) =>
+							new AlertRulePreviewPoint({
+								bucket: asIso(point.bucket),
+								value: point.value,
+								sampleCount: point.sample_count,
+								status: point.status,
+								...(point.provisional !== undefined ? { provisional: point.provisional } : {}),
+							}),
+					),
+				}),
+		),
+		wouldFire: result.would_fire.map(
+			(span) =>
+				new AlertRulePreviewFiringSpan({
+					groupKey: span.group_key,
+					start: asIso(span.start),
+					end: asIso(span.end),
+				}),
+		),
+	})
+}
+
+export function v2CheckToDocument(check: V2AlertCheck): AlertCheckDocument {
+	return new AlertCheckDocument({
+		timestamp: asIso(check.timestamp),
+		groupKey: check.group_key,
+		status: check.status,
+		signalType: check.signal_type,
+		comparator: check.comparator,
+		threshold: check.threshold,
+		thresholdUpper: check.threshold_upper,
+		observedValue: check.observed_value,
+		sampleCount: check.sample_count,
+		windowMinutes: check.window_minutes,
+		windowStart: asIso(check.window_start),
+		windowEnd: asIso(check.window_end),
+		consecutiveBreaches: check.consecutive_breaches,
+		consecutiveHealthy: check.consecutive_healthy,
+		incidentId: check.incident_id,
+		incidentTransition: check.incident_transition,
+		evaluationDurationMs: check.evaluation_duration_ms,
+		errorMessage: check.error_message,
+		errorCategory: check.error_category,
 	})
 }
 

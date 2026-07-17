@@ -17,6 +17,7 @@ import {
 	KeyIcon,
 	ServerIcon,
 	ShieldIcon,
+	SquareTerminalIcon,
 	UserIcon,
 	type IconComponent,
 } from "@/components/icons"
@@ -27,6 +28,7 @@ export const settingsTabValues = [
 	"members",
 	"ingestion",
 	"api-keys",
+	"developer",
 	"mcp",
 	"notifications",
 	"escalations",
@@ -41,6 +43,7 @@ export const settingsTabLabels: Record<SettingsTab, string> = {
 	members: "Members",
 	ingestion: "Ingestion",
 	"api-keys": "API Keys",
+	developer: "API Reference",
 	mcp: "MCP",
 	notifications: "Notifications",
 	escalations: "Escalations",
@@ -86,7 +89,8 @@ const navSections: SettingsNavSection[] = [
 		items: [
 			{ id: "ingestion", label: "Ingestion", icon: ServerIcon },
 			{ id: "api-keys", label: "API Keys", icon: KeyIcon },
-			{ id: "mcp", label: "MCP", icon: CodeIcon },
+			{ id: "developer", label: "API Reference", icon: CodeIcon },
+			{ id: "mcp", label: "MCP", icon: SquareTerminalIcon },
 		],
 		links: [{ id: "integrations", label: "Integrations", icon: GridIcon, to: "/integrations" }],
 	},

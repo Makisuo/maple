@@ -105,8 +105,8 @@ const groups: Array<{
 		transition: border-color 180ms ease, background-color 180ms ease, transform 180ms ease;
 	}
 	.cg__card:hover {
-		border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-		background: color-mix(in oklab, var(--accent) 6%, var(--bg-elevated));
+		border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+		background: color-mix(in oklab, var(--primary) 6%, var(--bg-elevated));
 	}
 
 	.cg__head {
@@ -127,7 +127,7 @@ const groups: Array<{
 		margin: 0;
 	}
 	.cg__hash {
-		color: var(--accent);
+		color: var(--primary);
 		opacity: 0.7;
 	}
 	.cg__count {
@@ -145,7 +145,7 @@ const groups: Array<{
 		transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms ease, opacity 160ms ease;
 	}
 	.cg__card:hover .cg__go {
-		color: var(--accent);
+		color: var(--primary);
 		opacity: 1;
 		transform: translateX(4px);
 	}
@@ -168,7 +168,7 @@ const groups: Array<{
 	.cg__cmd {
 		font-family: var(--font-mono);
 		font-size: 12.5px;
-		color: var(--accent);
+		color: var(--primary);
 		background: none;
 		border: 0;
 		padding: 0;

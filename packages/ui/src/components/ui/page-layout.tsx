@@ -2,7 +2,7 @@ import * as React from "react"
 
 import { cn } from "../../lib/utils"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "./sheet"
-import { useIsMobile } from "../../hooks/use-mobile"
+import { useMediaQuery } from "../../hooks/use-media-query"
 
 /* -------------------------------------------------------------------------------------------------
  * Context
@@ -13,7 +13,13 @@ interface PageLayoutContextValue {
 	setIsScrolled: (scrolled: boolean) => void
 	filterSheetOpen: boolean
 	setFilterSheetOpen: (open: boolean) => void
-	isMobile: boolean
+	/**
+	 * The filter sidebar is a sheet rather than an inline aside. Below `lg` the nav rail plus an
+	 * inline filter sidebar leave too little room for page content, so filters move behind a
+	 * trigger. Both the sidebar and its trigger read this so they can never disagree — if they
+	 * did, filters would render as a sheet with no way to open it.
+	 */
+	filterSidebarCollapsed: boolean
 }
 
 const PageLayoutContext = React.createContext<PageLayoutContextValue | null>(null)
@@ -31,11 +37,17 @@ function usePageLayout() {
 function Root({ children, className }: { children: React.ReactNode; className?: string }) {
 	const [isScrolled, setIsScrolled] = React.useState(false)
 	const [filterSheetOpen, setFilterSheetOpen] = React.useState(false)
-	const isMobile = useIsMobile()
+	const filterSidebarCollapsed = useMediaQuery("max-lg")
 
 	const ctx = React.useMemo(
-		() => ({ isScrolled, setIsScrolled, filterSheetOpen, setFilterSheetOpen, isMobile }),
-		[isScrolled, filterSheetOpen, isMobile],
+		() => ({
+			isScrolled,
+			setIsScrolled,
+			filterSheetOpen,
+			setFilterSheetOpen,
+			filterSidebarCollapsed,
+		}),
+		[isScrolled, filterSheetOpen, filterSidebarCollapsed],
 	)
 
 	return (
@@ -94,7 +106,12 @@ function Header({ children, title, titleContent, description, className }: Heade
 
 function HeaderActions({ children, className }: { children: React.ReactNode; className?: string }) {
 	return (
-		<div data-slot="page-header-actions" className={cn("shrink-0 overflow-x-auto", className)}>
+		<div
+			data-slot="page-header-actions"
+			// Only pinned to its natural width once the header goes side-by-side. Below that it must
+			// be free to shrink, or children that wrap internally never get the chance to.
+			className={cn("min-w-0 @2xl/page:shrink-0", className)}
+		>
 			{children}
 		</div>
 	)
@@ -146,9 +163,9 @@ function FilterSidebar({
 	className?: string
 	width?: string
 }) {
-	const { isMobile, filterSheetOpen, setFilterSheetOpen } = usePageLayout()
+	const { filterSidebarCollapsed, filterSheetOpen, setFilterSheetOpen } = usePageLayout()
 
-	if (isMobile) {
+	if (filterSidebarCollapsed) {
 		return (
 			<Sheet open={filterSheetOpen} onOpenChange={setFilterSheetOpen}>
 				<SheetContent side="left" className="w-72 p-4 overflow-y-auto">
@@ -222,12 +239,17 @@ function RightSidebar({ children, className }: { children: React.ReactNode; clas
  * FilterSidebarTrigger — button to open filter sheet on mobile
  * -------------------------------------------------------------------------------------------------*/
 
-function FilterSidebarTrigger({ children }: { children: React.ReactNode }) {
-	const { isMobile, setFilterSheetOpen } = usePageLayout()
+/**
+ * Opens the filter sheet. `children` must be a single interactive element (a Button) — the click
+ * handler is cloned onto it rather than wrapped around it, so the trigger stays one real button and
+ * keeps its keyboard behaviour.
+ */
+function FilterSidebarTrigger({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
+	const { filterSidebarCollapsed, setFilterSheetOpen } = usePageLayout()
 
-	if (!isMobile) return null
+	if (!filterSidebarCollapsed) return null
 
-	return <span onClick={() => setFilterSheetOpen(true)}>{children}</span>
+	return React.cloneElement(children, { onClick: () => setFilterSheetOpen(true) })
 }
 
 /* -------------------------------------------------------------------------------------------------

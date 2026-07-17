@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { memo, useMemo } from "react"
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
@@ -22,7 +22,9 @@ const baseChartConfig = {
 	p50LatencyMs: { label: "P50", color: "var(--chart-p50)" },
 } satisfies ChartConfig
 
-export function LatencyLineChart({
+// Memoized: these charts sit in synced grids whose parent rerenders on every
+// atom/query settle; with stable props the whole Recharts subtree is skipped.
+export const LatencyLineChart = memo(function LatencyLineChart({
 	data,
 	className,
 	legend,
@@ -175,4 +177,4 @@ export function LatencyLineChart({
 			</LineChart>
 		</ChartContainer>
 	)
-}
+})

@@ -21,8 +21,8 @@ import {
 import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
+	getMetricSparklines,
 	getMetricAttributeValues,
-	getMetricTimeSeries,
 	getMetricsSummary,
 	listMetrics,
 } from "@/api/warehouse/metrics"
@@ -45,6 +45,7 @@ import {
 	workloadInfraTimeseries,
 } from "@/api/warehouse/infra"
 import { getServiceUsage } from "@/api/warehouse/service-usage"
+import { getServiceOperations } from "@/api/warehouse/service-operations"
 import {
 	getServiceDependenciesBundle,
 	getServiceMap,
@@ -81,6 +82,7 @@ import {
 	listTraces,
 } from "@/api/warehouse/traces"
 import { getQueryBuilderTimeseries } from "@/api/warehouse/query-builder-timeseries"
+import { getQueryBuilderBreakdown } from "@/api/warehouse/query-builder-breakdown"
 import {
 	getReplay,
 	getReplayEvents,
@@ -160,6 +162,10 @@ export const getServiceUsageResultAtom = makeQueryAtomFamily(getServiceUsage, {
 	staleTime: 60_000,
 })
 
+export const getServiceOperationsResultAtom = makeQueryAtomFamily(getServiceOperations, {
+	staleTime: 30_000,
+})
+
 export const getServicesFacetsResultAtom = makeQueryAtomFamily(getServicesFacets, {
 	// 5 min idle TTL — environments / commit SHAs / service names move slowly,
 	// and the dashboard route now reuses this atom for demo-detection (was a
@@ -198,7 +204,11 @@ export const getTracesFacetValuesResultAtom = makeQueryAtomFamily(getTracesFacet
 	staleTime: 30_000,
 })
 
-export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy)
+// Trace spans are near-immutable once ingested — keep the most expensive
+// detail query warm across back-navigation instead of refetching every mount.
+export const getSpanHierarchyResultAtom = makeQueryAtomFamily(getSpanHierarchy, {
+	staleTime: 60_000,
+})
 
 export const listReplaysResultAtom = makeQueryAtomFamily(listReplays, {
 	staleTime: 30_000,
@@ -281,8 +291,8 @@ export const getMetricsSummaryResultAtom = makeQueryAtomFamily(getMetricsSummary
 	staleTime: 60_000,
 })
 
-export const getMetricTimeSeriesResultAtom = makeQueryAtomFamily(getMetricTimeSeries, {
-	staleTime: 30_000,
+export const getMetricSparklinesResultAtom = makeQueryAtomFamily(getMetricSparklines, {
+	staleTime: 60_000,
 })
 
 export const getMetricAttributeKeysResultAtom = makeQueryAtomFamily(getMetricAttributeKeys, {
@@ -425,6 +435,10 @@ export const getCustomChartTimeSeriesResultAtom = makeQueryAtomFamily(getCustomC
 })
 
 export const getQueryBuilderTimeseriesResultAtom = makeQueryAtomFamily(getQueryBuilderTimeseries, {
+	staleTime: 30_000,
+})
+
+export const getQueryBuilderBreakdownResultAtom = makeQueryAtomFamily(getQueryBuilderBreakdown, {
 	staleTime: 30_000,
 })
 

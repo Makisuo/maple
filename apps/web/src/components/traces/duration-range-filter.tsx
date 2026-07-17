@@ -1,16 +1,16 @@
 import * as React from "react"
-import { ChevronDownIcon } from "@/components/icons"
+import { ChevronDownIcon, XmarkIcon } from "@/components/icons"
 
 import { cn } from "@maple/ui/utils"
 import { Input } from "@maple/ui/components/ui/input"
-import { Label } from "@maple/ui/components/ui/label"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
+
+const COMMIT_DEBOUNCE_MS = 400
 
 interface DurationRangeFilterProps {
 	minValue: number | undefined
 	maxValue: number | undefined
-	onMinChange: (value: number | undefined) => void
-	onMaxChange: (value: number | undefined) => void
+	onRangeChange: (min: number | undefined, max: number | undefined) => void
 	durationStats?: {
 		minDurationMs: number
 		maxDurationMs: number
@@ -23,90 +23,176 @@ interface DurationRangeFilterProps {
 export function DurationRangeFilter({
 	minValue,
 	maxValue,
-	onMinChange,
-	onMaxChange,
+	onRangeChange,
 	durationStats,
-	defaultOpen = true,
+	defaultOpen = false,
 }: DurationRangeFilterProps) {
-	const [isOpen, setIsOpen] = React.useState(defaultOpen)
+	const hasActiveRange = minValue !== undefined || maxValue !== undefined
+	const [isOpen, setIsOpen] = React.useState(defaultOpen || hasActiveRange)
 
-	const handleMinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const val = e.target.value
-		onMinChange(val === "" ? undefined : Number(val))
+	// Inputs edit a local draft; the URL (and the queries behind it) only
+	// updates after a pause in typing, or immediately for preset clicks.
+	const [draft, setDraft] = React.useState({ min: toText(minValue), max: toText(maxValue) })
+	const [prevRange, setPrevRange] = React.useState({ minValue, maxValue })
+	if (prevRange.minValue !== minValue || prevRange.maxValue !== maxValue) {
+		setPrevRange({ minValue, maxValue })
+		setDraft({ min: toText(minValue), max: toText(maxValue) })
 	}
 
-	const handleMaxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const val = e.target.value
-		onMaxChange(val === "" ? undefined : Number(val))
+	const commitTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+	const cancelPendingCommit = () => {
+		if (commitTimer.current !== undefined) {
+			clearTimeout(commitTimer.current)
+			commitTimer.current = undefined
+		}
 	}
+
+	const handleDraftChange = (next: { min: string; max: string }) => {
+		setDraft(next)
+		cancelPendingCommit()
+		commitTimer.current = setTimeout(() => {
+			commitTimer.current = undefined
+			onRangeChange(fromText(next.min), fromText(next.max))
+		}, COMMIT_DEBOUNCE_MS)
+	}
+
+	const applyRange = (min: number | undefined, max: number | undefined) => {
+		cancelPendingCommit()
+		setDraft({ min: toText(min), max: toText(max) })
+		onRangeChange(min, max)
+	}
+
+	const applyPreset = (minMs: number) => {
+		const rounded = Math.round(minMs)
+		if (minValue === rounded && maxValue === undefined) {
+			applyRange(undefined, undefined)
+			return
+		}
+		applyRange(rounded, undefined)
+	}
+
+	const presets: Array<{ key: string; label: string; minMs: number; value: string }> = []
+	if (durationStats && durationStats.p50DurationMs > 0) {
+		presets.push({
+			key: "p50",
+			label: "> p50",
+			minMs: durationStats.p50DurationMs,
+			value: formatDuration(durationStats.p50DurationMs),
+		})
+	}
+	if (durationStats && durationStats.p95DurationMs > 0) {
+		presets.push({
+			key: "p95",
+			label: "> p95",
+			minMs: durationStats.p95DurationMs,
+			value: formatDuration(durationStats.p95DurationMs),
+		})
+	}
+	presets.push({ key: "1s", label: "> 1s", minMs: 1000, value: "" })
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={setIsOpen}>
 			<CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-medium hover:text-foreground text-muted-foreground transition-colors">
-				<span>Duration (ms)</span>
-				<ChevronDownIcon className={cn("size-4 transition-transform", isOpen && "rotate-180")} />
+				<span>Duration</span>
+				<span className="flex items-center gap-1.5">
+					{!isOpen && hasActiveRange && (
+						<span className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-xs tabular-nums text-foreground">
+							{formatRange(minValue, maxValue)}
+							<span
+								role="button"
+								tabIndex={0}
+								aria-label="Clear duration filter"
+								className="rounded-xs hover:text-muted-foreground"
+								onClick={(e) => {
+									e.stopPropagation()
+									applyRange(undefined, undefined)
+								}}
+								onKeyDown={(e) => {
+									if (e.key === "Enter" || e.key === " ") {
+										e.preventDefault()
+										e.stopPropagation()
+										applyRange(undefined, undefined)
+									}
+								}}
+							>
+								<XmarkIcon className="size-3" />
+							</span>
+						</span>
+					)}
+					<ChevronDownIcon className={cn("size-4 transition-transform", isOpen && "rotate-180")} />
+				</span>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="pb-3">
-				<div className="space-y-3">
-					<div className="flex items-center gap-2">
-						<div className="flex-1">
-							<Label
-								htmlFor="min-duration"
-								className="text-xs text-muted-foreground mb-1 block"
-							>
-								Min
-							</Label>
-							<Input
-								id="min-duration"
-								type="number"
-								min={0}
-								placeholder={
-									durationStats ? String(Math.floor(durationStats.minDurationMs)) : "0"
-								}
-								value={minValue ?? ""}
-								onChange={handleMinChange}
-							/>
-						</div>
-						<span className="text-muted-foreground mt-5">-</span>
-						<div className="flex-1">
-							<Label
-								htmlFor="max-duration"
-								className="text-xs text-muted-foreground mb-1 block"
-							>
-								Max
-							</Label>
-							<Input
-								id="max-duration"
-								type="number"
-								min={0}
-								placeholder={
-									durationStats ? String(Math.ceil(durationStats.maxDurationMs)) : ""
-								}
-								value={maxValue ?? ""}
-								onChange={handleMaxChange}
-							/>
-						</div>
+				<div className="space-y-2">
+					<div>
+						{presets.map((preset) => {
+							const isActive = minValue === Math.round(preset.minMs) && maxValue === undefined
+							return (
+								<button
+									key={preset.key}
+									type="button"
+									onClick={() => applyPreset(preset.minMs)}
+									className={cn(
+										"flex w-full items-center justify-between rounded-sm px-1.5 py-1 text-xs transition-colors",
+										isActive
+											? "bg-primary/10 text-foreground"
+											: "text-muted-foreground hover:bg-muted hover:text-foreground",
+									)}
+								>
+									<span>{preset.label}</span>
+									<span className="tabular-nums">{preset.value}</span>
+								</button>
+							)
+						})}
 					</div>
-					{durationStats && (
-						<div className="text-xs text-muted-foreground space-y-1">
-							<div className="flex justify-between">
-								<span>p50:</span>
-								<span className="tabular-nums">
-									{formatDuration(durationStats.p50DurationMs)}
-								</span>
-							</div>
-							<div className="flex justify-between">
-								<span>p95:</span>
-								<span className="tabular-nums">
-									{formatDuration(durationStats.p95DurationMs)}
-								</span>
-							</div>
-						</div>
-					)}
+					<div className="flex items-center gap-1.5">
+						<Input
+							aria-label="Min duration (ms)"
+							type="number"
+							min={0}
+							size="sm"
+							className="text-xs"
+							placeholder="0"
+							value={draft.min}
+							onChange={(e) => handleDraftChange({ ...draft, min: e.target.value })}
+						/>
+						<span className="text-xs text-muted-foreground">–</span>
+						<Input
+							aria-label="Max duration (ms)"
+							type="number"
+							min={0}
+							size="sm"
+							className="text-xs"
+							placeholder="max"
+							value={draft.max}
+							onChange={(e) => handleDraftChange({ ...draft, max: e.target.value })}
+						/>
+						<span className="text-xs text-muted-foreground">ms</span>
+					</div>
 				</div>
 			</CollapsibleContent>
 		</Collapsible>
 	)
+}
+
+function toText(value: number | undefined): string {
+	return value === undefined ? "" : String(value)
+}
+
+function fromText(text: string): number | undefined {
+	if (text.trim() === "") return undefined
+	const value = Number(text)
+	return Number.isFinite(value) && value >= 0 ? value : undefined
+}
+
+function formatRange(minValue: number | undefined, maxValue: number | undefined): string {
+	if (minValue !== undefined && maxValue !== undefined) {
+		return `${formatDuration(minValue)} – ${formatDuration(maxValue)}`
+	}
+	if (minValue !== undefined) {
+		return `≥ ${formatDuration(minValue)}`
+	}
+	return `≤ ${formatDuration(maxValue ?? 0)}`
 }
 
 function formatDuration(ms: number): string {

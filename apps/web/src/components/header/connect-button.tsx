@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { toast } from "sonner"
 
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -22,6 +21,7 @@ import { CopyableField } from "@/components/ingest/copyable-field"
 import { ConnectCredentials } from "@/components/ingest/connect-credentials"
 import { ConnectionStatusPill } from "@/components/ingest/connection-status"
 import { useIngestConnection } from "@/components/ingest/use-ingest-connection"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { mcpUrl } from "@/lib/services/common/mcp-url"
 
 const ONBOARD_SKILL_COMMAND = "bunx skills add Makisuo/maple/skills/maple-onboard"
@@ -102,18 +102,7 @@ function ConnectPanel() {
 }
 
 function McpCard() {
-	const [copied, setCopied] = useState(false)
-
-	async function handleCopy() {
-		try {
-			await navigator.clipboard.writeText(MCP_ENDPOINT)
-			setCopied(true)
-			toast.success("MCP endpoint copied")
-			setTimeout(() => setCopied(false), 1500)
-		} catch {
-			toast.error("Failed to copy MCP endpoint")
-		}
-	}
+	const { copied, copy } = useCopyToClipboard("MCP endpoint")
 
 	return (
 		<div className="group overflow-hidden rounded-lg border bg-muted/30 transition-colors hover:border-foreground/20">
@@ -149,7 +138,7 @@ function McpCard() {
 					variant="ghost"
 					size="icon"
 					className="size-6 shrink-0 text-muted-foreground hover:text-foreground"
-					onClick={handleCopy}
+					onClick={() => copy(MCP_ENDPOINT)}
 					aria-label="Copy MCP endpoint"
 				>
 					{copied ? <CheckIcon size={13} className="text-severity-info" /> : <CopyIcon size={13} />}

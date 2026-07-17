@@ -34,19 +34,25 @@ import {
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
+import { useAtomValue } from "@/lib/effect-atom"
+import { Result } from "@/lib/effect-atom"
+import { getTracesFacetValuesResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 const MAX_RESULTS = 12
 
 interface PaletteEntry {
 	id: string
 	title: string
-	group: "Navigation" | "Dashboards" | "Actions"
+	group: "Navigation" | "Services" | "Dashboards" | "Actions"
 	keywords?: string
 	icon?: typeof GearIcon
 	/** Static route to navigate to (rendered as a router Link). */
 	href?: string
 	/** Dashboard id for /dashboards/$dashboardId entries. */
 	dashboardId?: string
+	/** Service name for /services/$serviceName entries (renders a ServiceDot). */
+	serviceName?: string
 	/** Imperative action (theme toggle, open shortcuts dialog, …). */
 	run?: () => void
 	/** Keyboard shortcut hint shown on the right edge of the row. */
@@ -62,7 +68,12 @@ const FUSE_OPTIONS: IFuseOptions<PaletteEntry> = {
 	threshold: 0.35,
 }
 
-const GROUP_ORDER: ReadonlyArray<PaletteEntry["group"]> = ["Navigation", "Dashboards", "Actions"]
+const GROUP_ORDER: ReadonlyArray<PaletteEntry["group"]> = [
+	"Navigation",
+	"Services",
+	"Dashboards",
+	"Actions",
+]
 
 function groupEntries(entries: PaletteEntry[]): [PaletteEntry["group"], PaletteEntry[]][] {
 	const groups = new Map<PaletteEntry["group"], PaletteEntry[]>()
@@ -114,6 +125,12 @@ function PaletteContent({
 	const { dashboards } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 	const infraEnabled = useInfraEnabled()
+	const servicesFacetResult = useAtomValue(
+		getTracesFacetValuesResultAtom({ data: { facet: "service" } }),
+	)
+	const serviceNames = Result.builder(servicesFacetResult)
+		.onSuccess((r) => r.data.map((item) => item.name))
+		.orElse(() => [])
 
 	// The forced-open Autocomplete stopPropagation()s Escape (and swallows ⌘K)
 	// before the Dialog or the document-level hotkey manager sees it, so handle
@@ -166,6 +183,14 @@ function PaletteContent({
 			},
 		]
 
+		const serviceEntries: PaletteEntry[] = serviceNames.map((name) => ({
+			id: `service:${name}`,
+			title: name,
+			group: "Services" as const,
+			keywords: `service ${name}`,
+			serviceName: name,
+		}))
+
 		const favoriteDashboards = dashboards.filter((d) => favorites.has(d.id))
 		const otherDashboards = dashboards.filter((d) => !favorites.has(d.id))
 		const dashboardEntries: PaletteEntry[] = [...favoriteDashboards, ...otherDashboards].map(
@@ -210,10 +235,17 @@ function PaletteContent({
 			},
 		]
 
-		return [...navigation, ...dashboardEntries, ...actions]
-	}, [dashboards, favorites, infraEnabled, theme, setTheme, onShowShortcuts])
+		return [...navigation, ...serviceEntries, ...dashboardEntries, ...actions]
+	}, [dashboards, favorites, infraEnabled, serviceNames, theme, setTheme, onShowShortcuts])
 
 	const fuse = useMemo(() => new Fuse(entries, FUSE_OPTIONS), [entries])
+
+	// Browse mode shows only a taste of the services list — the full set stays
+	// searchable, but dozens of service rows shouldn't bury Dashboards/Actions.
+	const browseEntries = useMemo(() => {
+		let serviceCount = 0
+		return entries.filter((entry) => entry.group !== "Services" || serviceCount++ < 5)
+	}, [entries])
 
 	// `null` => browse mode (empty query); otherwise the ranked Fuse hits.
 	const results = useMemo<PaletteEntry[] | null>(() => {
@@ -225,11 +257,29 @@ function PaletteContent({
 	const renderEntry = (entry: PaletteEntry) => {
 		const content = (
 			<>
-				{entry.icon ? <entry.icon size={16} className="shrink-0 text-muted-foreground" /> : null}
+				{entry.serviceName !== undefined ? (
+					<ServiceDot serviceName={entry.serviceName} />
+				) : entry.icon ? (
+					<entry.icon size={16} className="shrink-0 text-muted-foreground" />
+				) : null}
 				<span className="truncate text-sm">{entry.title}</span>
 				{entry.shortcut ? <CommandShortcut>{entry.shortcut}</CommandShortcut> : null}
 			</>
 		)
+		if (entry.serviceName !== undefined) {
+			const serviceName = entry.serviceName
+			return (
+				<CommandItem
+					key={entry.id}
+					value={entry.id}
+					className="flex items-center gap-2"
+					render={<Link to="/services/$serviceName" params={{ serviceName }} />}
+					onClick={close}
+				>
+					{content}
+				</CommandItem>
+			)
+		}
 		if (entry.dashboardId !== undefined) {
 			const dashboardId = entry.dashboardId
 			return (
@@ -273,7 +323,7 @@ function PaletteContent({
 		)
 	}
 
-	const grouped = groupEntries(results ?? entries)
+	const grouped = groupEntries(results ?? browseEntries)
 
 	return (
 		<CommandDialogPopup>

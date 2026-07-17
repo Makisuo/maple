@@ -64,18 +64,18 @@ export function useQueryParams(): readonly [
 	URLSearchParams,
 	(updates: Record<string, string | null | undefined>) => void,
 ] {
-	const { path, query } = useLocation()
-	const queryString = query.toString()
-	const setParams = useCallback(
-		(updates: Record<string, string | null | undefined>) => {
-			const next = new URLSearchParams(queryString)
-			for (const [key, value] of Object.entries(updates)) {
-				if (value == null || value === "") next.delete(key)
-				else next.set(key, value)
-			}
-			navigate(path, next, { replace: true })
-		},
-		[path, queryString],
-	)
+	const { query } = useLocation()
+	const setParams = useCallback((updates: Record<string, string | null | undefined>) => {
+		// Read the live hash rather than the render-captured location: handlers
+		// that call setParams twice in one tick (e.g. a duration preset setting
+		// min and clearing max) would otherwise clobber each other's update.
+		const current = parseLocation(getHash())
+		const next = new URLSearchParams(current.query)
+		for (const [key, value] of Object.entries(updates)) {
+			if (value == null || value === "") next.delete(key)
+			else next.set(key, value)
+		}
+		navigate(current.path, next, { replace: true })
+	}, [])
 	return [query, setParams] as const
 }

@@ -29,6 +29,7 @@ export const HttpApiKeysLive = HttpApiBuilder.group(MapleApi, "apiKeys", (handle
 						description: payload.description,
 						expiresInSeconds: payload.expiresInSeconds,
 						kind: payload.kind,
+						scopes: payload.scopes,
 						createdByEmail,
 					})
 				}),

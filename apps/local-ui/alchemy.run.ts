@@ -1,5 +1,8 @@
 import path from "node:path"
-import { Vite } from "alchemy/cloudflare"
+import * as Cloudflare from "alchemy/Cloudflare"
+import * as Command from "alchemy/Command"
+import * as Output from "alchemy/Output"
+import * as Effect from "effect/Effect"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
 	resolveWorkerName,
@@ -17,20 +20,25 @@ export interface CreateLocalUiWorkerOptions {
 // and embeds this same build only as the `--offline` fallback.
 //
 // It's a plain Vite SPA that builds flat to `dist/` (the `maple` binary embeds
-// that same `dist/` via rust-embed — see `apps/cli/src/server/ui-assets.ts`).
-// The `Vite` helper otherwise defaults its asset directory to `dist/client`
-// whenever an `entrypoint` is set (the TanStack-Start layout), which doesn't
-// exist here — so pin `assets` to `dist` to match the flat build.
-export const createLocalUiWorker = async ({ stage, domains }: CreateLocalUiWorkerOptions) => {
-	const worker = await Vite("local-ui", {
-		name: resolveWorkerName("local-ui", stage),
-		adopt: true,
-		cwd: import.meta.dirname,
-		entrypoint: path.join(import.meta.dirname, "src", "worker.ts"),
-		assets: "dist",
-		placement: CLOUDFLARE_WORKER_PLACEMENT,
-		domains: domains.local ? [{ domainName: domains.local, adopt: true }] : undefined,
-	})
+// that same `dist/` via rust-embed — see `apps/cli/src/server/ui-assets.ts`), so
+// the build stays a plain `vite build` via Command.Build and the worker serves
+// the flat `dist/` as assets with the SPA fallback in `src/worker.ts`.
+export const createLocalUiWorker = ({ stage, domains }: CreateLocalUiWorkerOptions) =>
+	Effect.gen(function* () {
+		const build = yield* Command.Build("local-ui-build", {
+			command: "bun run build",
+			cwd: import.meta.dirname,
+			outdir: "dist",
+		})
 
-	return worker
-}
+		const worker = yield* Cloudflare.Worker<{}, Cloudflare.AssetsWithHash>("local-ui", {
+			name: resolveWorkerName("local-ui", stage),
+			main: path.join(import.meta.dirname, "src", "worker.ts"),
+			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
+			placement: CLOUDFLARE_WORKER_PLACEMENT,
+			url: true,
+			domain: domains.local,
+		})
+
+		return worker
+	})

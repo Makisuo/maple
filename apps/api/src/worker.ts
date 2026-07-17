@@ -1,8 +1,14 @@
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
-import { runScheduledEffect, WorkerConfigProviderLayer, WorkerEnvironment } from "@maple/effect-cloudflare"
-import { Context, FileSystem, Layer, Path } from "effect"
+import {
+	layerFromEnvRecord,
+	runScheduledEffect,
+	WorkerConfigProviderLayer,
+	WorkerEnvironment,
+} from "@maple/effect-cloudflare"
+import { WorkerEntrypoint } from "cloudflare:workers"
+import { Cause, Context, Effect, FileSystem, Layer, ManagedRuntime, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
 import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
@@ -79,14 +85,12 @@ const passThroughMiddleware: HttpMiddleware.HttpMiddleware = (httpApp) => httpAp
 // the top level near-empty; the cost moves to the first request, which runs
 // under the far larger per-request CPU budget.
 const buildHandler = async () => {
-	const { AllRoutes, ApiAuthLive, InternalServiceAuthLive, ApiObservabilityLive, MainLive } =
-		await import("./app")
+	const { AllRoutes, ApiAuthLive, ApiObservabilityLive, MainLive } = await import("./app")
 	const { layerPg } = await import("./lib/DatabasePgLive")
 	return HttpRouter.toWebHandler(
 		AllRoutes.pipe(
 			Layer.provideMerge(MainLive),
 			Layer.provideMerge(ApiAuthLive),
-			Layer.provideMerge(InternalServiceAuthLive),
 			Layer.provideMerge(ApiObservabilityLive),
 			Layer.provideMerge(WorkerPlatformLive),
 			Layer.provideMerge(layerPg),
@@ -105,6 +109,74 @@ const buildHandler = async () => {
 // isolate.
 let handlerPromise: ReturnType<typeof buildHandler> | undefined
 const getHandler = () => (handlerPromise ??= buildHandler())
+
+// RPC has no HttpApi request to construct the application services for it, so
+// it gets a sibling isolate-wide ManagedRuntime. The heavy route/service graph
+// stays behind a dynamic import, preserving the worker's startup-CPU budget.
+const buildRpcRuntime = async (env: Record<string, unknown>) => {
+	const { MainLive } = await import("./app")
+	const { layerPg } = await import("./lib/DatabasePgLive")
+	return ManagedRuntime.make(
+		MainLive.pipe(
+			Layer.provideMerge(WorkerPlatformLive),
+			Layer.provideMerge(layerPg),
+			Layer.provideMerge(layerFromEnvRecord(env)),
+			Layer.provideMerge(telemetry.layer),
+			Layer.provideMerge(WorkerConfigProviderLayer),
+		),
+	)
+}
+
+let rpcRuntimePromise: ReturnType<typeof buildRpcRuntime> | undefined
+const getRpcRuntime = (env: Record<string, unknown>) => (rpcRuntimePromise ??= buildRpcRuntime(env))
+
+type InternalRpcMethod = "listMcpTools" | "callMcpTool" | "submitDiagnosis"
+
+const ALCHEMY_RPC_ERROR_TAG = "~alchemy/rpc/error" as const
+
+// Alchemy's schemaless RPC error envelope is deliberately tiny. Keeping this
+// encoder local avoids pulling its full Worker bridge into an already large API
+// bundle; chat-flue's `toRpcAsync` decodes this exact public wire shape.
+const encodeRpcError = (error: unknown): unknown => {
+	if (error == null || typeof error !== "object") return error
+	const object = error as Record<string, unknown>
+	if (typeof object._tag === "string") {
+		const encoded = Object.fromEntries(Object.keys(object).map((key) => [key, object[key]]))
+		if (error instanceof Error && !("message" in encoded)) encoded.message = error.message
+		return encoded
+	}
+	if (error instanceof Error) {
+		return { name: error.name, message: error.message, stack: error.stack }
+	}
+	return error
+}
+
+const runInternalRpc = async (
+	method: InternalRpcMethod,
+	input: unknown,
+	env: Record<string, unknown>,
+	ctx: ExecutionContext,
+) => {
+	const [runtime, rpc] = await Promise.all([getRpcRuntime(env), import("./internal-rpc")])
+	const program =
+		method === "listMcpTools"
+			? rpc.listMcpToolsRpc
+			: method === "callMcpTool"
+				? rpc.callMcpToolRpc(input)
+				: rpc.submitDiagnosisRpc(input)
+	const exit = await runtime.runPromiseExit(program as Effect.Effect<unknown, unknown, never>)
+	ctx.waitUntil(flushTelemetry(env))
+	if (exit._tag === "Success") return exit.value
+	const failure = exit.cause.reasons.find(Cause.isFailReason)
+	if (failure) {
+		return {
+			_tag: ALCHEMY_RPC_ERROR_TAG,
+			error: encodeRpcError(failure.error),
+		}
+	}
+	const defect = exit.cause.reasons.find(Cause.isDieReason)
+	throw defect?.defect ?? new Error("RPC method failed with an unexpected cause")
+}
 
 const isMcpPost = (request: Request): boolean => {
 	if (request.method !== "POST") return false
@@ -257,11 +329,34 @@ const handleScheduled = async (env: Record<string, unknown>, ctx: ExecutionConte
 	}
 }
 
-export default {
-	fetch: (request: Request, env: Record<string, unknown>, ctx: ExecutionContext) =>
-		handle(request, env, ctx),
-	queue: (batch: MessageBatch<unknown>, env: Record<string, unknown>, ctx: ExecutionContext) =>
-		handleQueue(batch, env, ctx),
-	scheduled: (_event: ScheduledController, env: Record<string, unknown>, ctx: ExecutionContext) =>
-		handleScheduled(env, ctx),
+/**
+ * Class entrypoint keeps fetch/queue/cron intact while publishing Alchemy's
+ * schemaless RPC methods over a Cloudflare service binding. RPC failures are
+ * encoded with Alchemy's wire envelope so a plain Worker caller can recover tagged
+ * Effect errors via `toRpcAsync`.
+ */
+export default class MapleApiWorker extends WorkerEntrypoint<Record<string, unknown>> {
+	override fetch(request: Request): Promise<Response> {
+		return handle(request, this.env, this.ctx)
+	}
+
+	override queue(batch: MessageBatch<unknown>): Promise<void> {
+		return handleQueue(batch, this.env, this.ctx)
+	}
+
+	override scheduled(_event: ScheduledController): Promise<void> {
+		return handleScheduled(this.env, this.ctx)
+	}
+
+	listMcpTools() {
+		return runInternalRpc("listMcpTools", undefined, this.env, this.ctx)
+	}
+
+	callMcpTool(input: unknown) {
+		return runInternalRpc("callMcpTool", input, this.env, this.ctx)
+	}
+
+	submitDiagnosis(input: unknown) {
+		return runInternalRpc("submitDiagnosis", input, this.env, this.ctx)
+	}
 }

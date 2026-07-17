@@ -8,12 +8,14 @@ import {
 	ApiKeyResponse,
 	ApiKeysListResponse,
 	OrgId,
+	type PostgresTransactionId,
 	UserId,
 } from "@maple/domain/http"
 import { API_KEY_PREFIX, apiKeys, generateApiKey, hashApiKey, parseIngestKeyLookupHmacKey } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
 import { Clock, Effect, Layer, Option, Redacted, Schema, Context } from "effect"
 import { Database } from "../lib/DatabaseLive"
+import { readTxid, txidColumn } from "../lib/electric-txid"
 import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 
@@ -22,6 +24,8 @@ interface ResolvedApiKey {
 	readonly userId: UserId
 	readonly keyId: ApiKeyId
 	readonly metadataJson: string | null
+	/** v2 scope strings; null = legacy full access. */
+	readonly scopes: ReadonlyArray<string> | null
 }
 
 const decodeApiKeyIdSync = Schema.decodeUnknownSync(ApiKeyId)
@@ -33,13 +37,14 @@ const toPersistenceError = (error: unknown) =>
 		message: error instanceof Error ? error.message : "API key persistence failed",
 	})
 
-const rowToResponse = (row: typeof apiKeys.$inferSelect): ApiKeyResponse =>
+const rowToResponse = (row: typeof apiKeys.$inferSelect, txid?: PostgresTransactionId): ApiKeyResponse =>
 	new ApiKeyResponse({
 		id: decodeApiKeyIdSync(row.id),
 		name: row.name,
 		description: row.description ?? null,
 		keyPrefix: row.keyPrefix,
 		kind: row.kind,
+		scopes: row.scopes ?? null,
 		revoked: row.revoked,
 		revokedAt: dateToMs(row.revokedAt),
 		lastUsedAt: dateToMs(row.lastUsedAt),
@@ -47,6 +52,7 @@ const rowToResponse = (row: typeof apiKeys.$inferSelect): ApiKeyResponse =>
 		createdAt: row.createdAt.getTime(),
 		createdBy: decodeUserIdSync(row.createdBy),
 		createdByEmail: row.createdByEmail ?? null,
+		...(txid !== undefined ? { txid } : {}),
 	})
 
 export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/api/services/ApiKeysService", {
@@ -79,6 +85,11 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			return yield* Effect.fail(new ApiKeyNotFoundError({ keyId, message: "API key not found" }))
 		})
 
+		const get = Effect.fn("ApiKeysService.get")(function* (orgId: OrgId, keyId: ApiKeyId) {
+			const row = yield* requireById(orgId, keyId)
+			return rowToResponse(row)
+		})
+
 		const list = Effect.fn("ApiKeysService.list")(function* (orgId: OrgId) {
 			const rows = yield* database
 				.execute((db) =>
@@ -91,7 +102,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				.pipe(Effect.mapError(toPersistenceError))
 
 			return new ApiKeysListResponse({
-				keys: rows.map(rowToResponse),
+				keys: rows.map((row) => rowToResponse(row)),
 			})
 		})
 
@@ -103,6 +114,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				description?: string
 				expiresInSeconds?: number
 				kind?: ApiKeyKind
+				scopes?: ReadonlyArray<string> | null
 				createdByEmail?: string | null
 			},
 		) {
@@ -113,25 +125,31 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			const now = yield* Clock.currentTimeMillis
 			const expiresAt = params.expiresInSeconds ? now + params.expiresInSeconds * 1000 : undefined
 			const kind: ApiKeyKind = params.kind ?? "standard"
+			const scopes = params.scopes == null ? null : [...params.scopes]
 			const createdByEmail = params.createdByEmail ?? null
 
-			yield* database
+			const inserted = yield* database
 				.execute((db) =>
-					db.insert(apiKeys).values({
-						id,
-						orgId,
-						name: params.name,
-						description: params.description ?? null,
-						keyHash,
-						keyPrefix,
-						kind,
-						expiresAt: msToDate(expiresAt),
-						createdAt: new Date(now),
-						createdBy: userId,
-						createdByEmail,
-					}),
+					db
+						.insert(apiKeys)
+						.values({
+							id,
+							orgId,
+							name: params.name,
+							description: params.description ?? null,
+							keyHash,
+							keyPrefix,
+							kind,
+							scopes,
+							expiresAt: msToDate(expiresAt),
+							createdAt: new Date(now),
+							createdBy: userId,
+							createdByEmail,
+						})
+						.returning(txidColumn),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
+			const txid = readTxid(inserted)
 
 			return new ApiKeyCreatedResponse({
 				id,
@@ -139,6 +157,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				description: params.description ?? null,
 				keyPrefix,
 				kind,
+				scopes,
 				revoked: false,
 				revokedAt: null,
 				lastUsedAt: null,
@@ -147,6 +166,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdBy: userId,
 				createdByEmail,
 				secret: rawKey,
+				...(txid !== undefined ? { txid } : {}),
 			})
 		})
 
@@ -172,7 +192,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			const now = yield* Clock.currentTimeMillis
 			const createdByEmail = params.createdByEmail ?? null
 
-			yield* database
+			const rolledRows = yield* database
 				.execute((db) =>
 					db.transaction(async (tx) => {
 						await tx.insert(apiKeys).values({
@@ -183,18 +203,21 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 							keyHash,
 							keyPrefix,
 							kind: existing.kind,
+							scopes: existing.scopes ?? null,
 							expiresAt: null,
 							createdAt: new Date(now),
 							createdBy: userId,
 							createdByEmail,
 						})
-						await tx
+						return tx
 							.update(apiKeys)
 							.set({ revoked: true, revokedAt: new Date(now) })
 							.where(eq(apiKeys.id, keyId))
+							.returning(txidColumn)
 					}),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
+			const txid = readTxid(rolledRows)
 
 			return new ApiKeyCreatedResponse({
 				id,
@@ -202,6 +225,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				description: existing.description ?? null,
 				keyPrefix,
 				kind: existing.kind,
+				scopes: existing.scopes ?? null,
 				revoked: false,
 				revokedAt: null,
 				lastUsedAt: null,
@@ -210,6 +234,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				createdBy: userId,
 				createdByEmail,
 				secret: rawKey,
+				...(txid !== undefined ? { txid } : {}),
 			})
 		})
 
@@ -217,16 +242,18 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			const now = yield* Clock.currentTimeMillis
 			const row = yield* requireById(orgId, keyId)
 
-			yield* database
+			const revokedRows = yield* database
 				.execute((db) =>
 					db
 						.update(apiKeys)
 						.set({ revoked: true, revokedAt: new Date(now) })
-						.where(eq(apiKeys.id, keyId)),
+						.where(eq(apiKeys.id, keyId))
+						.returning(txidColumn),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
+			const txid = readTxid(revokedRows)
 
-			return rowToResponse({ ...row, revoked: true, revokedAt: new Date(now) })
+			return rowToResponse({ ...row, revoked: true, revokedAt: new Date(now) }, txid)
 		})
 
 		const resolveByKey = Effect.fn("ApiKeysService.resolveByKey")(function* (rawKey: string) {
@@ -249,8 +276,8 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				orgId: decodeOrgIdSync(row.value.orgId),
 				userId: decodeUserIdSync(row.value.createdBy),
 				keyId: decodeApiKeyIdSync(row.value.id),
-				metadataJson:
-					row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
+				metadataJson: row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
+				scopes: row.value.scopes ?? null,
 			} satisfies ResolvedApiKey)
 		})
 
@@ -258,7 +285,10 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 			const now = yield* Clock.currentTimeMillis
 			yield* database
 				.execute((db) =>
-					db.update(apiKeys).set({ lastUsedAt: new Date(now) }).where(eq(apiKeys.id, keyId)),
+					db
+						.update(apiKeys)
+						.set({ lastUsedAt: new Date(now) })
+						.where(eq(apiKeys.id, keyId)),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 		})
@@ -278,6 +308,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 		})
 
 		return {
+			get,
 			list,
 			create,
 			roll,

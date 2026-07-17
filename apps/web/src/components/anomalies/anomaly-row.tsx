@@ -1,7 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import type { AnomalyIncidentDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
-import { getServiceColorClass } from "@maple/ui/lib/colors"
 
 import { shortIssueId } from "@/components/errors/issue-id"
 import { LinkIcon } from "@/components/icons"
@@ -14,6 +13,7 @@ import {
 	severityToneFor,
 	TRIAGE_STATUS_CHIP,
 } from "./anomaly-format"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 
 export interface AnomalyRowProps {
 	incident: AnomalyIncidentDocument
@@ -96,13 +96,7 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 					className="relative z-10 hidden h-5 min-w-0 shrink items-center gap-1.5 rounded-full border border-border/70 bg-background px-2 text-[11px] text-muted-foreground md:inline-flex"
 					title={incident.serviceName}
 				>
-					<span
-						aria-hidden
-						className={cn(
-							"size-1.5 shrink-0 rounded-full",
-							getServiceColorClass(incident.serviceName),
-						)}
-					/>
+					<ServiceDot serviceName={incident.serviceName} className="size-1.5" />
 					<span className="max-w-[140px] truncate">{incident.serviceName}</span>
 				</span>
 			) : null}

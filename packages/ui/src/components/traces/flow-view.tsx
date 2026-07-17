@@ -14,7 +14,7 @@ import "@xyflow/react/dist/style.css"
 import { EyeIcon } from "../icons"
 
 import { Button } from "../ui/button"
-import { getServiceLegendColor } from "../../lib/colors"
+import { getServiceColor } from "../../lib/colors"
 import { FlowSpanNode } from "./flow-node"
 import { transformSpansToFlow, getLayoutedElements, findSpanById, type FlowNodeData } from "./flow-utils"
 import type { SpanNode } from "../../lib/types"
@@ -129,7 +129,7 @@ export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpa
 							if (data.span.statusCode === "Error") {
 								return "oklch(0.62 0.20 25)"
 							}
-							return getServiceLegendColor(data.span.serviceName, data.services)
+							return getServiceColor(data.span.serviceName)
 						}}
 						maskColor="oklch(0.15 0 0 / 0.8)"
 						className="!bg-muted/50 !border-border"
@@ -152,7 +152,7 @@ export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpa
 						<div key={service} className="flex items-center gap-1.5">
 							<div
 								className="h-3 w-3"
-								style={{ backgroundColor: getServiceLegendColor(service, services) }}
+								style={{ backgroundColor: getServiceColor(service) }}
 							/>
 							<span className="font-medium">{service}</span>
 						</div>

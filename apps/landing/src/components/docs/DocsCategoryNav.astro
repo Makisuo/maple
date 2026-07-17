@@ -41,20 +41,20 @@ for (const item of HEADER_NAV) {
 			aria-current={cat.active ? "page" : undefined}
 			class:list={[
 				"group relative flex items-center gap-2 px-2.5 text-[11px] font-medium whitespace-nowrap transition-colors",
-				cat.active ? "text-accent" : "text-fg-muted hover:text-fg",
+				cat.active ? "text-primary" : "text-fg-muted hover:text-fg",
 			]}
 		>
 			<DocsCategoryIcon
 				name={cat.icon}
 				class:list={[
 					"w-3.5 h-3.5 shrink-0 transition-colors",
-					cat.active ? "text-accent" : "text-fg-muted/70 group-hover:text-fg-muted",
+					cat.active ? "text-primary" : "text-fg-muted/70 group-hover:text-fg-muted",
 				]}
 			/>
 			<span class="tracking-wide">{cat.label}</span>
 			<span
 				class:list={[
-					"pointer-events-none absolute inset-x-1 -bottom-px h-0.5 bg-accent transition-opacity",
+					"pointer-events-none absolute inset-x-1 -bottom-px h-0.5 bg-primary transition-opacity",
 					cat.active ? "opacity-100" : "opacity-0 group-hover:opacity-30",
 				]}
 			></span>

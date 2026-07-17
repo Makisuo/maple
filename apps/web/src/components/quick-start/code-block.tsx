@@ -1,8 +1,6 @@
-import { useState } from "react"
-import { toast } from "sonner"
 import { CopyIcon, CheckIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
-import { useClipboard } from "@maple/ui/hooks/use-clipboard"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { highlightCode } from "@/lib/sugar-high"
 
 interface CodeBlockProps {
@@ -12,20 +10,8 @@ interface CodeBlockProps {
 }
 
 export function CodeBlock({ code, language, className }: CodeBlockProps) {
-	const clipboard = useClipboard()
-	const [copied, setCopied] = useState(false)
+	const { copied, copy } = useCopyToClipboard("Code")
 	const highlighted = highlightCode(code)
-
-	async function handleCopy() {
-		try {
-			await clipboard.copy(code)
-			setCopied(true)
-			toast.success("Copied to clipboard")
-			setTimeout(() => setCopied(false), 2000)
-		} catch {
-			toast.error("Failed to copy")
-		}
-	}
 
 	return (
 		<div className={cn("relative overflow-clip rounded-md border border-border bg-muted", className)}>
@@ -35,7 +21,7 @@ export function CodeBlock({ code, language, className }: CodeBlockProps) {
 				)}
 				<button
 					type="button"
-					onClick={handleCopy}
+					onClick={() => copy(code)}
 					className="ml-auto flex items-center gap-1 text-xs hover:text-foreground transition-colors"
 				>
 					{copied ? (

@@ -1,11 +1,10 @@
 import { formatDuration } from "../../lib/format"
-import { getServiceLegendColor, calculateSelfTime } from "../../lib/colors"
+import { getServiceColor, calculateSelfTime } from "../../lib/colors"
 import { getHttpInfo } from "../../lib/http"
 import type { SpanNode } from "../../lib/types"
 
 interface TraceTimelineTooltipProps {
 	span: SpanNode
-	services?: string[]
 	totalDurationMs?: number
 	traceStartTime?: string
 }
@@ -20,13 +19,12 @@ const kindLabels: Record<string, string> = {
 
 export function TraceTimelineTooltipContent({
 	span,
-	services,
 	totalDurationMs,
 	traceStartTime,
 }: TraceTimelineTooltipProps) {
 	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
 
-	const serviceColor = services ? getServiceLegendColor(span.serviceName, services) : null
+	const serviceColor = getServiceColor(span.serviceName)
 	const selfTime = calculateSelfTime(span, span.children)
 	const selfTimePercent = span.durationMs > 0 ? (selfTime / span.durationMs) * 100 : 0
 	const durationPercent = totalDurationMs ? (span.durationMs / totalDurationMs) * 100 : null

@@ -78,7 +78,7 @@ export default createAgent<unknown, ChatFlueEnv>(async (ctx) => {
 	const instructions = buildSystemPrompt({ mode })
 
 	// Connect to Maple's MCP server (all tools). We tolerate connection failures so
-	// the agent still answers on Workers AI when apps/api or INTERNAL_SERVICE_TOKEN
+	// the agent still answers on Workers AI when the API RPC binding
 	// isn't wired yet. The initializer runs per interaction and we don't `close()`
 	// here because tool calls need the connection live for the whole turn —
 	// connection lifecycle/pooling is a follow-up.

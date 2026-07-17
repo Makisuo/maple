@@ -22,7 +22,7 @@ import {
 import { CopyableValue, AttributesTable, ResourceAttributesSection } from "@maple/ui/components/attributes"
 import { useClipboard } from "@maple/ui/hooks/use-clipboard"
 import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
-import { getServiceLegendColor } from "@maple/ui/lib/colors"
+import { getServiceColor } from "@maple/ui/lib/colors"
 import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
 import type { SpanNode } from "@maple/ui/types"
@@ -34,7 +34,6 @@ import { LogDetailSheet } from "./log-detail-sheet"
 
 interface SpanDetailPanelProps {
 	span: SpanNode
-	services: string[]
 	onClose: () => void
 }
 
@@ -52,7 +51,7 @@ const kindLabels: Record<string, string> = {
 	SPAN_KIND_INTERNAL: "Internal",
 }
 
-export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProps) {
+export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 	const cacheInfo = getCacheInfo(span.spanAttributes)
 	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
 	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
@@ -87,7 +86,7 @@ export function SpanDetailPanel({ span, services, onClose }: SpanDetailPanelProp
 						<Badge
 							variant="outline"
 							className="font-mono text-[10px]"
-							style={{ color: getServiceLegendColor(span.serviceName, services) }}
+							style={{ color: getServiceColor(span.serviceName) }}
 						>
 							<CopyableValue value={span.serviceName}>{span.serviceName}</CopyableValue>
 						</Badge>

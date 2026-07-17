@@ -9,6 +9,7 @@ import {
 	type FilterOption,
 } from "@/components/filters/filter-section"
 import { MagnifierIcon, XmarkIcon } from "@/components/icons"
+import { browserIconFor, deviceIconFor } from "@/components/replays/session-icons"
 import { Route } from "@/routes/replays"
 import {
 	InputGroup,
@@ -125,7 +126,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 				facets.errorCount > 0
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<UserIdFilter value={search.userId} onApply={setUserId} />
@@ -179,6 +180,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 									options={browsers}
 									selected={search.browser ? [search.browser] : []}
 									onChange={(vals) => setSingle("browser", vals)}
+									getOptionIcon={browserIconFor}
 								/>
 							</>
 						)}
@@ -191,6 +193,7 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 									options={devices}
 									selected={search.deviceType ? [search.deviceType] : []}
 									onChange={(vals) => setSingle("deviceType", vals)}
+									getOptionIcon={deviceIconFor}
 								/>
 							</>
 						)}
@@ -249,7 +252,10 @@ function UserIdFilter({ value, onApply }: UserIdFilterProps) {
 				onApply(text.trim() || undefined)
 			}}
 		>
-			<Label htmlFor="replays-user-filter" className="mb-2 block text-sm font-medium text-muted-foreground">
+			<Label
+				htmlFor="replays-user-filter"
+				className="mb-2 block text-sm font-medium text-muted-foreground"
+			>
 				User
 			</Label>
 			<InputGroup>

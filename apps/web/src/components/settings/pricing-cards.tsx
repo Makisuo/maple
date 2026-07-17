@@ -6,6 +6,7 @@ import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { billingCustomerAtom, billingPlansAtom } from "@/lib/services/atoms/billing-atoms"
 import { useBillingActions } from "@/hooks/use-billing-actions"
 import { getTrialStatus } from "@/lib/billing/plan-gating"
+import { formatCurrency } from "@/lib/billing/currency"
 
 type Plan = CatalogPlan
 type PlanItem = CatalogPlanItem
@@ -181,22 +182,6 @@ function getButtonConfig(plan: Plan) {
 				disabled: false,
 			}
 	}
-}
-
-const currencyFormatters = new Map<string, Intl.NumberFormat>()
-
-function formatCurrency(amount: number, currency: string): string {
-	const key = currency.toUpperCase()
-	let formatter = currencyFormatters.get(key)
-	if (!formatter) {
-		formatter = new Intl.NumberFormat("en-US", {
-			style: "currency",
-			currency: key,
-			minimumFractionDigits: 2,
-		})
-		currencyFormatters.set(key, formatter)
-	}
-	return formatter.format(amount)
 }
 
 interface CheckoutPreview {

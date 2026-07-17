@@ -1,4 +1,4 @@
-import { useId, useMemo } from "react"
+import { memo, useId, useMemo } from "react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
@@ -21,7 +21,9 @@ const baseChartConfig = {
 	apdexScore: { label: "Apdex", color: "var(--chart-apdex)" },
 } satisfies ChartConfig
 
-export function ApdexAreaChart({
+// Memoized: these charts sit in synced grids whose parent rerenders on every
+// atom/query settle; with stable props the whole Recharts subtree is skipped.
+export const ApdexAreaChart = memo(function ApdexAreaChart({
 	data,
 	className,
 	legend,
@@ -143,4 +145,4 @@ export function ApdexAreaChart({
 			</AreaChart>
 		</ChartContainer>
 	)
-}
+})

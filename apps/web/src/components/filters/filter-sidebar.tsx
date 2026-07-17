@@ -13,8 +13,10 @@ interface FilterSidebarFrameProps {
 }
 
 export function FilterSidebarFrame({ children, waiting = false, className }: FilterSidebarFrameProps) {
+	// Width is owned by the container (PageLayout.FilterSidebar: an inline aside on desktop, a sheet
+	// below lg). Setting one here would fight it — and leave dead space inside the wider sheet.
 	return (
-		<div className={cn("flex h-full w-56 shrink-0 flex-col", waiting && "opacity-60", className)}>
+		<div className={cn("flex h-full w-full flex-col", waiting && "opacity-60", className)}>
 			{children}
 		</div>
 	)

@@ -3,6 +3,7 @@ import { createCollection, localOnlyCollectionOptions } from "@tanstack/db"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Scope from "effect/Scope"
+import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { InstanceScope, Registry, Store } from "../src/core/index.js"
 import * as Db from "../src/db/index.js"
@@ -73,6 +74,34 @@ describe("Db.fromCollection", () => {
 			// event (the makeQuery-inside-compute bug class) would tear down and
 			// resubscribe 20 times; a raced teardown leaves count !== 1.
 			assert.strictEqual(todos.subscriberCount, 1)
+		}).pipe(Effect.provide(Registry.layer)),
+	)
+
+	it.effect("coalesces a same-tick burst of changes into one snapshot", () =>
+		Effect.gen(function* () {
+			const todos = makeTodos([{ id: 0, label: "seed" }])
+			const store = yield* Db.fromCollection(todos)
+			yield* Store.waitFor(store, successWith(1), { timeout: "1 second" })
+
+			let emissions = 0
+			yield* Registry.run(
+				Store.stream(store).pipe(
+					Stream.drop(1),
+					Stream.tap(() =>
+						Effect.sync(() => {
+							emissions += 1
+						}),
+					),
+				),
+			)
+
+			// One synchronous burst — the transaction fires one change callback per
+			// row, but only one microtask-deferred snapshot may reach the store.
+			for (let i = 1; i <= 50; i++) {
+				todos.insert({ id: i, label: `todo-${i}` })
+			}
+			yield* Store.waitFor(store, successWith(51), { timeout: "1 second" })
+			assert.strictEqual(emissions, 1)
 		}).pipe(Effect.provide(Registry.layer)),
 	)
 

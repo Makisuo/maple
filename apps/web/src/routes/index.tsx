@@ -4,10 +4,7 @@ import { effectRoute } from "@effect-router/core"
 import { Result, useAtomValue, useAtomSet, useAtomRefresh } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
-import {
-	dashboardFacetsHintAtomFamily,
-	type DashboardFacetsHint,
-} from "@/atoms/dashboard-facets-hint-atoms"
+import { dashboardFacetsHintAtomFamily, type DashboardFacetsHint } from "@/atoms/dashboard-facets-hint-atoms"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ErrorState } from "@/components/common/error-state"
@@ -392,16 +389,16 @@ function DashboardContent({
 					<span className="text-chart-error">{formatErrorRate(avgErrorRate)}</span>
 				) : undefined,
 			footer:
-				chart.id === "throughput" && !isOverviewLoading && !errorMap[chart.id] ? (
-					(refinementErrorFooter ?? (
-						<>
-							Total{" "}
-							<span className="font-medium text-foreground tabular-nums">
-								{totalVolume.toLocaleString()}
-							</span>
-						</>
-					))
-				) : undefined,
+				chart.id === "throughput" && !isOverviewLoading && !errorMap[chart.id]
+					? (refinementErrorFooter ?? (
+							<>
+								Total{" "}
+								<span className="font-medium text-foreground tabular-nums">
+									{totalVolume.toLocaleString()}
+								</span>
+							</>
+						))
+					: undefined,
 		}))
 	}, [
 		overviewPoints,

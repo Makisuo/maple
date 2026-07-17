@@ -1,5 +1,5 @@
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
-import { Schema } from "effect"
+import { Schema, SchemaGetter } from "effect"
 import {
 	ActorId,
 	AlertDestinationId,
@@ -7,6 +7,7 @@ import {
 	ErrorIssueEventId,
 	ErrorIssueId,
 	IsoDateTimeString,
+	PostgresTransactionId,
 	SpanId,
 	TraceId,
 	UserId,
@@ -158,12 +159,15 @@ export class ErrorIssueDocument extends Schema.Class<ErrorIssueDocument>("ErrorI
 	// Postgres txid of the write, present only on mutation responses so the web's
 	// ElectricSQL error_issues collection can resolve optimistic state on the exact
 	// synced transaction. Absent on list/read responses.
-	txid: Schema.optionalKey(Schema.String),
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class ErrorIssuesListResponse extends Schema.Class<ErrorIssuesListResponse>("ErrorIssuesListResponse")(
 	{
 		issues: Schema.Array(ErrorIssueDocument),
+		// Opaque cursor for the next page (pass back as `?cursor=`); absent on
+		// the last page.
+		nextCursor: Schema.optionalKey(Schema.String),
 	},
 ) {}
 
@@ -365,7 +369,29 @@ export class IssueEscalationPolicyUpsertRequest extends Schema.Class<IssueEscala
 // Query schemas
 // ---------------------------------------------------------------------------
 
+/**
+ * Keyset cursor for `listIssues`: the sort key of the last row of the previous
+ * page (lastSeenAt epoch-ms, id as tiebreaker). The wire form is opaque
+ * base64url JSON, and the whole codec is declarative Schema — a tampered or
+ * malformed cursor fails decode at the HTTP boundary instead of reaching the
+ * query.
+ */
+export const IssueListCursorFields = Schema.Struct({
+	lastSeenAt: Schema.Number,
+	id: ErrorIssueId,
+}).annotate({ identifier: "@maple/IssueListCursorFields" })
+export type IssueListCursorFields = Schema.Schema.Type<typeof IssueListCursorFields>
+
+export const IssueListCursor = Schema.String.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: SchemaGetter.decodeBase64UrlString(),
+		encode: SchemaGetter.encodeBase64Url(),
+	}),
+	Schema.decodeTo(Schema.fromJsonString(IssueListCursorFields)),
+).annotate({ identifier: "@maple/IssueListCursor", title: "Issue List Cursor" })
+
 const IssueListQuery = Schema.Struct({
+	cursor: Schema.optional(IssueListCursor),
 	workflowState: Schema.optional(WorkflowState),
 	severity: Schema.optional(Schema.Union([IssueSeverity, Schema.Literal("unset")])),
 	kind: Schema.optional(IssueKind),

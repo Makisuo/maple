@@ -2,7 +2,6 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
-import { toast } from "sonner"
 import { formatDistanceToNow, format } from "date-fns"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
@@ -24,6 +23,7 @@ import {
 	inferBucketSeconds,
 	inferRangeMs,
 } from "@/lib/format"
+import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
@@ -76,6 +76,8 @@ function ErrorDetailContent() {
 	// Prefer the human label passed from the list; fall back to the hash.
 	const displayLabel = search.label ?? fingerprintHash
 	const navigate = useNavigate({ from: Route.fullPath })
+	const messageCopy = useCopyToClipboard("Error message")
+	const promptCopy = useCopyToClipboard("Agent prompt")
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(
 		search.startTime,
 		search.endTime,
@@ -159,7 +161,7 @@ function ErrorDetailContent() {
 
 			return (
 				<div
-					className={`grid grid-cols-2 gap-4 lg:grid-cols-4 transition-opacity ${errorResult.waiting ? "opacity-60" : ""}`}
+					className={`grid grid-cols-2 gap-4 lg:grid-cols-4 content-enter ${errorResult.waiting ? "opacity-60" : ""}`}
 				>
 					<StatCard label="Total Occurrences" value={formatNumber(error.count)} />
 					<StatCard
@@ -193,7 +195,7 @@ function ErrorDetailContent() {
 			if (!error) return null
 
 			return (
-				<div className="space-y-2">
+				<div className="space-y-2 content-enter">
 					<h3 className="text-sm font-semibold">Error Message</h3>
 					<div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
 						<pre className="text-sm font-mono whitespace-pre-wrap break-all">
@@ -203,31 +205,32 @@ function ErrorDetailContent() {
 							<button
 								type="button"
 								className="text-xs text-primary hover:underline"
-								onClick={() => {
-									navigator.clipboard.writeText(error.sampleMessage)
-									toast.success("Error message copied to clipboard")
-								}}
+								onClick={() => messageCopy.copy(error.sampleMessage)}
 							>
 								Copy error message
 							</button>
 							<button
 								type="button"
 								className="text-xs text-primary hover:underline"
-								onClick={() => {
-									navigator.clipboard.writeText(
+								onClick={() =>
+									promptCopy.copy(
 										formatAgentDebugPrompt({
 											fingerprintHash,
 											label: displayLabel,
-											serviceName: search.services?.length === 1 ? search.services[0] : null,
+											serviceName:
+												search.services?.length === 1 ? search.services[0] : null,
 											message: error.sampleMessage,
 											occurrenceCount: error.count,
 											affectedServicesCount: error.affectedServicesCount,
 											firstSeen: error.firstSeen.toISOString(),
 											lastSeen: error.lastSeen.toISOString(),
 										}),
+										{
+											successMessage:
+												"Agent prompt copied — paste it into your MCP agent",
+										},
 									)
-									toast.success("Copied agent prompt — paste it into your MCP agent")
-								}}
+								}
 							>
 								Copy agent prompt
 							</button>
@@ -264,7 +267,7 @@ function ErrorDetailContent() {
 
 			return (
 				<div
-					className={`space-y-2 transition-opacity ${timeseriesResult.waiting ? "opacity-60" : ""}`}
+					className={`space-y-2 content-enter ${timeseriesResult.waiting ? "opacity-60" : ""}`}
 				>
 					<h3 className="text-sm font-semibold">Error Frequency</h3>
 					<ChartContainer config={chartConfig} className="h-[160px] w-full">
@@ -344,7 +347,7 @@ function ErrorDetailContent() {
 		.onSuccess((data: { data: ErrorDetailTrace[] }) => {
 			if (data.data.length === 0) {
 				return (
-					<div className="space-y-2">
+					<div className="space-y-2 content-enter">
 						<h3 className="text-sm font-semibold">Sample Traces</h3>
 						<p className="text-sm text-muted-foreground">
 							No traces found for this error in the selected time range.
@@ -354,7 +357,7 @@ function ErrorDetailContent() {
 			}
 
 			return (
-				<div className={`space-y-2 transition-opacity ${tracesResult.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-2 content-enter ${tracesResult.waiting ? "opacity-60" : ""}`}>
 					<div className="flex items-center justify-between">
 						<h3 className="text-sm font-semibold">Sample Traces</h3>
 						<span className="text-xs text-muted-foreground">

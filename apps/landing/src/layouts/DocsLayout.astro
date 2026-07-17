@@ -25,7 +25,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
     <head>
         <meta charset="utf-8" />
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -47,8 +47,8 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
             <div class="h-12 flex items-center justify-between px-5">
                 <div class="flex items-center gap-3">
                     <a href="/" class="flex items-center gap-2.5 text-fg-muted hover:text-fg transition-colors">
-                        <div class="w-5 h-5 bg-accent flex items-center justify-center">
-                            <span class="text-accent-foreground text-[9px] font-bold">M</span>
+                        <div class="w-5 h-5 bg-primary flex items-center justify-center">
+                            <span class="text-primary-foreground text-[9px] font-bold">M</span>
                         </div>
                         <span class="text-xs font-medium text-fg">Maple</span>
                     </a>
@@ -64,7 +64,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site).toString();
                     <GithubStarButton stars={stars} className="inline-flex" />
                     <a
                         href="https://app.maple.dev"
-                        class="text-[10px] text-fg-muted hover:text-accent transition-colors font-medium uppercase tracking-wider"
+                        class="text-[10px] text-fg-muted hover:text-primary transition-colors font-medium uppercase tracking-wider"
                     >
                         App
                     </a>

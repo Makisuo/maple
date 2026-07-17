@@ -9,7 +9,6 @@ interface TraceTimelineMinimapProps {
 	rootSpans: SpanNode[]
 	traceStartMs: number
 	traceEndMs: number
-	services: string[]
 	colorBy: ColorByField
 	viewport: ViewportState
 	onViewportChange: (viewport: ViewportState) => void
@@ -29,7 +28,6 @@ function collectMinimapSpans(
 	rootSpans: SpanNode[],
 	traceStartMs: number,
 	traceDurationMs: number,
-	services: string[],
 	colorBy: ColorByField,
 ): { spans: MinimapSpan[]; maxDepth: number } {
 	const spans: MinimapSpan[] = []
@@ -50,11 +48,7 @@ function collectMinimapSpans(
 			bgColor = "oklch(0.50 0.18 25)"
 		} else {
 			const value = resolveColorValue(node, colorBy)
-			const indexHint =
-				colorBy.kind === "preset" && colorBy.key === "service" && value
-					? services.indexOf(value)
-					: undefined
-			const hue = getValueHue(value, indexHint, services.length)
+			const hue = getValueHue(value)
 			bgColor = hue === null ? NEUTRAL_MINIMAP_BG : `oklch(0.50 0.14 ${hue})`
 		}
 
@@ -78,7 +72,6 @@ export function TraceTimelineMinimap({
 	rootSpans,
 	traceStartMs,
 	traceEndMs,
-	services,
 	colorBy,
 	viewport,
 	onViewportChange,
@@ -93,8 +86,8 @@ export function TraceTimelineMinimap({
 	const traceDuration = traceEndMs - traceStartMs
 
 	const { spans } = React.useMemo(
-		() => collectMinimapSpans(rootSpans, traceStartMs, traceDuration, services, colorBy),
-		[rootSpans, traceStartMs, traceDuration, services, colorBy],
+		() => collectMinimapSpans(rootSpans, traceStartMs, traceDuration, colorBy),
+		[rootSpans, traceStartMs, traceDuration, colorBy],
 	)
 
 	const ROW_H = 3

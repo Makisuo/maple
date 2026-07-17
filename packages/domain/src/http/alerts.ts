@@ -10,6 +10,7 @@ import {
 	HazelChannelId,
 	HazelOrganizationId,
 	IsoDateTimeString,
+	PostgresTransactionId,
 	RoleName,
 	UserId,
 } from "../primitives"
@@ -24,6 +25,7 @@ export const AlertDestinationType = Schema.Literals([
 	"hazel",
 	"hazel-oauth",
 	"discord",
+	"email",
 ]).annotate({
 	identifier: "@maple/AlertDestinationType",
 	title: "Alert Destination Type",
@@ -216,6 +218,27 @@ export class DiscordAlertDestinationConfig extends Schema.Class<DiscordAlertDest
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export const MAX_EMAIL_RECIPIENTS = 10
+
+/**
+ * Recipients are workspace members, referenced by user id. The server resolves
+ * each id to the member's email via the auth provider (Clerk) at save time, so
+ * clients can never route alerts to arbitrary addresses.
+ */
+const MemberUserIdList = Schema.Array(NonEmptyString).check(
+	Schema.isMinLength(1),
+	Schema.isMaxLength(MAX_EMAIL_RECIPIENTS),
+)
+
+export class EmailAlertDestinationConfig extends Schema.Class<EmailAlertDestinationConfig>(
+	"EmailAlertDestinationConfig",
+)({
+	type: Schema.Literal("email"),
+	name: ChannelLabel,
+	memberUserIds: MemberUserIdList,
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationCreateRequest = Schema.Union([
 	SlackAlertDestinationConfig,
 	PagerDutyAlertDestinationConfig,
@@ -223,6 +246,7 @@ export const AlertDestinationCreateRequest = Schema.Union([
 	HazelAlertDestinationConfig,
 	HazelOAuthAlertDestinationConfig,
 	DiscordAlertDestinationConfig,
+	EmailAlertDestinationConfig,
 ])
 export type AlertDestinationCreateRequest = Schema.Schema.Type<typeof AlertDestinationCreateRequest>
 
@@ -281,6 +305,14 @@ export class UpdateDiscordAlertDestinationConfig extends Schema.Class<UpdateDisc
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}
 
+export class UpdateEmailAlertDestinationConfig extends Schema.Class<UpdateEmailAlertDestinationConfig>(
+	"UpdateEmailAlertDestinationConfig",
+)({
+	name: OptionalNonEmptyString,
+	memberUserIds: Schema.optionalKey(MemberUserIdList),
+	enabled: Schema.optionalKey(Schema.Boolean),
+}) {}
+
 export const AlertDestinationUpdateRequest = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("slack"),
@@ -306,6 +338,10 @@ export const AlertDestinationUpdateRequest = Schema.Union([
 		type: Schema.Literal("discord"),
 		...UpdateDiscordAlertDestinationConfig.fields,
 	}),
+	Schema.Struct({
+		type: Schema.Literal("email"),
+		...UpdateEmailAlertDestinationConfig.fields,
+	}),
 ])
 export type AlertDestinationUpdateRequest = Schema.Schema.Type<typeof AlertDestinationUpdateRequest>
 
@@ -318,6 +354,8 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	enabled: Schema.Boolean,
 	summary: Schema.String,
 	channelLabel: Schema.NullOr(Schema.String),
+	/** Selected workspace-member recipients (email destinations only). */
+	memberUserIds: Schema.NullOr(Schema.Array(Schema.String)),
 	lastTestedAt: Schema.NullOr(IsoDateTimeString),
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,
@@ -445,7 +483,7 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	// Postgres txid of the write, present only on create/update responses so the
 	// web's ElectricSQL alert_rules collection can resolve optimistic state on the
 	// exact synced transaction. Absent on list/read responses.
-	txid: Schema.optionalKey(Schema.String),
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>("AlertRuleUpsertRequest")({
@@ -485,7 +523,7 @@ export class AlertRuleDeleteResponse extends Schema.Class<AlertRuleDeleteRespons
 	{
 		id: AlertRuleId,
 		// Txid of the delete, for the Electric alert_rules collection's onDelete.
-		txid: Schema.optionalKey(Schema.String),
+		txid: Schema.optionalKey(PostgresTransactionId),
 	},
 ) {}
 
@@ -504,11 +542,13 @@ export class AlertEvaluationResult extends Schema.Class<AlertEvaluationResult>("
 	reason: Schema.String,
 }) {}
 
-export class AlertRulePreviewRequest extends Schema.Class<AlertRulePreviewRequest>("AlertRulePreviewRequest")({
-	rule: AlertRuleUpsertRequest,
-	startTime: IsoDateTimeString,
-	endTime: IsoDateTimeString,
-}) {}
+export class AlertRulePreviewRequest extends Schema.Class<AlertRulePreviewRequest>("AlertRulePreviewRequest")(
+	{
+		rule: AlertRuleUpsertRequest,
+		startTime: IsoDateTimeString,
+		endTime: IsoDateTimeString,
+	},
+) {}
 
 /**
  * One evaluator-faithful data point: what the scheduler would have observed for

@@ -66,6 +66,9 @@ export {
 	metricsTimeseriesQuery,
 	metricsTimeseriesRateQuery,
 	metricsBreakdownQuery,
+	metricsSparklinesQuery,
+	type MetricsSparklinesOpts,
+	type MetricsSparklinesOutput,
 	type MetricsTimeseriesOpts,
 	type MetricsTimeseriesOutput,
 	type MetricsRateTimeseriesOpts,
@@ -280,6 +283,18 @@ export {
 // timeseries queries (tracesTimeseriesQuery / logsTimeseriesQuery /
 // metricsTimeseriesQuery) so dashboards and alerts share the same grouping
 // and filter semantics. See `makeQueryEngineEvaluate` in @maple/query-engine/runtime.
+
+// Queries — Service Operations (per-SpanName breakdown for the service detail page)
+export {
+	serviceOperationsSummaryQuery,
+	serviceOperationsSummaryRowSchema,
+	serviceOperationsTimeseriesQuery,
+	serviceOperationsTimeseriesRowSchema,
+	type ServiceOperationsSummaryOpts,
+	type ServiceOperationsSummaryOutput,
+	type ServiceOperationsTimeseriesOpts,
+	type ServiceOperationsTimeseriesOutput,
+} from "./queries/service-operations"
 
 // Queries — Alert Checks (historical rule evaluations)
 export {

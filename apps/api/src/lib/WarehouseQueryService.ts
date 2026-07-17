@@ -61,6 +61,14 @@ const createClickHouseSqlClient = (config: ClickHouseConfig): WarehouseSqlClient
 	}
 }
 
+// The Tinybird SDK's `sql()` calls `response.json()` on the raw response with no empty-body guard,
+// so a successful (2xx) query that matches zero rows — which can come back with an empty body —
+// throws `SyntaxError: "Unexpected end of JSON input"`. Treat ONLY that exact shape as zero rows: a
+// `SyntaxError` with any other message (e.g. "Unexpected token < in JSON") means Tinybird returned
+// an HTML error page and must keep propagating as a real WarehouseClientError.
+const isEmptyJsonBodyError = (error: unknown): boolean =>
+	error instanceof SyntaxError && /unexpected end of json input/i.test(error.message)
+
 const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient => {
 	const client = new Tinybird({
 		baseUrl: config.host,
@@ -70,7 +78,16 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 		devMode: false,
 	})
 	return {
-		sql: async (sql: string) => client.sql(sql),
+		sql: async (sql: string) => {
+			try {
+				return await client.sql(sql)
+			} catch (error) {
+				// Empty 2xx body ⇒ zero rows. Return an empty result set so the caller's no-data path
+				// runs instead of surfacing a spurious WarehouseClientError.
+				if (isEmptyJsonBodyError(error)) return { data: [] }
+				throw error
+			}
+		},
 		insert: async (datasource, rows) => {
 			if (rows.length === 0) return
 			const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
@@ -262,4 +279,5 @@ export const __testables = {
 	},
 	createClickHouseSqlClient,
 	createTinybirdSdkSqlClient,
+	isEmptyJsonBodyError,
 }

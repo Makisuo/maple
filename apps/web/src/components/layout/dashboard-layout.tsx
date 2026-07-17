@@ -13,7 +13,6 @@ import {
 } from "@maple/ui/components/ui/breadcrumb"
 import { PageLayout } from "@maple/ui/components/ui/page-layout"
 import { Button } from "@maple/ui/components/ui/button"
-import { useIsMobile } from "@maple/ui/hooks/use-mobile"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { Kbd } from "@maple/ui/components/ui/kbd"
 import { ChatBubbleSparkleIcon, LayoutLeftIcon } from "@/components/icons"
@@ -66,7 +65,6 @@ export function DashboardLayout({
 	breadcrumbActions,
 	rightSidebar,
 }: DashboardLayoutProps) {
-	const isMobile = useIsMobile()
 	const hasHeader = title || titleContent || description || headerActions
 
 	return (
@@ -141,7 +139,7 @@ export function DashboardLayout({
 								</TooltipContent>
 							</Tooltip>
 							<ConnectButton />
-							{filterSidebar && isMobile && (
+							{filterSidebar && (
 								<PageLayout.FilterSidebarTrigger>
 									<Button variant="outline" size="icon-sm" aria-label="Open filters">
 										<LayoutLeftIcon size={16} />
