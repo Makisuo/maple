@@ -21,7 +21,7 @@ permissions:
 jobs:
     cd:
         name: Deploy (${{ matrix.target.label }})
-        runs-on: ubuntu-latest
+        runs-on: blacksmith-4vcpu-ubuntu-2404
         # One leg per long-lived Tinybird workspace. Each GitHub Environment supplies
         # its own TINYBIRD_HOST/TINYBIRD_TOKEN, so the matching workspace admin token
         # scopes each deploy to that workspace — no `--branch`/`__tb__` params needed.
