@@ -1,10 +1,4 @@
-// ClickHouse datetime string (`YYYY-MM-DD HH:mm:ss[.ffffff]`) ↔ epoch-ms.
-// Sub-second precision is irrelevant everywhere these are used, so the
-// seconds-level prefix is parsed as UTC.
-export const parseChDateTime = (timestamp: string): number =>
-	Date.parse(`${timestamp.slice(0, 19).replace(" ", "T")}Z`)
-export const formatChDateTime = (epochMs: number): string =>
-	new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
+import { parseWarehouseDateTime } from "@maple/query-engine"
 
 // Trace spans are immutable once a trace has finished — only recently-ended
 // traces can still receive late-arriving spans. Traces whose query window
@@ -18,7 +12,7 @@ const TRACE_SETTLED_AFTER_MS = 15 * 60_000
 
 export const traceCacheTtlSeconds = (endTime: string | undefined, nowMs: number): number => {
 	if (endTime == null) return TRACE_TTL_UNKNOWN_SECONDS
-	const endMs = parseChDateTime(endTime)
+	const endMs = parseWarehouseDateTime(endTime)
 	if (Number.isNaN(endMs)) return TRACE_TTL_LIVE_SECONDS
 	return nowMs - endMs > TRACE_SETTLED_AFTER_MS ? TRACE_TTL_SETTLED_SECONDS : TRACE_TTL_LIVE_SECONDS
 }

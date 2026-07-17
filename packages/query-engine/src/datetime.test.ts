@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	bucketTimeline,
 	computeBucketSeconds,
+	formatWarehouseDateTime,
 	parseWarehouseDateTime,
 	warehouseDateTimeToIso,
 } from "./datetime"
@@ -52,6 +53,21 @@ describe("parseWarehouseDateTime", () => {
 
 	it("returns NaN for unparseable input", () => {
 		expect(Number.isNaN(parseWarehouseDateTime("nonsense"))).toBe(true)
+	})
+})
+
+describe("formatWarehouseDateTime", () => {
+	it("formats epoch ms as tz-less space-separated UTC seconds", () => {
+		expect(formatWarehouseDateTime(Date.UTC(2026, 4, 24, 14, 30, 0))).toBe("2026-05-24 14:30:00")
+	})
+
+	it("drops fractional milliseconds", () => {
+		expect(formatWarehouseDateTime(Date.UTC(2026, 4, 24, 14, 30, 0, 999))).toBe("2026-05-24 14:30:00")
+	})
+
+	it("round-trips through parseWarehouseDateTime", () => {
+		const epoch = Date.UTC(2026, 0, 2, 3, 4, 5)
+		expect(parseWarehouseDateTime(formatWarehouseDateTime(epoch))).toBe(epoch)
 	})
 })
 

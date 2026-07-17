@@ -69,8 +69,13 @@ import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { formatChDateTime, parseChDateTime, traceCacheTtlSeconds } from "../lib/trace-detail-cache"
-import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
+import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
+import {
+	CH,
+	QueryEngineExecuteRequest,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
@@ -101,8 +106,8 @@ const coerceStatusCode = (value: string): StatusCode =>
 
 // Build a ±1h partition-pruning window around a ClickHouse datetime string.
 const partitionWindowAround = (timestamp: string): { startTime: string; endTime: string } => {
-	const ms = parseChDateTime(timestamp)
-	return { startTime: formatChDateTime(ms - 3_600_000), endTime: formatChDateTime(ms + 3_600_000) }
+	const ms = parseWarehouseDateTime(timestamp)
+	return { startTime: formatWarehouseDateTime(ms - 3_600_000), endTime: formatWarehouseDateTime(ms + 3_600_000) }
 }
 
 // Most traces opened without a timestamp are still recent (list rows carry
@@ -155,7 +160,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 													narrowByTime
 														? {
 																orgId: tenant.orgId,
-																startTime: formatChDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
+																startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
 															}
 														: { orgId: tenant.orgId },
 												),
