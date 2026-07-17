@@ -242,7 +242,7 @@ function DetailView({
 				/>
 			}
 		>
-			<div className="max-w-3xl space-y-6">
+			<div className="max-w-3xl space-y-6 content-enter">
 				<Summary issue={issue} />
 				<ChangeBreakdown issue={issue} />
 				<CautionCallout issue={issue} isApplyable={isApplyable} />

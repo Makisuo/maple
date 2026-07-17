@@ -3,17 +3,20 @@ import { useCallback, useMemo, useRef } from "react"
 import { Cause, Exit, Option, Schema } from "effect"
 import {
 	DashboardConcurrencyError,
-	DashboardCreateRequest,
 	DashboardDocument,
 	DashboardId,
-	DashboardPersesImportRequest,
 	IsoDateTimeString,
 	PortableDashboardDocument,
 } from "@maple/domain/http"
+import type { V2DashboardMutation } from "@maple/domain/http/v2"
 import { useLiveQuery } from "@tanstack/react-db"
-import { runMapleApi } from "@/lib/collections/api-runner"
-import { documentToDashboard, rowToDashboard } from "@/lib/collections/dashboards"
-import { getOrgCollections, useActiveOrgId, useCollectionsGeneration } from "@/lib/collections/org-collections"
+import { runMapleApiV2 } from "@/lib/collections/api-runner"
+import { rowToDashboard } from "@/lib/collections/dashboards"
+import {
+	getOrgCollections,
+	useActiveOrgId,
+	useCollectionsGeneration,
+} from "@/lib/collections/org-collections"
 import type { PortableDashboard } from "@/components/dashboard-builder/portable-dashboard"
 import type {
 	Dashboard,
@@ -103,18 +106,17 @@ function isConcurrencyConflict(failure: Exit.Exit<unknown, unknown>): boolean {
 	})
 }
 
-const decodeDashboardDocument = Schema.decodeUnknownOption(DashboardDocument)
-
-// Validate an unknown payload (a mutation result or list item) against the
-// `DashboardDocument` schema. A decoded document is structurally a `Dashboard`
-// once its `readonly` arrays are widened to the mutable web equivalents (its
-// branded ids / ISO timestamps are already assignable to the web type's strings).
-function ensureDashboard(value: unknown): Dashboard | null {
-	return Option.match(decodeDashboardDocument(value), {
-		onNone: () => null,
-		onSome: documentToDashboard,
-	})
-}
+const v2DashboardToDashboard = (value: V2DashboardMutation): Dashboard => ({
+	id: value.id,
+	name: value.name,
+	...(value.description !== null ? { description: value.description } : {}),
+	tags: [...value.tags],
+	timeRange: value.timeRange,
+	widgets: [...value.widgets] as Dashboard["widgets"],
+	variables: [...value.variables] as Dashboard["variables"],
+	createdAt: value.createdAt,
+	updatedAt: value.updatedAt,
+})
 
 function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 	// `description`/`tags`/`variables` are `Schema.optionalKey` on `DashboardDocument`;
@@ -422,10 +424,25 @@ function makeWidgetMutators(deps: {
 // (post-deploy schema drift) as well as an org switch, matching the
 // alerts/errors collection hooks — otherwise the memo keeps the stale,
 // cleaned-up collection after a schema-error reset.
-function useDashboardsCollection() {
+export function useDashboardsCollection() {
 	const orgKey = useActiveOrgId() ?? "pending"
 	const generation = useCollectionsGeneration()
 	return useMemo(() => getOrgCollections(orgKey).dashboards, [orgKey, generation])
+}
+
+export function useDashboardMutationSync() {
+	const collection = useDashboardsCollection()
+	const prepareForMutation = useCallback(() => {
+		void collection.preload().catch(() => undefined)
+	}, [collection])
+	const reconcileTxid = useCallback(
+		async (txid: V2DashboardMutation["txid"]): Promise<void> => {
+			if (txid === undefined) return
+			await collection.utils.awaitTxId(Number(txid)).catch(() => undefined)
+		},
+		[collection],
+	)
+	return { prepareForMutation, reconcileTxid }
 }
 
 // The read half of the ElectricSQL-backed dashboard store: a live query over
@@ -435,10 +452,11 @@ function useDashboardsCollection() {
 export function useDashboardsRead() {
 	const collection = useDashboardsCollection()
 
-	const { data: rows, isLoading: liveLoading } = useLiveQuery(
-		(q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"),
-		[collection],
-	)
+	const {
+		data: rows,
+		isLoading: liveLoading,
+		isError,
+	} = useLiveQuery((q) => q.from({ d: collection }).orderBy(({ d }) => d.updated_at, "desc"), [collection])
 
 	const dashboards = useMemo(
 		() => (rows ?? []).map(rowToDashboard).filter((d): d is Dashboard => d !== null),
@@ -447,7 +465,7 @@ export function useDashboardsRead() {
 
 	const isLoading = liveLoading && dashboards.length === 0
 
-	return { dashboards, isLoading }
+	return { dashboards, isLoading, isError }
 }
 
 // The write half: create/import/delete plus the per-dashboard widget mutators,
@@ -481,8 +499,7 @@ export function useDashboardMutations() {
 		// TanStack DB has already rolled the optimistic state back by the time the
 		// transaction rejects; surface the reason.
 		const concurrency =
-			error instanceof DashboardConcurrencyError ||
-			(isExitLike(error) && isConcurrencyConflict(error))
+			error instanceof DashboardConcurrencyError || (isExitLike(error) && isConcurrencyConflict(error))
 		if (concurrency) {
 			setPersistenceErrorRef.current(
 				"Another editor saved changes to this dashboard. The latest version is loading — re-apply your edit if needed.",
@@ -535,19 +552,24 @@ export function useDashboardMutations() {
 	const importDashboard = useCallback(
 		async (imported: PortableDashboard): Promise<Dashboard> => {
 			if (readOnly) throw new Error("Dashboards are read-only")
-			const result = await runMapleApi((client) =>
+			const portable = toPortableDashboardDocument(imported)
+			const result = await runMapleApiV2((client) =>
 				client.dashboards.create({
-					payload: new DashboardCreateRequest({
-						dashboard: toPortableDashboardDocument(imported),
-					}),
+					payload: {
+						name: portable.name,
+						...(portable.description !== undefined ? { description: portable.description } : {}),
+						...(portable.tags !== undefined ? { tags: portable.tags } : {}),
+						timeRange: portable.timeRange,
+						widgets: portable.widgets,
+						...(portable.variables !== undefined ? { variables: portable.variables } : {}),
+					},
 				}),
 			).catch((error) => {
 				setPersistenceError(getErrorMessage(error))
 				throw new Error(getErrorMessage(error))
 			})
 
-			const dashboard = ensureDashboard(result)
-			if (dashboard === null) throw new Error("Created dashboard payload is invalid")
+			const dashboard = v2DashboardToDashboard(result)
 			if (result.txid !== undefined) {
 				await collectionRef.current.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
 			}
@@ -561,19 +583,20 @@ export function useDashboardMutations() {
 			persesDashboard: Record<string, unknown>,
 		): Promise<{ dashboard: Dashboard; warnings: string[] }> => {
 			if (readOnly) throw new Error("Dashboards are read-only")
-			const result = await runMapleApi((client) =>
+			const result = await runMapleApiV2((client) =>
 				client.dashboards.importPerses({
-					payload: new DashboardPersesImportRequest({ dashboard: persesDashboard }),
+					payload: { dashboard: persesDashboard },
 				}),
 			).catch((error) => {
 				setPersistenceError(getErrorMessage(error))
 				throw new Error(getErrorMessage(error))
 			})
 
-			const dashboard = ensureDashboard(result.dashboard)
-			if (dashboard === null) throw new Error("Imported Perses dashboard payload is invalid")
-			if (result.txid !== undefined) {
-				await collectionRef.current.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
+			const dashboard = v2DashboardToDashboard(result.dashboard)
+			if (result.dashboard.txid !== undefined) {
+				await collectionRef.current.utils
+					.awaitTxId(Number(result.dashboard.txid))
+					.catch(() => undefined)
 			}
 			return { dashboard, warnings: [...result.warnings] }
 		},

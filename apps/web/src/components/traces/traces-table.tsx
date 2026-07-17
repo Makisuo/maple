@@ -355,9 +355,7 @@ function TracesTableView({
 	}
 
 	return (
-		<div
-			className={`flex-1 min-h-0 flex flex-col gap-4 transition-opacity ${waiting ? "opacity-50" : ""}`}
-		>
+		<div className={`flex-1 min-h-0 flex flex-col gap-4 content-enter ${waiting ? "opacity-50" : ""}`}>
 			<div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-auto rounded-md border">
 				{/*
 				 * table-fixed makes the declared column widths authoritative. Under auto layout a long

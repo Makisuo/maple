@@ -220,7 +220,7 @@ function CommitCard({ commit, compact = false }: { commit: VcsCommitDetailRespon
 
 	const pad = compact ? "p-2.5" : "p-3.5"
 	return (
-		<div className="flex flex-col divide-y divide-foreground/10">
+		<div className="flex flex-col divide-y divide-foreground/10 content-enter">
 			<div className={cn("flex flex-col gap-1.5", pad)}>
 				<p
 					className={cn(
@@ -335,7 +335,7 @@ function CommitListRowLink({ commit }: { commit: VcsCommitDetailResponse }) {
 	const author = commit.authorLogin ?? commit.authorName ?? "Unknown author"
 	const profileHref = commit.authorLogin ? hrefFromOrigin(commit.htmlUrl, commit.authorLogin) : null
 	return (
-		<div className="flex items-center gap-2.5 px-2.5 py-2">
+		<div className="flex items-center gap-2.5 px-2.5 py-2 content-enter">
 			<CommitAvatar url={commit.authorAvatarUrl} name={author} href={profileHref} compact />
 			<div className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
 				<a

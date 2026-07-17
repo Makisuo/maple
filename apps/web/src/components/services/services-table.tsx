@@ -295,7 +295,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 			const groups = groupByEnvironment(services)
 
 			return (
-				<div className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-4 content-enter ${combinedResult.waiting ? "opacity-60" : ""}`}>
 					{/* Desktop: full metrics table. Below md the fixed-width columns and
 					    in-cell sparklines force horizontal scroll, so we swap to a list. */}
 					<div className="hidden md:block rounded-md border overflow-auto">

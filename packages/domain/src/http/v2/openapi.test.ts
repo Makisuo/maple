@@ -41,11 +41,38 @@ describe("MapleApiV2 OpenAPI", () => {
 			.sort()
 
 		expect(surface).toEqual([
+			"DELETE /v2/alert_destinations/{id}",
+			"DELETE /v2/alert_rules/{id}",
 			"DELETE /v2/api_keys/{id}",
+			"DELETE /v2/dashboards/{id}",
+			"GET /v2/alert_destinations",
+			"GET /v2/alert_destinations/{id}",
+			"GET /v2/alert_incidents",
+			"GET /v2/alert_incidents/{id}",
+			"GET /v2/alert_rules",
+			"GET /v2/alert_rules/{id}",
+			"GET /v2/alert_rules/{id}/checks",
 			"GET /v2/api_keys",
 			"GET /v2/api_keys/{id}",
+			"GET /v2/dashboards",
+			"GET /v2/dashboards/templates",
+			"GET /v2/dashboards/{id}",
+			"GET /v2/dashboards/{id}/versions",
+			"GET /v2/dashboards/{id}/versions/{versionId}",
+			"PATCH /v2/alert_destinations/{id}",
+			"PATCH /v2/alert_rules/{id}",
+			"PATCH /v2/dashboards/{id}",
+			"POST /v2/alert_destinations",
+			"POST /v2/alert_destinations/{id}/test",
+			"POST /v2/alert_rules",
+			"POST /v2/alert_rules/preview",
+			"POST /v2/alert_rules/test",
 			"POST /v2/api_keys",
 			"POST /v2/api_keys/{id}/roll",
+			"POST /v2/dashboards",
+			"POST /v2/dashboards/import/perses",
+			"POST /v2/dashboards/templates/{templateId}/instantiate",
+			"POST /v2/dashboards/{id}/versions/{versionId}/restore",
 		])
 	})
 

@@ -239,14 +239,14 @@ function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: stri
 
 					if (logs.length === 0) {
 						return (
-							<div className="p-4 text-center text-sm text-muted-foreground">
+							<div className="p-4 text-center text-sm text-muted-foreground content-enter">
 								No logs found for this span
 							</div>
 						)
 					}
 
 					return (
-						<div className="divide-y">
+						<div className="divide-y content-enter">
 							{logs.map((log, i) => (
 								<LogEntry
 									key={`${log.timestamp}-${i}`}

@@ -157,7 +157,7 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 					.onSuccess((response) => {
 						if (response.destinations.length === 0) {
 							return (
-								<p className="text-muted-foreground text-sm">
+								<p className="text-muted-foreground text-sm content-enter">
 									No destinations yet.{" "}
 									<Link
 										to="/alerts"
@@ -183,7 +183,7 @@ export function EscalationPolicySection({ isAdmin }: { isAdmin: boolean }) {
 							),
 						})) satisfies AlertSegmentedOption<string>[]
 						return (
-							<div className="space-y-4">
+							<div className="space-y-4 content-enter">
 								{SEVERITY_ORDER.map((severity) => (
 									<div key={severity} className="space-y-2 border-t border-border/60 pt-3">
 										<div className="flex items-center justify-between gap-3">

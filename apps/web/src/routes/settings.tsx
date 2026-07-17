@@ -9,6 +9,7 @@ import { BillingSection } from "@/components/settings/billing-section"
 import { MembersSection } from "@/components/settings/members-section"
 import { IngestionSection } from "@/components/settings/ingestion-section"
 import { ApiKeysSection } from "@/components/settings/api-keys-section"
+import { DeveloperSection } from "@/components/settings/developer-section"
 import { McpSection } from "@/components/settings/mcp-section"
 import { NotificationsSection } from "@/components/settings/notifications-section"
 import { EscalationPolicySection } from "@/components/settings/escalation-policy-section"
@@ -108,6 +109,9 @@ export function SettingsPage() {
 			{activeTab === "members" && <MembersSection />}
 			{activeTab === "ingestion" && <IngestionSection />}
 			{activeTab === "api-keys" && <ApiKeysSection />}
+			{activeTab === "developer" && (
+				<DeveloperSection onNavigateToApiKeys={() => handleTabSelect("api-keys")} />
+			)}
 			{activeTab === "mcp" && <McpSection />}
 			{activeTab === "notifications" && <NotificationsSection />}
 			{activeTab === "escalations" && <EscalationPolicySection isAdmin={isAdmin} />}

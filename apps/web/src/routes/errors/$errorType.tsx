@@ -161,7 +161,7 @@ function ErrorDetailContent() {
 
 			return (
 				<div
-					className={`grid grid-cols-2 gap-4 lg:grid-cols-4 transition-opacity ${errorResult.waiting ? "opacity-60" : ""}`}
+					className={`grid grid-cols-2 gap-4 lg:grid-cols-4 content-enter ${errorResult.waiting ? "opacity-60" : ""}`}
 				>
 					<StatCard label="Total Occurrences" value={formatNumber(error.count)} />
 					<StatCard
@@ -195,7 +195,7 @@ function ErrorDetailContent() {
 			if (!error) return null
 
 			return (
-				<div className="space-y-2">
+				<div className="space-y-2 content-enter">
 					<h3 className="text-sm font-semibold">Error Message</h3>
 					<div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
 						<pre className="text-sm font-mono whitespace-pre-wrap break-all">
@@ -267,7 +267,7 @@ function ErrorDetailContent() {
 
 			return (
 				<div
-					className={`space-y-2 transition-opacity ${timeseriesResult.waiting ? "opacity-60" : ""}`}
+					className={`space-y-2 content-enter ${timeseriesResult.waiting ? "opacity-60" : ""}`}
 				>
 					<h3 className="text-sm font-semibold">Error Frequency</h3>
 					<ChartContainer config={chartConfig} className="h-[160px] w-full">
@@ -347,7 +347,7 @@ function ErrorDetailContent() {
 		.onSuccess((data: { data: ErrorDetailTrace[] }) => {
 			if (data.data.length === 0) {
 				return (
-					<div className="space-y-2">
+					<div className="space-y-2 content-enter">
 						<h3 className="text-sm font-semibold">Sample Traces</h3>
 						<p className="text-sm text-muted-foreground">
 							No traces found for this error in the selected time range.
@@ -357,7 +357,7 @@ function ErrorDetailContent() {
 			}
 
 			return (
-				<div className={`space-y-2 transition-opacity ${tracesResult.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-2 content-enter ${tracesResult.waiting ? "opacity-60" : ""}`}>
 					<div className="flex items-center justify-between">
 						<h3 className="text-sm font-semibold">Sample Traces</h3>
 						<span className="text-xs text-muted-foreground">

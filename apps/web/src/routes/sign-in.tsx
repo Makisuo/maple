@@ -107,10 +107,16 @@ export function SelfHostedSignInPage() {
 }
 
 export function SignInPage() {
+	const { redirect_url } = Route.useSearch()
+	// Clerk's <SignIn> defaults its post-sign-in redirect to "/", which would
+	// discard the guard-preserved redirect_url (e.g. after a hard reload on a
+	// deep link bounced through /sign-in while the session was still settling).
+	const target = validateInternalRedirect(redirect_url ?? null)
+
 	if (isClerkAuthEnabled) {
 		return (
 			<AuthLayout>
-				<SignIn appearance={clerkAppearance} />
+				<SignIn appearance={clerkAppearance} forceRedirectUrl={target ?? undefined} />
 			</AuthLayout>
 		)
 	}

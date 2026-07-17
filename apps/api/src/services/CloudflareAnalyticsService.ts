@@ -40,9 +40,11 @@ import {
 import * as CH from "@maple/query-engine/ch"
 import {
 	cloudflareAnalyticsState,
+	cloudflareHyperdriveConfigs,
 	oauthConnections,
 	type CloudflareAnalyticsStateInsert,
 	type CloudflareAnalyticsStateRow,
+	type CloudflareHyperdriveConfigRow,
 } from "@maple/db"
 import { and, eq, gt, inArray, isNull, lt, or } from "drizzle-orm"
 import {
@@ -62,9 +64,11 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import type { TenantContext } from "./AuthService"
 import {
 	graphqlQuery,
+	listHyperdriveConfigs as listAccountHyperdriveConfigs,
 	listWorkerScripts,
 	listZones,
 	type CloudflareGraphqlError,
+	type CloudflareHyperdriveConfig,
 	type CloudflareZone,
 } from "../lib/CloudflareApi"
 import { Database, type DatabaseClient } from "../lib/DatabaseLive"
@@ -888,6 +892,10 @@ export interface CloudflareAnalyticsServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<CloudflareIntegrationStatus, IntegrationsPersistenceError>
 	readonly getUsage: (orgId: OrgId) => Effect.Effect<CloudflareUsageResponse, IntegrationsPersistenceError>
+	/** Non-deleted Hyperdrive config inventory rows, refreshed by the hourly discovery pass. */
+	readonly listHyperdriveConfigs: (
+		orgId: OrgId,
+	) => Effect.Effect<ReadonlyArray<CloudflareHyperdriveConfigRow>, IntegrationsPersistenceError>
 	/** Recovery hook for reconnect — see the implementation below for why this exists. */
 	readonly resetOrgState: (orgId: OrgId) => Effect.Effect<void, IntegrationsPersistenceError>
 }
@@ -1550,6 +1558,95 @@ export class CloudflareAnalyticsService extends Context.Service<
 		})
 
 		// ------------------------------------------------------------------
+		// Hyperdrive config inventory (discovery-cadence, service-map consumer)
+		// ------------------------------------------------------------------
+
+		/**
+		 * Upsert the org's Hyperdrive configs by `(orgId, configId)` and soft-delete rows whose
+		 * config disappeared upstream — mirrors the PlanetScale inventory reconcile so identity
+		 * is kept if a config re-appears.
+		 */
+		const reconcileHyperdriveConfigs = Effect.fn(
+			"CloudflareAnalyticsService.reconcileHyperdriveConfigs",
+		)(function* (orgId: OrgId, configs: ReadonlyArray<CloudflareHyperdriveConfig>, now: number) {
+			yield* Effect.annotateCurrentSpan({
+				orgId,
+				"maple.cloudflare.hyperdrive_config_count": configs.length,
+			})
+			const existingRows = yield* dbExecute((db) =>
+				db
+					.select()
+					.from(cloudflareHyperdriveConfigs)
+					.where(eq(cloudflareHyperdriveConfigs.orgId, orgId)),
+			)
+			const existingByConfigId = new Map(existingRows.map((row) => [row.configId, row]))
+			const upstreamIds = new Set(configs.map((config) => config.id))
+
+			yield* Effect.forEach(
+				configs,
+				(config) => {
+					const values = {
+						name: config.name,
+						originHost: config.origin.host,
+						originPort: config.origin.port,
+						originScheme: config.origin.scheme,
+						originDatabase: config.origin.database,
+						originUser: config.origin.user,
+						deletedAt: null,
+						updatedAt: new Date(now),
+					}
+					const existing = existingByConfigId.get(config.id)
+					return existing !== undefined
+						? dbExecute((db) =>
+								db
+									.update(cloudflareHyperdriveConfigs)
+									.set(values)
+									.where(eq(cloudflareHyperdriveConfigs.id, existing.id)),
+							)
+						: dbExecute((db) =>
+								db.insert(cloudflareHyperdriveConfigs).values({
+									id: randomUUID(),
+									orgId,
+									configId: config.id,
+									createdAt: new Date(now),
+									...values,
+								}),
+							)
+				},
+				{ concurrency: 4, discard: true },
+			)
+
+			yield* Effect.forEach(
+				existingRows.filter((row) => !upstreamIds.has(row.configId) && row.deletedAt === null),
+				(row) =>
+					dbExecute((db) =>
+						db
+							.update(cloudflareHyperdriveConfigs)
+							.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
+							.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
+					),
+				{ concurrency: 4, discard: true },
+			)
+		})
+
+		const listHyperdriveConfigsForOrg = Effect.fn(
+			"CloudflareAnalyticsService.listHyperdriveConfigs",
+		)(function* (orgId: OrgId) {
+			yield* Effect.annotateCurrentSpan("orgId", orgId)
+			return yield* dbExecute((db) =>
+				db
+					.select()
+					.from(cloudflareHyperdriveConfigs)
+					.where(
+						and(
+							eq(cloudflareHyperdriveConfigs.orgId, orgId),
+							isNull(cloudflareHyperdriveConfigs.deletedAt),
+						),
+					),
+			)
+		})
+
+		// ------------------------------------------------------------------
 		// Per-org poll
 		// ------------------------------------------------------------------
 
@@ -1645,6 +1742,22 @@ export class CloudflareAnalyticsService extends Context.Service<
 							liveScriptsJson: JSON.stringify(scriptsResult.success),
 							updatedAt: new Date(now),
 						})
+					}
+					// Hyperdrive config inventory rides the same discovery TTL. It only feeds the
+					// service map's "what sits behind Hyperdrive" resolution, so a failure (typically
+					// a pre-hyperdrive-scope grant surfacing as IntegrationsRevokedError) degrades
+					// open — log and keep the last-known rows, never disable the org's analytics.
+					const hyperdriveResult = yield* Effect.result(
+						listAccountHyperdriveConfigs(accessToken, accountId, apiBaseUrl),
+					)
+					if (Result.isFailure(hyperdriveResult)) {
+						yield* Effect.logWarning("cloudflare-analytics hyperdrive discovery failed", {
+							orgId,
+							errorTag: hyperdriveResult.failure._tag,
+							error: hyperdriveResult.failure.message,
+						})
+					} else {
+						yield* reconcileHyperdriveConfigs(orgId, hyperdriveResult.success, now)
 					}
 				} else {
 					rows = yield* loadStateRows(orgId)
@@ -2134,6 +2247,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 			getStatus,
 			getIntegrationStatus,
 			getUsage,
+			listHyperdriveConfigs: listHyperdriveConfigsForOrg,
 			resetOrgState,
 		} satisfies CloudflareAnalyticsServiceShape
 	}),

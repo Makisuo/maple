@@ -246,6 +246,8 @@
 	--radius-4xl: calc(var(--radius) + 16px);
 	--animate-skeleton: skeleton 2s -1s infinite linear;
 	--animate-caret-blink: 1s ease-out infinite caret-blink;
+	--ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
 	--color-warning-foreground: var(--warning-foreground);
 	--color-warning: var(--warning);
 	--color-success-foreground: var(--success-foreground);
@@ -268,6 +270,16 @@
 		50% {
 			opacity: 0;
 		}
+	}
+}
+
+/* Entrance for content replacing a loading skeleton: opacity-only so data the
+   user is about to read never moves. Gentle enough that it doubles as its own
+   reduced-motion fallback. */
+@utility content-enter {
+	transition: opacity 150ms var(--ease-out-quint);
+	@starting-style {
+		opacity: 0;
 	}
 }
 

@@ -162,7 +162,7 @@ function PlanetScaleData({
 				inventory.lastInventoryAt !== null &&
 				Date.now() - inventory.lastInventoryAt > INVENTORY_STALE_MS
 			return (
-				<div className="space-y-6">
+				<div className="space-y-6 content-enter">
 					{lastInventoryError !== null || inventoryStale ? (
 						<p className="text-xs text-severity-warn">
 							{lastInventoryError !== null

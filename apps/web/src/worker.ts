@@ -11,6 +11,9 @@ export default {
 			return assetResponse
 		}
 
-		return env.ASSETS.fetch(new Request(new URL("/index.html", url), request))
+		// Fetch "/" rather than "/index.html": the assets layer's
+		// auto-trailing-slash handling answers explicit /index.html requests
+		// with a 307 to "/", which would bounce deep links to the root.
+		return env.ASSETS.fetch(new Request(new URL("/", url), request))
 	},
 }

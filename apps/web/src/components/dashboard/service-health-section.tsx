@@ -215,7 +215,7 @@ export function ServiceHealthOverview(props: ServiceHealthProps) {
 		.onSuccess((response, result) => {
 			const counts = countByHealth(enrichServices(response.data, openIncidents, baselineMap))
 			return (
-				<section className={cn("mb-4 space-y-3", result.waiting && "opacity-60 transition-opacity")}>
+				<section className={cn("mb-4 space-y-3 content-enter", result.waiting && "opacity-60")}>
 					{banner}
 					<StatRail>
 						<StatRailItem
@@ -294,7 +294,7 @@ export function ServiceHealthList(props: ServiceHealthProps) {
 		.onSuccess((response, result) => {
 			const rows = enrichServices(response.data, openIncidents, baselineMap).slice(0, MAX_ROWS)
 			return (
-				<section className={cn("mt-4 space-y-3", result.waiting && "opacity-60 transition-opacity")}>
+				<section className={cn("mt-4 space-y-3 content-enter", result.waiting && "opacity-60")}>
 					{header}
 					<Card className="overflow-hidden p-0">
 						{rows.length === 0 ? (

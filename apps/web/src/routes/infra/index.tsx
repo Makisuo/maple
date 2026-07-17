@@ -93,7 +93,7 @@ function InfraPageContent() {
 
 						if (hosts.length === 0 && !search.trim()) {
 							return (
-								<Empty className="py-16">
+								<Empty className="py-16 content-enter">
 									<EmptyHeader>
 										<EmptyMedia variant="icon">
 											<ServerIcon size={16} />
@@ -174,7 +174,7 @@ function FleetView({
 	const showFleetGrid = hosts.length >= FLEET_GRID_THRESHOLD
 
 	return (
-		<div className={cn("transition-opacity", waiting && "opacity-60")}>
+		<div className={cn("content-enter", waiting && "opacity-60")}>
 			<div className="space-y-4">
 				<HostSummaryCards hosts={hosts} startTime={startTime} endTime={endTime} />
 				{showFleetGrid && <FleetGrid hosts={hosts} />}

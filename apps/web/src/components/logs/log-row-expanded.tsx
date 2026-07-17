@@ -20,7 +20,10 @@ export function LogRowExpanded({ log, onOpenDetail }: LogRowExpandedProps) {
 	const { copy } = useCopyToClipboard("Log JSON")
 
 	return (
-		<div className="border-t border-border/60 bg-muted/15 px-3 py-2.5 font-mono">
+		// Entrance finishes the story the row's rotating chevron starts. Opacity +
+		// a 2px translate only — never height, which would fight the virtualizer's
+		// ResizeObserver re-measure.
+		<div className="border-t border-border/60 bg-muted/15 px-3 py-2.5 font-mono transition-[opacity,translate] duration-[140ms] ease-out-quint starting:opacity-0 starting:-translate-y-0.5 motion-reduce:starting:translate-y-0">
 			<div className="mb-2 flex items-center justify-end gap-3">
 				<button
 					type="button"

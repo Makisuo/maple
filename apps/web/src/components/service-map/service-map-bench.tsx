@@ -1,5 +1,6 @@
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ReactFlowProvider, useReactFlow, useStoreApi } from "@xyflow/react"
+import type { DeclutterFocus } from "./service-map-declutter"
 import type { ServiceDbEdge, ServiceEdge, ServicePlatform } from "@/api/warehouse/service-map"
 import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
@@ -30,6 +31,10 @@ export interface BenchParams {
 	seed: number
 	/** Number of `service.namespace` groups to spread services across (0 = none). */
 	groups: number
+	/** Low-traffic filter threshold (% of peak edge rate; 0 = off). */
+	minTraffic: number
+	/** Service to focus (dim non-neighbors); "" = no focus. */
+	focus: string
 }
 
 export const DEFAULT_BENCH_PARAMS: BenchParams = {
@@ -38,6 +43,8 @@ export const DEFAULT_BENCH_PARAMS: BenchParams = {
 	rps: "high",
 	seed: 1,
 	groups: 0,
+	minTraffic: 0,
+	focus: "",
 }
 
 // Realistic-ish namespace names; falls back to `team-<n>` past the pool length.
@@ -222,6 +229,8 @@ interface BenchMetrics {
 
 interface SmBench {
 	ready: boolean
+	/** Time from harness install to ready (nodes measured + edges in the DOM) — includes the async ELK layout. */
+	readyMs: number | null
 	last: BenchMetrics | null
 	run: (opts?: { durationMs?: number; pan?: boolean }) => Promise<BenchMetrics>
 }
@@ -249,6 +258,7 @@ function BenchDriver({ params }: { params: BenchParams }) {
 	useEffect(() => {
 		const harness: SmBench = {
 			ready: false,
+			readyMs: null,
 			last: null,
 			run: ({ durationMs = 5000, pan = true } = {}) =>
 				new Promise<BenchMetrics>((resolve) => {
@@ -323,6 +333,7 @@ function BenchDriver({ params }: { params: BenchParams }) {
 			const measured = nodes.length > 0 && nodes.every((n) => n.measured?.width)
 			const domEdges = document.querySelectorAll(".react-flow__edge").length
 			if ((measured && domEdges > 0) || performance.now() - settleStart > 8000) {
+				harness.readyMs = Math.round(performance.now() - settleStart)
 				harness.ready = true
 				return
 			}
@@ -341,6 +352,11 @@ function BenchDriver({ params }: { params: BenchParams }) {
 
 export function ServiceMapBench({ params }: { params: BenchParams }) {
 	const graph = useMemo(() => generateBenchGraph(params), [params])
+	// URL-driven focus so the perf spec can exercise the declutter paths without
+	// UI automation; interactive changes via the toolbar still work on top.
+	const [focus, setFocus] = useState<DeclutterFocus | null>(
+		params.focus ? { serviceId: params.focus, hops: 1, mode: "dim" } : null,
+	)
 	// Note: animation respects `prefers-reduced-motion`. The Playwright project
 	// runs with `reducedMotion: "no-preference"` (browser default) so the harness
 	// measures the animated path.
@@ -387,6 +403,9 @@ export function ServiceMapBench({ params }: { params: BenchParams }) {
 					startTime={START_TIME}
 					endTime={END_TIME}
 					layoutKey="bench"
+					focus={focus}
+					onFocusChange={setFocus}
+					minTrafficPctOverride={params.minTraffic > 0 ? params.minTraffic : undefined}
 				/>
 				<BenchDriver params={params} />
 			</ReactFlowProvider>

@@ -99,7 +99,7 @@ function LinkedIssueBody({
 						</div>
 					))
 					.onSuccess(({ issue }) => (
-						<div className="flex flex-wrap items-start justify-between gap-3">
+						<div className="flex flex-wrap items-start justify-between gap-3 content-enter">
 							<div className="min-w-0 space-y-2">
 								<div className="flex flex-wrap items-center gap-2">
 									<WorkflowBadge state={issue.workflowState} />

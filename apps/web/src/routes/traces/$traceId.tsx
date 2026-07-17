@@ -268,7 +268,7 @@ function TraceDetailContent({
 				</div>
 			}
 		>
-			<div className="flex flex-1 flex-col gap-y-3 min-h-0">
+			<div className="flex flex-1 flex-col gap-y-3 min-h-0 content-enter">
 				{/*
 				 * Each label stays glued to its value in its own group, so wrapping can never strand a
 				 * "Duration:" at the end of one line and its badge at the start of the next.

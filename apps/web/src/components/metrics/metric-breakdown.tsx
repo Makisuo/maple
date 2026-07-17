@@ -185,7 +185,7 @@ function BreakdownBars({
 
 			if (rows.length === 0) {
 				return (
-					<p className="py-4 text-center text-xs text-muted-foreground">
+					<p className="content-enter py-4 text-center text-xs text-muted-foreground">
 						No values for this attribute in the selected range.
 					</p>
 				)
@@ -194,7 +194,7 @@ function BreakdownBars({
 			const max = Math.max(...rows.map((row) => row.value), 1)
 
 			return (
-				<div className="space-y-1">
+				<div className="content-enter space-y-1">
 					{rows.map((row) => (
 						<button
 							key={row.name}

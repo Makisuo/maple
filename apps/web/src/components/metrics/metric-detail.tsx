@@ -169,7 +169,7 @@ export function MetricDetail({ metricName, state, startTime, endTime, onPatch }:
 			const summary = summarizeCatalogRows(response.data, metricName, state.type)
 			if (!summary) {
 				return (
-					<div className="flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
+					<div className="content-enter flex flex-col items-center justify-center rounded-md border border-dashed p-12 text-center">
 						<p className="text-sm font-medium">No data for this metric in the selected range</p>
 						<p className="mt-2 max-w-md text-sm text-muted-foreground">
 							<span className="font-mono">{metricName}</span> has no datapoints between{" "}
@@ -208,7 +208,7 @@ function MetricDetailContent({
 	const draft = React.useMemo(() => buildMetricExplorerDraft(summary, state), [summary, state])
 
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="content-enter flex flex-col gap-4">
 			<div className="flex justify-end">
 				<MetricGraduationActions draft={draft} />
 			</div>
@@ -289,7 +289,7 @@ function MetricChart({
 					))
 					.onSuccess((response) =>
 						response.data.length === 0 ? (
-							<div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+							<div className="content-enter flex h-full items-center justify-center text-sm text-muted-foreground">
 								No datapoints match this query in the selected range.
 							</div>
 						) : (

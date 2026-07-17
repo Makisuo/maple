@@ -127,7 +127,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 	const margin = { top: 12, right: 12, left: 0, bottom: 0 }
 
 	return (
-		<div className={cn("rounded-lg border bg-card p-4 transition-opacity", waiting && "opacity-60")}>
+		<div className={cn("rounded-lg border bg-card p-4 content-enter", waiting && "opacity-60")}>
 			<div className="mb-3 flex flex-wrap items-center gap-2">
 				{series.map((s) => {
 					const value = lastValues[s]

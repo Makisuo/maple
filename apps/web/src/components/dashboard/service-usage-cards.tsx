@@ -161,7 +161,7 @@ export function ServiceUsageCards({ startTime, endTime }: ServiceUsageCardsProps
 			const totals = sumTotals(response)
 
 			return (
-				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+				<div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 content-enter">
 					{cardConfig.map((card) => {
 						const current = totals[card.key]
 						const previous = previousTotals?.[card.key]

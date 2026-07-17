@@ -87,13 +87,6 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 				}
 			/>
 			<FilterSidebarBody>
-				<DurationRangeFilter
-					minValue={filters.minDurationMs}
-					maxValue={filters.maxDurationMs}
-					onMinChange={(v) => setParams({ minDur: v != null ? String(v) : null })}
-					onMaxChange={(v) => setParams({ maxDur: v != null ? String(v) : null })}
-					durationStats={facets.data?.durationStats}
-				/>
 				<SingleCheckboxFilter
 					title="Errors only"
 					checked={filters.errorsOnly === true}
@@ -124,6 +117,13 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 					options={facets.data?.spanNames ?? []}
 					selected={filters.span ? [filters.span] : []}
 					onChange={facetSelect("span")}
+				/>
+				<DurationRangeFilter
+					minValue={filters.minDurationMs}
+					maxValue={filters.maxDurationMs}
+					onMinChange={(v) => setParams({ minDur: v != null ? String(v) : null })}
+					onMaxChange={(v) => setParams({ maxDur: v != null ? String(v) : null })}
+					durationStats={facets.data?.durationStats}
 				/>
 				<FilterSection
 					title="HTTP Method"

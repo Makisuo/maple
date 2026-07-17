@@ -98,7 +98,7 @@ export function ErrorsSummaryCards({ filters }: ErrorsSummaryCardsProps) {
 
 			return (
 				<div
-					className={`grid gap-4 md:grid-cols-2 lg:grid-cols-4 ${result.waiting ? "opacity-60" : ""}`}
+					className={`grid gap-4 md:grid-cols-2 lg:grid-cols-4 content-enter ${result.waiting ? "opacity-60" : ""}`}
 				>
 					{cardConfig.map((card) => (
 						<Card key={card.title}>

@@ -65,7 +65,16 @@ export const createMapleWeb = ({
 		const worker = yield* Cloudflare.Worker<{}, Cloudflare.AssetsWithHash>("app", {
 			name: resolveWorkerName("web", stage),
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
-			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
+			assets: {
+				directory: build.outdir,
+				hash: Output.map(build.hash, (h) => h.output ?? ""),
+				// Deep links (/traces, /alerts, …) must serve the SPA shell at the
+				// requested URL. Without this the binding 404s, worker.ts falls back
+				// to an explicit /index.html fetch, and the assets layer's
+				// auto-trailing-slash normalization answers that with a 307 to "/" —
+				// hard reloads on any deep path land on the dashboard root.
+				notFoundHandling: "single-page-application",
+			},
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
 			url: true,
 			domain: domains.web,

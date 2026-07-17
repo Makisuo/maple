@@ -60,7 +60,7 @@ export function PodsFilterSidebarView({
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection
@@ -215,7 +215,7 @@ export function NodesFilterSidebarView({
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection
@@ -295,7 +295,7 @@ export function WorkloadsFilterSidebarView({
 			const f = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame waiting={result.waiting}>
+				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SearchableFilterSection

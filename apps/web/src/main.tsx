@@ -156,6 +156,7 @@ const app = isClerkAuthEnabled ? (
 		publishableKey={clerkPublishableKey}
 		signInUrl={clerkSignInUrl}
 		signUpUrl={clerkSignUpUrl}
+		signUpFallbackRedirectUrl="/quick-start"
 		afterSignOutUrl={clerkSignInUrl}
 	>
 		<ClerkAuthBridge />

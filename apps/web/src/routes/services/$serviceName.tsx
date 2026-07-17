@@ -27,7 +27,11 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { Button } from "@maple/ui/components/ui/button"
 import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
+import { ServiceDependencyStrip } from "@/components/services/service-dependency-strip"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
+import { ServiceErrorsPanel } from "@/components/services/service-errors-panel"
+import { ServiceHealthStrip } from "@/components/services/service-health-strip"
+import { ServiceRecentDeploys } from "@/components/services/service-recent-deploys"
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
@@ -225,6 +229,7 @@ function ServiceDetailContent() {
 					effectiveStartTime={effectiveStartTime}
 					effectiveEndTime={effectiveEndTime}
 					environments={search.environments}
+					onShowDependencies={() => handleTabChange("dependencies")}
 				/>
 			) : (
 				<ServiceDependenciesTab
@@ -245,9 +250,16 @@ interface OverviewTabProps {
 	effectiveStartTime: string
 	effectiveEndTime: string
 	environments?: string[]
+	onShowDependencies: () => void
 }
 
-function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, environments }: OverviewTabProps) {
+function OverviewTab({
+	serviceName,
+	effectiveStartTime,
+	effectiveEndTime,
+	environments,
+	onShowDependencies,
+}: OverviewTabProps) {
 	// One fetch for the whole Overview tab — the primary chart and the environment
 	// switcher's options (the switcher reads this same atom key, so it shares this
 	// round-trip instead of issuing its own overview query).
@@ -302,16 +314,23 @@ function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, enviro
 	// `Initial`), so this stays false and the stale-data dim (`opacity-60`) wins.
 	const isDetailLoading = Result.isInitial(overviewResult)
 
+	// The typed per-bucket series, shared by the chart grid and the health strip's
+	// window aggregates so both always describe the same data.
+	const basePoints: ReadonlyArray<ServiceDetailTimeSeriesPoint> = useMemo(
+		() =>
+			Result.builder(overviewResult)
+				.onSuccess((response) => response.data)
+				.orElse(() => []),
+		[overviewResult],
+	)
+
 	// ServiceDetail points are typed structs; the chart grid consumes a
 	// generic `Record<string, unknown>[]`. Each point's fields are all primitive,
 	// so this is a safe widening (no `as unknown` round-trip needed). The exact
 	// SpanMetrics throughput overlay (when present) is merged by ISO bucket here.
 	const detailPoints: Record<string, unknown>[] = useMemo(() => {
-		const base: ReadonlyArray<ServiceDetailTimeSeriesPoint> = Result.builder(overviewResult)
-			.onSuccess((response) => response.data)
-			.orElse(() => [])
-		return mergeExactThroughput(base, exactThroughputByBucket).map((point) => ({ ...point }))
-	}, [overviewResult, exactThroughputByBucket])
+		return mergeExactThroughput(basePoints, exactThroughputByBucket).map((point) => ({ ...point }))
+	}, [basePoints, exactThroughputByBucket])
 
 	// Commit deploy markers (dashed verticals + labels) drawn over every chart.
 	// Derived from the overview's release timeline and snapped onto the chart's
@@ -342,17 +361,37 @@ function OverviewTab({ serviceName, effectiveStartTime, effectiveEndTime, enviro
 	}))
 
 	return (
-		<MetricsGrid
-			items={metrics}
-			waiting={!!isWaiting}
-			syncId={`service-${serviceName}`}
-			overlay={commitMarkers}
-			// Pin every chart's y-axis to one width so their plot areas align — the
-			// synced cursor and the commit markers then line up and group identically
-			// across charts (otherwise each chart's own y-axis width shifts the plot,
-			// and the same commits group differently per chart). 72 fits the widest
-			// of these metrics' tick labels (latency ms).
-			yAxisWidth={72}
-		/>
+		<div className="flex flex-col gap-3">
+			<ServiceHealthStrip
+				serviceName={serviceName}
+				points={basePoints}
+				isLoading={isDetailLoading}
+				effectiveStartTime={effectiveStartTime}
+				effectiveEndTime={effectiveEndTime}
+				environments={environments}
+			/>
+			<MetricsGrid
+				items={metrics}
+				waiting={!!isWaiting}
+				syncId={`service-${serviceName}`}
+				overlay={commitMarkers}
+				// Pin every chart's y-axis to one width so their plot areas align — the
+				// synced cursor and the commit markers then line up and group identically
+				// across charts (otherwise each chart's own y-axis width shifts the plot,
+				// and the same commits group differently per chart). 72 fits the widest
+				// of these metrics' tick labels (latency ms).
+				yAxisWidth={72}
+			/>
+			<div className="grid gap-3 lg:grid-cols-2">
+				<ServiceErrorsPanel serviceName={serviceName} />
+				<ServiceRecentDeploys releases={releases} />
+			</div>
+			<ServiceDependencyStrip
+				serviceName={serviceName}
+				effectiveStartTime={effectiveStartTime}
+				effectiveEndTime={effectiveEndTime}
+				onViewAll={onShowDependencies}
+			/>
+		</div>
 	)
 }

@@ -9,6 +9,7 @@ import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refresha
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { ServiceMapView } from "@/components/service-map/service-map-view"
+import type { DeclutterFocus } from "@/components/service-map/service-map-declutter"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -24,6 +25,11 @@ const serviceMapSearchSchema = Schema.Struct({
 	endTime: Schema.optional(Schema.String),
 	timePreset: Schema.optional(Schema.String),
 	environment: Schema.optional(Schema.String),
+	// Focus mode: dim/hide everything outside a service's neighborhood. Kept in
+	// the URL so a focused view is shareable / survives reloads.
+	focusService: Schema.optional(Schema.String),
+	focusHops: Schema.optional(Schema.Literals([1, 2])),
+	focusMode: Schema.optional(Schema.Literals(["dim", "hide"])),
 })
 
 export const Route = effectRoute(createFileRoute("/service-map"))({
@@ -102,6 +108,26 @@ function ServiceMapContent() {
 		})
 	}
 
+	const focus: DeclutterFocus | null = search.focusService
+		? {
+				serviceId: search.focusService,
+				hops: search.focusHops ?? 1,
+				mode: search.focusMode ?? "dim",
+			}
+		: null
+
+	const handleFocusChange = (next: DeclutterFocus | null) => {
+		navigate({
+			replace: true,
+			search: (prev: Record<string, unknown>) => ({
+				...prev,
+				focusService: next?.serviceId,
+				focusHops: next && next.hops !== 1 ? next.hops : undefined,
+				focusMode: next && next.mode !== "dim" ? next.mode : undefined,
+			}),
+		})
+	}
+
 	return (
 		<DashboardLayout
 			breadcrumbs={[{ label: "Service Map" }]}
@@ -139,6 +165,8 @@ function ServiceMapContent() {
 					startTime={effectiveStartTime}
 					endTime={effectiveEndTime}
 					deploymentEnv={deploymentEnv}
+					focus={focus}
+					onFocusChange={handleFocusChange}
 				/>
 			</div>
 		</DashboardLayout>

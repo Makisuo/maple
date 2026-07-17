@@ -3,7 +3,12 @@ import { Retry } from "@distilled.cloud/cloudflare"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { OrgId } from "@maple/domain/http"
 import { clickHouseSchemaVersion } from "@maple/domain/clickhouse"
-import { cloudflareAnalyticsState, oauthConnections, orgClickHouseSettings } from "@maple/db"
+import {
+	cloudflareAnalyticsState,
+	cloudflareHyperdriveConfigs,
+	oauthConnections,
+	orgClickHouseSettings,
+} from "@maple/db"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
@@ -172,12 +177,23 @@ interface OtlpCall {
 	readonly payload: OtlpMetricsPayload
 }
 
+/** Wire-form Hyperdrive config as `GET /accounts/{id}/hyperdrive/configs` returns it. */
+interface HyperdriveConfigFixture {
+	readonly id: string
+	readonly name: string
+	readonly origin: Record<string, unknown>
+}
+
 interface FetchOptions {
 	readonly zones?: ReadonlyArray<typeof zoneFixture>
 	readonly zonesStatus?: number
 	readonly graphqlErrors?: ReadonlyArray<{ message: string; path?: ReadonlyArray<string | number> }>
 	/** Live Worker scripts the REST enumeration returns (default: my-worker). */
 	readonly workerScripts?: ReadonlyArray<{ id: string }>
+	/** Hyperdrive configs the REST enumeration returns (default: none). Mutable so a test can change the upstream set between polls. */
+	hyperdriveConfigs?: ReadonlyArray<HyperdriveConfigFixture>
+	/** HTTP status for the hyperdrive listing (default 200). Mutable for per-poll failure injection. */
+	hyperdriveStatus?: number
 	/** When set, OTLP metrics POSTs to the ingest gateway (`/v1/metrics`) are captured here. */
 	readonly otlpCalls?: Array<OtlpCall>
 	/** HTTP status the mock gateway returns for `/v1/metrics` (default 200). */
@@ -233,6 +249,25 @@ const mockCloudflareFetch =
 			if (body.query.includes("MapleCfZoneAnalytics")) return jsonResponse({ data: httpData })
 			if (body.query.includes("MapleCfAccountAnalytics")) return jsonResponse({ data: workersData })
 			return jsonResponse({ data: null, errors: [{ message: "unknown query" }] })
+		}
+		if (url.includes("/hyperdrive/configs")) {
+			if (options.hyperdriveStatus) {
+				return jsonResponse(
+					{
+						success: false,
+						errors: [{ code: 10000, message: "Authentication error" }],
+						messages: [],
+						result: null,
+					},
+					options.hyperdriveStatus,
+				)
+			}
+			return jsonResponse({
+				success: true,
+				errors: [],
+				messages: [],
+				result: options.hyperdriveConfigs ?? [],
+			})
 		}
 		if (url.includes("/workers/scripts")) {
 			const page = Number(new URL(url).searchParams.get("page") ?? "1")
@@ -544,6 +579,117 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(captured.length, 0)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, { otlpCalls })))
 	})
+
+	const hyperdriveMysqlFixture: HyperdriveConfigFixture = {
+		id: "a".repeat(32),
+		name: "maple-mysql",
+		origin: {
+			database: "maple",
+			host: "aws.connect.psdb.cloud",
+			port: 3306,
+			scheme: "mysql",
+			user: "reader",
+		},
+	}
+	// VPC-service origin variant: no host/port on the wire.
+	const hyperdriveVpcFixture: HyperdriveConfigFixture = {
+		id: "b".repeat(32),
+		name: "maple-pg",
+		origin: {
+			database: "pgdb",
+			scheme: "postgres",
+			service_id: "svc-1",
+			user: "writer",
+		},
+	}
+
+	it.effect(
+		"pollOrg discovers hyperdrive configs, reconciles renames, and soft-deletes vanished configs",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			const fetchOptions: FetchOptions = {
+				hyperdriveConfigs: [hyperdriveMysqlFixture, hyperdriveVpcFixture],
+			}
+			return Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				yield* seedConnection()
+				const service = yield* CloudflareAnalyticsService
+
+				yield* service.pollOrg(ORG)
+				const first = yield* service.listHyperdriveConfigs(ORG)
+				assert.strictEqual(first.length, 2)
+				const mysqlRow = first.find((row) => row.configId === hyperdriveMysqlFixture.id)
+				assert.strictEqual(mysqlRow?.name, "maple-mysql")
+				assert.strictEqual(mysqlRow?.originHost, "aws.connect.psdb.cloud")
+				assert.strictEqual(mysqlRow?.originPort, 3306)
+				assert.strictEqual(mysqlRow?.originDatabase, "maple")
+				// The VPC variant normalizes its absent host/port to null.
+				const vpcRow = first.find((row) => row.configId === hyperdriveVpcFixture.id)
+				assert.isNull(vpcRow?.originHost)
+				assert.isNull(vpcRow?.originPort)
+				assert.strictEqual(vpcRow?.originScheme, "postgres")
+
+				// Rename one config and drop the other; the next discovery pass (TTL-gated)
+				// updates in place and soft-deletes the vanished row.
+				fetchOptions.hyperdriveConfigs = [
+					{ ...hyperdriveMysqlFixture, name: "maple-mysql-renamed" },
+				]
+				yield* TestClock.setTime(T0 + 61 * MIN)
+				yield* service.pollOrg(ORG)
+				const second = yield* service.listHyperdriveConfigs(ORG)
+				assert.strictEqual(second.length, 1)
+				assert.strictEqual(second[0]!.name, "maple-mysql-renamed")
+
+				const database = yield* Database
+				const allRows = yield* database.execute((db) =>
+					db.select().from(cloudflareHyperdriveConfigs),
+				)
+				const deleted = allRows.find((row) => row.configId === hyperdriveVpcFixture.id)
+				assert.isNotNull(deleted?.deletedAt)
+
+				// A re-appearing config resurrects its soft-deleted row (identity kept).
+				fetchOptions.hyperdriveConfigs = [hyperdriveMysqlFixture, hyperdriveVpcFixture]
+				yield* TestClock.setTime(T0 + 122 * MIN)
+				yield* service.pollOrg(ORG)
+				const third = yield* service.listHyperdriveConfigs(ORG)
+				assert.strictEqual(third.length, 2)
+				assert.strictEqual(
+					third.find((row) => row.configId === hyperdriveVpcFixture.id)?.id,
+					deleted!.id,
+				)
+			}).pipe(Effect.provide(makeLayer(testDb, captured, fetchOptions)))
+		},
+	)
+
+	it.effect(
+		"a hyperdrive discovery failure degrades open: rows kept, analytics not disabled",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const captured: CapturedIngest[] = []
+			const fetchOptions: FetchOptions = { hyperdriveConfigs: [hyperdriveMysqlFixture] }
+			return Effect.gen(function* () {
+				yield* TestClock.setTime(T0)
+				yield* seedConnection()
+				const service = yield* CloudflareAnalyticsService
+
+				yield* service.pollOrg(ORG)
+				assert.strictEqual((yield* service.listHyperdriveConfigs(ORG)).length, 1)
+
+				// A pre-hyperdrive-scope grant surfaces as a 403 on the listing only —
+				// the discovery pass must keep last-known rows and leave analytics running.
+				fetchOptions.hyperdriveStatus = 403
+				yield* TestClock.setTime(T0 + 61 * MIN)
+				const summary = yield* service.pollOrg(ORG)
+				assert.isNull(summary.skipped)
+
+				const rows = yield* service.listHyperdriveConfigs(ORG)
+				assert.strictEqual(rows.length, 1)
+				const stateRows = yield* loadStateRows
+				assert.isTrue(stateRows.every((row) => row.enabled))
+			}).pipe(Effect.provide(makeLayer(testDb, captured, fetchOptions)))
+		},
+	)
 
 	// Seed a workers anchor (discovery + settings pre-stamped fresh so the whole call budget goes to
 	// polling) plus `zoneCount` http zone rows with null settingsJson ⇒ no retention cap ⇒ the full
