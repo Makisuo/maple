@@ -204,7 +204,8 @@ The dashboard SPA is a single build served two ways, and it decides which
   Safari/Firefox differ. The banner encodes the bound port as `?port=` so links
   work on non-default ports.
 - **`--offline` (and dev) — same origin.** The binary serves the bundled SPA from
-  `127.0.0.1`, so queries are same-origin: no CORS, no Private Network Access, no
+  its selected bind address, so queries are same-origin even through a LAN
+  hostname or reverse proxy: no CORS, no Private Network Access, no
   permission prompt, and it works with no internet. In dev the Vite server proxies
   `/local/*` to the binary, which is the same same-origin path. This is the
   recommended escape hatch whenever the default path hits a browser prompt.

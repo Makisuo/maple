@@ -3,13 +3,10 @@
 // call must pass the same constant so the WHERE `OrgId = 'local'` filter matches.
 export const LOCAL_ORG_ID = "local"
 
-// OTLP/HTTP ingest endpoint exposed by the local Maple binary. Mirrors the
-// `MAPLE_LOCAL_URL` default the dev proxy points at (see vite.config.ts). Point
-// any OpenTelemetry SDK (or @maple-dev/browser) here to stream into local mode.
-export const LOCAL_OTLP_ENDPOINT = "http://127.0.0.1:4318"
-
 // Default OTLP/HTTP + query port for `maple start`.
 const DEFAULT_LOCAL_PORT = "4318"
+const DEFAULT_LOOPBACK_ENDPOINT = `http://127.0.0.1:${DEFAULT_LOCAL_PORT}`
+const HOSTED_LOCAL_UI_HOST = "local.maple.dev"
 
 /**
  * Resolve the origin of the local `maple` binary's `/local/query` endpoint for
@@ -26,12 +23,18 @@ const DEFAULT_LOCAL_PORT = "4318"
 export function localApiBase(): string {
 	if (typeof window === "undefined") return ""
 	const { hostname, search } = window.location
-	const isLoopback =
-		hostname === "127.0.0.1" ||
-		hostname === "localhost" ||
-		hostname === "[::1]" ||
-		hostname.endsWith(".localhost")
-	if (isLoopback) return ""
+	// Only the separately hosted dashboard needs to reach back into the
+	// browser's loopback interface. An embedded UI may be served from a LAN
+	// hostname, container address, or reverse proxy and must remain same-origin.
+	if (hostname !== HOSTED_LOCAL_UI_HOST) return ""
 	const port = new URLSearchParams(search).get("port") ?? DEFAULT_LOCAL_PORT
 	return `http://127.0.0.1:${port}`
 }
+
+/** OTLP/HTTP endpoint shown in the UI's connection hints. */
+export function localOtlpEndpoint(): string {
+	if (typeof window === "undefined") return DEFAULT_LOOPBACK_ENDPOINT
+	return localApiBase() || window.location.origin
+}
+
+export const LOCAL_OTLP_ENDPOINT = localOtlpEndpoint()
