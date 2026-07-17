@@ -24,7 +24,13 @@ import {
 import { resolveUiAssets } from "../server/ui-assets"
 import { amber, bold, cyan, dim, green, underline } from "../lib/style"
 import { MAPLE_VERSION } from "../version"
-import { buildDetachedChildArgs, type DirtyStorePolicy } from "./server-args"
+import {
+	buildDetachedChildArgs,
+	type DirtyStorePolicy,
+	resolveBindHost,
+	serverProbeUrl,
+	serverUrl,
+} from "./server-args"
 
 /** A `maple start`/`maple stop` failure. The message is shown to the user and
  *  the process exits non-zero — same role the old `process.exit(1)` paths had,
@@ -47,7 +53,7 @@ const remoteUiUrl = (): string => process.env.MAPLE_LOCAL_UI_URL?.trim() || "htt
 
 /** The startup banner shown once the server is listening. `dashboardUrl` is the
  *  URL the user should open (the auto-updating `local.maple.dev` by default, or
- *  the bundled UI on `127.0.0.1` with `--offline`); `undefined` when no UI. */
+ *  the bundled same-origin UI with `--offline`); `undefined` when no UI. */
 const startBanner = (
 	addr: string,
 	dataDir: string,
@@ -105,6 +111,13 @@ const port = Flag.integer("port").pipe(
 	Flag.withDefault(4318),
 )
 
+const host = Flag.string("host").pipe(
+	Flag.withDescription(
+		"Bind host for local mode (env: MAPLE_LOCAL_BIND_HOST; non-loopback exposes unauthenticated ingest and queries)",
+	),
+	Flag.withDefault(resolveBindHost(process.env.MAPLE_LOCAL_BIND_HOST)),
+)
+
 const dataDirFlag = Flag.optional(
 	Flag.string("data-dir").pipe(
 		Flag.withDescription("Embedded ClickHouse data directory (default: ~/.maple/data)"),
@@ -149,7 +162,7 @@ const checkpointIdFlag = Flag.optional(
 
 const offlineFlag = Flag.boolean("offline").pipe(
 	Flag.withDescription(
-		"Use the UI bundled in this binary (served from 127.0.0.1) instead of local.maple.dev",
+		"Use the UI bundled in this binary (served from the configured bind host) instead of local.maple.dev",
 	),
 	Flag.withDefault(false),
 )
@@ -174,6 +187,7 @@ const probeHealth = (addr: string): Effect.Effect<boolean> =>
  * parent process exits.
  */
 const startDetached = (
+	host: string,
 	port: number,
 	dataDir: string,
 	offline: boolean,
@@ -188,6 +202,7 @@ const startDetached = (
 		// script and Bun needs it; in the compiled binary execPath alone suffices.
 		const childArgs = buildDetachedChildArgs({
 			entry: process.argv[1],
+			host,
 			port,
 			dataDir,
 			offline,
@@ -212,11 +227,12 @@ const startDetached = (
 				}),
 		})
 
-		const addr = `http://127.0.0.1:${port}`
+		const addr = serverUrl(host, port)
+		const probeAddr = serverProbeUrl(host, port)
 		let up = false
 		for (let i = 0; i < 100; i++) {
 			yield* Effect.sleep("100 millis")
-			if (yield* probeHealth(addr)) {
+			if (yield* probeHealth(probeAddr)) {
 				up = true
 				break
 			}
@@ -239,6 +255,7 @@ const startDetached = (
 	})
 
 export const start = Command.make("start", {
+	host,
 	port,
 	dataDir: dataDirFlag,
 	chdbConfigFile: chdbConfigFileFlag,
@@ -356,6 +373,7 @@ export const start = Command.make("start", {
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
 				return yield* startDetached(
+					a.host,
 					a.port,
 					dataDir,
 					a.offline,
@@ -389,6 +407,7 @@ export const start = Command.make("start", {
 					)
 
 					const { port: boundPort } = yield* startServer({
+						hostname: a.host,
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
@@ -412,7 +431,7 @@ export const start = Command.make("start", {
 						fs.remove(pidPath, { force: true }).pipe(Effect.ignore),
 					)
 
-					const addr = `http://127.0.0.1:${boundPort}`
+					const addr = serverUrl(a.host, boundPort)
 					// Default: send users to the auto-updating UI on local.maple.dev (it
 					// reaches this binary on loopback via the encoded ?port=). --offline:
 					// serve the bundled UI from this origin (only when one is embedded).

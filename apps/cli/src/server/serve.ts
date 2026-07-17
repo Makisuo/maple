@@ -24,6 +24,7 @@ export interface AssetResolver {
 }
 
 export interface ServerOptions {
+	readonly hostname: string
 	readonly port: number
 	readonly dataDir: string
 	readonly configFile?: string
@@ -354,7 +355,7 @@ export const startServer = (
 			Effect.sync(() =>
 				Bun.serve({
 					port: options.port,
-					hostname: "127.0.0.1",
+					hostname: options.hostname,
 					fetch: makeFetch(db, options, runSpan),
 				}),
 			),

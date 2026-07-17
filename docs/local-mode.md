@@ -45,6 +45,22 @@ maple services         # query the running server
 maple traces
 ```
 
+Local mode binds to `127.0.0.1` by default. To make the bundled dashboard and
+APIs reachable from another machine, set a bind host explicitly and use the
+same-origin offline UI:
+
+```bash
+MAPLE_LOCAL_BIND_HOST=0.0.0.0 maple start --offline
+# Equivalent: maple start --host 0.0.0.0 --offline
+```
+
+Binding outside loopback exposes the complete, unauthenticated local-mode
+listener: OTLP ingest, `/local/query` raw SQL, `/health`, and the bundled UI.
+Use it only on a trusted network or behind an authentication/TLS proxy. Open
+`http://<server-address>:4318/` from another machine; the default UI hosted at
+`local.maple.dev` always talks to the browser machine's loopback address and is
+therefore not suitable for a remote local-mode server.
+
 By default `maple start` points you at the auto-updating dashboard hosted at
 `local.maple.dev` (it talks back to this binary on loopback — see
 [Where the UI comes from](#where-the-ui-comes-from)). `--offline` serves the copy
@@ -200,6 +216,9 @@ backward compatible — a newer UI may run against an older binary.
 
 `MAPLE_LOCAL_UI_URL` overrides the default UI origin (e.g. point a binary at
 `https://local-staging.maple.dev` for testing).
+
+`MAPLE_LOCAL_BIND_HOST` sets the `maple start` listening address and defaults to
+`127.0.0.1`; the `--host` flag overrides it for one invocation.
 
 ## Dev workflow
 
