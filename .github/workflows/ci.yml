@@ -112,9 +112,11 @@ jobs:
             - name: Build web workspace deps
               run: bun turbo build --filter=@maple/web^...
 
-            # Headless Chromium + its system libs for the rendering benchmark.
-            - name: Install Playwright Chromium
-              run: bunx playwright install --with-deps chromium
+            # Headless browsers + their system libs for the rendering benchmark
+            # and the @cross-browser smoke projects (firefox/webkit fail to
+            # launch in 1ms if only chromium is installed).
+            - name: Install Playwright browsers
+              run: bunx playwright install --with-deps chromium firefox webkit
               working-directory: apps/web
 
             # Boots a self-hosted dev server (see playwright.config.ts) and runs the
