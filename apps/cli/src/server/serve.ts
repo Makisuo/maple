@@ -6,6 +6,7 @@ import { Effect, Schema, type Scope } from "effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
+import { isLoopbackHostname } from "../lib/local-address"
 import { acquireChdb, type Chdb, type ChdbError } from "./chdb"
 import { buildInsertSql } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch } from "./otlp/encode"
@@ -51,6 +52,10 @@ export const isBrowserOriginAllowed = (
 		return false
 	}
 	if (originUrl.origin === corsOrigin) return true
+	// Loopback aliases and dev-proxy ports are equivalent local origins. Require
+	// both sides to be loopback so this exception cannot weaken LAN DNS-rebinding
+	// protection.
+	if (isLoopbackHostname(originUrl.hostname) && isLoopbackHostname(requestUrl.hostname)) return true
 	// Compare host (including port), not scheme: a TLS reverse proxy may preserve
 	// Host while forwarding to this HTTP listener. Restrict the hostname to the
 	// bind/connect/advertised set so a DNS-rebinding origin cannot claim itself as

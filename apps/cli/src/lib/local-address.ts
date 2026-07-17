@@ -9,6 +9,18 @@ export const resolveBindHost = (environmentValue: string | undefined): string =>
 export const connectionHostForBindHost = (host: string): string =>
 	host === "0.0.0.0" ? "127.0.0.1" : host === "::" ? "::1" : host
 
+/** Browser URL hostnames that resolve to the browser machine itself. */
+export const isLoopbackHostname = (hostname: string): boolean => {
+	const normalized = hostname.toLowerCase()
+	return (
+		normalized === "localhost" ||
+		normalized.endsWith(".localhost") ||
+		normalized === "127.0.0.1" ||
+		normalized === "::1" ||
+		normalized === "[::1]"
+	)
+}
+
 export const resolveAdvertiseHost = (
 	flagValue: string | undefined,
 	environmentValue: string | undefined,

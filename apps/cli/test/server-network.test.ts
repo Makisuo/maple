@@ -69,6 +69,36 @@ describe("browser origin policy", () => {
 		strictEqual(isBrowserOriginAllowed(requestUrl, hostedOrigin, hostedOrigin, browserHosts), true)
 	})
 
+	it("allows loopback aliases and the documented Vite proxy across ports", () => {
+		strictEqual(
+			isBrowserOriginAllowed(
+				new URL("http://localhost:4318/local/query"),
+				"http://localhost:4318",
+				hostedOrigin,
+				["127.0.0.1"],
+			),
+			true,
+		)
+		strictEqual(
+			isBrowserOriginAllowed(
+				new URL("http://127.0.0.1:4318/local/query"),
+				"http://127.0.0.1:4319",
+				hostedOrigin,
+				["127.0.0.1"],
+			),
+			true,
+		)
+		strictEqual(
+			isBrowserOriginAllowed(
+				new URL("http://[::1]:4318/local/query"),
+				"http://[::1]:4319",
+				hostedOrigin,
+				["[::1]"],
+			),
+			true,
+		)
+	})
+
 	it("rejects arbitrary and DNS-rebinding browser origins", () => {
 		strictEqual(
 			isBrowserOriginAllowed(requestUrl, "https://attacker.example", hostedOrigin, browserHosts),
@@ -81,6 +111,10 @@ describe("browser origin policy", () => {
 				hostedOrigin,
 				browserHosts,
 			),
+			false,
+		)
+		strictEqual(
+			isBrowserOriginAllowed(requestUrl, "http://localhost:4319", hostedOrigin, browserHosts),
 			false,
 		)
 	})
