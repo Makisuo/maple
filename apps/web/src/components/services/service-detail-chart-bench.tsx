@@ -6,12 +6,9 @@ import {
 	createReactRecorder,
 	startInteractionBench,
 	type InteractionBenchHarness,
-	type InteractionMetrics,
 } from "@/lib/bench/interaction-bench"
 
 export type ServiceDetailBenchSyncMode = "recharts" | "cursor"
-
-export type ServiceDetailInteractionMetrics = InteractionMetrics
 
 declare global {
 	interface Window {

@@ -34,7 +34,7 @@ jobs:
             # chat/replay code in the startup graph. Reads the dist/ the turbo
             # build step just produced (or restored from cache).
             - name: Web bundle budget
-              run: bun perf/check-bundle-budget.ts
+              run: bun run check:bundle
               working-directory: apps/web
 
     knip:
