@@ -10,6 +10,7 @@ import { getCacheInfo, cacheResultStyles } from "../../lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "../../lib/http"
 import { getCloudPlatform, outcomeBadgeStyle } from "../../lib/cloud-platforms"
 import { PixelDurationBar } from "./pixel-duration-bar"
+import { ServiceDot } from "../service-dot"
 import { countDescendants } from "./auto-collapse"
 import type { SpanNode } from "../../lib/types"
 
@@ -168,7 +169,7 @@ function SpanRowImpl({
 					<div className="w-6 shrink-0" />
 				)}
 
-				<Badge variant="outline" className="shrink-0 font-mono text-[10px] px-1.5 gap-1">
+				<span className="flex shrink-0 items-center gap-1.5 font-mono text-[10px]">
 					{platform && (
 						<platform.Icon
 							size={11}
@@ -176,12 +177,12 @@ function SpanRowImpl({
 							aria-label={platform.label}
 						/>
 					)}
+					<ServiceDot serviceName={span.serviceName} className="size-1.5" />
 					<span style={{ color: getServiceColor(span.serviceName) }}>
 						{span.serviceName}
 					</span>
-					<span className="text-muted-foreground">·</span>
-					{kindLabel}
-				</Badge>
+					<span className="text-muted-foreground/60">{kindLabel}</span>
+				</span>
 
 				{platform?.edge && (
 					<span

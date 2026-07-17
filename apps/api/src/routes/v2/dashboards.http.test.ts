@@ -11,7 +11,7 @@ import { AuthService } from "../../services/AuthService"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AlertsServiceStubLayer, AllV2GroupLayersLive } from "./v2-test-support"
+import { AlertsServiceStubLayer, AllV2GroupLayersLive, ConfigResourceServiceStubsLayer } from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -45,6 +45,7 @@ const makeHarness = () => {
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(AlertsServiceStubLayer),
+		Layer.provide(ConfigResourceServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
 		Layer.provideMerge(servicesLive),
 	)

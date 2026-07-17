@@ -28,6 +28,7 @@ import { getCacheInfo, cacheResultStyles } from "@maple/ui/lib/cache"
 import { getCloudPlatform, outcomeBadgeStyle } from "@maple/ui/lib/cloud-platforms"
 import { GlobeIcon } from "@maple/ui/components/icons"
 import { getServiceColor } from "@maple/ui/lib/colors"
+import { ServiceDot } from "@maple/ui/components/service-dot"
 import type { SpanNode, SpanDetailResult } from "@/api/warehouse/traces"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { getSpanDetailResultAtom, listLogsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -41,6 +42,10 @@ import { InfraCorrelationPanel, infraCorrelationWindow } from "@/components/infr
 interface SpanDetailPanelProps {
 	span: SpanNode
 	onClose: () => void
+	/** Start of the whole trace (earliest span start) — anchors the position-in-trace bar. */
+	traceStartTime: string
+	totalDurationMs: number
+	className?: string
 }
 
 const statusStyles: Record<string, string> = {
@@ -74,6 +79,44 @@ function PlatformRow({
 		<div className={cn("flex items-center justify-between gap-2 min-w-0", className)}>
 			<span className="text-muted-foreground shrink-0">{label}</span>
 			<span className="font-mono truncate text-right">{children}</span>
+		</div>
+	)
+}
+
+/**
+ * Where this span sits inside the whole trace: a muted track spanning the
+ * trace's wall-clock time, with the span's own window in its service color.
+ * Offsets are clamped so clock-skewed spans never paint outside the track.
+ */
+function SpanPositionBar({
+	span,
+	traceStartTime,
+	totalDurationMs,
+	color,
+}: {
+	span: SpanNode
+	traceStartTime: string
+	totalDurationMs: number
+	color: string
+}) {
+	const offsetMs = new Date(span.startTime).getTime() - new Date(traceStartTime).getTime()
+	if (!Number.isFinite(offsetMs) || totalDurationMs <= 0) return null
+
+	const offsetPct = Math.min(Math.max((offsetMs / totalDurationMs) * 100, 0), 100)
+	const widthPct = Math.min(Math.max((span.durationMs / totalDurationMs) * 100, 0.75), 100 - offsetPct)
+
+	return (
+		<div className="py-1">
+			<div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+				<div
+					className="absolute inset-y-0 rounded-full"
+					style={{ left: `${offsetPct}%`, width: `${widthPct}%`, backgroundColor: color }}
+				/>
+			</div>
+			<div className="mt-1 flex justify-between text-[10px] text-muted-foreground tabular-nums">
+				<span>+{formatDuration(Math.max(offsetMs, 0))}</span>
+				<span>{formatDuration(totalDurationMs)} total</span>
+			</div>
 		</div>
 	)
 }
@@ -239,14 +282,14 @@ function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: stri
 
 					if (logs.length === 0) {
 						return (
-							<div className="p-4 text-center text-sm text-muted-foreground content-enter">
+							<div className="p-4 text-center text-sm text-muted-foreground">
 								No logs found for this span
 							</div>
 						)
 					}
 
 					return (
-						<div className="divide-y content-enter">
+						<div className="divide-y">
 							{logs.map((log, i) => (
 								<LogEntry
 									key={`${log.timestamp}-${i}`}
@@ -264,7 +307,13 @@ function SpanLogs({ traceId, spanId, timeZone }: { traceId: string; spanId: stri
 	)
 }
 
-export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
+export function SpanDetailPanel({
+	span,
+	onClose,
+	traceStartTime,
+	totalDurationMs,
+	className,
+}: SpanDetailPanelProps) {
 	const { effectiveTimezone } = useTimezonePreference()
 	const cacheInfo = getCacheInfo(span.spanAttributes)
 	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
@@ -298,10 +347,17 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 	// arrives with the lazily-loaded detail attrs.
 	const platform = getCloudPlatform(detailAttrs?.spanAttributes ?? span.spanAttributes)
 
+	const serviceColor = getServiceColor(span.serviceName)
+
 	return (
-		<div className="flex flex-col h-full border-l bg-background overflow-hidden">
-			{/* Header */}
-			<div className="flex items-center justify-between border-b px-3 py-2 shrink-0">
+		<div className={cn("flex flex-col h-full border-l bg-background overflow-hidden", className)}>
+			{/* Header — the left rail carries the span's service identity color */}
+			<div className="relative flex items-center justify-between border-b px-3 py-2 shrink-0">
+				<span
+					aria-hidden
+					className="absolute inset-y-0 left-0 w-0.5"
+					style={{ backgroundColor: serviceColor }}
+				/>
 				<div className="flex-1 min-w-0 mr-2 overflow-hidden">
 					<CopyableValue value={span.spanName} className="block min-w-0 overflow-hidden">
 						<div className="min-w-0">
@@ -313,14 +369,13 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 							/>
 						</div>
 					</CopyableValue>
-					<div className="flex items-center gap-2 mt-0.5">
-						<Badge
-							variant="outline"
-							className="font-mono text-[10px]"
-							style={{ color: getServiceColor(span.serviceName) }}
-						>
-							<CopyableValue value={span.serviceName}>{span.serviceName}</CopyableValue>
-						</Badge>
+					<div className="flex items-center gap-1.5 mt-0.5">
+						<ServiceDot serviceName={span.serviceName} className="size-1.5" />
+						<CopyableValue value={span.serviceName}>
+							<span className="font-mono text-[10px]" style={{ color: serviceColor }}>
+								{span.serviceName}
+							</span>
+						</CopyableValue>
 						<span className="text-[10px] text-muted-foreground">{kindLabel}</span>
 					</div>
 				</div>
@@ -458,10 +513,18 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 				<TabsContent value="details" className="flex-1 min-h-0 mt-0">
 					<ScrollArea className="h-full">
 						<div className="p-3 space-y-3">
-							{/* Timing info */}
+							{/* Timing + identifiers, with the span's position inside the trace */}
 							<div className="space-y-1">
-								<h4 className="text-xs font-medium text-muted-foreground">Timing</h4>
+								<h4 className="text-xs font-medium text-muted-foreground">Span</h4>
 								<div className="rounded-md border p-2 space-y-1 text-xs">
+									{!span.isMissing && (
+										<SpanPositionBar
+											span={span}
+											traceStartTime={traceStartTime}
+											totalDurationMs={totalDurationMs}
+											color={serviceColor}
+										/>
+									)}
 									<PlatformRow label="Start Time">
 										<CopyableValue value={span.startTime}>
 											{formatTimestampInTimezone(span.startTime, {
@@ -475,13 +538,6 @@ export function SpanDetailPanel({ span, onClose }: SpanDetailPanelProps) {
 											{formatDuration(span.durationMs)}
 										</CopyableValue>
 									</PlatformRow>
-								</div>
-							</div>
-
-							{/* IDs */}
-							<div className="space-y-1">
-								<h4 className="text-xs font-medium text-muted-foreground">Identifiers</h4>
-								<div className="rounded-md border p-2 space-y-1 text-xs">
 									<PlatformRow label="Span ID">
 										<CopyableValue value={span.spanId}>{span.spanId}</CopyableValue>
 									</PlatformRow>

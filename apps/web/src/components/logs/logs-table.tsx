@@ -40,10 +40,14 @@ interface LogsTableViewProps {
 	density: LogsDensity
 	pinnedColumns: string[]
 	onLogClick?: (log: Log) => void
+	embedded?: boolean
 }
 
 interface LogsTableProps {
 	filters?: LogsSearchParams
+	/** Hide the /logs route toolbar — required when rendering off the /logs route
+	 *  (LogsTableToolbar reads that route's search params and throws elsewhere). */
+	embedded?: boolean
 }
 
 function LoadingState() {
@@ -292,6 +296,7 @@ function LogsTableView({
 	density,
 	pinnedColumns,
 	onLogClick,
+	embedded,
 }: LogsTableViewProps) {
 	const [selectedLog, setSelectedLog] = React.useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = React.useState(false)
@@ -430,7 +435,7 @@ function LogsTableView({
 	if (allData.length === 0) {
 		return (
 			<div className="flex-1 min-h-0 flex flex-col gap-4">
-				{!onLogClick && <LogsTableToolbar />}
+				{!onLogClick && !embedded && <LogsTableToolbar />}
 				<div className="rounded-md border flex items-center justify-center h-48">
 					<span className="text-sm text-muted-foreground">No logs found</span>
 				</div>
@@ -440,8 +445,8 @@ function LogsTableView({
 
 	return (
 		<>
-			<div className={`flex-1 min-h-0 flex flex-col content-enter ${waiting ? "opacity-60" : ""}`}>
-				{!onLogClick && <LogsTableToolbar />}
+			<div className={`flex-1 min-h-0 flex flex-col transition-opacity ${waiting ? "opacity-60" : ""}`}>
+				{!onLogClick && !embedded && <LogsTableToolbar />}
 				<div className="flex-1 min-h-0 relative">
 					<div
 						ref={scrollContainerRef}
@@ -494,7 +499,7 @@ function LogsTableView({
 	)
 }
 
-export function LogsTable({ filters }: LogsTableProps) {
+export function LogsTable({ filters, embedded }: LogsTableProps) {
 	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, fetchNextPage } =
 		useInfiniteLogs(filters)
 	const { wrap, density } = useLogsViewPreferences()
@@ -519,6 +524,7 @@ export function LogsTable({ filters }: LogsTableProps) {
 				wrap={wrap}
 				density={density}
 				pinnedColumns={pinnedColumns}
+				embedded={embedded}
 			/>
 		))
 		.render()

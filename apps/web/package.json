@@ -9,6 +9,8 @@
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
 		"test:perf": "playwright test",
+		"test:perf:renders": "playwright test --grep \"React render work\"",
+		"test:perf:compare-renders": "bun perf/compare-react-render-reports.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

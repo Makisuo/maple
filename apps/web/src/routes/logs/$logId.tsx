@@ -133,7 +133,7 @@ function LogDetailPage() {
 						withMilliseconds: true,
 					})}`}
 				>
-					<div className="flex flex-col gap-3 content-enter">
+					<div className="flex flex-col gap-3">
 						{/* Hero + meta as one card, mirroring the drawer's stacked top section. */}
 						<div className="overflow-hidden rounded-md border">
 							<LogHeroHeader log={log} showClose={false} />

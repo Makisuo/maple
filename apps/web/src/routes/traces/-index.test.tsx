@@ -144,6 +144,12 @@ vi.mock("@/lib/effect-atom", async () => {
 				case atoms.resourceAttributeValues:
 					return actual.Result.success({ data: [] })
 				default:
+					// The lazy AutocompleteValuesProvider subscribes to a static idle
+					// atom (a real Atom, unlike the sentinel symbols above) until
+					// activate() is called — it holds Result.initial.
+					if (actual.Atom.isAtom(atom)) {
+						return actual.Result.initial()
+					}
 					throw new Error(`Unexpected atom: ${String(atom)}`)
 			}
 		},

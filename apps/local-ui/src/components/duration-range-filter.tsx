@@ -12,6 +12,10 @@ import type { DurationStats } from "../hooks/use-local-trace-facets"
 
 const DEBOUNCE_MS = 300
 
+const flushOnEnter = (flush: () => void) => (event: React.KeyboardEvent<HTMLInputElement>) => {
+	if (event.key === "Enter") flush()
+}
+
 interface DurationRangeFilterProps {
 	minValue: number | undefined
 	maxValue: number | undefined
@@ -24,8 +28,6 @@ interface DurationRangeFilterProps {
 function useDebouncedNumberInput(value: number | undefined, onChange: (value: number | undefined) => void) {
 	const [text, setText] = React.useState(value != null ? String(value) : "")
 	const timeoutRef = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-	const onChangeRef = React.useRef(onChange)
-	onChangeRef.current = onChange
 
 	// Re-sync from the URL when it changes externally (e.g. "Clear all" or a preset chip).
 	const [lastValue, setLastValue] = React.useState(value)
@@ -34,12 +36,13 @@ function useDebouncedNumberInput(value: number | undefined, onChange: (value: nu
 		setText(value != null ? String(value) : "")
 	}
 
-	const commit = React.useCallback((raw: string) => {
-		const parsed = Number(raw)
-		onChangeRef.current(
-			raw === "" || !Number.isFinite(parsed) || parsed < 0 ? undefined : Math.round(parsed),
-		)
-	}, [])
+	const commit = React.useCallback(
+		(raw: string) => {
+			const parsed = Number(raw)
+			onChange(raw === "" || !Number.isFinite(parsed) || parsed < 0 ? undefined : Math.round(parsed))
+		},
+		[onChange],
+	)
 
 	const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
 		const raw = e.target.value
@@ -70,10 +73,6 @@ export function DurationRangeFilter({
 	const [isOpen, setIsOpen] = React.useState(defaultOpen || hasActiveRange)
 	const min = useDebouncedNumberInput(minValue, onMinChange)
 	const max = useDebouncedNumberInput(maxValue, onMaxChange)
-
-	const handleKeyDown = (flush: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
-		if (e.key === "Enter") flush()
-	}
 
 	const applyPreset = (minMs: number) => {
 		if (minValue === Math.round(minMs) && maxValue === undefined) {
@@ -166,11 +165,13 @@ export function DurationRangeFilter({
 							type="number"
 							min={0}
 							className="h-7 text-xs"
-							placeholder={durationStats ? String(Math.floor(durationStats.minDurationMs)) : "0"}
+							placeholder={
+								durationStats ? String(Math.floor(durationStats.minDurationMs)) : "0"
+							}
 							value={min.text}
 							onChange={min.handleChange}
 							onBlur={min.flush}
-							onKeyDown={handleKeyDown(min.flush)}
+							onKeyDown={flushOnEnter(min.flush)}
 						/>
 						<span className="text-xs text-muted-foreground">–</span>
 						<Input
@@ -178,11 +179,13 @@ export function DurationRangeFilter({
 							type="number"
 							min={0}
 							className="h-7 text-xs"
-							placeholder={durationStats ? String(Math.ceil(durationStats.maxDurationMs)) : "max"}
+							placeholder={
+								durationStats ? String(Math.ceil(durationStats.maxDurationMs)) : "max"
+							}
 							value={max.text}
 							onChange={max.handleChange}
 							onBlur={max.flush}
-							onKeyDown={handleKeyDown(max.flush)}
+							onKeyDown={flushOnEnter(max.flush)}
 						/>
 						<span className="text-xs text-muted-foreground">ms</span>
 					</div>

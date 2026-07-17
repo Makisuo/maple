@@ -21,9 +21,9 @@ export function useTraceAttributeKeys(rootSpans: SpanNode[]): AttributeKey[] {
 			for (const k of Object.keys(node.resourceAttributes ?? {})) {
 				resourceCounts.set(k, (resourceCounts.get(k) ?? 0) + 1)
 			}
-			node.children.forEach(visit)
+			for (const child of node.children) visit(child)
 		}
-		rootSpans.forEach(visit)
+		for (const rootSpan of rootSpans) visit(rootSpan)
 
 		const sortByCountThenKey = (a: [string, number], b: [string, number]) =>
 			b[1] - a[1] || a[0].localeCompare(b[0])

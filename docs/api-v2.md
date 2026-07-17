@@ -93,7 +93,7 @@ Authorization: Bearer maple_ak_…
 
 v2 accepts the same credentials as v1: API keys (`maple_ak_…`) and dashboard session tokens (Clerk or self-hosted JWT). API keys can be **restricted with scopes** at creation:
 
-- Grammar: `<family>:read`, `<family>:write`, or `*`. The family is the first path segment under `/v2` (`api_keys`, `dashboards`, `alert_rules`, `error_issues`, `traces`, …).
+- Grammar: `<family>:read`, `<family>:write`, or `*`. The family is the first path segment under `/v2` (`api_keys`, `dashboards`, `alerts`, `error_issues`, `traces`, …).
 - Enforcement is mechanical: `GET`/`HEAD` requires `<family>:read`, everything else `<family>:write`. `write` implies `read`.
 - Keys with no scopes (all pre-v2 keys) have full access. Session tokens are never scope-checked — the dashboard's authorization comes from org roles, like Stripe's own dashboard.
 - Failing the check returns `permission_error` / `insufficient_scope`.
@@ -125,17 +125,17 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | Resource             | Endpoints                                                                                          | Backing v1 group / service               |
 |---|---|---|
 | `api_keys` ✅ pilot  | list/create/retrieve/roll/revoke, `scopes` param                                                   | `apiKeys` / `ApiKeysService`             |
-| `ingest_keys`        | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
+| `ingest_keys` ✅     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
 | `dashboards` ✅      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import         | `dashboards`                             |
-| `alert_rules`        | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
-| `alert_destinations` | CRUD + `test`                                                                                      | `alerts`                                 |
-| `alert_incidents`    | list/retrieve                                                                                      | `alerts`                                 |
+| `alerts/rules` ✅   | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
+| `alerts/destinations` ✅ | CRUD + `test`                                                                                      | `alerts`                                 |
+| `alerts/incidents` ✅ | list/retrieve                                                                                      | `alerts`                                 |
 | `error_issues`       | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity`           | `errors`                                 |
 | `investigations`     | list/retrieve/create/status                                                                        | `investigations`                         |
 | `anomalies`          | incidents list/retrieve/resolve/link-issue + settings                                              | `anomalies`                              |
-| `recommendations`    | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
-| `scrape_targets`     | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
-| `attribute_mappings` | CRUD                                                                                               | `ingestAttributeMappings`                |
+| `recommendations` ✅ | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
+| `scrape_targets` ✅  | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
+| `attribute_mappings` ✅ | CRUD                                                                                               | `ingestAttributeMappings`                |
 | `session_replays`    | list/retrieve + events/transcript/for-trace                                                        | `sessionReplays`                         |
 | `organization`       | retrieve/update settings (incl. ClickHouse BYOC), delete                                           | `organizations`, `orgClickHouseSettings` |
 | `traces`             | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |

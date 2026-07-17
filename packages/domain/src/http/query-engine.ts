@@ -696,6 +696,47 @@ export class ServiceUsageResponse extends Schema.Class<ServiceUsageResponse>("Se
 	data: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+export class ServiceOperationsRequest extends Schema.Class<ServiceOperationsRequest>(
+	"ServiceOperationsRequest",
+)({
+	serviceName: ServiceName,
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: Schema.optional(Schema.Array(DeploymentEnvironment)),
+	// Bucket size for the per-operation sparkline sub-query (client-computed,
+	// like ServiceDetailOverviewRequest.releasesBucketSeconds).
+	bucketSeconds: Schema.optional(Schema.Number),
+	limit: Schema.optional(Schema.Number),
+}) {}
+
+export class ServiceOperationsResponse extends Schema.Class<ServiceOperationsResponse>(
+	"ServiceOperationsResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			// Display span name ("GET /api/users") — matches the /traces spanNames
+			// filter, which accepts either the raw or rewritten spelling.
+			spanName: Schema.String,
+			spanCount: Schema.Number,
+			estimatedSpanCount: Schema.Number,
+			errorCount: Schema.Number,
+			estimatedErrorCount: Schema.Number,
+			// 0–1 ratio, sampling-weighted.
+			errorRate: Schema.Number,
+			avgDurationMs: Schema.Number,
+			p50DurationMs: Schema.Number,
+			p95DurationMs: Schema.Number,
+			// Sampling-weighted per-bucket counts, joined per operation server-side.
+			sparkline: Schema.Array(
+				Schema.Struct({
+					bucket: Schema.String,
+					count: Schema.Number,
+				}),
+			),
+		}),
+	),
+}) {}
+
 export class ListLogsRequest extends Schema.Class<ListLogsRequest>("ListLogsRequest")({
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
@@ -1641,6 +1682,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceUsage", "/service-usage", {
 			payload: ServiceUsageRequest,
 			success: ServiceUsageResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceOperations", "/service-operations", {
+			payload: ServiceOperationsRequest,
+			success: ServiceOperationsResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

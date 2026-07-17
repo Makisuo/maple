@@ -14,14 +14,28 @@ import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 const SCOPE_FAMILY_ROWS = [
 	{ id: "api_keys", label: "API keys", description: "Create, roll, and revoke API keys" },
 	{ id: "dashboards", label: "Dashboards", description: "Dashboards, templates, and version history" },
-	{ id: "alert_rules", label: "Alert rules", description: "Alert rules, test/preview, and check history" },
-	{ id: "alert_destinations", label: "Alert destinations", description: "Notification channels rules deliver to" },
-	{ id: "alert_incidents", label: "Alert incidents", description: "Incident history (read-only)" },
+	{
+		id: "alerts",
+		label: "Alerts",
+		description: "Alert rules (incl. test/preview/checks), destinations, and incidents",
+	},
+	{ id: "ingest_keys", label: "Ingest keys", description: "View and roll telemetry ingest keys" },
+	{
+		id: "attribute_mappings",
+		label: "Attribute mappings",
+		description: "Ingest-time attribute rewrite rules",
+	},
+	{
+		id: "scrape_targets",
+		label: "Scrape targets",
+		description: "Prometheus/PlanetScale scrape targets, probes, and checks",
+	},
+	{ id: "recommendations", label: "Recommendations", description: "Instrumentation recommendations" },
 ] as const
 
 const docsUrl = `${apiBaseUrl}/v2/docs`
 
-const curlExample = `curl ${apiBaseUrl}/v2/alert_rules \\
+const curlExample = `curl ${apiBaseUrl}/v2/alerts/rules \\
   -H "Authorization: Bearer maple_ak_..."`
 
 function CopyButton({ text, label }: { text: string; label: string }) {

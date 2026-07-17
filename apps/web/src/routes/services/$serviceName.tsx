@@ -1,8 +1,8 @@
 import { Link, useNavigate, createFileRoute } from "@tanstack/react-router"
-import { useMemo } from "react"
+import { useCallback, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
-import { Schema } from "effect"
+import { Option, Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
@@ -27,11 +27,14 @@ import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-ran
 import { Button } from "@maple/ui/components/ui/button"
 import { BellIcon } from "@/components/icons"
 import { ServiceDependenciesTab } from "@/components/services/service-dependencies-tab"
+import { ServiceOperationsTab } from "@/components/services/service-operations-tab"
 import { ServiceDependencyStrip } from "@/components/services/service-dependency-strip"
 import { ServiceEnvironmentSwitcher } from "@/components/services/service-environment-switcher"
 import { ServiceErrorsPanel } from "@/components/services/service-errors-panel"
-import { ServiceHealthStrip } from "@/components/services/service-health-strip"
 import { ServiceRecentDeploys } from "@/components/services/service-recent-deploys"
+import { ServiceTopOperationsPanel } from "@/components/services/service-top-operations-panel"
+import { ServiceUsagePanel } from "@/components/services/service-usage-panel"
+import { ServiceWorkloadsPanel } from "@/components/services/service-workloads-panel"
 import { OptionalStringArrayParam } from "@/lib/search-params"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 
@@ -40,14 +43,18 @@ import { ServiceDot } from "@maple/ui/components/service-dot"
 // dependency identity every render, busting the marker cache.
 const EMPTY_RELEASES: ReadonlyArray<ReleasePoint> = []
 
-const ServiceDetailTab = Schema.Literals(["overview", "dependencies"])
+const ServiceDetailTab = Schema.Literals(["overview", "operations", "dependencies"])
 type ServiceDetailTabValue = Schema.Schema.Type<typeof ServiceDetailTab>
+const decodeServiceDetailTab = Schema.decodeUnknownOption(ServiceDetailTab)
 
 const serviceDetailSearchSchema = Schema.Struct({
 	startTime: Schema.optional(Schema.String),
 	endTime: Schema.optional(Schema.String),
 	timePreset: Schema.optional(Schema.String),
-	tab: Schema.optional(ServiceDetailTab),
+	// Plain string, narrowed via decodeServiceDetailTab at the use site — an
+	// unknown value (e.g. a stale `?tab=traces` link) falls back to Overview
+	// instead of failing route search validation.
+	tab: Schema.optional(Schema.String),
 	// Scopes the Overview charts to a single deployment environment (carried from
 	// the clicked service-list row, or chosen via the env switcher). Single-element
 	// by convention; `undefined` = all environments. Uses the JSON-string-tolerant
@@ -123,40 +130,58 @@ function ServiceDetailContent() {
 		search.timePreset ?? "12h",
 	)
 
-	const handleTimeChange = (
-		range: {
-			startTime?: string
-			endTime?: string
-			presetValue?: string
+	const handleTimeChange = useCallback(
+		(
+			range: {
+				startTime?: string
+				endTime?: string
+				presetValue?: string
+			},
+			options?: { replace?: boolean },
+		) => {
+			navigate({
+				replace: options?.replace,
+				search: (prev: Record<string, unknown>) => applyTimeRangeSearch(prev, range),
+			})
 		},
-		options?: { replace?: boolean },
-	) => {
-		navigate({
-			replace: options?.replace,
-			search: (prev: Record<string, unknown>) => applyTimeRangeSearch(prev, range),
-		})
-	}
+		[navigate],
+	)
 
-	const activeTab: ServiceDetailTabValue = search.tab ?? "overview"
-	const handleTabChange = (value: unknown) => {
-		const next = value === "dependencies" ? "dependencies" : "overview"
-		navigate({
-			replace: true,
-			search: (prev: Record<string, unknown>) => ({
-				...prev,
-				tab: next === "overview" ? undefined : next,
-			}),
-		})
-	}
+	const activeTab: ServiceDetailTabValue = Option.getOrElse(
+		decodeServiceDetailTab(search.tab),
+		(): ServiceDetailTabValue => "overview",
+	)
+	const handleTabChange = useCallback(
+		(value: unknown) => {
+			const next = Option.getOrElse(
+				decodeServiceDetailTab(value),
+				(): ServiceDetailTabValue => "overview",
+			)
+			navigate({
+				replace: true,
+				search: (prev: Record<string, unknown>) => ({
+					...prev,
+					tab: next === "overview" ? undefined : next,
+				}),
+			})
+		},
+		[navigate],
+	)
 
-	const handleEnvironmentChange = (environment: string | undefined) => {
-		navigate({
-			search: (prev: Record<string, unknown>) => ({
-				...prev,
-				environments: environment ? [environment] : undefined,
-			}),
-		})
-	}
+	const handleEnvironmentChange = useCallback(
+		(environment: string | undefined) => {
+			navigate({
+				search: (prev: Record<string, unknown>) => ({
+					...prev,
+					environments: environment ? [environment] : undefined,
+				}),
+			})
+		},
+		[navigate],
+	)
+
+	const handleShowDependencies = useCallback(() => handleTabChange("dependencies"), [handleTabChange])
+	const handleShowOperations = useCallback(() => handleTabChange("operations"), [handleTabChange])
 
 	return (
 		<DashboardLayout
@@ -185,6 +210,12 @@ function ServiceDetailContent() {
 								Overview
 							</TabsTrigger>
 							<TabsTrigger
+								value="operations"
+								className="h-6 flex-1 px-2.5 text-xs font-medium sm:h-6 sm:flex-initial sm:text-xs"
+							>
+								Operations
+							</TabsTrigger>
+							<TabsTrigger
 								value="dependencies"
 								className="h-6 flex-1 px-2.5 text-xs font-medium sm:h-6 sm:flex-initial sm:text-xs"
 							>
@@ -192,9 +223,10 @@ function ServiceDetailContent() {
 							</TabsTrigger>
 						</TabsList>
 					</Tabs>
-					{/* Env scope only applies to the Overview charts; hide it on the
-					    Dependencies tab so it can't imply a filter it doesn't drive. */}
-					{activeTab === "overview" && (
+					{/* Env scope drives every tab except Dependencies (whose bundle query
+					    has its own deploymentEnv semantics); hide it there so it can't
+					    imply a filter it doesn't drive. */}
+					{activeTab !== "dependencies" && (
 						<ServiceEnvironmentSwitcher
 							serviceName={serviceName}
 							startTime={effectiveStartTime}
@@ -223,15 +255,28 @@ function ServiceDetailContent() {
 				</div>
 			}
 		>
-			{activeTab === "overview" ? (
+			{activeTab === "overview" && (
 				<OverviewTab
 					serviceName={serviceName}
 					effectiveStartTime={effectiveStartTime}
 					effectiveEndTime={effectiveEndTime}
 					environments={search.environments}
-					onShowDependencies={() => handleTabChange("dependencies")}
+					onShowDependencies={handleShowDependencies}
+					onShowOperations={handleShowOperations}
 				/>
-			) : (
+			)}
+			{activeTab === "operations" && (
+				<ServiceOperationsTab
+					serviceName={serviceName}
+					effectiveStartTime={effectiveStartTime}
+					effectiveEndTime={effectiveEndTime}
+					environments={search.environments}
+					startTime={search.startTime}
+					endTime={search.endTime}
+					timePreset={search.timePreset}
+				/>
+			)}
+			{activeTab === "dependencies" && (
 				<ServiceDependenciesTab
 					serviceName={serviceName}
 					startTime={search.startTime}
@@ -251,6 +296,7 @@ interface OverviewTabProps {
 	effectiveEndTime: string
 	environments?: string[]
 	onShowDependencies: () => void
+	onShowOperations: () => void
 }
 
 function OverviewTab({
@@ -259,6 +305,7 @@ function OverviewTab({
 	effectiveEndTime,
 	environments,
 	onShowDependencies,
+	onShowOperations,
 }: OverviewTabProps) {
 	// One fetch for the whole Overview tab — the primary chart and the environment
 	// switcher's options (the switcher reads this same atom key, so it shares this
@@ -335,41 +382,37 @@ function OverviewTab({
 	// Commit deploy markers (dashed verticals + labels) drawn over every chart.
 	// Derived from the overview's release timeline and snapped onto the chart's
 	// own bucket grid so each marker sits on an x-tick.
-	const releases = Result.builder(overviewResult)
-		.onSuccess((response) => response.releases)
-		.orElse(() => EMPTY_RELEASES)
+	const releases = useMemo(
+		() =>
+			Result.builder(overviewResult)
+				.onSuccess((response) => response.releases)
+				.orElse(() => EMPTY_RELEASES),
+		[overviewResult],
+	)
 	const chartBuckets = useMemo(() => detailPoints.map((point) => String(point.bucket)), [detailPoints])
 	const commitMarkers = useCommitMarkers(releases, chartBuckets)
 
-	const widgetData: Record<string, Record<string, unknown>[]> = {
-		latency: detailPoints,
-		throughput: detailPoints,
-		"error-rate": detailPoints,
-		apdex: detailPoints,
-	}
-
-	const metrics = SERVICE_CHARTS.map((chart) => ({
-		id: chart.id,
-		chartId: chart.chartId,
-		title: chart.title,
-		layout: chart.layout,
-		data: widgetData[chart.id] ?? [],
-		legend: chart.legend,
-		tooltip: chart.tooltip,
-		rateMode: chart.rateMode,
-		isLoading: isDetailLoading,
-	}))
+	// Stable identity so the memoized chart components under MetricsGrid skip
+	// rerenders when this tab rerenders for unrelated reasons (sibling panel
+	// atoms settling, root-level churn).
+	const metrics = useMemo(
+		() =>
+			SERVICE_CHARTS.map((chart) => ({
+				id: chart.id,
+				chartId: chart.chartId,
+				title: chart.title,
+				layout: chart.layout,
+				data: detailPoints,
+				legend: chart.legend,
+				tooltip: chart.tooltip,
+				rateMode: chart.rateMode,
+				isLoading: isDetailLoading,
+			})),
+		[detailPoints, isDetailLoading],
+	)
 
 	return (
 		<div className="flex flex-col gap-3">
-			<ServiceHealthStrip
-				serviceName={serviceName}
-				points={basePoints}
-				isLoading={isDetailLoading}
-				effectiveStartTime={effectiveStartTime}
-				effectiveEndTime={effectiveEndTime}
-				environments={environments}
-			/>
 			<MetricsGrid
 				items={metrics}
 				waiting={!!isWaiting}
@@ -382,9 +425,26 @@ function OverviewTab({
 				// of these metrics' tick labels (latency ms).
 				yAxisWidth={72}
 			/>
+			<ServiceTopOperationsPanel
+				serviceName={serviceName}
+				effectiveStartTime={effectiveStartTime}
+				effectiveEndTime={effectiveEndTime}
+				environments={environments}
+				onViewAll={onShowOperations}
+			/>
 			<div className="grid gap-3 lg:grid-cols-2">
 				<ServiceErrorsPanel serviceName={serviceName} />
 				<ServiceRecentDeploys releases={releases} />
+				<ServiceUsagePanel
+					serviceName={serviceName}
+					effectiveStartTime={effectiveStartTime}
+					effectiveEndTime={effectiveEndTime}
+				/>
+				<ServiceWorkloadsPanel
+					serviceName={serviceName}
+					effectiveStartTime={effectiveStartTime}
+					effectiveEndTime={effectiveEndTime}
+				/>
 			</div>
 			<ServiceDependencyStrip
 				serviceName={serviceName}

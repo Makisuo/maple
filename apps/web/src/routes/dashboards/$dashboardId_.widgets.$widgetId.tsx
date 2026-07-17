@@ -17,10 +17,7 @@ import type {
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
-import {
-	pickVariableParams,
-	variableSearchRest,
-} from "@/lib/dashboard-variables/search-params"
+import { pickVariableParams, variableSearchRest } from "@/lib/dashboard-variables/search-params"
 import { Button } from "@maple/ui/components/ui/button"
 
 // The editor carries the dashboard's `var-*` selections through its own search
@@ -39,10 +36,10 @@ function WidgetConfigurePage() {
 
 	const builderRef = React.useRef<WidgetQueryBuilderPageHandle>(null)
 	const [isSaving, setIsSaving] = React.useState(false)
-	// Stabilize time range reference — only update when the value actually changes,
+	// Stabilize time range value — only update when the value actually changes,
 	// not when the dashboard object is rebuilt (e.g. from widget save optimistic update).
 	// Without this, DashboardTimeRangeSync fires spurious mutations that overwrite concurrent saves.
-	const timeRangeRef = React.useRef<TimeRange | null>(null)
+	const [stableTimeRange, setStableTimeRange] = React.useState<TimeRange | null>(null)
 
 	const activeDashboard = dashboards.find((d) => d.id === dashboardId)
 	const configureWidget = activeDashboard?.widgets.find((w) => w.id === widgetId)
@@ -90,72 +87,78 @@ function WidgetConfigurePage() {
 		return null
 	}
 
+	let initialTimeRange = stableTimeRange
 	if (
-		timeRangeRef.current === null ||
-		JSON.stringify(timeRangeRef.current) !== JSON.stringify(activeDashboard.timeRange)
+		initialTimeRange === null ||
+		JSON.stringify(initialTimeRange) !== JSON.stringify(activeDashboard.timeRange)
 	) {
-		timeRangeRef.current = activeDashboard.timeRange
+		initialTimeRange = activeDashboard.timeRange
+		setStableTimeRange(initialTimeRange)
 	}
 
 	return (
 		<DashboardTimeRangeWrapper
-			initialTimeRange={timeRangeRef.current}
+			initialTimeRange={initialTimeRange}
 			onTimeRangeChange={(timeRange) => updateDashboardTimeRange(activeDashboard.id, timeRange)}
 		>
-		{/* Variables resolve to their defaults here so previews of queries
+			{/* Variables resolve to their defaults here so previews of queries
 		    referencing `$name` run against real values while editing. */}
-		<DashboardVariablesProvider
-			variables={activeDashboard.variables}
-			urlValues={{}}
-			onValueChange={() => undefined}
-		>
-			<DashboardLayout
-				breadcrumbs={[
-					{ label: "Dashboards", href: "/dashboards" },
-					{
-						label: activeDashboard.name,
-						href: `/dashboards/${activeDashboard.id}`,
-					},
-					{ label: "Configure Widget" },
-				]}
-				breadcrumbActions={
-					<div className="flex items-center gap-2">
-						<Button variant="ghost" size="sm" onClick={navigateBack} disabled={isSaving}>
-							&larr; Back
-						</Button>
-						<Button variant="outline" size="sm" onClick={navigateBack} disabled={isSaving}>
-							Cancel
-						</Button>
-						<Button size="sm" onClick={() => builderRef.current?.apply()} disabled={isSaving}>
-							{isSaving ? "Saving..." : "Apply"}
-						</Button>
-					</div>
-				}
+			<DashboardVariablesProvider
+				variables={activeDashboard.variables}
+				urlValues={{}}
+				onValueChange={() => undefined}
 			>
-				<WidgetBuilderProvider widget={configureWidget}>
-					<WidgetQueryBuilderPage ref={builderRef} widget={configureWidget} onApply={handleApply} />
-				</WidgetBuilderProvider>
-			</DashboardLayout>
-
-			{status === "blocked" && (
-				<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-					<div className="bg-background rounded-lg border p-6 shadow-lg max-w-sm">
-						<h3 className="text-sm font-medium mb-2">Unsaved changes</h3>
-						<p className="text-sm text-muted-foreground mb-4">
-							You have unsaved widget changes. Are you sure you want to leave?
-						</p>
-						<div className="flex justify-end gap-2">
-							<Button variant="outline" size="sm" onClick={reset}>
-								Stay
+				<DashboardLayout
+					breadcrumbs={[
+						{ label: "Dashboards", href: "/dashboards" },
+						{
+							label: activeDashboard.name,
+							href: `/dashboards/${activeDashboard.id}`,
+						},
+						{ label: "Configure Widget" },
+					]}
+					breadcrumbActions={
+						<div className="flex items-center gap-2">
+							<Button variant="ghost" size="sm" onClick={navigateBack} disabled={isSaving}>
+								&larr; Back
 							</Button>
-							<Button variant="destructive" size="sm" onClick={proceed}>
-								Discard changes
+							<Button variant="outline" size="sm" onClick={navigateBack} disabled={isSaving}>
+								Cancel
+							</Button>
+							<Button size="sm" onClick={() => builderRef.current?.apply()} disabled={isSaving}>
+								{isSaving ? "Saving..." : "Apply"}
 							</Button>
 						</div>
+					}
+				>
+					<WidgetBuilderProvider widget={configureWidget}>
+						<WidgetQueryBuilderPage
+							ref={builderRef}
+							widget={configureWidget}
+							onApply={handleApply}
+						/>
+					</WidgetBuilderProvider>
+				</DashboardLayout>
+
+				{status === "blocked" && (
+					<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+						<div className="bg-background rounded-lg border p-6 shadow-lg max-w-sm">
+							<h3 className="text-sm font-medium mb-2">Unsaved changes</h3>
+							<p className="text-sm text-muted-foreground mb-4">
+								You have unsaved widget changes. Are you sure you want to leave?
+							</p>
+							<div className="flex justify-end gap-2">
+								<Button variant="outline" size="sm" onClick={reset}>
+									Stay
+								</Button>
+								<Button variant="destructive" size="sm" onClick={proceed}>
+									Discard changes
+								</Button>
+							</div>
+						</div>
 					</div>
-				</div>
-			)}
-		</DashboardVariablesProvider>
+				)}
+			</DashboardVariablesProvider>
 		</DashboardTimeRangeWrapper>
 	)
 }

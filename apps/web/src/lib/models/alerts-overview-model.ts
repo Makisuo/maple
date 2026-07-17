@@ -25,7 +25,6 @@ import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { Reactivity } from "effect/unstable/reactivity/Reactivity"
 
-import { buildRuleToggleRequest } from "@/lib/alerts/form-utils"
 import { deriveRuleStatus, type DerivedRuleStatus, needsAttention } from "@/lib/alerts/rule-status"
 import {
 	type AlertIncidentRow,
@@ -38,8 +37,19 @@ import {
 import { getOrgCollections } from "@/lib/collections/org-collections"
 import { collectionFailureMessage, makeOrgCollectionsKey, orgIdOf } from "@/lib/models/org-collections-key"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Oldest resolved incident the overview still processes — the widest window any
+ * consumer renders (the summary strip's 30d "Triggered" count). The synced
+ * collection holds the org's full incident history; without this cutoff every
+ * derivation re-sorts and re-groups an ever-growing set, which is what
+ * gradually locked up the tab during long firing stretches. Open incidents are
+ * always kept.
+ */
+const INCIDENT_WINDOW_MS = 30 * DAY_MS
 
 /** How often the wall-clock input of the staleness derivation advances. */
 const CLOCK_TICK = "30 seconds"
@@ -98,7 +108,10 @@ export const deriveOverview = (inputs: OverviewInputs): AlertsOverviewReady => {
 	// ISO timestamps order lexicographically; newest first, as the server lists do.
 	const byIsoDesc = (a: string, b: string) => (a < b ? 1 : a > b ? -1 : 0)
 	const rules = [...inputs.rules].sort((a, b) => byIsoDesc(a.updatedAt, b.updatedAt))
-	const incidents = [...inputs.incidents].sort((a, b) => byIsoDesc(a.lastTriggeredAt, b.lastTriggeredAt))
+	const incidentCutoff = now - INCIDENT_WINDOW_MS
+	const incidents = inputs.incidents
+		.filter((incident) => incident.status === "open" || Date.parse(incident.lastTriggeredAt) >= incidentCutoff)
+		.sort((a, b) => byIsoDesc(a.lastTriggeredAt, b.lastTriggeredAt))
 
 	const openIncidents = incidents.filter((incident) => incident.status === "open")
 	const incidentsByRule = groupByRuleId(incidents)
@@ -187,12 +200,12 @@ const buildOverview = (sources: OverviewSources): AlertsOverviewData => {
 export const toggleRuleHandler = (rule: AlertRuleDocument) =>
 	Effect.gen(function* () {
 		const reactivity = yield* Reactivity
-		const client = yield* MapleApiAtomClient
+		const client = yield* MapleApiV2AtomClient
 		return yield* reactivity.mutation(
 			["alertRules"],
-			client.alerts.updateRule({
-				params: { ruleId: rule.id },
-				payload: buildRuleToggleRequest(rule),
+			client.alertRules.update({
+				params: { id: rule.id },
+				payload: { enabled: !rule.enabled },
 			}),
 		)
 	})
@@ -219,6 +232,8 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 
 			// Delivery events stay an HTTP read (no Electric shape) — refetched on
 			// org/generation change via the dependency store, manually via `refresh`.
+			// TODO(v2): also the last v1 alerts endpoint the web app calls — no v2
+			// equivalent exists; the follow-up is an alert_delivery_events Electric shape.
 			const deliveryEvents = yield* Query.make({
 				stores: { orgKey },
 				handler: () =>

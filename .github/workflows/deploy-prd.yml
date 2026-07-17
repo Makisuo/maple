@@ -16,7 +16,7 @@ permissions:
 
 jobs:
     deploy-prd:
-        runs-on: ubuntu-latest
+        runs-on: blacksmith-4vcpu-ubuntu-2404
         environment: production
         env:
             INFISICAL_ENV_SLUG: prod

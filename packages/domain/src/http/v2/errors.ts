@@ -169,6 +169,30 @@ export class V2ApiError extends Schema.ErrorClass<V2ApiError>("@maple/http/v2/Ap
 	},
 ) {}
 
+/**
+ * `api_error` flavor for a misbehaving upstream provider (502) — the target of
+ * an outbound call (e.g. a scrape target's discovery endpoint) rejected our
+ * credentials or failed at the transport level. Distinct from 503 so consumers
+ * can tell "the provider is misbehaving" from "Maple's storage is unavailable".
+ */
+export class V2UpstreamError extends Schema.ErrorClass<V2UpstreamError>(
+	"@maple/http/v2/UpstreamError",
+)(
+	{
+		error: errorBody("api_error", {
+			code: "upstream_error",
+			message: "The upstream provider rejected the request.",
+		}),
+	},
+	{
+		httpApiStatus: 502,
+		identifier: "UpstreamError",
+		title: "Upstream error",
+		description:
+			"An upstream provider the operation depends on failed or rejected our credentials. Check the integration's connection before retrying. HTTP 502.",
+	},
+) {}
+
 /** `api_error` flavor for upstream/persistence unavailability (503). */
 export class V2ServiceUnavailableError extends Schema.ErrorClass<V2ServiceUnavailableError>(
 	"@maple/http/v2/ServiceUnavailableError",
@@ -206,6 +230,9 @@ export const notFound = (message: string, param?: string) =>
 
 export const conflict = (code: string, message: string) =>
 	new V2ConflictError({ error: { type: "conflict_error", code, message } })
+
+export const upstreamError = (code: string, message: string) =>
+	new V2UpstreamError({ error: { type: "api_error", code, message } })
 
 export const apiError = (message: string) =>
 	new V2ApiError({ error: { type: "api_error", code: "internal_error", message } })

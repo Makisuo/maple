@@ -14,9 +14,8 @@ import {
 	resolveWidgetAlertPrefill,
 	type WidgetAlertPrefillNotice,
 } from "@/lib/alerts/widget-prefill"
-import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
-import { Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { useAlertDestinationsList, useAlertRulesList } from "@/hooks/use-alerts-list"
+import { Result } from "@/lib/effect-atom"
 import { useDashboardsRead } from "@/hooks/use-dashboard-store"
 
 type AlertCreateSearchValue = {
@@ -50,11 +49,8 @@ export function AlertCreatePageContent() {
 	const needsDashboards =
 		!search.ruleId && chartContext == null && Boolean(search.dashboardId || search.widgetId)
 
-	const rulesQueryAtom = MapleApiAtomClient.query("alerts", "listRules", {
-		reactivityKeys: ["alertRules"],
-	})
 	const { result: destinationsResult } = useAlertDestinationsList()
-	const rulesResult = useAtomValue(rulesQueryAtom)
+	const { result: rulesResult } = useAlertRulesList()
 	const { dashboards, isLoading: dashboardsLoading, isError: dashboardsError } = useDashboardsRead()
 	const dashboardsResult = useMemo(() => {
 		if (!needsDashboards || dashboardsLoading) return Result.initial(dashboardsLoading)

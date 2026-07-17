@@ -9,8 +9,8 @@ import { DestinationDialog } from "@/components/alerts/destination-dialog"
 import { ProviderLogo } from "@/components/alerts/destination-provider"
 import { CircleWarningIcon, FireIcon, PlusIcon, TruckIcon } from "@/components/icons"
 import {
-	buildDestinationCreatePayload,
-	buildDestinationUpdatePayload,
+	buildDestinationCreateParamsV2,
+	buildDestinationUpdateParamsV2,
 	defaultDestinationForm,
 	deliveryStatusMeta,
 	destinationToFormState,
@@ -21,8 +21,10 @@ import {
 	groupDeliveryEventsByDay,
 	type DestinationFormState,
 } from "@/lib/alerts/form-utils"
+import { v2ErrorInfo } from "@/lib/error-messages"
 import { useAlertDestinationsList } from "@/hooks/use-alerts-list"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -55,16 +57,16 @@ export interface DestinationManager {
 }
 
 export function useDestinationManager(): DestinationManager {
-	const createDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "createDestination"), {
+	const createDestination = useAtomSet(MapleApiV2AtomClient.mutation("alertDestinations", "create"), {
 		mode: "promiseExit",
 	})
-	const updateDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateDestination"), {
+	const updateDestination = useAtomSet(MapleApiV2AtomClient.mutation("alertDestinations", "update"), {
 		mode: "promiseExit",
 	})
-	const deleteDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "deleteDestination"), {
+	const deleteDestination = useAtomSet(MapleApiV2AtomClient.mutation("alertDestinations", "delete"), {
 		mode: "promiseExit",
 	})
-	const testDestination = useAtomSet(MapleApiAtomClient.mutation("alerts", "testDestination"), {
+	const testDestination = useAtomSet(MapleApiV2AtomClient.mutation("alertDestinations", "test"), {
 		mode: "promiseExit",
 	})
 
@@ -83,14 +85,17 @@ export function useDestinationManager(): DestinationManager {
 
 	async function save() {
 		setSaving(true)
+		// `as never`: the generated client collapses the discriminated-union payload
+		// to a single member in its inferred signature; the builders return the
+		// correctly-typed union, so the cast only bridges that inference gap.
 		const result = editing
 			? await updateDestination({
-					params: { destinationId: editing.id },
-					payload: buildDestinationUpdatePayload(form) as never,
+					params: { id: editing.id },
+					payload: buildDestinationUpdateParamsV2(form) as never,
 					reactivityKeys: ["alertDestinations"],
 				})
 			: await createDestination({
-					payload: buildDestinationCreatePayload(form) as never,
+					payload: buildDestinationCreateParamsV2(form) as never,
 					reactivityKeys: ["alertDestinations"],
 				})
 
@@ -106,11 +111,15 @@ export function useDestinationManager(): DestinationManager {
 	async function test(destination: AlertDestinationDocument) {
 		setTestingId(destination.id)
 		const result = await testDestination({
-			params: { destinationId: destination.id },
+			params: { id: destination.id },
 			reactivityKeys: ["alertDestinations", "alertDeliveryEvents"],
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(result.value.message)
+			if (result.value.success) {
+				toast.success(result.value.message)
+			} else {
+				toast.error(result.value.message)
+			}
 		} else {
 			toast.error(getExitErrorMessage(result, "Failed to send test notification"))
 		}
@@ -121,8 +130,9 @@ export function useDestinationManager(): DestinationManager {
 		const nextForm = destinationToFormState(destination)
 		nextForm.enabled = !destination.enabled
 		const result = await updateDestination({
-			params: { destinationId: destination.id },
-			payload: buildDestinationUpdatePayload(nextForm) as never,
+			params: { id: destination.id },
+			// `as never`: see the union-payload note in `save`.
+			payload: buildDestinationUpdateParamsV2(nextForm) as never,
 			reactivityKeys: ["alertDestinations"],
 		})
 		if (!Exit.isSuccess(result)) {
@@ -133,27 +143,18 @@ export function useDestinationManager(): DestinationManager {
 	async function remove(destination: AlertDestinationDocument) {
 		setDeletingId(destination.id)
 		const result = await deleteDestination({
-			params: { destinationId: destination.id },
+			params: { id: destination.id },
 			reactivityKeys: ["alertDestinations", "alertRules"],
 		})
 		if (Exit.isSuccess(result)) {
 			toast.success("Destination deleted")
 		} else {
+			// A destination still referenced by rules deletes with a 409
+			// conflict_error whose message already names the referencing rules.
 			const failure = Option.getOrUndefined(Exit.findErrorOption(result))
-			if (
-				typeof failure === "object" &&
-				failure !== null &&
-				"_tag" in failure &&
-				failure._tag === "@maple/http/errors/AlertDestinationInUseError" &&
-				"ruleNames" in failure &&
-				Array.isArray(failure.ruleNames)
-			) {
-				const ruleNames = failure.ruleNames.filter((name): name is string => typeof name === "string")
-				toast.error(
-					ruleNames.length > 0
-						? `Remove this destination from these rules first: ${ruleNames.join(", ")}`
-						: getExitErrorMessage(result, "Failed to delete destination"),
-				)
+			const v2 = v2ErrorInfo(failure)
+			if (v2 !== null && v2.type === "conflict_error") {
+				toast.error(v2.message)
 			} else {
 				toast.error(getExitErrorMessage(result, "Failed to delete destination"))
 			}
@@ -185,6 +186,8 @@ export function useDestinationManager(): DestinationManager {
  */
 export function AlertsSettingsTab({ manager, isAdmin }: { manager: DestinationManager; isAdmin: boolean }) {
 	const { result: destinationsResult } = useAlertDestinationsList()
+	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
+	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
 		MapleApiAtomClient.query("alerts", "listDeliveryEvents", { reactivityKeys: ["alertDeliveryEvents"] }),
 	)

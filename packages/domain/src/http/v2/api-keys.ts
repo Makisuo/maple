@@ -33,7 +33,7 @@ const apiKeyExample = {
 	description: "Publishes deploys from the CI pipeline",
 	key_prefix: "maple_ak_9f2c",
 	kind: "standard",
-	scopes: ["dashboards:read", "alert_rules:write"],
+	scopes: ["dashboards:read", "alerts:write"],
 	revoked: false,
 	revoked_at: null,
 	last_used_at: "2026-07-15T09:12:00.000Z",
@@ -73,7 +73,7 @@ export const V2ApiKey = Schema.Struct({
 	}),
 	scopes: Schema.NullOr(Schema.Array(V2Scope)).annotate({
 		description: "The scopes granted to the key, or `null` for a legacy key with full access.",
-		examples: [["dashboards:read", "alert_rules:write"]],
+		examples: [["dashboards:read", "alerts:write"]],
 	}),
 	revoked: Schema.Boolean.annotate({
 		description: "Whether the key has been revoked. Revoked keys can no longer authenticate.",
@@ -182,7 +182,7 @@ export const V2ApiKeyCreateParams = Schema.Struct({
 		Schema.Array(V2Scope).annotate({
 			description:
 				"Scopes to restrict the key to. Omit for a key with full access to the organization.",
-			examples: [["dashboards:read", "alert_rules:write"]],
+			examples: [["dashboards:read", "alerts:write"]],
 		}),
 	),
 }).annotate({
@@ -195,7 +195,7 @@ export const V2ApiKeyCreateParams = Schema.Struct({
 			description: "Publishes deploys from the CI pipeline",
 			expires_in_seconds: 7_776_000,
 			kind: "standard",
-			scopes: ["dashboards:read", "alert_rules:write"],
+			scopes: ["dashboards:read", "alerts:write"],
 		}),
 	],
 })

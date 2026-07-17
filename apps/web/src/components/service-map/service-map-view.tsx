@@ -118,6 +118,7 @@ import {
 import type { HyperdriveConfigInput, HyperdriveNodeInfo } from "./service-map-hyperdrive"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
+import { useMountEffect } from "@/hooks/use-mount-effect"
 
 const nodeTypes = {
 	serviceNode: ServiceMapNode,
@@ -131,6 +132,9 @@ const nsGroupId = (namespace: string) => `${NAMESPACE_GROUP_PREFIX}${encodeURICo
 // dotted boxes appear on first paint and refine once real sizes arrive.
 const FALLBACK_NODE_WIDTH = 220
 const FALLBACK_NODE_HEIGHT = 70
+
+const formatReplicationLag = (seconds: number) =>
+	seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`
 
 // Custom MiniMap node that renders with the service's legend color
 function ServiceMiniMapNode({
@@ -978,9 +982,6 @@ function PlanetScaleSection({
 	const idleBranches = planetscale.branches.filter((branch) => !statNames.has(branch.name))
 	const stats = planetscale.stats
 
-	const formatLag = (seconds: number) =>
-		seconds >= 1 ? `${seconds.toFixed(1)}s` : `${Math.round(seconds * 1000)}ms`
-
 	return (
 		<div className="space-y-3">
 			<div className="h-px bg-border" />
@@ -990,8 +991,8 @@ function PlanetScaleSection({
 					PlanetScale
 				</h4>
 				<span className="ml-auto text-[10px] text-muted-foreground">
-					{planetscale.kind === "postgresql" ? "Postgres" : "MySQL"} ·{" "}
-					{planetscale.branchCount} branch{planetscale.branchCount === 1 ? "" : "es"}
+					{planetscale.kind === "postgresql" ? "Postgres" : "MySQL"} · {planetscale.branchCount}{" "}
+					branch{planetscale.branchCount === 1 ? "" : "es"}
 				</span>
 			</div>
 
@@ -1039,7 +1040,7 @@ function PlanetScaleSection({
 										: "text-foreground",
 							)}
 						>
-							{formatLag(stats.replicaLagMaxSeconds)}
+							{formatReplicationLag(stats.replicaLagMaxSeconds)}
 						</p>
 					</div>
 				</div>
@@ -1103,7 +1104,7 @@ function PlanetScaleSection({
 													: undefined,
 										)}
 									>
-										{formatLag(row.replicaLagMaxSeconds)} lag
+										{formatReplicationLag(row.replicaLagMaxSeconds)} lag
 									</span>
 								</div>
 							</div>
@@ -1374,9 +1375,7 @@ function DatabaseDetailPanel({
 						</div>
 					</div>
 
-					{hyperdrive && hyperdrive.length > 0 ? (
-						<HyperdriveSection configs={hyperdrive} />
-					) : null}
+					{hyperdrive && hyperdrive.length > 0 ? <HyperdriveSection configs={hyperdrive} /> : null}
 
 					{planetscale ? (
 						<PlanetScaleSection
@@ -1617,37 +1616,62 @@ function LayoutDebugPanel({
  * state. Reads live nodes/edges through refs so the effect only re-fires on the
  * stable string key, not on array identity churn.
  */
-function useElkLayout(
+interface LayoutRequest {
+	key: string
+	nodes: Node<ServiceNodeData>[]
+	edges: Edge<ServiceEdgeData>[]
+	config: LayoutConfig
+}
+
+function useLayoutRequest(
 	rawNodes: Node<ServiceNodeData>[],
 	flowEdges: Edge<ServiceEdgeData>[],
 	config: LayoutConfig,
 	key: string,
-): { layout: ElkLayoutResult | null; settled: boolean } {
-	const [state, setState] = useState<{ key: string; layout: ElkLayoutResult | null } | null>(null)
-	const nodesRef = useRef(rawNodes)
-	nodesRef.current = rawNodes
-	const edgesRef = useRef(flowEdges)
-	edgesRef.current = flowEdges
-	const configRef = useRef(config)
-	configRef.current = config
+): LayoutRequest {
+	const [stored, setStored] = useState<LayoutRequest>(() => ({
+		key,
+		nodes: rawNodes,
+		edges: flowEdges,
+		config,
+	}))
+	if (stored.key === key) return stored
+
+	const next = { key, nodes: rawNodes, edges: flowEdges, config }
+	setStored(next)
+	return next
+}
+
+function useElkLayout(request: LayoutRequest): {
+	layout: ElkLayoutResult | null
+	hasEverSettled: boolean
+} {
+	const [state, setState] = useState<{
+		key: string
+		layout: ElkLayoutResult | null
+		hasEverSettled: boolean
+	} | null>(null)
 
 	useEffect(() => {
 		let cancelled = false
-		layoutServiceMapWithElk(nodesRef.current, edgesRef.current, configRef.current)
+		layoutServiceMapWithElk(request.nodes, request.edges, request.config)
 			.then((layout) => {
-				if (!cancelled) setState({ key, layout })
+				if (!cancelled) setState({ key: request.key, layout, hasEverSettled: true })
 			})
 			.catch((error) => {
 				console.error("Service map ELK layout failed", error)
-				if (!cancelled) setState({ key, layout: null })
+				if (!cancelled) setState({ key: request.key, layout: null, hasEverSettled: true })
 			})
 		return () => {
 			cancelled = true
 		}
-	}, [key])
+	}, [request])
 
-	const current = state?.key === key ? state : null
-	return { layout: current?.layout ?? null, settled: current != null }
+	const current = state?.key === request.key ? state : null
+	return {
+		layout: current?.layout ?? null,
+		hasEverSettled: state?.hasEverSettled ?? false,
+	}
 }
 
 export function ServiceMapCanvas({
@@ -1835,15 +1859,17 @@ export function ServiceMapCanvas({
 	// hierarchical layout on a topology key so metric refreshes (new array
 	// identities, same shape) don't re-run barycenter sweeps. The memo body runs
 	// each render but short-circuits on an unchanged key.
-	const topoKey = useMemo(() => topologyKey(effectiveNodes, effectiveEdges), [effectiveNodes, effectiveEdges])
+	const topoKey = useMemo(
+		() => topologyKey(effectiveNodes, effectiveEdges),
+		[effectiveNodes, effectiveEdges],
+	)
 	// Namespace assignment is part of node DATA, not topology, so it isn't covered
 	// by topoKey. Fold a namespace signature into the cache key so re-bucketing
 	// happens when a service's namespace changes even if the shape is unchanged.
 	const nsKey = useMemo(
 		() =>
 			effectiveNodes
-				.map((n) => (n.data.namespace ? `${n.id}=${n.data.namespace}` : ""))
-				.filter(Boolean)
+				.flatMap((node) => (node.data.namespace ? [`${node.id}=${node.data.namespace}`] : []))
 				.sort()
 				.join(","),
 		[effectiveNodes],
@@ -1869,36 +1895,21 @@ export function ServiceMapCanvas({
 			},
 		[layout, layoutSignature],
 	)
-	// Mirror the live signature into a ref so drag/viewport persistence callbacks
-	// can stamp it without being re-created on every signature change.
-	const sigRef = useRef(layoutSignature)
-	sigRef.current = layoutSignature
-
 	// ELK's layered layout (async, in a web worker) produces the final node
 	// positions for ALL graphs. Until it resolves for the current signature we
 	// fall back to the synchronous layout below (also the terminal fallback if
 	// ELK errors). Edges always render as smooth-step curves (ELK is positions
 	// only).
-	const { layout: elk, settled: elkSettled } = useElkLayout(
-		effectiveNodes,
-		effectiveEdges,
-		layoutConfig,
-		layoutSignature,
-	)
-
-	const layoutCacheRef = useRef<{ key: string; positions: Map<string, { x: number; y: number }> } | null>(
-		null,
+	const layoutRequest = useLayoutRequest(effectiveNodes, effectiveEdges, layoutConfig, layoutSignature)
+	const { layout: elk, hasEverSettled: elkHasEverSettled } = useElkLayout(layoutRequest)
+	const fallbackPositions = useMemo(
+		() => computeNodePositions(layoutRequest.nodes, layoutRequest.edges, layoutRequest.config),
+		[layoutRequest],
 	)
 	const layoutedNodes = useMemo(() => {
-		if (layoutCacheRef.current?.key !== layoutSignature) {
-			layoutCacheRef.current = {
-				key: layoutSignature,
-				positions: computeNodePositions(effectiveNodes, effectiveEdges, layoutConfig),
-			}
-		}
-		const positions = elk?.positions ?? layoutCacheRef.current.positions
+		const positions = elk?.positions ?? fallbackPositions
 		return effectiveNodes.map((node) => ({ ...node, position: positions.get(node.id) ?? node.position }))
-	}, [effectiveNodes, effectiveEdges, layoutConfig, layoutSignature, elk])
+	}, [effectiveNodes, elk, fallbackPositions])
 
 	// Merge layout positions with selection + color-mode + focus-dim state.
 	// Persisted drag positions (keyed by node id) override the deterministic
@@ -1921,33 +1932,31 @@ export function ServiceMapCanvas({
 	const renderedEdges = useMemo(() => {
 		if (declutter.dimmedEdgeIds.size === 0) return effectiveEdges
 		return effectiveEdges.map((edge) =>
-			declutter.dimmedEdgeIds.has(edge.id)
-				? { ...edge, data: { ...edge.data!, dimmed: true } }
-				: edge,
+			declutter.dimmedEdgeIds.has(edge.id) ? { ...edge, data: { ...edge.data!, dimmed: true } } : edge,
 		)
 	}, [effectiveEdges, declutter.dimmedEdgeIds])
 
 	// Track nodes with full ReactFlow state (dimensions, positions from drag, etc.)
-	const [nodes, setNodes] = useState(nodesWithSelection)
+	const [nodeState, setNodeState] = useState(() => ({
+		source: nodesWithSelection,
+		nodes: nodesWithSelection,
+	}))
+	let nodes = nodeState.nodes
 
 	// Sync layout changes into node state (preserving measured dimensions)
-	const prevLayoutRef = useRef(nodesWithSelection)
-	if (prevLayoutRef.current !== nodesWithSelection) {
-		prevLayoutRef.current = nodesWithSelection
-		setNodes((prev) => {
-			// Preserve measured dimensions from previous nodes
-			const dimMap = new Map<
-				string,
-				{ width?: number; height?: number; measured?: { width?: number; height?: number } }
-			>()
-			for (const n of prev) {
-				dimMap.set(n.id, { width: n.width, height: n.height, measured: n.measured })
-			}
-			return nodesWithSelection.map((n) => {
-				const dims = dimMap.get(n.id)
-				return dims ? { ...n, width: dims.width, height: dims.height, measured: dims.measured } : n
-			})
+	if (nodeState.source !== nodesWithSelection) {
+		const dimMap = new Map<
+			string,
+			{ width?: number; height?: number; measured?: { width?: number; height?: number } }
+		>()
+		for (const node of nodeState.nodes) {
+			dimMap.set(node.id, { width: node.width, height: node.height, measured: node.measured })
+		}
+		nodes = nodesWithSelection.map((node) => {
+			const dims = dimMap.get(node.id)
+			return dims ? { ...node, width: dims.width, height: dims.height, measured: dims.measured } : node
 		})
+		setNodeState({ source: nodesWithSelection, nodes })
 	}
 
 	// Programmatic fitView after ALL nodes are measured (the fitView prop fires too early).
@@ -1960,13 +1969,14 @@ export function ServiceMapCanvas({
 	// declutter change the new signature often already has a (stale, pre-layout)
 	// viewport stamped on it — deciding from `persisted.viewport` then would skip
 	// the refit and strand the re-laid-out graph off-camera.
-	const viewportAtSigSwitchRef = useRef<{ x: number; y: number; zoom: number } | null>(
-		persisted.viewport,
-	)
-	const prevSigForViewportRef = useRef(layoutSignature)
-	if (prevSigForViewportRef.current !== layoutSignature) {
-		prevSigForViewportRef.current = layoutSignature
-		viewportAtSigSwitchRef.current = persisted.viewport
+	const [viewportSnapshot, setViewportSnapshot] = useState(() => ({
+		signature: layoutSignature,
+		viewport: persisted.viewport,
+	}))
+	let savedViewport = viewportSnapshot.viewport
+	if (viewportSnapshot.signature !== layoutSignature) {
+		savedViewport = persisted.viewport
+		setViewportSnapshot({ signature: layoutSignature, viewport: savedViewport })
 	}
 
 	// ELK repositions every node when it resolves (positions, not dimensions, so
@@ -1978,7 +1988,6 @@ export function ServiceMapCanvas({
 		if (!elk) return
 		if (elkFitKeyRef.current === layoutSignature) return
 		elkFitKeyRef.current = layoutSignature
-		const savedViewport = viewportAtSigSwitchRef.current
 		const raf = requestAnimationFrame(() =>
 			requestAnimationFrame(() => {
 				if (savedViewport) rfInstance.current?.setViewport(savedViewport)
@@ -1986,28 +1995,36 @@ export function ServiceMapCanvas({
 			}),
 		)
 		return () => cancelAnimationFrame(raf)
-	}, [elk, layoutSignature])
+	}, [elk, layoutSignature, savedViewport])
 
+	const fitCheckPending = useRef(false)
 	const onNodesChange = useCallback(
 		(changes: NodeChange[]) => {
-			setNodes((prev) => {
-				const next = applyNodeChanges(changes, prev) as typeof prev
+			setNodeState((current) => ({
+				...current,
+				nodes: applyNodeChanges(changes, current.nodes) as typeof current.nodes,
+			}))
 
-				if (
-					!hasFitView.current &&
-					rfInstance.current &&
-					changes.some((c) => c.type === "dimensions")
-				) {
-					const allMeasured =
-						next.length > 0 && next.every((n) => n.measured?.width && n.measured?.height)
-					if (allMeasured) {
+			if (
+				!hasFitView.current &&
+				!fitCheckPending.current &&
+				rfInstance.current &&
+				changes.some((change) => change.type === "dimensions")
+			) {
+				fitCheckPending.current = true
+				requestAnimationFrame(() => {
+					fitCheckPending.current = false
+					const measuredNodes = rfInstance.current?.getNodes() ?? []
+					if (
+						!hasFitView.current &&
+						measuredNodes.length > 0 &&
+						measuredNodes.every((node) => node.measured?.width && node.measured?.height)
+					) {
 						hasFitView.current = true
-						setTimeout(() => rfInstance.current?.fitView(), 0)
+						rfInstance.current?.fitView()
 					}
-				}
-
-				return next
-			})
+				})
+			}
 
 			// Persist finished drags only (dragging === false), keyed by node id.
 			const dragEnds = changes.filter(
@@ -2016,7 +2033,7 @@ export function ServiceMapCanvas({
 			)
 			if (dragEnds.length > 0) {
 				setLayout((prev) =>
-					upsertSnapshot(prev, sigRef.current, (snap) => {
+					upsertSnapshot(prev, layoutSignature, (snap) => {
 						const positions = { ...snap.positions }
 						for (const c of dragEnds) {
 							positions[c.id] = { x: c.position!.x, y: c.position!.y }
@@ -2026,14 +2043,14 @@ export function ServiceMapCanvas({
 				)
 			}
 		},
-		[setLayout],
+		[layoutSignature, setLayout],
 	)
 
 	const onMoveEnd = useCallback(
 		(_: unknown, viewport: Viewport) => {
-			setLayout((prev) => upsertSnapshot(prev, sigRef.current, (snap) => ({ ...snap, viewport })))
+			setLayout((prev) => upsertSnapshot(prev, layoutSignature, (snap) => ({ ...snap, viewport })))
 		},
-		[setLayout],
+		[layoutSignature, setLayout],
 	)
 
 	const handleNodeClick = useCallback(
@@ -2070,9 +2087,9 @@ export function ServiceMapCanvas({
 		// Drop only the CURRENT signature's snapshot — other declutter states keep
 		// their manual arrangements.
 		setLayout((prev) => ({
-			snapshots: prev.snapshots.filter((s) => s.signature !== sigRef.current),
+			snapshots: prev.snapshots.filter((s) => s.signature !== layoutSignature),
 		}))
-	}, [setLayout])
+	}, [layoutSignature, setLayout])
 
 	useEffect(() => {
 		if (!resortFitPending.current) return
@@ -2176,14 +2193,12 @@ export function ServiceMapCanvas({
 	// sync-layout graph beats a skeleton (ELK repositions + refits when it
 	// lands). Reveal once, then never fall back to the skeleton — later
 	// refresh-driven ELK recomputes keep showing the current graph.
-	const revealedRef = useRef(false)
 	const [revealGraceExpired, setRevealGraceExpired] = useState(false)
-	useEffect(() => {
-		if (revealedRef.current) return
+	useMountEffect(() => {
 		const timer = setTimeout(() => setRevealGraceExpired(true), 2000)
 		return () => clearTimeout(timer)
-	}, [])
-	if (elkSettled || revealGraceExpired) revealedRef.current = true
+	})
+	const revealed = elkHasEverSettled || revealGraceExpired
 
 	if (nodes.length === 0) {
 		// The graph exists but declutter hid everything — offer a reset instead of
@@ -2215,7 +2230,7 @@ export function ServiceMapCanvas({
 		return <ServiceMapEmptyState />
 	}
 
-	if (!revealedRef.current) {
+	if (!revealed) {
 		return <ServiceMapLoading />
 	}
 
@@ -2426,7 +2441,13 @@ export function ServiceMapCanvas({
 	)
 }
 
-export function ServiceMapView({ startTime, endTime, deploymentEnv, focus, onFocusChange }: ServiceMapViewProps) {
+export function ServiceMapView({
+	startTime,
+	endTime,
+	deploymentEnv,
+	focus,
+	onFocusChange,
+}: ServiceMapViewProps) {
 	const orgId = useMapleOrganizationId()
 	const infraEnabled = useInfraEnabled()
 	const durationSeconds = useMemo(() => {
@@ -2460,7 +2481,9 @@ export function ServiceMapView({ startTime, endTime, deploymentEnv, focus, onFoc
 	const cloudflareResult = useRefreshableAtomValue(getServiceMapCloudflareResultAtom(cloudflareInput))
 	// PlanetScale scraped metrics carry no deployment.environment either — share
 	// the env-less input so environment switches don't refetch.
-	const planetscaleStatsResult = useRefreshableAtomValue(getServiceMapPlanetScaleResultAtom(cloudflareInput))
+	const planetscaleStatsResult = useRefreshableAtomValue(
+		getServiceMapPlanetScaleResultAtom(cloudflareInput),
+	)
 	const planetscaleInventoryResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
 			reactivityKeys: ["planetscaleIntegrationStatus"],

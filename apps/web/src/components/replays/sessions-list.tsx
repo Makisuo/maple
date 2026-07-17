@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react"
+import { useCallback } from "react"
 import { useNavigate } from "@tanstack/react-router"
 import { GlobeIcon, ClockIcon, PulseIcon, CircleWarningIcon, EyeIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "./session-icons"
@@ -64,6 +64,30 @@ interface SessionsListProps {
 	loadingMore?: boolean
 }
 
+function SessionsSentinel({
+	onReachEnd,
+	loadingMore,
+}: Pick<SessionsListProps, "onReachEnd" | "loadingMore">) {
+	const elementRef = useCallback(
+		(element: HTMLDivElement | null) => {
+			if (!element) return
+			const observer = new IntersectionObserver(
+				(entries) => {
+					if (entries[0]?.isIntersecting && !loadingMore) onReachEnd?.()
+				},
+				{ rootMargin: "400px 0px" },
+			)
+			// React Doctor does not yet recognize React 19 callback-ref cleanup.
+			// oxlint-disable-next-line react-doctor/effect-needs-cleanup
+			observer.observe(element)
+			return () => observer.disconnect()
+		},
+		[loadingMore, onReachEnd],
+	)
+
+	return <div ref={elementRef} aria-hidden className="h-px w-full" />
+}
+
 export function SessionsList({
 	sessions,
 	onReachEnd,
@@ -71,37 +95,6 @@ export function SessionsList({
 	loadingMore = false,
 }: SessionsListProps) {
 	const navigate = useNavigate()
-
-	// Auto-load the next page when the bottom sentinel nears the viewport. Guards
-	// live in refs so the observer is created once yet always reads fresh values;
-	// appending a full page pushes the sentinel out of view and re-arms it.
-	const onReachEndRef = useRef(onReachEnd)
-	onReachEndRef.current = onReachEnd
-	const canLoadRef = useRef(false)
-	canLoadRef.current = hasMore && !loadingMore
-	const observerRef = useRef<IntersectionObserver | null>(null)
-
-	// Attach the observer via a callback ref so it follows the sentinel's
-	// existence: the sentinel only renders while `hasMore`, so a mount with
-	// hasMore=false that later flips true (a live append while this branch stays
-	// mounted) would never arm a mount-time observer, silently stopping paging.
-	const sentinelRef = useCallback((el: HTMLDivElement | null) => {
-		observerRef.current?.disconnect()
-		if (!el) {
-			observerRef.current = null
-			return
-		}
-		const observer = new IntersectionObserver(
-			(entries) => {
-				if (entries[0]?.isIntersecting && canLoadRef.current) {
-					onReachEndRef.current?.()
-				}
-			},
-			{ rootMargin: "400px 0px" },
-		)
-		observer.observe(el)
-		observerRef.current = observer
-	}, [])
 
 	if (sessions.length === 0) {
 		return (
@@ -240,7 +233,7 @@ export function SessionsList({
 				)
 			})}
 
-			{hasMore && <div ref={sentinelRef} aria-hidden className="h-px w-full" />}
+			{hasMore && <SessionsSentinel onReachEnd={onReachEnd} loadingMore={loadingMore} />}
 
 			{loadingMore && (
 				<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">

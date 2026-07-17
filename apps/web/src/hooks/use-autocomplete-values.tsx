@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Atom, Result, useAtomValue } from "@/lib/effect-atom"
 import { AutocompleteKeysProvider, useAutocompleteContext } from "@/hooks/use-autocomplete-context"
 import {
 	getLogsFacetsResultAtom,
@@ -48,42 +48,72 @@ export function useAutocompleteValuesContextOptional(): AutocompleteValuesContex
 // Inner component (must be inside AutocompleteKeysProvider)
 // ---------------------------------------------------------------------------
 
+/**
+ * Subscribe to `atom` only once `enabled` is true; until then read a static
+ * idle atom so no warehouse query fires. Keeps hook order stable, which lets
+ * the lazy provider keep one component tree across activation — swapping the
+ * tree shape instead would remount every descendant (and e.g. close the
+ * advanced-filter dialog the moment it activates the provider).
+ */
+function useGatedAtomValue<A, E>(
+	atom: Atom.Atom<Result.Result<A, E>>,
+	enabled: boolean,
+): Result.Result<A, E> {
+	const idle = React.useMemo(() => Atom.make<Result.Result<A, E>>(Result.initial()), [])
+	return useAtomValue(enabled ? atom : idle)
+}
+
 function AutocompleteValuesInner({
 	startTime,
 	endTime,
+	activated,
+	activate,
 	children,
 }: {
 	startTime?: string
 	endTime?: string
+	activated: boolean
+	activate: () => void
 	children: React.ReactNode
 }) {
 	const { activeAttributeKey, activeResourceAttributeKey } = useAutocompleteContext()
 
 	// --- Facets ---
-	const tracesFacetsResult = useAtomValue(getTracesFacetsResultAtom({ data: { startTime, endTime } }))
-	const logsFacetsResult = useAtomValue(getLogsFacetsResultAtom({ data: { startTime, endTime } }))
+	const tracesFacetsResult = useGatedAtomValue(
+		getTracesFacetsResultAtom({ data: { startTime, endTime } }),
+		activated,
+	)
+	const logsFacetsResult = useGatedAtomValue(
+		getLogsFacetsResultAtom({ data: { startTime, endTime } }),
+		activated,
+	)
 
 	// --- Attribute keys ---
-	const spanAttributeKeysResult = useAtomValue(
+	const spanAttributeKeysResult = useGatedAtomValue(
 		getSpanAttributeKeysResultAtom({ data: { startTime, endTime } }),
+		activated,
 	)
-	const resourceAttributeKeysResult = useAtomValue(
+	const resourceAttributeKeysResult = useGatedAtomValue(
 		getResourceAttributeKeysResultAtom({ data: { startTime, endTime } }),
+		activated,
 	)
-	const metricAttributeKeysResult = useAtomValue(
+	const metricAttributeKeysResult = useGatedAtomValue(
 		getMetricAttributeKeysResultAtom({ data: { startTime, endTime } }),
+		activated,
 	)
 
 	// --- Attribute values (lazy, driven by active key) ---
-	const spanAttributeValuesResult = useAtomValue(
+	const spanAttributeValuesResult = useGatedAtomValue(
 		getSpanAttributeValuesResultAtom({
 			data: { startTime, endTime, attributeKey: activeAttributeKey ?? "" },
 		}),
+		activated,
 	)
-	const resourceAttributeValuesResult = useAtomValue(
+	const resourceAttributeValuesResult = useGatedAtomValue(
 		getResourceAttributeValuesResultAtom({
 			data: { startTime, endTime, attributeKey: activeResourceAttributeKey ?? "" },
 		}),
+		activated,
 	)
 
 	// --- Derived arrays ---
@@ -177,6 +207,7 @@ function AutocompleteValuesInner({
 			attributeKeys,
 			resourceAttributeKeys,
 			metricAttributeKeys,
+			activate,
 		}
 	}, [
 		tracesFacetsResult,
@@ -186,6 +217,7 @@ function AutocompleteValuesInner({
 		resourceAttributeKeys,
 		resourceAttributeValues,
 		metricAttributeKeys,
+		activate,
 	])
 
 	return <AutocompleteValuesCtx value={value}>{children}</AutocompleteValuesCtx>
@@ -194,32 +226,6 @@ function AutocompleteValuesInner({
 // ---------------------------------------------------------------------------
 // Public provider
 // ---------------------------------------------------------------------------
-
-const emptyAutocompleteValues: AutocompleteValuesContextType = {
-	traces: {
-		services: [],
-		spanNames: [],
-		environments: [],
-		httpMethods: [],
-		httpStatusCodes: [],
-		attributeKeys: [],
-		attributeValues: [],
-		resourceAttributeKeys: [],
-		resourceAttributeValues: [],
-	},
-	logs: {
-		services: [],
-		severities: [],
-		attributeKeys: [],
-		attributeValues: [],
-		resourceAttributeKeys: [],
-		resourceAttributeValues: [],
-	},
-	metrics: { metricTypes: [...QUERY_BUILDER_METRIC_TYPES], attributeKeys: [] },
-	attributeKeys: [],
-	resourceAttributeKeys: [],
-	metricAttributeKeys: [],
-}
 
 export function AutocompleteValuesProvider({
 	startTime,
@@ -236,14 +242,17 @@ export function AutocompleteValuesProvider({
 	const [activated, setActivated] = React.useState(!lazy)
 	const activate = React.useCallback(() => setActivated(true), [])
 
-	if (!activated) {
-		const value = { ...emptyAutocompleteValues, activate }
-		return <AutocompleteValuesCtx value={value}>{children}</AutocompleteValuesCtx>
-	}
-
+	// One stable tree for both states — activation only flips which atoms the
+	// inner component subscribes to (see useGatedAtomValue). Swapping the
+	// wrapper structure here would remount all children on activate().
 	return (
 		<AutocompleteKeysProvider>
-			<AutocompleteValuesInner startTime={startTime} endTime={endTime}>
+			<AutocompleteValuesInner
+				startTime={startTime}
+				endTime={endTime}
+				activated={activated}
+				activate={activate}
+			>
 				{children}
 			</AutocompleteValuesInner>
 		</AutocompleteKeysProvider>

@@ -97,7 +97,7 @@ export function MetricsSummaryCards({
 
 			return (
 				<div
-					className={`content-enter grid gap-4 md:grid-cols-2 lg:grid-cols-4 ${result.waiting ? "opacity-60" : ""}`}
+					className={`grid gap-4 md:grid-cols-2 lg:grid-cols-4 ${result.waiting ? "opacity-60" : ""}`}
 				>
 					{cardConfig.map((card) => {
 						const data = summaryByType[card.key]

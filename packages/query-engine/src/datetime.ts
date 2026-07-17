@@ -43,6 +43,15 @@ export function parseWarehouseDateTime(value: string): number {
 	return Date.parse(warehouseDateTimeToIso(value))
 }
 
+/**
+ * Format epoch milliseconds as the tz-less second-precision
+ * `YYYY-MM-DD HH:MM:SS` shape ClickHouse/Tinybird DateTime params expect
+ * (UTC wall clock, space separator, no fractional part).
+ */
+export function formatWarehouseDateTime(epochMs: number): string {
+	return new Date(epochMs).toISOString().replace("T", " ").slice(0, 19)
+}
+
 // ---------------------------------------------------------------------------
 // Time-series bucketing — single source of truth
 //

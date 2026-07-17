@@ -103,7 +103,7 @@ export function LogsFilterSidebar() {
 				(facets.namespaces?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<div className="pb-3">

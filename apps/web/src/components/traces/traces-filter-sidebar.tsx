@@ -59,7 +59,7 @@ function TracesFilterSidebarView({
 			const facets = facetsResponse.data
 
 			return (
-				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={onClearFilters} />
 					<FilterSidebarBody>
 						<SingleCheckboxFilter

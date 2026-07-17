@@ -14,6 +14,7 @@ import {
 	type EdgeCacheServiceShape,
 } from "@maple/query-engine/caching"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
+import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 
 const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 
@@ -296,5 +297,30 @@ describe("QueryEngineService.cachedDirect TTL", () => {
 				{ bucket: "qe-direct", ttlSeconds: 15 },
 			])
 		}).pipe(Effect.provide(layer))
+	})
+})
+
+// --- trace-detail cache TTL: age-conditional tiers. ---
+
+describe("traceCacheTtlSeconds", () => {
+	const nowMs = Date.parse("2026-07-17T12:00:00Z")
+
+	it("caches settled traces (window ended >15min ago) for 600s", () => {
+		assert.strictEqual(traceCacheTtlSeconds("2026-07-17 11:00:00", nowMs), 600)
+		assert.strictEqual(traceCacheTtlSeconds("2026-07-01 00:00:00", nowMs), 600)
+	})
+
+	it("keeps live traces (window still recent or in the future) on the 15s default", () => {
+		assert.strictEqual(traceCacheTtlSeconds("2026-07-17 11:50:00", nowMs), 15)
+		// ±1h windows around a fresh timestamp end in the future.
+		assert.strictEqual(traceCacheTtlSeconds("2026-07-17 12:45:00", nowMs), 15)
+	})
+
+	it("uses a conservative 60s when the payload has no window (probe path)", () => {
+		assert.strictEqual(traceCacheTtlSeconds(undefined, nowMs), 60)
+	})
+
+	it("falls back to 15s on an unparseable timestamp", () => {
+		assert.strictEqual(traceCacheTtlSeconds("not-a-date", nowMs), 15)
 	})
 })

@@ -50,10 +50,14 @@ const EMPTY_SUPPRESSORS: ReadonlySet<string> = new Set()
  * unmounting — so when it un-suppresses it resumes its position transition from
  * where it was (next to the marker) rather than snapping in from the origin.
  */
-const ChartTooltipSuppressionContext = React.createContext<{
-	suppressed: boolean
-	setSuppressed: (id: string, suppressed: boolean) => void
-} | null>(null)
+// Split into two contexts so a suppression toggle only rerenders the
+// components that read the boolean (the tooltip contents), not every overlay
+// holding the stable setter — in a synced grid one marker hover would
+// otherwise fan a render out to all sibling charts' overlays.
+const ChartTooltipSuppressedContext = React.createContext<boolean>(false)
+const ChartTooltipSetSuppressedContext = React.createContext<
+	((id: string, suppressed: boolean) => void) | null
+>(null)
 
 export function ChartTooltipSuppressionProvider({ children }: { children: React.ReactNode }) {
 	const [suppressors, setSuppressors] = React.useState<ReadonlySet<string>>(EMPTY_SUPPRESSORS)
@@ -66,32 +70,30 @@ export function ChartTooltipSuppressionProvider({ children }: { children: React.
 			return next
 		})
 	}, [])
-	const value = React.useMemo(
-		() => ({ suppressed: suppressors.size > 0, setSuppressed }),
-		[suppressors, setSuppressed],
-	)
 	return (
-		<ChartTooltipSuppressionContext.Provider value={value}>
-			{children}
-		</ChartTooltipSuppressionContext.Provider>
+		<ChartTooltipSetSuppressedContext.Provider value={setSuppressed}>
+			<ChartTooltipSuppressedContext.Provider value={suppressors.size > 0}>
+				{children}
+			</ChartTooltipSuppressedContext.Provider>
+		</ChartTooltipSetSuppressedContext.Provider>
 	)
 }
 
 /**
  * The setter an in-chart overlay uses to hide/restore the chart's data tooltip.
- * Depends on the provider's STABLE `setSuppressed` (not the whole context value,
- * which changes whenever suppression toggles) so the returned function keeps a
- * stable identity — overlays put it in effect deps, and an unstable one would
- * loop (cleanup re-fires → toggles state → re-renders → …).
+ * Reads only the STABLE setter context (not the boolean, which changes whenever
+ * suppression toggles) so the returned function keeps a stable identity and the
+ * overlay doesn't rerender on toggles — overlays put it in effect deps, and an
+ * unstable one would loop (cleanup re-fires → toggles state → re-renders → …).
  */
 export function useSuppressChartTooltip(): (suppressed: boolean) => void {
-	const setSuppressed = React.use(ChartTooltipSuppressionContext)?.setSuppressed
+	const setSuppressed = React.use(ChartTooltipSetSuppressedContext)
 	const id = React.useId()
 	return React.useCallback((suppressed: boolean) => setSuppressed?.(id, suppressed), [setSuppressed, id])
 }
 
 function useChartTooltipSuppressed(): boolean {
-	return React.use(ChartTooltipSuppressionContext)?.suppressed ?? false
+	return React.use(ChartTooltipSuppressedContext)
 }
 
 export type ChartLegendItem = { key: string; label: React.ReactNode; color?: string }
@@ -150,8 +152,15 @@ function ChartContainer({
 		return () => legendSlot.setItems([])
 	}, [legendSlot, publishedItems])
 
+	// Stable identity so ChartContext consumers (tooltip/legend contents) don't
+	// rerender just because the container did.
+	const chartContextValue = React.useMemo(
+		() => ({ config, containerRef, chartId }),
+		[config, chartId],
+	)
+
 	return (
-		<ChartContext.Provider value={{ config, containerRef, chartId }}>
+		<ChartContext.Provider value={chartContextValue}>
 			<div
 				ref={containerRef}
 				data-slot="chart"

@@ -228,7 +228,7 @@ function WorkloadsPageContent() {
 
 							return (
 								<div
-									className={`space-y-4 content-enter ${
+									className={`space-y-4 transition-opacity ${
 										result.waiting ? "opacity-60" : ""
 									}`}
 								>

@@ -130,7 +130,7 @@ function ErrorDetailPanel({ errorRow, filters }: { errorRow: ErrorByType; filter
 						}
 
 						return (
-							<div className="rounded-md border bg-background divide-y content-enter">
+							<div className="rounded-md border bg-background divide-y">
 								{traces.map((trace) => (
 									<Link
 										key={trace.traceId}
@@ -237,7 +237,7 @@ export function ErrorsByTypeTable({ filters }: ErrorsByTypeTableProps) {
 			}
 
 			return (
-				<div className={`space-y-4 content-enter ${result.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-4 ${result.waiting ? "opacity-60" : ""}`}>
 					<div className="rounded-md border overflow-auto">
 						<Table>
 							<TableHeader>

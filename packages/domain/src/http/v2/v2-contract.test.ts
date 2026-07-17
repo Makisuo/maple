@@ -319,7 +319,7 @@ describe("scopes", () => {
 
 	it("accepts valid scope strings and rejects invalid ones", () => {
 		expect(check("dashboards:read")).toBe("dashboards:read")
-		expect(check("alert_rules:write")).toBe("alert_rules:write")
+		expect(check("alerts:write")).toBe("alerts:write")
 		expect(check("*")).toBe("*")
 		expect(() => check("dashboards")).toThrow()
 		expect(() => check("dashboards:admin")).toThrow()
@@ -341,6 +341,15 @@ describe("scopes", () => {
 		})
 		expect(requiredScopeForRequest("DELETE", "/v2/api_keys/key_abc")).toEqual({
 			family: "api_keys",
+			access: "write",
+		})
+		// Namespaced groups share one family: the first path segment under /v2.
+		expect(requiredScopeForRequest("GET", "/v2/alerts/rules")).toEqual({
+			family: "alerts",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/alerts/destinations/dest_abc/test")).toEqual({
+			family: "alerts",
 			access: "write",
 		})
 		expect(requiredScopeForRequest("GET", "/api/api-keys")).toBeNull()

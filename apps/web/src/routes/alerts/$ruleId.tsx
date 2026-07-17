@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
-import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 import { Fragment, useMemo, useState } from "react"
@@ -8,6 +8,8 @@ import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { useAlertRuleChecks } from "@/hooks/use-alert-rule-checks"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
@@ -28,7 +30,6 @@ import {
 	formatAlertDateTimeFull,
 	formatAlertDuration,
 	computeIncidentStats,
-	buildRuleToggleRequest,
 	getExitErrorMessage,
 } from "@/lib/alerts/form-utils"
 import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
@@ -38,6 +39,7 @@ import {
 	IsoDateTimeString,
 	type AiTriageResult,
 	type AlertCheckDocument,
+	type AlertDestinationDocument,
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
@@ -77,6 +79,13 @@ import { formatSql } from "@/lib/sql-format"
 
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
+
+// Shared loading/error fallbacks, so the derived lists keep one stable
+// identity until their Result actually changes.
+const NO_RULES: ReadonlyArray<AlertRuleDocument> = []
+const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
+const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
+const NO_DESTINATIONS: ReadonlyArray<AlertDestinationDocument> = []
 
 // Decode the raw `$ruleId` URL segment into its branded id once, at the route
 // boundary, so the branded value threads through the checks/states queries
@@ -132,34 +141,49 @@ function RuleDetailContent() {
 	const { result: incidentsResult, refresh: refreshIncidents } = useAlertIncidentsList()
 	const ruleStates = useAlertRuleStates(ruleId)
 	const { result: destinationsResult } = useAlertDestinationsList()
+	// TODO(v2): delivery events have no v2 endpoint (internal delivery-audit
+	// schema); the proper follow-up is an Electric shape for alert_delivery_events.
 	const deliveryEventsResult = useAtomValue(
 		MapleApiAtomClient.query("alerts", "listDeliveryEvents", {
 			reactivityKeys: ["alertDeliveryEvents"],
 		}),
 	)
-	const updateRule = useAtomSet(MapleApiAtomClient.mutation("alerts", "updateRule"), {
+	const updateRule = useAtomSet(MapleApiV2AtomClient.mutation("alertRules", "update"), {
 		mode: "promiseExit",
 	})
-	const checksQueryAtom = MapleApiAtomClient.query("alerts", "listRuleChecks", {
-		params: { ruleId },
-		query: { since, until },
-		reactivityKeys: ["alertChecks", ruleId, since, until],
-	})
-	const checksResult = useAtomValue(checksQueryAtom)
-	const refreshChecks = useAtomRefresh(checksQueryAtom)
+	const { result: checksResult, refresh: refreshChecks } = useAlertRuleChecks(ruleId, since, until)
 
-	const rules = Result.builder(rulesResult)
-		.onSuccess((response) => response.rules)
-		.orElse(() => [])
-	const allIncidents = Result.builder(incidentsResult)
-		.onSuccess((response) => response.incidents)
-		.orElse(() => [])
-	const checks = Result.builder(checksResult)
-		.onSuccess((response) => response.checks)
-		.orElse(() => [])
-	const destinations = Result.builder(destinationsResult)
-		.onSuccess((response) => response.destinations)
-		.orElse(() => [])
+	// Memoized (with a shared empty-array fallback) so the identities only
+	// change when the underlying Result does — these feed memo chains below
+	// (diagnosis, chart) that must hold across unrelated renders.
+	const rules = useMemo(
+		() =>
+			Result.builder(rulesResult)
+				.onSuccess((response) => response.rules)
+				.orElse(() => NO_RULES),
+		[rulesResult],
+	)
+	const allIncidents = useMemo(
+		() =>
+			Result.builder(incidentsResult)
+				.onSuccess((response) => response.incidents)
+				.orElse(() => NO_INCIDENTS),
+		[incidentsResult],
+	)
+	const checks = useMemo(
+		() =>
+			Result.builder(checksResult)
+				.onSuccess((response) => response.checks)
+				.orElse(() => NO_CHECKS),
+		[checksResult],
+	)
+	const destinations = useMemo(
+		() =>
+			Result.builder(destinationsResult)
+				.onSuccess((response) => response.destinations)
+				.orElse(() => NO_DESTINATIONS),
+		[destinationsResult],
+	)
 	const ruleDeliveryEvents = useMemo(
 		() =>
 			Result.builder(deliveryEventsResult)
@@ -180,6 +204,23 @@ function RuleDetailContent() {
 					return dateB - dateA
 				}),
 		[allIncidents, ruleId],
+	)
+
+	// Memoized so RuleDiagnosisPanel's buildDiagnosis memo can hold — a fresh
+	// filter() identity here recomputed the whole diagnosis every render.
+	const openRuleIncidents = useMemo(
+		() => ruleIncidents.filter((i) => i.status === "open"),
+		[ruleIncidents],
+	)
+
+	// Wall clock for the diagnosis's relative-time labels. Deliberately NOT a
+	// live ticker: it refreshes only when the diagnosis's data inputs change
+	// (while firing, Electric pushes a state row every evaluation ≈1/min). A
+	// per-render Date.now() defeated the buildDiagnosis memo entirely.
+	const diagnosisNow = useMemo(
+		() => Date.now(),
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[ruleStates, ruleIncidents, checks, ruleDeliveryEvents],
 	)
 
 	const activeTab: RuleDetailTab = (tabValues as readonly string[]).includes(search.tab ?? "")
@@ -325,8 +366,8 @@ function RuleDetailContent() {
 	async function handleToggleEnabled() {
 		if (!rule) return
 		const result = await updateRule({
-			params: { ruleId: rule.id },
-			payload: buildRuleToggleRequest(rule),
+			params: { id: rule.id },
+			payload: { enabled: !rule.enabled },
 			reactivityKeys: ["alertRules"],
 		})
 		if (!Exit.isSuccess(result)) {
@@ -336,7 +377,7 @@ function RuleDetailContent() {
 		}
 	}
 
-	const isFiring = ruleIncidents.some((i) => i.status === "open")
+	const isFiring = openRuleIncidents.length > 0
 	const subtitle = `${signalLabels[rule.signalType]} ${comparatorLabels[rule.comparator]} ${formatSignalValue(rule.signalType, rule.threshold)} over ${rule.windowMinutes}min${rule.serviceNames?.length > 0 ? ` on ${rule.serviceNames.join(", ")}` : ""}${rule.excludeServiceNames?.length > 0 ? ` (excl. ${rule.excludeServiceNames.join(", ")})` : ""}`
 
 	const stickyContent = (
@@ -402,10 +443,10 @@ function RuleDetailContent() {
 						rule={rule}
 						states={ruleStates}
 						checks={checks}
-						openIncidents={ruleIncidents.filter((i) => i.status === "open")}
+						openIncidents={openRuleIncidents}
 						destinations={destinations}
 						deliveryEvents={ruleDeliveryEvents}
-						now={Date.now()}
+						now={diagnosisNow}
 						onToggleEnabled={() => void handleToggleEnabled()}
 					/>
 					<div className="space-y-2">
@@ -633,7 +674,7 @@ function RuleDetailContent() {
 						</Empty>
 					))
 					.onSuccess(() => (
-						<div className="space-y-6 content-enter">
+						<div className="space-y-6">
 							<div className="flex items-center justify-between">
 								<div>
 									<h2 className="text-lg font-semibold">History</h2>

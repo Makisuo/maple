@@ -182,7 +182,7 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 				.onError((err) => <QueryErrorState error={err} />)
 				.onSuccess((response, result) => {
 					return (
-						<div className={`space-y-6 content-enter ${result.waiting ? "opacity-60" : ""}`}>
+						<div className={`space-y-6 transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
 							{response.zones.length > 0 && (
 								<CloudflareKpiCards zones={response.zones} buckets={timeseries?.buckets} />
 							)}

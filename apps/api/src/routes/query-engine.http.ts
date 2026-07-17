@@ -37,6 +37,7 @@ import {
 	ServicePlatformsResponse,
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
+	ServiceOperationsResponse,
 	ListLogsResponse,
 	GetLogResponse,
 	ListMetricsResponse,
@@ -65,11 +66,17 @@ import {
 	TraceId,
 	SpanId,
 } from "@maple/domain/http"
-import { Effect, Match, Option, Schema } from "effect"
+import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
 import { RawSqlChartService } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
+import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
+import {
+	CH,
+	QueryEngineExecuteRequest,
+	formatWarehouseDateTime,
+	parseWarehouseDateTime,
+} from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
@@ -98,14 +105,18 @@ const decodeStatusCodeOption = Schema.decodeUnknownOption(StatusCode)
 const coerceStatusCode = (value: string): StatusCode =>
 	Option.getOrElse(decodeStatusCodeOption(value), () => "Unset" as const)
 
-// Build a ±1h partition-pruning window around a ClickHouse datetime string
-// (`YYYY-MM-DD HH:mm:ss[.ffffff]`). Sub-second precision is irrelevant for the
-// window bounds, so the seconds-level prefix is parsed as UTC.
+// Build a ±1h partition-pruning window around a ClickHouse datetime string.
 const partitionWindowAround = (timestamp: string): { startTime: string; endTime: string } => {
-	const ms = Date.parse(`${timestamp.slice(0, 19).replace(" ", "T")}Z`)
-	const fmt = (epoch: number) => new Date(epoch).toISOString().replace("T", " ").slice(0, 19)
-	return { startTime: fmt(ms - 3_600_000), endTime: fmt(ms + 3_600_000) }
+	const ms = parseWarehouseDateTime(timestamp)
+	return { startTime: formatWarehouseDateTime(ms - 3_600_000), endTime: formatWarehouseDateTime(ms + 3_600_000) }
 }
+
+// Most traces opened without a timestamp are still recent (list rows carry
+// `?t=`; it's direct/shared/AI links that don't, and those overwhelmingly
+// point at fresh traces). Probing the last 48h first prunes to ~2 daily
+// partitions; only older traces fall back to the unbounded every-partition
+// probe.
+const PROBE_RECENT_WINDOW_MS = 48 * 3_600_000
 
 export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine", (handlers) =>
 	Effect.gen(function* () {
@@ -123,6 +134,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("spanHierarchy", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const nowMs = yield* Clock.currentTimeMillis
 					const rows = yield* queryEngine.cachedDirect(
 						tenant,
 						"spanHierarchy",
@@ -133,23 +145,35 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						// seeks across every daily partition (~30) — p95 ~8.8s vs ~2.3s when
 						// pruned to one. When the caller has no timestamp (direct URL,
 						// shared link, AI link), resolve one via a cheap LIMIT-1 probe and
-						// derive a ±1h window so the main query can prune.
+						// derive a ±1h window so the main query can prune. The probe itself
+						// tries the recent window first (see PROBE_RECENT_WINDOW_MS).
 						Effect.gen(function* () {
 							let startTime = payload.startTime
 							let endTime = payload.endTime
 							if (startTime == null || endTime == null) {
-								const probe = yield* mapExecError(
-									warehouse
-										.compiledQueryFirst(
-											tenant,
-											CH.compile(CH.traceTimeProbeQuery({ traceId: payload.traceId }), {
-												orgId: tenant.orgId,
-											}),
-											{ profile: "discovery", context: "spanHierarchyProbe" },
-										)
-										.pipe(Effect.map(Option.getOrNull)),
-									"spanHierarchy probe failed",
-								)
+								const runProbe = (narrowByTime: boolean) =>
+									mapExecError(
+										warehouse
+											.compiledQueryFirst(
+												tenant,
+												CH.compile(
+													CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime }),
+													narrowByTime
+														? {
+																orgId: tenant.orgId,
+																startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
+															}
+														: { orgId: tenant.orgId },
+												),
+												{
+													profile: "discovery",
+													context: narrowByTime ? "spanHierarchyProbeRecent" : "spanHierarchyProbe",
+												},
+											)
+											.pipe(Effect.map(Option.getOrNull)),
+										"spanHierarchy probe failed",
+									)
+								const probe = (yield* runProbe(true)) ?? (yield* runProbe(false))
 								if (probe?.timestamp != null) {
 									const window = partitionWindowAround(probe.timestamp)
 									startTime = window.startTime
@@ -175,6 +199,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								"spanHierarchy query failed",
 							)
 						}),
+						traceCacheTtlSeconds(payload.endTime, nowMs),
 					)
 					const typedRows = rows.map((row) => ({
 						...row,
@@ -190,6 +215,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 			.handle("spanDetail", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const nowMs = yield* Clock.currentTimeMillis
 					const narrowByTime = payload.startTime != null && payload.endTime != null
 					const compiled = CH.compile(
 						CH.spanDetailQuery({
@@ -214,6 +240,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								.pipe(Effect.map(Option.getOrNull)),
 							"spanDetail query failed",
 						),
+						traceCacheTtlSeconds(payload.endTime, nowMs),
 					)
 					return new SpanDetailResponse({
 						data: row
@@ -1464,6 +1491,94 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						60,
 					)
 					return new ServiceUsageResponse({ data: rows })
+				}),
+			)
+			.handle("serviceOperations", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const toNumber = (value: unknown) => Number(value ?? 0)
+					const data = yield* queryEngine.cachedDirect(
+						tenant,
+						"serviceOperations",
+						payload,
+						Effect.gen(function* () {
+							const params = {
+								orgId: tenant.orgId,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							}
+							const summaryCompiled = CH.compile(
+								CH.serviceOperationsSummaryQuery({
+									serviceName: payload.serviceName,
+									environments: payload.environments,
+									limit: payload.limit,
+								}),
+								params,
+								{ rowSchema: CH.serviceOperationsSummaryRowSchema },
+							)
+							const summaryRows = yield* mapExecError(
+								warehouse.compiledQuery(tenant, summaryCompiled, {
+									profile: "aggregation",
+									context: "serviceOperations",
+								}),
+								"serviceOperations query failed",
+							)
+							if (summaryRows.length === 0) {
+								return []
+							}
+
+							const spanNames = summaryRows.map((row) => String(row.spanName))
+							// Fallback bucket sizing mirrors the client's chart-grid density
+							// (~50 buckets), floored at 1 minute.
+							const windowSeconds = Math.max(
+								0,
+								(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
+									Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
+									1000,
+							)
+							const bucketSeconds =
+								payload.bucketSeconds ?? Math.max(60, Math.floor(windowSeconds / 50))
+							const timeseriesCompiled = CH.compile(
+								CH.serviceOperationsTimeseriesQuery({
+									serviceName: payload.serviceName,
+									environments: payload.environments,
+									spanNames,
+								}),
+								{ ...params, bucketSeconds },
+								{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+							)
+							const timeseriesRows = yield* mapExecError(
+								warehouse.compiledQuery(tenant, timeseriesCompiled, {
+									profile: "aggregation",
+									context: "serviceOperationsTimeseries",
+								}),
+								"serviceOperationsTimeseries query failed",
+							)
+
+							const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
+							for (const row of timeseriesRows) {
+								const key = String(row.spanName)
+								const points = sparklines.get(key) ?? []
+								points.push({ bucket: String(row.bucket), count: toNumber(row.count) })
+								sparklines.set(key, points)
+							}
+
+							return summaryRows.map((row) => ({
+								spanName: String(row.spanName),
+								spanCount: toNumber(row.spanCount),
+								estimatedSpanCount: toNumber(row.estimatedSpanCount),
+								errorCount: toNumber(row.errorCount),
+								estimatedErrorCount: toNumber(row.estimatedErrorCount),
+								errorRate: toNumber(row.errorRate),
+								avgDurationMs: toNumber(row.avgDurationMs),
+								p50DurationMs: toNumber(row.p50DurationMs),
+								p95DurationMs: toNumber(row.p95DurationMs),
+								sparkline: sparklines.get(String(row.spanName)) ?? [],
+							}))
+						}),
+						30,
+					)
+					return new ServiceOperationsResponse({ data })
 				}),
 			)
 			.handle("listLogs", ({ payload }) =>

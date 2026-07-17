@@ -1263,5 +1263,16 @@ describe("converted queries", () => {
 		// Must early-terminate per partition — no sort, no full projection.
 		expect(sql).not.toContain("ORDER BY")
 		expect(sql).not.toContain("toJSONString")
+		// Unbounded fallback shape — no time predicate.
+		expect(sql).not.toContain("Timestamp >=")
+	})
+
+	it("traceTimeProbeQuery with narrowByTime adds a Timestamp lower bound for partition pruning", () => {
+		const q = traceTimeProbeQuery({ traceId: "abc123", narrowByTime: true })
+		const { sql } = compileCH(q, { orgId: "org_1", startTime: "2026-04-15 13:00:00" })
+		expect(sql).toContain("Timestamp >= '2026-04-15 13:00:00'")
+		// Lower bound only — "recent" needs no upper bound.
+		expect(sql).not.toContain("Timestamp <=")
+		expect(sql).toContain("LIMIT 1")
 	})
 })

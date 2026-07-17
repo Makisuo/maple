@@ -36,38 +36,21 @@ export function useTableRefreshTimeRange({
 	const baseRange = useEffectiveTimeRange(startTime, endTime, timePreset ?? defaultRange)
 	const pageRefresh = useOptionalPageRefreshContext()
 	const refreshVersion = pageRefresh?.refreshVersion ?? 0
-	const lastRefreshVersion = React.useRef(refreshVersion)
 	const relativePreset = resolveRefreshPreset({
 		startTime,
 		endTime,
 		timePreset,
 		defaultRange,
 	})
-	const [refreshedRange, setRefreshedRange] = React.useState<TimeRange>(baseRange)
+	const source = `${baseRange.startTime}\u0000${baseRange.endTime}\u0000${relativePreset ?? ""}\u0000${refreshVersion}`
+	const [refreshState, setRefreshState] = React.useState(() => ({ source, range: baseRange }))
+	let refreshedRange = refreshState.range
 
-	const prevBaseStartRef = React.useRef(baseRange.startTime)
-	const prevBaseEndRef = React.useRef(baseRange.endTime)
-	const prevPresetRef = React.useRef(relativePreset)
-
-	if (
-		baseRange.startTime !== prevBaseStartRef.current ||
-		baseRange.endTime !== prevBaseEndRef.current ||
-		relativePreset !== prevPresetRef.current
-	) {
-		prevBaseStartRef.current = baseRange.startTime
-		prevBaseEndRef.current = baseRange.endTime
-		prevPresetRef.current = relativePreset
-		setRefreshedRange(baseRange)
-	}
-
-	if (pageRefresh && refreshVersion !== lastRefreshVersion.current) {
-		lastRefreshVersion.current = refreshVersion
-		if (relativePreset) {
-			const nextRange = relativeToAbsolute(relativePreset)
-			if (nextRange) {
-				setRefreshedRange(nextRange)
-			}
-		}
+	if (refreshState.source !== source) {
+		const nextRange =
+			pageRefresh && relativePreset ? (relativeToAbsolute(relativePreset) ?? baseRange) : baseRange
+		refreshedRange = nextRange
+		setRefreshState({ source, range: nextRange })
 	}
 
 	return refreshedRange

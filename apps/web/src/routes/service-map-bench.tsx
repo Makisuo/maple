@@ -48,6 +48,7 @@ function ServiceMapBenchPage() {
 		minTraffic: search.minTraffic ?? DEFAULT_BENCH_PARAMS.minTraffic,
 		focus: search.focus ?? DEFAULT_BENCH_PARAMS.focus,
 	}
+	const benchKey = JSON.stringify(params)
 
 	return (
 		<div className="relative h-screen w-screen">
@@ -73,7 +74,7 @@ function ServiceMapBenchPage() {
 					</button>
 				))}
 			</div>
-			<ServiceMapBench params={params} />
+			<ServiceMapBench key={benchKey} params={params} />
 		</div>
 	)
 }

@@ -75,7 +75,7 @@ export function SessionEventsPanel({
 		return (
 			// The panel body is the scroll container so the tab bar can stick to its
 			// top while the event rows scroll underneath.
-			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto content-enter">
+			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				<div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-card">
 					{TABS.map((t) => (
 						<button

@@ -1,4 +1,4 @@
-import { useId, useMemo } from "react"
+import { memo, useId, useMemo } from "react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
@@ -21,7 +21,9 @@ const baseChartConfig = {
 	errorRate: { label: "Error Rate", color: "var(--chart-error)" },
 } satisfies ChartConfig
 
-export function ErrorRateAreaChart({
+// Memoized: these charts sit in synced grids whose parent rerenders on every
+// atom/query settle; with stable props the whole Recharts subtree is skipped.
+export const ErrorRateAreaChart = memo(function ErrorRateAreaChart({
 	data,
 	className,
 	legend,
@@ -144,4 +146,4 @@ export function ErrorRateAreaChart({
 			</AreaChart>
 		</ChartContainer>
 	)
-}
+})

@@ -1,4 +1,4 @@
-import { useMemo, useId } from "react"
+import { memo, useMemo, useId } from "react"
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import type { BaseChartProps } from "../_shared/chart-types"
@@ -23,7 +23,9 @@ import {
 
 const VALUE_KEYS = ["throughput"]
 
-export function ThroughputAreaChart({
+// Memoized: these charts sit in synced grids whose parent rerenders on every
+// atom/query settle; with stable props the whole Recharts subtree is skipped.
+export const ThroughputAreaChart = memo(function ThroughputAreaChart({
 	data,
 	className,
 	legend,
@@ -296,4 +298,4 @@ export function ThroughputAreaChart({
 			</AreaChart>
 		</ChartContainer>
 	)
-}
+})

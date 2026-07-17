@@ -150,7 +150,7 @@ function ChartView({ rows, unit, metric, seriesLabel, waiting, syncId }: ChartVi
 	const margin = { top: 12, right: 12, left: 0, bottom: 0 }
 
 	return (
-		<div className={cn("content-enter", waiting && "opacity-60")}>
+		<div className={cn("transition-opacity", waiting && "opacity-60")}>
 			<div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 px-3 py-2">
 				{series.map((s) => {
 					const value = lastValues[s]
