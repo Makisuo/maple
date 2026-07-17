@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { cn } from "@maple/ui/utils"
 
@@ -25,7 +24,7 @@ const benchSearchSchema = Schema.Struct({
 	focus: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/service-map-bench"))({
+export const Route = createFileRoute("/service-map-bench")({
 	component: ServiceMapBenchPage,
 	validateSearch: Schema.toStandardSchemaV1(benchSearchSchema),
 })

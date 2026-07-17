@@ -1,5 +1,6 @@
-import { useCallback } from "react"
+import { useCallback, useState } from "react"
 import { useNavigate } from "@tanstack/react-router"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import { GlobeIcon, ClockIcon, PulseIcon, CircleWarningIcon, EyeIcon } from "@/components/icons"
 import { browserIconFor, deviceIconFor } from "./session-icons"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
@@ -62,6 +63,8 @@ interface SessionsListProps {
 	hasMore?: boolean
 	/** Whether a next page is currently in flight. */
 	loadingMore?: boolean
+	/** The client retention guard stopped pagination before the backend ended. */
+	isCapped?: boolean
 }
 
 function SessionsSentinel({
@@ -93,8 +96,19 @@ export function SessionsList({
 	onReachEnd,
 	hasMore = false,
 	loadingMore = false,
+	isCapped = false,
 }: SessionsListProps) {
 	const navigate = useNavigate()
+	const [listElement, setListElement] = useState<HTMLDivElement | null>(null)
+	const scrollElement = listElement?.closest<HTMLDivElement>('[data-slot="page-scroll-area"]') ?? null
+	const virtualizer = useVirtualizer({
+		count: sessions.length,
+		getScrollElement: () => scrollElement,
+		estimateSize: () => 78,
+		overscan: 8,
+		scrollMargin: listElement?.offsetTop ?? 0,
+	})
+	const virtualItems = virtualizer.getVirtualItems()
 
 	if (sessions.length === 0) {
 		return (
@@ -119,121 +133,147 @@ export function SessionsList({
 	}
 
 	return (
-		<div className="@container space-y-2">
-			{sessions.map((session) => {
-				const id = identity(session)
-				const isActive = session.status === "active"
-				const BrowserIcon = browserIconFor(session.browserName)
-				const DeviceIcon = deviceIconFor(session.deviceType)
-				return (
-					<button
-						type="button"
-						key={session.sessionId}
-						onClick={() =>
-							navigate({
-								to: "/replays/$sessionId",
-								params: { sessionId: session.sessionId },
-								search: { t: session.startTime },
-							})
-						}
-						className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-left transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-accent/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @2xl:gap-4 @2xl:px-4"
-					>
+		<div className="@container">
+			<div
+				ref={setListElement}
+				className="relative w-full"
+				style={{ height: virtualizer.getTotalSize() }}
+			>
+				{virtualItems.map((virtualRow) => {
+					const session = sessions[virtualRow.index]!
+					const id = identity(session)
+					const isActive = session.status === "active"
+					const BrowserIcon = browserIconFor(session.browserName)
+					const DeviceIcon = deviceIconFor(session.deviceType)
+					return (
 						<div
-							className={`grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br ${id.gradient} text-sm font-semibold text-white shadow-sm @2xl:size-10`}
+							key={session.sessionId}
+							data-index={virtualRow.index}
+							ref={virtualizer.measureElement}
+							className="absolute top-0 left-0 w-full pb-2"
+							style={{
+								transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
+							}}
 						>
-							{id.initial}
-						</div>
+							<button
+								type="button"
+								onClick={() =>
+									navigate({
+										to: "/replays/$sessionId",
+										params: { sessionId: session.sessionId },
+										search: { t: session.startTime },
+									})
+								}
+								className="group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-left transition-all hover:-translate-y-px hover:border-primary/40 hover:bg-accent/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @2xl:gap-4 @2xl:px-4"
+							>
+								<div
+									className={`grid size-9 shrink-0 place-items-center rounded-full bg-gradient-to-br ${id.gradient} text-sm font-semibold text-white shadow-sm @2xl:size-10`}
+								>
+									{id.initial}
+								</div>
 
-						<div className="min-w-0 flex-1">
-							<div className="flex items-center gap-2">
-								<span className="min-w-0 truncate text-sm font-medium @2xl:max-w-[16rem]">
-									{id.label}
-								</span>
-								<StatusDot active={isActive} />
-								<span className="hidden shrink-0 font-mono text-xs text-muted-foreground @2xl:inline">
-									{session.sessionId.slice(0, 8)} · {formatDuration(session.durationMs)}
-								</span>
-								{/* On phones the right-hand columns are gone, so the timestamp
+								<div className="min-w-0 flex-1">
+									<div className="flex items-center gap-2">
+										<span className="min-w-0 truncate text-sm font-medium @2xl:max-w-[16rem]">
+											{id.label}
+										</span>
+										<StatusDot active={isActive} />
+										<span className="hidden shrink-0 font-mono text-xs text-muted-foreground @2xl:inline">
+											{session.sessionId.slice(0, 8)} ·{" "}
+											{formatDuration(session.durationMs)}
+										</span>
+										{/* On phones the right-hand columns are gone, so the timestamp
 								    anchors the top-right corner of the stacked row. */}
-								<span
-									className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground @2xl:hidden"
-									title={absoluteTs(session.startTime)}
-								>
-									{formatRelative(session.startTime)}
-								</span>
-							</div>
-							<div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
-								<span className="shrink-0 font-mono @2xl:hidden">
-									{session.sessionId.slice(0, 8)} · {formatDuration(session.durationMs)}
-								</span>
-								<span className="flex min-w-0 items-center gap-1.5">
-									<GlobeIcon className="size-3.5 shrink-0 opacity-60" />
-									<span className="min-w-0 truncate @2xl:max-w-[18rem]">
-										{hostFromUrl(session.urlInitial)}
+										<span
+											className="ml-auto shrink-0 whitespace-nowrap text-xs text-muted-foreground @2xl:hidden"
+											title={absoluteTs(session.startTime)}
+										>
+											{formatRelative(session.startTime)}
+										</span>
+									</div>
+									<div className="mt-1 flex items-center gap-3 text-xs text-muted-foreground">
+										<span className="shrink-0 font-mono @2xl:hidden">
+											{session.sessionId.slice(0, 8)} ·{" "}
+											{formatDuration(session.durationMs)}
+										</span>
+										<span className="flex min-w-0 items-center gap-1.5">
+											<GlobeIcon className="size-3.5 shrink-0 opacity-60" />
+											<span className="min-w-0 truncate @2xl:max-w-[18rem]">
+												{hostFromUrl(session.urlInitial)}
+											</span>
+										</span>
+										<span className="hidden items-center gap-1.5 @2xl:flex">
+											<BrowserIcon className="size-3.5 shrink-0" />
+											<span className="truncate">
+												{session.browserName || "Unknown"}
+												{session.osName ? ` · ${session.osName}` : ""}
+											</span>
+										</span>
+										<span
+											className="hidden shrink-0 @2xl:block"
+											title={session.deviceType || "desktop"}
+										>
+											<DeviceIcon className="size-3.5 opacity-60" />
+										</span>
+										{session.country && (
+											<span className="hidden truncate @3xl:inline">
+												{session.country}
+											</span>
+										)}
+									</div>
+									{(session.traceCount > 0 || session.errorCount > 0) && (
+										<div className="mt-1.5 flex items-center gap-2 @2xl:hidden">
+											<SessionBadges session={session} />
+										</div>
+									)}
+								</div>
+
+								<div className="hidden shrink-0 items-center gap-2.5 text-xs text-muted-foreground @2xl:flex">
+									{/* Click/page-view counts are low-signal — drop them on phones and
+							    keep the load-bearing trace/error badges. */}
+									<span className="flex items-center gap-2.5">
+										<Stat
+											icon={<PulseIcon className="size-3.5" />}
+											value={session.clickCount}
+											title="clicks"
+										/>
+										<Stat
+											icon={<EyeIcon className="size-3.5" />}
+											value={session.pageViews || 1}
+											title="page views"
+										/>
 									</span>
-								</span>
-								<span className="hidden items-center gap-1.5 @2xl:flex">
-									<BrowserIcon className="size-3.5 shrink-0" />
-									<span className="truncate">
-										{session.browserName || "Unknown"}
-										{session.osName ? ` · ${session.osName}` : ""}
-									</span>
-								</span>
-								<span
-									className="hidden shrink-0 @2xl:block"
-									title={session.deviceType || "desktop"}
-								>
-									<DeviceIcon className="size-3.5 opacity-60" />
-								</span>
-								{session.country && (
-									<span className="hidden truncate @3xl:inline">{session.country}</span>
-								)}
-							</div>
-							{(session.traceCount > 0 || session.errorCount > 0) && (
-								<div className="mt-1.5 flex items-center gap-2 @2xl:hidden">
 									<SessionBadges session={session} />
 								</div>
-							)}
-						</div>
 
-						<div className="hidden shrink-0 items-center gap-2.5 text-xs text-muted-foreground @2xl:flex">
-							{/* Click/page-view counts are low-signal — drop them on phones and
-							    keep the load-bearing trace/error badges. */}
-							<span className="flex items-center gap-2.5">
-								<Stat
-									icon={<PulseIcon className="size-3.5" />}
-									value={session.clickCount}
-									title="clicks"
-								/>
-								<Stat
-									icon={<EyeIcon className="size-3.5" />}
-									value={session.pageViews || 1}
-									title="page views"
-								/>
-							</span>
-							<SessionBadges session={session} />
-						</div>
-
-						<div className="hidden shrink-0 items-center gap-3 @2xl:flex">
-							<span
-								className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-muted-foreground"
-								title={absoluteTs(session.startTime)}
-							>
-								<ClockIcon className="size-3.5 opacity-60" />
-								{formatRelative(session.startTime)}
-							</span>
-							{/* Tap affordance: hover-revealed on desktop. Phones skip it —
+								<div className="hidden shrink-0 items-center gap-3 @2xl:flex">
+									<span
+										className="inline-flex items-center gap-1.5 whitespace-nowrap text-sm text-muted-foreground"
+										title={absoluteTs(session.startTime)}
+									>
+										<ClockIcon className="size-3.5 opacity-60" />
+										{formatRelative(session.startTime)}
+									</span>
+									{/* Tap affordance: hover-revealed on desktop. Phones skip it —
 							    the whole card is the tap target and the stacked row needs
 							    every horizontal pixel. */}
-							<span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
-								<PlayGlyph />
-							</span>
+									<span className="grid size-7 place-items-center rounded-full bg-primary/10 text-primary opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
+										<PlayGlyph />
+									</span>
+								</div>
+							</button>
 						</div>
-					</button>
-				)
-			})}
+					)
+				})}
+			</div>
 
 			{hasMore && <SessionsSentinel onReachEnd={onReachEnd} loadingMore={loadingMore} />}
+
+			{isCapped && (
+				<p className="py-3 text-sm text-muted-foreground">
+					Showing first {sessions.length.toLocaleString()} sessions — narrow filters to continue
+				</p>
+			)}
 
 			{loadingMore && (
 				<div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">

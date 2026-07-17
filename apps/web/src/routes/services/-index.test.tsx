@@ -75,6 +75,7 @@ vi.mock("@/hooks/use-effective-time-range", () => ({
 }))
 
 import * as ServicesRoute from "./index"
+import { component as ServicesPage } from "./index?tsr-split=component"
 
 describe("ServicesPage timePreset search updates", () => {
 	beforeEach(() => {
@@ -94,7 +95,7 @@ describe("ServicesPage timePreset search updates", () => {
 	})
 
 	it("writes timePreset for preset-based selections", () => {
-		render(<ServicesRoute.ServicesPage />)
+		render(<ServicesPage />)
 
 		fireEvent.click(screen.getByRole("button", { name: "preset" }))
 
@@ -121,7 +122,7 @@ describe("ServicesPage timePreset search updates", () => {
 			timePreset: "1h",
 		})
 
-		render(<ServicesRoute.ServicesPage />)
+		render(<ServicesPage />)
 
 		fireEvent.click(screen.getByRole("button", { name: "custom" }))
 

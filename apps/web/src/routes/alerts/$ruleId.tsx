@@ -1,7 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 import { Fragment, useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -99,7 +98,7 @@ const RuleDetailSearch = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/alerts/$ruleId"))({
+export const Route = createFileRoute("/alerts/$ruleId")({
 	component: RuleDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(RuleDetailSearch),
 })

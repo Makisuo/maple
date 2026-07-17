@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
@@ -30,7 +29,7 @@ const planetscaleSearchSchema = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/infra/planetscale/"))({
+export const Route = createFileRoute("/infra/planetscale/")({
 	component: PlanetScalePage,
 	validateSearch: Schema.toStandardSchemaV1(planetscaleSearchSchema),
 })

@@ -1,7 +1,6 @@
 import { Link, useNavigate, createFileRoute } from "@tanstack/react-router"
 import { useCallback, useMemo } from "react"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Option, Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -62,7 +61,7 @@ const serviceDetailSearchSchema = Schema.Struct({
 	environments: OptionalStringArrayParam,
 })
 
-export const Route = effectRoute(createFileRoute("/services/$serviceName"))({
+export const Route = createFileRoute("/services/$serviceName")({
 	component: ServiceDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(serviceDetailSearchSchema),
 })
@@ -416,6 +415,7 @@ function OverviewTab({
 			<MetricsGrid
 				items={metrics}
 				waiting={!!isWaiting}
+				syncMode="cursor"
 				syncId={`service-${serviceName}`}
 				overlay={commitMarkers}
 				// Pin every chart's y-axis to one width so their plot areas align — the

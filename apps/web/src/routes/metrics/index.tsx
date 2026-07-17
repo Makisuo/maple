@@ -1,5 +1,4 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -25,7 +24,7 @@ const metricsSearchSchema = Schema.Struct({
 
 export type MetricsSearchParams = Schema.Schema.Type<typeof metricsSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/metrics/"))({
+export const Route = createFileRoute("/metrics/")({
 	component: MetricsPage,
 	validateSearch: Schema.toStandardSchemaV1(metricsSearchSchema),
 })

@@ -13,12 +13,14 @@ import type { TracesSearchParams } from "@/routes/traces"
 
 const PAGE_SIZE = 100
 const FETCH_THRESHOLD = 20
+export const MAX_RETAINED_TRACES = 2_000
 
 export interface UseInfiniteTracesReturn {
 	firstPageResult: Result.Result<TracesResponse, QueryAtomFailure>
 	allData: Trace[]
 	isFetchingNextPage: boolean
 	hasNextPage: boolean
+	isCapped: boolean
 	fetchNextPage: () => void
 }
 
@@ -92,10 +94,12 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 	const allData = React.useMemo(() => {
 		const firstPageData = Result.isSuccess(firstPageResult) ? firstPageResult.value.data : []
 		const additionalData = additionalPages.flatMap((p) => p.data)
-		return [...firstPageData, ...additionalData]
+		return [...firstPageData, ...additionalData].slice(0, MAX_RETAINED_TRACES)
 	}, [firstPageResult, additionalPages])
+	const isCapped = allData.length >= MAX_RETAINED_TRACES
 
 	const hasNextPage = React.useMemo(() => {
+		if (isCapped) return false
 		if (paginationStopped) return false
 		if (!Result.isSuccess(firstPageResult)) return false
 		if (additionalPages.length === 0) {
@@ -103,7 +107,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		}
 		const lastPage = additionalPages[additionalPages.length - 1]
 		return lastPage.data.length === PAGE_SIZE
-	}, [firstPageResult, additionalPages, paginationStopped])
+	}, [firstPageResult, additionalPages, paginationStopped, isCapped])
 
 	const fetchNextPage = React.useCallback(() => {
 		if (isFetchingRef.current || !hasNextPage) return
@@ -139,6 +143,7 @@ export function useInfiniteTraces(filters: TracesSearchParams | undefined): UseI
 		allData,
 		isFetchingNextPage,
 		hasNextPage,
+		isCapped,
 		fetchNextPage,
 	}
 }

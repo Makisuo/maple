@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Exit } from "effect"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -40,7 +39,7 @@ import {
 } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
-export const Route = effectRoute(createFileRoute("/recommendations/$recommendationKey"))({
+export const Route = createFileRoute("/recommendations/$recommendationKey")({
 	component: RecommendationDetailPage,
 })
 

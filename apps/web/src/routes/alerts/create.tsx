@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { AlertCreatePageRoot } from "@/components/alerts/alert-create-page-root"
@@ -20,7 +19,7 @@ const AlertCreateSearch = Schema.Struct({
 	chart: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/alerts/create"))({
+export const Route = createFileRoute("/alerts/create")({
 	component: AlertCreatePageRoot,
 	validateSearch: Schema.toStandardSchemaV1(AlertCreateSearch),
 })

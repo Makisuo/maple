@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -39,7 +38,7 @@ const cloudflareSearchSchema = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/infra/cloudflare/"))({
+export const Route = createFileRoute("/infra/cloudflare/")({
 	component: CloudflarePage,
 	validateSearch: Schema.toStandardSchemaV1(cloudflareSearchSchema),
 })

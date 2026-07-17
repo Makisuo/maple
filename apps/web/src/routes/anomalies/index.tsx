@@ -1,7 +1,6 @@
 import { useCallback, useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -48,7 +47,7 @@ const searchSchema = Schema.Struct({
 	live: Schema.optional(Schema.Boolean),
 })
 
-export const Route = effectRoute(createFileRoute("/anomalies/"))({
+export const Route = createFileRoute("/anomalies/")({
 	component: AnomaliesPage,
 	validateSearch: Schema.toStandardSchemaV1(searchSchema),
 })

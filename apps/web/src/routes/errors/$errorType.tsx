@@ -1,6 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { Result, useAtomRefresh } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { formatDistanceToNow, format } from "date-fns"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
@@ -49,7 +48,7 @@ const errorDetailSearchSchema = Schema.Struct({
 	label: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/errors/$errorType"))({
+export const Route = createFileRoute("/errors/$errorType")({
 	component: ErrorDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(errorDetailSearchSchema),
 })

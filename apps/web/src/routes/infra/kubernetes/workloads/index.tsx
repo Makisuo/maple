@@ -1,5 +1,4 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -43,7 +42,7 @@ const workloadsSearchSchema = Schema.Struct({
 
 export type WorkloadsSearchParams = Schema.Schema.Type<typeof workloadsSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/infra/kubernetes/workloads/"))({
+export const Route = createFileRoute("/infra/kubernetes/workloads/")({
 	component: WorkloadsPage,
 	validateSearch: Schema.toStandardSchemaV1(workloadsSearchSchema),
 })

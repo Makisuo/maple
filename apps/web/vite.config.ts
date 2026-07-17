@@ -67,9 +67,29 @@ export default defineConfig(({ mode }) => {
 		define,
 		plugins: [
 			devtools(),
-			tanstackRouter({ target: "react", autoCodeSplitting: false }),
+			tanstackRouter({
+				target: "react",
+				autoCodeSplitting: true,
+				codeSplittingOptions: {
+					// Loaders frequently import the warehouse query layer. Keeping them in
+					// the route shell makes every route's data stack part of startup even
+					// when its component is split.
+					defaultBehavior: [
+						["loader"],
+						["component"],
+						["pendingComponent"],
+						["errorComponent"],
+						["notFoundComponent"],
+					],
+				},
+			}),
 			tailwindcss(),
 			viteReact(),
 		],
+		build: {
+			// The bundle budget reads Vite's static/dynamic import graph instead of
+			// guessing relationships from hashed filenames.
+			manifest: true,
+		},
 	}
 })

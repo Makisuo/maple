@@ -1,7 +1,6 @@
 import { useMemo } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import {
@@ -23,7 +22,7 @@ const SearchSchema = Schema.Struct({
 	alert: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/alerts/incidents/$incidentId"))({
+export const Route = createFileRoute("/alerts/incidents/$incidentId")({
 	component: AlertIncidentPage,
 	validateSearch: Schema.toStandardSchemaV1(SearchSchema),
 })

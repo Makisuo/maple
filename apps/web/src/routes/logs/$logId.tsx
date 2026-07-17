@@ -1,6 +1,5 @@
 import type { ReactNode } from "react"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -37,11 +36,12 @@ function bodyExcerpt(body: string): string {
 	return trimmed.length > 48 ? `${trimmed.slice(0, 48)}…` : trimmed || "Log"
 }
 
-export const Route = effectRoute(createFileRoute("/logs/$logId"), ({ params }) => {
-	const key = decodeLogKey(params.logId)
-	return key ? [getLogResultAtom({ data: keyToInput(key) })] : []
-})({
+export const Route = createFileRoute("/logs/$logId")({
 	component: LogDetailPage,
+	loader: ({ context, params }) => {
+		const key = decodeLogKey(params.logId)
+		if (key) context.effectRegistry.mount(getLogResultAtom({ data: keyToInput(key) }))
+	},
 })
 
 /**

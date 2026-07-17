@@ -7,6 +7,7 @@ import { listReplaysResultAtom } from "@/lib/services/atoms/warehouse-query-atom
 import type { SessionRow } from "@/components/replays/sessions-list"
 
 const PAGE_SIZE = 50
+export const MAX_RETAINED_REPLAYS = 500
 
 /**
  * The filter inputs the replays route already assembles (time window from
@@ -63,10 +64,12 @@ export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 	const allData = React.useMemo<ReadonlyArray<SessionRow>>(() => {
 		const firstPageData = Result.isSuccess(firstPageResult) ? firstPageResult.value.data : []
 		const additionalData = additionalPages.flatMap((p) => p.data)
-		return [...firstPageData, ...additionalData]
+		return [...firstPageData, ...additionalData].slice(0, MAX_RETAINED_REPLAYS)
 	}, [firstPageResult, additionalPages])
+	const isCapped = allData.length >= MAX_RETAINED_REPLAYS
 
 	const hasNextPage = React.useMemo(() => {
+		if (isCapped) return false
 		if (paginationStopped) return false
 		if (!Result.isSuccess(firstPageResult)) return false
 		if (additionalPages.length === 0) {
@@ -74,7 +77,7 @@ export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 		}
 		const lastPage = additionalPages[additionalPages.length - 1]
 		return lastPage.data.length === PAGE_SIZE
-	}, [firstPageResult, additionalPages, paginationStopped])
+	}, [firstPageResult, additionalPages, paginationStopped, isCapped])
 
 	const fetchNextPage = React.useCallback(() => {
 		if (isFetchingRef.current || !hasNextPage) return
@@ -110,6 +113,7 @@ export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 		allData,
 		isFetchingNextPage,
 		hasNextPage,
+		isCapped,
 		fetchNextPage,
 	}
 }

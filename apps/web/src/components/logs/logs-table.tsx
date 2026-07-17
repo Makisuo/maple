@@ -34,6 +34,7 @@ interface LogsTableViewProps {
 	allData: Log[]
 	isFetchingNextPage: boolean
 	hasNextPage: boolean
+	isCapped: boolean
 	fetchNextPage: () => void
 	waiting: boolean
 	wrap: boolean
@@ -78,10 +79,7 @@ interface LogRowProps {
 	wrap: boolean
 	density: LogsDensity
 	pinnedColumns: string[]
-	/** Shared width (px) measured from the widest row, so every row's separator
-	 *  reaches the same end. `null` until measured (rows size to their content). */
-	contentWidth: number | null
-	measureRef: (node: Element | null) => void
+	measureRef?: (node: Element | null) => void
 	onClick: (log: Log) => void
 	onToggleExpand: (index: number) => void
 }
@@ -97,7 +95,6 @@ const LogRow = React.memo(function LogRow({
 	wrap,
 	density,
 	pinnedColumns,
-	contentWidth,
 	measureRef,
 	onClick,
 	onToggleExpand,
@@ -124,7 +121,7 @@ const LogRow = React.memo(function LogRow({
 				position: "absolute",
 				top: 0,
 				left: 0,
-				width: contentWidth != null ? contentWidth : fill ? "100%" : "max-content",
+				width: fill ? "100%" : "max-content",
 				minWidth: "100%",
 				transform: `translateY(${top}px)`,
 			}}
@@ -240,18 +237,9 @@ const LogRow = React.memo(function LogRow({
 })
 
 /** Slim sticky header that labels the pinned-attribute columns. */
-function PinnedHeader({
-	pinnedColumns,
-	wrap,
-	contentWidth,
-}: {
-	pinnedColumns: string[]
-	wrap: boolean
-	contentWidth: number | null
-}) {
+function PinnedHeader({ pinnedColumns, wrap }: { pinnedColumns: string[]; wrap: boolean }) {
 	return (
 		<div
-			style={{ width: contentWidth != null ? contentWidth : undefined }}
 			className={cn(
 				"sticky top-0 left-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-background border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground/70 select-none",
 				wrap ? "w-full" : "w-max min-w-full",
@@ -286,10 +274,11 @@ function PinnedHeader({
 	)
 }
 
-function LogsTableView({
+export function LogsTableView({
 	allData,
 	isFetchingNextPage,
 	hasNextPage,
+	isCapped,
 	fetchNextPage,
 	waiting,
 	wrap,
@@ -301,10 +290,8 @@ function LogsTableView({
 	const [selectedLog, setSelectedLog] = React.useState<Log | null>(null)
 	const [sheetOpen, setSheetOpen] = React.useState(false)
 	const [expandedRows, setExpandedRows] = React.useState<ReadonlySet<number>>(() => new Set())
-	const [contentWidth, setContentWidth] = React.useState<number | null>(null)
 	const { effectiveTimezone } = useTimezonePreference()
 	const scrollContainerRef = React.useRef<HTMLDivElement>(null)
-	const pinnedKey = pinnedColumns.join(" ")
 
 	const handleRowClick = React.useCallback(
 		(log: Log) => {
@@ -327,9 +314,10 @@ function LogsTableView({
 		})
 	}, [])
 
-	React.useEffect(() => {
-		if (!sheetOpen) setSelectedLog(null)
-	}, [sheetOpen])
+	const handleSheetOpenChange = React.useCallback((open: boolean) => {
+		setSheetOpen(open)
+		if (!open) setSelectedLog(null)
+	}, [])
 
 	const estimateSize = React.useCallback(() => {
 		if (wrap) return density === "comfortable" ? 88 : 72
@@ -340,7 +328,7 @@ function LogsTableView({
 		count: allData.length,
 		getScrollElement: () => scrollContainerRef.current,
 		estimateSize,
-		overscan: 10,
+		overscan: 4,
 	})
 
 	// A global wrap/density change resizes every row at once. Clear the
@@ -352,29 +340,6 @@ function LogsTableView({
 	}, [wrap, density, virtualizer])
 
 	const virtualItems = virtualizer.getVirtualItems()
-
-	// Drop back to natural widths when the layout mode or pinned columns change so
-	// the shared width can shrink (not only grow) for the new row shape.
-	React.useLayoutEffect(() => {
-		setContentWidth(null)
-	}, [wrap, density, pinnedKey])
-
-	// Measure the widest rendered row and give every row + the header that width,
-	// so the row separators all reach the same end while the stream scrolls
-	// sideways. Monotonic per shape (reset above); a wider row scrolling in grows
-	// it, and `measureElement`'s observer handles heights independently.
-	React.useLayoutEffect(() => {
-		if (wrap) return
-		const sc = scrollContainerRef.current
-		if (!sc) return
-		let max = 0
-		for (const el of sc.querySelectorAll<HTMLElement>("[data-index]")) {
-			if (el.scrollWidth > max) max = el.scrollWidth
-		}
-		if (max > 0) {
-			setContentWidth((prev) => (prev === null || max > prev + 1 ? max : prev))
-		}
-	}, [virtualItems, wrap, density, pinnedKey, contentWidth])
 
 	// Index-keyed nav ids: logs have no stable row id, and the list is
 	// append-only for a given query, so indices stay stable while browsing.
@@ -453,16 +418,13 @@ function LogsTableView({
 						className="absolute inset-0 overflow-auto rounded-md border"
 					>
 						{pinnedColumns.length > 0 && (
-							<PinnedHeader
-								pinnedColumns={pinnedColumns}
-								wrap={wrap}
-								contentWidth={wrap ? null : contentWidth}
-							/>
+							<PinnedHeader pinnedColumns={pinnedColumns} wrap={wrap} />
 						)}
 						<div style={{ height: virtualizer.getTotalSize(), position: "relative" }} role="log">
 							{virtualItems.map((virtualRow) => {
 								const log = allData[virtualRow.index]
 								const isSelected = selectedLog === log
+								const isExpanded = expandedRows.has(virtualRow.index)
 								return (
 									<LogRow
 										key={virtualRow.index}
@@ -472,12 +434,13 @@ function LogsTableView({
 										timeZone={effectiveTimezone}
 										isSelected={isSelected}
 										isFocused={virtualRow.index === focusedIndex}
-										isExpanded={expandedRows.has(virtualRow.index)}
+										isExpanded={isExpanded}
 										wrap={wrap}
 										density={density}
 										pinnedColumns={pinnedColumns}
-										contentWidth={contentWidth}
-										measureRef={virtualizer.measureElement}
+										measureRef={
+											wrap || isExpanded ? virtualizer.measureElement : undefined
+										}
 										onClick={handleRowClick}
 										onToggleExpand={toggleExpanded}
 									/>
@@ -489,18 +452,19 @@ function LogsTableView({
 				</div>
 
 				<div className="text-sm text-muted-foreground shrink-0 mt-1.5">
-					Showing {allData.length} logs
-					{!hasNextPage && allData.length > 0 && " (all loaded)"}
+					{isCapped
+						? `Showing first ${allData.length.toLocaleString()} logs — narrow filters to continue`
+						: `Showing ${allData.length.toLocaleString()} logs${!hasNextPage ? " (all loaded)" : ""}`}
 				</div>
 			</div>
 
-			<LogDetailSheet log={selectedLog} open={sheetOpen} onOpenChange={setSheetOpen} />
+			<LogDetailSheet log={selectedLog} open={sheetOpen} onOpenChange={handleSheetOpenChange} />
 		</>
 	)
 }
 
 export function LogsTable({ filters, embedded }: LogsTableProps) {
-	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, fetchNextPage } =
+	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, isCapped, fetchNextPage } =
 		useInfiniteLogs(filters)
 	const { wrap, density } = useLogsViewPreferences()
 
@@ -519,6 +483,7 @@ export function LogsTable({ filters, embedded }: LogsTableProps) {
 				allData={allData}
 				isFetchingNextPage={isFetchingNextPage}
 				hasNextPage={hasNextPage}
+				isCapped={isCapped}
 				fetchNextPage={fetchNextPage}
 				waiting={result.waiting ?? false}
 				wrap={wrap}

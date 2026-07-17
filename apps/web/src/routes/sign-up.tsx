@@ -1,6 +1,5 @@
 import { SignUp } from "@clerk/clerk-react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { validateInternalRedirect } from "@maple/ui/lib/sanitizers"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
@@ -11,7 +10,7 @@ const SignUpSearch = Schema.Struct({
 	redirect_url: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/sign-up"))({
+export const Route = createFileRoute("/sign-up")({
 	component: SignUpPage,
 	validateSearch: Schema.toStandardSchemaV1(SignUpSearch),
 })

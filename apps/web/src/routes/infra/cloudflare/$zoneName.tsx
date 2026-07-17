@@ -1,5 +1,4 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -40,7 +39,7 @@ const zoneDetailSearchSchema = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/infra/cloudflare/$zoneName"))({
+export const Route = createFileRoute("/infra/cloudflare/$zoneName")({
 	component: ZoneDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(zoneDetailSearchSchema),
 })

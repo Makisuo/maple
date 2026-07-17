@@ -30,6 +30,13 @@ jobs:
 
             - run: bun turbo typecheck test build --filter='!@maple/ingest'
 
+            # Guard the code-split web bundle: initial-load gzip budget and no
+            # chat/replay code in the startup graph. Reads the dist/ the turbo
+            # build step just produced (or restored from cache).
+            - name: Web bundle budget
+              run: bun perf/check-bundle-budget.ts
+              working-directory: apps/web
+
     knip:
         name: Knip
         runs-on: ubuntu-latest

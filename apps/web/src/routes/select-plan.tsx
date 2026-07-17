@@ -1,7 +1,6 @@
 import { useAuth } from "@clerk/clerk-react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { RocketIcon } from "@/components/icons"
 import { BootSplash } from "@/components/boot-splash"
@@ -15,7 +14,7 @@ const SelectPlanSearch = Schema.Struct({
 	redirect_url: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/select-plan"))({
+export const Route = createFileRoute("/select-plan")({
 	component: SelectPlanPage,
 	validateSearch: Schema.toStandardSchemaV1(SelectPlanSearch),
 })

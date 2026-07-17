@@ -1,5 +1,4 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -45,7 +44,7 @@ const podsSearchSchema = Schema.Struct({
 
 export type PodsSearchParams = Schema.Schema.Type<typeof podsSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/infra/kubernetes/pods/"))({
+export const Route = createFileRoute("/infra/kubernetes/pods/")({
 	component: PodsPage,
 	validateSearch: Schema.toStandardSchemaV1(podsSearchSchema),
 })

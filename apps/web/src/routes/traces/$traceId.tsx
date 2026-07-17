@@ -1,7 +1,6 @@
 import * as React from "react"
 import { useNavigate, useRouterState, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { TraceId } from "@maple/domain"
 
@@ -39,16 +38,20 @@ function buildBackToTracesHref(searchStr: string): string {
 	return nextSearch ? `/traces?${nextSearch}` : "/traces"
 }
 
-export const Route = effectRoute(createFileRoute("/traces/$traceId"), ({ params, search }) => {
-	const t = typeof (search as { t?: unknown }).t === "string" ? (search as { t: string }).t : undefined
-	return [
-		getSpanHierarchyResultAtom({
-			data: { traceId: Schema.decodeSync(TraceId)(params.traceId), timestamp: t },
-		}),
-	]
-})({
+export const Route = createFileRoute("/traces/$traceId")({
 	component: TraceDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(TraceDetailSearchSchema),
+	loaderDeps: ({ search }) => ({ t: search.t }),
+	loader: ({ context, params, deps }) => {
+		context.effectRegistry.mount(
+			getSpanHierarchyResultAtom({
+				data: {
+					traceId: Schema.decodeSync(TraceId)(params.traceId),
+					timestamp: deps.t,
+				},
+			}),
+		)
+	},
 })
 
 function TraceDetailPage() {

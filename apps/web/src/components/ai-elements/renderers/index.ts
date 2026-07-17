@@ -1,2 +1,1 @@
-export { ToolRenderer } from "./tool-renderer"
-export const STRUCTURED_MARKER = "__maple_ui"
+export { STRUCTURED_MARKER } from "./constants"

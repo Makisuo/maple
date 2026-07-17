@@ -13,12 +13,14 @@ import type { LogsSearchParams } from "@/routes/logs"
 
 const PAGE_SIZE = 100
 const FETCH_THRESHOLD = 20
+export const MAX_RETAINED_LOGS = 2_000
 
 export interface UseInfiniteLogsReturn {
 	firstPageResult: Result.Result<LogsResponse, QueryAtomFailure>
 	allData: Log[]
 	isFetchingNextPage: boolean
 	hasNextPage: boolean
+	isCapped: boolean
 	fetchNextPage: () => void
 }
 
@@ -81,10 +83,11 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 	const allData = React.useMemo(() => {
 		const firstPageData = Result.isSuccess(firstPageResult) ? firstPageResult.value.data : []
 		const additionalData = additionalPages.flatMap((p) => p.data)
-		return [...firstPageData, ...additionalData]
+		return [...firstPageData, ...additionalData].slice(0, MAX_RETAINED_LOGS)
 	}, [firstPageResult, additionalPages])
 
-	const hasNextPage = lastCursor !== null
+	const isCapped = allData.length >= MAX_RETAINED_LOGS
+	const hasNextPage = !isCapped && lastCursor !== null
 
 	const fetchNextPage = React.useCallback(() => {
 		if (isFetchingRef.current || !hasNextPage || !lastCursor) return
@@ -114,6 +117,7 @@ export function useInfiniteLogs(filters: LogsSearchParams | undefined): UseInfin
 		allData,
 		isFetchingNextPage,
 		hasNextPage,
+		isCapped,
 		fetchNextPage,
 	}
 }

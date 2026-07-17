@@ -14,6 +14,7 @@ import { HostMetadataPanel } from "@/components/infra/host-metadata-panel"
 import { hostDetailSummaryResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { TIME_PRESETS, bucketSecondsFor } from "@/components/infra/constants"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
+import { useLinkedCursor } from "@/hooks/use-linked-cursor"
 
 export const Route = createFileRoute("/infra/$hostName")({
 	component: HostDetailPage,
@@ -51,6 +52,10 @@ function HostDetailPageContent() {
 		.orElse(() => null)
 
 	const rightSidebar = <HostMetadataPanel summary={summary} />
+
+	// Linked hover cursor across the metric strips (charts stay independent —
+	// no Recharts syncId render storms).
+	const { containerProps: linkedCursorContainerProps } = useLinkedCursor(true)
 
 	const toolbar = (
 		<Select value={preset} onValueChange={(v) => v && setPreset(v)}>
@@ -94,7 +99,7 @@ function HostDetailPageContent() {
 							{METRIC_STRIPS.length} signals · {preset}
 						</span>
 					</div>
-					<div className="px-4">
+					<div className="px-4" {...linkedCursorContainerProps}>
 						{METRIC_STRIPS.map((strip) => (
 							<MetricStrip
 								key={strip.metric}

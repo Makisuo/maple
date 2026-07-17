@@ -26,8 +26,24 @@ export default defineConfig({
 	},
 	projects: [
 		{
-			name: "chromium",
+			name: "chromium-performance",
+			grepInvert: /@cross-browser/,
 			use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+		},
+		{
+			name: "chromium-smoke",
+			grep: /@cross-browser/,
+			use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+		},
+		{
+			name: "firefox-smoke",
+			grep: /@cross-browser/,
+			use: { ...devices["Desktop Firefox"], viewport: { width: 1440, height: 900 } },
+		},
+		{
+			name: "webkit-smoke",
+			grep: /@cross-browser/,
+			use: { ...devices["Desktop Safari"], viewport: { width: 1440, height: 900 } },
 		},
 	],
 	webServer: {

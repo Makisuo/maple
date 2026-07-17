@@ -1,6 +1,5 @@
 import * as React from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { BooleanFromStringParam, OptionalStringArrayParam } from "@/lib/search-params"
@@ -59,12 +58,12 @@ const tracesSearchSchema = Schema.Struct({
 
 export type TracesSearchParams = Schema.Schema.Type<typeof tracesSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/traces/"))({
+export const Route = createFileRoute("/traces/")({
 	component: TracesPage,
 	validateSearch: Schema.toStandardSchemaV1(tracesSearchSchema),
 })
 
-export function TracesPage() {
+function TracesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 

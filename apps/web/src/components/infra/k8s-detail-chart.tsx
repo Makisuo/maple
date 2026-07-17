@@ -33,6 +33,7 @@ import {
 } from "./chart-utils"
 import { InfraTooltipItem } from "./chart-tooltip"
 import { formatBackendError } from "@/lib/error-messages"
+import { LinkedCursorOverlay, linkedCursorChartProps } from "@/hooks/use-linked-cursor"
 
 const CHART_HEIGHT = 280
 
@@ -59,7 +60,7 @@ const WORKLOAD_METRIC_LABELS: Record<WorkloadInfraMetric, string> = {
 	memory_limit: "Memory / limit",
 }
 
-interface ChartViewProps {
+interface K8sMetricChartViewProps {
 	rows: ReadonlyArray<{ bucket: string; attributeValue: string; value: number }>
 	unit: Unit
 	// Label for the unnamed default series so the tooltip shows the metric type
@@ -68,10 +69,34 @@ interface ChartViewProps {
 	isStacked?: boolean
 	showThreshold?: boolean
 	waiting: boolean
+	/**
+	 * Groups this chart with its siblings for the linked hover cursor (see
+	 * `useLinkedCursor`; the container rendering the group must spread
+	 * `containerProps`). Only sent to Recharts when `syncMode="recharts"`.
+	 */
 	syncId?: string
+	/**
+	 * `cursor` (default) drives the shared linked cursor; `recharts` hands the
+	 * syncId to Recharts' event bus instead (render storms on hover — kept only
+	 * for the perf bench baseline).
+	 */
+	syncMode?: "recharts" | "cursor"
+	/** Distinguishes sibling charts in the linked-cursor DOM markers. */
+	chartId?: string
 }
 
-function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting, syncId }: ChartViewProps) {
+// Exported for the /infra-bench synthetic perf harness.
+export function K8sMetricChartView({
+	rows,
+	unit,
+	seriesLabel,
+	isStacked,
+	showThreshold,
+	waiting,
+	syncId,
+	syncMode = "cursor",
+	chartId,
+}: K8sMetricChartViewProps) {
 	const gradientPrefix = useId().replace(/:/g, "")
 	const { data, series } = useMemo(() => transformRows(rows), [rows])
 
@@ -79,8 +104,7 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 	// which are invalid in a raw `var(--color-…)` reference — colour series
 	// directly instead of via the ChartContainer CSS variables.
 	const seriesColor = useMemo(
-		() =>
-			new Map(series.map((name, idx) => [name, COLOR_PALETTE[idx % COLOR_PALETTE.length] ?? ""])),
+		() => new Map(series.map((name, idx) => [name, COLOR_PALETTE[idx % COLOR_PALETTE.length] ?? ""])),
 		[series],
 	)
 
@@ -125,6 +149,9 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 	}
 
 	const margin = { top: 12, right: 12, left: 0, bottom: 0 }
+	const linkedCursor = syncMode === "cursor" && syncId != null
+	const linkedChartId = chartId ?? seriesLabel ?? "k8s-metric"
+	const rechartsSyncId = syncMode === "recharts" ? syncId : undefined
 
 	return (
 		<div className={cn("rounded-lg border bg-card p-4 transition-opacity", waiting && "opacity-60")}>
@@ -150,150 +177,153 @@ function ChartView({ rows, unit, seriesLabel, isStacked, showThreshold, waiting,
 					)
 				})}
 			</div>
-			<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
-				{isStacked ? (
-					<AreaChart data={data} margin={margin} syncId={syncId} syncMethod="value">
-						<defs>
+			<div className="relative" {...linkedCursorChartProps(linkedCursor ? linkedChartId : undefined)}>
+				<ChartContainer config={config} className="w-full" style={{ height: CHART_HEIGHT }}>
+					{isStacked ? (
+						<AreaChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
+							<defs>
+								{series.map((s) => {
+									const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
+									return (
+										<linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
+											<stop
+												offset="5%"
+												stopColor={seriesColor.get(s)}
+												stopOpacity={0.45}
+											/>
+											<stop
+												offset="95%"
+												stopColor={seriesColor.get(s)}
+												stopOpacity={0.05}
+											/>
+										</linearGradient>
+									)
+								})}
+							</defs>
+							<CartesianGrid
+								strokeDasharray={CHART_GRID_DASH}
+								stroke="var(--border)"
+								vertical={false}
+							/>
+							<XAxis
+								dataKey="time"
+								tickLine={false}
+								axisLine={false}
+								tickMargin={8}
+								fontSize={10}
+								stroke="var(--muted-foreground)"
+							/>
+							<YAxis
+								tickLine={false}
+								axisLine={false}
+								tickMargin={8}
+								fontSize={10}
+								width={56}
+								stroke="var(--muted-foreground)"
+								tickFormatter={tickFormatter}
+							/>
+							{showThreshold && unit === "percent" && (
+								<ReferenceLine
+									y={0.8}
+									stroke="var(--severity-warn)"
+									strokeDasharray="4 4"
+									strokeOpacity={0.7}
+									label={{
+										value: "80%",
+										position: "right",
+										fill: "var(--severity-warn)",
+										fontSize: 10,
+									}}
+								/>
+							)}
+							<ChartTooltip
+								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
+								content={
+									<ChartTooltipContent
+										indicator="dot"
+										formatter={(value, name) => (
+											<InfraTooltipItem
+												color={seriesColor.get(String(name)) ?? ""}
+												label={config[String(name)]?.label ?? String(name)}
+												value={Number(value)}
+												unit={unit}
+											/>
+										)}
+									/>
+								}
+							/>
 							{series.map((s) => {
 								const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
 								return (
-									<linearGradient key={id} id={id} x1="0" y1="0" x2="0" y2="1">
-										<stop
-											offset="5%"
-											stopColor={seriesColor.get(s)}
-											stopOpacity={0.45}
-										/>
-										<stop
-											offset="95%"
-											stopColor={seriesColor.get(s)}
-											stopOpacity={0.05}
-										/>
-									</linearGradient>
+									<Area
+										key={s}
+										dataKey={s}
+										type="monotone"
+										stackId="a"
+										stroke={seriesColor.get(s)}
+										strokeWidth={1.6}
+										fill={`url(#${id})`}
+										fillOpacity={1}
+									/>
 								)
 							})}
-						</defs>
-						<CartesianGrid
-							strokeDasharray={CHART_GRID_DASH}
-							stroke="var(--border)"
-							vertical={false}
-						/>
-						<XAxis
-							dataKey="time"
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							stroke="var(--muted-foreground)"
-						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							width={56}
-							stroke="var(--muted-foreground)"
-							tickFormatter={tickFormatter}
-						/>
-						{showThreshold && unit === "percent" && (
-							<ReferenceLine
-								y={0.8}
-								stroke="var(--severity-warn)"
-								strokeDasharray="4 4"
-								strokeOpacity={0.7}
-								label={{
-									value: "80%",
-									position: "right",
-									fill: "var(--severity-warn)",
-									fontSize: 10,
-								}}
+						</AreaChart>
+					) : (
+						<LineChart data={data} margin={margin} syncId={rechartsSyncId} syncMethod="value">
+							<CartesianGrid
+								strokeDasharray={CHART_GRID_DASH}
+								stroke="var(--border)"
+								vertical={false}
 							/>
-						)}
-						<ChartTooltip
-							cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
-							content={
-								<ChartTooltipContent
-									indicator="dot"
-									formatter={(value, name) => (
-										<InfraTooltipItem
-											color={seriesColor.get(String(name)) ?? ""}
-											label={config[String(name)]?.label ?? String(name)}
-											value={Number(value)}
-											unit={unit}
-										/>
-									)}
-								/>
-							}
-						/>
-						{series.map((s) => {
-							const id = `${gradientPrefix}-${s.replace(/\W+/g, "_")}`
-							return (
-								<Area
+							<XAxis
+								dataKey="time"
+								tickLine={false}
+								axisLine={false}
+								tickMargin={8}
+								fontSize={10}
+								stroke="var(--muted-foreground)"
+							/>
+							<YAxis
+								tickLine={false}
+								axisLine={false}
+								tickMargin={8}
+								fontSize={10}
+								width={70}
+								stroke="var(--muted-foreground)"
+								tickFormatter={tickFormatter}
+							/>
+							<ChartTooltip
+								cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
+								content={
+									<ChartTooltipContent
+										indicator="line"
+										formatter={(value, name) => (
+											<InfraTooltipItem
+												color={seriesColor.get(String(name)) ?? ""}
+												label={config[String(name)]?.label ?? String(name)}
+												value={Number(value)}
+												unit={unit}
+											/>
+										)}
+									/>
+								}
+							/>
+							{series.map((s) => (
+								<Line
 									key={s}
 									dataKey={s}
 									type="monotone"
-									stackId="a"
 									stroke={seriesColor.get(s)}
-									strokeWidth={1.6}
-									fill={`url(#${id})`}
-									fillOpacity={1}
+									strokeWidth={1.8}
+									dot={false}
+									activeDot={{ r: 3, strokeWidth: 0 }}
 								/>
-							)
-						})}
-					</AreaChart>
-				) : (
-					<LineChart data={data} margin={margin} syncId={syncId} syncMethod="value">
-						<CartesianGrid
-							strokeDasharray={CHART_GRID_DASH}
-							stroke="var(--border)"
-							vertical={false}
-						/>
-						<XAxis
-							dataKey="time"
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							stroke="var(--muted-foreground)"
-						/>
-						<YAxis
-							tickLine={false}
-							axisLine={false}
-							tickMargin={8}
-							fontSize={10}
-							width={70}
-							stroke="var(--muted-foreground)"
-							tickFormatter={tickFormatter}
-						/>
-						<ChartTooltip
-							cursor={{ stroke: "var(--border)", strokeDasharray: "3 3" }}
-							content={
-								<ChartTooltipContent
-									indicator="line"
-									formatter={(value, name) => (
-										<InfraTooltipItem
-											color={seriesColor.get(String(name)) ?? ""}
-											label={config[String(name)]?.label ?? String(name)}
-											value={Number(value)}
-											unit={unit}
-										/>
-									)}
-								/>
-							}
-						/>
-						{series.map((s) => (
-							<Line
-								key={s}
-								dataKey={s}
-								type="monotone"
-								stroke={seriesColor.get(s)}
-								strokeWidth={1.8}
-								dot={false}
-								activeDot={{ r: 3, strokeWidth: 0 }}
-							/>
-						))}
-					</LineChart>
-				)}
-			</ChartContainer>
+							))}
+						</LineChart>
+					)}
+				</ChartContainer>
+				{linkedCursor && <LinkedCursorOverlay chartId={linkedChartId} />}
+			</div>
 		</div>
 	)
 }
@@ -331,13 +361,14 @@ export function PodDetailChart({
 			</div>
 		))
 		.onSuccess((response, holder) => (
-			<ChartView
+			<K8sMetricChartView
 				rows={response.data}
 				unit={response.unit}
 				seriesLabel={POD_METRIC_LABELS[metric]}
 				showThreshold={metric.startsWith("cpu_") || metric.startsWith("memory_")}
 				waiting={Boolean(holder.waiting)}
 				syncId={syncId}
+				chartId={`pod-${metric}`}
 			/>
 		))
 		.render()
@@ -374,12 +405,13 @@ export function NodeDetailChart({
 			</div>
 		))
 		.onSuccess((response, holder) => (
-			<ChartView
+			<K8sMetricChartView
 				rows={response.data}
 				unit={response.unit}
 				seriesLabel={NODE_METRIC_LABELS[metric]}
 				waiting={Boolean(holder.waiting)}
 				syncId={syncId}
+				chartId={`node-${metric}`}
 			/>
 		))
 		.render()
@@ -431,13 +463,14 @@ export function WorkloadDetailChart({
 			</div>
 		))
 		.onSuccess((response, holder) => (
-			<ChartView
+			<K8sMetricChartView
 				rows={response.data}
 				unit={response.unit}
 				seriesLabel={WORKLOAD_METRIC_LABELS[metric]}
 				showThreshold={metric === "cpu_limit" || metric === "memory_limit"}
 				waiting={Boolean(holder.waiting)}
 				syncId={syncId}
+				chartId={`workload-${metric}`}
 			/>
 		))
 		.render()

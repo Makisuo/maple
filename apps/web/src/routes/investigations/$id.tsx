@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { toAlertContext } from "@/components/chat/alert-context"
@@ -20,7 +19,7 @@ const SearchSchema = Schema.Struct({
 	r: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/investigations/$id"))({
+export const Route = createFileRoute("/investigations/$id")({
 	component: InvestigationPage,
 	validateSearch: Schema.toStandardSchemaV1(SearchSchema),
 })

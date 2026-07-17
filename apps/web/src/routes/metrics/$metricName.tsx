@@ -1,5 +1,4 @@
 import { useNavigate, useRouterState, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -35,7 +34,7 @@ function buildBackToMetricsHref(searchStr: string): string {
 	return nextSearch ? `/metrics?${nextSearch}` : "/metrics"
 }
 
-export const Route = effectRoute(createFileRoute("/metrics/$metricName"))({
+export const Route = createFileRoute("/metrics/$metricName")({
 	component: MetricDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(metricDetailSearchSchema),
 })

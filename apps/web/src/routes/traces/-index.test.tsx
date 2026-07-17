@@ -157,6 +157,7 @@ vi.mock("@/lib/effect-atom", async () => {
 })
 
 import * as TracesRoute from "./index"
+import { component as TracesPage } from "./index?tsr-split=component"
 
 describe("TracesPage timePreset search updates", () => {
 	beforeEach(() => {
@@ -191,14 +192,14 @@ describe("TracesPage timePreset search updates", () => {
 	})
 
 	it("does not attach route-level relative refresh rebasing", () => {
-		render(<TracesRoute.TracesPage />)
+		render(<TracesPage />)
 
 		expect(providerProps.timePreset).toBe("12h")
 		expect(providerProps.onRelativeRangeRefresh).toBeUndefined()
 	})
 
 	it("writes timePreset for preset-based selections", () => {
-		render(<TracesRoute.TracesPage />)
+		render(<TracesPage />)
 
 		fireEvent.click(screen.getByRole("button", { name: "preset" }))
 
@@ -237,7 +238,7 @@ describe("TracesPage timePreset search updates", () => {
 			deploymentEnvMatchMode: undefined,
 		})
 
-		render(<TracesRoute.TracesPage />)
+		render(<TracesPage />)
 
 		fireEvent.click(screen.getByRole("button", { name: "custom" }))
 

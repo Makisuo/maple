@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { ChatPage } from "@/components/chat/chat-page"
 import { decodeAlertContextFromSearchParam } from "@/components/chat/alert-context"
@@ -25,7 +24,7 @@ const ChatSearch = Schema.Struct({
 	title: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/chat"))({
+export const Route = createFileRoute("/chat")({
 	component: ChatRoute,
 	validateSearch: Schema.toStandardSchemaV1(ChatSearch),
 })
