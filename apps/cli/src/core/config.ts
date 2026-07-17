@@ -2,6 +2,7 @@ import { Clock, Context, Effect, Layer, type PlatformError, Schema } from "effec
 import { FileSystem } from "effect/FileSystem"
 import * as os from "node:os"
 import * as path from "node:path"
+import { defaultLocalUrl } from "../lib/local-address"
 
 /**
  * On-disk CLI config, stored at `~/.maple/config.json` (mode 0600). The same
@@ -30,7 +31,6 @@ class ConfigParseError extends Schema.TaggedErrorClass<ConfigParseError>()("@map
 const CONFIG_DIR = path.join(os.homedir(), ".maple")
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json")
 
-const DEFAULT_LOCAL_URL = "http://127.0.0.1:4318"
 const DEFAULT_API_URL = "https://api.maple.dev"
 
 const readStored = (fs: FileSystem): Effect.Effect<StoredConfig> =>
@@ -99,7 +99,7 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 			apiUrl: env.MAPLE_API_URL ?? stored.apiUrl,
 			token: env.MAPLE_API_TOKEN ?? stored.token,
 			orgId: env.MAPLE_ORG_ID ?? stored.orgId,
-			localUrl: env.MAPLE_LOCAL_URL ?? DEFAULT_LOCAL_URL,
+			localUrl: env.MAPLE_LOCAL_URL ?? defaultLocalUrl(env.MAPLE_LOCAL_BIND_HOST),
 			defaultMode: stored.defaultMode,
 			defaultApiUrl: env.MAPLE_API_URL ?? DEFAULT_API_URL,
 			lastUpdateCheck: stored.lastUpdateCheck,

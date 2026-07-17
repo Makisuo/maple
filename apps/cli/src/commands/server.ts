@@ -26,7 +26,12 @@ import { amber, bold, cyan, dim, green, underline } from "../lib/style"
 import { MAPLE_VERSION } from "../version"
 import {
 	buildDetachedChildArgs,
+	canonicalUrlHostname,
+	connectionHostForBindHost,
 	type DirtyStorePolicy,
+	hostedDashboardUrl,
+	hostedUiOrigin,
+	resolveAdvertiseHost,
 	resolveBindHost,
 	serverProbeUrl,
 	serverUrl,
@@ -55,7 +60,8 @@ const remoteUiUrl = (): string => process.env.MAPLE_LOCAL_UI_URL?.trim() || "htt
  *  URL the user should open (the auto-updating `local.maple.dev` by default, or
  *  the bundled same-origin UI with `--offline`); `undefined` when no UI. */
 const startBanner = (
-	addr: string,
+	bindAddr: string,
+	connectAddr: string,
 	dataDir: string,
 	dashboardUrl: string | undefined,
 	offline: boolean,
@@ -64,8 +70,9 @@ const startBanner = (
 	const lines = [
 		"",
 		`  ${amber("🍁 maple")}  ${dim("· local mode")}`,
-		`  ${green("●")} listening on ${cyan(underline(addr))}`,
+		`  ${green("●")} listening on ${cyan(underline(bindAddr))}`,
 		"",
+		...(connectAddr === bindAddr ? [] : [row("connect", cyan(connectAddr))]),
 		row("OTLP/HTTP", `POST ${dim("/v1/{traces,logs,metrics}")}`),
 		row("query", `POST ${dim("/local/query")}`),
 		...(dashboardUrl
@@ -113,9 +120,17 @@ const port = Flag.integer("port").pipe(
 
 const host = Flag.string("host").pipe(
 	Flag.withDescription(
-		"Bind host for local mode (env: MAPLE_LOCAL_BIND_HOST; non-loopback exposes unauthenticated ingest and queries)",
+		"Local server host (env: MAPLE_LOCAL_BIND_HOST; non-loopback start exposes unauthenticated ingest and queries)",
 	),
 	Flag.withDefault(resolveBindHost(process.env.MAPLE_LOCAL_BIND_HOST)),
+)
+
+const advertiseHostFlag = Flag.optional(
+	Flag.string("advertise-host").pipe(
+		Flag.withDescription(
+			"Hostname or address printed for clients and the bundled UI (env: MAPLE_LOCAL_ADVERTISE_HOST)",
+		),
+	),
 )
 
 const dataDirFlag = Flag.optional(
@@ -188,6 +203,7 @@ const probeHealth = (addr: string): Effect.Effect<boolean> =>
  */
 const startDetached = (
 	host: string,
+	advertiseHost: string,
 	port: number,
 	dataDir: string,
 	offline: boolean,
@@ -203,6 +219,7 @@ const startDetached = (
 		const childArgs = buildDetachedChildArgs({
 			entry: process.argv[1],
 			host,
+			advertiseHost,
 			port,
 			dataDir,
 			offline,
@@ -227,7 +244,8 @@ const startDetached = (
 				}),
 		})
 
-		const addr = serverUrl(host, port)
+		const bindAddr = serverUrl(host, port)
+		const connectAddr = serverUrl(advertiseHost, port)
 		const probeAddr = serverProbeUrl(host, port)
 		let up = false
 		for (let i = 0; i < 100; i++) {
@@ -247,7 +265,8 @@ const startDetached = (
 		yield* Effect.sync(() =>
 			process.stdout.write(
 				`${green("✓")} maple started in background ${dim(`(PID ${child.pid})`)}\n` +
-					`  ${dim("listening")} ${cyan(underline(addr))}\n` +
+					`  ${dim("listening")} ${cyan(underline(bindAddr))}\n` +
+					(connectAddr === bindAddr ? "" : `  ${dim("connect")}   ${cyan(connectAddr)}\n`) +
 					`  ${dim("logs")}      ${prettyPath(logPath)}\n` +
 					`  ${dim("stop")}      ${bold("maple stop")}\n`,
 			),
@@ -256,6 +275,7 @@ const startDetached = (
 
 export const start = Command.make("start", {
 	host,
+	advertiseHost: advertiseHostFlag,
 	port,
 	dataDir: dataDirFlag,
 	chdbConfigFile: chdbConfigFileFlag,
@@ -269,6 +289,11 @@ export const start = Command.make("start", {
 		Effect.fnUntraced(function* (a) {
 			const fs = yield* FileSystem
 			const dataDir = Option.getOrUndefined(a.dataDir) ?? defaultDataDir()
+			const advertiseHost = resolveAdvertiseHost(
+				Option.getOrUndefined(a.advertiseHost),
+				process.env.MAPLE_LOCAL_ADVERTISE_HOST,
+				a.host,
+			)
 			const pidPath = pidFilePath(dataDir)
 
 			// Already-running guard.
@@ -374,6 +399,7 @@ export const start = Command.make("start", {
 			if (a.background)
 				return yield* startDetached(
 					a.host,
+					advertiseHost,
 					a.port,
 					dataDir,
 					a.offline,
@@ -408,6 +434,14 @@ export const start = Command.make("start", {
 
 					const { port: boundPort } = yield* startServer({
 						hostname: a.host,
+						browserHosts: Array.from(
+							new Set(
+								[a.host, connectionHostForBindHost(a.host), advertiseHost].map(
+									canonicalUrlHostname,
+								),
+							),
+						),
+						corsOrigin: hostedUiOrigin(remoteUiUrl()),
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
@@ -431,17 +465,20 @@ export const start = Command.make("start", {
 						fs.remove(pidPath, { force: true }).pipe(Effect.ignore),
 					)
 
-					const addr = serverUrl(a.host, boundPort)
+					const bindAddr = serverUrl(a.host, boundPort)
+					const connectAddr = serverUrl(advertiseHost, boundPort)
 					// Default: send users to the auto-updating UI on local.maple.dev (it
 					// reaches this binary on loopback via the encoded ?port=). --offline:
 					// serve the bundled UI from this origin (only when one is embedded).
 					const dashboardUrl = a.offline
 						? assets !== undefined
-							? `${addr}/`
+							? `${connectAddr}/`
 							: undefined
-						: `${remoteUiUrl()}/?port=${boundPort}`
+						: hostedDashboardUrl(remoteUiUrl(), boundPort)
 					yield* Effect.sync(() =>
-						process.stdout.write(startBanner(addr, dataDir, dashboardUrl, a.offline)),
+						process.stdout.write(
+							startBanner(bindAddr, connectAddr, dataDir, dashboardUrl, a.offline),
+						),
 					)
 
 					return yield* Effect.never
@@ -534,14 +571,16 @@ export const reset = Command.make("reset", { dataDir: dataDirFlag, yes: yesFlag 
 	),
 )
 
-export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, port }).pipe(
+export const checkpoint = Command.make("checkpoint", { dataDir: dataDirFlag, host, port }).pipe(
 	Command.withDescription("Create and validate a restorable checkpoint of the local chDB store"),
 	Command.withHandler(
 		Effect.fnUntraced(function* (a) {
 			const dataDir = Option.getOrUndefined(a.dataDir) ?? defaultDataDir()
-			const result = yield* createCheckpoint({ dataDir, port: a.port }).pipe(
-				Effect.mapError((e) => new ServerError({ message: e.message })),
-			)
+			const result = yield* createCheckpoint({
+				dataDir,
+				host: connectionHostForBindHost(a.host),
+				port: a.port,
+			}).pipe(Effect.mapError((e) => new ServerError({ message: e.message })))
 			yield* Effect.sync(() =>
 				process.stdout.write(
 					`${green("✓")} checkpoint created\n` +

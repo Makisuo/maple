@@ -2,7 +2,10 @@ import { describe, it } from "@effect/vitest"
 import { deepStrictEqual, strictEqual } from "node:assert"
 import {
 	buildDetachedChildArgs,
+	defaultLocalUrl,
+	hostedDashboardUrl,
 	type DirtyStorePolicy,
+	resolveAdvertiseHost,
 	resolveBindHost,
 	serverProbeUrl,
 	serverUrl,
@@ -20,6 +23,26 @@ describe("local server bind host", () => {
 		strictEqual(serverProbeUrl("0.0.0.0", 4318), "http://127.0.0.1:4318")
 		strictEqual(serverProbeUrl("::", 4318), "http://[::1]:4318")
 	})
+
+	it("separates the bind address from the client-facing address", () => {
+		strictEqual(resolveAdvertiseHost(undefined, undefined, "0.0.0.0"), "127.0.0.1")
+		strictEqual(resolveAdvertiseHost(undefined, " srvmini2.lan ", "0.0.0.0"), "srvmini2.lan")
+		strictEqual(resolveAdvertiseHost(" 192.0.2.10 ", "ignored", "0.0.0.0"), "192.0.2.10")
+	})
+
+	it("derives the normal CLI target from the configured bind host", () => {
+		strictEqual(defaultLocalUrl(undefined), "http://127.0.0.1:4318")
+		strictEqual(defaultLocalUrl("192.0.2.10"), "http://192.0.2.10:4318")
+		strictEqual(defaultLocalUrl("0.0.0.0"), "http://127.0.0.1:4318")
+		strictEqual(defaultLocalUrl("::"), "http://[::1]:4318")
+	})
+
+	it("marks custom hosted dashboards as loopback clients without discarding their URL", () => {
+		strictEqual(
+			hostedDashboardUrl("https://local-staging.maple.dev/preview?channel=next", 4418),
+			"https://local-staging.maple.dev/preview?channel=next&port=4418&maple-local-api=loopback",
+		)
+	})
 })
 
 describe("buildDetachedChildArgs", () => {
@@ -28,6 +51,7 @@ describe("buildDetachedChildArgs", () => {
 			const args = buildDetachedChildArgs({
 				entry: "/repo/apps/cli/src/bin.ts",
 				host: "0.0.0.0",
+				advertiseHost: "srvmini2.lan",
 				port: 4318,
 				dataDir: "/tmp/maple data",
 				offline: true,
@@ -39,6 +63,8 @@ describe("buildDetachedChildArgs", () => {
 				"start",
 				"--host",
 				"0.0.0.0",
+				"--advertise-host",
+				"srvmini2.lan",
 				"--port",
 				"4318",
 				"--data-dir",
@@ -60,6 +86,7 @@ describe("buildDetachedChildArgs", () => {
 			buildDetachedChildArgs({
 				entry: "/$bunfs/root/maple",
 				host: "127.0.0.1",
+				advertiseHost: "127.0.0.1",
 				port: 4418,
 				dataDir: "/data",
 				offline: false,
@@ -69,6 +96,8 @@ describe("buildDetachedChildArgs", () => {
 			[
 				"start",
 				"--host",
+				"127.0.0.1",
+				"--advertise-host",
 				"127.0.0.1",
 				"--port",
 				"4418",

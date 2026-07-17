@@ -6,6 +6,7 @@
 		"dev": "vite --port ${PORT:-4319} --host ${HOST:-127.0.0.1}",
 		"build": "vite build",
 		"preview": "vite preview",
+		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -29,6 +30,7 @@
 		"tw-animate-css": "catalog:tailwind",
 		"typescript": "catalog:tooling",
 		"vite": "catalog:",
-		"vite-tsconfig-paths": "^6.0.0"
+		"vite-tsconfig-paths": "^6.0.0",
+		"vitest": "catalog:"
 	}
 }

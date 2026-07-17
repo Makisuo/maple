@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { Effect, Schema } from "effect"
 import { CHDB_VERSION, MAPLE_VERSION } from "../version"
+import { serverUrl } from "../lib/local-address"
 import { Chdb } from "./chdb"
 import {
 	type DurabilityFaults,
@@ -199,6 +200,7 @@ const errorCause = (error: unknown): string =>
 
 export interface CheckpointOptions {
 	readonly dataDir: string
+	readonly host: string
 	readonly port: number
 	readonly faults?: DurabilityFaults
 }
@@ -414,8 +416,11 @@ const localQueryError = (status: number, detail: string, cause = detail): LocalQ
 		cause,
 	})
 
-const postLocalQuery = (port: number, sql: string): Effect.Effect<unknown, LocalQueryError> => {
-	const url = `http://127.0.0.1:${port}/local/query`
+export const checkpointQueryUrl = (host: string, port: number): string =>
+	`${serverUrl(host, port)}/local/query`
+
+const postLocalQuery = (host: string, port: number, sql: string): Effect.Effect<unknown, LocalQueryError> => {
+	const url = checkpointQueryUrl(host, port)
 	return Effect.gen(function* () {
 		const response = yield* Effect.tryPromise({
 			try: (signal) =>
@@ -449,7 +454,7 @@ const postLocalQuery = (port: number, sql: string): Effect.Effect<unknown, Local
 			attributes: {
 				"peer.service": "maple-local",
 				"http.request.method": "POST",
-				"server.address": "127.0.0.1",
+				"server.address": host,
 				"server.port": port,
 				"url.full": url,
 			},
@@ -1294,6 +1299,7 @@ export const createCheckpoint = Effect.fn("CheckpointService.create")(function* 
 				catch: createError,
 			})
 			yield* postLocalQuery(
+				options.host,
 				options.port,
 				`BACKUP DATABASE default TO Disk('default', '${snapshotBackupSqlPath(checkpointId)}')`,
 			).pipe(

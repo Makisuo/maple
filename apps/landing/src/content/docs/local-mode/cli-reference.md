@@ -40,20 +40,23 @@ Local mode only. `maple start` is the long-lived process that owns the embedded 
 
 Start the local ingest + query server (embedded ClickHouse via chDB).
 
-| Flag                                                | Default         | Description                                                                         |
-| --------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------- |
-| `--port <int>`                                      | `4318`          | Port for OTLP/HTTP ingest, the query API, and the bundled UI                        |
-| `--data-dir <path>`                                 | `~/.maple/data` | Embedded ClickHouse data directory                                                  |
-| `--chdb-config-file <path>`                         |                 | Optional ClickHouse config file passed to embedded chDB                             |
-| `--offline`                                         | `false`         | Serve the UI bundled in this binary (from `127.0.0.1`) instead of `local.maple.dev` |
-| `--background`, `-d`                                | `false`         | Run detached (logs to `~/.maple/maple.log`); stop with `maple stop`                 |
-| `--reset`                                           | `false`         | Wipe live chDB data while preserving checkpoints                                    |
-| `--on-dirty-store <wipe\|fail\|restore-checkpoint>` | `fail`          | Recovery policy when the store was not cleanly closed                               |
+| Flag                                                | Default                      | Description                                                         |
+| --------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------- |
+| `--host <address>`                                  | `127.0.0.1`                  | Bind address; non-loopback exposes all unauthenticated local routes |
+| `--advertise-host <host>`                           | connection-safe bind address | Host printed for clients and the bundled UI                         |
+| `--port <int>`                                      | `4318`                       | Port for OTLP/HTTP ingest, query API, and bundled UI                |
+| `--data-dir <path>`                                 | `~/.maple/data`              | Embedded ClickHouse data directory                                  |
+| `--chdb-config-file <path>`                         |                              | Optional ClickHouse config file passed to embedded chDB             |
+| `--offline`                                         | `false`                      | Serve the bundled same-origin UI instead of `local.maple.dev`       |
+| `--background`, `-d`                                | `false`                      | Run detached; stop with `maple stop`                                |
+| `--reset`                                           | `false`                      | Wipe live chDB data while preserving checkpoints                    |
+| `--on-dirty-store <wipe\|fail\|restore-checkpoint>` | `fail`                       | Recovery policy when the store was not cleanly closed               |
 
 ```bash
 maple start                    # foreground, UI from local.maple.dev
 maple start --offline          # foreground, bundled UI, no internet needed
 maple start -d --port 4400     # detached on a custom port
+maple start --host 0.0.0.0 --advertise-host maple.home.arpa --offline
 ```
 
 Detached startup forwards the selected `--on-dirty-store` policy unchanged to
@@ -114,6 +117,10 @@ server must have been started with a chDB config that allows ClickHouse backups:
 maple start --chdb-config-file ./chdb-backups.xml
 maple checkpoint
 ```
+
+Checkpoint accepts `--host`, `--port`, and `--data-dir`. Wildcard hosts are
+queried through matching loopback; if the server was started with one-off host
+or port flags, pass the same values to `maple checkpoint`.
 
 Every completed checkpoint receives an immutable UUID and is written under:
 
@@ -369,16 +376,19 @@ Pin the default backend so commands stop auto-detecting, or restore auto-detect.
 
 ## Server endpoints
 
-`maple start` binds `127.0.0.1` only (never externally reachable). When `--offline` is set, the bundled SPA is also served over `GET`.
+`maple start` binds `127.0.0.1` by default. `--host` or
+`MAPLE_LOCAL_BIND_HOST` may select another address; doing so exposes every route
+below without application authentication. When `--offline` is set, the bundled
+SPA is also served over `GET`.
 
-| Method    | Path           | Purpose                                                                      |
-| --------- | -------------- | ---------------------------------------------------------------------------- |
-| `GET`     | `/health`      | Liveness probe (returns `OK`); used by mode auto-detect                      |
-| `POST`    | `/v1/traces`   | OTLP traces ingest → `{ "accepted": <rowCount> }`                            |
-| `POST`    | `/v1/logs`     | OTLP logs ingest                                                             |
-| `POST`    | `/v1/metrics`  | OTLP metrics ingest                                                          |
-| `POST`    | `/local/query` | Run SQL: `{ "sql": "..." }` → bare JSON array of rows                        |
-| `OPTIONS` | `*`            | CORS preflight (answers Private Network Access for the `local.maple.dev` UI) |
+| Method    | Path           | Purpose                                                                 |
+| --------- | -------------- | ----------------------------------------------------------------------- |
+| `GET`     | `/health`      | Liveness probe (returns `OK`); used by mode auto-detect                 |
+| `POST`    | `/v1/traces`   | OTLP traces ingest → `{ "accepted": <rowCount> }`                       |
+| `POST`    | `/v1/logs`     | OTLP logs ingest                                                        |
+| `POST`    | `/v1/metrics`  | OTLP metrics ingest                                                     |
+| `POST`    | `/local/query` | Run SQL: `{ "sql": "..." }` → bare JSON array of rows                   |
+| `OPTIONS` | `*`            | Restricted CORS/PNA preflight for the exact configured hosted UI origin |
 
 OTLP bodies may be protobuf (default) or JSON, optionally gzip-encoded. The `/local/query` handler owns the output format — it strips any trailing `FORMAT <ident>` and re-appends `FORMAT JSONEachRow`, then wraps the rows into a JSON array, so clients POST their compiled SQL verbatim.
 
@@ -386,17 +396,19 @@ OTLP bodies may be protobuf (default) or JSON, optionally gzip-encoded. The `/lo
 
 **Runtime** (CLI + server):
 
-| Variable                | Default                   | Purpose                                                                                                                                                |
-| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `MAPLE_LOCAL_URL`       | `http://127.0.0.1:4318`   | Base URL the CLI targets in local mode                                                                                                                 |
-| `MAPLE_LOCAL_UI_URL`    | `https://local.maple.dev` | Deployed dashboard origin `maple start` links to                                                                                                       |
-| `MAPLE_LIBCHDB`         | _(auto)_                  | Explicit path to `libchdb`. Otherwise resolved beside the binary (Homebrew keeps it in the same `libexec` dir), then `~/.maple/bin/libchdb.{so,dylib}` |
-| `MAPLE_API_URL`         | `https://api.maple.dev`   | Remote API base URL                                                                                                                                    |
-| `MAPLE_API_TOKEN`       |                           | Remote bearer token (overrides the stored value)                                                                                                       |
-| `MAPLE_ORG_ID`          |                           | Remote org override                                                                                                                                    |
-| `MAPLE_DEBUG`           |                           | Set to `1` to enable `--debug`                                                                                                                         |
-| `MAPLE_FORMAT`          | `json`                    | `json` or `table` — same as `--format`                                                                                                                 |
-| `MAPLE_NO_UPDATE_CHECK` |                           | Set to `1` to disable startup update checks (the Homebrew wrapper sets this automatically)                                                             |
+| Variable                     | Default                    | Purpose                                                                                                                                                |
+| ---------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `MAPLE_LOCAL_BIND_HOST`      | `127.0.0.1`                | Server bind host and default same-machine CLI target; wildcards map to loopback                                                                        |
+| `MAPLE_LOCAL_ADVERTISE_HOST` | connection-safe bind host  | Host printed for clients and the bundled UI                                                                                                            |
+| `MAPLE_LOCAL_URL`            | derived bind host + `4318` | Explicit base URL override for CLI query and mode detection                                                                                            |
+| `MAPLE_LOCAL_UI_URL`         | `https://local.maple.dev`  | Exact separately hosted UI origin linked by `maple start` and allowed by CORS                                                                          |
+| `MAPLE_LIBCHDB`              | _(auto)_                   | Explicit path to `libchdb`. Otherwise resolved beside the binary (Homebrew keeps it in the same `libexec` dir), then `~/.maple/bin/libchdb.{so,dylib}` |
+| `MAPLE_API_URL`              | `https://api.maple.dev`    | Remote API base URL                                                                                                                                    |
+| `MAPLE_API_TOKEN`            |                            | Remote bearer token (overrides the stored value)                                                                                                       |
+| `MAPLE_ORG_ID`               |                            | Remote org override                                                                                                                                    |
+| `MAPLE_DEBUG`                |                            | Set to `1` to enable `--debug`                                                                                                                         |
+| `MAPLE_FORMAT`               | `json`                     | `json` or `table` — same as `--format`                                                                                                                 |
+| `MAPLE_NO_UPDATE_CHECK`      |                            | Set to `1` to disable startup update checks (the Homebrew wrapper sets this automatically)                                                             |
 
 **Homebrew**:
 
@@ -430,8 +442,10 @@ The on-disk config at `~/.maple/config.json` stores `apiUrl`, `token`, `orgId`, 
 
 **Incompatible store after an upgrade.** If a new binary refuses to open an older store (`the local store … is incompatible`), explicitly clear live data with `maple reset --yes`, or start fresh in one step with `maple start --reset`. Both preserve the checkpoint registry; incompatible checkpoints remain preserved and fail closed until deliberately handled.
 
-**Browser asks to "access devices on your local network" (or CORS errors).** The default dashboard at `local.maple.dev` is a public origin reaching your loopback server, which trips Chrome's Private Network Access gate. Run `maple start --offline` to serve the dashboard same-origin from `127.0.0.1` — no prompt, no internet needed.
+**Browser asks to "access devices on your local network" (or CORS errors).** The default dashboard at `local.maple.dev` is a public origin reaching your loopback server, which trips Chrome's Private Network Access gate. Run `maple start --offline` to serve the dashboard same-origin — no prompt, no internet needed. For a wildcard LAN bind, also set `--advertise-host` to the hostname the browser will use; other browser hosts and cross-origins are rejected.
 
-**No data appearing.** Confirm your exporter points at `http://127.0.0.1:<port>` and the server is up (`maple whoami`, or `curl 127.0.0.1:4318/health`). Widen the time range (`--since 24h` — the default is `6h`). Local mode stores everything under `org_id = "local"`; a successful ingest responds `{ "accepted": <n> }`.
+**Authentication proxy blocks the bundled UI.** The UI works with TLS and browser-managed authentication such as a session cookie or HTTP authentication. It does not inject a Bearer API key or copy an entry-page query parameter into `/local/query` and OTLP URLs.
+
+**No data appearing.** Confirm your exporter points at the advertised host and port and the server is up (`maple whoami`, or `curl <host>:4318/health`). Widen the time range (`--since 24h` — the default is `6h`). Local mode stores everything under `org_id = "local"`; a successful ingest responds `{ "accepted": <n> }`.
 
 **`No Maple backend found`.** No mode could be resolved: start local mode (`maple start`) or connect a workspace (`maple login`), or force one with `--local` / `--remote`.
