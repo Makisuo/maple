@@ -1,13 +1,13 @@
-export type WarehouseResponseLimitKind = "rows" | "bytes"
+import { Schema } from "effect"
+
+export const WarehouseResponseLimitKind = Schema.Literals(["rows", "bytes"])
+export type WarehouseResponseLimitKind = Schema.Schema.Type<typeof WarehouseResponseLimitKind>
 
 /** Driver-level abort used before a raw response can be fully buffered. */
-export class WarehouseResponseLimitError extends Error {
-	readonly _tag = "WarehouseResponseLimitError"
-	readonly kind: WarehouseResponseLimitKind
-
-	constructor(kind: WarehouseResponseLimitKind, message: string) {
-		super(message)
-		this.name = "WarehouseResponseLimitError"
-		this.kind = kind
-	}
-}
+export class WarehouseResponseLimitError extends Schema.TaggedErrorClass<WarehouseResponseLimitError>()(
+	"@maple/query-engine/execution/WarehouseResponseLimitError",
+	{
+		kind: WarehouseResponseLimitKind,
+		message: Schema.String,
+	},
+) {}

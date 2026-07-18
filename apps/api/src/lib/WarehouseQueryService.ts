@@ -67,18 +67,18 @@ const createClickHouseSqlClient = (config: ClickHouseConfig): WarehouseSqlClient
 						encodedBytes += encoder.encode(row.text).byteLength + 1
 						if (encodedBytes > limits.maxBytes) {
 							await reader.cancel().catch(() => undefined)
-							throw new WarehouseResponseLimitError(
-								"bytes",
-								`Raw SQL results may contain at most ${limits.maxBytes} encoded bytes`,
-							)
+							throw new WarehouseResponseLimitError({
+								kind: "bytes",
+								message: `Raw SQL results may contain at most ${limits.maxBytes} encoded bytes`,
+							})
 						}
 						data.push(row.json<Record<string, unknown>>())
 						if (data.length > limits.maxRows) {
 							await reader.cancel().catch(() => undefined)
-							throw new WarehouseResponseLimitError(
-								"rows",
-								`Raw SQL results may contain at most ${limits.maxRows} rows`,
-							)
+							throw new WarehouseResponseLimitError({
+								kind: "rows",
+								message: `Raw SQL results may contain at most ${limits.maxRows} rows`,
+							})
 						}
 					}
 				}
@@ -122,10 +122,10 @@ const boundedResponseFetch =
 				totalBytes += chunk.value.byteLength
 				if (totalBytes > maxBytes) {
 					await reader.cancel().catch(() => undefined)
-					throw new WarehouseResponseLimitError(
-						"bytes",
-						`Raw SQL results may contain at most ${maxBytes} encoded bytes`,
-					)
+					throw new WarehouseResponseLimitError({
+						kind: "bytes",
+						message: `Raw SQL results may contain at most ${maxBytes} encoded bytes`,
+					})
 				}
 				chunks.push(chunk.value)
 			}
@@ -177,10 +177,10 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 				}
 				const result = await queryClient.sql<Record<string, unknown>>(jsonSql)
 				if (limits !== undefined && result.data.length > limits.maxRows) {
-					throw new WarehouseResponseLimitError(
-						"rows",
-						`Raw SQL results may contain at most ${limits.maxRows} rows`,
-					)
+					throw new WarehouseResponseLimitError({
+						kind: "rows",
+						message: `Raw SQL results may contain at most ${limits.maxRows} rows`,
+					})
 				}
 				return { data: result.data }
 			} catch (error) {

@@ -171,7 +171,10 @@ describe("makeWarehouseExecutor raw response limits", () => {
 				...makeDeps([]),
 				createClient: () => ({
 					sql: async () => {
-						throw new WarehouseResponseLimitError("bytes", "raw response too large")
+						throw new WarehouseResponseLimitError({
+							kind: "bytes",
+							message: "raw response too large",
+						})
 					},
 					insert: async () => {},
 				}),
