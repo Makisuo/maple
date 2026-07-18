@@ -24,6 +24,13 @@ Self-managed Maple is a **per-org BYO** feature. Each org configures their own b
 
 The Maple deployment itself still uses the env-level `TINYBIRD_HOST` / `TINYBIRD_TOKEN` for any org without a BYO row. API query routing does not require new env vars for ClickHouse-BYO; D1-backed direct ingest does require `MAPLE_INGEST_KEY_ENCRYPTION_KEY` so the ingest gateway can decrypt stored ClickHouse passwords.
 
+Env-level `CLICKHOUSE_URL` defaults to a vanilla ClickHouse provider. Maple preserves
+`CLICKHOUSE_PASSWORD` for raw SQL in that mode. If the URL is Tinybird's
+ClickHouse-compatible gateway, set `CLICKHOUSE_PROVIDER=tinybird`; raw SQL then
+substitutes a per-org JWT and removes Tinybird-restricted query settings. Tinybird
+raw SQL also requires explicit `TINYBIRD_SIGNING_KEY` and
+`TINYBIRD_WORKSPACE_ID` values; Maple never derives either from the API token.
+
 ### Routing precedence
 
 For any given query the API resolves the upstream in this order:

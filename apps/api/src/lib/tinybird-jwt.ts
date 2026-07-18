@@ -24,9 +24,9 @@ export interface TinybirdJwtScope {
 }
 
 export interface MintOrgReadJwtInput {
-	/** The workspace admin token — the HMAC signing secret. */
-	readonly adminToken: string
-	/** The workspace UUID (see {@link deriveWorkspaceId}). */
+	/** The explicitly configured HMAC signing secret. */
+	readonly signingKey: string
+	/** The explicitly configured Tinybird workspace id. */
 	readonly workspaceId: string
 	/** The org to scope the token to; embedded into every datasource filter. */
 	readonly orgId: string
@@ -63,35 +63,6 @@ export function mintOrgReadJwt(input: MintOrgReadJwtInput): string {
 		}),
 	)
 	const signingInput = `${header}.${payload}`
-	const signature = base64url(createHmac("sha256", input.adminToken).update(signingInput).digest())
+	const signature = base64url(createHmac("sha256", input.signingKey).update(signingInput).digest())
 	return `${signingInput}.${signature}`
-}
-
-/**
- * Extract the workspace UUID from a Tinybird admin token. Tinybird tokens are
- * `p.<base64-json>.<sig>`; the JSON payload carries the workspace id under `u`.
- * Throws if the token can't be decoded or lacks `u`, so a token-format change
- * fails loudly at mint time rather than producing invalid JWTs.
- */
-export function deriveWorkspaceId(adminToken: string): string {
-	const encodedPayload = adminToken.split(".")[1]
-	if (!encodedPayload) {
-		throw new Error("Cannot derive Tinybird workspace id: admin token is not a dotted JWT")
-	}
-	let decoded: unknown
-	try {
-		decoded = JSON.parse(Buffer.from(encodedPayload, "base64").toString("utf8"))
-	} catch (cause) {
-		throw new Error("Cannot derive Tinybird workspace id: admin token payload is not valid JSON", {
-			cause,
-		})
-	}
-	const workspaceId =
-		decoded && typeof decoded === "object" && "u" in decoded
-			? (decoded as { u?: unknown }).u
-			: undefined
-	if (typeof workspaceId !== "string" || workspaceId.length === 0) {
-		throw new Error("Cannot derive Tinybird workspace id: admin token payload has no 'u' field")
-	}
-	return workspaceId
 }

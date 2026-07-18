@@ -998,10 +998,14 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 	it.effect("groups raw SQL rows by the `group` column and reduces with the configured reducer", () =>
 		Effect.gen(function* () {
 			let profile: string | undefined
+			let scopeToOrgJwt: boolean | undefined
+			let rawResponseLimits: boolean | undefined
 			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
 				makeTinybirdStub({
 					sqlQuery: (_tenant, _sql, options) => {
 						profile = options?.profile
+						scopeToOrgJwt = options?.scopeToOrgJwt
+						rawResponseLimits = options?.rawResponseLimits
 						return Effect.succeed([
 							{ group: "checkout", value: 10, samples: 4 },
 							{ group: "checkout", value: 30, samples: 6 },
@@ -1027,6 +1031,8 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			assert.strictEqual(byGroup.payments?.sampleCount, 2)
 			assert.strictEqual(byGroup.payments?.hasData, true)
 			assert.strictEqual(profile, "rawAlert")
+			assert.strictEqual(scopeToOrgJwt, true)
+			assert.strictEqual(rawResponseLimits, true)
 		}),
 	)
 

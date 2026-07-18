@@ -9,11 +9,15 @@ const tenant = { orgId: "org_test" } as TenantContext
 
 const makeStub = (
 	rows: ReadonlyArray<Record<string, unknown>>,
-	captured?: { sql?: string },
+	captured?: { sql?: string; scopeToOrgJwt?: boolean; rawResponseLimits?: boolean },
 ): WarehouseQueryServiceShape =>
 	({
-		sqlQuery: (_t: unknown, sql: string) => {
-			if (captured) captured.sql = sql
+		sqlQuery: (_t: unknown, sql: string, options) => {
+			if (captured) {
+				captured.sql = sql
+				captured.scopeToOrgJwt = options?.scopeToOrgJwt
+				captured.rawResponseLimits = options?.rawResponseLimits
+			}
 			return Effect.succeed(rows)
 		},
 	}) as unknown as WarehouseQueryServiceShape
@@ -25,7 +29,11 @@ const range = { startTime: "2026-04-01 00:00:00", endTime: "2026-04-01 01:00:00"
 describe("runRawSql", () => {
 	it.effect("expands macros and returns rows + column metadata", () =>
 		Effect.gen(function* () {
-			const captured: { sql?: string } = {}
+			const captured: {
+				sql?: string
+				scopeToOrgJwt?: boolean
+				rawResponseLimits?: boolean
+			} = {}
 			const result = yield* runRawSql({
 				tenant,
 				sql: "SELECT ServiceName, count() AS c FROM traces WHERE $__orgFilter GROUP BY ServiceName",
@@ -35,6 +43,8 @@ describe("runRawSql", () => {
 
 			// $__orgFilter expanded to the scoped predicate before execution.
 			assert.include(captured.sql ?? "", "OrgId = 'org_test'")
+			assert.strictEqual(captured.scopeToOrgJwt, true)
+			assert.strictEqual(captured.rawResponseLimits, true)
 			assert.strictEqual(result.rowCount, 1)
 			assert.deepStrictEqual([...result.columns], ["ServiceName", "c"])
 		}),

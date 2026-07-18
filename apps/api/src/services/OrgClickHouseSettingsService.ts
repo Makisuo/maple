@@ -179,7 +179,9 @@ export interface OrgClickHouseSettingsServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<
 		Option.Option<RuntimeBackendConfig>,
-		OrgClickHouseSettingsPersistenceError | OrgClickHouseSettingsEncryptionError
+		| OrgClickHouseSettingsPersistenceError
+		| OrgClickHouseSettingsEncryptionError
+		| OrgClickHouseSettingsValidationError
 	>
 	/**
 	 * Whether the ingest gateway is currently routing this org's frames to its
@@ -378,7 +380,16 @@ const quoteYaml = (value: string): string => `"${value.replace(/\\/g, "\\\\").re
 
 const normalizeHttpUrl = (raw: string): Effect.Effect<string, OrgClickHouseSettingsValidationError> =>
 	validateExternalUrl(raw).pipe(
-		Effect.map(() => raw.trim().replace(/\/+$/, "")),
+		Effect.flatMap((url) =>
+			url.username.length > 0 || url.password.length > 0
+				? Effect.fail(
+						new OrgClickHouseSettingsValidationError({
+							message:
+								"ClickHouse credentials must use the user/password fields, not URL userinfo",
+						}),
+					)
+				: Effect.succeed(raw.trim().replace(/\/+$/, "")),
+		),
 		Effect.mapError(
 			(error) =>
 				new OrgClickHouseSettingsValidationError({
@@ -391,13 +402,35 @@ export const validateClickHouseCredentialTransport = (
 	url: string,
 	password: string,
 ): Effect.Effect<void, OrgClickHouseSettingsValidationError> =>
-	password.length > 0 && new URL(url).protocol !== "https:"
-		? Effect.fail(
-				new OrgClickHouseSettingsValidationError({
-					message: "ClickHouse URLs must use HTTPS when a password is configured",
-				}),
-			)
-		: Effect.void
+	Effect.try({
+		try: () => new URL(url),
+		catch: () =>
+			new OrgClickHouseSettingsValidationError({ message: "Stored ClickHouse URL is invalid" }),
+	}).pipe(
+		Effect.flatMap((parsed) => {
+			if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+				return Effect.fail(
+					new OrgClickHouseSettingsValidationError({
+						message: "ClickHouse URLs must use HTTP or HTTPS",
+					}),
+				)
+			}
+			if (parsed.username.length > 0 || parsed.password.length > 0) {
+				return Effect.fail(
+					new OrgClickHouseSettingsValidationError({
+						message: "ClickHouse credentials must not be embedded in the URL",
+					}),
+				)
+			}
+			return password.length > 0 && parsed.protocol !== "https:"
+				? Effect.fail(
+						new OrgClickHouseSettingsValidationError({
+							message: "ClickHouse URLs must use HTTPS when a password is configured",
+						}),
+					)
+				: Effect.void
+		}),
+	)
 
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
 	roles.includes(ROOT_ROLE) || roles.includes(ORG_ADMIN_ROLE)
@@ -546,6 +579,14 @@ const mapStatusToError = (
 			}),
 		)
 	}
+	if (status >= 300 && status < 400) {
+		return Effect.fail(
+			new OrgClickHouseSettingsUpstreamRejectedError({
+				message: `ClickHouse redirect responses are not allowed (${status})`,
+				statusCode: status,
+			}),
+		)
+	}
 	if (status >= 500) {
 		return Effect.fail(
 			new OrgClickHouseSettingsUpstreamUnavailableError({
@@ -568,7 +609,9 @@ export const execClickHouse = (config: ClickHouseExecConfig, sql: string) =>
 		const request = HttpClientRequest.post(buildClickHouseUrl(config), {
 			headers: buildClickHouseHeaders(config),
 		}).pipe(HttpClientRequest.bodyText(sql))
-		const response = yield* client.execute(request)
+		const response = yield* client
+			.execute(request)
+			.pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }))
 		const text = yield* response.text
 		return { status: response.status, text }
 	}).pipe(
@@ -909,12 +952,16 @@ export class OrgClickHouseSettingsService extends Context.Service<
 		})
 
 		const loadConfigForRow = (row: ActiveRow) =>
-			Effect.map(decryptStoredPassword(row), (password) => ({
-				url: row.chUrl,
-				user: row.chUser,
-				password,
-				database: row.chDatabase,
-			}))
+			Effect.gen(function* () {
+				const password = yield* decryptStoredPassword(row)
+				yield* validateClickHouseCredentialTransport(row.chUrl, password)
+				return {
+					url: row.chUrl,
+					user: row.chUser,
+					password,
+					database: row.chDatabase,
+				}
+			})
 
 		const schemaDiff = Effect.fn("OrgClickHouseSettingsService.schemaDiff")(function* (
 			orgId: OrgId,
@@ -1177,6 +1224,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 					cached.schemaVersion !== clickHouseSchemaVersion,
 				)
 				const password = yield* decryptStoredPassword(cached)
+				yield* validateClickHouseCredentialTransport(cached.chUrl, password)
 				return Option.some<RuntimeBackendConfig>({
 					backend: "clickhouse",
 					url: cached.chUrl,
@@ -1216,6 +1264,15 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
 			yield* requireAdmin(roles)
 			const row = yield* requireActiveRow(orgId)
+			const password = yield* decryptStoredPassword(row).pipe(
+				Effect.mapError(
+					() =>
+						new OrgClickHouseSettingsValidationError({
+							message: "Stored ClickHouse credentials could not be decrypted",
+						}),
+				),
+			)
+			yield* validateClickHouseCredentialTransport(row.chUrl, password)
 			const yaml = renderCollectorYaml({
 				orgId,
 				endpoint: row.chUrl,

@@ -149,22 +149,23 @@ describe("RawSqlChartService.expandMacros", () => {
 			}),
 		)
 
-		it.effect("appends a default LIMIT when the user did not specify one", () =>
+		it.effect("wraps queries with the 1,001-row overflow sentinel", () =>
 			Effect.gen(function* () {
 				const result = yield* expandOk(
 					"SELECT 1 FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 				)
-				assert.match(result.sql, /LIMIT 10000\s*$/)
+				assert.match(result.sql, /^SELECT \* FROM \(/)
+				assert.match(result.sql, /LIMIT 1001\s*$/)
 			}),
 		)
 
-		it.effect("preserves the user's LIMIT if already present", () =>
+		it.effect("enforces the outer cap even when the user requests a larger LIMIT", () =>
 			Effect.gen(function* () {
 				const result = yield* expandOk(
-					"SELECT 1 FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp) LIMIT 7",
+					"SELECT 1 FROM Logs WHERE $__orgFilter AND $__timeFilter(Timestamp) LIMIT 50000",
 				)
-				assert.notInclude(result.sql, "LIMIT 10000")
-				assert.match(result.sql, /LIMIT 7/)
+				assert.include(result.sql, "LIMIT 50000")
+				assert.match(result.sql, /LIMIT 1001\s*$/)
 			}),
 		)
 

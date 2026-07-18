@@ -31,8 +31,9 @@ import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
 import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
-import { makeExpandMacros } from "./raw-sql"
+import { makeExpandMacros, RAW_SQL_EXECUTION_GUARDS } from "./raw-sql"
 import { rawSqlResultLimitError } from "./raw-result-limits"
+import { isRawSqlResponseLimitError } from "../execution/response-limits"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
@@ -60,6 +61,7 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 			readonly context?: string
 			readonly settings?: WarehouseQuerySettings
 			readonly scopeToOrgJwt?: boolean
+			readonly rawResponseLimits?: boolean
 		},
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
 	readonly compiledQuery: <Output>(
@@ -2139,10 +2141,20 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 			warehouse.sqlQuery(tenant, expanded.sql, {
 				profile: "rawAlert",
 				context: "alertRawQuery",
-				// Untrusted user SQL — scope to a per-org Tinybird JWT (server-enforced isolation).
-				scopeToOrgJwt: true,
+				...RAW_SQL_EXECUTION_GUARDS,
 			}),
 			"alertRawQuery",
+		).pipe(
+			Effect.catchTag("@maple/http/errors/WarehouseValidationError", (error) =>
+				isRawSqlResponseLimitError(error)
+					? Effect.fail(
+							new QueryEngineValidationError({
+								message: "Invalid raw SQL alert query",
+								details: [error.message],
+							}),
+						)
+					: Effect.fail(error),
+			),
 		)
 		const resultLimitError = rawSqlResultLimitError(rawRows)
 		if (resultLimitError != null) {

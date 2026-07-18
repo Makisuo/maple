@@ -1,9 +1,10 @@
 import { Effect } from "effect"
+import { MAX_RAW_SQL_LENGTH, RawSqlValidationError } from "@maple/domain/http"
 import {
-	MAX_RAW_SQL_LENGTH,
-	RawSqlValidationError,
-} from "@maple/domain/http"
-import { makeExpandMacros, rawSqlResultLimitError } from "@maple/query-engine/runtime"
+	makeExpandMacros,
+	rawSqlResultLimitError,
+	RAW_SQL_EXECUTION_GUARDS,
+} from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import type { TenantContext } from "@/lib/tenant-context"
 
@@ -76,8 +77,7 @@ export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput
 	const rows = yield* warehouse.sqlQuery(input.tenant, expanded.sql, {
 		profile: "rawInteractive",
 		context: "mcp.run_sql",
-		// Untrusted user SQL — scope to a per-org Tinybird JWT (server-enforced isolation).
-		scopeToOrgJwt: true,
+		...RAW_SQL_EXECUTION_GUARDS,
 	})
 	const resultLimitError = rawSqlResultLimitError(rows)
 	if (resultLimitError != null) {

@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing"
 import type { OrgId } from "@maple/domain"
 import { compile, listRuleChecksQuery } from "../ch"
 import { makeWarehouseExecutor } from "./executor"
+import { isRawSqlResponseLimitError, WarehouseResponseLimitError } from "./response-limits"
 import type {
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
@@ -21,6 +22,7 @@ const tenant: ExecutionTenant = {
 // pipeline (the write path). alert_checks rows only ever land in the latter.
 const clickhouseConfig: ResolvedWarehouseConfig = {
 	_tag: "clickhouse",
+	provider: "clickhouse",
 	url: "https://byo.example.com",
 	username: "default",
 	password: "secret",
@@ -28,8 +30,13 @@ const clickhouseConfig: ResolvedWarehouseConfig = {
 }
 const tinybirdConfig: ResolvedWarehouseConfig = {
 	_tag: "tinybird",
+	provider: "tinybird",
 	host: "https://api.tinybird.co",
 	token: "tb_token",
+}
+const tinybirdGatewayConfig: ResolvedWarehouseConfig = {
+	...clickhouseConfig,
+	provider: "tinybird",
 }
 
 const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
@@ -77,10 +84,9 @@ describe("makeWarehouseExecutor pinToIngestConfig", () => {
 
 // Capture the final SQL the executor hands to the client so a test can assert
 // whether a Tinybird-restricted setting (max_block_size) survived the strip for
-// the resolved backend. The strip keys on the config `source`, not its `_tag`:
-// the managed warehouse is Tinybird (SDK or its ClickHouse-compatible gateway,
-// which surfaces as _tag "clickhouse" when CLICKHOUSE_URL is set) and enforces
-// the restriction, so only a genuine per-org BYO ClickHouse keeps the setting.
+// the resolved backend. Provider is independent from protocol and routing
+// source: a Tinybird gateway uses the ClickHouse protocol but still enforces
+// Tinybird's restricted-settings policy.
 const makeRecordingDeps = (
 	resolved: { config: ResolvedWarehouseConfig; source: "managed" | "org_override" },
 	sqls: Array<string>,
@@ -97,7 +103,24 @@ const makeRecordingDeps = (
 })
 
 describe("makeWarehouseExecutor restricted-settings strip", () => {
-	it.effect("strips max_block_size for the managed Tinybird CH-gateway (_tag clickhouse, source managed)", () =>
+	it.effect(
+		"strips max_block_size for the managed Tinybird CH-gateway (_tag clickhouse, source managed)",
+		() =>
+			Effect.gen(function* () {
+				const sqls: Array<string> = []
+				const executor = makeWarehouseExecutor(
+					makeRecordingDeps({ config: tinybirdGatewayConfig, source: "managed" }, sqls),
+				)
+				yield* executor.compiledQuery(tenant, compiled, {
+					context: "test",
+					settings: { maxBlockSize: 512 },
+				})
+				assert.lengthOf(sqls, 1)
+				assert.isFalse(sqls[0]?.includes("max_block_size"))
+			}),
+	)
+
+	it.effect("keeps max_block_size for env-level vanilla ClickHouse", () =>
 		Effect.gen(function* () {
 			const sqls: Array<string> = []
 			const executor = makeWarehouseExecutor(
@@ -107,36 +130,61 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 				context: "test",
 				settings: { maxBlockSize: 512 },
 			})
-			assert.lengthOf(sqls, 1)
-			assert.isFalse(sqls[0]?.includes("max_block_size"))
-		}),
-	)
-
-	it.effect("strips max_block_size for the managed Tinybird SDK backend (_tag tinybird, source managed)", () =>
-		Effect.gen(function* () {
-			const sqls: Array<string> = []
-			const executor = makeWarehouseExecutor(
-				makeRecordingDeps({ config: tinybirdConfig, source: "managed" }, sqls),
-			)
-			yield* executor.compiledQuery(tenant, compiled, {
-				context: "test",
-				settings: { maxBlockSize: 512 },
-			})
-			assert.isFalse(sqls[0]?.includes("max_block_size"))
-		}),
-	)
-
-	it.effect("keeps max_block_size for a genuine BYO ClickHouse (_tag clickhouse, source org_override)", () =>
-		Effect.gen(function* () {
-			const sqls: Array<string> = []
-			const executor = makeWarehouseExecutor(
-				makeRecordingDeps({ config: clickhouseConfig, source: "org_override" }, sqls),
-			)
-			yield* executor.compiledQuery(tenant, compiled, {
-				context: "test",
-				settings: { maxBlockSize: 512 },
-			})
 			assert.isTrue(sqls[0]?.includes("max_block_size=512"))
+		}),
+	)
+
+	it.effect(
+		"strips max_block_size for the managed Tinybird SDK backend (_tag tinybird, source managed)",
+		() =>
+			Effect.gen(function* () {
+				const sqls: Array<string> = []
+				const executor = makeWarehouseExecutor(
+					makeRecordingDeps({ config: tinybirdConfig, source: "managed" }, sqls),
+				)
+				yield* executor.compiledQuery(tenant, compiled, {
+					context: "test",
+					settings: { maxBlockSize: 512 },
+				})
+				assert.isFalse(sqls[0]?.includes("max_block_size"))
+			}),
+	)
+
+	it.effect(
+		"keeps max_block_size for a genuine BYO ClickHouse (_tag clickhouse, source org_override)",
+		() =>
+			Effect.gen(function* () {
+				const sqls: Array<string> = []
+				const executor = makeWarehouseExecutor(
+					makeRecordingDeps({ config: clickhouseConfig, source: "org_override" }, sqls),
+				)
+				yield* executor.compiledQuery(tenant, compiled, {
+					context: "test",
+					settings: { maxBlockSize: 512 },
+				})
+				assert.isTrue(sqls[0]?.includes("max_block_size=512"))
+			}),
+	)
+})
+
+describe("makeWarehouseExecutor raw response limits", () => {
+	it.effect("maps a driver byte abort to the typed warehouse validation marker", () =>
+		Effect.gen(function* () {
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async () => {
+						throw new WarehouseResponseLimitError("bytes", "raw response too large")
+					},
+					insert: async () => {},
+				}),
+			})
+			const error = yield* Effect.flip(
+				executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
+					rawResponseLimits: true,
+				}),
+			)
+			assert.isTrue(isRawSqlResponseLimitError(error))
 		}),
 	)
 })

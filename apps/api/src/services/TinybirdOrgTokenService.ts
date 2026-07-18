@@ -1,6 +1,7 @@
-import { Clock, Context, Effect, Layer, Redacted } from "effect"
+import type { OrgId } from "@maple/domain"
+import { Clock, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import { listOrgScopedDatasourceNames } from "../mcp/lib/warehouse-catalog"
-import { deriveWorkspaceId, mintOrgReadJwt } from "../lib/tinybird-jwt"
+import { mintOrgReadJwt } from "../lib/tinybird-jwt"
 import { Env } from "../lib/Env"
 
 // ---------------------------------------------------------------------------
@@ -21,8 +22,16 @@ const JWT_REFRESH_SKEW_SECONDS = 60
 
 export interface TinybirdOrgTokenServiceShape {
 	/** A Tinybird read JWT scoped to `orgId` across every OrgId-bearing datasource. */
-	readonly getOrgReadToken: (orgId: string) => Effect.Effect<string>
+	readonly getOrgReadToken: (orgId: OrgId) => Effect.Effect<string, TinybirdOrgTokenError>
 }
+
+export class TinybirdOrgTokenError extends Schema.TaggedErrorClass<TinybirdOrgTokenError>()(
+	"@maple/api/services/TinybirdOrgTokenError",
+	{
+		reason: Schema.Literals(["MissingSigningKey", "MissingWorkspaceId", "MintFailed"]),
+		message: Schema.String,
+	},
+) {}
 
 export class TinybirdOrgTokenService extends Context.Service<
 	TinybirdOrgTokenService,
@@ -30,21 +39,14 @@ export class TinybirdOrgTokenService extends Context.Service<
 >()("@maple/api/services/TinybirdOrgTokenService", {
 	make: Effect.gen(function* () {
 		const env = yield* Env
-		const adminToken = Redacted.value(env.TINYBIRD_TOKEN)
 		// The scope allowlist is static per deploy — compute it once.
 		const datasourceNames = listOrgScopedDatasourceNames()
-
-		// Derive the workspace id lazily (on first mint), so constructing the layer
-		// never fails on a non-Tinybird token — tests and non-raw-SQL paths that
-		// never mint a scoped JWT don't need a real admin token.
-		let workspaceId: string | null = null
-		const getWorkspaceId = () => (workspaceId ??= deriveWorkspaceId(adminToken))
 
 		// Per-instance (per-isolate) cache. `expiresAt` is the re-mint deadline in ms.
 		const cache = new Map<string, { token: string; expiresAt: number }>()
 
 		const getOrgReadToken = Effect.fn("TinybirdOrgTokenService.getOrgReadToken")(function* (
-			orgId: string,
+			orgId: OrgId,
 		) {
 			const nowMs = yield* Clock.currentTimeMillis
 			const cached = cache.get(orgId)
@@ -53,13 +55,41 @@ export class TinybirdOrgTokenService extends Context.Service<
 				return cached.token
 			}
 			yield* Effect.annotateCurrentSpan("tinybird.jwt.cacheHit", false)
-			const token = mintOrgReadJwt({
-				adminToken,
-				workspaceId: getWorkspaceId(),
-				orgId,
-				datasourceNames,
-				nowSeconds: Math.floor(nowMs / 1000),
-				ttlSeconds: JWT_TTL_SECONDS,
+			if (Option.isNone(env.TINYBIRD_SIGNING_KEY)) {
+				return yield* new TinybirdOrgTokenError({
+					reason: "MissingSigningKey",
+					message: "TINYBIRD_SIGNING_KEY is required for Tinybird-scoped raw SQL",
+				})
+			}
+			if (Option.isNone(env.TINYBIRD_WORKSPACE_ID) || env.TINYBIRD_WORKSPACE_ID.value.trim() === "") {
+				return yield* new TinybirdOrgTokenError({
+					reason: "MissingWorkspaceId",
+					message: "TINYBIRD_WORKSPACE_ID is required for Tinybird-scoped raw SQL",
+				})
+			}
+			const workspaceId = env.TINYBIRD_WORKSPACE_ID.value
+			const signingKey = Redacted.value(env.TINYBIRD_SIGNING_KEY.value)
+			if (signingKey.trim() === "") {
+				return yield* new TinybirdOrgTokenError({
+					reason: "MissingSigningKey",
+					message: "TINYBIRD_SIGNING_KEY must not be empty",
+				})
+			}
+			const token = yield* Effect.try({
+				try: () =>
+					mintOrgReadJwt({
+						signingKey,
+						workspaceId,
+						orgId,
+						datasourceNames,
+						nowSeconds: Math.floor(nowMs / 1000),
+						ttlSeconds: JWT_TTL_SECONDS,
+					}),
+				catch: () =>
+					new TinybirdOrgTokenError({
+						reason: "MintFailed",
+						message: "Failed to mint the Tinybird org-scoped read token",
+					}),
 			})
 			cache.set(orgId, {
 				token,

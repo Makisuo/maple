@@ -1,5 +1,5 @@
 import { Context, Effect, Layer } from "effect"
-import { RawSqlValidationError } from "@maple/domain/http"
+import { MAX_RAW_SQL_RESULT_ROWS, RawSqlValidationError } from "@maple/domain/http"
 import { escapeClickHouseString } from "../sql"
 
 // ---------------------------------------------------------------------------
@@ -40,7 +40,14 @@ const DENY_LIST = [
 
 const DENY_LIST_RE = new RegExp(`\\b(${DENY_LIST.join("|")})\\b`, "i")
 
-const DEFAULT_ROW_CAP = 10_000
+/** One extra row is the overflow sentinel for the public 1,000-row cap. */
+export const RAW_SQL_FETCH_ROW_LIMIT = MAX_RAW_SQL_RESULT_ROWS + 1
+
+/** Shared execution guards required by every HTTP, MCP, and alert raw-SQL caller. */
+export const RAW_SQL_EXECUTION_GUARDS = {
+	scopeToOrgJwt: true,
+	rawResponseLimits: true,
+} as const
 
 export interface ExpandMacrosInput {
 	readonly sql: string
@@ -181,9 +188,19 @@ export const makeExpandMacros = Effect.fn("RawSqlChartService.expandMacros")(fun
 		)
 	}
 
-	if (!/\blimit\b/i.test(masked)) {
-		sql = `${sql.trimEnd()}\nLIMIT ${DEFAULT_ROW_CAP}`
+	if (!/^\s*(?:SELECT|WITH)\b/i.test(masked)) {
+		return yield* fail(
+			"DisallowedStatement",
+			"Raw SQL must be a SELECT query (WITH common table expressions are supported).",
+		)
 	}
+
+	// An inner LIMIT is not a trustworthy response bound: users can request a
+	// much larger value, and UNION / nested queries can make textual rewriting
+	// ambiguous. Put every validated query behind one outer cap instead. Fetching
+	// one extra row lets the caller distinguish exactly 1,000 rows from overflow
+	// without ever buffering an unbounded result.
+	sql = `SELECT * FROM (\n${sql.trim()}\n) AS maple_raw_sql_limited\nLIMIT ${RAW_SQL_FETCH_ROW_LIMIT}`
 
 	return {
 		sql,

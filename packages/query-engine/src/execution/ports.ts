@@ -44,12 +44,17 @@ export type SqlQueryOptions = {
 	 * ClickHouse orgs (already isolated by their own credentials).
 	 */
 	scopeToOrgJwt?: boolean
+	/** Apply the hard pre-buffer limits used for untrusted raw-SQL responses. */
+	rawResponseLimits?: boolean
 }
+
+export type WarehouseProvider = "clickhouse" | "tinybird"
 
 /** Resolved upstream connection config for a tenant's queries. */
 export type ResolvedWarehouseConfig =
 	| {
 			readonly _tag: "clickhouse"
+			readonly provider: WarehouseProvider
 			readonly url: string
 			readonly username: string
 			readonly password: string
@@ -57,13 +62,17 @@ export type ResolvedWarehouseConfig =
 	  }
 	| {
 			readonly _tag: "tinybird"
+			readonly provider: "tinybird"
 			readonly host: string
 			readonly token: string
 	  }
 
 /** Minimal client interface — raw SQL execution plus row inserts. */
 export interface WarehouseSqlClient {
-	readonly sql: (sql: string) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
+	readonly sql: (
+		sql: string,
+		options?: { readonly rawResponseLimits?: boolean },
+	) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 	readonly insert: (datasource: string, rows: ReadonlyArray<unknown>) => Promise<void>
 }
 
@@ -89,7 +98,7 @@ export interface WarehouseExecutorDeps {
 		options?: ResolveConfigOptions,
 	) => Effect.Effect<
 		{ readonly config: ResolvedWarehouseConfig; readonly source: "managed" | "org_override" },
-		WarehouseQueryError
+		WarehouseSqlError
 	>
 	/**
 	 * Config resolver for the WRITE path (`ingest`). Inserts must land in the
