@@ -146,8 +146,12 @@ const toUpsertRequest = (
 				: {}),
 			...(params.metric_name !== undefined ? { metricName: params.metric_name } : {}),
 			...(params.metric_type !== undefined ? { metricType: params.metric_type } : {}),
-			...(params.metric_aggregation !== undefined ? { metricAggregation: params.metric_aggregation } : {}),
-			...(params.apdex_threshold_ms !== undefined ? { apdexThresholdMs: params.apdex_threshold_ms } : {}),
+			...(params.metric_aggregation !== undefined
+				? { metricAggregation: params.metric_aggregation }
+				: {}),
+			...(params.apdex_threshold_ms !== undefined
+				? { apdexThresholdMs: params.apdex_threshold_ms }
+				: {}),
 			...(params.raw_query_sql !== undefined ? { rawQuerySql: params.raw_query_sql } : {}),
 			...(params.raw_query_reducer !== undefined ? { rawQueryReducer: params.raw_query_reducer } : {}),
 			...draftField,
@@ -174,7 +178,9 @@ const mergeUpsertRequest = (
 			name: patch.name ?? doc.name,
 			notes: patch.notes !== undefined ? patch.notes : doc.notes,
 			notificationTemplate:
-				patch.notification_template !== undefined ? patch.notification_template : doc.notificationTemplate,
+				patch.notification_template !== undefined
+					? patch.notification_template
+					: doc.notificationTemplate,
 			enabled: patch.enabled ?? doc.enabled,
 			severity: patch.severity ?? doc.severity,
 			serviceNames: patch.service_names ?? doc.serviceNames,
@@ -246,8 +252,10 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts.listRules(tenant.orgId).pipe(Effect.mapError(mapAlertError))
-					const page = paginateArray(response.rules.map(toV2Rule), query)
+					const response = yield* alerts
+						.listRules(tenant.orgId)
+						.pipe(Effect.mapError(mapAlertError))
+					const page = yield* paginateArray(response.rules.map(toV2Rule), query)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -340,7 +348,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 							limit: 2000,
 						})
 						.pipe(Effect.mapError(mapAlertError))
-					const page = paginateArray(response.checks.map(toV2Check), query)
+					const page = yield* paginateArray(response.checks.map(toV2Check), query)
 					return { object: "list" as const, ...page }
 				}),
 			)

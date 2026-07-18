@@ -1,4 +1,5 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
+import { invalidRequest } from "./errors"
 
 /**
  * Shared v2 wire-format primitives (see docs/api-v2.md).
@@ -9,7 +10,14 @@ import { Schema } from "effect"
  */
 
 /** ISO-8601 UTC timestamp on the v2 wire (e.g. `2026-07-15T12:34:56.000Z`). */
-export const Timestamp = Schema.String.annotate({
+const ISO_8601_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]00:00)$/
+
+export const Timestamp = Schema.String.check(
+	Schema.makeFilter(
+		(value: string) => ISO_8601_UTC_PATTERN.test(value) && Number.isFinite(Date.parse(value)),
+		{ description: "Expected an ISO-8601 UTC timestamp" },
+	),
+).annotate({
 	title: "Timestamp",
 	description: "ISO-8601 UTC timestamp, e.g. `2026-07-15T12:34:56.000Z`.",
 	examples: ["2026-07-15T12:34:56.000Z"],
@@ -60,14 +68,16 @@ export const ListOf = <S extends Schema.Top>(item: S) =>
 			examples: ["list"],
 		}),
 		data: Schema.Array(item).annotate({
-			description: "The page of objects, newest first.",
+			description: "The page of objects, in the ordering documented by the endpoint.",
 		}),
 		has_more: Schema.Boolean.annotate({
-			description: "Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
+			description:
+				"Whether more objects exist after this page. When `true`, use `next_cursor` to fetch them.",
 			examples: [true],
 		}),
 		next_cursor: Schema.NullOr(Schema.String).annotate({
-			description: "Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
+			description:
+				"Cursor for the next page, or `null` on the last page. Pass it back as the `cursor` query param.",
 			examples: ["off_1k"],
 		}),
 	}).annotate({
@@ -83,23 +93,33 @@ export const ListOf = <S extends Schema.Top>(item: S) =>
 export const encodeOffsetCursor = (offset: number): string => `off_${offset.toString(36)}`
 
 export const decodeOffsetCursor = (cursor: string): number | null => {
-	if (!cursor.startsWith("off_")) return null
-	const offset = Number.parseInt(cursor.slice(4), 36)
-	return Number.isInteger(offset) && offset >= 0 ? offset : null
+	const match = /^off_([0-9a-z]+)$/.exec(cursor)
+	if (match === null) return null
+	const offset = Number.parseInt(match[1]!, 36)
+	return Number.isSafeInteger(offset) && offset >= 0 ? offset : null
+}
+
+/** Decode an optional offset cursor, failing with the standard v2 400 envelope. */
+export const decodeOffsetCursorEffect = (cursor: string | undefined) => {
+	if (cursor === undefined) return Effect.succeed(0)
+	const offset = decodeOffsetCursor(cursor)
+	return offset === null
+		? Effect.fail(invalidRequest("parameter_invalid", "Invalid pagination cursor.", "cursor"))
+		: Effect.succeed(offset)
 }
 
 /** Paginate an already-materialized array into the list envelope. */
 export const paginateArray = <T>(
 	items: ReadonlyArray<T>,
 	query: { readonly limit?: number | undefined; readonly cursor?: string | undefined },
-): { data: ReadonlyArray<T>; has_more: boolean; next_cursor: string | null } => {
-	const limit = query.limit ?? LIST_LIMIT_DEFAULT
-	const offset = query.cursor === undefined ? 0 : (decodeOffsetCursor(query.cursor) ?? 0)
-	const data = items.slice(offset, offset + limit)
-	const hasMore = offset + limit < items.length
-	return {
-		data,
-		has_more: hasMore,
-		next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
-	}
-}
+) =>
+	Effect.map(decodeOffsetCursorEffect(query.cursor), (offset) => {
+		const limit = query.limit ?? LIST_LIMIT_DEFAULT
+		const data = items.slice(offset, offset + limit)
+		const hasMore = offset + limit < items.length
+		return {
+			data,
+			has_more: hasMore,
+			next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
+		}
+	})

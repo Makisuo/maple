@@ -74,9 +74,7 @@ const makeHarness = () => {
 		fetch: globalThis.fetch,
 		deliveryTimeoutMs: () => 15_000,
 	})
-	const hazelOAuthLive = HazelOAuthService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
-	)
+	const hazelOAuthLive = HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, testDb.layer)))
 	const emailLive = Layer.succeed(EmailService, {
 		isConfigured: false,
 		send: () => Effect.void,
@@ -167,11 +165,20 @@ describe("v2 alerts over HTTP", () => {
 		expect(destCreated.body.object).toBe("alert_destination")
 		expect(destCreated.body.id).toMatch(/^dest_/)
 		expect(destCreated.body.type).toBe("webhook")
+		expect(destCreated.body.txid).toMatch(/^\d+$/)
 		// Secrets never round-trip: only the redacted summary comes back.
 		expect(JSON.stringify(destCreated.body)).not.toContain("signing")
 		expect("url" in destCreated.body).toBe(false)
 
 		const destId: string = destCreated.body.id
+
+		const destUpdated = await harness.request("PATCH", `/v2/alerts/destinations/${destId}`, key.secret, {
+			type: "webhook",
+			name: "Primary ops hook",
+		})
+		expect(destUpdated.status).toBe(200)
+		expect(destUpdated.body.name).toBe("Primary ops hook")
+		expect(destUpdated.body.txid).toMatch(/^\d+$/)
 
 		const ruleCreated = await harness.request("POST", "/v2/alerts/rules", key.secret, {
 			name: "Checkout error rate",
@@ -233,6 +240,7 @@ describe("v2 alerts over HTTP", () => {
 		const destDeleted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(destDeleted.status).toBe(200)
 		expect(destDeleted.body).toMatchObject({ id: destId, object: "alert_destination", deleted: true })
+		expect(destDeleted.body.txid).toMatch(/^\d+$/)
 
 		const missing = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(missing.status).toBe(404)

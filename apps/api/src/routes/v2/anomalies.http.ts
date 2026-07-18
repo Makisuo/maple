@@ -14,9 +14,11 @@ import {
 	CurrentTenant,
 } from "@maple/domain/http"
 import {
+	LIST_LIMIT_DEFAULT,
 	MapleApiV2,
+	decodeOffsetCursorEffect,
+	encodeOffsetCursor,
 	notFound,
-	paginateArray,
 	permissionError,
 	serviceUnavailable,
 } from "@maple/domain/http/v2"
@@ -25,9 +27,6 @@ import { Effect } from "effect"
 import { requireAdmin } from "../../lib/auth"
 import { AnomalyDetectionService } from "../../services/AnomalyDetectionService"
 import { ErrorsService } from "../../services/ErrorsService"
-
-/** v1 list caps at the most recent N incidents; v2 cursor-paginates over that window. */
-const LIST_FETCH_LIMIT = 200
 
 const toV2Incident = (doc: AnomalyIncidentDocument): V2AnomalyIncident => ({
 	id: doc.id,
@@ -137,6 +136,8 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 			.handle("listIncidents", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const limit = query.limit ?? LIST_LIMIT_DEFAULT
+					const offset = yield* decodeOffsetCursorEffect(query.cursor)
 					const response = yield* anomalies
 						.listIncidents(tenant.orgId, {
 							...(query.status !== undefined ? { status: query.status } : {}),
@@ -145,14 +146,23 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 							...(query.deployment_env !== undefined
 								? { deploymentEnv: query.deployment_env }
 								: {}),
-							...(query.error_issue_id !== undefined ? { errorIssueId: query.error_issue_id } : {}),
+							...(query.error_issue_id !== undefined
+								? { errorIssueId: query.error_issue_id }
+								: {}),
 							...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
 							...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
-							limit: LIST_FETCH_LIMIT,
+							limit: limit + 1,
+							offset,
 						})
 						.pipe(Effect.mapError(mapCommonError))
-					const page = paginateArray(response.incidents.map(toV2Incident), query)
-					return { object: "list" as const, ...page }
+					const items = response.incidents.map(toV2Incident)
+					const hasMore = items.length > limit
+					return {
+						object: "list" as const,
+						data: hasMore ? items.slice(0, limit) : items,
+						has_more: hasMore,
+						next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
+					}
 				}),
 			)
 			.handle("getIncident", ({ params }) =>
@@ -188,12 +198,10 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 			.handle("setIncidentIssue", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const actor = yield* errors
-						.ensureUserActor(tenant.orgId, tenant.userId)
-						.pipe(
-							Effect.mapError((error) => new AnomalyPersistenceError({ message: error.message })),
-							Effect.mapError(mapCommonError),
-						)
+					const actor = yield* errors.ensureUserActor(tenant.orgId, tenant.userId).pipe(
+						Effect.mapError((error) => new AnomalyPersistenceError({ message: error.message })),
+						Effect.mapError(mapCommonError),
+					)
 					const { incident, previousIssueId } = yield* anomalies
 						.setIncidentIssue(tenant.orgId, params.id, payload.issue_id)
 						.pipe(Effect.mapError(mapWith404))
@@ -231,7 +239,9 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 							tenant.userId,
 							new AnomalyDetectorSettingsUpdateRequest({
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
-								...(payload.sensitivity !== undefined ? { sensitivity: payload.sensitivity } : {}),
+								...(payload.sensitivity !== undefined
+									? { sensitivity: payload.sensitivity }
+									: {}),
 								...(payload.muted_signals !== undefined
 									? { mutedSignals: payload.muted_signals }
 									: {}),

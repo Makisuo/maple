@@ -360,12 +360,17 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
+	// Postgres txid of the write, present only on create/update responses so the
+	// Electric alert_destinations collection can resolve optimistic state.
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class AlertDestinationDeleteResponse extends Schema.Class<AlertDestinationDeleteResponse>(
 	"AlertDestinationDeleteResponse",
 )({
 	id: AlertDestinationId,
+	// Txid of the delete, for the Electric alert_destinations collection's onDelete.
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class AlertDestinationsListResponse extends Schema.Class<AlertDestinationsListResponse>(

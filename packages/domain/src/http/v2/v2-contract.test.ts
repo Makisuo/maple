@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { V2AlertDestinationCreateParams } from "./alert-destinations"
 import { V2AlertIncident } from "./alert-incidents"
 import { V2AlertRule, V2AlertRuleMutationResponse } from "./alert-rules"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2DashboardMutation } from "./dashboards"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
-import { decodeOffsetCursor, encodeOffsetCursor, isoTimestamp, paginateArray } from "./envelopes"
+import { decodeOffsetCursor, encodeOffsetCursor, isoTimestamp, paginateArray, Timestamp } from "./envelopes"
 import { notFound, permissionError, V2NotFoundError } from "./errors"
 import { encodePublicId } from "./public-id"
 
@@ -352,6 +352,14 @@ describe("scopes", () => {
 			family: "alerts",
 			access: "write",
 		})
+		expect(requiredScopeForRequest("POST", "/v2/session_replays/search")).toEqual({
+			family: "session_replays",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/session_replays/for_trace")).toEqual({
+			family: "session_replays",
+			access: "read",
+		})
 		expect(requiredScopeForRequest("GET", "/api/api-keys")).toBeNull()
 	})
 
@@ -375,15 +383,15 @@ describe("list pagination", () => {
 	const items = Array.from({ length: 45 }, (_, index) => index)
 
 	it("paginates with default limit and opaque cursors", () => {
-		const first = paginateArray(items, {})
+		const first = Effect.runSync(paginateArray(items, {}))
 		expect(first.data).toHaveLength(20)
 		expect(first.has_more).toBe(true)
 		expect(first.next_cursor).not.toBeNull()
 
-		const second = paginateArray(items, { cursor: first.next_cursor! })
+		const second = Effect.runSync(paginateArray(items, { cursor: first.next_cursor! }))
 		expect(second.data[0]).toBe(20)
 
-		const third = paginateArray(items, { cursor: second.next_cursor!, limit: 20 })
+		const third = Effect.runSync(paginateArray(items, { cursor: second.next_cursor!, limit: 20 }))
 		expect(third.data).toHaveLength(5)
 		expect(third.has_more).toBe(false)
 		expect(third.next_cursor).toBeNull()
@@ -394,10 +402,23 @@ describe("list pagination", () => {
 		expect(decodeOffsetCursor("garbage")).toBeNull()
 		expect(decodeOffsetCursor("off_-1")).toBeNull()
 	})
+
+	it("fails invalid cursors instead of silently restarting at page one", () => {
+		const exit = Effect.runSyncExit(paginateArray(items, { cursor: "garbage" }))
+		expect(exit._tag).toBe("Failure")
+	})
 })
 
 describe("timestamps", () => {
 	it("formats epoch-ms as ISO-8601 UTC", () => {
 		expect(isoTimestamp(0)).toBe("1970-01-01T00:00:00.000Z")
+	})
+
+	it("accepts UTC ISO-8601 timestamps and rejects invalid values", () => {
+		expect(Schema.decodeUnknownSync(Timestamp)("2026-07-15T12:34:56.000Z")).toBe(
+			"2026-07-15T12:34:56.000Z",
+		)
+		expect(() => Schema.decodeUnknownSync(Timestamp)("not-a-date")).toThrow()
+		expect(() => Schema.decodeUnknownSync(Timestamp)("2026-07-15T12:34:56+02:00")).toThrow()
 	})
 })

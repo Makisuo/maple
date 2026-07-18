@@ -263,7 +263,7 @@ export class V2ApiKeysApiGroup extends HttpApiGroup.make("apiKeys")
 				identifier: "rollApiKey",
 				summary: "Roll an API key",
 				description:
-					"Invalidates the key's current secret and issues a new one for the same key, returning it **with the new one-time `secret`**. Requires an org-admin role and the `api_keys:write` scope.",
+					"Revokes the existing key and creates a replacement with a new `key_…` ID and one-time `secret`, preserving its name, description, kind, and scopes. Requires an org-admin role and the `api_keys:write` scope.",
 			}),
 		),
 	)

@@ -34,53 +34,47 @@ const mapPersistenceError = (error: { readonly message: string }) => serviceUnav
  * The issue is always present after a successful mutation — the fallback guards
  * against a concurrent reconciliation dropping it from the list.
  */
-const pickIssue = (
-	issues: ReadonlyArray<RecommendationIssue>,
-	id: RecommendationIssueId,
-) => {
+const pickIssue = (issues: ReadonlyArray<RecommendationIssue>, id: RecommendationIssueId) => {
 	const issue = issues.find((candidate) => candidate.id === id)
 	return issue === undefined
 		? Effect.fail(notFound("No such recommendation.", "id"))
 		: Effect.succeed(issue)
 }
 
-export const HttpV2RecommendationsLive = HttpApiBuilder.group(
-	MapleApiV2,
-	"recommendations",
-	(handlers) =>
-		Effect.gen(function* () {
-			const service = yield* RecommendationIssueService
+export const HttpV2RecommendationsLive = HttpApiBuilder.group(MapleApiV2, "recommendations", (handlers) =>
+	Effect.gen(function* () {
+		const service = yield* RecommendationIssueService
 
-			return handlers
-				.handle("list", ({ query }) =>
-					Effect.gen(function* () {
-						const tenant = yield* CurrentTenant.Context
-						const response = yield* service
-							.listReconciled(tenant)
-							.pipe(Effect.mapError(mapPersistenceError))
-						const page = paginateArray(response.issues.map(toV2Recommendation), query)
-						return { object: "list" as const, ...page }
-					}),
-				)
-				.handle("dismiss", ({ params }) =>
-					Effect.gen(function* () {
-						const tenant = yield* CurrentTenant.Context
-						const response = yield* service
-							.dismiss(tenant, params.id)
-							.pipe(Effect.mapError(mapMutationError))
-						const issue = yield* pickIssue(response.issues, params.id)
-						return toV2Recommendation(issue)
-					}),
-				)
-				.handle("reopen", ({ params }) =>
-					Effect.gen(function* () {
-						const tenant = yield* CurrentTenant.Context
-						const response = yield* service
-							.reopen(tenant, params.id)
-							.pipe(Effect.mapError(mapMutationError))
-						const issue = yield* pickIssue(response.issues, params.id)
-						return toV2Recommendation(issue)
-					}),
-				)
-		}),
+		return handlers
+			.handle("list", ({ query }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const response = yield* service
+						.listReconciled(tenant)
+						.pipe(Effect.mapError(mapPersistenceError))
+					const page = yield* paginateArray(response.issues.map(toV2Recommendation), query)
+					return { object: "list" as const, ...page }
+				}),
+			)
+			.handle("dismiss", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const response = yield* service
+						.dismiss(tenant, params.id)
+						.pipe(Effect.mapError(mapMutationError))
+					const issue = yield* pickIssue(response.issues, params.id)
+					return toV2Recommendation(issue)
+				}),
+			)
+			.handle("reopen", ({ params }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const response = yield* service
+						.reopen(tenant, params.id)
+						.pipe(Effect.mapError(mapMutationError))
+					const issue = yield* pickIssue(response.issues, params.id)
+					return toV2Recommendation(issue)
+				}),
+			)
+	}),
 )

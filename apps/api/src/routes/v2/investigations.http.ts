@@ -1,40 +1,70 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { InvestigationDocument, InvestigationSubject } from "@maple/domain/http"
 import {
+	AlertIncidentId,
+	AnomalyIncidentId,
 	CurrentTenant,
+	ErrorIncidentId,
 	InvestigationCreateRequest,
 	InvestigationFreeformSubject,
 	InvestigationIncidentSubject,
 } from "@maple/domain/http"
-import { MapleApiV2, invalidRequest, notFound, paginateArray, serviceUnavailable } from "@maple/domain/http/v2"
+import {
+	LIST_LIMIT_DEFAULT,
+	MapleApiV2,
+	decodeOffsetCursorEffect,
+	encodeOffsetCursor,
+	invalidRequest,
+	notFound,
+	serviceUnavailable,
+} from "@maple/domain/http/v2"
 import type { V2Investigation, V2InvestigationSubject } from "@maple/domain/http/v2"
-import { Effect } from "effect"
+import { Effect, Match, Schema } from "effect"
 import { InvestigationService } from "../../services/InvestigationService"
 
-/** v1 list caps at the most recent N rows; v2 cursor-paginates over that window. */
-const LIST_FETCH_LIMIT = 100
+const decodeErrorIncidentId = Schema.decodeSync(ErrorIncidentId)
+const decodeAnomalyIncidentId = Schema.decodeSync(AnomalyIncidentId)
+const decodeAlertIncidentId = Schema.decodeSync(AlertIncidentId)
 
-const toWireSubject = (subject: InvestigationSubject): V2InvestigationSubject =>
-	subject.type === "incident"
-		? {
-				type: "incident",
-				incident_kind: subject.incidentKind,
-				incident_id: subject.incidentId,
-				...(subject.issueId !== undefined ? { issue_id: subject.issueId } : {}),
-			}
-		: {
-				type: "freeform",
-				title: subject.title,
-				prompt: subject.prompt,
-				context_refs: subject.contextRefs,
-			}
+const toWireSubject = (subject: InvestigationSubject): V2InvestigationSubject => {
+	if (subject.type === "freeform") {
+		return {
+			type: "freeform",
+			title: subject.title,
+			prompt: subject.prompt,
+			context_refs: subject.contextRefs,
+		}
+	}
+	const shared = {
+		type: "incident" as const,
+		...(subject.issueId !== undefined ? { issue_id: subject.issueId } : {}),
+	}
+	return Match.value(subject.incidentKind).pipe(
+		Match.when("error", () => ({
+			...shared,
+			incident_kind: "error" as const,
+			incident_id: decodeErrorIncidentId(subject.incidentId),
+		})),
+		Match.when("anomaly", () => ({
+			...shared,
+			incident_kind: "anomaly" as const,
+			incident_id: decodeAnomalyIncidentId(subject.incidentId),
+		})),
+		Match.when("alert", () => ({
+			...shared,
+			incident_kind: "alert" as const,
+			incident_id: decodeAlertIncidentId(subject.incidentId),
+		})),
+		Match.exhaustive,
+	)
+}
 
 const toInternalSubject = (subject: V2InvestigationSubject): InvestigationSubject =>
 	subject.type === "incident"
 		? new InvestigationIncidentSubject({
 				type: "incident",
 				incidentKind: subject.incident_kind,
-				incidentId: subject.incident_id,
+				incidentId: String(subject.incident_id),
 				...(subject.issue_id !== undefined ? { issueId: subject.issue_id } : {}),
 			})
 		: new InvestigationFreeformSubject({
@@ -83,17 +113,30 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const limit = query.limit ?? LIST_LIMIT_DEFAULT
+					const offset = yield* decodeOffsetCursorEffect(query.cursor)
 					const response = yield* service
 						.listInvestigations(tenant.orgId, {
 							...(query.status !== undefined ? { status: query.status } : {}),
 							...(query.issue_id !== undefined ? { issueId: query.issue_id } : {}),
-							...(query.incident_kind !== undefined ? { incidentKind: query.incident_kind } : {}),
-							...(query.incident_id !== undefined ? { incidentId: query.incident_id } : {}),
-							limit: LIST_FETCH_LIMIT,
+							...(query.incident_kind !== undefined
+								? { incidentKind: query.incident_kind }
+								: {}),
+							...(query.incident_id !== undefined
+								? { incidentId: String(query.incident_id) }
+								: {}),
+							limit: limit + 1,
+							offset,
 						})
 						.pipe(Effect.mapError(mapCommonError))
-					const page = paginateArray(response.investigations.map(toV2Investigation), query)
-					return { object: "list" as const, ...page }
+					const items = response.investigations.map(toV2Investigation)
+					const hasMore = items.length > limit
+					return {
+						object: "list" as const,
+						data: hasMore ? items.slice(0, limit) : items,
+						has_more: hasMore,
+						next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
+					}
 				}),
 			)
 			.handle("retrieve", ({ params }) =>

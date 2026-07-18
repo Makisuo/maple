@@ -2,7 +2,12 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { AlertIncidentDocument } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertIncident } from "@maple/domain/http/v2"
-import { MapleApiV2, notFound, paginateArray } from "@maple/domain/http/v2"
+import {
+	LIST_LIMIT_DEFAULT,
+	MapleApiV2,
+	decodeOffsetCursorEffect,
+	encodeOffsetCursor,
+} from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
@@ -38,22 +43,32 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts.listIncidents(tenant.orgId).pipe(Effect.mapError(mapAlertError))
-					const filtered = response.incidents.filter(
-						(incident) =>
-							(query.status === undefined || incident.status === query.status) &&
-							(query.rule_id === undefined || incident.ruleId === query.rule_id),
-					)
-					const page = paginateArray(filtered.map(toV2Incident), query)
-					return { object: "list" as const, ...page }
+					const limit = query.limit ?? LIST_LIMIT_DEFAULT
+					const offset = yield* decodeOffsetCursorEffect(query.cursor)
+					const response = yield* alerts
+						.listIncidents(tenant.orgId, {
+							...(query.status !== undefined ? { status: query.status } : {}),
+							...(query.rule_id !== undefined ? { ruleId: query.rule_id } : {}),
+							limit: limit + 1,
+							offset,
+						})
+						.pipe(Effect.mapError(mapAlertError))
+					const items = response.incidents.map(toV2Incident)
+					const hasMore = items.length > limit
+					return {
+						object: "list" as const,
+						data: hasMore ? items.slice(0, limit) : items,
+						has_more: hasMore,
+						next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
+					}
 				}),
 			)
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts.listIncidents(tenant.orgId).pipe(Effect.mapError(mapAlertError))
-					const incident = response.incidents.find((doc) => doc.id === params.id)
-					if (incident === undefined) return yield* Effect.fail(notFound("No such alert_incident.", "id"))
+					const incident = yield* alerts
+						.getIncident(tenant.orgId, params.id)
+						.pipe(Effect.mapError(mapAlertError))
 					return toV2Incident(incident)
 				}),
 			)

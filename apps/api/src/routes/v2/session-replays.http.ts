@@ -4,7 +4,7 @@ import {
 	MapleApiV2,
 	LIST_LIMIT_DEFAULT,
 	encodeOffsetCursor,
-	decodeOffsetCursor,
+	decodeOffsetCursorEffect,
 	invalidRequest,
 	notFound,
 	paginateArray,
@@ -54,17 +54,37 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
 
+		const requireSession = Effect.fn("HttpV2SessionReplays.requireSession")(function* (
+			tenant: CurrentTenant.TenantSchema,
+			sessionId: SessionId,
+			windowStart: string | undefined,
+			windowEnd: string | undefined,
+		) {
+			const compiled = CH.compile(
+				CH.getSessionReplayQuery({ startTime: windowStart, endTime: windowEnd }),
+				{ orgId: tenant.orgId, sessionId },
+			)
+			const replay = yield* warehouse
+				.compiledQueryFirst(tenant, compiled, { profile: "discovery", context: "v2RequireReplay" })
+				.pipe(Effect.mapError(mapWarehouseError))
+			if (Option.isNone(replay)) {
+				return yield* notFound("No such session_replay.", "id")
+			}
+		})
+
 		return handlers
 			.handle("search", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const limit = payload.limit ?? LIST_LIMIT_DEFAULT
-					const offset = payload.cursor === undefined ? 0 : (decodeOffsetCursor(payload.cursor) ?? 0)
+					const offset = yield* decodeOffsetCursorEffect(payload.cursor)
 					const startTime = yield* toTinybird(payload.start_time, "start_time")
 					const endTime = yield* toTinybird(payload.end_time, "end_time")
 					const compiled = CH.compile(
 						CH.sessionReplaysListQuery({
-							...(payload.service_name !== undefined ? { serviceName: payload.service_name } : {}),
+							...(payload.service_name !== undefined
+								? { serviceName: payload.service_name }
+								: {}),
 							...(payload.browser !== undefined ? { browser: payload.browser } : {}),
 							...(payload.country !== undefined ? { country: payload.country } : {}),
 							...(payload.device_type !== undefined ? { deviceType: payload.device_type } : {}),
@@ -193,6 +213,9 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 					const rows = yield* warehouse
 						.compiledQuery(tenant, compiled, { profile: "list", context: "v2GetReplayEvents" })
 						.pipe(Effect.mapError(mapWarehouseError))
+					if (rows.length === 0) {
+						yield* requireSession(tenant, params.id, windowStart, windowEnd)
+					}
 					const chunks: ReadonlyArray<V2SessionReplayChunk> = rows.map((row) => ({
 						object: "session_replay.event_chunk" as const,
 						chunk_seq: row.chunkSeq,
@@ -203,7 +226,7 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 						is_checkpoint: Number(row.isCheckpoint) !== 0,
 						events: row.events,
 					}))
-					const page = paginateArray(chunks, query)
+					const page = yield* paginateArray(chunks, query)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -219,6 +242,9 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 					const rows = yield* warehouse
 						.compiledQuery(tenant, compiled, { profile: "list", context: "v2SessionTranscript" })
 						.pipe(Effect.mapError(mapWarehouseError))
+					if (rows.length === 0) {
+						yield* requireSession(tenant, params.id, windowStart, windowEnd)
+					}
 					const events: ReadonlyArray<V2SessionTranscriptEvent> = rows.map((row) => ({
 						object: "session_replay.transcript_event" as const,
 						timestamp: chToIso(row.timestamp),
@@ -236,20 +262,25 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 						net_duration_ms: row.netDurationMs,
 						error_stack: row.errorStack,
 					}))
-					const page = paginateArray(events, query)
+					const page = yield* paginateArray(events, query)
 					return { object: "list" as const, ...page }
 				}),
 			)
 			.handle("forTrace", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
+					const limit = payload.limit ?? LIST_LIMIT_DEFAULT
+					const offset = yield* decodeOffsetCursorEffect(payload.cursor)
 					const startTime = yield* toTinybird(payload.start_time, "start_time")
 					const endTime = yield* toTinybird(payload.end_time, "end_time")
-					const compiled = CH.compile(CH.sessionsForTraceQuery({ traceId: payload.trace_id }), {
-						orgId: tenant.orgId,
-						startTime,
-						endTime,
-					})
+					const compiled = CH.compile(
+						CH.sessionsForTraceQuery({ traceId: payload.trace_id, limit: limit + 1, offset }),
+						{
+							orgId: tenant.orgId,
+							startTime,
+							endTime,
+						},
+					)
 					const rows = yield* warehouse
 						.compiledQuery(tenant, compiled, { profile: "list", context: "v2ReplaysForTrace" })
 						.pipe(Effect.mapError(mapWarehouseError))
@@ -259,7 +290,13 @@ export const HttpV2SessionReplaysLive = HttpApiBuilder.group(MapleApiV2, "sessio
 						start_time: chToIso(row.startTime),
 						duration_ms: row.durationMs,
 					}))
-					return { object: "list" as const, ...paginateArray(refs, {}) }
+					const hasMore = refs.length > limit
+					return {
+						object: "list" as const,
+						data: hasMore ? refs.slice(0, limit) : refs,
+						has_more: hasMore,
+						next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
+					}
 				}),
 			)
 	}),

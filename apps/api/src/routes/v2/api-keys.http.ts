@@ -84,7 +84,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const response = yield* apiKeysService
 						.list(tenant.orgId)
 						.pipe(Effect.mapError(mapPersistenceError))
-					const page = paginateArray(response.keys.map(toV2ApiKey), query)
+					const page = yield* paginateArray(response.keys.map(toV2ApiKey), query)
 					return { object: "list" as const, ...page }
 				}),
 			)

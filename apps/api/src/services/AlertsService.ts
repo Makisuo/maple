@@ -1076,7 +1076,19 @@ export interface AlertsServiceShape {
 		AlertRulePreviewResponse,
 		AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
 	>
-	readonly listIncidents: (orgId: OrgId) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
+	readonly listIncidents: (
+		orgId: OrgId,
+		options?: {
+			readonly status?: AlertIncidentStatus
+			readonly ruleId?: AlertRuleId
+			readonly limit?: number
+			readonly offset?: number
+		},
+	) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
+	readonly getIncident: (
+		orgId: OrgId,
+		incidentId: AlertIncidentId,
+	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertNotFoundError>
 	readonly listRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -1122,7 +1134,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				memberUserIds: ReadonlyArray<string>,
 			): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
 				orgMembers.resolveMembers(orgId, memberUserIds).pipe(
-					Effect.mapError((error) => makeValidationError(error.message, error.unknownUserIds ?? [])),
+					Effect.mapError((error) =>
+						makeValidationError(error.message, error.unknownUserIds ?? []),
+					),
 					Effect.flatMap((members) =>
 						members.length === 0
 							? Effect.fail(makeValidationError("At least one workspace member is required"))
@@ -1997,9 +2011,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					updatedBy: userId,
 				}
 
-				yield* dbExecute((db) => db.insert(alertDestinations).values(row))
-
-				return rowToDestinationDocument(row, publicConfig)
+				const writeRows = yield* dbExecute((db) =>
+					db.insert(alertDestinations).values(row).returning(txidColumn),
+				)
+				const txid = readTxid(writeRows)
+				const document = rowToDestinationDocument(row, publicConfig)
+				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 			})
 
 			const updateDestination = Effect.fn("AlertsService.updateDestination")(function* (
@@ -2259,7 +2276,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const nextName = normalizeOptionalString(request.name) ?? existing.name
 				const nextEnabled = request.enabled === undefined ? existing.enabled : request.enabled
 
-				yield* dbExecute((db) =>
+				const writeRows = yield* dbExecute((db) =>
 					db
 						.update(alertDestinations)
 						.set({
@@ -2274,10 +2291,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						})
 						.where(
 							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						),
+						)
+						.returning(txidColumn),
 				)
 
-				return rowToDestinationDocument(
+				const txid = readTxid(writeRows)
+				const document = rowToDestinationDocument(
 					{
 						...existing,
 						name: nextName,
@@ -2291,6 +2310,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					},
 					nextPublicConfig,
 				)
+				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 			})
 
 			const deleteDestination = Effect.fn("AlertsService.deleteDestination")(function* (
@@ -2330,14 +2350,19 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 				}
 
-				yield* dbExecute((db) =>
+				const deleted = yield* dbExecute((db) =>
 					db
 						.delete(alertDestinations)
 						.where(
 							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						),
+						)
+						.returning(txidColumn),
 				)
-				return new AlertDestinationDeleteResponse({ id: destinationId })
+				const txid = readTxid(deleted)
+				return new AlertDestinationDeleteResponse({
+					id: destinationId,
+					...(txid !== undefined && { txid }),
+				})
 			})
 
 			const testDestination = Effect.fn("AlertsService.testDestination")(function* (
@@ -2993,19 +3018,48 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 			})
 
-			const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (orgId: OrgId) {
+			const listIncidents: AlertsServiceShape["listIncidents"] = Effect.fn(
+				"AlertsService.listIncidents",
+			)(function* (orgId, options = {}) {
+				const conditions = [
+					eq(alertIncidents.orgId, orgId),
+					options.status ? eq(alertIncidents.status, options.status) : undefined,
+					options.ruleId ? eq(alertIncidents.ruleId, options.ruleId) : undefined,
+				].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined)
 				const rows = yield* dbExecute((db) =>
 					db
 						.select()
 						.from(alertIncidents)
-						.where(eq(alertIncidents.orgId, orgId))
-						.orderBy(desc(alertIncidents.status), desc(alertIncidents.lastTriggeredAt))
-						.limit(100),
+						.where(and(...conditions))
+						.orderBy(desc(alertIncidents.lastTriggeredAt), desc(alertIncidents.id))
+						.limit(options.limit ?? 100)
+						.offset(options.offset ?? 0),
 				)
 				return new AlertIncidentsListResponse({
 					incidents: rows.map(rowToIncidentDocument),
 				})
 			})
+
+			const getIncident: AlertsServiceShape["getIncident"] = Effect.fn("AlertsService.getIncident")(
+				function* (orgId, incidentId) {
+					const rows = yield* dbExecute((db) =>
+						db
+							.select()
+							.from(alertIncidents)
+							.where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.id, incidentId)))
+							.limit(1),
+					)
+					const incident = rows[0]
+					if (incident === undefined) {
+						return yield* new AlertNotFoundError({
+							message: `No such alert incident: '${incidentId}'`,
+							resourceType: "alert_incident",
+							resourceId: incidentId,
+						})
+					}
+					return rowToIncidentDocument(incident)
+				},
+			)
 
 			const toTinybirdSqlDateTime64 = (iso: string) => {
 				const d = new Date(iso)
@@ -4588,6 +4642,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				testRule,
 				previewRule,
 				listIncidents,
+				getIncident,
 				listRuleChecks,
 				listDeliveryEvents,
 				runSchedulerTick,

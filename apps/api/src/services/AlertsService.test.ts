@@ -350,11 +350,16 @@ describe("AlertsService", () => {
 			yield* TestClock.adjust(Duration.minutes(1))
 			yield* alerts.runSchedulerTick()
 			const incidentsAfterSecondTick = yield* alerts.listIncidents(orgId)
+			const retrievedIncident = yield* alerts.getIncident(
+				orgId,
+				incidentsAfterSecondTick.incidents[0]!.id,
+			)
 			const events = yield* alerts.listDeliveryEvents(orgId)
 
 			assert.lengthOf(incidentsAfterFirstTick.incidents, 0)
 			assert.lengthOf(incidentsAfterSecondTick.incidents, 1)
 			assert.strictEqual(incidentsAfterSecondTick.incidents[0]?.status, "open")
+			assert.strictEqual(retrievedIncident.id, incidentsAfterSecondTick.incidents[0]?.id)
 			assert.lengthOf(events.events, 1)
 			assert.strictEqual(events.events[0]?.status, "success")
 			assert.strictEqual(events.events[0]?.eventType, "trigger")

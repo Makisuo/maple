@@ -73,6 +73,7 @@ export interface ListInvestigationsOptions {
 	readonly incidentId?: string
 	readonly status?: InvestigationStatus
 	readonly limit?: number
+	readonly offset?: number
 }
 
 export interface InvestigationServiceShape {
@@ -190,8 +191,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 						.select()
 						.from(investigations)
 						.where(and(...conditions))
-						.orderBy(desc(investigations.createdAt))
-						.limit(opts.limit ?? 50),
+						.orderBy(desc(investigations.createdAt), desc(investigations.id))
+						.limit(opts.limit ?? 50)
+						.offset(opts.offset ?? 0),
 				)
 				return new InvestigationsListResponse({
 					investigations: yield* Effect.forEach(rows, rowToDocument),
@@ -276,7 +278,9 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				const row = yield* loadRow(orgId, id)
 				if (!row) {
 					return yield* Effect.fail(
-						new InvestigationPersistenceError({ message: "Investigation row missing after insert" }),
+						new InvestigationPersistenceError({
+							message: "Investigation row missing after insert",
+						}),
 					)
 				}
 				return yield* rowToDocument(row)

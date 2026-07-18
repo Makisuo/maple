@@ -1,6 +1,5 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { AnomalyIncidentId } from "../../primitives"
 import {
 	AnomalyIncidentSeverity,
 	AnomalyIncidentStatus,
@@ -12,15 +11,18 @@ import {
 } from "../anomalies"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import { V2InvalidRequestError, V2NotFoundError, V2PermissionError, V2ServiceUnavailableError } from "./errors"
-import { ErrorIssuePublicId } from "./investigations"
-import { PublicId, PublicIdPrefixes } from "./public-id"
+import {
+	V2InvalidRequestError,
+	V2NotFoundError,
+	V2PermissionError,
+	V2ServiceUnavailableError,
+} from "./errors"
+import { AnomalyIncidentPublicId, ErrorIssuePublicId } from "./resource-ids"
+
+export { AnomalyIncidentPublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
-
-/** `anom_…` public ID ⇄ internal `AnomalyIncidentId` (raw UUID). */
-export const AnomalyIncidentPublicId = PublicId(PublicIdPrefixes.anomalyIncident, AnomalyIncidentId)
 
 const signalTypeField = AnomalySignalType.annotate({
 	description: "The monitored signal that triggered the anomaly.",
@@ -88,9 +90,12 @@ export const V2AnomalyIncident = Schema.Struct({
 	}),
 	signal_type: signalTypeField,
 	service_name: Schema.String.annotate({ description: "The service the anomaly was detected on." }),
-	deployment_env: Schema.String.annotate({ description: "The deployment environment (e.g. `production`)." }),
+	deployment_env: Schema.String.annotate({
+		description: "The deployment environment (e.g. `production`).",
+	}),
 	fingerprint_hash: Schema.NullOr(Schema.String).annotate({
-		description: "The error fingerprint for `error_spike` incidents, or `null` for golden-signal incidents.",
+		description:
+			"The error fingerprint for `error_spike` incidents, or `null` for golden-signal incidents.",
 	}),
 	error_issue_id: Schema.NullOr(ErrorIssuePublicId).annotate({
 		description: "The `iss_…` error issue linked to the incident, or `null`.",
@@ -108,7 +113,9 @@ export const V2AnomalyIncident = Schema.Struct({
 	baseline_sigma: Schema.Number.annotate({ description: "The learned baseline standard deviation." }),
 	threshold_value: Schema.Number.annotate({ description: "The threshold the signal crossed to trigger." }),
 	last_observed_value: Schema.Number.annotate({ description: "The most recent observed signal value." }),
-	last_sample_count: Schema.Number.annotate({ description: "Raw sample volume behind the last observation." }),
+	last_sample_count: Schema.Number.annotate({
+		description: "Raw sample volume behind the last observation.",
+	}),
 	first_triggered_at: Timestamp.annotate({ description: "When the incident first triggered." }),
 	last_triggered_at: Timestamp.annotate({ description: "When the incident most recently triggered." }),
 	resolved_at: Schema.NullOr(Timestamp).annotate({ description: "When the incident resolved, or `null`." }),
@@ -146,7 +153,8 @@ export const V2AnomalyIncidentTimeseries = Schema.Struct({
 	}),
 	signal_type: signalTypeField,
 	unit: AnomalyTimeseriesUnit.annotate({
-		description: "The unit of the bucketed values (`ratio`, `milliseconds`, `per_minute`, `count_per_30m`).",
+		description:
+			"The unit of the bucketed values (`ratio`, `milliseconds`, `per_minute`, `count_per_30m`).",
 	}),
 	bucket_seconds: Schema.Number.annotate({ description: "Bucket width in seconds." }),
 	buckets: Schema.Array(V2AnomalyTimeseriesBucket).annotate({
@@ -184,7 +192,9 @@ export const V2AnomalySettings = Schema.Struct({
 	muted_signals: Schema.Array(AnomalySignalType).annotate({
 		description: "Signals the detector ignores.",
 	}),
-	updated_at: Schema.NullOr(Timestamp).annotate({ description: "When settings were last updated, or `null`." }),
+	updated_at: Schema.NullOr(Timestamp).annotate({
+		description: "When settings were last updated, or `null`.",
+	}),
 	updated_by: Schema.NullOr(Schema.String).annotate({
 		description: "The `user_…` who last updated settings, or `null`.",
 	}),
@@ -242,12 +252,18 @@ export const V2AnomalyIncidentsListQuery = Schema.Struct({
 	status: Schema.optional(AnomalyIncidentStatus.annotate({ description: "Filter by incident status." })),
 	signal_type: Schema.optional(AnomalySignalType.annotate({ description: "Filter by signal type." })),
 	service: Schema.optional(Schema.String.annotate({ description: "Filter by service name." })),
-	deployment_env: Schema.optional(Schema.String.annotate({ description: "Filter by deployment environment." })),
+	deployment_env: Schema.optional(
+		Schema.String.annotate({ description: "Filter by deployment environment." }),
+	),
 	error_issue_id: Schema.optional(
 		ErrorIssuePublicId.annotate({ description: "Filter by linked `iss_…` error issue." }),
 	),
-	start_time: Schema.optional(Timestamp.annotate({ description: "Only incidents triggered at or after this time." })),
-	end_time: Schema.optional(Timestamp.annotate({ description: "Only incidents triggered at or before this time." })),
+	start_time: Schema.optional(
+		Timestamp.annotate({ description: "Only incidents triggered at or after this time." }),
+	),
+	end_time: Schema.optional(
+		Timestamp.annotate({ description: "Only incidents triggered at or before this time." }),
+	),
 }).annotate({
 	identifier: "AnomalyIncidentsListQuery",
 	title: "Anomaly incidents list query",
@@ -256,8 +272,12 @@ export const V2AnomalyIncidentsListQuery = Schema.Struct({
 export type V2AnomalyIncidentsListQuery = Schema.Schema.Type<typeof V2AnomalyIncidentsListQuery>
 
 export const V2AnomalyTimeseriesQuery = Schema.Struct({
-	start_time: Schema.optional(Timestamp.annotate({ description: "Window start; defaults to the incident window." })),
-	end_time: Schema.optional(Timestamp.annotate({ description: "Window end; defaults to the incident window." })),
+	start_time: Schema.optional(
+		Timestamp.annotate({ description: "Window start; defaults to the incident window." }),
+	),
+	end_time: Schema.optional(
+		Timestamp.annotate({ description: "Window end; defaults to the incident window." }),
+	),
 }).annotate({
 	identifier: "AnomalyTimeseriesQuery",
 	title: "Anomaly timeseries query",

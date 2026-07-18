@@ -60,15 +60,21 @@ export interface RequiredScope {
 	readonly access: "read" | "write"
 }
 
+/** POST endpoints that are semantically read-only despite carrying a JSON body. */
+const READ_ONLY_POST_PATHS = new Set(["/v2/session_replays/search", "/v2/session_replays/for_trace"])
+
 /**
  * Mechanical scope derivation: the resource family is the first path segment
- * after `/v2/`, and the access level follows the HTTP method (GET/HEAD → read,
- * everything else → write). Returns null for non-/v2 paths.
+ * after `/v2/`. GET/HEAD and explicitly registered read-only POST queries require
+ * read access; mutation methods require write access. Returns null for non-/v2 paths.
  */
 export const requiredScopeForRequest = (method: string, path: string): RequiredScope | null => {
 	const match = /^\/v2\/([a-z][a-z0-9_]*)(?:\/|$)/.exec(path)
 	if (match === null) return null
-	const access = method === "GET" || method === "HEAD" ? "read" : "write"
+	const access =
+		method === "GET" || method === "HEAD" || (method === "POST" && READ_ONLY_POST_PATHS.has(path))
+			? "read"
+			: "write"
 	return { family: match[1]!, access }
 }
 

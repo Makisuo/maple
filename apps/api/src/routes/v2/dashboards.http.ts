@@ -183,7 +183,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					const response = yield* persistence
 						.list(tenant.orgId)
 						.pipe(Effect.mapError(mapPersistenceError))
-					const page = paginateArray(response.dashboards.map(toV2Dashboard), query)
+					const page = yield* paginateArray(response.dashboards.map(toV2Dashboard), query)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -292,15 +292,17 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					return toV2DashboardMutation(dashboard)
 				}),
 			)
-			.handle("listTemplates", ({ query }) => {
-				const page = paginateArray(
-					listTemplateMetadata().map((template) =>
-						toV2Template(new DashboardTemplateMetadata(template)),
+			.handle("listTemplates", ({ query }) =>
+				Effect.map(
+					paginateArray(
+						listTemplateMetadata().map((template) =>
+							toV2Template(new DashboardTemplateMetadata(template)),
+						),
+						query,
 					),
-					query,
-				)
-				return Effect.succeed({ object: "list" as const, ...page })
-			})
+					(page) => ({ object: "list" as const, ...page }),
+				),
+			)
 			.handle("instantiateTemplate", ({ params, payload }) =>
 				Effect.gen(function* () {
 					const template = getTemplateById(params.templateId)

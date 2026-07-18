@@ -1,56 +1,64 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { ErrorIssueId, InvestigationId } from "../../primitives"
-import { AiTriageIncidentKind, AiTriageResult } from "../ai-triage"
+import { AiTriageIncidentKind } from "../ai-triage"
 import { IssueSeverity } from "../errors"
 import { InvestigationConfidence, InvestigationSeededBy, InvestigationStatus } from "../investigations"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
-import { PublicId, PublicIdPrefixes } from "./public-id"
+import { encodePublicId, PublicIdPrefixes } from "./public-id"
+import {
+	AlertIncidentPublicId,
+	AnomalyIncidentPublicId,
+	ErrorIncidentPublicId,
+	ErrorIssuePublicId,
+	InvestigationPublicId,
+} from "./resource-ids"
+
+export { ErrorIssuePublicId, InvestigationPublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
-
-/** `inv_…` public ID ⇄ internal `InvestigationId` (raw UUID). */
-export const InvestigationPublicId = PublicId(PublicIdPrefixes.investigation, InvestigationId)
-
-/**
- * `iss_…` public ID ⇄ internal `ErrorIssueId`. Defined here (not in a dedicated
- * `error_issues` v2 group, which does not exist yet) so investigations and
- * anomalies — both of which reference error issues — share one codec.
- */
-export const ErrorIssuePublicId = PublicId(PublicIdPrefixes.errorIssue, ErrorIssueId)
 
 // ---------------------------------------------------------------------------
 // Subject (snake_case wire form of the internal InvestigationSubject union)
 // ---------------------------------------------------------------------------
 
-const incidentKindField = AiTriageIncidentKind.annotate({
-	description: "The kind of incident being investigated.",
-	examples: ["error"],
-})
-
 /** A page/entity context hint (structurally the web's AutoContext) — opaque JSON. */
 const InvestigationContextRef = Schema.Record(Schema.String, Schema.Unknown)
 
-export const V2InvestigationIncidentSubject = Schema.Struct({
+const investigationIncidentSubjectBase = {
 	type: Schema.Literal("incident").annotate({
 		description: 'Discriminator — always `"incident"` for an incident-anchored investigation.',
-	}),
-	incident_kind: incidentKindField,
-	incident_id: Schema.String.annotate({
-		description: "The ID of the incident being investigated.",
 	}),
 	issue_id: Schema.optionalKey(
 		ErrorIssuePublicId.annotate({
 			description: "The `iss_…` ID of the linked error issue, when the incident is backed by one.",
 		}),
 	),
-}).annotate({
+}
+
+export const V2InvestigationIncidentSubject = Schema.Union([
+	Schema.Struct({
+		...investigationIncidentSubjectBase,
+		incident_kind: Schema.Literal("error"),
+		incident_id: ErrorIncidentPublicId,
+	}),
+	Schema.Struct({
+		...investigationIncidentSubjectBase,
+		incident_kind: Schema.Literal("anomaly"),
+		incident_id: AnomalyIncidentPublicId,
+	}),
+	Schema.Struct({
+		...investigationIncidentSubjectBase,
+		incident_kind: Schema.Literal("alert"),
+		incident_id: AlertIncidentPublicId,
+	}),
+]).annotate({
 	identifier: "InvestigationIncidentSubject",
 	title: "Incident subject",
-	description: "An investigation anchored to a typed incident (error, anomaly, or alert).",
+	description:
+		"An investigation anchored to a typed incident. The public-ID prefix must match `incident_kind`: `einc_…`, `anom_…`, or `inc_…`.",
 })
 
 export const V2InvestigationFreeformSubject = Schema.Struct({
@@ -79,6 +87,37 @@ export const V2InvestigationSubject = Schema.Union([
 })
 export type V2InvestigationSubject = Schema.Schema.Type<typeof V2InvestigationSubject>
 
+const V2AiTriageEvidence = Schema.Struct({
+	traceIds: Schema.Array(Schema.String),
+	logPatterns: Schema.Array(Schema.String),
+	relatedServices: Schema.Array(Schema.String),
+	note: Schema.String,
+}).pipe(
+	Schema.encodeKeys({
+		traceIds: "trace_ids",
+		logPatterns: "log_patterns",
+		relatedServices: "related_services",
+	}),
+)
+
+/** Snake-case v2 wire projection of the internal AI triage result. */
+const V2AiTriageResult = Schema.Struct({
+	summary: Schema.String,
+	suspectedCause: Schema.String,
+	severityAssessment: IssueSeverity,
+	affectedScope: Schema.String,
+	evidence: Schema.Array(V2AiTriageEvidence),
+	suggestedActions: Schema.Array(Schema.String),
+	confidence: Schema.Literals(["high", "medium", "low"]),
+}).pipe(
+	Schema.encodeKeys({
+		suspectedCause: "suspected_cause",
+		severityAssessment: "severity_assessment",
+		affectedScope: "affected_scope",
+		suggestedActions: "suggested_actions",
+	}),
+)
+
 // ---------------------------------------------------------------------------
 // Resource
 // ---------------------------------------------------------------------------
@@ -90,7 +129,7 @@ const investigationExample = {
 	subject: {
 		type: "incident",
 		incident_kind: "error",
-		incident_id: "a1b2c3d4",
+		incident_id: encodePublicId(PublicIdPrefixes.errorIncident, "018f2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"),
 		issue_id: "iss_YofPTrK9782DWwcnXhpcCw",
 	},
 	report: null,
@@ -119,7 +158,7 @@ export const V2Investigation = Schema.Struct({
 		examples: ["diagnosed"],
 	}),
 	subject: V2InvestigationSubject,
-	report: Schema.NullOr(AiTriageResult).annotate({
+	report: Schema.NullOr(V2AiTriageResult).annotate({
 		description:
 			"The latest structured AI diagnosis, or `null` until the first diagnosis lands. The report's internal fields are an evolving shape — treat it as a diagnosis blob, not a stability-committed schema.",
 	}),
@@ -174,7 +213,14 @@ export const V2InvestigationCreateParams = Schema.Struct({
 		"Request body for opening an investigation. Incident-anchored investigations dedup to one per incident.",
 	examples: [
 		wireExample({
-			subject: { type: "incident", incident_kind: "error", incident_id: "a1b2c3d4" },
+			subject: {
+				type: "incident",
+				incident_kind: "error",
+				incident_id: encodePublicId(
+					PublicIdPrefixes.errorIncident,
+					"018f2b3c-4d5e-6f70-8192-a3b4c5d6e7f8",
+				),
+			},
 		}),
 	],
 })
@@ -199,13 +245,17 @@ export const V2InvestigationsListQuery = Schema.Struct({
 		InvestigationStatus.annotate({ description: "Only return investigations in this status." }),
 	),
 	issue_id: Schema.optional(
-		ErrorIssuePublicId.annotate({ description: "Only return investigations for this `iss_…` error issue." }),
+		ErrorIssuePublicId.annotate({
+			description: "Only return investigations for this `iss_…` error issue.",
+		}),
 	),
 	incident_kind: Schema.optional(
 		AiTriageIncidentKind.annotate({ description: "Only return investigations for this incident kind." }),
 	),
 	incident_id: Schema.optional(
-		Schema.String.annotate({ description: "Only return investigations for this incident ID." }),
+		Schema.Union([ErrorIncidentPublicId, AnomalyIncidentPublicId, AlertIncidentPublicId]).annotate({
+			description: "Only return investigations for this prefixed incident ID.",
+		}),
 	),
 }).annotate({
 	identifier: "InvestigationsListQuery",

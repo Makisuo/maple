@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 import { MapleApiV2 } from "./api"
+import { V2AlertDestinationMutationResponse } from "./alert-destinations"
 import { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "./anomalies"
 import { V2ApiKey, V2ApiKeyCreateParams, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2Investigation } from "./investigations"
@@ -232,10 +233,45 @@ describe("MapleApiV2 OpenAPI", () => {
 		}
 	})
 
+	it("documents alert-destination mutation sync metadata", () => {
+		const mutation = schemas["AlertDestinationMutationResponse"]
+		expect(() =>
+			Schema.decodeUnknownSync(V2AlertDestinationMutationResponse)(mutation.examples[0]),
+		).not.toThrow()
+		expect(mutation.properties.txid.$ref).toBe("#/components/schemas/_maple_PostgresTransactionId")
+		expect(operation("post", "/v2/alerts/destinations").responses["200"]).toBeDefined()
+	})
+
 	it("documents the public-ID and Scope primitives with examples", () => {
 		expect(schemas["_maple_ApiKeyId"].description).toContain("public object ID")
 		expect(schemas["_maple_ApiKeyId"].examples?.[0]).toMatch(/^key_/)
 		expect(schemas["Scope"].allOf?.[0]?.examples).toEqual(expect.arrayContaining(["*"]))
+	})
+
+	it("generates syntactically valid examples for every public-ID primitive", () => {
+		const publicIds = Object.entries(schemas).filter(
+			([name, component]) =>
+				name.startsWith("_maple_") && JSON.stringify(component).includes("public object ID"),
+		)
+		expect(publicIds.length).toBeGreaterThan(5)
+		for (const [name, component] of publicIds) {
+			const examples = [component, ...(component.allOf ?? [])].flatMap((part) => part.examples ?? [])
+			expect(examples, `${name} has an example`).toHaveLength(1)
+			expect(examples[0], `${name} has a valid prefixed base58 ID`).toMatch(
+				/^[a-z]+_[1-9A-HJ-NP-Za-km-z]+$/,
+			)
+		}
+	})
+
+	it("does not advertise ignored list pagination on session-replay retrieve", () => {
+		const parameters = operation("get", "/v2/session_replays/{id}").parameters as ReadonlyArray<{
+			name: string
+		}>
+		expect(parameters.map((parameter) => parameter.name).sort()).toEqual([
+			"id",
+			"window_end",
+			"window_start",
+		])
 	})
 
 	it("documents the bearer security scheme with a description and bearer format", () => {

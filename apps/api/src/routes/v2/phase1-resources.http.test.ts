@@ -5,6 +5,8 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import {
 	ActorDocument,
 	ActorId,
+	AiTriageEvidence,
+	AiTriageResult,
 	AnomalyDetectorSettingsDocument,
 	AnomalyIncidentDocument,
 	AnomalyIncidentNotFoundError,
@@ -35,7 +37,11 @@ import { ErrorsService } from "../../services/ErrorsService"
 import { InvestigationService } from "../../services/InvestigationService"
 import { OrganizationService } from "../../services/OrganizationService"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AlertsServiceStubLayer, AllV2GroupLayersLive, ConfigResourceServiceStubsLayer } from "./v2-test-support"
+import {
+	AlertsServiceStubLayer,
+	AllV2GroupLayersLive,
+	ConfigResourceServiceStubsLayer,
+} from "./v2-test-support"
 
 /**
  * End-to-end HTTP tests for the Phase-1 remainder v2 groups (investigations,
@@ -58,12 +64,18 @@ const ANOM_UUID = "22222222-2222-4222-8222-222222222222"
 const MISSING_ANOM_UUID = "44444444-4444-4444-8444-444444444444"
 const ISS_UUID = "55555555-5555-4555-8555-555555555555"
 const ACTOR_UUID = "66666666-6666-4666-8666-666666666666"
+const ERROR_INCIDENT_UUID = "77777777-7777-4777-8777-777777777777"
+const INV_UUID_2 = "88888888-8888-4888-8888-888888888888"
+const INV_UUID_3 = "99999999-9999-4999-8999-999999999999"
+const ANOM_UUID_2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const ANOM_UUID_3 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 const INV_ID = encodePublicId("inv", INV_UUID)
 const MISSING_INV_ID = encodePublicId("inv", MISSING_INV_UUID)
 const ANOM_ID = encodePublicId("anom", ANOM_UUID)
 const MISSING_ANOM_ID = encodePublicId("anom", MISSING_ANOM_UUID)
 const ISS_ID = encodePublicId("iss", ISS_UUID)
+const ERROR_INCIDENT_ID = encodePublicId("einc", ERROR_INCIDENT_UUID)
 
 const investigationFixture = new InvestigationDocument({
 	id: decodeInvId(INV_UUID),
@@ -71,9 +83,24 @@ const investigationFixture = new InvestigationDocument({
 	subject: new InvestigationIncidentSubject({
 		type: "incident",
 		incidentKind: "error",
-		incidentId: "inc-abc",
+		incidentId: ERROR_INCIDENT_UUID,
 	}),
-	report: null,
+	report: new AiTriageResult({
+		summary: "Checkout failures increased after a deploy.",
+		suspectedCause: "A database connection pool regression.",
+		severityAssessment: "high",
+		affectedScope: "payments checkout",
+		evidence: [
+			new AiTriageEvidence({
+				traceIds: ["0123456789abcdef0123456789abcdef"],
+				logPatterns: ["connection pool exhausted"],
+				relatedServices: ["payments", "postgres"],
+				note: "Failures begin at the deployment boundary.",
+			}),
+		],
+		suggestedActions: ["Roll back the pool change."],
+		confidence: "high",
+	}),
 	model: "claude-opus-4-8",
 	severity: "high",
 	confidence: "high",
@@ -112,6 +139,18 @@ const anomalyFixture = new AnomalyIncidentDocument({
 	reopenCount: 0,
 	lastReopenedAt: null,
 })
+
+const investigationFixtures = [
+	investigationFixture,
+	new InvestigationDocument({ ...investigationFixture, id: decodeInvId(INV_UUID_2) }),
+	new InvestigationDocument({ ...investigationFixture, id: decodeInvId(INV_UUID_3) }),
+]
+
+const anomalyFixtures = [
+	anomalyFixture,
+	new AnomalyIncidentDocument({ ...anomalyFixture, id: decodeAnomId(ANOM_UUID_2) }),
+	new AnomalyIncidentDocument({ ...anomalyFixture, id: decodeAnomId(ANOM_UUID_3) }),
+]
 
 const settingsFixture = new AnomalyDetectorSettingsDocument({
 	enabled: true,
@@ -187,20 +226,34 @@ const makeHarness = () => {
 	// over the inert stubs in ConfigResourceServiceStubsLayer.
 	const functionalStubs = Layer.mergeAll(
 		Layer.succeed(InvestigationService, {
-			listInvestigations: () =>
-				Effect.succeed(new InvestigationsListResponse({ investigations: [investigationFixture] })),
+			listInvestigations: (_org, options) => {
+				const offset = options?.offset ?? 0
+				return Effect.succeed(
+					new InvestigationsListResponse({
+						investigations: investigationFixtures.slice(offset, offset + (options?.limit ?? 100)),
+					}),
+				)
+			},
 			getInvestigation: (_org, id) =>
 				id === investigationFixture.id
 					? Effect.succeed(investigationFixture)
-					: Effect.fail(new InvestigationNotFoundError({ message: `No such investigation: '${id}'` })),
+					: Effect.fail(
+							new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
+						),
 			createInvestigation: () => Effect.succeed(investigationFixture),
 			updateStatus: () => Effect.succeed(investigationFixture),
 			submitDiagnosis: die,
 		}),
 		Layer.succeed(AnomalyDetectionService, {
 			runTick: die,
-			listIncidents: () =>
-				Effect.succeed(new AnomalyIncidentsListResponse({ incidents: [anomalyFixture] })),
+			listIncidents: (_org, options) => {
+				const offset = options?.offset ?? 0
+				return Effect.succeed(
+					new AnomalyIncidentsListResponse({
+						incidents: anomalyFixtures.slice(offset, offset + (options?.limit ?? 100)),
+					}),
+				)
+			},
 			getIncident: (_org, id) =>
 				id === anomalyFixture.id
 					? Effect.succeed(anomalyFixture)
@@ -283,7 +336,11 @@ const makeHarness = () => {
 	const { handler, dispose: disposeHandler } = HttpRouter.toWebHandler(routes, { disableLogger: true })
 	const runtime = ManagedRuntime.make(servicesLive)
 
-	const request = async (method: string, path: string, options: { token?: string; body?: unknown } = {}) => {
+	const request = async (
+		method: string,
+		path: string,
+		options: { token?: string; body?: unknown } = {},
+	) => {
 		const response = await handler(
 			new Request(`http://maple.test${path}`, {
 				method,
@@ -299,11 +356,11 @@ const makeHarness = () => {
 		return { status: response.status, body: text.length > 0 ? JSON.parse(text) : null }
 	}
 
-	const bootstrapKey = () =>
+	const bootstrapKey = (scopes?: ReadonlyArray<string>) =>
 		runtime.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ApiKeysService
-				return yield* service.create(ORG, USER, { name: "phase1-test" })
+				return yield* service.create(ORG, USER, { name: "phase1-test", scopes })
 			}),
 		)
 
@@ -325,14 +382,30 @@ describe("v2 investigations over HTTP", () => {
 		const list = await harness.request("GET", "/v2/investigations", { token: key.secret })
 		expect(list.status).toBe(200)
 		expect(list.body.object).toBe("list")
-		expect(list.body.data).toHaveLength(1)
+		expect(list.body.data).toHaveLength(3)
 		expect(list.body.data[0].id).toBe(INV_ID)
 		expect(list.body.data[0].object).toBe("investigation")
 		expect(list.body.data[0].seeded_by).toBe("system")
 		expect(list.body.data[0].subject).toEqual({
 			type: "incident",
 			incident_kind: "error",
-			incident_id: "inc-abc",
+			incident_id: ERROR_INCIDENT_ID,
+		})
+		expect(list.body.data[0].report).toEqual({
+			summary: "Checkout failures increased after a deploy.",
+			suspected_cause: "A database connection pool regression.",
+			severity_assessment: "high",
+			affected_scope: "payments checkout",
+			evidence: [
+				{
+					trace_ids: ["0123456789abcdef0123456789abcdef"],
+					log_patterns: ["connection pool exhausted"],
+					related_services: ["payments", "postgres"],
+					note: "Failures begin at the deployment boundary.",
+				},
+			],
+			suggested_actions: ["Roll back the pool change."],
+			confidence: "high",
 		})
 		expect(list.body.data[0].created_at).toBe("2026-07-15T09:12:00.000Z")
 
@@ -362,7 +435,14 @@ describe("v2 investigations over HTTP", () => {
 		// Incident subject: exercises the wire→internal subject mapper (with iss_ id).
 		const createdIncident = await harness.request("POST", "/v2/investigations", {
 			token: key.secret,
-			body: { subject: { type: "incident", incident_kind: "error", incident_id: "inc-xyz", issue_id: ISS_ID } },
+			body: {
+				subject: {
+					type: "incident",
+					incident_kind: "error",
+					incident_id: ERROR_INCIDENT_ID,
+					issue_id: ISS_ID,
+				},
+			},
 		})
 		expect(createdIncident.status).toBe(200)
 		expect(createdIncident.body.object).toBe("investigation")
@@ -371,7 +451,12 @@ describe("v2 investigations over HTTP", () => {
 		const createdFreeform = await harness.request("POST", "/v2/investigations", {
 			token: key.secret,
 			body: {
-				subject: { type: "freeform", title: "why slow", prompt: "investigate p99", context_refs: [{ kind: "service", name: "payments" }] },
+				subject: {
+					type: "freeform",
+					title: "why slow",
+					prompt: "investigate p99",
+					context_refs: [{ kind: "service", name: "payments" }],
+				},
 			},
 		})
 		expect(createdFreeform.status).toBe(200)
@@ -463,6 +548,30 @@ describe("v2 anomalies over HTTP", () => {
 	})
 })
 
+describe("v2 database-backed list pagination", () => {
+	it("continues investigations and anomalies from the requested cursor", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+
+		for (const path of ["/v2/investigations", "/v2/anomalies/incidents"]) {
+			const first = await harness.request("GET", `${path}?limit=1`, { token: key.secret })
+			expect(first.status).toBe(200)
+			expect(first.body.data).toHaveLength(1)
+			expect(first.body.has_more).toBe(true)
+			expect(first.body.next_cursor).toMatch(/^off_/)
+
+			const second = await harness.request("GET", `${path}?limit=1&cursor=${first.body.next_cursor}`, {
+				token: key.secret,
+			})
+			expect(second.status).toBe(200)
+			expect(second.body.data).toHaveLength(1)
+			expect(second.body.data[0].id).not.toBe(first.body.data[0].id)
+		}
+
+		await harness.dispose()
+	})
+})
+
 describe("v2 organization over HTTP", () => {
 	it("retrieves the org identity with wire shape", async () => {
 		const harness = makeHarness()
@@ -494,9 +603,13 @@ describe("v2 session_replays over HTTP", () => {
 		expect(search.body.has_more).toBe(false)
 		expect(search.body.next_cursor).toBeNull()
 
-		const missing = await harness.request("GET", `/v2/session_replays/${encodePublicId("srep", "sess_missing")}`, {
-			token: key.secret,
-		})
+		const missing = await harness.request(
+			"GET",
+			`/v2/session_replays/${encodePublicId("srep", "sess_missing")}`,
+			{
+				token: key.secret,
+			},
+		)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
 		await harness.dispose()
@@ -512,6 +625,51 @@ describe("v2 session_replays over HTTP", () => {
 		})
 		expect(bad.status).toBe(400)
 		expect(bad.body.error.type).toBe("invalid_request_error")
+		await harness.dispose()
+	})
+
+	it("allows read-scoped keys on search and for_trace, and rejects malformed cursors", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["session_replays:read"])
+		const window = {
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-16T00:00:00.000Z",
+		}
+
+		const search = await harness.request("POST", "/v2/session_replays/search", {
+			token: key.secret,
+			body: window,
+		})
+		expect(search.status).toBe(200)
+
+		const forTrace = await harness.request("POST", "/v2/session_replays/for_trace", {
+			token: key.secret,
+			body: { ...window, trace_id: "0123456789abcdef0123456789abcdef" },
+		})
+		expect(forTrace.status).toBe(200)
+		expect(forTrace.body).toMatchObject({ object: "list", data: [], has_more: false })
+
+		const invalidCursor = await harness.request("POST", "/v2/session_replays/for_trace", {
+			token: key.secret,
+			body: { ...window, trace_id: "0123456789abcdef0123456789abcdef", cursor: "garbage" },
+		})
+		expect(invalidCursor.status).toBe(400)
+		expect(invalidCursor.body.error.code).toBe("parameter_invalid")
+		await harness.dispose()
+	})
+
+	it("404s events and transcript when the parent session does not exist", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		const missingId = encodePublicId("srep", "sess_missing")
+
+		for (const child of ["events", "transcript"]) {
+			const response = await harness.request("GET", `/v2/session_replays/${missingId}/${child}`, {
+				token: key.secret,
+			})
+			expect(response.status).toBe(404)
+			expect(response.body.error.type).toBe("not_found_error")
+		}
 		await harness.dispose()
 	})
 })

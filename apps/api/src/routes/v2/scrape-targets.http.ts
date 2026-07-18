@@ -1,10 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ScrapeTargetResponse } from "@maple/domain/http"
-import {
-	CreateScrapeTargetRequest,
-	CurrentTenant,
-	UpdateScrapeTargetRequest,
-} from "@maple/domain/http"
+import { CreateScrapeTargetRequest, CurrentTenant, UpdateScrapeTargetRequest } from "@maple/domain/http"
 import {
 	MapleApiV2,
 	invalidRequest,
@@ -76,8 +72,10 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* service.list(tenant.orgId).pipe(Effect.mapError(mapPersistenceError))
-					const page = paginateArray(response.targets.map(toV2ScrapeTarget), query)
+					const response = yield* service
+						.list(tenant.orgId)
+						.pipe(Effect.mapError(mapPersistenceError))
+					const page = yield* paginateArray(response.targets.map(toV2ScrapeTarget), query)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -99,7 +97,9 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 							new CreateScrapeTargetRequest({
 								name: payload.name,
 								...(payload.url !== undefined ? { url: payload.url } : {}),
-								...(payload.target_type !== undefined ? { targetType: payload.target_type } : {}),
+								...(payload.target_type !== undefined
+									? { targetType: payload.target_type }
+									: {}),
 								...(payload.organization !== undefined
 									? { organization: payload.organization }
 									: {}),
@@ -112,7 +112,9 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								...(payload.scrape_interval_seconds !== undefined
 									? { scrapeIntervalSeconds: payload.scrape_interval_seconds }
 									: {}),
-								...(payload.labels_json !== undefined ? { labelsJson: payload.labels_json } : {}),
+								...(payload.labels_json !== undefined
+									? { labelsJson: payload.labels_json }
+									: {}),
 								...(payload.auth_type !== undefined ? { authType: payload.auth_type } : {}),
 								...(payload.service_name !== undefined
 									? { serviceName: payload.service_name }
@@ -149,7 +151,9 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								...(payload.scrape_interval_seconds !== undefined
 									? { scrapeIntervalSeconds: payload.scrape_interval_seconds }
 									: {}),
-								...(payload.labels_json !== undefined ? { labelsJson: payload.labels_json } : {}),
+								...(payload.labels_json !== undefined
+									? { labelsJson: payload.labels_json }
+									: {}),
 								...(payload.auth_type !== undefined ? { authType: payload.auth_type } : {}),
 								...(payload.service_name !== undefined
 									? { serviceName: payload.service_name }
@@ -207,7 +211,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 						samples_post_metric_relabeling: row.samplesPostRelabel,
 						message: row.error,
 					}))
-					const page = paginateArray(checks, query)
+					const page = yield* paginateArray(checks, query)
 					return { object: "list" as const, ...page }
 				}),
 			)

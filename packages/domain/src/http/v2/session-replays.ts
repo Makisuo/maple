@@ -26,10 +26,16 @@ const sessionReplayBaseFields = {
 		examples: ["session_replay"],
 	}),
 	start_time: Timestamp.annotate({ description: "When the session started." }),
-	end_time: Schema.NullOr(Timestamp).annotate({ description: "When the session ended, or `null` if ongoing." }),
-	duration_ms: Schema.NullOr(Schema.Number).annotate({ description: "Session wall-clock duration in ms, or `null`." }),
+	end_time: Schema.NullOr(Timestamp).annotate({
+		description: "When the session ended, or `null` if ongoing.",
+	}),
+	duration_ms: Schema.NullOr(Schema.Number).annotate({
+		description: "Session wall-clock duration in ms, or `null`.",
+	}),
 	status: Schema.String.annotate({ description: "Session status (e.g. `active`, `ended`)." }),
-	user_id: Schema.NullOr(Schema.String).annotate({ description: "The identified user, or `null` if anonymous." }),
+	user_id: Schema.NullOr(Schema.String).annotate({
+		description: "The identified user, or `null` if anonymous.",
+	}),
 	url_initial: Schema.String.annotate({ description: "The first URL of the session." }),
 	browser_name: Schema.String.annotate({ description: "Browser name." }),
 	os_name: Schema.String.annotate({ description: "Operating system name." }),
@@ -123,7 +129,9 @@ export const V2SessionReplayChunk = Schema.Struct({
 	duration_ms: Schema.Number.annotate({ description: "Duration covered by the chunk in ms." }),
 	event_count: Schema.Number.annotate({ description: "Number of rrweb events in the chunk." }),
 	byte_size: Schema.Number.annotate({ description: "Serialized size of the chunk in bytes." }),
-	is_checkpoint: Schema.Boolean.annotate({ description: "Whether the chunk is a full-snapshot checkpoint." }),
+	is_checkpoint: Schema.Boolean.annotate({
+		description: "Whether the chunk is a full-snapshot checkpoint.",
+	}),
 	events: Schema.String.annotate({
 		description: "The rrweb event array for this chunk, serialized as a JSON string.",
 	}),
@@ -140,7 +148,9 @@ export const V2SessionTranscriptEvent = Schema.Struct({
 	}),
 	timestamp: Timestamp.annotate({ description: "When the event occurred." }),
 	seq: Schema.Number.annotate({ description: "Ordinal of the event within the session." }),
-	type: Schema.String.annotate({ description: "Event type (navigation, click, network, console, error, …)." }),
+	type: Schema.String.annotate({
+		description: "Event type (navigation, click, network, console, error, …).",
+	}),
 	url: Schema.String.annotate({ description: "The page URL at the time of the event." }),
 	trace_id: Schema.NullOr(TraceId).annotate({ description: "Correlated trace ID, or `null`." }),
 	level: Schema.String.annotate({ description: "Severity/level for console and error events." }),
@@ -180,33 +190,50 @@ export type V2SessionReplayRef = Schema.Schema.Type<typeof V2SessionReplayRef>
 export const V2SessionReplaySearchParams = Schema.Struct({
 	start_time: Timestamp.annotate({ description: "Window start (ISO-8601). Required." }),
 	end_time: Timestamp.annotate({ description: "Window end (ISO-8601). Required." }),
-	service_name: Schema.optional(Schema.String.annotate({ description: "Filter by service." })),
-	browser: Schema.optional(Schema.String.annotate({ description: "Filter by browser." })),
-	country: Schema.optional(Schema.String.annotate({ description: "Filter by country." })),
-	device_type: Schema.optional(Schema.String.annotate({ description: "Filter by device type." })),
-	user_id: Schema.optional(Schema.String.annotate({ description: "Filter by identified user." })),
-	has_errors: Schema.optional(Schema.Boolean.annotate({ description: "Only sessions with (or without) errors." })),
-	search: Schema.optional(Schema.String.annotate({ description: "Free-text search over URL/user." })),
-	duration_min_ms: Schema.optional(Schema.Number.annotate({ description: "Minimum session duration in ms." })),
-	duration_max_ms: Schema.optional(Schema.Number.annotate({ description: "Maximum session duration in ms." })),
-	active_time_min_ms: Schema.optional(Schema.Number.annotate({ description: "Minimum active (non-idle) time in ms." })),
-	active_time_max_ms: Schema.optional(Schema.Number.annotate({ description: "Maximum active (non-idle) time in ms." })),
-	limit: Schema.optional(
+	service_name: Schema.optionalKey(Schema.String.annotate({ description: "Filter by service." })),
+	browser: Schema.optionalKey(Schema.String.annotate({ description: "Filter by browser." })),
+	country: Schema.optionalKey(Schema.String.annotate({ description: "Filter by country." })),
+	device_type: Schema.optionalKey(Schema.String.annotate({ description: "Filter by device type." })),
+	user_id: Schema.optionalKey(Schema.String.annotate({ description: "Filter by identified user." })),
+	has_errors: Schema.optionalKey(
+		Schema.Boolean.annotate({ description: "Only sessions with (or without) errors." }),
+	),
+	search: Schema.optionalKey(Schema.String.annotate({ description: "Free-text search over URL/user." })),
+	duration_min_ms: Schema.optionalKey(
+		Schema.Number.annotate({ description: "Minimum session duration in ms." }),
+	),
+	duration_max_ms: Schema.optionalKey(
+		Schema.Number.annotate({ description: "Maximum session duration in ms." }),
+	),
+	active_time_min_ms: Schema.optionalKey(
+		Schema.Number.annotate({ description: "Minimum active (non-idle) time in ms." }),
+	),
+	active_time_max_ms: Schema.optionalKey(
+		Schema.Number.annotate({ description: "Maximum active (non-idle) time in ms." }),
+	),
+	limit: Schema.optionalKey(
 		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })).annotate({
 			description: "Maximum number of sessions to return (1–100, default 20).",
 		}),
 	),
-	cursor: Schema.optional(Schema.String.annotate({ description: "Opaque pagination cursor from a prior response." })),
+	cursor: Schema.optionalKey(
+		Schema.String.annotate({ description: "Opaque pagination cursor from a prior response." }),
+	),
 }).annotate({
 	identifier: "SessionReplaySearchParams",
 	title: "Session replay search parameters",
 	description: "Filters, required time window, and pagination for searching session replays.",
-	examples: [wireExample({ start_time: "2026-07-15T00:00:00.000Z", end_time: "2026-07-16T00:00:00.000Z", has_errors: true })],
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-16T00:00:00.000Z",
+			has_errors: true,
+		}),
+	],
 })
 export type V2SessionReplaySearchParams = Schema.Schema.Type<typeof V2SessionReplaySearchParams>
 
 export const V2SessionReplayWindowQuery = Schema.Struct({
-	...ListQuery.fields,
 	window_start: Schema.optional(
 		Timestamp.annotate({ description: "Optional session-window start (ISO-8601) to prune partitions." }),
 	),
@@ -221,10 +248,27 @@ export const V2SessionReplayWindowQuery = Schema.Struct({
 })
 export type V2SessionReplayWindowQuery = Schema.Schema.Type<typeof V2SessionReplayWindowQuery>
 
+export const V2SessionReplayCollectionQuery = Schema.Struct({
+	...ListQuery.fields,
+	...V2SessionReplayWindowQuery.fields,
+}).annotate({
+	identifier: "SessionReplayCollectionQuery",
+	title: "Session replay collection query",
+	description: "Pagination plus an optional time window for replay child collections.",
+})
+
 export const V2SessionReplaysForTraceParams = Schema.Struct({
 	trace_id: TraceId.annotate({ description: "The trace ID to find sessions for." }),
 	start_time: Timestamp.annotate({ description: "Window start (ISO-8601)." }),
 	end_time: Timestamp.annotate({ description: "Window end (ISO-8601)." }),
+	limit: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 100 })).annotate({
+			description: "Maximum number of session references to return (1–100, default 20).",
+		}),
+	),
+	cursor: Schema.optionalKey(
+		Schema.String.annotate({ description: "Opaque pagination cursor from a prior response." }),
+	),
 }).annotate({
 	identifier: "SessionReplaysForTraceParams",
 	title: "Sessions-for-trace parameters",
@@ -291,7 +335,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 	.add(
 		HttpApiEndpoint.get("events", "/:id/events", {
 			params: { id: SessionReplayPublicId },
-			query: V2SessionReplayWindowQuery,
+			query: V2SessionReplayCollectionQuery,
 			success: SessionReplayChunkList,
 			error: [...commonErrors, V2NotFoundError],
 		}).annotateMerge(
@@ -306,7 +350,7 @@ export class V2SessionReplaysApiGroup extends HttpApiGroup.make("sessionReplays"
 	.add(
 		HttpApiEndpoint.get("transcript", "/:id/transcript", {
 			params: { id: SessionReplayPublicId },
-			query: V2SessionReplayWindowQuery,
+			query: V2SessionReplayCollectionQuery,
 			success: SessionTranscriptList,
 			error: [...commonErrors, V2NotFoundError],
 		}).annotateMerge(
