@@ -47,7 +47,6 @@ vi.mock("./errors", () => ({
 	createActorsCollection: collectionStub,
 	createOpenErrorIncidentsCollection: collectionStub,
 }))
-vi.mock("./scrape-targets", () => ({ createScrapeTargetChecksCollection: collectionStub }))
 
 // Each test wants isolated module state (generation counter + heal budget), so
 // re-import a fresh copy. Importing registry in the same epoch first hands back
@@ -119,6 +118,7 @@ describe("org-collections bounded self-heal", () => {
 		const first = mod.getOrgCollections("org_a")
 		const second = mod.getOrgCollections("org_b")
 		expect(second).not.toBe(first)
+		expect("scrapeTargetChecks" in first).toBe(false)
 
 		// No live queries attached → nothing to wait for.
 		expect(asStub(first.dashboards).cleanup).toHaveBeenCalledTimes(1)

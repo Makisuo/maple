@@ -22,7 +22,6 @@ import {
 	type ErrorIssuesCollection,
 	type OpenErrorIncidentsCollection,
 } from "./errors"
-import { createScrapeTargetChecksCollection, type ScrapeTargetChecksCollection } from "./scrape-targets"
 
 /**
  * The set of ElectricSQL-synced collections for one org. Collections are
@@ -42,7 +41,6 @@ export type OrgCollections = {
 	readonly errorIssues: ErrorIssuesCollection
 	readonly actors: ActorsCollection
 	readonly openErrorIncidents: OpenErrorIncidentsCollection
-	readonly scrapeTargetChecks: ScrapeTargetChecksCollection
 }
 
 // Single live set at a time — the app shows one org at a time, and recreating on
@@ -230,7 +228,6 @@ const scheduleOrgCollectionsCleanup = (collections: OrgCollections): void => {
 	cleanupCollectionWhenIdle(collections.errorIssues)
 	cleanupCollectionWhenIdle(collections.actors)
 	cleanupCollectionWhenIdle(collections.openErrorIncidents)
-	cleanupCollectionWhenIdle(collections.scrapeTargetChecks)
 }
 
 // Tracks the last org we resolved collections for, independent of `current`
@@ -259,7 +256,6 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 		errorIssues: createErrorIssuesCollection(orgId),
 		actors: createActorsCollection(orgId),
 		openErrorIncidents: createOpenErrorIncidentsCollection(orgId),
-		scrapeTargetChecks: createScrapeTargetChecksCollection(orgId),
 	}
 	// Tear down the previous org's shape streams after swapping so an in-flight
 	// read never resolves against the wrong org. Deferred (see

@@ -1,52 +1,43 @@
-import { ScrapeTargetChecksListResponse, type ScrapeTargetId } from "@maple/domain/http"
-import { useLiveQuery } from "@tanstack/react-db"
-import { useMemo } from "react"
-import { rowToScrapeTargetCheckDocument } from "@/lib/collections/scrape-targets"
-import {
-	getOrgCollections,
-	useActiveOrgId,
-	useCollectionsGeneration,
-} from "@/lib/collections/org-collections"
-import { Result } from "@/lib/effect-atom"
+import type { ScrapeTargetId } from "@maple/domain/http"
+import type { V2ScrapeTargetCheck } from "@maple/domain/http/v2"
+import { Effect } from "effect"
+import { Atom, Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { useIntervalRefresh } from "./use-interval-refresh"
 
-type ListError = { readonly message: string }
+const CHECKS_LIMIT = 20
+const CHECKS_REFRESH_INTERVAL_MS = 10_000
+
+export interface ScrapeTargetChecksResponse {
+	readonly checks: ReadonlyArray<V2ScrapeTargetCheck>
+}
 
 export interface ScrapeTargetChecksHook {
-	readonly result: Result.Result<ScrapeTargetChecksListResponse, ListError>
+	readonly result: Result.Result<ScrapeTargetChecksResponse, unknown>
 	readonly refresh: () => void
 }
 
-const noop = () => {}
+// One cached query atom per target. Unlike the old Electric collection this
+// fetches only the selected target's latest checks, so the settings list never
+// fans out into one HTTP request per row.
+const checksAtomFamily = Atom.family((targetId: ScrapeTargetId) =>
+	MapleApiV2AtomClient.runtime.atom(
+		MapleApiV2AtomClient.use((client) =>
+			client.scrapeTargets.listChecks({
+				params: { id: targetId },
+				query: { limit: CHECKS_LIMIT },
+			}),
+		).pipe(Effect.map((response) => ({ checks: response.data }) satisfies ScrapeTargetChecksResponse)),
+	),
+)
 
-/**
- * Live `scrape_target_checks` for one target, synced via Electric. Mirrors the
- * server's `listChecks` (newest-first, capped at `limit`) but stays current
- * without polling — replaces `MapleApiAtomClient.query("scrapeTargets",
- * "listChecks", …)`. The collection holds every check for the org; we filter to
- * the target client-side (bounded to 24h / 10k-per-target by server pruning),
- * exactly like `useAlertRuleStates` filters by rule id.
- */
-export function useScrapeTargetChecks(targetId: ScrapeTargetId, limit: number): ScrapeTargetChecksHook {
-	const orgKey = useActiveOrgId() ?? "pending"
-	const generation = useCollectionsGeneration()
-	const collection = useMemo(
-		() => getOrgCollections(orgKey).scrapeTargetChecks,
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[orgKey, generation],
-	)
+/** Latest scheduled checks for the selected target, refreshed while visible. */
+export function useScrapeTargetChecks(targetId: ScrapeTargetId): ScrapeTargetChecksHook {
+	const atom = checksAtomFamily(targetId)
+	const result = useAtomValue(atom)
+	const refresh = useAtomRefresh(atom)
 
-	const { data: rows, isLoading } = useLiveQuery((q) => q.from({ c: collection }), [collection])
+	useIntervalRefresh(refresh, { intervalMs: CHECKS_REFRESH_INTERVAL_MS, enabled: true })
 
-	const result = useMemo<Result.Result<ScrapeTargetChecksListResponse, ListError>>(() => {
-		if (isLoading && (rows?.length ?? 0) === 0) return Result.initial(true)
-		const checks = (rows ?? [])
-			.filter((row) => row.target_id === targetId)
-			// ISO timestamps order lexicographically; newest first, matching the server.
-			.sort((a, b) => (a.checked_at < b.checked_at ? 1 : a.checked_at > b.checked_at ? -1 : 0))
-			.slice(0, limit)
-			.map(rowToScrapeTargetCheckDocument)
-		return Result.success(new ScrapeTargetChecksListResponse({ checks }))
-	}, [rows, isLoading, targetId, limit])
-
-	return { result, refresh: noop }
+	return { result, refresh }
 }

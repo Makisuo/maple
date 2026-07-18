@@ -1,17 +1,13 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { ScrapeIntervalSeconds } from "@maple/domain/http"
-import type {
-	ScrapeAuthType,
-	ScrapeTargetCheckResponse,
-	ScrapeTargetChecksListResponse,
-	ScrapeTargetId,
-} from "@maple/domain/http"
-import type { V2ScrapeTarget } from "@maple/domain/http/v2"
+import type { ScrapeAuthType, ScrapeTargetId } from "@maple/domain/http"
+import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
 import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Exit, Schema } from "effect"
 import { toast } from "sonner"
 
-import { useScrapeTargetChecks } from "@/hooks/use-scrape-target-checks"
+import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
+import { type ScrapeTargetChecksResponse, useScrapeTargetChecks } from "@/hooks/use-scrape-target-checks"
 
 import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import {
@@ -69,12 +65,13 @@ import {
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatDuration, formatNumber, formatRelativeTime } from "@/lib/format"
 import { diagnoseScrapeError } from "@/lib/scrape-error-diagnosis"
+import { scheduledStatusFromChecks, scheduledStatusFromRollup } from "@/lib/scrape-target-status"
 import { catalogEntry } from "../integrations/integration-catalog"
 import { IntegrationEmptyState } from "../integrations/integration-empty-state"
 
 type ScrapeTarget = V2ScrapeTarget
-type ScrapeTargetCheck = ScrapeTargetCheckResponse
-type ScrapeTargetChecksResult = Result.Result<ScrapeTargetChecksListResponse, unknown>
+type ScrapeTargetCheck = V2ScrapeTargetCheck
+type ScrapeTargetChecksResult = Result.Result<ScrapeTargetChecksResponse, unknown>
 
 const AUTH_TYPE_LABELS: Record<ScrapeAuthType, string> = {
 	none: "None",
@@ -131,60 +128,6 @@ function checksFromResult(result: ScrapeTargetChecksResult): ScrapeTargetCheck[]
 	return Result.builder(result)
 		.onSuccess((response) => [...response.checks] as ScrapeTargetCheck[])
 		.orElse(() => [])
-}
-
-function scheduledStatus(
-	target: ScrapeTarget,
-	latestCheck: ScrapeTargetCheck | null,
-	isLoading: boolean,
-	checksUnavailable: boolean,
-) {
-	if (!target.enabled) {
-		return {
-			label: "Disabled",
-			detail: "Collector skips this target",
-			dotClass: "bg-muted-foreground/30",
-			badgeVariant: "outline" as const,
-		}
-	}
-	if (isLoading) {
-		return {
-			label: "Checking",
-			detail: "Loading scheduled history",
-			dotClass: "bg-muted-foreground/40",
-			badgeVariant: "outline" as const,
-		}
-	}
-	if (checksUnavailable) {
-		return {
-			label: "Unavailable",
-			detail: "Failed to load scheduled checks",
-			dotClass: "bg-muted-foreground/40",
-			badgeVariant: "outline" as const,
-		}
-	}
-	if (!latestCheck) {
-		return {
-			label: "No checks",
-			detail: "No scheduled scrape observed",
-			dotClass: "bg-severity-warn",
-			badgeVariant: "warning" as const,
-		}
-	}
-	if (latestCheck.success) {
-		return {
-			label: "Up",
-			detail: `Scheduled ${formatRelativeTime(latestCheck.timestamp)}`,
-			dotClass: "bg-severity-info",
-			badgeVariant: "success" as const,
-		}
-	}
-	return {
-		label: "Down",
-		detail: `Scheduled ${formatRelativeTime(latestCheck.timestamp)}`,
-		dotClass: "bg-destructive",
-		badgeVariant: "error" as const,
-	}
 }
 
 const COPY = {
@@ -246,6 +189,7 @@ export function ScrapeTargetsSection({
 	})
 	const listResult = useAtomValue(listQueryAtom)
 	const refreshTargets = useAtomRefresh(listQueryAtom)
+	useIntervalRefresh(refreshTargets, { intervalMs: 30_000, enabled: true })
 
 	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("scrapeTargets", "create"), {
 		mode: "promiseExit",
@@ -700,14 +644,7 @@ function ScrapeTargetRow({
 	onEdit: (target: ScrapeTarget) => void
 	onDelete: (target: ScrapeTarget) => void
 }) {
-	const { result: latestCheckResult } = useScrapeTargetChecks(target.id, 1)
-	const latestCheck = checksFromResult(latestCheckResult).at(0) ?? null
-	const status = scheduledStatus(
-		target,
-		latestCheck,
-		Result.isInitial(latestCheckResult),
-		Result.isFailure(latestCheckResult),
-	)
+	const status = scheduledStatusFromRollup(target)
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		if (event.key === "Enter" || event.key === " ") {
@@ -755,20 +692,6 @@ function ScrapeTargetRow({
 						<span>Last scrape {formatRelativeTime(target.last_scrape_at)}</span>
 					)}
 				</div>
-				{latestCheck?.message && !latestCheck.success && (
-					<Tooltip>
-						<TooltipTrigger
-							render={<div />}
-							className="mt-1.5 flex items-center gap-1.5 text-xs text-destructive"
-						>
-							<CircleXmarkIcon size={12} className="shrink-0" />
-							<span className="truncate">{latestCheck.message}</span>
-						</TooltipTrigger>
-						<TooltipContent className="max-w-xs font-mono text-xs">
-							{latestCheck.message}
-						</TooltipContent>
-					</Tooltip>
-				)}
 				{target.last_scrape_error && (
 					<Tooltip>
 						<TooltipTrigger
@@ -858,10 +781,10 @@ function ScrapeTargetDetails({
 	onEdit: (target: ScrapeTarget) => void
 	onDelete: (target: ScrapeTarget) => void
 }) {
-	const { result: checksResult } = useScrapeTargetChecks(target.id, 20)
+	const { result: checksResult } = useScrapeTargetChecks(target.id)
 	const checks = checksFromResult(checksResult)
 	const latestCheck = checks.at(0) ?? null
-	const status = scheduledStatus(
+	const status = scheduledStatusFromChecks(
 		target,
 		latestCheck,
 		Result.isInitial(checksResult),
@@ -952,17 +875,17 @@ function ScrapeTargetDetails({
 						<MetricBox label="Interval" value={`${target.scrape_interval_seconds}s`} />
 						<MetricBox
 							label="Duration"
-							value={latestCheck ? formatDurationSeconds(latestCheck.durationSeconds) : "-"}
+							value={latestCheck ? formatDurationSeconds(latestCheck.duration_seconds) : "-"}
 						/>
 						<MetricBox
 							label="Samples"
-							value={latestCheck ? formatOptionalCount(latestCheck.samplesScraped) : "-"}
+							value={latestCheck ? formatOptionalCount(latestCheck.samples_scraped) : "-"}
 						/>
 						<MetricBox
 							label="Post relabel"
 							value={
 								latestCheck
-									? formatOptionalCount(latestCheck.samplesPostMetricRelabeling)
+									? formatOptionalCount(latestCheck.samples_post_metric_relabeling)
 									: "-"
 							}
 						/>
@@ -1010,7 +933,7 @@ function ScrapeTargetDetails({
 							</span>
 						)}
 					</div>
-					<ChecksTable result={checksResult} checks={checks} />
+					<ScrapeTargetChecksTable result={checksResult} checks={checks} />
 				</section>
 			</div>
 		</aside>
@@ -1035,7 +958,13 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
 	)
 }
 
-function ChecksTable({ result, checks }: { result: ScrapeTargetChecksResult; checks: ScrapeTargetCheck[] }) {
+export function ScrapeTargetChecksTable({
+	result,
+	checks,
+}: {
+	result: ScrapeTargetChecksResult
+	checks: ScrapeTargetCheck[]
+}) {
 	if (Result.isInitial(result)) {
 		return (
 			<div className="space-y-2">
@@ -1071,7 +1000,7 @@ function ChecksTable({ result, checks }: { result: ScrapeTargetChecksResult; che
 			<div className="divide-y">
 				{checks.map((check) => (
 					<div
-						key={`${check.timestamp}-${check.subTargetKey ?? ""}`}
+						key={`${check.timestamp}-${check.sub_target_key ?? ""}`}
 						className="grid grid-cols-[minmax(100px,1fr)_64px_70px_72px] items-center gap-2 px-3 py-2 text-xs"
 					>
 						<div className="min-w-0">
@@ -1098,8 +1027,8 @@ function ChecksTable({ result, checks }: { result: ScrapeTargetChecksResult; che
 							)}
 							<span>{check.success ? "up" : "down"}</span>
 						</div>
-						<span className="font-mono">{formatDurationSeconds(check.durationSeconds)}</span>
-						<span className="font-mono">{formatOptionalCount(check.samplesScraped)}</span>
+						<span className="font-mono">{formatDurationSeconds(check.duration_seconds)}</span>
+						<span className="font-mono">{formatOptionalCount(check.samples_scraped)}</span>
 					</div>
 				))}
 			</div>
