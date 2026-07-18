@@ -1,16 +1,12 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import {
-	CreateScrapeTargetRequest,
-	ScrapeIntervalSeconds,
-	UpdateScrapeTargetRequest,
-} from "@maple/domain/http"
+import { ScrapeIntervalSeconds } from "@maple/domain/http"
 import type {
 	ScrapeAuthType,
 	ScrapeTargetCheckResponse,
 	ScrapeTargetChecksListResponse,
 	ScrapeTargetId,
-	ScrapeTargetResponse,
 } from "@maple/domain/http"
+import type { V2ScrapeTarget } from "@maple/domain/http/v2"
 import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { Exit, Schema } from "effect"
 import { toast } from "sonner"
@@ -70,13 +66,13 @@ import {
 	PulseIcon,
 	TrashIcon,
 } from "@/components/icons"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatDuration, formatNumber, formatRelativeTime } from "@/lib/format"
 import { diagnoseScrapeError } from "@/lib/scrape-error-diagnosis"
 import { catalogEntry } from "../integrations/integration-catalog"
 import { IntegrationEmptyState } from "../integrations/integration-empty-state"
 
-type ScrapeTarget = ScrapeTargetResponse
+type ScrapeTarget = V2ScrapeTarget
 type ScrapeTargetCheck = ScrapeTargetCheckResponse
 type ScrapeTargetChecksResult = Result.Result<ScrapeTargetChecksListResponse, unknown>
 
@@ -241,29 +237,33 @@ export function ScrapeTargetsSection({
 	const [formAuthUsername, setFormAuthUsername] = useState("")
 	const [formAuthPassword, setFormAuthPassword] = useState("")
 
-	const listQueryAtom = MapleApiAtomClient.query("scrapeTargets", "list", {
+	// v2 lists cap at 100/page; scrape targets per org are few, so a single 100-item
+	// page covers them while preserving the `scrapeTargets` reactivity-key refresh
+	// (which mutations here and the PlanetScale integration card both invalidate).
+	const listQueryAtom = MapleApiV2AtomClient.query("scrapeTargets", "list", {
+		query: { limit: 100 },
 		reactivityKeys: ["scrapeTargets"],
 	})
 	const listResult = useAtomValue(listQueryAtom)
 	const refreshTargets = useAtomRefresh(listQueryAtom)
 
-	const createMutation = useAtomSet(MapleApiAtomClient.mutation("scrapeTargets", "create"), {
+	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("scrapeTargets", "create"), {
 		mode: "promiseExit",
 	})
-	const updateMutation = useAtomSet(MapleApiAtomClient.mutation("scrapeTargets", "update"), {
+	const updateMutation = useAtomSet(MapleApiV2AtomClient.mutation("scrapeTargets", "update"), {
 		mode: "promiseExit",
 	})
-	const deleteMutation = useAtomSet(MapleApiAtomClient.mutation("scrapeTargets", "delete"), {
+	const deleteMutation = useAtomSet(MapleApiV2AtomClient.mutation("scrapeTargets", "delete"), {
 		mode: "promiseExit",
 	})
-	const probeMutation = useAtomSet(MapleApiAtomClient.mutation("scrapeTargets", "probe"), {
+	const probeMutation = useAtomSet(MapleApiV2AtomClient.mutation("scrapeTargets", "probe"), {
 		mode: "promiseExit",
 	})
 
 	const targets = Result.builder(listResult)
-		.onSuccess((response) => [...response.targets] as ScrapeTarget[])
-		.orElse(() => [])
-		.filter((target) => target.targetType === sourceFilter)
+		.onSuccess((response) => [...response.data])
+		.orElse(() => [] as ScrapeTarget[])
+		.filter((target) => target.target_type === sourceFilter)
 	const selectedTarget = targets.find((target) => target.id === selectedTargetId) ?? null
 	const copy = COPY
 	// When empty, the centered empty state owns the primary action — hide the toolbar row.
@@ -273,14 +273,14 @@ export function ScrapeTargetsSection({
 	async function handleProbe(target: ScrapeTarget) {
 		setProbingId(target.id)
 		const result = await probeMutation({
-			params: { targetId: target.id },
+			params: { id: target.id },
 			reactivityKeys: ["scrapeTargets"],
 		})
 		if (Exit.isSuccess(result)) {
 			if (result.value.success) {
 				toast.success("Connection successful")
 			} else {
-				toast.error(`Connection failed: ${result.value.lastScrapeError}`)
+				toast.error(`Connection failed: ${result.value.last_scrape_error}`)
 			}
 		} else {
 			toast.error("Failed to test connection")
@@ -304,10 +304,10 @@ export function ScrapeTargetsSection({
 	function openEditDialog(target: ScrapeTarget) {
 		setEditingTarget(target)
 		setFormName(target.name)
-		setFormServiceName(target.serviceName ?? "")
+		setFormServiceName(target.service_name ?? "")
 		setFormUrl(target.url)
-		setFormInterval(String(target.scrapeIntervalSeconds))
-		setFormAuthType(target.authType)
+		setFormInterval(String(target.scrape_interval_seconds))
+		setFormAuthType(target.auth_type)
 		setFormAuthToken("")
 		setFormAuthUsername("")
 		setFormAuthPassword("")
@@ -349,15 +349,15 @@ export function ScrapeTargetsSection({
 
 		if (editingTarget) {
 			const result = await updateMutation({
-				params: { targetId: editingTarget.id },
-				payload: new UpdateScrapeTargetRequest({
+				params: { id: editingTarget.id },
+				payload: {
 					name: formName.trim(),
-					scrapeIntervalSeconds: parsedInterval,
-					serviceName: formServiceName.trim() || null,
+					scrape_interval_seconds: parsedInterval,
+					service_name: formServiceName.trim() || null,
 					url: formUrl.trim(),
-					authType: formAuthType,
-					...(authCredentials !== null ? { authCredentials } : {}),
-				}),
+					auth_type: formAuthType,
+					...(authCredentials !== null ? { auth_credentials: authCredentials } : {}),
+				},
 				reactivityKeys: ["scrapeTargets"],
 			})
 			if (Exit.isSuccess(result)) {
@@ -368,14 +368,14 @@ export function ScrapeTargetsSection({
 			}
 		} else {
 			const result = await createMutation({
-				payload: new CreateScrapeTargetRequest({
+				payload: {
 					name: formName.trim(),
-					scrapeIntervalSeconds: parsedInterval,
-					serviceName: formServiceName.trim() || null,
+					scrape_interval_seconds: parsedInterval,
+					service_name: formServiceName.trim() || null,
 					url: formUrl.trim(),
-					authType: formAuthType,
-					...(authCredentials !== null ? { authCredentials } : {}),
-				}),
+					auth_type: formAuthType,
+					...(authCredentials !== null ? { auth_credentials: authCredentials } : {}),
+				},
 				reactivityKeys: ["scrapeTargets"],
 			})
 			if (Exit.isSuccess(result)) {
@@ -392,7 +392,7 @@ export function ScrapeTargetsSection({
 	async function handleDelete(targetId: ScrapeTargetId) {
 		setDeleteConfirmTarget(null)
 		const result = await deleteMutation({
-			params: { targetId },
+			params: { id: targetId },
 			reactivityKeys: ["scrapeTargets"],
 		})
 		if (Exit.isSuccess(result)) {
@@ -406,10 +406,10 @@ export function ScrapeTargetsSection({
 	async function handleToggleEnabled(target: ScrapeTarget) {
 		setTogglingId(target.id)
 		const result = await updateMutation({
-			params: { targetId: target.id },
-			payload: new UpdateScrapeTargetRequest({
+			params: { id: target.id },
+			payload: {
 				enabled: !target.enabled,
-			}),
+			},
 			reactivityKeys: ["scrapeTargets"],
 		})
 		if (!Exit.isSuccess(result)) {
@@ -582,7 +582,7 @@ export function ScrapeTargetsSection({
 									id="scrape-auth-token"
 									type="password"
 									placeholder={
-										editingTarget?.hasCredentials && editingTarget.authType === "bearer"
+										editingTarget?.has_credentials && editingTarget.auth_type === "bearer"
 											? "Leave blank to keep existing"
 											: "Enter bearer token"
 									}
@@ -598,8 +598,8 @@ export function ScrapeTargetsSection({
 									<Input
 										id="scrape-auth-username"
 										placeholder={
-											editingTarget?.hasCredentials &&
-											editingTarget.authType === "basic"
+											editingTarget?.has_credentials &&
+											editingTarget.auth_type === "basic"
 												? "Leave blank to keep existing"
 												: "Enter username"
 										}
@@ -613,8 +613,8 @@ export function ScrapeTargetsSection({
 										id="scrape-auth-password"
 										type="password"
 										placeholder={
-											editingTarget?.hasCredentials &&
-											editingTarget.authType === "basic"
+											editingTarget?.has_credentials &&
+											editingTarget.auth_type === "basic"
 												? "Leave blank to keep existing"
 												: "Enter password"
 										}
@@ -736,23 +736,23 @@ function ScrapeTargetRow({
 					<Badge variant={status.badgeVariant} className="shrink-0">
 						{status.label}
 					</Badge>
-					{target.serviceName && (
+					{target.service_name && (
 						<Badge variant="outline" className="shrink-0">
-							{target.serviceName}
+							{target.service_name}
 						</Badge>
 					)}
-					{target.authType !== "none" && (
+					{target.auth_type !== "none" && (
 						<Badge variant="outline" className="shrink-0">
-							{AUTH_TYPE_LABELS[target.authType] ?? target.authType}
+							{AUTH_TYPE_LABELS[target.auth_type] ?? target.auth_type}
 						</Badge>
 					)}
 				</div>
 				<div className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
 					<span className="max-w-[280px] truncate font-mono">{hostnameFromUrl(target.url)}</span>
-					<span>{target.scrapeIntervalSeconds}s interval</span>
+					<span>{target.scrape_interval_seconds}s interval</span>
 					<span>{status.detail}</span>
-					{target.lastScrapeAt && (
-						<span>Last scrape {formatRelativeTime(target.lastScrapeAt)}</span>
+					{target.last_scrape_at && (
+						<span>Last scrape {formatRelativeTime(target.last_scrape_at)}</span>
 					)}
 				</div>
 				{latestCheck?.message && !latestCheck.success && (
@@ -769,17 +769,17 @@ function ScrapeTargetRow({
 						</TooltipContent>
 					</Tooltip>
 				)}
-				{target.lastScrapeError && (
+				{target.last_scrape_error && (
 					<Tooltip>
 						<TooltipTrigger
 							render={<div />}
 							className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground"
 						>
 							<CircleInfoIcon size={12} className="shrink-0" />
-							<span className="truncate">Last scrape: {target.lastScrapeError}</span>
+							<span className="truncate">Last scrape: {target.last_scrape_error}</span>
 						</TooltipTrigger>
 						<TooltipContent className="max-w-xs font-mono text-xs">
-							{target.lastScrapeError}
+							{target.last_scrape_error}
 						</TooltipContent>
 					</Tooltip>
 				)}
@@ -821,14 +821,14 @@ function ScrapeTargetRow({
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
 						{/* Managed targets are edited/removed through the owning integration card. */}
-						<DropdownMenuItem disabled={target.managedBy != null} onClick={() => onEdit(target)}>
+						<DropdownMenuItem disabled={target.managed_by != null} onClick={() => onEdit(target)}>
 							<PencilIcon size={14} />
 							Edit
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
 							variant="destructive"
-							disabled={target.managedBy != null}
+							disabled={target.managed_by != null}
 							onClick={() => onDelete(target)}
 						>
 							<TrashIcon size={14} />
@@ -867,13 +867,13 @@ function ScrapeTargetDetails({
 		Result.isInitial(checksResult),
 		Result.isFailure(checksResult),
 	)
-	const labels = labelEntries(target.labelsJson)
+	const labels = labelEntries(target.labels_json)
 
 	// Diagnose the freshest failure: the latest failed check, falling back to the
 	// target-level rollup error. Healthy targets show no banner.
 	const failureMessage =
-		latestCheck && !latestCheck.success ? latestCheck.message : target.lastScrapeError
-	const diagnosis = diagnoseScrapeError(failureMessage, target.targetType)
+		latestCheck && !latestCheck.success ? latestCheck.message : target.last_scrape_error
+	const diagnosis = diagnoseScrapeError(failureMessage, target.target_type)
 
 	return (
 		<aside className="rounded-lg border bg-card">
@@ -898,7 +898,7 @@ function ScrapeTargetDetails({
 						variant="outline"
 						size="sm"
 						onClick={() => onEdit(target)}
-						disabled={target.managedBy != null}
+						disabled={target.managed_by != null}
 					>
 						<PencilIcon size={14} />
 						Edit
@@ -911,7 +911,7 @@ function ScrapeTargetDetails({
 						size="sm"
 						className="text-destructive"
 						onClick={() => onDelete(target)}
-						disabled={target.managedBy != null}
+						disabled={target.managed_by != null}
 					>
 						<TrashIcon size={14} />
 						Delete
@@ -949,7 +949,7 @@ function ScrapeTargetDetails({
 						Scheduled Scrape
 					</div>
 					<div className="grid grid-cols-2 gap-2 text-xs">
-						<MetricBox label="Interval" value={`${target.scrapeIntervalSeconds}s`} />
+						<MetricBox label="Interval" value={`${target.scrape_interval_seconds}s`} />
 						<MetricBox
 							label="Duration"
 							value={latestCheck ? formatDurationSeconds(latestCheck.durationSeconds) : "-"}
@@ -975,15 +975,15 @@ function ScrapeTargetDetails({
 						Target
 					</div>
 					<div className="divide-y rounded-md border bg-background/35 text-xs">
-						<DetailRow label="Service" value={target.serviceName ?? target.name} />
+						<DetailRow label="Service" value={target.service_name ?? target.name} />
 						<DetailRow label="Instance" value={hostnameFromUrl(target.url)} />
 						<DetailRow
 							label="Auth"
-							value={AUTH_TYPE_LABELS[target.authType] ?? target.authType}
+							value={AUTH_TYPE_LABELS[target.auth_type] ?? target.auth_type}
 						/>
 						<DetailRow label="Target ID" value={<span className="font-mono">{target.id}</span>} />
-						<DetailRow label="Created" value={formatDateTime(target.createdAt)} />
-						<DetailRow label="Updated" value={formatDateTime(target.updatedAt)} />
+						<DetailRow label="Created" value={formatDateTime(target.created_at)} />
+						<DetailRow label="Updated" value={formatDateTime(target.updated_at)} />
 					</div>
 					{labels.length > 0 && (
 						<div className="flex flex-wrap gap-1.5 pt-1">
