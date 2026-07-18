@@ -6,6 +6,7 @@ export {
 	defaultLocalUrl,
 	hostedDashboardUrl,
 	hostedUiOrigin,
+	normalizeHost,
 	resolveAdvertiseHost,
 	resolveBindHost,
 	serverProbeUrl,

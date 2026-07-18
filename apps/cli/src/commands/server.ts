@@ -31,6 +31,7 @@ import {
 	type DirtyStorePolicy,
 	hostedDashboardUrl,
 	hostedUiOrigin,
+	normalizeHost,
 	resolveAdvertiseHost,
 	resolveBindHost,
 	serverProbeUrl,
@@ -54,7 +55,19 @@ const prettyPath = (p: string): string => {
 
 /** Public origin of the deployed local-mode dashboard SPA. Overridable for
  *  testing against staging (`local-staging.maple.dev`). */
-const remoteUiUrl = (): string => process.env.MAPLE_LOCAL_UI_URL?.trim() || "https://local.maple.dev"
+const remoteUiUrl = (): Effect.Effect<string, ServerError> => {
+	const configured = process.env.MAPLE_LOCAL_UI_URL?.trim() || "https://local.maple.dev"
+	return Effect.try({
+		try: () => {
+			hostedUiOrigin(configured)
+			return configured
+		},
+		catch: (error) =>
+			new ServerError({
+				message: `invalid MAPLE_LOCAL_UI_URL: ${error instanceof Error ? error.message : String(error)}`,
+			}),
+	})
+}
 
 /** The startup banner shown once the server is listening. `dashboardUrl` is the
  *  URL the user should open (the auto-updating `local.maple.dev` by default, or
@@ -289,10 +302,12 @@ export const start = Command.make("start", {
 		Effect.fnUntraced(function* (a) {
 			const fs = yield* FileSystem
 			const dataDir = Option.getOrUndefined(a.dataDir) ?? defaultDataDir()
+			const bindHost = normalizeHost(a.host)
+			const hostedUiUrl = yield* remoteUiUrl()
 			const advertiseHost = resolveAdvertiseHost(
 				Option.getOrUndefined(a.advertiseHost),
 				process.env.MAPLE_LOCAL_ADVERTISE_HOST,
-				a.host,
+				bindHost,
 			)
 			const pidPath = pidFilePath(dataDir)
 
@@ -398,7 +413,7 @@ export const start = Command.make("start", {
 			// Detached: spawn the same command without --background and exit.
 			if (a.background)
 				return yield* startDetached(
-					a.host,
+					bindHost,
 					advertiseHost,
 					a.port,
 					dataDir,
@@ -433,15 +448,15 @@ export const start = Command.make("start", {
 					)
 
 					const { port: boundPort } = yield* startServer({
-						hostname: a.host,
+						hostname: bindHost,
 						browserHosts: Array.from(
 							new Set(
-								[a.host, connectionHostForBindHost(a.host), advertiseHost].map(
+								[bindHost, connectionHostForBindHost(bindHost), advertiseHost].map(
 									canonicalUrlHostname,
 								),
 							),
 						),
-						corsOrigin: hostedUiOrigin(remoteUiUrl()),
+						corsOrigin: hostedUiOrigin(hostedUiUrl),
 						port: a.port,
 						dataDir,
 						configFile: Option.getOrUndefined(a.chdbConfigFile),
@@ -465,7 +480,7 @@ export const start = Command.make("start", {
 						fs.remove(pidPath, { force: true }).pipe(Effect.ignore),
 					)
 
-					const bindAddr = serverUrl(a.host, boundPort)
+					const bindAddr = serverUrl(bindHost, boundPort)
 					const connectAddr = serverUrl(advertiseHost, boundPort)
 					// Default: send users to the auto-updating UI on local.maple.dev (it
 					// reaches this binary on loopback via the encoded ?port=). --offline:
@@ -474,7 +489,7 @@ export const start = Command.make("start", {
 						? assets !== undefined
 							? `${connectAddr}/`
 							: undefined
-						: hostedDashboardUrl(remoteUiUrl(), boundPort)
+						: hostedDashboardUrl(hostedUiUrl, boundPort)
 					yield* Effect.sync(() =>
 						process.stdout.write(
 							startBanner(bindAddr, connectAddr, dataDir, dashboardUrl, a.offline),

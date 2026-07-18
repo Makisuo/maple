@@ -1,9 +1,10 @@
 import { describe, it } from "@effect/vitest"
-import { deepStrictEqual, strictEqual } from "node:assert"
+import { deepStrictEqual, strictEqual, throws } from "node:assert"
 import {
 	buildDetachedChildArgs,
 	defaultLocalUrl,
 	hostedDashboardUrl,
+	hostedUiOrigin,
 	type DirtyStorePolicy,
 	resolveAdvertiseHost,
 	resolveBindHost,
@@ -16,18 +17,21 @@ describe("local server bind host", () => {
 		strictEqual(resolveBindHost(undefined), "127.0.0.1")
 		strictEqual(resolveBindHost("  "), "127.0.0.1")
 		strictEqual(resolveBindHost(" 0.0.0.0 "), "0.0.0.0")
+		strictEqual(resolveBindHost(" [::] "), "::")
 	})
 
 	it("formats IPv6 URLs and probes wildcard binds through loopback", () => {
 		strictEqual(serverUrl("::1", 4318), "http://[::1]:4318")
 		strictEqual(serverProbeUrl("0.0.0.0", 4318), "http://127.0.0.1:4318")
 		strictEqual(serverProbeUrl("::", 4318), "http://[::1]:4318")
+		strictEqual(serverProbeUrl("[::]", 4318), "http://[::1]:4318")
 	})
 
 	it("separates the bind address from the client-facing address", () => {
 		strictEqual(resolveAdvertiseHost(undefined, undefined, "0.0.0.0"), "127.0.0.1")
 		strictEqual(resolveAdvertiseHost(undefined, " srvmini2.lan ", "0.0.0.0"), "srvmini2.lan")
 		strictEqual(resolveAdvertiseHost(" 192.0.2.10 ", "ignored", "0.0.0.0"), "192.0.2.10")
+		strictEqual(resolveAdvertiseHost("  ", " [::1] ", "0.0.0.0"), "::1")
 	})
 
 	it("derives the normal CLI target from the configured bind host", () => {
@@ -42,6 +46,11 @@ describe("local server bind host", () => {
 			hostedDashboardUrl("https://local-staging.maple.dev/preview?channel=next", 4418),
 			"https://local-staging.maple.dev/preview?channel=next&port=4418&maple-local-api=loopback",
 		)
+	})
+
+	it("reports malformed hosted UI URLs clearly", () => {
+		throws(() => hostedUiOrigin("not a url"), /invalid hosted UI URL.*absolute HTTP\(S\) URL/)
+		throws(() => hostedUiOrigin("file:///tmp/local-ui"), /invalid hosted UI URL.*absolute HTTP\(S\) URL/)
 	})
 })
 

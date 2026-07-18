@@ -56,6 +56,8 @@ export const isBrowserOriginAllowed = (
 	// both sides to be loopback so this exception cannot weaken LAN DNS-rebinding
 	// protection.
 	if (isLoopbackHostname(originUrl.hostname) && isLoopbackHostname(requestUrl.hostname)) return true
+	// Bun constructs requestUrl from the client's Host header. Keep that behavior:
+	// this comparison is the load-bearing DNS-rebinding check for non-loopback UI traffic.
 	// Compare host (including port), not scheme: a TLS reverse proxy may preserve
 	// Host while forwarding to this HTTP listener. Restrict the hostname to the
 	// bind/connect/advertised set so a DNS-rebinding origin cannot claim itself as
@@ -63,13 +65,15 @@ export const isBrowserOriginAllowed = (
 	return originUrl.host === requestUrl.host && browserHosts.includes(originUrl.hostname)
 }
 
-export const corsHeadersForOrigin = (
+/** Build CORS headers for an origin that has already passed
+ * `isBrowserOriginAllowed`. Echoing it preserves browser OTLP ingest between
+ * loopback aliases and ports without restoring wildcard CORS. */
+export const corsHeadersForAllowedOrigin = (
 	origin: string | null,
-	corsOrigin: string,
 ): Readonly<Record<string, string>> | undefined =>
-	origin === corsOrigin
+	origin !== null
 		? {
-				"access-control-allow-origin": corsOrigin,
+				"access-control-allow-origin": origin,
 				"access-control-allow-methods": "GET, POST, OPTIONS",
 				"access-control-allow-headers": "content-type, content-encoding",
 				"access-control-allow-private-network": "true",
@@ -358,7 +362,7 @@ const makeFetch =
 		if (!isBrowserOriginAllowed(url, origin, options.corsOrigin, options.browserHosts)) {
 			return text("browser origin not allowed", 403)
 		}
-		const corsHeaders = corsHeadersForOrigin(origin, options.corsOrigin)
+		const corsHeaders = corsHeadersForAllowedOrigin(origin)
 		const respond = (response: Response): Response => withCors(response, corsHeaders)
 		if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
 		if (url.pathname === "/health") return respond(text("OK"))

@@ -1,7 +1,7 @@
 import { describe, it } from "@effect/vitest"
 import { deepStrictEqual, rejects, strictEqual } from "node:assert"
 import { checkpointQueryUrl } from "../src/server/checkpoints"
-import { corsHeadersForOrigin, isBrowserOriginAllowed } from "../src/server/serve"
+import { corsHeadersForAllowedOrigin, isBrowserOriginAllowed } from "../src/server/serve"
 import { serverProbeUrl } from "../src/commands/server-args"
 
 describe("local listener addresses", () => {
@@ -119,14 +119,25 @@ describe("browser origin policy", () => {
 		)
 	})
 
-	it("returns an exact hosted-origin CORS policy instead of a wildcard", () => {
-		deepStrictEqual(corsHeadersForOrigin(hostedOrigin, hostedOrigin), {
+	it("echoes any allowed origin instead of a wildcard", () => {
+		deepStrictEqual(corsHeadersForAllowedOrigin(hostedOrigin), {
 			"access-control-allow-origin": hostedOrigin,
 			"access-control-allow-methods": "GET, POST, OPTIONS",
 			"access-control-allow-headers": "content-type, content-encoding",
 			"access-control-allow-private-network": "true",
 			vary: "Origin",
 		})
-		strictEqual(corsHeadersForOrigin("https://attacker.example", hostedOrigin), undefined)
+		const loopbackOrigin = "http://localhost:3000"
+		strictEqual(
+			isBrowserOriginAllowed(new URL("http://127.0.0.1:4318/v1/traces"), loopbackOrigin, hostedOrigin, [
+				"127.0.0.1",
+			]),
+			true,
+		)
+		strictEqual(
+			corsHeadersForAllowedOrigin(loopbackOrigin)?.["access-control-allow-origin"],
+			loopbackOrigin,
+		)
+		strictEqual(corsHeadersForAllowedOrigin(null), undefined)
 	})
 })
