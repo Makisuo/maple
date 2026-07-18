@@ -1078,12 +1078,7 @@ export interface AlertsServiceShape {
 	>
 	readonly listIncidents: (
 		orgId: OrgId,
-		options?: {
-			readonly status?: AlertIncidentStatus
-			readonly ruleId?: AlertRuleId
-			readonly limit?: number
-			readonly offset?: number
-		},
+		options?: ListAlertIncidentsOptions,
 	) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
 	readonly getIncident: (
 		orgId: OrgId,
@@ -1097,6 +1092,7 @@ export interface AlertsServiceShape {
 			readonly since?: string
 			readonly until?: string
 			readonly limit?: number
+			readonly offset?: number
 		},
 	) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
 	readonly listDeliveryEvents: (
@@ -1114,6 +1110,13 @@ export interface AlertsServiceShape {
 		// inside the per-rule Effect.catch in the scheduler tick, so the tick
 		// itself never surfaces them.
 	>
+}
+
+export interface ListAlertIncidentsOptions {
+	readonly status?: AlertIncidentStatus
+	readonly ruleId?: AlertRuleId
+	readonly limit?: number
+	readonly offset?: number
 }
 
 export class AlertsService extends Context.Service<AlertsService, AlertsServiceShape>()(
@@ -1894,7 +1897,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						.select()
 						.from(alertDestinations)
 						.where(eq(alertDestinations.orgId, orgId))
-						.orderBy(desc(alertDestinations.updatedAt)),
+						.orderBy(desc(alertDestinations.createdAt), desc(alertDestinations.id)),
 				)
 
 				const destinations = rows.map((row) =>
@@ -2500,7 +2503,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						.select()
 						.from(alertRules)
 						.where(eq(alertRules.orgId, orgId))
-						.orderBy(desc(alertRules.updatedAt)),
+						.orderBy(desc(alertRules.createdAt), desc(alertRules.id)),
 				)
 
 				// Surface the most recent evaluation error per rule. `lastError` is
@@ -3018,9 +3021,15 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 			})
 
-			const listIncidents: AlertsServiceShape["listIncidents"] = Effect.fn(
-				"AlertsService.listIncidents",
-			)(function* (orgId, options = {}) {
+			const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (
+				orgId: OrgId,
+				options: ListAlertIncidentsOptions = {},
+			) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					...(options.status !== undefined ? { status: options.status } : {}),
+					...(options.ruleId !== undefined ? { ruleId: options.ruleId } : {}),
+				})
 				const conditions = [
 					eq(alertIncidents.orgId, orgId),
 					options.status ? eq(alertIncidents.status, options.status) : undefined,
@@ -3035,31 +3044,34 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						.limit(options.limit ?? 100)
 						.offset(options.offset ?? 0),
 				)
+				yield* Effect.annotateCurrentSpan("result.rowCount", rows.length)
 				return new AlertIncidentsListResponse({
 					incidents: rows.map(rowToIncidentDocument),
 				})
 			})
 
-			const getIncident: AlertsServiceShape["getIncident"] = Effect.fn("AlertsService.getIncident")(
-				function* (orgId, incidentId) {
-					const rows = yield* dbExecute((db) =>
-						db
-							.select()
-							.from(alertIncidents)
-							.where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.id, incidentId)))
-							.limit(1),
-					)
-					const incident = rows[0]
-					if (incident === undefined) {
-						return yield* new AlertNotFoundError({
-							message: `No such alert incident: '${incidentId}'`,
-							resourceType: "alert_incident",
-							resourceId: incidentId,
-						})
-					}
-					return rowToIncidentDocument(incident)
-				},
-			)
+			const getIncident = Effect.fn("AlertsService.getIncident")(function* (
+				orgId: OrgId,
+				incidentId: AlertIncidentId,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, incidentId })
+				const rows = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(alertIncidents)
+						.where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.id, incidentId)))
+						.limit(1),
+				)
+				const incident = rows[0]
+				if (incident === undefined) {
+					return yield* new AlertNotFoundError({
+						message: `No such alert incident: '${incidentId}'`,
+						resourceType: "alert_incident",
+						resourceId: incidentId,
+					})
+				}
+				return rowToIncidentDocument(incident)
+			})
 
 			const toTinybirdSqlDateTime64 = (iso: string) => {
 				const d = new Date(iso)
@@ -3076,6 +3088,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					readonly since?: string
 					readonly until?: string
 					readonly limit?: number
+					readonly offset?: number
 				},
 			) {
 				// Verify the rule exists and belongs to this org before querying Tinybird.
@@ -3107,6 +3120,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const compiled = CH.compile(
 					CH.listRuleChecksQuery({
 						limit,
+						offset: Math.max(Math.trunc(options.offset ?? 0), 0),
 						groupKey: hasGroupKey ? options.groupKey : undefined,
 						since: since ?? undefined,
 						until: until ?? undefined,

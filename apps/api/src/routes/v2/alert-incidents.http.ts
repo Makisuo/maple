@@ -2,12 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { AlertIncidentDocument } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertIncident } from "@maple/domain/http/v2"
-import {
-	LIST_LIMIT_DEFAULT,
-	MapleApiV2,
-	decodeOffsetCursorEffect,
-	encodeOffsetCursor,
-} from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
@@ -43,24 +38,20 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const limit = query.limit ?? LIST_LIMIT_DEFAULT
-					const offset = yield* decodeOffsetCursorEffect(query.cursor)
-					const response = yield* alerts
-						.listIncidents(tenant.orgId, {
-							...(query.status !== undefined ? { status: query.status } : {}),
-							...(query.rule_id !== undefined ? { ruleId: query.rule_id } : {}),
-							limit: limit + 1,
-							offset,
-						})
-						.pipe(Effect.mapError(mapAlertError))
-					const items = response.incidents.map(toV2Incident)
-					const hasMore = items.length > limit
-					return {
-						object: "list" as const,
-						data: hasMore ? items.slice(0, limit) : items,
-						has_more: hasMore,
-						next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
-					}
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						alerts
+							.listIncidents(tenant.orgId, {
+								...(query.status !== undefined ? { status: query.status } : {}),
+								...(query.rule_id !== undefined ? { ruleId: query.rule_id } : {}),
+								limit,
+								offset,
+							})
+							.pipe(
+								mapAlertError("incident_list"),
+								Effect.map((response) => response.incidents.map(toV2Incident)),
+							),
+					)
+					return { object: "list" as const, ...page }
 				}),
 			)
 			.handle("retrieve", ({ params }) =>
@@ -68,7 +59,7 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 					const tenant = yield* CurrentTenant.Context
 					const incident = yield* alerts
 						.getIncident(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapAlertError))
+						.pipe(mapAlertError("incident_retrieve"))
 					return toV2Incident(incident)
 				}),
 			)

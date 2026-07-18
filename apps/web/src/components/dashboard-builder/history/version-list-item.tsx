@@ -1,5 +1,6 @@
 import { cn } from "@maple/ui/lib/utils"
-import type { DashboardVersionChangeKind, DashboardVersionSummary } from "@maple/domain/http"
+import type { DashboardVersionChangeKind } from "@maple/domain/http"
+import type { V2DashboardVersion } from "@maple/domain/http/v2"
 import { formatRelativeTime } from "@/lib/format"
 import { ArrowPathIcon } from "@/components/icons"
 
@@ -46,7 +47,7 @@ function actorInitials(userId: string): string {
 }
 
 interface VersionListItemProps {
-	version: DashboardVersionSummary
+	version: V2DashboardVersion
 	isPreviewing: boolean
 	isCurrent: boolean
 	onPreview: () => void

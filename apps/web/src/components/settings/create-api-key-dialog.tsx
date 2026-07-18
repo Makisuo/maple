@@ -55,7 +55,7 @@ const SCOPE_FAMILIES = [
 	{ id: "ingest_keys", label: "Ingest keys" },
 	{ id: "attribute_mappings", label: "Attribute mappings" },
 	{ id: "scrape_targets", label: "Scrape targets" },
-	{ id: "recommendations", label: "Recommendations" },
+	{ id: "instrumentation", label: "Recommendations" },
 	{ id: "investigations", label: "Investigations" },
 	{ id: "anomalies", label: "Anomalies" },
 	{ id: "session_replays", label: "Session replays" },

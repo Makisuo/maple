@@ -3,6 +3,7 @@ import { CurrentTenant, RoleName } from "@maple/domain/http"
 import {
 	AuthorizationV2,
 	authenticationError,
+	dependencyUnavailable,
 	permissionError,
 	requiredScopeForRequest,
 	scopeAllows,
@@ -49,11 +50,13 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 					const request = yield* HttpServerRequest.HttpServerRequest
 
 					const token = getBearerToken(request.headers)
-					const apiKeyResolved = yield* apiKeys.resolveByBearer(token).pipe(
-						Effect.mapError(() =>
-							authenticationError("api_key_invalid", "API key validation failed"),
-						),
-					)
+					const apiKeyResolved = yield* apiKeys
+						.resolveByBearer(token)
+						.pipe(
+							Effect.catchTag("@maple/http/errors/ApiKeyLookupPersistenceError", () =>
+								Effect.fail(dependencyUnavailable("api_key_lookup_unavailable")),
+							),
+						)
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
@@ -87,11 +90,8 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 					}
 
 					const tenant = yield* resolveTenant(request.headers).pipe(
-						Effect.mapError((error) =>
-							authenticationError(
-								"invalid_credentials",
-								error.message || "Invalid or missing credentials",
-							),
+						Effect.mapError(() =>
+							authenticationError("invalid_credentials", "Invalid or missing credentials."),
 						),
 					)
 					yield* annotateAuthSpan("session", { orgId: tenant.orgId, userId: tenant.userId })

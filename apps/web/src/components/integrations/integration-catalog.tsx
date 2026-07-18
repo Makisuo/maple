@@ -13,7 +13,7 @@ import {
 } from "@/components/icons"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { scrapeTargetsListAtom } from "@/lib/services/atoms/scrape-target-atoms"
 
 export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warpstream" | "hazel" | "github"
 
@@ -119,12 +119,7 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
-	const scrapeResult = useAtomValue(
-		MapleApiV2AtomClient.query("scrapeTargets", "list", {
-			query: { limit: 100 },
-			reactivityKeys: ["scrapeTargets"],
-		}),
-	)
+	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
 	const planetscaleResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
 			reactivityKeys: ["planetscaleIntegrationStatus"],

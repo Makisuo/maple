@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { QueryEngineAlertReducer, QueryEngineNoDataBehavior } from "../../query-engine"
-import { IsoDateTimeString, PostgresTransactionId, UserId } from "../../primitives"
+import { PostgresTransactionId, UserId } from "../../primitives"
 import {
 	AlertCheckStatus,
 	AlertComparator,
@@ -21,6 +21,7 @@ import {
 	V2NotFoundError,
 	V2PermissionError,
 	V2ServiceUnavailableError,
+	V2UpstreamError,
 } from "./errors"
 import { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
 
@@ -236,7 +237,7 @@ export const V2AlertRuleMutationResponse = Schema.Struct({
 	identifier: "AlertRuleMutationResponse",
 	title: "Alert rule mutation response",
 	description:
-		"The alert rule state after a create or update. The optional `txid` is an internal dashboard reconciliation token; API consumers should ignore it.",
+		"The alert rule state after a create or update. `txid` is optional reconciliation metadata for ElectricSQL-integrated clients; other public API consumers do not need it.",
 	examples: [wireExample({ ...alertRuleExample, txid: "81234" })],
 })
 export type V2AlertRuleMutationResponse = Schema.Schema.Type<typeof V2AlertRuleMutationResponse>
@@ -432,10 +433,10 @@ export type V2AlertRuleTestResult = Schema.Schema.Type<typeof V2AlertRuleTestRes
 
 export const V2AlertRulePreviewParams = Schema.Struct({
 	rule: V2AlertRuleCreateParams,
-	start_time: IsoDateTimeString.annotate({
+	start_time: Timestamp.annotate({
 		description: "Start of the preview range (ISO-8601 UTC), e.g. `2026-07-14T00:00:00.000Z`.",
 	}),
-	end_time: IsoDateTimeString.annotate({
+	end_time: Timestamp.annotate({
 		description: "End of the preview range (ISO-8601 UTC), e.g. `2026-07-15T00:00:00.000Z`.",
 	}),
 }).annotate({
@@ -611,12 +612,12 @@ const ChecksQuery = Schema.Struct({
 		}),
 	),
 	since: Schema.optional(
-		IsoDateTimeString.annotate({
+		Timestamp.annotate({
 			description: "Only return checks recorded at or after this time (ISO-8601 UTC).",
 		}),
 	),
 	until: Schema.optional(
-		IsoDateTimeString.annotate({
+		Timestamp.annotate({
 			description: "Only return checks recorded before this time (ISO-8601 UTC).",
 		}),
 	),
@@ -626,7 +627,7 @@ const ChecksQuery = Schema.Struct({
 	description: "Pagination plus optional group/time filters for a rule's check history.",
 })
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError, V2UpstreamError] as const
 
 const AlertRuleList = ListOf(V2AlertRule).annotate({
 	identifier: "AlertRuleList",
@@ -736,7 +737,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "previewAlertRule",
 				summary: "Preview an alert rule",
 				description:
-					"Replays a rule definition over a historical range and returns the per-window observations and would-have-fired spans. Read-only (sends nothing). Requires the `alerts:write` scope (the request carries a rule definition).",
+					"Replays a rule definition over a historical range and returns the per-window observations and would-have-fired spans. Read-only (sends nothing). Requires the `alerts:read` scope.",
 			}),
 		),
 	)

@@ -105,12 +105,18 @@ export function RecommendedMappingsSection() {
 	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "create"), {
 		mode: "promiseExit",
 	})
-	const dismissMutation = useAtomSet(MapleApiV2AtomClient.mutation("recommendations", "dismiss"), {
-		mode: "promiseExit",
-	})
-	const reopenMutation = useAtomSet(MapleApiV2AtomClient.mutation("recommendations", "reopen"), {
-		mode: "promiseExit",
-	})
+	const dismissMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "dismiss"),
+		{
+			mode: "promiseExit",
+		},
+	)
+	const reopenMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "reopen"),
+		{
+			mode: "promiseExit",
+		},
+	)
 
 	const issues = Result.builder(listResult)
 		.onSuccess((r) => [...r.data])

@@ -14,16 +14,14 @@ import {
 	CurrentTenant,
 } from "@maple/domain/http"
 import {
-	LIST_LIMIT_DEFAULT,
 	MapleApiV2,
-	decodeOffsetCursorEffect,
-	encodeOffsetCursor,
-	notFound,
+	dependencyUnavailable,
+	paginateOffsetQuery,
 	permissionError,
-	serviceUnavailable,
+	resourceNotFound,
 } from "@maple/domain/http/v2"
 import type { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "@maple/domain/http/v2"
-import { Effect } from "effect"
+import { Effect, Match } from "effect"
 import { requireAdmin } from "../../lib/auth"
 import { AnomalyDetectionService } from "../../services/AnomalyDetectionService"
 import { ErrorsService } from "../../services/ErrorsService"
@@ -83,25 +81,25 @@ const toV2Settings = (s: AnomalyDetectorSettingsDocument): V2AnomalySettings => 
 })
 
 /** Service tagged errors → v2 envelope errors (no 404). */
-const mapCommonError = (error: { readonly message: string }) => serviceUnavailable(error.message)
+const mapCommonError = () => dependencyUnavailable("anomaly_operation_unavailable")
 
 /** Service tagged errors → v2 envelope errors (incident/linked-issue 404s). */
-const mapWith404 = (error: { readonly _tag: string; readonly message: string }) => {
-	switch (error._tag) {
-		case "@maple/http/anomalies/AnomalyIncidentNotFoundError":
-			return notFound(error.message, "id")
-		case "@maple/http/anomalies/AnomalyLinkedIssueNotFoundError":
-			return notFound(error.message, "issue_id")
-		default:
-			return serviceUnavailable(error.message)
-	}
-}
+const mapWith404 = (error: { readonly _tag: string; readonly message: string }) =>
+	Match.value(error._tag).pipe(
+		Match.when("@maple/http/anomalies/AnomalyIncidentNotFoundError", () =>
+			resourceNotFound("anomaly_incident", "No such anomaly incident."),
+		),
+		Match.when("@maple/http/anomalies/AnomalyLinkedIssueNotFoundError", () =>
+			resourceNotFound("error_issue", "No such error issue.", "issue_id"),
+		),
+		Match.orElse(() => dependencyUnavailable("anomaly_operation_unavailable")),
+	)
 
 /** Settings mutation: forbidden → 403, else 503. */
 const mapSettingsError = (error: { readonly _tag: string; readonly message: string }) =>
 	error._tag === "@maple/http/anomalies/AnomalyForbiddenError"
 		? permissionError("insufficient_permissions", error.message)
-		: serviceUnavailable(error.message)
+		: dependencyUnavailable("anomaly_settings_update_unavailable")
 
 export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies", (handlers) =>
 	Effect.gen(function* () {
@@ -125,44 +123,41 @@ export const HttpV2AnomaliesLive = HttpApiBuilder.group(MapleApiV2, "anomalies",
 					deploymentEnv: incident.deploymentEnv,
 				})
 				.pipe(
-					Effect.catch((error) =>
+					Effect.tapError((error) =>
 						Effect.logWarning("Failed to record anomaly link event").pipe(
-							Effect.annotateLogs({ issueId, action, message: error.message }),
+							Effect.annotateLogs({ issueId, action, errorTag: error._tag }),
 						),
 					),
+					Effect.ignore,
 				)
 
 		return handlers
 			.handle("listIncidents", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const limit = query.limit ?? LIST_LIMIT_DEFAULT
-					const offset = yield* decodeOffsetCursorEffect(query.cursor)
-					const response = yield* anomalies
-						.listIncidents(tenant.orgId, {
-							...(query.status !== undefined ? { status: query.status } : {}),
-							...(query.signal_type !== undefined ? { signalType: query.signal_type } : {}),
-							...(query.service !== undefined ? { service: query.service } : {}),
-							...(query.deployment_env !== undefined
-								? { deploymentEnv: query.deployment_env }
-								: {}),
-							...(query.error_issue_id !== undefined
-								? { errorIssueId: query.error_issue_id }
-								: {}),
-							...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
-							...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
-							limit: limit + 1,
-							offset,
-						})
-						.pipe(Effect.mapError(mapCommonError))
-					const items = response.incidents.map(toV2Incident)
-					const hasMore = items.length > limit
-					return {
-						object: "list" as const,
-						data: hasMore ? items.slice(0, limit) : items,
-						has_more: hasMore,
-						next_cursor: hasMore ? encodeOffsetCursor(offset + limit) : null,
-					}
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						anomalies
+							.listIncidents(tenant.orgId, {
+								...(query.status !== undefined ? { status: query.status } : {}),
+								...(query.signal_type !== undefined ? { signalType: query.signal_type } : {}),
+								...(query.service_name !== undefined ? { service: query.service_name } : {}),
+								...(query.deployment_env !== undefined
+									? { deploymentEnv: query.deployment_env }
+									: {}),
+								...(query.error_issue_id !== undefined
+									? { errorIssueId: query.error_issue_id }
+									: {}),
+								...(query.start_time !== undefined ? { startTime: query.start_time } : {}),
+								...(query.end_time !== undefined ? { endTime: query.end_time } : {}),
+								limit,
+								offset,
+							})
+							.pipe(
+								Effect.mapError(mapCommonError),
+								Effect.map((response) => response.incidents.map(toV2Incident)),
+							),
+					)
+					return { object: "list" as const, ...page }
 				}),
 			)
 			.handle("getIncident", ({ params }) =>

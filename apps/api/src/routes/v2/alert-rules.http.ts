@@ -4,6 +4,7 @@ import {
 	AlertRulePreviewRequest,
 	AlertRuleUpsertRequest,
 	CurrentTenant,
+	IsoDateTimeString,
 	QueryBuilderQueryDraftSchema,
 } from "@maple/domain/http"
 import type {
@@ -15,10 +16,18 @@ import type {
 	V2AlertRuleUpdateParams,
 	V2InvalidRequestError,
 } from "@maple/domain/http/v2"
-import { MapleApiV2, invalidRequest, notFound, paginateArray } from "@maple/domain/http/v2"
+import {
+	MapleApiV2,
+	invalidRequest,
+	paginateArray,
+	paginateOffsetQuery,
+	resourceNotFound,
+} from "@maple/domain/http/v2"
 import { Effect, Schema } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
+
+const decodeIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
 
 const toV2Rule = (doc: AlertRuleDocument): V2AlertRule => ({
 	id: doc.id,
@@ -242,9 +251,10 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 
 		const findRule = (orgId: Parameters<typeof alerts.listRules>[0], ruleId: AlertRuleDocument["id"]) =>
 			Effect.gen(function* () {
-				const response = yield* alerts.listRules(orgId).pipe(Effect.mapError(mapAlertError))
+				const response = yield* alerts.listRules(orgId).pipe(mapAlertError("rule_list"))
 				const rule = response.rules.find((doc) => doc.id === ruleId)
-				if (rule === undefined) return yield* Effect.fail(notFound("No such alert_rule.", "id"))
+				if (rule === undefined)
+					return yield* Effect.fail(resourceNotFound("alert_rule", "No such alert rule."))
 				return rule
 			})
 
@@ -252,9 +262,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts
-						.listRules(tenant.orgId)
-						.pipe(Effect.mapError(mapAlertError))
+					const response = yield* alerts.listRules(tenant.orgId).pipe(mapAlertError("rule_list"))
 					const page = yield* paginateArray(response.rules.map(toV2Rule), query)
 					return { object: "list" as const, ...page }
 				}),
@@ -272,7 +280,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const request = yield* toUpsertRequest(payload)
 					const created = yield* alerts
 						.createRule(tenant.orgId, tenant.userId, tenant.roles, request)
-						.pipe(Effect.mapError(mapAlertError))
+						.pipe(mapAlertError("rule_create"))
 					return toV2RuleMutationResponse(created)
 				}),
 			)
@@ -283,7 +291,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const request = yield* mergeUpsertRequest(current, payload)
 					const updated = yield* alerts
 						.updateRule(tenant.orgId, tenant.userId, tenant.roles, params.id, request)
-						.pipe(Effect.mapError(mapAlertError))
+						.pipe(mapAlertError("rule_update"))
 					return toV2RuleMutationResponse(updated)
 				}),
 			)
@@ -292,7 +300,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* alerts
 						.deleteRule(tenant.orgId, tenant.roles, params.id)
-						.pipe(Effect.mapError(mapAlertError))
+						.pipe(mapAlertError("rule_delete"))
 					return {
 						id: deleted.id,
 						object: "alert_rule" as const,
@@ -307,7 +315,7 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 					const rule = yield* toUpsertRequest(payload.rule)
 					const result = yield* alerts
 						.testRule(tenant.orgId, tenant.userId, tenant.roles, rule, payload.send_notification)
-						.pipe(Effect.mapError(mapAlertError))
+						.pipe(mapAlertError("rule_test"))
 					return {
 						object: "alert_rule.test_result" as const,
 						status: result.status,
@@ -329,26 +337,31 @@ export const HttpV2AlertRulesLive = HttpApiBuilder.group(MapleApiV2, "alertRules
 							tenant.orgId,
 							new AlertRulePreviewRequest({
 								rule,
-								startTime: payload.start_time,
-								endTime: payload.end_time,
+								startTime: decodeIsoDateTime(payload.start_time),
+								endTime: decodeIsoDateTime(payload.end_time),
 							}),
 						)
-						.pipe(Effect.mapError(mapAlertError))
+						.pipe(mapAlertError("rule_preview"))
 					return toV2PreviewResult(preview)
 				}),
 			)
 			.handle("checks", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts
-						.listRuleChecks(tenant.orgId, params.id, {
-							...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
-							...(query.since !== undefined ? { since: query.since } : {}),
-							...(query.until !== undefined ? { until: query.until } : {}),
-							limit: 2000,
-						})
-						.pipe(Effect.mapError(mapAlertError))
-					const page = yield* paginateArray(response.checks.map(toV2Check), query)
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						alerts
+							.listRuleChecks(tenant.orgId, params.id, {
+								...(query.group_key !== undefined ? { groupKey: query.group_key } : {}),
+								...(query.since !== undefined ? { since: query.since } : {}),
+								...(query.until !== undefined ? { until: query.until } : {}),
+								limit,
+								offset,
+							})
+							.pipe(
+								mapAlertError("rule_checks_list"),
+								Effect.map((response) => response.checks.map(toV2Check)),
+							),
+					)
 					return { object: "list" as const, ...page }
 				}),
 			)

@@ -5,6 +5,7 @@ import {
 	HazelChannelId,
 	HazelOrganizationId,
 	PostgresTransactionId,
+	UserId,
 } from "../../primitives"
 import { AlertDestinationType, MAX_EMAIL_RECIPIENTS } from "../alerts"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
@@ -15,6 +16,7 @@ import {
 	V2NotFoundError,
 	V2PermissionError,
 	V2ServiceUnavailableError,
+	V2UpstreamError,
 } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
@@ -33,7 +35,7 @@ const OptionalNonEmptyString = Schema.optionalKey(NonEmptyString)
  * each id to the member's email via the auth provider at save time, so API
  * consumers can never route alerts to arbitrary addresses.
  */
-const MemberUserIdList = Schema.Array(NonEmptyString).check(
+const MemberUserIdList = Schema.Array(UserId).check(
 	Schema.isMinLength(1),
 	Schema.isMaxLength(MAX_EMAIL_RECIPIENTS),
 )
@@ -369,7 +371,7 @@ export const V2AlertDestinationTestResult = Schema.Struct({
 })
 export type V2AlertDestinationTestResult = Schema.Schema.Type<typeof V2AlertDestinationTestResult>
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError, V2UpstreamError] as const
 
 const AlertDestinationList = ListOf(V2AlertDestination).annotate({
 	identifier: "AlertDestinationList",

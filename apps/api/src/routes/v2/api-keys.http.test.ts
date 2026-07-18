@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -11,7 +11,11 @@ import { AuthService } from "../../services/AuthService"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AlertsServiceStubLayer, AllV2GroupLayersLive, ConfigResourceServiceStubsLayer } from "./v2-test-support"
+import {
+	AlertsServiceStubLayer,
+	AllV2GroupLayersLive,
+	ConfigResourceServiceStubsLayer,
+} from "./v2-test-support"
 
 /**
  * End-to-end HTTP tests for the v2 pilot: a real router (auth middleware, v2
@@ -99,6 +103,7 @@ const makeHarness = () => {
 	return {
 		request,
 		bootstrapKey,
+		closeDatabase: () => testDb.close(),
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -130,6 +135,20 @@ describe("v2 api_keys over HTTP", () => {
 		const { status, body } = await harness.request("GET", "/v2/api_keys")
 		expect(status).toBe(401)
 		expect(body.error.type).toBe("authentication_error")
+		await harness.dispose()
+	})
+
+	it("returns a sanitized 503 when API-key lookup storage is unavailable", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		await harness.closeDatabase()
+		const { status, body } = await harness.request("GET", "/v2/api_keys", { token: key.secret })
+		expect(status).toBe(503)
+		expect(body.error).toEqual({
+			type: "api_error",
+			code: "api_key_lookup_unavailable",
+			message: "A service required for this operation is temporarily unavailable; retry with backoff.",
+		})
 		await harness.dispose()
 	})
 
@@ -203,6 +222,7 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(malformed.status).toBe(400)
 		expect(malformed.body.error.type).toBe("invalid_request_error")
+		expect(malformed.body.error.param).toBe("id")
 		expect(malformed.body.error.code).toBe("parameter_invalid")
 
 		// valid key_ encoding of a UUID that doesn't exist
@@ -211,7 +231,7 @@ describe("v2 api_keys over HTTP", () => {
 		const missing = await harness.request("GET", `/v2/api_keys/${ghost}`, { token: root.secret })
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
-		expect(missing.body.error.code).toBe("resource_missing")
+		expect(missing.body.error.code).toBe("api_key_not_found")
 		await harness.dispose()
 	})
 

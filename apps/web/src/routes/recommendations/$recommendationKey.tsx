@@ -118,12 +118,18 @@ function RecommendationDetailPage() {
 	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "create"), {
 		mode: "promiseExit",
 	})
-	const dismissMutation = useAtomSet(MapleApiV2AtomClient.mutation("recommendations", "dismiss"), {
-		mode: "promiseExit",
-	})
-	const reopenMutation = useAtomSet(MapleApiV2AtomClient.mutation("recommendations", "reopen"), {
-		mode: "promiseExit",
-	})
+	const dismissMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "dismiss"),
+		{
+			mode: "promiseExit",
+		},
+	)
+	const reopenMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "reopen"),
+		{
+			mode: "promiseExit",
+		},
+	)
 
 	const [busy, setBusy] = useState<BusyAction>(null)
 
@@ -264,8 +270,8 @@ function Summary({ issue }: { issue: V2Recommendation }) {
 			<>
 				Your spans emit both <code className={MONO}>{issue.source_key}</code> and{" "}
 				<code className={MONO}>{issue.canonical_key}</code>. Standardize on{" "}
-				<code className={MONO}>{issue.canonical_key}</code> in your SDK — an ingest mapping can't merge
-				them because the canonical key already exists on your spans.
+				<code className={MONO}>{issue.canonical_key}</code> in your SDK — an ingest mapping can't
+				merge them because the canonical key already exists on your spans.
 			</>
 		)
 	} else if (issue.kind === "naming") {
@@ -345,8 +351,9 @@ function CautionCallout({ issue, isApplyable }: { issue: V2Recommendation; isApp
 	const text =
 		isApplyable && issue.canonical_key ? (
 			<>
-				Applying creates an ingest mapping that copies <code className={MONO}>{issue.source_key}</code>{" "}
-				→ <code className={MONO}>{issue.canonical_key}</code> on newly ingested spans. Existing spans
+				Applying creates an ingest mapping that copies{" "}
+				<code className={MONO}>{issue.source_key}</code> →{" "}
+				<code className={MONO}>{issue.canonical_key}</code> on newly ingested spans. Existing spans
 				aren't rewritten, and the mapping never overwrites a target that already exists.
 			</>
 		) : (

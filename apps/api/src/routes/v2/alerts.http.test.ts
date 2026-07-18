@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -55,11 +55,11 @@ const warehouseStub: WarehouseQueryServiceShape = {
 	},
 }
 
-const makeHarness = () => {
+const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStub) => {
 	const testDb = createTestDb(createdDbs)
 	const configLive = testConfig()
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
-	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseStub)
+	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseService)
 	const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 	const bucketCacheLive = BucketCacheService.layer.pipe(Layer.provide(edgeCacheLive))
 	const queryEngineLive = QueryEngineService.layer.pipe(
@@ -231,7 +231,10 @@ describe("v2 alerts over HTTP", () => {
 		// A destination referenced by a rule cannot be deleted.
 		const conflicted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(conflicted.status).toBe(409)
-		expect(conflicted.body.error).toMatchObject({ type: "conflict_error", code: "resource_in_use" })
+		expect(conflicted.body.error).toMatchObject({
+			type: "conflict_error",
+			code: "alert_destination_in_use",
+		})
 
 		const ruleDeleted = await harness.request("DELETE", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(ruleDeleted.status).toBe(200)
@@ -244,8 +247,79 @@ describe("v2 alerts over HTTP", () => {
 
 		const missing = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(missing.status).toBe(404)
-		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "resource_missing" })
+		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "alert_rule_not_found" })
 
+		await harness.dispose()
+	})
+
+	it("paginates alert checks beyond the former 2,000-row window", async () => {
+		const checkRows = Array.from({ length: 2_005 }, (_, index) => {
+			const timestamp = new Date(Date.UTC(2026, 0, 1) + (2_005 - index) * 1_000).toISOString()
+			return {
+				timestamp,
+				groupKey: `service=api-${String(index).padStart(4, "0")}`,
+				status: "healthy",
+				signalType: "error_rate",
+				comparator: "gt",
+				threshold: 0.05,
+				observedValue: 0.01,
+				sampleCount: 100,
+				windowMinutes: 5,
+				windowStart: timestamp,
+				windowEnd: timestamp,
+				consecutiveBreaches: 0,
+				consecutiveHealthy: 1,
+				incidentId: null,
+				incidentTransition: "none",
+				evaluationDurationMs: 8,
+				errorMessage: null,
+				errorCategory: "",
+			}
+		})
+		const pagedWarehouse: WarehouseQueryServiceShape = {
+			...warehouseStub,
+			compiledQuery: (_tenant, compiled, options) => {
+				if (options?.context !== "listAlertChecks") return compiled.decodeRows([]).pipe(Effect.orDie)
+				const match = /LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i.exec(compiled.sql)
+				const limit = Number(match?.[1] ?? 100)
+				const offset = Number(match?.[2] ?? 0)
+				return compiled.decodeRows(checkRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+			},
+		}
+		const harness = makeHarness(pagedWarehouse)
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const destination = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Pagination hook",
+			url: "https://example.com/hooks/pagination",
+		})
+		expect(destination.status).toBe(200)
+		const created = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Pagination rule",
+			severity: "warning",
+			signal_type: "error_rate",
+			comparator: "gt",
+			threshold: 0.05,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		expect(created.status, JSON.stringify(created.body)).toBe(200)
+
+		let cursor: string | null = null
+		const seen = new Set<string>()
+		do {
+			const suffix = cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`
+			const page = await harness.request(
+				"GET",
+				`/v2/alerts/rules/${created.body.id}/checks?limit=100${suffix}`,
+				key.secret,
+			)
+			expect(page.status).toBe(200)
+			for (const check of page.body.data) seen.add(`${check.timestamp}:${check.group_key}`)
+			cursor = page.body.next_cursor
+		} while (cursor !== null)
+
+		expect(seen.size).toBe(2_005)
 		await harness.dispose()
 	})
 

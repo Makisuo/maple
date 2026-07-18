@@ -43,7 +43,7 @@ export const recommendationIssuesListAtom = MapleApiV2AtomClient.runtime.atom(
 		const data: V2Recommendation[] = []
 		let cursor: string | undefined
 		for (let page = 0; page < MAX_PAGES; page++) {
-			const response = yield* client.recommendations.list({
+			const response = yield* client.instrumentationRecommendations.list({
 				query: { limit: PAGE_LIMIT, ...(cursor !== undefined ? { cursor } : {}) },
 			})
 			for (const recommendation of response.data) data.push(recommendation)

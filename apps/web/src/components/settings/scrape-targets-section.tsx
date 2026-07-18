@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { type ScrapeTargetChecksResponse, useScrapeTargetChecks } from "@/hooks/use-scrape-target-checks"
+import { scrapeTargetsListAtom } from "@/lib/services/atoms/scrape-target-atoms"
 
 import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import {
@@ -180,13 +181,7 @@ export function ScrapeTargetsSection({
 	const [formAuthUsername, setFormAuthUsername] = useState("")
 	const [formAuthPassword, setFormAuthPassword] = useState("")
 
-	// v2 lists cap at 100/page; scrape targets per org are few, so a single 100-item
-	// page covers them while preserving the `scrapeTargets` reactivity-key refresh
-	// (which mutations here and the PlanetScale integration card both invalidate).
-	const listQueryAtom = MapleApiV2AtomClient.query("scrapeTargets", "list", {
-		query: { limit: 100 },
-		reactivityKeys: ["scrapeTargets"],
-	})
+	const listQueryAtom = scrapeTargetsListAtom
 	const listResult = useAtomValue(listQueryAtom)
 	const refreshTargets = useAtomRefresh(listQueryAtom)
 	useIntervalRefresh(refreshTargets, { intervalMs: 30_000, enabled: true })
@@ -221,6 +216,7 @@ export function ScrapeTargetsSection({
 			reactivityKeys: ["scrapeTargets"],
 		})
 		if (Exit.isSuccess(result)) {
+			refreshTargets()
 			if (result.value.success) {
 				toast.success("Connection successful")
 			} else {
@@ -305,6 +301,7 @@ export function ScrapeTargetsSection({
 				reactivityKeys: ["scrapeTargets"],
 			})
 			if (Exit.isSuccess(result)) {
+				refreshTargets()
 				toast.success("Scrape target updated")
 				setDialogOpen(false)
 			} else {
@@ -323,6 +320,7 @@ export function ScrapeTargetsSection({
 				reactivityKeys: ["scrapeTargets"],
 			})
 			if (Exit.isSuccess(result)) {
+				refreshTargets()
 				toast.success("Scrape target created")
 				setDialogOpen(false)
 				setSelectedTargetId(result.value.id)
@@ -340,6 +338,7 @@ export function ScrapeTargetsSection({
 			reactivityKeys: ["scrapeTargets"],
 		})
 		if (Exit.isSuccess(result)) {
+			refreshTargets()
 			toast.success("Scrape target deleted")
 			if (selectedTargetId === targetId) setSelectedTargetId(null)
 		} else {
@@ -358,6 +357,8 @@ export function ScrapeTargetsSection({
 		})
 		if (!Exit.isSuccess(result)) {
 			toast.error("Failed to update scrape target")
+		} else {
+			refreshTargets()
 		}
 		setTogglingId(null)
 	}

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -67,6 +67,7 @@ const ACTOR_UUID = "66666666-6666-4666-8666-666666666666"
 const ERROR_INCIDENT_UUID = "77777777-7777-4777-8777-777777777777"
 const INV_UUID_2 = "88888888-8888-4888-8888-888888888888"
 const INV_UUID_3 = "99999999-9999-4999-8999-999999999999"
+const CORRUPT_INV_UUID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 const ANOM_UUID_2 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const ANOM_UUID_3 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
@@ -76,6 +77,7 @@ const ANOM_ID = encodePublicId("anom", ANOM_UUID)
 const MISSING_ANOM_ID = encodePublicId("anom", MISSING_ANOM_UUID)
 const ISS_ID = encodePublicId("iss", ISS_UUID)
 const ERROR_INCIDENT_ID = encodePublicId("einc", ERROR_INCIDENT_UUID)
+const CORRUPT_INV_ID = encodePublicId("inv", CORRUPT_INV_UUID)
 
 const investigationFixture = new InvestigationDocument({
 	id: decodeInvId(INV_UUID),
@@ -112,6 +114,16 @@ const investigationFixture = new InvestigationDocument({
 	createdAt: decodeIso("2026-07-15T09:12:00.000Z"),
 	diagnosedAt: decodeIso("2026-07-15T09:12:42.000Z"),
 	updatedAt: decodeIso("2026-07-15T09:12:42.000Z"),
+})
+
+const corruptInvestigationFixture = new InvestigationDocument({
+	...investigationFixture,
+	id: decodeInvId(CORRUPT_INV_UUID),
+	subject: new InvestigationIncidentSubject({
+		type: "incident",
+		incidentKind: "error",
+		incidentId: "legacy-invalid-incident-id",
+	}),
 })
 
 const anomalyFixture = new AnomalyIncidentDocument({
@@ -218,7 +230,7 @@ const testConfig = () =>
 const ORG = Schema.decodeUnknownSync(OrgId)("org_phase1_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_phase1_e2e")
 
-const makeHarness = () => {
+const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStub) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 
@@ -237,9 +249,11 @@ const makeHarness = () => {
 			getInvestigation: (_org, id) =>
 				id === investigationFixture.id
 					? Effect.succeed(investigationFixture)
-					: Effect.fail(
-							new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
-						),
+					: id === corruptInvestigationFixture.id
+						? Effect.succeed(corruptInvestigationFixture)
+						: Effect.fail(
+								new InvestigationNotFoundError({ message: `No such investigation: '${id}'` }),
+							),
 			createInvestigation: () => Effect.succeed(investigationFixture),
 			updateStatus: () => Effect.succeed(investigationFixture),
 			submitDiagnosis: die,
@@ -314,7 +328,7 @@ const makeHarness = () => {
 				}),
 			delete: die,
 		}),
-		Layer.succeed(WarehouseQueryService, warehouseStub),
+		Layer.succeed(WarehouseQueryService, warehouseService),
 	)
 
 	const servicesLive = Layer.mergeAll(
@@ -390,6 +404,7 @@ describe("v2 investigations over HTTP", () => {
 			type: "incident",
 			incident_kind: "error",
 			incident_id: ERROR_INCIDENT_ID,
+			issue_id: null,
 		})
 		expect(list.body.data[0].report).toEqual({
 			summary: "Checkout failures increased after a deploy.",
@@ -415,6 +430,21 @@ describe("v2 investigations over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("sanitizes a corrupt legacy investigation subject", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		const response = await harness.request("GET", `/v2/investigations/${CORRUPT_INV_ID}`, {
+			token: key.secret,
+		})
+		expect(response.status).toBe(503)
+		expect(response.body.error).toMatchObject({
+			type: "api_error",
+			code: "investigation_subject_decode_failed",
+		})
+		expect(JSON.stringify(response.body)).not.toContain("legacy-invalid-incident-id")
+		await harness.dispose()
+	})
+
 	it("maps a missing investigation to not_found_error", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey()
@@ -424,7 +454,7 @@ describe("v2 investigations over HTTP", () => {
 		})
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
-		expect(missing.body.error.code).toBe("resource_missing")
+		expect(missing.body.error.code).toBe("investigation_not_found")
 		await harness.dispose()
 	})
 
@@ -538,7 +568,7 @@ describe("v2 anomalies over HTTP", () => {
 		expect(linked.body.id).toBe(ANOM_ID)
 
 		// API-key tenants are `root` → the admin gate passes.
-		const updated = await harness.request("PUT", "/v2/anomalies/settings", {
+		const updated = await harness.request("PATCH", "/v2/anomalies/settings", {
 			token: key.secret,
 			body: { sensitivity: "high" },
 		})
@@ -655,6 +685,61 @@ describe("v2 session_replays over HTTP", () => {
 		})
 		expect(invalidCursor.status).toBe(400)
 		expect(invalidCursor.body.error.code).toBe("parameter_invalid")
+		await harness.dispose()
+	})
+
+	it("paginates transcripts beyond the query engine's old 100-row default", async () => {
+		const transcriptRows = Array.from({ length: 105 }, (_, seq) => ({
+			timestamp: `2026-07-15T09:12:${String(seq % 60).padStart(2, "0")}.000Z`,
+			seq,
+			type: seq % 2 === 0 ? "navigation" : "network",
+			url: "https://example.com",
+			traceId: "",
+			level: "",
+			message: "",
+			targetSelector: "",
+			targetText: "",
+			netMethod: seq % 2 === 0 ? "" : "GET",
+			netUrl: seq % 2 === 0 ? "" : "https://example.com/api",
+			netStatus: seq % 2 === 0 ? 0 : 200,
+			netDurationMs: seq % 2 === 0 ? 0 : 12,
+			errorStack: "",
+		}))
+		const transcriptWarehouse: WarehouseQueryServiceShape = {
+			...warehouseStub,
+			compiledQuery: (_tenant, compiled, options) => {
+				if (options?.context !== "v2SessionTranscript") {
+					return compiled.decodeRows([]).pipe(Effect.orDie)
+				}
+				const match = /LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i.exec(compiled.sql)
+				const limit = Number(match?.[1] ?? 100)
+				const offset = Number(match?.[2] ?? 0)
+				return compiled.decodeRows(transcriptRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+			},
+		}
+		const harness = makeHarness(transcriptWarehouse)
+		const key = await harness.bootstrapKey()
+		const sessionId = encodePublicId("srep", "sess_105_events")
+
+		const first = await harness.request("GET", `/v2/session_replays/${sessionId}/transcript?limit=100`, {
+			token: key.secret,
+		})
+		expect(first.status).toBe(200)
+		expect(first.body.data).toHaveLength(100)
+		expect(first.body.has_more).toBe(true)
+		expect(first.body.data[0].level).toBeNull()
+		expect(first.body.data[0].net_status).toBeNull()
+
+		const second = await harness.request(
+			"GET",
+			`/v2/session_replays/${sessionId}/transcript?limit=100&cursor=${encodeURIComponent(first.body.next_cursor)}`,
+			{ token: key.secret },
+		)
+		expect(second.status).toBe(200)
+		expect(second.body.data).toHaveLength(5)
+		expect(second.body.data[0].seq).toBe(100)
+		expect(second.body.has_more).toBe(false)
+		expect(second.body.next_cursor).toBeNull()
 		await harness.dispose()
 	})
 

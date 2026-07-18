@@ -30,7 +30,7 @@ const SCOPE_FAMILY_ROWS = [
 		label: "Scrape targets",
 		description: "Prometheus/PlanetScale scrape targets, probes, and checks",
 	},
-	{ id: "recommendations", label: "Recommendations", description: "Instrumentation recommendations" },
+	{ id: "instrumentation", label: "Recommendations", description: "Instrumentation recommendations" },
 	{
 		id: "investigations",
 		label: "Investigations",
@@ -83,11 +83,14 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 						<div className="space-y-1">
 							<CardTitle>API Reference</CardTitle>
 							<CardDescription>
-								The Maple v2 API is a resource-oriented REST interface — snake_case JSON, prefixed
-								object IDs, cursor-paginated lists, and scoped API keys.
+								The Maple v2 API is a resource-oriented REST interface — snake_case JSON,
+								prefixed object IDs, cursor-paginated lists, and scoped API keys.
 							</CardDescription>
 						</div>
-						<Button size="sm" render={<a href={docsUrl} target="_blank" rel="noopener noreferrer" />}>
+						<Button
+							size="sm"
+							render={<a href={docsUrl} target="_blank" rel="noopener noreferrer" />}
+						>
 							<CodeIcon data-icon="inline-start" size={14} />
 							Open API reference
 						</Button>
@@ -134,16 +137,22 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 						Restricted keys grant <code className="font-mono text-xs">read</code> or{" "}
 						<code className="font-mono text-xs">write</code> access per resource family (
 						<code className="font-mono text-xs">write</code> implies{" "}
-						<code className="font-mono text-xs">read</code>). A key without scopes has full access.
+						<code className="font-mono text-xs">read</code>). A key without scopes has full
+						access.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<div className="divide-y rounded-md border">
 						{SCOPE_FAMILY_ROWS.map((family) => (
-							<div key={family.id} className="flex items-center justify-between gap-4 px-3 py-2.5">
+							<div
+								key={family.id}
+								className="flex items-center justify-between gap-4 px-3 py-2.5"
+							>
 								<div className="min-w-0 space-y-0.5">
 									<div className="text-sm font-medium">{family.label}</div>
-									<div className="text-muted-foreground truncate text-xs">{family.description}</div>
+									<div className="text-muted-foreground truncate text-xs">
+										{family.description}
+									</div>
 								</div>
 								<div className="flex shrink-0 items-center gap-1.5">
 									<Badge variant="outline" className="font-mono text-[11px]">

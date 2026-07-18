@@ -3,6 +3,7 @@ import {
 	ApiKeyId,
 	type ApiKeyKind,
 	ApiKeyCreatedResponse,
+	ApiKeyLookupPersistenceError,
 	ApiKeyNotFoundError,
 	ApiKeyPersistenceError,
 	ApiKeyResponse,
@@ -300,7 +301,11 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				return Option.none<ResolvedApiKey>()
 			}
 
-			const resolved = yield* resolveByKey(bearerToken)
+			const resolved = yield* resolveByKey(bearerToken).pipe(
+				Effect.catchTag("@maple/http/errors/ApiKeyPersistenceError", (error) =>
+					Effect.fail(new ApiKeyLookupPersistenceError({ message: error.message, cause: error })),
+				),
+			)
 			if (Option.isSome(resolved)) {
 				yield* touchLastUsed(resolved.value.keyId).pipe(Effect.ignore, Effect.forkDetach)
 			}

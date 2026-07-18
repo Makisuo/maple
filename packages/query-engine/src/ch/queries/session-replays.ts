@@ -232,7 +232,7 @@ export function sessionReplaysListQuery(
 				}
 				return conds
 			})
-			.orderBy(["startTime", "desc"])
+			.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 			.limit(limit)
 			.offset(opts.offset ?? 0)
 			.format("JSON")
@@ -242,7 +242,7 @@ export function sessionReplaysListQuery(
 	// (never reads session_events).
 	if (!needsDurationFilter && !needsActiveFilter) {
 		return base
-			.orderBy(["startTime", "desc"])
+			.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 			.limit(limit)
 			.offset(opts.offset ?? 0)
 			.format("JSON")
@@ -290,7 +290,7 @@ export function sessionReplaysListQuery(
 					opts.activeTimeMaxMs != null ? activeMs.lte(opts.activeTimeMaxMs) : undefined,
 				]
 			})
-			.orderBy(["startTime", "desc"])
+			.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 			.limit(limit)
 			.offset(opts.offset ?? 0)
 			.format("JSON")

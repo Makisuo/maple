@@ -12,6 +12,7 @@ import { V2OrganizationApiGroup } from "./organization"
 import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
+import { V2UnexpectedErrors } from "./auth"
 
 /**
  * The Maple v2 public API (see docs/api-v2.md).
@@ -39,6 +40,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2AnomaliesApiGroup)
 	.add(V2OrganizationApiGroup)
 	.add(V2SessionReplaysApiGroup)
+	.middleware(V2UnexpectedErrors)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Maple API",

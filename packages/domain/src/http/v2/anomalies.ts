@@ -1,5 +1,6 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
+import { UserId } from "../../primitives"
 import {
 	AnomalyIncidentSeverity,
 	AnomalyIncidentStatus,
@@ -195,7 +196,7 @@ export const V2AnomalySettings = Schema.Struct({
 	updated_at: Schema.NullOr(Timestamp).annotate({
 		description: "When settings were last updated, or `null`.",
 	}),
-	updated_by: Schema.NullOr(Schema.String).annotate({
+	updated_by: Schema.NullOr(UserId).annotate({
 		description: "The `user_…` who last updated settings, or `null`.",
 	}),
 }).annotate({
@@ -251,7 +252,7 @@ export const V2AnomalyIncidentsListQuery = Schema.Struct({
 	...ListQuery.fields,
 	status: Schema.optional(AnomalyIncidentStatus.annotate({ description: "Filter by incident status." })),
 	signal_type: Schema.optional(AnomalySignalType.annotate({ description: "Filter by signal type." })),
-	service: Schema.optional(Schema.String.annotate({ description: "Filter by service name." })),
+	service_name: Schema.optional(Schema.String.annotate({ description: "Filter by service name." })),
 	deployment_env: Schema.optional(
 		Schema.String.annotate({ description: "Filter by deployment environment." }),
 	),
@@ -380,7 +381,7 @@ export class V2AnomaliesApiGroup extends HttpApiGroup.make("anomalies")
 		),
 	)
 	.add(
-		HttpApiEndpoint.put("updateSettings", "/settings", {
+		HttpApiEndpoint.patch("updateSettings", "/settings", {
 			payload: V2AnomalySettingsUpdateParams,
 			success: V2AnomalySettings,
 			error: [...commonErrors, V2PermissionError],

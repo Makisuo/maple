@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { OrgId, UserId } from "@maple/domain/http"
-import { MapleApiV2 } from "@maple/domain/http/v2"
+import { OrgId, ScrapeTargetId, UserId } from "@maple/domain/http"
+import { decodePublicId, MapleApiV2 } from "@maple/domain/http/v2"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
 import type { WarehouseQueryServiceShape } from "../../lib/WarehouseQueryService"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
@@ -139,10 +139,30 @@ const makeHarness = () => {
 				return yield* service.create(ORG, USER, { name: "config-test", scopes })
 			}),
 		)
+	const seedScrapeChecks = (publicId: string, count: number) => {
+		const internalId = decodePublicId("scrp", publicId)
+		if (internalId === null) throw new Error(`Invalid scrape target public ID: ${publicId}`)
+		const targetId = Schema.decodeUnknownSync(ScrapeTargetId)(internalId)
+		const now = Date.now()
+		return runtime.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ScrapeTargetsService
+				yield* service.recordScrapeResults(
+					Array.from({ length: count }, (_, index) => ({
+						targetId,
+						scrapedAt: now - index * 1_000,
+						error: null,
+						durationMs: index,
+					})),
+				)
+			}),
+		)
+	}
 
 	return {
 		request,
 		bootstrapKey,
+		seedScrapeChecks,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -224,7 +244,7 @@ describe("v2 attribute_mappings over HTTP", () => {
 		)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
-		expect(missing.body.error.code).toBe("resource_missing")
+		expect(missing.body.error.code).toBe("attribute_mapping_not_found")
 		await harness.dispose()
 	})
 })
@@ -276,7 +296,7 @@ describe("v2 scrape_targets over HTTP", () => {
 			token: key.secret,
 			body: {
 				name: "payments prometheus",
-				url: "https://payments.internal:9090/metrics",
+				url: "https://example.com:1/metrics",
 				target_type: "prometheus",
 				scrape_interval_seconds: 60,
 			},
@@ -318,6 +338,41 @@ describe("v2 scrape_targets over HTTP", () => {
 		})
 		expect(deleted.status).toBe(200)
 		expect(deleted.body).toEqual({ id: created.body.id, object: "scrape_target", deleted: true })
+		await harness.dispose()
+	})
+
+	it("paginates scrape checks beyond the former 200-row window", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		const created = await harness.request("POST", "/v2/scrape_targets", {
+			token: key.secret,
+			body: {
+				name: "pagination prometheus",
+				url: "https://example.com:1/metrics",
+				target_type: "prometheus",
+				scrape_interval_seconds: 60,
+			},
+		})
+		expect(created.status).toBe(200)
+		await harness.seedScrapeChecks(created.body.id, 205)
+
+		let cursor: string | null = null
+		const seen = new Set<string>()
+		do {
+			const suffix = cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`
+			const page = await harness.request(
+				"GET",
+				`/v2/scrape_targets/${created.body.id}/checks?limit=100${suffix}`,
+				{ token: key.secret },
+			)
+			expect(page.status).toBe(200)
+			for (const check of page.body.data) {
+				seen.add(`${check.timestamp}:${check.duration_seconds}`)
+			}
+			cursor = page.body.next_cursor
+		} while (cursor !== null)
+
+		expect(seen.size).toBe(205)
 		await harness.dispose()
 	})
 
@@ -381,6 +436,24 @@ describe("v2 instrumentation recommendations over HTTP", () => {
 			token: oldFamily.secret,
 		})
 		expect(denied.status).toBe(403)
+		await harness.dispose()
+	})
+})
+
+describe("v2 unexpected-error envelope", () => {
+	it("sanitizes route defects without exposing their message", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		const response = await harness.request("GET", "/v2/organization", { token: key.secret })
+		expect(response.status).toBe(500)
+		expect(response.body).toEqual({
+			error: {
+				type: "api_error",
+				code: "internal_error",
+				message: "An unexpected error occurred on our end.",
+			},
+		})
+		expect(JSON.stringify(response.body)).not.toContain("not available in this test harness")
 		await harness.dispose()
 	})
 })

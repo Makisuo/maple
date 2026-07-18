@@ -13,11 +13,12 @@ import {
 } from "@maple/domain/http"
 import {
 	MapleApiV2,
+	LIST_LIMIT_DEFAULT,
 	conflict,
+	dependencyUnavailable,
 	invalidRequest,
-	notFound,
 	paginateArray,
-	serviceUnavailable,
+	resourceNotFound,
 } from "@maple/domain/http/v2"
 import type {
 	V2Dashboard,
@@ -82,6 +83,17 @@ const toV2Template = (template: DashboardTemplateMetadata): V2DashboardTemplate 
 
 const asIsoDateTime = Schema.decodeUnknownSync(IsoDateTimeString)
 
+const toInternalTimeRange = (
+	range: NonNullable<V2DashboardCreateParams["timeRange"]>,
+): PortableDashboardDocument["timeRange"] =>
+	range.type === "relative"
+		? range
+		: {
+				type: "absolute",
+				startTime: asIsoDateTime(range.startTime),
+				endTime: asIsoDateTime(range.endTime),
+			}
+
 const toPortable = (payload: V2DashboardCreateParams): PortableDashboardDocument =>
 	new PortableDashboardDocument({
 		name: payload.name,
@@ -89,7 +101,10 @@ const toPortable = (payload: V2DashboardCreateParams): PortableDashboardDocument
 			? { description: payload.description }
 			: {}),
 		...(payload.tags !== undefined ? { tags: payload.tags } : {}),
-		timeRange: payload.timeRange ?? { type: "relative", value: "12h" },
+		timeRange:
+			payload.timeRange === undefined
+				? { type: "relative", value: "12h" }
+				: toInternalTimeRange(payload.timeRange),
 		widgets: payload.widgets ?? [],
 		...(payload.variables !== undefined ? { variables: payload.variables } : {}),
 	})
@@ -109,7 +124,8 @@ const applyUpdate = (
 		name: payload.name ?? current.name,
 		...(description !== undefined ? { description } : {}),
 		...(tags !== undefined ? { tags } : {}),
-		timeRange: payload.timeRange ?? current.timeRange,
+		timeRange:
+			payload.timeRange === undefined ? current.timeRange : toInternalTimeRange(payload.timeRange),
 		widgets: payload.widgets ?? current.widgets,
 		...(variables !== undefined ? { variables } : {}),
 		createdAt: current.createdAt,
@@ -117,12 +133,12 @@ const applyUpdate = (
 	})
 }
 
-const mapPersistenceError = (error: DashboardPersistenceError) => serviceUnavailable(error.message)
+const mapPersistenceError = () => dependencyUnavailable("dashboard_list_unavailable")
 
 const mapReadError = (error: DashboardNotFoundError | DashboardPersistenceError) =>
 	error instanceof DashboardNotFoundError
-		? notFound(error.message, "id")
-		: serviceUnavailable(error.message)
+		? resourceNotFound("dashboard", "No such dashboard.")
+		: dependencyUnavailable("dashboard_retrieve_unavailable")
 
 const mapWriteError = (
 	error: DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError,
@@ -131,9 +147,9 @@ const mapWriteError = (
 		case "@maple/http/errors/DashboardValidationError":
 			return invalidRequest("parameter_invalid", error.message)
 		case "@maple/http/errors/DashboardConcurrencyError":
-			return conflict("resource_conflict", error.message)
+			return conflict("dashboard_concurrent_update", error.message)
 		default:
-			return serviceUnavailable(error.message)
+			return dependencyUnavailable("dashboard_mutation_unavailable")
 	}
 }
 
@@ -143,14 +159,22 @@ const mapUpdateError = (
 		| DashboardValidationError
 		| DashboardPersistenceError
 		| DashboardConcurrencyError,
-) => (error instanceof DashboardNotFoundError ? notFound(error.message, "id") : mapWriteError(error))
+) =>
+	error instanceof DashboardNotFoundError
+		? resourceNotFound("dashboard", "No such dashboard.")
+		: mapWriteError(error)
 
 const mapVersionError = (
 	error: DashboardNotFoundError | DashboardVersionNotFoundError | DashboardPersistenceError,
 ) =>
 	error instanceof DashboardNotFoundError || error instanceof DashboardVersionNotFoundError
-		? notFound(error.message, "id")
-		: serviceUnavailable(error.message)
+		? resourceNotFound(
+				error instanceof DashboardVersionNotFoundError ? "dashboard_version" : "dashboard",
+				error instanceof DashboardVersionNotFoundError
+					? "No such dashboard version."
+					: "No such dashboard.",
+			)
+		: dependencyUnavailable("dashboard_version_retrieve_unavailable")
 
 const mapRestoreError = (
 	error:
@@ -161,15 +185,21 @@ const mapRestoreError = (
 		| DashboardConcurrencyError,
 ) =>
 	error instanceof DashboardNotFoundError || error instanceof DashboardVersionNotFoundError
-		? notFound(error.message, "id")
+		? resourceNotFound(
+				error instanceof DashboardVersionNotFoundError ? "dashboard_version" : "dashboard",
+				error instanceof DashboardVersionNotFoundError
+					? "No such dashboard version."
+					: "No such dashboard.",
+			)
 		: mapWriteError(error)
 
 const encodeVersionCursor = (versionNumber: number): string => `ver_${versionNumber.toString(36)}`
 
 const decodeVersionCursor = (cursor: string): number | null => {
-	if (!cursor.startsWith("ver_")) return null
-	const version = Number.parseInt(cursor.slice(4), 36)
-	return Number.isInteger(version) && version > 0 ? version : null
+	const match = /^ver_([0-9a-z]+)$/.exec(cursor)
+	if (match === null) return null
+	const version = Number.parseInt(match[1]!, 36)
+	return Number.isSafeInteger(version) && version > 0 ? version : null
 }
 
 export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards", (handlers) =>
@@ -258,7 +288,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					const tenant = yield* CurrentTenant.Context
 					const response = yield* persistence
 						.listVersions(tenant.orgId, params.id, {
-							limit: query.limit,
+							limit: query.limit ?? LIST_LIMIT_DEFAULT,
 							...(before !== undefined && before !== null ? { before } : {}),
 						})
 						.pipe(Effect.mapError(mapReadError))
@@ -278,7 +308,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const version = yield* persistence
-						.getVersion(tenant.orgId, params.id, params.versionId)
+						.getVersion(tenant.orgId, params.id, params.version_id)
 						.pipe(Effect.mapError(mapVersionError))
 					return toV2VersionDetail(version)
 				}),
@@ -287,7 +317,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const dashboard = yield* persistence
-						.restoreVersion(tenant.orgId, tenant.userId, params.id, params.versionId)
+						.restoreVersion(tenant.orgId, tenant.userId, params.id, params.version_id)
 						.pipe(Effect.mapError(mapRestoreError))
 					return toV2DashboardMutation(dashboard)
 				}),
@@ -305,9 +335,15 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 			)
 			.handle("instantiateTemplate", ({ params, payload }) =>
 				Effect.gen(function* () {
-					const template = getTemplateById(params.templateId)
+					const template = getTemplateById(params.template_id)
 					if (!template)
-						return yield* Effect.fail(notFound("Dashboard template not found", "template_id"))
+						return yield* Effect.fail(
+							resourceNotFound(
+								"dashboard_template",
+								"No such dashboard template.",
+								"template_id",
+							),
+						)
 
 					const provided: TemplateParameterValues = payload.parameters ?? {}
 					const missing = template.parameters

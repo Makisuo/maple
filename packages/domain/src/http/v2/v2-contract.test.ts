@@ -1,12 +1,20 @@
-import { describe, expect, it } from "vitest"
-import { Effect, Schema } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Result, Schema } from "effect"
 import { V2AlertDestinationCreateParams } from "./alert-destinations"
 import { V2AlertIncident } from "./alert-incidents"
 import { V2AlertRule, V2AlertRuleMutationResponse } from "./alert-rules"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2DashboardMutation } from "./dashboards"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
-import { decodeOffsetCursor, encodeOffsetCursor, isoTimestamp, paginateArray, Timestamp } from "./envelopes"
+import {
+	decodeOffsetCursor,
+	encodeOffsetCursor,
+	isoTimestamp,
+	ListQuery,
+	paginateArray,
+	paginateOffsetQuery,
+	Timestamp,
+} from "./envelopes"
 import { notFound, permissionError, V2NotFoundError } from "./errors"
 import { encodePublicId } from "./public-id"
 
@@ -377,6 +385,17 @@ describe("scopes", () => {
 		expect(scopeAllows(["dashboards:write"], required)).toBe(false)
 		expect(scopeAllows([], required)).toBe(false)
 	})
+
+	it("treats alert preview as a read-only POST", () => {
+		expect(requiredScopeForRequest("POST", "/v2/alerts/rules/preview")).toEqual({
+			family: "alerts",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/alerts/rules/test")).toEqual({
+			family: "alerts",
+			access: "write",
+		})
+	})
 })
 
 describe("list pagination", () => {
@@ -404,8 +423,37 @@ describe("list pagination", () => {
 	})
 
 	it("fails invalid cursors instead of silently restarting at page one", () => {
-		const exit = Effect.runSyncExit(paginateArray(items, { cursor: "garbage" }))
-		expect(exit._tag).toBe("Failure")
+		const result = Effect.runSync(Effect.result(paginateArray(items, { cursor: "garbage" })))
+		expect(Result.isFailure(result)).toBe(true)
+		if (Result.isFailure(result)) {
+			expect(result.failure.error.code).toBe("parameter_invalid")
+			expect(result.failure.error.param).toBe("cursor")
+		}
+	})
+
+	it("uses storage lookahead and returns each row exactly once", () => {
+		const calls: Array<{ limit: number; offset: number }> = []
+		const fetch = ({ limit, offset }: { limit: number; offset: number }) => {
+			calls.push({ limit, offset })
+			return Effect.succeed(items.slice(offset, offset + limit))
+		}
+		const first = Effect.runSync(paginateOffsetQuery({ limit: 10 }, fetch))
+		const second = Effect.runSync(paginateOffsetQuery({ limit: 10, cursor: first.next_cursor! }, fetch))
+		expect(calls).toEqual([
+			{ limit: 11, offset: 0 },
+			{ limit: 11, offset: 10 },
+		])
+		expect([...first.data, ...second.data]).toEqual(items.slice(0, 20))
+	})
+
+	it("enforces the shared limit range", () => {
+		const decode = Schema.decodeUnknownSync(ListQuery)
+		expect(decode({})).toEqual({})
+		expect(decode({ limit: "1" }).limit).toBe(1)
+		expect(decode({ limit: "100" }).limit).toBe(100)
+		for (const limit of ["0", "101", "1.5", "nope"]) {
+			expect(() => decode({ limit }), `rejects ${limit}`).toThrow()
+		}
 	})
 })
 

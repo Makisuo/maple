@@ -12,22 +12,31 @@ import { invalidRequest } from "./errors"
 /** ISO-8601 UTC timestamp on the v2 wire (e.g. `2026-07-15T12:34:56.000Z`). */
 const ISO_8601_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]00:00)$/
 
-export const Timestamp = Schema.String.check(
-	Schema.makeFilter(
-		(value: string) => ISO_8601_UTC_PATTERN.test(value) && Number.isFinite(Date.parse(value)),
-		{ description: "Expected an ISO-8601 UTC timestamp" },
+export const Timestamp = Schema.String.pipe(
+	Schema.check(
+		Schema.makeFilter((value) => ISO_8601_UTC_PATTERN.test(value) && Number.isFinite(Date.parse(value)), {
+			description: "Expected an ISO-8601 UTC timestamp",
+		}),
 	),
-).annotate({
-	title: "Timestamp",
-	description: "ISO-8601 UTC timestamp, e.g. `2026-07-15T12:34:56.000Z`.",
-	examples: ["2026-07-15T12:34:56.000Z"],
-	format: "date-time",
-})
+	Schema.annotate({
+		title: "Timestamp",
+		description: "ISO-8601 UTC timestamp, e.g. `2026-07-15T12:34:56.000Z`.",
+		examples: ["2026-07-15T12:34:56.000Z"],
+		format: "date-time",
+	}),
+)
+export type Timestamp = Schema.Schema.Type<typeof Timestamp>
+
+/** Brand a service-layer ISO value for the strict v2 timestamp wire schema. */
+export const timestamp = (value: string): Timestamp => Timestamp.make(value)
+
+export const timestampOrNull = (value: string | null | undefined): Timestamp | null =>
+	value == null ? null : timestamp(value)
 
 /** Convert service-layer epoch-ms to the v2 wire timestamp. */
-export const isoTimestamp = (epochMs: number): string => new Date(epochMs).toISOString()
+export const isoTimestamp = (epochMs: number): Timestamp => timestamp(new Date(epochMs).toISOString())
 
-export const isoTimestampOrNull = (epochMs: number | null | undefined): string | null =>
+export const isoTimestampOrNull = (epochMs: number | null | undefined): Timestamp | null =>
 	epochMs == null ? null : isoTimestamp(epochMs)
 
 export const LIST_LIMIT_DEFAULT = 20
@@ -108,13 +117,59 @@ export const decodeOffsetCursorEffect = (cursor: string | undefined) => {
 		: Effect.succeed(offset)
 }
 
+export interface OffsetPage {
+	readonly limit: number
+	readonly offset: number
+}
+
+/** Resolve the shared list query into a page request for the backing store. */
+export const decodeOffsetPage = (query: {
+	readonly limit?: number | undefined
+	readonly cursor?: string | undefined
+}) =>
+	Effect.map(
+		decodeOffsetCursorEffect(query.cursor),
+		(offset): OffsetPage => ({
+			limit: query.limit ?? LIST_LIMIT_DEFAULT,
+			offset,
+		}),
+	)
+
+/** Build a list page from a `limit + 1` lookahead result. */
+export const pageFromLookahead = <T>(items: ReadonlyArray<T>, page: OffsetPage) => {
+	const hasMore = items.length > page.limit
+	return {
+		data: hasMore ? items.slice(0, page.limit) : items,
+		has_more: hasMore,
+		next_cursor: hasMore ? encodeOffsetCursor(page.offset + page.limit) : null,
+	}
+}
+
+/**
+ * Run an offset-backed list query with one-row lookahead and build the uniform
+ * v2 list envelope fields. Backing stores receive the only pagination policy
+ * they should need: `limit + 1` plus the decoded offset.
+ */
+export const paginateOffsetQuery = <T, E, R>(
+	query: { readonly limit?: number | undefined; readonly cursor?: string | undefined },
+	fetch: (page: {
+		readonly limit: number
+		readonly offset: number
+	}) => Effect.Effect<ReadonlyArray<T>, E, R>,
+) =>
+	Effect.gen(function* () {
+		const page = yield* decodeOffsetPage(query)
+		const items = yield* fetch({ limit: page.limit + 1, offset: page.offset })
+		return pageFromLookahead(items, page)
+	})
+
 /** Paginate an already-materialized array into the list envelope. */
 export const paginateArray = <T>(
 	items: ReadonlyArray<T>,
 	query: { readonly limit?: number | undefined; readonly cursor?: string | undefined },
 ) =>
-	Effect.map(decodeOffsetCursorEffect(query.cursor), (offset) => {
-		const limit = query.limit ?? LIST_LIMIT_DEFAULT
+	Effect.map(decodeOffsetPage(query), (page) => {
+		const { limit, offset } = page
 		const data = items.slice(offset, offset + limit)
 		const hasMore = offset + limit < items.length
 		return {

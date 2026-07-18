@@ -1,6 +1,6 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant } from "@maple/domain/http"
-import { MapleApiV2, isoTimestampOrNull, serviceUnavailable } from "@maple/domain/http/v2"
+import { dependencyUnavailable, MapleApiV2, isoTimestampOrNull } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { OrganizationService } from "../../services/OrganizationService"
 
@@ -13,7 +13,11 @@ export const HttpV2OrganizationLive = HttpApiBuilder.group(MapleApiV2, "organiza
 				const tenant = yield* CurrentTenant.Context
 				const org = yield* service
 					.retrieve(tenant.orgId)
-					.pipe(Effect.mapError((error) => serviceUnavailable(error.message)))
+					.pipe(
+						Effect.catchTag("@maple/http/errors/OrganizationProviderError", () =>
+							Effect.fail(dependencyUnavailable("organization_retrieve_unavailable")),
+						),
+					)
 				return {
 					id: org.id,
 					object: "organization" as const,

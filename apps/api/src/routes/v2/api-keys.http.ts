@@ -3,12 +3,12 @@ import type { ApiKeyCreatedResponse, ApiKeyResponse } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import {
 	MapleApiV2,
+	dependencyUnavailable,
 	isoTimestamp,
 	isoTimestampOrNull,
-	notFound,
 	paginateArray,
 	permissionError,
-	serviceUnavailable,
+	resourceNotFound,
 } from "@maple/domain/http/v2"
 import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
@@ -67,10 +67,10 @@ const toV2ApiKeyMutationResponse = (key: ApiKeyResponse): V2ApiKeyMutationRespon
 /** Service tagged errors → v2 envelope errors. */
 const mapServiceError = (error: { readonly _tag: string; readonly message: string }) =>
 	error._tag === "@maple/http/errors/ApiKeyNotFoundError"
-		? notFound(error.message, "id")
-		: serviceUnavailable(error.message)
+		? resourceNotFound("api_key", "No such API key.")
+		: dependencyUnavailable("api_key_mutation_unavailable")
 
-const mapPersistenceError = (error: { readonly message: string }) => serviceUnavailable(error.message)
+const mapPersistenceError = () => dependencyUnavailable("api_key_list_unavailable")
 
 export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (handlers) =>
 	Effect.gen(function* () {

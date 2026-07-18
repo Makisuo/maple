@@ -153,15 +153,33 @@ export const V2SessionTranscriptEvent = Schema.Struct({
 	}),
 	url: Schema.String.annotate({ description: "The page URL at the time of the event." }),
 	trace_id: Schema.NullOr(TraceId).annotate({ description: "Correlated trace ID, or `null`." }),
-	level: Schema.String.annotate({ description: "Severity/level for console and error events." }),
-	message: Schema.String.annotate({ description: "The event message." }),
-	target_selector: Schema.String.annotate({ description: "CSS selector of the interaction target." }),
-	target_text: Schema.String.annotate({ description: "Text of the interaction target." }),
-	net_method: Schema.String.annotate({ description: "HTTP method for network events." }),
-	net_url: Schema.String.annotate({ description: "Request URL for network events." }),
-	net_status: Schema.Number.annotate({ description: "Response status for network events." }),
-	net_duration_ms: Schema.Number.annotate({ description: "Request duration in ms for network events." }),
-	error_stack: Schema.String.annotate({ description: "Stack trace for error events." }),
+	level: Schema.NullOr(Schema.String).annotate({
+		description: "Severity/level for console and error events, otherwise `null`.",
+	}),
+	message: Schema.NullOr(Schema.String).annotate({
+		description: "The event message when this event carries one, otherwise `null`.",
+	}),
+	target_selector: Schema.NullOr(Schema.String).annotate({
+		description: "CSS selector of the interaction target, otherwise `null`.",
+	}),
+	target_text: Schema.NullOr(Schema.String).annotate({
+		description: "Text of the interaction target, otherwise `null`.",
+	}),
+	net_method: Schema.NullOr(Schema.String).annotate({
+		description: "HTTP method for network events, otherwise `null`.",
+	}),
+	net_url: Schema.NullOr(Schema.String).annotate({
+		description: "Request URL for network events, otherwise `null`.",
+	}),
+	net_status: Schema.NullOr(Schema.Number).annotate({
+		description: "Response status for network events, otherwise `null`.",
+	}),
+	net_duration_ms: Schema.NullOr(Schema.Number).annotate({
+		description: "Request duration in ms for network events, otherwise `null`.",
+	}),
+	error_stack: Schema.NullOr(Schema.String).annotate({
+		description: "Stack trace for error events, otherwise `null`.",
+	}),
 }).annotate({
 	identifier: "SessionTranscriptEvent",
 	title: "Session transcript event",

@@ -3,10 +3,12 @@ import type { ScrapeTargetResponse } from "@maple/domain/http"
 import { CreateScrapeTargetRequest, CurrentTenant, UpdateScrapeTargetRequest } from "@maple/domain/http"
 import {
 	MapleApiV2,
+	dependencyUnavailable,
 	invalidRequest,
-	notFound,
 	paginateArray,
-	serviceUnavailable,
+	paginateOffsetQuery,
+	resourceNotFound,
+	timestamp,
 	upstreamError,
 } from "@maple/domain/http/v2"
 import type { V2ScrapeTarget, V2ScrapeTargetCheck } from "@maple/domain/http/v2"
@@ -36,33 +38,37 @@ const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
 })
 
 /** Service tagged errors → v2 envelope errors (create: no 404 on the contract). */
-const mapCommonError = (error: { readonly _tag: string; readonly message: string }) =>
+const mapCommonError = (operation: string) => (error: { readonly _tag: string; readonly message: string }) =>
 	error._tag === "@maple/http/errors/ScrapeTargetValidationError"
 		? invalidRequest("parameter_invalid", error.message)
-		: serviceUnavailable(error.message)
+		: dependencyUnavailable(`scrape_target_${operation}_unavailable`)
 
 /** Service tagged errors → v2 envelope errors (endpoints with a 404). */
-const mapMutationError = (error: { readonly _tag: string; readonly message: string }) =>
-	error._tag === "@maple/http/errors/ScrapeTargetNotFoundError"
-		? notFound(error.message, "id")
-		: mapCommonError(error)
+const mapMutationError =
+	(operation: string) => (error: { readonly _tag: string; readonly message: string }) =>
+		error._tag === "@maple/http/errors/ScrapeTargetNotFoundError"
+			? resourceNotFound("scrape_target", "No such scrape target.")
+			: mapCommonError(operation)(error)
 
 /** Probe can additionally surface upstream/auth failures as 502s. */
 const mapProbeError = (error: { readonly _tag: string; readonly message: string }) => {
 	switch (error._tag) {
 		case "@maple/http/errors/ScrapeTargetAuthError":
-			return upstreamError("upstream_auth_failed", error.message)
+			return upstreamError(
+				"scrape_target_probe_auth_failed",
+				"The scrape target rejected Maple's credentials.",
+			)
 		case "@maple/http/errors/ScrapeTargetUpstreamError":
-			return upstreamError("upstream_error", error.message)
+			return upstreamError(
+				"scrape_target_probe_upstream_failed",
+				"The scrape target could not complete the probe.",
+			)
 		default:
-			return mapMutationError(error)
+			return mapMutationError("probe")(error)
 	}
 }
 
-const mapPersistenceError = (error: { readonly message: string }) => serviceUnavailable(error.message)
-
-/** v1 caps the checks history at 200 rows; v2 cursor-paginates over that window. */
-const CHECKS_FETCH_LIMIT = 200
+const mapPersistenceError = () => dependencyUnavailable("scrape_target_list_unavailable")
 
 export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeTargets", (handlers) =>
 	Effect.gen(function* () {
@@ -84,7 +90,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const tenant = yield* CurrentTenant.Context
 					const target = yield* service
 						.get(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapMutationError))
+						.pipe(Effect.mapError(mapMutationError("retrieve")))
 					return toV2ScrapeTarget(target)
 				}),
 			)
@@ -125,7 +131,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(Effect.mapError(mapCommonError))
+						.pipe(Effect.mapError(mapCommonError("create")))
 					return toV2ScrapeTarget(created)
 				}),
 			)
@@ -164,7 +170,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(Effect.mapError(mapMutationError))
+						.pipe(Effect.mapError(mapMutationError("update")))
 					return toV2ScrapeTarget(updated)
 				}),
 			)
@@ -173,7 +179,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* service
 						.delete(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapMutationError))
+						.pipe(Effect.mapError(mapMutationError("delete")))
 					return { id: deleted.id, object: "scrape_target" as const, deleted: true as const }
 				}),
 			)
@@ -194,24 +200,32 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 			.handle("listChecks", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* service
-						.listChecks(tenant.orgId, params.id, {
-							...(query.since !== undefined ? { startTime: Date.parse(query.since) } : {}),
-							...(query.until !== undefined ? { endTime: Date.parse(query.until) } : {}),
-							limit: CHECKS_FETCH_LIMIT,
-						})
-						.pipe(Effect.mapError(mapMutationError))
-					const checks: ReadonlyArray<V2ScrapeTargetCheck> = rows.map((row) => ({
-						object: "scrape_target.check" as const,
-						timestamp: new Date(row.checkedAt).toISOString(),
-						success: row.error === null,
-						sub_target_key: row.subTargetKey === "" ? null : row.subTargetKey,
-						duration_seconds: row.durationMs === null ? null : row.durationMs / 1000,
-						samples_scraped: row.samplesScraped,
-						samples_post_metric_relabeling: row.samplesPostRelabel,
-						message: row.error,
-					}))
-					const page = yield* paginateArray(checks, query)
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						service
+							.listChecks(tenant.orgId, params.id, {
+								...(query.since !== undefined ? { startTime: Date.parse(query.since) } : {}),
+								...(query.until !== undefined ? { endTime: Date.parse(query.until) } : {}),
+								limit,
+								offset,
+							})
+							.pipe(
+								Effect.mapError(mapMutationError("list_checks")),
+								Effect.map(
+									(rows): ReadonlyArray<V2ScrapeTargetCheck> =>
+										rows.map((row) => ({
+											object: "scrape_target.check" as const,
+											timestamp: timestamp(new Date(row.checkedAt).toISOString()),
+											success: row.error === null,
+											sub_target_key: row.subTargetKey === "" ? null : row.subTargetKey,
+											duration_seconds:
+												row.durationMs === null ? null : row.durationMs / 1000,
+											samples_scraped: row.samplesScraped,
+											samples_post_metric_relabeling: row.samplesPostRelabel,
+											message: row.error,
+										})),
+								),
+							),
+					)
 					return { object: "list" as const, ...page }
 				}),
 			)

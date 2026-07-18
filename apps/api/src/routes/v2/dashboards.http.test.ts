@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -11,7 +11,11 @@ import { AuthService } from "../../services/AuthService"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AlertsServiceStubLayer, AllV2GroupLayersLive, ConfigResourceServiceStubsLayer } from "./v2-test-support"
+import {
+	AlertsServiceStubLayer,
+	AllV2GroupLayersLive,
+	ConfigResourceServiceStubsLayer,
+} from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -167,7 +171,7 @@ describe("v2 dashboards over HTTP", () => {
 		expect(missing.status).toBe(404)
 		expect(missing.body.error).toMatchObject({
 			type: "not_found_error",
-			code: "resource_missing",
+			code: "dashboard_not_found",
 		})
 		await harness.dispose()
 	})

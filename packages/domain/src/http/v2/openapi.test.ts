@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 import { MapleApiV2 } from "./api"
@@ -29,6 +29,17 @@ const doc = spec as unknown as Record<string, any>
 const schemas = doc.components.schemas as Record<string, any>
 const operation = (method: string, path: string): Record<string, any> =>
 	(spec.paths as Record<string, any>)[path][method]
+
+const OpenApiOperationMetadata = Schema.Struct({
+	operationId: Schema.String,
+	summary: Schema.String,
+	description: Schema.String,
+	tags: Schema.Array(Schema.String),
+	security: Schema.Array(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+	responses: Schema.Record(Schema.String, Schema.Unknown),
+})
+const decodeOperationMetadata = Schema.decodeUnknownSync(OpenApiOperationMetadata)
+const decodeParameterNames = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))
 
 describe("MapleApiV2 OpenAPI", () => {
 	it("derives with v2 metadata", () => {
@@ -71,7 +82,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/dashboards/templates",
 			"GET /v2/dashboards/{id}",
 			"GET /v2/dashboards/{id}/versions",
-			"GET /v2/dashboards/{id}/versions/{versionId}",
+			"GET /v2/dashboards/{id}/versions/{version_id}",
 			"GET /v2/ingest_keys",
 			"GET /v2/instrumentation/recommendations",
 			"GET /v2/investigations",
@@ -85,6 +96,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/session_replays/{id}/transcript",
 			"PATCH /v2/alerts/destinations/{id}",
 			"PATCH /v2/alerts/rules/{id}",
+			"PATCH /v2/anomalies/settings",
 			"PATCH /v2/attribute_mappings/{id}",
 			"PATCH /v2/dashboards/{id}",
 			"PATCH /v2/scrape_targets/{id}",
@@ -99,8 +111,8 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/attribute_mappings",
 			"POST /v2/dashboards",
 			"POST /v2/dashboards/import/perses",
-			"POST /v2/dashboards/templates/{templateId}/instantiate",
-			"POST /v2/dashboards/{id}/versions/{versionId}/restore",
+			"POST /v2/dashboards/templates/{template_id}/instantiate",
+			"POST /v2/dashboards/{id}/versions/{version_id}/restore",
 			"POST /v2/ingest_keys/private/roll",
 			"POST /v2/ingest_keys/public/roll",
 			"POST /v2/instrumentation/recommendations/{id}/dismiss",
@@ -112,7 +124,6 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
 			"PUT /v2/anomalies/incidents/{id}/issue",
-			"PUT /v2/anomalies/settings",
 		])
 	})
 
@@ -134,22 +145,28 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(tag?.description).toEqual(expect.stringContaining("Programmatic credentials"))
 	})
 
-	it("gives every operation a stable operationId, summary, and description", () => {
-		const expected: ReadonlyArray<readonly [string, string, string]> = [
-			["get", "/v2/api_keys", "listApiKeys"],
-			["post", "/v2/api_keys", "createApiKey"],
-			["get", "/v2/api_keys/{id}", "getApiKey"],
-			["post", "/v2/api_keys/{id}/roll", "rollApiKey"],
-			["delete", "/v2/api_keys/{id}", "revokeApiKey"],
-		]
-		for (const [method, path, operationId] of expected) {
-			const op = operation(method, path)
-			expect(op.operationId).toBe(operationId)
+	it("gives every operation complete metadata, security, and common error envelopes", () => {
+		const operations = Object.entries(spec.paths ?? {}).flatMap(([path, item]) =>
+			Object.entries(item ?? {})
+				.filter(([method]) => ["get", "post", "put", "patch", "delete"].includes(method))
+				.map(([method, op]) => ({ method, path, op: decodeOperationMetadata(op) })),
+		)
+		const operationIds = new Set<string>()
+		for (const { method, path, op } of operations) {
+			expect(op.operationId, `${method.toUpperCase()} ${path} operationId`).toEqual(expect.any(String))
+			expect(operationIds.has(op.operationId), `${op.operationId} is unique`).toBe(false)
+			operationIds.add(op.operationId)
 			expect(op.summary).toEqual(expect.any(String))
 			expect(op.summary.length).toBeGreaterThan(0)
 			expect(op.description.length).toBeGreaterThan(20)
-			expect(op.tags).toEqual(["API Keys"])
+			expect(op.tags).toHaveLength(1)
 			expect(op.security).toEqual([{ bearer: [] }])
+			for (const status of ["400", "401", "403", "500"]) {
+				expect(
+					op.responses[status],
+					`${method.toUpperCase()} ${path} declares ${status}`,
+				).toBeDefined()
+			}
 		}
 	})
 
@@ -202,7 +219,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(withSecret.properties.txid.$ref).toBe("#/components/schemas/_maple_PostgresTransactionId")
 		expect(schemas["_maple_PostgresTransactionId"].allOf).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ description: expect.stringContaining("reconcile") }),
+				expect.objectContaining({ description: expect.stringContaining("reconciliation") }),
 			]),
 		)
 
@@ -215,20 +232,25 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("documents the Phase-1 resource schemas with decodable wire examples", () => {
-		const cases: ReadonlyArray<readonly [string, Schema.Codec<any, any>, string]> = [
-			["Investigation", V2Investigation, "investigation"],
-			["AnomalyIncident", V2AnomalyIncident, "anomaly_incident"],
-			["AnomalyIncidentTimeseries", V2AnomalyIncidentTimeseries, "anomaly_incident.timeseries"],
-			["AnomalySettings", V2AnomalySettings, "anomaly_settings"],
-			["Organization", V2Organization, "organization"],
-			["SessionReplayListItem", V2SessionReplayListItem, "session_replay"],
-			["SessionReplay", V2SessionReplay, "session_replay"],
-		]
-		for (const [name, schema, objectType] of cases) {
+		type ObjectDecoder = (input: unknown) => { readonly object: string }
+		const cases = [
+			["Investigation", Schema.decodeUnknownSync(V2Investigation), "investigation"],
+			["AnomalyIncident", Schema.decodeUnknownSync(V2AnomalyIncident), "anomaly_incident"],
+			[
+				"AnomalyIncidentTimeseries",
+				Schema.decodeUnknownSync(V2AnomalyIncidentTimeseries),
+				"anomaly_incident.timeseries",
+			],
+			["AnomalySettings", Schema.decodeUnknownSync(V2AnomalySettings), "anomaly_settings"],
+			["Organization", Schema.decodeUnknownSync(V2Organization), "organization"],
+			["SessionReplayListItem", Schema.decodeUnknownSync(V2SessionReplayListItem), "session_replay"],
+			["SessionReplay", Schema.decodeUnknownSync(V2SessionReplay), "session_replay"],
+		] satisfies ReadonlyArray<readonly [string, ObjectDecoder, string]>
+		for (const [name, decode, objectType] of cases) {
 			const component = schemas[name]
 			expect(component, `component ${name} present`).toBeDefined()
 			expect(component.examples, `${name} has an example`).toHaveLength(1)
-			const decoded = Schema.decodeUnknownSync(schema)(component.examples[0]) as { object: string }
+			const decoded = decode(component.examples[0])
 			expect(decoded.object).toBe(objectType)
 		}
 	})
@@ -264,9 +286,7 @@ describe("MapleApiV2 OpenAPI", () => {
 	})
 
 	it("does not advertise ignored list pagination on session-replay retrieve", () => {
-		const parameters = operation("get", "/v2/session_replays/{id}").parameters as ReadonlyArray<{
-			name: string
-		}>
+		const parameters = decodeParameterNames(operation("get", "/v2/session_replays/{id}").parameters)
 		expect(parameters.map((parameter) => parameter.name).sort()).toEqual([
 			"id",
 			"window_end",
@@ -284,7 +304,7 @@ describe("MapleApiV2 OpenAPI", () => {
 
 	it("documents error responses with a stable code example", () => {
 		const notFound = schemas["NotFoundError"]
-		expect(notFound.properties.error.properties.code.examples).toEqual(["resource_missing"])
+		expect(notFound.properties.error.properties.code.examples).toEqual(["api_key_not_found"])
 		expect(notFound.properties.error.properties.message.description).toEqual(expect.any(String))
 	})
 })

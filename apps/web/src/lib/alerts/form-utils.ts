@@ -10,6 +10,7 @@ import {
 	HazelChannelId,
 	HazelOrganizationId,
 	IsoDateTimeString,
+	UserId,
 	type AlertComparator,
 	type AlertDeliveryEventDocument,
 	type AlertDeliveryStatus,
@@ -38,6 +39,7 @@ import { formatErrorRate, formatLatency, formatNumber } from "@/lib/format"
 
 const asHazelOrganizationId = Schema.decodeUnknownSync(HazelOrganizationId)
 const asHazelChannelId = Schema.decodeUnknownSync(HazelChannelId)
+const asUserId = Schema.decodeUnknownSync(UserId)
 
 // v2 timestamps arrive as plain ISO strings; the v1 domain documents brand them.
 const asIso = (value: string) => IsoDateTimeString.make(value)
@@ -431,10 +433,7 @@ export function buildRuleCreateParamsV2(form: RuleFormState): V2AlertRuleCreateP
 	}
 }
 
-export function buildRuleTestParamsV2(
-	form: RuleFormState,
-	sendNotification: boolean,
-): V2AlertRuleTestParams {
+export function buildRuleTestParamsV2(form: RuleFormState, sendNotification: boolean): V2AlertRuleTestParams {
 	return {
 		rule: buildRuleCreateParamsV2(form),
 		send_notification: sendNotification,
@@ -590,7 +589,7 @@ export function buildDestinationCreateParamsV2(form: DestinationFormState): V2Al
 				type: "email",
 				name: form.name.trim(),
 				enabled: form.enabled,
-				member_user_ids: form.memberUserIds,
+				member_user_ids: form.memberUserIds.map((userId) => asUserId(userId)),
 			}
 	}
 }
@@ -678,7 +677,9 @@ export function buildDestinationUpdateParamsV2(form: DestinationFormState): V2Al
 				type: "email",
 				enabled: form.enabled,
 				...(name ? { name } : {}),
-				...(form.memberUserIds.length > 0 ? { member_user_ids: form.memberUserIds } : {}),
+				...(form.memberUserIds.length > 0
+					? { member_user_ids: form.memberUserIds.map((userId) => asUserId(userId)) }
+					: {}),
 			}
 	}
 }
@@ -713,7 +714,9 @@ export function v2PreviewToResponse(result: V2AlertRulePreviewResult): AlertRule
 								value: point.value,
 								sampleCount: point.sample_count,
 								status: point.status,
-								...(point.provisional !== undefined ? { provisional: point.provisional } : {}),
+								...(point.provisional !== undefined
+									? { provisional: point.provisional }
+									: {}),
 							}),
 					),
 				}),

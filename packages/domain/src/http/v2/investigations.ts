@@ -3,6 +3,7 @@ import { Schema } from "effect"
 import { AiTriageIncidentKind } from "../ai-triage"
 import { IssueSeverity } from "../errors"
 import { InvestigationConfidence, InvestigationSeededBy, InvestigationStatus } from "../investigations"
+import { TraceId, UserId } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
@@ -31,35 +32,48 @@ const investigationIncidentSubjectBase = {
 	type: Schema.Literal("incident").annotate({
 		description: 'Discriminator — always `"incident"` for an incident-anchored investigation.',
 	}),
-	issue_id: Schema.optionalKey(
-		ErrorIssuePublicId.annotate({
-			description: "The `iss_…` ID of the linked error issue, when the incident is backed by one.",
-		}),
-	),
 }
 
-export const V2InvestigationIncidentSubject = Schema.Union([
-	Schema.Struct({
-		...investigationIncidentSubjectBase,
-		incident_kind: Schema.Literal("error"),
-		incident_id: ErrorIncidentPublicId,
+const investigationIncidentVariants = <IssueId extends Schema.Top>(issueId: IssueId) =>
+	Schema.Union([
+		Schema.Struct({
+			...investigationIncidentSubjectBase,
+			issue_id: issueId,
+			incident_kind: Schema.Literal("error"),
+			incident_id: ErrorIncidentPublicId,
+		}),
+		Schema.Struct({
+			...investigationIncidentSubjectBase,
+			issue_id: issueId,
+			incident_kind: Schema.Literal("anomaly"),
+			incident_id: AnomalyIncidentPublicId,
+		}),
+		Schema.Struct({
+			...investigationIncidentSubjectBase,
+			issue_id: issueId,
+			incident_kind: Schema.Literal("alert"),
+			incident_id: AlertIncidentPublicId,
+		}),
+	])
+
+export const V2InvestigationIncidentSubject = investigationIncidentVariants(
+	Schema.NullOr(ErrorIssuePublicId).annotate({
+		description: "The linked `iss_…` error issue, or `null` when the incident has none.",
 	}),
-	Schema.Struct({
-		...investigationIncidentSubjectBase,
-		incident_kind: Schema.Literal("anomaly"),
-		incident_id: AnomalyIncidentPublicId,
-	}),
-	Schema.Struct({
-		...investigationIncidentSubjectBase,
-		incident_kind: Schema.Literal("alert"),
-		incident_id: AlertIncidentPublicId,
-	}),
-]).annotate({
+).annotate({
 	identifier: "InvestigationIncidentSubject",
 	title: "Incident subject",
 	description:
 		"An investigation anchored to a typed incident. The public-ID prefix must match `incident_kind`: `einc_…`, `anom_…`, or `inc_…`.",
 })
+
+const V2InvestigationIncidentSubjectInput = investigationIncidentVariants(
+	Schema.optionalKey(
+		ErrorIssuePublicId.annotate({
+			description: "The `iss_…` ID of the linked error issue, when the incident is backed by one.",
+		}),
+	),
+)
 
 export const V2InvestigationFreeformSubject = Schema.Struct({
 	type: Schema.Literal("freeform").annotate({
@@ -87,8 +101,14 @@ export const V2InvestigationSubject = Schema.Union([
 })
 export type V2InvestigationSubject = Schema.Schema.Type<typeof V2InvestigationSubject>
 
+export const V2InvestigationCreateSubject = Schema.Union([
+	V2InvestigationIncidentSubjectInput,
+	V2InvestigationFreeformSubject,
+])
+export type V2InvestigationCreateSubject = Schema.Schema.Type<typeof V2InvestigationCreateSubject>
+
 const V2AiTriageEvidence = Schema.Struct({
-	traceIds: Schema.Array(Schema.String),
+	traceIds: Schema.Array(TraceId),
 	logPatterns: Schema.Array(Schema.String),
 	relatedServices: Schema.Array(Schema.String),
 	note: Schema.String,
@@ -174,7 +194,7 @@ export const V2Investigation = Schema.Struct({
 	seeded_by: InvestigationSeededBy.annotate({
 		description: "Who opened the investigation: `user` (attended) or `system` (incident-open trigger).",
 	}),
-	created_by: Schema.NullOr(Schema.String).annotate({
+	created_by: Schema.NullOr(UserId).annotate({
 		description: "The `user_…` ID that opened the investigation, or `null` for system-seeded ones.",
 	}),
 	input_tokens: Schema.NullOr(Schema.Number).annotate({
@@ -205,7 +225,7 @@ export type V2Investigation = Schema.Schema.Type<typeof V2Investigation>
 // ---------------------------------------------------------------------------
 
 export const V2InvestigationCreateParams = Schema.Struct({
-	subject: V2InvestigationSubject,
+	subject: V2InvestigationCreateSubject,
 }).annotate({
 	identifier: "InvestigationCreateParams",
 	title: "Investigation create parameters",
