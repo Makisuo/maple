@@ -352,7 +352,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="flex gap-0 border-b border-border -mx-6 px-6">
+				<div className="flex gap-0 border-b border-border">
 					{tabs.map((tab) => (
 						<button
 							key={tab.id}
@@ -369,7 +369,7 @@ export function WidgetPicker({ open, onOpenChange, onSelect }: WidgetPickerProps
 					))}
 				</div>
 
-				<div className="flex flex-col gap-5 max-h-[60vh] overflow-y-auto py-1">
+				<div className="flex flex-col gap-5 max-h-[60vh] overflow-y-auto py-5 px-4">
 					{showCharts && (
 						<div className="flex flex-col gap-3">
 							{activeTab === "all" && (
