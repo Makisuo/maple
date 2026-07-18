@@ -187,7 +187,7 @@ export function registerUpdateAlertRuleTool(server: McpToolRegistrar) {
 				"JSON string of a query-builder draft (for signal_type=builder_query).",
 			),
 			raw_query_sql: optionalStringParam(
-				"ClickHouse SQL returning a numeric `value` column (for signal_type=raw_query). Must reference $__orgFilter.",
+				"ClickHouse SQL returning a numeric `value` column (for signal_type=raw_query). Must reference $__orgFilter and $__timeFilter(col).",
 			),
 			raw_query_reducer: optionalStringParam(
 				"How to collapse raw_query result rows into one value: identity, sum, avg, min, max.",

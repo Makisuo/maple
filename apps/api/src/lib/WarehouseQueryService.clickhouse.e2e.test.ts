@@ -1,9 +1,8 @@
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { spawn } from "node:child_process"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
-import { OrgId, UserId } from "@maple/domain/http"
-import { isRawSqlResponseLimitError } from "@maple/query-engine/execution"
-import { makeExpandMacros, RAW_SQL_EXECUTION_GUARDS } from "@maple/query-engine/runtime"
+import { OrgId, RawSqlValidationError, UserId } from "@maple/domain/http"
+import { prepareRawSql } from "@maple/query-engine/runtime"
 import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
 import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 import type { TenantContext } from "../services/AuthService"
@@ -112,12 +111,13 @@ const buildLayer = () => {
 }
 
 const expand = (sql: string) =>
-	makeExpandMacros({
+	prepareRawSql({
 		sql,
 		orgId,
 		startTime: "2026-01-01 00:00:00",
 		endTime: "2026-01-01 01:00:00",
 		granularitySeconds: 60,
+		workload: "interactive",
 	})
 
 describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => {
@@ -140,7 +140,7 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 	}, 30_000)
 
 	it.effect(
-		"uses the configured ClickHouse password even when org-JWT scoping is requested",
+		"uses the configured ClickHouse password for raw SQL",
 		() => {
 			const layer = buildLayer()
 			return Effect.gen(function* () {
@@ -148,10 +148,9 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 					"SELECT TraceId, ServiceName FROM traces WHERE $__orgFilter ORDER BY TraceId",
 				)
 				const rows = yield* WarehouseQueryService.use((service) =>
-					service.sqlQuery(tenant, query.sql, {
+					service.rawSqlQuery(tenant, query.sql, {
 						profile: "rawInteractive",
 						context: "clickhouse.e2e.fixture",
-						...RAW_SQL_EXECUTION_GUARDS,
 					}),
 				)
 				assert.deepStrictEqual(rows, [
@@ -172,7 +171,7 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 					`SELECT number, '${orgId}' AS OrgId FROM numbers(1000) WHERE $__orgFilter`,
 				)
 				const rows = yield* WarehouseQueryService.use((service) =>
-					service.sqlQuery(tenant, exact.sql, RAW_SQL_EXECUTION_GUARDS),
+					service.rawSqlQuery(tenant, exact.sql),
 				)
 				assert.strictEqual(rows.length, 1000)
 
@@ -180,11 +179,10 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 					`SELECT number, '${orgId}' AS OrgId FROM numbers(50000) WHERE $__orgFilter LIMIT 50000`,
 				)
 				const error = yield* Effect.flip(
-					WarehouseQueryService.use((service) =>
-						service.sqlQuery(tenant, overflow.sql, RAW_SQL_EXECUTION_GUARDS),
-					),
+					WarehouseQueryService.use((service) => service.rawSqlQuery(tenant, overflow.sql)),
 				)
-				assert.isTrue(isRawSqlResponseLimitError(error))
+				assert.instanceOf(error, RawSqlValidationError)
+				assert.strictEqual(error.code, "ResourceLimit")
 			}).pipe(Effect.provide(layer))
 		},
 		120_000,
@@ -199,11 +197,9 @@ describe.skipIf(!enabled)("WarehouseQueryService ClickHouse raw-SQL E2E", () => 
 					`SELECT number, repeat('x', 10000) AS payload, '${orgId}' AS OrgId FROM numbers(600) WHERE $__orgFilter`,
 				)
 				const error = yield* Effect.flip(
-					WarehouseQueryService.use((service) =>
-						service.sqlQuery(tenant, query.sql, RAW_SQL_EXECUTION_GUARDS),
-					),
+					WarehouseQueryService.use((service) => service.rawSqlQuery(tenant, query.sql)),
 				)
-				assert.isTrue(isRawSqlResponseLimitError(error))
+				assert.instanceOf(error, RawSqlValidationError)
 				assert.match(error.message, /5000000 encoded bytes/)
 			}).pipe(Effect.provide(layer))
 		},

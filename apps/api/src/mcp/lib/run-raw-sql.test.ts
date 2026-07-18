@@ -9,14 +9,18 @@ const tenant = { orgId: "org_test" } as TenantContext
 
 const makeStub = (
 	rows: ReadonlyArray<Record<string, unknown>>,
-	captured?: { sql?: string; scopeToOrgJwt?: boolean; rawResponseLimits?: boolean },
+	captured?: { sql?: string; profile?: string; context?: string },
 ): WarehouseQueryServiceShape =>
 	({
-		sqlQuery: (_t: unknown, sql: string, options) => {
+		rawSqlQuery: (
+			_t: unknown,
+			sql: string,
+			options?: { readonly profile?: string; readonly context?: string },
+		) => {
 			if (captured) {
 				captured.sql = sql
-				captured.scopeToOrgJwt = options?.scopeToOrgJwt
-				captured.rawResponseLimits = options?.rawResponseLimits
+				captured.profile = options?.profile
+				captured.context = options?.context
 			}
 			return Effect.succeed(rows)
 		},
@@ -31,8 +35,8 @@ describe("runRawSql", () => {
 		Effect.gen(function* () {
 			const captured: {
 				sql?: string
-				scopeToOrgJwt?: boolean
-				rawResponseLimits?: boolean
+				profile?: string
+				context?: string
 			} = {}
 			const result = yield* runRawSql({
 				tenant,
@@ -43,8 +47,8 @@ describe("runRawSql", () => {
 
 			// $__orgFilter expanded to the scoped predicate before execution.
 			assert.include(captured.sql ?? "", "OrgId = 'org_test'")
-			assert.strictEqual(captured.scopeToOrgJwt, true)
-			assert.strictEqual(captured.rawResponseLimits, true)
+			assert.strictEqual(captured.profile, "rawInteractive")
+			assert.strictEqual(captured.context, "mcp.run_sql")
 			assert.strictEqual(result.rowCount, 1)
 			assert.deepStrictEqual([...result.columns], ["ServiceName", "c"])
 		}),

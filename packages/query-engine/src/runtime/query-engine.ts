@@ -24,16 +24,14 @@ import {
 	QueryEngineValidationError,
 	MAX_RAW_SQL_ALERT_GROUPS,
 	MAX_RAW_SQL_GROUP_KEY_LENGTH,
-	MAX_RAW_SQL_LENGTH,
+	type RawSqlValidationError,
 	type WarehouseError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
 import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
-import { makeExpandMacros, RAW_SQL_EXECUTION_GUARDS } from "./raw-sql"
-import { rawSqlResultLimitError } from "./raw-result-limits"
-import { isRawSqlResponseLimitError } from "../execution/response-limits"
+import { makeExecuteRawSql } from "./raw-sql"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
@@ -60,10 +58,13 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 			readonly profile?: QueryProfileName
 			readonly context?: string
 			readonly settings?: WarehouseQuerySettings
-			readonly scopeToOrgJwt?: boolean
-			readonly rawResponseLimits?: boolean
 		},
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
+	readonly rawSqlQuery: (
+		tenant: T,
+		sql: string,
+		options: { readonly profile: QueryProfileName; readonly context: string },
+	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError | RawSqlValidationError>
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
@@ -2112,8 +2113,9 @@ const RawSqlAlertRowSchema = Schema.Struct({
  * and an optional `samples` column carries the sample count (else each row
  * counts as 1). Per group, `value` rows are collapsed with the reducer.
  */
-export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
-	Effect.fn("QueryEngineService.evaluateRawSql")(function* (
+export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) => {
+	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
+	return Effect.fn("QueryEngineService.evaluateRawSql")(function* (
 		tenant: T,
 		request: QueryEngineRawSqlEvaluateRequest,
 	): Effect.fn.Return<ReadonlyArray<GroupedAlertObservation>, QueryEngineValidationError | WarehouseError> {
@@ -2121,54 +2123,24 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
 
 		const granularitySeconds = Math.max(request.windowMinutes * 60, 60)
-		if (request.sql.length > MAX_RAW_SQL_LENGTH) {
-			return yield* new QueryEngineValidationError({
-				message: "Invalid raw SQL alert query",
-				details: [`Raw SQL is limited to ${MAX_RAW_SQL_LENGTH} characters.`],
-			})
-		}
-		const expanded = yield* makeExpandMacros({
+		const { rows: rawRows } = yield* executeRawSql(tenant, {
 			sql: request.sql,
 			orgId: tenant.orgId,
 			startTime: request.startTime,
 			endTime: request.endTime,
 			granularitySeconds,
+			workload: "alert",
+			context: "alertRawQuery",
 		}).pipe(
-			Effect.mapError(
-				(error) =>
+			Effect.catchTag("@maple/http/errors/RawSqlValidationError", (error) =>
+				Effect.fail(
 					new QueryEngineValidationError({
 						message: "Invalid raw SQL alert query",
 						details: [error.message],
 					}),
+				),
 			),
 		)
-
-		const rawRows = yield* annotateWarehouseError(
-			warehouse.sqlQuery(tenant, expanded.sql, {
-				profile: "rawAlert",
-				context: "alertRawQuery",
-				...RAW_SQL_EXECUTION_GUARDS,
-			}),
-			"alertRawQuery",
-		).pipe(
-			Effect.catchTag("@maple/http/errors/WarehouseValidationError", (error) =>
-				isRawSqlResponseLimitError(error)
-					? Effect.fail(
-							new QueryEngineValidationError({
-								message: "Invalid raw SQL alert query",
-								details: [error.message],
-							}),
-						)
-					: Effect.fail(error),
-			),
-		)
-		const resultLimitError = rawSqlResultLimitError(rawRows)
-		if (resultLimitError != null) {
-			return yield* new QueryEngineValidationError({
-				message: "Invalid raw SQL alert query",
-				details: [resultLimitError],
-			})
-		}
 		const rows = yield* Schema.decodeUnknownEffect(Schema.Array(RawSqlAlertRowSchema))(rawRows).pipe(
 			Effect.mapError(
 				() =>
@@ -2228,3 +2200,4 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 		return result
 	})
+}

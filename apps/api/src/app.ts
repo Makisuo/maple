@@ -85,7 +85,6 @@ import { TinybirdOrgTokenService } from "./services/TinybirdOrgTokenService"
 import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
-import { RawSqlChartService } from "@maple/query-engine/runtime"
 import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService } from "./services/PlanetScaleOAuthService"
@@ -265,7 +264,6 @@ export const MainLive = Layer.mergeAll(
 	DigestServiceLive,
 	DemoServiceLive,
 	VcsServicesLive,
-	RawSqlChartService.layer,
 )
 
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(

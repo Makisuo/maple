@@ -205,6 +205,7 @@ const die = () => Effect.die(new Error("not exercised in this test harness"))
 const warehouseStub: WarehouseQueryServiceShape = {
 	query: die,
 	sqlQuery: () => Effect.succeed([]),
+	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.succeed(Option.none()),
 	ingest: () => Effect.void,

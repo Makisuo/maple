@@ -6,7 +6,7 @@ import {
 	QueryEngineExecutionError,
 	QueryEngineValidationError,
 	RawSqlExecuteResponse,
-	RawSqlValidationError,
+	type RawSqlValidationError,
 	SpanHierarchyResponse,
 	SpanDetailResponse,
 	ErrorsByTypeResponse,
@@ -69,11 +69,7 @@ import {
 } from "@maple/domain/http"
 import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
-import {
-	rawSqlResultLimitError,
-	RAW_SQL_EXECUTION_GUARDS,
-	RawSqlChartService,
-} from "@maple/query-engine/runtime"
+import { makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 import {
@@ -83,7 +79,7 @@ import {
 	parseWarehouseDateTime,
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
-import { isRawSqlResponseLimitError } from "@maple/query-engine/execution"
+import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
@@ -128,7 +124,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
-		const rawSqlChart = yield* RawSqlChartService
+		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
+			warehouse,
+		)
 
 		return handlers
 			.handle("execute", ({ payload }) =>
@@ -162,19 +160,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 										warehouse
 											.compiledQueryFirst(
 												tenant,
-												CH.compile(
-											CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime }),
-													narrowByTime
-														? {
-																orgId: tenant.orgId,
-													startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
-															}
-														: { orgId: tenant.orgId },
-												),
-												{
-													profile: "discovery",
-											context: narrowByTime ? "spanHierarchyProbeRecent" : "spanHierarchyProbe",
-												},
+										CH.compile(
+									CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime }),
+											narrowByTime
+												? {
+														orgId: tenant.orgId,
+											startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
+													}
+												: { orgId: tenant.orgId },
+										),
+										{
+											profile: "discovery",
+									context: narrowByTime ? "spanHierarchyProbeRecent" : "spanHierarchyProbe",
+										},
 											)
 											.pipe(Effect.map(Option.getOrNull)),
 										"spanHierarchy probe failed",
@@ -2644,51 +2642,25 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const autoBucketSeconds = computeAutoBucketSeconds(payload.startTime, payload.endTime)
 					const granularitySeconds = payload.granularitySeconds ?? autoBucketSeconds
 
-					const expanded = yield* rawSqlChart.expandMacros({
-						sql: payload.sql,
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						granularitySeconds,
-					})
-
-					const rows = yield* mapExecError(
-						warehouse
-							.sqlQuery(tenant, expanded.sql, {
-								profile: "rawInteractive",
-								context: "rawSql",
-								...RAW_SQL_EXECUTION_GUARDS,
-							})
-							.pipe(
-								Effect.catchIf(isRawSqlResponseLimitError, (error) =>
-									Effect.fail(
-										new RawSqlValidationError({
-											code: "ResourceLimit",
-											message: error.message,
-										}),
-									),
-								),
-							),
+					const result = yield* mapExecError(
+						executeRawSql(tenant, {
+							sql: payload.sql,
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							granularitySeconds,
+							workload: "interactive",
+							context: "rawSql",
+						}),
 						"rawSql query failed",
 					)
 
-					const resultLimitError = rawSqlResultLimitError(rows)
-					if (resultLimitError != null) {
-						return yield* new RawSqlValidationError({
-							code: "ResourceLimit",
-							message: resultLimitError,
-						})
-					}
-
-					const records = rows
-					const columns = records.length > 0 ? Object.keys(records[0]) : []
-
 					return new RawSqlExecuteResponse({
-						data: records,
+						data: result.rows,
 						meta: {
-							rowCount: records.length,
-							columns,
-							granularitySeconds: expanded.granularitySeconds,
+							rowCount: result.rowCount,
+							columns: result.columns,
+							granularitySeconds: result.granularitySeconds,
 						},
 					})
 				}),

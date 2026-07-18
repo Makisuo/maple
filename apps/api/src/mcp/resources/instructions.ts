@@ -107,7 +107,7 @@ The mutation tools now reject clauses the engine can't honor BEFORE persisting (
 When you pass \`sql\` to \`add_dashboard_widget\` (or build a widget with \`dataSource.endpoint: "raw_sql_chart"\`), you author ClickHouse SQL directly. The server expands macros and runs the SQL through the warehouse. Use this path when the structured query builder can't express what you need (window functions, multi-step CTEs, unusual aggregations, joins).
 
 ### Macros — what gets substituted
-- \`$__orgFilter\` → \`OrgId = '<your org>'\` — **REQUIRED**; without it the request is rejected before execution. Org isolation depends on this macro appearing in the SQL.
+- \`$__orgFilter\` → \`OrgId = '<your org>'\` — **REQUIRED** for sorting-key pruning and defense in depth. Tenant isolation is also enforced by scoped warehouse credentials.
 - \`$__timeFilter(Column)\` → \`Column >= toDateTime('<start>') AND Column <= toDateTime('<end>')\`. \`Column\` must be a bare identifier (letters/digits/underscores/dots) — no expressions. **Prefer this over \`$__startTime\`/\`$__endTime\`** for WHERE clauses.
 - \`$__startTime\` / \`$__endTime\` → \`toDateTime('…')\` literals. Use when you need the bound inline somewhere other than a WHERE comparison.
 - \`$__interval_s\` → integer bucket size in seconds. Resolved from \`granularity_seconds\` (or auto-derived from the dashboard time range when omitted). **Only interpolate this if your SQL actually buckets time** — otherwise \`granularity_seconds\` is a no-op.
@@ -115,7 +115,7 @@ When you pass \`sql\` to \`add_dashboard_widget\` (or build a widget with \`data
 ### Safety rules (server-enforced)
 - One statement only. Multiple statements separated by \`;\` are rejected.
 - Deny-listed keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, RENAME, ATTACH, DETACH, CREATE, GRANT, REVOKE, OPTIMIZE, SYSTEM, KILL) trigger a \`DisallowedStatement\` error. Comments and string literals are masked first so a SELECT containing the word "drop" in a string is fine.
-- \`LIMIT 10000\` is auto-appended when no LIMIT clause is present.
+- Every query is wrapped in an outer \`LIMIT 1001\`; the extra row is an overflow sentinel for the public 1,000-row cap.
 
 ### Tables — discover at call time
 
@@ -222,6 +222,6 @@ The renderer is opinionated about column names. Get these wrong and the chart sh
 - **Pie missing \`name\` column** → renderer can't label slices.
 - **Timeseries with no DateTime in the first row** → reshape skips and you get raw rows; the chart looks empty. Put the bucket column first OR alias it \`bucket\`.
 - **\`Map\` lookup on missing key** returns empty string, not NULL — use \`SpanAttributes['k'] != ''\` not \`IS NOT NULL\`.
-- **High-cardinality groupBy** without LIMIT → server appends \`LIMIT 10000\` but the chart still struggles. Always add an explicit \`LIMIT\` for pie/table/heatmap.`,
+- **High-cardinality groupBy** without LIMIT → the server's outer 1,000-row cap protects the response, but the chart can still struggle. Add a tighter explicit \`LIMIT\` for pie/table/heatmap.`,
 	),
 })

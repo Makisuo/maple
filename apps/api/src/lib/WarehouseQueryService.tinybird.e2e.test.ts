@@ -2,13 +2,8 @@ import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest"
 import { mintOrgReadJwt } from "./tinybird-jwt"
 
 const enabled = process.env.TINYBIRD_LOCAL_E2E === "1"
-const apiBase = (process.env.TINYBIRD_LOCAL_E2E_URL ?? "http://127.0.0.1:7181").replace(
-	/\/$/,
-	"",
-)
-const gatewayBase = (
-	process.env.TINYBIRD_LOCAL_E2E_GATEWAY_URL ?? "http://127.0.0.1:7182"
-).replace(/\/$/, "")
+const apiBase = (process.env.TINYBIRD_LOCAL_E2E_URL ?? "http://127.0.0.1:7181").replace(/\/$/, "")
+const gatewayBase = (process.env.TINYBIRD_LOCAL_E2E_GATEWAY_URL ?? "http://127.0.0.1:7182").replace(/\/$/, "")
 const workspaceName = `RawSqlE2E_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 const datasource = "raw_sql_e2e"
 
@@ -143,50 +138,58 @@ describe.skipIf(!enabled)("Tinybird Local raw-SQL JWT E2E", () => {
 		if (!response.ok) throw new Error(`Failed to delete Tinybird E2E workspace (${response.status})`)
 	}, 30_000)
 
-	it("enforces the org filter through /v0/sql even with OR 1=1", async () => {
+	it("enforces the org filter through /v0/sql across predicates, UNIONs, and subqueries", async () => {
 		if (workspace === undefined || workspaceSigningKey === undefined) {
 			throw new Error("workspace not initialized")
 		}
-		const response = await fetch(`${apiBase}/v0/sql`, {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${scopedToken(workspace, workspaceSigningKey)}`,
-				"Content-Type": "application/x-www-form-urlencoded",
-			},
-			body: new URLSearchParams({
-				q: `SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_a' OR 1=1 ORDER BY OrgId FORMAT JSON`,
-			}),
-		})
-		const body = await responseJson<{ readonly data: ReadonlyArray<Record<string, unknown>> }>(response)
-		assert.deepStrictEqual(body.data, [{ OrgId: "org_a", value: 1 }])
-	})
-
-	it("enforces the same org filter through the ClickHouse-compatible gateway", async () => {
-		if (workspace === undefined || workspaceSigningKey === undefined) {
-			throw new Error("workspace not initialized")
-		}
-		const response = await fetch(
-			`${gatewayBase}/?database=${encodeURIComponent(workspace.name)}`,
-			{
+		for (const query of [
+			`SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_a' OR 1=1 ORDER BY OrgId`,
+			`SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_a' UNION ALL SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_b'`,
+			`SELECT OrgId, value FROM (SELECT OrgId, value FROM ${datasource}) ORDER BY OrgId`,
+		]) {
+			const response = await fetch(`${apiBase}/v0/sql`, {
 				method: "POST",
 				headers: {
-					"X-ClickHouse-Key": scopedToken(
-						workspace,
-						workspaceSigningKey,
-					),
+					Authorization: `Bearer ${scopedToken(workspace, workspaceSigningKey)}`,
+					"Content-Type": "application/x-www-form-urlencoded",
+				},
+				body: new URLSearchParams({ q: `${query} FORMAT JSON` }),
+			})
+			const body = await responseJson<{
+				readonly data: ReadonlyArray<Record<string, unknown>>
+			}>(response)
+			assert.deepStrictEqual(body.data, [{ OrgId: "org_a", value: 1 }])
+		}
+	})
+
+	it("enforces the same isolation through the ClickHouse-compatible gateway", async () => {
+		if (workspace === undefined || workspaceSigningKey === undefined) {
+			throw new Error("workspace not initialized")
+		}
+		for (const query of [
+			`SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_a' OR 1=1 ORDER BY OrgId`,
+			`SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_a' UNION ALL SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_b'`,
+			`SELECT OrgId, value FROM (SELECT OrgId, value FROM ${datasource}) ORDER BY OrgId`,
+		]) {
+			const response = await fetch(`${gatewayBase}/?database=${encodeURIComponent(workspace.name)}`, {
+				method: "POST",
+				headers: {
+					"X-ClickHouse-Key": scopedToken(workspace, workspaceSigningKey),
 					"X-ClickHouse-Database": workspace.name,
 					"Content-Type": "text/plain",
 				},
-				body: `SELECT OrgId, value FROM ${datasource} WHERE OrgId = 'org_a' OR 1=1 ORDER BY OrgId FORMAT JSONEachRow`,
-			},
-		)
-		const text = await response.text()
-		if (!response.ok) throw new Error(`Tinybird gateway ${response.status}: ${text.slice(0, 500)}`)
-		const rows = text
-			.trim()
-			.split("\n")
-			.filter(Boolean)
-			.map((line) => JSON.parse(line) as Record<string, unknown>)
-		assert.deepStrictEqual(rows, [{ OrgId: "org_a", value: 1 }])
+				body: `${query} FORMAT JSONEachRow`,
+			})
+			const text = await response.text()
+			if (!response.ok) {
+				throw new Error(`Tinybird gateway ${response.status}: ${text.slice(0, 500)}`)
+			}
+			const rows = text
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as Record<string, unknown>)
+			assert.deepStrictEqual(rows, [{ OrgId: "org_a", value: 1 }])
+		}
 	})
 })

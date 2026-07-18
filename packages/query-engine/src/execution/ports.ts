@@ -1,6 +1,7 @@
 import type { Effect, Option } from "effect"
 import type { OrgId } from "@maple/domain"
 import type {
+	RawSqlValidationError,
 	WarehouseQueryRequest,
 	WarehouseQueryResponse,
 	WarehouseQueryError,
@@ -36,16 +37,6 @@ export type SqlQueryOptions = {
 	 * did not inject a `resolveIngestConfig`.
 	 */
 	pinToIngestConfig?: boolean
-	/**
-	 * Mark this as untrusted, user-authored raw SQL. When set and the resolved
-	 * backend is the shared managed Tinybird warehouse, the host swaps the shared
-	 * admin token for a per-org scoped read JWT, so tenant isolation is enforced
-	 * by Tinybird server-side instead of by SQL-string checks. No-op for BYO
-	 * ClickHouse orgs (already isolated by their own credentials).
-	 */
-	scopeToOrgJwt?: boolean
-	/** Apply the hard pre-buffer limits used for untrusted raw-SQL responses. */
-	rawResponseLimits?: boolean
 }
 
 export type WarehouseProvider = "clickhouse" | "tinybird"
@@ -71,7 +62,12 @@ export type ResolvedWarehouseConfig =
 export interface WarehouseSqlClient {
 	readonly sql: (
 		sql: string,
-		options?: { readonly rawResponseLimits?: boolean },
+		options?: {
+			readonly responseLimits?: {
+				readonly maxRows: number
+				readonly maxBytes: number
+			}
+		},
 	) => Promise<{ data: ReadonlyArray<Record<string, unknown>> }>
 	readonly insert: (datasource: string, rows: ReadonlyArray<unknown>) => Promise<void>
 }
@@ -79,15 +75,15 @@ export interface WarehouseSqlClient {
 /**
  * The injected dependencies of the warehouse executor. The host app provides
  * the driver construction (`createClient`) and the per-org config resolution
- * (`resolveConfig`, which reads the org-override DB row / env and emits the
- * `clientSource` / `db.client` span annotations); the executor itself — error
- * mapping, retry, client cache, OrgId scoping, span instrumentation — lives in
- * this package.
+ * (`resolveConfig` / `resolveRawSqlConfig`, which read the org-override DB row
+ * or env and return stable logical cache partitions); the executor itself —
+ * error mapping, retry, client cache, OrgId scoping, span instrumentation —
+ * lives in this package.
  */
-/** Per-call hints the host config resolver may act on. */
-export interface ResolveConfigOptions {
-	/** Untrusted raw SQL — use a per-org scoped read token on the managed backend. */
-	readonly scopeToOrgJwt?: boolean
+export interface ResolvedWarehouseTarget {
+	readonly config: ResolvedWarehouseConfig
+	/** Stable logical cache partition; config changes are detected independently. */
+	readonly clientCacheKey: string
 }
 
 export interface WarehouseExecutorDeps {
@@ -95,11 +91,12 @@ export interface WarehouseExecutorDeps {
 	readonly resolveConfig: (
 		tenant: ExecutionTenant,
 		label: string,
-		options?: ResolveConfigOptions,
-	) => Effect.Effect<
-		{ readonly config: ResolvedWarehouseConfig; readonly source: "managed" | "org_override" },
-		WarehouseSqlError
-	>
+	) => Effect.Effect<ResolvedWarehouseTarget, WarehouseSqlError>
+	/** Resolve the isolated credentials used exclusively for user-authored SQL. */
+	readonly resolveRawSqlConfig: (
+		tenant: ExecutionTenant,
+		label: string,
+	) => Effect.Effect<ResolvedWarehouseTarget, WarehouseSqlError>
 	/**
 	 * Config resolver for the WRITE path (`ingest`). Inserts must land in the
 	 * managed pipeline (Tinybird in the cloud), NOT a per-org BYO ClickHouse
@@ -109,11 +106,7 @@ export interface WarehouseExecutorDeps {
 	readonly resolveIngestConfig?: (
 		tenant: ExecutionTenant,
 		label: string,
-		options?: ResolveConfigOptions,
-	) => Effect.Effect<
-		{ readonly config: ResolvedWarehouseConfig; readonly source: "managed" | "org_override" },
-		WarehouseQueryError
-	>
+	) => Effect.Effect<ResolvedWarehouseTarget, WarehouseQueryError>
 }
 
 export interface WarehouseQueryServiceShape {
@@ -127,6 +120,12 @@ export interface WarehouseQueryServiceShape {
 		sql: string,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError | WarehouseValidationError>
+	/** Execute validated user-authored SQL with tenant-scoped credentials and hard response limits. */
+	readonly rawSqlQuery: (
+		tenant: ExecutionTenant,
+		sql: string,
+		options?: Pick<SqlQueryOptions, "profile" | "context">,
+	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError | RawSqlValidationError>
 	readonly compiledQuery: <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T>,

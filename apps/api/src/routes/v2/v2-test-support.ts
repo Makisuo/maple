@@ -132,6 +132,7 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	query: die,
 	sqlQuery: die,
+	rawSqlQuery: die,
 	compiledQuery: die,
 	compiledQueryFirst: die,
 	ingest: die,

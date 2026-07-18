@@ -2,9 +2,10 @@ import { assert, describe, it } from "@effect/vitest"
 import { Duration, Effect, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import type { OrgId } from "@maple/domain"
+import { RawSqlValidationError } from "@maple/domain/http"
 import { compile, listRuleChecksQuery } from "../ch"
 import { makeWarehouseExecutor } from "./executor"
-import { isRawSqlResponseLimitError, WarehouseResponseLimitError } from "./response-limits"
+import { WarehouseResponseLimitError } from "./response-limits"
 import type {
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
@@ -55,8 +56,9 @@ const makeDeps = (createdTags: Array<ResolvedWarehouseConfig["_tag"]>): Warehous
 		}
 		return client
 	},
-	resolveConfig: () => Effect.succeed({ config: clickhouseConfig, source: "org_override" as const }),
-	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+	resolveConfig: () => Effect.succeed({ config: clickhouseConfig, clientCacheKey: "read:org_test" }),
+	resolveRawSqlConfig: () => Effect.succeed({ config: clickhouseConfig, clientCacheKey: "raw:org_test" }),
+	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
 })
 
 describe("makeWarehouseExecutor pinToIngestConfig", () => {
@@ -88,7 +90,7 @@ describe("makeWarehouseExecutor pinToIngestConfig", () => {
 // source: a Tinybird gateway uses the ClickHouse protocol but still enforces
 // Tinybird's restricted-settings policy.
 const makeRecordingDeps = (
-	resolved: { config: ResolvedWarehouseConfig; source: "managed" | "org_override" },
+	resolved: { config: ResolvedWarehouseConfig; clientCacheKey: string },
 	sqls: Array<string>,
 ): WarehouseExecutorDeps => ({
 	createClient: () => ({
@@ -99,32 +101,31 @@ const makeRecordingDeps = (
 		insert: async () => {},
 	}),
 	resolveConfig: () => Effect.succeed(resolved),
+	resolveRawSqlConfig: () => Effect.succeed({ ...resolved, clientCacheKey: "raw:org_test" }),
 	resolveIngestConfig: () => Effect.succeed(resolved),
 })
 
 describe("makeWarehouseExecutor restricted-settings strip", () => {
-	it.effect(
-		"strips max_block_size for the managed Tinybird CH-gateway (_tag clickhouse, source managed)",
-		() =>
-			Effect.gen(function* () {
-				const sqls: Array<string> = []
-				const executor = makeWarehouseExecutor(
-					makeRecordingDeps({ config: tinybirdGatewayConfig, source: "managed" }, sqls),
-				)
-				yield* executor.compiledQuery(tenant, compiled, {
-					context: "test",
-					settings: { maxBlockSize: 512 },
-				})
-				assert.lengthOf(sqls, 1)
-				assert.isFalse(sqls[0]?.includes("max_block_size"))
-			}),
+	it.effect("strips max_block_size for the managed Tinybird CH-gateway", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: tinybirdGatewayConfig, clientCacheKey: "read:managed" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, {
+				context: "test",
+				settings: { maxBlockSize: 512 },
+			})
+			assert.lengthOf(sqls, 1)
+			assert.isFalse(sqls[0]?.includes("max_block_size"))
+		}),
 	)
 
 	it.effect("keeps max_block_size for env-level vanilla ClickHouse", () =>
 		Effect.gen(function* () {
 			const sqls: Array<string> = []
 			const executor = makeWarehouseExecutor(
-				makeRecordingDeps({ config: clickhouseConfig, source: "managed" }, sqls),
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:managed" }, sqls),
 			)
 			yield* executor.compiledQuery(tenant, compiled, {
 				context: "test",
@@ -134,41 +135,37 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 		}),
 	)
 
-	it.effect(
-		"strips max_block_size for the managed Tinybird SDK backend (_tag tinybird, source managed)",
-		() =>
-			Effect.gen(function* () {
-				const sqls: Array<string> = []
-				const executor = makeWarehouseExecutor(
-					makeRecordingDeps({ config: tinybirdConfig, source: "managed" }, sqls),
-				)
-				yield* executor.compiledQuery(tenant, compiled, {
-					context: "test",
-					settings: { maxBlockSize: 512 },
-				})
-				assert.isFalse(sqls[0]?.includes("max_block_size"))
-			}),
+	it.effect("strips max_block_size for the managed Tinybird SDK backend", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: tinybirdConfig, clientCacheKey: "read:managed" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, {
+				context: "test",
+				settings: { maxBlockSize: 512 },
+			})
+			assert.isFalse(sqls[0]?.includes("max_block_size"))
+		}),
 	)
 
-	it.effect(
-		"keeps max_block_size for a genuine BYO ClickHouse (_tag clickhouse, source org_override)",
-		() =>
-			Effect.gen(function* () {
-				const sqls: Array<string> = []
-				const executor = makeWarehouseExecutor(
-					makeRecordingDeps({ config: clickhouseConfig, source: "org_override" }, sqls),
-				)
-				yield* executor.compiledQuery(tenant, compiled, {
-					context: "test",
-					settings: { maxBlockSize: 512 },
-				})
-				assert.isTrue(sqls[0]?.includes("max_block_size=512"))
-			}),
+	it.effect("keeps max_block_size for a genuine BYO ClickHouse", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, {
+				context: "test",
+				settings: { maxBlockSize: 512 },
+			})
+			assert.isTrue(sqls[0]?.includes("max_block_size=512"))
+		}),
 	)
 })
 
 describe("makeWarehouseExecutor raw response limits", () => {
-	it.effect("maps a driver byte abort to the typed warehouse validation marker", () =>
+	it.effect("maps a driver byte abort directly to RawSqlValidationError", () =>
 		Effect.gen(function* () {
 			const executor = makeWarehouseExecutor({
 				...makeDeps([]),
@@ -180,11 +177,52 @@ describe("makeWarehouseExecutor raw response limits", () => {
 				}),
 			})
 			const error = yield* Effect.flip(
-				executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
-					rawResponseLimits: true,
-				}),
+				executor.rawSqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'"),
 			)
-			assert.isTrue(isRawSqlResponseLimitError(error))
+			assert.instanceOf(error, RawSqlValidationError)
+			assert.strictEqual(error.code, "ResourceLimit")
+		}),
+	)
+})
+
+describe("makeWarehouseExecutor client cache partitions", () => {
+	it.effect("keeps standard reads, raw org reads, and managed writes in stable separate entries", () =>
+		Effect.gen(function* () {
+			let nextClientId = 0
+			const calls: Array<{ readonly clientId: number; readonly operation: "sql" | "insert" }> = []
+			const executor = makeWarehouseExecutor({
+				createClient: () => {
+					const clientId = ++nextClientId
+					return {
+						sql: async () => {
+							calls.push({ clientId, operation: "sql" })
+							return { data: [] }
+						},
+						insert: async () => {
+							calls.push({ clientId, operation: "insert" })
+						},
+					}
+				},
+				resolveConfig: () =>
+					Effect.succeed({ config: tinybirdConfig, clientCacheKey: "read:managed" }),
+				resolveRawSqlConfig: () =>
+					Effect.succeed({ config: tinybirdConfig, clientCacheKey: "raw:org_test" }),
+				resolveIngestConfig: () =>
+					Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
+			})
+
+			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
+			yield* executor.rawSqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
+			yield* executor.ingest(tenant, "traces", [{ TraceId: "trace" }])
+			yield* executor.sqlQuery(tenant, "SELECT 2 WHERE OrgId = 'org_test'")
+
+			assert.strictEqual(nextClientId, 3)
+			assert.deepStrictEqual(calls, [
+				{ clientId: 1, operation: "sql" },
+				{ clientId: 2, operation: "sql" },
+				{ clientId: 3, operation: "insert" },
+				{ clientId: 1, operation: "sql" },
+			])
 		}),
 	)
 })
@@ -197,8 +235,9 @@ const makeHangingDeps = (): WarehouseExecutorDeps => ({
 		sql: () => new Promise<{ data: never[] }>(() => {}),
 		insert: async () => {},
 	}),
-	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
-	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "read:managed" }),
+	resolveRawSqlConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "raw:org_test" }),
+	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
 })
 
 // Like makeHangingDeps, but counts how many times the client's `sql` is invoked
@@ -212,8 +251,9 @@ const makeCountingHangingDeps = (counter: { count: number }): WarehouseExecutorD
 		},
 		insert: async () => {},
 	}),
-	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
-	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, source: "managed" as const }),
+	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "read:managed" }),
+	resolveRawSqlConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "raw:org_test" }),
+	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
 })
 
 describe("makeWarehouseExecutor client timeout", () => {

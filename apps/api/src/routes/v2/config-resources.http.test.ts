@@ -58,6 +58,7 @@ const die = () => Effect.die(new Error("not available in this test harness"))
 const warehouseStub: WarehouseQueryServiceShape = {
 	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
 	sqlQuery: () => Effect.succeed([]),
+	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 	ingest: () => Effect.void,

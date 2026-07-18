@@ -104,6 +104,7 @@ function makeWarehouseStub(state: {
 	return {
 		query: (_tenant, payload) => Effect.die(new Error(`Unexpected pipe ${payload.pipeName}`)),
 		sqlQuery: sqlQueryStub,
+		rawSqlQuery: sqlQueryStub,
 		compiledQuery: (_tenant, compiled) =>
 			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
 		compiledQueryFirst: (_tenant, compiled) =>
@@ -2496,6 +2497,7 @@ describe("AlertsService evaluation error persistence", () => {
 		return {
 			query: () => Effect.die(new Error("Unexpected pipe query")),
 			sqlQuery: sqlQueryStub,
+			rawSqlQuery: sqlQueryStub,
 			compiledQuery: (_tenant, compiled) =>
 				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
 			compiledQueryFirst: (_tenant, compiled) =>

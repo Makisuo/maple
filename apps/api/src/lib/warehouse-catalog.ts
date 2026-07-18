@@ -3,10 +3,9 @@ import * as Datasources from "@maple/domain/tinybird"
 
 // ---------------------------------------------------------------------------
 // Live introspection of the `defineDatasource` exports in
-// packages/domain/src/tinybird/datasources.ts. Used by the MCP
-// `describe_warehouse_tables` tool so agents discover real tables/columns at
-// call time rather than relying on a hand-maintained list inside the tool
-// description.
+// packages/domain/src/tinybird/datasources.ts. This neutral catalog powers
+// both raw-SQL datasource scoping and the MCP discovery tool, keeping the
+// security allowlist and agent-visible schema derived from the same source.
 //
 // Type strings (`String`, `DateTime64(9)`, `LowCardinality(String)`,
 // `Map(LowCardinality(String), String)`) come straight from the SDK's

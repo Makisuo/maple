@@ -1,5 +1,8 @@
 import { Clock, Duration, Effect, Ref, Schedule } from "effect"
 import {
+	MAX_RAW_SQL_RESULT_BYTES,
+	MAX_RAW_SQL_RESULT_ROWS,
+	RawSqlValidationError,
 	type WarehouseQueryRequest,
 	WarehouseQueryResponse,
 	WarehouseSchemaDriftError,
@@ -16,7 +19,7 @@ import {
 	stripTinybirdRestrictedSettings,
 } from "../profiles"
 import { mapWarehouseError, toWarehouseQueryError, type WarehouseSqlError } from "./errors"
-import { RAW_SQL_RESPONSE_LIMIT_TYPE, WarehouseResponseLimitError } from "./response-limits"
+import { WarehouseResponseLimitError } from "./response-limits"
 import {
 	SQL_LOG_MAX,
 	SQL_TRACE_MAX,
@@ -55,7 +58,7 @@ const TRANSIENT_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
 	Schedule.both(Schedule.recurs(2)),
 )
 
-const isTransientUpstreamError = (error: WarehouseSqlError | WarehouseValidationError): boolean =>
+const isTransientUpstreamError = (error: unknown): error is WarehouseUpstreamError =>
 	error instanceof WarehouseUpstreamError
 
 // Client-side ceiling for a single query attempt. Tinybird's server-side
@@ -117,6 +120,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		sql: string,
 		pipe: string,
 		options?: SqlQueryOptions,
+		execution: "trusted" | "raw" = "trusted",
 	) {
 		const startedAtMs = yield* Clock.currentTimeMillis
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
@@ -140,10 +144,12 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// config to stay symmetric with the write — otherwise a BYO-CH org reads an
 		// empty table from its own ClickHouse.
 		const resolveFn =
-			options?.pinToIngestConfig && deps.resolveIngestConfig
-				? deps.resolveIngestConfig
-				: deps.resolveConfig
-		const resolved = yield* resolveFn(tenant, pipe, { scopeToOrgJwt: options?.scopeToOrgJwt })
+			execution === "raw"
+				? deps.resolveRawSqlConfig
+				: options?.pinToIngestConfig && deps.resolveIngestConfig
+					? deps.resolveIngestConfig
+					: deps.resolveConfig
+		const resolved = yield* resolveFn(tenant, pipe)
 		if (options?.pinToIngestConfig) yield* Effect.annotateCurrentSpan("query.routing", "ingest")
 		const peerService = resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird"
 		yield* Effect.annotateCurrentSpan("db.system.name", peerService)
@@ -172,23 +178,24 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 		if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
-		// Managed queries share one client (one shared admin token). But a per-org
-		// scoped-JWT raw query carries an org-specific token, so it must key per org
-		// — otherwise every org would evict the single "__managed__" client (thrash).
-		const cacheKey =
-			resolved.source === "managed" && !options?.scopeToOrgJwt ? "__managed__" : tenant.orgId
-		const client = getCachedOrCreateClient(cacheKey, resolved.config, yield* Clock.currentTimeMillis)
+		const client = getCachedOrCreateClient(
+			resolved.clientCacheKey,
+			resolved.config,
+			yield* Clock.currentTimeMillis,
+		)
 		const attemptTimeoutMs = clientTimeoutMs(options?.profile, settings?.maxExecutionTime)
 		const retryAttempts = yield* Ref.make(0)
+		const responseLimits =
+			execution === "raw"
+				? { maxRows: MAX_RAW_SQL_RESULT_ROWS, maxBytes: MAX_RAW_SQL_RESULT_BYTES }
+				: undefined
 		const queryAttempt = Effect.tryPromise({
-			try: () => client.sql(finalSql, { rawResponseLimits: options?.rawResponseLimits }),
+			try: () => client.sql(finalSql, responseLimits === undefined ? undefined : { responseLimits }),
 			catch: (error) =>
 				error instanceof WarehouseResponseLimitError
-					? new WarehouseValidationError({
-							pipeName: pipe,
+					? new RawSqlValidationError({
+							code: "ResourceLimit",
 							message: error.message,
-							cause: error,
-							clickhouseType: RAW_SQL_RESPONSE_LIMIT_TYPE,
 						})
 					: mapWarehouseError(pipe, error),
 		})
@@ -220,39 +227,39 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 						}),
 					)
 		const result = yield* boundedAttempt.pipe(
-				Effect.tapError((error) =>
-					isTransientUpstreamError(error) ? Ref.update(retryAttempts, (n) => n + 1) : Effect.void,
-				),
-				Effect.retry({
-					schedule: TRANSIENT_RETRY_SCHEDULE,
-					while: isTransientUpstreamError,
+			Effect.tapError((error) =>
+				isTransientUpstreamError(error) ? Ref.update(retryAttempts, (n) => n + 1) : Effect.void,
+			),
+			Effect.retry({
+				schedule: TRANSIENT_RETRY_SCHEDULE,
+				while: isTransientUpstreamError,
+			}),
+			Effect.tapError((error) =>
+				Effect.gen(function* () {
+					const nowMs = yield* Clock.currentTimeMillis
+					const elapsedMs = nowMs - sqlStartedMs
+					const totalElapsedMs = nowMs - startedAtMs
+					const attempts = yield* Ref.get(retryAttempts)
+					yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
+					yield* Effect.annotateCurrentSpan("db.total_duration_ms", totalElapsedMs)
+					yield* Effect.annotateCurrentSpan("db.retry.attempts", attempts)
+					yield* Effect.logError("WarehouseQueryService.executeSql failed", {
+						pipe,
+						context: options?.context,
+						orgId: tenant.orgId,
+						backend: resolved.config._tag,
+						durationMs: elapsedMs,
+						retryAttempts: attempts,
+						errorTag: error._tag,
+						message: error.message,
+						sql: truncateSql(finalSql, SQL_LOG_MAX),
+						sqlLength,
+						sqlFingerprint: fingerprintSql(finalSql),
+						profile: options?.profile,
+					})
 				}),
-				Effect.tapError((error) =>
-					Effect.gen(function* () {
-						const nowMs = yield* Clock.currentTimeMillis
-						const elapsedMs = nowMs - sqlStartedMs
-						const totalElapsedMs = nowMs - startedAtMs
-						const attempts = yield* Ref.get(retryAttempts)
-						yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
-						yield* Effect.annotateCurrentSpan("db.total_duration_ms", totalElapsedMs)
-						yield* Effect.annotateCurrentSpan("db.retry.attempts", attempts)
-						yield* Effect.logError("WarehouseQueryService.executeSql failed", {
-							pipe,
-							context: options?.context,
-							orgId: tenant.orgId,
-							backend: resolved.config._tag,
-							durationMs: elapsedMs,
-							retryAttempts: attempts,
-							errorTag: error._tag,
-							message: error.message,
-							sql: truncateSql(finalSql, SQL_LOG_MAX),
-							sqlLength,
-							sqlFingerprint: fingerprintSql(finalSql),
-							profile: options?.profile,
-						})
-					}),
-				),
-			)
+			),
+		)
 
 		yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
 		const completedAtMs = yield* Clock.currentTimeMillis
@@ -261,6 +268,18 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		yield* Effect.annotateCurrentSpan("db.retry.attempts", yield* Ref.get(retryAttempts))
 		return result.data
 	})
+
+	const executeTrustedSql = (
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options?: SqlQueryOptions,
+	) =>
+		executeSql(tenant, sql, pipe, options, "trusted").pipe(
+			// A trusted driver call never receives response limits, so this branch is
+			// an impossible implementation defect rather than part of its error API.
+			Effect.catchTag("@maple/http/errors/RawSqlValidationError", Effect.die),
+		)
 
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
@@ -289,7 +308,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		}
 
-		const rows = yield* executeSql(tenant, compiled.sql, payload.pipeName, options)
+		const rows = yield* executeTrustedSql(tenant, compiled.sql, payload.pipeName, options)
 		const decodedRows = yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
@@ -323,7 +342,21 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 				message: "SQL query must contain OrgId filter (sqlQuery)",
 			})
 		}
-		return yield* executeSql(tenant, sql, "sqlQuery", options)
+		return yield* executeTrustedSql(tenant, sql, "sqlQuery", options)
+	})
+
+	const rawSqlQuery = Effect.fn("WarehouseQueryService.rawSqlQuery")(function* (
+		tenant: ExecutionTenant,
+		sql: string,
+		options?: Pick<SqlQueryOptions, "profile" | "context">,
+	) {
+		if (!sql.includes("OrgId")) {
+			return yield* new RawSqlValidationError({
+				code: "MissingOrgFilter",
+				message: "Raw SQL must contain the expanded OrgId filter",
+			})
+		}
+		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
 	const compiledQuery = Effect.fn("WarehouseQueryService.compiledQuery")(function* <T>(
@@ -388,8 +421,11 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// Tinybird) so the wire protocol is handled correctly — a hand-rolled
 		// `?query=INSERT … FORMAT JSONEachRow` POST had its query param dropped
 		// by managed ClickHouse, which then parsed the NDJSON body as SQL.
-		const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-		const client = getCachedOrCreateClient(cacheKey, resolved.config, yield* Clock.currentTimeMillis)
+		const client = getCachedOrCreateClient(
+			resolved.clientCacheKey,
+			resolved.config,
+			yield* Clock.currentTimeMillis,
+		)
 
 		yield* Effect.tryPromise({
 			try: () => client.insert(datasource, rows),
@@ -464,6 +500,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 	return {
 		query,
 		sqlQuery,
+		rawSqlQuery,
 		compiledQuery,
 		compiledQueryFirst,
 		ingest,

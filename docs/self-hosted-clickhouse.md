@@ -31,6 +31,18 @@ removes Tinybird-restricted query settings. For a vanilla/self-managed server, s
 SQL. Tinybird raw SQL also requires explicit `TINYBIRD_SIGNING_KEY` and
 `TINYBIRD_WORKSPACE_ID` values; Maple never derives either from the API token.
 
+Env-level vanilla ClickHouse raw SQL is enabled only when `MAPLE_AUTH_MODE=self_hosted`,
+where the deployment is single-org. Hosted multi-org deployments fail closed unless
+they use Tinybird's scoped JWT path or per-org BYO credentials.
+
+For user-authored SQL, configure the runtime ClickHouse account as SELECT-only on the
+Maple database. Apply schema migrations with a separate administrative account, and
+enforce server-side limits such as maximum execution time, memory, rows, and bytes
+read. Maple's client-side caps are a final response boundary, not a substitute for a
+least-privilege role and server-side resource controls. See
+[ClickHouse's guidance for agent-authored queries](https://clickhouse.com/blog/how-to-set-up-clickhouse-for-agentic-analytics)
+for the corresponding database-side setup.
+
 ### Routing precedence
 
 For any given query the API resolves the upstream in this order:

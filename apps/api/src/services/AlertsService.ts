@@ -8,7 +8,7 @@ import {
 } from "@maple/query-engine"
 import * as CH from "@maple/query-engine/ch"
 import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
-import { makeExpandMacros } from "@maple/query-engine/runtime"
+import { prepareRawSql } from "@maple/query-engine/runtime"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -1390,11 +1390,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					const sql = request.rawQuerySql?.trim() ?? ""
 					if (sql.length === 0) {
 						details.push("rawQuerySql is required for raw_query alerts")
-					} else if (!sql.includes("$__orgFilter")) {
-						details.push("rawQuerySql must reference $__orgFilter for org scoping")
-					}
-					if (!sql.includes("$__timeFilter(")) {
-						details.push("rawQuerySql must reference $__timeFilter(...) to bound alert reads")
 					}
 					if (serviceNames.length > 0) {
 						details.push("serviceNames is not supported for raw_query alerts")
@@ -1438,12 +1433,13 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					return yield* Effect.fail(makeValidationError("Invalid alert rule", details))
 				}
 				if (request.signalType === "raw_query") {
-					yield* makeExpandMacros({
+					yield* prepareRawSql({
 						sql: request.rawQuerySql ?? "",
 						orgId,
 						startTime: "2000-01-01 00:00:00",
 						endTime: "2000-01-01 00:05:00",
 						granularitySeconds: 60,
+						workload: "alert",
 					}).pipe(
 						Effect.mapError((error) =>
 							makeValidationError("Invalid raw SQL alert query", [error.message], error),

@@ -2,6 +2,7 @@ import { describe, it } from "@effect/vitest"
 import { Effect, Exit, Option, Schema } from "effect"
 import { strict as nodeAssert } from "node:assert"
 import { MetricName, OrgId, ServiceName, UserId } from "@maple/domain"
+import { RawSqlValidationError } from "@maple/domain/http"
 import type {
 	QueryEngineEvaluateRequest,
 	QueryEngineExecuteRequest,
@@ -72,14 +73,18 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
 	const unexpected = (name: string) => () =>
 		Effect.die(new Error(`Unexpected tinybird call in test: ${name}`))
 	const sqlQuery = overrides.sqlQuery ?? unexpected("sqlQuery")
+	const rawSqlQuery = overrides.rawSqlQuery ?? sqlQuery
 
 	return {
-		sqlQuery,
-		compiledQuery: (tenant, compiled, options) =>
-			sqlQuery(tenant, compiled.sql, options).pipe(
-				Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
-			),
 		...overrides,
+		sqlQuery,
+		rawSqlQuery,
+		compiledQuery:
+			overrides.compiledQuery ??
+			((tenant, compiled, options) =>
+				sqlQuery(tenant, compiled.sql, options).pipe(
+					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
+				)),
 	} satisfies Parameters<typeof makeQueryEngineExecute>[0]
 }
 
@@ -995,17 +1000,47 @@ describe("makeQueryEngineEvaluate", () => {
 })
 
 describe("makeQueryEngineEvaluateRawSql", () => {
+	it.effect("translates raw warehouse limits once into the alert validation contract", () =>
+		Effect.gen(function* () {
+			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+				makeTinybirdStub({
+					rawSqlQuery: () =>
+						Effect.fail(
+							new RawSqlValidationError({
+								code: "ResourceLimit",
+								message: "Raw SQL results may contain at most 5000000 encoded bytes",
+							}),
+						),
+				}),
+			)
+
+			const exit = yield* evaluateRawSql(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				sql: "SELECT value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				reducer: "identity",
+				windowMinutes: 5,
+			}).pipe(Effect.exit)
+			const failure = Option.getOrUndefined(Exit.findErrorOption(exit)) as
+				| { readonly _tag?: string; readonly details?: ReadonlyArray<string> }
+				| undefined
+
+			assert.strictEqual(failure?._tag, "@maple/http/errors/QueryEngineValidationError")
+			assert.deepStrictEqual(failure?.details, [
+				"Raw SQL results may contain at most 5000000 encoded bytes",
+			])
+		}),
+	)
+
 	it.effect("groups raw SQL rows by the `group` column and reduces with the configured reducer", () =>
 		Effect.gen(function* () {
 			let profile: string | undefined
-			let scopeToOrgJwt: boolean | undefined
-			let rawResponseLimits: boolean | undefined
+			let context: string | undefined
 			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
 				makeTinybirdStub({
-					sqlQuery: (_tenant, _sql, options) => {
+					rawSqlQuery: (_tenant, _sql, options) => {
 						profile = options?.profile
-						scopeToOrgJwt = options?.scopeToOrgJwt
-						rawResponseLimits = options?.rawResponseLimits
+						context = options?.context
 						return Effect.succeed([
 							{ group: "checkout", value: 10, samples: 4 },
 							{ group: "checkout", value: 30, samples: 6 },
@@ -1018,7 +1053,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			const response = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT group, value FROM otel_traces WHERE $__orgFilter",
+				sql: "SELECT group, value FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 				reducer: "max",
 				windowMinutes: 5,
 			})
@@ -1031,8 +1066,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			assert.strictEqual(byGroup.payments?.sampleCount, 2)
 			assert.strictEqual(byGroup.payments?.hasData, true)
 			assert.strictEqual(profile, "rawAlert")
-			assert.strictEqual(scopeToOrgJwt, true)
-			assert.strictEqual(rawResponseLimits, true)
+			assert.strictEqual(context, "alertRawQuery")
 		}),
 	)
 
@@ -1047,7 +1081,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			const exit = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT value, samples FROM otel_traces WHERE $__orgFilter",
+				sql: "SELECT value, samples FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 				reducer: "identity",
 				windowMinutes: 5,
 			}).pipe(Effect.exit)
@@ -1071,7 +1105,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			const response = yield* evaluateRawSql(tenant, {
 				startTime: "2026-01-01 00:00:00",
 				endTime: "2026-01-01 00:05:00",
-				sql: "SELECT value FROM otel_traces WHERE $__orgFilter",
+				sql: "SELECT value FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 				reducer: "identity",
 				windowMinutes: 5,
 			})
@@ -1094,7 +1128,7 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 				evaluateRawSql(tenant, {
 					startTime: "2026-01-01 00:00:00",
 					endTime: "2026-01-01 00:05:00",
-					sql: "SELECT bucket, errors FROM otel_traces WHERE $__orgFilter",
+					sql: "SELECT bucket, errors FROM otel_traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 					reducer: "identity",
 					windowMinutes: 5,
 				}),

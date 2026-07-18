@@ -346,17 +346,7 @@ const inspectRawSqlWidget = Effect.fn("inspectRawSqlWidget")(function* (
 		Effect.catchTag("@maple/http/errors/RawSqlValidationError", (error) =>
 			Effect.succeed({ ok: false as const, error: `${error.code}: ${error.message}` }),
 		),
-		Effect.catchTags({
-			"@maple/http/errors/WarehouseQueryError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseUpstreamError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseAuthError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseConfigError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseClientError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseSchemaDriftError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseQuotaExceededError": (e) =>
-				Effect.succeed({ ok: false as const, error: e.message }),
-			"@maple/http/errors/WarehouseValidationError": (e) => Effect.succeed({ ok: false as const, error: e.message }),
-		}),
+		Effect.catch((error) => Effect.succeed({ ok: false as const, error: error.message })),
 	)
 
 	if (!result.ok) {
