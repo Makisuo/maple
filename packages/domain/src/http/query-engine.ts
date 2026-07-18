@@ -1368,6 +1368,8 @@ export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
 
 export const MAX_RAW_SQL_LENGTH = 32_768
 export const MAX_RAW_SQL_RESULT_ROWS = 1_000
+export const MAX_RAW_SQL_RESULT_BYTES = 5_000_000
+export const MAX_RAW_SQL_CELL_LENGTH = 64_000
 export const MAX_RAW_SQL_ALERT_GROUPS = 100
 export const MAX_RAW_SQL_GROUP_KEY_LENGTH = 256
 

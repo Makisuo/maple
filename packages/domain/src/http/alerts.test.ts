@@ -182,6 +182,7 @@ describe("AlertNotificationTemplate", () => {
 
 describe("AlertRuleUpsertRequest notificationTemplate", () => {
 	const decode = Schema.decodeUnknownSync(AlertRuleUpsertRequest)
+	const decodeExit = Schema.decodeUnknownExit(AlertRuleUpsertRequest)
 
 	const baseRule = {
 		name: "Checkout errors",
@@ -204,5 +205,9 @@ describe("AlertRuleUpsertRequest notificationTemplate", () => {
 	it("accepts a null template and a fully omitted template", () => {
 		expect(decode({ ...baseRule, notificationTemplate: null }).notificationTemplate).toBeNull()
 		expect(decode(baseRule).notificationTemplate).toBeUndefined()
+	})
+
+	it("rejects alert windows longer than 24 hours", () => {
+		expect(Exit.isFailure(decodeExit({ ...baseRule, windowMinutes: 24 * 60 + 1 }))).toBe(true)
 	})
 })

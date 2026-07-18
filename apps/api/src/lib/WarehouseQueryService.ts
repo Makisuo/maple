@@ -16,6 +16,7 @@ import { WarehouseExecutor } from "@maple/query-engine/observability"
 import { Env } from "./Env"
 import type { TenantContext } from "../services/AuthService"
 import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 
 // ---------------------------------------------------------------------------
 // WarehouseQueryService — the API's managed-warehouse executor.
@@ -120,6 +121,7 @@ export class WarehouseQueryService extends Context.Service<
 	make: Effect.gen(function* () {
 		const env = yield* Env
 		const orgClickHouseSettings = yield* OrgClickHouseSettingsService
+		const orgTokens = yield* TinybirdOrgTokenService
 
 		/**
 		 * Resolve the upstream config for this tenant's queries.
@@ -169,7 +171,7 @@ export class WarehouseQueryService extends Context.Service<
 		 */
 		const resolveConfig: WarehouseExecutorDeps["resolveConfig"] = Effect.fn(
 			"WarehouseQueryService.resolveSqlConfig",
-		)(function* (tenant, label) {
+		)(function* (tenant, label, options) {
 			const override = yield* orgClickHouseSettings
 				.resolveRuntimeConfig(tenant.orgId)
 				.pipe(Effect.mapError((error) => toWarehouseQueryError(label, error)))
@@ -190,7 +192,19 @@ export class WarehouseQueryService extends Context.Service<
 			}
 
 			yield* Effect.annotateCurrentSpan("clientSource", "managed")
-			return yield* resolveManagedConfig()
+			const managed = yield* resolveManagedConfig()
+
+			// Untrusted raw SQL against the shared managed Tinybird warehouse: swap the
+			// shared admin token for a per-org scoped read JWT so Tinybird enforces
+			// `OrgId` isolation server-side (immune to `OR 1=1`, UNION, subqueries).
+			// Only applies to the Tinybird SDK backend — the managed ClickHouse gateway
+			// (a shared user) can't be JWT-scoped, and BYO ClickHouse is already isolated.
+			if (options?.scopeToOrgJwt && managed.config._tag === "tinybird") {
+				const token = yield* orgTokens.getOrgReadToken(tenant.orgId)
+				yield* Effect.annotateCurrentSpan("tinybird.token.scope", "org_jwt")
+				return { config: { ...managed.config, token }, source: managed.source }
+			}
+			return managed
 		})
 
 		/**

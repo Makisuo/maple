@@ -7,7 +7,6 @@ import {
 	QueryEngineValidationError,
 	RawSqlExecuteResponse,
 	RawSqlValidationError,
-	MAX_RAW_SQL_RESULT_ROWS,
 	SpanHierarchyResponse,
 	SpanDetailResponse,
 	ErrorsByTypeResponse,
@@ -70,7 +69,7 @@ import {
 } from "@maple/domain/http"
 import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
-import { RawSqlChartService } from "@maple/query-engine/runtime"
+import { rawSqlResultLimitError, RawSqlChartService } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 import {
@@ -2652,14 +2651,17 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						warehouse.sqlQuery(tenant, expanded.sql, {
 							profile: "rawInteractive",
 							context: "rawSql",
+							// Untrusted user SQL — scope to a per-org Tinybird JWT (server-enforced isolation).
+							scopeToOrgJwt: true,
 						}),
 						"rawSql query failed",
 					)
 
-					if (rows.length > MAX_RAW_SQL_RESULT_ROWS) {
+					const resultLimitError = rawSqlResultLimitError(rows)
+					if (resultLimitError != null) {
 						return yield* new RawSqlValidationError({
 							code: "ResourceLimit",
-							message: `Raw SQL results may contain at most ${MAX_RAW_SQL_RESULT_ROWS} rows`,
+							message: resultLimitError,
 						})
 					}
 

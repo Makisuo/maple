@@ -312,7 +312,6 @@ describe("v2 alerts over HTTP", () => {
 		})
 		expect(response.status).toBe(400)
 		expect(response.body.error).toMatchObject({ type: "invalid_request_error" })
-		expect(JSON.stringify(response.body)).toContain("rawQuerySql is only supported")
 		await harness.dispose()
 	})
 

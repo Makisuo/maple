@@ -142,7 +142,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			options?.pinToIngestConfig && deps.resolveIngestConfig
 				? deps.resolveIngestConfig
 				: deps.resolveConfig
-		const resolved = yield* resolveFn(tenant, pipe)
+		const resolved = yield* resolveFn(tenant, pipe, { scopeToOrgJwt: options?.scopeToOrgJwt })
 		if (options?.pinToIngestConfig) yield* Effect.annotateCurrentSpan("query.routing", "ingest")
 		const peerService = resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird"
 		yield* Effect.annotateCurrentSpan("db.system.name", peerService)
@@ -172,7 +172,11 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 		if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
-		const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
+		// Managed queries share one client (one shared admin token). But a per-org
+		// scoped-JWT raw query carries an org-specific token, so it must key per org
+		// — otherwise every org would evict the single "__managed__" client (thrash).
+		const cacheKey =
+			resolved.source === "managed" && !options?.scopeToOrgJwt ? "__managed__" : tenant.orgId
 		const client = getCachedOrCreateClient(cacheKey, resolved.config, yield* Clock.currentTimeMillis)
 		const attemptTimeoutMs = clientTimeoutMs(options?.profile, settings?.maxExecutionTime)
 		const retryAttempts = yield* Ref.make(0)

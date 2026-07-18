@@ -36,6 +36,14 @@ export type SqlQueryOptions = {
 	 * did not inject a `resolveIngestConfig`.
 	 */
 	pinToIngestConfig?: boolean
+	/**
+	 * Mark this as untrusted, user-authored raw SQL. When set and the resolved
+	 * backend is the shared managed Tinybird warehouse, the host swaps the shared
+	 * admin token for a per-org scoped read JWT, so tenant isolation is enforced
+	 * by Tinybird server-side instead of by SQL-string checks. No-op for BYO
+	 * ClickHouse orgs (already isolated by their own credentials).
+	 */
+	scopeToOrgJwt?: boolean
 }
 
 /** Resolved upstream connection config for a tenant's queries. */
@@ -67,11 +75,18 @@ export interface WarehouseSqlClient {
  * mapping, retry, client cache, OrgId scoping, span instrumentation — lives in
  * this package.
  */
+/** Per-call hints the host config resolver may act on. */
+export interface ResolveConfigOptions {
+	/** Untrusted raw SQL — use a per-org scoped read token on the managed backend. */
+	readonly scopeToOrgJwt?: boolean
+}
+
 export interface WarehouseExecutorDeps {
 	readonly createClient: (config: ResolvedWarehouseConfig) => WarehouseSqlClient
 	readonly resolveConfig: (
 		tenant: ExecutionTenant,
 		label: string,
+		options?: ResolveConfigOptions,
 	) => Effect.Effect<
 		{ readonly config: ResolvedWarehouseConfig; readonly source: "managed" | "org_override" },
 		WarehouseQueryError
@@ -85,6 +100,7 @@ export interface WarehouseExecutorDeps {
 	readonly resolveIngestConfig?: (
 		tenant: ExecutionTenant,
 		label: string,
+		options?: ResolveConfigOptions,
 	) => Effect.Effect<
 		{ readonly config: ResolvedWarehouseConfig; readonly source: "managed" | "org_override" },
 		WarehouseQueryError

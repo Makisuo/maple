@@ -11,6 +11,7 @@ import { unsafeCompiledQuery } from "@maple/query-engine/ch"
 import { makeWarehouseExecutor } from "@maple/query-engine/execution"
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
 import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 import type { TenantContext } from "../services/AuthService"
 import { Env } from "./Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
@@ -46,7 +47,10 @@ const buildLayer = (testDb: TestDb, extra: Record<string, string> = {}) => {
 	const orgSettingsLive = OrgClickHouseSettingsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
 	)
-	return WarehouseQueryService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, orgSettingsLive)))
+	const tinybirdTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
+	return WarehouseQueryService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, orgSettingsLive, tinybirdTokenLive)),
+	)
 }
 
 const getError = <A, E>(exit: Exit.Exit<A, E>): unknown => {

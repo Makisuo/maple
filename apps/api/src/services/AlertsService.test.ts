@@ -15,7 +15,13 @@ import {
 } from "@maple/domain/http"
 import type { WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { AlertRuntime, type AlertRuntimeShape, AlertsService, type AlertsServiceShape } from "./AlertsService"
+import {
+	AlertRuntime,
+	type AlertRuntimeShape,
+	AlertsService,
+	type AlertsServiceShape,
+	interleaveAlertRulesByOrg,
+} from "./AlertsService"
 import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"
@@ -28,6 +34,23 @@ import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } 
 const trackedDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(trackedDbs))
+
+describe("interleaveAlertRulesByOrg", () => {
+	it("round-robins organizations while preserving per-org order", () => {
+		const rows = [
+			{ orgId: "a", id: "a1" },
+			{ orgId: "a", id: "a2" },
+			{ orgId: "a", id: "a3" },
+			{ orgId: "b", id: "b1" },
+			{ orgId: "b", id: "b2" },
+			{ orgId: "c", id: "c1" },
+		]
+		assert.deepStrictEqual(
+			interleaveAlertRulesByOrg(rows).map((row) => row.id),
+			["a1", "b1", "c1", "a2", "b2", "a3"],
+		)
+	})
+})
 
 const getError = <A, E>(exit: Exit.Exit<A, E>): unknown => {
 	if (!Exit.isFailure(exit)) return undefined
@@ -309,6 +332,43 @@ const insertDeliveryEventRow = async (
 }
 
 describe("AlertsService", () => {
+	it.effect("caps active alert rules per organization", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_active_rule_cap")
+			const userId = asUserId("user_active_rule_cap")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const createRule = (index: number) =>
+				alerts.createRule(
+					orgId,
+					userId,
+					adminRoles,
+					new AlertRuleUpsertRequest({
+						name: `Capped rule ${index}`,
+						severity: "warning",
+						enabled: true,
+						signalType: "error_rate",
+						comparator: "gt",
+						threshold: 5,
+						windowMinutes: 5,
+						destinationIds: [destination.id],
+					}),
+				)
+			yield* Effect.forEach(
+				Array.from({ length: 100 }, (_, index) => index),
+				createRule,
+				{ concurrency: 1, discard: true },
+			)
+
+			const exit = yield* createRule(100).pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(exit))
+			const error = getError(exit)
+			assert.instanceOf(error, AlertValidationError)
+			assert.include((error as AlertValidationError).message, "at most 100 active alert rules")
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}), { fetch: okFetch })))
+	})
+
 	it.effect("opens an incident after consecutive breaches and delivers the webhook notification", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {

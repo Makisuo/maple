@@ -393,6 +393,30 @@ const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 
 // Cap on how many evaluation windows a structured rule preview replays.
 const MAX_PREVIEW_BUCKETS = 200
+const MAX_ACTIVE_ALERT_RULES_PER_ORG = 100
+
+/** Preserve each org's oldest-first order while preventing one org from monopolizing a tick. */
+export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
+	rows: ReadonlyArray<T>,
+): ReadonlyArray<T> => {
+	const queues = new Map<string, T[]>()
+	for (const row of rows) {
+		const queue = queues.get(row.orgId)
+		if (queue) queue.push(row)
+		else queues.set(row.orgId, [row])
+	}
+
+	const fair: T[] = []
+	let index = 0
+	while (fair.length < rows.length) {
+		for (const queue of queues.values()) {
+			const row = queue[index]
+			if (row !== undefined) fair.push(row)
+		}
+		index += 1
+	}
+	return fair
+}
 
 // Tinybird DateTime64(3) wire format for alert_checks ingest:
 // "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
@@ -2469,6 +2493,23 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				request: AlertRuleUpsertRequest,
 			) {
 				const normalized = yield* normalizeRule(orgId, request)
+				if (normalized.enabled) {
+					const activeRows = yield* dbExecute((db) =>
+						db
+							.select({ id: alertRules.id })
+							.from(alertRules)
+							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.enabled, true))),
+					)
+					const alreadyActive =
+						existingId != null && activeRows.some((row) => row.id === existingId)
+					if (!alreadyActive && activeRows.length >= MAX_ACTIVE_ALERT_RULES_PER_ORG) {
+						return yield* Effect.fail(
+							makeValidationError(
+								`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
+							),
+						)
+					}
+				}
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 				const ruleId = existingId ?? normalized.id
 				const timestamp = yield* now
@@ -4402,7 +4443,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 
 				yield* Effect.forEach(
-					rows,
+					interleaveAlertRulesByOrg(rows),
 					(row) =>
 						Effect.gen(function* () {
 							const timestamp = yield* now

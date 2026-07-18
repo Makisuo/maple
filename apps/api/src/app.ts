@@ -81,6 +81,7 @@ import { Env } from "./lib/Env"
 import { IngestAttributeMappingService } from "./services/IngestAttributeMappingService"
 import { OrgIngestKeysService } from "./services/OrgIngestKeysService"
 import { OrgClickHouseSettingsService } from "./services/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "./services/TinybirdOrgTokenService"
 import { OrganizationService } from "./services/OrganizationService"
 import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
@@ -143,6 +144,7 @@ const CoreServicesLive = Layer.mergeAll(
 	OnboardingService.layer,
 	OrgIngestKeysService.layer,
 	OrgClickHouseSettingsService.layer,
+	TinybirdOrgTokenService.layer,
 	OrganizationService.layer,
 	PlanetScaleOAuthLive,
 	PlanetScaleDiscoveryLive,

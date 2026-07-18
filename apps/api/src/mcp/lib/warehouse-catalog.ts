@@ -94,6 +94,20 @@ export function listWarehouseTables(): ReadonlyArray<TableSummary> {
 		.sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/**
+ * Datasource names that carry an `OrgId` column — the allowlist used to scope a
+ * per-org raw-SQL read JWT. Derived live from the `defineDatasource` exports, so
+ * a new telemetry datasource is covered automatically; any datasource WITHOUT an
+ * `OrgId` column is excluded, making it unqueryable in raw SQL (fail-closed)
+ * rather than leaking cross-tenant rows.
+ */
+export function listOrgScopedDatasourceNames(): ReadonlyArray<string> {
+	return collectDatasources()
+		.filter((ds) => "OrgId" in ds._schema)
+		.map((ds) => ds._name)
+		.sort((a, b) => a.localeCompare(b))
+}
+
 export function describeWarehouseTable(name: string): TableInfo | null {
 	const ds = collectDatasources().find((d) => d._name === name)
 	if (!ds) return null
