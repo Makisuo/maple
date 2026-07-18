@@ -87,13 +87,20 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/instrumentation/recommendations",
 			"GET /v2/investigations",
 			"GET /v2/investigations/{id}",
+			"GET /v2/logs/{id}",
+			"GET /v2/metrics",
 			"GET /v2/organization",
 			"GET /v2/scrape_targets",
 			"GET /v2/scrape_targets/{id}",
 			"GET /v2/scrape_targets/{id}/checks",
+			"GET /v2/service_map",
+			"GET /v2/services",
+			"GET /v2/services/{name}",
 			"GET /v2/session_replays/{id}",
 			"GET /v2/session_replays/{id}/events",
 			"GET /v2/session_replays/{id}/transcript",
+			"GET /v2/traces/{trace_id}",
+			"GET /v2/traces/{trace_id}/spans/{span_id}",
 			"PATCH /v2/alerts/destinations/{id}",
 			"PATCH /v2/alerts/rules/{id}",
 			"PATCH /v2/anomalies/settings",
@@ -119,10 +126,14 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/instrumentation/recommendations/{id}/reopen",
 			"POST /v2/investigations",
 			"POST /v2/investigations/{id}/status",
+			"POST /v2/logs/search",
+			"POST /v2/metrics/timeseries",
+			"POST /v2/query",
 			"POST /v2/scrape_targets",
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/traces/search",
 			"PUT /v2/anomalies/incidents/{id}/issue",
 		])
 	})
@@ -161,12 +172,18 @@ describe("MapleApiV2 OpenAPI", () => {
 			expect(op.description.length).toBeGreaterThan(20)
 			expect(op.tags).toHaveLength(1)
 			expect(op.security).toEqual([{ bearer: [] }])
-			for (const status of ["400", "401", "403", "500"]) {
+			for (const status of ["400", "401", "403", "429", "500"]) {
 				expect(
 					op.responses[status],
 					`${method.toUpperCase()} ${path} declares ${status}`,
 				).toBeDefined()
 			}
+			const rateLimitResponse = op.responses["429"] as Record<string, any>
+			expect(rateLimitResponse.headers?.["Retry-After"]).toMatchObject({
+				description: expect.any(String),
+				schema: { type: "integer", minimum: 1 },
+				example: 60,
+			})
 		}
 	})
 
@@ -188,6 +205,7 @@ describe("MapleApiV2 OpenAPI", () => {
 				"AuthenticationError",
 				"PermissionError",
 				"NotFoundError",
+				"RateLimitError",
 				"ServiceUnavailableError",
 			]),
 		)

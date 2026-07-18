@@ -28,6 +28,7 @@ export {
 	tracesBreakdownQuery,
 	tracesListQuery,
 	tracesRootListQuery,
+	traceSummariesQuery,
 	slowTracesQuery,
 	spanSearchQuery,
 	type TracesTimeseriesOpts,
@@ -38,6 +39,8 @@ export {
 	type TracesBreakdownOutput,
 	type TracesListOutput,
 	type TracesRootListOutput,
+	type TraceSummariesOpts,
+	type TraceSummaryOutput,
 	type SlowTracesOpts,
 	type SlowTracesOutput,
 	type SpanSearchOpts,
@@ -141,6 +144,7 @@ export {
 // Queries — Services
 export {
 	serviceOverviewQuery,
+	serviceCatalogQuery,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
@@ -150,6 +154,8 @@ export {
 	servicesFacetsQuery,
 	type ServiceOverviewOpts,
 	type ServiceOverviewOutput,
+	type ServiceCatalogOpts,
+	type ServiceCatalogOutput,
 	type ServiceHealthBaselineOpts,
 	type ServiceHealthBaselineOutput,
 	type ServiceReleasesTimelineOpts,

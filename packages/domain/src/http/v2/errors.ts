@@ -247,6 +247,15 @@ export const resourceNotFound = (resource: string, message: string, param = "id"
 export const conflict = (code: string, message: string) =>
 	new V2ConflictError({ error: { type: "conflict_error", code, message } })
 
+export const rateLimited = () =>
+	new V2RateLimitError({
+		error: {
+			type: "rate_limit_error",
+			code: "rate_limited",
+			message: "Too many requests. Retry after 60 seconds.",
+		},
+	})
+
 export const upstreamError = (code: string, message: string) =>
 	new V2UpstreamError({ error: { type: "api_error", code, message } })
 

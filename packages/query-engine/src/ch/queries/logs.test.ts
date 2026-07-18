@@ -276,6 +276,8 @@ describe("logsListQuery", () => {
 		expect(sql).toContain("Body AS body")
 		expect(sql).toContain("TraceId AS traceId")
 		expect(sql).toContain("SpanId AS spanId")
+		expect(sql).toContain("hex(MD5(toJSONString(tuple(")
+		expect(sql).toContain("AS recordIdentity")
 		expect(sql).toContain("toJSONString(LogAttributes) AS logAttributes")
 		expect(sql).toContain("toJSONString(ResourceAttributes) AS resourceAttributes")
 		expect(sql).toContain("ORDER BY timestamp DESC")
@@ -287,6 +289,31 @@ describe("logsListQuery", () => {
 		const q = logsListQuery({ cursor: "2024-01-01T12:00:00" })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("Timestamp < '2024-01-01T12:00:00'")
+	})
+
+	it("uses the full composite identity for deterministic keyset continuation", () => {
+		const { sql } = compileCH(
+			logsListQuery({
+				limit: 21,
+				cursorIdentity: {
+					timestamp: "2024-01-01 12:00:00.123",
+					serviceName: "api",
+					traceId: "trace123",
+					spanId: "span456",
+					recordIdentity: "00112233445566778899AABBCCDDEEFF",
+				},
+			}),
+			baseParams,
+		)
+		expect(sql).toContain(
+			"ORDER BY timestamp DESC, serviceName ASC, traceId ASC, spanId ASC, recordIdentity ASC",
+		)
+		expect(sql).toContain("Timestamp < '2024-01-01 12:00:00.123'")
+		expect(sql).toContain("ServiceName > 'api'")
+		expect(sql).toContain("TraceId > 'trace123'")
+		expect(sql).toContain("SpanId > 'span456'")
+		expect(sql).toContain("hex(MD5(toJSONString(tuple(")
+		expect(sql).toContain("> '00112233445566778899AABBCCDDEEFF'")
 	})
 
 	it("applies custom limit", () => {
@@ -376,10 +403,16 @@ describe("getLogByKeyQuery", () => {
 	})
 
 	it("applies optional traceId and spanId filters", () => {
-		const q = getLogByKeyQuery({ serviceName: "api", traceId: "trace123", spanId: "span456" })
+		const q = getLogByKeyQuery({
+			serviceName: "api",
+			traceId: "trace123",
+			spanId: "span456",
+			recordIdentity: "00112233445566778899AABBCCDDEEFF",
+		})
 		const { sql } = compileCH(q, keyParams)
 		expect(sql).toContain("TraceId = 'trace123'")
 		expect(sql).toContain("SpanId = 'span456'")
+		expect(sql).toContain("= '00112233445566778899AABBCCDDEEFF'")
 	})
 
 	it("omits traceId and spanId filters when not provided", () => {
@@ -480,7 +513,10 @@ describe("logsFacetsQuery", () => {
 	})
 
 	it("facet scoping follows the raw-`logs` fallback path", () => {
-		const q = logsFacetsQuery({ environments: ["prod"], matchModes: { deploymentEnv: "contains" } }, "severity")
+		const q = logsFacetsQuery(
+			{ environments: ["prod"], matchModes: { deploymentEnv: "contains" } },
+			"severity",
+		)
 		const { sql } = compileUnion(q, baseParams)
 		expect(sql).not.toContain("UNION ALL")
 		expect(sql).toContain("FROM logs")

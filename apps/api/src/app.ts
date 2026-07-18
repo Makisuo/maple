@@ -23,6 +23,14 @@ import { HttpV2OrganizationLive } from "./routes/v2/organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./routes/v2/recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./routes/v2/scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./routes/v2/session-replays.http"
+import {
+	HttpV2LogsLive,
+	HttpV2MetricsLive,
+	HttpV2QueryLive,
+	HttpV2ServiceMapLive,
+	HttpV2ServicesLive,
+	HttpV2TracesLive,
+} from "./routes/v2/telemetry.http"
 import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
@@ -57,6 +65,7 @@ import { HazelOAuthService } from "./services/HazelOAuthService"
 import { InvestigationService } from "./services/InvestigationService"
 import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
+import { ApiV2RateLimiter } from "./services/ApiV2RateLimiter"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
 import { ApiAuthorizationV2Layer } from "./services/ApiAuthorizationV2Layer"
@@ -91,6 +100,7 @@ import { VcsCommitService } from "./services/vcs/VcsCommitService"
 import { VcsProviderRegistry } from "./services/vcs/VcsProviderRegistry"
 import { VcsRepository } from "./services/vcs/VcsRepository"
 import { VcsSyncQueue } from "./services/vcs/VcsSyncQueue"
+import { API_CORS_OPTIONS } from "./lib/api-cors"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
 
@@ -301,6 +311,12 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2AnomaliesLive,
 			HttpV2OrganizationLive,
 			HttpV2SessionReplaysLive,
+			HttpV2TracesLive,
+			HttpV2LogsLive,
+			HttpV2MetricsLive,
+			HttpV2ServicesLive,
+			HttpV2ServiceMapLive,
+			HttpV2QueryLive,
 		),
 	),
 	Layer.provide(V2SchemaErrorsLive),
@@ -320,20 +336,10 @@ export const AllRoutes = Layer.mergeAll(
 	McpGetFallback,
 	DocsRoute,
 	DocsV2Route,
-).pipe(
-	Layer.provideMerge(
-		HttpRouter.cors({
-			allowedOrigins: ["*"],
-			allowedMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-			allowedHeaders: ["*"],
-			// The ElectricSQL shape proxy (and its electric-* exposed headers) moved
-			// to the standalone `apps/electric-sync` worker.
-			exposedHeaders: ["Mcp-Session-Id"],
-		}),
-	),
-)
+).pipe(Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)))
 
 export const ApiAuthLive = Layer.mergeAll(ApiAuthorizationLayer, ApiAuthorizationV2Layer).pipe(
+	Layer.provideMerge(ApiV2RateLimiter.layer),
 	Layer.provideMerge(ApiKeysService.layer),
 	Layer.provideMerge(Env.layer),
 )

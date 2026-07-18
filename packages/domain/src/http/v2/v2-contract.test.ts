@@ -15,8 +15,9 @@ import {
 	paginateOffsetQuery,
 	Timestamp,
 } from "./envelopes"
-import { notFound, permissionError, V2NotFoundError } from "./errors"
+import { notFound, permissionError, rateLimited, V2NotFoundError, V2RateLimitError } from "./errors"
 import { encodePublicId } from "./public-id"
+import { LogPublicId, V2QueryParams } from "./telemetry"
 
 const UUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 
@@ -320,6 +321,16 @@ describe("v2 error envelope", () => {
 	it("permissionError has type permission_error", () => {
 		expect(permissionError("insufficient_scope", "nope").error.type).toBe("permission_error")
 	})
+
+	it("rateLimited has the stable public 429 envelope", () => {
+		expect(Schema.encodeSync(V2RateLimitError)(rateLimited())).toEqual({
+			error: {
+				type: "rate_limit_error",
+				code: "rate_limited",
+				message: "Too many requests. Retry after 60 seconds.",
+			},
+		})
+	})
 })
 
 describe("scopes", () => {
@@ -368,6 +379,14 @@ describe("scopes", () => {
 			family: "session_replays",
 			access: "read",
 		})
+		for (const [path, family] of [
+			["/v2/traces/search", "traces"],
+			["/v2/logs/search", "logs"],
+			["/v2/metrics/timeseries", "metrics"],
+			["/v2/query", "query"],
+		] as const) {
+			expect(requiredScopeForRequest("POST", path)).toEqual({ family, access: "read" })
+		}
 		expect(requiredScopeForRequest("GET", "/api/api-keys")).toBeNull()
 	})
 
@@ -395,6 +414,57 @@ describe("scopes", () => {
 			family: "alerts",
 			access: "write",
 		})
+	})
+})
+
+describe("telemetry contracts", () => {
+	it("round-trips the synthetic composite log ID", () => {
+		const internal = JSON.stringify([
+			"2026-07-15 12:00:00.123",
+			"00112233445566778899AABBCCDDEEFF",
+		])
+		const wire = Schema.encodeSync(LogPublicId)(internal)
+		expect(wire.startsWith("log_")).toBe(true)
+		expect(Schema.decodeSync(LogPublicId)(wire)).toBe(internal)
+	})
+
+	it("decodes structured queries with trace attribute grouping", () => {
+		const structured = Schema.decodeUnknownSync(V2QueryParams)({
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-15T01:00:00.000Z",
+			query: {
+				kind: "timeseries",
+				source: "traces",
+				metric: "count",
+				group_by: ["attribute"],
+				filters: { group_by_attribute_keys: ["http.route"] },
+			},
+		})
+		expect(structured.query.kind).toBe("timeseries")
+	})
+
+	it("rejects raw SQL and invalid query budgets at the HTTP boundary", () => {
+		const base = {
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-15T01:00:00.000Z",
+		}
+		expect(() =>
+			Schema.decodeUnknownSync(V2QueryParams)({
+				...base,
+				query: { kind: "raw_sql", sql: "SELECT 1 WHERE $__orgFilter" },
+			}),
+		).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(V2QueryParams)({
+				...base,
+				query: {
+					kind: "timeseries",
+					source: "logs",
+					metric: "count",
+					bucket_seconds: 0,
+				},
+			}),
+		).toThrow()
 	})
 })
 

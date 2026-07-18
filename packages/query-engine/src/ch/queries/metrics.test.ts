@@ -376,7 +376,9 @@ describe("listMetricsQuery", () => {
 		expect(sql).not.toContain("UNION ALL")
 		expect(sql).toContain("FROM metric_catalog")
 		expect(sql).toContain("GROUP BY metricName, metricType, serviceName")
-		expect(sql).toContain("ORDER BY lastSeen DESC")
+		expect(sql).toContain(
+			"ORDER BY lastSeen DESC, metricName ASC, metricType ASC, serviceName ASC",
+		)
 		expect(sql).toContain("LIMIT 100")
 		// start bound floored to the hour
 		expect(sql).toContain("toStartOfInterval")

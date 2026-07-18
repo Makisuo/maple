@@ -117,7 +117,7 @@ export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTime
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
 
-const MAX_RANGE_SECONDS = 60 * 60 * 24 * 31
+export const MAX_QUERY_RANGE_SECONDS = 60 * 60 * 24 * 31
 const MAX_LIST_RANGE_SECONDS = 60 * 60 * 24 * 7
 const MAX_TIMESERIES_POINTS = 1_500
 const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
@@ -314,10 +314,10 @@ const validateTimeRange = Effect.fn("QueryEngineService.validateTimeRange")(func
 	}
 
 	const rangeSeconds = (endMs - startMs) / 1000
-	if (rangeSeconds > MAX_RANGE_SECONDS) {
+	if (rangeSeconds > MAX_QUERY_RANGE_SECONDS) {
 		return yield* new QueryEngineValidationError({
 			message: "Time range too large",
-			details: [`Maximum supported range is ${MAX_RANGE_SECONDS} seconds`],
+			details: [`Maximum supported range is ${MAX_QUERY_RANGE_SECONDS} seconds`],
 		})
 	}
 

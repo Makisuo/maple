@@ -46,6 +46,12 @@ const SCOPE_FAMILY_ROWS = [
 		label: "Session replays",
 		description: "Search sessions, retrieve detail, events, and transcripts",
 	},
+	{ id: "traces", label: "Traces", description: "Search traces and retrieve spans" },
+	{ id: "logs", label: "Logs", description: "Search and retrieve log records" },
+	{ id: "metrics", label: "Metrics", description: "Metric catalog and timeseries reads" },
+	{ id: "services", label: "Services", description: "Service catalog and health summaries" },
+	{ id: "service_map", label: "Service map", description: "Service-to-service topology" },
+	{ id: "query", label: "Query", description: "Structured telemetry queries" },
 	{ id: "organization", label: "Organization", description: "Read the organization's identity" },
 ] as const
 
@@ -87,10 +93,17 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 								prefixed object IDs, cursor-paginated lists, and scoped API keys.
 							</CardDescription>
 						</div>
-						<Button
-							size="sm"
-							render={<a href={docsUrl} target="_blank" rel="noopener noreferrer" />}
-						>
+							<Button
+								size="sm"
+								render={
+									<a
+										href={docsUrl}
+										target="_blank"
+										rel="noopener noreferrer"
+										aria-label="Open API reference"
+									/>
+								}
+							>
 							<CodeIcon data-icon="inline-start" size={14} />
 							Open API reference
 						</Button>

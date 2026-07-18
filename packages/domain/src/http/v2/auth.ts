@@ -6,6 +6,7 @@ import {
 	V2AuthenticationError,
 	V2InvalidRequestError,
 	V2PermissionError,
+	V2RateLimitError,
 	V2ServiceUnavailableError,
 } from "./errors"
 
@@ -23,7 +24,7 @@ export class AuthorizationV2 extends HttpApiMiddleware.Service<
 		provides: Context
 	}
 >()("AuthorizationV2", {
-	error: [V2AuthenticationError, V2PermissionError, V2ServiceUnavailableError],
+	error: [V2AuthenticationError, V2PermissionError, V2RateLimitError, V2ServiceUnavailableError],
 	security: {
 		bearer: HttpApiSecurity.bearer.pipe(
 			HttpApiSecurity.annotateMerge(
@@ -77,6 +78,10 @@ const READ_ONLY_POST_PATHS = new Set([
 	"/v2/session_replays/search",
 	"/v2/session_replays/for_trace",
 	"/v2/alerts/rules/preview",
+	"/v2/traces/search",
+	"/v2/logs/search",
+	"/v2/metrics/timeseries",
+	"/v2/query",
 ])
 
 /**

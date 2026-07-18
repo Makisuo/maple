@@ -20,7 +20,12 @@ import { HazelOAuthService } from "../../services/HazelOAuthService"
 import { OrgMembersService } from "../../services/OrgMembersService"
 import { QueryEngineService } from "../../services/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AllV2GroupLayersLive, ConfigResourceServiceStubsLayer } from "./v2-test-support"
+import {
+	AllV2GroupLayersLive,
+	ApiV2RateLimiterAllowAllLayer,
+	ConfigResourceServiceStubsLayer,
+	TelemetryServiceStubsLayer,
+} from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -106,8 +111,10 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(ConfigResourceServiceStubsLayer),
+		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)
 	const { handler, dispose: disposeHandler } = HttpRouter.toWebHandler(routes, {

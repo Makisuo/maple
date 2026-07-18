@@ -34,7 +34,7 @@ POST   /v2/traces/search         complex reads are POST .../search
 
 Every v2 object has a prefixed public ID (`key_4CzLmR…`, `dash_…`, `alrt_…`). Public IDs are opaque; internally they are a reversible base58 encoding of the internal ID, computed at the API boundary (`packages/domain/src/http/v2/public-id.ts` — the prefix registry lives there and is the single source of truth). No database migration: rows keep their raw UUIDs / internal strings.
 
-Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `einc` (error incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping), and `srep` (session replay); `evt` and `we` are reserved for events/webhooks.
+Prefixes: `key` (API key), `ingk` (ingest key), `dash` (dashboard), `dbv` (dashboard version), `dtpl` (dashboard template), `alrt` (alert rule), `dest` (alert destination), `inc` (alert incident), `einc` (error incident), `iss` (error issue), `inv` (investigation), `anom` (anomaly incident), `scrp` (scrape target), `rec` (recommendation), `amap` (attribute mapping), `srep` (session replay), and `log` (synthetic log identity); `evt` and `we` are reserved for events/webhooks.
 
 Exception: Clerk-issued `org_…` / `user_…` IDs are already prefixed public IDs and pass through unchanged.
 
@@ -112,9 +112,13 @@ Implementation: `packages/domain/src/http/v2/auth.ts` + `apps/api/src/services/A
 
 Mutating endpoints will accept an `Idempotency-Key` header. Replays within the retention window return the original response. Backed by a Postgres `idempotency_keys` table keyed by `(org_id, key)`.
 
-### Rate limiting (Phase 4 — reserved)
+### Rate limiting
 
-Per-key rate limits will return `429` with the error envelope (`type: "rate_limit_error"`) and a `Retry-After` header.
+API-key-authenticated requests share one budget per key across the entire `/v2` surface: **600 requests per 60 seconds**. The budget is partitioned by deployment stage, and rolling a key starts a fresh budget because the replacement has a new internal key ID. Valid-key requests count even when a later scope or role check rejects them; invalid credentials and dashboard session tokens do not use this budget.
+
+Exceeding the budget returns `429` with the standard error envelope (`type: "rate_limit_error"`, `code: "rate_limited"`) and `Retry-After: 60`. No remaining/reset headers are emitted because the backing Cloudflare binding returns only an allow/deny result.
+
+The limiter fails open: if its binding is missing or errors, Maple logs and traces `maple.rate_limit.outcome=failed_open` and continues the request. Cloudflare counters are local to the location serving the Worker and eventually consistent, so this is abuse protection rather than exact global quota accounting.
 
 ### Expansion — not supported
 
@@ -140,13 +144,26 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | `attribute_mappings` ✅              | CRUD                                                                                               | `ingestAttributeMappings`                |
 | `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)   | `sessionReplays`                         |
 | `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred             | `organizations`, `orgClickHouseSettings` |
-| `traces`                             | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
-| `logs`                               | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
-| `metrics`                            | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
-| `services`                           | `GET /v2/services`, `GET /v2/services/{name}`, `GET /v2/service_map`                               | `queryEngine`                            |
-| `query`                              | `POST /v2/query` — query-builder execution; raw SQL org-gated                                      | `queryEngine`                            |
+| `traces` ✅                          | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
+| `logs` ✅                            | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
+| `metrics` ✅                         | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
+| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                      | `queryEngine`                            |
+| `service_map` ✅                     | `GET /v2/service_map`                                                                              | `queryEngine`                            |
+| `query` ✅                           | `POST /v2/query` — structured telemetry queries                                                    | `queryEngine`                            |
 
 The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare/PlanetScale infra) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
+
+### Telemetry reads
+
+Phase 2 exposes traces, logs, metrics, services, the service map, and the common query engine. Collection and aggregation operations require explicit ISO-8601 UTC `start_time` and `end_time`; `end_time` must be later than `start_time`, and ranges are capped at 31 days. Direct trace/span retrieval uses the `(OrgId, TraceId, SpanId)` sorting-key prefix so it returns the complete retained trace without a correctness-limiting timestamp window. Direct log retrieval derives its narrow partition window from the timestamp embedded in the log ID.
+
+Trace IDs, span IDs, metric names, and service names remain their native OpenTelemetry identifiers. Logs have no native record ID, so search results return a deterministic `log_…` ID containing a compact timestamp and a complete-record fingerprint. Malformed log IDs return `log_id_invalid`; records outside retention return `log_not_found`.
+
+All telemetry lists use the standard cursor envelope with a default limit of 20 and maximum of 100. Trace results are root-span summaries ordered by start time and trace ID. Log ordering includes timestamp plus the complete composite identity. Services are grouped by service name across namespaces and deployment environments. The service map includes only service-to-service edges in this version; database, external, and infrastructure nodes remain internal APIs.
+
+`POST /v2/query` accepts `timeseries` and `breakdown` specifications for trace, log, and metric sources using snake_case fields. Responses use the common `query_result` envelope. Raw SQL is intentionally unavailable through the public API because tenant isolation must not depend on inspecting caller-authored SQL text. Warehouse diagnostics are never returned to callers.
+
+Telemetry scope families are `traces`, `logs`, `metrics`, `services`, `service_map`, and `query`. Search, timeseries, and query POSTs are read-only operations for scope enforcement, so `<family>:read` is sufficient.
 
 Not in v2: org membership and invitations (delegated to Clerk; revisit if/when a members API is needed).
 
@@ -158,9 +175,9 @@ The dashboard can reconcile optimistic writes against ElectricSQL synced shapes 
 
 - **Phase 0 (this change)** — conventions doc, v2 primitives (`public-id`, `envelopes`, `errors`, `auth`), scoped API keys (schema + service + enforcement), `MapleApiV2` shell mounted at `/v2` with Scalar docs at `/v2/docs`, pilot resource `api_keys` end-to-end with tests.
 - **Phase 1 — core resources**: dashboards, alerts, error issues, scrape targets, ingest keys, attribute mappings, investigations, anomalies, recommendations, organization, session replays. Thin handler adapters over existing services; `txid` preserved.
-- **Phase 2 — telemetry reads**: traces/logs/metrics/services/service_map/query over `QueryEngineService`.
+- **Phase 2 ✅ — telemetry reads**: traces/logs/metrics/services/service_map/query over `QueryEngineService`.
 - **Phase 3 — internal RPC tier + dashboard migration**: `RpcGroup` contracts in `packages/domain/src/rpc/` served at `/rpc`; dashboard gets a `MapleApiV2AtomClient` (same wiring as `apps/web/src/lib/services/common/atom-client.ts`, pointed at `MapleApiV2`) plus an `RpcClient`; migrate group-by-group, deleting v1 groups as they empty. (Note: the billing-scoped 401 retry in `atom-client.ts` must follow billing to its RPC home.)
-- **Phase 4 — hardening**: `Idempotency-Key`, per-key rate limiting (Workers rate-limit binding), `Maple-Version` header enforcement.
+- **Phase 4 — hardening**: `Idempotency-Key`, `Maple-Version` header enforcement. Per-key rate limiting is implemented.
 - **Phase 5 — events & webhooks**: `evt_` event objects, `GET /v2/events`, `/v2/webhook_endpoints` CRUD, HMAC-signed deliveries (`Maple-Signature`) via an outbox drained by the alerting worker.
 
 ## Adding a v2 resource (checklist)

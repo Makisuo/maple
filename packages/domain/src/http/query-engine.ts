@@ -759,9 +759,9 @@ export class ListLogsResponse extends Schema.Class<ListLogsResponse>("ListLogsRe
 }) {}
 
 // Exact-match lookup of one log by its composite key (logs have no primary id).
-// `timestamp` is the raw ClickHouse DateTime64 string and carries sub-second
-// precision (`YYYY-MM-DD HH:mm:ss.fffffffff`), so it is a plain string rather
-// than `TinybirdDateTime` (which only matches second-level precision).
+// `timestamp` is the raw ClickHouse DateTime64 string. It remains a plain
+// string because older stored rows and upstream drivers can vary their
+// fractional-second rendering.
 export class GetLogRequest extends Schema.Class<GetLogRequest>("GetLogRequest")({
 	timestamp: Schema.String,
 	serviceName: ServiceName,

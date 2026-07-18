@@ -1,5 +1,5 @@
 import { useAtomSet } from "@/lib/effect-atom"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Exit } from "effect"
 import type { ApiKeyKind } from "@maple/domain/http"
 import type { V2ApiKeyWithSecret, V2Scope } from "@maple/domain/http/v2"
@@ -59,6 +59,12 @@ const SCOPE_FAMILIES = [
 	{ id: "investigations", label: "Investigations" },
 	{ id: "anomalies", label: "Anomalies" },
 	{ id: "session_replays", label: "Session replays" },
+	{ id: "traces", label: "Traces" },
+	{ id: "logs", label: "Logs" },
+	{ id: "metrics", label: "Metrics" },
+	{ id: "services", label: "Services" },
+	{ id: "service_map", label: "Service map" },
+	{ id: "query", label: "Query" },
 	{ id: "organization", label: "Organization" },
 ] as const
 
@@ -75,6 +81,7 @@ const scopesFromLevels = (levels: Record<string, ScopeLevel>): Array<V2Scope> =>
 	})
 
 export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: CreateApiKeyDialogProps) {
+	const accessLabelId = useId()
 	const [newName, setNewName] = useState("")
 	const [newDescription, setNewDescription] = useState("")
 	const [expiration, setExpiration] = useState<ExpirationValue>("never")
@@ -216,8 +223,9 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 								</Select>
 							</div>
 							<div className="space-y-2">
-								<Label>Access</Label>
-								<ToggleGroup
+									<Label id={accessLabelId}>Access</Label>
+									<ToggleGroup
+										aria-labelledby={accessLabelId}
 									value={[accessMode]}
 									onValueChange={(values) => {
 										const next = values[0]
@@ -231,16 +239,19 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 								</ToggleGroup>
 								{accessMode === "restricted" ? (
 									<div className="space-y-2 pt-1">
-										{SCOPE_FAMILIES.map((family) => (
-											<div
-												key={family.id}
-												className="flex items-center justify-between gap-3"
-											>
-												<span className="text-foreground text-sm">
-													{family.label}
-												</span>
-												<ToggleGroup
-													value={[scopeLevels[family.id] ?? "none"]}
+										{SCOPE_FAMILIES.map((family) => {
+											const familyLabelId = `${accessLabelId}-${family.id}`
+											return (
+												<div
+													key={family.id}
+													className="flex items-center justify-between gap-3"
+												>
+													<span id={familyLabelId} className="text-foreground text-sm">
+														{family.label}
+													</span>
+													<ToggleGroup
+														aria-labelledby={familyLabelId}
+												value={[scopeLevels[family.id] ?? "none"]}
 													onValueChange={(values) => {
 														const next = values[0]
 														if (
@@ -260,9 +271,10 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 													<ToggleGroupItem value="none">None</ToggleGroupItem>
 													<ToggleGroupItem value="read">Read</ToggleGroupItem>
 													<ToggleGroupItem value="write">Write</ToggleGroupItem>
-												</ToggleGroup>
-											</div>
-										))}
+													</ToggleGroup>
+												</div>
+											)
+										})}
 										<p className="text-muted-foreground text-xs">
 											Write includes read. Scopes are fixed at creation — roll the key
 											to change access.

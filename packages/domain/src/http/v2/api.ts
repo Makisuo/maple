@@ -12,7 +12,39 @@ import { V2OrganizationApiGroup } from "./organization"
 import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
+import {
+	V2LogsApiGroup,
+	V2MetricsApiGroup,
+	V2QueryApiGroup,
+	V2ServiceMapApiGroup,
+	V2ServicesApiGroup,
+	V2TracesApiGroup,
+} from "./telemetry"
 import { V2UnexpectedErrors } from "./auth"
+
+const HTTP_OPERATION_METHODS = ["get", "post", "put", "patch", "delete", "head"] as const
+
+/** Add the rate-limit retry contract to every generated 429 response. */
+const addRateLimitResponseHeaders = (spec: Record<string, any>): Record<string, any> => {
+	for (const pathItem of Object.values(spec.paths ?? {})) {
+		if (typeof pathItem !== "object" || pathItem === null) continue
+		for (const method of HTTP_OPERATION_METHODS) {
+			const operation = (pathItem as Record<string, any>)[method]
+			if (typeof operation !== "object" || operation === null) continue
+			const response = operation.responses?.["429"]
+			if (typeof response !== "object" || response === null) continue
+			response.headers = {
+				...response.headers,
+				"Retry-After": {
+					description: "Seconds to wait before retrying the request.",
+					schema: { type: "integer", minimum: 1 },
+					example: 60,
+				},
+			}
+		}
+	}
+	return spec
+}
 
 /**
  * The Maple v2 public API (see docs/api-v2.md).
@@ -40,6 +72,12 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2AnomaliesApiGroup)
 	.add(V2OrganizationApiGroup)
 	.add(V2SessionReplaysApiGroup)
+	.add(V2TracesApiGroup)
+	.add(V2LogsApiGroup)
+	.add(V2MetricsApiGroup)
+	.add(V2ServicesApiGroup)
+	.add(V2ServiceMapApiGroup)
+	.add(V2QueryApiGroup)
 	.middleware(V2UnexpectedErrors)
 	.annotateMerge(
 		OpenApi.annotations({
@@ -63,20 +101,23 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 			// `info.contact` and top-level `externalDocs` have no dedicated annotation
 			// key (they are not in `OpenAPISpecInfo`), so inject them via the api-level
 			// spec transform, which receives the whole generated document.
-			transform: (spec) => ({
-				...spec,
-				info: {
-					...spec.info,
-					contact: {
-						name: "Maple Support",
-						url: "https://maple.dev",
-						email: "support@maple.dev",
+			transform: (spec) => {
+				const withRateLimitHeaders = addRateLimitResponseHeaders(spec)
+				return {
+					...withRateLimitHeaders,
+					info: {
+						...withRateLimitHeaders.info,
+						contact: {
+							name: "Maple Support",
+							url: "https://maple.dev",
+							email: "support@maple.dev",
+						},
 					},
-				},
-				externalDocs: {
-					url: "https://api.maple.dev/v2/docs",
-					description: "Interactive Maple API reference",
-				},
-			}),
+					externalDocs: {
+						url: "https://api.maple.dev/v2/docs",
+						description: "Interactive Maple API reference",
+					},
+				}
+			},
 		}),
 	) {}

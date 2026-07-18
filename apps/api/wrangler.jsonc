@@ -7,6 +7,19 @@
 	"dev": {
 		"port": 3472,
 	},
+	"vars": {
+		"API_V2_RATE_LIMIT_PARTITION": "local",
+	},
+	"ratelimits": [
+		{
+			"name": "API_V2_RATE_LIMITER",
+			"namespace_id": "2026071801",
+			"simple": {
+				"limit": 600,
+				"period": 60,
+			},
+		},
+	],
 	// Periodic VCS sync backstop every 12h — handler: worker.ts `scheduled`. (Mirrored in alchemy.run.ts for deploy.)
 	"triggers": {
 		"crons": ["0 */12 * * *"],

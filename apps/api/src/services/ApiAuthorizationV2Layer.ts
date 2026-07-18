@@ -1,10 +1,11 @@
-import { HttpServerRequest } from "effect/unstable/http"
+import { HttpEffect, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { CurrentTenant, RoleName } from "@maple/domain/http"
 import {
 	AuthorizationV2,
 	authenticationError,
 	dependencyUnavailable,
 	permissionError,
+	rateLimited,
 	requiredScopeForRequest,
 	scopeAllows,
 } from "@maple/domain/http/v2"
@@ -13,6 +14,11 @@ import { ApiKeysService } from "./ApiKeysService"
 import { makeResolveTenant } from "./AuthService"
 import { annotateAuthSpan } from "../lib/auth-span"
 import { Env } from "../lib/Env"
+import {
+	API_V2_RATE_LIMIT_PERIOD_SECONDS,
+	API_V2_RATE_LIMIT_REQUESTS,
+	ApiV2RateLimiter,
+} from "./ApiV2RateLimiter"
 
 const decodeRoleNameSync = Schema.decodeUnknownSync(RoleName)
 const apiKeyDefaultRoles = [decodeRoleNameSync("root")] as const
@@ -42,6 +48,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 	Effect.gen(function* () {
 		const env = yield* Env
 		const apiKeys = yield* ApiKeysService
+		const rateLimiter = yield* ApiV2RateLimiter
 		const resolveTenant = makeResolveTenant(env)
 
 		return AuthorizationV2.of({
@@ -68,6 +75,26 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 							userId: resolved.userId,
 							keyId: resolved.keyId,
 						})
+
+						const rateLimitOutcome = yield* rateLimiter.check(resolved.keyId)
+						yield* Effect.annotateCurrentSpan({
+							"maple.rate_limit.outcome": rateLimitOutcome,
+							"maple.rate_limit.limit": API_V2_RATE_LIMIT_REQUESTS,
+							"maple.rate_limit.period_seconds": API_V2_RATE_LIMIT_PERIOD_SECONDS,
+						})
+
+						if (rateLimitOutcome === "limited") {
+							yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+								Effect.succeed(
+									HttpServerResponse.setHeader(
+										response,
+										"Retry-After",
+										String(API_V2_RATE_LIMIT_PERIOD_SECONDS),
+									),
+								),
+							)
+							return yield* Effect.fail(rateLimited())
+						}
 
 						const required = requiredScopeForRequest(request.method, requestPath(request.url))
 						if (required !== null && !scopeAllows(resolved.scopes, required)) {

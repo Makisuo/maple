@@ -19,7 +19,13 @@ import { PlanetScaleOAuthService } from "../../services/PlanetScaleOAuthService"
 import { RecommendationIssueService } from "../../services/RecommendationIssueService"
 import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AlertsServiceStubLayer, AllV2GroupLayersLive, Phase1ResourceStubsLayer } from "./v2-test-support"
+import {
+	AlertsServiceStubLayer,
+	AllV2GroupLayersLive,
+	ApiV2RateLimiterAllowAllLayer,
+	Phase1ResourceStubsLayer,
+	TelemetryServiceStubsLayer,
+} from "./v2-test-support"
 
 /**
  * End-to-end HTTP tests for the v2 config-resource bundle (attribute_mappings,
@@ -98,9 +104,11 @@ const makeHarness = () => {
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(Phase1ResourceStubsLayer),
+		Layer.provide(TelemetryServiceStubsLayer),
 		// session_replays (in AllV2GroupLayersLive) needs the warehouse at the routes level.
 		Layer.provide(warehouseLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)
 

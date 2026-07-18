@@ -10,12 +10,12 @@ import {
 	TraceId,
 } from "./primitives"
 
-const dateTimePattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/
+const dateTimePattern = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,9})?$/
 
 export const TinybirdDateTime = Schema.String.check(Schema.isPattern(dateTimePattern)).pipe(
 	Schema.annotate({
 		identifier: "TinybirdDateTime",
-		description: "Date time string in YYYY-MM-DD HH:mm:ss format",
+		description: "Date time string in YYYY-MM-DD HH:mm:ss[.fffffffff] format",
 	}),
 )
 

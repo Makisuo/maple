@@ -40,7 +40,9 @@ import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
 	AllV2GroupLayersLive,
+	ApiV2RateLimiterAllowAllLayer,
 	ConfigResourceServiceStubsLayer,
+	TelemetryServiceStubsLayer,
 } from "./v2-test-support"
 
 /**
@@ -343,7 +345,9 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(AlertsServiceStubLayer),
 		Layer.provide(ConfigResourceServiceStubsLayer),
+		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)
 

@@ -8,7 +8,9 @@ import { OrganizationService } from "../../services/OrganizationService"
 import { OrgIngestKeysService } from "../../services/OrgIngestKeysService"
 import { RecommendationIssueService } from "../../services/RecommendationIssueService"
 import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
+import { ApiV2RateLimiter } from "../../services/ApiV2RateLimiter"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
+import { QueryEngineService } from "../../services/QueryEngineService"
 import { HttpV2AlertDestinationsLive } from "./alert-destinations.http"
 import { HttpV2AlertIncidentsLive } from "./alert-incidents.http"
 import { HttpV2AlertRulesLive } from "./alert-rules.http"
@@ -22,6 +24,14 @@ import { HttpV2OrganizationLive } from "./organization.http"
 import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
+import {
+	HttpV2LogsLive,
+	HttpV2MetricsLive,
+	HttpV2QueryLive,
+	HttpV2ServiceMapLive,
+	HttpV2ServicesLive,
+	HttpV2TracesLive,
+} from "./telemetry.http"
 
 /**
  * Test-only support for the v2 HTTP harnesses. `HttpApiBuilder.layer(MapleApiV2)`
@@ -44,7 +54,17 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,
 	HttpV2SessionReplaysLive,
+	HttpV2TracesLive,
+	HttpV2LogsLive,
+	HttpV2MetricsLive,
+	HttpV2ServicesLive,
+	HttpV2ServiceMapLive,
+	HttpV2QueryLive,
 )
+
+export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {
+	check: () => Effect.succeed("allowed" as const),
+})
 
 const die = () => Effect.die(new Error("AlertsService is not available in this test harness"))
 
@@ -117,6 +137,16 @@ export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	ingest: die,
 	asExecutor: dieSync,
 })
+
+export const TelemetryServiceStubsLayer = Layer.mergeAll(
+	Layer.succeed(QueryEngineService, {
+		execute: die,
+		evaluate: die,
+		evaluateRawSql: die,
+		evaluateSeries: die,
+		cachedDirect: die,
+	}),
+)
 
 /** Inert config-resource services for harnesses that never touch those groups. */
 export const ConfigResourceServiceStubsLayer = Layer.mergeAll(

@@ -522,7 +522,12 @@ export function listMetricsQuery(opts: ListMetricsOpts) {
 			CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
 		])
 		.groupBy("metricName", "metricType", "serviceName")
-		.orderBy(["lastSeen", "desc"])
+		.orderBy(
+			["lastSeen", "desc"],
+			["metricName", "asc"],
+			["metricType", "asc"],
+			["serviceName", "asc"],
+		)
 		.limit(opts.limit ?? 100)
 		.offset(opts.offset ?? 0)
 		.format("JSON")
