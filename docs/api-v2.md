@@ -121,27 +121,27 @@ Stripe-style `expand[]` is deliberately omitted: responses embed the small, alwa
 
 Implemented in phases; the pilot (`api_keys`) ships first and proves every convention.
 
-| Resource                 | Endpoints                                                                                          | Backing v1 group / service               |
-| ------------------------ | -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `api_keys` ✅ pilot      | list/create/retrieve/roll/revoke, `scopes` param                                                   | `apiKeys` / `ApiKeysService`             |
-| `ingest_keys` ✅         | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
-| `dashboards` ✅          | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import         | `dashboards`                             |
-| `alerts/rules` ✅        | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
-| `alerts/destinations` ✅ | CRUD + `test`                                                                                      | `alerts`                                 |
-| `alerts/incidents` ✅    | list/retrieve                                                                                      | `alerts`                                 |
-| `error_issues`           | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity`           | `errors`                                 |
-| `investigations` ✅      | list/retrieve/create/status                                                                        | `investigations`                         |
-| `anomalies` ✅           | incidents list/retrieve/timeseries/resolve/link-issue + settings                                   | `anomalies`                              |
-| `recommendations` ✅     | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
-| `scrape_targets` ✅      | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
-| `attribute_mappings` ✅  | CRUD                                                                                               | `ingestAttributeMappings`                |
-| `session_replays` ✅     | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)   | `sessionReplays`                         |
-| `organization` 🟡        | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred             | `organizations`, `orgClickHouseSettings` |
-| `traces`                 | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
-| `logs`                   | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
-| `metrics`                | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
-| `services`               | `GET /v2/services`, `GET /v2/services/{name}`, `GET /v2/service_map`                               | `queryEngine`                            |
-| `query`                  | `POST /v2/query` — query-builder execution; raw SQL org-gated                                      | `queryEngine`                            |
+| Resource                             | Endpoints                                                                                          | Backing v1 group / service               |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                   | `apiKeys` / `ApiKeysService`             |
+| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
+| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import         | `dashboards`                             |
+| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
+| `alerts/destinations` ✅             | CRUD + `test`                                                                                      | `alerts`                                 |
+| `alerts/incidents` ✅                | list/retrieve                                                                                      | `alerts`                                 |
+| `error_issues`                       | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity`           | `errors`                                 |
+| `investigations` ✅                  | list/retrieve/create/status                                                                        | `investigations`                         |
+| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + settings                                   | `anomalies`                              |
+| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
+| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
+| `attribute_mappings` ✅              | CRUD                                                                                               | `ingestAttributeMappings`                |
+| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)   | `sessionReplays`                         |
+| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred             | `organizations`, `orgClickHouseSettings` |
+| `traces`                             | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
+| `logs`                               | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
+| `metrics`                            | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
+| `services`                           | `GET /v2/services`, `GET /v2/services/{name}`, `GET /v2/service_map`                               | `queryEngine`                            |
+| `query`                              | `POST /v2/query` — query-builder execution; raw SQL org-gated                                      | `queryEngine`                            |
 
 The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare/PlanetScale infra) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
 

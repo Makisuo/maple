@@ -336,12 +336,14 @@ describe("v2 scrape_targets over HTTP", () => {
 	})
 })
 
-describe("v2 recommendations over HTTP", () => {
+describe("v2 instrumentation recommendations over HTTP", () => {
 	it("returns the list envelope (empty telemetry reconciles to no issues)", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey()
 
-		const list = await harness.request("GET", "/v2/recommendations", { token: key.secret })
+		const list = await harness.request("GET", "/v2/instrumentation/recommendations", {
+			token: key.secret,
+		})
 		expect(list.status).toBe(200)
 		expect(list.body.object).toBe("list")
 		expect(list.body.data).toEqual([])
@@ -349,11 +351,36 @@ describe("v2 recommendations over HTTP", () => {
 
 		const missing = await harness.request(
 			"POST",
-			"/v2/recommendations/rec_YofPTrK9782DWwcnXhpcCw/dismiss",
+			"/v2/instrumentation/recommendations/rec_YofPTrK9782DWwcnXhpcCw/dismiss",
 			{ token: key.secret },
 		)
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
+		await harness.dispose()
+	})
+
+	it("uses the instrumentation scope family", async () => {
+		const harness = makeHarness()
+		const readOnly = await harness.bootstrapKey(["instrumentation:read"])
+
+		const list = await harness.request("GET", "/v2/instrumentation/recommendations", {
+			token: readOnly.secret,
+		})
+		expect(list.status).toBe(200)
+
+		const dismiss = await harness.request(
+			"POST",
+			"/v2/instrumentation/recommendations/rec_YofPTrK9782DWwcnXhpcCw/dismiss",
+			{ token: readOnly.secret },
+		)
+		expect(dismiss.status).toBe(403)
+		expect(dismiss.body.error.code).toBe("insufficient_scope")
+
+		const oldFamily = await harness.bootstrapKey(["recommendations:read"])
+		const denied = await harness.request("GET", "/v2/instrumentation/recommendations", {
+			token: oldFamily.secret,
+		})
+		expect(denied.status).toBe(403)
 		await harness.dispose()
 	})
 })

@@ -50,7 +50,8 @@ export const V2Recommendation = Schema.Struct({
 		examples: ["rename"],
 	}),
 	source_key: Schema.String.annotate({
-		description: "The attribute or signal name the recommendation is about, as observed in your telemetry.",
+		description:
+			"The attribute or signal name the recommendation is about, as observed in your telemetry.",
 		examples: ["http.status_code"],
 	}),
 	canonical_key: Schema.NullOr(Schema.String).annotate({
@@ -87,7 +88,9 @@ const RecommendationList = ListOf(V2Recommendation).annotate({
 	description: "A cursor-paginated page of recommendations.",
 })
 
-export class V2RecommendationsApiGroup extends HttpApiGroup.make("recommendations")
+export class V2InstrumentationRecommendationsApiGroup extends HttpApiGroup.make(
+	"instrumentationRecommendations",
+)
 	.add(
 		HttpApiEndpoint.get("list", "/", {
 			query: ListQuery,
@@ -95,10 +98,10 @@ export class V2RecommendationsApiGroup extends HttpApiGroup.make("recommendation
 			error: [...commonErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
-				identifier: "listRecommendations",
-				summary: "List recommendations",
+				identifier: "listInstrumentationRecommendations",
+				summary: "List instrumentation recommendations",
 				description:
-					"Reconciles recommendations against your live telemetry and returns the full numbered list. Cursor-paginated. Requires the `recommendations:read` scope.",
+					"Reconciles instrumentation recommendations against your live telemetry and returns the full numbered list. Cursor-paginated. Requires the `instrumentation:read` scope.",
 			}),
 		),
 	)
@@ -109,10 +112,10 @@ export class V2RecommendationsApiGroup extends HttpApiGroup.make("recommendation
 			error: [...commonErrors, V2NotFoundError],
 		}).annotateMerge(
 			OpenApi.annotations({
-				identifier: "dismissRecommendation",
-				summary: "Dismiss a recommendation",
+				identifier: "dismissInstrumentationRecommendation",
+				summary: "Dismiss an instrumentation recommendation",
 				description:
-					"Marks a recommendation as dismissed so it stops appearing as actionable. Requires the `recommendations:write` scope.",
+					"Marks an instrumentation recommendation as dismissed so it stops appearing as actionable. Requires the `instrumentation:write` scope.",
 			}),
 		),
 	)
@@ -123,19 +126,19 @@ export class V2RecommendationsApiGroup extends HttpApiGroup.make("recommendation
 			error: [...commonErrors, V2NotFoundError],
 		}).annotateMerge(
 			OpenApi.annotations({
-				identifier: "reopenRecommendation",
-				summary: "Reopen a recommendation",
+				identifier: "reopenInstrumentationRecommendation",
+				summary: "Reopen an instrumentation recommendation",
 				description:
-					"Returns a dismissed recommendation to the `open` state. Requires the `recommendations:write` scope.",
+					"Returns a dismissed instrumentation recommendation to the `open` state. Requires the `instrumentation:write` scope.",
 			}),
 		),
 	)
-	.prefix("/v2/recommendations")
+	.prefix("/v2/instrumentation/recommendations")
 	.middleware(AuthorizationV2)
 	.middleware(V2SchemaErrors)
 	.annotateMerge(
 		OpenApi.annotations({
-			title: "Recommendations",
+			title: "Instrumentation Recommendations",
 			description:
 				"Automatically detected instrumentation improvements — attribute renames toward canonical semantic conventions, double emissions, and naming violations. List them, and dismiss or reopen individual recommendations.",
 		}),

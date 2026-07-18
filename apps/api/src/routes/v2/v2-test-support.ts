@@ -19,7 +19,7 @@ import { HttpV2IngestKeysLive } from "./ingest-keys.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
 import { HttpV2OrganizationLive } from "./organization.http"
-import { HttpV2RecommendationsLive } from "./recommendations.http"
+import { HttpV2InstrumentationRecommendationsLive } from "./recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./scrape-targets.http"
 import { HttpV2SessionReplaysLive } from "./session-replays.http"
 
@@ -39,7 +39,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2IngestKeysLive,
 	HttpV2AttributeMappingsLive,
 	HttpV2ScrapeTargetsLive,
-	HttpV2RecommendationsLive,
+	HttpV2InstrumentationRecommendationsLive,
 	HttpV2InvestigationsLive,
 	HttpV2AnomaliesLive,
 	HttpV2OrganizationLive,

@@ -9,7 +9,7 @@ import { V2DashboardsApiGroup } from "./dashboards"
 import { V2IngestKeysApiGroup } from "./ingest-keys"
 import { V2InvestigationsApiGroup } from "./investigations"
 import { V2OrganizationApiGroup } from "./organization"
-import { V2RecommendationsApiGroup } from "./recommendations"
+import { V2InstrumentationRecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
 import { V2SessionReplaysApiGroup } from "./session-replays"
 
@@ -34,7 +34,7 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2IngestKeysApiGroup)
 	.add(V2AttributeMappingsApiGroup)
 	.add(V2ScrapeTargetsApiGroup)
-	.add(V2RecommendationsApiGroup)
+	.add(V2InstrumentationRecommendationsApiGroup)
 	.add(V2InvestigationsApiGroup)
 	.add(V2AnomaliesApiGroup)
 	.add(V2OrganizationApiGroup)
