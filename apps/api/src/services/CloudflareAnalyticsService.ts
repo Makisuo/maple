@@ -2104,7 +2104,7 @@ export class CloudflareAnalyticsService extends Context.Service<
 				.compiledQuery(systemTenant(orgId), compiled, {
 					profile: "aggregation",
 					context: "cloudflareUsage",
-					pinToIngestConfig: !clickHouseReady,
+					...(clickHouseReady ? {} : { route: "ingest" as const }),
 				})
 				.pipe(
 					Effect.mapError(

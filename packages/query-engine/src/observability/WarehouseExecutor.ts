@@ -2,6 +2,7 @@ import { Context, type Effect, type Option } from "effect"
 import type { WarehouseError } from "@maple/domain/http/warehouse-errors"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import type { CompiledQuery } from "../ch"
+import type { SqlQueryOptions } from "../profiles"
 
 /**
  * The error channel of every `WarehouseExecutor` method. This is the warehouse
@@ -11,27 +12,6 @@ import type { CompiledQuery } from "../ch"
  */
 export type WarehouseExecutorError = WarehouseError
 
-/**
- * ClickHouse settings a call site may request. Row/byte caps
- * (`max_rows_to_read`, `max_result_rows`, `max_bytes_to_read`) are restricted
- * by Tinybird and intentionally absent. `maxBlockSize` is ClickHouse-only —
- * the executor strips it when the resolved backend is Tinybird (see
- * `WarehouseQuerySettings.maxBlockSize` in `../profiles` for the rationale).
- */
-export type ExecutorQuerySettings = {
-	maxExecutionTime?: number
-	maxMemoryUsage?: number
-	maxThreads?: number
-	maxBlockSize?: number
-}
-
-export type ExecutorQueryProfile = "discovery" | "list" | "aggregation" | "explain" | "unbounded"
-
-export type ExecutorQueryOptions = {
-	profile?: ExecutorQueryProfile
-	settings?: ExecutorQuerySettings
-}
-
 export interface WarehouseExecutorShape {
 	/** The org ID for the current tenant — needed for raw SQL queries. */
 	readonly orgId: string
@@ -39,23 +19,23 @@ export interface WarehouseExecutorShape {
 	readonly query: <T = any>(
 		pipe: WarehouseQueryName,
 		params: Record<string, unknown>,
-		options?: ExecutorQueryOptions,
+		options?: SqlQueryOptions,
 	) => Effect.Effect<{ data: ReadonlyArray<T> }, WarehouseExecutorError>
 
 	/** Execute raw ClickHouse SQL. The SQL MUST include an OrgId filter. */
 	readonly sqlQuery: <T = Record<string, unknown>>(
 		sql: string,
-		options?: ExecutorQueryOptions,
+		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseExecutorError>
 
 	readonly compiledQuery: <T>(
 		compiled: CompiledQuery<T>,
-		options?: ExecutorQueryOptions,
+		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseExecutorError>
 
 	readonly compiledQueryFirst: <T>(
 		compiled: CompiledQuery<T>,
-		options?: ExecutorQueryOptions,
+		options?: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<T>, WarehouseExecutorError>
 }
 

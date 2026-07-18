@@ -111,9 +111,8 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 			yield* WarehouseQueryService.use((service) =>
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			)
-			assert.strictEqual(captured?._tag, "tinybird")
-			if (captured?._tag !== "tinybird") throw new Error("expected Tinybird config")
-			assert.strictEqual(captured.provider, "tinybird")
+			assert.strictEqual(captured?.kind, "tinybird")
+			if (captured?.kind !== "tinybird") throw new Error("expected Tinybird config")
 			assert.notStrictEqual(captured.token, "managed-token")
 			assert.strictEqual(decodeJwtPayload(captured.token).workspace_id, "test-workspace")
 			assert.deepStrictEqual(responseLimits, { maxRows: 1000, maxBytes: 5_000_000 })
@@ -135,9 +134,8 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 			yield* WarehouseQueryService.use((service) =>
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			)
-			assert.strictEqual(captured?._tag, "clickhouse")
-			if (captured?._tag !== "clickhouse") throw new Error("expected gateway config")
-			assert.strictEqual(captured.provider, "tinybird")
+			assert.strictEqual(captured?.kind, "tinybird-gateway")
+			if (captured?.kind !== "tinybird-gateway") throw new Error("expected gateway config")
 			assert.notStrictEqual(captured.password, "gateway-admin-token")
 			assert.strictEqual(decodeJwtPayload(captured.password).workspace_id, "test-workspace")
 		}).pipe(Effect.provide(layer))
@@ -159,9 +157,8 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 			yield* WarehouseQueryService.use((service) =>
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			)
-			assert.strictEqual(captured?._tag, "clickhouse")
-			if (captured?._tag !== "clickhouse") throw new Error("expected ClickHouse config")
-			assert.strictEqual(captured.provider, "clickhouse")
+			assert.strictEqual(captured?.kind, "clickhouse")
+			if (captured?.kind !== "clickhouse") throw new Error("expected ClickHouse config")
 			assert.strictEqual(captured.password, "original-clickhouse-password")
 		}).pipe(Effect.provide(layer))
 	})
@@ -223,9 +220,8 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 			yield* WarehouseQueryService.use((service) =>
 				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
 			)
-			assert.strictEqual(captured?._tag, "clickhouse")
-			if (captured?._tag !== "clickhouse") throw new Error("expected ClickHouse config")
-			assert.strictEqual(captured.provider, "clickhouse")
+			assert.strictEqual(captured?.kind, "clickhouse")
+			if (captured?.kind !== "clickhouse") throw new Error("expected ClickHouse config")
 			assert.strictEqual(captured.password, "byo-password")
 		}).pipe(Effect.provide(layer))
 	})
@@ -608,8 +604,7 @@ describe("createClickHouseSqlClient.insert is disabled (ClickHouse is read-only)
 	// client's insert must fail loudly so it can never silently 500 against the
 	// read-only query gateway ("Only SELECT or DESCRIBE … Got: InsertQuery").
 	const chConfig = {
-		_tag: "clickhouse" as const,
-		provider: "clickhouse" as const,
+		kind: "clickhouse" as const,
 		url: "https://ch.example.com",
 		username: "u",
 		password: "p",
@@ -644,8 +639,7 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 	// Inserts in the cloud only need to work on Tinybird. This pins that path so a
 	// future change can't silently break ingest into the managed pipeline.
 	const tbConfig = {
-		_tag: "tinybird" as const,
-		provider: "tinybird" as const,
+		kind: "tinybird" as const,
 		host: "https://api.tinybird.co",
 		token: "tok_123",
 	}
@@ -711,8 +705,7 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 describe("ingest routes writes to the managed pipeline, not a per-org read override", () => {
 	const clickhouseReadOverride = {
 		config: {
-			_tag: "clickhouse" as const,
-			provider: "clickhouse" as const,
+			kind: "clickhouse" as const,
 			url: "https://byo-clickhouse.example.com",
 			username: "u",
 			password: "p",
@@ -722,30 +715,34 @@ describe("ingest routes writes to the managed pipeline, not a per-org read overr
 	}
 	const tinybirdManaged = {
 		config: {
-			_tag: "tinybird" as const,
-			provider: "tinybird" as const,
+			kind: "tinybird" as const,
 			host: "https://managed.tinybird.co",
 			token: "tok",
 		},
 		clientCacheKey: "write:managed",
 	}
 
-	it.effect("ingest uses resolveIngestConfig (Tinybird) while reads use resolveConfig (override)", () => {
-		const used: Array<{ op: "sql" | "insert"; tag: string }> = []
+	it.effect("ingest routes with purpose 'ingest' (Tinybird) while reads route to the override", () => {
+		const used: Array<{ op: "sql" | "insert"; kind: string }> = []
+		const purposes: Array<string> = []
 		const executor = makeWarehouseExecutor({
 			createClient: (config) => ({
 				sql: async () => {
-					used.push({ op: "sql", tag: config._tag })
+					used.push({ op: "sql", kind: config.kind })
 					return { data: [] }
 				},
 				insert: async () => {
-					used.push({ op: "insert", tag: config._tag })
+					used.push({ op: "insert", kind: config.kind })
 				},
 			}),
-			resolveConfig: () => Effect.succeed(clickhouseReadOverride),
-			resolveRawSqlConfig: () =>
-				Effect.succeed({ ...clickhouseReadOverride, clientCacheKey: "raw:org_test" }),
-			resolveIngestConfig: () => Effect.succeed(tinybirdManaged),
+			resolveRoute: (_tenant, purpose) => {
+				purposes.push(purpose)
+				return Effect.succeed(
+					purpose === "ingest"
+						? { source: "managed" as const, ...tinybirdManaged }
+						: { source: "org-byo" as const, ...clickhouseReadOverride },
+				)
+			},
 		})
 		const tenant = makeTenant()
 
@@ -753,30 +750,11 @@ describe("ingest routes writes to the managed pipeline, not a per-org read overr
 			yield* executor.sqlQuery(tenant, "SELECT 1 FROM traces WHERE OrgId = 'org_test'")
 			yield* executor.ingest(tenant, "traces", [{ trace_id: "a" }])
 
+			assert.deepStrictEqual(purposes, ["read", "ingest"])
 			assert.deepStrictEqual(used, [
-				{ op: "sql", tag: "clickhouse" },
-				{ op: "insert", tag: "tinybird" },
+				{ op: "sql", kind: "clickhouse" },
+				{ op: "insert", kind: "tinybird" },
 			])
-		})
-	})
-
-	it.effect("falls back to resolveConfig for ingest when resolveIngestConfig is absent", () => {
-		const used: Array<{ op: "insert"; tag: string }> = []
-		const executor = makeWarehouseExecutor({
-			createClient: (config) => ({
-				sql: async () => ({ data: [] }),
-				insert: async () => {
-					used.push({ op: "insert", tag: config._tag })
-				},
-			}),
-			resolveConfig: () => Effect.succeed(tinybirdManaged),
-			resolveRawSqlConfig: () => Effect.succeed({ ...tinybirdManaged, clientCacheKey: "raw:org_test" }),
-		})
-		const tenant = makeTenant()
-
-		return Effect.gen(function* () {
-			yield* executor.ingest(tenant, "traces", [{ trace_id: "a" }])
-			assert.deepStrictEqual(used, [{ op: "insert", tag: "tinybird" }])
 		})
 	})
 })
@@ -788,14 +766,14 @@ describe("ingest pins writes to Tinybird even when CLICKHOUSE_URL makes managed 
 	// MUST resolve to Tinybird regardless. Routing ingest through the managed
 	// resolver (which prefers ClickHouse) is what kept demo-seed onboarding broken.
 	it.effect("reads resolve to managed ClickHouse, but ingest resolves to Tinybird", () => {
-		const used: Array<{ op: "sql" | "insert"; tag: string }> = []
+		const used: Array<{ op: "sql" | "insert"; kind: string }> = []
 		__testables.setClientFactory((config) => ({
 			sql: async () => {
-				used.push({ op: "sql", tag: config._tag })
+				used.push({ op: "sql", kind: config.kind })
 				return { data: [] }
 			},
 			insert: async () => {
-				used.push({ op: "insert", tag: config._tag })
+				used.push({ op: "insert", kind: config.kind })
 			},
 		}))
 
@@ -814,9 +792,11 @@ describe("ingest pins writes to Tinybird even when CLICKHOUSE_URL makes managed 
 				service.ingest(tenant, "traces", [{ trace_id: "a" }]),
 			)
 
+			// CLICKHOUSE_PROVIDER defaults to "tinybird", so a bare CLICKHOUSE_URL is
+			// the Tinybird CH-gateway.
 			assert.deepStrictEqual(used, [
-				{ op: "sql", tag: "clickhouse" },
-				{ op: "insert", tag: "tinybird" },
+				{ op: "sql", kind: "tinybird-gateway" },
+				{ op: "insert", kind: "tinybird" },
 			])
 		}).pipe(Effect.provide(layer))
 	})

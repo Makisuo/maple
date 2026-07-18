@@ -235,8 +235,11 @@ async function handleQuery(db: Chdb, req: Request): Promise<QueryResult> {
 	try {
 		out = db.query(forceJsonEachRow(sql))
 	} catch (error) {
+		// 400, not 500: a failing statement is a problem with the submitted SQL,
+		// and a 5xx would make the shared warehouse executor classify it as a
+		// transient upstream error and retry the identical query.
 		return {
-			response: text(`query failed: ${(error as Error).message}`, 500),
+			response: text(`query failed: ${(error as Error).message}`, 400),
 			rowCount: 0,
 			durationMs: Math.round(performance.now() - started),
 			sql,

@@ -3,7 +3,7 @@ import { Duration, Effect, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import type { OrgId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
-import { compile, listRuleChecksQuery } from "../ch"
+import { compile, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
 import { makeWarehouseExecutor } from "./executor"
 import { WarehouseResponseLimitError } from "./response-limits"
 import type {
@@ -22,62 +22,84 @@ const tenant: ExecutionTenant = {
 // A per-org BYO read override (the read path) vs the managed Tinybird ingest
 // pipeline (the write path). alert_checks rows only ever land in the latter.
 const clickhouseConfig: ResolvedWarehouseConfig = {
-	_tag: "clickhouse",
-	provider: "clickhouse",
+	kind: "clickhouse",
 	url: "https://byo.example.com",
 	username: "default",
 	password: "secret",
 	database: "maple",
 }
 const tinybirdConfig: ResolvedWarehouseConfig = {
-	_tag: "tinybird",
-	provider: "tinybird",
+	kind: "tinybird",
 	host: "https://api.tinybird.co",
 	token: "tb_token",
 }
 const tinybirdGatewayConfig: ResolvedWarehouseConfig = {
 	...clickhouseConfig,
-	provider: "tinybird",
+	kind: "tinybird-gateway",
 }
 
+// listRuleChecksQuery declares .routing("ingest") at its definition —
+// alert_checks only exists in the managed ingest pipeline.
 const compiled = compile(listRuleChecksQuery({ limit: 1 }), {
 	orgId: "org_test",
 	ruleId: "rule_test",
 })
 
+// A plain query with no routing declaration follows the default read route.
+const untaggedCompiled = unsafeCompiledQuery<{ readonly c: number }>({
+	sql: "SELECT count() AS c FROM traces WHERE OrgId = 'org_test'\nFORMAT JSON",
+})
+
 // Records the backend each constructed client was wired to, so a test can assert
-// which config the executor resolved through.
-const makeDeps = (createdTags: Array<ResolvedWarehouseConfig["_tag"]>): WarehouseExecutorDeps => ({
+// which route the executor resolved through. Models a BYO-CH org: reads and raw
+// SQL hit the org's ClickHouse, ingest hits the managed Tinybird pipeline.
+const makeDeps = (createdKinds: Array<ResolvedWarehouseConfig["kind"]>): WarehouseExecutorDeps => ({
 	createClient: (config) => {
-		createdTags.push(config._tag)
+		createdKinds.push(config.kind)
 		const client: WarehouseSqlClient = {
 			sql: async () => ({ data: [] }),
 			insert: async () => {},
 		}
 		return client
 	},
-	resolveConfig: () => Effect.succeed({ config: clickhouseConfig, clientCacheKey: "read:org_test" }),
-	resolveRawSqlConfig: () => Effect.succeed({ config: clickhouseConfig, clientCacheKey: "raw:org_test" }),
-	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
+	resolveRoute: (_tenant, purpose) =>
+		Effect.succeed(
+			purpose === "ingest"
+				? { source: "managed" as const, config: tinybirdConfig, clientCacheKey: "write:managed" }
+				: {
+						source: "org-byo" as const,
+						config: clickhouseConfig,
+						clientCacheKey: purpose === "raw" ? "raw:org_test" : "read:org_test",
+					},
+		),
 })
 
-describe("makeWarehouseExecutor pinToIngestConfig", () => {
-	it.effect("reads from the per-org (ClickHouse) config by default", () =>
+describe("makeWarehouseExecutor ingest routing", () => {
+	it.effect("reads an untagged compiled query from the per-org (ClickHouse) route", () =>
 		Effect.gen(function* () {
-			const created: Array<ResolvedWarehouseConfig["_tag"]> = []
+			const created: Array<ResolvedWarehouseConfig["kind"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
-			yield* executor.compiledQuery(tenant, compiled, { context: "test" })
+			yield* executor.compiledQuery(tenant, untaggedCompiled, { context: "test" })
 			assert.deepStrictEqual(created, ["clickhouse"])
 		}),
 	)
 
-	it.effect("reads from the ingest (Tinybird) config when pinToIngestConfig is set", () =>
+	it.effect("routes a .routing('ingest')-tagged compiled query to the ingest (Tinybird) route", () =>
 		Effect.gen(function* () {
-			const created: Array<ResolvedWarehouseConfig["_tag"]> = []
+			const created: Array<ResolvedWarehouseConfig["kind"]> = []
 			const executor = makeWarehouseExecutor(makeDeps(created))
-			yield* executor.compiledQuery(tenant, compiled, {
+			yield* executor.compiledQuery(tenant, compiled, { context: "test" })
+			assert.deepStrictEqual(created, ["tinybird"])
+		}),
+	)
+
+	it.effect("routes hand-written SQL with the route:'ingest' option", () =>
+		Effect.gen(function* () {
+			const created: Array<ResolvedWarehouseConfig["kind"]> = []
+			const executor = makeWarehouseExecutor(makeDeps(created))
+			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
 				context: "test",
-				pinToIngestConfig: true,
+				route: "ingest",
 			})
 			assert.deepStrictEqual(created, ["tinybird"])
 		}),
@@ -86,9 +108,8 @@ describe("makeWarehouseExecutor pinToIngestConfig", () => {
 
 // Capture the final SQL the executor hands to the client so a test can assert
 // whether a Tinybird-restricted setting (max_block_size) survived the strip for
-// the resolved backend. Provider is independent from protocol and routing
-// source: a Tinybird gateway uses the ClickHouse protocol but still enforces
-// Tinybird's restricted-settings policy.
+// the resolved backend. The Tinybird gateway (`tinybird-gateway`) uses the
+// ClickHouse protocol but still enforces Tinybird's restricted-settings policy.
 const makeRecordingDeps = (
 	resolved: { config: ResolvedWarehouseConfig; clientCacheKey: string },
 	sqls: Array<string>,
@@ -100,9 +121,12 @@ const makeRecordingDeps = (
 		},
 		insert: async () => {},
 	}),
-	resolveConfig: () => Effect.succeed(resolved),
-	resolveRawSqlConfig: () => Effect.succeed({ ...resolved, clientCacheKey: "raw:org_test" }),
-	resolveIngestConfig: () => Effect.succeed(resolved),
+	resolveRoute: (_tenant, purpose) =>
+		Effect.succeed({
+			source: "managed" as const,
+			config: resolved.config,
+			clientCacheKey: purpose === "raw" ? "raw:org_test" : resolved.clientCacheKey,
+		}),
 })
 
 describe("makeWarehouseExecutor restricted-settings strip", () => {
@@ -164,6 +188,46 @@ describe("makeWarehouseExecutor restricted-settings strip", () => {
 	)
 })
 
+// The compiled DSL always ends in `FORMAT JSON`; the official ClickHouse client
+// rejects a trailing FORMAT/`;` (it sets the format itself) while Tinybird's
+// /v0/sql requires it. Normalization follows the wire protocol (the dialect's
+// normalizeSqlForClient) — the Tinybird CH-gateway speaks the ClickHouse protocol.
+describe("makeWarehouseExecutor SQL normalization", () => {
+	it.effect("strips the trailing FORMAT JSON for a ClickHouse-protocol backend", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: clickhouseConfig, clientCacheKey: "read:org_test" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, { context: "test" })
+			assert.isTrue(compiled.sql.trimEnd().endsWith("FORMAT JSON"))
+			assert.isFalse(sqls[0]?.includes("FORMAT JSON"))
+		}),
+	)
+
+	it.effect("strips the trailing FORMAT JSON for the Tinybird CH-gateway", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: tinybirdGatewayConfig, clientCacheKey: "read:managed" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, { context: "test" })
+			assert.isFalse(sqls[0]?.includes("FORMAT JSON"))
+		}),
+	)
+
+	it.effect("keeps the trailing FORMAT JSON for the Tinybird SDK backend", () =>
+		Effect.gen(function* () {
+			const sqls: Array<string> = []
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: tinybirdConfig, clientCacheKey: "read:managed" }, sqls),
+			)
+			yield* executor.compiledQuery(tenant, compiled, { context: "test" })
+			assert.isTrue(sqls[0]?.trimEnd().endsWith("FORMAT JSON"))
+		}),
+	)
+})
+
 describe("makeWarehouseExecutor raw response limits", () => {
 	it.effect("maps a driver byte abort directly to RawSqlValidationError", () =>
 		Effect.gen(function* () {
@@ -206,12 +270,17 @@ describe("makeWarehouseExecutor client cache partitions", () => {
 						},
 					}
 				},
-				resolveConfig: () =>
-					Effect.succeed({ config: tinybirdConfig, clientCacheKey: "read:managed" }),
-				resolveRawSqlConfig: () =>
-					Effect.succeed({ config: tinybirdConfig, clientCacheKey: "raw:org_test" }),
-				resolveIngestConfig: () =>
-					Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
+				resolveRoute: (_tenant, purpose) =>
+					Effect.succeed({
+						source: "managed" as const,
+						config: tinybirdConfig,
+						clientCacheKey:
+							purpose === "ingest"
+								? "write:managed"
+								: purpose === "raw"
+									? "raw:org_test"
+									: "read:managed",
+					}),
 			})
 
 			yield* executor.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'")
@@ -238,9 +307,12 @@ const makeHangingDeps = (): WarehouseExecutorDeps => ({
 		sql: () => new Promise<{ data: never[] }>(() => {}),
 		insert: async () => {},
 	}),
-	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "read:managed" }),
-	resolveRawSqlConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "raw:org_test" }),
-	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
+	resolveRoute: () =>
+		Effect.succeed({
+			source: "managed" as const,
+			config: tinybirdConfig,
+			clientCacheKey: "read:managed",
+		}),
 })
 
 // Like makeHangingDeps, but counts how many times the client's `sql` is invoked
@@ -254,9 +326,12 @@ const makeCountingHangingDeps = (counter: { count: number }): WarehouseExecutorD
 		},
 		insert: async () => {},
 	}),
-	resolveConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "read:managed" }),
-	resolveRawSqlConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "raw:org_test" }),
-	resolveIngestConfig: () => Effect.succeed({ config: tinybirdConfig, clientCacheKey: "write:managed" }),
+	resolveRoute: () =>
+		Effect.succeed({
+			source: "managed" as const,
+			config: tinybirdConfig,
+			clientCacheKey: "read:managed",
+		}),
 })
 
 describe("makeWarehouseExecutor client timeout", () => {

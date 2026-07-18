@@ -29,7 +29,12 @@ import {
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
-import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
+import {
+	LOGS_BODY_SEARCH_SETTINGS,
+	type QueryProfileName,
+	type SqlQueryOptions,
+	type WarehouseQuerySettings,
+} from "../profiles"
 import { computeBucketSeconds } from "../datetime"
 import { makeExecuteRawSql } from "./raw-sql"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
@@ -54,11 +59,7 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	readonly sqlQuery: (
 		tenant: T,
 		sql: string,
-		options?: {
-			readonly profile?: QueryProfileName
-			readonly context?: string
-			readonly settings?: WarehouseQuerySettings
-		},
+		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
 	readonly rawSqlQuery: (
 		tenant: T,
@@ -68,11 +69,7 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
-		options?: {
-			readonly profile?: QueryProfileName
-			readonly context?: string
-			readonly settings?: WarehouseQuerySettings
-		},
+		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
 }
 

@@ -473,7 +473,6 @@ const make: Effect.Effect<
 		})
 		return yield* warehouse
 			.compiledQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
-				pinToIngestConfig: true,
 				// Bound the one cross-org scan (no OrgId predicate ⇒ can't prune the
 				// primary key): abort server-side at 5s instead of riding the ~30s
 				// client timeout when the warehouse is slow.

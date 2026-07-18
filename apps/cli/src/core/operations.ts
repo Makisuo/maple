@@ -21,6 +21,9 @@ import {
 	findSlowTraces as obsFindSlowTraces,
 	topOperations as obsTopOperations,
 } from "@maple/query-engine/observability"
+import { WarehouseClientError, WarehouseQueryError } from "@maple/domain/http/warehouse-errors"
+import { executeLocalQuery } from "@maple/query-engine/local"
+import { Mode } from "./mode"
 import type { Range } from "./time"
 
 type AttrSource = "traces" | "metrics" | "services"
@@ -166,11 +169,34 @@ export const listMetrics = (p: { range: Range; service?: string; search?: string
 		return result.data
 	})
 
-/** Raw SQL escape hatch against the local chDB store. */
+/**
+ * Raw SQL escape hatch against the local chDB store — local mode only.
+ * Arbitrary user SQL carries no OrgId guarantee, so it deliberately bypasses
+ * the warehouse executor (whose `sqlQuery` enforces the OrgId scoping guard)
+ * and posts straight to the single-tenant `/local/query` endpoint.
+ */
 export const rawQuery = (sql: string) =>
 	Effect.gen(function* () {
-		const executor = yield* WarehouseExecutor
-		return yield* executor.sqlQuery(sql)
+		const mode = yield* Mode
+		const resolved = yield* mode.resolve.pipe(
+			Effect.mapError(
+				(error) => new WarehouseClientError({ message: error.message, pipeName: "rawQuery" }),
+			),
+		)
+		if (resolved._tag !== "local") {
+			return yield* new WarehouseClientError({
+				message: "Raw SQL is only available in local mode",
+				pipeName: "rawQuery",
+			})
+		}
+		return yield* Effect.tryPromise({
+			try: () => executeLocalQuery<Record<string, unknown>>(sql, resolved.baseUrl),
+			catch: (error) =>
+				new WarehouseQueryError({
+					message: error instanceof Error ? error.message : String(error),
+					pipeName: "rawQuery",
+				}),
+		})
 	})
 
 // Custom traces analytics share the `group_by_*` presence-flag convention the

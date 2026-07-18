@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SpanId, TraceId } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { warehouseHttpErrors } from "./warehouse-errors"
 
 export { UnauthorizedError } from "./current-tenant"
 
@@ -231,42 +232,42 @@ export class ObservabilityApiGroup extends HttpApiGroup.make("observability")
 		HttpApiEndpoint.post("listServices", "/services", {
 			payload: ListServicesRequest,
 			success: ListServicesResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("searchTraces", "/traces/search", {
 			payload: SearchTracesRequest,
 			success: SearchTracesResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("inspectTrace", "/traces/inspect", {
 			payload: InspectTraceRequest,
 			success: InspectTraceResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("findErrors", "/errors", {
 			payload: FindErrorsRequest,
 			success: FindErrorsResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("diagnoseService", "/diagnose", {
 			payload: DiagnoseServiceRequest,
 			success: DiagnoseServiceResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("searchLogs", "/logs", {
 			payload: SearchLogsRequest,
 			success: SearchLogsResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.prefix("/api/observability")

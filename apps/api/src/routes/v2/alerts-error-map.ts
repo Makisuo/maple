@@ -6,12 +6,15 @@ import type {
 	AlertPersistenceError,
 	AlertValidationError,
 	WarehouseError,
+	WarehouseQuotaExceededError,
+	WarehouseValidationError,
 } from "@maple/domain/http"
 import {
 	conflict,
 	dependencyUnavailable,
 	invalidRequest,
 	permissionError,
+	rateLimited,
 	resourceNotFound,
 	upstreamError,
 } from "@maple/domain/http/v2"
@@ -20,6 +23,7 @@ import type {
 	V2InvalidRequestError,
 	V2NotFoundError,
 	V2PermissionError,
+	V2RateLimitError,
 	V2ServiceUnavailableError,
 	V2UpstreamError,
 } from "@maple/domain/http/v2"
@@ -34,12 +38,18 @@ type V2ReachableAlertError =
 	| AlertDeliveryError
 	| WarehouseError
 
+type UpstreamMappedWarehouseError = Exclude<
+	WarehouseError,
+	WarehouseValidationError | WarehouseQuotaExceededError
+>
+
 type MappedV2AlertError<E> =
 	| (E extends AlertForbiddenError ? V2PermissionError : never)
-	| (E extends AlertValidationError ? V2InvalidRequestError : never)
+	| (E extends AlertValidationError | WarehouseValidationError ? V2InvalidRequestError : never)
 	| (E extends AlertNotFoundError ? V2NotFoundError : never)
 	| (E extends AlertDestinationInUseError ? V2ConflictError : never)
-	| (E extends AlertDeliveryError | WarehouseError ? V2UpstreamError : never)
+	| (E extends WarehouseQuotaExceededError ? V2RateLimitError : never)
+	| (E extends AlertDeliveryError | UpstreamMappedWarehouseError ? V2UpstreamError : never)
 	| (E extends AlertPersistenceError ? V2ServiceUnavailableError : never)
 
 const normalizeAlertResourceType = (resourceType: string) =>
@@ -82,8 +92,12 @@ const makeAlertErrorMatcher = (operation: string) => {
 			"@maple/http/errors/WarehouseConfigError": warehouseFailure,
 			"@maple/http/errors/WarehouseClientError": warehouseFailure,
 			"@maple/http/errors/WarehouseSchemaDriftError": warehouseFailure,
-			"@maple/http/errors/WarehouseQuotaExceededError": warehouseFailure,
-			"@maple/http/errors/WarehouseValidationError": warehouseFailure,
+			// A quota breach is the caller exceeding cost limits (429), and a
+			// validation failure is a malformed request (400) — neither is an
+			// upstream outage.
+			"@maple/http/errors/WarehouseQuotaExceededError": () => rateLimited(),
+			"@maple/http/errors/WarehouseValidationError": (error) =>
+				invalidRequest("parameter_invalid", error.message),
 		}),
 	)
 }

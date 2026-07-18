@@ -87,6 +87,8 @@ interface CHQueryState {
 	readonly limitValue?: number
 	readonly offsetValue?: number
 	readonly formatValue?: string
+	/** Execution-routing metadata carried onto the CompiledQuery (see compile.ts). */
+	readonly routingValue?: "ingest"
 	/** Typed FROM subquery. Compiled lazily at compileCH time. */
 	readonly fromQuery?: CHQuery<any, any, any>
 	readonly fromQueryAlias?: string
@@ -135,6 +137,14 @@ export interface CHQuery<
 	offset(n: number): CHQuery<Cols, Output, Joins>
 
 	format(fmt: "JSON" | "JSONEachRow"): CHQuery<Cols, Output, Joins>
+
+	/**
+	 * Declare that this query reads a datasource that only exists in the managed
+	 * ingest pipeline (an MV-less `ingest`-written table like `alert_checks`, or
+	 * a deliberately cross-org managed scan). The executor routes it to the
+	 * ingest backend instead of a per-org read override.
+	 */
+	routing(route: "ingest"): CHQuery<Cols, Output, Joins>
 
 	// ---------------------------------------------------------------------------
 	// Type-safe joins with Table
@@ -336,6 +346,10 @@ function makeQuery<
 
 		format(fmt) {
 			return makeQuery({ ...state, formatValue: fmt })
+		},
+
+		routing(route) {
+			return makeQuery({ ...state, routingValue: route })
 		},
 
 		// -----------------------------------------------------------------------

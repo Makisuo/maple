@@ -1,5 +1,5 @@
 import { Effect, type Option } from "effect"
-import { type WarehouseExecutorShape, type ExecutorQueryOptions } from "@maple/query-engine/observability"
+import { type WarehouseExecutorShape, type SqlQueryOptions } from "@maple/query-engine/observability"
 import { WarehouseClientError, WarehouseQueryError } from "@maple/domain/http/warehouse-errors"
 import { debugLog } from "../lib/debug"
 
@@ -28,7 +28,7 @@ export const makeRemoteWarehouseExecutorShape = (
 	const endpoint = `${apiUrl.replace(/\/$/, "")}/api/tinybird/query`
 	return {
 		orgId,
-		query: <T>(pipe: string, params: Record<string, unknown>, _options?: ExecutorQueryOptions) =>
+		query: <T>(pipe: string, params: Record<string, unknown>, _options?: SqlQueryOptions) =>
 			Effect.tryPromise({
 				try: async (): Promise<{ data: ReadonlyArray<T> }> => {
 					const started = performance.now()
@@ -71,15 +71,15 @@ export const makeRemoteWarehouseExecutorShape = (
 					},
 				}),
 			),
-		sqlQuery: <T = Record<string, unknown>>(_sql: string, _options?: ExecutorQueryOptions) =>
+		sqlQuery: <T = Record<string, unknown>>(_sql: string, _options?: SqlQueryOptions) =>
 			Effect.fail(
 				new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName: "sqlQuery" }),
 			) as Effect.Effect<ReadonlyArray<T>, WarehouseClientError>,
-		compiledQuery: <T>(_compiled: unknown, _options?: ExecutorQueryOptions) =>
+		compiledQuery: <T>(_compiled: unknown, _options?: SqlQueryOptions) =>
 			Effect.fail(
 				new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName: "compiledQuery" }),
 			) as Effect.Effect<ReadonlyArray<T>, WarehouseClientError>,
-		compiledQueryFirst: <T>(_compiled: unknown, _options?: ExecutorQueryOptions) =>
+		compiledQueryFirst: <T>(_compiled: unknown, _options?: SqlQueryOptions) =>
 			Effect.fail(
 				new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName: "compiledQueryFirst" }),
 			) as Effect.Effect<Option.Option<T>, WarehouseClientError>,

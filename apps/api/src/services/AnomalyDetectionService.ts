@@ -294,12 +294,12 @@ const make = Effect.gen(function* () {
 				warehouse.compiledQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByTracesQuery(), { startTime }),
-					{ pinToIngestConfig: true, profile: "discovery", context: "anomalyActiveOrgsTraces" },
+					{ profile: "discovery", context: "anomalyActiveOrgsTraces" },
 				),
 				warehouse.compiledQuery(
 					routingTenant,
 					CH.compile(CH.activeOrgsByLogsQuery(), { startTime }),
-					{ pinToIngestConfig: true, profile: "discovery", context: "anomalyActiveOrgsLogs" },
+					{ profile: "discovery", context: "anomalyActiveOrgsLogs" },
 				),
 			],
 			{ concurrency: 2 },

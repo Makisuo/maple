@@ -2,7 +2,7 @@ import { Effect, Layer } from "effect"
 import {
 	WarehouseExecutor,
 	type WarehouseExecutorShape,
-	type ExecutorQueryOptions,
+	type SqlQueryOptions,
 } from "@maple/query-engine/observability"
 import { WarehouseConfigError } from "@maple/domain/http/warehouse-errors"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
@@ -42,15 +42,15 @@ export const WarehouseExecutorFromMode = Layer.effect(
 		)
 		return WarehouseExecutor.of({
 			orgId: "",
-			query: <T>(pipe: string, params: Record<string, unknown>, options?: ExecutorQueryOptions) =>
+			query: <T>(pipe: string, params: Record<string, unknown>, options?: SqlQueryOptions) =>
 				getShape.pipe(
 					Effect.flatMap((shape) => shape.query<T>(pipe as WarehouseQueryName, params, options)),
 				),
-			sqlQuery: <T = Record<string, unknown>>(sql: string, options?: ExecutorQueryOptions) =>
+			sqlQuery: <T = Record<string, unknown>>(sql: string, options?: SqlQueryOptions) =>
 				getShape.pipe(Effect.flatMap((shape) => shape.sqlQuery<T>(sql, options))),
-			compiledQuery: (compiled, options?: ExecutorQueryOptions) =>
+			compiledQuery: (compiled, options?: SqlQueryOptions) =>
 				getShape.pipe(Effect.flatMap((shape) => shape.compiledQuery(compiled, options))),
-			compiledQueryFirst: (compiled, options?: ExecutorQueryOptions) =>
+			compiledQueryFirst: (compiled, options?: SqlQueryOptions) =>
 				getShape.pipe(Effect.flatMap((shape) => shape.compiledQueryFirst(compiled, options))),
 		})
 	}),

@@ -59,6 +59,29 @@ export type WarehouseQueryOptions = {
 }
 
 /**
+ * The single per-call option type shared by every warehouse query surface
+ * (`WarehouseQueryServiceShape`, the `WarehouseExecutor` facade, the runtime
+ * `QueryEngineWarehouse` port, and the CLI executors). It lives next to the
+ * profiles because it is a pure type with no execution-layer dependency.
+ */
+export type SqlQueryOptions = WarehouseQueryOptions & {
+	/**
+	 * Semantic name for the query (e.g. "errorsByType", "spanHierarchy").
+	 * Annotated on the executeSql span as `query.context` so traces can be
+	 * filtered and grouped by call site without re-running the SQL.
+	 */
+	context?: string
+	/**
+	 * Route this query to the INGEST backend (managed Tinybird) instead of the
+	 * per-org read config. Prefer declaring this at the query definition via
+	 * `.routing("ingest")` (carried on `CompiledQuery.routing`); use this option
+	 * only for hand-written SQL or when the pin depends on runtime state (e.g.
+	 * reads of gateway-written data gated on write-readiness).
+	 */
+	route?: "ingest"
+}
+
+/**
  * Named cost profiles. Pick one at the call site (not at the query
  * definition) since the same query can be cheap as a one-off and
  * expensive as a dropdown populator.

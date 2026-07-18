@@ -316,7 +316,7 @@ interface CompiledQueryStub {
 	calls: Array<{
 		sql: string
 		orgId: string
-		options: { pinToIngestConfig?: boolean; profile?: string; context?: string } | undefined
+		options: { route?: "ingest"; profile?: string; context?: string } | undefined
 	}>
 }
 
@@ -1419,9 +1419,9 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(worker.totalRequests, 42)
 
 			// This org has no BYO-CH settings row (managed/Tinybird), so the gateway wrote its
-			// metrics to Tinybird — the usage read must pin to the ingest config to find them.
+			// metrics to Tinybird — the usage read must route to the ingest config to find them.
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.strictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+			assert.strictEqual(queryStub.calls[0]?.options?.route, "ingest")
 			assert.strictEqual(queryStub.calls[0]?.options?.profile, "aggregation")
 			assert.strictEqual(queryStub.calls[0]?.orgId, ORG)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
@@ -1435,13 +1435,13 @@ describe("CloudflareAnalyticsService", () => {
 			yield* TestClock.setTime(T0)
 			yield* seedConnection()
 			// Connected + schema_version == running version → gateway routes metrics to the
-			// org's own ClickHouse, so the read must NOT pin to the ingest (Tinybird) config.
+			// org's own ClickHouse, so the read must NOT route to the ingest (Tinybird) config.
 			yield* seedByoClickHouse()
 			const service = yield* CloudflareAnalyticsService
 			yield* service.getUsage(ORG)
 
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.notStrictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+			assert.notStrictEqual(queryStub.calls[0]?.options?.route, "ingest")
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
@@ -1453,13 +1453,13 @@ describe("CloudflareAnalyticsService", () => {
 			yield* TestClock.setTime(T0)
 			yield* seedConnection()
 			// Stale schema_version → gateway falls back to Tinybird for this org's metrics,
-			// so the read must pin to the ingest config (its own CH would be empty).
+			// so the read must route to the ingest config (its own CH would be empty).
 			yield* seedByoClickHouse({ schemaVersion: "stale-schema-version" })
 			const service = yield* CloudflareAnalyticsService
 			yield* service.getUsage(ORG)
 
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.strictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+			assert.strictEqual(queryStub.calls[0]?.options?.route, "ingest")
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
