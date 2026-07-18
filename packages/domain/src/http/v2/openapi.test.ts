@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 import { MapleApiV2 } from "./api"
+import { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "./anomalies"
 import { V2ApiKey, V2ApiKeyCreateParams, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
+import { V2Investigation } from "./investigations"
+import { V2Organization } from "./organization"
+import { V2SessionReplay, V2SessionReplayListItem } from "./session-replays"
 
 /**
  * Contract freeze: the public v2 OpenAPI surface (paths + methods) is asserted
@@ -54,6 +58,10 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/alerts/rules",
 			"GET /v2/alerts/rules/{id}",
 			"GET /v2/alerts/rules/{id}/checks",
+			"GET /v2/anomalies/incidents",
+			"GET /v2/anomalies/incidents/{id}",
+			"GET /v2/anomalies/incidents/{id}/timeseries",
+			"GET /v2/anomalies/settings",
 			"GET /v2/api_keys",
 			"GET /v2/api_keys/{id}",
 			"GET /v2/attribute_mappings",
@@ -64,10 +72,16 @@ describe("MapleApiV2 OpenAPI", () => {
 			"GET /v2/dashboards/{id}/versions",
 			"GET /v2/dashboards/{id}/versions/{versionId}",
 			"GET /v2/ingest_keys",
+			"GET /v2/investigations",
+			"GET /v2/investigations/{id}",
+			"GET /v2/organization",
 			"GET /v2/recommendations",
 			"GET /v2/scrape_targets",
 			"GET /v2/scrape_targets/{id}",
 			"GET /v2/scrape_targets/{id}/checks",
+			"GET /v2/session_replays/{id}",
+			"GET /v2/session_replays/{id}/events",
+			"GET /v2/session_replays/{id}/transcript",
 			"PATCH /v2/alerts/destinations/{id}",
 			"PATCH /v2/alerts/rules/{id}",
 			"PATCH /v2/attribute_mappings/{id}",
@@ -78,6 +92,7 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/alerts/rules",
 			"POST /v2/alerts/rules/preview",
 			"POST /v2/alerts/rules/test",
+			"POST /v2/anomalies/incidents/{id}/resolve",
 			"POST /v2/api_keys",
 			"POST /v2/api_keys/{id}/roll",
 			"POST /v2/attribute_mappings",
@@ -87,10 +102,16 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/dashboards/{id}/versions/{versionId}/restore",
 			"POST /v2/ingest_keys/private/roll",
 			"POST /v2/ingest_keys/public/roll",
+			"POST /v2/investigations",
+			"POST /v2/investigations/{id}/status",
 			"POST /v2/recommendations/{id}/dismiss",
 			"POST /v2/recommendations/{id}/reopen",
 			"POST /v2/scrape_targets",
 			"POST /v2/scrape_targets/{id}/probe",
+			"POST /v2/session_replays/for_trace",
+			"POST /v2/session_replays/search",
+			"PUT /v2/anomalies/incidents/{id}/issue",
+			"PUT /v2/anomalies/settings",
 		])
 	})
 
@@ -190,6 +211,25 @@ describe("MapleApiV2 OpenAPI", () => {
 		const createParams = schemas["ApiKeyCreateParams"]
 		expect(createParams.examples).toHaveLength(1)
 		expect(() => Schema.decodeUnknownSync(V2ApiKeyCreateParams)(createParams.examples[0])).not.toThrow()
+	})
+
+	it("documents the Phase-1 resource schemas with decodable wire examples", () => {
+		const cases: ReadonlyArray<readonly [string, Schema.Codec<any, any>, string]> = [
+			["Investigation", V2Investigation, "investigation"],
+			["AnomalyIncident", V2AnomalyIncident, "anomaly_incident"],
+			["AnomalyIncidentTimeseries", V2AnomalyIncidentTimeseries, "anomaly_incident.timeseries"],
+			["AnomalySettings", V2AnomalySettings, "anomaly_settings"],
+			["Organization", V2Organization, "organization"],
+			["SessionReplayListItem", V2SessionReplayListItem, "session_replay"],
+			["SessionReplay", V2SessionReplay, "session_replay"],
+		]
+		for (const [name, schema, objectType] of cases) {
+			const component = schemas[name]
+			expect(component, `component ${name} present`).toBeDefined()
+			expect(component.examples, `${name} has an example`).toHaveLength(1)
+			const decoded = Schema.decodeUnknownSync(schema)(component.examples[0]) as { object: string }
+			expect(decoded.object).toBe(objectType)
+		}
 	})
 
 	it("documents the public-ID and Scope primitives with examples", () => {

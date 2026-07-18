@@ -56,6 +56,10 @@ const SCOPE_FAMILIES = [
 	{ id: "attribute_mappings", label: "Attribute mappings" },
 	{ id: "scrape_targets", label: "Scrape targets" },
 	{ id: "recommendations", label: "Recommendations" },
+	{ id: "investigations", label: "Investigations" },
+	{ id: "anomalies", label: "Anomalies" },
+	{ id: "session_replays", label: "Session replays" },
+	{ id: "organization", label: "Organization" },
 ] as const
 
 type ScopeLevel = "none" | "read" | "write"

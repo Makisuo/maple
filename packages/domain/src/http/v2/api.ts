@@ -1,13 +1,17 @@
 import { HttpApi, OpenApi } from "effect/unstable/httpapi"
 import { V2AlertDestinationsApiGroup } from "./alert-destinations"
+import { V2AnomaliesApiGroup } from "./anomalies"
 import { V2AlertIncidentsApiGroup } from "./alert-incidents"
 import { V2AlertRulesApiGroup } from "./alert-rules"
 import { V2ApiKeysApiGroup } from "./api-keys"
 import { V2AttributeMappingsApiGroup } from "./attribute-mappings"
 import { V2DashboardsApiGroup } from "./dashboards"
 import { V2IngestKeysApiGroup } from "./ingest-keys"
+import { V2InvestigationsApiGroup } from "./investigations"
+import { V2OrganizationApiGroup } from "./organization"
 import { V2RecommendationsApiGroup } from "./recommendations"
 import { V2ScrapeTargetsApiGroup } from "./scrape-targets"
+import { V2SessionReplaysApiGroup } from "./session-replays"
 
 /**
  * The Maple v2 public API (see docs/api-v2.md).
@@ -31,6 +35,10 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2AttributeMappingsApiGroup)
 	.add(V2ScrapeTargetsApiGroup)
 	.add(V2RecommendationsApiGroup)
+	.add(V2InvestigationsApiGroup)
+	.add(V2AnomaliesApiGroup)
+	.add(V2OrganizationApiGroup)
+	.add(V2SessionReplaysApiGroup)
 	.annotateMerge(
 		OpenApi.annotations({
 			title: "Maple API",

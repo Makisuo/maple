@@ -31,6 +31,22 @@ const SCOPE_FAMILY_ROWS = [
 		description: "Prometheus/PlanetScale scrape targets, probes, and checks",
 	},
 	{ id: "recommendations", label: "Recommendations", description: "Instrumentation recommendations" },
+	{
+		id: "investigations",
+		label: "Investigations",
+		description: "AI investigation war-rooms — list, open, and update status",
+	},
+	{
+		id: "anomalies",
+		label: "Anomalies",
+		description: "Anomaly incidents (incl. timeseries/resolve/link-issue) and detector settings",
+	},
+	{
+		id: "session_replays",
+		label: "Session replays",
+		description: "Search sessions, retrieve detail, events, and transcripts",
+	},
+	{ id: "organization", label: "Organization", description: "Read the organization's identity" },
 ] as const
 
 const docsUrl = `${apiBaseUrl}/v2/docs`

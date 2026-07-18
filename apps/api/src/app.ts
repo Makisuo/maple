@@ -17,8 +17,12 @@ import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./routes/v2/attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
 import { HttpV2IngestKeysLive } from "./routes/v2/ingest-keys.http"
+import { HttpV2AnomaliesLive } from "./routes/v2/anomalies.http"
+import { HttpV2InvestigationsLive } from "./routes/v2/investigations.http"
+import { HttpV2OrganizationLive } from "./routes/v2/organization.http"
 import { HttpV2RecommendationsLive } from "./routes/v2/recommendations.http"
 import { HttpV2ScrapeTargetsLive } from "./routes/v2/scrape-targets.http"
+import { HttpV2SessionReplaysLive } from "./routes/v2/session-replays.http"
 import { V2SchemaErrorsLive } from "./routes/v2/error-envelope"
 import { HttpAuthLive, HttpAuthPublicLive } from "./routes/auth.http"
 import { HttpChatLive } from "./routes/chat.http"
@@ -293,6 +297,10 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2AttributeMappingsLive,
 			HttpV2ScrapeTargetsLive,
 			HttpV2RecommendationsLive,
+			HttpV2InvestigationsLive,
+			HttpV2AnomaliesLive,
+			HttpV2OrganizationLive,
+			HttpV2SessionReplaysLive,
 		),
 	),
 	Layer.provide(V2SchemaErrorsLive),

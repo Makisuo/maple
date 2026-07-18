@@ -131,13 +131,13 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | `alerts/destinations` ✅ | CRUD + `test`                                                                                      | `alerts`                                 |
 | `alerts/incidents` ✅ | list/retrieve                                                                                      | `alerts`                                 |
 | `error_issues`       | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity`           | `errors`                                 |
-| `investigations`     | list/retrieve/create/status                                                                        | `investigations`                         |
-| `anomalies`          | incidents list/retrieve/resolve/link-issue + settings                                              | `anomalies`                              |
+| `investigations` ✅  | list/retrieve/create/status                                                                        | `investigations`                         |
+| `anomalies` ✅       | incidents list/retrieve/timeseries/resolve/link-issue + settings                                   | `anomalies`                              |
 | `recommendations` ✅ | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
 | `scrape_targets` ✅  | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
 | `attribute_mappings` ✅ | CRUD                                                                                               | `ingestAttributeMappings`                |
-| `session_replays`    | list/retrieve + events/transcript/for-trace                                                        | `sessionReplays`                         |
-| `organization`       | retrieve/update settings (incl. ClickHouse BYOC), delete                                           | `organizations`, `orgClickHouseSettings` |
+| `session_replays` ✅ | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)    | `sessionReplays`                         |
+| `organization` 🟡    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred              | `organizations`, `orgClickHouseSettings` |
 | `traces`             | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
 | `logs`               | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
 | `metrics`            | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
