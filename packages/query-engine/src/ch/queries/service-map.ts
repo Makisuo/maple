@@ -46,6 +46,9 @@ import { CHNumber } from "../schema"
 // they're niche and only this builder uses them; promote later if reused.
 const _toFloat64 = defineFn<[CH.Expr<unknown>], number>("toFloat64")
 const _matchRegex = defineCondFn<[CH.Expr<string>, string]>("match")
+const _leastDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("least")
+const _greatestDateTime = defineFn<[CH.Expr<string>, CH.Expr<string>], string>("greatest")
+const _addHours = defineFn<[CH.Expr<string>, CH.Expr<number>], string>("addHours")
 
 // ---------------------------------------------------------------------------
 // Service dependencies
@@ -182,10 +185,16 @@ export function serviceDependenciesSQL(
 	// instead of `avg(avgDurationMs)` (averaging averages, which ignores
 	// the relative call counts of each branch).
 	//
-	// Time ranges are split so the two branches don't double-count the
-	// in-progress hour: the hourly rollup covers complete hourly buckets
-	// strictly before `toStartOfHour(endTime)`, the live topology join scans
-	// only from there to `endTime`.
+	// Only complete interior hours may come from the hourly rollup. The partial
+	// start and end hours are read from raw spans so neither edge includes data
+	// outside the requested half-open window. `startEdgeEnd` also collapses a
+	// same-hour request into one raw branch; the end branch is then empty.
+	const startDateTime = `toDateTime('${esc(params.startTime)}')`
+	const endDateTime = `toDateTime('${esc(params.endTime)}')`
+	const startHour = `toStartOfHour(${startDateTime})`
+	const endHour = `toStartOfHour(${endDateTime})`
+	const startEdgeEnd = `least(${endDateTime}, if(${startDateTime} = ${startHour}, ${startDateTime}, addHours(${startHour}, 1)))`
+	const endEdgeStart = `greatest(${startEdgeEnd}, ${endHour})`
 	const completedHourEdges = `SELECT
       SourceService AS sourceService,
       TargetService AS targetService,
@@ -196,8 +205,8 @@ export function serviceDependenciesSQL(
       sum(if(SampleRateSum > 0, SampleRateSum, toFloat64(CallCount))) AS bucketEstimatedSpanCount
     FROM service_map_edges_hourly
     WHERE OrgId = '${esc(params.orgId)}'
-      AND Hour >= toStartOfHour(toDateTime('${esc(params.startTime)}'))
-      AND Hour < toStartOfHour(toDateTime('${esc(params.endTime)}'))
+	  AND Hour >= ${startEdgeEnd}
+	  AND Hour < ${endHour}
       ${envFilter}
     GROUP BY sourceService, targetService`
 
@@ -205,7 +214,7 @@ export function serviceDependenciesSQL(
 	// yet sealed this hour into `service_map_edges_hourly`. Reuses the exact
 	// SQL the rollup runs (`serviceMapEdgeJoinSQL`) so the two stay in lockstep,
 	// then re-aggregates dropping `Hour` into the `bucket*` shape.
-	const joinEdges = `SELECT
+	const joinEdges = (startExpr: string, endExpr: string) => `SELECT
       SourceService AS sourceService,
       TargetService AS targetService,
       sum(CallCount) AS bucketCallCount,
@@ -216,8 +225,8 @@ export function serviceDependenciesSQL(
     FROM (
       ${serviceMapEdgeJoinSQL({
 			orgId: params.orgId,
-			startExpr: `toStartOfHour(toDateTime('${esc(params.endTime)}'))`,
-			endExpr: `toDateTime('${esc(params.endTime)}')`,
+			startExpr,
+			endExpr,
 			deploymentEnv: opts.deploymentEnv,
 		})}
     )
@@ -234,7 +243,9 @@ export function serviceDependenciesSQL(
 FROM (
   ${completedHourEdges}
   UNION ALL
-  ${joinEdges}
+  ${joinEdges(startDateTime, startEdgeEnd)}
+  UNION ALL
+  ${joinEdges(endEdgeStart, endDateTime)}
 )
 GROUP BY sourceService, targetService
 ORDER BY callCount DESC
@@ -279,7 +290,19 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 	const envFilterMv = (deploymentEnv: CH.Expr<string>) =>
 		opts.deploymentEnv ? deploymentEnv.eq(opts.deploymentEnv) : undefined
 
-	// Hourly branch — sealed buckets from the cross-span rollup.
+	const startDateTime = CH.toDateTime(param.dateTime("startTime"))
+	const endDateTime = CH.toDateTime(param.dateTime("endTime"))
+	const startHour = CH.toStartOfHour(startDateTime)
+	const endHour = CH.toStartOfHour(endDateTime)
+	const firstHourBoundary = CH.if_(
+		startDateTime.eq(startHour),
+		startDateTime,
+		_addHours(startHour, CH.lit(1)),
+	)
+	const startEdgeEnd = _leastDateTime(endDateTime, firstHourBoundary)
+	const endEdgeStart = _greatestDateTime(startEdgeEnd, endHour)
+
+	// Hourly branch — only sealed, complete buckets inside the requested window.
 	const hourlyBranch = from(ServiceMapEdgesHourly)
 		.select(($) => ({
 			sourceService: $.SourceService,
@@ -298,85 +321,90 @@ export function serviceDependenciesForServiceQuery(opts: ServiceDependenciesForS
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.SourceService.eq(opts.serviceName),
-			$.Hour.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("startTime")))),
-			$.Hour.lt(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
+			$.Hour.gte(startEdgeEnd),
+			$.Hour.lt(endHour),
 			envFilterMv($.DeploymentEnv),
 		])
 		.groupBy("sourceService", "targetService")
 
-	// Live topology JOIN for the in-progress hour only — the rollup hasn't
-	// sealed this hour yet. Mirrors the all-orgs `serviceMapEdgeJoinSQL`
-	// helper used by the rollup, but pushes `ServiceName = ?` into the parent
-	// subquery so the JOIN's left side shrinks to one service's outbound spans.
-	const parentSpans = from(ServiceMapSpans)
-		.select(($) => ({
-			TraceId: $.TraceId,
-			SpanId: $.SpanId,
-			ServiceName: $.ServiceName,
-			Timestamp: $.Timestamp,
-		}))
-		.where(($) => [
-			$.SpanKind.in_("Client", "Producer"),
-			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
-			$.Timestamp.lt(param.dateTime("endTime")),
-			$.OrgId.eq(param.string("orgId")),
-			$.ServiceName.eq(opts.serviceName),
-			envFilterMv($.DeploymentEnv),
-		])
+	// Raw topology JOIN for one partial-hour edge. Called for both the start and
+	// end edges; empty intervals naturally return no rows.
+	const liveJoinBranch = (rangeStart: CH.Expr<string>, rangeEnd: CH.Expr<string>) => {
+		const parentSpans = from(ServiceMapSpans)
+			.select(($) => ({
+				TraceId: $.TraceId,
+				SpanId: $.SpanId,
+				ServiceName: $.ServiceName,
+				Timestamp: $.Timestamp,
+			}))
+			.where(($) => [
+				$.SpanKind.in_("Client", "Producer"),
+				$.Timestamp.gte(rangeStart),
+				$.Timestamp.lt(rangeEnd),
+				$.OrgId.eq(param.string("orgId")),
+				$.ServiceName.eq(opts.serviceName),
+				envFilterMv($.DeploymentEnv),
+			])
 
-	const childSpans = from(ServiceMapChildren)
-		.select(($) => ({
-			TraceId: $.TraceId,
-			ParentSpanId: $.ParentSpanId,
-			ServiceName: $.ServiceName,
-			Duration: $.Duration,
-			StatusCode: $.StatusCode,
-			TraceState: $.TraceState,
-		}))
-		.where(($) => [
-			$.Timestamp.gte(CH.toStartOfHour(CH.toDateTime(param.dateTime("endTime")))),
-			$.Timestamp.lt(param.dateTime("endTime")),
-			$.OrgId.eq(param.string("orgId")),
-			envFilterMv($.DeploymentEnv),
-		])
+		const childSpans = from(ServiceMapChildren)
+			.select(($) => ({
+				TraceId: $.TraceId,
+				ParentSpanId: $.ParentSpanId,
+				ServiceName: $.ServiceName,
+				Duration: $.Duration,
+				StatusCode: $.StatusCode,
+				TraceState: $.TraceState,
+			}))
+			.where(($) => [
+				$.Timestamp.gte(rangeStart),
+				$.Timestamp.lt(rangeEnd),
+				$.OrgId.eq(param.string("orgId")),
+				envFilterMv($.DeploymentEnv),
+			])
 
-	// Sample-weight expression: `1 / (1 - acceptanceProbability)` for spans
-	// carrying a `th:` TraceState threshold, else `1.0` (unsampled). The bit
-	// math is intentionally raw — these CH functions (reinterpret/unhex/
-	// rightPad/pow/reverse/greatest) aren't worth promoting to first-class
-	// DSL helpers for a single call site.
-	const sampleWeightExpr = CH.multiIf(
-		[
+		// Sample-weight expression: `1 / (1 - acceptanceProbability)` for spans
+		// carrying a `th:` TraceState threshold, else `1.0` (unsampled). The bit
+		// math is intentionally raw — these CH functions (reinterpret/unhex/
+		// rightPad/pow/reverse/greatest) aren't worth promoting to first-class
+		// DSL helpers for a single call site.
+		const sampleWeightExpr = CH.multiIf(
 			[
-				_matchRegex(CH.rawExpr<string>("c.TraceState"), "th:[0-9a-f]+"),
-				CH.rawExpr<number>(
-					"1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001)",
-				),
+				[
+					_matchRegex(CH.rawExpr<string>("c.TraceState"), "th:[0-9a-f]+"),
+					CH.rawExpr<number>(
+						"1.0 / greatest(1.0 - reinterpretAsUInt64(reverse(unhex(rightPad(extract(c.TraceState, 'th:([0-9a-f]+)'), 16, '0')))) / pow(2.0, 64), 0.0001)",
+					),
+				],
 			],
-		],
-		CH.rawExpr<number>("1.0"),
-	)
+			CH.rawExpr<number>("1.0"),
+		)
 
-	// In a join, the main subquery's columns are auto-qualified with its alias
-	// (`p.ServiceName`), and joined columns are reached via `$.<alias>.Column`.
-	const liveJoinBranch = fromQuery(parentSpans, "p")
-		.innerJoinQuery(childSpans, "c", (p, c) => p.SpanId.eq(c.ParentSpanId).and(p.TraceId.eq(c.TraceId)))
-		.select(($) => ({
-			sourceService: $.ServiceName,
-			targetService: $.c.ServiceName,
-			bucketCallCount: CH.count(),
-			bucketErrorCount: CH.countIf($.c.StatusCode.eq("Error")),
-			bucketDurationSumMs: CH.sum($.c.Duration.div(1000000)),
-			bucketMaxDurationMs: CH.max_($.c.Duration.div(1000000)),
-			bucketEstimatedSpanCount: CH.sum(sampleWeightExpr),
-		}))
-		.where(($) => [$.ServiceName.neq($.c.ServiceName)])
-		.groupBy("sourceService", "targetService")
+		// In a join, the main subquery's columns are auto-qualified with its alias
+		// (`p.ServiceName`), and joined columns are reached via `$.<alias>.Column`.
+		return fromQuery(parentSpans, "p")
+			.innerJoinQuery(childSpans, "c", (p, c) =>
+				p.SpanId.eq(c.ParentSpanId).and(p.TraceId.eq(c.TraceId)),
+			)
+			.select(($) => ({
+				sourceService: $.ServiceName,
+				targetService: $.c.ServiceName,
+				bucketCallCount: CH.count(),
+				bucketErrorCount: CH.countIf($.c.StatusCode.eq("Error")),
+				bucketDurationSumMs: CH.sum($.c.Duration.div(1000000)),
+				bucketMaxDurationMs: CH.max_($.c.Duration.div(1000000)),
+				bucketEstimatedSpanCount: CH.sum(sampleWeightExpr),
+			}))
+			.where(($) => [$.ServiceName.neq($.c.ServiceName)])
+			.groupBy("sourceService", "targetService")
+	}
+
+	const startLiveBranch = liveJoinBranch(startDateTime, startEdgeEnd)
+	const endLiveBranch = liveJoinBranch(endEdgeStart, endDateTime)
 
 	// Outer wrap: re-aggregate across both branches so avg duration uses
 	// branch-summed numerators/denominators (avoids averaging averages). With
 	// no further joins, columns from the union are accessed bare.
-	return fromUnion(unionAll(hourlyBranch, liveJoinBranch), "edges")
+	return fromUnion(unionAll(hourlyBranch, startLiveBranch, endLiveBranch), "edges")
 		.select(($) => ({
 			sourceService: $.sourceService,
 			targetService: $.targetService,
@@ -445,10 +473,7 @@ export function serviceDbEdgesSQL(
 // talks to, mirroring the write-side `DB_SYSTEM_ATTR_SQL` /
 // `DB_NAMESPACE_ATTR_SQL` fragments so raw-branch keys merge with the MV's.
 const dbSystemExpr = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
-	CH.coalesce(
-		CH.nullIf($.SpanAttributes.get("db.system.name"), ""),
-		$.SpanAttributes.get("db.system"),
-	)
+	CH.coalesce(CH.nullIf($.SpanAttributes.get("db.system.name"), ""), $.SpanAttributes.get("db.system"))
 const dbNamespaceCoalesce = ($: { SpanAttributes: CH.ColumnRef<"SpanAttributes", any> }) =>
 	CH.coalesce(
 		CH.nullIf($.SpanAttributes.get("db.namespace"), ""),
@@ -732,9 +757,7 @@ const shapesHourlyFilters = (
 	// `undefined` = unscoped; `''` is a real value (the legacy/unknown node).
 	// Collapse sealed hex → sentinel so a `dbNamespace: "hyperdrive"` filter also
 	// matches pre-migration rows that still carry the raw Hyperdrive config ID.
-	params.dbNamespace !== undefined
-		? collapseHyperdriveNs($.DbNamespace).eq(params.dbNamespace)
-		: undefined,
+	params.dbNamespace !== undefined ? collapseHyperdriveNs($.DbNamespace).eq(params.dbNamespace) : undefined,
 	params.sourceService ? $.ServiceName.eq(params.sourceService) : undefined,
 	params.deploymentEnv ? $.DeploymentEnv.eq(params.deploymentEnv) : undefined,
 ]

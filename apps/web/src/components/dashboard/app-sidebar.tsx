@@ -1,3 +1,4 @@
+import { memo } from "react"
 import { Link, useRouterState } from "@tanstack/react-router"
 import { useUser, useClerk } from "@clerk/clerk-react"
 import {
@@ -188,9 +189,12 @@ function GuestMenu() {
 	)
 }
 
-export function AppSidebar() {
-	const routerState = useRouterState()
-	const currentPath = routerState.location.pathname
+// Memoized: DashboardLayout renders this inside every page, so without memo the
+// sidebar's ~500-fiber subtree rerenders on every page-level state change
+// (refresh version bumps, search-param updates, query settles). The selector
+// (instead of bare useRouterState) keeps it quiet during loader/pending ticks.
+export const AppSidebar = memo(function AppSidebar() {
+	const currentPath = useRouterState({ select: (s) => s.location.pathname })
 	const { dashboards, isLoading } = useDashboardsRead()
 	const { favorites } = useDashboardPreferences()
 
@@ -423,4 +427,4 @@ export function AppSidebar() {
 			</SidebarFooter>
 		</Sidebar>
 	)
-}
+})

@@ -27,12 +27,16 @@ export const PublicIdPrefixes = {
 	alertDestination: "dest",
 	alertIncident: "inc",
 	errorIssue: "iss",
+	errorIncident: "einc",
 	investigation: "inv",
 	anomalyIncident: "anom",
 	scrapeTarget: "scrp",
 	recommendation: "rec",
 	ingestKey: "ingk",
 	attributeMapping: "amap",
+	sessionReplay: "srep",
+	/** Synthetic identity for logs, which have no native OTel record id. */
+	log: "log",
 	/** Reserved for the future events/webhooks system. */
 	event: "evt",
 	webhookEndpoint: "we",
@@ -113,7 +117,7 @@ const bytesToUuid = (bytes: Uint8Array): string => {
 }
 
 /** Encode an internal ID (raw UUID or free-form string) as a `<prefix>_…` public ID. */
-export const encodePublicId = (prefix: string, internalId: string): string => {
+export const encodePublicId = (prefix: PublicIdPrefix, internalId: string): string => {
 	const isUuid = UUID_RE.test(internalId)
 	const idBytes = isUuid ? uuidToBytes(internalId.toLowerCase()) : new TextEncoder().encode(internalId)
 	const bytes = new Uint8Array(1 + idBytes.length)
@@ -123,7 +127,7 @@ export const encodePublicId = (prefix: string, internalId: string): string => {
 }
 
 /** Decode a `<prefix>_…` public ID back to its internal ID. Returns null on any mismatch. */
-export const decodePublicId = (prefix: string, publicId: string): string | null => {
+export const decodePublicId = (prefix: PublicIdPrefix, publicId: string): string | null => {
 	if (!publicId.startsWith(`${prefix}_`)) return null
 	const body = publicId.slice(prefix.length + 1)
 	if (body.length === 0) return null
@@ -153,31 +157,37 @@ export const decodePublicId = (prefix: string, publicId: string): string | null 
  * Decoding a malformed or wrong-prefix ID fails schema decode, which the v2
  * error middleware surfaces as an `invalid_request_error`.
  */
-export const PublicId = <S extends Schema.Codec<any, string>>(prefix: string, internal: S) =>
-	// Annotate the *encoded* base string: the OpenAPI schema renders the wire
-	// form, and annotations on the transformation node above are dropped in the
-	// encoded projection — so `description`/`examples`/`format` must live here to
-	// surface in `/v2/docs`. Metadata only; decoding/encoding is unchanged.
-	Schema.String.annotate({
-		title: "Public ID",
-		description: `Opaque, prefixed public object ID (e.g. \`${prefix}_4CzLmR8pTqVn6yWjZ2xK\`). A reversible base58 encoding of the internal ID — treat it as an opaque string.`,
-		examples: [`${prefix}_4CzLmR8pTqVn6yWjZ2xK`],
-		format: "maple.public_id",
-	})
-		.pipe(
-			Schema.decodeTo(Schema.String, {
-				decode: SchemaGetter.transformOrFail((publicId: string) => {
-					const internalId = decodePublicId(prefix, publicId)
-					return internalId === null
-						? Effect.fail(
-								new SchemaIssue.InvalidValue(Option.some(publicId), {
-									message: `Invalid ID: expected an ID with prefix "${prefix}_"`,
-								}),
-							)
-						: Effect.succeed(internalId)
+export const PublicId = <S extends Schema.Codec<any, string>>(prefix: PublicIdPrefix, internal: S) => {
+	const example = encodePublicId(prefix, "018f2b3c-4d5e-6f70-8192-a3b4c5d6e7f8")
+	return (
+		// Annotate the *encoded* base string: the OpenAPI schema renders the wire
+		// form, and annotations on the transformation node above are dropped in the
+		// encoded projection — so `description`/`examples`/`format` must live here to
+		// surface in `/v2/docs`. Metadata only; decoding/encoding is unchanged.
+		Schema.String.annotate({
+			title: "Public ID",
+			description: `Opaque, prefixed public object ID (e.g. \`${example}\`). A reversible base58 encoding of the internal ID — treat it as an opaque string.`,
+			examples: [example],
+			format: "maple.public_id",
+		})
+			.pipe(
+				Schema.decodeTo(Schema.String, {
+					decode: SchemaGetter.transformOrFail((publicId: string) => {
+						const internalId = decodePublicId(prefix, publicId)
+						return internalId === null
+							? Effect.fail(
+									new SchemaIssue.InvalidValue(Option.some(publicId), {
+										message: `Invalid ID: expected an ID with prefix "${prefix}_"`,
+									}),
+								)
+							: Effect.succeed(internalId)
+					}),
+					encode: SchemaGetter.transform((internalId: string) =>
+						encodePublicId(prefix, internalId),
+					),
 				}),
-				encode: SchemaGetter.transform((internalId: string) => encodePublicId(prefix, internalId)),
-			}),
-			Schema.decodeTo(internal),
-		)
-		.annotate({ title: `Public ID (${prefix}_…)` })
+				Schema.decodeTo(internal),
+			)
+			.annotate({ title: `Public ID (${prefix}_…)` })
+	)
+}

@@ -3,6 +3,7 @@ import {
 	ApiKeyId,
 	type ApiKeyKind,
 	ApiKeyCreatedResponse,
+	ApiKeyLookupPersistenceError,
 	ApiKeyNotFoundError,
 	ApiKeyPersistenceError,
 	ApiKeyResponse,
@@ -19,10 +20,11 @@ import { readTxid, txidColumn } from "../lib/electric-txid"
 import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
 
-interface ResolvedApiKey {
+export interface ResolvedApiKey {
 	readonly orgId: OrgId
 	readonly userId: UserId
 	readonly keyId: ApiKeyId
+	readonly kind: ApiKeyKind
 	readonly metadataJson: string | null
 	/** v2 scope strings; null = legacy full access. */
 	readonly scopes: ReadonlyArray<string> | null
@@ -276,6 +278,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				orgId: decodeOrgIdSync(row.value.orgId),
 				userId: decodeUserIdSync(row.value.createdBy),
 				keyId: decodeApiKeyIdSync(row.value.id),
+				kind: row.value.kind,
 				metadataJson: row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
 				scopes: row.value.scopes ?? null,
 			} satisfies ResolvedApiKey)
@@ -300,7 +303,11 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				return Option.none<ResolvedApiKey>()
 			}
 
-			const resolved = yield* resolveByKey(bearerToken)
+			const resolved = yield* resolveByKey(bearerToken).pipe(
+				Effect.catchTag("@maple/http/errors/ApiKeyPersistenceError", (error) =>
+					Effect.fail(new ApiKeyLookupPersistenceError({ message: error.message, cause: error })),
+				),
+			)
 			if (Option.isSome(resolved)) {
 				yield* touchLastUsed(resolved.value.keyId).pipe(Effect.ignore, Effect.forkDetach)
 			}

@@ -30,9 +30,17 @@ maple start --offline  # …serve the UI bundled in the binary (no internet, no 
 maple start -d         # …or detached; logs to ~/.maple/maple.log, stop with `maple stop`
 ```
 
-`maple start` is the long-lived process: it owns the embedded ClickHouse (chDB) connection and hosts OTLP/HTTP ingest, the `/local/query` API, and (with `--offline`) the dashboard — all on one loopback port. Data persists in `~/.maple/data` between runs.
+`maple start` is the long-lived process: it owns the embedded ClickHouse (chDB) connection and hosts OTLP/HTTP ingest, the `/local/query` API, and (with `--offline`) the dashboard — all on one port that binds loopback by default. Data persists in `~/.maple/data` between runs.
 
-Common flags: `--port` (default `4318`), `--data-dir` (default `~/.maple/data`), `--offline`, `--background`/`-d`, and `--reset` to wipe an incompatible store before starting. See the [CLI reference](/docs/local-mode/cli-reference#server-commands) for the full list, plus `maple stop` and `maple reset`.
+Common flags: `--host` (default `127.0.0.1`), `--advertise-host`, `--port` (default `4318`), `--data-dir` (default `~/.maple/data`), `--offline`, `--background`/`-d`, and `--reset` to wipe an incompatible store before starting. See the [CLI reference](/docs/local-mode/cli-reference#server-commands) for the full list, plus `maple stop` and `maple reset`.
+
+To reach the bundled UI from another machine, opt into the complete unauthenticated listener and print a real client-facing hostname:
+
+```bash
+maple start --host 0.0.0.0 --advertise-host maple.home.arpa --offline
+```
+
+This exposes the UI, raw SQL query API, health endpoint, and direct OTLP routes—not just ingest. Use it only on a trusted network or behind TLS with browser-compatible authentication. The bundled UI does not add a Bearer API key or propagate an entry-page query parameter to API requests.
 
 ## Send telemetry
 
@@ -51,7 +59,7 @@ That's it — most exporters default to protobuf and work out of the box. For la
 
 By default `maple start` points you at the auto-updating dashboard hosted at `local.maple.dev`, which talks back to your binary on loopback (the startup banner prints a link with the bound `?port=`). Because that page is a public origin reaching a local server, Chrome may show a one-time "access devices on your local network" prompt.
 
-Pass `--offline` to serve the dashboard bundled inside the binary from `127.0.0.1` instead: same-origin, no prompt, and it works with no internet. The banner always prints the right URL for the mode you chose.
+Pass `--offline` to serve the dashboard bundled inside the binary from the configured bind address instead: same-origin, no prompt, and it works with no internet. The banner prints a connection-safe address; wildcard LAN binds should set `--advertise-host` to the hostname another browser will use.
 
 ## Query from the terminal
 

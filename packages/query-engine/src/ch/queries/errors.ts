@@ -181,11 +181,13 @@ const TREE_RESOURCE_ATTR_KEYS = ["deployment.environment", "deployment.commit_sh
  * keeps the earliest spans (ORDER BY StartTime ASC) so the root and its subtree
  * stay connected.
  */
-const SPAN_HIERARCHY_MAX_SPANS = 5_000
+export const SPAN_HIERARCHY_MAX_SPANS = 5_000
 
 export interface SpanHierarchyOpts {
 	traceId: string
 	spanId?: string
+	/** Override the default cap for callers that fetch one sentinel row. */
+	limit?: number
 	/**
 	 * When true, the generated SQL adds `Timestamp BETWEEN startTime AND endTime`
 	 * filters using parameter placeholders. Callers must then pass `startTime`
@@ -258,7 +260,7 @@ export function spanHierarchyQuery(opts: SpanHierarchyOpts) {
 			// ORDER BY + LIMIT bounds pathological traces — the earliest spans keep
 			// the root subtree connected. buildSpanTree (web) re-sorts children anyway.
 			.orderBy(["startTime", "asc"])
-			.limit(SPAN_HIERARCHY_MAX_SPANS)
+			.limit(opts.limit ?? SPAN_HIERARCHY_MAX_SPANS)
 			.format("JSON")
 	)
 }
@@ -281,6 +283,14 @@ export interface SpanDetailOpts {
 export interface SpanDetailOutput {
 	readonly traceId: string
 	readonly spanId: string
+	readonly parentSpanId: string
+	readonly spanName: string
+	readonly serviceName: string
+	readonly spanKind: string
+	readonly durationMs: number
+	readonly startTime: string
+	readonly statusCode: string
+	readonly statusMessage: string
 	readonly spanAttributes: string
 	readonly resourceAttributes: string
 }
@@ -296,6 +306,18 @@ export function spanDetailQuery(opts: SpanDetailOpts) {
 		.select(($) => ({
 			traceId: $.TraceId,
 			spanId: $.SpanId,
+			parentSpanId: $.ParentSpanId,
+			spanName: httpDisplaySpanName(
+				$.SpanName,
+				$.SpanAttributes.get("http.route"),
+				$.SpanAttributes.get("url.path"),
+			),
+			serviceName: $.ServiceName,
+			spanKind: $.SpanKind,
+			durationMs: $.Duration.div(1000000),
+			startTime: $.Timestamp,
+			statusCode: $.StatusCode,
+			statusMessage: $.StatusMessage,
 			spanAttributes: CH.toJSONString($.SpanAttributes),
 			resourceAttributes: CH.toJSONString($.ResourceAttributes),
 		}))
@@ -577,7 +599,8 @@ export function tracesFacetsQuery(opts: TracesFacetsOpts): CHUnionQuery<TracesFa
 		spanName: () => makeFacetQuery("SpanName", "spanName", ($) => $.SpanName.neq(""), 20),
 		httpMethod: () => makeFacetQuery("HttpMethod", "httpMethod", ($) => $.HttpMethod.neq(""), 20),
 		httpStatus: () => makeFacetQuery("HttpStatusCode", "httpStatus", ($) => $.HttpStatusCode.neq(""), 20),
-		deploymentEnv: () => makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
+		deploymentEnv: () =>
+			makeFacetQuery("DeploymentEnv", "deploymentEnv", ($) => $.DeploymentEnv.neq(""), 20),
 		serviceNamespace: () =>
 			makeFacetQuery("ServiceNamespace", "serviceNamespace", ($) => $.ServiceNamespace.neq(""), 20),
 	}

@@ -157,6 +157,11 @@ const NonNegativeInt = Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.is
 
 const PositiveFloat = Schema.Number.pipe(Schema.check(Schema.isFinite(), Schema.isGreaterThan(0)))
 
+export const MAX_ALERT_WINDOW_MINUTES = 24 * 60
+export const AlertWindowMinutes = PositiveInt.pipe(
+	Schema.check(Schema.isLessThanOrEqualTo(MAX_ALERT_WINDOW_MINUTES)),
+)
+
 export class SlackAlertDestinationConfig extends Schema.Class<SlackAlertDestinationConfig>(
 	"SlackAlertDestinationConfig",
 )({
@@ -360,12 +365,17 @@ export class AlertDestinationDocument extends Schema.Class<AlertDestinationDocum
 	lastTestError: Schema.NullOr(Schema.String),
 	createdAt: IsoDateTimeString,
 	updatedAt: IsoDateTimeString,
+	// Postgres txid of the write, present only on create/update responses so the
+	// Electric alert_destinations collection can resolve optimistic state.
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class AlertDestinationDeleteResponse extends Schema.Class<AlertDestinationDeleteResponse>(
 	"AlertDestinationDeleteResponse",
 )({
 	id: AlertDestinationId,
+	// Txid of the delete, for the Electric alert_destinations collection's onDelete.
+	txid: Schema.optionalKey(PostgresTransactionId),
 }) {}
 
 export class AlertDestinationsListResponse extends Schema.Class<AlertDestinationsListResponse>(
@@ -456,7 +466,7 @@ export class AlertRuleDocument extends Schema.Class<AlertRuleDocument>("AlertRul
 	comparator: AlertComparator,
 	threshold: Schema.Number,
 	thresholdUpper: Schema.NullOr(Schema.Number),
-	windowMinutes: PositiveInt,
+	windowMinutes: AlertWindowMinutes,
 	minimumSampleCount: NonNegativeInt,
 	consecutiveBreachesRequired: PositiveInt,
 	consecutiveHealthyRequired: PositiveInt,
@@ -500,7 +510,7 @@ export class AlertRuleUpsertRequest extends Schema.Class<AlertRuleUpsertRequest>
 	comparator: AlertComparator,
 	threshold: Schema.Number,
 	thresholdUpper: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-	windowMinutes: PositiveInt,
+	windowMinutes: AlertWindowMinutes,
 	minimumSampleCount: Schema.optionalKey(NonNegativeInt),
 	consecutiveBreachesRequired: Schema.optionalKey(PositiveInt),
 	consecutiveHealthyRequired: Schema.optionalKey(PositiveInt),

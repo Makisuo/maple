@@ -74,6 +74,7 @@ const countRequest = (reducer: QueryEngineEvaluateRequest["reducer"]): QueryEngi
 const evalStub = (rows: ReadonlyArray<Record<string, unknown>>) =>
 	({
 		sqlQuery: () => Effect.succeed(rows as never),
+		rawSqlQuery: () => Effect.die(new Error("rawSqlQuery is not used by evaluate cache tests")),
 		compiledQuery: (_tenant, compiled) => compiled.decodeRows(rows).pipe(Effect.orDie),
 	}) satisfies Parameters<typeof makeQueryEngineEvaluate>[0]
 

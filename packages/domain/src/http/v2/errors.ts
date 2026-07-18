@@ -37,7 +37,8 @@ const errorBody = <const T extends V2ErrorType>(type: T, example: ErrorExample) 
 			examples: [example.code],
 		}),
 		message: Schema.String.annotate({
-			description: "Human-readable explanation of what went wrong. For humans, not for programmatic branching.",
+			description:
+				"Human-readable explanation of what went wrong. For humans, not for programmatic branching.",
 			examples: [example.message],
 		}),
 		param: Schema.optionalKey(
@@ -90,9 +91,7 @@ export class V2AuthenticationError extends Schema.ErrorClass<V2AuthenticationErr
 	},
 ) {}
 
-export class V2PermissionError extends Schema.ErrorClass<V2PermissionError>(
-	"@maple/http/v2/PermissionError",
-)(
+export class V2PermissionError extends Schema.ErrorClass<V2PermissionError>("@maple/http/v2/PermissionError")(
 	{
 		error: errorBody("permission_error", {
 			code: "insufficient_scope",
@@ -111,7 +110,7 @@ export class V2PermissionError extends Schema.ErrorClass<V2PermissionError>(
 export class V2NotFoundError extends Schema.ErrorClass<V2NotFoundError>("@maple/http/v2/NotFoundError")(
 	{
 		error: errorBody("not_found_error", {
-			code: "resource_missing",
+			code: "api_key_not_found",
 			message: "No such api_key.",
 			param: "id",
 		}),
@@ -169,13 +168,35 @@ export class V2ApiError extends Schema.ErrorClass<V2ApiError>("@maple/http/v2/Ap
 	},
 ) {}
 
+/**
+ * `api_error` flavor for a misbehaving upstream provider (502) — the target of
+ * an outbound call (e.g. a scrape target's discovery endpoint) rejected our
+ * credentials or failed at the transport level. Distinct from 503 so consumers
+ * can tell "the provider is misbehaving" from "Maple's storage is unavailable".
+ */
+export class V2UpstreamError extends Schema.ErrorClass<V2UpstreamError>("@maple/http/v2/UpstreamError")(
+	{
+		error: errorBody("api_error", {
+			code: "upstream_error",
+			message: "The upstream provider rejected the request.",
+		}),
+	},
+	{
+		httpApiStatus: 502,
+		identifier: "UpstreamError",
+		title: "Upstream error",
+		description:
+			"An upstream provider the operation depends on failed or rejected our credentials. Check the integration's connection before retrying. HTTP 502.",
+	},
+) {}
+
 /** `api_error` flavor for upstream/persistence unavailability (503). */
 export class V2ServiceUnavailableError extends Schema.ErrorClass<V2ServiceUnavailableError>(
 	"@maple/http/v2/ServiceUnavailableError",
 )(
 	{
 		error: errorBody("api_error", {
-			code: "service_unavailable",
+			code: "api_key_lookup_unavailable",
 			message: "The service is temporarily unavailable; retry after a short delay.",
 		}),
 	},
@@ -183,14 +204,17 @@ export class V2ServiceUnavailableError extends Schema.ErrorClass<V2ServiceUnavai
 		httpApiStatus: 503,
 		identifier: "ServiceUnavailableError",
 		title: "Service unavailable error",
-		description: "A dependency (persistence or upstream) was temporarily unavailable. Retry with backoff. HTTP 503.",
+		description:
+			"A dependency (persistence or upstream) was temporarily unavailable. Retry with backoff. HTTP 503.",
 	},
 ) {}
 
 // Constructors — keep handler adapters one-liners.
 
 export const invalidRequest = (code: string, message: string, param?: string) =>
-	new V2InvalidRequestError({ error: { type: "invalid_request_error", code, message, ...(param !== undefined ? { param } : {}) } })
+	new V2InvalidRequestError({
+		error: { type: "invalid_request_error", code, message, ...(param !== undefined ? { param } : {}) },
+	})
 
 export const authenticationError = (code: string, message: string) =>
 	new V2AuthenticationError({ error: { type: "authentication_error", code, message } })
@@ -201,14 +225,58 @@ export const permissionError = (code: string, message: string) =>
 /** `resource_missing` matches Stripe's code for a bad object ID. */
 export const notFound = (message: string, param?: string) =>
 	new V2NotFoundError({
-		error: { type: "not_found_error", code: "resource_missing", message, ...(param !== undefined ? { param } : {}) },
+		error: {
+			type: "not_found_error",
+			code: "resource_missing",
+			message,
+			...(param !== undefined ? { param } : {}),
+		},
+	})
+
+/** Resource-specific 404 code for stable public branching. */
+export const resourceNotFound = (resource: string, message: string, param = "id") =>
+	new V2NotFoundError({
+		error: {
+			type: "not_found_error",
+			code: `${resource}_not_found`,
+			message,
+			param,
+		},
 	})
 
 export const conflict = (code: string, message: string) =>
 	new V2ConflictError({ error: { type: "conflict_error", code, message } })
 
-export const apiError = (message: string) =>
-	new V2ApiError({ error: { type: "api_error", code: "internal_error", message } })
+export const rateLimited = () =>
+	new V2RateLimitError({
+		error: {
+			type: "rate_limit_error",
+			code: "rate_limited",
+			message: "Too many requests. Retry after 60 seconds.",
+		},
+	})
+
+export const upstreamError = (code: string, message: string) =>
+	new V2UpstreamError({ error: { type: "api_error", code, message } })
+
+export const apiError = () =>
+	new V2ApiError({
+		error: {
+			type: "api_error",
+			code: "internal_error",
+			message: "An unexpected error occurred on our end.",
+		},
+	})
 
 export const serviceUnavailable = (message: string) =>
 	new V2ServiceUnavailableError({ error: { type: "api_error", code: "service_unavailable", message } })
+
+/** Sanitized dependency failure with a stable operation-specific public code. */
+export const dependencyUnavailable = (code: string) =>
+	new V2ServiceUnavailableError({
+		error: {
+			type: "api_error",
+			code,
+			message: "A service required for this operation is temporarily unavailable; retry with backoff.",
+		},
+	})

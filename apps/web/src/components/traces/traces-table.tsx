@@ -21,6 +21,7 @@ interface TracesTableViewProps {
 	allData: Trace[]
 	isFetchingNextPage: boolean
 	hasNextPage: boolean
+	isCapped: boolean
 	fetchNextPage: () => void
 	waiting: boolean
 	onTraceClick: (traceId: string, startTime: string) => void
@@ -178,6 +179,7 @@ function TracesTableView({
 	allData,
 	isFetchingNextPage,
 	hasNextPage,
+	isCapped,
 	fetchNextPage,
 	waiting,
 	onTraceClick,
@@ -355,7 +357,9 @@ function TracesTableView({
 	}
 
 	return (
-		<div className={`flex-1 min-h-0 flex flex-col gap-4 content-enter ${waiting ? "opacity-50" : ""}`}>
+		<div
+			className={`flex-1 min-h-0 flex flex-col gap-4 transition-opacity ${waiting ? "opacity-50" : ""}`}
+		>
 			<div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-auto rounded-md border">
 				{/*
 				 * table-fixed makes the declared column widths authoritative. Under auto layout a long
@@ -448,8 +452,9 @@ function TracesTableView({
 			</div>
 
 			<div className="text-sm text-muted-foreground shrink-0">
-				Showing {allData.length} traces
-				{!hasNextPage && allData.length > 0 && " (all loaded)"}
+				{isCapped
+					? `Showing first ${allData.length.toLocaleString()} traces — narrow filters to continue`
+					: `Showing ${allData.length.toLocaleString()} traces${!hasNextPage ? " (all loaded)" : ""}`}
 			</div>
 		</div>
 	)
@@ -457,7 +462,7 @@ function TracesTableView({
 
 export function TracesTable({ filters }: TracesTableProps) {
 	const navigate = useNavigate()
-	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, fetchNextPage } =
+	const { firstPageResult, allData, isFetchingNextPage, hasNextPage, isCapped, fetchNextPage } =
 		useInfiniteTraces(filters)
 
 	const onTraceClick = React.useCallback(
@@ -479,6 +484,7 @@ export function TracesTable({ filters }: TracesTableProps) {
 				allData={allData}
 				isFetchingNextPage={isFetchingNextPage}
 				hasNextPage={hasNextPage}
+				isCapped={isCapped}
 				fetchNextPage={fetchNextPage}
 				waiting={result.waiting ?? false}
 				onTraceClick={onTraceClick}

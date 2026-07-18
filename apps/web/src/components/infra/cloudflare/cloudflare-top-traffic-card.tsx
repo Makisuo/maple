@@ -95,7 +95,7 @@ export function CloudflareTopTrafficCard({
 						)
 					}
 					return (
-						<div className={`content-enter ${r.waiting ? "opacity-60" : ""}`}>
+						<div className={`transition-opacity ${r.waiting ? "opacity-60" : ""}`}>
 							<TableShell
 								ariaLabel={`Top ${dimension}s`}
 								waiting={r.waiting}

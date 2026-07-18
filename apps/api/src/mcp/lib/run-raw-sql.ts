@@ -1,5 +1,7 @@
 import { Effect } from "effect"
-import { makeExpandMacros } from "@maple/query-engine/runtime"
+import type { RawSqlValidationError } from "@maple/domain/http"
+import type { WarehouseSqlError } from "@maple/query-engine/execution"
+import { makeExecuteRawSql, type ExecuteRawSqlResult } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import type { TenantContext } from "@/lib/tenant-context"
 
@@ -30,46 +32,29 @@ export interface RunRawSqlInput {
 	readonly granularitySeconds: number
 }
 
-export interface RunRawSqlResult {
-	readonly rows: ReadonlyArray<Record<string, unknown>>
-	readonly columns: ReadonlyArray<string>
-	readonly rowCount: number
-	readonly expandedSql: string
-	readonly granularitySeconds: number
-}
+export type RunRawSqlResult = ExecuteRawSqlResult
 
 /**
  * Expand the raw-SQL macros (`$__orgFilter`, `$__timeFilter(col)`, …) with the
  * full safety pass (required org filter, DDL/DML deny-list, single-statement,
- * auto-LIMIT) and run the result through `WarehouseQueryService.sqlQuery`,
+ * auto-LIMIT) and run the result through `WarehouseQueryService.rawSqlQuery`,
  * returning the rows plus column/row metadata. Shared by the `run_sql` MCP tool
  * and `inspect_chart_data`'s raw_sql_chart branch so both honor the identical
  * guardrails. Fails with `RawSqlValidationError` (macro/safety) or a
  * `WarehouseError` (execution); callers surface these to the agent.
  */
 export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput) {
-	const expanded = yield* makeExpandMacros({
+	const warehouse = yield* WarehouseQueryService
+	const executeRawSql = makeExecuteRawSql<TenantContext, WarehouseSqlError | RawSqlValidationError>(
+		warehouse,
+	)
+	return yield* executeRawSql(input.tenant, {
 		sql: input.sql,
 		orgId: input.tenant.orgId,
 		startTime: input.startTime,
 		endTime: input.endTime,
 		granularitySeconds: input.granularitySeconds,
-	})
-
-	const warehouse = yield* WarehouseQueryService
-	const rows = yield* warehouse.sqlQuery(input.tenant, expanded.sql, {
-		profile: "list",
+		workload: "interactive",
 		context: "mcp.run_sql",
 	})
-
-	const records = rows as ReadonlyArray<Record<string, unknown>>
-	const columns = records.length > 0 ? Object.keys(records[0]) : []
-
-	return {
-		rows: records,
-		columns,
-		rowCount: records.length,
-		expandedSql: expanded.sql,
-		granularitySeconds: expanded.granularitySeconds,
-	} satisfies RunRawSqlResult
 })

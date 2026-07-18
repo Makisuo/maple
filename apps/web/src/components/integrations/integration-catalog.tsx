@@ -13,6 +13,7 @@ import {
 } from "@/components/icons"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { scrapeTargetsListAtom } from "@/lib/services/atoms/scrape-target-atoms"
 
 export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warpstream" | "hazel" | "github"
 
@@ -118,11 +119,7 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 			reactivityKeys: ["cloudflareIntegrationStatus"],
 		}),
 	)
-	const scrapeResult = useAtomValue(
-		MapleApiAtomClient.query("scrapeTargets", "list", {
-			reactivityKeys: ["scrapeTargets"],
-		}),
-	)
+	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
 	const planetscaleResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
 			reactivityKeys: ["planetscaleIntegrationStatus"],
@@ -150,9 +147,9 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 	const scrapeStatus = (targetType: "prometheus" | "planetscale"): CardStatus | null =>
 		Result.builder(scrapeResult)
 			.onSuccess((response): CardStatus => {
-				const targets = response.targets.filter((target) => target.targetType === targetType)
+				const targets = response.data.filter((target) => target.target_type === targetType)
 				if (targets.length === 0) return NOT_CONNECTED
-				const failing = targets.some((target) => target.enabled && target.lastScrapeError)
+				const failing = targets.some((target) => target.enabled && target.last_scrape_error)
 				const enabled = targets.filter((target) => target.enabled).length
 				const noun = targetType === "planetscale" ? "org" : "target"
 				return {

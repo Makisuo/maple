@@ -11,7 +11,7 @@ import { resolveTimeRange } from "../lib/time"
 import { autoBucketSeconds, runRawSql } from "../lib/run-raw-sql"
 import { createDualContent } from "../lib/structured-output"
 import { formatTable, truncate } from "../lib/format"
-import { warehouseToMcpHandlers } from "../lib/map-warehouse-error"
+import { toMcpQueryError } from "../lib/map-warehouse-error"
 
 // Rows returned to the model are capped so a wide/long result doesn't blow the
 // context. The full count is always reported via meta.rowCount.
@@ -24,7 +24,7 @@ const runSqlSchema = Schema.Struct({
 			"Optional macros: `$__timeFilter(Column)` (expands to `Column >= <start> AND Column <= <end>`), " +
 			"`$__startTime`, `$__endTime`, `$__interval_s` (bucket width in seconds for toStartOfInterval). " +
 			"Only a single SELECT is allowed; DDL/DML keywords (INSERT, DROP, ALTER, …) are rejected. " +
-			"A `LIMIT 10000` is appended automatically if you omit one. " +
+			"An outer 1,000-row result cap is always enforced. " +
 			"Use describe_warehouse_tables to discover table/column names.",
 	),
 	start_time: optionalStringParam("Start time (YYYY-MM-DD HH:mm:ss UTC). Defaults to 1 hour ago."),
@@ -83,7 +83,7 @@ export function registerRunSqlTool(server: McpToolRegistrar) {
 					}),
 				),
 				// Execution failures (CH syntax/schema/quota) surface the warehouse message so the agent can fix the SQL.
-				Effect.catchTags(warehouseToMcpHandlers("run_sql")),
+				Effect.mapError(toMcpQueryError("run_sql")),
 			)
 
 			if (!outcome.ok) return outcome.result

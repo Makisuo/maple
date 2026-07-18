@@ -55,6 +55,7 @@ const warehouseStub = Layer.succeed(WarehouseQueryService, {
 			}),
 		),
 	sqlQuery: () => Effect.die("sqlQuery not used by DigestService tests"),
+	rawSqlQuery: () => Effect.die("rawSqlQuery not used by DigestService tests"),
 	compiledQuery: () => Effect.die("compiledQuery not used by DigestService tests"),
 	compiledQueryFirst: () => Effect.die("compiledQueryFirst not used by DigestService tests"),
 	ingest: () => Effect.die("ingest not used by DigestService tests"),

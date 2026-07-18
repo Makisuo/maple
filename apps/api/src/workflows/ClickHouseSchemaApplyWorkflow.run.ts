@@ -88,8 +88,11 @@ async function exec(cfg: ChConfig, sql: string): Promise<string> {
 		"X-ClickHouse-Database": cfg.database,
 	}
 	if (cfg.password.length > 0) headers["X-ClickHouse-Key"] = cfg.password
-	const response = await fetch(url, { method: "POST", headers, body: sql })
+	const response = await fetch(url, { method: "POST", headers, body: sql, redirect: "manual" })
 	const text = await response.text()
+	if (response.status >= 300 && response.status < 400) {
+		throw new Error(`ClickHouse redirect responses are not allowed (${response.status})`)
+	}
 	if (!response.ok) {
 		throw new Error(`ClickHouse ${response.status}: ${text.split("\n")[0]?.slice(0, 500) ?? ""}`)
 	}
@@ -134,11 +137,7 @@ const recordVersion = (cfg: ChConfig, version: number, description: string) =>
 
 // --- config load + decrypt (imperative mirror of the service helper) --------
 
-const loadConfig = async (
-	db: MaplePgClient,
-	orgId: string,
-	encryptionKey: Buffer,
-): Promise<ChConfig> => {
+const loadConfig = async (db: MaplePgClient, orgId: string, encryptionKey: Buffer): Promise<ChConfig> => {
 	const rows = await db
 		.select()
 		.from(orgClickHouseSettings)
@@ -158,6 +157,21 @@ const loadConfig = async (
 			decipher.update(Buffer.from(row.chPasswordCiphertext, "base64")),
 			decipher.final(),
 		]).toString("utf8")
+	}
+	let parsedUrl: URL
+	try {
+		parsedUrl = new URL(row.chUrl)
+	} catch {
+		throw new Error("Stored ClickHouse URL is invalid")
+	}
+	if (parsedUrl.username.length > 0 || parsedUrl.password.length > 0) {
+		throw new Error("Stored ClickHouse credentials must not be embedded in the URL")
+	}
+	if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+		throw new Error("Stored ClickHouse URL must use HTTP or HTTPS")
+	}
+	if (password.length > 0 && parsedUrl.protocol !== "https:") {
+		throw new Error("Stored ClickHouse URL must use HTTPS when a password is configured")
 	}
 	return { url: row.chUrl, user: row.chUser, password, database: row.chDatabase }
 }

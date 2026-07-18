@@ -1,5 +1,5 @@
 import { useAtom } from "@/lib/effect-atom"
-import { useCallback, useMemo, useRef } from "react"
+import { useCallback, useMemo } from "react"
 import { Cause, Exit, Option, Schema } from "effect"
 import {
 	DashboardConcurrencyError,
@@ -480,34 +480,30 @@ export function useDashboardMutations() {
 
 	const readOnly = persistenceError !== null
 
-	const collectionRef = useRef(collection)
-	collectionRef.current = collection
-	const setPersistenceErrorRef = useRef(setPersistenceError)
-	setPersistenceErrorRef.current = setPersistenceError
-	const persistenceErrorRef = useRef(persistenceError)
-	persistenceErrorRef.current = persistenceError
-
 	// A successful write proves persistence is healthy again — clear a stale
 	// banner so the UI leaves read-only without a page reload. Mirrors the atom
-	// path, which clears the error on a successful list refetch. Guarded so a
-	// steady stream of successful edits doesn't churn state when nothing is set.
+	// path, which clears the error on a successful list refetch.
 	const clearPersistenceError = useCallback(() => {
-		if (persistenceErrorRef.current !== null) setPersistenceErrorRef.current(null)
-	}, [])
+		setPersistenceError(null)
+	}, [setPersistenceError])
 
-	const applyMutationError = useCallback((error: unknown) => {
-		// TanStack DB has already rolled the optimistic state back by the time the
-		// transaction rejects; surface the reason.
-		const concurrency =
-			error instanceof DashboardConcurrencyError || (isExitLike(error) && isConcurrencyConflict(error))
-		if (concurrency) {
-			setPersistenceErrorRef.current(
-				"Another editor saved changes to this dashboard. The latest version is loading — re-apply your edit if needed.",
-			)
-		} else {
-			setPersistenceErrorRef.current(getErrorMessage(error))
-		}
-	}, [])
+	const applyMutationError = useCallback(
+		(error: unknown) => {
+			// TanStack DB has already rolled the optimistic state back by the time the
+			// transaction rejects; surface the reason.
+			const concurrency =
+				error instanceof DashboardConcurrencyError ||
+				(isExitLike(error) && isConcurrencyConflict(error))
+			if (concurrency) {
+				setPersistenceError(
+					"Another editor saved changes to this dashboard. The latest version is loading — re-apply your edit if needed.",
+				)
+			} else {
+				setPersistenceError(getErrorMessage(error))
+			}
+		},
+		[setPersistenceError],
+	)
 
 	const mutateDashboard = useCallback(
 		// No per-dashboard FIFO queue (unlike the atom path): TanStack DB applies
@@ -519,7 +515,7 @@ export function useDashboardMutations() {
 		// compensate for `dashboardsRef.current` (React state) lagging until the
 		// next render, which reading the collection directly avoids.
 		async (dashboardId: string, updater: (dashboard: Dashboard) => Dashboard): Promise<void> => {
-			const active = collectionRef.current
+			const active = collection
 			const row = active.get(dashboardId)
 			if (!row) return
 			const current = rowToDashboard(row)
@@ -531,7 +527,7 @@ export function useDashboardMutations() {
 			// Store a plain (structurally-cloned) document so Immer's draft proxy
 			// never wraps a Schema.Class instance; onUpdate re-decodes it.
 			const nextDoc = toDashboardDocument(updated)
-			const plainDoc = JSON.parse(JSON.stringify(nextDoc)) as unknown
+			const plainDoc = structuredClone(nextDoc) as unknown
 
 			const tx = active.update(dashboardId, (draft) => {
 				draft.payload_json = plainDoc
@@ -546,7 +542,7 @@ export function useDashboardMutations() {
 				applyMutationError(error)
 			}
 		},
-		[applyMutationError, clearPersistenceError],
+		[applyMutationError, clearPersistenceError, collection],
 	)
 
 	const importDashboard = useCallback(
@@ -571,11 +567,11 @@ export function useDashboardMutations() {
 
 			const dashboard = v2DashboardToDashboard(result)
 			if (result.txid !== undefined) {
-				await collectionRef.current.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
+				await collection.utils.awaitTxId(Number(result.txid)).catch(() => undefined)
 			}
 			return dashboard
 		},
-		[readOnly, setPersistenceError],
+		[collection, readOnly, setPersistenceError],
 	)
 
 	const importPersesDashboard = useCallback(
@@ -594,13 +590,11 @@ export function useDashboardMutations() {
 
 			const dashboard = v2DashboardToDashboard(result.dashboard)
 			if (result.dashboard.txid !== undefined) {
-				await collectionRef.current.utils
-					.awaitTxId(Number(result.dashboard.txid))
-					.catch(() => undefined)
+				await collection.utils.awaitTxId(Number(result.dashboard.txid)).catch(() => undefined)
 			}
 			return { dashboard, warnings: [...result.warnings] }
 		},
-		[readOnly, setPersistenceError],
+		[collection, readOnly, setPersistenceError],
 	)
 
 	const createDashboard = useCallback(
@@ -614,10 +608,13 @@ export function useDashboardMutations() {
 		[importDashboard],
 	)
 
-	const readDashboard = useCallback((id: string) => {
-		const row = collectionRef.current.get(id)
-		return row ? (rowToDashboard(row) ?? undefined) : undefined
-	}, [])
+	const readDashboard = useCallback(
+		(id: string) => {
+			const row = collection.get(id)
+			return row ? (rowToDashboard(row) ?? undefined) : undefined
+		},
+		[collection],
+	)
 
 	const widgetMutators = useMemo(
 		() => makeWidgetMutators({ mutateDashboard, readOnly, readDashboard }),
@@ -627,12 +624,12 @@ export function useDashboardMutations() {
 	const deleteDashboard = useCallback(
 		(id: string) => {
 			if (readOnly) return
-			const active = collectionRef.current
+			const active = collection
 			if (!active.get(id)) return
 			const tx = active.delete(id)
 			void tx.isPersisted.promise.catch((error: unknown) => applyMutationError(error))
 		},
-		[readOnly, applyMutationError],
+		[collection, readOnly, applyMutationError],
 	)
 
 	return {

@@ -4,7 +4,7 @@
 // DSL-based query definitions for logs timeseries and breakdown.
 // ---------------------------------------------------------------------------
 
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCH, compileFnCall } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, fromUnion, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
@@ -30,6 +30,29 @@ interface LogsQueryOpts {
 		deploymentEnv?: "contains"
 		serviceNamespace?: "contains"
 	}
+}
+
+/** Stable identity for log records that do not carry a native OTel record ID. */
+const logRecordIdentity = ($: ColumnAccessor<typeof Logs.columns>): CH.Expr<string> => {
+	const record = compileFnCall<readonly unknown[]>(
+		"tuple",
+		$.Timestamp,
+		$.TraceId,
+		$.SpanId,
+		$.TraceFlags,
+		$.SeverityText,
+		$.SeverityNumber,
+		$.ServiceName,
+		$.Body,
+		$.ResourceSchemaUrl,
+		$.ResourceAttributes,
+		$.ScopeSchemaUrl,
+		$.ScopeName,
+		$.ScopeVersion,
+		$.ScopeAttributes,
+		$.LogAttributes,
+	)
+	return compileFnCall<string>("hex", compileFnCall<unknown>("MD5", CH.toJSONString(record)))
 }
 
 function environmentCondition(
@@ -408,6 +431,14 @@ export interface LogsListOpts extends LogsQueryOpts {
 	minSeverity?: number
 	cursor?: string
 	limit?: number
+	offset?: number
+	cursorIdentity?: {
+		timestamp: string
+		serviceName: string
+		traceId: string
+		spanId: string
+		recordIdentity: string
+	}
 }
 
 export interface LogsListOutput {
@@ -418,6 +449,7 @@ export interface LogsListOutput {
 	readonly body: string
 	readonly traceId: string
 	readonly spanId: string
+	readonly recordIdentity: string
 	readonly logAttributes: string
 	readonly resourceAttributes: string
 }
@@ -438,6 +470,7 @@ export interface LogsListOutput {
  */
 export function logsListQuery(opts: LogsListOpts) {
 	const limit = opts.limit ?? 50
+	const offset = opts.offset ?? 0
 
 	const baseWhere = ($: ColumnAccessor<typeof Logs.columns>): Array<CH.Condition | undefined> => [
 		$.OrgId.eq(param.string("orgId")),
@@ -451,6 +484,25 @@ export function logsListQuery(opts: LogsListOpts) {
 		CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 		CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 		CH.when(opts.cursor, (v: string) => $.Timestamp.lt(v)),
+		opts.cursorIdentity
+			? $.Timestamp.lt(opts.cursorIdentity.timestamp).or(
+					$.Timestamp.eq(opts.cursorIdentity.timestamp).and(
+						$.ServiceName.gt(opts.cursorIdentity.serviceName).or(
+							$.ServiceName.eq(opts.cursorIdentity.serviceName).and(
+								$.TraceId.gt(opts.cursorIdentity.traceId).or(
+								$.TraceId.eq(opts.cursorIdentity.traceId).and(
+									$.SpanId.gt(opts.cursorIdentity.spanId).or(
+										$.SpanId.eq(opts.cursorIdentity.spanId).and(
+											logRecordIdentity($).gt(opts.cursorIdentity.recordIdentity),
+										),
+									),
+								),
+								),
+							),
+						),
+					),
+				)
+			: undefined,
 		CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
 		environmentCondition($, opts),
 		namespaceCondition($, opts),
@@ -462,12 +514,12 @@ export function logsListQuery(opts: LogsListOpts) {
 		.select(($) => ({ ts: $.Timestamp }))
 		.where(baseWhere)
 		.orderBy(["ts", "desc"])
-		.limit(limit)
+		.limit(limit + offset)
 	const cutoffSql = compileCH(cutoffInner, {}, { skipFormat: true }).sql
 	const cutoff = CH.rawExpr<string>(`(SELECT min(ts) FROM (${cutoffSql}))`)
 
 	// Stage 2: heavy columns read only for rows at/after the cutoff timestamp.
-	return from(Logs)
+	let query = from(Logs)
 		.select(($) => ({
 			timestamp: $.Timestamp,
 			severityText: $.SeverityText,
@@ -476,28 +528,38 @@ export function logsListQuery(opts: LogsListOpts) {
 			body: $.Body,
 			traceId: $.TraceId,
 			spanId: $.SpanId,
+			recordIdentity: logRecordIdentity($),
 			logAttributes: CH.toJSONString($.LogAttributes),
 			resourceAttributes: CH.toJSONString($.ResourceAttributes),
 		}))
 		.where(($) => [...baseWhere($), $.Timestamp.gte(cutoff)])
-		.orderBy(["timestamp", "desc"])
+		.orderBy(
+			["timestamp", "desc"],
+			["serviceName", "asc"],
+			["traceId", "asc"],
+			["spanId", "asc"],
+			["recordIdentity", "asc"],
+		)
 		.limit(limit)
 		.format("JSON")
+
+	if (offset > 0) query = query.offset(offset)
+	return query
 }
 
 // ---------------------------------------------------------------------------
 // Single log lookup (exact-match by composite key)
 //
-// Logs have no primary id; a row is identified by Timestamp + ServiceName
-// (+ TraceId / SpanId when present). `Timestamp` is DateTime64 (sub-second),
-// so the pair is effectively unique per service. Used by the shareable
-// `/logs/$logId` detail page.
+// Logs have no native primary id; the public identity combines the indexed
+// timestamp with a deterministic hash of the complete stored record. Used by
+// the shareable `/logs/$logId` detail page.
 // ---------------------------------------------------------------------------
 
 export interface LogByKeyOpts {
-	serviceName: string
+	serviceName?: string
 	traceId?: string
 	spanId?: string
+	recordIdentity?: string
 }
 
 export function getLogByKeyQuery(opts: LogByKeyOpts) {
@@ -510,6 +572,7 @@ export function getLogByKeyQuery(opts: LogByKeyOpts) {
 			body: $.Body,
 			traceId: $.TraceId,
 			spanId: $.SpanId,
+			recordIdentity: logRecordIdentity($),
 			logAttributes: CH.toJSONString($.LogAttributes),
 			resourceAttributes: CH.toJSONString($.ResourceAttributes),
 		}))
@@ -520,9 +583,10 @@ export function getLogByKeyQuery(opts: LogByKeyOpts) {
 			$.TimestampTime.gte(param.dateTime("startTime")),
 			$.TimestampTime.lte(param.dateTime("endTime")),
 			$.Timestamp.eq(param.dateTime("timestamp")),
-			$.ServiceName.eq(opts.serviceName),
+			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
+			CH.when(opts.recordIdentity, (v: string) => logRecordIdentity($).eq(v)),
 		])
 		.limit(1)
 		.format("JSON")

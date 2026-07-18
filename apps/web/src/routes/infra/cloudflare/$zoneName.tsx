@@ -1,5 +1,4 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -40,7 +39,7 @@ const zoneDetailSearchSchema = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/infra/cloudflare/$zoneName"))({
+export const Route = createFileRoute("/infra/cloudflare/$zoneName")({
 	component: ZoneDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(zoneDetailSearchSchema),
 })
@@ -137,7 +136,7 @@ function ZoneDetailContent({
 		.onSuccess((detail, result) => {
 			if (detail.statusBuckets.length === 0 && !result.waiting) {
 				return (
-					<Empty className="py-16 content-enter">
+					<Empty className="py-16">
 						<EmptyHeader>
 							<EmptyMedia variant="icon">
 								<CloudflareIcon size={16} />
@@ -159,7 +158,7 @@ function ZoneDetailContent({
 			const errorRate = requests > 0 ? errors5xx / requests : 0
 
 			return (
-				<div className={`space-y-6 content-enter ${result.waiting ? "opacity-60" : ""}`}>
+				<div className={`space-y-6 transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
 					<StatRail>
 						<StatRailItem eyebrow="Edge requests" value={formatNumber(requests)} compact />
 						<StatRailItem

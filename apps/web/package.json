@@ -9,6 +9,14 @@
 		"preview": "vite preview",
 		"test": "vitest run --passWithNoTests",
 		"test:perf": "playwright test",
+		"test:perf:bundle": "bun run build && bun run check:bundle",
+		"check:bundle": "bun perf/check-bundle-budget.ts",
+		"test:perf:logs": "playwright test perf/logs.perf.spec.ts --project=chromium-performance",
+		"test:perf:cross-browser": "playwright test perf/cross-browser.perf.spec.ts",
+		"test:perf:service-detail": "playwright test perf/service-detail.perf.spec.ts",
+		"test:perf:infra": "playwright test perf/infra.perf.spec.ts --project=chromium-performance",
+		"test:perf:renders": "playwright test --grep \"React render work\"",
+		"test:perf:compare-renders": "bun perf/compare-react-render-reports.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -62,6 +70,7 @@
 		"tailwindcss": "catalog:tailwind",
 		"tw-animate-css": "catalog:tailwind",
 		"use-stick-to-bottom": "^1.1.6",
+		"web-vitals": "^5.3.0",
 		"zod": "^4.4.3"
 	},
 	"devDependencies": {

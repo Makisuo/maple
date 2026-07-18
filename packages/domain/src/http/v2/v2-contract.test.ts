@@ -1,14 +1,23 @@
-import { describe, expect, it } from "vitest"
-import { Schema } from "effect"
+import { describe, expect, it } from "@effect/vitest"
+import { Effect, Result, Schema } from "effect"
 import { V2AlertDestinationCreateParams } from "./alert-destinations"
 import { V2AlertIncident } from "./alert-incidents"
 import { V2AlertRule, V2AlertRuleMutationResponse } from "./alert-rules"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2DashboardMutation } from "./dashboards"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
-import { decodeOffsetCursor, encodeOffsetCursor, isoTimestamp, paginateArray } from "./envelopes"
-import { notFound, permissionError, V2NotFoundError } from "./errors"
+import {
+	decodeOffsetCursor,
+	encodeOffsetCursor,
+	isoTimestamp,
+	ListQuery,
+	paginateArray,
+	paginateOffsetQuery,
+	Timestamp,
+} from "./envelopes"
+import { notFound, permissionError, rateLimited, V2NotFoundError, V2RateLimitError } from "./errors"
 import { encodePublicId } from "./public-id"
+import { LogPublicId, V2QueryParams } from "./telemetry"
 
 const UUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 
@@ -312,6 +321,16 @@ describe("v2 error envelope", () => {
 	it("permissionError has type permission_error", () => {
 		expect(permissionError("insufficient_scope", "nope").error.type).toBe("permission_error")
 	})
+
+	it("rateLimited has the stable public 429 envelope", () => {
+		expect(Schema.encodeSync(V2RateLimitError)(rateLimited())).toEqual({
+			error: {
+				type: "rate_limit_error",
+				code: "rate_limited",
+				message: "Too many requests. Retry after 60 seconds.",
+			},
+		})
+	})
 })
 
 describe("scopes", () => {
@@ -319,7 +338,7 @@ describe("scopes", () => {
 
 	it("accepts valid scope strings and rejects invalid ones", () => {
 		expect(check("dashboards:read")).toBe("dashboards:read")
-		expect(check("alert_rules:write")).toBe("alert_rules:write")
+		expect(check("alerts:write")).toBe("alerts:write")
 		expect(check("*")).toBe("*")
 		expect(() => check("dashboards")).toThrow()
 		expect(() => check("dashboards:admin")).toThrow()
@@ -343,6 +362,31 @@ describe("scopes", () => {
 			family: "api_keys",
 			access: "write",
 		})
+		// Namespaced groups share one family: the first path segment under /v2.
+		expect(requiredScopeForRequest("GET", "/v2/alerts/rules")).toEqual({
+			family: "alerts",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/alerts/destinations/dest_abc/test")).toEqual({
+			family: "alerts",
+			access: "write",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/session_replays/search")).toEqual({
+			family: "session_replays",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/session_replays/for_trace")).toEqual({
+			family: "session_replays",
+			access: "read",
+		})
+		for (const [path, family] of [
+			["/v2/traces/search", "traces"],
+			["/v2/logs/search", "logs"],
+			["/v2/metrics/timeseries", "metrics"],
+			["/v2/query", "query"],
+		] as const) {
+			expect(requiredScopeForRequest("POST", path)).toEqual({ family, access: "read" })
+		}
 		expect(requiredScopeForRequest("GET", "/api/api-keys")).toBeNull()
 	})
 
@@ -360,21 +404,83 @@ describe("scopes", () => {
 		expect(scopeAllows(["dashboards:write"], required)).toBe(false)
 		expect(scopeAllows([], required)).toBe(false)
 	})
+
+	it("treats alert preview as a read-only POST", () => {
+		expect(requiredScopeForRequest("POST", "/v2/alerts/rules/preview")).toEqual({
+			family: "alerts",
+			access: "read",
+		})
+		expect(requiredScopeForRequest("POST", "/v2/alerts/rules/test")).toEqual({
+			family: "alerts",
+			access: "write",
+		})
+	})
+})
+
+describe("telemetry contracts", () => {
+	it("round-trips the synthetic composite log ID", () => {
+		const internal = JSON.stringify([
+			"2026-07-15 12:00:00.123",
+			"00112233445566778899AABBCCDDEEFF",
+		])
+		const wire = Schema.encodeSync(LogPublicId)(internal)
+		expect(wire.startsWith("log_")).toBe(true)
+		expect(Schema.decodeSync(LogPublicId)(wire)).toBe(internal)
+	})
+
+	it("decodes structured queries with trace attribute grouping", () => {
+		const structured = Schema.decodeUnknownSync(V2QueryParams)({
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-15T01:00:00.000Z",
+			query: {
+				kind: "timeseries",
+				source: "traces",
+				metric: "count",
+				group_by: ["attribute"],
+				filters: { group_by_attribute_keys: ["http.route"] },
+			},
+		})
+		expect(structured.query.kind).toBe("timeseries")
+	})
+
+	it("rejects raw SQL and invalid query budgets at the HTTP boundary", () => {
+		const base = {
+			start_time: "2026-07-15T00:00:00.000Z",
+			end_time: "2026-07-15T01:00:00.000Z",
+		}
+		expect(() =>
+			Schema.decodeUnknownSync(V2QueryParams)({
+				...base,
+				query: { kind: "raw_sql", sql: "SELECT 1 WHERE $__orgFilter" },
+			}),
+		).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(V2QueryParams)({
+				...base,
+				query: {
+					kind: "timeseries",
+					source: "logs",
+					metric: "count",
+					bucket_seconds: 0,
+				},
+			}),
+		).toThrow()
+	})
 })
 
 describe("list pagination", () => {
 	const items = Array.from({ length: 45 }, (_, index) => index)
 
 	it("paginates with default limit and opaque cursors", () => {
-		const first = paginateArray(items, {})
+		const first = Effect.runSync(paginateArray(items, {}))
 		expect(first.data).toHaveLength(20)
 		expect(first.has_more).toBe(true)
 		expect(first.next_cursor).not.toBeNull()
 
-		const second = paginateArray(items, { cursor: first.next_cursor! })
+		const second = Effect.runSync(paginateArray(items, { cursor: first.next_cursor! }))
 		expect(second.data[0]).toBe(20)
 
-		const third = paginateArray(items, { cursor: second.next_cursor!, limit: 20 })
+		const third = Effect.runSync(paginateArray(items, { cursor: second.next_cursor!, limit: 20 }))
 		expect(third.data).toHaveLength(5)
 		expect(third.has_more).toBe(false)
 		expect(third.next_cursor).toBeNull()
@@ -385,10 +491,52 @@ describe("list pagination", () => {
 		expect(decodeOffsetCursor("garbage")).toBeNull()
 		expect(decodeOffsetCursor("off_-1")).toBeNull()
 	})
+
+	it("fails invalid cursors instead of silently restarting at page one", () => {
+		const result = Effect.runSync(Effect.result(paginateArray(items, { cursor: "garbage" })))
+		expect(Result.isFailure(result)).toBe(true)
+		if (Result.isFailure(result)) {
+			expect(result.failure.error.code).toBe("parameter_invalid")
+			expect(result.failure.error.param).toBe("cursor")
+		}
+	})
+
+	it("uses storage lookahead and returns each row exactly once", () => {
+		const calls: Array<{ limit: number; offset: number }> = []
+		const fetch = ({ limit, offset }: { limit: number; offset: number }) => {
+			calls.push({ limit, offset })
+			return Effect.succeed(items.slice(offset, offset + limit))
+		}
+		const first = Effect.runSync(paginateOffsetQuery({ limit: 10 }, fetch))
+		const second = Effect.runSync(paginateOffsetQuery({ limit: 10, cursor: first.next_cursor! }, fetch))
+		expect(calls).toEqual([
+			{ limit: 11, offset: 0 },
+			{ limit: 11, offset: 10 },
+		])
+		expect([...first.data, ...second.data]).toEqual(items.slice(0, 20))
+	})
+
+	it("enforces the shared limit range", () => {
+		const decode = Schema.decodeUnknownSync(ListQuery)
+		expect(decode({})).toEqual({})
+		expect(decode({ limit: "1" }).limit).toBe(1)
+		expect(decode({ limit: "100" }).limit).toBe(100)
+		for (const limit of ["0", "101", "1.5", "nope"]) {
+			expect(() => decode({ limit }), `rejects ${limit}`).toThrow()
+		}
+	})
 })
 
 describe("timestamps", () => {
 	it("formats epoch-ms as ISO-8601 UTC", () => {
 		expect(isoTimestamp(0)).toBe("1970-01-01T00:00:00.000Z")
+	})
+
+	it("accepts UTC ISO-8601 timestamps and rejects invalid values", () => {
+		expect(Schema.decodeUnknownSync(Timestamp)("2026-07-15T12:34:56.000Z")).toBe(
+			"2026-07-15T12:34:56.000Z",
+		)
+		expect(() => Schema.decodeUnknownSync(Timestamp)("not-a-date")).toThrow()
+		expect(() => Schema.decodeUnknownSync(Timestamp)("2026-07-15T12:34:56+02:00")).toThrow()
 	})
 })

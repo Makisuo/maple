@@ -25,7 +25,12 @@ import {
 } from "@/lib/collections/errors"
 import { getOrgCollections } from "@/lib/collections/org-collections"
 import { initialIssueSelection, updateIssueSelection } from "@/lib/models/issue-selection"
-import { collectionFailureMessage, makeOrgCollectionsKey, orgIdOf } from "@/lib/models/org-collections-key"
+import {
+	collectionFailureMessage,
+	makeOrgCollectionsKey,
+	orgCollectionStuckOptions,
+	orgIdOf,
+} from "@/lib/models/org-collections-key"
 
 /** The server's page cap, mirrored client-side by {@link filterIssues}. */
 export const ISSUES_PAGE_LIMIT = 100
@@ -144,11 +149,22 @@ export class ErrorIssuesModel extends Model.Service<ErrorIssuesModel>()("maple/e
 	make: () =>
 		Effect.gen(function* () {
 			const orgKey = yield* makeOrgCollectionsKey
-			const issues = yield* Db.fromCollectionByKey(orgKey, (key) => getOrgCollections(orgIdOf(key)).errorIssues)
-			const actors = yield* Db.fromCollectionByKey(orgKey, (key) => getOrgCollections(orgIdOf(key)).actors)
+			// The stuck guard keeps a wedged shape stream from skeleton-ing every
+			// consumer forever: timeout → error phase + bounded collection recreate.
+			const issues = yield* Db.fromCollectionByKey(
+				orgKey,
+				(key) => getOrgCollections(orgIdOf(key)).errorIssues,
+				orgCollectionStuckOptions,
+			)
+			const actors = yield* Db.fromCollectionByKey(
+				orgKey,
+				(key) => getOrgCollections(orgIdOf(key)).actors,
+				orgCollectionStuckOptions,
+			)
 			const openIncidents = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).openErrorIncidents,
+				orgCollectionStuckOptions,
 			)
 
 			const overview = Store.combine([issues, actors, openIncidents], (issuesState, actorsState, incidentsState) =>

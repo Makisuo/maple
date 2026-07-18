@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { toAlertContext } from "@/components/chat/alert-context"
@@ -8,6 +7,7 @@ import { decodeInvestigationRef } from "@/components/chat/investigation-context"
 import { InvestigationView } from "@/components/investigations/investigation-view"
 import { subjectFromAlertContext, subjectFromAnomaly, subjectFromError } from "@/components/investigations/subject"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
@@ -19,7 +19,7 @@ const SearchSchema = Schema.Struct({
 	r: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/investigations/$id"))({
+export const Route = createFileRoute("/investigations/$id")({
 	component: InvestigationPage,
 	validateSearch: Schema.toStandardSchemaV1(SearchSchema),
 })
@@ -121,12 +121,8 @@ function ErrorInvestigation({ id }: { id: string }) {
 }
 
 function AlertInvestigation({ incidentId }: { incidentId: string }) {
-	const incidentsResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listIncidents", { reactivityKeys: ["alertIncidents"] }),
-	)
-	const rulesResult = useAtomValue(
-		MapleApiAtomClient.query("alerts", "listRules", { reactivityKeys: ["alertRules"] }),
-	)
+	const { result: incidentsResult } = useAlertIncidentsList()
+	const { result: rulesResult } = useAlertRulesList()
 
 	if (Result.isInitial(incidentsResult) || Result.isInitial(rulesResult)) return <LoadingShell />
 

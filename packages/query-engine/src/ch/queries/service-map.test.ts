@@ -220,6 +220,21 @@ describe("serviceMapResolutionsRollupSQL", () => {
 // ---------------------------------------------------------------------------
 
 describe("serviceDependenciesSQL", () => {
+	it("reads partial boundary hours from raw spans without widening the start", () => {
+		const { sql } = serviceDependenciesSQL(
+			{},
+			{
+				orgId: "org_1",
+				startTime: "2024-01-01 10:15:00",
+				endTime: "2024-01-01 12:30:00",
+			},
+		)
+		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:15:00')")
+		expect(sql).toContain("addHours(toStartOfHour(toDateTime('2024-01-01 10:15:00')), 1)")
+		expect(sql).toContain("greatest(least(")
+		expect(sql).not.toContain("Timestamp >= toStartOfHour(toDateTime('2024-01-01 10:15:00'))")
+	})
+
 	it.effect("decodes service dependency rows with numeric strings from ClickHouse JSON", () =>
 		Effect.gen(function* () {
 			const compiled = serviceDependenciesSQL({ deploymentEnv: "production" }, baseParams)
@@ -252,6 +267,17 @@ describe("serviceDependenciesSQL", () => {
 })
 
 describe("serviceDependenciesForServiceQuery", () => {
+	it("keeps partial start and end hours outside the hourly rollup", () => {
+		const { sql } = compileCH(serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }), {
+			orgId: "org_1",
+			startTime: "2024-01-01 10:15:00",
+			endTime: "2024-01-01 12:30:00",
+		})
+		expect(sql).toContain("Timestamp >= toDateTime('2024-01-01 10:15:00')")
+		expect(sql).toContain("addHours(toStartOfHour(toDateTime('2024-01-01 10:15:00')), 1)")
+		expect(sql).toContain("greatest(least(")
+	})
+
 	it("filters SourceService on the hourly branch", () => {
 		const { sql } = compileCH(
 			serviceDependenciesForServiceQuery({ serviceName: "artifacts-api" }),
@@ -561,7 +587,11 @@ describe("service-map database query summaries", () => {
 		// regression here silently widens the panel to every database of the system.
 		// (Sub-hour timeseries is raw-only, covered separately below.)
 		const namespaceCoalesce = `${DB_NAMESPACE_ATTR_SQL} = 'orders'`
-		const timeseries = serviceDbQueryTimeseriesSQL({ ...params, dbNamespace: "orders", bucketSeconds: 3600 }).sql
+		const timeseries = serviceDbQueryTimeseriesSQL({
+			...params,
+			dbNamespace: "orders",
+			bucketSeconds: 3600,
+		}).sql
 		const topQueries = serviceDbTopQueriesSQL({ ...params, dbNamespace: "orders" }).sql
 		for (const sql of [timeseries, topQueries]) {
 			expect(sql).toContain(`${SEALED_NAMESPACE_COLLAPSE} = 'orders'`) // sealed rollup branch

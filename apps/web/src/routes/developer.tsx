@@ -1,5 +1,4 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -11,7 +10,7 @@ const DeveloperSearch = Schema.Struct({
 	tab: Schema.optional(Schema.Literals(["ingestion", "api-keys"])),
 })
 
-export const Route = effectRoute(createFileRoute("/developer"))({
+export const Route = createFileRoute("/developer")({
 	component: DeveloperPage,
 	validateSearch: Schema.toStandardSchemaV1(DeveloperSearch),
 })

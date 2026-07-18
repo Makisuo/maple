@@ -18,14 +18,14 @@ import { Layer } from "effect"
 import * as Exit from "effect/Exit"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import { Atom } from "@/lib/effect-atom"
-import { mapleApiClientLayer } from "@/lib/registry"
+import { mapleApiClientLayer, mapleApiV2ClientLayer } from "@/lib/registry"
 import { AlertsOverviewModel } from "./alerts-overview-model"
 import { DashboardsListModel } from "./dashboards-list-model"
 import { ErrorIssuesModel } from "./error-issues-model"
 
 export const unitflowRuntime = UnitflowRuntime.make(
 	Layer.mergeAll(AlertsOverviewModel.layer, DashboardsListModel.layer, ErrorIssuesModel.layer).pipe(
-		Layer.provideMerge(Layer.mergeAll(mapleApiClientLayer, Reactivity.layer)),
+		Layer.provideMerge(Layer.mergeAll(mapleApiClientLayer, mapleApiV2ClientLayer, Reactivity.layer)),
 	),
 	{ memoMap: Atom.runtime.memoMap },
 )

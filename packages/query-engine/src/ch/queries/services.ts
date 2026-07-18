@@ -19,6 +19,8 @@ export interface ServiceOverviewOpts {
 	environments?: readonly string[]
 	namespaces?: readonly string[]
 	commitShas?: readonly string[]
+	serviceName?: string
+	limit?: number
 }
 
 export interface ServiceOverviewOutput {
@@ -34,6 +36,61 @@ export interface ServiceOverviewOutput {
 	readonly p95LatencyMs: number
 	readonly p99LatencyMs: number
 	readonly estimatedSpanCount: number
+}
+
+export interface ServiceCatalogOpts {
+	serviceName?: string
+	deploymentEnvironment?: string
+	serviceNamespace?: string
+	limit?: number
+	offset?: number
+}
+
+export interface ServiceCatalogOutput {
+	readonly serviceName: string
+	readonly serviceNamespaces: readonly string[]
+	readonly deploymentEnvironments: readonly string[]
+	readonly spanCount: number
+	readonly errorCount: number
+	readonly estimatedErrorCount: number
+	readonly estimatedSpanCount: number
+	readonly p50LatencyMs: number
+	readonly p95LatencyMs: number
+	readonly p99LatencyMs: number
+}
+
+/** Name-level public service catalog, intentionally aggregated across env/namespace. */
+export function serviceCatalogQuery(opts: ServiceCatalogOpts) {
+	return from(ServiceOverviewSpans)
+		.select(($) => ({
+			serviceName: $.ServiceName,
+			serviceNamespaces: CH.rawExpr<readonly string[]>(
+				"arraySort(arrayFilter(x -> x != '', arrayDistinct(groupArray(ServiceNamespace))))",
+			),
+			deploymentEnvironments: CH.rawExpr<readonly string[]>(
+				"arraySort(arrayFilter(x -> x != '', arrayDistinct(groupArray(DeploymentEnv))))",
+			),
+			spanCount: CH.count(),
+			errorCount: CH.countIf($.StatusCode.eq("Error")),
+			estimatedErrorCount: CH.sumIf($.SampleRate, $.StatusCode.eq("Error")),
+			estimatedSpanCount: CH.sum($.SampleRate),
+			p50LatencyMs: CH.quantile(0.5)($.Duration).div(1000000),
+			p95LatencyMs: CH.quantile(0.95)($.Duration).div(1000000),
+			p99LatencyMs: CH.quantile(0.99)($.Duration).div(1000000),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			CH.when(opts.serviceName, (value: string) => $.ServiceName.eq(value)),
+			CH.when(opts.deploymentEnvironment, (value: string) => $.DeploymentEnv.eq(value)),
+			CH.when(opts.serviceNamespace, (value: string) => $.ServiceNamespace.eq(value)),
+		])
+		.groupBy("serviceName")
+		.orderBy(["estimatedSpanCount", "desc"], ["serviceName", "asc"])
+		.limit(opts.limit ?? 20)
+		.offset(opts.offset ?? 0)
+		.format("JSON")
 }
 
 export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
@@ -59,13 +116,14 @@ export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
+			CH.when(opts.serviceName, (value: string) => $.ServiceName.eq(value)),
 			opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
 			opts.namespaces?.length ? CH.inList($.ServiceNamespace, opts.namespaces) : undefined,
 			opts.commitShas?.length ? CH.inList($.CommitSha, opts.commitShas) : undefined,
 		])
 		.groupBy("serviceName", "serviceNamespace", "environment", "commitSha")
 		.orderBy(["throughput", "desc"])
-		.limit(100)
+		.limit(opts.limit ?? 100)
 		.format("JSON")
 }
 

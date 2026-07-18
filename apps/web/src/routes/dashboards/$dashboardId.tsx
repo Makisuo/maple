@@ -1,5 +1,4 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { DashboardId, DashboardVersionId } from "@maple/domain/http"
 import { Atom, useAtom } from "@/lib/effect-atom"
@@ -64,7 +63,7 @@ function variableValuesFromSearch(search: Record<string, unknown>): Record<strin
 	return values
 }
 
-export const Route = effectRoute(createFileRoute("/dashboards/$dashboardId"))({
+export const Route = createFileRoute("/dashboards/$dashboardId")({
 	component: DashboardViewPage,
 	validateSearch: Schema.toStandardSchemaV1(dashboardViewSearchSchema),
 })

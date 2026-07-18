@@ -1,5 +1,4 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { useMemo } from "react"
 
@@ -32,7 +31,7 @@ const serviceMapSearchSchema = Schema.Struct({
 	focusMode: Schema.optional(Schema.Literals(["dim", "hide"])),
 })
 
-export const Route = effectRoute(createFileRoute("/service-map"))({
+export const Route = createFileRoute("/service-map")({
 	component: ServiceMapPage,
 	validateSearch: Schema.toStandardSchemaV1(serviceMapSearchSchema),
 })

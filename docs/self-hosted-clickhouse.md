@@ -24,6 +24,25 @@ Self-managed Maple is a **per-org BYO** feature. Each org configures their own b
 
 The Maple deployment itself still uses the env-level `TINYBIRD_HOST` / `TINYBIRD_TOKEN` for any org without a BYO row. API query routing does not require new env vars for ClickHouse-BYO; D1-backed direct ingest does require `MAPLE_INGEST_KEY_ENCRYPTION_KEY` so the ingest gateway can decrypt stored ClickHouse passwords.
 
+Env-level `CLICKHOUSE_URL` defaults to Tinybird's ClickHouse-compatible gateway for
+compatibility with existing deployments; raw SQL substitutes a per-org JWT and
+removes Tinybird-restricted query settings. For a vanilla/self-managed server, set
+`CLICKHOUSE_PROVIDER=clickhouse`; Maple then preserves `CLICKHOUSE_PASSWORD` for raw
+SQL. Tinybird raw SQL also requires explicit `TINYBIRD_SIGNING_KEY` and
+`TINYBIRD_WORKSPACE_ID` values; Maple never derives either from the API token.
+
+Env-level vanilla ClickHouse raw SQL is enabled only when `MAPLE_AUTH_MODE=self_hosted`,
+where the deployment is single-org. Hosted multi-org deployments fail closed unless
+they use Tinybird's scoped JWT path or per-org BYO credentials.
+
+For user-authored SQL, configure the runtime ClickHouse account as SELECT-only on the
+Maple database. Apply schema migrations with a separate administrative account, and
+enforce server-side limits such as maximum execution time, memory, rows, and bytes
+read. Maple's client-side caps are a final response boundary, not a substitute for a
+least-privilege role and server-side resource controls. See
+[ClickHouse's guidance for agent-authored queries](https://clickhouse.com/blog/how-to-set-up-clickhouse-for-agentic-analytics)
+for the corresponding database-side setup.
+
 ### Routing precedence
 
 For any given query the API resolves the upstream in this order:

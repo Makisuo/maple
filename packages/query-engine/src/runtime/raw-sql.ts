@@ -1,21 +1,22 @@
-import { Context, Effect, Layer } from "effect"
-import { RawSqlValidationError } from "@maple/domain/http"
+import { Effect } from "effect"
+import {
+	MAX_RAW_SQL_CELL_LENGTH,
+	MAX_RAW_SQL_LENGTH,
+	MAX_RAW_SQL_RESULT_BYTES,
+	MAX_RAW_SQL_RESULT_ROWS,
+	RawSqlValidationError,
+} from "@maple/domain/http"
+import type { QueryProfileName } from "../profiles"
 import { escapeClickHouseString } from "../sql"
 
 // ---------------------------------------------------------------------------
-// Raw SQL chart macro expansion + safety checks.
+// User-authored ClickHouse SQL: validation, macro expansion, and execution.
 //
-// Users author a ClickHouse SQL string that references a handful of server-
-// evaluated macros. We expand them with escaped values, then run a deny-list
-// pass before handing the string off to WarehouseQueryService.sqlQuery.
-//
-// SECURITY NOTE: org isolation rests on three layers:
-//   1. `$__orgFilter` MUST appear in the user SQL — expanded to OrgId = '<id>'.
-//   2. WarehouseQueryService.sqlQuery() string-matches "OrgId" as belt+braces.
-//   3. Deny-listed statements (INSERT/DROP/…) are rejected pre-execution.
-//
-// TODO(security): migrate to ClickHouse row policies + a read-only CH user so
-// org isolation is enforced at the DB layer instead of by SQL substring checks.
+// Tenant isolation is enforced by the rawSqlQuery warehouse capability:
+// Tinybird uses a per-org datasource-scoped JWT, BYO ClickHouse uses per-org
+// credentials, and shared vanilla ClickHouse is limited to single-org mode.
+// `$__orgFilter` remains mandatory as defense in depth and because OrgId is the
+// leading sorting-key filter on Maple telemetry tables.
 // ---------------------------------------------------------------------------
 
 const COLUMN_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_.]*$/
@@ -40,30 +41,48 @@ const DENY_LIST = [
 
 const DENY_LIST_RE = new RegExp(`\\b(${DENY_LIST.join("|")})\\b`, "i")
 
-const DEFAULT_ROW_CAP = 10_000
+/** One extra row is the overflow sentinel for the public 1,000-row cap. */
+export const RAW_SQL_FETCH_ROW_LIMIT = MAX_RAW_SQL_RESULT_ROWS + 1
 
-export interface ExpandMacrosInput {
+export type RawSqlWorkload = "interactive" | "alert"
+
+export interface PrepareRawSqlInput {
 	readonly sql: string
 	readonly orgId: string
 	readonly startTime: string
 	readonly endTime: string
 	readonly granularitySeconds: number
+	readonly workload: RawSqlWorkload
 }
 
-export interface ExpandMacrosResult {
+export interface PreparedRawSql {
 	readonly sql: string
 	readonly granularitySeconds: number
 }
 
-export interface RawSqlChartServiceShape {
-	readonly expandMacros: (
-		input: ExpandMacrosInput,
-	) => Effect.Effect<ExpandMacrosResult, RawSqlValidationError>
+export interface ExecuteRawSqlInput extends PrepareRawSqlInput {
+	readonly context: string
+}
+
+export interface ExecuteRawSqlResult {
+	readonly rows: ReadonlyArray<Record<string, unknown>>
+	readonly columns: ReadonlyArray<string>
+	readonly rowCount: number
+	readonly expandedSql: string
+	readonly granularitySeconds: number
+}
+
+export interface RawSqlWarehouse<TTenant, E> {
+	readonly rawSqlQuery: (
+		tenant: TTenant,
+		sql: string,
+		options: { readonly profile: QueryProfileName; readonly context: string },
+	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, E>
 }
 
 /**
- * Strip ClickHouse-style comments and string literals so deny-list scans and
- * semicolon detection don't false-positive on words inside them.
+ * Strip ClickHouse-style comments and string literals so keyword and semicolon
+ * checks do not false-positive on their contents.
  */
 function maskLiteralsAndComments(sql: string): string {
 	let out = ""
@@ -111,23 +130,31 @@ function maskLiteralsAndComments(sql: string): string {
 const fail = (code: RawSqlValidationError["code"], message: string) =>
 	Effect.fail(new RawSqlValidationError({ code, message }))
 
-/**
- * Pure macro-expansion + safety pass. Exported so non-service callers (e.g.
- * raw-SQL alert evaluation in QueryEngineService) can reuse it without wiring
- * the `RawSqlChartService` layer.
- */
-export const makeExpandMacros = Effect.fn("RawSqlChartService.expandMacros")(function* (
-	input: ExpandMacrosInput,
-) {
-	let sql = input.sql
-
-	if (!sql.includes("$__orgFilter")) {
+/** Validate and expand a raw query without accessing the warehouse. */
+export const prepareRawSql = Effect.fn("RawSql.prepare")(function* (input: PrepareRawSqlInput) {
+	if (input.sql.length === 0 || input.sql.length > MAX_RAW_SQL_LENGTH) {
+		return yield* fail(
+			"ResourceLimit",
+			`Raw SQL must contain between 1 and ${MAX_RAW_SQL_LENGTH} characters`,
+		)
+	}
+	if (!Number.isFinite(input.granularitySeconds) || input.granularitySeconds <= 0) {
+		return yield* fail("ResourceLimit", "Raw SQL granularity must be a positive finite number")
+	}
+	if (!input.sql.includes("$__orgFilter")) {
 		return yield* fail(
 			"MissingOrgFilter",
 			"SQL must reference $__orgFilter so the query is scoped to your org.",
 		)
 	}
+	if (input.workload === "alert" && !input.sql.includes("$__timeFilter(")) {
+		return yield* fail(
+			"InvalidMacro",
+			"Raw SQL alerts must reference $__timeFilter(...) to bound alert reads.",
+		)
+	}
 
+	let sql = input.sql
 	const orgLiteral = `'${escapeClickHouseString(input.orgId)}'`
 	const startLiteral = `toDateTime('${escapeClickHouseString(input.startTime)}')`
 	const endLiteral = `toDateTime('${escapeClickHouseString(input.endTime)}')`
@@ -138,12 +165,6 @@ export const makeExpandMacros = Effect.fn("RawSqlChartService.expandMacros")(fun
 	sql = sql.replaceAll("$__endTime", endLiteral)
 	sql = sql.replaceAll("$__interval_s", String(granularity))
 
-	// $__timeFilter(Column) -> Column >= <start> AND Column <= <end>
-	// Match anything inside the parens (greedy up to next `)`), then strictly
-	// validate the captured argument is a single column identifier. Catching
-	// the whole inner string lets us return InvalidMacro for injection
-	// attempts like `$__timeFilter(1 OR 1=1)` instead of letting them slip
-	// through to the UnresolvedMacro fallback.
 	const timeFilterMatches = [...sql.matchAll(/\$__timeFilter\(([^)]*)\)/g)]
 	for (const match of timeFilterMatches) {
 		const column = match[1].trim()
@@ -165,7 +186,6 @@ export const makeExpandMacros = Effect.fn("RawSqlChartService.expandMacros")(fun
 	}
 
 	const masked = maskLiteralsAndComments(sql)
-
 	if (masked.includes(";")) {
 		return yield* fail(
 			"MultipleStatements",
@@ -177,25 +197,68 @@ export const makeExpandMacros = Effect.fn("RawSqlChartService.expandMacros")(fun
 	if (denyMatch) {
 		return yield* fail(
 			"DisallowedStatement",
-			`Statement keyword '${denyMatch[1].toUpperCase()}' is not allowed in raw SQL charts.`,
+			`Statement keyword '${denyMatch[1].toUpperCase()}' is not allowed in raw SQL.`,
+		)
+	}
+	if (!/^\s*(?:SELECT|WITH)\b/i.test(masked)) {
+		return yield* fail(
+			"DisallowedStatement",
+			"Raw SQL must be a SELECT query (WITH common table expressions are supported).",
 		)
 	}
 
-	if (!/\blimit\b/i.test(masked)) {
-		sql = `${sql.trimEnd()}\nLIMIT ${DEFAULT_ROW_CAP}`
-	}
-
 	return {
-		sql,
+		sql: `SELECT * FROM (\n${sql.trim()}\n) AS maple_raw_sql_limited\nLIMIT ${RAW_SQL_FETCH_ROW_LIMIT}`,
 		granularitySeconds: granularity,
-	} satisfies ExpandMacrosResult
+	} satisfies PreparedRawSql
 })
 
-export class RawSqlChartService extends Context.Service<RawSqlChartService, RawSqlChartServiceShape>()(
-	"@maple/api/services/RawSqlChartService",
-	{
-		make: Effect.succeed({ expandMacros: makeExpandMacros } satisfies RawSqlChartServiceShape),
-	},
-) {
-	static readonly layer = Layer.effect(this, this.make)
+const rawSqlResultLimitError = (rows: ReadonlyArray<Record<string, unknown>>): string | null => {
+	if (rows.length > MAX_RAW_SQL_RESULT_ROWS) {
+		return `Raw SQL results may contain at most ${MAX_RAW_SQL_RESULT_ROWS} rows`
+	}
+
+	let totalBytes = 2
+	for (const row of rows) {
+		for (const value of Object.values(row)) {
+			if (typeof value === "string" && value.length > MAX_RAW_SQL_CELL_LENGTH) {
+				return `Raw SQL result cells may contain at most ${MAX_RAW_SQL_CELL_LENGTH} characters`
+			}
+		}
+
+		let encoded: string
+		try {
+			encoded = JSON.stringify(row) ?? "null"
+		} catch {
+			return "Raw SQL results must be JSON serializable"
+		}
+		totalBytes += new TextEncoder().encode(encoded).byteLength + 1
+		if (totalBytes > MAX_RAW_SQL_RESULT_BYTES) {
+			return `Raw SQL results may contain at most ${MAX_RAW_SQL_RESULT_BYTES} encoded bytes`
+		}
+	}
+	return null
 }
+
+/** Build the single prepare/execute workflow shared by HTTP, MCP, and alerts. */
+export const makeExecuteRawSql = <TTenant, E>(warehouse: RawSqlWarehouse<TTenant, E>) =>
+	Effect.fn("RawSql.execute")(function* (tenant: TTenant, input: ExecuteRawSqlInput) {
+		const prepared = yield* prepareRawSql(input)
+		const rows = yield* warehouse.rawSqlQuery(tenant, prepared.sql, {
+			profile: input.workload === "alert" ? "rawAlert" : "rawInteractive",
+			context: input.context,
+		})
+
+		const limitError = rawSqlResultLimitError(rows)
+		if (limitError !== null) {
+			return yield* new RawSqlValidationError({ code: "ResourceLimit", message: limitError })
+		}
+
+		return {
+			rows,
+			columns: rows.length > 0 ? Object.keys(rows[0]) : [],
+			rowCount: rows.length,
+			expandedSql: prepared.sql,
+			granularitySeconds: prepared.granularitySeconds,
+		} satisfies ExecuteRawSqlResult
+	})

@@ -1,6 +1,5 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { CreateIngestAttributeMappingRequest } from "@maple/domain/http"
-import type { RecommendationIssue } from "@maple/domain/http"
+import type { V2Recommendation } from "@maple/domain/http/v2"
 import { useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
@@ -18,15 +17,15 @@ import {
 	LoaderIcon,
 	XmarkIcon,
 } from "@/components/icons"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
 import { formatRelativeTime } from "@/lib/format"
 
-type IssueKind = RecommendationIssue["kind"]
-type IssueStatus = RecommendationIssue["status"]
+type IssueKind = V2Recommendation["kind"]
+type IssueStatus = V2Recommendation["status"]
 
 const KIND_BADGE: Record<IssueKind, { label: string; variant: "success" | "warning" | "info" }> = {
 	rename: { label: "Safe rename", variant: "success" },
@@ -58,14 +57,14 @@ const MODE = {
 
 const MONO = "font-mono text-[0.92em] text-muted-foreground"
 
-function recSentence(issue: RecommendationIssue) {
+function recSentence(issue: V2Recommendation) {
 	if (issue.kind === "double-emission") {
 		return (
 			<>
 				<span className="text-foreground font-medium">Standardize on</span>{" "}
-				<code className={MONO}>{issue.canonicalKey}</code>
+				<code className={MONO}>{issue.canonical_key}</code>
 				<span className="text-muted-foreground"> — spans also emit </span>
-				<code className={MONO}>{issue.sourceKey}</code>
+				<code className={MONO}>{issue.source_key}</code>
 			</>
 		)
 	}
@@ -73,24 +72,24 @@ function recSentence(issue: RecommendationIssue) {
 		return (
 			<>
 				<span className="text-foreground font-medium">Rename non-conforming key</span>{" "}
-				<code className={MONO}>{issue.sourceKey}</code>
+				<code className={MONO}>{issue.source_key}</code>
 			</>
 		)
 	}
 	return (
 		<>
 			<span className="text-foreground font-medium">Rename</span>{" "}
-			<code className={MONO}>{issue.sourceKey}</code> <span className="text-muted-foreground">→</span>{" "}
-			<code className={MONO}>{issue.canonicalKey}</code>
+			<code className={MONO}>{issue.source_key}</code> <span className="text-muted-foreground">→</span>{" "}
+			<code className={MONO}>{issue.canonical_key}</code>
 		</>
 	)
 }
 
-function recPlainText(issue: RecommendationIssue): string {
+function recPlainText(issue: V2Recommendation): string {
 	if (issue.kind === "double-emission")
-		return `Standardize on ${issue.canonicalKey} — spans also emit ${issue.sourceKey}`
-	if (issue.kind === "naming") return `Rename non-conforming key ${issue.sourceKey}`
-	return `Rename ${issue.sourceKey} → ${issue.canonicalKey}`
+		return `Standardize on ${issue.canonical_key} — spans also emit ${issue.source_key}`
+	if (issue.kind === "naming") return `Rename non-conforming key ${issue.source_key}`
+	return `Rename ${issue.source_key} → ${issue.canonical_key}`
 }
 
 export function RecommendedMappingsSection() {
@@ -103,19 +102,25 @@ export function RecommendedMappingsSection() {
 	// Applying a recommendation creates a mapping, so refresh the mappings list too.
 	const refreshMappings = useAtomRefresh(ingestAttributeMappingsListAtom)
 
-	const createMutation = useAtomSet(MapleApiAtomClient.mutation("ingestAttributeMappings", "create"), {
+	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "create"), {
 		mode: "promiseExit",
 	})
-	const dismissMutation = useAtomSet(MapleApiAtomClient.mutation("recommendationIssues", "dismiss"), {
-		mode: "promiseExit",
-	})
-	const reopenMutation = useAtomSet(MapleApiAtomClient.mutation("recommendationIssues", "reopen"), {
-		mode: "promiseExit",
-	})
+	const dismissMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "dismiss"),
+		{
+			mode: "promiseExit",
+		},
+	)
+	const reopenMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "reopen"),
+		{
+			mode: "promiseExit",
+		},
+	)
 
 	const issues = Result.builder(listResult)
-		.onSuccess((r) => [...r.issues])
-		.orElse(() => [] as RecommendationIssue[])
+		.onSuccess((r) => [...r.data])
+		.orElse(() => [] as V2Recommendation[])
 
 	const openIssues = issues.filter((i) => i.status === "open")
 	const closedIssues = issues.filter((i) => i.status !== "open")
@@ -126,20 +131,21 @@ export function RecommendedMappingsSection() {
 		return null
 	}
 
-	async function handleApply(issue: RecommendationIssue) {
-		if (issue.kind !== "rename" || !issue.canonicalKey) return
+	async function handleApply(issue: V2Recommendation) {
+		if (issue.kind !== "rename" || !issue.canonical_key) return
+		const canonicalKey = issue.canonical_key
 		setApplyingId(issue.id)
 		const result = await createMutation({
-			payload: new CreateIngestAttributeMappingRequest({
-				name: `Rename ${issue.sourceKey} → ${issue.canonicalKey}`,
-				sourceContext: "span",
-				sourceKey: issue.sourceKey,
-				targetKey: issue.canonicalKey,
+			payload: {
+				name: `Rename ${issue.source_key} → ${canonicalKey}`,
+				source_context: "span",
+				source_key: issue.source_key,
+				target_key: canonicalKey,
 				operation: "copy",
-			}),
+			},
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(`Mapping created — ${issue.sourceKey} → ${issue.canonicalKey}`)
+			toast.success(`Mapping created — ${issue.source_key} → ${canonicalKey}`)
 			refreshIssues()
 			refreshMappings()
 		} else {
@@ -148,7 +154,7 @@ export function RecommendedMappingsSection() {
 		setApplyingId(null)
 	}
 
-	async function handleDismiss(issue: RecommendationIssue) {
+	async function handleDismiss(issue: V2Recommendation) {
 		setBusyId(issue.id)
 		const result = await dismissMutation({ params: { id: issue.id } })
 		if (Exit.isSuccess(result)) {
@@ -159,7 +165,7 @@ export function RecommendedMappingsSection() {
 		setBusyId(null)
 	}
 
-	async function handleReopen(issue: RecommendationIssue) {
+	async function handleReopen(issue: V2Recommendation) {
 		setBusyId(issue.id)
 		const result = await reopenMutation({ params: { id: issue.id } })
 		if (Exit.isSuccess(result)) {
@@ -283,9 +289,9 @@ export function RecommendedMappingsSection() {
 									<div className="relative flex w-32 shrink-0 items-center justify-end">
 										<span
 											className="text-muted-foreground text-xs whitespace-nowrap tabular-nums transition-opacity group-hover:opacity-0"
-											title={`${issue.usageCount.toLocaleString()} spans · 24h`}
+											title={`${issue.usage_count.toLocaleString()} spans · 24h`}
 										>
-											{formatRelativeTime(issue.openedAt)}
+											{formatRelativeTime(issue.opened_at)}
 										</span>
 										<div className="absolute right-0 flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 											{issue.status === "open" ? (

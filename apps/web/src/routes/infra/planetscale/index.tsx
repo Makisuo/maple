@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
@@ -30,7 +29,7 @@ const planetscaleSearchSchema = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/infra/planetscale/"))({
+export const Route = createFileRoute("/infra/planetscale/")({
 	component: PlanetScalePage,
 	validateSearch: Schema.toStandardSchemaV1(planetscaleSearchSchema),
 })
@@ -162,7 +161,7 @@ function PlanetScaleData({
 				inventory.lastInventoryAt !== null &&
 				Date.now() - inventory.lastInventoryAt > INVENTORY_STALE_MS
 			return (
-				<div className="space-y-6 content-enter">
+				<div className="space-y-6">
 					{lastInventoryError !== null || inventoryStale ? (
 						<p className="text-xs text-severity-warn">
 							{lastInventoryError !== null

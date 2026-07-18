@@ -81,7 +81,16 @@ const ORG_SCOPED_TABLES = [
 	vcsCommits,
 ] as const
 
+/** Read model for the org identity — sourced from Clerk when available. */
+export interface OrganizationInfo {
+	readonly id: OrgId
+	readonly name: string | null
+	readonly slug: string | null
+	readonly createdAtMs: number | null
+}
+
 export interface OrganizationServiceShape {
+	readonly retrieve: (orgId: OrgId) => Effect.Effect<OrganizationInfo, OrganizationProviderError>
 	readonly delete: (
 		orgId: OrgId,
 		roles: ReadonlyArray<RoleName>,
@@ -122,21 +131,48 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 				)
 			})
 
+			/** The Clerk backend client, or `None` when not running in Clerk auth mode. */
+			const clerkClient = () =>
+				env.MAPLE_AUTH_MODE.toLowerCase() === "clerk" && Option.isSome(env.CLERK_SECRET_KEY)
+					? Option.some(
+							createClerkClient({ secretKey: Redacted.value(env.CLERK_SECRET_KEY.value) }),
+						)
+					: Option.none()
+
 			const deleteClerkOrganization = Effect.fn("OrganizationService.deleteClerkOrganization")(
 				function* (orgId: OrgId) {
-					if (env.MAPLE_AUTH_MODE.toLowerCase() !== "clerk") return
-					if (Option.isNone(env.CLERK_SECRET_KEY)) return
-
-					const clerk = createClerkClient({
-						secretKey: Redacted.value(env.CLERK_SECRET_KEY.value),
-					})
+					const clerk = clerkClient()
+					if (Option.isNone(clerk)) return
 
 					yield* Effect.tryPromise({
-						try: () => clerk.organizations.deleteOrganization(orgId),
+						try: () => clerk.value.organizations.deleteOrganization(orgId),
 						catch: toProviderError,
 					})
 				},
 			)
+
+			/**
+			 * The caller's org identity. In Clerk mode it is read from Clerk; in
+			 * self-hosted mode there is no directory, so name/slug/createdAt are null
+			 * and only the id is meaningful.
+			 */
+			const retrieve = Effect.fn("OrganizationService.retrieve")(function* (orgId: OrgId) {
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
+				const clerk = clerkClient()
+				if (Option.isNone(clerk)) {
+					return { id: orgId, name: null, slug: null, createdAtMs: null } satisfies OrganizationInfo
+				}
+				const org = yield* Effect.tryPromise({
+					try: () => clerk.value.organizations.getOrganization({ organizationId: orgId }),
+					catch: toProviderError,
+				})
+				return {
+					id: orgId,
+					name: org.name,
+					slug: org.slug,
+					createdAtMs: org.createdAt,
+				} satisfies OrganizationInfo
+			})
 
 			const deleteOrganization = Effect.fn("OrganizationService.delete")(function* (
 				orgId: OrgId,
@@ -150,12 +186,15 @@ export class OrganizationService extends Context.Service<OrganizationService, Or
 			})
 
 			return {
+				retrieve,
 				delete: deleteOrganization,
 			} satisfies OrganizationServiceShape
 		}),
 	},
 ) {
 	static readonly layer = Layer.effect(this, this.make)
+
+	static readonly retrieve = (orgId: OrgId) => this.use((service) => service.retrieve(orgId))
 
 	static readonly delete = (orgId: OrgId, roles: ReadonlyArray<RoleName>) =>
 		this.use((service) => service.delete(orgId, roles))

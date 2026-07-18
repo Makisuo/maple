@@ -1,14 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Exit } from "effect"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import { CreateIngestAttributeMappingRequest, type RecommendationIssue } from "@maple/domain/http"
+import type { V2Recommendation } from "@maple/domain/http/v2"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
@@ -40,15 +39,15 @@ import {
 } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 
-export const Route = effectRoute(createFileRoute("/recommendations/$recommendationKey"))({
+export const Route = createFileRoute("/recommendations/$recommendationKey")({
 	component: RecommendationDetailPage,
 })
 
 const INGESTION_HREF = "/settings?tab=ingestion"
 const MONO = "font-mono text-[0.92em] text-muted-foreground"
 
-type IssueKind = RecommendationIssue["kind"]
-type IssueStatus = RecommendationIssue["status"]
+type IssueKind = V2Recommendation["kind"]
+type IssueStatus = V2Recommendation["status"]
 type BusyAction = "apply" | "dismiss" | "reopen" | null
 
 const KIND_BADGE: Record<IssueKind, { label: string; variant: "success" | "warning" | "info" }> = {
@@ -80,14 +79,14 @@ const MODE = {
 } as const
 
 /** The recommendation rendered as a sentence with mono-styled attribute keys. */
-function recSentence(issue: RecommendationIssue) {
+function recSentence(issue: V2Recommendation) {
 	if (issue.kind === "double-emission") {
 		return (
 			<>
 				<span className="text-foreground font-medium">Standardize on</span>{" "}
-				<code className={MONO}>{issue.canonicalKey}</code>
+				<code className={MONO}>{issue.canonical_key}</code>
 				<span className="text-muted-foreground"> — spans also emit </span>
-				<code className={MONO}>{issue.sourceKey}</code>
+				<code className={MONO}>{issue.source_key}</code>
 			</>
 		)
 	}
@@ -95,15 +94,15 @@ function recSentence(issue: RecommendationIssue) {
 		return (
 			<>
 				<span className="text-foreground font-medium">Rename non-conforming key</span>{" "}
-				<code className={MONO}>{issue.sourceKey}</code>
+				<code className={MONO}>{issue.source_key}</code>
 			</>
 		)
 	}
 	return (
 		<>
 			<span className="text-foreground font-medium">Rename</span>{" "}
-			<code className={MONO}>{issue.sourceKey}</code> <span className="text-muted-foreground">→</span>{" "}
-			<code className={MONO}>{issue.canonicalKey}</code>
+			<code className={MONO}>{issue.source_key}</code> <span className="text-muted-foreground">→</span>{" "}
+			<code className={MONO}>{issue.canonical_key}</code>
 		</>
 	)
 }
@@ -116,40 +115,47 @@ function RecommendationDetailPage() {
 	// Applying a recommendation creates a mapping, so refresh the mappings list too.
 	const refreshMappings = useAtomRefresh(ingestAttributeMappingsListAtom)
 
-	const createMutation = useAtomSet(MapleApiAtomClient.mutation("ingestAttributeMappings", "create"), {
+	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "create"), {
 		mode: "promiseExit",
 	})
-	const dismissMutation = useAtomSet(MapleApiAtomClient.mutation("recommendationIssues", "dismiss"), {
-		mode: "promiseExit",
-	})
-	const reopenMutation = useAtomSet(MapleApiAtomClient.mutation("recommendationIssues", "reopen"), {
-		mode: "promiseExit",
-	})
+	const dismissMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "dismiss"),
+		{
+			mode: "promiseExit",
+		},
+	)
+	const reopenMutation = useAtomSet(
+		MapleApiV2AtomClient.mutation("instrumentationRecommendations", "reopen"),
+		{
+			mode: "promiseExit",
+		},
+	)
 
 	const [busy, setBusy] = useState<BusyAction>(null)
 
 	const issue = useMemo(
 		() =>
 			Result.builder(listResult)
-				.onSuccess((r) => r.issues.find((i) => i.id === recommendationKey) ?? null)
+				.onSuccess((r) => r.data.find((i) => i.id === recommendationKey) ?? null)
 				.orElse(() => null),
 		[listResult, recommendationKey],
 	)
 
-	async function handleApply(target: RecommendationIssue) {
-		if (target.kind !== "rename" || !target.canonicalKey) return
+	async function handleApply(target: V2Recommendation) {
+		if (target.kind !== "rename" || !target.canonical_key) return
+		const canonicalKey = target.canonical_key
 		setBusy("apply")
 		const result = await createMutation({
-			payload: new CreateIngestAttributeMappingRequest({
-				name: `Rename ${target.sourceKey} → ${target.canonicalKey}`,
-				sourceContext: "span",
-				sourceKey: target.sourceKey,
-				targetKey: target.canonicalKey,
+			payload: {
+				name: `Rename ${target.source_key} → ${canonicalKey}`,
+				source_context: "span",
+				source_key: target.source_key,
+				target_key: canonicalKey,
 				operation: "copy",
-			}),
+			},
 		})
 		if (Exit.isSuccess(result)) {
-			toast.success(`Mapping created — ${target.sourceKey} → ${target.canonicalKey}`)
+			toast.success(`Mapping created — ${target.source_key} → ${canonicalKey}`)
 			refreshIssues()
 			refreshMappings()
 		} else {
@@ -158,7 +164,7 @@ function RecommendationDetailPage() {
 		setBusy(null)
 	}
 
-	async function handleDismiss(target: RecommendationIssue) {
+	async function handleDismiss(target: V2Recommendation) {
 		setBusy("dismiss")
 		const result = await dismissMutation({ params: { id: target.id } })
 		if (Exit.isSuccess(result)) refreshIssues()
@@ -166,7 +172,7 @@ function RecommendationDetailPage() {
 		setBusy(null)
 	}
 
-	async function handleReopen(target: RecommendationIssue) {
+	async function handleReopen(target: V2Recommendation) {
 		setBusy("reopen")
 		const result = await reopenMutation({ params: { id: target.id } })
 		if (Exit.isSuccess(result)) refreshIssues()
@@ -203,14 +209,14 @@ function DetailView({
 	onDismiss,
 	onReopen,
 }: {
-	issue: RecommendationIssue
+	issue: V2Recommendation
 	busy: BusyAction
 	onApply: () => void
 	onDismiss: () => void
 	onReopen: () => void
 }) {
 	const status = STATUS_BADGE[issue.status]
-	const isApplyable = issue.kind === "rename" && Boolean(issue.canonicalKey)
+	const isApplyable = issue.kind === "rename" && Boolean(issue.canonical_key)
 	const isLive = issue.status === "applied" || issue.status === "resolved"
 
 	return (
@@ -229,7 +235,7 @@ function DetailView({
 					</Badge>
 				</div>
 			}
-			description={`Opened ${formatRelativeTime(issue.openedAt)} · ${issue.usageCount.toLocaleString()} spans · 24h`}
+			description={`Opened ${formatRelativeTime(issue.opened_at)} · ${issue.usage_count.toLocaleString()} spans · 24h`}
 			rightSidebar={
 				<DetailSidebar
 					issue={issue}
@@ -242,11 +248,11 @@ function DetailView({
 				/>
 			}
 		>
-			<div className="max-w-3xl space-y-6 content-enter">
+			<div className="max-w-3xl space-y-6">
 				<Summary issue={issue} />
 				<ChangeBreakdown issue={issue} />
 				<CautionCallout issue={issue} isApplyable={isApplyable} />
-				{isApplyable && issue.canonicalKey ? (
+				{isApplyable && issue.canonical_key ? (
 					<MappingBlock issue={issue} isLive={isLive} />
 				) : (
 					<SdkFixBlock issue={issue} />
@@ -257,21 +263,21 @@ function DetailView({
 }
 
 /** Plain-language explanation of the recommendation, with mono-styled keys. */
-function Summary({ issue }: { issue: RecommendationIssue }) {
+function Summary({ issue }: { issue: V2Recommendation }) {
 	let body: React.ReactNode
 	if (issue.kind === "double-emission") {
 		body = (
 			<>
-				Your spans emit both <code className={MONO}>{issue.sourceKey}</code> and{" "}
-				<code className={MONO}>{issue.canonicalKey}</code>. Standardize on{" "}
-				<code className={MONO}>{issue.canonicalKey}</code> in your SDK — an ingest mapping can't merge
-				them because the canonical key already exists on your spans.
+				Your spans emit both <code className={MONO}>{issue.source_key}</code> and{" "}
+				<code className={MONO}>{issue.canonical_key}</code>. Standardize on{" "}
+				<code className={MONO}>{issue.canonical_key}</code> in your SDK — an ingest mapping can't
+				merge them because the canonical key already exists on your spans.
 			</>
 		)
 	} else if (issue.kind === "naming") {
 		body = (
 			<>
-				<code className={MONO}>{issue.sourceKey}</code> doesn't follow OpenTelemetry's lowercase{" "}
+				<code className={MONO}>{issue.source_key}</code> doesn't follow OpenTelemetry's lowercase{" "}
 				<code className={MONO}>dotted.snake_case</code> convention. Rename it where your spans are
 				created so it conforms to the semantic conventions.
 			</>
@@ -279,9 +285,9 @@ function Summary({ issue }: { issue: RecommendationIssue }) {
 	} else {
 		body = (
 			<>
-				<code className={MONO}>{issue.sourceKey}</code> is a deprecated or non-conforming
+				<code className={MONO}>{issue.source_key}</code> is a deprecated or non-conforming
 				OpenTelemetry attribute key. Maple can rewrite it to{" "}
-				<code className={MONO}>{issue.canonicalKey}</code> at ingest time so newly ingested spans use
+				<code className={MONO}>{issue.canonical_key}</code> at ingest time so newly ingested spans use
 				the current semantic-convention name.
 			</>
 		)
@@ -290,7 +296,7 @@ function Summary({ issue }: { issue: RecommendationIssue }) {
 }
 
 /** Before → after card — the deprecated key today vs. the key Maple writes. */
-function ChangeBreakdown({ issue }: { issue: RecommendationIssue }) {
+function ChangeBreakdown({ issue }: { issue: V2Recommendation }) {
 	const labels = {
 		rename: { from: "Deprecated key on your spans today", to: "Canonical key Maple will write" },
 		"double-emission": {
@@ -316,20 +322,20 @@ function ChangeBreakdown({ issue }: { issue: RecommendationIssue }) {
 					<div className="min-w-0 flex-1">
 						<p className="text-xs text-muted-foreground">{labels.from}</p>
 						<code className="font-mono text-sm break-all text-foreground line-through decoration-muted-foreground/40">
-							{issue.sourceKey}
+							{issue.source_key}
 						</code>
 					</div>
 					<span className="shrink-0 pt-0.5 text-xs tabular-nums text-muted-foreground">
-						{issue.usageCount.toLocaleString()} spans · 24h
+						{issue.usage_count.toLocaleString()} spans · 24h
 					</span>
 				</div>
-				{issue.canonicalKey ? (
+				{issue.canonical_key ? (
 					<div className="flex items-start gap-3 border-t border-border/60 px-4 py-3">
 						<CircleCheckIcon size={16} className="mt-0.5 shrink-0 text-success" />
 						<div className="min-w-0 flex-1">
 							<p className="text-xs text-muted-foreground">{labels.to}</p>
 							<code className="font-mono text-sm break-all text-foreground">
-								{issue.canonicalKey}
+								{issue.canonical_key}
 							</code>
 						</div>
 					</div>
@@ -341,12 +347,13 @@ function ChangeBreakdown({ issue }: { issue: RecommendationIssue }) {
 }
 
 /** Orange "Please note" caution, mirroring the reference layout. */
-function CautionCallout({ issue, isApplyable }: { issue: RecommendationIssue; isApplyable: boolean }) {
+function CautionCallout({ issue, isApplyable }: { issue: V2Recommendation; isApplyable: boolean }) {
 	const text =
-		isApplyable && issue.canonicalKey ? (
+		isApplyable && issue.canonical_key ? (
 			<>
-				Applying creates an ingest mapping that copies <code className={MONO}>{issue.sourceKey}</code>{" "}
-				→ <code className={MONO}>{issue.canonicalKey}</code> on newly ingested spans. Existing spans
+				Applying creates an ingest mapping that copies{" "}
+				<code className={MONO}>{issue.source_key}</code> →{" "}
+				<code className={MONO}>{issue.canonical_key}</code> on newly ingested spans. Existing spans
 				aren't rewritten, and the mapping never overwrites a target that already exists.
 			</>
 		) : (
@@ -365,9 +372,9 @@ function CautionCallout({ issue, isApplyable }: { issue: RecommendationIssue; is
 }
 
 /** The exact ingest mapping Apply creates — the analog of the reference page's SQL block. */
-function MappingBlock({ issue, isLive }: { issue: RecommendationIssue; isLive: boolean }) {
+function MappingBlock({ issue, isLive }: { issue: V2Recommendation; isLive: boolean }) {
 	const { copied, copy } = useCopyToClipboard("Mapping")
-	const snippet = `WHEN span attribute \`${issue.sourceKey}\` is present\nCOPY → \`${issue.canonicalKey}\``
+	const snippet = `WHEN span attribute \`${issue.source_key}\` is present\nCOPY → \`${issue.canonical_key}\``
 
 	const onCopy = () => copy(snippet)
 
@@ -393,7 +400,7 @@ function MappingBlock({ issue, isLive }: { issue: RecommendationIssue; isLive: b
 					<div className="flex items-baseline gap-3">
 						<span className="w-12 shrink-0 text-muted-foreground">when</span>
 						<span className="break-all">
-							span attribute <span className="text-foreground">{issue.sourceKey}</span> is
+							span attribute <span className="text-foreground">{issue.source_key}</span> is
 							present
 						</span>
 					</div>
@@ -401,7 +408,7 @@ function MappingBlock({ issue, isLive }: { issue: RecommendationIssue; isLive: b
 						<span className="w-12 shrink-0 text-muted-foreground">copy</span>
 						<span className="break-all">
 							<span className="text-muted-foreground">→</span>{" "}
-							<span className="text-success">{issue.canonicalKey}</span>
+							<span className="text-success">{issue.canonical_key}</span>
 						</span>
 					</div>
 				</div>
@@ -410,17 +417,17 @@ function MappingBlock({ issue, isLive }: { issue: RecommendationIssue; isLive: b
 	)
 }
 
-function SdkFixBlock({ issue }: { issue: RecommendationIssue }) {
+function SdkFixBlock({ issue }: { issue: V2Recommendation }) {
 	return (
 		<section>
 			<SectionHeader label="How to fix" />
 			<div className="rounded-md border bg-muted/40 px-4 py-3">
 				<p className="text-sm leading-relaxed text-muted-foreground">
-					Rename <code className={MONO}>{issue.sourceKey}</code>
-					{issue.canonicalKey ? (
+					Rename <code className={MONO}>{issue.source_key}</code>
+					{issue.canonical_key ? (
 						<>
 							{" "}
-							to <code className={MONO}>{issue.canonicalKey}</code>
+							to <code className={MONO}>{issue.canonical_key}</code>
 						</>
 					) : (
 						<> to a lowercase, dotted semantic-convention key</>
@@ -446,7 +453,7 @@ function DetailSidebar({
 	onDismiss,
 	onReopen,
 }: {
-	issue: RecommendationIssue
+	issue: V2Recommendation
 	busy: BusyAction
 	isApplyable: boolean
 	isLive: boolean
@@ -475,16 +482,16 @@ function DetailSidebar({
 					</Badge>
 				</Row>
 				<Row label="Spans">
-					<span className="tabular-nums text-foreground">{issue.usageCount.toLocaleString()}</span>
+					<span className="tabular-nums text-foreground">{issue.usage_count.toLocaleString()}</span>
 				</Row>
-				<Row label="Opened" title={new Date(issue.openedAt).toLocaleString()}>
+				<Row label="Opened" title={new Date(issue.opened_at).toLocaleString()}>
 					<span className="tabular-nums text-muted-foreground">
-						{formatRelativeTime(issue.openedAt)}
+						{formatRelativeTime(issue.opened_at)}
 					</span>
 				</Row>
-				<Row label="Key" title={issue.sourceKey}>
+				<Row label="Key" title={issue.source_key}>
 					<code className="truncate font-mono text-xs text-muted-foreground">
-						{issue.sourceKey}
+						{issue.source_key}
 					</code>
 				</Row>
 			</SidebarGroup>

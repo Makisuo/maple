@@ -24,6 +24,7 @@ import {
 } from "@tanstack/db"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
@@ -34,9 +35,11 @@ import * as Store from "../core/store.js"
  * Why a collection store failed.
  * - `load-failed` — the collection reported `status === "error"`.
  * - `cleaned-up` — the collection was disposed while the store still watched it.
+ * - `load-timeout` — the collection sat in `loading` with no emissions for the
+ *   configured `stuckTimeoutMs` (see {@link CollectionWatchOptions}).
  */
 export class CollectionError extends Data.TaggedError("unitflow/db/CollectionError")<{
-	readonly reason: "load-failed" | "cleaned-up"
+	readonly reason: "load-failed" | "cleaned-up" | "load-timeout"
 	readonly message: string
 }> {}
 
@@ -75,19 +78,99 @@ export const changes = <T extends object>(
 		Effect.acquireRelease(
 			Effect.sync(() => {
 				if (startSync) collection.startSyncImmediate()
+				let closed = false
+				let scheduled = false
 				const offer = () => Queue.offerUnsafe(queue, snapshot(collection))
-				const subscription = collection.subscribeChanges(offer)
-				const offStatus = collection.on("status:change", offer)
+				// A sync transaction that touches N rows fires N change callbacks;
+				// snapshotting each one queues N O(collection) `toArray` copies and N
+				// downstream recomputations for what is one observable state change.
+				// Coalesce same-tick bursts into a single microtask-deferred snapshot.
+				const offerCoalesced = () => {
+					if (scheduled) return
+					scheduled = true
+					queueMicrotask(() => {
+						scheduled = false
+						if (!closed) offer()
+					})
+				}
+				const subscription = collection.subscribeChanges(offerCoalesced)
+				const offStatus = collection.on("status:change", offerCoalesced)
 				offer()
-				return { subscription, offStatus }
+				return {
+					subscription,
+					offStatus,
+					markClosed: () => {
+						closed = true
+					},
+				}
 			}),
-			({ offStatus, subscription }) =>
+			({ markClosed, offStatus, subscription }) =>
 				Effect.sync(() => {
+					markClosed()
 					offStatus()
 					subscription.unsubscribe()
 				}),
 		),
 	)
+
+/** Options for {@link fromCollection} / {@link fromCollectionByKey}. */
+export interface CollectionWatchOptions {
+	/**
+	 * Escape hatch for a wedged sync: when the store has sat in the initial
+	 * (loading) state with NO emissions for this long, it fails with a
+	 * `load-timeout` {@link CollectionError} instead of showing a skeleton
+	 * forever. The subscription stays live — a later snapshot (the stream coming
+	 * back to life, or a key switch to fresh collections) overwrites the failure
+	 * and the watchdog re-arms. Any emission resets the window, so a slow but
+	 * progressing initial sync is not "stuck". Off when omitted.
+	 */
+	readonly stuckTimeoutMs?: number
+	/** Called once per timeout firing — the host app's recovery hook (e.g. a bounded collection recreate). */
+	readonly onStuck?: () => void
+}
+
+/**
+ * The stuck watchdog behind {@link CollectionWatchOptions}: while the store is
+ * in the initial state, any `stuckTimeoutMs` window with no emissions marks it
+ * failed (`load-timeout`) and fires `onStuck`. It then parks until the next
+ * emission (recovery) before re-arming. Runs until the owning scope closes
+ * (the store's stream ending interrupts the parked waits).
+ */
+const watchStuck = <T>(
+	store: Store.Store<CollectionState<T>>,
+	timeoutMs: number,
+	onStuck: (() => void) | undefined,
+): Effect.Effect<void, never, Registry> =>
+	Effect.gen(function* () {
+		while (true) {
+			const current = yield* Store.get(store)
+			if (AsyncResult.isInitial(current)) {
+				const next = yield* Effect.exit(
+					Store.waitFor(store, () => true, { skipCurrent: true, timeout: timeoutMs }),
+				)
+				if (Exit.isSuccess(next)) continue
+				yield* Store.set(
+					store,
+					AsyncResult.fail(
+						new CollectionError({ reason: "load-timeout", message: "Collection timed out while loading" }),
+					),
+				)
+				if (onStuck) yield* Effect.sync(onStuck)
+			}
+			// Park until the underlying stream shows life again (or, for a
+			// non-initial current state, until the next change), then re-evaluate.
+			yield* Store.waitFor(store, () => true, { skipCurrent: true })
+		}
+	})
+
+/** Forks the watchdog alongside a store's snapshot pipeline when configured. */
+const runStuckWatch = <T>(
+	store: Store.Store<CollectionState<T>>,
+	options: CollectionWatchOptions | undefined,
+): Effect.Effect<void, never, Registry> =>
+	options?.stuckTimeoutMs === undefined
+		? Effect.void
+		: Registry.run(Stream.fromEffect(watchStuck(store, options.stuckTimeoutMs, options.onStuck)))
 
 /**
  * A read-only Store tracking a synced collection. The subscription is forked
@@ -97,10 +180,12 @@ export const changes = <T extends object>(
  */
 export const fromCollection = <T extends object>(
 	collection: Collection<T, any, any>,
+	options?: CollectionWatchOptions,
 ): Effect.Effect<Store.Store<CollectionState<T>>, never, Registry> =>
 	Effect.gen(function* () {
 		const store = Store.make<CollectionState<T>>(AsyncResult.initial(true))
 		yield* Registry.run(changes(collection).pipe(Stream.mapEffect((state) => Store.set(store, state))))
+		yield* runStuckWatch(store, options)
 		return store
 	})
 
@@ -115,6 +200,7 @@ export const fromCollection = <T extends object>(
 export const fromCollectionByKey = <K, T extends object>(
 	key: Store.Source<K>,
 	collectionFor: (key: K) => Collection<T, any, any>,
+	options?: CollectionWatchOptions,
 ): Effect.Effect<Store.Store<CollectionState<T>>, never, Registry> =>
 	Effect.gen(function* () {
 		const store = Store.make<CollectionState<T>>(AsyncResult.initial(true))
@@ -127,6 +213,7 @@ export const fromCollectionByKey = <K, T extends object>(
 				Stream.mapEffect((state) => Store.set(store, state)),
 			),
 		)
+		yield* runStuckWatch(store, options)
 		return store
 	})
 

@@ -24,6 +24,7 @@ import {
 	PlanetScaleService,
 	QueryEngineService,
 	ServiceMapRollupService,
+	TinybirdOrgTokenService,
 	WarehouseQueryService,
 } from "@maple/api/alerting"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
@@ -50,8 +51,10 @@ const buildLayer = (_env: Record<string, unknown>) => {
 
 	const OrgClickHouseSettingsLive = OrgClickHouseSettingsService.layer.pipe(Layer.provide(BaseLive))
 
+	const TinybirdOrgTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(EnvLive))
+
 	const WarehouseQueryServiceLive = WarehouseQueryService.layer.pipe(
-		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive)),
+		Layer.provide(Layer.mergeAll(EnvLive, OrgClickHouseSettingsLive, TinybirdOrgTokenLive)),
 	)
 
 	// EdgeCacheService's storage backend is injected via the CacheBackend port.

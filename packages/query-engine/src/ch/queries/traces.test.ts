@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 import { compileCH } from "@maple-dev/clickhouse-builder"
-import { slowTracesQuery, spanSearchQuery, tracesListQuery, tracesRootListQuery } from "./traces"
+import {
+	slowTracesQuery,
+	spanSearchQuery,
+	traceSummariesQuery,
+	tracesListQuery,
+	tracesRootListQuery,
+} from "./traces"
 
 const baseParams = {
 	orgId: "org_1",
@@ -8,6 +14,31 @@ const baseParams = {
 	endTime: "2024-01-02 00:00:00",
 	bucketSeconds: 3600,
 }
+
+describe("traceSummariesQuery", () => {
+	it("uses the trace-list ordering key with org/time filters and deterministic pagination", () => {
+		const { sql } = compileCH(
+			traceSummariesQuery({
+				serviceName: "api",
+				hasError: true,
+				limit: 21,
+				cursor: { timestamp: "2024-01-01 12:00:00", traceId: "trace123" },
+			}),
+			baseParams,
+		)
+		expect(sql).toContain("FROM trace_list_mv")
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
+		expect(sql).toContain("Timestamp <= '2024-01-02 00:00:00'")
+		expect(sql).toContain("ServiceName = 'api'")
+		expect(sql).toContain("HasError = 1")
+		expect(sql).toContain("GROUP BY traceId")
+		expect(sql).toContain("ORDER BY startTime DESC, traceId DESC")
+		expect(sql).toContain("LIMIT 21")
+		expect(sql).toContain("Timestamp < '2024-01-01 12:00:00'")
+		expect(sql).toContain("TraceId < 'trace123'")
+	})
+})
 
 // ---------------------------------------------------------------------------
 // tracesListQuery

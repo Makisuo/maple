@@ -39,7 +39,14 @@ export type WarehouseQuerySettings = {
  */
 export const LOGS_BODY_SEARCH_SETTINGS: WarehouseQuerySettings = { maxBlockSize: 512 }
 
-export type QueryProfileName = "discovery" | "list" | "aggregation" | "explain" | "unbounded"
+export type QueryProfileName =
+	| "discovery"
+	| "list"
+	| "aggregation"
+	| "rawInteractive"
+	| "rawAlert"
+	| "explain"
+	| "unbounded"
 
 /**
  * The shared profile/settings selector carried by every warehouse query path
@@ -63,6 +70,8 @@ export const QueryProfile: Record<QueryProfileName, WarehouseQuerySettings> = {
 	discovery: { maxExecutionTime: 5, maxMemoryUsage: 512_000_000 },
 	list: { maxExecutionTime: 15, maxMemoryUsage: 1_500_000_000 },
 	aggregation: { maxExecutionTime: 30, maxMemoryUsage: 4_000_000_000 },
+	rawInteractive: { maxExecutionTime: 10, maxMemoryUsage: 512_000_000, maxThreads: 2 },
+	rawAlert: { maxExecutionTime: 5, maxMemoryUsage: 256_000_000, maxThreads: 2 },
 	explain: { maxExecutionTime: 2, maxMemoryUsage: 128_000_000 },
 	unbounded: {},
 }

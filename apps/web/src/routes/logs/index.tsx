@@ -1,5 +1,4 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { OptionalStringArrayParam } from "@/lib/search-params"
@@ -28,12 +27,12 @@ const logsSearchSchema = Schema.Struct({
 
 export type LogsSearchParams = Schema.Schema.Type<typeof logsSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/logs/"))({
+export const Route = createFileRoute("/logs/")({
 	component: LogsPage,
 	validateSearch: Schema.toStandardSchemaV1(logsSearchSchema),
 })
 
-export function LogsPage() {
+function LogsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 

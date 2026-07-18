@@ -87,7 +87,7 @@ export const PostgresTransactionId = Schema.String.check(Schema.isTrimmed(), Sch
 		identifier: "@maple/PostgresTransactionId",
 		title: "Postgres Transaction ID",
 		description:
-			"Internal Postgres transaction identifier encoded as an unsigned decimal string. Maple uses it to reconcile ElectricSQL state; API consumers should treat it as opaque.",
+			"Optional ElectricSQL reconciliation metadata encoded as an unsigned decimal string. Public API consumers that do not use ElectricSQL can ignore it.",
 	}),
 )
 export type PostgresTransactionId = Schema.Schema.Type<typeof PostgresTransactionId>

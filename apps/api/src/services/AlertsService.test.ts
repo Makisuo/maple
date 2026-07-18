@@ -15,7 +15,13 @@ import {
 } from "@maple/domain/http"
 import type { WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
-import { AlertRuntime, type AlertRuntimeShape, AlertsService, type AlertsServiceShape } from "./AlertsService"
+import {
+	AlertRuntime,
+	type AlertRuntimeShape,
+	AlertsService,
+	type AlertsServiceShape,
+	interleaveAlertRulesByOrg,
+} from "./AlertsService"
 import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { Env } from "../lib/Env"
@@ -28,6 +34,23 @@ import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } 
 const trackedDbs: TestDb[] = []
 
 afterEach(() => cleanupTestDbs(trackedDbs))
+
+describe("interleaveAlertRulesByOrg", () => {
+	it("round-robins organizations while preserving per-org order", () => {
+		const rows = [
+			{ orgId: "a", id: "a1" },
+			{ orgId: "a", id: "a2" },
+			{ orgId: "a", id: "a3" },
+			{ orgId: "b", id: "b1" },
+			{ orgId: "b", id: "b2" },
+			{ orgId: "c", id: "c1" },
+		]
+		assert.deepStrictEqual(
+			interleaveAlertRulesByOrg(rows).map((row) => row.id),
+			["a1", "b1", "c1", "a2", "b2", "a3"],
+		)
+	})
+})
 
 const getError = <A, E>(exit: Exit.Exit<A, E>): unknown => {
 	if (!Exit.isFailure(exit)) return undefined
@@ -81,6 +104,7 @@ function makeWarehouseStub(state: {
 	return {
 		query: (_tenant, payload) => Effect.die(new Error(`Unexpected pipe ${payload.pipeName}`)),
 		sqlQuery: sqlQueryStub,
+		rawSqlQuery: sqlQueryStub,
 		compiledQuery: (_tenant, compiled) =>
 			sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
 		compiledQueryFirst: (_tenant, compiled) =>
@@ -309,6 +333,54 @@ const insertDeliveryEventRow = async (
 }
 
 describe("AlertsService", () => {
+	it.effect("caps active alert rules per organization", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_active_rule_cap")
+			const userId = asUserId("user_active_rule_cap")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			const createRule = (index: number) =>
+				alerts.createRule(
+					orgId,
+					userId,
+					adminRoles,
+					new AlertRuleUpsertRequest({
+						name: `Capped rule ${index}`,
+						severity: "warning",
+						enabled: true,
+						signalType: "error_rate",
+						comparator: "gt",
+						threshold: 5,
+						windowMinutes: 5,
+						destinationIds: [destination.id],
+					}),
+				)
+			yield* Effect.forEach(
+				Array.from({ length: 99 }, (_, index) => index),
+				createRule,
+				{ concurrency: 1, discard: true },
+			)
+
+			const exits = yield* Effect.all(
+				[createRule(99).pipe(Effect.exit), createRule(100).pipe(Effect.exit)],
+				{
+					concurrency: "unbounded",
+				},
+			)
+			assert.strictEqual(exits.filter(Exit.isSuccess).length, 1)
+			assert.strictEqual(exits.filter(Exit.isFailure).length, 1)
+			const error = getError(exits.find(Exit.isFailure)!)
+			assert.instanceOf(error, AlertValidationError)
+			assert.include((error as AlertValidationError).message, "at most 100 active alert rules")
+			const rules = yield* alerts.listRules(orgId)
+			assert.lengthOf(
+				rules.rules.filter((rule) => rule.enabled),
+				100,
+			)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}), { fetch: okFetch })))
+	})
+
 	it.effect("opens an incident after consecutive breaches and delivers the webhook notification", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = {
@@ -350,11 +422,16 @@ describe("AlertsService", () => {
 			yield* TestClock.adjust(Duration.minutes(1))
 			yield* alerts.runSchedulerTick()
 			const incidentsAfterSecondTick = yield* alerts.listIncidents(orgId)
+			const retrievedIncident = yield* alerts.getIncident(
+				orgId,
+				incidentsAfterSecondTick.incidents[0]!.id,
+			)
 			const events = yield* alerts.listDeliveryEvents(orgId)
 
 			assert.lengthOf(incidentsAfterFirstTick.incidents, 0)
 			assert.lengthOf(incidentsAfterSecondTick.incidents, 1)
 			assert.strictEqual(incidentsAfterSecondTick.incidents[0]?.status, "open")
+			assert.strictEqual(retrievedIncident.id, incidentsAfterSecondTick.incidents[0]?.id)
 			assert.lengthOf(events.events, 1)
 			assert.strictEqual(events.events[0]?.status, "success")
 			assert.strictEqual(events.events[0]?.eventType, "trigger")
@@ -2420,6 +2497,7 @@ describe("AlertsService evaluation error persistence", () => {
 		return {
 			query: () => Effect.die(new Error("Unexpected pipe query")),
 			sqlQuery: sqlQueryStub,
+			rawSqlQuery: sqlQueryStub,
 			compiledQuery: (_tenant, compiled) =>
 				sqlQueryStub().pipe(Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie))),
 			compiledQueryFirst: (_tenant, compiled) =>
@@ -2647,7 +2725,7 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
-	it.effect("replays raw-SQL rules per evaluation window", () => {
+	it.effect("rejects raw-SQL previews before warehouse execution", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = { rawQueryRows: [{ value: 42, samples: 20 }] }
 
@@ -2661,7 +2739,8 @@ describe("AlertsService.previewRule", () => {
 					severity: "warning",
 					enabled: true,
 					signalType: "raw_query",
-					rawQuerySql: "SELECT count() AS value FROM traces WHERE $__orgFilter",
+					rawQuerySql:
+						"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 					rawQueryReducer: "max",
 					comparator: "gt",
 					threshold: 10,
@@ -2676,13 +2755,11 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:30:00.000Z",
 			})
 
-			const response = yield* alerts.previewRule(orgId, request)
-
-			assert.lengthOf(response.series, 1)
-			const points = response.series[0]!.points
-			assert.lengthOf(points, 6)
-			assert.isTrue(points.every((point) => point.value === 42 && point.status === "breached"))
-			assert.lengthOf(response.wouldFire, 1)
+			const exit = yield* alerts.previewRule(orgId, request).pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(exit))
+			const failure = getError(exit)
+			assert.instanceOf(failure, AlertValidationError)
+			assert.include((failure as AlertValidationError).message, "cannot be previewed")
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 })

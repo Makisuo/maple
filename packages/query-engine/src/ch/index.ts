@@ -28,6 +28,7 @@ export {
 	tracesBreakdownQuery,
 	tracesListQuery,
 	tracesRootListQuery,
+	traceSummariesQuery,
 	slowTracesQuery,
 	spanSearchQuery,
 	type TracesTimeseriesOpts,
@@ -38,6 +39,8 @@ export {
 	type TracesBreakdownOutput,
 	type TracesListOutput,
 	type TracesRootListOutput,
+	type TraceSummariesOpts,
+	type TraceSummaryOutput,
 	type SlowTracesOpts,
 	type SlowTracesOutput,
 	type SpanSearchOpts,
@@ -141,6 +144,7 @@ export {
 // Queries — Services
 export {
 	serviceOverviewQuery,
+	serviceCatalogQuery,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
@@ -150,6 +154,8 @@ export {
 	servicesFacetsQuery,
 	type ServiceOverviewOpts,
 	type ServiceOverviewOutput,
+	type ServiceCatalogOpts,
+	type ServiceCatalogOutput,
 	type ServiceHealthBaselineOpts,
 	type ServiceHealthBaselineOutput,
 	type ServiceReleasesTimelineOpts,
@@ -169,6 +175,7 @@ export {
 	errorsByTypeQuery,
 	errorsTimeseriesQuery,
 	spanHierarchyQuery,
+	SPAN_HIERARCHY_MAX_SPANS,
 	spanDetailQuery,
 	traceTimeProbeQuery,
 	tracesDurationStatsQuery,
@@ -283,6 +290,18 @@ export {
 // timeseries queries (tracesTimeseriesQuery / logsTimeseriesQuery /
 // metricsTimeseriesQuery) so dashboards and alerts share the same grouping
 // and filter semantics. See `makeQueryEngineEvaluate` in @maple/query-engine/runtime.
+
+// Queries — Service Operations (per-SpanName breakdown for the service detail page)
+export {
+	serviceOperationsSummaryQuery,
+	serviceOperationsSummaryRowSchema,
+	serviceOperationsTimeseriesQuery,
+	serviceOperationsTimeseriesRowSchema,
+	type ServiceOperationsSummaryOpts,
+	type ServiceOperationsSummaryOutput,
+	type ServiceOperationsTimeseriesOpts,
+	type ServiceOperationsTimeseriesOutput,
+} from "./queries/service-operations"
 
 // Queries — Alert Checks (historical rule evaluations)
 export {

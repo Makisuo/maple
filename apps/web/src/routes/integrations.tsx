@@ -1,5 +1,4 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -27,7 +26,7 @@ const IntegrationsSearch = Schema.Struct({
 	),
 })
 
-export const Route = effectRoute(createFileRoute("/integrations"))({
+export const Route = createFileRoute("/integrations")({
 	component: IntegrationsPage,
 	validateSearch: Schema.toStandardSchemaV1(IntegrationsSearch),
 })

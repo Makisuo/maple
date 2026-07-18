@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 
 import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
@@ -38,7 +37,7 @@ import { AnomalyIncidentId, type AnomalyIncidentDocument, type ErrorIssueId } fr
 const decodeIncidentId = Schema.decodeSync(AnomalyIncidentId)
 const LIVE_REFRESH_INTERVAL_MS = 15_000
 
-export const Route = effectRoute(createFileRoute("/anomalies/$incidentId"))({
+export const Route = createFileRoute("/anomalies/$incidentId")({
 	component: AnomalyDetailPage,
 })
 

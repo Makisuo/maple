@@ -6,6 +6,7 @@ import {
 	QueryEngineExecutionError,
 	QueryEngineValidationError,
 	RawSqlExecuteResponse,
+	type RawSqlValidationError,
 	SpanHierarchyResponse,
 	SpanDetailResponse,
 	ErrorsByTypeResponse,
@@ -37,6 +38,7 @@ import {
 	ServicePlatformsResponse,
 	ServiceWorkloadsResponse,
 	ServiceUsageResponse,
+	ServiceOperationsResponse,
 	ListLogsResponse,
 	GetLogResponse,
 	ListMetricsResponse,
@@ -67,7 +69,7 @@ import {
 } from "@maple/domain/http"
 import { Clock, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
-import { RawSqlChartService } from "@maple/query-engine/runtime"
+import { makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 import {
@@ -77,6 +79,7 @@ import {
 	parseWarehouseDateTime,
 } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
+import type { ExecutionTenant, WarehouseSqlError } from "@maple/query-engine/execution"
 import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-engine/query-builder"
 
 // `warehouse.sqlQuery` fails with the warehouse error union (distinct tagged
@@ -121,7 +124,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
-		const rawSqlChart = yield* RawSqlChartService
+		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
+			warehouse,
+		)
 
 		return handlers
 			.handle("execute", ({ payload }) =>
@@ -155,19 +160,19 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 										warehouse
 											.compiledQueryFirst(
 												tenant,
-												CH.compile(
-													CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime }),
-													narrowByTime
-														? {
-																orgId: tenant.orgId,
-																startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
-															}
-														: { orgId: tenant.orgId },
-												),
-												{
-													profile: "discovery",
-													context: narrowByTime ? "spanHierarchyProbeRecent" : "spanHierarchyProbe",
-												},
+										CH.compile(
+									CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime }),
+											narrowByTime
+												? {
+														orgId: tenant.orgId,
+											startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
+													}
+												: { orgId: tenant.orgId },
+										),
+										{
+											profile: "discovery",
+									context: narrowByTime ? "spanHierarchyProbeRecent" : "spanHierarchyProbe",
+										},
 											)
 											.pipe(Effect.map(Option.getOrNull)),
 										"spanHierarchy probe failed",
@@ -1492,6 +1497,94 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new ServiceUsageResponse({ data: rows })
 				}),
 			)
+			.handle("serviceOperations", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const toNumber = (value: unknown) => Number(value ?? 0)
+					const data = yield* queryEngine.cachedDirect(
+						tenant,
+						"serviceOperations",
+						payload,
+						Effect.gen(function* () {
+							const params = {
+								orgId: tenant.orgId,
+								startTime: payload.startTime,
+								endTime: payload.endTime,
+							}
+							const summaryCompiled = CH.compile(
+								CH.serviceOperationsSummaryQuery({
+									serviceName: payload.serviceName,
+									environments: payload.environments,
+									limit: payload.limit,
+								}),
+								params,
+								{ rowSchema: CH.serviceOperationsSummaryRowSchema },
+							)
+							const summaryRows = yield* mapExecError(
+								warehouse.compiledQuery(tenant, summaryCompiled, {
+									profile: "aggregation",
+									context: "serviceOperations",
+								}),
+								"serviceOperations query failed",
+							)
+							if (summaryRows.length === 0) {
+								return []
+							}
+
+							const spanNames = summaryRows.map((row) => String(row.spanName))
+							// Fallback bucket sizing mirrors the client's chart-grid density
+							// (~50 buckets), floored at 1 minute.
+							const windowSeconds = Math.max(
+								0,
+								(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
+									Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
+									1000,
+							)
+							const bucketSeconds =
+								payload.bucketSeconds ?? Math.max(60, Math.floor(windowSeconds / 50))
+							const timeseriesCompiled = CH.compile(
+								CH.serviceOperationsTimeseriesQuery({
+									serviceName: payload.serviceName,
+									environments: payload.environments,
+									spanNames,
+								}),
+								{ ...params, bucketSeconds },
+								{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+							)
+							const timeseriesRows = yield* mapExecError(
+								warehouse.compiledQuery(tenant, timeseriesCompiled, {
+									profile: "aggregation",
+									context: "serviceOperationsTimeseries",
+								}),
+								"serviceOperationsTimeseries query failed",
+							)
+
+							const sparklines = new Map<string, Array<{ bucket: string; count: number }>>()
+							for (const row of timeseriesRows) {
+								const key = String(row.spanName)
+								const points = sparklines.get(key) ?? []
+								points.push({ bucket: String(row.bucket), count: toNumber(row.count) })
+								sparklines.set(key, points)
+							}
+
+							return summaryRows.map((row) => ({
+								spanName: String(row.spanName),
+								spanCount: toNumber(row.spanCount),
+								estimatedSpanCount: toNumber(row.estimatedSpanCount),
+								errorCount: toNumber(row.errorCount),
+								estimatedErrorCount: toNumber(row.estimatedErrorCount),
+								errorRate: toNumber(row.errorRate),
+								avgDurationMs: toNumber(row.avgDurationMs),
+								p50DurationMs: toNumber(row.p50DurationMs),
+								p95DurationMs: toNumber(row.p95DurationMs),
+								sparkline: sparklines.get(String(row.spanName)) ?? [],
+							}))
+						}),
+						30,
+					)
+					return new ServiceOperationsResponse({ data })
+				}),
+			)
 			.handle("listLogs", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -2549,33 +2642,25 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const autoBucketSeconds = computeAutoBucketSeconds(payload.startTime, payload.endTime)
 					const granularitySeconds = payload.granularitySeconds ?? autoBucketSeconds
 
-					const expanded = yield* rawSqlChart.expandMacros({
-						sql: payload.sql,
-						orgId: tenant.orgId,
-						startTime: payload.startTime,
-						endTime: payload.endTime,
-						granularitySeconds,
-					})
-
-					const profile: "aggregation" | "list" =
-						payload.displayType === "table" ? "list" : "aggregation"
-					const rows = yield* mapExecError(
-						warehouse.sqlQuery(tenant, expanded.sql, {
-							profile,
+					const result = yield* mapExecError(
+						executeRawSql(tenant, {
+							sql: payload.sql,
+							orgId: tenant.orgId,
+							startTime: payload.startTime,
+							endTime: payload.endTime,
+							granularitySeconds,
+							workload: "interactive",
 							context: "rawSql",
 						}),
 						"rawSql query failed",
 					)
 
-					const records = rows
-					const columns = records.length > 0 ? Object.keys(records[0]) : []
-
 					return new RawSqlExecuteResponse({
-						data: records,
+						data: result.rows,
 						meta: {
-							rowCount: records.length,
-							columns,
-							granularitySeconds: expanded.granularitySeconds,
+							rowCount: result.rowCount,
+							columns: result.columns,
+							granularitySeconds: result.granularitySeconds,
 						},
 					})
 				}),

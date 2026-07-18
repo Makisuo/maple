@@ -7,6 +7,7 @@ import type { MapleApiRpcShape } from "@maple/domain/internal-rpc"
 import type { MapleDomains, MapleStage } from "@maple/infra/cloudflare"
 import {
 	CLOUDFLARE_WORKER_PLACEMENT,
+	formatMapleStage,
 	resolveDeploymentEnvironment,
 	resolveHyperdriveName,
 	resolveHyperdriveRefId,
@@ -137,12 +138,20 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				VCS_SYNC_QUEUE: vcsSyncQueue,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
+				API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
+					namespaceId: 2026071801,
+					simple: { limit: 600, period: 60 },
+				}),
+				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
 				EMAIL: Cloudflare.Email.SendEmail("email", {
 					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
 				}),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
+				...optionalSecret("TINYBIRD_SIGNING_KEY"),
+				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
 				...optionalPlain("CLICKHOUSE_URL"),
+				CLICKHOUSE_PROVIDER: process.env.CLICKHOUSE_PROVIDER?.trim() || "tinybird",
 				...optionalPlain("CLICKHOUSE_USER"),
 				...optionalPlain("CLICKHOUSE_DATABASE"),
 				...optionalSecret("CLICKHOUSE_PASSWORD"),

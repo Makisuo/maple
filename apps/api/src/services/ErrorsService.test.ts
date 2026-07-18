@@ -153,6 +153,7 @@ const makeWarehouseStub = (
 ): WarehouseQueryServiceShape => ({
 	query: () => Effect.die(new Error("unexpected warehouse query")),
 	sqlQuery: () => Effect.succeed([]),
+	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 		Effect.sync(() => {
 			if (options?.context === "errorIssuesScan") {
@@ -244,6 +245,7 @@ const makeGatingLayer = (opts: {
 	const warehouseStub: WarehouseQueryServiceShape = {
 		query: () => Effect.die(new Error("unexpected warehouse query")),
 		sqlQuery: () => Effect.succeed([]),
+		rawSqlQuery: () => Effect.succeed([]),
 		compiledQuery: <T>(tenant: unknown, compiled: CompiledQuery<T>, options?: SqlQueryOptions) => {
 			if (options?.context) opts.profiles?.set(options.context, options.profile)
 			if (options?.context === "errorActiveOrgsDiscovery") {

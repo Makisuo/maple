@@ -80,6 +80,7 @@ describe("ApiKeysService.roll", () => {
 			assert.isTrue(Option.isSome(resolvedNew))
 			if (Option.isSome(resolvedNew)) {
 				assert.strictEqual(resolvedNew.value.keyId, rolled.id)
+				assert.strictEqual(resolvedNew.value.kind, "mcp")
 			}
 			assert.deepStrictEqual(resolvedOld, Option.none())
 		}).pipe(Effect.provide(makeLayer(testDb)))

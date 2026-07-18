@@ -97,11 +97,11 @@ export function MetricMetadataPanel({ summary, startTime, endTime }: MetricMetad
 					))
 					.onSuccess((response) =>
 						response.data.length === 0 ? (
-							<p className="content-enter text-xs text-muted-foreground">
+							<p className="text-xs text-muted-foreground">
 								This metric has no datapoint attributes.
 							</p>
 						) : (
-							<ul className="content-enter space-y-1">
+							<ul className="space-y-1">
 								{response.data.map((row) => (
 									<li
 										key={row.attributeKey}

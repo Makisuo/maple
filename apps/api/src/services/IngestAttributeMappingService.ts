@@ -15,7 +15,7 @@ import {
 	type UpdateIngestAttributeMappingRequest,
 } from "@maple/domain/http"
 import { orgIngestAttributeMappings } from "@maple/db"
-import { and, eq } from "drizzle-orm"
+import { and, desc, eq } from "drizzle-orm"
 import { Array, Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { Database, DatabaseError } from "../lib/DatabaseLive"
 
@@ -160,7 +160,11 @@ export class IngestAttributeMappingService extends Context.Service<
 					db
 						.select()
 						.from(orgIngestAttributeMappings)
-						.where(eq(orgIngestAttributeMappings.orgId, orgId)),
+						.where(eq(orgIngestAttributeMappings.orgId, orgId))
+						.orderBy(
+							desc(orgIngestAttributeMappings.createdAt),
+							desc(orgIngestAttributeMappings.id),
+						),
 				),
 			)
 

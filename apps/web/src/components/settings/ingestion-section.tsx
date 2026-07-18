@@ -26,7 +26,7 @@ import { Separator } from "@maple/ui/components/ui/separator"
 import { AlertWarningIcon, ArrowPathIcon, CheckIcon, CopyIcon, EyeIcon, ShieldIcon } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { maskKey } from "@/components/ingest/copyable-field"
 import { GuidedSetup } from "@/components/ingest/guided-setup"
 import { IngestStatusPanel } from "@/components/ingest/connection-status"
@@ -123,16 +123,16 @@ export function IngestionSection() {
 	const [regenerateKeyType, setRegenerateKeyType] = useState<"public" | "private" | null>(null)
 	const [submittingKeyType, setSubmittingKeyType] = useState<"public" | "private" | null>(null)
 
-	const keysQueryAtom = MapleApiAtomClient.query("ingestKeys", "get", {})
+	const keysQueryAtom = MapleApiV2AtomClient.query("ingestKeys", "retrieve", {})
 	const keysResult = useAtomValue(keysQueryAtom)
 	const refreshKeys = useAtomRefresh(keysQueryAtom)
 
 	const connection = useIngestConnection()
 
-	const rerollPublicMutation = useAtomSet(MapleApiAtomClient.mutation("ingestKeys", "rerollPublic"), {
+	const rerollPublicMutation = useAtomSet(MapleApiV2AtomClient.mutation("ingestKeys", "rollPublic"), {
 		mode: "promiseExit",
 	})
-	const rerollPrivateMutation = useAtomSet(MapleApiAtomClient.mutation("ingestKeys", "rerollPrivate"), {
+	const rerollPrivateMutation = useAtomSet(MapleApiV2AtomClient.mutation("ingestKeys", "rollPrivate"), {
 		mode: "promiseExit",
 	})
 
@@ -144,7 +144,7 @@ export function IngestionSection() {
 	function handleCopy(keyType: "public" | "private") {
 		if (!Result.isSuccess(keysResult)) return
 
-		const key = keyType === "public" ? keysResult.value.publicKey : keysResult.value.privateKey
+		const key = keyType === "public" ? keysResult.value.public_key : keysResult.value.private_key
 		;(keyType === "public" ? publicKeyCopy : privateKeyCopy).copy(key)
 	}
 
@@ -177,10 +177,10 @@ export function IngestionSection() {
 	}
 
 	const publicKey = Result.builder(keysResult)
-		.onSuccess((v) => v.publicKey)
+		.onSuccess((v) => v.public_key)
 		.orElse(() => "Loading...")
 	const privateKey = Result.builder(keysResult)
-		.onSuccess((v) => v.privateKey)
+		.onSuccess((v) => v.private_key)
 		.orElse(() => "Loading...")
 
 	return (

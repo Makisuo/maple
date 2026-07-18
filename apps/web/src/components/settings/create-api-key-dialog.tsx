@@ -1,5 +1,5 @@
 import { useAtomSet } from "@/lib/effect-atom"
-import { useState } from "react"
+import { useId, useState } from "react"
 import { Exit } from "effect"
 import type { ApiKeyKind } from "@maple/domain/http"
 import type { V2ApiKeyWithSecret, V2Scope } from "@maple/domain/http/v2"
@@ -44,15 +44,28 @@ type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]["value"]
 
 /**
  * v2 scope families the dashboard can mint restricted keys for. Only families
- * with live /v2 route groups belong here — append as groups ship (dashboards,
- * alert_rules, error_issues, traces per docs/api-v2.md).
+ * with live /v2 route groups belong here — append as groups ship (error_issues,
+ * traces per docs/api-v2.md). A family is the first path segment under /v2, so
+ * the /v2/alerts/* namespace (rules, destinations, incidents) is one family.
  */
 const SCOPE_FAMILIES = [
 	{ id: "api_keys", label: "API keys" },
 	{ id: "dashboards", label: "Dashboards" },
-	{ id: "alert_rules", label: "Alert rules" },
-	{ id: "alert_destinations", label: "Alert destinations" },
-	{ id: "alert_incidents", label: "Alert incidents" },
+	{ id: "alerts", label: "Alerts" },
+	{ id: "ingest_keys", label: "Ingest keys" },
+	{ id: "attribute_mappings", label: "Attribute mappings" },
+	{ id: "scrape_targets", label: "Scrape targets" },
+	{ id: "instrumentation", label: "Recommendations" },
+	{ id: "investigations", label: "Investigations" },
+	{ id: "anomalies", label: "Anomalies" },
+	{ id: "session_replays", label: "Session replays" },
+	{ id: "traces", label: "Traces" },
+	{ id: "logs", label: "Logs" },
+	{ id: "metrics", label: "Metrics" },
+	{ id: "services", label: "Services" },
+	{ id: "service_map", label: "Service map" },
+	{ id: "query", label: "Query" },
+	{ id: "organization", label: "Organization" },
 ] as const
 
 type ScopeLevel = "none" | "read" | "write"
@@ -68,6 +81,8 @@ const scopesFromLevels = (levels: Record<string, ScopeLevel>): Array<V2Scope> =>
 	})
 
 export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: CreateApiKeyDialogProps) {
+	const isMcp = kind === "mcp"
+	const accessLabelId = useId()
 	const [newName, setNewName] = useState("")
 	const [newDescription, setNewDescription] = useState("")
 	const [expiration, setExpiration] = useState<ExpirationValue>("never")
@@ -81,8 +96,8 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 		mode: "promiseExit",
 	})
 
-	const restrictedScopes = accessMode === "restricted" ? scopesFromLevels(scopeLevels) : undefined
-	const missingScopes = accessMode === "restricted" && restrictedScopes?.length === 0
+	const restrictedScopes = !isMcp && accessMode === "restricted" ? scopesFromLevels(scopeLevels) : undefined
+	const missingScopes = !isMcp && accessMode === "restricted" && restrictedScopes?.length === 0
 	const canCreate = newName.trim().length > 0 && !missingScopes && !isCreating
 
 	async function handleCreate() {
@@ -123,11 +138,9 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 		<Dialog open={open} onOpenChange={handleClose}>
 			<DialogContent>
 				{createdKey ? (
-					// Fresh element (vs the form fragment) so the success view remounts and
-					// its @starting-style entrance fires on the form→created swap.
-					<div className="flex min-h-0 flex-col transition-[opacity,translate] duration-200 ease-out-expo starting:opacity-0 starting:translate-y-1 motion-reduce:starting:translate-y-0">
+					<>
 						<DialogHeader>
-							<DialogTitle>API key created</DialogTitle>
+							<DialogTitle>{isMcp ? "MCP key created" : "API key created"}</DialogTitle>
 							<DialogDescription>
 								Copy your API key now. You won't be able to see it again.
 							</DialogDescription>
@@ -152,13 +165,15 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 								Done
 							</Button>
 						</DialogFooter>
-					</div>
+					</>
 				) : (
 					<>
 						<DialogHeader>
-							<DialogTitle>Create API key</DialogTitle>
+							<DialogTitle>{isMcp ? "Create MCP key" : "Create API key"}</DialogTitle>
 							<DialogDescription>
-								API keys are used to authenticate with the Maple API and MCP server.
+								{isMcp
+									? "MCP keys authenticate clients with the Maple MCP server."
+									: "API keys authenticate clients with the Maple API."}
 							</DialogDescription>
 						</DialogHeader>
 						<DialogPanel className="space-y-4">
@@ -210,65 +225,81 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 									</SelectContent>
 								</Select>
 							</div>
-							<div className="space-y-2">
-								<Label>Access</Label>
-								<ToggleGroup
-									value={[accessMode]}
-									onValueChange={(values) => {
-										const next = values[0]
-										if (next === "full" || next === "restricted") setAccessMode(next)
-									}}
-									variant="outline"
-									size="sm"
-								>
-									<ToggleGroupItem value="full">Full access</ToggleGroupItem>
-									<ToggleGroupItem value="restricted">Restricted</ToggleGroupItem>
-								</ToggleGroup>
-								{accessMode === "restricted" ? (
-									<div className="space-y-2 pt-1">
-										{SCOPE_FAMILIES.map((family) => (
-											<div
-												key={family.id}
-												className="flex items-center justify-between gap-3"
-											>
-												<span className="text-foreground text-sm">
-													{family.label}
-												</span>
-												<ToggleGroup
-													value={[scopeLevels[family.id] ?? "none"]}
-													onValueChange={(values) => {
-														const next = values[0]
-														if (
-															next === "none" ||
-															next === "read" ||
-															next === "write"
-														) {
-															setScopeLevels((current) => ({
-																...current,
-																[family.id]: next,
-															}))
-														}
-													}}
-													variant="outline"
-													size="sm"
-												>
-													<ToggleGroupItem value="none">None</ToggleGroupItem>
-													<ToggleGroupItem value="read">Read</ToggleGroupItem>
-													<ToggleGroupItem value="write">Write</ToggleGroupItem>
-												</ToggleGroup>
-											</div>
-										))}
+							{!isMcp && (
+								<div className="space-y-2">
+									<Label id={accessLabelId}>Access</Label>
+									<ToggleGroup
+										aria-labelledby={accessLabelId}
+										value={[accessMode]}
+										onValueChange={(values) => {
+											const next = values[0]
+											if (next === "full" || next === "restricted") setAccessMode(next)
+										}}
+										variant="outline"
+										size="sm"
+									>
+										<ToggleGroupItem value="full">Full access</ToggleGroupItem>
+										<ToggleGroupItem value="restricted">Restricted</ToggleGroupItem>
+									</ToggleGroup>
+									{accessMode === "restricted" ? (
+										<div className="space-y-2 pt-1">
+											{SCOPE_FAMILIES.map((family) => {
+												const familyLabelId = `${accessLabelId}-${family.id}`
+												return (
+													<div
+														key={family.id}
+														className="flex items-center justify-between gap-3"
+													>
+														<span
+															id={familyLabelId}
+															className="text-foreground text-sm"
+														>
+															{family.label}
+														</span>
+														<ToggleGroup
+															aria-labelledby={familyLabelId}
+															value={[scopeLevels[family.id] ?? "none"]}
+															onValueChange={(values) => {
+																const next = values[0]
+																if (
+																	next === "none" ||
+																	next === "read" ||
+																	next === "write"
+																) {
+																	setScopeLevels((current) => ({
+																		...current,
+																		[family.id]: next,
+																	}))
+																}
+															}}
+															variant="outline"
+															size="sm"
+														>
+															<ToggleGroupItem value="none">
+																None
+															</ToggleGroupItem>
+															<ToggleGroupItem value="read">
+																Read
+															</ToggleGroupItem>
+															<ToggleGroupItem value="write">
+																Write
+															</ToggleGroupItem>
+														</ToggleGroup>
+													</div>
+												)
+											})}
+											<p className="text-muted-foreground text-xs">
+												Write includes read. Scopes are fixed at creation — roll the
+												key to change access.
+											</p>
+										</div>
+									) : (
 										<p className="text-muted-foreground text-xs">
-											Write includes read. Scopes are fixed at creation — roll the key
-											to change access.
+											Full access to the organization's API.
 										</p>
-									</div>
-								) : (
-									<p className="text-muted-foreground text-xs">
-										Full access to the organization's API.
-									</p>
-								)}
-							</div>
+									)}
+								</div>
+							)}
 						</DialogPanel>
 						<DialogFooter>
 							<Button variant="outline" onClick={() => handleClose(false)}>

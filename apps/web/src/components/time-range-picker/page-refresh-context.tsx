@@ -12,6 +12,7 @@ interface PageRefreshContextValue {
 	refreshVersion: number
 	isReloading: boolean
 	reload: () => void
+	subscribeReload: (listener: () => void) => () => void
 }
 
 interface PageRefreshProviderProps {
@@ -41,7 +42,15 @@ export function PageRefreshProvider({
 }: PageRefreshProviderProps) {
 	const [refreshVersion, setRefreshVersion] = React.useState(0)
 	const [isReloading, setIsReloading] = React.useState(false)
+	const [reloadListeners] = React.useState(() => new Set<() => void>())
 	const reloadTimeoutRef = React.useRef<ReturnType<typeof setTimeout>>(null)
+	const subscribeReload = React.useCallback(
+		(listener: () => void) => {
+			reloadListeners.add(listener)
+			return () => reloadListeners.delete(listener)
+		},
+		[reloadListeners],
+	)
 
 	const reload = React.useCallback(() => {
 		const relativeRange = resolveRelativeRefreshRange(timePreset)
@@ -49,11 +58,12 @@ export function PageRefreshProvider({
 			onRelativeRangeRefresh?.(relativeRange)
 		}
 		setRefreshVersion((current) => current + 1)
+		for (const listener of reloadListeners) listener()
 
 		if (reloadTimeoutRef.current) clearTimeout(reloadTimeoutRef.current)
 		setIsReloading(true)
 		reloadTimeoutRef.current = setTimeout(() => setIsReloading(false), 600)
-	}, [timePreset, onRelativeRangeRefresh])
+	}, [timePreset, onRelativeRangeRefresh, reloadListeners])
 
 	React.useEffect(() => {
 		return () => {
@@ -66,8 +76,9 @@ export function PageRefreshProvider({
 			refreshVersion,
 			isReloading,
 			reload,
+			subscribeReload,
 		}),
-		[isReloading, refreshVersion, reload],
+		[isReloading, refreshVersion, reload, subscribeReload],
 	)
 
 	return <PageRefreshContext value={value}>{children}</PageRefreshContext>

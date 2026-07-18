@@ -1,5 +1,5 @@
 import { ClerkProvider, useAuth } from "@clerk/clerk-react"
-import { StrictMode, useCallback, useEffect, useRef, useState } from "react"
+import { StrictMode, memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import ReactDOM from "react-dom/client"
 import { EffectRouterProvider } from "@effect-router/core/react"
 import { apiBaseUrl } from "./lib/services/common/api-base-url"
@@ -15,6 +15,7 @@ import { AppErrorBoundary } from "./components/app-error-boundary"
 import { BootSplash } from "./components/boot-splash"
 import { appRegistry } from "./lib/registry"
 import { clearChunkReloadGuard, shouldAttemptChunkReload } from "./lib/chunk-reload"
+import { initPerfVitals } from "./lib/perf-vitals"
 import "./styles.css"
 
 // Client telemetry for the dashboard itself comes from the effect-sdk client
@@ -34,6 +35,10 @@ window.addEventListener("load", () => {
 	clearChunkReloadGuard()
 })
 
+// Web Vitals + long-frame RUM for the dashboard itself (prod only) — the
+// signal that makes frontend lag/freeze regressions visible in Maple.
+initPerfVitals()
+
 const root = document.getElementById("app")
 
 if (!root) {
@@ -49,7 +54,15 @@ if (import.meta.env.DEV && isClerkAuthEnabled && !clerkPublishableKey) {
 }
 
 const AUTH_SETTLE_TIMEOUT_MS = 2000
-const PUBLIC_PATHS = ["/sign-in", "/sign-up", "/org-required", "/service-map-bench"]
+const PUBLIC_PATHS = [
+	"/sign-in",
+	"/sign-up",
+	"/org-required",
+	"/service-map-bench",
+	"/service-detail-bench",
+	"/logs-bench",
+	"/overview-bench",
+]
 
 /**
  * Wait for Clerk's auth state to settle before rendering the router.
@@ -96,6 +109,14 @@ function useClerkAuthSettled() {
 	return { settled, isSignedIn, orgId }
 }
 
+// Memoized so ClerkInnerApp's rerenders (one per Clerk-internal emit — session
+// touches, token refreshes) stop here: rerendering EffectRouterProvider
+// rerenders the entire match tree, so without this every Clerk emit was a
+// full-app render.
+const RouterShell = memo(function RouterShell({ context }: { context: { auth: RouterAuthContext } }) {
+	return <EffectRouterProvider router={router} registry={appRegistry} context={context} />
+})
+
 function ClerkInnerApp() {
 	const { settled, isSignedIn, orgId } = useClerkAuthSettled()
 	const isRouterMountedRef = useRef(false)
@@ -111,15 +132,17 @@ function ClerkInnerApp() {
 		router.invalidate()
 	}, [settled, isSignedIn, orgId])
 
+	// Stable identity across Clerk session touches that don't change
+	// sign-in/org, so EffectRouterProvider doesn't see a new context prop on
+	// every Clerk-internal update.
+	const context = useMemo(
+		() => ({ auth: { isAuthenticated: !!isSignedIn, orgId } }),
+		[isSignedIn, orgId],
+	)
+
 	if (!settled) return <BootSplash />
 
-	return (
-		<EffectRouterProvider
-			router={router}
-			registry={appRegistry}
-			context={{ auth: { isAuthenticated: !!isSignedIn, orgId } }}
-		/>
-	)
+	return <RouterShell context={context} />
 }
 
 function SelfHostedInnerApp() {
@@ -144,11 +167,13 @@ function SelfHostedInnerApp() {
 		router.invalidate()
 	}, [auth])
 
-	if (!auth) {
+	const context = useMemo(() => (auth ? { auth } : null), [auth])
+
+	if (!context) {
 		return <BootSplash />
 	}
 
-	return <EffectRouterProvider router={router} registry={appRegistry} context={{ auth }} />
+	return <RouterShell context={context} />
 }
 
 const app = isClerkAuthEnabled ? (

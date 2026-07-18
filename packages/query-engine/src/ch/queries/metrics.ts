@@ -15,6 +15,7 @@ import { MetricsSum, MetricCatalog, SpanMetricsCallsHourly } from "../tables"
 import { compileCH } from "@maple-dev/clickhouse-builder"
 import { resolveMetricTable, metricsSelectExprs } from "./query-helpers"
 import { buildAttrFilterCondition } from "../../traces-shared"
+import { finalizeTimeseries } from "./series-cap"
 
 /**
  * WHERE conditions for `resourceAttributeFilters` — predicates on the
@@ -41,6 +42,8 @@ interface MetricsQueryOpts {
 	attributeKey?: string
 	attributeValue?: string
 	resourceAttributeFilters?: readonly AttributeFilter[]
+	groupBy?: readonly string[]
+	seriesLimit?: number
 }
 
 export interface MetricsTimeseriesOpts extends MetricsQueryOpts {}
@@ -49,11 +52,24 @@ export interface MetricsTimeseriesOutput {
 	readonly bucket: string
 	readonly serviceName: string
 	readonly attributeValue: string
+	readonly groupName: string
 	readonly avgValue: number
 	readonly minValue: number
 	readonly maxValue: number
 	readonly sumValue: number
 	readonly dataPointCount: number
+}
+
+const metricsTimeseriesColumns = {
+	bucket: T.dateTime,
+	serviceName: T.string,
+	attributeValue: T.string,
+	groupName: T.string,
+	avgValue: T.float64,
+	minValue: T.float64,
+	maxValue: T.float64,
+	sumValue: T.float64,
+	dataPointCount: T.uint64,
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +91,12 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 				: opts.groupByAttributeKey
 					? $.Attributes.get(opts.groupByAttributeKey)
 					: CH.lit(""),
+			groupName:
+				opts.groupByAttributeKey || opts.groupByResourceAttributeKey
+					? opts.groupByResourceAttributeKey
+						? $.ResourceAttributes.get(opts.groupByResourceAttributeKey)
+						: $.Attributes.get(opts.groupByAttributeKey!)
+					: $.ServiceName,
 			...metricsSelectExprs($, isHistogram),
 		}))
 		.where(($) => [
@@ -87,13 +109,13 @@ export function metricsTimeseriesQuery(opts: MetricsTimeseriesOpts) {
 			...resourceFilterConditions(opts.resourceAttributeFilters),
 		])
 
-	return (
+	const inner = (
 		opts.groupByAttributeKey || opts.groupByResourceAttributeKey
 			? q.groupBy("bucket", "serviceName", "attributeValue")
 			: q.groupBy("bucket", "serviceName")
-	)
-		.orderBy(["bucket", "asc"])
-		.format("JSON")
+	).orderBy(["bucket", "asc"])
+
+	return finalizeTimeseries(inner, metricsTimeseriesColumns, "dataPointCount", opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -114,15 +136,28 @@ export interface MetricsRateTimeseriesOpts {
 	attributeKey?: string
 	attributeValue?: string
 	resourceAttributeFilters?: readonly AttributeFilter[]
+	groupBy?: readonly string[]
+	seriesLimit?: number
 }
 
 export interface MetricsRateTimeseriesOutput {
 	readonly bucket: string
 	readonly serviceName: string
 	readonly attributeValue: string
+	readonly groupName: string
 	readonly rateValue: number
 	readonly increaseValue: number
 	readonly dataPointCount: number
+}
+
+const metricsRateTimeseriesColumns = {
+	bucket: T.dateTime,
+	serviceName: T.string,
+	attributeValue: T.string,
+	groupName: T.string,
+	rateValue: T.float64,
+	increaseValue: T.float64,
+	dataPointCount: T.uint64,
 }
 
 const SPAN_METRICS_CALLS_NAMES = new Set(["span.metrics.calls", "calls"])
@@ -249,19 +284,20 @@ function metricsTimeseriesRateFromSpanMetricsCallsHourly(
 			bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
 			serviceName: $.ServiceName,
 			attributeValue: opts.groupByAttributeKey === "span.kind" ? $.SpanKind : CH.lit(""),
+			groupName: opts.groupByAttributeKey === "span.kind" ? $.SpanKind : $.ServiceName,
 			rateValue: CH.sumIf($.delta.div(param.int("bucketSeconds")), $.delta.gte(0)),
 			increaseValue: CH.sumIf($.delta, $.delta.gte(0)),
 			dataPointCount: CH.count(),
 		}))
 		.where(($) => [$.Hour.gte(bucket), $.Hour.lte(endBucket)])
 
-	return (
+	const inner = (
 		opts.groupByAttributeKey === "span.kind"
 			? q.groupBy("bucket", "serviceName", "attributeValue")
 			: q.groupBy("bucket", "serviceName")
-	)
-		.orderBy(["bucket", "asc"])
-		.format("JSON")
+	).orderBy(["bucket", "asc"])
+
+	return finalizeTimeseries(inner, metricsRateTimeseriesColumns, "dataPointCount", opts)
 }
 
 export function metricsTimeseriesRateQuery(
@@ -358,19 +394,25 @@ export function metricsTimeseriesRateQuery(
 				: opts.groupByAttributeKey
 					? $.Attributes.get(opts.groupByAttributeKey)
 					: CH.lit(""),
+			groupName:
+				opts.groupByAttributeKey || opts.groupByResourceAttributeKey
+					? opts.groupByResourceAttributeKey
+						? $.resourceAttributeValue
+						: $.Attributes.get(opts.groupByAttributeKey!)
+					: $.ServiceName,
 			rateValue: CH.sumIf($.delta.div($.time_delta), $.delta.gte(0).and($.time_delta.gt(0))),
 			increaseValue: CH.sumIf($.delta, $.delta.gte(0)),
 			dataPointCount: CH.count(),
 		}))
 		.where(($) => [$.TimeUnix.gte(param.dateTime("startTime"))])
 
-	return (
+	const inner = (
 		opts.groupByAttributeKey || opts.groupByResourceAttributeKey
 			? q.groupBy("bucket", "serviceName", "attributeValue")
 			: q.groupBy("bucket", "serviceName")
-	)
-		.orderBy(["bucket", "asc"])
-		.format("JSON")
+	).orderBy(["bucket", "asc"])
+
+	return finalizeTimeseries(inner, metricsRateTimeseriesColumns, "dataPointCount", opts)
 }
 
 // ---------------------------------------------------------------------------
@@ -522,7 +564,7 @@ export function listMetricsQuery(opts: ListMetricsOpts) {
 			CH.when(opts.search, (v: string) => $.MetricName.ilike(`%${v}%`)),
 		])
 		.groupBy("metricName", "metricType", "serviceName")
-		.orderBy(["lastSeen", "desc"])
+		.orderBy(["lastSeen", "desc"], ["metricName", "asc"], ["metricType", "asc"], ["serviceName", "asc"])
 		.limit(opts.limit ?? 100)
 		.offset(opts.offset ?? 0)
 		.format("JSON")

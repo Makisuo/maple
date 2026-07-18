@@ -1,8 +1,13 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 import { MapleApiV2 } from "./api"
+import { V2AlertDestinationMutationResponse } from "./alert-destinations"
+import { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "./anomalies"
 import { V2ApiKey, V2ApiKeyCreateParams, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
+import { V2Investigation } from "./investigations"
+import { V2Organization } from "./organization"
+import { V2SessionReplay, V2SessionReplayListItem } from "./session-replays"
 
 /**
  * Contract freeze: the public v2 OpenAPI surface (paths + methods) is asserted
@@ -25,6 +30,17 @@ const schemas = doc.components.schemas as Record<string, any>
 const operation = (method: string, path: string): Record<string, any> =>
 	(spec.paths as Record<string, any>)[path][method]
 
+const OpenApiOperationMetadata = Schema.Struct({
+	operationId: Schema.String,
+	summary: Schema.String,
+	description: Schema.String,
+	tags: Schema.Array(Schema.String),
+	security: Schema.Array(Schema.Record(Schema.String, Schema.Array(Schema.String))),
+	responses: Schema.Record(Schema.String, Schema.Unknown),
+})
+const decodeOperationMetadata = Schema.decodeUnknownSync(OpenApiOperationMetadata)
+const decodeParameterNames = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))
+
 describe("MapleApiV2 OpenAPI", () => {
 	it("derives with v2 metadata", () => {
 		expect(spec.info.title).toBe("Maple API")
@@ -41,38 +57,84 @@ describe("MapleApiV2 OpenAPI", () => {
 			.sort()
 
 		expect(surface).toEqual([
-			"DELETE /v2/alert_destinations/{id}",
-			"DELETE /v2/alert_rules/{id}",
+			"DELETE /v2/alerts/destinations/{id}",
+			"DELETE /v2/alerts/rules/{id}",
 			"DELETE /v2/api_keys/{id}",
+			"DELETE /v2/attribute_mappings/{id}",
 			"DELETE /v2/dashboards/{id}",
-			"GET /v2/alert_destinations",
-			"GET /v2/alert_destinations/{id}",
-			"GET /v2/alert_incidents",
-			"GET /v2/alert_incidents/{id}",
-			"GET /v2/alert_rules",
-			"GET /v2/alert_rules/{id}",
-			"GET /v2/alert_rules/{id}/checks",
+			"DELETE /v2/scrape_targets/{id}",
+			"GET /v2/alerts/destinations",
+			"GET /v2/alerts/destinations/{id}",
+			"GET /v2/alerts/incidents",
+			"GET /v2/alerts/incidents/{id}",
+			"GET /v2/alerts/rules",
+			"GET /v2/alerts/rules/{id}",
+			"GET /v2/alerts/rules/{id}/checks",
+			"GET /v2/anomalies/incidents",
+			"GET /v2/anomalies/incidents/{id}",
+			"GET /v2/anomalies/incidents/{id}/timeseries",
+			"GET /v2/anomalies/settings",
 			"GET /v2/api_keys",
 			"GET /v2/api_keys/{id}",
+			"GET /v2/attribute_mappings",
+			"GET /v2/attribute_mappings/{id}",
 			"GET /v2/dashboards",
 			"GET /v2/dashboards/templates",
 			"GET /v2/dashboards/{id}",
 			"GET /v2/dashboards/{id}/versions",
-			"GET /v2/dashboards/{id}/versions/{versionId}",
-			"PATCH /v2/alert_destinations/{id}",
-			"PATCH /v2/alert_rules/{id}",
+			"GET /v2/dashboards/{id}/versions/{version_id}",
+			"GET /v2/ingest_keys",
+			"GET /v2/instrumentation/recommendations",
+			"GET /v2/investigations",
+			"GET /v2/investigations/{id}",
+			"GET /v2/logs/{id}",
+			"GET /v2/metrics",
+			"GET /v2/organization",
+			"GET /v2/scrape_targets",
+			"GET /v2/scrape_targets/{id}",
+			"GET /v2/scrape_targets/{id}/checks",
+			"GET /v2/service_map",
+			"GET /v2/services",
+			"GET /v2/services/{name}",
+			"GET /v2/session_replays/{id}",
+			"GET /v2/session_replays/{id}/events",
+			"GET /v2/session_replays/{id}/transcript",
+			"GET /v2/traces/{trace_id}",
+			"GET /v2/traces/{trace_id}/spans/{span_id}",
+			"PATCH /v2/alerts/destinations/{id}",
+			"PATCH /v2/alerts/rules/{id}",
+			"PATCH /v2/anomalies/settings",
+			"PATCH /v2/attribute_mappings/{id}",
 			"PATCH /v2/dashboards/{id}",
-			"POST /v2/alert_destinations",
-			"POST /v2/alert_destinations/{id}/test",
-			"POST /v2/alert_rules",
-			"POST /v2/alert_rules/preview",
-			"POST /v2/alert_rules/test",
+			"PATCH /v2/scrape_targets/{id}",
+			"POST /v2/alerts/destinations",
+			"POST /v2/alerts/destinations/{id}/test",
+			"POST /v2/alerts/rules",
+			"POST /v2/alerts/rules/preview",
+			"POST /v2/alerts/rules/test",
+			"POST /v2/anomalies/incidents/{id}/resolve",
 			"POST /v2/api_keys",
 			"POST /v2/api_keys/{id}/roll",
+			"POST /v2/attribute_mappings",
 			"POST /v2/dashboards",
 			"POST /v2/dashboards/import/perses",
-			"POST /v2/dashboards/templates/{templateId}/instantiate",
-			"POST /v2/dashboards/{id}/versions/{versionId}/restore",
+			"POST /v2/dashboards/templates/{template_id}/instantiate",
+			"POST /v2/dashboards/{id}/versions/{version_id}/restore",
+			"POST /v2/ingest_keys/private/roll",
+			"POST /v2/ingest_keys/public/roll",
+			"POST /v2/instrumentation/recommendations/{id}/dismiss",
+			"POST /v2/instrumentation/recommendations/{id}/reopen",
+			"POST /v2/investigations",
+			"POST /v2/investigations/{id}/status",
+			"POST /v2/logs/search",
+			"POST /v2/metrics/timeseries",
+			"POST /v2/query",
+			"POST /v2/scrape_targets",
+			"POST /v2/scrape_targets/{id}/probe",
+			"POST /v2/session_replays/for_trace",
+			"POST /v2/session_replays/search",
+			"POST /v2/traces/search",
+			"PUT /v2/anomalies/incidents/{id}/issue",
 		])
 	})
 
@@ -94,22 +156,34 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(tag?.description).toEqual(expect.stringContaining("Programmatic credentials"))
 	})
 
-	it("gives every operation a stable operationId, summary, and description", () => {
-		const expected: ReadonlyArray<readonly [string, string, string]> = [
-			["get", "/v2/api_keys", "listApiKeys"],
-			["post", "/v2/api_keys", "createApiKey"],
-			["get", "/v2/api_keys/{id}", "getApiKey"],
-			["post", "/v2/api_keys/{id}/roll", "rollApiKey"],
-			["delete", "/v2/api_keys/{id}", "revokeApiKey"],
-		]
-		for (const [method, path, operationId] of expected) {
-			const op = operation(method, path)
-			expect(op.operationId).toBe(operationId)
+	it("gives every operation complete metadata, security, and common error envelopes", () => {
+		const operations = Object.entries(spec.paths ?? {}).flatMap(([path, item]) =>
+			Object.entries(item ?? {})
+				.filter(([method]) => ["get", "post", "put", "patch", "delete"].includes(method))
+				.map(([method, op]) => ({ method, path, op: decodeOperationMetadata(op) })),
+		)
+		const operationIds = new Set<string>()
+		for (const { method, path, op } of operations) {
+			expect(op.operationId, `${method.toUpperCase()} ${path} operationId`).toEqual(expect.any(String))
+			expect(operationIds.has(op.operationId), `${op.operationId} is unique`).toBe(false)
+			operationIds.add(op.operationId)
 			expect(op.summary).toEqual(expect.any(String))
 			expect(op.summary.length).toBeGreaterThan(0)
 			expect(op.description.length).toBeGreaterThan(20)
-			expect(op.tags).toEqual(["API Keys"])
+			expect(op.tags).toHaveLength(1)
 			expect(op.security).toEqual([{ bearer: [] }])
+			for (const status of ["400", "401", "403", "429", "500"]) {
+				expect(
+					op.responses[status],
+					`${method.toUpperCase()} ${path} declares ${status}`,
+				).toBeDefined()
+			}
+			const rateLimitResponse = op.responses["429"] as Record<string, any>
+			expect(rateLimitResponse.headers?.["Retry-After"]).toMatchObject({
+				description: expect.any(String),
+				schema: { type: "integer", minimum: 1 },
+				example: 60,
+			})
 		}
 	})
 
@@ -131,6 +205,7 @@ describe("MapleApiV2 OpenAPI", () => {
 				"AuthenticationError",
 				"PermissionError",
 				"NotFoundError",
+				"RateLimitError",
 				"ServiceUnavailableError",
 			]),
 		)
@@ -162,7 +237,7 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(withSecret.properties.txid.$ref).toBe("#/components/schemas/_maple_PostgresTransactionId")
 		expect(schemas["_maple_PostgresTransactionId"].allOf).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ description: expect.stringContaining("reconcile") }),
+				expect.objectContaining({ description: expect.stringContaining("reconciliation") }),
 			]),
 		)
 
@@ -174,10 +249,67 @@ describe("MapleApiV2 OpenAPI", () => {
 		expect(() => Schema.decodeUnknownSync(V2ApiKeyCreateParams)(createParams.examples[0])).not.toThrow()
 	})
 
+	it("documents the Phase-1 resource schemas with decodable wire examples", () => {
+		type ObjectDecoder = (input: unknown) => { readonly object: string }
+		const cases = [
+			["Investigation", Schema.decodeUnknownSync(V2Investigation), "investigation"],
+			["AnomalyIncident", Schema.decodeUnknownSync(V2AnomalyIncident), "anomaly_incident"],
+			[
+				"AnomalyIncidentTimeseries",
+				Schema.decodeUnknownSync(V2AnomalyIncidentTimeseries),
+				"anomaly_incident.timeseries",
+			],
+			["AnomalySettings", Schema.decodeUnknownSync(V2AnomalySettings), "anomaly_settings"],
+			["Organization", Schema.decodeUnknownSync(V2Organization), "organization"],
+			["SessionReplayListItem", Schema.decodeUnknownSync(V2SessionReplayListItem), "session_replay"],
+			["SessionReplay", Schema.decodeUnknownSync(V2SessionReplay), "session_replay"],
+		] satisfies ReadonlyArray<readonly [string, ObjectDecoder, string]>
+		for (const [name, decode, objectType] of cases) {
+			const component = schemas[name]
+			expect(component, `component ${name} present`).toBeDefined()
+			expect(component.examples, `${name} has an example`).toHaveLength(1)
+			const decoded = decode(component.examples[0])
+			expect(decoded.object).toBe(objectType)
+		}
+	})
+
+	it("documents alert-destination mutation sync metadata", () => {
+		const mutation = schemas["AlertDestinationMutationResponse"]
+		expect(() =>
+			Schema.decodeUnknownSync(V2AlertDestinationMutationResponse)(mutation.examples[0]),
+		).not.toThrow()
+		expect(mutation.properties.txid.$ref).toBe("#/components/schemas/_maple_PostgresTransactionId")
+		expect(operation("post", "/v2/alerts/destinations").responses["200"]).toBeDefined()
+	})
+
 	it("documents the public-ID and Scope primitives with examples", () => {
 		expect(schemas["_maple_ApiKeyId"].description).toContain("public object ID")
 		expect(schemas["_maple_ApiKeyId"].examples?.[0]).toMatch(/^key_/)
 		expect(schemas["Scope"].allOf?.[0]?.examples).toEqual(expect.arrayContaining(["*"]))
+	})
+
+	it("generates syntactically valid examples for every public-ID primitive", () => {
+		const publicIds = Object.entries(schemas).filter(
+			([name, component]) =>
+				name.startsWith("_maple_") && JSON.stringify(component).includes("public object ID"),
+		)
+		expect(publicIds.length).toBeGreaterThan(5)
+		for (const [name, component] of publicIds) {
+			const examples = [component, ...(component.allOf ?? [])].flatMap((part) => part.examples ?? [])
+			expect(examples, `${name} has an example`).toHaveLength(1)
+			expect(examples[0], `${name} has a valid prefixed base58 ID`).toMatch(
+				/^[a-z]+_[1-9A-HJ-NP-Za-km-z]+$/,
+			)
+		}
+	})
+
+	it("does not advertise ignored list pagination on session-replay retrieve", () => {
+		const parameters = decodeParameterNames(operation("get", "/v2/session_replays/{id}").parameters)
+		expect(parameters.map((parameter) => parameter.name).sort()).toEqual([
+			"id",
+			"window_end",
+			"window_start",
+		])
 	})
 
 	it("documents the bearer security scheme with a description and bearer format", () => {
@@ -190,7 +322,7 @@ describe("MapleApiV2 OpenAPI", () => {
 
 	it("documents error responses with a stable code example", () => {
 		const notFound = schemas["NotFoundError"]
-		expect(notFound.properties.error.properties.code.examples).toEqual(["resource_missing"])
+		expect(notFound.properties.error.properties.code.examples).toEqual(["api_key_not_found"])
 		expect(notFound.properties.error.properties.message.description).toEqual(expect.any(String))
 	})
 })

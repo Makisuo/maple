@@ -19,12 +19,13 @@ describe("SignInPage (clerk mode)", () => {
 		}))
 
 		const module = await import("./sign-in")
+		const { component: SignInPage } = await import("./sign-in?tsr-split=component")
 
 		// SignInPage reads redirect_url via Route.useSearch(), which needs a live
 		// router — stub it since this test renders the page standalone.
 		vi.spyOn(module.Route, "useSearch").mockReturnValue({ redirect_url: undefined })
 
-		render(<module.SignInPage />)
+		render(<SignInPage />)
 
 		expect(screen.getByText("Clerk Sign In")).toBeTruthy()
 	})

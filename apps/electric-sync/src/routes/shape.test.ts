@@ -13,6 +13,7 @@ describe("isShapeName", () => {
 		assert.isTrue(isShapeName("error_issues"))
 		assert.isTrue(isShapeName("open_error_incidents"))
 		assert.isTrue(isShapeName("api_keys"))
+		assert.isFalse(isShapeName("scrape_target_checks"))
 		assert.isFalse(isShapeName("users"))
 		assert.isFalse(isShapeName("dashboards; drop table"))
 		assert.isFalse(isShapeName(null))
@@ -123,11 +124,6 @@ describe("buildUpstreamShapeUrl", () => {
 		assert.include(columns, "scopes")
 		assert.notInclude(columns, "key_hash")
 		assert.notInclude(columns, "metadata_json")
-	})
-
-	it("omits the columns param for shapes that sync every column", () => {
-		const { params } = parse(buildUpstreamShapeUrl({ ...base, shape: "scrape_target_checks" }))
-		assert.isNull(params.get("columns"))
 	})
 
 	it("never lets the client widen a column-restricted shape back to secrets", () => {

@@ -75,7 +75,7 @@ export function ErrorsFilterSidebar() {
 				(facets.errorTypes?.length ?? 0) > 0
 
 			return (
-				<FilterSidebarFrame className="content-enter" waiting={result.waiting}>
+				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
 						<SingleCheckboxFilter

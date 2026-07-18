@@ -45,6 +45,29 @@ maple services         # query the running server
 maple traces
 ```
 
+Local mode binds to `127.0.0.1` by default. To make the bundled dashboard and
+APIs reachable from another machine, set a bind host explicitly and use the
+same-origin offline UI:
+
+```bash
+MAPLE_LOCAL_BIND_HOST=0.0.0.0 \
+MAPLE_LOCAL_ADVERTISE_HOST=maple.home.arpa \
+  maple start --offline
+# Equivalent: maple start --host 0.0.0.0 --advertise-host maple.home.arpa --offline
+```
+
+Binding outside loopback exposes the complete, unauthenticated local-mode
+listener: OTLP ingest, `/local/query` raw SQL, `/health`, and the bundled UI.
+Maple restricts browser requests to the advertised same-origin UI and the exact
+configured hosted UI origin, but non-browser clients on the network still need
+no credentials. Use it only on a trusted network or behind a TLS proxy with
+browser-compatible authentication (for example, a session cookie or HTTP
+authentication). The bundled UI does not inject a Bearer API key or propagate
+an entry-page query parameter to its API requests. Open the advertised URL from
+another machine; the default UI hosted at
+`local.maple.dev` always talks to the browser machine's loopback address and is
+therefore not suitable for a remote local-mode server.
+
 By default `maple start` points you at the auto-updating dashboard hosted at
 `local.maple.dev` (it talks back to this binary on loopback — see
 [Where the UI comes from](#where-the-ui-comes-from)). `--offline` serves the copy
@@ -182,13 +205,15 @@ The dashboard SPA is a single build served two ways, and it decides which
   binary. Because that page is a _public_ origin, its queries to
   `http://127.0.0.1:<port>/local/query` are a **public → loopback** request, which
   trips the browser's **Private Network Access** gate. The server answers the
-  preflight with `Access-Control-Allow-Private-Network: true` (set on
-  `CORS_HEADERS` in [serve.ts](../apps/cli/src/server/serve.ts)), but recent Chrome
-  may still show a one-time "wants to access devices on your local network" prompt;
-  Safari/Firefox differ. The banner encodes the bound port as `?port=` so links
-  work on non-default ports.
+  preflight with `Access-Control-Allow-Private-Network: true` only when the
+  request origin exactly matches `MAPLE_LOCAL_UI_URL`; other cross-origin and
+  unadvertised same-origin browser requests are rejected. Recent Chrome may
+  still show a one-time "wants to access devices on your local network" prompt;
+  Safari/Firefox differ. The banner encodes the bound port as `?port=` and adds
+  `maple-local-api=loopback`, so custom hosted UI origins use the same routing.
 - **`--offline` (and dev) — same origin.** The binary serves the bundled SPA from
-  `127.0.0.1`, so queries are same-origin: no CORS, no Private Network Access, no
+  its selected bind address, so queries are same-origin even through a LAN
+  hostname or reverse proxy: no CORS, no Private Network Access, no
   permission prompt, and it works with no internet. In dev the Vite server proxies
   `/local/*` to the binary, which is the same same-origin path. This is the
   recommended escape hatch whenever the default path hits a browser prompt.
@@ -199,7 +224,14 @@ Because the remote UI auto-updates independently of the binary, keep the
 backward compatible — a newer UI may run against an older binary.
 
 `MAPLE_LOCAL_UI_URL` overrides the default UI origin (e.g. point a binary at
-`https://local-staging.maple.dev` for testing).
+`https://local-staging.maple.dev` for testing). The startup link marks that
+custom origin as a hosted loopback client.
+
+`MAPLE_LOCAL_BIND_HOST` sets the `maple start` listening address and defaults to
+`127.0.0.1`; the `--host` flag overrides it for one invocation.
+`MAPLE_LOCAL_ADVERTISE_HOST` (or `--advertise-host`) controls the client-facing
+URL printed for wildcard binds. If omitted, wildcard IPv4/IPv6 binds advertise
+their matching loopback address instead of the unusable `0.0.0.0` or `::`.
 
 ## Dev workflow
 
@@ -225,7 +257,10 @@ bun run apps/cli/src/bin.ts traces --service api --since 1h
 bun run apps/cli/src/bin.ts query "SELECT count() FROM traces"
 ```
 
-In local mode the CLI targets `http://127.0.0.1:4318` by default; override with `MAPLE_LOCAL_URL`.
+In local mode the CLI derives its default target from `MAPLE_LOCAL_BIND_HOST`,
+mapping wildcard binds to matching loopback. `MAPLE_LOCAL_URL` remains the
+explicit override and is required when the server was started with a one-off
+`--host` or non-default `--port` that later CLI processes cannot infer.
 
 > **libchdb in dev.** `chdb.ts` resolves `libchdb` from, in order: `MAPLE_LIBCHDB`,
 > a sibling of the executable, then `~/.maple/bin/libchdb.{so,dylib}`. Running from
@@ -251,7 +286,8 @@ maple whoami                                   # show the resolved mode + target
 maple logout                                   # forget the stored token
 ```
 
-Env overrides: `MAPLE_API_URL`, `MAPLE_API_TOKEN`, `MAPLE_LOCAL_URL`.
+Env overrides: `MAPLE_API_URL`, `MAPLE_API_TOKEN`, `MAPLE_LOCAL_URL`,
+`MAPLE_LOCAL_BIND_HOST`, and `MAPLE_LOCAL_ADVERTISE_HOST`.
 
 **How queries route.** Local mode compiles the pipe → SQL client-side and POSTs
 it to `/local/query`. Remote mode POSTs `{ pipe, params }` to the API's

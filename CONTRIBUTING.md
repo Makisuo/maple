@@ -82,6 +82,7 @@ These values align with `docker-compose.development.yml` and self-hosted auth:
 ```dotenv
 # Warehouse — route API queries to local ClickHouse instead of Tinybird Cloud
 CLICKHOUSE_URL=http://localhost:8123
+CLICKHOUSE_PROVIDER=clickhouse
 CLICKHOUSE_USER=maple
 CLICKHOUSE_PASSWORD=maple
 CLICKHOUSE_DATABASE=default
@@ -186,7 +187,9 @@ Default URL: `http://localhost:3472`
 | `MAPLE_DEFAULT_ORG_ID` | yes | Default `default`; must match ingest org override |
 | `TINYBIRD_HOST` | yes | Placeholder OK when using `CLICKHOUSE_URL` |
 | `TINYBIRD_TOKEN` | yes | Placeholder OK when using `CLICKHOUSE_URL` |
+| `TINYBIRD_SIGNING_KEY` / `TINYBIRD_WORKSPACE_ID` | with Tinybird raw SQL | Explicit JWT signing configuration; never derived from `TINYBIRD_TOKEN` |
 | `CLICKHOUSE_URL` | recommended | `http://localhost:8123` for local ClickHouse stack |
+| `CLICKHOUSE_PROVIDER` | optional | `tinybird` (default) or `clickhouse`; set `clickhouse` for env-level vanilla/self-managed ClickHouse |
 | `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | with CH | Match docker-compose (`maple` / `maple` / `default`) |
 | `INTERNAL_SERVICE_TOKEN` | recommended | Shared with scraper + chat-flue |
 | `SD_INTERNAL_TOKEN` | optional | Prometheus scraper internal API auth |

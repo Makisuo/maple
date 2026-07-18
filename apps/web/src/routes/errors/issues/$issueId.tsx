@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Exit, Schema } from "effect"
 import { useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -37,7 +36,7 @@ import {
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
 
-export const Route = effectRoute(createFileRoute("/errors/issues/$issueId"))({
+export const Route = createFileRoute("/errors/issues/$issueId")({
 	component: IssueDetailPage,
 })
 

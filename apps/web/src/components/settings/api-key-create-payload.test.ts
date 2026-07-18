@@ -12,13 +12,17 @@ describe("buildApiKeyCreatePayload", () => {
 	})
 
 	it("preserves the MCP kind and a non-empty description", () => {
-		const payload = buildApiKeyCreatePayload("  MCP key  ", "  Claude desktop  ", "mcp")
+		const payload = buildApiKeyCreatePayload("  MCP key  ", "  Claude desktop  ", "mcp", {
+			scopes: ["traces:read"],
+		})
 
 		expect(payload).toEqual({
 			name: "MCP key",
 			description: "Claude desktop",
 			kind: "mcp",
 		})
+		// MCP authentication requires an unscoped MCP-kind key. Ignore scopes at
+		// the payload boundary even if a caller accidentally supplies them.
 		expect(() => Schema.encodeUnknownSync(V2ApiKeyCreateParams)(payload)).not.toThrow()
 	})
 

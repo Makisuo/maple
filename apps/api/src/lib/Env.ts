@@ -11,7 +11,10 @@ export interface EnvShape {
 	readonly PORT: number
 	readonly TINYBIRD_HOST: string
 	readonly TINYBIRD_TOKEN: Redacted.Redacted<string>
+	readonly TINYBIRD_SIGNING_KEY: Option.Option<Redacted.Redacted<string>>
+	readonly TINYBIRD_WORKSPACE_ID: Option.Option<string>
 	readonly CLICKHOUSE_URL: Option.Option<string>
+	readonly CLICKHOUSE_PROVIDER: string
 	readonly CLICKHOUSE_USER: string
 	readonly CLICKHOUSE_PASSWORD: Option.Option<Redacted.Redacted<string>>
 	readonly CLICKHOUSE_DATABASE: string
@@ -82,7 +85,10 @@ const envConfig = Config.all({
 	PORT: portConfig,
 	TINYBIRD_HOST: Config.string("TINYBIRD_HOST"),
 	TINYBIRD_TOKEN: Config.redacted("TINYBIRD_TOKEN"),
+	TINYBIRD_SIGNING_KEY: optionalRedacted("TINYBIRD_SIGNING_KEY"),
+	TINYBIRD_WORKSPACE_ID: optionalString("TINYBIRD_WORKSPACE_ID"),
 	CLICKHOUSE_URL: optionalString("CLICKHOUSE_URL"),
+	CLICKHOUSE_PROVIDER: stringWithDefault("CLICKHOUSE_PROVIDER", "tinybird"),
 	CLICKHOUSE_USER: stringWithDefault("CLICKHOUSE_USER", "default"),
 	CLICKHOUSE_PASSWORD: optionalRedacted("CLICKHOUSE_PASSWORD"),
 	CLICKHOUSE_DATABASE: stringWithDefault("CLICKHOUSE_DATABASE", "default"),
@@ -210,6 +216,14 @@ const makeEnv = Effect.gen(function* () {
 
 	if (env.MAPLE_DEFAULT_ORG_ID.trim().length === 0) {
 		return yield* Effect.die(new EnvValidationError({ message: "MAPLE_DEFAULT_ORG_ID cannot be empty" }))
+	}
+
+	if (env.CLICKHOUSE_PROVIDER !== "clickhouse" && env.CLICKHOUSE_PROVIDER !== "tinybird") {
+		return yield* Effect.die(
+			new EnvValidationError({
+				message: "CLICKHOUSE_PROVIDER must be either 'clickhouse' or 'tinybird'",
+			}),
+		)
 	}
 
 	const authMode = env.MAPLE_AUTH_MODE.toLowerCase()

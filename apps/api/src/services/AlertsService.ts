@@ -8,6 +8,7 @@ import {
 } from "@maple/query-engine"
 import * as CH from "@maple/query-engine/ch"
 import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
+import { prepareRawSql } from "@maple/query-engine/runtime"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -84,7 +85,7 @@ import {
 	type AlertRuleRow,
 	alertRuleStates,
 } from "@maple/db"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -335,7 +336,7 @@ const planGroupingTokens = (
 }
 
 const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
-	planGroupingTokens(plan) != null
+	plan.kind === "raw_sql" || planGroupingTokens(plan) != null
 
 const resolveServiceLinkName = (
 	rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
@@ -390,11 +391,32 @@ export class AlertRuntime extends Context.Reference<AlertRuntimeShape>("@maple/a
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
-// Caps on how many evaluation windows a rule preview replays. Spec plans cost
-// one CH query regardless of bucket count; raw-SQL plans run one query per
-// window, so they get a tighter cap.
+// Cap on how many evaluation windows a structured rule preview replays.
 const MAX_PREVIEW_BUCKETS = 200
-const MAX_RAW_PREVIEW_WINDOWS = 60
+const MAX_ACTIVE_ALERT_RULES_PER_ORG = 100
+
+/** Preserve each org's oldest-first order while preventing one org from monopolizing a tick. */
+export const interleaveAlertRulesByOrg = <T extends { readonly orgId: string }>(
+	rows: ReadonlyArray<T>,
+): ReadonlyArray<T> => {
+	const queues = new Map<string, T[]>()
+	for (const row of rows) {
+		const queue = queues.get(row.orgId)
+		if (queue) queue.push(row)
+		else queues.set(row.orgId, [row])
+	}
+
+	const fair: T[] = []
+	let index = 0
+	while (fair.length < rows.length) {
+		for (const queue of queues.values()) {
+			const row = queue[index]
+			if (row !== undefined) fair.push(row)
+		}
+		index += 1
+	}
+	return fair
+}
 
 // Tinybird DateTime64(3) wire format for alert_checks ingest:
 // "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
@@ -827,10 +849,13 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 const parseCompiledPlan = (
 	row: Pick<
 		AlertRuleRow,
-		"querySpecJson" | "rawQuerySql" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
+		"signalType" | "querySpecJson" | "rawQuerySql" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
 	>,
 ): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> => {
-	if (row.rawQuerySql != null) {
+	if (row.signalType === "raw_query") {
+		if (row.rawQuerySql == null) {
+			return Effect.fail(makeValidationError("Stored raw alert is missing its SQL query"))
+		}
 		return Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
 			kind: "raw_sql",
 			query: null,
@@ -938,7 +963,7 @@ const rowToRuleDocument = (
 			row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
 		apdexThresholdMs: row.apdexThresholdMs,
 		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-		rawQuerySql: row.rawQuerySql ?? null,
+		rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
 		rawQueryReducer:
 			row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
 		destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
@@ -1076,7 +1101,14 @@ export interface AlertsServiceShape {
 		AlertRulePreviewResponse,
 		AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
 	>
-	readonly listIncidents: (orgId: OrgId) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
+	readonly listIncidents: (
+		orgId: OrgId,
+		options?: ListAlertIncidentsOptions,
+	) => Effect.Effect<AlertIncidentsListResponse, AlertPersistenceError>
+	readonly getIncident: (
+		orgId: OrgId,
+		incidentId: AlertIncidentId,
+	) => Effect.Effect<AlertIncidentDocument, AlertPersistenceError | AlertNotFoundError>
 	readonly listRuleChecks: (
 		orgId: OrgId,
 		ruleId: AlertRuleId,
@@ -1085,6 +1117,7 @@ export interface AlertsServiceShape {
 			readonly since?: string
 			readonly until?: string
 			readonly limit?: number
+			readonly offset?: number
 		},
 	) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
 	readonly listDeliveryEvents: (
@@ -1102,6 +1135,13 @@ export interface AlertsServiceShape {
 		// inside the per-rule Effect.catch in the scheduler tick, so the tick
 		// itself never surfaces them.
 	>
+}
+
+export interface ListAlertIncidentsOptions {
+	readonly status?: AlertIncidentStatus
+	readonly ruleId?: AlertRuleId
+	readonly limit?: number
+	readonly offset?: number
 }
 
 export class AlertsService extends Context.Service<AlertsService, AlertsServiceShape>()(
@@ -1122,7 +1162,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				memberUserIds: ReadonlyArray<string>,
 			): Effect.Effect<ReadonlyArray<OrgMember>, AlertValidationError> =>
 				orgMembers.resolveMembers(orgId, memberUserIds).pipe(
-					Effect.mapError((error) => makeValidationError(error.message, error.unknownUserIds ?? [])),
+					Effect.mapError((error) =>
+						makeValidationError(error.message, error.unknownUserIds ?? []),
+					),
 					Effect.flatMap((members) =>
 						members.length === 0
 							? Effect.fail(makeValidationError("At least one workspace member is required"))
@@ -1289,6 +1331,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			})
 
 			const normalizeRule = Effect.fn("AlertsService.normalizeRule")(function* (
+				orgId: OrgId,
 				request: AlertRuleUpsertRequest,
 				options?: {
 					// Preview evaluates a form draft that may not have a name or
@@ -1307,6 +1350,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					: []
 				const tags = normalizeTags(request.tags)
 				const metricName = normalizeOptionalString(request.metricName)
+				const groupBy = request.groupBy ?? null
 				// Dedupe while preserving selection order — a destination listed twice still
 				// notifies once, so we persist each id at most once. This is the authoritative
 				// fix; the editor also dedupes on submit for UX (see buildRuleRequest).
@@ -1346,8 +1390,21 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					const sql = request.rawQuerySql?.trim() ?? ""
 					if (sql.length === 0) {
 						details.push("rawQuerySql is required for raw_query alerts")
-					} else if (!sql.includes("$__orgFilter")) {
-						details.push("rawQuerySql must reference $__orgFilter for org scoping")
+					}
+					if (serviceNames.length > 0) {
+						details.push("serviceNames is not supported for raw_query alerts")
+					}
+					if (groupBy != null) {
+						details.push(
+							"groupBy is not supported for raw_query alerts; return a group column instead",
+						)
+					}
+				} else {
+					if (normalizeOptionalString(request.rawQuerySql) != null) {
+						details.push("rawQuerySql is only supported for raw_query alerts")
+					}
+					if (request.rawQueryReducer != null) {
+						details.push("rawQueryReducer is only supported for raw_query alerts")
 					}
 				}
 				const allowsMetricFields = request.signalType === "metric"
@@ -1360,7 +1417,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				if (request.signalType !== "metric" && request.metricAggregation) {
 					details.push("metricAggregation is only supported for metric alerts")
 				}
-				const groupBy = request.groupBy ?? null
 				if (groupBy != null && serviceNames.length > 0) {
 					details.push("groupBy is only supported when no service is specified")
 				}
@@ -1375,6 +1431,20 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				if (details.length > 0) {
 					return yield* Effect.fail(makeValidationError("Invalid alert rule", details))
+				}
+				if (request.signalType === "raw_query") {
+					yield* prepareRawSql({
+						sql: request.rawQuerySql ?? "",
+						orgId,
+						startTime: "2000-01-01 00:00:00",
+						endTime: "2000-01-01 00:05:00",
+						granularitySeconds: 60,
+						workload: "alert",
+					}).pipe(
+						Effect.mapError((error) =>
+							makeValidationError("Invalid raw SQL alert query", [error.message], error),
+						),
+					)
 				}
 
 				const nowMs = yield* now
@@ -1404,8 +1474,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					apdexThresholdMs:
 						request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
 					queryBuilderDraft: request.queryBuilderDraft ?? null,
-					rawQuerySql: normalizeOptionalString(request.rawQuerySql),
-					rawQueryReducer: request.rawQueryReducer ?? null,
+					rawQuerySql:
+						request.signalType === "raw_query"
+							? normalizeOptionalString(request.rawQuerySql)
+							: null,
+					rawQueryReducer:
+						request.signalType === "raw_query" ? (request.rawQueryReducer ?? null) : null,
 					destinationIds,
 					createdAt: nowMs,
 					updatedAt: nowMs,
@@ -1880,7 +1954,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						.select()
 						.from(alertDestinations)
 						.where(eq(alertDestinations.orgId, orgId))
-						.orderBy(desc(alertDestinations.updatedAt)),
+						.orderBy(desc(alertDestinations.createdAt), desc(alertDestinations.id)),
 				)
 
 				const destinations = rows.map((row) =>
@@ -1997,9 +2071,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					updatedBy: userId,
 				}
 
-				yield* dbExecute((db) => db.insert(alertDestinations).values(row))
-
-				return rowToDestinationDocument(row, publicConfig)
+				const writeRows = yield* dbExecute((db) =>
+					db.insert(alertDestinations).values(row).returning(txidColumn),
+				)
+				const txid = readTxid(writeRows)
+				const document = rowToDestinationDocument(row, publicConfig)
+				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 			})
 
 			const updateDestination = Effect.fn("AlertsService.updateDestination")(function* (
@@ -2259,7 +2336,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const nextName = normalizeOptionalString(request.name) ?? existing.name
 				const nextEnabled = request.enabled === undefined ? existing.enabled : request.enabled
 
-				yield* dbExecute((db) =>
+				const writeRows = yield* dbExecute((db) =>
 					db
 						.update(alertDestinations)
 						.set({
@@ -2274,10 +2351,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						})
 						.where(
 							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						),
+						)
+						.returning(txidColumn),
 				)
 
-				return rowToDestinationDocument(
+				const txid = readTxid(writeRows)
+				const document = rowToDestinationDocument(
 					{
 						...existing,
 						name: nextName,
@@ -2291,6 +2370,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					},
 					nextPublicConfig,
 				)
+				return txid === undefined ? document : new AlertDestinationDocument({ ...document, txid })
 			})
 
 			const deleteDestination = Effect.fn("AlertsService.deleteDestination")(function* (
@@ -2330,14 +2410,19 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					)
 				}
 
-				yield* dbExecute((db) =>
+				const deleted = yield* dbExecute((db) =>
 					db
 						.delete(alertDestinations)
 						.where(
 							and(eq(alertDestinations.orgId, orgId), eq(alertDestinations.id, destinationId)),
-						),
+						)
+						.returning(txidColumn),
 				)
-				return new AlertDestinationDeleteResponse({ id: destinationId })
+				const txid = readTxid(deleted)
+				return new AlertDestinationDeleteResponse({
+					id: destinationId,
+					...(txid !== undefined && { txid }),
+				})
 			})
 
 			const testDestination = Effect.fn("AlertsService.testDestination")(function* (
@@ -2400,7 +2485,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				existingId: AlertRuleId | null,
 				request: AlertRuleUpsertRequest,
 			) {
-				const normalized = yield* normalizeRule(request)
+				const normalized = yield* normalizeRule(orgId, request)
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 				const ruleId = existingId ?? normalized.id
 				const timestamp = yield* now
@@ -2440,28 +2525,54 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					updatedBy: userId,
 				} as const
 
-				const writeRows =
-					existingId == null
-						? yield* dbExecute((db) =>
-								db
-									.insert(alertRules)
-									.values({
-										id: ruleId,
-										orgId,
-										...ruleFields,
-										createdAt: new Date(timestamp),
-										createdBy: userId,
-									})
-									.returning(txidColumn),
-							)
-						: yield* dbExecute((db) =>
-								db
-									.update(alertRules)
-									.set(ruleFields)
-									.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)))
-									.returning(txidColumn),
-							)
-				const txid = readTxid(writeRows)
+				const writeResult = yield* dbExecute((db) =>
+					db.transaction(async (tx) => {
+						// Serialize quota checks per organization. Without the transaction-scoped
+						// advisory lock, concurrent creates can both observe 99 active rows and
+						// commit the 100th and 101st rules.
+						await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`)
+						if (normalized.enabled) {
+							const activeRows = await tx
+								.select({ id: alertRules.id })
+								.from(alertRules)
+								.where(and(eq(alertRules.orgId, orgId), eq(alertRules.enabled, true)))
+							const alreadyActive =
+								existingId != null && activeRows.some((row) => row.id === existingId)
+							if (!alreadyActive && activeRows.length >= MAX_ACTIVE_ALERT_RULES_PER_ORG) {
+								return { limitExceeded: true as const, writeRows: [] }
+							}
+						}
+
+						const writeRows =
+							existingId == null
+								? await tx
+										.insert(alertRules)
+										.values({
+											id: ruleId,
+											orgId,
+											...ruleFields,
+											createdAt: new Date(timestamp),
+											createdBy: userId,
+										})
+										.returning(txidColumn)
+								: await tx
+										.update(alertRules)
+										.set(ruleFields)
+										.where(
+											and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)),
+										)
+										.returning(txidColumn)
+						return { limitExceeded: false as const, writeRows }
+					}),
+				)
+				if (writeResult.limitExceeded) {
+					return yield* Effect.fail(
+						makeValidationError(
+							`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
+						),
+					)
+				}
+				const txid = readTxid(writeResult.writeRows)
 
 				const row = yield* requireRuleRow(orgId, ruleId)
 				const destinationIds = safeParseStringArray(row.destinationIdsJson)
@@ -2475,7 +2586,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						.select()
 						.from(alertRules)
 						.where(eq(alertRules.orgId, orgId))
-						.orderBy(desc(alertRules.updatedAt)),
+						.orderBy(desc(alertRules.createdAt), desc(alertRules.id)),
 				)
 
 				// Surface the most recent evaluation error per rule. `lastError` is
@@ -2540,7 +2651,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				// Resolve stale incidents caused by the configuration change
 				const oldNormalized = yield* normalizeRuleRow(oldRow)
-				const newNormalized = yield* normalizeRule(request)
+				const newNormalized = yield* normalizeRule(orgId, request)
 
 				if (oldNormalized.enabled && !newNormalized.enabled) {
 					// Rule was disabled — resolve all open incidents
@@ -2606,7 +2717,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				sendNotification = false,
 			) {
 				yield* requireAdmin(roles)
-				const normalized = yield* normalizeRule(request)
+				const normalized = yield* normalizeRule(orgId, request)
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 
 				let evaluation: EvaluatedRule
@@ -2741,8 +2852,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				AlertRulePreviewResponse,
 				AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
 			> {
-				const normalized = yield* normalizeRule(request.rule, { forPreview: true })
+				const normalized = yield* normalizeRule(orgId, request.rule, { forPreview: true })
 				const plan = normalized.compiledPlan
+				if (plan.kind === "raw_sql") {
+					return yield* Effect.fail(makeValidationError("Raw SQL alerts cannot be previewed"))
+				}
 
 				const windowMs = normalized.windowMinutes * 60_000
 				const requestedStartMs = Date.parse(request.startTime)
@@ -2760,7 +2874,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// lines up with the rows evaluateSeries returns.
 				const endMs = Math.floor(requestedEndMs / windowMs) * windowMs
 				const alignedStartMs = Math.floor(requestedStartMs / windowMs) * windowMs
-				const maxBuckets = plan.kind === "raw_sql" ? MAX_RAW_PREVIEW_WINDOWS : MAX_PREVIEW_BUCKETS
+				const maxBuckets = MAX_PREVIEW_BUCKETS
 				const minStartMs = endMs - maxBuckets * windowMs
 				const startMs = Math.max(alignedStartMs, minStartMs)
 				if (endMs - startMs < windowMs) {
@@ -2811,98 +2925,66 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					buckets.set(bucketMs, obs)
 				}
 
-				if (plan.kind === "spec") {
-					if (plan.query == null || plan.sampleCountStrategy == null) {
-						return yield* Effect.fail(
-							makeValidationError("Compiled alert plan is missing its query spec"),
-						)
-					}
-					if (normalized.serviceNames.length > 1) {
-						// Mirror the scheduler's multi-service mode: independent per-service
-						// plans, groupKey = service name.
-						yield* Effect.forEach(
-							normalized.serviceNames,
-							(svcName) =>
-								Effect.gen(function* () {
-									const perServicePlan = yield* compileRulePlan({
-										...normalized,
-										serviceName: svcName,
-									})
-									if (
-										perServicePlan.query == null ||
-										perServicePlan.sampleCountStrategy == null
-									) {
-										return
-									}
-									const observations = yield* queryEngine
-										.evaluateSeries(systemTenant(orgId), {
-											startTime: toTinybirdDateTime(startMs),
-											endTime: toTinybirdDateTime(queryEndMs),
-											query: perServicePlan.query,
-											reducer: perServicePlan.reducer,
-											sampleCountStrategy: perServicePlan.sampleCountStrategy,
-										})
-										.pipe(catchQueryEngineErrors)
-									for (const obs of observations) {
-										record(svcName, Date.parse(obs.bucket), {
-											value: obs.value,
-											sampleCount: obs.sampleCount,
-											hasData: obs.sampleCount > 0,
-										})
-									}
-								}),
-							{ concurrency: 5 },
-						)
-					} else {
-						const observations = yield* queryEngine
-							.evaluateSeries(systemTenant(orgId), {
-								startTime: toTinybirdDateTime(startMs),
-								endTime: toTinybirdDateTime(queryEndMs),
-								query: plan.query,
-								reducer: plan.reducer,
-								sampleCountStrategy: plan.sampleCountStrategy,
-							})
-							.pipe(catchQueryEngineErrors)
-						const excludeSet = new Set(normalized.excludeServiceNames)
-						for (const obs of observations) {
-							if (excludeSet.has(obs.groupKey)) continue
-							record(obs.groupKey, Date.parse(obs.bucket), {
-								value: obs.value,
-								sampleCount: obs.sampleCount,
-								hasData: obs.sampleCount > 0,
-							})
-						}
-					}
-				} else {
-					// Raw SQL: the reducer runs INSIDE one evaluation window, so replay
-					// the evaluator over each historical window (plus the trailing
-					// in-progress one). Bounded by MAX_RAW_PREVIEW_WINDOWS via the range
-					// clamp above.
-					yield* Effect.forEach(
-						pointBuckets,
-						(bucketMs) =>
-							queryEngine
-								.evaluateRawSql(systemTenant(orgId), {
-									startTime: toTinybirdDateTime(bucketMs),
-									endTime: toTinybirdDateTime(Math.min(bucketMs + windowMs, queryEndMs)),
-									sql: plan.rawSql ?? "",
-									reducer: plan.reducer,
-									windowMinutes: normalized.windowMinutes,
-								})
-								.pipe(
-									catchQueryEngineErrors,
-									Effect.map((groups) => {
-										for (const group of groups) {
-											record(group.groupKey, bucketMs, {
-												value: group.value,
-												sampleCount: group.sampleCount,
-												hasData: group.hasData,
-											})
-										}
-									}),
-								),
-						{ concurrency: 4 },
+				if (plan.query == null || plan.sampleCountStrategy == null) {
+					return yield* Effect.fail(
+						makeValidationError("Compiled alert plan is missing its query spec"),
 					)
+				}
+				if (normalized.serviceNames.length > 1) {
+					// Mirror the scheduler's multi-service mode: independent per-service
+					// plans, groupKey = service name.
+					yield* Effect.forEach(
+						normalized.serviceNames,
+						(svcName) =>
+							Effect.gen(function* () {
+								const perServicePlan = yield* compileRulePlan({
+									...normalized,
+									serviceName: svcName,
+								})
+								if (
+									perServicePlan.query == null ||
+									perServicePlan.sampleCountStrategy == null
+								) {
+									return
+								}
+								const observations = yield* queryEngine
+									.evaluateSeries(systemTenant(orgId), {
+										startTime: toTinybirdDateTime(startMs),
+										endTime: toTinybirdDateTime(queryEndMs),
+										query: perServicePlan.query,
+										reducer: perServicePlan.reducer,
+										sampleCountStrategy: perServicePlan.sampleCountStrategy,
+									})
+									.pipe(catchQueryEngineErrors)
+								for (const obs of observations) {
+									record(svcName, Date.parse(obs.bucket), {
+										value: obs.value,
+										sampleCount: obs.sampleCount,
+										hasData: obs.sampleCount > 0,
+									})
+								}
+							}),
+						{ concurrency: 5 },
+					)
+				} else {
+					const observations = yield* queryEngine
+						.evaluateSeries(systemTenant(orgId), {
+							startTime: toTinybirdDateTime(startMs),
+							endTime: toTinybirdDateTime(queryEndMs),
+							query: plan.query,
+							reducer: plan.reducer,
+							sampleCountStrategy: plan.sampleCountStrategy,
+						})
+						.pipe(catchQueryEngineErrors)
+					const excludeSet = new Set(normalized.excludeServiceNames)
+					for (const obs of observations) {
+						if (excludeSet.has(obs.groupKey)) continue
+						record(obs.groupKey, Date.parse(obs.bucket), {
+							value: obs.value,
+							sampleCount: obs.sampleCount,
+							hasData: obs.sampleCount > 0,
+						})
+					}
 				}
 
 				// Ungrouped rules always observe *something* per tick ("all"), so chart
@@ -2993,18 +3075,56 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 			})
 
-			const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (orgId: OrgId) {
+			const listIncidents = Effect.fn("AlertsService.listIncidents")(function* (
+				orgId: OrgId,
+				options: ListAlertIncidentsOptions = {},
+			) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					...(options.status !== undefined ? { status: options.status } : {}),
+					...(options.ruleId !== undefined ? { ruleId: options.ruleId } : {}),
+				})
+				const conditions = [
+					eq(alertIncidents.orgId, orgId),
+					options.status ? eq(alertIncidents.status, options.status) : undefined,
+					options.ruleId ? eq(alertIncidents.ruleId, options.ruleId) : undefined,
+				].filter((condition): condition is NonNullable<typeof condition> => condition !== undefined)
 				const rows = yield* dbExecute((db) =>
 					db
 						.select()
 						.from(alertIncidents)
-						.where(eq(alertIncidents.orgId, orgId))
-						.orderBy(desc(alertIncidents.status), desc(alertIncidents.lastTriggeredAt))
-						.limit(100),
+						.where(and(...conditions))
+						.orderBy(desc(alertIncidents.lastTriggeredAt), desc(alertIncidents.id))
+						.limit(options.limit ?? 100)
+						.offset(options.offset ?? 0),
 				)
+				yield* Effect.annotateCurrentSpan("result.rowCount", rows.length)
 				return new AlertIncidentsListResponse({
 					incidents: rows.map(rowToIncidentDocument),
 				})
+			})
+
+			const getIncident = Effect.fn("AlertsService.getIncident")(function* (
+				orgId: OrgId,
+				incidentId: AlertIncidentId,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId, incidentId })
+				const rows = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(alertIncidents)
+						.where(and(eq(alertIncidents.orgId, orgId), eq(alertIncidents.id, incidentId)))
+						.limit(1),
+				)
+				const incident = rows[0]
+				if (incident === undefined) {
+					return yield* new AlertNotFoundError({
+						message: `No such alert incident: '${incidentId}'`,
+						resourceType: "alert_incident",
+						resourceId: incidentId,
+					})
+				}
+				return rowToIncidentDocument(incident)
 			})
 
 			const toTinybirdSqlDateTime64 = (iso: string) => {
@@ -3022,6 +3142,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					readonly since?: string
 					readonly until?: string
 					readonly limit?: number
+					readonly offset?: number
 				},
 			) {
 				// Verify the rule exists and belongs to this org before querying Tinybird.
@@ -3053,6 +3174,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				const compiled = CH.compile(
 					CH.listRuleChecksQuery({
 						limit,
+						offset: Math.max(Math.trunc(options.offset ?? 0), 0),
 						groupKey: hasGroupKey ? options.groupKey : undefined,
 						since: since ?? undefined,
 						until: until ?? undefined,
@@ -4323,7 +4445,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 
 				yield* Effect.forEach(
-					rows,
+					interleaveAlertRulesByOrg(rows),
 					(row) =>
 						Effect.gen(function* () {
 							const timestamp = yield* now
@@ -4588,6 +4710,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				testRule,
 				previewRule,
 				listIncidents,
+				getIncident,
 				listRuleChecks,
 				listDeliveryEvents,
 				runSchedulerTick,

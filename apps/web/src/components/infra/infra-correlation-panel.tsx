@@ -8,6 +8,7 @@ import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { NodeDetailChart, PodDetailChart } from "./k8s-detail-chart"
 import { HostDetailChart } from "./host-detail-chart"
 import { getActiveInfraCorrelations, type InfraCorrelation } from "./infra-correlations"
+import { useLinkedCursor } from "@/hooks/use-linked-cursor"
 
 const DEFAULT_PAD_MINUTES = 15
 // Charts bucket at this width; metrics are sampled coarsely (hostmetrics /
@@ -55,6 +56,9 @@ export function InfraCorrelationPanel({
 	endTime,
 }: InfraCorrelationPanelProps) {
 	const correlations = getActiveInfraCorrelations(resourceAttributes)
+	// One linked hover cursor across every chart in the panel (charts stay
+	// independent — no Recharts syncId render storms).
+	const { containerProps } = useLinkedCursor(true)
 
 	if (correlations.length === 0) {
 		return (
@@ -64,11 +68,11 @@ export function InfraCorrelationPanel({
 		)
 	}
 
-	// One shared syncId across every chart so tooltips/cursors track together.
+	// One shared syncId across every chart so the linked cursor tracks together.
 	const syncId = "infra-correlation"
 
 	return (
-		<div className="space-y-6">
+		<div className="space-y-6" {...containerProps}>
 			{correlations.map((correlation) => (
 				<section key={`${correlation.kind}:${correlation.identifier}`} className="space-y-2">
 					{/* Header: title + link share a row; the (often long) identifier

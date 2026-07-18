@@ -3,10 +3,9 @@ import * as Datasources from "@maple/domain/tinybird"
 
 // ---------------------------------------------------------------------------
 // Live introspection of the `defineDatasource` exports in
-// packages/domain/src/tinybird/datasources.ts. Used by the MCP
-// `describe_warehouse_tables` tool so agents discover real tables/columns at
-// call time rather than relying on a hand-maintained list inside the tool
-// description.
+// packages/domain/src/tinybird/datasources.ts. This neutral catalog powers
+// both raw-SQL datasource scoping and the MCP discovery tool, keeping the
+// security allowlist and agent-visible schema derived from the same source.
 //
 // Type strings (`String`, `DateTime64(9)`, `LowCardinality(String)`,
 // `Map(LowCardinality(String), String)`) come straight from the SDK's
@@ -92,6 +91,20 @@ export function listWarehouseTables(): ReadonlyArray<TableSummary> {
 			columnCount: Object.keys(ds._schema).length,
 		}))
 		.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/**
+ * Datasource names that carry an `OrgId` column — the allowlist used to scope a
+ * per-org raw-SQL read JWT. Derived live from the `defineDatasource` exports, so
+ * a new telemetry datasource is covered automatically; any datasource WITHOUT an
+ * `OrgId` column is excluded, making it unqueryable in raw SQL (fail-closed)
+ * rather than leaking cross-tenant rows.
+ */
+export function listOrgScopedDatasourceNames(): ReadonlyArray<string> {
+	return collectDatasources()
+		.filter((ds) => "OrgId" in ds._schema)
+		.map((ds) => ds._name)
+		.sort((a, b) => a.localeCompare(b))
 }
 
 export function describeWarehouseTable(name: string): TableInfo | null {

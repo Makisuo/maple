@@ -85,10 +85,6 @@ const SHAPES = {
 			"updated_at",
 		],
 	},
-	// Uptime-probe history — already pruned server-side to 24h + a 10k-per-target
-	// cap (see ScrapeTargetsService.pruneChecks), so the whole per-org shape stays
-	// bounded. No secrets in this table.
-	scrape_target_checks: { table: "scrape_target_checks" },
 } as const satisfies Record<
 	string,
 	{ readonly table: string; readonly extraWhere?: string; readonly columns?: ReadonlyArray<string> }

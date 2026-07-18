@@ -1,14 +1,15 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ApiKeyCreatedResponse, ApiKeyResponse } from "@maple/domain/http"
+import type { ApiKeyNotFoundError, ApiKeyPersistenceError } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import {
 	MapleApiV2,
+	dependencyUnavailable,
 	isoTimestamp,
 	isoTimestampOrNull,
-	notFound,
 	paginateArray,
 	permissionError,
-	serviceUnavailable,
+	resourceNotFound,
 } from "@maple/domain/http/v2"
 import type { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "@maple/domain/http/v2"
 import { Effect } from "effect"
@@ -65,12 +66,20 @@ const toV2ApiKeyMutationResponse = (key: ApiKeyResponse): V2ApiKeyMutationRespon
 })
 
 /** Service tagged errors → v2 envelope errors. */
-const mapServiceError = (error: { readonly _tag: string; readonly message: string }) =>
-	error._tag === "@maple/http/errors/ApiKeyNotFoundError"
-		? notFound(error.message, "id")
-		: serviceUnavailable(error.message)
+const mapServiceError =
+	(operation: string) =>
+	<A, R>(effect: Effect.Effect<A, ApiKeyNotFoundError | ApiKeyPersistenceError, R>) =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/errors/ApiKeyNotFoundError": () =>
+					Effect.fail(resourceNotFound("api_key", "No such API key.")),
+				"@maple/http/errors/ApiKeyPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`api_key_${operation}_unavailable`)),
+			}),
+		)
 
-const mapPersistenceError = (error: { readonly message: string }) => serviceUnavailable(error.message)
+const mapPersistenceError = (operation: string) => () =>
+	dependencyUnavailable(`api_key_${operation}_unavailable`)
 
 export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (handlers) =>
 	Effect.gen(function* () {
@@ -83,8 +92,8 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const tenant = yield* CurrentTenant.Context
 					const response = yield* apiKeysService
 						.list(tenant.orgId)
-						.pipe(Effect.mapError(mapPersistenceError))
-					const page = paginateArray(response.keys.map(toV2ApiKey), query)
+						.pipe(Effect.mapError(mapPersistenceError("list")))
+					const page = yield* paginateArray(response.keys.map(toV2ApiKey), query)
 					return { object: "list" as const, ...page }
 				}),
 			)
@@ -93,7 +102,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const tenant = yield* CurrentTenant.Context
 					const key = yield* apiKeysService
 						.get(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapServiceError))
+						.pipe(mapServiceError("retrieve"))
 					return toV2ApiKey(key)
 				}),
 			)
@@ -111,7 +120,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 							scopes: payload.scopes,
 							createdByEmail,
 						})
-						.pipe(Effect.mapError(mapPersistenceError))
+						.pipe(Effect.mapError(mapPersistenceError("create")))
 					return toV2ApiKeyWithSecret(created)
 				}),
 			)
@@ -122,7 +131,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					const createdByEmail = yield* auth.getUserEmail(tenant.userId)
 					const rolled = yield* apiKeysService
 						.roll(tenant.orgId, tenant.userId, params.id, { createdByEmail })
-						.pipe(Effect.mapError(mapServiceError))
+						.pipe(mapServiceError("roll"))
 					return toV2ApiKeyWithSecret(rolled)
 				}),
 			)
@@ -132,7 +141,7 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 					yield* requireAdmin(tenant.roles, adminOnly("revoke"))
 					const revoked = yield* apiKeysService
 						.revoke(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapServiceError))
+						.pipe(mapServiceError("revoke"))
 					return toV2ApiKeyMutationResponse(revoked)
 				}),
 			)

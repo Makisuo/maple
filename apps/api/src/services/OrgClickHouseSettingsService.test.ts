@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import {
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
+	OrgClickHouseSettingsValidationError,
 	OrgId,
 	RoleName,
 } from "@maple/domain/http"
@@ -10,6 +11,7 @@ import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effe
 import { FetchHttpClient } from "effect/unstable/http"
 import type { TableDiffEntry } from "@maple/domain/clickhouse"
 import { Env } from "../lib/Env"
+import { encryptAes256Gcm } from "../lib/Crypto"
 import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../lib/test-pglite"
 import {
 	type ClickHouseExecConfig,
@@ -17,6 +19,7 @@ import {
 	isRetryableUpstream,
 	OrgClickHouseSettingsService,
 	shouldHealSchemaVersion,
+	validateClickHouseCredentialTransport,
 } from "./OrgClickHouseSettingsService"
 
 // `execClickHouse` runs through Effect's HttpClient. We inject a stub `fetch` via
@@ -59,6 +62,35 @@ const unavailable = (statusCode: number | null) =>
 	new OrgClickHouseSettingsUpstreamUnavailableError({ message: "x", statusCode })
 const rejected = (statusCode: number | null) =>
 	new OrgClickHouseSettingsUpstreamRejectedError({ message: "x", statusCode })
+
+describe("validateClickHouseCredentialTransport", () => {
+	it.effect("rejects sending a ClickHouse password over plaintext HTTP", () =>
+		Effect.gen(function* () {
+			const exit = yield* validateClickHouseCredentialTransport(
+				"http://clickhouse.example.test",
+				"secret",
+			).pipe(Effect.exit)
+			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+		}),
+	)
+
+	it.effect("allows HTTPS credentials and passwordless HTTP", () =>
+		Effect.gen(function* () {
+			yield* validateClickHouseCredentialTransport("https://clickhouse.example.test", "secret")
+			yield* validateClickHouseCredentialTransport("http://clickhouse.example.test", "")
+		}),
+	)
+
+	it.effect("rejects URL-embedded userinfo even without a separate password", () =>
+		Effect.gen(function* () {
+			const exit = yield* validateClickHouseCredentialTransport(
+				"https://user:secret@clickhouse.example.test",
+				"",
+			).pipe(Effect.exit)
+			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+		}),
+	)
+})
 
 describe("shouldHealSchemaVersion", () => {
 	const REV = "019c3db4cf690e3748b302098cae4c9213d18c55355db9fc68ea44982c7a980a"
@@ -119,6 +151,27 @@ describe("isRetryableUpstream", () => {
 })
 
 describe("execClickHouse", () => {
+	it.live("uses manual redirects and rejects every 3xx without following it", () =>
+		Effect.gen(function* () {
+			let redirectMode: RequestRedirect | undefined
+			let calls = 0
+			const fetchImpl = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+				calls += 1
+				redirectMode = init?.redirect
+				return new Response("moved", {
+					status: 307,
+					headers: { Location: "https://attacker.example/steal" },
+				})
+			}) as typeof fetch
+			const exit = yield* run("SELECT 1", fetchImpl).pipe(Effect.exit)
+			const failure = getError(exit)
+			expect(failure).toBeInstanceOf(OrgClickHouseSettingsUpstreamRejectedError)
+			expect((failure as OrgClickHouseSettingsUpstreamRejectedError).statusCode).toBe(307)
+			expect(redirectMode).toBe("manual")
+			expect(calls).toBe(1)
+		}),
+	)
+
 	it.live("maps a Cloudflare 524 to a clear, actionable message (and retries 52x)", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() =>
@@ -237,6 +290,20 @@ describe("resolveRuntimeConfig caching", () => {
 			[orgId, chUrl],
 		)
 
+	const seedPasswordRow = async (db: TestDb, orgId: string, chUrl: string) => {
+		const encrypted = await Effect.runPromise(
+			encryptAes256Gcm("legacy-password", Buffer.alloc(32, 5), (message) => new Error(message)),
+		)
+		await executeSql(
+			db,
+			`INSERT INTO org_clickhouse_settings
+				(org_id, ch_url, ch_user, ch_database, ch_password_ciphertext, ch_password_iv,
+				 ch_password_tag, sync_status, created_at, updated_at, created_by, updated_by)
+			 VALUES ($1, $2, 'default', 'maple', $3, $4, $5, 'connected', NOW(), NOW(), 'u', 'u')`,
+			[orgId, chUrl, encrypted.ciphertext, encrypted.iv, encrypted.tag],
+		)
+	}
+
 	const expectSome = <A>(o: Option.Option<A>): A => {
 		expect(Option.isSome(o)).toBe(true)
 		return (o as Option.Some<A>).value
@@ -281,6 +348,30 @@ describe("resolveRuntimeConfig caching", () => {
 			const after = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId))
 			// Would still be a stale `Some` if the write had not busted the cache.
 			expect(Option.isNone(after)).toBe(true)
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	it.effect("fails closed for a legacy passworded HTTP runtime row", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_legacy_http"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedPasswordRow(testDb, orgId, "http://clickhouse.example.test"))
+			const exit = yield* OrgClickHouseSettingsService.resolveRuntimeConfig(asOrgId(orgId)).pipe(
+				Effect.exit,
+			)
+			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+		}).pipe(Effect.provide(buildLayer(testDb)))
+	})
+
+	it.effect("fails closed for legacy URL userinfo during collector config generation", () => {
+		const testDb = createTestDb(cacheTrackedDbs)
+		const orgId = "org_ch_legacy_userinfo"
+		return Effect.gen(function* () {
+			yield* Effect.promise(() => seedRow(testDb, orgId, "https://user:secret@clickhouse.example.test"))
+			const exit = yield* OrgClickHouseSettingsService.collectorConfig(asOrgId(orgId), [
+				asRole("org:admin"),
+			]).pipe(Effect.exit)
+			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
 		}).pipe(Effect.provide(buildLayer(testDb)))
 	})
 })

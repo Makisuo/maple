@@ -17,6 +17,7 @@ export interface ListRuleChecksOpts {
 	readonly since?: string
 	readonly until?: string
 	readonly limit: number
+	readonly offset?: number
 }
 
 export interface ListRuleChecksOutput {
@@ -71,7 +72,8 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 			opts.since != null ? $.Timestamp.gte(param.dateTime("since")) : undefined,
 			opts.until != null ? $.Timestamp.lte(param.dateTime("until")) : undefined,
 		])
-		.orderBy(["timestamp", "desc"])
+		.orderBy(["timestamp", "desc"], ["groupKey", "asc"])
 		.limit(opts.limit)
+		.offset(opts.offset ?? 0)
 		.format("JSON")
 }

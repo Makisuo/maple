@@ -60,6 +60,7 @@ vi.mock("@/components/time-range-picker/time-range-header-controls", () => ({
 }))
 
 import * as LogsRoute from "./logs"
+import { component as LogsPage } from "./logs?tsr-split=component"
 
 describe("LogsPage live refresh scope", () => {
 	beforeEach(() => {
@@ -82,7 +83,7 @@ describe("LogsPage live refresh scope", () => {
 	})
 
 	it("does not attach route-level relative refresh rebasing", () => {
-		render(<LogsRoute.LogsPage />)
+		render(<LogsPage />)
 
 		expect(providerProps.timePreset).toBe("12h")
 		expect(providerProps.onRelativeRangeRefresh).toBeUndefined()

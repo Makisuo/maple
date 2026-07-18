@@ -7,7 +7,7 @@ import {
 	LoaderIcon,
 } from "@/components/icons"
 import type { StructuredToolOutput } from "@maple/domain"
-import { STRUCTURED_MARKER } from "./renderers"
+import { STRUCTURED_MARKER } from "./renderers/constants"
 import { toolIcon, toolLabel } from "./tool-metadata"
 
 export { normalizeToolName, toolLabel } from "./tool-metadata"

@@ -7,14 +7,15 @@ export function useRetainedRefreshableResultValue<A, E>(
 	atom: Atom.Atom<Result.Result<A, E>>,
 ): Result.Result<A, E> {
 	const result = useRefreshableAtomValue(atom)
-	const [lastSuccess, setLastSuccess] = React.useState<Result.Success<A, E> | null>(null)
-	const prevResultRef = React.useRef<Result.Result<A, E> | null>(null)
+	const [retained, setRetained] = React.useState<{
+		result: Result.Result<A, E>
+		lastSuccess: Result.Success<A, E> | null
+	}>(() => ({ result, lastSuccess: Result.isSuccess(result) ? result : null }))
+	let lastSuccess = retained.lastSuccess
 
-	if (result !== prevResultRef.current) {
-		prevResultRef.current = result
-		if (Result.isSuccess(result) && result !== lastSuccess) {
-			setLastSuccess(result)
-		}
+	if (result !== retained.result) {
+		lastSuccess = Result.isSuccess(result) ? result : retained.lastSuccess
+		setRetained({ result, lastSuccess })
 	}
 
 	return React.useMemo(() => {

@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -22,17 +21,17 @@ const detailSearchSchema = Schema.Struct({
 	t: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/replays/$sessionId"), ({ params, search }) => {
-	const window = replayPartitionWindow(typeof search.t === "string" ? search.t : undefined)
-	const data = { sessionId: params.sessionId, ...window }
-	return [
-		getReplayResultAtom({ data }),
-		getReplayEventsResultAtom({ data }),
-		getSessionTranscriptResultAtom({ data }),
-	]
-})({
+export const Route = createFileRoute("/replays/$sessionId")({
 	component: ReplayDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(detailSearchSchema),
+	loaderDeps: ({ search }) => ({ t: search.t }),
+	loader: ({ context, params, deps }) => {
+		const window = replayPartitionWindow(typeof deps.t === "string" ? deps.t : undefined)
+		const data = { sessionId: params.sessionId, ...window }
+		context.effectRegistry.mount(getReplayResultAtom({ data }))
+		context.effectRegistry.mount(getReplayEventsResultAtom({ data }))
+		context.effectRegistry.mount(getSessionTranscriptResultAtom({ data }))
+	},
 })
 
 function ReplayDetailPage() {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
 import {
 	serviceOverviewQuery,
+	serviceCatalogQuery,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
@@ -17,6 +18,28 @@ const baseParams = {
 	endTime: "2024-01-02 00:00:00",
 	bucketSeconds: 3600,
 }
+
+describe("serviceCatalogQuery", () => {
+	it("aggregates by service name with pruning filters and limit-plus-one pagination", () => {
+		const { sql } = compileCH(
+			serviceCatalogQuery({
+				deploymentEnvironment: "production",
+				serviceNamespace: "checkout",
+				limit: 21,
+				offset: 20,
+			}),
+			baseParams,
+		)
+		expect(sql).toContain("FROM service_overview_spans")
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
+		expect(sql).toContain("DeploymentEnv = 'production'")
+		expect(sql).toContain("ServiceNamespace = 'checkout'")
+		expect(sql).toContain("GROUP BY serviceName")
+		expect(sql).toContain("LIMIT 21")
+		expect(sql).toContain("OFFSET 20")
+	})
+})
 
 // ---------------------------------------------------------------------------
 // serviceOverviewQuery

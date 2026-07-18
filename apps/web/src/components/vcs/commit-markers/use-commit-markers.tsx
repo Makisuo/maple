@@ -43,5 +43,7 @@ export function useCommitMarkers(
 	)
 	const markers = useAtomValue(markersAtom)
 
-	return markers.length > 0 ? <CommitMarkersLayer markers={markers} /> : null
+	// Stable element identity: this is passed as an `overlay` prop into memoized
+	// charts, so a fresh element per render would defeat their memo.
+	return useMemo(() => (markers.length > 0 ? <CommitMarkersLayer markers={markers} /> : null), [markers])
 }

@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Result, useAtomValue, useAtomSet, useAtomRefresh } from "@/lib/effect-atom"
 import { Schema } from "effect"
 import { useMountEffect } from "@/hooks/use-mount-effect"
@@ -39,7 +38,7 @@ const dashboardSearchSchema = Schema.Struct({
 	environment: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/"))({
+export const Route = createFileRoute("/")({
 	component: DashboardPage,
 	validateSearch: Schema.toStandardSchemaV1(dashboardSearchSchema),
 })

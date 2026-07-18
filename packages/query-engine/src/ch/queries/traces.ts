@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import type { TracesMetric } from "../../query-engine"
-import { compileCH } from "@maple-dev/clickhouse-builder"
+import { compileCH, compileFnCall } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
 import { from, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
@@ -61,7 +61,11 @@ function metricSelectExprs(
 
 	const apdex = needs.has("apdex")
 		? apdexExprs(durationMs, apdexThresholdMs, $.StatusCode.eq("Error"))
-		: { satisfiedCount: CH.lit(0), toleratingCount: CH.lit(0), apdexScore: CH.lit(0) }
+		: {
+				satisfiedCount: CH.lit(0),
+				toleratingCount: CH.lit(0),
+				apdexScore: CH.lit(0),
+			}
 
 	return {
 		count: CH.count(),
@@ -761,6 +765,85 @@ export interface TracesRootListOutput {
 	 */
 	readonly rootSpanAttributes: string
 	readonly hasError: number
+}
+
+export interface TraceSummariesOpts {
+	serviceName?: string
+	spanName?: string
+	hasError?: boolean
+	minDurationMs?: number
+	maxDurationMs?: number
+	httpMethod?: string
+	httpStatusCode?: string
+	deploymentEnv?: string
+	namespace?: string
+	limit?: number
+	offset?: number
+	cursor?: { timestamp: string; traceId: string }
+}
+
+export interface TraceSummaryOutput {
+	readonly traceId: string
+	readonly startTime: string
+	readonly durationMs: number
+	readonly rootSpanName: string
+	readonly rootSpanKind: string
+	readonly rootServiceName: string
+	readonly statusCode: string
+	readonly hasError: number
+	readonly deploymentEnvironment: string
+	readonly serviceNamespace: string
+	readonly httpMethod: string
+	readonly httpRoute: string
+	readonly httpStatusCode: string
+}
+
+const argMin = <T>(value: CH.Expr<T>, ordering: CH.Expr<unknown>): CH.Expr<T> =>
+	compileFnCall<T>("argMin", value, ordering)
+
+/** Public trace catalog read over the root-span MV, ordered deterministically. */
+export function traceSummariesQuery(opts: TraceSummariesOpts) {
+	return from(TraceListMv)
+		.select(($) => ({
+			traceId: $.TraceId,
+			startTime: CH.min_($.Timestamp),
+			durationMs: argMin($.Duration, $.Timestamp).div(1000000),
+			rootSpanName: argMin($.SpanName, $.Timestamp),
+			rootSpanKind: argMin($.SpanKind, $.Timestamp),
+			rootServiceName: argMin($.ServiceName, $.Timestamp),
+			statusCode: argMin($.StatusCode, $.Timestamp),
+			hasError: CH.max_($.HasError),
+			deploymentEnvironment: argMin($.DeploymentEnv, $.Timestamp),
+			serviceNamespace: argMin($.ServiceNamespace, $.Timestamp),
+			httpMethod: argMin($.HttpMethod, $.Timestamp),
+			httpRoute: argMin($.HttpRoute, $.Timestamp),
+			httpStatusCode: argMin($.HttpStatusCode, $.Timestamp),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			CH.when(opts.serviceName, (value: string) => $.ServiceName.eq(value)),
+			CH.when(opts.spanName, (value: string) => $.SpanName.eq(value)),
+			CH.when(opts.hasError, () => $.HasError.eq(1)),
+			CH.when(opts.hasError === false, () => $.HasError.eq(0)),
+			opts.minDurationMs !== undefined ? $.Duration.gte(opts.minDurationMs * 1000000) : undefined,
+			opts.maxDurationMs !== undefined ? $.Duration.lte(opts.maxDurationMs * 1000000) : undefined,
+			CH.when(opts.httpMethod, (value: string) => $.HttpMethod.eq(value)),
+			CH.when(opts.httpStatusCode, (value: string) => $.HttpStatusCode.eq(value)),
+			CH.when(opts.deploymentEnv, (value: string) => $.DeploymentEnv.eq(value)),
+			CH.when(opts.namespace, (value: string) => $.ServiceNamespace.eq(value)),
+			opts.cursor
+				? $.Timestamp.lt(opts.cursor.timestamp).or(
+						$.Timestamp.eq(opts.cursor.timestamp).and($.TraceId.lt(opts.cursor.traceId)),
+					)
+				: undefined,
+		])
+		.groupBy("traceId")
+		.orderBy(["startTime", "desc"], ["traceId", "desc"])
+		.limit(opts.limit ?? 20)
+		.offset(opts.offset ?? 0)
+		.format("JSON")
 }
 
 /**

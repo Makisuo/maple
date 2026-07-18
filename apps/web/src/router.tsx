@@ -16,6 +16,9 @@ export const router = createEffectRouter({
 	atomRuntime: sharedAtomRuntime,
 	registry: appRegistry,
 	scrollRestoration: true,
+	// Route modules stay off the startup path, while pointer/keyboard intent
+	// warms the next screen before navigation completes.
+	defaultPreload: "intent",
 	defaultPreloadStaleTime: 0,
 	defaultErrorComponent: RouteError,
 	defaultNotFoundComponent: NotFoundError,

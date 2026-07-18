@@ -195,10 +195,8 @@ export function sessionReplaysListQuery(
 			s.sessionId.eq(e.sessionId),
 		)
 		if (needsActiveFilter) {
-			joined = joined.leftJoinQuery(
-				sessionActivityAggregateQuery(),
-				"a",
-				(s: any, a: any) => s.sessionId.eq(a.sessionId),
+			joined = joined.leftJoinQuery(sessionActivityAggregateQuery(), "a", (s: any, a: any) =>
+				s.sessionId.eq(a.sessionId),
 			)
 		}
 		return joined
@@ -234,7 +232,7 @@ export function sessionReplaysListQuery(
 				}
 				return conds
 			})
-			.orderBy(["startTime", "desc"])
+			.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 			.limit(limit)
 			.offset(opts.offset ?? 0)
 			.format("JSON")
@@ -243,7 +241,11 @@ export function sessionReplaysListQuery(
 	// Fast path: no post-aggregate filters → the original grouped query, untouched
 	// (never reads session_events).
 	if (!needsDurationFilter && !needsActiveFilter) {
-		return base.orderBy(["startTime", "desc"]).limit(limit).offset(opts.offset ?? 0).format("JSON")
+		return base
+			.orderBy(["startTime", "desc"], ["sessionId", "desc"])
+			.limit(limit)
+			.offset(opts.offset ?? 0)
+			.format("JSON")
 	}
 
 	// Duration and active-time bounds are post-aggregate predicates (argMax /
@@ -288,7 +290,7 @@ export function sessionReplaysListQuery(
 					opts.activeTimeMaxMs != null ? activeMs.lte(opts.activeTimeMaxMs) : undefined,
 				]
 			})
-			.orderBy(["startTime", "desc"])
+			.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 			.limit(limit)
 			.offset(opts.offset ?? 0)
 			.format("JSON")
@@ -321,7 +323,7 @@ export function sessionReplaysListQuery(
 			opts.durationMinMs != null ? $.durationMs.gte(opts.durationMinMs) : undefined,
 			opts.durationMaxMs != null ? $.durationMs.lte(opts.durationMaxMs) : undefined,
 		])
-		.orderBy(["startTime", "desc"])
+		.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 		.limit(limit)
 		.offset(opts.offset ?? 0)
 		.format("JSON")
@@ -551,6 +553,7 @@ export function sessionReplayEventsQuery(opts: SessionReplayEventsOpts = {}) {
 export interface SessionsForTraceOpts {
 	traceId: string
 	limit?: number
+	offset?: number
 }
 
 export interface SessionsForTraceOutput {
@@ -573,8 +576,9 @@ export function sessionsForTraceQuery(opts: SessionsForTraceOpts) {
 			has($.TraceIds, CH.lit(opts.traceId)),
 		])
 		.groupBy("sessionId")
-		.orderBy(["startTime", "desc"])
+		.orderBy(["startTime", "desc"], ["sessionId", "desc"])
 		.limit(opts.limit ?? 10)
+		.offset(opts.offset ?? 0)
 		.format("JSON")
 }
 

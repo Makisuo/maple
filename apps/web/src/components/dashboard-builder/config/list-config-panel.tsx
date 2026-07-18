@@ -222,14 +222,16 @@ export function ListConfigPanel() {
 	const [showFieldSuggestions, setShowFieldSuggestions] = React.useState<number | null>(null)
 
 	// Stable IDs for Reorder — kept in sync with columns array.
-	// addColumn/removeColumn/reorderColumns update the ref before calling onChange,
+	// addColumn/removeColumn/reorderColumns update the state before calling onChange,
 	// so a length mismatch here means an external reset (e.g. parent replaced columns).
-	const columnIdsRef = React.useRef<string[]>(columns.map(() => crypto.randomUUID()))
-	if (columnIdsRef.current.length !== columns.length) {
-		columnIdsRef.current = columns.map(() => crypto.randomUUID())
+	const [storedColumnIds, setStoredColumnIds] = React.useState<string[]>(() =>
+		columns.map(() => crypto.randomUUID()),
+	)
+	let columnIds = storedColumnIds
+	if (columnIds.length !== columns.length) {
+		columnIds = columns.map(() => crypto.randomUUID())
+		setStoredColumnIds(columnIds)
 	}
-
-	const columnIds = columnIdsRef.current
 
 	const knownFields = listDataSource === "traces" ? TRACE_FIELDS : LOG_FIELDS
 	// Query engine list returns full SpanAttributes/ResourceAttributes maps,
@@ -260,7 +262,7 @@ export function ListConfigPanel() {
 
 	const handleDataSourceChange = (ds: ListDataSource) => {
 		const newCols = ds === "traces" ? TRACE_DEFAULT_COLUMNS : LOG_DEFAULT_COLUMNS
-		columnIdsRef.current = newCols.map(() => crypto.randomUUID())
+		setStoredColumnIds(newCols.map(() => crypto.randomUUID()))
 		onChange({
 			listDataSource: ds,
 			listWhereClause: "",
@@ -274,12 +276,12 @@ export function ListConfigPanel() {
 	}
 
 	const removeColumn = (index: number) => {
-		columnIdsRef.current = columnIdsRef.current.filter((_, i) => i !== index)
+		setStoredColumnIds((current) => current.filter((_, i) => i !== index))
 		onChange({ listColumns: columns.filter((_, i) => i !== index) })
 	}
 
 	const addColumn = (field?: string) => {
-		columnIdsRef.current = [...columnIdsRef.current, crypto.randomUUID()]
+		setStoredColumnIds((current) => [...current, crypto.randomUUID()])
 		const newCol: ListColumnDraft = {
 			field: field ?? "",
 			header: field ?? "",
@@ -293,7 +295,7 @@ export function ListConfigPanel() {
 			const idx = columnIds.indexOf(id)
 			return columns[idx]!
 		})
-		columnIdsRef.current = newIdOrder
+		setStoredColumnIds(newIdOrder)
 		onChange({ listColumns: reordered })
 	}
 

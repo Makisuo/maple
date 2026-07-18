@@ -1,5 +1,4 @@
 import { Navigate, useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -31,12 +30,12 @@ const SettingsSearch = Schema.Struct({
 	tab: Schema.optional(Schema.Literals([...settingsTabValues, ...legacyTabValues])),
 })
 
-export const Route = effectRoute(createFileRoute("/settings"))({
+export const Route = createFileRoute("/settings")({
 	component: SettingsPage,
 	validateSearch: Schema.toStandardSchemaV1(SettingsSearch),
 })
 
-export function SettingsPage() {
+function SettingsPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const {

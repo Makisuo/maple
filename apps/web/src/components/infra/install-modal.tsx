@@ -22,7 +22,7 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { CheckIcon, CopyIcon, EyeIcon } from "@/components/icons"
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 const HOSTED_INGEST_URL = "https://ingest.maple.dev"
 const DOCS_URL = "https://maple.dev/docs/guides/kubernetes-infrastructure"
@@ -61,12 +61,12 @@ export function InstallHostModal({ open, onOpenChange }: InstallModalProps) {
 	const { copied, copy } = useCopyToClipboard("Install command")
 	const [revealed, setRevealed] = useState(false)
 
-	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
+	const keysResult = useAtomValue(MapleApiV2AtomClient.query("ingestKeys", "retrieve", {}))
 
 	const token = useMemo(
 		() =>
 			Result.builder(keysResult)
-				.onSuccess((v) => v.privateKey)
+				.onSuccess((v) => v.private_key)
 				.orElse(() => ""),
 		[keysResult],
 	)

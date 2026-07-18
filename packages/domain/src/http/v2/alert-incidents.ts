@@ -1,18 +1,19 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import { ErrorIssueId } from "../../primitives"
-import { AlertComparator, AlertEventType, AlertIncidentStatus, AlertSeverity, AlertSignalType } from "../alerts"
-import { AlertIncidentPublicId, AlertRulePublicId } from "./alert-rules"
+import {
+	AlertComparator,
+	AlertEventType,
+	AlertIncidentStatus,
+	AlertSeverity,
+	AlertSignalType,
+} from "../alerts"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
-import { PublicId, PublicIdPrefixes } from "./public-id"
+import { AlertIncidentPublicId, AlertRulePublicId, ErrorIssuePublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
-
-/** `iss_…` public ID ⇄ internal `ErrorIssueId` (raw UUID). */
-const ErrorIssuePublicId = PublicId(PublicIdPrefixes.errorIssue, ErrorIssueId)
 
 const alertIncidentExample = {
 	id: "inc_tC4d9V79DCDzgbGKhAnff9",
@@ -87,10 +88,12 @@ export const V2AlertIncident = Schema.Struct({
 		description: "Sample count of the most recent observation, or `null`.",
 	}),
 	dedupe_key: Schema.String.annotate({
-		description: "Stable identity of the (rule, group) incident stream, used to deduplicate notifications.",
+		description:
+			"Stable identity of the (rule, group) incident stream, used to deduplicate notifications.",
 	}),
 	last_delivered_event_type: Schema.NullOr(AlertEventType).annotate({
-		description: "The most recent notification event delivered for this incident (`trigger`, `resolve`, `renotify`, `test`), or `null`.",
+		description:
+			"The most recent notification event delivered for this incident (`trigger`, `resolve`, `renotify`, `test`), or `null`.",
 	}),
 	last_notified_at: Schema.NullOr(Timestamp).annotate({
 		description: "When a notification was last delivered for this incident, or `null`.",
@@ -145,7 +148,7 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 				identifier: "listAlertIncidents",
 				summary: "List alert incidents",
 				description:
-					"Returns your organization's alert incidents, most recently triggered first, optionally filtered by `status` or `rule_id`. Cursor-paginated. Requires the `alert_incidents:read` scope.",
+					"Returns your organization's alert incidents, most recently triggered first, optionally filtered by `status` or `rule_id`. Cursor-paginated. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -159,11 +162,11 @@ export class V2AlertIncidentsApiGroup extends HttpApiGroup.make("alertIncidents"
 				identifier: "getAlertIncident",
 				summary: "Retrieve an alert incident",
 				description:
-					"Returns a single alert incident by its `inc_…` ID. Requires the `alert_incidents:read` scope.",
+					"Returns a single alert incident by its `inc_…` ID. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
-	.prefix("/v2/alert_incidents")
+	.prefix("/v2/alerts/incidents")
 	.middleware(AuthorizationV2)
 	.middleware(V2SchemaErrors)
 	.annotateMerge(

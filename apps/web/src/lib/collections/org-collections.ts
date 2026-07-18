@@ -22,7 +22,6 @@ import {
 	type ErrorIssuesCollection,
 	type OpenErrorIncidentsCollection,
 } from "./errors"
-import { createScrapeTargetChecksCollection, type ScrapeTargetChecksCollection } from "./scrape-targets"
 
 /**
  * The set of ElectricSQL-synced collections for one org. Collections are
@@ -42,7 +41,6 @@ export type OrgCollections = {
 	readonly errorIssues: ErrorIssuesCollection
 	readonly actors: ActorsCollection
 	readonly openErrorIncidents: OpenErrorIncidentsCollection
-	readonly scrapeTargetChecks: ScrapeTargetChecksCollection
 }
 
 // Single live set at a time — the app shows one org at a time, and recreating on
@@ -103,12 +101,14 @@ let lastSchemaHealAt = 0
 let schemaHealGaveUp = false
 let pendingHealTimer: ReturnType<typeof setTimeout> | null = null
 
-const logSchemaHealGaveUp = (): void => {
+const logSchemaHealGaveUp = (source: HealSource): void => {
 	mapleRuntime.runFork(
 		Effect.logError(
-			"Electric sync self-heal exhausted its retry budget after repeated schema-validation " +
-				"errors; collections left stopped (lists may show stale/empty data until reload).",
-		).pipe(Effect.annotateLogs({ attempts: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS })),
+			"Electric sync self-heal exhausted its retry budget; collections left as-is " +
+				"(lists may show stale/empty/errored data until reload).",
+		).pipe(
+			Effect.annotateLogs({ source, attempts: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS }),
+		),
 	)
 }
 
@@ -123,16 +123,20 @@ const resetSchemaHealBudget = (): void => {
 	schemaHealGaveUp = false
 }
 
+/** What tripped a bounded heal — annotates the logs so dev consoles/telemetry show the cause. */
+type HealSource = "schema-error" | "stuck-loading"
+
 /**
- * Self-heal handler for `collection:schema-error`: schedules a bounded, spaced
- * recreation. Once the budget is spent it stops recreating and logs once, so a
- * permanent schema drift can no longer loop the sync proxy. Exported for tests.
+ * Schedules a bounded, spaced recreation of the org collections. Both triggers
+ * (schema drift, stuck-loading) share ONE budget: once it is spent no further
+ * recreations happen and we log once, so a persistent failure can no longer
+ * loop the sync proxy. The budget resets on a genuine org switch.
  */
-export const handleSchemaError = (): void => {
+const scheduleBoundedHeal = (source: HealSource): void => {
 	if (schemaHealGaveUp || pendingHealTimer !== null) return
 	if (schemaHealAttempts >= MAX_SCHEMA_HEAL_ATTEMPTS) {
 		schemaHealGaveUp = true
-		logSchemaHealGaveUp()
+		logSchemaHealGaveUp(source)
 		return
 	}
 	// First attempt fires immediately; later ones wait out the cooldown so the
@@ -143,9 +147,32 @@ export const handleSchemaError = (): void => {
 		pendingHealTimer = null
 		schemaHealAttempts += 1
 		lastSchemaHealAt = Date.now()
+		// The schema path already logs at the effect-db layer; the stuck path has
+		// no other trace, so log the recreate here for dev consoles/telemetry.
+		if (source === "stuck-loading") {
+			mapleRuntime.runFork(
+				Effect.logWarning("Electric sync self-heal: recreating org collections (stuck loading)").pipe(
+					Effect.annotateLogs({ source, attempt: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS }),
+				),
+			)
+		}
 		recreateOrgCollections()
 	}, delay)
 }
+
+/**
+ * Self-heal handler for `collection:schema-error`: schedules a bounded, spaced
+ * recreation (see {@link scheduleBoundedHeal}). Exported for tests.
+ */
+export const handleSchemaError = (): void => scheduleBoundedHeal("schema-error")
+
+/**
+ * Recovery hook for a collection that sat in `loading` with no emissions past
+ * the stuck timeout (`Db.fromCollectionByKey`'s `onStuck`): recreates the org
+ * collections so fresh shape streams replace the wedged ones, under the same
+ * bounded budget as the schema-error heal. Exported for tests.
+ */
+export const handleCollectionStuck = (): void => scheduleBoundedHeal("stuck-loading")
 
 /** Reactive generation counter — re-runs a consumer's collection memo after a self-heal. */
 export const useCollectionsGeneration = (): number =>
@@ -201,7 +228,6 @@ const scheduleOrgCollectionsCleanup = (collections: OrgCollections): void => {
 	cleanupCollectionWhenIdle(collections.errorIssues)
 	cleanupCollectionWhenIdle(collections.actors)
 	cleanupCollectionWhenIdle(collections.openErrorIncidents)
-	cleanupCollectionWhenIdle(collections.scrapeTargetChecks)
 }
 
 // Tracks the last org we resolved collections for, independent of `current`
@@ -230,7 +256,6 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 		errorIssues: createErrorIssuesCollection(orgId),
 		actors: createActorsCollection(orgId),
 		openErrorIncidents: createOpenErrorIncidentsCollection(orgId),
-		scrapeTargetChecks: createScrapeTargetChecksCollection(orgId),
 	}
 	// Tear down the previous org's shape streams after swapping so an in-flight
 	// read never resolves against the wrong org. Deferred (see

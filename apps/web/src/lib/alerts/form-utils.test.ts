@@ -1,14 +1,13 @@
-import { AlertRuleDocument } from "@maple/domain/http"
-import { Schema } from "effect"
 import { describe, expect, it } from "vitest"
 import {
-	buildRuleRequest,
-	buildRuleToggleRequest,
+	buildRuleCreateParamsV2,
 	defaultRuleForm,
 	deriveRuleQueryIssues,
 	domainThresholdToForm,
 	formThresholdToDomain,
 	rawSqlHasValueColumn,
+	v2CheckToDocument,
+	v2PreviewToResponse,
 } from "./form-utils"
 
 describe("rule notes", () => {
@@ -16,19 +15,19 @@ describe("rule notes", () => {
 		expect(defaultRuleForm().notes).toBe("")
 	})
 
-	it("carries a trimmed note onto the upsert request", () => {
-		const request = buildRuleRequest({
+	it("carries a trimmed note onto the create params", () => {
+		const params = buildRuleCreateParamsV2({
 			...defaultRuleForm(),
 			name: "Error rate",
 			notes: "  See runbook: https://wiki/incidents  ",
 		})
 
-		expect(request.notes).toBe("See runbook: https://wiki/incidents")
+		expect(params.notes).toBe("See runbook: https://wiki/incidents")
 	})
 
 	it("sends null when the note is blank or whitespace-only", () => {
-		expect(buildRuleRequest({ ...defaultRuleForm(), name: "A", notes: "" }).notes).toBeNull()
-		expect(buildRuleRequest({ ...defaultRuleForm(), name: "A", notes: "   " }).notes).toBeNull()
+		expect(buildRuleCreateParamsV2({ ...defaultRuleForm(), name: "A", notes: "" }).notes).toBeNull()
+		expect(buildRuleCreateParamsV2({ ...defaultRuleForm(), name: "A", notes: "   " }).notes).toBeNull()
 	})
 })
 
@@ -48,25 +47,52 @@ describe("threshold unit conversion", () => {
 		expect(formThresholdToDomain("throughput", "1000")).toBe(1000)
 	})
 
-	it("stores error_rate threshold as a ratio on the upsert request", () => {
+	it("stores error_rate threshold as a ratio on the create params", () => {
 		// The default form threshold "5" must round-trip to the 0.05 ratio the
 		// MCP tool also uses — so a default error-rate alert can actually fire.
-		const request = buildRuleRequest({
+		const params = buildRuleCreateParamsV2({
 			...defaultRuleForm(),
 			name: "Error rate",
 			signalType: "error_rate",
 		})
-		expect(request.threshold).toBe(0.05)
+		expect(params.threshold).toBe(0.05)
 	})
 
-	it("keeps latency thresholds in their native units on the upsert request", () => {
-		const request = buildRuleRequest({
+	it("keeps latency thresholds in their native units on the create params", () => {
+		const params = buildRuleCreateParamsV2({
 			...defaultRuleForm(),
 			name: "P95",
 			signalType: "p95_latency",
 			threshold: "500",
 		})
-		expect(request.threshold).toBe(500)
+		expect(params.threshold).toBe(500)
+	})
+})
+
+describe("buildRuleCreateParamsV2", () => {
+	it("dedupes destination ids", () => {
+		const form = defaultRuleForm()
+		const params = buildRuleCreateParamsV2({
+			...form,
+			name: "A",
+			destinationIds: [...form.destinationIds, ...form.destinationIds],
+		})
+		expect(params.destination_ids).toEqual([...new Set(params.destination_ids)])
+	})
+
+	it("empties the rule-level scope for query-owned signals", () => {
+		const params = buildRuleCreateParamsV2({
+			...defaultRuleForm(),
+			name: "Builder",
+			signalType: "builder_query",
+			serviceNames: ["checkout"],
+			excludeServiceNames: ["internal"],
+			groupBy: ["service.name"],
+		})
+		expect(params.service_names).toEqual([])
+		expect(params.exclude_service_names).toEqual([])
+		expect(params.group_by).toBeNull()
+		expect(params.query_builder_draft).not.toBeNull()
 	})
 })
 
@@ -92,73 +118,95 @@ describe("raw SQL alert query validation", () => {
 	})
 })
 
-// Decode a plain object into a branded `AlertRuleDocument` (as `listRules` would),
-// so fixtures pass plain strings/UUIDs and Schema does the branding — no casts.
-const decodeRuleDoc = Schema.decodeUnknownSync(AlertRuleDocument)
+describe("v2 response mappers", () => {
+	it("maps a v2 preview result onto the camelCase domain response", () => {
+		const response = v2PreviewToResponse({
+			object: "alert_rule.preview",
+			bucket_seconds: 300,
+			window_minutes: 5,
+			threshold: 0.05,
+			threshold_upper: null,
+			comparator: "gt",
+			truncated_to_start: "2026-07-15T00:00:00.000Z",
+			series: [
+				{
+					group_key: "__total__",
+					points: [
+						{
+							bucket: "2026-07-15T09:10:00.000Z",
+							value: 0.09,
+							sample_count: 132,
+							status: "breached",
+							provisional: true,
+						},
+					],
+				},
+			],
+			would_fire: [
+				{
+					group_key: "__total__",
+					start: "2026-07-15T09:10:00.000Z",
+					end: "2026-07-15T09:40:00.000Z",
+				},
+			],
+		})
 
-function makeRuleDoc(
-	overrides: Partial<{ enabled: boolean; serviceNames: string[]; excludeServiceNames: string[] }> = {},
-): AlertRuleDocument {
-	return decodeRuleDoc({
-		id: "00000000-0000-4000-8000-000000000000",
-		name: "My rule",
-		notes: null,
-		notificationTemplate: null,
-		enabled: true,
-		severity: "warning",
-		serviceNames: [],
-		excludeServiceNames: [],
-		tags: [],
-		groupBy: null,
-		signalType: "error_rate",
-		comparator: "gt",
-		threshold: 0.05,
-		thresholdUpper: null,
-		windowMinutes: 5,
-		minimumSampleCount: 0,
-		consecutiveBreachesRequired: 2,
-		consecutiveHealthyRequired: 2,
-		renotifyIntervalMinutes: 30,
-		metricName: null,
-		metricType: null,
-		metricAggregation: null,
-		apdexThresholdMs: null,
-		queryBuilderDraft: null,
-		rawQuerySql: null,
-		rawQueryReducer: null,
-		destinationIds: [],
-		noDataBehavior: "skip",
-		lastEvaluationError: null,
-		lastEvaluatedAt: null,
-		lastScheduledAt: null,
-		createdAt: "2026-01-01T00:00:00.000Z",
-		updatedAt: "2026-01-01T00:00:00.000Z",
-		createdBy: "user_test",
-		updatedBy: "user_test",
-		...overrides,
-	})
-}
-
-describe("buildRuleToggleRequest", () => {
-	// Regression: `optionalKey(Array)` rejects an explicit `undefined`, so coercing
-	// empty service arrays to `undefined` made `new AlertRuleUpsertRequest({...})`
-	// throw synchronously — the toggle silently no-op'd and the Switch never moved.
-	it("does not throw when serviceNames/excludeServiceNames are empty", () => {
-		const rule = makeRuleDoc({ enabled: true, serviceNames: [], excludeServiceNames: [] })
-		const request = buildRuleToggleRequest(rule)
-		expect(request.enabled).toBe(false)
-		expect(request.serviceNames).toEqual([])
-		expect(request.excludeServiceNames).toEqual([])
+		expect(response.bucketSeconds).toBe(300)
+		expect(response.windowMinutes).toBe(5)
+		expect(response.truncatedToStart).toBe("2026-07-15T00:00:00.000Z")
+		expect(response.series[0]?.groupKey).toBe("__total__")
+		expect(response.series[0]?.points[0]).toMatchObject({
+			bucket: "2026-07-15T09:10:00.000Z",
+			value: 0.09,
+			sampleCount: 132,
+			status: "breached",
+			provisional: true,
+		})
+		expect(response.wouldFire[0]).toMatchObject({
+			groupKey: "__total__",
+			start: "2026-07-15T09:10:00.000Z",
+			end: "2026-07-15T09:40:00.000Z",
+		})
 	})
 
-	it("flips enabled in both directions", () => {
-		expect(buildRuleToggleRequest(makeRuleDoc({ enabled: false })).enabled).toBe(true)
-		expect(buildRuleToggleRequest(makeRuleDoc({ enabled: true })).enabled).toBe(false)
-	})
+	it("maps a v2 check onto the camelCase domain document", () => {
+		const document = v2CheckToDocument({
+			object: "alert_check",
+			timestamp: "2026-07-15T09:10:00.000Z",
+			group_key: "__total__",
+			status: "breached",
+			signal_type: "error_rate",
+			comparator: "gt",
+			threshold: 0.05,
+			threshold_upper: null,
+			observed_value: 0.09,
+			sample_count: 132,
+			window_minutes: 5,
+			window_start: "2026-07-15T09:05:00.000Z",
+			window_end: "2026-07-15T09:10:00.000Z",
+			consecutive_breaches: 2,
+			consecutive_healthy: 0,
+			incident_id: null,
+			incident_transition: "opened",
+			evaluation_duration_ms: 412,
+			error_message: null,
+			error_category: null,
+		})
 
-	it("preserves the rule's service scoping", () => {
-		const rule = makeRuleDoc({ serviceNames: ["svc-a", "svc-b"], excludeServiceNames: [] })
-		const request = buildRuleToggleRequest(rule)
-		expect(request.serviceNames).toEqual(["svc-a", "svc-b"])
+		expect(document).toMatchObject({
+			timestamp: "2026-07-15T09:10:00.000Z",
+			groupKey: "__total__",
+			status: "breached",
+			signalType: "error_rate",
+			observedValue: 0.09,
+			sampleCount: 132,
+			windowStart: "2026-07-15T09:05:00.000Z",
+			windowEnd: "2026-07-15T09:10:00.000Z",
+			consecutiveBreaches: 2,
+			consecutiveHealthy: 0,
+			incidentId: null,
+			incidentTransition: "opened",
+			evaluationDurationMs: 412,
+		})
 	})
 })

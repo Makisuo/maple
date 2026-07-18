@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -40,7 +39,7 @@ const replaysSearchSchema = Schema.Struct({
 	q: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/replays/"))({
+export const Route = createFileRoute("/replays/")({
 	component: ReplaysPage,
 	validateSearch: Schema.toStandardSchemaV1(replaysSearchSchema),
 })
@@ -88,7 +87,7 @@ function ReplaysPage() {
 		],
 	)
 
-	const { firstPageResult, allData, hasNextPage, isFetchingNextPage, fetchNextPage } =
+	const { firstPageResult, allData, hasNextPage, isCapped, isFetchingNextPage, fetchNextPage } =
 		useInfiniteReplays(filterInputs)
 	const facetsResult = useAtomValue(replaysFacetsResultAtom({ data: filterInputs }))
 
@@ -165,6 +164,7 @@ function ReplaysPage() {
 						<SessionsList
 							sessions={allData}
 							hasMore={hasNextPage}
+							isCapped={isCapped}
 							loadingMore={isFetchingNextPage}
 							onReachEnd={fetchNextPage}
 						/>

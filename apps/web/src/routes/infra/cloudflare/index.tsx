@@ -1,6 +1,5 @@
 import { useMemo } from "react"
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -39,7 +38,7 @@ const cloudflareSearchSchema = Schema.Struct({
 	timePreset: Schema.optional(Schema.String),
 })
 
-export const Route = effectRoute(createFileRoute("/infra/cloudflare/"))({
+export const Route = createFileRoute("/infra/cloudflare/")({
 	component: CloudflarePage,
 	validateSearch: Schema.toStandardSchemaV1(cloudflareSearchSchema),
 })
@@ -182,7 +181,7 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 				.onError((err) => <QueryErrorState error={err} />)
 				.onSuccess((response, result) => {
 					return (
-						<div className={`space-y-6 content-enter ${result.waiting ? "opacity-60" : ""}`}>
+						<div className={`space-y-6 transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
 							{response.zones.length > 0 && (
 								<CloudflareKpiCards zones={response.zones} buckets={timeseries?.buckets} />
 							)}

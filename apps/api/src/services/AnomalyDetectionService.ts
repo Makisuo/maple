@@ -179,6 +179,7 @@ export interface AnomalyDetectionServiceShape {
 			readonly startTime?: string
 			readonly endTime?: string
 			readonly limit?: number
+			readonly offset?: number
 		},
 	) => Effect.Effect<AnomalyIncidentsListResponse, AnomalyPersistenceError>
 	readonly getIncident: (
@@ -513,8 +514,9 @@ const make = Effect.gen(function* () {
 				.select()
 				.from(anomalyIncidents)
 				.where(and(...conditions))
-				.orderBy(desc(anomalyIncidents.lastTriggeredAt))
-				.limit(opts.limit ?? 100),
+				.orderBy(desc(anomalyIncidents.lastTriggeredAt), desc(anomalyIncidents.id))
+				.limit(opts.limit ?? 100)
+				.offset(opts.offset ?? 0),
 		)
 		return new AnomalyIncidentsListResponse({ incidents: rows.map(incidentToDocument) })
 	})
@@ -1828,9 +1830,7 @@ const make = Effect.gen(function* () {
 			const candidates = new Set<OrgId>([...knownOrgs, ...mustProcess])
 
 			const activeOrgs = yield* resolveActiveOrgs([...candidates], nowMs)
-			const orgsToProcess = [...candidates].filter(
-				(org) => activeOrgs.has(org) || mustProcess.has(org),
-			)
+			const orgsToProcess = [...candidates].filter((org) => activeOrgs.has(org) || mustProcess.has(org))
 
 			const orgFailures = yield* Ref.make(0)
 			const emptyStats = {

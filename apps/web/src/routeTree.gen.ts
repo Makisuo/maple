@@ -15,12 +15,16 @@ import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ServiceMapBenchRouteImport } from './routes/service-map-bench'
 import { Route as ServiceMapRouteImport } from './routes/service-map'
+import { Route as ServiceDetailBenchRouteImport } from './routes/service-detail-bench'
 import { Route as SelectPlanRouteImport } from './routes/select-plan'
 import { Route as QuickStartRouteImport } from './routes/quick-start'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
+import { Route as OverviewBenchRouteImport } from './routes/overview-bench'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
 import { Route as McpRouteImport } from './routes/mcp'
+import { Route as LogsBenchRouteImport } from './routes/logs-bench'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as InfraBenchRouteImport } from './routes/infra-bench'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as ChatRouteImport } from './routes/chat'
@@ -95,6 +99,11 @@ const ServiceMapRoute = ServiceMapRouteImport.update({
   path: '/service-map',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ServiceDetailBenchRoute = ServiceDetailBenchRouteImport.update({
+  id: '/service-detail-bench',
+  path: '/service-detail-bench',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SelectPlanRoute = SelectPlanRouteImport.update({
   id: '/select-plan',
   path: '/select-plan',
@@ -110,6 +119,11 @@ const QueryBuilderLabRoute = QueryBuilderLabRouteImport.update({
   path: '/query-builder-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OverviewBenchRoute = OverviewBenchRouteImport.update({
+  id: '/overview-bench',
+  path: '/overview-bench',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrgRequiredRoute = OrgRequiredRouteImport.update({
   id: '/org-required',
   path: '/org-required',
@@ -120,9 +134,19 @@ const McpRoute = McpRouteImport.update({
   path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LogsBenchRoute = LogsBenchRouteImport.update({
+  id: '/logs-bench',
+  path: '/logs-bench',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfraBenchRoute = InfraBenchRouteImport.update({
+  id: '/infra-bench',
+  path: '/infra-bench',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeveloperRoute = DeveloperRouteImport.update({
@@ -355,12 +379,16 @@ export interface FileRoutesByFullPath {
   '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
+  '/infra-bench': typeof InfraBenchRoute
   '/integrations': typeof IntegrationsRoute
+  '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/org-required': typeof OrgRequiredRoute
+  '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
   '/quick-start': typeof QuickStartRoute
   '/select-plan': typeof SelectPlanRoute
+  '/service-detail-bench': typeof ServiceDetailBenchRoute
   '/service-map': typeof ServiceMapRoute
   '/service-map-bench': typeof ServiceMapBenchRoute
   '/settings': typeof SettingsRoute
@@ -412,12 +440,16 @@ export interface FileRoutesByTo {
   '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
+  '/infra-bench': typeof InfraBenchRoute
   '/integrations': typeof IntegrationsRoute
+  '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/org-required': typeof OrgRequiredRoute
+  '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
   '/quick-start': typeof QuickStartRoute
   '/select-plan': typeof SelectPlanRoute
+  '/service-detail-bench': typeof ServiceDetailBenchRoute
   '/service-map': typeof ServiceMapRoute
   '/service-map-bench': typeof ServiceMapBenchRoute
   '/settings': typeof SettingsRoute
@@ -470,12 +502,16 @@ export interface FileRoutesById {
   '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
+  '/infra-bench': typeof InfraBenchRoute
   '/integrations': typeof IntegrationsRoute
+  '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
   '/org-required': typeof OrgRequiredRoute
+  '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
   '/quick-start': typeof QuickStartRoute
   '/select-plan': typeof SelectPlanRoute
+  '/service-detail-bench': typeof ServiceDetailBenchRoute
   '/service-map': typeof ServiceMapRoute
   '/service-map-bench': typeof ServiceMapBenchRoute
   '/settings': typeof SettingsRoute
@@ -529,12 +565,16 @@ export interface FileRouteTypes {
     | '/chat'
     | '/connectors'
     | '/developer'
+    | '/infra-bench'
     | '/integrations'
+    | '/logs-bench'
     | '/mcp'
     | '/org-required'
+    | '/overview-bench'
     | '/query-builder-lab'
     | '/quick-start'
     | '/select-plan'
+    | '/service-detail-bench'
     | '/service-map'
     | '/service-map-bench'
     | '/settings'
@@ -586,12 +626,16 @@ export interface FileRouteTypes {
     | '/chat'
     | '/connectors'
     | '/developer'
+    | '/infra-bench'
     | '/integrations'
+    | '/logs-bench'
     | '/mcp'
     | '/org-required'
+    | '/overview-bench'
     | '/query-builder-lab'
     | '/quick-start'
     | '/select-plan'
+    | '/service-detail-bench'
     | '/service-map'
     | '/service-map-bench'
     | '/settings'
@@ -643,12 +687,16 @@ export interface FileRouteTypes {
     | '/chat'
     | '/connectors'
     | '/developer'
+    | '/infra-bench'
     | '/integrations'
+    | '/logs-bench'
     | '/mcp'
     | '/org-required'
+    | '/overview-bench'
     | '/query-builder-lab'
     | '/quick-start'
     | '/select-plan'
+    | '/service-detail-bench'
     | '/service-map'
     | '/service-map-bench'
     | '/settings'
@@ -701,12 +749,16 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRoute
   ConnectorsRoute: typeof ConnectorsRoute
   DeveloperRoute: typeof DeveloperRoute
+  InfraBenchRoute: typeof InfraBenchRoute
   IntegrationsRoute: typeof IntegrationsRoute
+  LogsBenchRoute: typeof LogsBenchRoute
   McpRoute: typeof McpRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
+  OverviewBenchRoute: typeof OverviewBenchRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
   QuickStartRoute: typeof QuickStartRoute
   SelectPlanRoute: typeof SelectPlanRoute
+  ServiceDetailBenchRoute: typeof ServiceDetailBenchRoute
   ServiceMapRoute: typeof ServiceMapRoute
   ServiceMapBenchRoute: typeof ServiceMapBenchRoute
   SettingsRoute: typeof SettingsRoute
@@ -798,6 +850,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ServiceMapRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/service-detail-bench': {
+      id: '/service-detail-bench'
+      path: '/service-detail-bench'
+      fullPath: '/service-detail-bench'
+      preLoaderRoute: typeof ServiceDetailBenchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/select-plan': {
       id: '/select-plan'
       path: '/select-plan'
@@ -819,6 +878,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof QueryBuilderLabRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/overview-bench': {
+      id: '/overview-bench'
+      path: '/overview-bench'
+      fullPath: '/overview-bench'
+      preLoaderRoute: typeof OverviewBenchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/org-required': {
       id: '/org-required'
       path: '/org-required'
@@ -833,11 +899,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/logs-bench': {
+      id: '/logs-bench'
+      path: '/logs-bench'
+      fullPath: '/logs-bench'
+      preLoaderRoute: typeof LogsBenchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations': {
       id: '/integrations'
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/infra-bench': {
+      id: '/infra-bench'
+      path: '/infra-bench'
+      fullPath: '/infra-bench'
+      preLoaderRoute: typeof InfraBenchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/developer': {
@@ -1149,12 +1229,16 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRoute,
   ConnectorsRoute: ConnectorsRoute,
   DeveloperRoute: DeveloperRoute,
+  InfraBenchRoute: InfraBenchRoute,
   IntegrationsRoute: IntegrationsRoute,
+  LogsBenchRoute: LogsBenchRoute,
   McpRoute: McpRoute,
   OrgRequiredRoute: OrgRequiredRoute,
+  OverviewBenchRoute: OverviewBenchRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,
   QuickStartRoute: QuickStartRoute,
   SelectPlanRoute: SelectPlanRoute,
+  ServiceDetailBenchRoute: ServiceDetailBenchRoute,
   ServiceMapRoute: ServiceMapRoute,
   ServiceMapBenchRoute: ServiceMapBenchRoute,
   SettingsRoute: SettingsRoute,

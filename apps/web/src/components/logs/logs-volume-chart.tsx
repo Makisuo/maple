@@ -190,7 +190,7 @@ export function LogsVolumeChart({ filters, onTimeRangeSelect }: LogsVolumeChartP
 			bucketSecondsRef.current = dataBucketSeconds ?? 300
 
 			return (
-				<div className={`content-enter ${result.waiting ? "opacity-60" : ""}`}>
+				<div className={`transition-opacity ${result.waiting ? "opacity-60" : ""}`}>
 					<div className="mb-1 flex items-baseline gap-2">
 						<span className="text-sm font-medium">{formatNumber(totalCount)} logs</span>
 						<span className="text-xs text-muted-foreground">in selected range</span>

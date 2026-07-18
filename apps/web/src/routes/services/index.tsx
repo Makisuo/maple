@@ -1,5 +1,4 @@
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { OptionalStringArrayParam } from "@/lib/search-params"
@@ -22,12 +21,12 @@ const servicesSearchSchema = Schema.Struct({
 
 export type ServicesSearchParams = Schema.Schema.Type<typeof servicesSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/services/"))({
+export const Route = createFileRoute("/services/")({
 	component: ServicesPage,
 	validateSearch: Schema.toStandardSchemaV1(servicesSearchSchema),
 })
 
-export function ServicesPage() {
+function ServicesPage() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
 	const { startTime: effectiveStartTime, endTime: effectiveEndTime } = useEffectiveTimeRange(

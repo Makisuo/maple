@@ -17,6 +17,10 @@ const COMMIT_SHA_KEYS = new Set(["deployment.commit_sha", "vcs.ref.head.revision
  */
 export function renderAttributeValue(attrKey: string, value: string): ReactNode | null {
 	if (!COMMIT_SHA_KEYS.has(attrKey)) return null
+	return <CommitShaAttributeValue value={value} />
+}
+
+export function CommitShaAttributeValue({ value }: { value: string }) {
 	return (
 		<CommitShaHoverCard
 			sha={value}

@@ -2,7 +2,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { AlertIncidentDocument } from "@maple/domain/http"
 import { CurrentTenant } from "@maple/domain/http"
 import type { V2AlertIncident } from "@maple/domain/http/v2"
-import { MapleApiV2, notFound, paginateArray } from "@maple/domain/http/v2"
+import { MapleApiV2, paginateOffsetQuery } from "@maple/domain/http/v2"
 import { Effect } from "effect"
 import { AlertsService } from "../../services/AlertsService"
 import { mapAlertError } from "./alerts-error-map"
@@ -38,22 +38,28 @@ export const HttpV2AlertIncidentsLive = HttpApiBuilder.group(MapleApiV2, "alertI
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts.listIncidents(tenant.orgId).pipe(Effect.mapError(mapAlertError))
-					const filtered = response.incidents.filter(
-						(incident) =>
-							(query.status === undefined || incident.status === query.status) &&
-							(query.rule_id === undefined || incident.ruleId === query.rule_id),
+					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
+						alerts
+							.listIncidents(tenant.orgId, {
+								...(query.status !== undefined ? { status: query.status } : {}),
+								...(query.rule_id !== undefined ? { ruleId: query.rule_id } : {}),
+								limit,
+								offset,
+							})
+							.pipe(
+								mapAlertError("incident_list"),
+								Effect.map((response) => response.incidents.map(toV2Incident)),
+							),
 					)
-					const page = paginateArray(filtered.map(toV2Incident), query)
 					return { object: "list" as const, ...page }
 				}),
 			)
 			.handle("retrieve", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const response = yield* alerts.listIncidents(tenant.orgId).pipe(Effect.mapError(mapAlertError))
-					const incident = response.incidents.find((doc) => doc.id === params.id)
-					if (incident === undefined) return yield* Effect.fail(notFound("No such alert_incident.", "id"))
+					const incident = yield* alerts
+						.getIncident(tenant.orgId, params.id)
+						.pipe(mapAlertError("incident_retrieve"))
 					return toV2Incident(incident)
 				}),
 			)

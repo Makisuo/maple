@@ -169,11 +169,14 @@ function buildAlertRuleRequest(
 		Match.when("raw_query", (): { error: string } | { draft?: unknown } => {
 			if (!params.raw_query_sql) {
 				return {
-					error: "signal_type=raw_query requires raw_query_sql: ClickHouse SQL returning a numeric `value` column (optional `group`, `samples` columns). Must reference $__orgFilter and may use $__timeFilter(col), $__startTime, $__endTime, $__interval_s.",
+					error: "signal_type=raw_query requires raw_query_sql: ClickHouse SQL returning a numeric `value` column (optional `group`, `samples` columns). Must reference $__orgFilter and $__timeFilter(col); may also use $__startTime, $__endTime, and $__interval_s.",
 				}
 			}
 			if (!params.raw_query_sql.includes("$__orgFilter")) {
 				return { error: "raw_query_sql must reference $__orgFilter for org scoping" }
+			}
+			if (!params.raw_query_sql.includes("$__timeFilter(")) {
+				return { error: "raw_query_sql must reference $__timeFilter(...) to bound alert reads" }
 			}
 			return {}
 		}),
@@ -302,7 +305,7 @@ export function registerCreateAlertRuleTool(server: McpToolRegistrar) {
 				"JSON string of a query-builder draft (required when signal_type=builder_query). Same shape as dashboard custom-query widgets: { id, name, dataSource, aggregation, whereClause, groupBy, ... }.",
 			),
 			raw_query_sql: optionalStringParam(
-				"ClickHouse SQL returning a numeric `value` column, optional `group`/`samples` columns (required when signal_type=raw_query). Must reference $__orgFilter; supports $__timeFilter(col), $__startTime, $__endTime, $__interval_s.",
+				"ClickHouse SQL returning a numeric `value` column, optional `group`/`samples` columns (required when signal_type=raw_query). Must reference $__orgFilter and $__timeFilter(col); supports $__startTime, $__endTime, and $__interval_s.",
 			),
 			raw_query_reducer: optionalStringParam(
 				"How to collapse raw_query result rows into one value: identity, sum, avg, min, max (default: identity).",

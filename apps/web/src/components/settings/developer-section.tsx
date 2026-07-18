@@ -14,14 +14,50 @@ import { apiBaseUrl } from "@/lib/services/common/api-base-url"
 const SCOPE_FAMILY_ROWS = [
 	{ id: "api_keys", label: "API keys", description: "Create, roll, and revoke API keys" },
 	{ id: "dashboards", label: "Dashboards", description: "Dashboards, templates, and version history" },
-	{ id: "alert_rules", label: "Alert rules", description: "Alert rules, test/preview, and check history" },
-	{ id: "alert_destinations", label: "Alert destinations", description: "Notification channels rules deliver to" },
-	{ id: "alert_incidents", label: "Alert incidents", description: "Incident history (read-only)" },
+	{
+		id: "alerts",
+		label: "Alerts",
+		description: "Alert rules (incl. test/preview/checks), destinations, and incidents",
+	},
+	{ id: "ingest_keys", label: "Ingest keys", description: "View and roll telemetry ingest keys" },
+	{
+		id: "attribute_mappings",
+		label: "Attribute mappings",
+		description: "Ingest-time attribute rewrite rules",
+	},
+	{
+		id: "scrape_targets",
+		label: "Scrape targets",
+		description: "Prometheus/PlanetScale scrape targets, probes, and checks",
+	},
+	{ id: "instrumentation", label: "Recommendations", description: "Instrumentation recommendations" },
+	{
+		id: "investigations",
+		label: "Investigations",
+		description: "AI investigation war-rooms — list, open, and update status",
+	},
+	{
+		id: "anomalies",
+		label: "Anomalies",
+		description: "Anomaly incidents (incl. timeseries/resolve/link-issue) and detector settings",
+	},
+	{
+		id: "session_replays",
+		label: "Session replays",
+		description: "Search sessions, retrieve detail, events, and transcripts",
+	},
+	{ id: "traces", label: "Traces", description: "Search traces and retrieve spans" },
+	{ id: "logs", label: "Logs", description: "Search and retrieve log records" },
+	{ id: "metrics", label: "Metrics", description: "Metric catalog and timeseries reads" },
+	{ id: "services", label: "Services", description: "Service catalog and health summaries" },
+	{ id: "service_map", label: "Service map", description: "Service-to-service topology" },
+	{ id: "query", label: "Query", description: "Structured telemetry queries" },
+	{ id: "organization", label: "Organization", description: "Read the organization's identity" },
 ] as const
 
 const docsUrl = `${apiBaseUrl}/v2/docs`
 
-const curlExample = `curl ${apiBaseUrl}/v2/alert_rules \\
+const curlExample = `curl ${apiBaseUrl}/v2/alerts/rules \\
   -H "Authorization: Bearer maple_ak_..."`
 
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -53,11 +89,21 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 						<div className="space-y-1">
 							<CardTitle>API Reference</CardTitle>
 							<CardDescription>
-								The Maple v2 API is a resource-oriented REST interface — snake_case JSON, prefixed
-								object IDs, cursor-paginated lists, and scoped API keys.
+								The Maple v2 API is a resource-oriented REST interface — snake_case JSON,
+								prefixed object IDs, cursor-paginated lists, and scoped API keys.
 							</CardDescription>
 						</div>
-						<Button size="sm" render={<a href={docsUrl} target="_blank" rel="noopener noreferrer" />}>
+							<Button
+								size="sm"
+								render={
+									<a
+										href={docsUrl}
+										target="_blank"
+										rel="noopener noreferrer"
+										aria-label="Open API reference"
+									/>
+								}
+							>
 							<CodeIcon data-icon="inline-start" size={14} />
 							Open API reference
 						</Button>
@@ -104,16 +150,22 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 						Restricted keys grant <code className="font-mono text-xs">read</code> or{" "}
 						<code className="font-mono text-xs">write</code> access per resource family (
 						<code className="font-mono text-xs">write</code> implies{" "}
-						<code className="font-mono text-xs">read</code>). A key without scopes has full access.
+						<code className="font-mono text-xs">read</code>). A key without scopes has full
+						access.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<div className="divide-y rounded-md border">
 						{SCOPE_FAMILY_ROWS.map((family) => (
-							<div key={family.id} className="flex items-center justify-between gap-4 px-3 py-2.5">
+							<div
+								key={family.id}
+								className="flex items-center justify-between gap-4 px-3 py-2.5"
+							>
 								<div className="min-w-0 space-y-0.5">
 									<div className="text-sm font-medium">{family.label}</div>
-									<div className="text-muted-foreground truncate text-xs">{family.description}</div>
+									<div className="text-muted-foreground truncate text-xs">
+										{family.description}
+									</div>
 								</div>
 								<div className="flex shrink-0 items-center gap-1.5">
 									<Badge variant="outline" className="font-mono text-[11px]">

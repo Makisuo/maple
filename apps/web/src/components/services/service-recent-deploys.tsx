@@ -1,4 +1,5 @@
 import { useMemo } from "react"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 import { CommitShaHoverCard } from "@/components/vcs/commit-sha-hover-card"
 import type { ReleasePoint } from "@/components/vcs/commit-markers/marker-layout"
@@ -11,6 +12,8 @@ const RAIL_LIMIT = 6
 interface ServiceRecentDeploysProps {
 	/** The per-bucket release timeline the Overview already fetched. */
 	releases: ReadonlyArray<ReleasePoint>
+	/** True while the overview query is still in flight (no retained data yet). */
+	isLoading?: boolean
 }
 
 interface DeployEntry {
@@ -51,9 +54,21 @@ function deriveDeploys(releases: ReadonlyArray<ReleasePoint>): DeployEntry[] {
  * first, each one hover-expandable to the resolved commit card. Derived purely
  * from the release timeline the Overview tab already has — no extra fetch.
  */
-export function ServiceRecentDeploys({ releases }: ServiceRecentDeploysProps) {
+export function ServiceRecentDeploys({ releases, isLoading = false }: ServiceRecentDeploysProps) {
 	const deploys = useMemo(() => deriveDeploys(releases), [releases])
 	const visible = deploys.slice(0, RAIL_LIMIT)
+
+	if (isLoading) {
+		return (
+			<SectionCard title="Recent deploys">
+				<div className="space-y-px p-2">
+					{Array.from({ length: 4 }).map((_, i) => (
+						<Skeleton key={i} className="h-8 w-full" />
+					))}
+				</div>
+			</SectionCard>
+		)
+	}
 
 	return (
 		<SectionCard

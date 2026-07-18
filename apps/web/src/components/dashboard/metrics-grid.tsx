@@ -7,6 +7,7 @@ import { ChartTooltipSuppressionProvider } from "@maple/ui/components/ui/chart"
 import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/charts/_shared/chart-types"
 import { ReadonlyWidgetShell } from "@/components/dashboard-builder/widgets/widget-shell"
 import { ErrorState } from "@/components/common/error-state"
+import { LinkedCursorOverlay, linkedCursorChartProps, useLinkedCursor } from "@/hooks/use-linked-cursor"
 
 interface MetricsGridItem {
 	id: string
@@ -31,8 +32,15 @@ interface MetricsGridProps {
 	className?: string
 	waiting?: boolean
 	/**
+	 * `recharts` uses Recharts' event bus to synchronize every chart store and
+	 * tooltip. `cursor` keeps each chart independent and paints a lightweight
+	 * linked cursor across the sibling plots without scheduling React work.
+	 */
+	syncMode?: "recharts" | "cursor"
+	/**
 	 * If provided, every chart in the grid is given the same syncId so
-	 * hovering one chart highlights the same time bucket on the others.
+	 * hovering one chart highlights the same time bucket on the others. In
+	 * `cursor` mode the id enables the linked cursor but is not sent to Recharts.
 	 */
 	syncId?: string
 	/**
@@ -50,10 +58,23 @@ interface MetricsGridProps {
 	yAxisWidth?: number
 }
 
-export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisWidth }: MetricsGridProps) {
+export function MetricsGrid({
+	items,
+	className,
+	waiting,
+	syncMode = "cursor",
+	syncId,
+	overlay,
+	yAxisWidth,
+}: MetricsGridProps) {
+	const linkedCursorEnabled = syncMode === "cursor" && syncId != null
+	const { containerProps } = useLinkedCursor(linkedCursorEnabled)
+
 	return (
 		<ChartTooltipSuppressionProvider>
 			<div
+				{...containerProps}
+				data-metrics-grid-sync-mode={syncMode}
 				className={cn(
 					"grid grid-cols-1 md:grid-cols-2 gap-3 transition-opacity",
 					waiting && "opacity-60",
@@ -72,6 +93,7 @@ export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisW
 					return (
 						<div
 							key={item.id}
+							{...linkedCursorChartProps(linkedCursorEnabled ? item.id : undefined)}
 							className={cn("h-[240px] md:h-[280px]", fullWidth && "md:col-span-2")}
 						>
 							<ReadonlyWidgetShell
@@ -98,18 +120,21 @@ export function MetricsGrid({ items, className, waiting, syncId, overlay, yAxisW
 								) : item.isLoading ? (
 									<ChartSkeleton variant={entry.category} />
 								) : (
-									<Suspense fallback={<ChartSkeleton variant={entry.category} />}>
-										<ChartComponent
-											data={item.data}
-											className="h-full w-full aspect-auto"
-											legend={item.legend}
-											tooltip={item.tooltip}
-											rateMode={item.rateMode}
-											syncId={syncId}
-											overlay={overlay}
-											yAxisWidth={yAxisWidth}
-										/>
-									</Suspense>
+									<div className="relative h-full min-h-0 w-full">
+										<Suspense fallback={<ChartSkeleton variant={entry.category} />}>
+											<ChartComponent
+												data={item.data}
+												className="h-full w-full aspect-auto"
+												legend={item.legend}
+												tooltip={item.tooltip}
+												rateMode={item.rateMode}
+												syncId={syncMode === "recharts" ? syncId : undefined}
+												overlay={overlay}
+												yAxisWidth={yAxisWidth}
+											/>
+										</Suspense>
+										{linkedCursorEnabled && <LinkedCursorOverlay chartId={item.id} />}
+									</div>
 								)}
 							</ReadonlyWidgetShell>
 						</div>

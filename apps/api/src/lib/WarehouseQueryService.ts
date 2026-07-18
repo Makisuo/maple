@@ -1,10 +1,11 @@
 import { createClient as createClickHouseClient } from "@clickhouse/client-web"
 import { Tinybird } from "@tinybirdco/sdk"
 import { Context, Effect, Layer, Option, Redacted } from "effect"
-import type { WarehouseQueryRequest } from "@maple/domain/http"
+import { WarehouseConfigError, type WarehouseQueryRequest } from "@maple/domain/http"
 import {
 	makeWarehouseExecutor,
 	toWarehouseQueryError,
+	WarehouseResponseLimitError,
 	type ResolvedWarehouseConfig,
 	type SqlQueryOptions,
 	type WarehouseExecutorDeps,
@@ -16,6 +17,7 @@ import { WarehouseExecutor } from "@maple/query-engine/observability"
 import { Env } from "./Env"
 import type { TenantContext } from "../services/AuthService"
 import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 
 // ---------------------------------------------------------------------------
 // WarehouseQueryService — the API's managed-warehouse executor.
@@ -42,12 +44,47 @@ const createClickHouseSqlClient = (config: ClickHouseConfig): WarehouseSqlClient
 		database: config.database,
 	})
 	return {
-		sql: async (sql: string) => {
+		sql: async (sql: string, options) => {
 			const resultSet = await client.query({
 				query: sql,
 				format: "JSONEachRow",
 			})
-			const data = await resultSet.json<Record<string, unknown>>()
+			const limits = options?.responseLimits
+			if (limits === undefined) {
+				const data = await resultSet.json<Record<string, unknown>>()
+				return { data }
+			}
+
+			const data: Array<Record<string, unknown>> = []
+			const encoder = new TextEncoder()
+			let encodedBytes = 0
+			const reader = resultSet.stream().getReader()
+			try {
+				while (true) {
+					const chunk = await reader.read()
+					if (chunk.done) break
+					for (const row of chunk.value) {
+						encodedBytes += encoder.encode(row.text).byteLength + 1
+						if (encodedBytes > limits.maxBytes) {
+							await reader.cancel().catch(() => undefined)
+							throw new WarehouseResponseLimitError({
+								kind: "bytes",
+								message: `Raw SQL results may contain at most ${limits.maxBytes} encoded bytes`,
+							})
+						}
+						data.push(row.json<Record<string, unknown>>())
+						if (data.length > limits.maxRows) {
+							await reader.cancel().catch(() => undefined)
+							throw new WarehouseResponseLimitError({
+								kind: "rows",
+								message: `Raw SQL results may contain at most ${limits.maxRows} rows`,
+							})
+						}
+					}
+				}
+			} finally {
+				reader.releaseLock()
+			}
 			return { data }
 		},
 		insert: async (_datasource, _rows) => {
@@ -69,18 +106,83 @@ const createClickHouseSqlClient = (config: ClickHouseConfig): WarehouseSqlClient
 const isEmptyJsonBodyError = (error: unknown): boolean =>
 	error instanceof SyntaxError && /unexpected end of json input/i.test(error.message)
 
+const boundedResponseFetch =
+	(maxBytes: number): typeof fetch =>
+	async (input, init) => {
+		const response = await fetch(input, init)
+		if (response.body === null) return response
+
+		const reader = response.body.getReader()
+		const chunks: Uint8Array[] = []
+		let totalBytes = 0
+		try {
+			while (true) {
+				const chunk = await reader.read()
+				if (chunk.done) break
+				totalBytes += chunk.value.byteLength
+				if (totalBytes > maxBytes) {
+					await reader.cancel().catch(() => undefined)
+					throw new WarehouseResponseLimitError({
+						kind: "bytes",
+						message: `Raw SQL results may contain at most ${maxBytes} encoded bytes`,
+					})
+				}
+				chunks.push(chunk.value)
+			}
+		} finally {
+			reader.releaseLock()
+		}
+
+		const body = new Uint8Array(totalBytes)
+		let offset = 0
+		for (const chunk of chunks) {
+			body.set(chunk, offset)
+			offset += chunk.byteLength
+		}
+		return new Response(body, {
+			status: response.status,
+			statusText: response.statusText,
+			headers: response.headers,
+		})
+	}
+
 const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient => {
-	const client = new Tinybird({
-		baseUrl: config.host,
-		token: config.token,
-		datasources: {},
-		pipes: {},
-		devMode: false,
-	})
+	const makeClient = (fetchAdapter?: typeof fetch) =>
+		new Tinybird({
+			baseUrl: config.host,
+			token: config.token,
+			datasources: {},
+			pipes: {},
+			devMode: false,
+			...(fetchAdapter === undefined ? {} : { fetch: fetchAdapter }),
+		})
+	const client = makeClient()
+	const boundedClients = new Map<number, typeof client>()
 	return {
-		sql: async (sql: string) => {
+		sql: async (sql: string, options) => {
 			try {
-				return await client.sql(sql)
+				// Tinybird Cloud currently defaults /v0/sql to JSON, while Tinybird Local
+				// defaults to tab-separated output. The SDK always calls response.json(), so
+				// make the expected wire format explicit for both environments.
+				const jsonSql = `${sql.trimEnd().replace(/;$/, "")}\nFORMAT JSON`
+				const limits = options?.responseLimits
+				// The SDK normally buffers through response.json(). Raw execution gets
+				// a fetch adapter that aborts before constructing an oversized Response.
+				let queryClient = client
+				if (limits !== undefined) {
+					queryClient =
+						boundedClients.get(limits.maxBytes) ??
+						makeClient(boundedResponseFetch(limits.maxBytes))
+					boundedClients.set(limits.maxBytes, queryClient)
+				}
+				const result = await queryClient.sql<Record<string, unknown>>(jsonSql)
+				if (limits !== undefined && result.data.length > limits.maxRows) {
+					throw new WarehouseResponseLimitError({
+						kind: "rows",
+						message: `Raw SQL results may contain at most ${limits.maxRows} rows`,
+					})
+				}
+				return { data: result.data }
 			} catch (error) {
 				// Empty 2xx body ⇒ zero rows. Return an empty result set so the caller's no-data path
 				// runs instead of surfacing a spurious WarehouseClientError.
@@ -120,6 +222,7 @@ export class WarehouseQueryService extends Context.Service<
 	make: Effect.gen(function* () {
 		const env = yield* Env
 		const orgClickHouseSettings = yield* OrgClickHouseSettingsService
+		const orgTokens = yield* TinybirdOrgTokenService
 
 		/**
 		 * Resolve the upstream config for this tenant's queries.
@@ -135,19 +238,37 @@ export class WarehouseQueryService extends Context.Service<
 		// here — and the read-path fallback when an org has no BYO override.
 		const resolveManagedConfig = Effect.fn("WarehouseQueryService.resolveManagedConfig")(function* () {
 			if (Option.isSome(env.CLICKHOUSE_URL)) {
+				const configuredUrl = env.CLICKHOUSE_URL.value
+				const clickhouseUrl = yield* Effect.try({
+					try: () => new URL(configuredUrl),
+					catch: () =>
+						new WarehouseConfigError({
+							pipeName: "resolveManagedConfig",
+							message: "CLICKHOUSE_URL is invalid",
+						}),
+				})
+				if (clickhouseUrl.username.length > 0 || clickhouseUrl.password.length > 0) {
+					return yield* new WarehouseConfigError({
+						pipeName: "resolveManagedConfig",
+						message: "CLICKHOUSE_URL must not contain embedded credentials",
+					})
+				}
 				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
+				const provider: "tinybird" | "clickhouse" =
+					env.CLICKHOUSE_PROVIDER === "tinybird" ? "tinybird" : "clickhouse"
 				return {
 					config: {
 						_tag: "clickhouse" as const,
-						url: env.CLICKHOUSE_URL.value,
+						provider,
+						url: clickhouseUrl.toString().replace(/\/$/, ""),
 						username: env.CLICKHOUSE_USER,
 						password: Option.match(env.CLICKHOUSE_PASSWORD, {
-							onNone: () => Redacted.value(env.TINYBIRD_TOKEN),
+							onNone: () => (provider === "tinybird" ? Redacted.value(env.TINYBIRD_TOKEN) : ""),
 							onSome: Redacted.value,
 						}),
 						database: env.CLICKHOUSE_DATABASE,
 					},
-					source: "managed" as const,
+					clientCacheKey: "read:managed",
 				}
 			}
 
@@ -155,10 +276,11 @@ export class WarehouseQueryService extends Context.Service<
 			return {
 				config: {
 					_tag: "tinybird" as const,
+					provider: "tinybird" as const,
 					host: env.TINYBIRD_HOST,
 					token: Redacted.value(env.TINYBIRD_TOKEN),
 				},
-				source: "managed" as const,
+				clientCacheKey: "read:managed",
 			}
 		})
 
@@ -180,17 +302,64 @@ export class WarehouseQueryService extends Context.Service<
 				return {
 					config: {
 						_tag: "clickhouse" as const,
+						provider: "clickhouse" as const,
 						url: override.value.url,
 						username: override.value.user,
 						password: override.value.password,
 						database: override.value.database,
 					},
-					source: "org_override" as const,
+					clientCacheKey: `read:${tenant.orgId}`,
 				}
 			}
 
 			yield* Effect.annotateCurrentSpan("clientSource", "managed")
 			return yield* resolveManagedConfig()
+		})
+
+		const resolveRawSqlConfig: WarehouseExecutorDeps["resolveRawSqlConfig"] = Effect.fn(
+			"WarehouseQueryService.resolveRawSqlConfig",
+		)(function* (tenant, label) {
+			const resolved = yield* resolveConfig(tenant, label)
+			const clientCacheKey = `raw:${tenant.orgId}`
+
+			// Per-org BYO ClickHouse credentials already isolate the warehouse.
+			if (resolved.clientCacheKey !== "read:managed") {
+				return { ...resolved, clientCacheKey }
+			}
+
+			// Shared Tinybird is isolated with a datasource-scoped JWT. The same token
+			// works through both the SDK and Tinybird's ClickHouse-compatible gateway.
+			if (resolved.config.provider === "tinybird") {
+				const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId).pipe(
+					Effect.mapError(
+						(error) =>
+							new WarehouseConfigError({
+								pipeName: label,
+								message: error.message,
+								cause: error,
+							}),
+					),
+				)
+				yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
+				return {
+					config:
+						resolved.config._tag === "tinybird"
+							? { ...resolved.config, token: jwt }
+							: { ...resolved.config, password: jwt },
+					clientCacheKey,
+				}
+			}
+
+			// A shared vanilla ClickHouse credential has no database-enforced OrgId
+			// scope. It is safe only in Maple's single-org self-hosted deployment mode.
+			if (env.MAPLE_AUTH_MODE.toLowerCase() !== "self_hosted") {
+				return yield* new WarehouseConfigError({
+					pipeName: label,
+					message:
+						"Raw SQL on managed vanilla ClickHouse is available only in single-org self-hosted mode",
+				})
+			}
+			return { ...resolved, clientCacheKey }
 		})
 
 		/**
@@ -211,26 +380,28 @@ export class WarehouseQueryService extends Context.Service<
 		 * it unconditionally (TINYBIRD_HOST/TOKEN are required env, always present).
 		 * Routing writes anywhere else broke demo-seed onboarding.
 		 */
-		const resolveIngestConfig: WarehouseExecutorDeps["resolveConfig"] = Effect.fn(
+		const resolveIngestConfig: NonNullable<WarehouseExecutorDeps["resolveIngestConfig"]> = Effect.fn(
 			"WarehouseQueryService.resolveIngestConfig",
 		)(function* (tenant, _label) {
 			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 			yield* Effect.annotateCurrentSpan("clientSource", "managed")
-			yield* Effect.annotateCurrentSpan("ingest.routing", "tinybird")
+			yield* Effect.annotateCurrentSpan("query.routing", "ingest")
 			yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 			return {
 				config: {
 					_tag: "tinybird" as const,
+					provider: "tinybird" as const,
 					host: env.TINYBIRD_HOST,
 					token: Redacted.value(env.TINYBIRD_TOKEN),
 				},
-				source: "managed" as const,
+				clientCacheKey: "write:managed",
 			}
 		})
 
 		return makeWarehouseExecutor({
 			createClient: (config) => sqlClientFactory(config),
 			resolveConfig,
+			resolveRawSqlConfig,
 			resolveIngestConfig,
 		})
 	}),
@@ -279,5 +450,6 @@ export const __testables = {
 	},
 	createClickHouseSqlClient,
 	createTinybirdSdkSqlClient,
+	boundedResponseFetch,
 	isEmptyJsonBodyError,
 }

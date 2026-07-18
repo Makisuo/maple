@@ -1,7 +1,6 @@
 import * as React from "react"
 import { useNavigate, useRouterState, createFileRoute } from "@tanstack/react-router"
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { TraceId } from "@maple/domain"
 
@@ -11,21 +10,17 @@ import { TraceReplayLink } from "@/components/replays/trace-replay-link"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { TraceViewTabs } from "@maple/ui/components/traces/trace-view-tabs"
 import { SpanDetailPanel } from "@/components/traces/span-detail-panel"
-import { Badge, badgeVariants } from "@maple/ui/components/ui/badge"
+import { TraceAnatomyStrip } from "@/components/traces/trace-anatomy-strip"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@maple/ui/components/ui/resizable"
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@maple/ui/components/ui/sheet"
 import { useIsMobile } from "@maple/ui/hooks/use-media-query"
-import { formatDuration } from "@/lib/format"
-import { getServiceColor } from "@maple/ui/lib/colors"
 import { type Span, type SpanNode, type SpanHierarchyResponse } from "@/api/warehouse/traces"
 import { getSpanHierarchyResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { findSpanById } from "@maple/ui/components/traces/flow-utils"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 import { TraceIdBadge } from "@/components/traces/trace-id-badge"
-import { CommitShaHoverCard } from "@/components/vcs/commit-sha-hover-card"
 import { getHttpInfo } from "@maple/ui/lib/http"
-import { cn } from "@maple/ui/utils"
 
 const TraceDetailSearchSchema = Schema.Struct({
 	spanId: Schema.optional(Schema.String),
@@ -43,16 +38,20 @@ function buildBackToTracesHref(searchStr: string): string {
 	return nextSearch ? `/traces?${nextSearch}` : "/traces"
 }
 
-export const Route = effectRoute(createFileRoute("/traces/$traceId"), ({ params, search }) => {
-	const t = typeof (search as { t?: unknown }).t === "string" ? (search as { t: string }).t : undefined
-	return [
-		getSpanHierarchyResultAtom({
-			data: { traceId: Schema.decodeSync(TraceId)(params.traceId), timestamp: t },
-		}),
-	]
-})({
+export const Route = createFileRoute("/traces/$traceId")({
 	component: TraceDetailPage,
 	validateSearch: Schema.toStandardSchemaV1(TraceDetailSearchSchema),
+	loaderDeps: ({ search }) => ({ t: search.t }),
+	loader: ({ context, params, deps }) => {
+		context.effectRegistry.mount(
+			getSpanHierarchyResultAtom({
+				data: {
+					traceId: Schema.decodeSync(TraceId)(params.traceId),
+					timestamp: deps.t,
+				},
+			}),
+		)
+	},
 })
 
 function TraceDetailPage() {
@@ -74,10 +73,14 @@ function TraceDetailPage() {
 				description="Loading trace details..."
 			>
 				<div className="space-y-4">
-					<div className="flex gap-2">
-						<Skeleton className="h-5 w-20" />
-						<Skeleton className="h-5 w-20" />
-						<Skeleton className="h-5 w-20" />
+					<div className="space-y-2">
+						<Skeleton className="h-8 w-32" />
+						<Skeleton className="h-1.5 w-full rounded-full" />
+						<div className="flex gap-4">
+							<Skeleton className="h-4 w-24" />
+							<Skeleton className="h-4 w-24" />
+							<Skeleton className="h-4 w-24" />
+						</div>
 					</div>
 					<div className="rounded-md border">
 						{Array.from({ length: 5 }).map((_, i) => (
@@ -261,111 +264,22 @@ function TraceDetailContent({
 					</h1>
 				) : undefined
 			}
-			description={`${data.spans.length} spans across ${services.length} service${services.length !== 1 ? "s" : ""}`}
 			headerActions={
 				<div className="flex items-center gap-2">
 					<TraceReplayLink traceId={traceId} />
 				</div>
 			}
 		>
-			<div className="flex flex-1 flex-col gap-y-3 min-h-0 content-enter">
-				{/*
-				 * Each label stays glued to its value in its own group, so wrapping can never strand a
-				 * "Duration:" at the end of one line and its badge at the start of the next.
-				 */}
-				<div className="flex flex-wrap items-center gap-x-4 gap-y-2 shrink-0">
-					<div className="flex min-w-0 flex-wrap items-center gap-2">
-						<span className="text-xs text-muted-foreground">Services:</span>
-						{services.map((service: string) => (
-							<Badge
-								key={service}
-								variant="outline"
-								className="font-mono text-xs"
-								style={{ color: getServiceColor(service) }}
-							>
-								{service}
-							</Badge>
-						))}
-					</div>
-
-					<div className="flex items-center gap-2">
-						<span className="text-xs text-muted-foreground">Duration:</span>
-						<Badge variant="secondary" className="font-mono text-xs">
-							{formatDuration(data.totalDurationMs)}
-						</Badge>
-					</div>
-
-					<div className="flex items-center gap-2">
-						<span className="text-xs text-muted-foreground">Status:</span>
-						<Badge
-							variant="secondary"
-							className={
-								hasError
-									? "bg-severity-error/15 text-severity-error"
-									: "bg-severity-info/15 text-severity-info"
-							}
-						>
-							{hasError ? "Error" : "OK"}
-						</Badge>
-					</div>
-
-					{rootHttpInfo?.statusCode != null && (
-						<div className="flex items-center gap-2">
-							<span className="text-xs text-muted-foreground">HTTP:</span>
-							<Badge
-								variant="secondary"
-								className={
-									rootHttpInfo.statusCode >= 500
-										? "bg-severity-error/15 text-severity-error"
-										: rootHttpInfo.statusCode >= 400
-											? "bg-severity-warn/15 text-severity-warn"
-											: rootHttpInfo.statusCode >= 300
-												? "bg-chart-p50/15 text-chart-p50"
-												: "bg-severity-info/15 text-severity-info"
-								}
-							>
-								{rootHttpInfo.statusCode}
-							</Badge>
-						</div>
-					)}
-
-					{deploymentEnv && (
-						<div className="flex items-center gap-2">
-							<span className="text-xs text-muted-foreground">Environment:</span>
-							<Badge
-								variant="secondary"
-								className={
-									deploymentEnv === "production"
-										? "bg-severity-warn/15 text-severity-warn"
-										: "bg-chart-p50/15 text-chart-p50"
-								}
-							>
-								{deploymentEnv}
-							</Badge>
-						</div>
-					)}
-
-					{commitSha && (
-						<div className="flex min-w-0 items-center gap-2">
-							<span className="text-xs text-muted-foreground">Commit:</span>
-							<CommitShaHoverCard
-								sha={commitSha}
-								copy={{ value: commitSha, label: "commit SHA" }}
-								className={cn(
-									badgeVariants({ variant: "outline" }),
-									"max-w-full font-mono text-xs",
-								)}
-							>
-								{commitSha.slice(0, 7)}
-							</CommitShaHoverCard>
-						</div>
-					)}
-
-					<div className="flex min-w-0 items-center gap-2">
-						<span className="shrink-0 text-xs text-muted-foreground">Trace ID:</span>
-						<TraceIdBadge traceId={traceId} size="default" className="text-xs max-w-[10rem]" />
-					</div>
-				</div>
+			<div className="flex flex-1 flex-col gap-y-3 min-h-0">
+				<TraceAnatomyStrip
+					spans={data.spans}
+					totalDurationMs={data.totalDurationMs}
+					traceId={traceId}
+					hasError={hasError}
+					httpStatusCode={rootHttpInfo?.statusCode}
+					deploymentEnv={deploymentEnv}
+					commitSha={commitSha}
+				/>
 
 				{isMobile ? (
 					// A 60/40 side-by-side split leaves each pane ~150px on a phone. Give the waterfall
@@ -389,6 +303,8 @@ function TraceDetailContent({
 									<SpanDetailPanel
 										span={selectedSpan}
 										onClose={handleCloseSpanDetails}
+										traceStartTime={traceStartTime}
+										totalDurationMs={data.totalDurationMs}
 									/>
 								)}
 							</SheetContent>
@@ -410,6 +326,8 @@ function TraceDetailContent({
 									<SpanDetailPanel
 										span={selectedSpan}
 										onClose={handleCloseSpanDetails}
+										traceStartTime={traceStartTime}
+										totalDurationMs={data.totalDurationMs}
 									/>
 								</ResizablePanel>
 							</>

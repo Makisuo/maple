@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router"
 
 import { Result, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { CopyableField } from "./copyable-field"
 
@@ -11,7 +11,7 @@ import { CopyableField } from "./copyable-field"
  * the Connect popover and any compact credentials surface.
  */
 export function ConnectCredentials() {
-	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
+	const keysResult = useAtomValue(MapleApiV2AtomClient.query("ingestKeys", "retrieve", {}))
 
 	return (
 		<div className="space-y-3">
@@ -34,14 +34,14 @@ export function ConnectCredentials() {
 					<CopyableField
 						label="Public key"
 						value={Result.builder(keysResult)
-							.onSuccess((v) => v.publicKey)
+							.onSuccess((v) => v.public_key)
 							.orElse(() => "Loading…")}
 						masked
 					/>
 					<CopyableField
 						label="Private key"
 						value={Result.builder(keysResult)
-							.onSuccess((v) => v.privateKey)
+							.onSuccess((v) => v.private_key)
 							.orElse(() => "Loading…")}
 						masked
 					/>

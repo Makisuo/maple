@@ -13,15 +13,36 @@ import * as Queue from "effect/Queue"
 import * as Stream from "effect/Stream"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 
-import { getCollectionsGeneration, subscribeCollectionsGeneration } from "@/lib/collections/org-collections"
+import {
+	getCollectionsGeneration,
+	handleCollectionStuck,
+	subscribeCollectionsGeneration,
+} from "@/lib/collections/org-collections"
 import { getActiveOrgId, subscribeActiveOrgId } from "@/lib/services/common/auth-headers"
 
 export const collectionFailureMessage = <T>(state: Db.CollectionState<T>): string | null => {
 	if (!AsyncResult.isFailure(state)) return null
 	for (const reason of state.cause.reasons) {
-		if (Cause.isFailReason(reason)) return reason.error.message
+		if (Cause.isFailReason(reason)) {
+			return reason.error.reason === "load-timeout"
+				? "Loading is taking longer than expected."
+				: reason.error.message
+		}
 	}
 	return "Collection failed to load"
+}
+
+/**
+ * Shared stuck-guard wiring for org-scoped collection stores: a store that
+ * sits in `loading` with no emissions for this window fails with
+ * `load-timeout` (so the page renders its error state instead of a skeleton
+ * forever) and triggers the bounded org-collections recreate — a wedged shape
+ * stream gets a fresh one, and a persistent failure degrades to the error
+ * message once the heal budget is spent.
+ */
+export const orgCollectionStuckOptions: Db.CollectionWatchOptions = {
+	stuckTimeoutMs: 30_000,
+	onStuck: handleCollectionStuck,
 }
 
 export const orgIdOf = (key: string): string => key.slice(0, key.lastIndexOf(":"))

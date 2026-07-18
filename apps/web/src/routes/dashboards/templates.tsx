@@ -37,7 +37,7 @@ function TemplatesPage() {
 		try {
 			prepareForMutation()
 			const result = await instantiate({
-				params: { templateId: asTemplateId(templateId) },
+				params: { template_id: asTemplateId(templateId) },
 				payload: {
 					...(Object.keys(parameters).length > 0 && { parameters }),
 				},

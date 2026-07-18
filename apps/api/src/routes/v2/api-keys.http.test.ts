@@ -1,17 +1,24 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
+import { API_CORS_OPTIONS } from "../../lib/api-cors"
 import { Env } from "../../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../../lib/test-pglite"
 import { ApiKeysService } from "../../services/ApiKeysService"
 import { AuthService } from "../../services/AuthService"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
 import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
+import { ApiV2RateLimiter, type ApiV2RateLimiterShape } from "../../services/ApiV2RateLimiter"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AlertsServiceStubLayer, AllV2GroupLayersLive } from "./v2-test-support"
+import {
+	AlertsServiceStubLayer,
+	AllV2GroupLayersLive,
+	ConfigResourceServiceStubsLayer,
+	TelemetryServiceStubsLayer,
+} from "./v2-test-support"
 
 /**
  * End-to-end HTTP tests for the v2 pilot: a real router (auth middleware, v2
@@ -38,7 +45,9 @@ const testConfig = () =>
 		}),
 	)
 
-const makeHarness = () => {
+const makeHarness = (
+	checkRateLimit: ApiV2RateLimiterShape["check"] = () => Effect.succeed("allowed" as const),
+) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const servicesLive = Layer.mergeAll(
@@ -51,8 +60,12 @@ const makeHarness = () => {
 		Layer.provide(AllV2GroupLayersLive),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provide(AlertsServiceStubLayer),
+		Layer.provide(ConfigResourceServiceStubsLayer),
+		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(Layer.succeed(ApiV2RateLimiter, { check: checkRateLimit })),
 		Layer.provideMerge(servicesLive),
+		Layer.provideMerge(HttpRouter.cors(API_CORS_OPTIONS)),
 	)
 
 	const { handler, dispose: disposeHandler } = HttpRouter.toWebHandler(routes, {
@@ -64,7 +77,7 @@ const makeHarness = () => {
 	const request = async (
 		method: string,
 		path: string,
-		options: { token?: string; body?: unknown } = {},
+		options: { token?: string; body?: unknown; origin?: string } = {},
 	) => {
 		const response = await handler(
 			new Request(`http://maple.test${path}`, {
@@ -72,32 +85,48 @@ const makeHarness = () => {
 				headers: {
 					...(options.token !== undefined ? { authorization: `Bearer ${options.token}` } : {}),
 					...(options.body !== undefined ? { "content-type": "application/json" } : {}),
+					...(options.origin !== undefined ? { origin: options.origin } : {}),
 				},
 				body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
 			}),
 			Context.empty() as never,
 		)
 		const text = await response.text()
-		return { status: response.status, body: text.length > 0 ? JSON.parse(text) : null }
+		return {
+			status: response.status,
+			headers: response.headers,
+			body: text.length > 0 ? JSON.parse(text) : null,
+		}
 	}
 
 	const ORG = Schema.decodeUnknownSync(OrgId)("org_e2e")
 	const USER = Schema.decodeUnknownSync(UserId)("user_e2e")
 
-	const bootstrapKey = (scopes?: ReadonlyArray<string>) =>
+	const bootstrapKey = (scopes?: ReadonlyArray<string>, kind: "standard" | "mcp" = "standard") =>
 		runtime.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ApiKeysService
 				return yield* service.create(ORG, USER, {
 					name: scopes === undefined ? "root-key" : `scoped:${scopes.join(",")}`,
 					scopes,
+					kind,
 				})
+			}),
+		)
+
+	const bootstrapSession = () =>
+		runtime.runPromise(
+			Effect.gen(function* () {
+				const service = yield* AuthService
+				return (yield* service.loginSelfHosted("test-root-password")).token
 			}),
 		)
 
 	return {
 		request,
 		bootstrapKey,
+		bootstrapSession,
+		closeDatabase: () => testDb.close(),
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
@@ -125,10 +154,101 @@ describe("v2 api_keys over HTTP", () => {
 	})
 
 	it("rejects missing credentials with a 401 envelope", async () => {
-		const harness = makeHarness()
+		let rateLimitChecks = 0
+		const harness = makeHarness(() => {
+			rateLimitChecks += 1
+			return Effect.succeed("allowed")
+		})
 		const { status, body } = await harness.request("GET", "/v2/api_keys")
 		expect(status).toBe(401)
 		expect(body.error.type).toBe("authentication_error")
+		expect(rateLimitChecks).toBe(0)
+		await harness.dispose()
+	})
+
+	it("rejects MCP-only keys on the HTTP API", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(undefined, "mcp")
+		const { status, body } = await harness.request("GET", "/v2/api_keys", { token: key.secret })
+		expect(status).toBe(401)
+		expect(body.error).toMatchObject({
+			type: "authentication_error",
+			code: "invalid_credentials",
+		})
+		await harness.dispose()
+	})
+
+	it("returns the rate-limit envelope and Retry-After before executing the handler", async () => {
+		const harness = makeHarness(() => Effect.succeed("limited"))
+		const key = await harness.bootstrapKey()
+
+		// OrganizationService is deliberately an inert stub in this harness. A 429
+		// proves authorization stopped before the route handler could execute it.
+		const response = await harness.request("GET", "/v2/organization", {
+			token: key.secret,
+			origin: "https://app.maple.dev",
+		})
+		expect(response.status).toBe(429)
+		expect(response.body).toEqual({
+			error: {
+				type: "rate_limit_error",
+				code: "rate_limited",
+				message: "Too many requests. Retry after 60 seconds.",
+			},
+		})
+		expect(response.headers.get("retry-after")).toBe("60")
+		expect(response.headers.get("access-control-expose-headers")).toContain("Retry-After")
+		await harness.dispose()
+	})
+
+	it("bypasses API-key rate limiting for session tokens", async () => {
+		let rateLimitChecks = 0
+		const harness = makeHarness(() => {
+			rateLimitChecks += 1
+			return Effect.succeed("limited")
+		})
+		const sessionToken = await harness.bootstrapSession()
+		const response = await harness.request("GET", "/v2/api_keys", { token: sessionToken })
+		expect(response.status).toBe(200)
+		expect(rateLimitChecks).toBe(0)
+		await harness.dispose()
+	})
+
+	it("allows requests when the limiter fails open", async () => {
+		const harness = makeHarness(() => Effect.succeed("failed_open"))
+		const key = await harness.bootstrapKey()
+		const response = await harness.request("GET", "/v2/api_keys", { token: key.secret })
+		expect(response.status).toBe(200)
+		await harness.dispose()
+	})
+
+	it("counts valid-key requests that are later rejected for insufficient scope", async () => {
+		let rateLimitChecks = 0
+		const harness = makeHarness(() => {
+			rateLimitChecks += 1
+			return Effect.succeed("allowed")
+		})
+		const readOnly = await harness.bootstrapKey(["api_keys:read"])
+		const response = await harness.request("POST", "/v2/api_keys", {
+			token: readOnly.secret,
+			body: { name: "nope" },
+		})
+		expect(response.status).toBe(403)
+		expect(rateLimitChecks).toBe(1)
+		await harness.dispose()
+	})
+
+	it("returns a sanitized 503 when API-key lookup storage is unavailable", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey()
+		await harness.closeDatabase()
+		const { status, body } = await harness.request("GET", "/v2/api_keys", { token: key.secret })
+		expect(status).toBe(503)
+		expect(body.error).toEqual({
+			type: "api_error",
+			code: "api_key_lookup_unavailable",
+			message: "A service required for this operation is temporarily unavailable; retry with backoff.",
+		})
 		await harness.dispose()
 	})
 
@@ -202,6 +322,7 @@ describe("v2 api_keys over HTTP", () => {
 		})
 		expect(malformed.status).toBe(400)
 		expect(malformed.body.error.type).toBe("invalid_request_error")
+		expect(malformed.body.error.param).toBe("id")
 		expect(malformed.body.error.code).toBe("parameter_invalid")
 
 		// valid key_ encoding of a UUID that doesn't exist
@@ -210,7 +331,7 @@ describe("v2 api_keys over HTTP", () => {
 		const missing = await harness.request("GET", `/v2/api_keys/${ghost}`, { token: root.secret })
 		expect(missing.status).toBe(404)
 		expect(missing.body.error.type).toBe("not_found_error")
-		expect(missing.body.error.code).toBe("resource_missing")
+		expect(missing.body.error.code).toBe("api_key_not_found")
 		await harness.dispose()
 	})
 

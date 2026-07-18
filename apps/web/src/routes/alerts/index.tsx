@@ -1,5 +1,4 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { AlertsOverviewTab } from "@/components/alerts/overview/alerts-overview-tab"
@@ -31,7 +30,7 @@ const AlertsSearch = Schema.Struct({
 	groupByTag: Schema.optional(Schema.Union([Schema.Boolean, BooleanFromStringParam])),
 })
 
-export const Route = effectRoute(createFileRoute("/alerts/"))({
+export const Route = createFileRoute("/alerts/")({
 	component: AlertsPage,
 	validateSearch: Schema.toStandardSchemaV1(AlertsSearch),
 })

@@ -1,6 +1,6 @@
 import { optionalStringParam, type McpToolRegistrar } from "./types"
 import { Effect, Schema } from "effect"
-import { describeWarehouseTable, listWarehouseTables } from "../lib/warehouse-catalog"
+import { describeWarehouseTable, listWarehouseTables } from "../../lib/warehouse-catalog"
 
 const TOOL = "describe_warehouse_tables"
 

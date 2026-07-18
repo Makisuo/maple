@@ -345,6 +345,9 @@ describe("ScrapeTargetsService", () => {
 			const limited = yield* service.listChecks(orgId, target.id, { limit: 1 })
 			assert.lengthOf(limited, 1)
 			assert.strictEqual(limited[0]?.checkedAt.getTime(), scrapedAt + 15_000)
+			const secondPage = yield* service.listChecks(orgId, target.id, { limit: 1, offset: 1 })
+			assert.lengthOf(secondPage, 1)
+			assert.strictEqual(secondPage[0]?.checkedAt.getTime(), scrapedAt)
 			const windowed = yield* service.listChecks(orgId, target.id, {
 				startTime: scrapedAt - 1,
 				endTime: scrapedAt + 1,

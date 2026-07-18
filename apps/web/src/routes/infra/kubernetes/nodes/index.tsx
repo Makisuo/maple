@@ -1,5 +1,4 @@
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 
@@ -38,7 +37,7 @@ const nodesSearchSchema = Schema.Struct({
 
 export type NodesSearchParams = Schema.Schema.Type<typeof nodesSearchSchema>
 
-export const Route = effectRoute(createFileRoute("/infra/kubernetes/nodes/"))({
+export const Route = createFileRoute("/infra/kubernetes/nodes/")({
 	component: NodesPage,
 	validateSearch: Schema.toStandardSchemaV1(nodesSearchSchema),
 })
@@ -159,7 +158,7 @@ function NodesPageContent() {
 
 							if (nodes.length === 0 && !hasAnyFilter) {
 								return (
-									<Empty className="py-16 content-enter">
+									<Empty className="py-16">
 										<EmptyHeader>
 											<EmptyMedia variant="icon">
 												<ServerIcon size={16} />
@@ -176,7 +175,7 @@ function NodesPageContent() {
 
 							return (
 								<div
-									className={`space-y-4 content-enter ${
+									className={`space-y-4 transition-opacity ${
 										result.waiting ? "opacity-60" : ""
 									}`}
 								>

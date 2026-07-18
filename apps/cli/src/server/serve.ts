@@ -6,6 +6,7 @@ import { Effect, Schema, type Scope } from "effect"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
+import { isLoopbackHostname } from "../lib/local-address"
 import { acquireChdb, type Chdb, type ChdbError } from "./chdb"
 import { buildInsertSql } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch } from "./otlp/encode"
@@ -24,6 +25,12 @@ export interface AssetResolver {
 }
 
 export interface ServerOptions {
+	readonly hostname: string
+	/** URL hostnames permitted to use the embedded UI same-origin. This also
+	 * rejects browser DNS-rebinding hosts that were never advertised. */
+	readonly browserHosts: readonly string[]
+	/** Exact separately hosted UI origin allowed to reach the local listener. */
+	readonly corsOrigin: string
 	readonly port: number
 	readonly dataDir: string
 	readonly configFile?: string
@@ -31,26 +38,62 @@ export interface ServerOptions {
 	readonly assets?: AssetResolver
 }
 
-const CORS_HEADERS = {
-	"access-control-allow-origin": "*",
-	"access-control-allow-methods": "GET, POST, OPTIONS",
-	"access-control-allow-headers": "content-type, content-encoding",
-	// The default-served UI lives at a public origin (local.maple.dev) but queries
-	// this loopback server, so Chrome's Private Network Access gate sends a
-	// preflight with `Access-Control-Request-Private-Network: true` and requires
-	// this header on the response. (`--offline` keeps the UI same-origin and skips
-	// the gate entirely.)
-	"access-control-allow-private-network": "true",
-} as const
+export const isBrowserOriginAllowed = (
+	requestUrl: URL,
+	origin: string | null,
+	corsOrigin: string,
+	browserHosts: readonly string[],
+): boolean => {
+	if (origin === null) return true // SDKs, collectors, and other non-browser clients
+	let originUrl: URL
+	try {
+		originUrl = new URL(origin)
+	} catch {
+		return false
+	}
+	if (originUrl.origin === corsOrigin) return true
+	// Loopback aliases and dev-proxy ports are equivalent local origins. Require
+	// both sides to be loopback so this exception cannot weaken LAN DNS-rebinding
+	// protection.
+	if (isLoopbackHostname(originUrl.hostname) && isLoopbackHostname(requestUrl.hostname)) return true
+	// Bun constructs requestUrl from the client's Host header. Keep that behavior:
+	// this comparison is the load-bearing DNS-rebinding check for non-loopback UI traffic.
+	// Compare host (including port), not scheme: a TLS reverse proxy may preserve
+	// Host while forwarding to this HTTP listener. Restrict the hostname to the
+	// bind/connect/advertised set so a DNS-rebinding origin cannot claim itself as
+	// a same-origin embedded dashboard.
+	return originUrl.host === requestUrl.host && browserHosts.includes(originUrl.hostname)
+}
+
+/** Build CORS headers for an origin that has already passed
+ * `isBrowserOriginAllowed`. Echoing it preserves browser OTLP ingest between
+ * loopback aliases and ports without restoring wildcard CORS. */
+export const corsHeadersForAllowedOrigin = (
+	origin: string | null,
+): Readonly<Record<string, string>> | undefined =>
+	origin !== null
+		? {
+				"access-control-allow-origin": origin,
+				"access-control-allow-methods": "GET, POST, OPTIONS",
+				"access-control-allow-headers": "content-type, content-encoding",
+				"access-control-allow-private-network": "true",
+				vary: "Origin",
+			}
+		: undefined
+
+const withCors = (response: Response, headers: Readonly<Record<string, string>> | undefined): Response => {
+	if (headers) for (const [name, value] of Object.entries(headers)) response.headers.set(name, value)
+	return response
+}
 
 const json = (body: unknown, status = 200): Response =>
 	new Response(JSON.stringify(body), {
 		status,
-		headers: { "content-type": "application/json", ...CORS_HEADERS },
+		headers: { "content-type": "application/json" },
 	})
 
 const text = (body: string, status = 200, contentType = "text/plain"): Response =>
-	new Response(body, { status, headers: { "content-type": contentType, ...CORS_HEADERS } })
+	new Response(body, { status, headers: { "content-type": contentType } })
 
 type Signal = "traces" | "logs" | "metrics"
 
@@ -315,16 +358,22 @@ const makeFetch =
 	(db: Chdb, options: ServerOptions, runSpan: SpanRunner) =>
 	async (req: Request): Promise<Response> => {
 		const url = new URL(req.url)
-		if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS })
-		if (url.pathname === "/health") return text("OK")
-		if (req.method === "POST") {
-			if (url.pathname === "/v1/traces") return ingestSpan(runSpan, db, "traces", req)
-			if (url.pathname === "/v1/logs") return ingestSpan(runSpan, db, "logs", req)
-			if (url.pathname === "/v1/metrics") return ingestSpan(runSpan, db, "metrics", req)
-			if (url.pathname === "/local/query") return querySpan(runSpan, db, req)
+		const origin = req.headers.get("origin")
+		if (!isBrowserOriginAllowed(url, origin, options.corsOrigin, options.browserHosts)) {
+			return text("browser origin not allowed", 403)
 		}
-		if (req.method === "GET" && options.assets) return serveAsset(options.assets, url.pathname)
-		return text("not found", 404)
+		const corsHeaders = corsHeadersForAllowedOrigin(origin)
+		const respond = (response: Response): Response => withCors(response, corsHeaders)
+		if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
+		if (url.pathname === "/health") return respond(text("OK"))
+		if (req.method === "POST") {
+			if (url.pathname === "/v1/traces") return respond(await ingestSpan(runSpan, db, "traces", req))
+			if (url.pathname === "/v1/logs") return respond(await ingestSpan(runSpan, db, "logs", req))
+			if (url.pathname === "/v1/metrics") return respond(await ingestSpan(runSpan, db, "metrics", req))
+			if (url.pathname === "/local/query") return respond(await querySpan(runSpan, db, req))
+		}
+		if (req.method === "GET" && options.assets) return respond(serveAsset(options.assets, url.pathname))
+		return respond(text("not found", 404))
 	}
 
 /** Start the server as a scoped resource. Opens chDB (bootstrapping the schema)
@@ -354,7 +403,7 @@ export const startServer = (
 			Effect.sync(() =>
 				Bun.serve({
 					port: options.port,
-					hostname: "127.0.0.1",
+					hostname: options.hostname,
 					fetch: makeFetch(db, options, runSpan),
 				}),
 			),

@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { lazy, memo, Suspense, useEffect } from "react"
 import { useAuth } from "@clerk/clerk-react"
 import { useMapleCustomer } from "@/hooks/use-maple-customer"
 import {
@@ -14,18 +14,52 @@ import { useAtom } from "@/lib/effect-atom"
 import { hasSelectedPlan, isUsableCustomer } from "@/lib/billing/plan-gating"
 import { parseRedirectUrl } from "@/lib/redirect-utils"
 import { Toaster } from "@maple/ui/components/ui/sonner"
-import { AttributesProvider } from "@maple/ui/components/attributes"
+import { AttributesProvider } from "@maple/ui/components/attributes/context"
 import { BootSplash } from "@/components/boot-splash"
-import { renderAttributeValue } from "@/components/attributes/commit-sha-attribute"
 import { highlightCode } from "@/lib/sugar-high"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import type { RouterAuthContext } from "@/router"
+import type { EffectRouterContext } from "@effect-router/core"
 import { captureChatReferrer } from "@/components/chat/auto-contexts"
 import { GlobalChatSheet } from "@/components/chat/global-chat-sheet"
 import { GlobalShortcuts } from "@/components/command-palette/global-shortcuts"
-import { UnitflowDevtools } from "@/components/devtools/unitflow-devtools"
+import { IdleRoutePrefetch } from "@/components/performance/idle-route-prefetch"
 
-const PUBLIC_PATHS = new Set(["/sign-in", "/sign-up", "/org-required", "/service-map-bench"])
+const UnitflowDevtools = import.meta.env.DEV
+	? lazy(() =>
+			import("@/components/devtools/unitflow-devtools").then((module) => ({
+				default: module.UnitflowDevtools,
+			})),
+		)
+	: null
+
+const CommitShaAttributeValue = lazy(() =>
+	import("@/components/attributes/commit-sha-attribute").then((module) => ({
+		default: module.CommitShaAttributeValue,
+	})),
+)
+
+const COMMIT_SHA_KEYS = new Set(["deployment.commit_sha", "vcs.ref.head.revision"])
+
+function renderAttributeValue(attrKey: string, value: string) {
+	if (!COMMIT_SHA_KEYS.has(attrKey)) return null
+	return (
+		<Suspense fallback={<span className="break-all">{value}</span>}>
+			<CommitShaAttributeValue value={value} />
+		</Suspense>
+	)
+}
+
+const PUBLIC_PATHS = new Set([
+	"/sign-in",
+	"/sign-up",
+	"/org-required",
+	"/service-map-bench",
+	"/service-detail-bench",
+	"/infra-bench",
+	"/logs-bench",
+	"/overview-bench",
+])
 
 // Routes that render their own onboarding/billing UI and so must never be
 // gated on plan selection (neither redirected away nor blocked while loading).
@@ -35,7 +69,7 @@ const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start"]
 // identity across renders (avoids re-rendering every CopyableValue consumer).
 const notifyCopied = (message?: string) => toast.success(message ?? "Copied to clipboard")
 
-export const Route = createRootRouteWithContext<{ auth: RouterAuthContext }>()({
+export const Route = createRootRouteWithContext<{ auth: RouterAuthContext } & EffectRouterContext>()({
 	beforeLoad: ({ context, location }) => {
 		if (PUBLIC_PATHS.has(location.pathname)) return
 
@@ -58,7 +92,10 @@ export const Route = createRootRouteWithContext<{ auth: RouterAuthContext }>()({
 	component: RootComponent,
 })
 
-function AppFrame() {
+// Memoized so root-level churn (Clerk session touches, customer-query state
+// transitions in ClerkReverseRedirects) stops here instead of cascading into
+// the entire route tree on every commit.
+const AppFrame = memo(function AppFrame() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname })
 	useEffect(() => {
 		captureChatReferrer(pathname)
@@ -71,16 +108,21 @@ function AppFrame() {
 		>
 			<Outlet />
 			<Toaster />
+			{!PUBLIC_PATHS.has(pathname) && <IdleRoutePrefetch />}
 			{!PUBLIC_PATHS.has(pathname) && (
 				<>
 					<GlobalShortcuts />
 					<GlobalChatSheet />
 				</>
 			)}
-			{import.meta.env.DEV && <UnitflowDevtools />}
+			{UnitflowDevtools && (
+				<Suspense fallback={null}>
+					<UnitflowDevtools />
+				</Suspense>
+			)}
 		</AttributesProvider>
 	)
-}
+})
 
 function getRedirectTarget(searchStr: string, fallback = "/") {
 	const params = new URLSearchParams(searchStr)

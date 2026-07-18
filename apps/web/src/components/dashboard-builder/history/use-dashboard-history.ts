@@ -21,7 +21,7 @@ export function useDashboardVersionDetail(dashboardId: DashboardId, versionId: D
 	const queryAtom = MapleApiV2AtomClient.query("dashboards", "retrieveVersion", {
 		params: {
 			id: dashboardId,
-			versionId,
+			version_id: versionId,
 		},
 		reactivityKeys: [`dashboard:${dashboardId}:version:${versionId}`],
 	})
@@ -35,7 +35,7 @@ export function useRestoreDashboardVersion() {
 export const buildRestorePayload = (dashboardId: DashboardId, versionId: DashboardVersionId) => ({
 	params: {
 		id: dashboardId,
-		versionId,
+		version_id: versionId,
 	},
 	reactivityKeys: ["dashboards", dashboardVersionsKey(dashboardId)] as const,
 })

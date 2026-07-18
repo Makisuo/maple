@@ -14,15 +14,19 @@ import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import { vi } from "vitest"
 
-import { AlertRuleDocument, type AlertRuleUpsertRequest } from "@maple/domain/http"
+import { AlertRuleDocument } from "@maple/domain/http"
 import { Event, Model, Mutation, Registry, Store } from "@maple/unitflow"
 
 // Importing the model pulls in the atom client / collections, which load
 // @/lib/registry (a ManagedRuntime) at module init. Stub it — this test
-// provides its own fake MapleApiAtomClient.
-vi.mock("@/lib/registry", () => ({ mapleRuntime: {}, mapleApiClientLayer: Layer.empty }))
+// provides its own fake MapleApiV2AtomClient.
+vi.mock("@/lib/registry", () => ({
+	mapleRuntime: {},
+	mapleApiClientLayer: Layer.empty,
+	mapleApiV2ClientLayer: Layer.empty,
+}))
 
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { toggleRuleHandler } from "./alerts-overview-model"
 
 const decodeRule = Schema.decodeUnknownSync(AlertRuleDocument)
@@ -70,27 +74,27 @@ const makeRule = (overrides: Record<string, unknown> = {}): AlertRuleDocument =>
 	})
 
 interface UpdateRuleReq {
-	readonly params: { readonly ruleId: string }
-	readonly payload: AlertRuleUpsertRequest
+	readonly params: { readonly id: string }
+	readonly payload: { readonly enabled?: boolean }
 }
 
 /**
- * A fake MapleApiAtomClient exposing only `alerts.updateRule` (all the handler
- * touches), recording every call. The real client is a large generated
+ * A fake MapleApiV2AtomClient exposing only `alertRules.update` (all the
+ * handler touches), recording every call. The real client is a large generated
  * HttpApiClient, so the stub is narrowed with one test-only boundary cast.
  */
 const makeFakeClient = (respond: (req: UpdateRuleReq) => Effect.Effect<AlertRuleDocument, Error>) => {
 	const calls: UpdateRuleReq[] = []
 	const client = {
-		alerts: {
-			updateRule: (req: UpdateRuleReq) => {
+		alertRules: {
+			update: (req: UpdateRuleReq) => {
 				calls.push(req)
 				return respond(req)
 			},
 		},
 	}
 	// biome-ignore lint/suspicious/noExplicitAny: narrow test double for a large generated client
-	const layer = Layer.succeed(MapleApiAtomClient, client as any)
+	const layer = Layer.succeed(MapleApiV2AtomClient, client as any)
 	return { calls, layer }
 }
 
@@ -107,7 +111,7 @@ class ToggleTestModel extends Model.Service<ToggleTestModel>()("test/alerts/togg
 		}),
 }) {}
 
-const layerFor = (fake: { readonly layer: Layer.Layer<MapleApiAtomClient> }) =>
+const layerFor = (fake: { readonly layer: Layer.Layer<MapleApiV2AtomClient> }) =>
 	ToggleTestModel.layer.pipe(
 		Layer.provideMerge(Reactivity.layer),
 		Layer.provideMerge(fake.layer),
@@ -117,7 +121,7 @@ const layerFor = (fake: { readonly layer: Layer.Layer<MapleApiAtomClient> }) =>
 describe("AlertsOverviewModel toggle mutation", () => {
 	it.effect("calls updateRule with the flipped `enabled` and lands success", () => {
 		const fake = makeFakeClient((req) =>
-			Effect.succeed(makeRule({ id: req.params.ruleId, enabled: req.payload.enabled })),
+			Effect.succeed(makeRule({ id: req.params.id, enabled: req.payload.enabled })),
 		)
 		return Effect.gen(function* () {
 			const ports = yield* Model.get(ToggleTestModel)
@@ -125,7 +129,7 @@ describe("AlertsOverviewModel toggle mutation", () => {
 
 			assert.strictEqual(updated.enabled, false)
 			assert.strictEqual(fake.calls.length, 1)
-			assert.strictEqual(fake.calls[0]?.params.ruleId, RULE_A)
+			assert.strictEqual(fake.calls[0]?.params.id, RULE_A)
 			assert.strictEqual(fake.calls[0]?.payload.enabled, false)
 
 			const state = yield* Store.get(ports.ui.state)
@@ -147,7 +151,7 @@ describe("AlertsOverviewModel toggle mutation", () => {
 
 	it.effect("serializes fire-and-forget toggles on one permit, in order", () => {
 		const fake = makeFakeClient((req) =>
-			Effect.succeed(makeRule({ id: req.params.ruleId, enabled: req.payload.enabled })),
+			Effect.succeed(makeRule({ id: req.params.id, enabled: req.payload.enabled })),
 		)
 		return Effect.gen(function* () {
 			const ports = yield* Model.get(ToggleTestModel)
@@ -156,8 +160,8 @@ describe("AlertsOverviewModel toggle mutation", () => {
 				Event.emit(ports.inputs.toggle, makeRule({ id: RULE_B })),
 			)
 			assert.strictEqual(fake.calls.length, 2)
-			assert.strictEqual(fake.calls[0]?.params.ruleId, RULE_A)
-			assert.strictEqual(fake.calls[1]?.params.ruleId, RULE_B)
+			assert.strictEqual(fake.calls[0]?.params.id, RULE_A)
+			assert.strictEqual(fake.calls[1]?.params.id, RULE_B)
 		}).pipe(Effect.provide(layerFor(fake)))
 	})
 })

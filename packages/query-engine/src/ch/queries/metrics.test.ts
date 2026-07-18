@@ -67,6 +67,17 @@ describe("metricsTimeseriesQuery", () => {
 		expect(sql).toContain("GROUP BY bucket, serviceName, attributeValue")
 	})
 
+	it("caps grouped value timeseries before returning the long tail", () => {
+		const q = metricsTimeseriesQuery({
+			metricType: "sum",
+			groupBy: ["service"],
+			seriesLimit: 7,
+		})
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("WITH __series_base AS")
+		expect(sql).toContain("LIMIT 7")
+	})
+
 	it("applies serviceName filter", () => {
 		const q = metricsTimeseriesQuery({ metricType: "sum", serviceName: "api" })
 		const { sql } = compileCH(q, baseParams)
@@ -111,6 +122,13 @@ describe("metricsTimeseriesQuery", () => {
 // ---------------------------------------------------------------------------
 
 describe("metricsTimeseriesRateQuery", () => {
+	it("caps grouped rate timeseries before returning the long tail", () => {
+		const q = metricsTimeseriesRateQuery({ groupBy: ["service"], seriesLimit: 7 })
+		const { sql } = compileCH(q, baseParams)
+		expect(sql).toContain("WITH __series_base AS")
+		expect(sql).toContain("LIMIT 7")
+	})
+
 	it("compiles CTE-based rate query", () => {
 		const q = metricsTimeseriesRateQuery({})
 		const { sql } = compileCH(q, baseParams)
@@ -376,7 +394,7 @@ describe("listMetricsQuery", () => {
 		expect(sql).not.toContain("UNION ALL")
 		expect(sql).toContain("FROM metric_catalog")
 		expect(sql).toContain("GROUP BY metricName, metricType, serviceName")
-		expect(sql).toContain("ORDER BY lastSeen DESC")
+		expect(sql).toContain("ORDER BY lastSeen DESC, metricName ASC, metricType ASC, serviceName ASC")
 		expect(sql).toContain("LIMIT 100")
 		// start bound floored to the hour
 		expect(sql).toContain("toStartOfInterval")

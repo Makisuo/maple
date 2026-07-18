@@ -12,7 +12,7 @@
  * inspector while open and unpaused. Nothing here runs in production.
  */
 
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffectEvent, useRef, useState } from "react"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { cn } from "@maple/ui/utils"
@@ -50,13 +50,7 @@ export function UnitflowDevtools() {
 	const [expandedEvents, setExpandedEvents] = useState<ReadonlySet<number>>(() => new Set())
 	const [expandedStores, setExpandedStores] = useState<ReadonlySet<string>>(() => new Set())
 
-	// Latest render values mirrored into refs so the mount-time poll closure
-	// reads current open/paused without re-subscribing.
-	const openRef = useRef(open)
-	const pausedRef = useRef(paused)
 	const lastSeqRef = useRef(-1)
-	openRef.current = open
-	pausedRef.current = paused
 
 	const refresh = useCallback((force: boolean) => {
 		const inspector = getUnitflowInspector()
@@ -71,11 +65,13 @@ export function UnitflowDevtools() {
 		setSnapshot(inspector.snapshot())
 	}, [])
 
+	const poll = useEffectEvent(() => {
+		if (!open || paused) return
+		refresh(false)
+	})
+
 	useMountEffect(() => {
-		const id = window.setInterval(() => {
-			if (!openRef.current || pausedRef.current) return
-			refresh(false)
-		}, POLL_MS)
+		const id = window.setInterval(poll, POLL_MS)
 		return () => window.clearInterval(id)
 	})
 
@@ -146,13 +142,21 @@ export function UnitflowDevtools() {
 						hasValue ? "cursor-pointer" : "cursor-default",
 					)}
 				>
-					<span className="w-10 shrink-0 text-right text-muted-foreground tabular-nums">#{event.seq}</span>
+					<span className="w-10 shrink-0 text-right text-muted-foreground tabular-nums">
+						#{event.seq}
+					</span>
 					<Badge variant={meta.variant} size="sm" className="shrink-0">
 						{meta.label}
 					</Badge>
 					<span className="truncate font-mono text-foreground">{event.name}</span>
-					{hasValue && <span className="truncate font-mono text-muted-foreground">{previewValue(event.value)}</span>}
-					<span className="ml-auto shrink-0 text-muted-foreground tabular-nums">{relativeTime(now - event.time)}</span>
+					{hasValue && (
+						<span className="truncate font-mono text-muted-foreground">
+							{previewValue(event.value)}
+						</span>
+					)}
+					<span className="ml-auto shrink-0 text-muted-foreground tabular-nums">
+						{relativeTime(now - event.time)}
+					</span>
 				</button>
 				{expanded && hasValue && (
 					<pre className="mx-2 mb-1 overflow-x-auto rounded border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">
@@ -176,7 +180,9 @@ export function UnitflowDevtools() {
 							onClick={() => setTab(value)}
 							className={cn(
 								"rounded px-2 py-0.5 font-medium capitalize",
-								tab === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+								tab === value
+									? "bg-background text-foreground shadow-sm"
+									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
 							{value}
@@ -207,7 +213,8 @@ export function UnitflowDevtools() {
 					<div className="flex-1 overflow-y-auto">
 						{events.length === 0 ? (
 							<p className="p-4 text-center text-muted-foreground">
-								No events yet. Interact with a model-backed page (e.g. /alerts) to record writes and emits.
+								No events yet. Interact with a model-backed page (e.g. /alerts) to record
+								writes and emits.
 							</p>
 						) : filtering ? (
 							<ul>{flat.map((event) => renderEventRow(event, 0))}</ul>
@@ -220,7 +227,8 @@ export function UnitflowDevtools() {
 						)}
 					</div>
 					<div className="border-t px-3 py-1 text-muted-foreground">
-						{events.length} events {paused && <span className="text-warning-foreground">· paused</span>}
+						{events.length} events{" "}
+						{paused && <span className="text-warning-foreground">· paused</span>}
 					</div>
 				</>
 			) : (
@@ -236,9 +244,18 @@ export function UnitflowDevtools() {
 								{snapshot.instances.map((instance) => {
 									const key = formatInstanceKey(instance.key)
 									return (
-										<li key={`${instance.model}:${key}`} className="flex items-center gap-2 px-3 py-1">
-											<span className="truncate font-mono text-foreground">{instance.model}</span>
-											{key !== "" && <span className="truncate font-mono text-muted-foreground">{key}</span>}
+										<li
+											key={`${instance.model}:${key}`}
+											className="flex items-center gap-2 px-3 py-1"
+										>
+											<span className="truncate font-mono text-foreground">
+												{instance.model}
+											</span>
+											{key !== "" && (
+												<span className="truncate font-mono text-muted-foreground">
+													{key}
+												</span>
+											)}
 											<Badge variant="secondary" size="sm" className="ml-auto shrink-0">
 												{instance.leases} lease{instance.leases === 1 ? "" : "s"}
 											</Badge>
@@ -265,13 +282,17 @@ export function UnitflowDevtools() {
 												onClick={() => toggleStore(store.id)}
 												className="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-accent/50"
 											>
-												<span className="truncate font-mono text-foreground">{store.name ?? store.id}</span>
+												<span className="truncate font-mono text-foreground">
+													{store.name ?? store.id}
+												</span>
 												{store.derived && (
 													<Badge variant="info" size="sm" className="shrink-0">
 														derived
 													</Badge>
 												)}
-												<span className="ml-auto truncate font-mono text-muted-foreground">{previewValue(store.value)}</span>
+												<span className="ml-auto truncate font-mono text-muted-foreground">
+													{previewValue(store.value)}
+												</span>
 											</button>
 											{expanded && (
 												<pre className="mx-3 mb-1 overflow-x-auto rounded border bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">

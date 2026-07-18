@@ -81,16 +81,6 @@ export function useTimelineInteractions({
 	const suppressClickRef = React.useRef(false)
 	const dragRef = React.useRef<DragState | null>(null)
 
-	// Latest values for the native wheel handler (added once, reads through this ref).
-	const cfgRef = React.useRef({ sidebarWidth, viewport, traceStartMs, traceEndMs, dispatch })
-	cfgRef.current = { sidebarWidth, viewport, traceStartMs, traceEndMs, dispatch }
-
-	const pxToMs = (px: number, left: number, width: number, vp: ViewportState) => {
-		const visible = vp.endMs - vp.startMs
-		const frac = width > 0 ? (px - left) / width : 0
-		return vp.startMs + frac * visible
-	}
-
 	const onPointerDown = React.useCallback(
 		(e: React.PointerEvent) => {
 			if (e.button !== 0 && e.button !== 1) return
@@ -128,7 +118,7 @@ export function useTimelineInteractions({
 					d.lastX = px
 					const visible = d.startViewport.endMs - d.startViewport.startMs
 					const deltaMs = -(deltaPx / d.timelineWidth) * visible
-					cfgRef.current.dispatch({ type: "PAN", deltaMs, traceStartMs, traceEndMs })
+					dispatch({ type: "PAN", deltaMs, traceStartMs, traceEndMs })
 				} else {
 					const lo = Math.max(d.timelineLeft, Math.min(d.startX, px))
 					const hi = Math.min(d.timelineLeft + d.timelineWidth, Math.max(d.startX, px))
@@ -146,10 +136,10 @@ export function useTimelineInteractions({
 				if (!d || !d.moved) return
 				if (d.mode === "zoom") {
 					const px = ev.clientX - d.bodyLeft
-					const a = pxToMs(d.startX, d.timelineLeft, d.timelineWidth, d.startViewport)
-					const b = pxToMs(px, d.timelineLeft, d.timelineWidth, d.startViewport)
+					const a = pxToMsStatic(d.startX, d.timelineLeft, d.timelineWidth, d.startViewport)
+					const b = pxToMsStatic(px, d.timelineLeft, d.timelineWidth, d.startViewport)
 					suppressClickRef.current = true
-					cfgRef.current.dispatch({
+					dispatch({
 						type: "ZOOM_TO_RANGE",
 						startMs: a,
 						endMs: b,
@@ -167,7 +157,7 @@ export function useTimelineInteractions({
 			// No preventDefault here — a plain press must still reach the row's onClick. Text
 			// selection during a drag is suppressed via `select-none` on the container.
 		},
-		[bodyRef, sidebarWidth, viewport, traceStartMs, traceEndMs],
+		[bodyRef, dispatch, sidebarWidth, viewport, traceStartMs, traceEndMs],
 	)
 
 	const onPointerMove = React.useCallback(
@@ -186,39 +176,37 @@ export function useTimelineInteractions({
 		if (!dragRef.current) setCrosshairX(null)
 	}, [])
 
+	const handleWheel = React.useEffectEvent((e: WheelEvent) => {
+		const el = bodyRef.current
+		if (!el) return
+		const sw = sidebarWidth
+		const vp = viewport
+		const rect = el.getBoundingClientRect()
+		const x = e.clientX - rect.left
+		if (x < sw) return // over the sidebar → let rows scroll natively
+		const timelineLeft = sw
+		const timelineWidth = el.clientWidth - sw
+		const visible = vp.endMs - vp.startMs
+		if (e.ctrlKey || e.metaKey) {
+			e.preventDefault()
+			const centerMs = pxToMsStatic(x, timelineLeft, timelineWidth, vp)
+			const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+			dispatch({ type: "ZOOM", centerMs, factor, traceStartMs, traceEndMs })
+		} else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+			e.preventDefault()
+			const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
+			const deltaMs = (delta / Math.max(1, timelineWidth)) * visible
+			dispatch({ type: "PAN", deltaMs, traceStartMs, traceEndMs })
+		}
+		// else: plain vertical wheel → native scroll (don't preventDefault)
+	})
+
 	// Native wheel listener (passive:false) so ctrl-wheel zoom / horizontal pan can preventDefault.
 	React.useEffect(() => {
 		const el = bodyRef.current
 		if (!el) return
-		const handler = (e: WheelEvent) => {
-			const {
-				sidebarWidth: sw,
-				viewport: vp,
-				traceStartMs: ts,
-				traceEndMs: te,
-				dispatch: dsp,
-			} = cfgRef.current
-			const rect = el.getBoundingClientRect()
-			const x = e.clientX - rect.left
-			if (x < sw) return // over the sidebar → let rows scroll natively
-			const timelineLeft = sw
-			const timelineWidth = el.clientWidth - sw
-			const visible = vp.endMs - vp.startMs
-			if (e.ctrlKey || e.metaKey) {
-				e.preventDefault()
-				const centerMs = pxToMsStatic(x, timelineLeft, timelineWidth, vp)
-				const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-				dsp({ type: "ZOOM", centerMs, factor, traceStartMs: ts, traceEndMs: te })
-			} else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
-				e.preventDefault()
-				const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
-				const deltaMs = (delta / Math.max(1, timelineWidth)) * visible
-				dsp({ type: "PAN", deltaMs, traceStartMs: ts, traceEndMs: te })
-			}
-			// else: plain vertical wheel → native scroll (don't preventDefault)
-		}
-		el.addEventListener("wheel", handler, { passive: false })
-		return () => el.removeEventListener("wheel", handler)
+		el.addEventListener("wheel", handleWheel, { passive: false })
+		return () => el.removeEventListener("wheel", handleWheel)
 	}, [bodyRef])
 
 	return {

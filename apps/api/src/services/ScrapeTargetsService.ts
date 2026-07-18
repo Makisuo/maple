@@ -121,7 +121,12 @@ export interface ScrapeTargetsServiceShape {
 	readonly listChecks: (
 		orgId: OrgId,
 		targetId: ScrapeTargetId,
-		query: { readonly startTime?: number; readonly endTime?: number; readonly limit?: number },
+		query: {
+			readonly startTime?: number
+			readonly endTime?: number
+			readonly limit?: number
+			readonly offset?: number
+		},
 	) => Effect.Effect<
 		ReadonlyArray<ScrapeTargetCheckRow>,
 		ScrapeTargetNotFoundError | ScrapeTargetPersistenceError
@@ -257,9 +262,7 @@ const rowToResponse = (row: ScrapeTargetRow): ScrapeTargetResponse => {
 		hasCredentials: row.authCredentialsCiphertext !== null,
 		managedBy: row.managedBy ?? null,
 		enabled: row.enabled,
-		lastScrapeAt: row.lastScrapeAt
-			? decodeIsoDateTimeStringSync(row.lastScrapeAt.toISOString())
-			: null,
+		lastScrapeAt: row.lastScrapeAt ? decodeIsoDateTimeStringSync(row.lastScrapeAt.toISOString()) : null,
 		lastScrapeError: row.lastScrapeError,
 		createdAt: decodeIsoDateTimeStringSync(row.createdAt.toISOString()),
 		updatedAt: decodeIsoDateTimeStringSync(row.updatedAt.toISOString()),
@@ -441,7 +444,13 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 			const list = Effect.fn("ScrapeTargetsService.list")(function* (orgId: OrgId) {
 				yield* Effect.annotateCurrentSpan({ orgId })
 				const rows = yield* database
-					.execute((db) => db.select().from(scrapeTargets).where(eq(scrapeTargets.orgId, orgId)))
+					.execute((db) =>
+						db
+							.select()
+							.from(scrapeTargets)
+							.where(eq(scrapeTargets.orgId, orgId))
+							.orderBy(desc(scrapeTargets.createdAt), desc(scrapeTargets.id)),
+					)
 					.pipe(Effect.mapError(toPersistenceError))
 
 				return new ScrapeTargetsListResponse({
@@ -466,9 +475,11 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 				const targetType = request.targetType ?? "prometheus"
 
 				let url: string
-				let discoveryConfigJson:
-					| { organization: string; includeBranches?: string[]; excludeBranches?: string[] }
-					| null = null
+				let discoveryConfigJson: {
+					organization: string
+					includeBranches?: string[]
+					excludeBranches?: string[]
+				} | null = null
 				let authType: string
 
 				if (targetType === "planetscale") {
@@ -515,14 +526,16 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					if (request.includeBranches !== undefined || request.excludeBranches !== undefined) {
 						return yield* Effect.fail(
 							new ScrapeTargetValidationError({
-								message: "includeBranches/excludeBranches are only valid for PlanetScale targets",
+								message:
+									"includeBranches/excludeBranches are only valid for PlanetScale targets",
 							}),
 						)
 					}
 					if (request.authType === "planetscale_oauth") {
 						return yield* Effect.fail(
 							new ScrapeTargetValidationError({
-								message: 'Auth type "planetscale_oauth" is only valid for PlanetScale targets',
+								message:
+									'Auth type "planetscale_oauth" is only valid for PlanetScale targets',
 							}),
 						)
 					}
@@ -887,9 +900,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 							contentType:
 								response.headers.get("content-type") ??
 								"text/plain; version=0.0.4; charset=utf-8",
-							retryAfterSeconds: parseRetryAfterSeconds(
-								response.headers.get("retry-after"),
-							),
+							retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("retry-after")),
 						} satisfies ScrapeTargetProxyResponse
 					},
 					catch: toPersistenceError,
@@ -1065,10 +1076,16 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 			const listChecks = Effect.fn("ScrapeTargetsService.listChecks")(function* (
 				orgId: OrgId,
 				targetId: ScrapeTargetId,
-				query: { readonly startTime?: number; readonly endTime?: number; readonly limit?: number },
+				query: {
+					readonly startTime?: number
+					readonly endTime?: number
+					readonly limit?: number
+					readonly offset?: number
+				},
 			) {
 				yield* requireTarget(orgId, targetId)
 				const limit = Math.min(Math.max(query.limit ?? 50, 1), 500)
+				const offset = Math.max(Math.trunc(query.offset ?? 0), 0)
 				const conditions = [
 					eq(scrapeTargetChecks.targetId, targetId),
 					eq(scrapeTargetChecks.orgId, orgId),
@@ -1086,7 +1103,8 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 							.from(scrapeTargetChecks)
 							.where(and(...conditions))
 							.orderBy(desc(scrapeTargetChecks.checkedAt), desc(scrapeTargetChecks.id))
-							.limit(limit),
+							.limit(limit)
+							.offset(offset),
 					)
 					.pipe(Effect.mapError(toPersistenceError))
 			})
@@ -1118,9 +1136,7 @@ export class ScrapeTargetsService extends Context.Service<ScrapeTargetsService, 
 					catch: (error) => (error instanceof Error ? error : new Error("Connection failed")),
 				}).pipe(
 					Effect.timeout(10_000),
-					Effect.catchTag("TimeoutError", () =>
-						Effect.fail(new Error("Connection failed")),
-					),
+					Effect.catchTag("TimeoutError", () => Effect.fail(new Error("Connection failed"))),
 					Effect.exit,
 				)
 

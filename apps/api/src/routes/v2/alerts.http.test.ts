@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -20,7 +20,12 @@ import { HazelOAuthService } from "../../services/HazelOAuthService"
 import { OrgMembersService } from "../../services/OrgMembersService"
 import { QueryEngineService } from "../../services/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
-import { AllV2GroupLayersLive } from "./v2-test-support"
+import {
+	AllV2GroupLayersLive,
+	ApiV2RateLimiterAllowAllLayer,
+	ConfigResourceServiceStubsLayer,
+	TelemetryServiceStubsLayer,
+} from "./v2-test-support"
 
 const createdDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(createdDbs))
@@ -47,6 +52,7 @@ const testConfig = () =>
 const warehouseStub: WarehouseQueryServiceShape = {
 	query: () => Effect.die(new Error("unexpected warehouse pipe query")),
 	sqlQuery: () => Effect.succeed([]),
+	rawSqlQuery: () => Effect.succeed([]),
 	compiledQuery: (_tenant, compiled) => compiled.decodeRows([]).pipe(Effect.orDie),
 	compiledQueryFirst: () => Effect.die(new Error("unexpected compiled query")),
 	ingest: () => Effect.void,
@@ -55,11 +61,11 @@ const warehouseStub: WarehouseQueryServiceShape = {
 	},
 }
 
-const makeHarness = () => {
+const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStub) => {
 	const testDb = createTestDb(createdDbs)
 	const configLive = testConfig()
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
-	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseStub)
+	const warehouseLive = Layer.succeed(WarehouseQueryService, warehouseService)
 	const edgeCacheLive = EdgeCacheService.layer.pipe(Layer.provide(CacheBackendLive))
 	const bucketCacheLive = BucketCacheService.layer.pipe(Layer.provide(edgeCacheLive))
 	const queryEngineLive = QueryEngineService.layer.pipe(
@@ -74,9 +80,7 @@ const makeHarness = () => {
 		fetch: globalThis.fetch,
 		deliveryTimeoutMs: () => 15_000,
 	})
-	const hazelOAuthLive = HazelOAuthService.layer.pipe(
-		Layer.provide(Layer.mergeAll(envLive, testDb.layer)),
-	)
+	const hazelOAuthLive = HazelOAuthService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, testDb.layer)))
 	const emailLive = Layer.succeed(EmailService, {
 		isConfigured: false,
 		send: () => Effect.void,
@@ -107,8 +111,11 @@ const makeHarness = () => {
 
 	const routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 		Layer.provide(AllV2GroupLayersLive),
+		Layer.provide(ConfigResourceServiceStubsLayer),
+		Layer.provide(TelemetryServiceStubsLayer),
 		Layer.provide(V2SchemaErrorsLive),
 		Layer.provideMerge(ApiAuthorizationV2Layer),
+		Layer.provideMerge(ApiV2RateLimiterAllowAllLayer),
 		Layer.provideMerge(servicesLive),
 	)
 	const { handler, dispose: disposeHandler } = HttpRouter.toWebHandler(routes, {
@@ -155,13 +162,9 @@ const makeHarness = () => {
 describe("v2 alerts over HTTP", () => {
 	it("supports destination + rule CRUD with v2 wire conventions", async () => {
 		const harness = makeHarness()
-		const key = await harness.bootstrapKey([
-			"alert_rules:write",
-			"alert_destinations:write",
-			"alert_incidents:read",
-		])
+		const key = await harness.bootstrapKey(["alerts:write"])
 
-		const destCreated = await harness.request("POST", "/v2/alert_destinations", key.secret, {
+		const destCreated = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
 			type: "webhook",
 			name: "Ops hook",
 			url: "https://example.com/hooks/maple",
@@ -170,13 +173,22 @@ describe("v2 alerts over HTTP", () => {
 		expect(destCreated.body.object).toBe("alert_destination")
 		expect(destCreated.body.id).toMatch(/^dest_/)
 		expect(destCreated.body.type).toBe("webhook")
+		expect(destCreated.body.txid).toMatch(/^\d+$/)
 		// Secrets never round-trip: only the redacted summary comes back.
 		expect(JSON.stringify(destCreated.body)).not.toContain("signing")
 		expect("url" in destCreated.body).toBe(false)
 
 		const destId: string = destCreated.body.id
 
-		const ruleCreated = await harness.request("POST", "/v2/alert_rules", key.secret, {
+		const destUpdated = await harness.request("PATCH", `/v2/alerts/destinations/${destId}`, key.secret, {
+			type: "webhook",
+			name: "Primary ops hook",
+		})
+		expect(destUpdated.status).toBe(200)
+		expect(destUpdated.body.name).toBe("Primary ops hook")
+		expect(destUpdated.body.txid).toMatch(/^\d+$/)
+
+		const ruleCreated = await harness.request("POST", "/v2/alerts/rules", key.secret, {
 			name: "Checkout error rate",
 			severity: "critical",
 			signal_type: "error_rate",
@@ -196,18 +208,18 @@ describe("v2 alerts over HTTP", () => {
 
 		const ruleId: string = ruleCreated.body.id
 
-		const listed = await harness.request("GET", "/v2/alert_rules?limit=1", key.secret)
+		const listed = await harness.request("GET", "/v2/alerts/rules?limit=1", key.secret)
 		expect(listed.status).toBe(200)
 		expect(listed.body).toMatchObject({ object: "list", has_more: false, next_cursor: null })
 		expect(listed.body.data[0].id).toBe(ruleId)
 		expect("txid" in listed.body.data[0]).toBe(false)
 
-		const retrieved = await harness.request("GET", `/v2/alert_rules/${ruleId}`, key.secret)
+		const retrieved = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(retrieved.status).toBe(200)
 		expect(retrieved.body.name).toBe("Checkout error rate")
 
 		// PATCH is a true partial update: pausing the rule keeps the condition.
-		const patched = await harness.request("PATCH", `/v2/alert_rules/${ruleId}`, key.secret, {
+		const patched = await harness.request("PATCH", `/v2/alerts/rules/${ruleId}`, key.secret, {
 			enabled: false,
 		})
 		expect(patched.status).toBe(200)
@@ -216,42 +228,205 @@ describe("v2 alerts over HTTP", () => {
 		expect(patched.body.tags).toEqual(["payments"])
 		expect(patched.body.txid).toMatch(/^\d+$/)
 
-		const checks = await harness.request("GET", `/v2/alert_rules/${ruleId}/checks`, key.secret)
+		const checks = await harness.request("GET", `/v2/alerts/rules/${ruleId}/checks`, key.secret)
 		expect(checks.status).toBe(200)
 		expect(checks.body).toMatchObject({ object: "list", data: [], has_more: false })
 
-		const incidents = await harness.request("GET", "/v2/alert_incidents", key.secret)
+		const incidents = await harness.request("GET", "/v2/alerts/incidents", key.secret)
 		expect(incidents.status).toBe(200)
 		expect(incidents.body).toMatchObject({ object: "list", data: [] })
 
 		// A destination referenced by a rule cannot be deleted.
-		const conflicted = await harness.request("DELETE", `/v2/alert_destinations/${destId}`, key.secret)
+		const conflicted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(conflicted.status).toBe(409)
-		expect(conflicted.body.error).toMatchObject({ type: "conflict_error", code: "resource_in_use" })
+		expect(conflicted.body.error).toMatchObject({
+			type: "conflict_error",
+			code: "alert_destination_in_use",
+		})
 
-		const ruleDeleted = await harness.request("DELETE", `/v2/alert_rules/${ruleId}`, key.secret)
+		const ruleDeleted = await harness.request("DELETE", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(ruleDeleted.status).toBe(200)
 		expect(ruleDeleted.body).toMatchObject({ id: ruleId, object: "alert_rule", deleted: true })
 
-		const destDeleted = await harness.request("DELETE", `/v2/alert_destinations/${destId}`, key.secret)
+		const destDeleted = await harness.request("DELETE", `/v2/alerts/destinations/${destId}`, key.secret)
 		expect(destDeleted.status).toBe(200)
 		expect(destDeleted.body).toMatchObject({ id: destId, object: "alert_destination", deleted: true })
+		expect(destDeleted.body.txid).toMatch(/^\d+$/)
 
-		const missing = await harness.request("GET", `/v2/alert_rules/${ruleId}`, key.secret)
+		const missing = await harness.request("GET", `/v2/alerts/rules/${ruleId}`, key.secret)
 		expect(missing.status).toBe(404)
-		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "resource_missing" })
+		expect(missing.body.error).toMatchObject({ type: "not_found_error", code: "alert_rule_not_found" })
 
 		await harness.dispose()
 	})
 
-	it("enforces per-family scopes and rejects malformed ids", async () => {
+	it("clears stored raw SQL when a rule switches to a structured signal", async () => {
 		const harness = makeHarness()
-		const readOnly = await harness.bootstrapKey(["alert_rules:read"])
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const destination = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Raw transition hook",
+			url: "https://example.com/hooks/raw-transition",
+		})
+		expect(destination.status).toBe(200)
 
-		const list = await harness.request("GET", "/v2/alert_rules", readOnly.secret)
+		const created = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Raw transition rule",
+			severity: "warning",
+			signal_type: "raw_query",
+			raw_query_sql:
+				"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+			raw_query_reducer: "max",
+			comparator: "gt",
+			threshold: 10,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		expect(created.status, JSON.stringify(created.body)).toBe(200)
+		expect(created.body.raw_query_sql).toContain("$__orgFilter")
+
+		const patched = await harness.request(
+			"PATCH",
+			`/v2/alerts/rules/${created.body.id}`,
+			key.secret,
+			{ signal_type: "error_rate" },
+		)
+		expect(patched.status, JSON.stringify(patched.body)).toBe(200)
+		expect(patched.body.signal_type).toBe("error_rate")
+		expect(patched.body.raw_query_sql).toBeNull()
+		expect(patched.body.raw_query_reducer).toBeNull()
+		await harness.dispose()
+	})
+
+	it("rejects hidden raw SQL on structured rules", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const response = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Disguised raw rule",
+			severity: "warning",
+			signal_type: "error_rate",
+			raw_query_sql: "SELECT count() AS value FROM traces WHERE $__orgFilter",
+			comparator: "gt",
+			threshold: 0.1,
+			window_minutes: 5,
+			destination_ids: [],
+		})
+		expect(response.status).toBe(400)
+		expect(response.body.error).toMatchObject({ type: "invalid_request_error" })
+		await harness.dispose()
+	})
+
+	it("blocks raw SQL preview for alerts:read keys without querying the warehouse", async () => {
+		let warehouseCalls = 0
+		const harness = makeHarness({
+			...warehouseStub,
+			sqlQuery: () => {
+				warehouseCalls += 1
+				return Effect.succeed([{ value: 42 }])
+			},
+		})
+		const key = await harness.bootstrapKey(["alerts:read"])
+		const response = await harness.request("POST", "/v2/alerts/rules/preview", key.secret, {
+			rule: {
+				name: "Raw preview",
+				severity: "warning",
+				signal_type: "raw_query",
+				raw_query_sql:
+					"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				raw_query_reducer: "max",
+				comparator: "gt",
+				threshold: 10,
+				window_minutes: 5,
+				destination_ids: [],
+			},
+			start_time: "2026-01-01T00:00:00.000Z",
+			end_time: "2026-01-01T00:30:00.000Z",
+		})
+		expect(response.status).toBe(400)
+		expect(JSON.stringify(response.body)).toContain("cannot be previewed")
+		expect(warehouseCalls).toBe(0)
+		await harness.dispose()
+	})
+
+	it("paginates alert checks beyond the former 2,000-row window", async () => {
+		const checkRows = Array.from({ length: 2_005 }, (_, index) => {
+			const timestamp = new Date(Date.UTC(2026, 0, 1) + (2_005 - index) * 1_000).toISOString()
+			return {
+				timestamp,
+				groupKey: `service=api-${String(index).padStart(4, "0")}`,
+				status: "healthy",
+				signalType: "error_rate",
+				comparator: "gt",
+				threshold: 0.05,
+				observedValue: 0.01,
+				sampleCount: 100,
+				windowMinutes: 5,
+				windowStart: timestamp,
+				windowEnd: timestamp,
+				consecutiveBreaches: 0,
+				consecutiveHealthy: 1,
+				incidentId: null,
+				incidentTransition: "none",
+				evaluationDurationMs: 8,
+				errorMessage: null,
+				errorCategory: "",
+			}
+		})
+		const pagedWarehouse: WarehouseQueryServiceShape = {
+			...warehouseStub,
+			compiledQuery: (_tenant, compiled, options) => {
+				if (options?.context !== "listAlertChecks") return compiled.decodeRows([]).pipe(Effect.orDie)
+				const match = /LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i.exec(compiled.sql)
+				const limit = Number(match?.[1] ?? 100)
+				const offset = Number(match?.[2] ?? 0)
+				return compiled.decodeRows(checkRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+			},
+		}
+		const harness = makeHarness(pagedWarehouse)
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const destination = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Pagination hook",
+			url: "https://example.com/hooks/pagination",
+		})
+		expect(destination.status).toBe(200)
+		const created = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Pagination rule",
+			severity: "warning",
+			signal_type: "error_rate",
+			comparator: "gt",
+			threshold: 0.05,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		expect(created.status, JSON.stringify(created.body)).toBe(200)
+
+		let cursor: string | null = null
+		const seen = new Set<string>()
+		do {
+			const suffix = cursor === null ? "" : `&cursor=${encodeURIComponent(cursor)}`
+			const page = await harness.request(
+				"GET",
+				`/v2/alerts/rules/${created.body.id}/checks?limit=100${suffix}`,
+				key.secret,
+			)
+			expect(page.status).toBe(200)
+			for (const check of page.body.data) seen.add(`${check.timestamp}:${check.group_key}`)
+			cursor = page.body.next_cursor
+		} while (cursor !== null)
+
+		expect(seen.size).toBe(2_005)
+		await harness.dispose()
+	})
+
+	it("enforces the alerts scope family and rejects malformed ids", async () => {
+		const harness = makeHarness()
+		const readOnly = await harness.bootstrapKey(["alerts:read"])
+
+		const list = await harness.request("GET", "/v2/alerts/rules", readOnly.secret)
 		expect(list.status).toBe(200)
 
-		const create = await harness.request("POST", "/v2/alert_rules", readOnly.secret, {
+		const create = await harness.request("POST", "/v2/alerts/rules", readOnly.secret, {
 			name: "Denied",
 			severity: "warning",
 			signal_type: "error_rate",
@@ -263,12 +438,17 @@ describe("v2 alerts over HTTP", () => {
 		expect(create.status).toBe(403)
 		expect(create.body.error).toMatchObject({ type: "permission_error", code: "insufficient_scope" })
 
-		// Scope families are independent: alert_rules:read grants nothing on destinations.
-		const destinations = await harness.request("GET", "/v2/alert_destinations", readOnly.secret)
-		expect(destinations.status).toBe(403)
-		expect(destinations.body.error).toMatchObject({ type: "permission_error", code: "insufficient_scope" })
+		// The /v2/alerts/* namespace is one scope family: alerts:read spans all three groups...
+		const destinations = await harness.request("GET", "/v2/alerts/destinations", readOnly.secret)
+		expect(destinations.status).toBe(200)
 
-		const malformed = await harness.request("GET", "/v2/alert_rules/dash_notARuleId", readOnly.secret)
+		// ...but another family's scope grants nothing here.
+		const foreign = await harness.bootstrapKey(["dashboards:read"])
+		const denied = await harness.request("GET", "/v2/alerts/destinations", foreign.secret)
+		expect(denied.status).toBe(403)
+		expect(denied.body.error).toMatchObject({ type: "permission_error", code: "insufficient_scope" })
+
+		const malformed = await harness.request("GET", "/v2/alerts/rules/dash_notARuleId", readOnly.secret)
 		expect(malformed.status).toBe(400)
 		expect(malformed.body.error).toMatchObject({ type: "invalid_request_error" })
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { compileCH } from "@maple-dev/clickhouse-builder"
 import { listRuleChecksQuery } from "./alert-checks"
 
@@ -17,7 +17,7 @@ describe("listRuleChecksQuery", () => {
 		expect(sql).toContain("formatDateTime(WindowEnd, '%Y-%m-%dT%H:%i:%S.%fZ') AS windowEnd")
 		expect(sql).toContain("OrgId = 'org_1'")
 		expect(sql).toContain("RuleId = 'rule_1'")
-		expect(sql).toContain("ORDER BY timestamp DESC")
+		expect(sql).toContain("ORDER BY timestamp DESC, groupKey ASC")
 		expect(sql).toContain("LIMIT 500")
 		expect(sql).toContain("FORMAT JSON")
 		// No optional filters present
@@ -60,8 +60,9 @@ describe("listRuleChecksQuery", () => {
 	})
 
 	it("respects the limit argument", () => {
-		const q = listRuleChecksQuery({ limit: 42 })
+		const q = listRuleChecksQuery({ limit: 42, offset: 84 })
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("LIMIT 42")
+		expect(sql).toContain("OFFSET 84")
 	})
 })

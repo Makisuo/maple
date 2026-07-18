@@ -1,7 +1,22 @@
 export type DirtyStorePolicy = "wipe" | "fail" | "restore-checkpoint"
 
+export {
+	canonicalUrlHostname,
+	connectionHostForBindHost,
+	defaultLocalUrl,
+	hostedDashboardUrl,
+	hostedUiOrigin,
+	normalizeHost,
+	resolveAdvertiseHost,
+	resolveBindHost,
+	serverProbeUrl,
+	serverUrl,
+} from "../lib/local-address"
+
 export interface DetachedChildArgs {
 	readonly entry: string | undefined
+	readonly host: string
+	readonly advertiseHost: string
 	readonly port: number
 	readonly dataDir: string
 	readonly offline: boolean
@@ -16,6 +31,10 @@ export const buildDetachedChildArgs = (options: DetachedChildArgs): string[] => 
 	return [
 		...runtimeArgs,
 		"start",
+		"--host",
+		options.host,
+		"--advertise-host",
+		options.advertiseHost,
 		"--port",
 		String(options.port),
 		"--data-dir",

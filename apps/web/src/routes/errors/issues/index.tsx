@@ -1,6 +1,5 @@
 import { useCallback, useMemo } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { effectRoute } from "@effect-router/core"
 import { Schema } from "effect"
 
 import { Unitflow, View } from "@maple/unitflow/react"
@@ -96,7 +95,7 @@ const searchSchema = Schema.Struct({
 	kind: Schema.optional(Schema.Literals(["error", "alert"])),
 })
 
-export const Route = effectRoute(createFileRoute("/errors/issues/"))({
+export const Route = createFileRoute("/errors/issues/")({
 	component: IssuesPage,
 	validateSearch: Schema.toStandardSchemaV1(searchSchema),
 })

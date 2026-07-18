@@ -1,5 +1,8 @@
 import { Clock, Duration, Effect, Ref, Schedule } from "effect"
 import {
+	MAX_RAW_SQL_RESULT_BYTES,
+	MAX_RAW_SQL_RESULT_ROWS,
+	RawSqlValidationError,
 	type WarehouseQueryRequest,
 	WarehouseQueryResponse,
 	WarehouseSchemaDriftError,
@@ -16,6 +19,7 @@ import {
 	stripTinybirdRestrictedSettings,
 } from "../profiles"
 import { mapWarehouseError, toWarehouseQueryError, type WarehouseSqlError } from "./errors"
+import { WarehouseResponseLimitError } from "./response-limits"
 import {
 	SQL_LOG_MAX,
 	SQL_TRACE_MAX,
@@ -42,7 +46,7 @@ interface CachedClient {
 
 const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
 	config._tag === "clickhouse"
-		? `clickhouse:${config.url}:${config.username}:${config.password}:${config.database}`
+		? `${config.provider}:clickhouse:${config.url}:${config.username}:${config.password}:${config.database}`
 		: `tinybird:${config.host}:${config.token}`
 
 // Only retry transient upstream failures (5xx, 408, 429, network blips). Non-transient
@@ -54,7 +58,7 @@ const TRANSIENT_RETRY_SCHEDULE = Schedule.exponential("100 millis", 2.0).pipe(
 	Schedule.both(Schedule.recurs(2)),
 )
 
-const isTransientUpstreamError = (error: WarehouseSqlError): boolean =>
+const isTransientUpstreamError = (error: unknown): error is WarehouseUpstreamError =>
 	error instanceof WarehouseUpstreamError
 
 // Client-side ceiling for a single query attempt. Tinybird's server-side
@@ -116,6 +120,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		sql: string,
 		pipe: string,
 		options?: SqlQueryOptions,
+		execution: "trusted" | "raw" = "trusted",
 	) {
 		const startedAtMs = yield* Clock.currentTimeMillis
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
@@ -139,9 +144,11 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// config to stay symmetric with the write — otherwise a BYO-CH org reads an
 		// empty table from its own ClickHouse.
 		const resolveFn =
-			options?.pinToIngestConfig && deps.resolveIngestConfig
-				? deps.resolveIngestConfig
-				: deps.resolveConfig
+			execution === "raw"
+				? deps.resolveRawSqlConfig
+				: options?.pinToIngestConfig && deps.resolveIngestConfig
+					? deps.resolveIngestConfig
+					: deps.resolveConfig
 		const resolved = yield* resolveFn(tenant, pipe)
 		if (options?.pinToIngestConfig) yield* Effect.annotateCurrentSpan("query.routing", "ingest")
 		const peerService = resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird"
@@ -150,14 +157,13 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// Tinybird's managed warehouse restricts some settings (e.g. max_block_size:
 		// "Usage of setting 'max_block_size' is restricted"). It is reached either via
 		// the Tinybird SDK (_tag "tinybird") or its ClickHouse-compatible gateway
-		// (_tag "clickhouse", when CLICKHOUSE_URL is set); both enforce that policy.
-		// Only a genuine per-org BYO ClickHouse (source "org_override") supports those
-		// settings, so strip everywhere except there. Gating on `source` (not `_tag`)
-		// is what fixes the managed CH-gateway path.
+		// (_tag "clickhouse", when CLICKHOUSE_PROVIDER=tinybird); both enforce that
+		// policy. Vanilla ClickHouse supports those settings regardless of whether its
+		// credentials come from the environment or an org override.
 		const settings =
-			resolved.source === "org_override"
-				? resolveSettings(options)
-				: stripTinybirdRestrictedSettings(resolveSettings(options))
+			resolved.config.provider === "tinybird"
+				? stripTinybirdRestrictedSettings(resolveSettings(options))
+				: resolveSettings(options)
 		const sqlForClient =
 			resolved.config._tag === "clickhouse" ? normalizeSqlForClickHouseClient(sql) : sql
 		const finalSql = appendSettings(sqlForClient, settings)
@@ -172,43 +178,55 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 		if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
-		const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-		const client = getCachedOrCreateClient(cacheKey, resolved.config, yield* Clock.currentTimeMillis)
+		const client = getCachedOrCreateClient(
+			resolved.clientCacheKey,
+			resolved.config,
+			yield* Clock.currentTimeMillis,
+		)
 		const attemptTimeoutMs = clientTimeoutMs(options?.profile, settings?.maxExecutionTime)
 		const retryAttempts = yield* Ref.make(0)
+		const responseLimits =
+			execution === "raw"
+				? { maxRows: MAX_RAW_SQL_RESULT_ROWS, maxBytes: MAX_RAW_SQL_RESULT_BYTES }
+				: undefined
 		const queryAttempt = Effect.tryPromise({
-			try: () => client.sql(finalSql),
-			catch: (error) => mapWarehouseError(pipe, error),
+			try: () => client.sql(finalSql, responseLimits === undefined ? undefined : { responseLimits }),
+			catch: (error) =>
+				error instanceof WarehouseResponseLimitError
+					? new RawSqlValidationError({
+							code: "ResourceLimit",
+							message: error.message,
+						})
+					: mapWarehouseError(pipe, error),
 		})
 		// `db.duration_ms` measures warehouse execution only — captured here, after
 		// config resolution + settings/client-cache preamble, immediately before the
 		// query runs. `startedAtMs` (captured at span entry) feeds the separate
 		// `db.total_duration_ms`, covering the whole executeSql span including preamble.
 		const sqlStartedMs = yield* Clock.currentTimeMillis
-		const result = yield* (
-			// Bound each attempt: don't let a queued query ride the ambient ~30s
-			// Worker fetch limit past its declared budget. Non-transient, so it
-			// fails fast rather than retrying into a struggling warehouse. Skipped
-			// entirely for the `unbounded` profile (explicit opt-out).
+		// Bound each attempt: don't let a queued query ride the ambient ~30s Worker
+		// fetch limit past its declared budget. The timeout is non-transient, so it
+		// fails fast instead of retrying. The `unbounded` profile explicitly opts out.
+		const boundedAttempt =
 			attemptTimeoutMs === undefined
 				? queryAttempt
 				: queryAttempt.pipe(
 						Effect.timeoutOrElse({
 							duration: Duration.millis(attemptTimeoutMs),
 							orElse: () =>
-								// Constructed directly via `toWarehouseQueryError` (non-transient) — this
-								// timeout must never flow through `mapWarehouseError`, whose transient
-								// regex could reclassify a "timeout" message and feed it back into the
-								// retry loop, re-amplifying load on an already-struggling warehouse.
+								// Constructed directly via `toWarehouseQueryError` so a transient
+								// message matcher cannot feed this client timeout into the retry loop.
 								Effect.fail(
 									toWarehouseQueryError(
 										pipe,
-										new Error(`Warehouse query exceeded ${attemptTimeoutMs}ms client timeout`),
+										new Error(
+											`Warehouse query exceeded ${attemptTimeoutMs}ms client timeout`,
+										),
 									),
 								),
 						}),
 					)
-		).pipe(
+		const result = yield* boundedAttempt.pipe(
 			Effect.tapError((error) =>
 				isTransientUpstreamError(error) ? Ref.update(retryAttempts, (n) => n + 1) : Effect.void,
 			),
@@ -251,6 +269,18 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		return result.data
 	})
 
+	const executeTrustedSql = (
+		tenant: ExecutionTenant,
+		sql: string,
+		pipe: string,
+		options?: SqlQueryOptions,
+	) =>
+		executeSql(tenant, sql, pipe, options, "trusted").pipe(
+			// A trusted driver call never receives response limits, so this branch is
+			// an impossible implementation defect rather than part of its error API.
+			Effect.catchTag("@maple/http/errors/RawSqlValidationError", Effect.die),
+		)
+
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
@@ -278,7 +308,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		}
 
-		const rows = yield* executeSql(tenant, compiled.sql, payload.pipeName, options)
+		const rows = yield* executeTrustedSql(tenant, compiled.sql, payload.pipeName, options)
 		const decodedRows = yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
@@ -312,7 +342,21 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 				message: "SQL query must contain OrgId filter (sqlQuery)",
 			})
 		}
-		return yield* executeSql(tenant, sql, "sqlQuery", options)
+		return yield* executeTrustedSql(tenant, sql, "sqlQuery", options)
+	})
+
+	const rawSqlQuery = Effect.fn("WarehouseQueryService.rawSqlQuery")(function* (
+		tenant: ExecutionTenant,
+		sql: string,
+		options?: Pick<SqlQueryOptions, "profile" | "context">,
+	) {
+		if (!sql.includes("OrgId")) {
+			return yield* new RawSqlValidationError({
+				code: "MissingOrgFilter",
+				message: "Raw SQL must contain the expanded OrgId filter",
+			})
+		}
+		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
 	const compiledQuery = Effect.fn("WarehouseQueryService.compiledQuery")(function* <T>(
@@ -368,15 +412,20 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// ClickHouse READ override (routing writes through the override 500'd every
 		// insert and broke demo-seed onboarding). Falls back to the read resolver.
 		const resolveForIngest = deps.resolveIngestConfig ?? deps.resolveConfig
-		const resolved = yield* resolveForIngest(tenant, label)
+		const resolved = yield* resolveForIngest(tenant, label).pipe(
+			Effect.mapError((error) => toWarehouseQueryError(label, error)),
+		)
 
 		// Insert through the same client the read path uses (official
 		// @clickhouse/client-web for ClickHouse, Tinybird Events API for
 		// Tinybird) so the wire protocol is handled correctly — a hand-rolled
 		// `?query=INSERT … FORMAT JSONEachRow` POST had its query param dropped
 		// by managed ClickHouse, which then parsed the NDJSON body as SQL.
-		const cacheKey = resolved.source === "managed" ? "__managed__" : tenant.orgId
-		const client = getCachedOrCreateClient(cacheKey, resolved.config, yield* Clock.currentTimeMillis)
+		const client = getCachedOrCreateClient(
+			resolved.clientCacheKey,
+			resolved.config,
+			yield* Clock.currentTimeMillis,
+		)
 
 		yield* Effect.tryPromise({
 			try: () => client.insert(datasource, rows),
@@ -451,6 +500,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 	return {
 		query,
 		sqlQuery,
+		rawSqlQuery,
 		compiledQuery,
 		compiledQueryFirst,
 		ingest,

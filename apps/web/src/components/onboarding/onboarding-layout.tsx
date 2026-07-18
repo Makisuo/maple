@@ -45,19 +45,21 @@ export function OnboardingLayout({
 					{Array.from({ length: totalSteps }).map((_, i) => {
 						const reached = i < currentStep
 						return (
-							<motion.div
-								key={i}
-								className={cn("h-1 rounded-full bg-muted overflow-hidden")}
-								animate={{ width: reached ? 28 : 16 }}
-								transition={PIP_TRANSITION}
-							>
+							<div key={i} className="flex h-1 w-7 items-center justify-center">
 								<motion.div
-									className="h-full bg-primary rounded-full origin-left"
+									className={cn("h-full w-full overflow-hidden rounded-full bg-muted")}
 									initial={false}
-									animate={{ scaleX: reached ? 1 : 0 }}
+									animate={{ scaleX: reached ? 1 : 4 / 7 }}
 									transition={PIP_TRANSITION}
-								/>
-							</motion.div>
+								>
+									<motion.div
+										className="h-full rounded-full bg-primary origin-left"
+										initial={false}
+										animate={{ scaleX: reached ? 1 : 0 }}
+										transition={PIP_TRANSITION}
+									/>
+								</motion.div>
+							</div>
 						)
 					})}
 				</div>

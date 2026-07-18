@@ -152,6 +152,36 @@ describe("deriveOverview", () => {
 		expect(overview.incidentsByRule.get(RULE_A)).toHaveLength(1)
 	})
 
+	it("windows out resolved incidents older than 30d but always keeps open ones", () => {
+		const overview = deriveOverview({
+			rules: [makeRule({ id: RULE_A })],
+			incidents: [
+				makeIncident({ id: "00000000-0000-4000-8000-0000000000f1", lastTriggeredAt: iso(60_000) }),
+				// Ancient but still open — must survive the window.
+				makeIncident({
+					id: "00000000-0000-4000-8000-0000000000f2",
+					lastTriggeredAt: iso(45 * DAY_MS),
+					firstTriggeredAt: iso(46 * DAY_MS),
+				}),
+				// Ancient and resolved — dropped before any sorting/grouping.
+				makeIncident({
+					id: "00000000-0000-4000-8000-0000000000f3",
+					status: "resolved",
+					lastTriggeredAt: iso(31 * DAY_MS),
+					firstTriggeredAt: iso(32 * DAY_MS),
+					resolvedAt: iso(31 * DAY_MS),
+				}),
+			],
+			states: [],
+			deliveryEvents: [],
+			now: NOW,
+		})
+		expect(overview.incidents.map((i) => i.id)).toEqual([
+			"00000000-0000-4000-8000-0000000000f1",
+			"00000000-0000-4000-8000-0000000000f2",
+		])
+	})
+
 	it("spans a 24h timeline ending at now", () => {
 		const overview = deriveOverview({ rules: [], incidents: [], states: [], deliveryEvents: [], now: NOW })
 		expect(overview.timelineRange).toEqual({ min: NOW - DAY_MS, max: NOW })

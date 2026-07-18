@@ -28,6 +28,10 @@ const telemetry = MapleFlush.make({
 	// Expected 4xx API responses (the maple-web → maple-api edge surfaces these
 	// as client-span failures) record as Ok instead of errors.
 	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	// Maple's dashboard prioritizes operator responsiveness over self-replay.
+	// Keep lightweight session metadata and trace/log correlation, but do not
+	// run rrweb DOM capture, compression, and upload loops in every open tab.
+	replay: { enabled: false },
 })
 
 export const mapleOtelLayer = telemetry.layer

@@ -142,7 +142,7 @@ export function MetricsTable({ search, metricType, onOpenMetric, startTime, endT
 			</EmptyHeader>
 		</Empty>
 	) : (
-		<div className={`content-enter space-y-4 ${waiting ? "opacity-60" : ""}`}>
+		<div className={`space-y-4 ${waiting ? "opacity-60" : ""}`}>
 			<div className="rounded-md border overflow-auto">
 				<Table className="table-fixed">
 					<TableHeader>

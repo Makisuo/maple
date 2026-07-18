@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { ingestUrl } from "@/lib/services/common/ingest-url"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
@@ -34,8 +34,8 @@ interface UseIngestConnectionOptions {
 export function useIngestConnection({ poll = true }: UseIngestConnectionOptions = {}): IngestConnection {
 	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, "1h")
 
-	const keysResult = useAtomValue(MapleApiAtomClient.query("ingestKeys", "get", {}))
-	const apiKey = Result.isSuccess(keysResult) ? keysResult.value.publicKey : ""
+	const keysResult = useAtomValue(MapleApiV2AtomClient.query("ingestKeys", "retrieve", {}))
+	const apiKey = Result.isSuccess(keysResult) ? keysResult.value.public_key : ""
 
 	const overviewAtom = getServiceOverviewResultAtom({ data: { startTime, endTime } })
 	const overviewResult = useAtomValue(overviewAtom)

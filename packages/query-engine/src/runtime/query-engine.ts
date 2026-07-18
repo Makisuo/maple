@@ -22,13 +22,16 @@ import {
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
+	MAX_RAW_SQL_ALERT_GROUPS,
+	MAX_RAW_SQL_GROUP_KEY_LENGTH,
+	type RawSqlValidationError,
 	type WarehouseError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
 import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
-import { makeExpandMacros } from "./raw-sql"
+import { makeExecuteRawSql } from "./raw-sql"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
 // Re-exported so `@maple/query-engine/runtime` consumers (apps/api) keep importing
@@ -57,6 +60,11 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 			readonly settings?: WarehouseQuerySettings
 		},
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
+	readonly rawSqlQuery: (
+		tenant: T,
+		sql: string,
+		options: { readonly profile: QueryProfileName; readonly context: string },
+	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError | RawSqlValidationError>
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
@@ -117,7 +125,7 @@ export type QueryEngineDirectError = QueryEngineExecutionError | QueryEngineTime
 
 export type QueryEngineRouteError = QueryEngineValidationError | QueryEngineDirectError
 
-const MAX_RANGE_SECONDS = 60 * 60 * 24 * 31
+export const MAX_QUERY_RANGE_SECONDS = 60 * 60 * 24 * 31
 const MAX_LIST_RANGE_SECONDS = 60 * 60 * 24 * 7
 const MAX_TIMESERIES_POINTS = 1_500
 const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
@@ -314,10 +322,10 @@ const validateTimeRange = Effect.fn("QueryEngineService.validateTimeRange")(func
 	}
 
 	const rangeSeconds = (endMs - startMs) / 1000
-	if (rangeSeconds > MAX_RANGE_SECONDS) {
+	if (rangeSeconds > MAX_QUERY_RANGE_SECONDS) {
 		return yield* new QueryEngineValidationError({
 			message: "Time range too large",
-			details: [`Maximum supported range is ${MAX_RANGE_SECONDS} seconds`],
+			details: [`Maximum supported range is ${MAX_QUERY_RANGE_SECONDS} seconds`],
 		})
 	}
 
@@ -347,41 +355,43 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
 	},
 )
 
-const validateMetricsAttributeFilters = Effect.fn(
-	"QueryEngineService.validateMetricsAttributeFilters",
-)(function* (query: QuerySpec): Effect.fn.Return<void, QueryEngineValidationError> {
-	if (query.source !== "metrics") return
-	if (query.kind !== "timeseries" && query.kind !== "breakdown") return
+const validateMetricsAttributeFilters = Effect.fn("QueryEngineService.validateMetricsAttributeFilters")(
+	function* (query: QuerySpec): Effect.fn.Return<void, QueryEngineValidationError> {
+		if (query.source !== "metrics") return
+		if (query.kind !== "timeseries" && query.kind !== "breakdown") return
 
-	// `groupBy` is an array for timeseries, a single literal for breakdown.
-	const groupBy = query.groupBy
-	const wantsAttribute = Array.isArray(groupBy) ? groupBy.includes("attribute") : groupBy === "attribute"
-	const wantsResourceAttribute = Array.isArray(groupBy)
-		? groupBy.includes("resource_attribute")
-		: groupBy === "resource_attribute"
-	if (wantsAttribute && !query.filters.groupByAttributeKey) {
-		// Mirror the traces guard: never silently downgrade an attribute grouping
-		// to a service grouping — the agent asked for a label breakdown.
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy=attribute requires filters.groupByAttributeKey"],
-		})
-	}
-	if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
-		})
-	}
-	if (wantsAttribute && wantsResourceAttribute) {
-		// The metrics queries carry a single attributeValue group column — one
-		// attribute dimension per query.
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy cannot combine attribute and resource_attribute"],
-		})
-	}
-})
+		// `groupBy` is an array for timeseries, a single literal for breakdown.
+		const groupBy = query.groupBy
+		const wantsAttribute = Array.isArray(groupBy)
+			? groupBy.includes("attribute")
+			: groupBy === "attribute"
+		const wantsResourceAttribute = Array.isArray(groupBy)
+			? groupBy.includes("resource_attribute")
+			: groupBy === "resource_attribute"
+		if (wantsAttribute && !query.filters.groupByAttributeKey) {
+			// Mirror the traces guard: never silently downgrade an attribute grouping
+			// to a service grouping — the agent asked for a label breakdown.
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy=attribute requires filters.groupByAttributeKey"],
+			})
+		}
+		if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
+			})
+		}
+		if (wantsAttribute && wantsResourceAttribute) {
+			// The metrics queries carry a single attributeValue group column — one
+			// attribute dimension per query.
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy cannot combine attribute and resource_attribute"],
+			})
+		}
+	},
+)
 
 const validatePointBudget = Effect.fn("QueryEngineService.validatePointBudget")(function* (
 	request: QueryEngineExecuteRequest,
@@ -1093,6 +1103,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						attributeKey: attributeFilter?.key,
 						attributeValue: attributeFilter?.value,
 						resourceAttributeFilters,
+						groupBy: request.query.groupBy,
+						seriesLimit: request.query.seriesLimit,
 					}),
 					{
 						orgId: tenant.orgId,
@@ -1140,6 +1152,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					attributeKey: attributeFilter?.key,
 					attributeValue: attributeFilter?.value,
 					resourceAttributeFilters,
+					groupBy: request.query.groupBy,
+					seriesLimit: request.query.seriesLimit,
 				}),
 				{
 					orgId: tenant.orgId,
@@ -1164,7 +1178,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				request.query.groupBy?.includes("none") || !request.query.groupBy?.length
 					? groupTimeSeriesRows(
 							collapseMetricTimeseriesRows(
-								result as Array<MetricTimeseriesRow>,
+								result as ReadonlyArray<MetricTimeseriesRow>,
 								request.query.metric,
 							),
 							(row) => row.value,
@@ -2099,8 +2113,9 @@ const RawSqlAlertRowSchema = Schema.Struct({
  * and an optional `samples` column carries the sample count (else each row
  * counts as 1). Per group, `value` rows are collapsed with the reducer.
  */
-export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) =>
-	Effect.fn("QueryEngineService.evaluateRawSql")(function* (
+export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: QueryEngineWarehouse<T>) => {
+	const executeRawSql = makeExecuteRawSql<T, WarehouseError | RawSqlValidationError>(warehouse)
+	return Effect.fn("QueryEngineService.evaluateRawSql")(function* (
 		tenant: T,
 		request: QueryEngineRawSqlEvaluateRequest,
 	): Effect.fn.Return<ReadonlyArray<GroupedAlertObservation>, QueryEngineValidationError | WarehouseError> {
@@ -2108,25 +2123,23 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
 
 		const granularitySeconds = Math.max(request.windowMinutes * 60, 60)
-		const expanded = yield* makeExpandMacros({
+		const { rows: rawRows } = yield* executeRawSql(tenant, {
 			sql: request.sql,
 			orgId: tenant.orgId,
 			startTime: request.startTime,
 			endTime: request.endTime,
 			granularitySeconds,
+			workload: "alert",
+			context: "alertRawQuery",
 		}).pipe(
-			Effect.mapError(
-				(error) =>
+			Effect.catchTag("@maple/http/errors/RawSqlValidationError", (error) =>
+				Effect.fail(
 					new QueryEngineValidationError({
 						message: "Invalid raw SQL alert query",
 						details: [error.message],
 					}),
+				),
 			),
-		)
-
-		const rawRows = yield* annotateWarehouseError(
-			warehouse.sqlQuery(tenant, expanded.sql, { profile: "list", context: "alertRawQuery" }),
-			"alertRawQuery",
 		)
 		const rows = yield* Schema.decodeUnknownEffect(Schema.Array(RawSqlAlertRowSchema))(rawRows).pipe(
 			Effect.mapError(
@@ -2145,14 +2158,36 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		for (const row of rows) {
 			const rawGroup = row.group
 			const groupKey = typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : "all"
+			if (groupKey.length > MAX_RAW_SQL_GROUP_KEY_LENGTH) {
+				return yield* new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: [
+						`Raw SQL alert group keys may contain at most ${MAX_RAW_SQL_GROUP_KEY_LENGTH} characters.`,
+					],
+				})
+			}
 			const numValue = row.value == null ? null : Number(row.value)
 			const value = numValue != null && Number.isFinite(numValue) ? numValue : null
 			const rawSamples = row.samples == null ? 1 : Number(row.samples)
-			const sampleCount = Number.isFinite(rawSamples) ? rawSamples : 1
+			if (!Number.isFinite(rawSamples) || rawSamples < 0) {
+				return yield* new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: ["Raw SQL alert samples must be finite and nonnegative."],
+				})
+			}
+			const sampleCount = rawSamples
 			const list = byGroup.get(groupKey)
 			const obs = { value, sampleCount, hasData: value != null }
 			if (list) list.push(obs)
-			else byGroup.set(groupKey, [obs])
+			else {
+				if (byGroup.size >= MAX_RAW_SQL_ALERT_GROUPS) {
+					return yield* new QueryEngineValidationError({
+						message: "Invalid raw SQL alert query",
+						details: [`Raw SQL alerts may return at most ${MAX_RAW_SQL_ALERT_GROUPS} groups.`],
+					})
+				}
+				byGroup.set(groupKey, [obs])
+			}
 		}
 
 		// No rows → emit a single no-data observation so the alert engine can
@@ -2165,3 +2200,4 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		yield* Effect.annotateCurrentSpan("result.groupCount", result.length)
 		return result
 	})
+}

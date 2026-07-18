@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
 import {
 	getSessionReplayQuery,
 	sessionReplaysFacetsQuery,
 	sessionReplaysListQuery,
 	sessionReplayEventsQuery,
+	sessionsForTraceQuery,
 	sessionTraceSummariesQuery,
 } from "./session-replays"
 
@@ -69,6 +70,21 @@ describe("sessionReplayEventsQuery", () => {
 		const q = sessionReplayEventsQuery()
 		const { sql } = compileCH(q, sessionParams)
 		expect(sql).not.toContain("Timestamp >=")
+	})
+})
+
+describe("sessionsForTraceQuery", () => {
+	it("applies deterministic offset pagination while preserving org and time scoping", () => {
+		const { sql } = compileCH(sessionsForTraceQuery({ traceId: "trace_1", limit: 21, offset: 20 }), {
+			...baseParams,
+			...WINDOW,
+		})
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("StartTime >= '2026-06-24 04:00:00'")
+		expect(sql).toContain("StartTime <= '2026-06-25 06:00:00'")
+		expect(sql).toContain("ORDER BY startTime DESC, sessionId DESC")
+		expect(sql).toContain("LIMIT 21")
+		expect(sql).toContain("OFFSET 20")
 	})
 })
 
@@ -214,10 +230,10 @@ describe("sessionReplaysListQuery session-time filters", () => {
 
 describe("sessionReplaysListQuery event refinement", () => {
 	it("INNER JOINs the session_events match subquery and selects matchCount", () => {
-		const { sql } = compileCH(
-			sessionReplaysListQuery({ eventType: "network", eventMinStatus: 500 }),
-			{ ...baseParams, ...WINDOW },
-		)
+		const { sql } = compileCH(sessionReplaysListQuery({ eventType: "network", eventMinStatus: 500 }), {
+			...baseParams,
+			...WINDOW,
+		})
 		expect(sql).toContain("INNER JOIN")
 		expect(sql).toContain("FROM session_events")
 		expect(sql).toContain("ON s.sessionId = e.sessionId")
@@ -240,10 +256,10 @@ describe("sessionReplaysListQuery event refinement", () => {
 	})
 
 	it("chains the event INNER JOIN with the active-time LEFT JOIN", () => {
-		const { sql } = compileCH(
-			sessionReplaysListQuery({ eventType: "network", activeTimeMinMs: 1000 }),
-			{ ...baseParams, ...WINDOW },
-		)
+		const { sql } = compileCH(sessionReplaysListQuery({ eventType: "network", activeTimeMinMs: 1000 }), {
+			...baseParams,
+			...WINDOW,
+		})
 		expect(sql).toContain("INNER JOIN")
 		expect(sql).toContain("LEFT JOIN")
 		expect(sql).toContain("ON s.sessionId = e.sessionId")

@@ -2,15 +2,21 @@ import { afterEach, assert, describe, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Effect, Exit, Layer, Option, Schema } from "effect"
 import {
 	WarehouseQueryError,
+	WarehouseConfigError,
+	MAX_RAW_SQL_RESULT_BYTES,
 	WarehouseSchemaDriftError,
 	WarehouseUpstreamError,
 	OrgId,
 	UserId,
 } from "@maple/domain/http"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
-import { makeWarehouseExecutor } from "@maple/query-engine/execution"
+import { makeWarehouseExecutor, type ResolvedWarehouseConfig } from "@maple/query-engine/execution"
 import { __testables, WarehouseQueryService } from "./WarehouseQueryService"
-import { OrgClickHouseSettingsService } from "../services/OrgClickHouseSettingsService"
+import {
+	OrgClickHouseSettingsService,
+	type OrgClickHouseSettingsServiceShape,
+} from "../services/OrgClickHouseSettingsService"
+import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 import type { TenantContext } from "../services/AuthService"
 import { Env } from "./Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "./test-pglite"
@@ -22,12 +28,18 @@ afterEach(async () => {
 	await cleanupTestDbs(trackedDbs)
 })
 
-const makeConfig = (extra: Record<string, string> = {}) =>
+const makeConfig = (extra: Record<string, string> = {}, includeTinybirdSigning = true) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
 			PORT: "3472",
 			TINYBIRD_HOST: "https://maple-managed.tinybird.co",
 			TINYBIRD_TOKEN: "managed-token",
+			...(includeTinybirdSigning
+				? {
+						TINYBIRD_SIGNING_KEY: "test-signing-key",
+						TINYBIRD_WORKSPACE_ID: "test-workspace",
+					}
+				: {}),
 			MAPLE_AUTH_MODE: "self_hosted",
 			MAPLE_ROOT_PASSWORD: "test-root-password",
 			MAPLE_DEFAULT_ORG_ID: "default",
@@ -39,14 +51,17 @@ const makeConfig = (extra: Record<string, string> = {}) =>
 		}),
 	)
 
-const buildLayer = (testDb: TestDb, extra: Record<string, string> = {}) => {
-	const configLive = makeConfig(extra)
+const buildLayer = (testDb: TestDb, extra: Record<string, string> = {}, includeTinybirdSigning = true) => {
+	const configLive = makeConfig(extra, includeTinybirdSigning)
 	const envLive = Env.layer.pipe(Layer.provide(configLive))
 	const databaseLive = testDb.layer
 	const orgSettingsLive = OrgClickHouseSettingsService.layer.pipe(
 		Layer.provide(Layer.mergeAll(envLive, databaseLive)),
 	)
-	return WarehouseQueryService.layer.pipe(Layer.provide(Layer.mergeAll(envLive, orgSettingsLive)))
+	const tinybirdTokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
+	return WarehouseQueryService.layer.pipe(
+		Layer.provide(Layer.mergeAll(envLive, orgSettingsLive, tinybirdTokenLive)),
+	)
 }
 
 const getError = <A, E>(exit: Exit.Exit<A, E>): unknown => {
@@ -69,6 +84,219 @@ const makeTenant = (): TenantContext => ({
 })
 
 const transient503 = () => new Error("HTTP status 503 service temporarily unavailable")
+
+const decodeJwtPayload = (token: string): Record<string, unknown> =>
+	JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8")) as Record<
+		string,
+		unknown
+	>
+
+describe("WarehouseQueryService raw-SQL provider routing", () => {
+	it.effect("substitutes a scoped JWT for the Tinybird SDK token", () => {
+		let captured: ResolvedWarehouseConfig | undefined
+		let responseLimits: { readonly maxRows: number; readonly maxBytes: number } | undefined
+		__testables.setClientFactory((config) => {
+			captured = config
+			return {
+				sql: async (_sql, options) => {
+					responseLimits = options?.responseLimits
+					return { data: [] }
+				},
+				insert: async () => {},
+			}
+		})
+		const layer = buildLayer(createTestDb(trackedDbs))
+
+		return Effect.gen(function* () {
+			yield* WarehouseQueryService.use((service) =>
+				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+			)
+			assert.strictEqual(captured?._tag, "tinybird")
+			if (captured?._tag !== "tinybird") throw new Error("expected Tinybird config")
+			assert.strictEqual(captured.provider, "tinybird")
+			assert.notStrictEqual(captured.token, "managed-token")
+			assert.strictEqual(decodeJwtPayload(captured.token).workspace_id, "test-workspace")
+			assert.deepStrictEqual(responseLimits, { maxRows: 1000, maxBytes: 5_000_000 })
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("defaults an env-level ClickHouse gateway to Tinybird and substitutes a scoped JWT", () => {
+		let captured: ResolvedWarehouseConfig | undefined
+		__testables.setClientFactory((config) => {
+			captured = config
+			return { sql: async () => ({ data: [] }), insert: async () => {} }
+		})
+		const layer = buildLayer(createTestDb(trackedDbs), {
+			CLICKHOUSE_URL: "https://gateway.tinybird.example",
+			CLICKHOUSE_PASSWORD: "gateway-admin-token",
+		})
+
+		return Effect.gen(function* () {
+			yield* WarehouseQueryService.use((service) =>
+				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+			)
+			assert.strictEqual(captured?._tag, "clickhouse")
+			if (captured?._tag !== "clickhouse") throw new Error("expected gateway config")
+			assert.strictEqual(captured.provider, "tinybird")
+			assert.notStrictEqual(captured.password, "gateway-admin-token")
+			assert.strictEqual(decodeJwtPayload(captured.password).workspace_id, "test-workspace")
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("preserves env-level vanilla ClickHouse credentials for raw SQL", () => {
+		let captured: ResolvedWarehouseConfig | undefined
+		__testables.setClientFactory((config) => {
+			captured = config
+			return { sql: async () => ({ data: [] }), insert: async () => {} }
+		})
+		const layer = buildLayer(createTestDb(trackedDbs), {
+			CLICKHOUSE_URL: "https://clickhouse.example",
+			CLICKHOUSE_PROVIDER: "clickhouse",
+			CLICKHOUSE_PASSWORD: "original-clickhouse-password",
+		})
+
+		return Effect.gen(function* () {
+			yield* WarehouseQueryService.use((service) =>
+				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+			)
+			assert.strictEqual(captured?._tag, "clickhouse")
+			if (captured?._tag !== "clickhouse") throw new Error("expected ClickHouse config")
+			assert.strictEqual(captured.provider, "clickhouse")
+			assert.strictEqual(captured.password, "original-clickhouse-password")
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("fails closed for env-level vanilla ClickHouse outside self-hosted mode", () => {
+		let constructed = false
+		__testables.setClientFactory(() => {
+			constructed = true
+			return { sql: async () => ({ data: [] }), insert: async () => {} }
+		})
+		const layer = buildLayer(createTestDb(trackedDbs), {
+			CLICKHOUSE_URL: "https://clickhouse.example",
+			CLICKHOUSE_PROVIDER: "clickhouse",
+			CLICKHOUSE_PASSWORD: "shared-password",
+			MAPLE_AUTH_MODE: "clerk",
+			CLERK_SECRET_KEY: "sk_test_raw_sql",
+		})
+
+		return Effect.gen(function* () {
+			const error = yield* Effect.flip(
+				WarehouseQueryService.use((service) =>
+					service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+				),
+			)
+			assert.instanceOf(error, WarehouseConfigError)
+			assert.include(error.message, "single-org self-hosted mode")
+			assert.isFalse(constructed)
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("preserves per-org ClickHouse override credentials for raw SQL", () => {
+		let captured: ResolvedWarehouseConfig | undefined
+		__testables.setClientFactory((config) => {
+			captured = config
+			return { sql: async () => ({ data: [] }), insert: async () => {} }
+		})
+		// BYO credentials are already tenant-isolated and must not require the
+		// managed Tinybird JWT signing configuration.
+		const configLive = makeConfig({}, false)
+		const envLive = Env.layer.pipe(Layer.provide(configLive))
+		const tokenLive = TinybirdOrgTokenService.layer.pipe(Layer.provide(envLive))
+		const orgSettingsLive = Layer.succeed(OrgClickHouseSettingsService, {
+			resolveRuntimeConfig: () =>
+				Effect.succeed(
+					Option.some({
+						backend: "clickhouse" as const,
+						url: "https://byo.example",
+						user: "byo-user",
+						password: "byo-password",
+						database: "maple",
+					}),
+				),
+		} as unknown as OrgClickHouseSettingsServiceShape)
+		const layer = WarehouseQueryService.layer.pipe(
+			Layer.provide(Layer.mergeAll(envLive, tokenLive, orgSettingsLive)),
+		)
+
+		return Effect.gen(function* () {
+			yield* WarehouseQueryService.use((service) =>
+				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+			)
+			assert.strictEqual(captured?._tag, "clickhouse")
+			if (captured?._tag !== "clickhouse") throw new Error("expected ClickHouse config")
+			assert.strictEqual(captured.provider, "clickhouse")
+			assert.strictEqual(captured.password, "byo-password")
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("maps missing Tinybird signing configuration to WarehouseConfigError", () => {
+		__testables.setClientFactory(() => ({
+			sql: async () => ({ data: [] }),
+			insert: async () => {},
+		}))
+		const layer = buildLayer(createTestDb(trackedDbs), {}, false)
+
+		return Effect.gen(function* () {
+			const exit = yield* WarehouseQueryService.use((service) =>
+				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+			).pipe(Effect.exit)
+			const failure = getError(exit)
+			assert.instanceOf(failure, WarehouseConfigError)
+			assert.include((failure as WarehouseConfigError).message, "TINYBIRD_SIGNING_KEY")
+			assert.notInclude((failure as WarehouseConfigError).message, "managed-token")
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("rejects env-level URL userinfo before constructing a client", () => {
+		let constructed = false
+		__testables.setClientFactory(() => {
+			constructed = true
+			return { sql: async () => ({ data: [] }), insert: async () => {} }
+		})
+		const layer = buildLayer(createTestDb(trackedDbs), {
+			CLICKHOUSE_URL: "https://user:secret@clickhouse.example",
+			CLICKHOUSE_PROVIDER: "clickhouse",
+		})
+
+		return Effect.gen(function* () {
+			const exit = yield* WarehouseQueryService.use((service) =>
+				service.rawSqlQuery(makeTenant(), "SELECT 1 WHERE OrgId = 'org_test'"),
+			).pipe(Effect.exit)
+			assert.instanceOf(getError(exit), WarehouseConfigError)
+			assert.isFalse(constructed)
+		}).pipe(Effect.provide(layer))
+	})
+})
+
+describe("bounded Tinybird response fetch", () => {
+	it("accepts an exact-boundary response and aborts one byte over", async () => {
+		const realFetch = globalThis.fetch
+		try {
+			globalThis.fetch = (async () =>
+				new Response(new Uint8Array(MAX_RAW_SQL_RESULT_BYTES))) as typeof fetch
+			const exact = await __testables.boundedResponseFetch(MAX_RAW_SQL_RESULT_BYTES)(
+				"https://api.tinybird.example/v0/sql",
+			)
+			assert.strictEqual((await exact.arrayBuffer()).byteLength, MAX_RAW_SQL_RESULT_BYTES)
+
+			globalThis.fetch = (async () =>
+				new Response(new Uint8Array(MAX_RAW_SQL_RESULT_BYTES + 1))) as typeof fetch
+			let thrown: unknown
+			try {
+				await __testables.boundedResponseFetch(MAX_RAW_SQL_RESULT_BYTES)(
+					"https://api.tinybird.example/v0/sql",
+				)
+			} catch (error) {
+				thrown = error
+			}
+			assert.instanceOf(thrown, Error)
+			assert.match((thrown as Error).message, /5000000 encoded bytes/)
+		} finally {
+			globalThis.fetch = realFetch
+		}
+	})
+})
 
 describe("WarehouseQueryService.sqlQuery retry on transient upstream failures", () => {
 	// Runs under it.live: the retry schedule uses real exponential backoff
@@ -381,6 +609,7 @@ describe("createClickHouseSqlClient.insert is disabled (ClickHouse is read-only)
 	// read-only query gateway ("Only SELECT or DESCRIBE … Got: InsertQuery").
 	const chConfig = {
 		_tag: "clickhouse" as const,
+		provider: "clickhouse" as const,
 		url: "https://ch.example.com",
 		username: "u",
 		password: "p",
@@ -414,7 +643,12 @@ describe("createClickHouseSqlClient.insert is disabled (ClickHouse is read-only)
 describe("createTinybirdSdkSqlClient.insert wire framing (the production insert path)", () => {
 	// Inserts in the cloud only need to work on Tinybird. This pins that path so a
 	// future change can't silently break ingest into the managed pipeline.
-	const tbConfig = { _tag: "tinybird" as const, host: "https://api.tinybird.co", token: "tok_123" }
+	const tbConfig = {
+		_tag: "tinybird" as const,
+		provider: "tinybird" as const,
+		host: "https://api.tinybird.co",
+		token: "tok_123",
+	}
 
 	it("POSTs raw ndjson rows to the Tinybird Events API (/v0/events?name=<datasource>)", async () => {
 		const captured: Array<{
@@ -478,16 +712,22 @@ describe("ingest routes writes to the managed pipeline, not a per-org read overr
 	const clickhouseReadOverride = {
 		config: {
 			_tag: "clickhouse" as const,
+			provider: "clickhouse" as const,
 			url: "https://byo-clickhouse.example.com",
 			username: "u",
 			password: "p",
 			database: "d",
 		},
-		source: "org_override" as const,
+		clientCacheKey: "read:org_test",
 	}
 	const tinybirdManaged = {
-		config: { _tag: "tinybird" as const, host: "https://managed.tinybird.co", token: "tok" },
-		source: "managed" as const,
+		config: {
+			_tag: "tinybird" as const,
+			provider: "tinybird" as const,
+			host: "https://managed.tinybird.co",
+			token: "tok",
+		},
+		clientCacheKey: "write:managed",
 	}
 
 	it.effect("ingest uses resolveIngestConfig (Tinybird) while reads use resolveConfig (override)", () => {
@@ -503,6 +743,8 @@ describe("ingest routes writes to the managed pipeline, not a per-org read overr
 				},
 			}),
 			resolveConfig: () => Effect.succeed(clickhouseReadOverride),
+			resolveRawSqlConfig: () =>
+				Effect.succeed({ ...clickhouseReadOverride, clientCacheKey: "raw:org_test" }),
 			resolveIngestConfig: () => Effect.succeed(tinybirdManaged),
 		})
 		const tenant = makeTenant()
@@ -528,6 +770,7 @@ describe("ingest routes writes to the managed pipeline, not a per-org read overr
 				},
 			}),
 			resolveConfig: () => Effect.succeed(tinybirdManaged),
+			resolveRawSqlConfig: () => Effect.succeed({ ...tinybirdManaged, clientCacheKey: "raw:org_test" }),
 		})
 		const tenant = makeTenant()
 

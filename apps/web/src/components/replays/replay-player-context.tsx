@@ -196,6 +196,8 @@ export interface ReplayPlayerContextValue {
 	togglePlay(): void
 	/** Seek to a position given in trimmed (display) ms. */
 	seekDisplay(displayMs: number): void
+	/** Seek relative to the engine's live clock, in trimmed (display) ms. */
+	seekRelativeDisplay(deltaMs: number): void
 	changeSpeed(s: number): void
 	toggleSkipInactive(): void
 	toggleFullscreen(): void
@@ -281,16 +283,6 @@ export function ReplayPlayerProvider({
 	const [speed, setSpeed] = React.useState(1)
 	const [skipInactive, setSkipInactive] = React.useState(true)
 	const [isFullscreen, setIsFullscreen] = React.useState(false)
-	const skipInactiveRef = React.useRef(skipInactive)
-	skipInactiveRef.current = skipInactive
-	const isFullscreenRef = React.useRef(isFullscreen)
-	isFullscreenRef.current = isFullscreen
-	// Mirrors read by the rAF-coalesced seek (see `seekDisplay`) so a frame that
-	// fires after several pointer moves still applies against fresh values.
-	const isPlayingRef = React.useRef(isPlaying)
-	isPlayingRef.current = isPlaying
-	const totalMsRef = React.useRef(totalMs)
-	totalMsRef.current = totalMs
 
 	// While skip-idle is on, present the timeline in active time: idle gaps
 	// collapse so the clock/scrubber match the (already idle-skipping) playback.
@@ -298,8 +290,6 @@ export function ReplayPlayerProvider({
 		() => buildTimeline(skipInactive ? inactiveIntervals : [], totalMs),
 		[inactiveIntervals, totalMs, skipInactive],
 	)
-	const timelineRef = React.useRef(timeline)
-	timelineRef.current = timeline
 	const displayCurrentMs = timeline.toDisplay(currentMs)
 	const displayTotalMs = timeline.activeTotalMs
 	const markers = React.useMemo<DisplayMarker[]>(
@@ -425,8 +415,7 @@ export function ReplayPlayerProvider({
 			const replayer = replayerRef.current
 			if (replayer) {
 				const cur = replayer.getCurrentTime()
-				const gap =
-					skipInactiveRef.current && inactiveIntervals.find((iv) => cur >= iv.start && cur < iv.end)
+				const gap = skipInactive && inactiveIntervals.find((iv) => cur >= iv.start && cur < iv.end)
 				if (gap && gap.end !== lastJumpedEnd) {
 					lastJumpedEnd = gap.end
 					// Explicit pause→play forces the engine to seek; play(offset) alone
@@ -443,7 +432,7 @@ export function ReplayPlayerProvider({
 		}
 		raf = requestAnimationFrame(tick)
 		return () => cancelAnimationFrame(raf)
-	}, [isPlaying, totalMs, inactiveIntervals])
+	}, [isPlaying, totalMs, inactiveIntervals, skipInactive])
 
 	const togglePlay = React.useCallback(() => {
 		const replayer = replayerRef.current
@@ -457,45 +446,58 @@ export function ReplayPlayerProvider({
 			replayer.pause()
 			setIsPlaying(false)
 		} else {
-			const from = currentMs >= totalMs ? 0 : currentMs
+			const engineCurrentMs = replayer.getCurrentTime()
+			const from = engineCurrentMs >= totalMs ? 0 : engineCurrentMs
 			replayer.play(from)
 			setIsPlaying(true)
 		}
-	}, [finished, isPlaying, currentMs, totalMs])
+	}, [finished, isPlaying, totalMs])
 
 	// rrweb's `pause(offset)` rebuilds the DOM synchronously — expensive. Pointer
 	// devices fire `pointermove` far above 60Hz, so seeking on every raw event
 	// thrashes the engine and re-renders. Coalesce to one engine seek per frame:
 	// the scrubbers write the latest target and we apply only the last one.
-	const pendingSeekRef = React.useRef<number | null>(null)
+	const pendingSeekRef = React.useRef<{
+		displayMs: number
+		totalMs: number
+		timeline: Timeline
+		isPlaying: boolean
+	} | null>(null)
 	const seekRafRef = React.useRef<number | null>(null)
 
 	const applySeek = React.useCallback(() => {
 		seekRafRef.current = null
-		const displayMs = pendingSeekRef.current
+		const pending = pendingSeekRef.current
 		pendingSeekRef.current = null
-		if (displayMs === null) return
+		if (pending === null) return
 		const replayer = replayerRef.current
 		if (!replayer) return
 		// `displayMs` arrives in trimmed-timeline space; map back to rrweb's real
-		// clock before driving the engine. Read state via refs — this runs a frame
-		// after the call, so closed-over values would be stale.
-		const total = totalMsRef.current
-		const clamped = Math.max(0, Math.min(timelineRef.current.toReal(displayMs), total))
+		// clock before driving the engine. The pending request snapshots the latest
+		// playback state at the call site and is overwritten by newer pointer moves.
+		const clamped = Math.max(0, Math.min(pending.timeline.toReal(pending.displayMs), pending.totalMs))
 		setCurrentMs(clamped)
-		if (clamped < total) setFinished(false)
-		if (isPlayingRef.current && clamped < total) replayer.play(clamped)
+		if (clamped < pending.totalMs) setFinished(false)
+		if (pending.isPlaying && clamped < pending.totalMs) replayer.play(clamped)
 		else replayer.pause(clamped)
 	}, [])
 
 	const seekDisplay = React.useCallback(
 		(displayMs: number) => {
-			pendingSeekRef.current = displayMs
+			pendingSeekRef.current = { displayMs, totalMs, timeline, isPlaying }
 			if (seekRafRef.current === null) {
 				seekRafRef.current = requestAnimationFrame(applySeek)
 			}
 		},
-		[applySeek],
+		[applySeek, isPlaying, timeline, totalMs],
+	)
+
+	const seekRelativeDisplay = React.useCallback(
+		(deltaMs: number) => {
+			const currentRealMs = replayerRef.current?.getCurrentTime() ?? 0
+			seekDisplay(timeline.toDisplay(currentRealMs) + deltaMs)
+		},
+		[seekDisplay, timeline],
 	)
 
 	React.useEffect(
@@ -535,6 +537,7 @@ export function ReplayPlayerProvider({
 			realTotalMs: totalMs,
 			togglePlay,
 			seekDisplay,
+			seekRelativeDisplay,
 			changeSpeed,
 			toggleSkipInactive,
 			toggleFullscreen,
@@ -556,6 +559,7 @@ export function ReplayPlayerProvider({
 			totalMs,
 			togglePlay,
 			seekDisplay,
+			seekRelativeDisplay,
 			changeSpeed,
 			toggleSkipInactive,
 			toggleFullscreen,

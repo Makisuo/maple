@@ -6,13 +6,12 @@ import {
 	DashboardTemplateId,
 	DashboardTemplateParameterKey,
 	DashboardVersionId,
-	IsoDateTimeString,
 	PostgresTransactionId,
 	UserId,
 } from "../../primitives"
 import { DashboardQueryVariableFacet, DashboardVariableName, DashboardVersionChangeKind } from "../dashboards"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
-import { ListOf, ListQuery } from "./envelopes"
+import { ListOf, ListQuery, Timestamp } from "./envelopes"
 import { V2ConflictError, V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
@@ -26,8 +25,8 @@ export const V2TimeRange = Schema.Union([
 	Schema.Struct({ type: Schema.Literal("relative"), value: Schema.String }),
 	Schema.Struct({
 		type: Schema.Literal("absolute"),
-		startTime: IsoDateTimeString,
-		endTime: IsoDateTimeString,
+		startTime: Timestamp,
+		endTime: Timestamp,
 	}).pipe(Schema.encodeKeys({ startTime: "start_time", endTime: "end_time" })),
 ]).annotate({ identifier: "DashboardTimeRange", title: "Dashboard time range" })
 
@@ -299,8 +298,8 @@ const dashboardFields = {
 	timeRange: V2TimeRange,
 	widgets: Schema.Array(V2DashboardWidget),
 	variables: Schema.Array(V2DashboardVariable),
-	createdAt: IsoDateTimeString,
-	updatedAt: IsoDateTimeString,
+	createdAt: Timestamp,
+	updatedAt: Timestamp,
 }
 
 export const V2Dashboard = Schema.Struct(dashboardFields)
@@ -321,7 +320,7 @@ export const V2DashboardMutation = Schema.Struct({
 		identifier: "DashboardMutationResponse",
 		title: "Dashboard mutation response",
 		description:
-			"The committed dashboard. `txid` is an internal Electric reconciliation token; API consumers should ignore it.",
+			"The committed dashboard. `txid` is optional reconciliation metadata for ElectricSQL-integrated clients; other public API consumers do not need it.",
 	})
 export type V2DashboardMutation = Schema.Schema.Type<typeof V2DashboardMutation>
 
@@ -361,7 +360,12 @@ export const V2DashboardDeleteResponse = Schema.Struct({
 	object: Schema.Literal("dashboard"),
 	deleted: Schema.Literal(true),
 	txid: optional(PostgresTransactionId),
-}).annotate({ identifier: "DashboardDeleted", title: "Deleted dashboard" })
+}).annotate({
+	identifier: "DashboardDeleted",
+	title: "Deleted dashboard",
+	description:
+		"A dashboard deletion tombstone. `txid` is optional reconciliation metadata for ElectricSQL-integrated clients.",
+})
 export type V2DashboardDeleteResponse = Schema.Schema.Type<typeof V2DashboardDeleteResponse>
 
 const versionFields = {
@@ -372,7 +376,7 @@ const versionFields = {
 	changeKind: DashboardVersionChangeKind,
 	changeSummary: Schema.NullOr(Schema.String),
 	sourceVersionId: Schema.NullOr(DashboardVersionPublicId),
-	createdAt: IsoDateTimeString,
+	createdAt: Timestamp,
 	createdBy: UserId,
 }
 
@@ -494,7 +498,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "createDashboard",
 				summary: "Create a dashboard",
 				description:
-					"Creates a dashboard and returns the committed object with its Electric reconciliation token.",
+					"Creates a dashboard and returns the committed object, with optional ElectricSQL reconciliation metadata when available.",
 			}),
 		),
 	)
@@ -527,8 +531,8 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		),
 	)
 	.add(
-		HttpApiEndpoint.post("instantiateTemplate", "/templates/:templateId/instantiate", {
-			params: { templateId: DashboardTemplatePublicId },
+		HttpApiEndpoint.post("instantiateTemplate", "/templates/:template_id/instantiate", {
+			params: { template_id: DashboardTemplatePublicId },
 			payload: V2DashboardTemplateInstantiateParams,
 			success: V2DashboardMutation,
 			error: [...mutationErrors, V2NotFoundError],
@@ -578,7 +582,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "deleteDashboard",
 				summary: "Delete a dashboard",
 				description:
-					"Permanently deletes a dashboard and returns a tombstone with its reconciliation token.",
+					"Permanently deletes a dashboard and returns a tombstone, with optional ElectricSQL reconciliation metadata when available.",
 			}),
 		),
 	)
@@ -597,8 +601,8 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		),
 	)
 	.add(
-		HttpApiEndpoint.get("retrieveVersion", "/:id/versions/:versionId", {
-			params: { id: DashboardPublicId, versionId: DashboardVersionPublicId },
+		HttpApiEndpoint.get("retrieveVersion", "/:id/versions/:version_id", {
+			params: { id: DashboardPublicId, version_id: DashboardVersionPublicId },
 			success: V2DashboardVersionDetail,
 			error: [...commonErrors, V2NotFoundError],
 		}).annotateMerge(
@@ -610,8 +614,8 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 		),
 	)
 	.add(
-		HttpApiEndpoint.post("restoreVersion", "/:id/versions/:versionId/restore", {
-			params: { id: DashboardPublicId, versionId: DashboardVersionPublicId },
+		HttpApiEndpoint.post("restoreVersion", "/:id/versions/:version_id/restore", {
+			params: { id: DashboardPublicId, version_id: DashboardVersionPublicId },
 			success: V2DashboardMutation,
 			error: [...mutationErrors, V2NotFoundError],
 		}).annotateMerge(

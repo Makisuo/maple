@@ -1,11 +1,10 @@
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { CreateIngestAttributeMappingRequest, UpdateIngestAttributeMappingRequest } from "@maple/domain/http"
 import type {
-	IngestAttributeMapping,
 	IngestAttributeMappingId,
 	IngestMappingOperation,
 	IngestMappingSourceContext,
 } from "@maple/domain/http"
+import type { V2AttributeMapping } from "@maple/domain/http/v2"
 import { useState } from "react"
 import { Exit } from "effect"
 import { toast } from "sonner"
@@ -61,7 +60,7 @@ import {
 	TrashIcon,
 } from "@/components/icons"
 import { formatRelativeTime } from "@/lib/format"
-import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
@@ -98,9 +97,9 @@ export function AttributeMappingsSection() {
 	const [dialogOpen, setDialogOpen] = useState(false)
 	const [isSaving, setIsSaving] = useState(false)
 	const [togglingId, setTogglingId] = useState<IngestAttributeMappingId | null>(null)
-	const [deleteConfirm, setDeleteConfirm] = useState<IngestAttributeMapping | null>(null)
+	const [deleteConfirm, setDeleteConfirm] = useState<V2AttributeMapping | null>(null)
 
-	const [editing, setEditing] = useState<IngestAttributeMapping | null>(null)
+	const [editing, setEditing] = useState<V2AttributeMapping | null>(null)
 	const [formName, setFormName] = useState("")
 	const [formSourceContext, setFormSourceContext] = useState<IngestMappingSourceContext>("span")
 	const [formSourceKey, setFormSourceKey] = useState("")
@@ -112,19 +111,19 @@ export function AttributeMappingsSection() {
 	// Mappings reconcile the recommendation list server-side, so refresh both after a change.
 	const refreshRecommendations = useAtomRefresh(recommendationIssuesListAtom)
 
-	const createMutation = useAtomSet(MapleApiAtomClient.mutation("ingestAttributeMappings", "create"), {
+	const createMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "create"), {
 		mode: "promiseExit",
 	})
-	const updateMutation = useAtomSet(MapleApiAtomClient.mutation("ingestAttributeMappings", "update"), {
+	const updateMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "update"), {
 		mode: "promiseExit",
 	})
-	const deleteMutation = useAtomSet(MapleApiAtomClient.mutation("ingestAttributeMappings", "delete"), {
+	const deleteMutation = useAtomSet(MapleApiV2AtomClient.mutation("attributeMappings", "delete"), {
 		mode: "promiseExit",
 	})
 
 	const mappings = Result.builder(listResult)
-		.onSuccess((response) => [...response.mappings])
-		.orElse(() => [] as IngestAttributeMapping[])
+		.onSuccess((response) => [...response.data])
+		.orElse(() => [] as V2AttributeMapping[])
 
 	function openAddDialog() {
 		setEditing(null)
@@ -136,12 +135,12 @@ export function AttributeMappingsSection() {
 		setDialogOpen(true)
 	}
 
-	function openEditDialog(mapping: IngestAttributeMapping) {
+	function openEditDialog(mapping: V2AttributeMapping) {
 		setEditing(mapping)
 		setFormName(mapping.name)
-		setFormSourceContext(mapping.sourceContext)
-		setFormSourceKey(mapping.sourceKey)
-		setFormTargetKey(mapping.targetKey)
+		setFormSourceContext(mapping.source_context)
+		setFormSourceKey(mapping.source_key)
+		setFormTargetKey(mapping.target_key)
 		setFormOperation(mapping.operation)
 		setDialogOpen(true)
 	}
@@ -155,14 +154,14 @@ export function AttributeMappingsSection() {
 		setIsSaving(true)
 		if (editing) {
 			const result = await updateMutation({
-				params: { mappingId: editing.id },
-				payload: new UpdateIngestAttributeMappingRequest({
+				params: { id: editing.id },
+				payload: {
 					name: formName.trim(),
-					sourceContext: formSourceContext,
-					sourceKey: formSourceKey.trim(),
-					targetKey: formTargetKey.trim(),
+					source_context: formSourceContext,
+					source_key: formSourceKey.trim(),
+					target_key: formTargetKey.trim(),
 					operation: formOperation,
-				}),
+				},
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Attribute mapping updated")
@@ -174,13 +173,13 @@ export function AttributeMappingsSection() {
 			}
 		} else {
 			const result = await createMutation({
-				payload: new CreateIngestAttributeMappingRequest({
+				payload: {
 					name: formName.trim(),
-					sourceContext: formSourceContext,
-					sourceKey: formSourceKey.trim(),
-					targetKey: formTargetKey.trim(),
+					source_context: formSourceContext,
+					source_key: formSourceKey.trim(),
+					target_key: formTargetKey.trim(),
 					operation: formOperation,
-				}),
+				},
 			})
 			if (Exit.isSuccess(result)) {
 				toast.success("Attribute mapping created")
@@ -196,7 +195,7 @@ export function AttributeMappingsSection() {
 
 	async function handleDelete(mappingId: IngestAttributeMappingId) {
 		setDeleteConfirm(null)
-		const result = await deleteMutation({ params: { mappingId } })
+		const result = await deleteMutation({ params: { id: mappingId } })
 		if (Exit.isSuccess(result)) {
 			toast.success("Attribute mapping deleted")
 			refreshMappings()
@@ -206,13 +205,13 @@ export function AttributeMappingsSection() {
 		}
 	}
 
-	async function handleToggleEnabled(mapping: IngestAttributeMapping) {
+	async function handleToggleEnabled(mapping: V2AttributeMapping) {
 		setTogglingId(mapping.id)
 		const result = await updateMutation({
-			params: { mappingId: mapping.id },
-			payload: new UpdateIngestAttributeMappingRequest({
+			params: { id: mapping.id },
+			payload: {
 				enabled: !mapping.enabled,
-			}),
+			},
 		})
 		if (Exit.isSuccess(result)) {
 			refreshMappings()
@@ -325,15 +324,15 @@ export function AttributeMappingsSection() {
 										</span>
 
 										<div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-sm">
-											<code className={MONO}>{mapping.sourceKey}</code>
+											<code className={MONO}>{mapping.source_key}</code>
 											<ArrowRightIcon
 												size={12}
 												className="text-muted-foreground shrink-0"
 											/>
 											<code className="font-mono text-[0.92em] text-foreground">
-												{mapping.targetKey}
+												{mapping.target_key}
 											</code>
-											{mapping.sourceContext === "resource" && (
+											{mapping.source_context === "resource" && (
 												<span className="text-muted-foreground text-xs">
 													· from {SOURCE_CONTEXT_LABELS.resource.toLowerCase()}
 												</span>
@@ -355,9 +354,9 @@ export function AttributeMappingsSection() {
 											/>
 											<span
 												className="text-muted-foreground w-20 text-right text-xs whitespace-nowrap tabular-nums transition-opacity group-hover:opacity-0"
-												title={new Date(mapping.createdAt).toLocaleString()}
+												title={new Date(mapping.created_at).toLocaleString()}
 											>
-												{formatRelativeTime(mapping.createdAt)}
+												{formatRelativeTime(mapping.created_at)}
 											</span>
 											<div className="absolute right-0 flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
 												<Button

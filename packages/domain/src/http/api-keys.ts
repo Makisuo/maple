@@ -64,6 +64,15 @@ export class ApiKeyPersistenceError extends Schema.TaggedErrorClass<ApiKeyPersis
 	{ httpApiStatus: 503 },
 ) {}
 
+export class ApiKeyLookupPersistenceError extends Schema.TaggedErrorClass<ApiKeyLookupPersistenceError>()(
+	"@maple/http/errors/ApiKeyLookupPersistenceError",
+	{
+		message: Schema.String,
+		cause: Schema.Defect(),
+	},
+	{ httpApiStatus: 503 },
+) {}
+
 export class ApiKeyForbiddenError extends Schema.TaggedErrorClass<ApiKeyForbiddenError>()(
 	"@maple/http/errors/ApiKeyForbiddenError",
 	{

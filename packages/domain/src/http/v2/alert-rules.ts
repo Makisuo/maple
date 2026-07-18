@@ -1,7 +1,7 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { QueryEngineAlertReducer, QueryEngineNoDataBehavior } from "../../query-engine"
-import { AlertIncidentId, AlertRuleId, IsoDateTimeString, PostgresTransactionId, UserId } from "../../primitives"
+import { PostgresTransactionId, UserId } from "../../primitives"
 import {
 	AlertCheckStatus,
 	AlertComparator,
@@ -12,6 +12,7 @@ import {
 	AlertNotificationTemplate,
 	AlertSeverity,
 	AlertSignalType,
+	AlertWindowMinutes,
 } from "../alerts"
 import { AlertDestinationPublicId } from "./alert-destinations"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
@@ -21,22 +22,14 @@ import {
 	V2NotFoundError,
 	V2PermissionError,
 	V2ServiceUnavailableError,
+	V2UpstreamError,
 } from "./errors"
-import { PublicId, PublicIdPrefixes } from "./public-id"
+import { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
+
+export { AlertIncidentPublicId, AlertRulePublicId } from "./resource-ids"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
 const wireExample = <A>(example: object): A => example as A
-
-/** `alrt_…` public ID ⇄ internal `AlertRuleId` (raw UUID). */
-export const AlertRulePublicId = PublicId(PublicIdPrefixes.alertRule, AlertRuleId)
-
-/**
- * `inc_…` public ID ⇄ internal `AlertIncidentId`. Defined here (not in
- * alert-incidents.ts) because rule checks reference incidents and
- * alert-incidents.ts references rules — a one-way import keeps the modules
- * cycle-free.
- */
-export const AlertIncidentPublicId = PublicId(PublicIdPrefixes.alertIncident, AlertIncidentId)
 
 const NonEmptyString = Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed()))
 const PositiveInt = Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0)))
@@ -159,12 +152,13 @@ export const V2AlertRule = Schema.Struct({
 	threshold_upper: Schema.NullOr(Schema.Number).annotate({
 		description: "Upper bound for range comparators (`between` / `not_between`), otherwise `null`.",
 	}),
-	window_minutes: PositiveInt.annotate({
+	window_minutes: AlertWindowMinutes.annotate({
 		description: "Length of the evaluation window in minutes.",
 		examples: [5],
 	}),
 	minimum_sample_count: NonNegativeInt.annotate({
-		description: "Minimum samples required in the window before the rule can breach; below it the check is skipped.",
+		description:
+			"Minimum samples required in the window before the rule can breach; below it the check is skipped.",
 		examples: [50],
 	}),
 	consecutive_breaches_required: PositiveInt.annotate({
@@ -183,10 +177,12 @@ export const V2AlertRule = Schema.Struct({
 		description: "For `metric` rules: the metric to evaluate. `null` for other signal types.",
 	}),
 	metric_type: Schema.NullOr(AlertMetricType).annotate({
-		description: "For `metric` rules: the metric's type (`sum`, `gauge`, `histogram`, `exponential_histogram`).",
+		description:
+			"For `metric` rules: the metric's type (`sum`, `gauge`, `histogram`, `exponential_histogram`).",
 	}),
 	metric_aggregation: Schema.NullOr(AlertMetricAggregation).annotate({
-		description: "For `metric` rules: how samples aggregate in the window (`avg`, `min`, `max`, `sum`, `count`).",
+		description:
+			"For `metric` rules: how samples aggregate in the window (`avg`, `min`, `max`, `sum`, `count`).",
 	}),
 	apdex_threshold_ms: Schema.NullOr(PositiveFloat).annotate({
 		description: "For `apdex` rules: the satisfied-latency threshold in milliseconds.",
@@ -203,11 +199,13 @@ export const V2AlertRule = Schema.Struct({
 		description: "The alert destinations (`dest_…`) this rule notifies.",
 	}),
 	no_data_behavior: QueryEngineNoDataBehavior.annotate({
-		description: "What the evaluator does when the window has no data: `skip` the check or treat the value as `zero`.",
+		description:
+			"What the evaluator does when the window has no data: `skip` the check or treat the value as `zero`.",
 		examples: ["skip"],
 	}),
 	last_evaluation_error: Schema.NullOr(Schema.String).annotate({
-		description: "The most recent evaluation error for this rule, or `null` if the last evaluation succeeded.",
+		description:
+			"The most recent evaluation error for this rule, or `null` if the last evaluation succeeded.",
 	}),
 	last_evaluated_at: Schema.NullOr(Timestamp).annotate({
 		description: "When the rule was last evaluated, or `null` if never.",
@@ -232,7 +230,7 @@ const MutationTxidFields = {
 	txid: Schema.optionalKey(PostgresTransactionId),
 }
 
-/** Returned by create/update: the rule plus the Electric reconciliation token. */
+/** Returned by create/update: the rule plus optional Electric reconciliation metadata. */
 export const V2AlertRuleMutationResponse = Schema.Struct({
 	...V2AlertRule.fields,
 	...MutationTxidFields,
@@ -240,7 +238,7 @@ export const V2AlertRuleMutationResponse = Schema.Struct({
 	identifier: "AlertRuleMutationResponse",
 	title: "Alert rule mutation response",
 	description:
-		"The alert rule state after a create or update. The optional `txid` is an internal dashboard reconciliation token; API consumers should ignore it.",
+		"The alert rule state after a create or update. `txid` is optional reconciliation metadata for ElectricSQL-integrated clients; other public API consumers do not need it.",
 	examples: [wireExample({ ...alertRuleExample, txid: "81234" })],
 })
 export type V2AlertRuleMutationResponse = Schema.Schema.Type<typeof V2AlertRuleMutationResponse>
@@ -259,7 +257,12 @@ export const V2AlertRuleDeleteResponse = Schema.Struct({
 	title: "Alert rule delete response",
 	description: "Confirmation that an alert rule was deleted.",
 	examples: [
-		wireExample({ id: "alrt_gU26thvJECdQvu54Ad9jiz", object: "alert_rule", deleted: true, txid: "81234" }),
+		wireExample({
+			id: "alrt_gU26thvJECdQvu54Ad9jiz",
+			object: "alert_rule",
+			deleted: true,
+			txid: "81234",
+		}),
 	],
 })
 export type V2AlertRuleDeleteResponse = Schema.Schema.Type<typeof V2AlertRuleDeleteResponse>
@@ -287,7 +290,8 @@ const createParamsFields = {
 		examples: ["error_rate"],
 	}),
 	comparator: AlertComparator.annotate({
-		description: "Comparison operator. Range forms (`between` / `not_between`) also require `threshold_upper`.",
+		description:
+			"Comparison operator. Range forms (`between` / `not_between`) also require `threshold_upper`.",
 		examples: ["gt"],
 	}),
 	threshold: Schema.Number.annotate({
@@ -390,7 +394,8 @@ export const V2AlertRuleTestResult = Schema.Struct({
 		description: 'The object type — always `"alert_rule.test_result"`.',
 	}),
 	status: AlertEvaluationStatus.annotate({
-		description: "The evaluation verdict: `breached`, `healthy`, or `skipped` (not enough samples / no data).",
+		description:
+			"The evaluation verdict: `breached`, `healthy`, or `skipped` (not enough samples / no data).",
 		examples: ["breached"],
 	}),
 	value: Schema.NullOr(Schema.Number).annotate({
@@ -429,16 +434,17 @@ export type V2AlertRuleTestResult = Schema.Schema.Type<typeof V2AlertRuleTestRes
 
 export const V2AlertRulePreviewParams = Schema.Struct({
 	rule: V2AlertRuleCreateParams,
-	start_time: IsoDateTimeString.annotate({
+	start_time: Timestamp.annotate({
 		description: "Start of the preview range (ISO-8601 UTC), e.g. `2026-07-14T00:00:00.000Z`.",
 	}),
-	end_time: IsoDateTimeString.annotate({
+	end_time: Timestamp.annotate({
 		description: "End of the preview range (ISO-8601 UTC), e.g. `2026-07-15T00:00:00.000Z`.",
 	}),
 }).annotate({
 	identifier: "AlertRulePreviewParams",
 	title: "Alert rule preview parameters",
-	description: "Request body for previewing what a rule definition would have observed over a historical range.",
+	description:
+		"Request body for previewing what a rule definition would have observed over a historical range.",
 })
 export type V2AlertRulePreviewParams = Schema.Schema.Type<typeof V2AlertRulePreviewParams>
 
@@ -506,12 +512,21 @@ export const V2AlertRulePreviewResult = Schema.Struct({
 				{
 					group_key: "__total__",
 					points: [
-						{ bucket: "2026-07-15T09:10:00.000Z", value: 0.09, sample_count: 132, status: "breached" },
+						{
+							bucket: "2026-07-15T09:10:00.000Z",
+							value: 0.09,
+							sample_count: 132,
+							status: "breached",
+						},
 					],
 				},
 			],
 			would_fire: [
-				{ group_key: "__total__", start: "2026-07-15T09:10:00.000Z", end: "2026-07-15T09:40:00.000Z" },
+				{
+					group_key: "__total__",
+					start: "2026-07-15T09:10:00.000Z",
+					end: "2026-07-15T09:40:00.000Z",
+				},
 			],
 		}),
 	],
@@ -546,7 +561,8 @@ export const V2AlertCheck = Schema.Struct({
 		description: "The incident (`inc_…`) this check opened or continued, or `null`.",
 	}),
 	incident_transition: AlertIncidentTransition.annotate({
-		description: "How this check moved the incident state machine: `none`, `opened`, `continued`, or `resolved`.",
+		description:
+			"How this check moved the incident state machine: `none`, `opened`, `continued`, or `resolved`.",
 		examples: ["opened"],
 	}),
 	evaluation_duration_ms: Schema.Number,
@@ -597,12 +613,12 @@ const ChecksQuery = Schema.Struct({
 		}),
 	),
 	since: Schema.optional(
-		IsoDateTimeString.annotate({
+		Timestamp.annotate({
 			description: "Only return checks recorded at or after this time (ISO-8601 UTC).",
 		}),
 	),
 	until: Schema.optional(
-		IsoDateTimeString.annotate({
+		Timestamp.annotate({
 			description: "Only return checks recorded before this time (ISO-8601 UTC).",
 		}),
 	),
@@ -612,7 +628,7 @@ const ChecksQuery = Schema.Struct({
 	description: "Pagination plus optional group/time filters for a rule's check history.",
 })
 
-const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
+const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError, V2UpstreamError] as const
 
 const AlertRuleList = ListOf(V2AlertRule).annotate({
 	identifier: "AlertRuleList",
@@ -637,7 +653,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "listAlertRules",
 				summary: "List alert rules",
 				description:
-					"Returns your organization's alert rules, most recently created first. Cursor-paginated. Requires the `alert_rules:read` scope.",
+					"Returns your organization's alert rules, most recently created first. Cursor-paginated. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -651,7 +667,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "createAlertRule",
 				summary: "Create an alert rule",
 				description:
-					"Creates an alert rule. Referenced `destination_ids` must exist. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Creates an alert rule. Referenced `destination_ids` must exist. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -664,7 +680,8 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 			OpenApi.annotations({
 				identifier: "getAlertRule",
 				summary: "Retrieve an alert rule",
-				description: "Returns a single alert rule by its `alrt_…` ID. Requires the `alert_rules:read` scope.",
+				description:
+					"Returns a single alert rule by its `alrt_…` ID. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -679,7 +696,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "updateAlertRule",
 				summary: "Update an alert rule",
 				description:
-					"Updates an alert rule. Omitted fields are left unchanged — `{\"enabled\": false}` pauses a rule without touching its condition. Requires an org-admin role and the `alert_rules:write` scope.",
+					'Updates an alert rule. Omitted fields are left unchanged — `{"enabled": false}` pauses a rule without touching its condition. Requires an org-admin role and the `alerts:write` scope.',
 			}),
 		),
 	)
@@ -693,7 +710,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "deleteAlertRule",
 				summary: "Delete an alert rule",
 				description:
-					"Permanently deletes an alert rule and its incident history linkage. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Permanently deletes an alert rule and its incident history linkage. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -707,7 +724,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "testAlertRule",
 				summary: "Test an alert rule",
 				description:
-					"Evaluates a rule definition once against live data without saving it, optionally delivering a test notification. Requires an org-admin role and the `alert_rules:write` scope.",
+					"Evaluates a rule definition once against live data without saving it, optionally delivering a test notification. Requires an org-admin role and the `alerts:write` scope.",
 			}),
 		),
 	)
@@ -721,7 +738,7 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "previewAlertRule",
 				summary: "Preview an alert rule",
 				description:
-					"Replays a rule definition over a historical range and returns the per-window observations and would-have-fired spans. Read-only (sends nothing). Requires the `alert_rules:write` scope (the request carries a rule definition).",
+					"Replays a rule definition over a historical range and returns the per-window observations and would-have-fired spans. Read-only (sends nothing). Requires the `alerts:read` scope.",
 			}),
 		),
 	)
@@ -736,11 +753,11 @@ export class V2AlertRulesApiGroup extends HttpApiGroup.make("alertRules")
 				identifier: "listAlertRuleChecks",
 				summary: "List a rule's checks",
 				description:
-					"Returns the rule's recorded evaluations (its audit trail), newest first, optionally filtered by group key and time range. Requires the `alert_rules:read` scope.",
+					"Returns the rule's recorded evaluations (its audit trail), newest first, optionally filtered by group key and time range. Requires the `alerts:read` scope.",
 			}),
 		),
 	)
-	.prefix("/v2/alert_rules")
+	.prefix("/v2/alerts/rules")
 	.middleware(AuthorizationV2)
 	.middleware(V2SchemaErrors)
 	.annotateMerge(

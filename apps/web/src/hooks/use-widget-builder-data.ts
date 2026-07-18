@@ -93,8 +93,8 @@ export function useWidgetBuilderData() {
 	}, [baseAutocompleteValues, metricRows, variableNames])
 
 	// Apply default metric selection when metric options first become available
-	const appliedMetricDefaultRef = React.useRef(false)
-	if (metricSelectionOptions.length > 0 && !appliedMetricDefaultRef.current) {
+	const [appliedMetricDefault, setAppliedMetricDefault] = React.useState(false)
+	if (metricSelectionOptions.length > 0 && !appliedMetricDefault) {
 		const [defaultMetricName, defaultMetricTypeRaw] = metricSelectionOptions[0].value.split("::")
 		const defaultMetricType = defaultMetricTypeRaw as QueryBuilderMetricType
 		const needsDefault = state.queries.some(
@@ -102,7 +102,7 @@ export function useWidgetBuilderData() {
 				query.dataSource === "metrics" && !query.metricName && defaultMetricName && defaultMetricType,
 		)
 		if (needsDefault) {
-			appliedMetricDefaultRef.current = true
+			setAppliedMetricDefault(true)
 			setState((current) => {
 				let changed = false
 				const queries = current.queries.map((query) => {
