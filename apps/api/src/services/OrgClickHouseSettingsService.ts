@@ -387,6 +387,18 @@ const normalizeHttpUrl = (raw: string): Effect.Effect<string, OrgClickHouseSetti
 		),
 	)
 
+export const validateClickHouseCredentialTransport = (
+	url: string,
+	password: string,
+): Effect.Effect<void, OrgClickHouseSettingsValidationError> =>
+	password.length > 0 && new URL(url).protocol !== "https:"
+		? Effect.fail(
+				new OrgClickHouseSettingsValidationError({
+					message: "ClickHouse URLs must use HTTPS when a password is configured",
+				}),
+			)
+		: Effect.void
+
 const isOrgAdmin = (roles: ReadonlyArray<RoleName>) =>
 	roles.includes(ROOT_ROLE) || roles.includes(ORG_ADMIN_ROLE)
 
@@ -818,6 +830,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 				}
 				plainPassword = yield* decryptStoredPassword(existing)
 			}
+			yield* validateClickHouseCredentialTransport(url, plainPassword)
 
 			// Connect-and-validate: hit the cluster with `SELECT 1` so a typo'd
 			// host or token surfaces here rather than after the user closes the

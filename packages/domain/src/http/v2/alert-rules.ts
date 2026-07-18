@@ -12,6 +12,7 @@ import {
 	AlertNotificationTemplate,
 	AlertSeverity,
 	AlertSignalType,
+	AlertWindowMinutes,
 } from "../alerts"
 import { AlertDestinationPublicId } from "./alert-destinations"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
@@ -151,7 +152,7 @@ export const V2AlertRule = Schema.Struct({
 	threshold_upper: Schema.NullOr(Schema.Number).annotate({
 		description: "Upper bound for range comparators (`between` / `not_between`), otherwise `null`.",
 	}),
-	window_minutes: PositiveInt.annotate({
+	window_minutes: AlertWindowMinutes.annotate({
 		description: "Length of the evaluation window in minutes.",
 		examples: [5],
 	}),

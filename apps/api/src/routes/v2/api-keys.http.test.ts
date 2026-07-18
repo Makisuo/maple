@@ -102,13 +102,14 @@ const makeHarness = (
 	const ORG = Schema.decodeUnknownSync(OrgId)("org_e2e")
 	const USER = Schema.decodeUnknownSync(UserId)("user_e2e")
 
-	const bootstrapKey = (scopes?: ReadonlyArray<string>) =>
+	const bootstrapKey = (scopes?: ReadonlyArray<string>, kind: "standard" | "mcp" = "standard") =>
 		runtime.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ApiKeysService
 				return yield* service.create(ORG, USER, {
 					name: scopes === undefined ? "root-key" : `scoped:${scopes.join(",")}`,
 					scopes,
+					kind,
 				})
 			}),
 		)
@@ -162,6 +163,18 @@ describe("v2 api_keys over HTTP", () => {
 		expect(status).toBe(401)
 		expect(body.error.type).toBe("authentication_error")
 		expect(rateLimitChecks).toBe(0)
+		await harness.dispose()
+	})
+
+	it("rejects MCP-only keys on the HTTP API", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(undefined, "mcp")
+		const { status, body } = await harness.request("GET", "/v2/api_keys", { token: key.secret })
+		expect(status).toBe(401)
+		expect(body.error).toMatchObject({
+			type: "authentication_error",
+			code: "invalid_credentials",
+		})
 		await harness.dispose()
 	})
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import {
 	OrgClickHouseSettingsUpstreamRejectedError,
 	OrgClickHouseSettingsUpstreamUnavailableError,
+	OrgClickHouseSettingsValidationError,
 	OrgId,
 	RoleName,
 } from "@maple/domain/http"
@@ -17,6 +18,7 @@ import {
 	isRetryableUpstream,
 	OrgClickHouseSettingsService,
 	shouldHealSchemaVersion,
+	validateClickHouseCredentialTransport,
 } from "./OrgClickHouseSettingsService"
 
 // `execClickHouse` runs through Effect's HttpClient. We inject a stub `fetch` via
@@ -59,6 +61,25 @@ const unavailable = (statusCode: number | null) =>
 	new OrgClickHouseSettingsUpstreamUnavailableError({ message: "x", statusCode })
 const rejected = (statusCode: number | null) =>
 	new OrgClickHouseSettingsUpstreamRejectedError({ message: "x", statusCode })
+
+describe("validateClickHouseCredentialTransport", () => {
+	it.effect("rejects sending a ClickHouse password over plaintext HTTP", () =>
+		Effect.gen(function* () {
+			const exit = yield* validateClickHouseCredentialTransport(
+				"http://clickhouse.example.test",
+				"secret",
+			).pipe(Effect.exit)
+			expect(getError(exit)).toBeInstanceOf(OrgClickHouseSettingsValidationError)
+		}),
+	)
+
+	it.effect("allows HTTPS credentials and passwordless HTTP", () =>
+		Effect.gen(function* () {
+			yield* validateClickHouseCredentialTransport("https://clickhouse.example.test", "secret")
+			yield* validateClickHouseCredentialTransport("http://clickhouse.example.test", "")
+		}),
+	)
+})
 
 describe("shouldHealSchemaVersion", () => {
 	const REV = "019c3db4cf690e3748b302098cae4c9213d18c55355db9fc68ea44982c7a980a"

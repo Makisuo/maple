@@ -40,14 +40,25 @@ export const ApiAuthorizationLayer = Layer.effect(
 					)
 
 					if (Option.isSome(apiKeyResolved)) {
+						const resolved = apiKeyResolved.value
+						if (resolved.kind !== "standard") {
+							return yield* new UnauthorizedError({
+								message: "This API key is only valid for the MCP server",
+							})
+						}
+						if (resolved.scopes !== null) {
+							return yield* new UnauthorizedError({
+								message: "Restricted API keys must use the /v2 API",
+							})
+						}
 						yield* annotateAuthSpan("api_key", {
-							orgId: apiKeyResolved.value.orgId,
-							userId: apiKeyResolved.value.userId,
-							keyId: apiKeyResolved.value.keyId,
+							orgId: resolved.orgId,
+							userId: resolved.userId,
+							keyId: resolved.keyId,
 						})
 						const tenant = new CurrentTenant.TenantSchema({
-							orgId: apiKeyResolved.value.orgId,
-							userId: apiKeyResolved.value.userId,
+							orgId: resolved.orgId,
+							userId: resolved.userId,
 							roles: apiKeyDefaultRoles,
 							authMode: "self_hosted",
 						})

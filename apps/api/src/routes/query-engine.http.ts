@@ -6,6 +6,8 @@ import {
 	QueryEngineExecutionError,
 	QueryEngineValidationError,
 	RawSqlExecuteResponse,
+	RawSqlValidationError,
+	MAX_RAW_SQL_RESULT_ROWS,
 	SpanHierarchyResponse,
 	SpanDetailResponse,
 	ErrorsByTypeResponse,
@@ -2646,15 +2648,20 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						granularitySeconds,
 					})
 
-					const profile: "aggregation" | "list" =
-						payload.displayType === "table" ? "list" : "aggregation"
 					const rows = yield* mapExecError(
 						warehouse.sqlQuery(tenant, expanded.sql, {
-							profile,
+							profile: "rawInteractive",
 							context: "rawSql",
 						}),
 						"rawSql query failed",
 					)
+
+					if (rows.length > MAX_RAW_SQL_RESULT_ROWS) {
+						return yield* new RawSqlValidationError({
+							code: "ResourceLimit",
+							message: `Raw SQL results may contain at most ${MAX_RAW_SQL_RESULT_ROWS} rows`,
+						})
+					}
 
 					const records = rows
 					const columns = records.length > 0 ? Object.keys(records[0]) : []

@@ -67,6 +67,14 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 
 					if (Option.isSome(apiKeyResolved)) {
 						const resolved = apiKeyResolved.value
+						if (resolved.kind !== "standard") {
+							return yield* Effect.fail(
+								authenticationError(
+									"invalid_credentials",
+									"This API key is only valid for the MCP server.",
+								),
+							)
+						}
 
 						// Attribute before the scope check so scope-rejected
 						// requests are still counted as API-key traffic.

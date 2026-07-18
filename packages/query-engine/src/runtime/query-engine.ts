@@ -22,6 +22,10 @@ import {
 	QueryEngineExecutionError,
 	QueryEngineTimeoutError,
 	QueryEngineValidationError,
+	MAX_RAW_SQL_ALERT_GROUPS,
+	MAX_RAW_SQL_GROUP_KEY_LENGTH,
+	MAX_RAW_SQL_LENGTH,
+	MAX_RAW_SQL_RESULT_ROWS,
 	type WarehouseError,
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
@@ -2108,6 +2112,12 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		yield* Effect.annotateCurrentSpan("query.reducer", request.reducer)
 
 		const granularitySeconds = Math.max(request.windowMinutes * 60, 60)
+		if (request.sql.length > MAX_RAW_SQL_LENGTH) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid raw SQL alert query",
+				details: [`Raw SQL is limited to ${MAX_RAW_SQL_LENGTH} characters.`],
+			})
+		}
 		const expanded = yield* makeExpandMacros({
 			sql: request.sql,
 			orgId: tenant.orgId,
@@ -2125,9 +2135,18 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		)
 
 		const rawRows = yield* annotateWarehouseError(
-			warehouse.sqlQuery(tenant, expanded.sql, { profile: "list", context: "alertRawQuery" }),
+			warehouse.sqlQuery(tenant, expanded.sql, {
+				profile: "rawAlert",
+				context: "alertRawQuery",
+			}),
 			"alertRawQuery",
 		)
+		if (rawRows.length > MAX_RAW_SQL_RESULT_ROWS) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid raw SQL alert query",
+				details: [`Raw SQL alert results may contain at most ${MAX_RAW_SQL_RESULT_ROWS} rows.`],
+			})
+		}
 		const rows = yield* Schema.decodeUnknownEffect(Schema.Array(RawSqlAlertRowSchema))(rawRows).pipe(
 			Effect.mapError(
 				() =>
@@ -2145,14 +2164,38 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 		for (const row of rows) {
 			const rawGroup = row.group
 			const groupKey = typeof rawGroup === "string" && rawGroup.length > 0 ? rawGroup : "all"
+			if (groupKey.length > MAX_RAW_SQL_GROUP_KEY_LENGTH) {
+				return yield* new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: [
+						`Raw SQL alert group keys may contain at most ${MAX_RAW_SQL_GROUP_KEY_LENGTH} characters.`,
+					],
+				})
+			}
 			const numValue = row.value == null ? null : Number(row.value)
 			const value = numValue != null && Number.isFinite(numValue) ? numValue : null
 			const rawSamples = row.samples == null ? 1 : Number(row.samples)
-			const sampleCount = Number.isFinite(rawSamples) ? rawSamples : 1
+			if (!Number.isFinite(rawSamples) || rawSamples < 0) {
+				return yield* new QueryEngineValidationError({
+					message: "Invalid raw SQL alert query",
+					details: ["Raw SQL alert samples must be finite and nonnegative."],
+				})
+			}
+			const sampleCount = rawSamples
 			const list = byGroup.get(groupKey)
 			const obs = { value, sampleCount, hasData: value != null }
 			if (list) list.push(obs)
-			else byGroup.set(groupKey, [obs])
+			else {
+				if (byGroup.size >= MAX_RAW_SQL_ALERT_GROUPS) {
+					return yield* new QueryEngineValidationError({
+						message: "Invalid raw SQL alert query",
+						details: [
+							`Raw SQL alerts may return at most ${MAX_RAW_SQL_ALERT_GROUPS} groups.`,
+						],
+					})
+				}
+				byGroup.set(groupKey, [obs])
+			}
 		}
 
 		// No rows → emit a single no-data observation so the alert engine can

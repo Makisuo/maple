@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
+import { MAX_RAW_SQL_RESULT_ROWS } from "@maple/domain/http"
 import { runRawSql, autoBucketSeconds } from "./run-raw-sql"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "@/lib/WarehouseQueryService"
 import type { TenantContext } from "@/lib/tenant-context"
@@ -66,6 +67,21 @@ describe("runRawSql", () => {
 			}).pipe(Effect.provide(provide(makeStub([]))), Effect.exit)
 
 			assert.isTrue(exit._tag === "Failure")
+		}),
+	)
+
+	it.effect("rejects results above the hard row cap", () =>
+		Effect.gen(function* () {
+			const rows = Array.from({ length: MAX_RAW_SQL_RESULT_ROWS + 1 }, (_, value) => ({ value }))
+			const exit = yield* runRawSql({
+				tenant,
+				sql: "SELECT value FROM traces WHERE $__orgFilter",
+				...range,
+				granularitySeconds: 60,
+			}).pipe(Effect.provide(provide(makeStub(rows))), Effect.exit)
+
+			assert.isTrue(exit._tag === "Failure")
+			assert.include(JSON.stringify(exit), "ResourceLimit")
 		}),
 	)
 })

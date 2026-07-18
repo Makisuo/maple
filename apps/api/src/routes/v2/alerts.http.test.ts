@@ -259,6 +259,95 @@ describe("v2 alerts over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("clears stored raw SQL when a rule switches to a structured signal", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const destination = await harness.request("POST", "/v2/alerts/destinations", key.secret, {
+			type: "webhook",
+			name: "Raw transition hook",
+			url: "https://example.com/hooks/raw-transition",
+		})
+		expect(destination.status).toBe(200)
+
+		const created = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Raw transition rule",
+			severity: "warning",
+			signal_type: "raw_query",
+			raw_query_sql:
+				"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+			raw_query_reducer: "max",
+			comparator: "gt",
+			threshold: 10,
+			window_minutes: 5,
+			destination_ids: [destination.body.id],
+		})
+		expect(created.status, JSON.stringify(created.body)).toBe(200)
+		expect(created.body.raw_query_sql).toContain("$__orgFilter")
+
+		const patched = await harness.request(
+			"PATCH",
+			`/v2/alerts/rules/${created.body.id}`,
+			key.secret,
+			{ signal_type: "error_rate" },
+		)
+		expect(patched.status, JSON.stringify(patched.body)).toBe(200)
+		expect(patched.body.signal_type).toBe("error_rate")
+		expect(patched.body.raw_query_sql).toBeNull()
+		expect(patched.body.raw_query_reducer).toBeNull()
+		await harness.dispose()
+	})
+
+	it("rejects hidden raw SQL on structured rules", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["alerts:write"])
+		const response = await harness.request("POST", "/v2/alerts/rules", key.secret, {
+			name: "Disguised raw rule",
+			severity: "warning",
+			signal_type: "error_rate",
+			raw_query_sql: "SELECT count() AS value FROM traces WHERE $__orgFilter",
+			comparator: "gt",
+			threshold: 0.1,
+			window_minutes: 5,
+			destination_ids: [],
+		})
+		expect(response.status).toBe(400)
+		expect(response.body.error).toMatchObject({ type: "invalid_request_error" })
+		expect(JSON.stringify(response.body)).toContain("rawQuerySql is only supported")
+		await harness.dispose()
+	})
+
+	it("blocks raw SQL preview for alerts:read keys without querying the warehouse", async () => {
+		let warehouseCalls = 0
+		const harness = makeHarness({
+			...warehouseStub,
+			sqlQuery: () => {
+				warehouseCalls += 1
+				return Effect.succeed([{ value: 42 }])
+			},
+		})
+		const key = await harness.bootstrapKey(["alerts:read"])
+		const response = await harness.request("POST", "/v2/alerts/rules/preview", key.secret, {
+			rule: {
+				name: "Raw preview",
+				severity: "warning",
+				signal_type: "raw_query",
+				raw_query_sql:
+					"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
+				raw_query_reducer: "max",
+				comparator: "gt",
+				threshold: 10,
+				window_minutes: 5,
+				destination_ids: [],
+			},
+			start_time: "2026-01-01T00:00:00.000Z",
+			end_time: "2026-01-01T00:30:00.000Z",
+		})
+		expect(response.status).toBe(400)
+		expect(JSON.stringify(response.body)).toContain("cannot be previewed")
+		expect(warehouseCalls).toBe(0)
+		await harness.dispose()
+	})
+
 	it("paginates alert checks beyond the former 2,000-row window", async () => {
 		const checkRows = Array.from({ length: 2_005 }, (_, index) => {
 			const timestamp = new Date(Date.UTC(2026, 0, 1) + (2_005 - index) * 1_000).toISOString()

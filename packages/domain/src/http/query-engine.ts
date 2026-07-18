@@ -1366,12 +1366,19 @@ export const RawSqlDisplayType = Schema.Literals([
 ])
 export type RawSqlDisplayType = Schema.Schema.Type<typeof RawSqlDisplayType>
 
+export const MAX_RAW_SQL_LENGTH = 32_768
+export const MAX_RAW_SQL_RESULT_ROWS = 1_000
+export const MAX_RAW_SQL_ALERT_GROUPS = 100
+export const MAX_RAW_SQL_GROUP_KEY_LENGTH = 256
+
 export class RawSqlExecuteRequest extends Schema.Class<RawSqlExecuteRequest>("RawSqlExecuteRequest")({
-	sql: Schema.String,
+	sql: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(MAX_RAW_SQL_LENGTH)),
 	displayType: RawSqlDisplayType,
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	granularitySeconds: Schema.optional(Schema.Number),
+	granularitySeconds: Schema.optional(
+		Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0)),
+	),
 }) {}
 
 export class RawSqlExecuteResponse extends Schema.Class<RawSqlExecuteResponse>("RawSqlExecuteResponse")({
@@ -1392,6 +1399,7 @@ export class RawSqlValidationError extends Schema.TaggedErrorClass<RawSqlValidat
 			"DisallowedStatement",
 			"MultipleStatements",
 			"UnresolvedMacro",
+			"ResourceLimit",
 		]),
 		message: Schema.String,
 	},

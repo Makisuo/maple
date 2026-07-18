@@ -2652,7 +2652,7 @@ describe("AlertsService.previewRule", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
-	it.effect("replays raw-SQL rules per evaluation window", () => {
+	it.effect("rejects raw-SQL previews before warehouse execution", () => {
 		const testDb = createTestDb(trackedDbs)
 		const state = { rawQueryRows: [{ value: 42, samples: 20 }] }
 
@@ -2666,7 +2666,8 @@ describe("AlertsService.previewRule", () => {
 					severity: "warning",
 					enabled: true,
 					signalType: "raw_query",
-					rawQuerySql: "SELECT count() AS value FROM traces WHERE $__orgFilter",
+					rawQuerySql:
+						"SELECT count() AS value FROM traces WHERE $__orgFilter AND $__timeFilter(Timestamp)",
 					rawQueryReducer: "max",
 					comparator: "gt",
 					threshold: 10,
@@ -2681,13 +2682,11 @@ describe("AlertsService.previewRule", () => {
 				endTime: "2026-01-01T00:30:00.000Z",
 			})
 
-			const response = yield* alerts.previewRule(orgId, request)
-
-			assert.lengthOf(response.series, 1)
-			const points = response.series[0]!.points
-			assert.lengthOf(points, 6)
-			assert.isTrue(points.every((point) => point.value === 42 && point.status === "breached"))
-			assert.lengthOf(response.wouldFire, 1)
+			const exit = yield* alerts.previewRule(orgId, request).pipe(Effect.exit)
+			assert.isTrue(Exit.isFailure(exit))
+			const failure = getError(exit)
+			assert.instanceOf(failure, AlertValidationError)
+			assert.include((failure as AlertValidationError).message, "cannot be previewed")
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 })

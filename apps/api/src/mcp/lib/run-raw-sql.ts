@@ -1,4 +1,9 @@
 import { Effect } from "effect"
+import {
+	MAX_RAW_SQL_LENGTH,
+	MAX_RAW_SQL_RESULT_ROWS,
+	RawSqlValidationError,
+} from "@maple/domain/http"
 import { makeExpandMacros } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
 import type { TenantContext } from "@/lib/tenant-context"
@@ -48,6 +53,18 @@ export interface RunRawSqlResult {
  * `WarehouseError` (execution); callers surface these to the agent.
  */
 export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput) {
+	if (input.sql.length > MAX_RAW_SQL_LENGTH) {
+		return yield* new RawSqlValidationError({
+			code: "ResourceLimit",
+			message: `Raw SQL is limited to ${MAX_RAW_SQL_LENGTH} characters`,
+		})
+	}
+	if (!Number.isFinite(input.granularitySeconds) || input.granularitySeconds <= 0) {
+		return yield* new RawSqlValidationError({
+			code: "ResourceLimit",
+			message: "Raw SQL granularity must be a positive finite number",
+		})
+	}
 	const expanded = yield* makeExpandMacros({
 		sql: input.sql,
 		orgId: input.tenant.orgId,
@@ -58,9 +75,15 @@ export const runRawSql = Effect.fn("runRawSql")(function* (input: RunRawSqlInput
 
 	const warehouse = yield* WarehouseQueryService
 	const rows = yield* warehouse.sqlQuery(input.tenant, expanded.sql, {
-		profile: "list",
+		profile: "rawInteractive",
 		context: "mcp.run_sql",
 	})
+	if (rows.length > MAX_RAW_SQL_RESULT_ROWS) {
+		return yield* new RawSqlValidationError({
+			code: "ResourceLimit",
+			message: `Raw SQL results may contain at most ${MAX_RAW_SQL_RESULT_ROWS} rows`,
+		})
+	}
 
 	const records = rows as ReadonlyArray<Record<string, unknown>>
 	const columns = records.length > 0 ? Object.keys(records[0]) : []

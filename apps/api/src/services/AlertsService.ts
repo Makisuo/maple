@@ -8,6 +8,7 @@ import {
 } from "@maple/query-engine"
 import * as CH from "@maple/query-engine/ch"
 import { buildTimeseriesQuerySpec, resolveGroupBy } from "@maple/query-engine/query-builder"
+import { makeExpandMacros } from "@maple/query-engine/runtime"
 import {
 	AlertComparator as AlertComparatorSchema,
 	AlertDeliveryError,
@@ -335,7 +336,7 @@ const planGroupingTokens = (
 }
 
 const isGroupedPlan = (plan: Schema.Schema.Type<typeof CompiledAlertQueryPlan>): boolean =>
-	planGroupingTokens(plan) != null
+	plan.kind === "raw_sql" || planGroupingTokens(plan) != null
 
 const resolveServiceLinkName = (
 	rule: Pick<NormalizedRule, "serviceNames" | "groupBy">,
@@ -390,11 +391,8 @@ export class AlertRuntime extends Context.Reference<AlertRuntimeShape>("@maple/a
 const toIso = (value: Date | null | undefined): IsoDateTimeValue | null =>
 	value == null ? null : decodeIsoDateTimeStringSync(value.toISOString())
 
-// Caps on how many evaluation windows a rule preview replays. Spec plans cost
-// one CH query regardless of bucket count; raw-SQL plans run one query per
-// window, so they get a tighter cap.
+// Cap on how many evaluation windows a structured rule preview replays.
 const MAX_PREVIEW_BUCKETS = 200
-const MAX_RAW_PREVIEW_WINDOWS = 60
 
 // Tinybird DateTime64(3) wire format for alert_checks ingest:
 // "YYYY-MM-DD HH:MM:SS.SSS" (UTC, no timezone).
@@ -827,10 +825,18 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 const parseCompiledPlan = (
 	row: Pick<
 		AlertRuleRow,
-		"querySpecJson" | "rawQuerySql" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
+		| "signalType"
+		| "querySpecJson"
+		| "rawQuerySql"
+		| "reducer"
+		| "sampleCountStrategy"
+		| "noDataBehavior"
 	>,
 ): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> => {
-	if (row.rawQuerySql != null) {
+	if (row.signalType === "raw_query") {
+		if (row.rawQuerySql == null) {
+			return Effect.fail(makeValidationError("Stored raw alert is missing its SQL query"))
+		}
 		return Schema.decodeUnknownEffect(CompiledAlertQueryPlan)({
 			kind: "raw_sql",
 			query: null,
@@ -938,7 +944,7 @@ const rowToRuleDocument = (
 			row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
 		apdexThresholdMs: row.apdexThresholdMs,
 		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-		rawQuerySql: row.rawQuerySql ?? null,
+				rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
 		rawQueryReducer:
 			row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
 		destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
@@ -1306,6 +1312,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 			})
 
 			const normalizeRule = Effect.fn("AlertsService.normalizeRule")(function* (
+				orgId: OrgId,
 				request: AlertRuleUpsertRequest,
 				options?: {
 					// Preview evaluates a form draft that may not have a name or
@@ -1324,6 +1331,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					: []
 				const tags = normalizeTags(request.tags)
 				const metricName = normalizeOptionalString(request.metricName)
+				const groupBy = request.groupBy ?? null
 				// Dedupe while preserving selection order — a destination listed twice still
 				// notifies once, so we persist each id at most once. This is the authoritative
 				// fix; the editor also dedupes on submit for UX (see buildRuleRequest).
@@ -1366,6 +1374,24 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					} else if (!sql.includes("$__orgFilter")) {
 						details.push("rawQuerySql must reference $__orgFilter for org scoping")
 					}
+					if (!sql.includes("$__timeFilter(")) {
+						details.push("rawQuerySql must reference $__timeFilter(...) to bound alert reads")
+					}
+					if (serviceNames.length > 0) {
+						details.push("serviceNames is not supported for raw_query alerts")
+					}
+					if (groupBy != null) {
+						details.push(
+							"groupBy is not supported for raw_query alerts; return a group column instead",
+						)
+					}
+				} else {
+					if (normalizeOptionalString(request.rawQuerySql) != null) {
+						details.push("rawQuerySql is only supported for raw_query alerts")
+					}
+					if (request.rawQueryReducer != null) {
+						details.push("rawQueryReducer is only supported for raw_query alerts")
+					}
 				}
 				const allowsMetricFields = request.signalType === "metric"
 				if (!allowsMetricFields && request.metricType) {
@@ -1377,7 +1403,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				if (request.signalType !== "metric" && request.metricAggregation) {
 					details.push("metricAggregation is only supported for metric alerts")
 				}
-				const groupBy = request.groupBy ?? null
 				if (groupBy != null && serviceNames.length > 0) {
 					details.push("groupBy is only supported when no service is specified")
 				}
@@ -1392,6 +1417,19 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				if (details.length > 0) {
 					return yield* Effect.fail(makeValidationError("Invalid alert rule", details))
+				}
+				if (request.signalType === "raw_query") {
+					yield* makeExpandMacros({
+						sql: request.rawQuerySql ?? "",
+						orgId,
+						startTime: "2000-01-01 00:00:00",
+						endTime: "2000-01-01 00:05:00",
+						granularitySeconds: 60,
+					}).pipe(
+						Effect.mapError((error) =>
+							makeValidationError("Invalid raw SQL alert query", [error.message], error),
+						),
+					)
 				}
 
 				const nowMs = yield* now
@@ -1421,8 +1459,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					apdexThresholdMs:
 						request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
 					queryBuilderDraft: request.queryBuilderDraft ?? null,
-					rawQuerySql: normalizeOptionalString(request.rawQuerySql),
-					rawQueryReducer: request.rawQueryReducer ?? null,
+					rawQuerySql:
+						request.signalType === "raw_query" ? normalizeOptionalString(request.rawQuerySql) : null,
+					rawQueryReducer:
+						request.signalType === "raw_query" ? (request.rawQueryReducer ?? null) : null,
 					destinationIds,
 					createdAt: nowMs,
 					updatedAt: nowMs,
@@ -2428,7 +2468,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				existingId: AlertRuleId | null,
 				request: AlertRuleUpsertRequest,
 			) {
-				const normalized = yield* normalizeRule(request)
+				const normalized = yield* normalizeRule(orgId, request)
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 				const ruleId = existingId ?? normalized.id
 				const timestamp = yield* now
@@ -2568,7 +2608,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				// Resolve stale incidents caused by the configuration change
 				const oldNormalized = yield* normalizeRuleRow(oldRow)
-				const newNormalized = yield* normalizeRule(request)
+				const newNormalized = yield* normalizeRule(orgId, request)
 
 				if (oldNormalized.enabled && !newNormalized.enabled) {
 					// Rule was disabled — resolve all open incidents
@@ -2634,7 +2674,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				sendNotification = false,
 			) {
 				yield* requireAdmin(roles)
-				const normalized = yield* normalizeRule(request)
+				const normalized = yield* normalizeRule(orgId, request)
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 
 				let evaluation: EvaluatedRule
@@ -2769,8 +2809,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				AlertRulePreviewResponse,
 				AlertValidationError | AlertDeliveryError | AlertPersistenceError | WarehouseError
 			> {
-				const normalized = yield* normalizeRule(request.rule, { forPreview: true })
+				const normalized = yield* normalizeRule(orgId, request.rule, { forPreview: true })
 				const plan = normalized.compiledPlan
+				if (plan.kind === "raw_sql") {
+					return yield* Effect.fail(makeValidationError("Raw SQL alerts cannot be previewed"))
+				}
 
 				const windowMs = normalized.windowMinutes * 60_000
 				const requestedStartMs = Date.parse(request.startTime)
@@ -2788,7 +2831,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				// lines up with the rows evaluateSeries returns.
 				const endMs = Math.floor(requestedEndMs / windowMs) * windowMs
 				const alignedStartMs = Math.floor(requestedStartMs / windowMs) * windowMs
-				const maxBuckets = plan.kind === "raw_sql" ? MAX_RAW_PREVIEW_WINDOWS : MAX_PREVIEW_BUCKETS
+				const maxBuckets = MAX_PREVIEW_BUCKETS
 				const minStartMs = endMs - maxBuckets * windowMs
 				const startMs = Math.max(alignedStartMs, minStartMs)
 				if (endMs - startMs < windowMs) {
@@ -2839,98 +2882,66 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					buckets.set(bucketMs, obs)
 				}
 
-				if (plan.kind === "spec") {
-					if (plan.query == null || plan.sampleCountStrategy == null) {
-						return yield* Effect.fail(
-							makeValidationError("Compiled alert plan is missing its query spec"),
-						)
-					}
-					if (normalized.serviceNames.length > 1) {
-						// Mirror the scheduler's multi-service mode: independent per-service
-						// plans, groupKey = service name.
-						yield* Effect.forEach(
-							normalized.serviceNames,
-							(svcName) =>
-								Effect.gen(function* () {
-									const perServicePlan = yield* compileRulePlan({
-										...normalized,
-										serviceName: svcName,
-									})
-									if (
-										perServicePlan.query == null ||
-										perServicePlan.sampleCountStrategy == null
-									) {
-										return
-									}
-									const observations = yield* queryEngine
-										.evaluateSeries(systemTenant(orgId), {
-											startTime: toTinybirdDateTime(startMs),
-											endTime: toTinybirdDateTime(queryEndMs),
-											query: perServicePlan.query,
-											reducer: perServicePlan.reducer,
-											sampleCountStrategy: perServicePlan.sampleCountStrategy,
-										})
-										.pipe(catchQueryEngineErrors)
-									for (const obs of observations) {
-										record(svcName, Date.parse(obs.bucket), {
-											value: obs.value,
-											sampleCount: obs.sampleCount,
-											hasData: obs.sampleCount > 0,
-										})
-									}
-								}),
-							{ concurrency: 5 },
-						)
-					} else {
-						const observations = yield* queryEngine
-							.evaluateSeries(systemTenant(orgId), {
-								startTime: toTinybirdDateTime(startMs),
-								endTime: toTinybirdDateTime(queryEndMs),
-								query: plan.query,
-								reducer: plan.reducer,
-								sampleCountStrategy: plan.sampleCountStrategy,
-							})
-							.pipe(catchQueryEngineErrors)
-						const excludeSet = new Set(normalized.excludeServiceNames)
-						for (const obs of observations) {
-							if (excludeSet.has(obs.groupKey)) continue
-							record(obs.groupKey, Date.parse(obs.bucket), {
-								value: obs.value,
-								sampleCount: obs.sampleCount,
-								hasData: obs.sampleCount > 0,
-							})
-						}
-					}
-				} else {
-					// Raw SQL: the reducer runs INSIDE one evaluation window, so replay
-					// the evaluator over each historical window (plus the trailing
-					// in-progress one). Bounded by MAX_RAW_PREVIEW_WINDOWS via the range
-					// clamp above.
-					yield* Effect.forEach(
-						pointBuckets,
-						(bucketMs) =>
-							queryEngine
-								.evaluateRawSql(systemTenant(orgId), {
-									startTime: toTinybirdDateTime(bucketMs),
-									endTime: toTinybirdDateTime(Math.min(bucketMs + windowMs, queryEndMs)),
-									sql: plan.rawSql ?? "",
-									reducer: plan.reducer,
-									windowMinutes: normalized.windowMinutes,
-								})
-								.pipe(
-									catchQueryEngineErrors,
-									Effect.map((groups) => {
-										for (const group of groups) {
-											record(group.groupKey, bucketMs, {
-												value: group.value,
-												sampleCount: group.sampleCount,
-												hasData: group.hasData,
-											})
-										}
-									}),
-								),
-						{ concurrency: 4 },
+				if (plan.query == null || plan.sampleCountStrategy == null) {
+					return yield* Effect.fail(
+						makeValidationError("Compiled alert plan is missing its query spec"),
 					)
+				}
+				if (normalized.serviceNames.length > 1) {
+					// Mirror the scheduler's multi-service mode: independent per-service
+					// plans, groupKey = service name.
+					yield* Effect.forEach(
+						normalized.serviceNames,
+						(svcName) =>
+							Effect.gen(function* () {
+								const perServicePlan = yield* compileRulePlan({
+									...normalized,
+									serviceName: svcName,
+								})
+								if (
+									perServicePlan.query == null ||
+									perServicePlan.sampleCountStrategy == null
+								) {
+									return
+								}
+								const observations = yield* queryEngine
+									.evaluateSeries(systemTenant(orgId), {
+										startTime: toTinybirdDateTime(startMs),
+										endTime: toTinybirdDateTime(queryEndMs),
+										query: perServicePlan.query,
+										reducer: perServicePlan.reducer,
+										sampleCountStrategy: perServicePlan.sampleCountStrategy,
+									})
+									.pipe(catchQueryEngineErrors)
+								for (const obs of observations) {
+									record(svcName, Date.parse(obs.bucket), {
+										value: obs.value,
+										sampleCount: obs.sampleCount,
+										hasData: obs.sampleCount > 0,
+									})
+								}
+							}),
+						{ concurrency: 5 },
+					)
+				} else {
+					const observations = yield* queryEngine
+						.evaluateSeries(systemTenant(orgId), {
+							startTime: toTinybirdDateTime(startMs),
+							endTime: toTinybirdDateTime(queryEndMs),
+							query: plan.query,
+							reducer: plan.reducer,
+							sampleCountStrategy: plan.sampleCountStrategy,
+						})
+						.pipe(catchQueryEngineErrors)
+					const excludeSet = new Set(normalized.excludeServiceNames)
+					for (const obs of observations) {
+						if (excludeSet.has(obs.groupKey)) continue
+						record(obs.groupKey, Date.parse(obs.bucket), {
+							value: obs.value,
+							sampleCount: obs.sampleCount,
+							hasData: obs.sampleCount > 0,
+						})
+					}
 				}
 
 				// Ungrouped rules always observe *something* per tick ("all"), so chart

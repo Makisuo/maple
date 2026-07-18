@@ -123,6 +123,18 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 	)
 
 	if (Option.isSome(apiKeyResolved)) {
+		if (apiKeyResolved.value.kind !== "mcp") {
+			return yield* new McpAuthInvalidError({
+				message: "This API key is only valid for the HTTP API",
+				reason: "key_kind",
+			})
+		}
+		if (apiKeyResolved.value.scopes !== null) {
+			return yield* new McpAuthInvalidError({
+				message: "Restricted API keys are not supported by the MCP server",
+				reason: "insufficient_scope",
+			})
+		}
 		const validOrgId = yield* decodeOrgId(apiKeyResolved.value.orgId).pipe(
 			Effect.mapError(
 				(e) =>

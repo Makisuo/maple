@@ -177,12 +177,33 @@ const mergeUpsertRequest = (
 	patch: V2AlertRuleUpdateParams,
 ): Effect.Effect<AlertRuleUpsertRequest, V2InvalidRequestError> =>
 	Effect.gen(function* () {
+		const signalType = patch.signal_type ?? doc.signalType
 		const queryBuilderDraft =
-			patch.query_builder_draft === undefined
-				? doc.queryBuilderDraft
+			signalType !== "builder_query"
+				? null
+				: patch.query_builder_draft === undefined
+					? doc.signalType === "builder_query"
+						? doc.queryBuilderDraft
+						: null
 				: patch.query_builder_draft === null
 					? null
 					: yield* decodeDraft(patch.query_builder_draft)
+		const rawQuerySql =
+			signalType !== "raw_query"
+				? null
+				: patch.raw_query_sql !== undefined
+					? patch.raw_query_sql
+					: doc.signalType === "raw_query"
+						? doc.rawQuerySql
+						: null
+		const rawQueryReducer =
+			signalType !== "raw_query"
+				? null
+				: patch.raw_query_reducer !== undefined
+					? patch.raw_query_reducer
+					: doc.signalType === "raw_query"
+						? doc.rawQueryReducer
+						: null
 		return new AlertRuleUpsertRequest({
 			name: patch.name ?? doc.name,
 			notes: patch.notes !== undefined ? patch.notes : doc.notes,
@@ -196,7 +217,7 @@ const mergeUpsertRequest = (
 			excludeServiceNames: patch.exclude_service_names ?? doc.excludeServiceNames,
 			tags: patch.tags ?? doc.tags,
 			groupBy: patch.group_by !== undefined ? patch.group_by : doc.groupBy,
-			signalType: patch.signal_type ?? doc.signalType,
+			signalType,
 			comparator: patch.comparator ?? doc.comparator,
 			threshold: patch.threshold ?? doc.threshold,
 			thresholdUpper: patch.threshold_upper !== undefined ? patch.threshold_upper : doc.thresholdUpper,
@@ -213,9 +234,8 @@ const mergeUpsertRequest = (
 			apdexThresholdMs:
 				patch.apdex_threshold_ms !== undefined ? patch.apdex_threshold_ms : doc.apdexThresholdMs,
 			queryBuilderDraft,
-			rawQuerySql: patch.raw_query_sql !== undefined ? patch.raw_query_sql : doc.rawQuerySql,
-			rawQueryReducer:
-				patch.raw_query_reducer !== undefined ? patch.raw_query_reducer : doc.rawQueryReducer,
+			rawQuerySql,
+			rawQueryReducer,
 			destinationIds: patch.destination_ids ?? doc.destinationIds,
 		})
 	})

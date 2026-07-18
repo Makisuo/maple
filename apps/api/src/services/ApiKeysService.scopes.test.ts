@@ -48,6 +48,7 @@ describe("ApiKeysService scopes", () => {
 			expect(Option.isSome(resolved)).toBe(true)
 			if (Option.isSome(resolved)) {
 				expect(resolved.value.scopes).toEqual(["api_keys:read", "dashboards:write"])
+				expect(resolved.value.kind).toBe("standard")
 			}
 
 			const fetched = yield* service.get(ORG, created.id)

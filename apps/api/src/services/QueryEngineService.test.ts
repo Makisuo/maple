@@ -997,14 +997,17 @@ describe("makeQueryEngineEvaluate", () => {
 describe("makeQueryEngineEvaluateRawSql", () => {
 	it.effect("groups raw SQL rows by the `group` column and reduces with the configured reducer", () =>
 		Effect.gen(function* () {
+			let profile: string | undefined
 			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
 				makeTinybirdStub({
-					sqlQuery: () =>
-						Effect.succeed([
+					sqlQuery: (_tenant, _sql, options) => {
+						profile = options?.profile
+						return Effect.succeed([
 							{ group: "checkout", value: 10, samples: 4 },
 							{ group: "checkout", value: 30, samples: 6 },
 							{ group: "payments", value: 5, samples: 2 },
-						]),
+						])
+					},
 				}),
 			)
 
@@ -1023,6 +1026,33 @@ describe("makeQueryEngineEvaluateRawSql", () => {
 			assert.strictEqual(byGroup.payments?.value, 5)
 			assert.strictEqual(byGroup.payments?.sampleCount, 2)
 			assert.strictEqual(byGroup.payments?.hasData, true)
+			assert.strictEqual(profile, "rawAlert")
+		}),
+	)
+
+	it.effect("rejects invalid sample counts returned by raw SQL", () =>
+		Effect.gen(function* () {
+			const evaluateRawSql = makeQueryEngineEvaluateRawSql(
+				makeTinybirdStub({
+					sqlQuery: () => Effect.succeed([{ value: 1, samples: -1 }]),
+				}),
+			)
+
+			const exit = yield* evaluateRawSql(tenant, {
+				startTime: "2026-01-01 00:00:00",
+				endTime: "2026-01-01 00:05:00",
+				sql: "SELECT value, samples FROM otel_traces WHERE $__orgFilter",
+				reducer: "identity",
+				windowMinutes: 5,
+			}).pipe(Effect.exit)
+
+			assert.isTrue(Exit.isFailure(exit))
+			const failure = Option.getOrUndefined(Exit.findErrorOption(exit)) as
+				| { details?: readonly string[] }
+				| undefined
+			assert.deepStrictEqual(failure?.details, [
+				"Raw SQL alert samples must be finite and nonnegative.",
+			])
 		}),
 	)
 
