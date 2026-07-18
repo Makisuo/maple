@@ -12,6 +12,7 @@ const PositiveInteger = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan
 const PositiveFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))
 const NonNegativeFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))
 const BreakdownLimit = PositiveInteger.check(Schema.isLessThanOrEqualTo(100))
+const TimeseriesSeriesLimit = PositiveInteger.check(Schema.isLessThanOrEqualTo(100))
 
 export const LogPublicId = PublicId(PublicIdPrefixes.log, Schema.String).annotate({
 	identifier: "LogId",
@@ -108,6 +109,7 @@ export const V2Trace = Schema.Struct({
 	duration_ms: Schema.Number,
 	span_count: Schema.Number,
 	service_count: Schema.Number,
+	truncated: Schema.Boolean,
 	spans: Schema.Array(V2Span),
 }).annotate({
 	identifier: "Trace",
@@ -317,6 +319,7 @@ export const V2MetricsTimeseriesParams = Schema.Struct({
 		Schema.Array(Schema.Literals(["service", "attribute", "resource_attribute", "none"])),
 	),
 	bucket_seconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
 }).annotate({
 	identifier: "MetricsTimeseriesParams",
 	title: "Metrics timeseries parameters",
@@ -422,7 +425,7 @@ export const V2ServiceMapEdge = Schema.Struct({
 	error_count: Schema.Number,
 	error_rate: Schema.Number,
 	avg_duration_ms: Schema.Number,
-	p95_duration_ms: Schema.Number,
+	max_duration_ms: Schema.Number,
 	has_sampling: Schema.Boolean,
 	sampling_weight: Schema.Number,
 }).annotate({ identifier: "ServiceMapEdge", title: "Service map edge" })
@@ -552,7 +555,7 @@ const V2TracesTimeseriesSpec = Schema.Struct({
 	),
 	filters: Schema.optionalKey(TraceFilters),
 	bucket_seconds: Schema.optionalKey(PositiveInteger),
-	series_limit: Schema.optionalKey(PositiveInteger),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
 	apdex_threshold_ms: Schema.optionalKey(PositiveFinite),
 })
 const V2LogsTimeseriesSpec = Schema.Struct({
@@ -562,7 +565,7 @@ const V2LogsTimeseriesSpec = Schema.Struct({
 	group_by: Schema.optionalKey(Schema.Array(Schema.Literals(["service", "severity", "none"]))),
 	filters: Schema.optionalKey(LogFilters),
 	bucket_seconds: Schema.optionalKey(PositiveInteger),
-	series_limit: Schema.optionalKey(PositiveInteger),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
 })
 const V2MetricsTimeseriesSpec = Schema.Struct({
 	kind: Schema.Literal("timeseries"),
@@ -573,6 +576,7 @@ const V2MetricsTimeseriesSpec = Schema.Struct({
 	),
 	filters: MetricsFiltersSchema,
 	bucket_seconds: Schema.optionalKey(PositiveInteger),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
 })
 const V2TracesBreakdownSpec = Schema.Struct({
 	kind: Schema.Literal("breakdown"),

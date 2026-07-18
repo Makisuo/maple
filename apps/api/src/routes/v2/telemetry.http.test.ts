@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
 import { OrgId, UserId, WarehouseQueryError } from "@maple/domain/http"
 import { MapleApiV2 } from "@maple/domain/http/v2"
-import { QueryEngineExecuteResponse } from "@maple/query-engine"
+import { QueryEngineExecuteResponse, type QueryEngineExecuteRequest } from "@maple/query-engine"
 import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -12,10 +12,7 @@ import { ApiAuthorizationV2Layer } from "../../services/ApiAuthorizationV2Layer"
 import { ApiKeysService } from "../../services/ApiKeysService"
 import { AuthService } from "../../services/AuthService"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
-import {
-	QueryEngineService,
-	type QueryEngineServiceShape,
-} from "../../services/QueryEngineService"
+import { QueryEngineService, type QueryEngineServiceShape } from "../../services/QueryEngineService"
 import { V2SchemaErrorsLive } from "./error-envelope"
 import {
 	AlertsServiceStubLayer,
@@ -118,8 +115,7 @@ const rowsForSql = (sql: string): ReadonlyArray<Record<string, unknown>> => {
 	if (sql.includes("FROM trace_detail_spans") && sql.includes("toJSONString(SpanAttributes)")) {
 		return [
 			{
-				traceId: TRACE_ID,
-				spanId: SPAN_ID,
+				...hierarchyRow,
 				spanAttributes: JSON.stringify({ "http.route": "/checkout", "error.type": "Timeout" }),
 				resourceAttributes: JSON.stringify({ "service.name": "api" }),
 			},
@@ -275,19 +271,12 @@ describe("v2 telemetry reads over HTTP", () => {
 		expect(traces.status).toBe(200)
 		expect(traces.body.data[0]).toMatchObject({ object: "trace", id: TRACE_ID, has_error: true })
 
-		const trace = await harness.request(
-			"GET",
-			`/v2/traces/${TRACE_ID}`,
-			key.secret,
-		)
+		const trace = await harness.request("GET", `/v2/traces/${TRACE_ID}`, key.secret)
 		expect(trace.status).toBe(200)
 		expect(trace.body.spans).toHaveLength(1)
+		expect(trace.body.truncated).toBe(false)
 
-		const span = await harness.request(
-			"GET",
-			`/v2/traces/${TRACE_ID}/spans/${SPAN_ID}`,
-			key.secret,
-		)
+		const span = await harness.request("GET", `/v2/traces/${TRACE_ID}/spans/${SPAN_ID}`, key.secret)
 		expect(span.status).toBe(200)
 		expect(span.body.attributes["error.type"]).toBe("Timeout")
 
@@ -419,6 +408,7 @@ describe("v2 telemetry reads over HTTP", () => {
 		expect(hierarchySql).toContain(`TraceId = '${TRACE_ID}'`)
 		expect(hierarchySql).not.toContain("Timestamp >=")
 		expect(hierarchySql).not.toContain("Timestamp <=")
+		expect(hierarchySql).toContain("LIMIT 5001")
 		await harness.dispose()
 	})
 
@@ -446,8 +436,42 @@ describe("v2 telemetry reads over HTTP", () => {
 		})
 		expect(response.status).toBe(200)
 		expect(observedRequest?.query).toMatchObject({
+			seriesLimit: 50,
 			filters: { groupByAttributeKeys: ["http.route"] },
 		})
+		const excessiveLimit = await harness.request("POST", "/v2/query", key.secret, {
+			start_time: START,
+			end_time: END,
+			query: {
+				kind: "timeseries",
+				source: "traces",
+				metric: "count",
+				group_by: ["service"],
+				series_limit: 101,
+			},
+		})
+		expect(excessiveLimit.status).toBe(400)
+		await harness.dispose()
+	})
+
+	it("applies bounded ClickHouse settings to log body searches", async () => {
+		let observedOptions: Parameters<WarehouseQueryServiceShape["compiledQuery"]>[2]
+		const observingWarehouse: WarehouseQueryServiceShape = {
+			...warehouseStub,
+			compiledQuery: (tenant, compiled, options) => {
+				observedOptions = options
+				return warehouseStub.compiledQuery(tenant, compiled, options)
+			},
+		}
+		const harness = makeHarness(observingWarehouse)
+		const key = await harness.bootstrapKey(["logs:read"])
+		const response = await harness.request("POST", "/v2/logs/search", key.secret, {
+			start_time: START,
+			end_time: END,
+			search: "checkout failed",
+		})
+		expect(response.status).toBe(200)
+		expect(observedOptions?.settings).toMatchObject({ maxBlockSize: 512 })
 		await harness.dispose()
 	})
 

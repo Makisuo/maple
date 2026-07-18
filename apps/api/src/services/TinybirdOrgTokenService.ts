@@ -51,10 +51,10 @@ export class TinybirdOrgTokenService extends Context.Service<
 			const nowMs = yield* Clock.currentTimeMillis
 			const cached = cache.get(orgId)
 			if (cached !== undefined && cached.expiresAt > nowMs) {
-				yield* Effect.annotateCurrentSpan("tinybird.jwt.cacheHit", true)
+				yield* Effect.annotateCurrentSpan("maple.tinybird.jwt.cache_hit", true)
 				return cached.token
 			}
-			yield* Effect.annotateCurrentSpan("tinybird.jwt.cacheHit", false)
+			yield* Effect.annotateCurrentSpan("maple.tinybird.jwt.cache_hit", false)
 			if (Option.isNone(env.TINYBIRD_SIGNING_KEY)) {
 				return yield* new TinybirdOrgTokenError({
 					reason: "MissingSigningKey",

@@ -151,7 +151,7 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalSecret("TINYBIRD_SIGNING_KEY"),
 				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
 				...optionalPlain("CLICKHOUSE_URL"),
-				CLICKHOUSE_PROVIDER: process.env.CLICKHOUSE_PROVIDER?.trim() || "clickhouse",
+				CLICKHOUSE_PROVIDER: process.env.CLICKHOUSE_PROVIDER?.trim() || "tinybird",
 				...optionalPlain("CLICKHOUSE_USER"),
 				...optionalPlain("CLICKHOUSE_DATABASE"),
 				...optionalSecret("CLICKHOUSE_PASSWORD"),

@@ -175,6 +175,7 @@ export {
 	errorsByTypeQuery,
 	errorsTimeseriesQuery,
 	spanHierarchyQuery,
+	SPAN_HIERARCHY_MAX_SPANS,
 	spanDetailQuery,
 	traceTimeProbeQuery,
 	tracesDurationStatsQuery,

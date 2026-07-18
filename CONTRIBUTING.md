@@ -189,7 +189,7 @@ Default URL: `http://localhost:3472`
 | `TINYBIRD_TOKEN` | yes | Placeholder OK when using `CLICKHOUSE_URL` |
 | `TINYBIRD_SIGNING_KEY` / `TINYBIRD_WORKSPACE_ID` | with Tinybird raw SQL | Explicit JWT signing configuration; never derived from `TINYBIRD_TOKEN` |
 | `CLICKHOUSE_URL` | recommended | `http://localhost:8123` for local ClickHouse stack |
-| `CLICKHOUSE_PROVIDER` | optional | `clickhouse` (default) or `tinybird`; existing Tinybird gateway deployments must set `tinybird` |
+| `CLICKHOUSE_PROVIDER` | optional | `tinybird` (default) or `clickhouse`; set `clickhouse` for env-level vanilla/self-managed ClickHouse |
 | `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | with CH | Match docker-compose (`maple` / `maple` / `default`) |
 | `INTERNAL_SERVICE_TOKEN` | recommended | Shared with scraper + chat-flue |
 | `SD_INTERNAL_TOKEN` | optional | Prometheus scraper internal API auth |

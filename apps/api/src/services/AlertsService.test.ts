@@ -356,16 +356,27 @@ describe("AlertsService", () => {
 					}),
 				)
 			yield* Effect.forEach(
-				Array.from({ length: 100 }, (_, index) => index),
+				Array.from({ length: 99 }, (_, index) => index),
 				createRule,
 				{ concurrency: 1, discard: true },
 			)
 
-			const exit = yield* createRule(100).pipe(Effect.exit)
-			assert.isTrue(Exit.isFailure(exit))
-			const error = getError(exit)
+			const exits = yield* Effect.all(
+				[createRule(99).pipe(Effect.exit), createRule(100).pipe(Effect.exit)],
+				{
+					concurrency: "unbounded",
+				},
+			)
+			assert.strictEqual(exits.filter(Exit.isSuccess).length, 1)
+			assert.strictEqual(exits.filter(Exit.isFailure).length, 1)
+			const error = getError(exits.find(Exit.isFailure)!)
 			assert.instanceOf(error, AlertValidationError)
 			assert.include((error as AlertValidationError).message, "at most 100 active alert rules")
+			const rules = yield* alerts.listRules(orgId)
+			assert.lengthOf(
+				rules.rules.filter((rule) => rule.enabled),
+				100,
+			)
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub({}), { fetch: okFetch })))
 	})
 

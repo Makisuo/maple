@@ -88,7 +88,7 @@ const envConfig = Config.all({
 	TINYBIRD_SIGNING_KEY: optionalRedacted("TINYBIRD_SIGNING_KEY"),
 	TINYBIRD_WORKSPACE_ID: optionalString("TINYBIRD_WORKSPACE_ID"),
 	CLICKHOUSE_URL: optionalString("CLICKHOUSE_URL"),
-	CLICKHOUSE_PROVIDER: stringWithDefault("CLICKHOUSE_PROVIDER", "clickhouse"),
+	CLICKHOUSE_PROVIDER: stringWithDefault("CLICKHOUSE_PROVIDER", "tinybird"),
 	CLICKHOUSE_USER: stringWithDefault("CLICKHOUSE_USER", "default"),
 	CLICKHOUSE_PASSWORD: optionalRedacted("CLICKHOUSE_PASSWORD"),
 	CLICKHOUSE_DATABASE: stringWithDefault("CLICKHOUSE_DATABASE", "default"),

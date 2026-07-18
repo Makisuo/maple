@@ -17,6 +17,7 @@ import {
 	type V2TraceSummary,
 } from "@maple/domain/http/v2"
 import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
+import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
 import { MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine/runtime"
 import { Effect, Encoding, Option, Result, Schema } from "effect"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
@@ -53,6 +54,7 @@ const serviceCatalogRowSchema = Schema.Struct({
 })
 
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
+const PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT = 50
 
 const mapWarehouseError = (operation: string) => () => dependencyUnavailable(`${operation}_unavailable`)
 
@@ -96,8 +98,7 @@ const chToIso = (value: string): Timestamp => {
 	return timestamp(Number.isNaN(ms) ? value : new Date(ms).toISOString())
 }
 
-const warehouseDate = (ms: number) =>
-	new Date(ms).toISOString().replace("T", " ").replace(/Z$/, "")
+const warehouseDate = (ms: number) => new Date(ms).toISOString().replace("T", " ").replace(/Z$/, "")
 const partitionWindow = (value: string) => {
 	const ms = Date.parse(value.includes("T") ? value : `${value.replace(" ", "T")}Z`)
 	return {
@@ -127,9 +128,7 @@ const compactTimestamp = (value: string) => {
 	const match = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?$/.exec(value)
 	if (match === null) return value
 	const epochSeconds = Date.parse(`${match[1]}T${match[2]}Z`) / 1000
-	return Number.isSafeInteger(epochSeconds)
-		? `~${epochSeconds.toString(36)}${match[3] ?? ""}`
-		: value
+	return Number.isSafeInteger(epochSeconds) ? `~${epochSeconds.toString(36)}${match[3] ?? ""}` : value
 }
 const expandTimestamp = (value: string) => {
 	const match = /^~([0-9a-z]+)(\.\d+)?$/.exec(value)
@@ -153,10 +152,7 @@ const expandHexId = (value: string) => {
 	return [...decoded.success].map((byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 const logKey = (row: { timestamp: string; recordIdentity: string }) =>
-	JSON.stringify([
-		compactTimestamp(row.timestamp),
-		compactHexId(row.recordIdentity),
-	] satisfies LogKey)
+	JSON.stringify([compactTimestamp(row.timestamp), compactHexId(row.recordIdentity)] satisfies LogKey)
 
 const parseLogKey = (value: string) => {
 	try {
@@ -312,7 +308,10 @@ const toInternalQuery = (query: Record<string, any>): Record<string, any> => {
 		metric: query.metric,
 		groupBy: query.group_by,
 		bucketSeconds: query.bucket_seconds,
-		seriesLimit: query.series_limit,
+		seriesLimit:
+			query.kind === "timeseries"
+				? (query.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT)
+				: undefined,
 		limit: query.limit,
 		apdexThresholdMs: query.apdex_threshold_ms,
 	}
@@ -368,7 +367,9 @@ const queryError = (error: unknown) => {
 
 const decodeQueryEngineRequest = (input: unknown) =>
 	Schema.decodeUnknownEffect(QueryEngineExecuteRequest)(input).pipe(
-		Effect.mapError(() => invalidRequest("query_invalid", "The query specification is invalid.", "query")),
+		Effect.mapError(() =>
+			invalidRequest("query_invalid", "The query specification is invalid.", "query"),
+		),
 	)
 
 export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (handlers) =>
@@ -379,9 +380,12 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 			tenant: CurrentTenant.TenantSchema,
 			traceId: string,
 		) {
-			const compiled = CH.compile(CH.spanHierarchyQuery({ traceId }), {
-				orgId: tenant.orgId,
-			})
+			const compiled = CH.compile(
+				CH.spanHierarchyQuery({ traceId, limit: CH.SPAN_HIERARCHY_MAX_SPANS + 1 }),
+				{
+					orgId: tenant.orgId,
+				},
+			)
 			return yield* warehouse
 				.compiledQuery(tenant, compiled, {
 					profile: "list",
@@ -437,7 +441,8 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 					const tenant = yield* CurrentTenant.Context
 					const rows = yield* hierarchy(tenant, params.trace_id)
 					if (rows.length === 0) return yield* resourceNotFound("trace", "No such trace.")
-					const spans = rows.map(toSpan)
+					const truncated = rows.length > CH.SPAN_HIERARCHY_MAX_SPANS
+					const spans = rows.slice(0, CH.SPAN_HIERARCHY_MAX_SPANS).map(toSpan)
 					const startMs = Math.min(...spans.map((span) => Date.parse(span.start_time)))
 					const endMs = Math.max(
 						...spans.map((span) => Date.parse(span.start_time) + span.duration_ms),
@@ -450,6 +455,7 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 						duration_ms: endMs - startMs,
 						span_count: spans.length,
 						service_count: new Set(spans.map((span) => span.service_name)).size,
+						truncated,
 						spans,
 					}
 				}),
@@ -457,9 +463,6 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 			.handle("retrieveSpan", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const rows = yield* hierarchy(tenant, params.trace_id)
-					const hierarchyRow = rows.find((row) => row.spanId === params.span_id)
-					if (!hierarchyRow) return yield* resourceNotFound("span", "No such span.")
 					const detail = yield* warehouse
 						.compiledQueryFirst(
 							tenant,
@@ -472,15 +475,9 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 							),
 							{ profile: "discovery", context: "v2GetSpan" },
 						)
-						.pipe(
-							Effect.mapError(mapWarehouseError("span_query")),
-							Effect.map(Option.getOrNull),
-						)
-					return toSpan({
-						...hierarchyRow,
-						spanAttributes: detail?.spanAttributes ?? hierarchyRow.spanAttributes,
-						resourceAttributes: detail?.resourceAttributes ?? hierarchyRow.resourceAttributes,
-					})
+						.pipe(Effect.mapError(mapWarehouseError("span_query")), Effect.map(Option.getOrNull))
+					if (!detail) return yield* resourceNotFound("span", "No such span.")
+					return toSpan(detail)
 				}),
 			)
 	}),
@@ -522,7 +519,11 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 						{ orgId: tenant.orgId, ...window },
 					)
 					const rows = yield* warehouse
-						.compiledQuery(tenant, compiled, { profile: "list", context: "v2LogSearch" })
+						.compiledQuery(tenant, compiled, {
+							profile: "list",
+							context: "v2LogSearch",
+							settings: payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
+						})
 						.pipe(Effect.mapError(mapWarehouseError("log_search")))
 					const dataRows = rows.slice(0, limit)
 					const last = dataRows.at(-1)
@@ -632,6 +633,7 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 							metric: payload.metric,
 							groupBy: payload.group_by,
 							bucketSeconds: payload.bucket_seconds,
+							seriesLimit: payload.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT,
 							filters: {
 								metricName: payload.metric_name,
 								metricType: payload.metric_type,
@@ -767,7 +769,7 @@ const toMapEdge = (row: {
 		error_count: errors,
 		error_rate: calls > 0 ? errors / calls : 0,
 		avg_duration_ms: Number(row.avgDurationMs),
-		p95_duration_ms: Number(row.p95DurationMs),
+		max_duration_ms: Number(row.p95DurationMs),
 		has_sampling: estimated > calls + 0.001,
 		sampling_weight: calls > 0 ? estimated / calls : 1,
 	}
@@ -821,9 +823,7 @@ export const HttpV2QueryLive = HttpApiBuilder.group(MapleApiV2, "query", (handle
 					endTime: window.endTime,
 					query: toInternalQuery(payload.query),
 				})
-				const response = yield* queryEngine
-					.execute(tenant, request)
-					.pipe(Effect.mapError(queryError))
+				const response = yield* queryEngine.execute(tenant, request).pipe(Effect.mapError(queryError))
 				if (response.result.kind !== "timeseries" && response.result.kind !== "breakdown") {
 					return yield* Effect.fail(dependencyUnavailable("query_unavailable"))
 				}

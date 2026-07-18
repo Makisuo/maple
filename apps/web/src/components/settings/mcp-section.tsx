@@ -186,6 +186,7 @@ export function McpSection() {
 				open={createDialogOpen}
 				onOpenChange={setCreateDialogOpen}
 				onCreated={(secret) => setCreatedSecret(secret)}
+				kind="mcp"
 			/>
 		</div>
 	)

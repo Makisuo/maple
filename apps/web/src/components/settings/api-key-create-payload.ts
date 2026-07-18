@@ -18,10 +18,8 @@ export const buildApiKeyCreatePayload = (
 		name: name.trim(),
 		...(trimmedDescription.length > 0 ? { description: trimmedDescription } : {}),
 		...(kind !== undefined ? { kind } : {}),
-		...(options.expiresInSeconds !== undefined
-			? { expires_in_seconds: options.expiresInSeconds }
-			: {}),
-		...(options.scopes !== undefined && options.scopes.length > 0
+		...(options.expiresInSeconds !== undefined ? { expires_in_seconds: options.expiresInSeconds } : {}),
+		...(kind !== "mcp" && options.scopes !== undefined && options.scopes.length > 0
 			? { scopes: options.scopes }
 			: {}),
 	}

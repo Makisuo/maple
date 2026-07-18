@@ -123,7 +123,7 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		}).pipe(Effect.provide(layer))
 	})
 
-	it.effect("substitutes a scoped JWT for the Tinybird ClickHouse gateway password", () => {
+	it.effect("defaults an env-level ClickHouse gateway to Tinybird and substitutes a scoped JWT", () => {
 		let captured: ResolvedWarehouseConfig | undefined
 		__testables.setClientFactory((config) => {
 			captured = config
@@ -131,7 +131,6 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 		})
 		const layer = buildLayer(createTestDb(trackedDbs), {
 			CLICKHOUSE_URL: "https://gateway.tinybird.example",
-			CLICKHOUSE_PROVIDER: "tinybird",
 			CLICKHOUSE_PASSWORD: "gateway-admin-token",
 		})
 

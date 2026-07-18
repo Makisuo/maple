@@ -1238,6 +1238,8 @@ describe("converted queries", () => {
 		expect(sql).toContain("TraceId = 'abc123'")
 		expect(sql).toContain("SpanId = 'span1'")
 		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("ParentSpanId AS parentSpanId")
+		expect(sql).toContain("Duration / 1000000 AS durationMs")
 		expect(sql).toContain("LIMIT 1")
 	})
 

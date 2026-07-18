@@ -354,41 +354,43 @@ const validateTraceAttributeFilters = Effect.fn("QueryEngineService.validateTrac
 	},
 )
 
-const validateMetricsAttributeFilters = Effect.fn(
-	"QueryEngineService.validateMetricsAttributeFilters",
-)(function* (query: QuerySpec): Effect.fn.Return<void, QueryEngineValidationError> {
-	if (query.source !== "metrics") return
-	if (query.kind !== "timeseries" && query.kind !== "breakdown") return
+const validateMetricsAttributeFilters = Effect.fn("QueryEngineService.validateMetricsAttributeFilters")(
+	function* (query: QuerySpec): Effect.fn.Return<void, QueryEngineValidationError> {
+		if (query.source !== "metrics") return
+		if (query.kind !== "timeseries" && query.kind !== "breakdown") return
 
-	// `groupBy` is an array for timeseries, a single literal for breakdown.
-	const groupBy = query.groupBy
-	const wantsAttribute = Array.isArray(groupBy) ? groupBy.includes("attribute") : groupBy === "attribute"
-	const wantsResourceAttribute = Array.isArray(groupBy)
-		? groupBy.includes("resource_attribute")
-		: groupBy === "resource_attribute"
-	if (wantsAttribute && !query.filters.groupByAttributeKey) {
-		// Mirror the traces guard: never silently downgrade an attribute grouping
-		// to a service grouping — the agent asked for a label breakdown.
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy=attribute requires filters.groupByAttributeKey"],
-		})
-	}
-	if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
-		})
-	}
-	if (wantsAttribute && wantsResourceAttribute) {
-		// The metrics queries carry a single attributeValue group column — one
-		// attribute dimension per query.
-		return yield* new QueryEngineValidationError({
-			message: "Invalid metrics attribute grouping",
-			details: ["groupBy cannot combine attribute and resource_attribute"],
-		})
-	}
-})
+		// `groupBy` is an array for timeseries, a single literal for breakdown.
+		const groupBy = query.groupBy
+		const wantsAttribute = Array.isArray(groupBy)
+			? groupBy.includes("attribute")
+			: groupBy === "attribute"
+		const wantsResourceAttribute = Array.isArray(groupBy)
+			? groupBy.includes("resource_attribute")
+			: groupBy === "resource_attribute"
+		if (wantsAttribute && !query.filters.groupByAttributeKey) {
+			// Mirror the traces guard: never silently downgrade an attribute grouping
+			// to a service grouping — the agent asked for a label breakdown.
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy=attribute requires filters.groupByAttributeKey"],
+			})
+		}
+		if (wantsResourceAttribute && !query.filters.groupByResourceAttributeKey) {
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy=resource_attribute requires filters.groupByResourceAttributeKey"],
+			})
+		}
+		if (wantsAttribute && wantsResourceAttribute) {
+			// The metrics queries carry a single attributeValue group column — one
+			// attribute dimension per query.
+			return yield* new QueryEngineValidationError({
+				message: "Invalid metrics attribute grouping",
+				details: ["groupBy cannot combine attribute and resource_attribute"],
+			})
+		}
+	},
+)
 
 const validatePointBudget = Effect.fn("QueryEngineService.validatePointBudget")(function* (
 	request: QueryEngineExecuteRequest,
@@ -1100,6 +1102,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 						attributeKey: attributeFilter?.key,
 						attributeValue: attributeFilter?.value,
 						resourceAttributeFilters,
+						groupBy: request.query.groupBy,
+						seriesLimit: request.query.seriesLimit,
 					}),
 					{
 						orgId: tenant.orgId,
@@ -1147,6 +1151,8 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 					attributeKey: attributeFilter?.key,
 					attributeValue: attributeFilter?.value,
 					resourceAttributeFilters,
+					groupBy: request.query.groupBy,
+					seriesLimit: request.query.seriesLimit,
 				}),
 				{
 					orgId: tenant.orgId,
@@ -1171,7 +1177,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				request.query.groupBy?.includes("none") || !request.query.groupBy?.length
 					? groupTimeSeriesRows(
 							collapseMetricTimeseriesRows(
-								result as Array<MetricTimeseriesRow>,
+								result as ReadonlyArray<MetricTimeseriesRow>,
 								request.query.metric,
 							),
 							(row) => row.value,
@@ -2205,9 +2211,7 @@ export const makeQueryEngineEvaluateRawSql = <T extends QueryTenant>(warehouse: 
 				if (byGroup.size >= MAX_RAW_SQL_ALERT_GROUPS) {
 					return yield* new QueryEngineValidationError({
 						message: "Invalid raw SQL alert query",
-						details: [
-							`Raw SQL alerts may return at most ${MAX_RAW_SQL_ALERT_GROUPS} groups.`,
-						],
+						details: [`Raw SQL alerts may return at most ${MAX_RAW_SQL_ALERT_GROUPS} groups.`],
 					})
 				}
 				byGroup.set(groupKey, [obs])

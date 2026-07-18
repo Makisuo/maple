@@ -155,6 +155,7 @@ export const MetricsTimeseriesQuery = Schema.Struct({
 	),
 	filters: MetricsFilters,
 	bucketSeconds: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+	seriesLimit: Schema.optional(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
 })
 export type MetricsTimeseriesQuery = Schema.Schema.Type<typeof MetricsTimeseriesQuery>
 

@@ -172,9 +172,13 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 	return {
 		sql: async (sql: string, options) => {
 			try {
+				// Tinybird Cloud currently defaults /v0/sql to JSON, while Tinybird Local
+				// defaults to tab-separated output. The SDK always calls response.json(), so
+				// make the expected wire format explicit for both environments.
+				const jsonSql = `${sql.trimEnd().replace(/;$/, "")}\nFORMAT JSON`
 				const result = await (options?.rawResponseLimits ? boundedClient : client).sql<
 					Record<string, unknown>
-				>(sql)
+				>(jsonSql)
 				if (options?.rawResponseLimits && result.data.length > MAX_RAW_SQL_RESULT_ROWS) {
 					throw new WarehouseResponseLimitError(
 						"rows",
@@ -335,7 +339,7 @@ export class WarehouseQueryService extends Context.Service<
 							}),
 					),
 				)
-				yield* Effect.annotateCurrentSpan("tinybird.token.scope", "org_jwt")
+				yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
 				if (managed.config._tag === "tinybird") {
 					return { config: { ...managed.config, token: jwt }, source: managed.source }
 				}
@@ -367,7 +371,7 @@ export class WarehouseQueryService extends Context.Service<
 		)(function* (tenant, _label) {
 			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 			yield* Effect.annotateCurrentSpan("clientSource", "managed")
-			yield* Effect.annotateCurrentSpan("ingest.routing", "tinybird")
+			yield* Effect.annotateCurrentSpan("query.routing", "ingest")
 			yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 			return {
 				config: {

@@ -85,7 +85,7 @@ import {
 	type AlertRuleRow,
 	alertRuleStates,
 } from "@maple/db"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from "drizzle-orm"
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -849,12 +849,7 @@ const compileRulePlan = Effect.fn("AlertsService.compileRulePlan")(function* (ru
 const parseCompiledPlan = (
 	row: Pick<
 		AlertRuleRow,
-		| "signalType"
-		| "querySpecJson"
-		| "rawQuerySql"
-		| "reducer"
-		| "sampleCountStrategy"
-		| "noDataBehavior"
+		"signalType" | "querySpecJson" | "rawQuerySql" | "reducer" | "sampleCountStrategy" | "noDataBehavior"
 	>,
 ): Effect.Effect<Schema.Schema.Type<typeof CompiledAlertQueryPlan>, AlertValidationError> => {
 	if (row.signalType === "raw_query") {
@@ -968,7 +963,7 @@ const rowToRuleDocument = (
 			row.metricAggregation != null ? decodeAlertMetricAggregationSync(row.metricAggregation) : null,
 		apdexThresholdMs: row.apdexThresholdMs,
 		queryBuilderDraft: parseStoredQueryBuilderDraft(row.queryBuilderDraftJson),
-				rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
+		rawQuerySql: row.signalType === "raw_query" ? (row.rawQuerySql ?? null) : null,
 		rawQueryReducer:
 			row.signalType === "raw_query" ? decodeQueryEngineAlertReducerSync(row.reducer) : null,
 		destinationIds: destinationIds.map((id) => decodeAlertDestinationIdSync(id)),
@@ -1484,7 +1479,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						request.apdexThresholdMs ?? (request.signalType === "apdex" ? 500 : null),
 					queryBuilderDraft: request.queryBuilderDraft ?? null,
 					rawQuerySql:
-						request.signalType === "raw_query" ? normalizeOptionalString(request.rawQuerySql) : null,
+						request.signalType === "raw_query"
+							? normalizeOptionalString(request.rawQuerySql)
+							: null,
 					rawQueryReducer:
 						request.signalType === "raw_query" ? (request.rawQueryReducer ?? null) : null,
 					destinationIds,
@@ -2493,23 +2490,6 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				request: AlertRuleUpsertRequest,
 			) {
 				const normalized = yield* normalizeRule(orgId, request)
-				if (normalized.enabled) {
-					const activeRows = yield* dbExecute((db) =>
-						db
-							.select({ id: alertRules.id })
-							.from(alertRules)
-							.where(and(eq(alertRules.orgId, orgId), eq(alertRules.enabled, true))),
-					)
-					const alreadyActive =
-						existingId != null && activeRows.some((row) => row.id === existingId)
-					if (!alreadyActive && activeRows.length >= MAX_ACTIVE_ALERT_RULES_PER_ORG) {
-						return yield* Effect.fail(
-							makeValidationError(
-								`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
-							),
-						)
-					}
-				}
 				yield* requireDestinationIds(orgId, normalized.destinationIds)
 				const ruleId = existingId ?? normalized.id
 				const timestamp = yield* now
@@ -2549,28 +2529,54 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					updatedBy: userId,
 				} as const
 
-				const writeRows =
-					existingId == null
-						? yield* dbExecute((db) =>
-								db
-									.insert(alertRules)
-									.values({
-										id: ruleId,
-										orgId,
-										...ruleFields,
-										createdAt: new Date(timestamp),
-										createdBy: userId,
-									})
-									.returning(txidColumn),
-							)
-						: yield* dbExecute((db) =>
-								db
-									.update(alertRules)
-									.set(ruleFields)
-									.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)))
-									.returning(txidColumn),
-							)
-				const txid = readTxid(writeRows)
+				const writeResult = yield* dbExecute((db) =>
+					db.transaction(async (tx) => {
+						// Serialize quota checks per organization. Without the transaction-scoped
+						// advisory lock, concurrent creates can both observe 99 active rows and
+						// commit the 100th and 101st rules.
+						await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${orgId}))`)
+						if (normalized.enabled) {
+							const activeRows = await tx
+								.select({ id: alertRules.id })
+								.from(alertRules)
+								.where(and(eq(alertRules.orgId, orgId), eq(alertRules.enabled, true)))
+							const alreadyActive =
+								existingId != null && activeRows.some((row) => row.id === existingId)
+							if (!alreadyActive && activeRows.length >= MAX_ACTIVE_ALERT_RULES_PER_ORG) {
+								return { limitExceeded: true as const, writeRows: [] }
+							}
+						}
+
+						const writeRows =
+							existingId == null
+								? await tx
+										.insert(alertRules)
+										.values({
+											id: ruleId,
+											orgId,
+											...ruleFields,
+											createdAt: new Date(timestamp),
+											createdBy: userId,
+										})
+										.returning(txidColumn)
+								: await tx
+										.update(alertRules)
+										.set(ruleFields)
+										.where(
+											and(eq(alertRules.orgId, orgId), eq(alertRules.id, existingId)),
+										)
+										.returning(txidColumn)
+						return { limitExceeded: false as const, writeRows }
+					}),
+				)
+				if (writeResult.limitExceeded) {
+					return yield* Effect.fail(
+						makeValidationError(
+							`Organizations may have at most ${MAX_ACTIVE_ALERT_RULES_PER_ORG} active alert rules`,
+						),
+					)
+				}
+				const txid = readTxid(writeResult.writeRows)
 
 				const row = yield* requireRuleRow(orgId, ruleId)
 				const destinationIds = safeParseStringArray(row.destinationIdsJson)
