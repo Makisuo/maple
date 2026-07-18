@@ -1,6 +1,16 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ScrapeTargetResponse } from "@maple/domain/http"
-import { CreateScrapeTargetRequest, CurrentTenant, UpdateScrapeTargetRequest } from "@maple/domain/http"
+import {
+	CreateScrapeTargetRequest,
+	CurrentTenant,
+	type ScrapeTargetAuthError,
+	type ScrapeTargetEncryptionError,
+	type ScrapeTargetNotFoundError,
+	type ScrapeTargetPersistenceError,
+	type ScrapeTargetUpstreamError,
+	type ScrapeTargetValidationError,
+	UpdateScrapeTargetRequest,
+} from "@maple/domain/http"
 import {
 	MapleApiV2,
 	dependencyUnavailable,
@@ -38,35 +48,88 @@ const toV2ScrapeTarget = (target: ScrapeTargetResponse): V2ScrapeTarget => ({
 })
 
 /** Service tagged errors → v2 envelope errors (create: no 404 on the contract). */
-const mapCommonError = (operation: string) => (error: { readonly _tag: string; readonly message: string }) =>
-	error._tag === "@maple/http/errors/ScrapeTargetValidationError"
-		? invalidRequest("parameter_invalid", error.message)
-		: dependencyUnavailable(`scrape_target_${operation}_unavailable`)
+const mapCommonError =
+	(operation: string) =>
+	<A, R>(
+		effect: Effect.Effect<
+			A,
+			ScrapeTargetValidationError | ScrapeTargetPersistenceError | ScrapeTargetEncryptionError,
+			R
+		>,
+	) =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/errors/ScrapeTargetValidationError": (error) =>
+					Effect.fail(invalidRequest("parameter_invalid", error.message)),
+				"@maple/http/errors/ScrapeTargetPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
+				"@maple/http/errors/ScrapeTargetEncryptionError": () =>
+					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
+			}),
+		)
 
 /** Service tagged errors → v2 envelope errors (endpoints with a 404). */
 const mapMutationError =
-	(operation: string) => (error: { readonly _tag: string; readonly message: string }) =>
-		error._tag === "@maple/http/errors/ScrapeTargetNotFoundError"
-			? resourceNotFound("scrape_target", "No such scrape target.")
-			: mapCommonError(operation)(error)
+	(operation: string) =>
+	<A, R>(
+		effect: Effect.Effect<
+			A,
+			| ScrapeTargetNotFoundError
+			| ScrapeTargetValidationError
+			| ScrapeTargetPersistenceError
+			| ScrapeTargetEncryptionError,
+			R
+		>,
+	) =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/errors/ScrapeTargetNotFoundError": () =>
+					Effect.fail(resourceNotFound("scrape_target", "No such scrape target.")),
+				"@maple/http/errors/ScrapeTargetValidationError": (error) =>
+					Effect.fail(invalidRequest("parameter_invalid", error.message)),
+				"@maple/http/errors/ScrapeTargetPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
+				"@maple/http/errors/ScrapeTargetEncryptionError": () =>
+					Effect.fail(dependencyUnavailable(`scrape_target_${operation}_unavailable`)),
+			}),
+		)
 
 /** Probe can additionally surface upstream/auth failures as 502s. */
-const mapProbeError = (error: { readonly _tag: string; readonly message: string }) => {
-	switch (error._tag) {
-		case "@maple/http/errors/ScrapeTargetAuthError":
-			return upstreamError(
-				"scrape_target_probe_auth_failed",
-				"The scrape target rejected Maple's credentials.",
-			)
-		case "@maple/http/errors/ScrapeTargetUpstreamError":
-			return upstreamError(
-				"scrape_target_probe_upstream_failed",
-				"The scrape target could not complete the probe.",
-			)
-		default:
-			return mapMutationError("probe")(error)
-	}
-}
+const mapProbeError = <A, R>(
+	effect: Effect.Effect<
+		A,
+		| ScrapeTargetNotFoundError
+		| ScrapeTargetPersistenceError
+		| ScrapeTargetEncryptionError
+		| ScrapeTargetAuthError
+		| ScrapeTargetUpstreamError,
+		R
+	>,
+) =>
+	effect.pipe(
+		Effect.catchTags({
+			"@maple/http/errors/ScrapeTargetNotFoundError": () =>
+				Effect.fail(resourceNotFound("scrape_target", "No such scrape target.")),
+			"@maple/http/errors/ScrapeTargetPersistenceError": () =>
+				Effect.fail(dependencyUnavailable("scrape_target_probe_unavailable")),
+			"@maple/http/errors/ScrapeTargetEncryptionError": () =>
+				Effect.fail(dependencyUnavailable("scrape_target_probe_unavailable")),
+			"@maple/http/errors/ScrapeTargetAuthError": () =>
+				Effect.fail(
+					upstreamError(
+						"scrape_target_probe_auth_failed",
+						"The scrape target rejected Maple's credentials.",
+					),
+				),
+			"@maple/http/errors/ScrapeTargetUpstreamError": () =>
+				Effect.fail(
+					upstreamError(
+						"scrape_target_probe_upstream_failed",
+						"The scrape target could not complete the probe.",
+					),
+				),
+		}),
+	)
 
 const mapPersistenceError = () => dependencyUnavailable("scrape_target_list_unavailable")
 
@@ -90,7 +153,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const tenant = yield* CurrentTenant.Context
 					const target = yield* service
 						.get(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapMutationError("retrieve")))
+						.pipe(mapMutationError("retrieve"))
 					return toV2ScrapeTarget(target)
 				}),
 			)
@@ -131,7 +194,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(Effect.mapError(mapCommonError("create")))
+						.pipe(mapCommonError("create"))
 					return toV2ScrapeTarget(created)
 				}),
 			)
@@ -170,7 +233,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(Effect.mapError(mapMutationError("update")))
+						.pipe(mapMutationError("update"))
 					return toV2ScrapeTarget(updated)
 				}),
 			)
@@ -179,16 +242,14 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 					const tenant = yield* CurrentTenant.Context
 					const deleted = yield* service
 						.delete(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapMutationError("delete")))
+						.pipe(mapMutationError("delete"))
 					return { id: deleted.id, object: "scrape_target" as const, deleted: true as const }
 				}),
 			)
 			.handle("probe", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const result = yield* service
-						.probe(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapProbeError))
+					const result = yield* service.probe(tenant.orgId, params.id).pipe(mapProbeError)
 					return {
 						object: "scrape_target.probe_result" as const,
 						success: result.success,
@@ -209,7 +270,7 @@ export const HttpV2ScrapeTargetsLive = HttpApiBuilder.group(MapleApiV2, "scrapeT
 								offset,
 							})
 							.pipe(
-								Effect.mapError(mapMutationError("list_checks")),
+								mapMutationError("list_checks"),
 								Effect.map(
 									(rows): ReadonlyArray<V2ScrapeTargetCheck> =>
 										rows.map((row) => ({

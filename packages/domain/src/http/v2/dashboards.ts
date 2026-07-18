@@ -498,7 +498,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "createDashboard",
 				summary: "Create a dashboard",
 				description:
-					"Creates a dashboard and returns the committed object with its Electric reconciliation token.",
+					"Creates a dashboard and returns the committed object, with optional ElectricSQL reconciliation metadata when available.",
 			}),
 		),
 	)
@@ -582,7 +582,7 @@ export class V2DashboardsApiGroup extends HttpApiGroup.make("dashboards")
 				identifier: "deleteDashboard",
 				summary: "Delete a dashboard",
 				description:
-					"Permanently deletes a dashboard and returns a tombstone with its reconciliation token.",
+					"Permanently deletes a dashboard and returns a tombstone, with optional ElectricSQL reconciliation metadata when available.",
 			}),
 		),
 	)

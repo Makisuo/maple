@@ -29,7 +29,7 @@ import type {
 	V2DashboardVersion,
 	V2DashboardVersionDetail,
 } from "@maple/domain/http/v2"
-import { Clock, Effect, Schema } from "effect"
+import { Clock, Effect, Match, Schema } from "effect"
 import { getTemplateById, listTemplateMetadata } from "../../dashboard-templates"
 import type { TemplateParameterValues } from "../../dashboard-templates"
 import { DashboardPersistenceService } from "../../services/DashboardPersistenceService"
@@ -140,29 +140,32 @@ const mapReadError = (error: DashboardNotFoundError | DashboardPersistenceError)
 		? resourceNotFound("dashboard", "No such dashboard.")
 		: dependencyUnavailable("dashboard_retrieve_unavailable")
 
-const mapWriteError = (
-	error: DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError,
-) => {
-	switch (error._tag) {
-		case "@maple/http/errors/DashboardValidationError":
-			return invalidRequest("parameter_invalid", error.message)
-		case "@maple/http/errors/DashboardConcurrencyError":
-			return conflict("dashboard_concurrent_update", error.message)
-		default:
-			return dependencyUnavailable("dashboard_mutation_unavailable")
-	}
-}
+const mapWriteError =
+	(operation: string) =>
+	(error: DashboardValidationError | DashboardPersistenceError | DashboardConcurrencyError) =>
+		Match.value(error).pipe(
+			Match.tagsExhaustive({
+				"@maple/http/errors/DashboardValidationError": (validation) =>
+					invalidRequest("parameter_invalid", validation.message),
+				"@maple/http/errors/DashboardConcurrencyError": (concurrency) =>
+					conflict("dashboard_concurrent_update", concurrency.message),
+				"@maple/http/errors/DashboardPersistenceError": () =>
+					dependencyUnavailable(`dashboard_${operation}_unavailable`),
+			}),
+		)
 
-const mapUpdateError = (
-	error:
-		| DashboardNotFoundError
-		| DashboardValidationError
-		| DashboardPersistenceError
-		| DashboardConcurrencyError,
-) =>
-	error instanceof DashboardNotFoundError
-		? resourceNotFound("dashboard", "No such dashboard.")
-		: mapWriteError(error)
+const mapUpdateError =
+	(operation: string) =>
+	(
+		error:
+			| DashboardNotFoundError
+			| DashboardValidationError
+			| DashboardPersistenceError
+			| DashboardConcurrencyError,
+	) =>
+		error instanceof DashboardNotFoundError
+			? resourceNotFound("dashboard", "No such dashboard.")
+			: mapWriteError(operation)(error)
 
 const mapVersionError = (
 	error: DashboardNotFoundError | DashboardVersionNotFoundError | DashboardPersistenceError,
@@ -176,22 +179,24 @@ const mapVersionError = (
 			)
 		: dependencyUnavailable("dashboard_version_retrieve_unavailable")
 
-const mapRestoreError = (
-	error:
-		| DashboardNotFoundError
-		| DashboardVersionNotFoundError
-		| DashboardValidationError
-		| DashboardPersistenceError
-		| DashboardConcurrencyError,
-) =>
-	error instanceof DashboardNotFoundError || error instanceof DashboardVersionNotFoundError
-		? resourceNotFound(
-				error instanceof DashboardVersionNotFoundError ? "dashboard_version" : "dashboard",
-				error instanceof DashboardVersionNotFoundError
-					? "No such dashboard version."
-					: "No such dashboard.",
-			)
-		: mapWriteError(error)
+const mapRestoreError =
+	(operation: string) =>
+	(
+		error:
+			| DashboardNotFoundError
+			| DashboardVersionNotFoundError
+			| DashboardValidationError
+			| DashboardPersistenceError
+			| DashboardConcurrencyError,
+	) =>
+		error instanceof DashboardNotFoundError || error instanceof DashboardVersionNotFoundError
+			? resourceNotFound(
+					error instanceof DashboardVersionNotFoundError ? "dashboard_version" : "dashboard",
+					error instanceof DashboardVersionNotFoundError
+						? "No such dashboard version."
+						: "No such dashboard.",
+				)
+			: mapWriteError(operation)(error)
 
 const encodeVersionCursor = (versionNumber: number): string => `ver_${versionNumber.toString(36)}`
 
@@ -231,7 +236,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					const tenant = yield* CurrentTenant.Context
 					const dashboard = yield* persistence
 						.create(tenant.orgId, tenant.userId, toPortable(payload))
-						.pipe(Effect.mapError(mapWriteError))
+						.pipe(Effect.mapError(mapWriteError("create")))
 					return toV2DashboardMutation(dashboard)
 				}),
 			)
@@ -243,7 +248,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 						.mutate(tenant.orgId, tenant.userId, params.id, (current) =>
 							Effect.succeed(applyUpdate(current, payload, updatedAt)),
 						)
-						.pipe(Effect.mapError(mapUpdateError))
+						.pipe(Effect.mapError(mapUpdateError("update")))
 					return toV2DashboardMutation(dashboard)
 				}),
 			)
@@ -269,7 +274,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					const tenant = yield* CurrentTenant.Context
 					const dashboard = yield* persistence
 						.create(tenant.orgId, tenant.userId, converted.dashboard)
-						.pipe(Effect.mapError(mapWriteError))
+						.pipe(Effect.mapError(mapWriteError("import")))
 					return {
 						object: "dashboard_import" as const,
 						dashboard: toV2DashboardMutation(dashboard),
@@ -318,7 +323,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					const tenant = yield* CurrentTenant.Context
 					const dashboard = yield* persistence
 						.restoreVersion(tenant.orgId, tenant.userId, params.id, params.version_id)
-						.pipe(Effect.mapError(mapRestoreError))
+						.pipe(Effect.mapError(mapRestoreError("restore_version")))
 					return toV2DashboardMutation(dashboard)
 				}),
 			)
@@ -379,7 +384,7 @@ export const HttpV2DashboardsLive = HttpApiBuilder.group(MapleApiV2, "dashboards
 					const tenant = yield* CurrentTenant.Context
 					const dashboard = yield* persistence
 						.create(tenant.orgId, tenant.userId, portable)
-						.pipe(Effect.mapError(mapWriteError))
+						.pipe(Effect.mapError(mapWriteError("instantiate_template")))
 					return toV2DashboardMutation(dashboard)
 				}),
 			)

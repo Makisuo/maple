@@ -9,12 +9,13 @@ import {
 	InvestigationFreeformSubject,
 	InvestigationId,
 	InvestigationIncidentSubject,
+	type InvestigationNotFoundError,
+	type InvestigationPersistenceError,
 	TraceId,
 } from "@maple/domain/http"
 import {
 	MapleApiV2,
 	dependencyUnavailable,
-	invalidRequest,
 	paginateOffsetQuery,
 	resourceNotFound,
 } from "@maple/domain/http/v2"
@@ -172,16 +173,27 @@ const toV2Investigation = Effect.fn("HttpV2Investigations.toV2Investigation")(fu
 })
 
 /** Service tagged errors → v2 envelope errors (no 404 on the contract). */
-const mapCommonError = (error: { readonly _tag: string; readonly message: string }) =>
-	error._tag === "@maple/http/investigations/InvestigationValidationError"
-		? invalidRequest("parameter_invalid", error.message)
-		: dependencyUnavailable("investigation_operation_unavailable")
+const mapPersistenceError =
+	(operation: string) =>
+	<A, R>(effect: Effect.Effect<A, InvestigationPersistenceError, R>) =>
+		effect.pipe(
+			Effect.catchTag("@maple/http/investigations/InvestigationPersistenceError", () =>
+				Effect.fail(dependencyUnavailable(`investigation_${operation}_unavailable`)),
+			),
+		)
 
 /** Service tagged errors → v2 envelope errors (endpoints with a 404). */
-const mapWith404 = (error: { readonly _tag: string; readonly message: string }) =>
-	error._tag === "@maple/http/investigations/InvestigationNotFoundError"
-		? resourceNotFound("investigation", "No such investigation.")
-		: mapCommonError(error)
+const mapWith404 =
+	(operation: string) =>
+	<A, R>(effect: Effect.Effect<A, InvestigationPersistenceError | InvestigationNotFoundError, R>) =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/investigations/InvestigationNotFoundError": () =>
+					Effect.fail(resourceNotFound("investigation", "No such investigation.")),
+				"@maple/http/investigations/InvestigationPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`investigation_${operation}_unavailable`)),
+			}),
+		)
 
 const mapSubjectDecodeError = (error: InvestigationSubjectDecodeError) =>
 	Effect.logError(error.message).pipe(
@@ -216,7 +228,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 								offset,
 							})
 							.pipe(
-								Effect.mapError(mapCommonError),
+								mapPersistenceError("list"),
 								Effect.flatMap((response) =>
 									Effect.forEach(response.investigations, toV2Investigation),
 								),
@@ -234,7 +246,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service
 						.getInvestigation(tenant.orgId, params.id)
-						.pipe(Effect.mapError(mapWith404))
+						.pipe(mapWith404("retrieve"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
@@ -252,7 +264,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 							tenant.userId,
 							new InvestigationCreateRequest({ subject: toInternalSubject(payload.subject) }),
 						)
-						.pipe(Effect.mapError(mapCommonError))
+						.pipe(mapPersistenceError("create"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",
@@ -266,7 +278,7 @@ export const HttpV2InvestigationsLive = HttpApiBuilder.group(MapleApiV2, "invest
 					const tenant = yield* CurrentTenant.Context
 					const doc = yield* service
 						.updateStatus(tenant.orgId, params.id, payload.status)
-						.pipe(Effect.mapError(mapWith404))
+						.pipe(mapWith404("update_status"))
 					return yield* toV2Investigation(doc).pipe(
 						Effect.catchTag(
 							"@maple/api/routes/v2/InvestigationSubjectDecodeError",

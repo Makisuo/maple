@@ -42,42 +42,46 @@ const toV2AttributeMapping = (mapping: IngestAttributeMapping): V2AttributeMappi
 })
 
 /** Service tagged errors → v2 envelope errors (endpoints without a 404). */
-const mapCommonError = <A, R>(
-	effect: Effect.Effect<
-		A,
-		IngestAttributeMappingValidationError | IngestAttributeMappingPersistenceError,
-		R
-	>,
-): Effect.Effect<A, V2InvalidRequestError | V2ServiceUnavailableError, R> =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/errors/IngestAttributeMappingValidationError": (error) =>
-				Effect.fail(invalidRequest("parameter_invalid", error.message)),
-			"@maple/http/errors/IngestAttributeMappingPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("attribute_mapping_mutation_unavailable")),
-		}),
-	)
+const mapCommonError =
+	(operation: string) =>
+	<A, R>(
+		effect: Effect.Effect<
+			A,
+			IngestAttributeMappingValidationError | IngestAttributeMappingPersistenceError,
+			R
+		>,
+	): Effect.Effect<A, V2InvalidRequestError | V2ServiceUnavailableError, R> =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/errors/IngestAttributeMappingValidationError": (error) =>
+					Effect.fail(invalidRequest("parameter_invalid", error.message)),
+				"@maple/http/errors/IngestAttributeMappingPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`attribute_mapping_${operation}_unavailable`)),
+			}),
+		)
 
 /** Service tagged errors → v2 envelope errors (endpoints with a 404). */
-const mapMutationError = <A, R>(
-	effect: Effect.Effect<
-		A,
-		| IngestAttributeMappingNotFoundError
-		| IngestAttributeMappingValidationError
-		| IngestAttributeMappingPersistenceError,
-		R
-	>,
-): Effect.Effect<A, V2NotFoundError | V2InvalidRequestError | V2ServiceUnavailableError, R> =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/errors/IngestAttributeMappingNotFoundError": () =>
-				Effect.fail(resourceNotFound("attribute_mapping", "No such attribute mapping.")),
-			"@maple/http/errors/IngestAttributeMappingValidationError": (error) =>
-				Effect.fail(invalidRequest("parameter_invalid", error.message)),
-			"@maple/http/errors/IngestAttributeMappingPersistenceError": () =>
-				Effect.fail(dependencyUnavailable("attribute_mapping_mutation_unavailable")),
-		}),
-	)
+const mapMutationError =
+	(operation: string) =>
+	<A, R>(
+		effect: Effect.Effect<
+			A,
+			| IngestAttributeMappingNotFoundError
+			| IngestAttributeMappingValidationError
+			| IngestAttributeMappingPersistenceError,
+			R
+		>,
+	): Effect.Effect<A, V2NotFoundError | V2InvalidRequestError | V2ServiceUnavailableError, R> =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/errors/IngestAttributeMappingNotFoundError": () =>
+					Effect.fail(resourceNotFound("attribute_mapping", "No such attribute mapping.")),
+				"@maple/http/errors/IngestAttributeMappingValidationError": (error) =>
+					Effect.fail(invalidRequest("parameter_invalid", error.message)),
+				"@maple/http/errors/IngestAttributeMappingPersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`attribute_mapping_${operation}_unavailable`)),
+			}),
+		)
 
 const mapPersistenceError = <A, R>(
 	effect: Effect.Effect<A, IngestAttributeMappingPersistenceError, R>,
@@ -141,7 +145,7 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(mapCommonError)
+						.pipe(mapCommonError("create"))
 					return toV2AttributeMapping(created)
 				}),
 			)
@@ -167,14 +171,16 @@ export const HttpV2AttributeMappingsLive = HttpApiBuilder.group(MapleApiV2, "att
 								...(payload.enabled !== undefined ? { enabled: payload.enabled } : {}),
 							}),
 						)
-						.pipe(mapMutationError)
+						.pipe(mapMutationError("update"))
 					return toV2AttributeMapping(updated)
 				}),
 			)
 			.handle("delete", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const deleted = yield* service.delete(tenant.orgId, params.id).pipe(mapMutationError)
+					const deleted = yield* service
+						.delete(tenant.orgId, params.id)
+						.pipe(mapMutationError("delete"))
 					return { id: deleted.id, object: "attribute_mapping" as const, deleted: true as const }
 				}),
 			)

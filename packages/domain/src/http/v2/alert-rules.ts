@@ -229,7 +229,7 @@ const MutationTxidFields = {
 	txid: Schema.optionalKey(PostgresTransactionId),
 }
 
-/** Returned by create/update: the rule plus the Electric reconciliation token. */
+/** Returned by create/update: the rule plus optional Electric reconciliation metadata. */
 export const V2AlertRuleMutationResponse = Schema.Struct({
 	...V2AlertRule.fields,
 	...MutationTxidFields,

@@ -27,17 +27,19 @@ const toV2Recommendation = (issue: RecommendationIssue): V2Recommendation => ({
 })
 
 /** Service tagged errors → v2 envelope errors. */
-const mapMutationError = <A, R>(
-	effect: Effect.Effect<A, RecommendationIssueNotFoundError | RecommendationIssuePersistenceError, R>,
-): Effect.Effect<A, V2NotFoundError | V2ServiceUnavailableError, R> =>
-	effect.pipe(
-		Effect.catchTags({
-			"@maple/http/errors/RecommendationIssueNotFoundError": () =>
-				Effect.fail(resourceNotFound("recommendation", "No such recommendation.")),
-			"@maple/http/errors/RecommendationIssuePersistenceError": () =>
-				Effect.fail(dependencyUnavailable("recommendation_mutation_unavailable")),
-		}),
-	)
+const mapMutationError =
+	(operation: string) =>
+	<A, R>(
+		effect: Effect.Effect<A, RecommendationIssueNotFoundError | RecommendationIssuePersistenceError, R>,
+	): Effect.Effect<A, V2NotFoundError | V2ServiceUnavailableError, R> =>
+		effect.pipe(
+			Effect.catchTags({
+				"@maple/http/errors/RecommendationIssueNotFoundError": () =>
+					Effect.fail(resourceNotFound("recommendation", "No such recommendation.")),
+				"@maple/http/errors/RecommendationIssuePersistenceError": () =>
+					Effect.fail(dependencyUnavailable(`recommendation_${operation}_unavailable`)),
+			}),
+		)
 
 const mapPersistenceError = <A, R>(
 	effect: Effect.Effect<A, RecommendationIssuePersistenceError, R>,
@@ -79,7 +81,9 @@ export const HttpV2InstrumentationRecommendationsLive = HttpApiBuilder.group(
 				.handle("dismiss", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* service.dismiss(tenant, params.id).pipe(mapMutationError)
+						const response = yield* service
+							.dismiss(tenant, params.id)
+							.pipe(mapMutationError("dismiss"))
 						const issue = yield* pickIssue(response.issues, params.id)
 						return toV2Recommendation(issue)
 					}),
@@ -87,7 +91,9 @@ export const HttpV2InstrumentationRecommendationsLive = HttpApiBuilder.group(
 				.handle("reopen", ({ params }) =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						const response = yield* service.reopen(tenant, params.id).pipe(mapMutationError)
+						const response = yield* service
+							.reopen(tenant, params.id)
+							.pipe(mapMutationError("reopen"))
 						const issue = yield* pickIssue(response.issues, params.id)
 						return toV2Recommendation(issue)
 					}),
