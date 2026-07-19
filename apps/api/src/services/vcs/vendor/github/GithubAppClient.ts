@@ -165,6 +165,33 @@ const GithubApiBranchSchema = Schema.Struct({
 type GithubApiBranch = Schema.Schema.Type<typeof GithubApiBranchSchema>
 const GithubApiBranchList = Schema.Array(GithubApiBranchSchema)
 
+const GithubCodeSearchResponseSchema = Schema.Struct({
+	items: Schema.Array(
+		Schema.Struct({
+			path: Schema.String,
+			sha: Schema.String,
+			html_url: Schema.String,
+			text_matches: Schema.optionalKey(
+				Schema.Array(
+					Schema.Struct({
+						fragment: Schema.String,
+					}),
+				),
+			),
+		}),
+	),
+})
+
+const GithubContentFileSchema = Schema.Struct({
+	type: Schema.Literal("file"),
+	path: Schema.String,
+	sha: Schema.String,
+	size: Schema.Number,
+	html_url: Schema.NullOr(Schema.String),
+	encoding: Schema.String,
+	content: Schema.String,
+})
+
 const decodeOAuthToken = Schema.decodeUnknownEffect(GithubOAuthTokenResponse)
 const decodeUserInstallations = Schema.decodeUnknownEffect(GithubUserInstallationsResponse)
 const decodeInstallationToken = Schema.decodeUnknownEffect(GithubInstallationTokenResponse)
@@ -173,6 +200,8 @@ const decodeInstallationRepos = Schema.decodeUnknownEffect(GithubInstallationRep
 const decodeCommitList = Schema.decodeUnknownEffect(GithubApiCommitList)
 const decodeCommit = Schema.decodeUnknownEffect(GithubApiCommitSchema)
 const decodeBranchList = Schema.decodeUnknownEffect(GithubApiBranchList)
+const decodeCodeSearch = Schema.decodeUnknownEffect(GithubCodeSearchResponseSchema)
+const decodeContentFile = Schema.decodeUnknownEffect(GithubContentFileSchema)
 
 // ---- JWT (RS256 via Web Crypto) -------------------------------------------
 
@@ -558,6 +587,69 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				)
 			})
 
+			const searchCode = Effect.fn("GithubAppClient.searchCode")(function* (
+				externalInstallationId: string,
+				owner: string,
+				repo: string,
+				queryText: string,
+				path: string | undefined,
+				limit: number,
+			) {
+				const config = yield* resolveConfig
+				const token = yield* mintInstallationToken(externalInstallationId)
+				const query = [queryText, `repo:${owner}/${repo}`, path ? `path:${path}` : undefined]
+					.filter((part): part is string => part !== undefined)
+					.join(" ")
+				const params = new URLSearchParams({ q: query, per_page: String(limit), page: "1" })
+				const response = yield* rateLimitedFetch(
+					Effect.tryPromise({
+						try: () =>
+							http.fetch(`${config.apiBaseUrl}/search/code?${params.toString()}`, {
+								headers: {
+									authorization: `token ${token}`,
+									accept: "application/vnd.github.text-match+json",
+									"x-github-api-version": GITHUB_API_VERSION,
+									"user-agent": USER_AGENT,
+								},
+							}),
+						catch: (cause) => new GithubAppError({ message: "GitHub code search failed", cause }),
+					}),
+				)
+				if (!response.ok) return yield* failure(response, "Search code", "repository")
+				const json = yield* parseJson(response, "Search code")
+				return yield* decodeCodeSearch(json).pipe(
+					Effect.mapError(
+						(cause) => new GithubAppError({ message: "Unexpected code search payload", cause }),
+					),
+				)
+			})
+
+			const getSourceFile = Effect.fn("GithubAppClient.getSourceFile")(function* (
+				externalInstallationId: string,
+				owner: string,
+				repo: string,
+				path: string,
+				ref: string,
+			) {
+				const config = yield* resolveConfig
+				const token = yield* mintInstallationToken(externalInstallationId)
+				const encodedPath = path.split("/").map(encodeURIComponent).join("/")
+				const params = new URLSearchParams({ ref })
+				const response = yield* authedGet(
+					config,
+					token,
+					`${config.apiBaseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodedPath}?${params.toString()}`,
+				)
+				if (!response.ok) return yield* failure(response, "Get repository file", "repository")
+				const json = yield* parseJson(response, "Get repository file")
+				return yield* decodeContentFile(json).pipe(
+					Effect.mapError(
+						(cause) =>
+							new GithubAppError({ message: "Unexpected repository file payload", cause }),
+					),
+				)
+			})
+
 			// Used by the dashboard connect flow to populate the installation row.
 			const getInstallation = Effect.fn("GithubAppClient.getInstallation")(function* (
 				externalInstallationId: string,
@@ -675,6 +767,8 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				listBranches,
 				listCommits,
 				getCommit,
+				searchCode,
+				getSourceFile,
 				getInstallation,
 				exchangeUserOAuthCode,
 				listUserInstallationIds,

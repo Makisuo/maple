@@ -100,6 +100,7 @@ import { VcsCommitService } from "./services/vcs/VcsCommitService"
 import { VcsProviderRegistry } from "./services/vcs/VcsProviderRegistry"
 import { VcsRepository } from "./services/vcs/VcsRepository"
 import { VcsSyncQueue } from "./services/vcs/VcsSyncQueue"
+import { VcsSourceService } from "./services/vcs/VcsSourceService"
 import { API_CORS_OPTIONS } from "./lib/api-cors"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
@@ -247,6 +248,7 @@ const VcsServicesLive = Layer.mergeAll(
 	GithubConnectService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, GithubAppClientLive))),
 	// Routed via VcsProviderRegistry so no provider module is imported directly.
 	VcsCommitService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
+	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
 ).pipe(Layer.provideMerge(InfraLive))
 
 export const MainLive = Layer.mergeAll(

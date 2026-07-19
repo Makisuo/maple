@@ -26,9 +26,11 @@ describe("buildTriageContextMessage", () => {
 })
 
 describe("TRIAGE_TOOL_NAMES", () => {
-	it("is the read-only 18-tool subset and excludes mutations", () => {
-		expect(TRIAGE_TOOL_NAMES.size).toBe(18)
+	it("includes read-only observability and connected-source tools while excluding mutations", () => {
+		expect(TRIAGE_TOOL_NAMES.size).toBe(21)
 		expect(TRIAGE_TOOL_NAMES.has("search_traces")).toBe(true)
+		expect(TRIAGE_TOOL_NAMES.has("search_source_code")).toBe(true)
+		expect(TRIAGE_TOOL_NAMES.has("read_source_file")).toBe(true)
 		for (const mutating of [
 			"create_dashboard",
 			"update_dashboard_widget",
