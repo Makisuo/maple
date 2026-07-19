@@ -14,26 +14,43 @@ Columns:
 
 Every SQL execution against Tinybird or ClickHouse emits these. When you add a new attribute to a query path, prefer extending this block over inventing a parallel set.
 
-Source: `apps/api/src/services/WarehouseQueryService.ts:441-510`
+Source: `packages/query-engine/src/execution/executor.ts` (`executeSql`)
 
 | Key | Type | Set at | Meaning |
 |---|---|---|---|
-| `orgId` | string | `WarehouseQueryService.ts:448` | Tenant org UUID (camelCase — historical, do not rename) |
-| `tenant.userId` | string | `WarehouseQueryService.ts:449` | User ID within the tenant |
-| `tenant.authMode` | string | `WarehouseQueryService.ts:450` | `"api_key"` / `"user_login"` / etc. |
-| `clientSource` | string | `WarehouseQueryService.ts:373, 387` | `"org_override"` or `"managed"` (which config resolved) |
-| `db.client` | string | `WarehouseQueryService.ts:374, 389, 405` | `"clickhouse"` or `"tinybird-sdk"` |
-| `db.system.name` | string | `WarehouseQueryService.ts:462` | `"clickhouse"` or `"tinybird"` (legacy spans: `db.system`) |
-| `db.query.text` | string | `WarehouseQueryService.ts:471` | Full compiled SQL, truncated to 16 KB (legacy spans: `db.statement`) |
-| `db.query.length` | int | `WarehouseQueryService.ts:472` | Pre-truncation byte length (legacy: `db.statement.length`) |
-| `db.query.truncated` | bool | `WarehouseQueryService.ts:473` | Whether SQL was capped at 16 KB (legacy: `db.statement.truncated`) |
-| `db.query.fingerprint` | string | `WarehouseQueryService.ts:474` | 32-bit FNV-1a hash with literals + numbers normalized (legacy: `db.statement.fingerprint`) |
-| `db.duration_ms` | int | `WarehouseQueryService.ts:489, 508` | Execution time in ms (emitted on both success and error tap) |
-| `query.pipe` | string | `WarehouseQueryService.ts:475` | Original pipe name passed to `sqlQuery()` |
-| `query.context` | string | `WarehouseQueryService.ts:476` | Semantic call-site label (e.g. `"errorsByType"`, `"spanHierarchy"`). Set via `SqlQueryOptions.context`. |
-| `query.profile` | string | `WarehouseQueryService.ts:477` | Execution profile (e.g. `"list"`, `"analytics"`). Set via `SqlQueryOptions.profile`. |
-| `ch.settings` | string (JSON) | `WarehouseQueryService.ts:478` | JSON-encoded ClickHouse settings applied to the query |
-| `result.rowCount` | int | `WarehouseQueryService.ts:507` | Number of rows returned |
+| `orgId` | string | `executor.ts` | Tenant org UUID (camelCase — historical, do not rename) |
+| `tenant.userId` | string | `executor.ts` | User ID within the tenant |
+| `tenant.authMode` | string | `executor.ts` | `"api_key"` / `"user_login"` / etc. |
+| `clientSource` | string | `executor.ts` | `"org_override"` or `"managed"` (which config resolved) |
+| `db.client` | string | `executor.ts` | `"clickhouse"` or `"tinybird-sdk"` |
+| `db.system.name` | string | `executor.ts` | `"clickhouse"` or `"tinybird"` (legacy spans: `db.system`) |
+| `db.query.text` | string | `executor.ts` | Full compiled SQL, truncated to 16 KB (legacy spans: `db.statement`) |
+| `db.query.length` | int | `executor.ts` | Pre-truncation byte length (legacy: `db.statement.length`) |
+| `db.query.truncated` | bool | `executor.ts` | Whether SQL was capped at 16 KB (legacy: `db.statement.truncated`) |
+| `db.query.fingerprint` | string | `executor.ts` | 32-bit FNV-1a hash with literals + numbers normalized (legacy: `db.statement.fingerprint`) |
+| `db.duration_ms` | int | `executor.ts` | Execution time in ms (emitted on both success and error tap) |
+| `db.total_duration_ms` | int | `executor.ts` | Total execution-span duration including config resolution and client setup |
+| `db.retry.attempts` | int | `executor.ts` | Retries actually performed (not total attempts) |
+| `query.pipe` | string | `executor.ts` | Original pipe name passed to `sqlQuery()` |
+| `query.context` | string | `executor.ts` | Semantic call-site label (e.g. `"errorsByType"`, `"spanHierarchy"`). Set via `SqlQueryOptions.context`. |
+| `query.profile` | string | `executor.ts` | Execution profile (e.g. `"list"`, `"analytics"`). Set via `SqlQueryOptions.profile`. |
+| `ch.settings` | string (JSON) | `executor.ts` | JSON-encoded ClickHouse settings applied to the query |
+| `result.rowCount` | int | `executor.ts` | Number of rows returned |
+
+## `warehouse.*` group
+
+Routing metadata emitted by the shared executor for API and local-CLI queries.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `warehouse.backend` | string | Concrete backend kind: `tinybird`, `tinybird-gateway`, `clickhouse`, or `chdb` |
+| `warehouse.route` | string | Route purpose: `read`, `raw`, or `ingest` |
+| `warehouse.config_source` | string | Config source: `managed`, `org-byo`, or `org-jwt` |
+
+The historical `clientSource` and `db.client` attributes remain on the same
+canonical span. `clientSource` maps `org-byo` to `org_override`; other sources
+map to `managed`. `db.client` records the concrete driver family
+(`tinybird-sdk` or `clickhouse`).
 
 **Rule:** When adding a new query, always pass a `context` string to `SqlQueryOptions` — it becomes filterable as `query.context` in trace search. Don't invent new keys when one of `query.*` fits.
 

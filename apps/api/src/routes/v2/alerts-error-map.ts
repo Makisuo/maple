@@ -7,6 +7,7 @@ import type {
 	AlertValidationError,
 	WarehouseError,
 	WarehouseQuotaExceededError,
+	WarehouseUpstreamError,
 	WarehouseValidationError,
 } from "@maple/domain/http"
 import {
@@ -40,7 +41,7 @@ type V2ReachableAlertError =
 
 type UpstreamMappedWarehouseError = Exclude<
 	WarehouseError,
-	WarehouseValidationError | WarehouseQuotaExceededError
+	WarehouseValidationError | WarehouseQuotaExceededError | WarehouseUpstreamError
 >
 
 type MappedV2AlertError<E> =
@@ -49,6 +50,7 @@ type MappedV2AlertError<E> =
 	| (E extends AlertNotFoundError ? V2NotFoundError : never)
 	| (E extends AlertDestinationInUseError ? V2ConflictError : never)
 	| (E extends WarehouseQuotaExceededError ? V2RateLimitError : never)
+	| (E extends WarehouseUpstreamError ? V2ServiceUnavailableError : never)
 	| (E extends AlertDeliveryError | UpstreamMappedWarehouseError ? V2UpstreamError : never)
 	| (E extends AlertPersistenceError ? V2ServiceUnavailableError : never)
 
@@ -87,7 +89,8 @@ const makeAlertErrorMatcher = (operation: string) => {
 			"@maple/http/errors/AlertDeliveryError": () =>
 				upstreamError(`alert_${operation}_upstream_failed`, "The alert provider request failed."),
 			"@maple/http/errors/WarehouseQueryError": warehouseFailure,
-			"@maple/http/errors/WarehouseUpstreamError": warehouseFailure,
+			"@maple/http/errors/WarehouseUpstreamError": () =>
+				dependencyUnavailable(`alert_${operation}_unavailable`),
 			"@maple/http/errors/WarehouseAuthError": warehouseFailure,
 			"@maple/http/errors/WarehouseConfigError": warehouseFailure,
 			"@maple/http/errors/WarehouseClientError": warehouseFailure,

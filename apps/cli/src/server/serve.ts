@@ -278,7 +278,7 @@ const truncateSql = (sql: string) => (sql.length > MAX_DB_QUERY_TEXT ? sql.slice
  *  `startServer`). The effect always succeeds with a `Response`. */
 type SpanRunner = <A>(effect: Effect.Effect<A>) => Promise<A>
 
-// A rejected (4xx/5xx) ingest/query response, surfaced through the Effect error
+// A rejected 5xx ingest/query response, surfaced through the Effect error
 // channel. `message` carries the handler's descriptive body so the span records
 // a real `exception.message`; `response` is the original, untouched response we
 // hand back to the client in `recoverResponse`. (Failing with a bare `Response`
@@ -290,19 +290,20 @@ class IngestRejected extends Schema.TaggedErrorClass<IngestRejected>()("@maple/c
 	message: Schema.String,
 }) {}
 
-// The Effect tracer derives span status from the effect's outcome — success →
-// `Ok`, failure → `Error` (conventions say never set the status string by hand
-// in TS). So to mark a 4xx/5xx span `Error`, we fail *inside* the span with an
-// `IngestRejected` carrying the reason, then recover the original response with
-// `Effect.match` *outside* the span — the span has already closed `Error` by then.
-const failIfError = (response: Response): Effect.Effect<Response, IngestRejected> =>
+// The Effect tracer derives span status from the effect's outcome. OTel HTTP
+// Server semantics treat 4xx as a successful server outcome (the caller sent a
+// bad request) and only 5xx as Error. Annotate every rejection, but fail inside
+// the Server span only for 5xx; recover the original response outside the span.
+const recordServerResponse = (response: Response): Effect.Effect<Response, IngestRejected> =>
 	Effect.gen(function* () {
 		if (response.status >= 400) {
 			// Clone to read the body without consuming the response we return below.
 			const body = (yield* Effect.promise(() => response.clone().text())).trim()
 			const message = body.length > 0 ? body : `HTTP ${response.status}`
 			yield* Effect.annotateCurrentSpan({ "error.type": `HTTP ${response.status}` })
-			return yield* new IngestRejected({ response, status: response.status, message })
+			if (response.status >= 500) {
+				return yield* new IngestRejected({ response, status: response.status, message })
+			}
 		}
 		return response
 	})
@@ -324,7 +325,7 @@ const ingestSpan = (runSpan: SpanRunner, db: Chdb, signal: Signal, req: Request)
 					"maple.ingest.item_count": accepted,
 					"http.response.status_code": response.status,
 				})
-				return yield* failIfError(response)
+				return yield* recordServerResponse(response)
 			}).pipe(
 				Effect.withSpan(`POST /v1/${signal}`, {
 					kind: "server",
@@ -353,7 +354,7 @@ const querySpan = (runSpan: SpanRunner, db: Chdb, req: Request): Promise<Respons
 					"http.response.status_code": response.status,
 					...(sql ? { "db.query.text": truncateSql(sql), "db.query.length": sql.length } : {}),
 				})
-				return yield* failIfError(response)
+				return yield* recordServerResponse(response)
 			}).pipe(
 				Effect.withSpan("POST /local/query", {
 					kind: "server",
@@ -430,3 +431,5 @@ export const startServer = (
 		)
 		return { port: server.port ?? options.port }
 	})
+
+export const __testables = { recordServerResponse }

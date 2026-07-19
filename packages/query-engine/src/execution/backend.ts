@@ -30,6 +30,8 @@ export type ResolvedWarehouseConfig = TinybirdBackendConfig | ClickHouseProtocol
 
 export interface WarehouseBackendDialect {
 	readonly driver: "tinybird-sdk" | "clickhouse-web"
+	/** Legacy driver label emitted as `db.client` on canonical query spans. */
+	readonly dbClient: "tinybird-sdk" | "clickhouse"
 	/**
 	 * Tinybird's managed warehouse rejects some ClickHouse settings (e.g.
 	 * "Usage of setting 'max_block_size' is restricted") — through the SDK AND
@@ -42,11 +44,11 @@ export interface WarehouseBackendDialect {
 	 */
 	readonly normalizeSqlForClient: boolean
 	/**
-	 * Value for the `db.system.name` / `peer.service` span attributes. The
-	 * gateway reports `clickhouse` (it is addressed over the ClickHouse
-	 * protocol) — service-map DB nodes key on this value, so it must stay
-	 * stable per deployment.
+	 * OTel database-system identity. chDB implements the ClickHouse interface,
+	 * so its system remains `clickhouse` even though the logical peer is `chdb`.
 	 */
+	readonly dbSystemName: "tinybird" | "clickhouse"
+	/** Logical destination used by the service-map `peer.service` edge. */
 	readonly peerService: string
 }
 
@@ -54,26 +56,34 @@ export interface WarehouseBackendDialect {
 export const BackendDialect: Record<WarehouseBackendKind, WarehouseBackendDialect> = {
 	tinybird: {
 		driver: "tinybird-sdk",
+		dbClient: "tinybird-sdk",
 		stripTinybirdRestrictedSettings: true,
 		normalizeSqlForClient: false,
+		dbSystemName: "tinybird",
 		peerService: "tinybird",
 	},
 	"tinybird-gateway": {
 		driver: "clickhouse-web",
+		dbClient: "clickhouse",
 		stripTinybirdRestrictedSettings: true,
 		normalizeSqlForClient: true,
+		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
 	},
 	clickhouse: {
 		driver: "clickhouse-web",
+		dbClient: "clickhouse",
 		stripTinybirdRestrictedSettings: false,
 		normalizeSqlForClient: true,
+		dbSystemName: "clickhouse",
 		peerService: "clickhouse",
 	},
 	chdb: {
 		driver: "clickhouse-web",
+		dbClient: "clickhouse",
 		stripTinybirdRestrictedSettings: false,
 		normalizeSqlForClient: true,
+		dbSystemName: "clickhouse",
 		peerService: "chdb",
 	},
 }

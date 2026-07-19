@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import { OrgId } from "@maple/domain/http"
+import { OrgId, UserId } from "@maple/domain/http"
 import { makeWarehouseExecutor, type WarehouseSqlClient } from "@maple/query-engine/execution"
 import type { WarehouseExecutorShape } from "@maple/query-engine/observability"
 import { executeLocalQuery } from "@maple/query-engine/local"
@@ -9,8 +9,9 @@ import { debugLog } from "../lib/debug"
 // OrgId, and every compiled query filters on it. `OrgId` is a non-empty trimmed
 // branded string, so "local" decodes cleanly (no cast needed).
 const LOCAL_ORG_ID = Schema.decodeUnknownSync(OrgId)("local")
+const LOCAL_USER_ID = Schema.decodeUnknownSync(UserId)("local")
 
-const LOCAL_TENANT = { orgId: LOCAL_ORG_ID, userId: "local", authMode: "local" }
+const LOCAL_TENANT = { orgId: LOCAL_ORG_ID, userId: LOCAL_USER_ID, authMode: "local" }
 
 // The chDB driver: POST `/local/query` on the local binary. Runs the SQL,
 // timing the round-trip and (under --debug) printing the SQL + elapsed ms to

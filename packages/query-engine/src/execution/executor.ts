@@ -18,7 +18,7 @@ import {
 	resolveSettings,
 	stripTinybirdRestrictedSettings,
 } from "../profiles"
-import { mapWarehouseError, toWarehouseQueryError, type WarehouseSqlError } from "./errors"
+import { mapWarehouseError, toWarehouseQueryError } from "./errors"
 import { WarehouseResponseLimitError } from "./response-limits"
 import {
 	SQL_LOG_MAX,
@@ -156,7 +156,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			const pinnedTable = findIngestPinnedTable(sql)
 			if (pinnedTable !== undefined) {
 				yield* Effect.logWarning(
-					"Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .routing(\"ingest\") at the query definition",
+					'Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .routing("ingest") at the query definition',
 					{ pipe, table: pinnedTable, orgId: tenant.orgId },
 				)
 			}
@@ -165,10 +165,13 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// dashboards move to the `warehouse.*` attributes.
 		if (purpose === "ingest") yield* Effect.annotateCurrentSpan("query.routing", "ingest")
 		const dialect = BackendDialect[resolved.config.kind]
+		const clientSource = resolved.source === "org-byo" ? "org_override" : "managed"
 		yield* Effect.annotateCurrentSpan("warehouse.backend", resolved.config.kind)
 		yield* Effect.annotateCurrentSpan("warehouse.route", purpose)
 		yield* Effect.annotateCurrentSpan("warehouse.config_source", resolved.source)
-		yield* Effect.annotateCurrentSpan("db.system.name", dialect.peerService)
+		yield* Effect.annotateCurrentSpan("clientSource", clientSource)
+		yield* Effect.annotateCurrentSpan("db.client", dialect.dbClient)
+		yield* Effect.annotateCurrentSpan("db.system.name", dialect.dbSystemName)
 		yield* Effect.annotateCurrentSpan("peer.service", dialect.peerService)
 		const settings = dialect.stripTinybirdRestrictedSettings
 			? stripTinybirdRestrictedSettings(resolveSettings(options))
@@ -247,7 +250,10 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 					const nowMs = yield* Clock.currentTimeMillis
 					const elapsedMs = nowMs - sqlStartedMs
 					const totalElapsedMs = nowMs - startedAtMs
-					const attempts = yield* Ref.get(retryAttempts)
+					const failedTransientAttempts = yield* Ref.get(retryAttempts)
+					const attempts = isTransientUpstreamError(error)
+						? Math.max(0, failedTransientAttempts - 1)
+						: failedTransientAttempts
 					yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
 					yield* Effect.annotateCurrentSpan("db.total_duration_ms", totalElapsedMs)
 					yield* Effect.annotateCurrentSpan("db.retry.attempts", attempts)
@@ -428,9 +434,9 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		// Tinybird pipeline, never a per-org BYO ClickHouse READ override (routing
 		// writes through the override 500'd every insert and broke demo-seed
 		// onboarding).
-		const resolved = yield* deps.resolveRoute(tenant, "ingest", label).pipe(
-			Effect.mapError((error) => toWarehouseQueryError(label, error)),
-		)
+		const resolved = yield* deps.resolveRoute(tenant, "ingest", label)
+		const dialect = BackendDialect[resolved.config.kind]
+		const clientSource = resolved.source === "org-byo" ? "org_override" : "managed"
 		yield* Effect.annotateCurrentSpan("warehouse.backend", resolved.config.kind)
 		yield* Effect.annotateCurrentSpan("warehouse.route", "ingest")
 		yield* Effect.annotateCurrentSpan("warehouse.config_source", resolved.source)
@@ -445,6 +451,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			resolved.config,
 			yield* Clock.currentTimeMillis,
 		)
+		const insertStartedAtMs = yield* Clock.currentTimeMillis
 
 		yield* Effect.tryPromise({
 			try: () => client.insert(datasource, rows),
@@ -452,15 +459,48 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			// insert surfaces with its real tag instead of a generic query error.
 			catch: (error) => mapWarehouseError(label, error),
 		}).pipe(
-			Effect.tapError((error) =>
-				Effect.logError("WarehouseQueryService.ingest failed", {
-					datasource,
-					rowCount: rows.length,
-					backend: resolved.config.kind,
-					errorTag: error._tag,
-					message: error.message,
-				}),
+			Effect.tap(() =>
+				Clock.currentTimeMillis.pipe(
+					Effect.flatMap((completedAtMs) =>
+						Effect.annotateCurrentSpan({
+							"db.duration_ms": completedAtMs - insertStartedAtMs,
+							"result.rowCount": rows.length,
+						}),
+					),
+				),
 			),
+			Effect.tapError((error) =>
+				Clock.currentTimeMillis.pipe(
+					Effect.flatMap((completedAtMs) =>
+						Effect.annotateCurrentSpan("db.duration_ms", completedAtMs - insertStartedAtMs),
+					),
+					Effect.andThen(
+						Effect.logError("WarehouseQueryService.ingest failed", {
+							datasource,
+							rowCount: rows.length,
+							backend: resolved.config.kind,
+							errorTag: error._tag,
+							message: error.message,
+						}),
+					),
+				),
+			),
+			Effect.withSpan("WarehouseQueryService.insert", {
+				kind: "client",
+				attributes: {
+					orgId: tenant.orgId,
+					"tenant.userId": tenant.userId,
+					"tenant.authMode": tenant.authMode,
+					clientSource,
+					"db.client": dialect.dbClient,
+					"db.system.name": dialect.dbSystemName,
+					"peer.service": dialect.peerService,
+					"warehouse.backend": resolved.config.kind,
+					"warehouse.route": "ingest",
+					"warehouse.config_source": resolved.source,
+					datasource,
+				},
+			}),
 		)
 	})
 

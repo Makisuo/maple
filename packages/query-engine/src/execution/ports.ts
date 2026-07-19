@@ -1,10 +1,9 @@
 import type { Effect, Option } from "effect"
-import type { OrgId } from "@maple/domain"
+import type { OrgId, UserId } from "@maple/domain"
 import type {
 	RawSqlValidationError,
 	WarehouseQueryRequest,
 	WarehouseQueryResponse,
-	WarehouseQueryError,
 	WarehouseValidationError,
 } from "@maple/domain/http"
 import type { ResolvedWarehouseConfig } from "./backend"
@@ -16,7 +15,7 @@ import type { WarehouseSqlError } from "./errors"
 /** The minimal tenant surface the executor reads (org scope + identity for spans). */
 export interface ExecutionTenant {
 	readonly orgId: OrgId
-	readonly userId: string
+	readonly userId: UserId
 	readonly authMode: string
 }
 

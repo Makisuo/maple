@@ -97,7 +97,7 @@ const LogEntry = Schema.Struct({
 })
 
 interface SpanNodeResponse {
-	readonly spanId: string
+	readonly spanId: Schema.Schema.Type<typeof SpanId>
 	readonly parentSpanId: string
 	readonly spanName: string
 	readonly serviceName: string
@@ -109,7 +109,20 @@ interface SpanNodeResponse {
 	readonly children: ReadonlyArray<SpanNodeResponse>
 }
 
-const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
+interface SpanNodeEncoded {
+	readonly spanId: string
+	readonly parentSpanId: string
+	readonly spanName: string
+	readonly serviceName: string
+	readonly durationMs: number
+	readonly statusCode: string
+	readonly statusMessage: string
+	readonly attributes: Record<string, string>
+	readonly resourceAttributes: Record<string, string>
+	readonly children: ReadonlyArray<SpanNodeEncoded>
+}
+
+const SpanNode: Schema.Codec<SpanNodeResponse, SpanNodeEncoded> = Schema.Struct({
 	spanId: SpanId,
 	parentSpanId: Schema.String,
 	spanName: Schema.String,
@@ -119,7 +132,7 @@ const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
 	statusMessage: Schema.String,
 	attributes: Schema.Record(Schema.String, Schema.String),
 	resourceAttributes: Schema.Record(Schema.String, Schema.String),
-	children: Schema.Array(Schema.suspend((): Schema.Codec<SpanNodeResponse> => SpanNode)),
+	children: Schema.Array(Schema.suspend((): Schema.Codec<SpanNodeResponse, SpanNodeEncoded> => SpanNode)),
 })
 
 const InspectTraceResponse = Schema.Struct({
@@ -197,7 +210,7 @@ const SearchLogsRequest = Schema.Struct({
 	service: Schema.optionalKey(Schema.String),
 	severity: Schema.optionalKey(Schema.String),
 	search: Schema.optionalKey(Schema.String),
-	traceId: Schema.optionalKey(Schema.String),
+	traceId: Schema.optionalKey(TraceId),
 	limit: Schema.optionalKey(Schema.Number),
 	offset: Schema.optionalKey(Schema.Number),
 })

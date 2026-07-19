@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, Ref } from "effect"
+import { Duration, Effect, Ref, Schema, Tracer } from "effect"
 import { TestClock } from "effect/testing"
-import type { OrgId } from "@maple/domain"
+import { OrgId, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
 import { compile, listRuleChecksQuery, unsafeCompiledQuery } from "../ch"
 import { makeWarehouseExecutor } from "./executor"
@@ -14,9 +14,21 @@ import type {
 } from "./ports"
 
 const tenant: ExecutionTenant = {
-	orgId: "org_test" as OrgId,
-	userId: "user_test",
+	orgId: Schema.decodeUnknownSync(OrgId)("org_test"),
+	userId: Schema.decodeUnknownSync(UserId)("user_test"),
 	authMode: "system",
+}
+
+const makeRecordingTracer = () => {
+	const spans: Array<Tracer.NativeSpan> = []
+	const tracer = Tracer.make({
+		span(options) {
+			const span = new Tracer.NativeSpan(options)
+			spans.push(span)
+			return span
+		},
+	})
+	return { spans, tracer }
 }
 
 // A per-org BYO read override (the read path) vs the managed Tinybird ingest
@@ -36,6 +48,10 @@ const tinybirdConfig: ResolvedWarehouseConfig = {
 const tinybirdGatewayConfig: ResolvedWarehouseConfig = {
 	...clickhouseConfig,
 	kind: "tinybird-gateway",
+}
+const chdbConfig: ResolvedWarehouseConfig = {
+	...clickhouseConfig,
+	kind: "chdb",
 }
 
 // listRuleChecksQuery declares .routing("ingest") at its definition —
@@ -102,6 +118,102 @@ describe("makeWarehouseExecutor ingest routing", () => {
 				route: "ingest",
 			})
 			assert.deepStrictEqual(created, ["tinybird"])
+		}),
+	)
+})
+
+describe("makeWarehouseExecutor span instrumentation", () => {
+	it.effect("emits the canonical SQL attributes on the Client span", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(makeDeps([]))
+
+			yield* executor
+				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", {
+					profile: "list",
+					context: "spanContract",
+				})
+				.pipe(Effect.withTracer(tracer))
+
+			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+			assert.isDefined(span)
+			assert.strictEqual(span.kind, "client")
+			assert.strictEqual(span.attributes.get("orgId"), "org_test")
+			assert.strictEqual(span.attributes.get("tenant.userId"), "user_test")
+			assert.strictEqual(span.attributes.get("tenant.authMode"), "system")
+			assert.strictEqual(span.attributes.get("clientSource"), "org_override")
+			assert.strictEqual(span.attributes.get("db.client"), "clickhouse")
+			assert.strictEqual(span.attributes.get("db.system.name"), "clickhouse")
+			assert.strictEqual(span.attributes.get("peer.service"), "clickhouse")
+			assert.strictEqual(span.attributes.get("query.context"), "spanContract")
+			assert.strictEqual(span.attributes.get("query.profile"), "list")
+			assert.strictEqual(span.attributes.get("result.rowCount"), 0)
+			assert.isNumber(span.attributes.get("db.duration_ms"))
+			assert.match(span.attributes.get("db.query.fingerprint") as string, /^[0-9a-f]{8}$/)
+		}),
+	)
+
+	it.effect("keeps chDB as the peer while reporting ClickHouse as the DB system", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(
+				makeRecordingDeps({ config: chdbConfig, clientCacheKey: "local" }, []),
+			)
+
+			yield* executor
+				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", { context: "localSpan" })
+				.pipe(Effect.withTracer(tracer))
+
+			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("db.system.name"), "clickhouse")
+			assert.strictEqual(span.attributes.get("peer.service"), "chdb")
+		}),
+	)
+
+	it.effect("wraps warehouse inserts in an attributed Client span", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const executor = makeWarehouseExecutor(makeDeps([]))
+
+			yield* executor
+				.ingest(tenant, "alert_checks", [{ OrgId: "org_test" }])
+				.pipe(Effect.withTracer(tracer))
+
+			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.insert")
+			assert.isDefined(span)
+			assert.strictEqual(span.kind, "client")
+			assert.strictEqual(span.attributes.get("db.system.name"), "tinybird")
+			assert.strictEqual(span.attributes.get("peer.service"), "tinybird")
+			assert.strictEqual(span.attributes.get("db.client"), "tinybird-sdk")
+			assert.strictEqual(span.attributes.get("result.rowCount"), 1)
+		}),
+	)
+
+	it.live("reports retries performed rather than failed attempts on terminal failure", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			let attempts = 0
+			const executor = makeWarehouseExecutor({
+				...makeDeps([]),
+				createClient: () => ({
+					sql: async () => {
+						attempts += 1
+						throw new Error("HTTP status 503 service temporarily unavailable")
+					},
+					insert: async () => {},
+				}),
+			})
+
+			const exit = yield* executor
+				.sqlQuery(tenant, "SELECT 1 WHERE OrgId = 'org_test'", { context: "retrySpan" })
+				.pipe(Effect.withTracer(tracer), Effect.exit)
+
+			assert.strictEqual(exit._tag, "Failure")
+			assert.strictEqual(attempts, 3)
+			const span = spans.find((candidate) => candidate.name === "WarehouseQueryService.executeSql")
+			assert.isDefined(span)
+			assert.strictEqual(span.attributes.get("db.retry.attempts"), 2)
 		}),
 	)
 })

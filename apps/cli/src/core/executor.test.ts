@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { Effect } from "effect"
+import { afterEach, describe, expect, it } from "@effect/vitest"
+import { Effect, Exit } from "effect"
 import { unsafeCompiledQuery } from "@maple/query-engine/ch"
 import { makeLocalWarehouseExecutorShape } from "./executor"
 
@@ -32,47 +32,53 @@ const stubLocalServer = (rows: ReadonlyArray<Record<string, unknown>>) => {
 }
 
 describe("makeLocalWarehouseExecutorShape", () => {
-	it("posts compiled SQL to /local/query with the trailing FORMAT stripped (chdb dialect)", async () => {
-		const requests = stubLocalServer([{ c: 1 }])
-		const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
-		const compiled = unsafeCompiledQuery<{ readonly c: number }>({
-			sql: "SELECT count() AS c FROM traces WHERE OrgId = 'local'\nFORMAT JSON",
-		})
+	it.effect("posts compiled SQL to /local/query with the trailing FORMAT stripped (chdb dialect)", () =>
+		Effect.gen(function* () {
+			const requests = stubLocalServer([{ c: 1 }])
+			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
+			const compiled = unsafeCompiledQuery<{ readonly c: number }>({
+				sql: "SELECT count() AS c FROM traces WHERE OrgId = 'local'\nFORMAT JSON",
+			})
 
-		const rows = await Effect.runPromise(shape.compiledQuery(compiled))
+			const rows = yield* shape.compiledQuery(compiled)
 
-		expect(rows).toEqual([{ c: 1 }])
-		expect(requests).toHaveLength(1)
-		expect(requests[0]!.url).toBe("http://127.0.0.1:4318/local/query")
-		// The chdb backend speaks the ClickHouse protocol shape: the executor
-		// strips the trailing FORMAT and the local server owns the output format.
-		expect(requests[0]!.sql).not.toContain("FORMAT JSON")
-		expect(requests[0]!.sql).toContain("OrgId = 'local'")
-	})
+			expect(rows).toEqual([{ c: 1 }])
+			expect(requests).toHaveLength(1)
+			expect(requests[0]!.url).toBe("http://127.0.0.1:4318/local/query")
+			// The chdb backend speaks the ClickHouse protocol shape: the executor
+			// strips the trailing FORMAT and the local server owns the output format.
+			expect(requests[0]!.sql).not.toContain("FORMAT JSON")
+			expect(requests[0]!.sql).toContain("OrgId = 'local'")
+		}),
+	)
 
-	it("keeps the executor's OrgId scoping guard for trusted SQL", async () => {
-		stubLocalServer([])
-		const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
+	it.effect("keeps the executor's OrgId scoping guard for trusted SQL", () =>
+		Effect.gen(function* () {
+			stubLocalServer([])
+			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
 
-		const exit = await Effect.runPromiseExit(shape.sqlQuery("SELECT 1"))
+			const exit = yield* shape.sqlQuery("SELECT 1").pipe(Effect.exit)
 
-		expect(exit._tag).toBe("Failure")
-	})
+			expect(Exit.isFailure(exit)).toBe(true)
+		}),
+	)
 
-	it("classifies a local 400 query failure without retrying it", async () => {
-		let attempts = 0
-		stubFetch(() => {
-			attempts += 1
-			return new Response("query failed: Unknown expression identifier", { status: 400 })
-		})
-		const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
+	it.effect("classifies a local 400 query failure without retrying it", () =>
+		Effect.gen(function* () {
+			let attempts = 0
+			stubFetch(() => {
+				attempts += 1
+				return new Response("query failed: Unknown expression identifier", { status: 400 })
+			})
+			const shape = makeLocalWarehouseExecutorShape("http://127.0.0.1:4318")
 
-		const exit = await Effect.runPromiseExit(
-			shape.sqlQuery("SELECT nope FROM traces WHERE OrgId = 'local'"),
-		)
+			const exit = yield* shape
+				.sqlQuery("SELECT nope FROM traces WHERE OrgId = 'local'")
+				.pipe(Effect.exit)
 
-		expect(exit._tag).toBe("Failure")
-		// 400 is a non-transient client-side failure — exactly one attempt.
-		expect(attempts).toBe(1)
-	})
+			expect(Exit.isFailure(exit)).toBe(true)
+			// 400 is a non-transient client-side failure — exactly one attempt.
+			expect(attempts).toBe(1)
+		}),
+	)
 })
