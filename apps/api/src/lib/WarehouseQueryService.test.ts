@@ -699,10 +699,12 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 	const captureSql = async (sql: string): Promise<string> => {
 		const sent: string[] = []
 		const requestFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-			const url = String(input)
-			const fromParam = new URL(url).searchParams.get("q")
-			const body = typeof init?.body === "string" ? init.body : ""
-			sent.push(fromParam ?? body)
+			const url = new URL(String(input))
+			if (url.pathname.endsWith("/v0/sql")) {
+				const fromParam = url.searchParams.get("q")
+				const body = typeof init?.body === "string" ? init.body : ""
+				sent.push(fromParam ?? body)
+			}
 			return new Response(JSON.stringify({ meta: [], data: [], rows: 0 }), {
 				status: 200,
 				headers: { "Content-Type": "application/json" },
