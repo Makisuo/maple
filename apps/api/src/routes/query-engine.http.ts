@@ -1511,8 +1511,11 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								startTime: payload.startTime,
 								endTime: payload.endTime,
 							}
+							// Keep production reads on the raw rollback path until the rollup has
+							// been deployed, backfilled under a write pause, and parity-verified on
+							// both managed Tinybird and every BYO ClickHouse backend.
 							const summaryCompiled = CH.compile(
-								CH.serviceOperationsSummaryQuery({
+								CH.serviceOperationsSummaryRawQuery({
 									serviceName: payload.serviceName,
 									environments: payload.environments,
 									limit: payload.limit,
@@ -1532,18 +1535,18 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							}
 
 							const spanNames = summaryRows.map((row) => String(row.spanName))
-							// Fallback bucket sizing mirrors the client's chart-grid density
-							// (~50 buckets), floored at 1 minute.
+							// The rollup is minute-grain, so every sparkline interval must be
+							// a whole-minute multiple. Nearest-minute rounding keeps ~50 points.
 							const windowSeconds = Math.max(
 								0,
 								(Date.parse(`${payload.endTime.replace(" ", "T")}Z`) -
 									Date.parse(`${payload.startTime.replace(" ", "T")}Z`)) /
 									1000,
 							)
-							const bucketSeconds =
-								payload.bucketSeconds ?? Math.max(60, Math.floor(windowSeconds / 50))
+							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
+							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
 							const timeseriesCompiled = CH.compile(
-								CH.serviceOperationsTimeseriesQuery({
+								CH.serviceOperationsTimeseriesRawQuery({
 									serviceName: payload.serviceName,
 									environments: payload.environments,
 									spanNames,

@@ -494,6 +494,7 @@
     "packages/domain": {
       "name": "@maple/domain",
       "dependencies": {
+        "@maple-dev/clickhouse-builder": "workspace:*",
         "@tinybirdco/sdk": "catalog:tinybird",
         "effect": "catalog:effect",
       },

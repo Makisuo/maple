@@ -294,8 +294,10 @@ export {
 // Queries — Service Operations (per-SpanName breakdown for the service detail page)
 export {
 	serviceOperationsSummaryQuery,
+	serviceOperationsSummaryRawQuery,
 	serviceOperationsSummaryRowSchema,
 	serviceOperationsTimeseriesQuery,
+	serviceOperationsTimeseriesRawQuery,
 	serviceOperationsTimeseriesRowSchema,
 	type ServiceOperationsSummaryOpts,
 	type ServiceOperationsSummaryOutput,

@@ -100,6 +100,27 @@ describe("ClickHouse DDL emitter", () => {
 		const aggDdl = emitCreateTable(aggDs!, { engineFlavor: "ReplicatedMergeTree" })
 		expect(aggDdl).toContain("ENGINE = AggregatingMergeTree")
 	})
+
+	it("emits the service-operation rollup key, lifecycle, and MV projection", async () => {
+		const manifest = await buildTinybirdProjectManifest()
+		const rollup = manifest.datasources.find((ds) => ds.name === "service_operations_minutely")
+		const mv = manifest.pipes.find((pipe) => pipe.name === "service_operations_minutely_mv")
+		expect(rollup).toBeDefined()
+		expect(mv).toBeDefined()
+
+		const tableDdl = emitCreateTable(rollup!)
+		expect(tableDdl).toContain("ENGINE = AggregatingMergeTree")
+		expect(tableDdl).toContain("PARTITION BY toDate(Minute)")
+		expect(tableDdl).toContain("ORDER BY (OrgId, ServiceName, DeploymentEnv, Minute, SpanName)")
+		expect(tableDdl).toContain("TTL toDate(Minute) + INTERVAL 90 DAY")
+		expect(tableDdl).toContain("DurationQuantiles AggregateFunction(quantilesTDigest(0.5, 0.95), UInt64)")
+
+		const mvDdl = emitCreateMaterializedView(mv!)
+		expect(mvDdl).toContain("FROM traces")
+		expect(mvDdl).toContain("toStartOfMinute(toDateTime(Timestamp)) AS Minute")
+		expect(mvDdl).toContain("http.route")
+		expect(mvDdl).toContain("GROUP BY OrgId, Minute, ServiceName, DeploymentEnv, SpanName")
+	})
 })
 
 describe("extractColumnDefinition", () => {

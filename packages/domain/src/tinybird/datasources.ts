@@ -1263,6 +1263,43 @@ export const alertChecks = defineDatasource("alert_checks", {
 export type AlertChecksRow = InferRow<typeof alertChecks>
 
 /**
+ * Minute-grain operation metrics used by the service-detail Operations panel.
+ * The operation name is normalized once by the write-side MV, while exact and
+ * sampling-weighted counts are retained side-by-side. Duration aggregates are
+ * deliberately unweighted to preserve the existing service-operations API
+ * semantics.
+ *
+ * Populated by materialized view, not direct ingestion.
+ */
+export const serviceOperationsMinutely = defineDatasource("service_operations_minutely", {
+	description:
+		"Minute-grain service operation metrics with normalized HTTP names, exact and sampling-weighted counts, and unweighted duration t-digest state.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Minute: t.dateTime(),
+		ServiceName: t.string().lowCardinality(),
+		DeploymentEnv: t.string().lowCardinality(),
+		// Falls back to url.path when no route template exists; keep this a plain
+		// String so high-cardinality paths do not churn a LowCardinality dictionary.
+		SpanName: t.string(),
+		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedSpanCount: t.simpleAggregateFunction("sum", t.float64()),
+		ErrorCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
+		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
+		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95)", t.uint64()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toDate(Minute)",
+		sortingKey: ["OrgId", "ServiceName", "DeploymentEnv", "Minute", "SpanName"],
+		ttl: "toDate(Minute) + INTERVAL 90 DAY",
+	}),
+})
+
+export type ServiceOperationsMinutelyRow = InferRow<typeof serviceOperationsMinutely>
+
+/**
  * Generalized hourly aggregating MV target for traces. Stores partial state
  * (`-State` aggregates) keyed on the dimensions that show up in 90%+ of
  * traces queries. Query layer finalizes via `-Merge` combinators at read

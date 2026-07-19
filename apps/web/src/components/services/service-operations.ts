@@ -1,7 +1,7 @@
 import type { GetServiceOperationsInput } from "@/api/warehouse/service-operations"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 
-/** Matches the chart grid's density: ~50 buckets across the window, ≥1 minute. */
+/** Matches the chart grid's density: ~50 whole-minute buckets, ≥1 minute. */
 export const OPERATIONS_SPARKLINE_BUCKETS = 50
 export const OPERATIONS_LIMIT = 25
 
@@ -13,7 +13,8 @@ export function windowSeconds(startTime: string, endTime: string): number {
 }
 
 export function operationsBucketSeconds(startTime: string, endTime: string): number {
-	return Math.max(60, Math.floor(windowSeconds(startTime, endTime) / OPERATIONS_SPARKLINE_BUCKETS))
+	const targetMinutes = windowSeconds(startTime, endTime) / OPERATIONS_SPARKLINE_BUCKETS / 60
+	return Math.max(1, Math.round(targetMinutes)) * 60
 }
 
 export function callsPerSecond(estimatedSpanCount: number, seconds: number): number {

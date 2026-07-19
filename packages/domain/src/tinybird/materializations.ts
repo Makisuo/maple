@@ -19,6 +19,7 @@ import {
 	logsAggregatesHourly,
 	metricCatalog,
 	spanMetricsCallsHourly,
+	serviceOperationsMinutely,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -27,6 +28,7 @@ import {
 	DB_STATEMENT_SQL,
 	DB_SYSTEM_ATTR_SQL,
 } from "./db-query-shape-sql"
+import { NORMALIZED_SPAN_NAME_SQL } from "./span-display-name"
 
 /**
  * Materialized view to aggregate log usage statistics per service per hour
@@ -1178,6 +1180,38 @@ export const tracesAggregatesHourlyMv = defineMaterializedView("traces_aggregate
           max(Duration) AS DurationMax
         FROM traces
         GROUP BY OrgId, Hour, ServiceName, SpanName, SpanKind, StatusCode, IsEntryPoint, DeploymentEnv
+      `,
+		}),
+	],
+})
+
+/**
+ * Precomputes the operation display name and minute-grain aggregates used by
+ * the service detail page. All spans are included: internal operations are a
+ * deliberate part of the ranking, matching the previous raw query.
+ */
+export const serviceOperationsMinutelyMv = defineMaterializedView("service_operations_minutely_mv", {
+	description:
+		"Pre-aggregates every span by service operation and minute with normalized HTTP names, exact/estimated counts, errors, duration sum, and unweighted t-digest state.",
+	datasource: serviceOperationsMinutely,
+	nodes: [
+		node({
+			name: "service_operations_minutely_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfMinute(toDateTime(Timestamp)) AS Minute,
+          ServiceName,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ${NORMALIZED_SPAN_NAME_SQL} AS SpanName,
+          count() AS SpanCount,
+          sum(SampleRate) AS EstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS ErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS EstimatedErrorCount,
+          sum(toFloat64(Duration)) AS DurationSum,
+          quantilesTDigestState(0.5, 0.95)(Duration) AS DurationQuantiles
+        FROM traces
+        GROUP BY OrgId, Minute, ServiceName, DeploymentEnv, SpanName
       `,
 		}),
 	],

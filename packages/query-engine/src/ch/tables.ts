@@ -322,6 +322,21 @@ export const TracesAggregatesHourly = table("traces_aggregates_hourly", {
 	DurationMax: T.uint64,
 })
 
+export const ServiceOperationsMinutely = table("service_operations_minutely", {
+	OrgId: T.string,
+	Minute: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	SpanName: T.string,
+	SpanCount: T.uint64,
+	EstimatedSpanCount: T.float64,
+	ErrorCount: T.uint64,
+	EstimatedErrorCount: T.float64,
+	DurationSum: T.float64,
+	// AggregateFunction(quantilesTDigest(0.5, 0.95), UInt64) — opaque state.
+	DurationQuantiles: T.string,
+})
+
 export const LogsAggregatesHourly = table("logs_aggregates_hourly", {
 	OrgId: T.string,
 	Hour: T.dateTime,

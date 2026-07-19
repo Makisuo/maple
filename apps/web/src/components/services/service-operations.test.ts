@@ -24,7 +24,13 @@ describe("windowSeconds", () => {
 
 describe("operationsBucketSeconds", () => {
 	it("targets ~50 buckets across the window", () => {
-		expect(operationsBucketSeconds("2024-01-01 00:00:00", "2024-01-01 12:00:00")).toBe(864)
+		expect(operationsBucketSeconds("2024-01-01 00:00:00", "2024-01-01 12:00:00")).toBe(840)
+	})
+
+	it("always rounds to a whole-minute multiple", () => {
+		const bucket = operationsBucketSeconds("2024-01-01 00:00:00", "2024-01-02 00:00:00")
+		expect(bucket).toBe(1740)
+		expect(bucket % 60).toBe(0)
 	})
 
 	it("floors at one minute for short windows", () => {
@@ -55,7 +61,7 @@ describe("serviceOperationsQueryInput", () => {
 			startTime: "2024-01-01 00:00:00",
 			endTime: "2024-01-01 12:00:00",
 			environments: ["production"],
-			bucketSeconds: 864,
+			bucketSeconds: 840,
 			limit: 25,
 		})
 	})
