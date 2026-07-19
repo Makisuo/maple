@@ -106,9 +106,9 @@ const isEmptyJsonBodyError = (error: unknown): boolean =>
 	error instanceof SyntaxError && /unexpected end of json input/i.test(error.message)
 
 const boundedResponseFetch =
-	(maxBytes: number): typeof fetch =>
+	(maxBytes: number, requestFetch: typeof fetch = fetch): typeof fetch =>
 	async (input, init) => {
-		const response = await fetch(input, init)
+		const response = await requestFetch(input, init)
 		if (response.body === null) return response
 
 		const reader = response.body.getReader()
@@ -145,15 +145,18 @@ const boundedResponseFetch =
 		})
 	}
 
-const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSqlClient => {
-	const makeClient = (fetchAdapter?: typeof fetch) =>
+const createTinybirdSdkSqlClient = (
+	config: TinybirdBackendConfig,
+	requestFetch: typeof fetch = fetch,
+): WarehouseSqlClient => {
+	const makeClient = (fetchAdapter: typeof fetch = requestFetch) =>
 		new Tinybird({
 			baseUrl: config.host,
 			token: config.token,
 			datasources: {},
 			pipes: {},
 			devMode: false,
-			...(fetchAdapter === undefined ? {} : { fetch: fetchAdapter }),
+			fetch: fetchAdapter,
 		})
 	const client = makeClient()
 	const boundedClients = new Map<number, typeof client>()
@@ -176,7 +179,7 @@ const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSql
 				if (limits !== undefined) {
 					queryClient =
 						boundedClients.get(limits.maxBytes) ??
-						makeClient(boundedResponseFetch(limits.maxBytes))
+						makeClient(boundedResponseFetch(limits.maxBytes, requestFetch))
 					boundedClients.set(limits.maxBytes, queryClient)
 				}
 				const result = await queryClient.sql<Record<string, unknown>>(jsonSql)
@@ -198,7 +201,7 @@ const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSql
 			if (rows.length === 0) return
 			const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
 			const url = `${config.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`
-			const response = await fetch(url, {
+			const response = await requestFetch(url, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/x-ndjson",
@@ -261,7 +264,8 @@ export class WarehouseQueryService extends Context.Service<
 						url: clickhouseUrl.toString().replace(/\/$/, ""),
 						username: env.CLICKHOUSE_USER,
 						password: Option.match(env.CLICKHOUSE_PASSWORD, {
-							onNone: () => (kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : ""),
+							onNone: () =>
+								kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : "",
 							onSome: Redacted.value,
 						}),
 						database: env.CLICKHOUSE_DATABASE,
@@ -350,8 +354,7 @@ export class WarehouseQueryService extends Context.Service<
 						password: override.value.password,
 						database: override.value.database,
 					},
-					clientCacheKey:
-						purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
+					clientCacheKey: purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
 				}
 			}
 

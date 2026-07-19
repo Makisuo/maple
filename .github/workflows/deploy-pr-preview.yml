@@ -59,6 +59,13 @@ jobs:
             - name: Install dependencies
               run: bun install --frozen-lockfile
 
+            # Tinybird's TypeScript resource generator loads @maple/domain from source,
+            # whose span-display helpers import this package through its dist exports.
+            # A clean runner has no dist/ until the workspace dependency is built.
+            - name: Build Tinybird TypeScript workspace dependencies
+              if: ${{ github.event.action != 'closed' }}
+              run: bun turbo build --filter=@maple-dev/clickhouse-builder
+
             # Needed for both branch create (deploy) and rm (close). `tb` is the
             # real Tinybird CLI (branch commands live there, not in `bunx tinybird`).
             - name: Install Tinybird CLI

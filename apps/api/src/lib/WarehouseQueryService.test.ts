@@ -267,30 +267,23 @@ describe("WarehouseQueryService raw-SQL provider routing", () => {
 
 describe("bounded Tinybird response fetch", () => {
 	it("accepts an exact-boundary response and aborts one byte over", async () => {
-		const realFetch = globalThis.fetch
-		try {
-			globalThis.fetch = (async () =>
-				new Response(new Uint8Array(MAX_RAW_SQL_RESULT_BYTES))) as typeof fetch
-			const exact = await __testables.boundedResponseFetch(MAX_RAW_SQL_RESULT_BYTES)(
-				"https://api.tinybird.example/v0/sql",
-			)
-			assert.strictEqual((await exact.arrayBuffer()).byteLength, MAX_RAW_SQL_RESULT_BYTES)
+		const exact = await __testables.boundedResponseFetch(
+			MAX_RAW_SQL_RESULT_BYTES,
+			(async () => new Response(new Uint8Array(MAX_RAW_SQL_RESULT_BYTES))) as typeof fetch,
+		)("https://api.tinybird.example/v0/sql")
+		assert.strictEqual((await exact.arrayBuffer()).byteLength, MAX_RAW_SQL_RESULT_BYTES)
 
-			globalThis.fetch = (async () =>
-				new Response(new Uint8Array(MAX_RAW_SQL_RESULT_BYTES + 1))) as typeof fetch
-			let thrown: unknown
-			try {
-				await __testables.boundedResponseFetch(MAX_RAW_SQL_RESULT_BYTES)(
-					"https://api.tinybird.example/v0/sql",
-				)
-			} catch (error) {
-				thrown = error
-			}
-			assert.instanceOf(thrown, Error)
-			assert.match((thrown as Error).message, /5000000 encoded bytes/)
-		} finally {
-			globalThis.fetch = realFetch
+		let thrown: unknown
+		try {
+			await __testables.boundedResponseFetch(
+				MAX_RAW_SQL_RESULT_BYTES,
+				(async () => new Response(new Uint8Array(MAX_RAW_SQL_RESULT_BYTES + 1))) as typeof fetch,
+			)("https://api.tinybird.example/v0/sql")
+		} catch (error) {
+			thrown = error
 		}
+		assert.instanceOf(thrown, Error)
+		assert.match((thrown as Error).message, /5000000 encoded bytes/)
 	})
 })
 
@@ -652,8 +645,7 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 			auth?: string
 			body: string
 		}> = []
-		const realFetch = globalThis.fetch
-		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const requestFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const headers = (init?.headers ?? {}) as Record<string, string>
 			captured.push({
 				url: String(input),
@@ -665,12 +657,8 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 			return new Response("", { status: 202 })
 		}) as typeof fetch
 
-		try {
-			const client = __testables.createTinybirdSdkSqlClient(tbConfig)
-			await client.insert("traces", [{ trace_id: "a" }, { trace_id: "b" }])
-		} finally {
-			globalThis.fetch = realFetch
-		}
+		const client = __testables.createTinybirdSdkSqlClient(tbConfig, requestFetch)
+		await client.insert("traces", [{ trace_id: "a" }, { trace_id: "b" }])
 
 		assert.strictEqual(captured.length, 1)
 		const req = captured[0]!
@@ -685,18 +673,13 @@ describe("createTinybirdSdkSqlClient.insert wire framing (the production insert 
 
 	it("no-ops on an empty row set (no request issued)", async () => {
 		let calls = 0
-		const realFetch = globalThis.fetch
-		globalThis.fetch = (async () => {
+		const requestFetch = (async () => {
 			calls++
 			return new Response("", { status: 202 })
 		}) as typeof fetch
 
-		try {
-			const client = __testables.createTinybirdSdkSqlClient(tbConfig)
-			await client.insert("traces", [])
-		} finally {
-			globalThis.fetch = realFetch
-		}
+		const client = __testables.createTinybirdSdkSqlClient(tbConfig, requestFetch)
+		await client.insert("traces", [])
 
 		assert.strictEqual(calls, 0)
 	})
@@ -715,8 +698,7 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 
 	const captureSql = async (sql: string): Promise<string> => {
 		const sent: string[] = []
-		const realFetch = globalThis.fetch
-		globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+		const requestFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
 			const url = String(input)
 			const fromParam = new URL(url).searchParams.get("q")
 			const body = typeof init?.body === "string" ? init.body : ""
@@ -727,12 +709,8 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 			})
 		}) as typeof fetch
 
-		try {
-			const client = __testables.createTinybirdSdkSqlClient(tbConfig)
-			await client.sql(sql, undefined)
-		} finally {
-			globalThis.fetch = realFetch
-		}
+		const client = __testables.createTinybirdSdkSqlClient(tbConfig, requestFetch)
+		await client.sql(sql, undefined)
 
 		assert.strictEqual(sent.length, 1)
 		return sent[0]!
