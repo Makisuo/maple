@@ -119,13 +119,13 @@ message Span {
     string trace_state = 3;
     repeated KeyValue attributes = 4;
     uint32 dropped_attributes_count = 5;
-    uint32 flags = 6;
+    fixed32 flags = 6;
   }
 
   repeated Link links = 13;
   uint32 dropped_links_count = 14;
   Status status = 15;
-  uint32 flags = 16;
+  fixed32 flags = 16;
 }
 
 message Status {
