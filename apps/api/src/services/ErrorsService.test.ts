@@ -23,6 +23,7 @@ import {
 	errorIssues,
 	errorIssueEvents,
 	errorIssueStates,
+	errorNotificationPolicies,
 	issueEscalations,
 	orgIngestKeys,
 } from "@maple/db"
@@ -186,13 +187,17 @@ const makeErrorsLayer = (
 	onScan?: () => void,
 	edgeBackend?: ReturnType<typeof makeMemoryBackend>,
 	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
+	dispatcher?: (typeof NotificationDispatcher)["Service"],
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
-	const dispatcherStub = Layer.succeed(NotificationDispatcher, {
-		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
-	})
+	const dispatcherStub = Layer.succeed(
+		NotificationDispatcher,
+		dispatcher ?? {
+			dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
+		},
+	)
 	return ErrorsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -936,6 +941,91 @@ describe("ErrorsService.runTick", () => {
 				1,
 			)
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect("overlapping ticks dispatch each incident notification exactly once", () => {
+		let rows: ReadonlyArray<Record<string, unknown>> = [scanRow()]
+		const dispatched: string[] = []
+		const countingDispatcher: (typeof NotificationDispatcher)["Service"] = {
+			dispatch: (_orgId, _destinationIds, context) =>
+				Effect.sync(() => {
+					dispatched.push(context.deliveryKey)
+					return { delivered: 1, failed: 0 }
+				}),
+		}
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+			// Enabled policy with a destination so incident open/resolve actually
+			// dispatches (the dispatcher itself is stubbed — no destination row needed).
+			yield* database.execute((db) =>
+				db.insert(errorNotificationPolicies).values({
+					orgId: ORG,
+					enabled: true,
+					destinationIdsJson: ["7d31c9e1-0000-4000-8000-000000000001"],
+					notifyOnResolve: true,
+					updatedAt: new Date(TICK_MS),
+					updatedBy: "test",
+				}),
+			)
+
+			yield* errors.runTick()
+			assert.lengthOf(
+				dispatched.filter((key) => key.endsWith(":open")),
+				1,
+			)
+
+			// Stale window elapsed, no fresh errors: two OVERLAPPING ticks race the
+			// open→resolved flip. The CAS lets exactly one dispatch the resolve.
+			rows = []
+			yield* TestClock.setTime(TICK_MS + 31 * 60_000)
+			const resolveResults = yield* Effect.all([errors.runTick(), errors.runTick()], {
+				concurrency: 2,
+			})
+			assert.strictEqual(
+				resolveResults.reduce((s, r) => s + r.incidentsResolved, 0),
+				1,
+			)
+			assert.lengthOf(
+				dispatched.filter((key) => key.endsWith(":resolve")),
+				1,
+			)
+
+			// Errors return: two OVERLAPPING ticks race the reopen. The state-row
+			// CAS lets exactly one insert the incident and dispatch its open.
+			const reopenMs = TICK_MS + 32 * 60_000
+			rows = [
+				scanRow({
+					firstSeen: toWarehouseDateTime(reopenMs - 60_000),
+					lastSeen: toWarehouseDateTime(reopenMs - 1_000),
+				}),
+			]
+			yield* TestClock.setTime(reopenMs)
+			const reopenResults = yield* Effect.all([errors.runTick(), errors.runTick()], {
+				concurrency: 2,
+			})
+			assert.strictEqual(
+				reopenResults.reduce((s, r) => s + r.incidentsOpened, 0),
+				1,
+			)
+			assert.lengthOf(
+				dispatched.filter((key) => key.endsWith(":open")),
+				2,
+			)
+
+			const issue = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+			const incidents = yield* loadIncidentsForIssue(issue.id)
+			assert.lengthOf(incidents, 2)
+			const states = yield* database.execute((db) =>
+				db.select().from(errorIssueStates).where(eq(errorIssueStates.issueId, issue.id)),
+			)
+			assert.strictEqual(
+				states[0]?.openIncidentId,
+				incidents.find((incident) => incident.status === "open")?.id,
+			)
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, countingDispatcher)))
 	})
 
 	it.effect(

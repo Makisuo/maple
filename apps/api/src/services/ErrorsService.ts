@@ -2482,23 +2482,14 @@ const make: Effect.Effect<
 							? "regression"
 							: "first_seen"
 					const incidentId = newErrorIncidentId()
-					yield* dbExecute((db) =>
-						db.insert(errorIncidents).values({
-							id: incidentId,
-							orgId,
-							issueId,
-							status: "open",
-							reason,
-							firstTriggeredAt: new Date(firstSeenMs),
-							lastTriggeredAt: new Date(lastSeenMs),
-							resolvedAt: null,
-							occurrenceCount: row.count,
-							createdAt: new Date(windowEndMs),
-							updatedAt: new Date(windowEndMs),
-						}),
-					)
 
-					yield* dbExecute((db) =>
+					// CAS the open slot BEFORE creating the incident or dispatching:
+					// overlapping ticks can both read openIncidentId == null, and the
+					// notify path below dispatches immediately (no outbox), so only the
+					// upsert winner may proceed. setWhere keeps the conflict-update a
+					// no-op when another tick already claimed the slot; RETURNING then
+					// yields zero rows for the loser.
+					const claimed = yield* dbExecute((db) =>
 						db
 							.insert(errorIssueStates)
 							.values({
@@ -2517,7 +2508,37 @@ const make: Effect.Effect<
 									openIncidentId: incidentId,
 									updatedAt: new Date(windowEndMs),
 								},
-							}),
+								setWhere: isNull(errorIssueStates.openIncidentId),
+							})
+							.returning({ openIncidentId: errorIssueStates.openIncidentId }),
+					)
+					const wonOpenSlot = claimed[0]?.openIncidentId === incidentId
+
+					if (!wonOpenSlot) {
+						// Lost the race: a concurrent tick opened the incident for this
+						// same scan window and already dispatched its notification. Do
+						// not bump occurrence counts here — the winner counted this
+						// window's occurrences on insert.
+						yield* Effect.logInfo("Skipping duplicate error incident open (lost CAS)").pipe(
+							Effect.annotateLogs({ orgId, issueId }),
+						)
+						return { touched: 1, opened: 0 }
+					}
+
+					yield* dbExecute((db) =>
+						db.insert(errorIncidents).values({
+							id: incidentId,
+							orgId,
+							issueId,
+							status: "open",
+							reason,
+							firstTriggeredAt: new Date(firstSeenMs),
+							lastTriggeredAt: new Date(lastSeenMs),
+							resolvedAt: null,
+							occurrenceCount: row.count,
+							createdAt: new Date(windowEndMs),
+							updatedAt: new Date(windowEndMs),
+						}),
 					)
 
 					yield* notifyIncidentOpened(orgId, policy, {
@@ -2599,9 +2620,12 @@ const make: Effect.Effect<
 					),
 				),
 		)
-		yield* Effect.forEach(staleIncidents, (incident) =>
+		const resolveOutcomes = yield* Effect.forEach(staleIncidents, (incident) =>
 			Effect.gen(function* () {
-				yield* dbExecute((db) =>
+				// CAS the status flip: overlapping ticks both list the incident as
+				// stale, and the resolve notification dispatches immediately — only
+				// the tick that wins the open→resolved transition may notify.
+				const flipped = yield* dbExecute((db) =>
 					db
 						.update(errorIncidents)
 						.set({
@@ -2609,8 +2633,12 @@ const make: Effect.Effect<
 							resolvedAt: new Date(windowEndMs),
 							updatedAt: new Date(windowEndMs),
 						})
-						.where(eq(errorIncidents.id, incident.id)),
+						.where(and(eq(errorIncidents.id, incident.id), eq(errorIncidents.status, "open")))
+						.returning({ id: errorIncidents.id }),
 				)
+				if (flipped.length === 0) {
+					return { resolved: 0 }
+				}
 				yield* dbExecute((db) =>
 					db
 						.update(errorIssueStates)
@@ -2645,9 +2673,10 @@ const make: Effect.Effect<
 						})
 					}
 				}
+				return { resolved: 1 }
 			}),
 		)
-		const incidentsResolved = staleIncidents.length
+		const incidentsResolved = resolveOutcomes.reduce((s, r) => s + r.resolved, 0)
 
 		let issuesArchived = 0
 		let issuesDeleted = 0
@@ -2758,6 +2787,10 @@ const make: Effect.Effect<
 		}
 	})
 
+	// Overlapping ticks are tolerated (there is no per-org claim lock): scan
+	// bookkeeping may repeat under overlap, but incident open/resolve
+	// transitions — and the notifications they dispatch — are CAS-guarded in
+	// processOrg, so users never receive duplicate incident emails.
 	const runTick: ErrorsServiceShape["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
 		const endMs = yield* Clock.currentTimeMillis
 		const startMs = endMs - TICK_WINDOW_MS

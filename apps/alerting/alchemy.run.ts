@@ -64,9 +64,16 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
-				EMAIL: Cloudflare.Email.SendEmail("email", {
-					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
-				}),
+				// Production only: preview/stg workers run the same email crons against
+				// their own DB branches, so a binding here means every live stage sends
+				// its own copy of onboarding/digest/alert emails to real users.
+				...(stage.kind === "prd"
+					? {
+							EMAIL: Cloudflare.Email.SendEmail("email", {
+								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+							}),
+						}
+					: {}),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
 				// Alert-rule evaluation runs Tinybird-scoped raw SQL through

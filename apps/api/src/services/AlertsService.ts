@@ -85,7 +85,7 @@ import {
 	type AlertRuleRow,
 	alertRuleStates,
 } from "@maple/db"
-import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import {
 	Array as Arr,
 	Cause,
@@ -3787,6 +3787,36 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 						openIncident == null &&
 						consecutiveBreaches >= normalized.consecutiveBreachesRequired
 					) {
+						// Flap suppression: a metric oscillating around the threshold opens
+						// a fresh incident per flap, which would email an identical trigger
+						// notification every few minutes. If the previous incident for this
+						// (rule, group) was notified within the renotify interval, open the
+						// incident but skip the trigger notification and carry the prior
+						// lastNotifiedAt forward — the renotify gate then enforces one
+						// email per interval while the flapping persists.
+						const priorNotified =
+							(yield* dbExecute((db) =>
+								db
+									.select({ lastNotifiedAt: alertIncidents.lastNotifiedAt })
+									.from(alertIncidents)
+									.where(
+										and(
+											eq(alertIncidents.orgId, row.orgId),
+											eq(alertIncidents.ruleId, row.id),
+											eq(alertIncidents.groupKey, groupKey),
+											eq(alertIncidents.status, "resolved"),
+											isNotNull(alertIncidents.lastNotifiedAt),
+											gte(
+												alertIncidents.lastNotifiedAt,
+												new Date(timestamp - normalized.renotifyIntervalMinutes * 60_000),
+											),
+										),
+									)
+									.orderBy(desc(alertIncidents.lastNotifiedAt))
+									.limit(1),
+							))[0] ?? null
+						const flapSuppressedAt = priorNotified?.lastNotifiedAt ?? null
+
 						const incidentId = decodeAlertIncidentIdSync(makeUuid())
 						const incident: AlertIncidentRow = {
 							id: incidentId,
@@ -3809,21 +3839,35 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							lastEvaluatedAt: new Date(timestamp),
 							dedupeKey: `${row.orgId}:${row.id}:${groupKey}`,
 							lastDeliveredEventType: null,
-							lastNotifiedAt: null,
+							// Suppressed flaps inherit the prior incident's notify anchor so
+							// the renotify gate spaces the next email a full interval from
+							// the last one the user actually received.
+							lastNotifiedAt: flapSuppressedAt,
 							errorIssueId: null,
 							createdAt: new Date(timestamp),
 							updatedAt: new Date(timestamp),
 						}
 
 						yield* dbExecute((db) => db.insert(alertIncidents).values(incident))
-						yield* queueIncidentNotifications(
-							row.orgId,
-							normalized,
-							incident,
-							evaluation,
-							"trigger",
-							timestamp,
-						)
+						if (flapSuppressedAt != null) {
+							yield* Effect.logInfo("Skipping trigger notification for flapping incident").pipe(
+								Effect.annotateLogs({
+									ruleId: row.id,
+									incidentId,
+									groupKey,
+									priorNotifiedAt: flapSuppressedAt.toISOString(),
+								}),
+							)
+						} else {
+							yield* queueIncidentNotifications(
+								row.orgId,
+								normalized,
+								incident,
+								evaluation,
+								"trigger",
+								timestamp,
+							)
+						}
 						return {
 							transition: "opened" as const,
 							incidentId,
@@ -3843,6 +3887,18 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 							updatedAt: new Date(timestamp),
 						}
 
+						const renotifyDueAt =
+							(openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt).getTime() +
+							normalized.renotifyIntervalMinutes * 60_000
+						const renotifyDue = renotifyDueAt <= timestamp
+
+						// The gate closes at QUEUE time, not delivery time: advancing
+						// lastNotifiedAt only on delivery success re-queues a fresh event
+						// (new scheduledAt → new deliveryKey) every tick while a delivery
+						// is failing or slow, and the whole backlog fires once the
+						// destination recovers. Failed deliveries are covered by the
+						// per-event retry chain instead. Written before queueing so a
+						// crash in between skips one interval rather than duplicating.
 						yield* dbExecute((db) =>
 							db
 								.update(alertIncidents)
@@ -3852,14 +3908,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									lastSampleCount: evaluation.sampleCount,
 									lastEvaluatedAt: new Date(timestamp),
 									updatedAt: new Date(timestamp),
+									...(renotifyDue ? { lastNotifiedAt: new Date(timestamp) } : {}),
 								})
 								.where(eq(alertIncidents.id, openIncident.id)),
 						)
 
-						const renotifyDueAt =
-							(openIncident.lastNotifiedAt ?? openIncident.firstTriggeredAt).getTime() +
-							normalized.renotifyIntervalMinutes * 60_000
-						if (renotifyDueAt <= timestamp) {
+						if (renotifyDue) {
 							yield* queueIncidentNotifications(
 								row.orgId,
 								normalized,
@@ -3907,14 +3961,30 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								.where(eq(alertIncidents.id, openIncident.id)),
 						)
 
-						yield* queueIncidentNotifications(
-							row.orgId,
-							normalized,
-							resolvedIncident,
-							evaluation,
-							"resolve",
-							timestamp,
-						)
+						// A flap-suppressed incident (notify anchor inherited, nothing ever
+						// delivered for it) resolves silently too — pairing every silent
+						// open with a resolve email would spam just as hard as the
+						// triggers we suppressed.
+						const resolveSuppressed =
+							openIncident.lastDeliveredEventType == null && openIncident.lastNotifiedAt != null
+						if (resolveSuppressed) {
+							yield* Effect.logInfo("Skipping resolve notification for flapping incident").pipe(
+								Effect.annotateLogs({
+									ruleId: row.id,
+									incidentId: openIncident.id,
+									groupKey,
+								}),
+							)
+						} else {
+							yield* queueIncidentNotifications(
+								row.orgId,
+								normalized,
+								resolvedIncident,
+								evaluation,
+								"resolve",
+								timestamp,
+							)
+						}
 						return {
 							transition: "resolved" as const,
 							incidentId: openIncident.id,
