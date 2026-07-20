@@ -30,6 +30,7 @@ import { Layer, Redacted } from "effect"
 import {
 	buildResolved,
 	type FlushTransport,
+	makeSerializedFlush,
 	type Resolved,
 	type ResourceInput,
 	runFlush,
@@ -61,10 +62,12 @@ export interface MapleClientFlushableConfig {
 	/** Span name prefixes to drop before OTLP export. */
 	readonly dropSpanNames?: ReadonlyArray<string> | undefined
 	/**
-	 * `_tag`s of *anticipated* failures (expected 4xx business errors). Spans
+	 * Stable `_tag` / `Error.name` identifiers of anticipated 4xx failures. Spans
 	 * failing entirely with these export as status `Ok` (no `exception` event),
 	 * so they stay visible but never count as errors.
 	 */
+	readonly anticipatedErrorIdentifiers?: ReadonlyArray<string> | undefined
+	/** @deprecated Use `anticipatedErrorIdentifiers`. */
 	readonly anticipatedErrorTags?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
@@ -154,10 +157,12 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		dropPrefixes !== undefined && dropPrefixes.length > 0
 			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
 			: undefined
-	const anticipatedErrorTags =
-		config.anticipatedErrorTags !== undefined && config.anticipatedErrorTags.length > 0
-			? new Set(config.anticipatedErrorTags)
-			: undefined
+	const anticipatedErrorIdentifiers = [
+		...(config.anticipatedErrorIdentifiers ?? []),
+		...(config.anticipatedErrorTags ?? []),
+	]
+	const anticipatedIdentifiers =
+		anticipatedErrorIdentifiers.length > 0 ? new Set(anticipatedErrorIdentifiers) : undefined
 	startClientSession({
 		endpoint: config.endpoint,
 		ingestKey: config.ingestKey,
@@ -168,7 +173,10 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 		emitSessionMeta: config.emitSessionMeta,
 	})
 
-	const spans: SpanBuffer = makeSpanBuffer({ dropSpan, anticipatedErrorTags })
+	const spans: SpanBuffer = makeSpanBuffer({
+		dropSpan,
+		anticipatedErrorIdentifiers: anticipatedIdentifiers,
+	})
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 	// `withSessionLink` overrides only the Tracer reference, keeping the logger.
 	const layer = withSessionLink(Layer.mergeAll(spans.tracerLayer, logs.loggerLayer))
@@ -195,7 +203,7 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 	const logsState: SignalState = { disabledUntil: 0 }
 	let noOpLogged = false
 
-	const flush = async (): Promise<void> => {
+	const flush = makeSerializedFlush(async (): Promise<void> => {
 		await runFlush({
 			resolved,
 			spans,
@@ -213,7 +221,7 @@ export const make = (config: MapleClientFlushableConfig): FlushableTelemetry => 
 				}
 			},
 		})
-	}
+	})
 
 	const intervalMs =
 		config.autoFlushInterval === undefined

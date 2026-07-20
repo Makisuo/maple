@@ -5,6 +5,7 @@ import { cp, lstat, mkdir, readFile, readdir, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { Effect, Schema } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { CHDB_VERSION, MAPLE_VERSION } from "../version"
 import { serverUrl } from "../lib/local-address"
 import { Chdb } from "./chdb"
@@ -419,29 +420,32 @@ const localQueryError = (status: number, detail: string, cause = detail): LocalQ
 export const checkpointQueryUrl = (host: string, port: number): string =>
 	`${serverUrl(host, port)}/local/query`
 
-const postLocalQuery = (host: string, port: number, sql: string): Effect.Effect<unknown, LocalQueryError> => {
+const postLocalQuery = (
+	host: string,
+	port: number,
+	sql: string,
+): Effect.Effect<unknown, LocalQueryError, HttpClient.HttpClient> => {
 	const url = checkpointQueryUrl(host, port)
 	return Effect.gen(function* () {
-		const response = yield* Effect.tryPromise({
-			try: (signal) =>
-				fetch(url, {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify({ sql }),
-					signal,
-				}),
-			catch: (error) => localQueryError(0, errorMessage(error), errorCause(error)),
-		})
+		const client = yield* HttpClient.HttpClient
+		const request = HttpClientRequest.post(url).pipe(
+			HttpClientRequest.bodyText(JSON.stringify({ sql }), "application/json"),
+		)
+		const response = yield* client
+			.execute(request)
+			.pipe(Effect.mapError((error) => localQueryError(0, errorMessage(error), errorCause(error))))
 		yield* Effect.annotateCurrentSpan("http.response.status_code", response.status)
-		if (!response.ok) {
-			const detail = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
-			})
+		const text = yield* response.text.pipe(
+			Effect.mapError((error) =>
+				localQueryError(response.status, errorMessage(error), errorCause(error)),
+			),
+		)
+		if (response.status < 200 || response.status >= 300) {
+			const detail = text
 			return yield* localQueryError(response.status, detail)
 		}
-		return yield* Effect.tryPromise({
-			try: () => response.json() as Promise<unknown>,
+		return yield* Effect.try({
+			try: () => JSON.parse(text) as unknown,
 			catch: (error) => localQueryError(response.status, errorMessage(error), errorCause(error)),
 		})
 	}).pipe(
@@ -949,12 +953,12 @@ const acquireMaintenance = async (
 	}
 }
 
-const withMaintenance = <A, E>(
+const withMaintenance = <A, E, R>(
 	dataDir: string,
 	operationId: CheckpointOperationId,
 	onAcquireError: (error: unknown) => E,
-	use: () => Effect.Effect<A, E>,
-): Effect.Effect<A, E> =>
+	use: () => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
 	Effect.acquireRelease(
 		Effect.tryPromise({
 			try: () => acquireMaintenance(dataDir, operationId),

@@ -96,7 +96,7 @@ export const whoami = Command.make("whoami", {}).pipe(
 		Effect.fnUntraced(function* () {
 			const config = yield* MapleConfig
 			const mode = yield* Mode
-			const defaultMode = config.defaultMode ?? "auto"
+			const defaultMode = Option.getOrElse(config.defaultMode, () => "auto" as const)
 			const resolved = yield* mode.resolve.pipe(
 				Effect.map((m) => ({ ok: true as const, m })),
 				Effect.catch((e) => Effect.succeed({ ok: false as const, message: e.message })),

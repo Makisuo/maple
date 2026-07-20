@@ -21,6 +21,7 @@ import { Effect, Layer } from "effect"
 import {
 	buildResolved,
 	fetchTransport,
+	makeSerializedFlush,
 	type Resolved,
 	runFlush,
 	type SignalState,
@@ -61,10 +62,12 @@ export interface MapleFlushableConfig {
 	/** Span name prefixes to drop before OTLP export. */
 	readonly dropSpanNames?: ReadonlyArray<string> | undefined
 	/**
-	 * `_tag`s of *anticipated* failures (expected 4xx business errors). Spans
+	 * Stable `_tag` / `Error.name` identifiers of anticipated 4xx failures. Spans
 	 * failing entirely with these export as status `Ok` (no `exception` event),
 	 * so they stay visible but never count as errors.
 	 */
+	readonly anticipatedErrorIdentifiers?: ReadonlyArray<string> | undefined
+	/** @deprecated Use `anticipatedErrorIdentifiers`. */
 	readonly anticipatedErrorTags?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
@@ -98,11 +101,16 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 		dropPrefixes !== undefined && dropPrefixes.length > 0
 			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
 			: undefined
-	const anticipatedErrorTags =
-		config.anticipatedErrorTags !== undefined && config.anticipatedErrorTags.length > 0
-			? new Set(config.anticipatedErrorTags)
-			: undefined
-	const spans: SpanBuffer = makeSpanBuffer({ dropSpan, anticipatedErrorTags })
+	const anticipatedErrorIdentifiers = [
+		...(config.anticipatedErrorIdentifiers ?? []),
+		...(config.anticipatedErrorTags ?? []),
+	]
+	const anticipatedIdentifiers =
+		anticipatedErrorIdentifiers.length > 0 ? new Set(anticipatedErrorIdentifiers) : undefined
+	const spans: SpanBuffer = makeSpanBuffer({
+		dropSpan,
+		anticipatedErrorIdentifiers: anticipatedIdentifiers,
+	})
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer)
 
@@ -129,7 +137,7 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 		return resolvedPromise
 	}
 
-	const flush = async (): Promise<void> => {
+	const flush = makeSerializedFlush(async (): Promise<void> => {
 		const resolved = await ensureResolved()
 		await runFlush({
 			resolved,
@@ -148,7 +156,7 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 				}
 			},
 		})
-	}
+	})
 
 	const intervalMs =
 		config.autoFlushInterval === undefined

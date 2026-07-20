@@ -1,4 +1,5 @@
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Redacted, Schema } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { MapleConfig } from "./config"
 
 /**
@@ -28,17 +29,14 @@ const hasFlag = (name: string): boolean =>
 	typeof process !== "undefined" && Array.isArray(process.argv) && process.argv.includes(name)
 
 /** Fast, non-fatal liveness probe of the local binary's `/health` route. */
-const probeLocal = (baseUrl: string): Effect.Effect<boolean> =>
-	Effect.tryPromise(async () => {
-		const controller = new AbortController()
-		const timer = setTimeout(() => controller.abort(), 400)
-		try {
-			const res = await fetch(`${baseUrl.replace(/\/$/, "")}/health`, { signal: controller.signal })
-			return res.ok
-		} finally {
-			clearTimeout(timer)
-		}
-	}).pipe(Effect.orElseSucceed(() => false))
+const probeLocal = (client: HttpClient.HttpClient, baseUrl: string): Effect.Effect<boolean> => {
+	const request = HttpClientRequest.get(`${baseUrl.replace(/\/$/, "")}/health`)
+	return client.execute(request).pipe(
+		Effect.map((response) => response.status >= 200 && response.status < 300),
+		Effect.timeoutOrElse({ duration: Duration.millis(400), orElse: () => Effect.succeed(false) }),
+		Effect.orElseSucceed(() => false),
+	)
+}
 
 export interface ModeShape {
 	/** Resolve the active backend. Fails with `ModeError` if none is available. */
@@ -48,14 +46,18 @@ export interface ModeShape {
 export class Mode extends Context.Service<Mode, ModeShape>()("@maple/cli/Mode", {
 	make: Effect.gen(function* () {
 		const config = yield* MapleConfig
+		const client = yield* HttpClient.HttpClient
 
-		const hasRemoteCreds = !!config.token && !!config.apiUrl
-		const remote = (): ResolvedMode => ({
-			_tag: "remote",
-			apiUrl: config.apiUrl!,
-			token: config.token!,
-			orgId: config.orgId,
-		})
+		const remoteConfig = Option.map(
+			Option.all({ apiUrl: config.apiUrl, token: config.token }),
+			({ apiUrl, token }): ResolvedMode => ({
+				_tag: "remote",
+				apiUrl,
+				token: Redacted.value(token),
+				orgId: Option.getOrUndefined(config.orgId),
+			}),
+		)
+		const remote = Option.getOrUndefined(remoteConfig)
 		const local = (): ResolvedMode => ({ _tag: "local", baseUrl: config.localUrl })
 
 		const resolve: Effect.Effect<ResolvedMode, ModeError> = Effect.gen(function* () {
@@ -66,24 +68,24 @@ export class Mode extends Context.Service<Mode, ModeShape>()("@maple/cli/Mode", 
 				return yield* new ModeError({ message: "Cannot use --remote and --local together." })
 			}
 			if (forceRemote) {
-				if (!hasRemoteCreds) {
+				if (remote === undefined) {
 					return yield* new ModeError({
 						message:
 							"Remote mode needs a workspace. Run `maple login`, or set MAPLE_API_URL + MAPLE_API_TOKEN.",
 					})
 				}
-				return remote()
+				return remote
 			}
 			if (forceLocal) return local()
 
 			// Stored preference.
-			if (config.defaultMode === "remote" && hasRemoteCreds) return remote()
-			if (config.defaultMode === "local") return local()
+			if (Option.contains(config.defaultMode, "remote") && remote !== undefined) return remote
+			if (Option.contains(config.defaultMode, "local")) return local()
 
 			// Auto-detect: a configured token implies remote; otherwise probe for a
 			// running local binary.
-			if (hasRemoteCreds) return remote()
-			if (yield* probeLocal(config.localUrl)) return local()
+			if (remote !== undefined) return remote
+			if (yield* probeLocal(client, config.localUrl)) return local()
 
 			return yield* new ModeError({
 				message:

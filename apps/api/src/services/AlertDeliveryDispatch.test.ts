@@ -1,7 +1,7 @@
 import type { AlertDestinationRow } from "@maple/db"
-import { AlertDeliveryError } from "@maple/domain/http"
+import { AlertDeliveryError, AlertDestinationId } from "@maple/domain/http"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import {
 	buildAlertChatUrl,
 	buildDiscordEmbedsFromTemplate,
@@ -37,6 +37,7 @@ const baseContext: TemplateRenderContext = {
 
 const LINK = "https://web.localhost/alerts"
 const CHAT = "https://web.localhost/chat?mode=alert"
+const DESTINATION_ID = Schema.decodeUnknownSync(AlertDestinationId)("7c6b5a49-3821-4e0f-9d8c-7b6a59483726")
 
 /** Dispatch deps for non-email destinations — email sends must not happen. */
 const noEmailDeps: DispatchDeps = {
@@ -138,7 +139,7 @@ describe("buildDiscordEmbedsFromTemplate", () => {
 
 describe("dispatchDelivery", () => {
 	const destinationRow: AlertDestinationRow = {
-		id: "dest_1" as AlertDestinationRow["id"],
+		id: DESTINATION_ID,
 		orgId: "org_1" as AlertDestinationRow["orgId"],
 		name: "PagerDuty",
 		type: "pagerduty",

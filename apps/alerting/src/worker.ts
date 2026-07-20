@@ -1,5 +1,5 @@
 import {
-	ANTICIPATED_ERROR_TAGS,
+	ANTICIPATED_ERROR_IDENTIFIERS,
 	AlertsService,
 	AnomalyDetectionService,
 	BucketCacheService,
@@ -38,7 +38,7 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceName: "alerting",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 const buildLayer = (_env: Record<string, unknown>) => {

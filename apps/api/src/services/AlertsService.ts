@@ -27,7 +27,6 @@ import {
 	AlertCheckDocument,
 	AlertChecksListResponse,
 	AlertCheckStatus as AlertCheckStatusSchema,
-	AlertEvaluationStatus as AlertEvaluationStatusSchema,
 	AlertIncidentDocument,
 	AlertIncidentsListResponse,
 	AlertIncidentStatus,
@@ -243,6 +242,8 @@ interface DeliveryAttemptFailure {
 }
 
 const MAX_DELIVERY_ATTEMPTS = 5
+const ALERT_TEST_DELIVERY_CONCURRENCY = 5
+const ALERT_CHECK_INGEST_CONCURRENCY = 4
 // Storm fuse: cap issue-hub upserts per scheduler tick so a pathological
 // group-by rule opening hundreds of incidents can't stall the per-minute tick.
 const ISSUE_UPSERTS_PER_TICK = 50
@@ -300,7 +301,6 @@ const decodeAlertDestinationTypeSync = Schema.decodeUnknownSync(AlertDestination
 const decodeAlertSeveritySync = Schema.decodeUnknownSync(AlertSeveritySchema)
 const decodeAlertSignalTypeSync = Schema.decodeUnknownSync(AlertSignalTypeSchema)
 const decodeAlertComparatorSync = Schema.decodeUnknownSync(AlertComparatorSchema)
-const decodeAlertEvaluationStatusSync = Schema.decodeUnknownSync(AlertEvaluationStatusSchema)
 const decodeAlertCheckStatusSync = Schema.decodeUnknownSync(AlertCheckStatusSchema)
 const decodeAlertIncidentTransitionSync = Schema.decodeUnknownSync(AlertIncidentTransitionSchema)
 const decodeAlertMetricTypeSync = Schema.decodeUnknownSync(AlertMetricTypeSchema)
@@ -2826,7 +2826,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 								linkUrl: resolveNotificationLinkUrl(normalized, null),
 								sentAtMs,
 							}),
-						{ concurrency: "unbounded" },
+						{ concurrency: ALERT_TEST_DELIVERY_CONCURRENCY },
 					)
 				}
 
@@ -3808,7 +3808,9 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											isNotNull(alertIncidents.lastNotifiedAt),
 											gte(
 												alertIncidents.lastNotifiedAt,
-												new Date(timestamp - normalized.renotifyIntervalMinutes * 60_000),
+												new Date(
+													timestamp - normalized.renotifyIntervalMinutes * 60_000,
+												),
 											),
 										),
 									)
@@ -4748,7 +4750,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 									),
 									Effect.ignore,
 								),
-						{ concurrency: "unbounded" },
+						{ concurrency: ALERT_CHECK_INGEST_CONCURRENCY },
 					)
 				}
 

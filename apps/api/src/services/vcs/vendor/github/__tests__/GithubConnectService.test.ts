@@ -25,6 +25,7 @@ import {
 	upsertCommitsFor,
 	upsertReposFor,
 } from "../../../__tests__/harness"
+import { decodeGitCommitSha } from "../../../__tests__/fixtures"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
@@ -325,7 +326,7 @@ describe("GithubConnectService", () => {
 			assert.strictEqual(result.disconnected, true)
 			assert.ok(Option.isNone(yield* repo.resolveInstallation("github", "42")))
 			assert.strictEqual((yield* reposOfInstallation(repo, "42", "all")).length, 0)
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
 
 			// A user-initiated disconnect fully removes the row, so status reverts to the
 			// pristine "never connected" state; a second disconnect is a no-op.
@@ -504,9 +505,9 @@ describe("GithubConnectService", () => {
 				assert.strictEqual(result.deleted, true)
 
 				assert.ok(Option.isNone(yield* repo.resolveRepository(orgId, "github", "7")))
-				assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_7 as never)))
+				assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_7))))
 				assert.ok(Option.isSome(yield* repo.resolveRepository(orgId, "github", "8")))
-				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_8 as never)))
+				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_8))))
 
 				// Deleting the same (now-absent) id again is a no-op (idempotent).
 				const again = yield* svc.deleteRepository(orgId, repo7Id)
@@ -563,7 +564,7 @@ describe("GithubConnectService", () => {
 			const exit = yield* svc.deleteRepository(orgId, repo7.value.id).pipe(Effect.exit)
 			assert.ok(findError(exit) instanceof IntegrationsValidationError)
 			assert.ok(Option.isSome(yield* repo.resolveRepository(orgId, "github", "7")))
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
 		}).pipe(Effect.provide(connectLayer(testDb, http, sent)))
 	})
 
@@ -620,13 +621,13 @@ describe("GithubConnectService", () => {
 				// An unknown branch is rejected; nothing changes.
 				const bad = yield* svc.setTrackedBranch(orgId, r.id, "nope").pipe(Effect.exit)
 				assert.ok(findError(bad) instanceof IntegrationsValidationError)
-				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA as never)))
+				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
 
 				// Selecting the current branch is a no-op: no wipe, no backfill enqueued.
 				sent.length = 0
 				const noop = yield* svc.setTrackedBranch(orgId, r.id, "main")
 				assert.strictEqual(noop.backfillQueued, false)
-				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA as never)))
+				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
 				assert.strictEqual(sent.filter((j) => j.kind === "sync-commits").length, 0)
 
 				// Changing the branch wipes commits and enqueues a backfill.
@@ -634,7 +635,7 @@ describe("GithubConnectService", () => {
 				const changed = yield* svc.setTrackedBranch(orgId, r.id, "release")
 				assert.strictEqual(changed.trackedBranch, "release")
 				assert.ok(changed.backfillQueued)
-				assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA as never)))
+				assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))))
 				assert.strictEqual((yield* repoFor(repo, orgId, "7")).trackedBranch, "release")
 				const backfills = sent.filter((j) => j.kind === "sync-commits")
 				assert.strictEqual(backfills.length, 1)

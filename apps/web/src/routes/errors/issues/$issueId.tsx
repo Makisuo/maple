@@ -35,6 +35,12 @@ import {
 	type IssueSeverity,
 	type WorkflowState,
 } from "@maple/domain/http"
+import {
+	makeIssueClaimPayload,
+	makeIssueCommentPayload,
+	makeIssueReleasePayload,
+	makeIssueTransitionPayload,
+} from "./-issue-mutation-payloads"
 
 const decodeIssueId = Schema.decodeSync(ErrorIssueId)
 
@@ -95,7 +101,7 @@ function IssueDetailPage() {
 		setBusy("state")
 		const result = await transitionIssue({
 			params: { issueId },
-			payload: { toState: next },
+			payload: makeIssueTransitionPayload(next),
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
@@ -107,7 +113,7 @@ function IssueDetailPage() {
 		setBusy("claim")
 		const result = await claimIssue({
 			params: { issueId },
-			payload: {},
+			payload: makeIssueClaimPayload(),
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
@@ -130,7 +136,7 @@ function IssueDetailPage() {
 		setBusy("release")
 		const result = await releaseIssue({
 			params: { issueId },
-			payload: {},
+			payload: makeIssueReleasePayload(),
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
@@ -159,7 +165,7 @@ function IssueDetailPage() {
 		setBusy("comment")
 		const result = await commentOnIssue({
 			params: { issueId },
-			payload: { body },
+			payload: makeIssueCommentPayload(body),
 			reactivityKeys: invalidateKeys,
 		})
 		setBusy(null)
@@ -225,7 +231,9 @@ function IssueDetailPage() {
 										void navigator.clipboard
 											.writeText(agentPromptFromIssue(issue))
 											.then(() =>
-												toast.success("Copied agent prompt — paste it into your MCP agent"),
+												toast.success(
+													"Copied agent prompt — paste it into your MCP agent",
+												),
 											)
 											.catch(() => toast.error("Copy failed"))
 									}}
@@ -241,7 +249,13 @@ function IssueDetailPage() {
 									<Link
 										to="/investigations/$id"
 										params={{ id: issueId }}
-										search={{ r: encodeInvestigationRef({ kind: "error", id: issueId, issueId }) }}
+										search={{
+											r: encodeInvestigationRef({
+												kind: "error",
+												id: issueId,
+												issueId,
+											}),
+										}}
 									/>
 								}
 							>

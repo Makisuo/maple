@@ -68,7 +68,7 @@ export const searchSessions = Effect.fn("Observability.searchSessions")(function
 		}),
 		{ orgId: executor.orgId, startTime: input.startTime, endTime: input.endTime },
 	)
-	return yield* executor.compiledQuery(compiled, { profile: "list" })
+	return yield* executor.compiledQuery(compiled, { profile: "list", context: "searchSessions" })
 })
 
 /**
@@ -103,5 +103,5 @@ export const getSessionTranscript = Effect.fn("Observability.getSessionTranscrip
 			sessionId: input.sessionId,
 		},
 	)
-	return yield* executor.compiledQuery(compiled, { profile: "list" })
+	return yield* executor.compiledQuery(compiled, { profile: "list", context: "sessionTranscript" })
 })

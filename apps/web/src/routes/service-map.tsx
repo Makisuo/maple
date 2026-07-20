@@ -2,7 +2,7 @@ import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { useMemo } from "react"
 
-import { Result } from "@/lib/effect-atom"
+import { Result, useAtomRefresh } from "@/lib/effect-atom"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -13,6 +13,7 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
+import { QueryErrorState } from "@/components/common/query-error-state"
 
 // `__all__` is the sentinel for the "All Environments" option. Storing it in the
 // URL (rather than clearing the param) keeps an explicit all-environments choice
@@ -63,12 +64,14 @@ function ServiceMapContent() {
 		const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
 		return { startTime: fmt(start), endTime: fmt(end) }
 	}, [])
-	const facetsResult = useRetainedRefreshableResultValue(getServicesFacetsResultAtom({ data: facetsRange }))
+	const facetsAtom = getServicesFacetsResultAtom({ data: facetsRange })
+	const facetsResult = useRetainedRefreshableResultValue(facetsAtom)
+	const refreshFacets = useAtomRefresh(facetsAtom)
 
 	const environments = Result.builder(facetsResult)
 		.onSuccess((response) => response.data.environments)
 		.orElse(() => [])
-	const facetsReady = !Result.isInitial(facetsResult)
+	const facetsReady = Result.isSuccess(facetsResult)
 	const hasProduction = environments.some((e) => e.name === "production")
 
 	// Default to production. Before facets resolve, optimistically assume it exists
@@ -159,15 +162,23 @@ function ServiceMapContent() {
 				</div>
 			}
 		>
-			<div className="-mx-4 -mb-4 h-[calc(100vh-10rem)]">
-				<ServiceMapView
-					startTime={effectiveStartTime}
-					endTime={effectiveEndTime}
-					deploymentEnv={deploymentEnv}
-					focus={focus}
-					onFocusChange={handleFocusChange}
+			{Result.isFailure(facetsResult) ? (
+				<QueryErrorState
+					error={facetsResult.cause}
+					titleOverride="Failed to load service environments"
+					onRetry={refreshFacets}
 				/>
-			</div>
+			) : (
+				<div className="-mx-4 -mb-4 h-[calc(100vh-10rem)]">
+					<ServiceMapView
+						startTime={effectiveStartTime}
+						endTime={effectiveEndTime}
+						deploymentEnv={deploymentEnv}
+						focus={focus}
+						onFocusChange={handleFocusChange}
+					/>
+				</div>
+			)}
 		</DashboardLayout>
 	)
 }

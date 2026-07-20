@@ -480,10 +480,7 @@ describe("scopes", () => {
 
 describe("telemetry contracts", () => {
 	it("round-trips the synthetic composite log ID", () => {
-		const internal = JSON.stringify([
-			"2026-07-15 12:00:00.123",
-			"00112233445566778899AABBCCDDEEFF",
-		])
+		const internal = JSON.stringify(["2026-07-15 12:00:00.123", "00112233445566778899AABBCCDDEEFF"])
 		const wire = Schema.encodeSync(LogPublicId)(internal)
 		expect(wire.startsWith("log_")).toBe(true)
 		expect(Schema.decodeSync(LogPublicId)(wire)).toBe(internal)
@@ -532,20 +529,22 @@ describe("telemetry contracts", () => {
 describe("list pagination", () => {
 	const items = Array.from({ length: 45 }, (_, index) => index)
 
-	it("paginates with default limit and opaque cursors", () => {
-		const first = Effect.runSync(paginateArray(items, {}))
-		expect(first.data).toHaveLength(20)
-		expect(first.has_more).toBe(true)
-		expect(first.next_cursor).not.toBeNull()
+	it.effect("paginates with default limit and opaque cursors", () =>
+		Effect.gen(function* () {
+			const first = yield* paginateArray(items, {})
+			expect(first.data).toHaveLength(20)
+			expect(first.has_more).toBe(true)
+			expect(first.next_cursor).not.toBeNull()
 
-		const second = Effect.runSync(paginateArray(items, { cursor: first.next_cursor! }))
-		expect(second.data[0]).toBe(20)
+			const second = yield* paginateArray(items, { cursor: first.next_cursor! })
+			expect(second.data[0]).toBe(20)
 
-		const third = Effect.runSync(paginateArray(items, { cursor: second.next_cursor!, limit: 20 }))
-		expect(third.data).toHaveLength(5)
-		expect(third.has_more).toBe(false)
-		expect(third.next_cursor).toBeNull()
-	})
+			const third = yield* paginateArray(items, { cursor: second.next_cursor!, limit: 20 })
+			expect(third.data).toHaveLength(5)
+			expect(third.has_more).toBe(false)
+			expect(third.next_cursor).toBeNull()
+		}),
+	)
 
 	it("cursor round-trips and rejects garbage", () => {
 		expect(decodeOffsetCursor(encodeOffsetCursor(1234))).toBe(1234)
@@ -553,29 +552,33 @@ describe("list pagination", () => {
 		expect(decodeOffsetCursor("off_-1")).toBeNull()
 	})
 
-	it("fails invalid cursors instead of silently restarting at page one", () => {
-		const result = Effect.runSync(Effect.result(paginateArray(items, { cursor: "garbage" })))
-		expect(Result.isFailure(result)).toBe(true)
-		if (Result.isFailure(result)) {
-			expect(result.failure.error.code).toBe("parameter_invalid")
-			expect(result.failure.error.param).toBe("cursor")
-		}
-	})
+	it.effect("fails invalid cursors instead of silently restarting at page one", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.result(paginateArray(items, { cursor: "garbage" }))
+			expect(Result.isFailure(result)).toBe(true)
+			if (Result.isFailure(result)) {
+				expect(result.failure.error.code).toBe("parameter_invalid")
+				expect(result.failure.error.param).toBe("cursor")
+			}
+		}),
+	)
 
-	it("uses storage lookahead and returns each row exactly once", () => {
-		const calls: Array<{ limit: number; offset: number }> = []
-		const fetch = ({ limit, offset }: { limit: number; offset: number }) => {
-			calls.push({ limit, offset })
-			return Effect.succeed(items.slice(offset, offset + limit))
-		}
-		const first = Effect.runSync(paginateOffsetQuery({ limit: 10 }, fetch))
-		const second = Effect.runSync(paginateOffsetQuery({ limit: 10, cursor: first.next_cursor! }, fetch))
-		expect(calls).toEqual([
-			{ limit: 11, offset: 0 },
-			{ limit: 11, offset: 10 },
-		])
-		expect([...first.data, ...second.data]).toEqual(items.slice(0, 20))
-	})
+	it.effect("uses storage lookahead and returns each row exactly once", () =>
+		Effect.gen(function* () {
+			const calls: Array<{ limit: number; offset: number }> = []
+			const fetch = ({ limit, offset }: { limit: number; offset: number }) => {
+				calls.push({ limit, offset })
+				return Effect.succeed(items.slice(offset, offset + limit))
+			}
+			const first = yield* paginateOffsetQuery({ limit: 10 }, fetch)
+			const second = yield* paginateOffsetQuery({ limit: 10, cursor: first.next_cursor! }, fetch)
+			expect(calls).toEqual([
+				{ limit: 11, offset: 0 },
+				{ limit: 11, offset: 10 },
+			])
+			expect([...first.data, ...second.data]).toEqual(items.slice(0, 20))
+		}),
+	)
 
 	it("enforces the shared limit range", () => {
 		const decode = Schema.decodeUnknownSync(ListQuery)

@@ -1,4 +1,5 @@
 import { Effect, Layer } from "effect"
+import { HttpClient } from "effect/unstable/http"
 import {
 	WarehouseExecutor,
 	type WarehouseExecutorShape,
@@ -29,13 +30,14 @@ export const WarehouseExecutorFromMode = Layer.effect(
 	WarehouseExecutor,
 	Effect.gen(function* () {
 		const mode = yield* Mode
+		const client = yield* HttpClient.HttpClient
 		const getShape = yield* Effect.cached(
 			mode.resolve.pipe(
 				Effect.map(
 					(m): WarehouseExecutorShape =>
 						m._tag === "local"
 							? makeLocalWarehouseExecutorShape(m.baseUrl)
-							: makeRemoteWarehouseExecutorShape(m.apiUrl, m.token, m.orgId ?? ""),
+							: makeRemoteWarehouseExecutorShape(client, m.apiUrl, m.token, m.orgId ?? ""),
 				),
 				Effect.mapError((e) => new WarehouseConfigError({ message: e.message, pipeName: "mode" })),
 			),

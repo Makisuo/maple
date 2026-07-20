@@ -70,7 +70,10 @@ export const spanDetail = Effect.fn("Observability.spanDetail")(function* (input
 			? { orgId: executor.orgId, startTime: range.startTime, endTime: range.endTime }
 			: { orgId: executor.orgId },
 	)
-	const maybeRow = yield* executor.compiledQueryFirst(compiled, { profile: "discovery" })
+	const maybeRow = yield* executor.compiledQueryFirst(compiled, {
+		profile: "discovery",
+		context: "spanDetail",
+	})
 
 	if (Option.isNone(maybeRow)) {
 		return {

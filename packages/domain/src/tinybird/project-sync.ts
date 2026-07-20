@@ -9,6 +9,7 @@ import {
 } from "./ttl-override"
 
 const REQUEST_TIMEOUT = Duration.seconds(30)
+const STALE_DEPLOYMENT_DELETE_CONCURRENCY = 3
 
 const FeedbackEntrySchema = Schema.Struct({
 	resource: Schema.NullOr(Schema.String),
@@ -445,7 +446,7 @@ export class TinybirdProjectSync extends Context.Service<TinybirdProjectSync, Ti
 								),
 								Effect.ignore,
 							),
-						{ concurrency: "unbounded", discard: true },
+						{ concurrency: STALE_DEPLOYMENT_DELETE_CONCURRENCY, discard: true },
 					)
 				},
 			)

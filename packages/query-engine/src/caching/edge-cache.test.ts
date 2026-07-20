@@ -34,7 +34,7 @@ const makeLayer = (backend: EdgeCacheBackend, readTimeoutMs?: number) =>
 	Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs))
 
 describe("EdgeCacheService.getOrCompute (no schema)", () => {
-	it.effect("fails open to computation when a backend read exceeds its deadline", () => {
+	it.live("fails open to computation when a backend read exceeds its deadline", () => {
 		let computeCalls = 0
 		const backend: EdgeCacheBackend = {
 			get: async () => await new Promise<never>(() => {}),
@@ -57,7 +57,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
 	})
 
-	it.effect("shares the complete slow read-or-compute operation across concurrent callers", () => {
+	it.live("shares the complete slow read-or-compute operation across concurrent callers", () => {
 		let getCalls = 0
 		let computeCalls = 0
 		const backend: EdgeCacheBackend = {
@@ -140,7 +140,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 })
 
 describe("EdgeCacheService.rawGet", () => {
-	it.effect("reports hit, miss, and timeout outcomes without collapsing them", () => {
+	it.live("reports hit, miss, and timeout outcomes without collapsing them", () => {
 		const backend: EdgeCacheBackend = {
 			get: async (bucket) => {
 				if (bucket === "hit") return { value: 42 }
@@ -166,7 +166,7 @@ describe("EdgeCacheService.rawGet", () => {
 		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
 	})
 
-	it.effect("treats a backend read timeout as a cache miss", () => {
+	it.live("treats a backend read timeout as a cache miss", () => {
 		const backend: EdgeCacheBackend = {
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {},

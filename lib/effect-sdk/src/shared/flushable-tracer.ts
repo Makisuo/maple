@@ -14,6 +14,7 @@ import type { ExtractTag } from "effect/Types"
 export interface SpanBuffer {
 	readonly tracerLayer: Layer.Layer<never>
 	readonly drain: () => Array<OtlpSpan>
+	readonly restore: (items: ReadonlyArray<OtlpSpan>) => void
 	readonly setDisabled: (value: boolean) => void
 	readonly size: () => number
 }
@@ -28,9 +29,10 @@ export interface SpanBufferOptions {
 	 */
 	readonly dropSpan?: ((name: string) => boolean) | undefined
 	/**
-	 * `_tag`s of failures that represent *anticipated* outcomes (expected 4xx
-	 * business errors: validation, not-found, unauthorized, …). When a span's
-	 * failure is caused *entirely* by errors with one of these tags, the span is
+	 * Stable `_tag` or `Error.name` identifiers for failures that represent
+	 * anticipated outcomes (expected 4xx business errors: validation, not-found,
+	 * unauthorized, …). When a span's failure is caused *entirely* by errors with
+	 * one of these identifiers, the span is
 	 * still exported (so latency / `http.response.status_code` stay visible) but
 	 * with OTLP status `Ok` and **no** `exception` event — so it never lands in
 	 * error tracking (`error_events_mv` keys off `StatusCode='Error'`). Mirrors
@@ -39,6 +41,8 @@ export interface SpanBufferOptions {
 	 * Distinct from Effect's `ErrorReporter.ignore` flag, which *drops* the span
 	 * entirely (used for benign routing 404s).
 	 */
+	readonly anticipatedErrorIdentifiers?: ReadonlySet<string> | undefined
+	/** @deprecated Use `anticipatedErrorIdentifiers`. */
 	readonly anticipatedErrorTags?: ReadonlySet<string> | undefined
 }
 
@@ -56,15 +60,16 @@ const isIgnoredSpan = (span: SpanImpl): boolean => {
 	if (status._tag !== "Ended") return false
 	const exit = status.exit
 	if (exit._tag !== "Failure") return false
-	// Cause is flat in effect v4: walk `reasons`, pick Fail reasons, inspect their error.
-	return exit.cause.reasons.some((reason) => Cause.isFailReason(reason) && isIgnoredFailure(reason.error))
+	if (exit.cause.reasons.some(Cause.isDieReason)) return false
+	const failures = exit.cause.reasons.filter(Cause.isFailReason)
+	return failures.length > 0 && failures.every((reason) => isIgnoredFailure(reason.error))
 }
 
 export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 	let buffer: Array<OtlpSpan> = []
 	let disabled = false
 	const dropSpan = options.dropSpan
-	const anticipatedErrorTags = options.anticipatedErrorTags
+	const anticipatedErrorIdentifiers = options.anticipatedErrorIdentifiers ?? options.anticipatedErrorTags
 
 	const exportFn = (span: SpanImpl) => {
 		if (disabled) return
@@ -72,7 +77,7 @@ export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 		if (dropSpan !== undefined && dropSpan(span.name)) return
 		if (isIgnoredSpan(span)) return
 		if (buffer.length >= MAX_BUFFER) return
-		buffer.push(makeOtlpSpan(span, anticipatedErrorTags))
+		buffer.push(makeOtlpSpan(span, anticipatedErrorIdentifiers))
 	}
 
 	const tracer = Tracer.make({
@@ -92,6 +97,10 @@ export const makeSpanBuffer = (options: SpanBufferOptions = {}): SpanBuffer => {
 			const items = buffer
 			buffer = []
 			return items
+		},
+		restore: (items) => {
+			if (disabled || items.length === 0) return
+			buffer = [...items, ...buffer].slice(0, MAX_BUFFER)
 		},
 		setDisabled: (value) => {
 			disabled = value
@@ -163,20 +172,28 @@ const generateId = (len: number): string => {
 // A failure is "anticipated" when its `_tag` is in the configured set. A span
 // whose failure is caused *entirely* by anticipated errors (no defects/Die)
 // records OTLP status `Ok` and emits no `exception` event.
-const isAnticipatedFailure = (error: unknown, tags: ReadonlySet<string>): boolean =>
-	Predicate.hasProperty(error, "_tag") && typeof error._tag === "string" && tags.has(error._tag)
+const failureIdentifier = (error: unknown): string | undefined => {
+	if (Predicate.hasProperty(error, "_tag") && typeof error._tag === "string") return error._tag
+	if (Predicate.hasProperty(error, "name") && typeof error.name === "string") return error.name
+	return undefined
+}
+
+const isAnticipatedFailure = (error: unknown, identifiers: ReadonlySet<string>): boolean => {
+	const identifier = failureIdentifier(error)
+	return identifier !== undefined && identifiers.has(identifier)
+}
 
 const isFullyAnticipated = (
 	cause: Cause.Cause<unknown>,
-	tags: ReadonlySet<string> | undefined,
+	identifiers: ReadonlySet<string> | undefined,
 ): boolean => {
-	if (tags === undefined || tags.size === 0) return false
+	if (identifiers === undefined || identifiers.size === 0) return false
 	if (cause.reasons.some(Cause.isDieReason)) return false
 	const failErrors = cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error)
-	return failErrors.length > 0 && failErrors.every((error) => isAnticipatedFailure(error, tags))
+	return failErrors.length > 0 && failErrors.every((error) => isAnticipatedFailure(error, identifiers))
 }
 
-const makeOtlpSpan = (self: SpanImpl, anticipatedErrorTags?: ReadonlySet<string>): OtlpSpan => {
+const makeOtlpSpan = (self: SpanImpl, anticipatedErrorIdentifiers?: ReadonlySet<string>): OtlpSpan => {
 	const status = self.status as ExtractTag<Tracer.SpanStatus, "Ended">
 	const attributes = OtlpResource.entriesToAttributes(self.attributes.entries())
 	const events = self.events.map(([name, startTime, attrs]) => ({
@@ -195,7 +212,7 @@ const makeOtlpSpan = (self: SpanImpl, anticipatedErrorTags?: ReadonlySet<string>
 			{ key: "span.label", value: { stringValue: "⚠︎ Interrupted" } },
 			{ key: "status.interrupted", value: { boolValue: true } },
 		)
-	} else if (isFullyAnticipated(status.exit.cause, anticipatedErrorTags)) {
+	} else if (isFullyAnticipated(status.exit.cause, anticipatedErrorIdentifiers)) {
 		// Expected business outcome (4xx). Keep the span (latency / status code
 		// stay visible) but don't flag it as an error or fingerprint it.
 		otelStatus = constOtelStatusSuccess

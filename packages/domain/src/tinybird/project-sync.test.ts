@@ -349,6 +349,49 @@ describe("Tinybird project sync", () => {
 
 			expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0)
 		})
+
+		it("bounds stale-deployment deletion concurrency and attempts every item", async () => {
+			const staleIds = Array.from({ length: 7 }, (_, index) => `failed-${index + 1}`)
+			const attempted: string[] = []
+			let active = 0
+			let peak = 0
+			let releaseGate: (() => void) | undefined
+			const gate = new Promise<void>((resolve) => {
+				releaseGate = resolve
+			})
+
+			globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+				const url =
+					typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
+				const method = init?.method ?? "GET"
+				if (method === "GET") {
+					return jsonResponse({
+						deployments: staleIds.map((id) => ({ id, status: "failed", live: false })),
+					})
+				}
+
+				const id = url.match(/\/v1\/deployments\/([^?]+)/)?.[1]
+				if (id === undefined) throw new Error(`Unexpected deletion URL: ${url}`)
+				attempted.push(id)
+				active += 1
+				peak = Math.max(peak, active)
+				await gate
+				active -= 1
+				return new Response("", { status: 200 })
+			}) as unknown as typeof fetch
+
+			const cleanup = cleanupStaleTinybirdDeployments({
+				baseUrl: "https://customer.tinybird.co",
+				token: "token",
+			})
+			await vi.waitFor(() => expect(attempted).toHaveLength(3))
+			expect(peak).toBe(3)
+			releaseGate?.()
+			await cleanup
+
+			expect(attempted.sort()).toEqual(staleIds)
+			expect(peak).toBe(3)
+		})
 	})
 
 	describe("cleanupOwnedTinybirdDeployment", () => {

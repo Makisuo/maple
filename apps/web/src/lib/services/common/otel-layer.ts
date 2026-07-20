@@ -1,5 +1,5 @@
 import { MapleFlush } from "@maple-dev/effect-sdk/client"
-import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
+import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { ingestUrl } from "./ingest-url"
 
 // Buffer-backed client telemetry with flush-on-unload. `Maple.layer`
@@ -27,7 +27,7 @@ const telemetry = MapleFlush.make({
 	},
 	// Expected 4xx API responses (the maple-web → maple-api edge surfaces these
 	// as client-span failures) record as Ok instead of errors.
-	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 	// Maple's dashboard prioritizes operator responsiveness over self-replay.
 	// Keep lightweight session metadata and trace/log correlation, but do not
 	// run rrweb DOM capture, compression, and upload loops in every open tab.

@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Data, Effect } from "effect"
+import { Data, Effect, Schema } from "effect"
 import * as ErrorReporter from "effect/ErrorReporter"
 import * as HttpServerError from "effect/unstable/http/HttpServerError"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
@@ -14,6 +14,9 @@ class ReportableError extends Data.TaggedError("ReportableError")<{}> {}
 
 // An anticipated 4xx business error (e.g. unauthorized / not-found).
 class UnauthorizedError extends Data.TaggedError("UnauthorizedError")<{}> {}
+class V2InvalidRequestError extends Schema.ErrorClass<V2InvalidRequestError>(
+	"@maple/http/v2/InvalidRequestError",
+)({ error: Schema.Struct({ type: Schema.Literal("invalid_request_error") }) }) {}
 
 const runSpan = (buffer: ReturnType<typeof makeSpanBuffer>, effect: Effect.Effect<unknown, unknown>) =>
 	effect.pipe(Effect.withSpan("http.server GET"), Effect.provide(buffer.tracerLayer), Effect.exit)
@@ -43,6 +46,14 @@ describe("makeSpanBuffer ignored-failure drop", () => {
 		}),
 	)
 
+	it.effect("keeps a mixed ignored failure and defect", () =>
+		Effect.gen(function* () {
+			const buffer = makeSpanBuffer()
+			yield* runSpan(buffer, Effect.fail(new BenignError()).pipe(Effect.ensuring(Effect.die("boom"))))
+			assert.strictEqual(buffer.size(), 1)
+		}),
+	)
+
 	// Pins the upstream contract: the actual error HttpRouter raises for an
 	// unmatched route must stay [ErrorReporter.ignore]-flagged, so the drop holds.
 	it.effect("drops the real HttpServerError/RouteNotFound", () =>
@@ -65,6 +76,25 @@ describe("makeSpanBuffer anticipated-error classification", () => {
 		Effect.gen(function* () {
 			const buffer = makeSpanBuffer({ anticipatedErrorTags: tags })
 			yield* runSpan(buffer, Effect.fail(new UnauthorizedError()))
+			const [span] = buffer.drain()
+			assert.isDefined(span)
+			assert.strictEqual(span!.status.code, 1 /* Ok */)
+			assert.strictEqual(
+				span!.events.some((event) => event.name === "exception"),
+				false,
+			)
+		}),
+	)
+
+	it.effect("classifies Schema.ErrorClass failures by Error.name", () =>
+		Effect.gen(function* () {
+			const buffer = makeSpanBuffer({
+				anticipatedErrorIdentifiers: new Set(["@maple/http/v2/InvalidRequestError"]),
+			})
+			yield* runSpan(
+				buffer,
+				Effect.fail(new V2InvalidRequestError({ error: { type: "invalid_request_error" } })),
+			)
 			const [span] = buffer.drain()
 			assert.isDefined(span)
 			assert.strictEqual(span!.status.code, 1 /* Ok */)
@@ -129,6 +159,29 @@ describe("makeSpanBuffer anticipated-error classification", () => {
 				span!.events.some((event) => event.name === "exception"),
 				false,
 			)
+		}),
+	)
+})
+
+describe("makeSpanBuffer restore", () => {
+	it.effect("keeps older failed telemetry and discards newest overflow", () =>
+		Effect.gen(function* () {
+			const buffer = makeSpanBuffer()
+			yield* runSpan(buffer, Effect.succeed("old"))
+			const [oldest] = buffer.drain()
+			yield* Effect.succeed(undefined).pipe(
+				Effect.withSpan("newest"),
+				Effect.provide(buffer.tracerLayer),
+			)
+			const [newest] = buffer.drain()
+			assert.isDefined(oldest)
+			assert.isDefined(newest)
+
+			buffer.restore([oldest!, ...Array.from({ length: 10_000 }, () => newest!)])
+			const restored = buffer.drain()
+			assert.strictEqual(restored.length, 10_000)
+			assert.strictEqual(restored[0]?.name, "http.server GET")
+			assert.strictEqual(restored.at(-1)?.name, "newest")
 		}),
 	)
 })

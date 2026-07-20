@@ -189,6 +189,8 @@ describe("makeExecuteRawSql", () => {
 			const cellError = yield* Effect.flip(
 				executeRows([{ value: "x".repeat(MAX_RAW_SQL_CELL_LENGTH + 1) }]),
 			)
+			assert.strictEqual(cellError._tag, "@maple/http/errors/RawSqlValidationError")
+			assert.strictEqual(cellError.code, "ResourceLimit")
 			assert.include(cellError.message, "cells")
 
 			const bytesError = yield* Effect.flip(
@@ -199,9 +201,13 @@ describe("makeExecuteRawSql", () => {
 					})),
 				),
 			)
+			assert.strictEqual(bytesError._tag, "@maple/http/errors/RawSqlValidationError")
+			assert.strictEqual(bytesError.code, "ResourceLimit")
 			assert.include(bytesError.message, "bytes")
 
 			const jsonError = yield* Effect.flip(executeRows([{ value: 1n }]))
+			assert.strictEqual(jsonError._tag, "@maple/http/errors/RawSqlValidationError")
+			assert.strictEqual(jsonError.code, "ResourceLimit")
 			assert.include(jsonError.message, "JSON serializable")
 		}),
 	)
