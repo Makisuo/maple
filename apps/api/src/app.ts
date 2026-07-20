@@ -228,7 +228,9 @@ const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreSe
 const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 const DigestServiceLive = DigestService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EmailServiceLive)),
+	Layer.provideMerge(
+		Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EdgeCacheServiceLive, EmailServiceLive),
+	),
 )
 
 // VCS service wiring for the fetch-path worker. VcsSyncService (the sync

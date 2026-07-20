@@ -98,7 +98,8 @@ const CLASSIFICATION_RULES: ReadonlyArray<ClassificationRule> = [
 	{
 		status: (s) => s === 401 || s === 403,
 		types: new Set(["AUTHENTICATION_FAILED", "ACCESS_DENIED", "USER_DOESNT_EXIST", "REQUIRED_PASSWORD"]),
-		pattern: /authentication failed|access denied|not enough privileges|password is incorrect/i,
+		pattern:
+			/authentication failed|access denied|not enough privileges|password is incorrect|invalid authentication token/i,
 		make: (base, upstreamStatus) => new WarehouseAuthError({ ...base, upstreamStatus }),
 	},
 	{

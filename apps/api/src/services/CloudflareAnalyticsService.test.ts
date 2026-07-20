@@ -12,6 +12,7 @@ import {
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
+import { eq } from "drizzle-orm"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
@@ -842,6 +843,32 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(result.skipped, 1)
 			assert.strictEqual(result.perOrg.length, 1)
 			assert.strictEqual(result.perOrg[0]!.skipped, "lease held by another tick")
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("pollAllOrgs skips connections stamped revoked; resetOrgState clears the stamp", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			const database = yield* Database
+			yield* database.execute((db) =>
+				db
+					.update(oauthConnections)
+					.set({ revokedAt: new Date(T0 - MIN) })
+					.where(eq(oauthConnections.orgId, ORG)),
+			)
+			const service = yield* CloudflareAnalyticsService
+			const result = yield* service.pollAllOrgs()
+			assert.strictEqual(result.perOrg.length, 0)
+			assert.strictEqual(result.rowsIngested, 0)
+
+			yield* service.resetOrgState(ORG)
+			const rows = yield* database.execute((db) =>
+				db.select().from(oauthConnections).where(eq(oauthConnections.orgId, ORG)),
+			)
+			assert.isNull(rows[0]!.revokedAt)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 

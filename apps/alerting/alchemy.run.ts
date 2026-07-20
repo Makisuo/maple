@@ -94,6 +94,9 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 				...optionalPlain("MAPLE_ENDPOINT"),
 				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+			// Non-prod stages skip all crons (they share live org data via the prod
+			// DB); set to "1" on a stage to deliberately exercise crons there.
+			...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
 				...optionalPlain("COMMIT_SHA"),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),

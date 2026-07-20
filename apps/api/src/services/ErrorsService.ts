@@ -80,6 +80,10 @@ import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "../lib/warehouse-org-quarantine"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -2840,7 +2844,18 @@ const make: Effect.Effect<
 		const results = yield* Effect.forEach(
 			[...knownOrgs],
 			(org) =>
-				processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org)).pipe(
+				Effect.gen(function* () {
+					// Orgs whose warehouse rejected queries with an auth/config-class error
+					// are parked (see warehouse-org-quarantine.ts) — retrying every tick
+					// fails identically until an operator repairs the org's config.
+					if (yield* isOrgWarehouseQuarantined(edgeCache, org)) {
+						yield* Effect.logInfo("Skipping org with quarantined warehouse").pipe(
+							Effect.annotateLogs({ orgId: org }),
+						)
+						return emptyResult
+					}
+					return yield* processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org))
+				}).pipe(
 					// Isolate genuine per-org failures/defects so one bad org can't fail the
 					// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
 					// re-raise them so the tick cancels promptly instead of logging a
@@ -2849,12 +2864,19 @@ const make: Effect.Effect<
 						Cause.hasInterruptsOnly(cause)
 							? Effect.interrupt
 							: Effect.gen(function* () {
-									yield* Effect.logError("Error tick failed for org").pipe(
-										Effect.annotateLogs({
-											orgId: org,
-											error: Cause.pretty(cause),
-										}),
-									)
+									const quarantined = yield* quarantineOnConfigClassCause(edgeCache, org, cause, endMs)
+									if (quarantined) {
+										yield* Effect.logInfo(
+											"Org warehouse rejected queries with a config-class error; quarantined",
+										).pipe(Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }))
+									} else {
+										yield* Effect.logError("Error tick failed for org").pipe(
+											Effect.annotateLogs({
+												orgId: org,
+												error: Cause.pretty(cause),
+											}),
+										)
+									}
 									yield* Ref.update(orgFailures, (n) => n + 1)
 									return emptyResult
 								}),

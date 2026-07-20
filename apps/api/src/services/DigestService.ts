@@ -22,6 +22,11 @@ import { dateToMs } from "../lib/time"
 import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
+import { EdgeCacheService } from "@maple/query-engine/caching"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "../lib/warehouse-org-quarantine"
 
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")
 const ROOT_ROLE = RoleName.make("root")
@@ -87,6 +92,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 		const email = yield* EmailService
 		const env = yield* Env
 		const warehouse = yield* WarehouseQueryService
+		const edgeCache = yield* EdgeCacheService
 
 		const getSubscription = Effect.fn("DigestService.getSubscription")(function* (
 			orgId: OrgId,
@@ -712,6 +718,16 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						const orgId = OrgId.make(rawOrgId)
 						const orgSubIds = orgSubs.map((s) => s.id)
 
+						// Orgs whose warehouse rejected queries with an auth/config-class
+						// error are parked (see warehouse-org-quarantine.ts). Checked before
+						// the claim so a parked org isn't marked attempted for the day.
+						if (yield* isOrgWarehouseQuarantined(edgeCache, rawOrgId)) {
+							yield* Effect.logInfo("Skipping digest for org with quarantined warehouse").pipe(
+								Effect.annotateLogs({ orgId: rawOrgId }),
+							)
+							return []
+						}
+
 						const claim = yield* database
 							.execute((db) =>
 								db
@@ -806,13 +822,27 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						return sendResults
 					}).pipe(
 						Effect.catchCause((cause) =>
-							Effect.logError("Digest failed for org").pipe(
-								Effect.annotateLogs({
-									orgId: rawOrgId,
-									error: Cause.pretty(cause),
-								}),
-								Effect.map(() => orgSubs.map(() => ({ sent: false }))),
-							),
+							Effect.gen(function* () {
+								const quarantined = yield* quarantineOnConfigClassCause(
+									edgeCache,
+									rawOrgId,
+									cause,
+									now,
+								)
+								if (quarantined) {
+									yield* Effect.logInfo(
+										"Org warehouse rejected queries with a config-class error; quarantined",
+									).pipe(Effect.annotateLogs({ orgId: rawOrgId, error: Cause.pretty(cause) }))
+								} else {
+									yield* Effect.logError("Digest failed for org").pipe(
+										Effect.annotateLogs({
+											orgId: rawOrgId,
+											error: Cause.pretty(cause),
+										}),
+									)
+								}
+								return orgSubs.map(() => ({ sent: false }))
+							}),
 						),
 					),
 				{ concurrency: 1 },

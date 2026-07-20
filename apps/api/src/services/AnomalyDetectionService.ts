@@ -36,6 +36,10 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import { CH, parseWarehouseDateTime } from "@maple/query-engine"
 import { EdgeCacheService } from "@maple/query-engine/caching"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "../lib/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
@@ -1844,7 +1848,17 @@ const make = Effect.gen(function* () {
 			const results = yield* Effect.forEach(
 				orgsToProcess,
 				(org) =>
-					processOrg(org, nowMs, runRetention).pipe(
+					Effect.gen(function* () {
+						// Orgs whose warehouse rejected queries with an auth/config-class
+						// error are parked (see warehouse-org-quarantine.ts).
+						if (yield* isOrgWarehouseQuarantined(edgeCache, org)) {
+							yield* Effect.logInfo("Skipping org with quarantined warehouse").pipe(
+								Effect.annotateLogs({ orgId: org }),
+							)
+							return emptyStats
+						}
+						return yield* processOrg(org, nowMs, runRetention)
+					}).pipe(
 						// Isolate genuine per-org failures/defects so one bad org can't fail
 						// the whole tick. Interrupts (isolate teardown) are NOT per-org
 						// failures — re-raise them so the tick cancels promptly instead of
@@ -1853,9 +1867,21 @@ const make = Effect.gen(function* () {
 							Cause.hasInterruptsOnly(cause)
 								? Effect.interrupt
 								: Effect.gen(function* () {
-										yield* Effect.logError("Anomaly tick failed for org").pipe(
-											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+										const quarantined = yield* quarantineOnConfigClassCause(
+											edgeCache,
+											org,
+											cause,
+											nowMs,
 										)
+										if (quarantined) {
+											yield* Effect.logInfo(
+												"Org warehouse rejected queries with a config-class error; quarantined",
+											).pipe(Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }))
+										} else {
+											yield* Effect.logError("Anomaly tick failed for org").pipe(
+												Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+											)
+										}
 										yield* Ref.update(orgFailures, (n) => n + 1)
 										return emptyStats
 									}),
