@@ -141,16 +141,16 @@ describe("evaluateGoldenSignals — throughput", () => {
 		expect(byKey(evals, "throughput").status).toBe("skipped")
 	})
 
-	it("breaches on a >50% drop after 20 elapsed minutes", () => {
+	it("stays healthy on a large but non-outage traffic reduction", () => {
 		// Baseline 6000/h = 100/min; current 600 over 20min = 30/min.
 		const evals = evaluateGoldenSignals(goldenSeries({ requestCount: 600, errorCount: 6, p95Ms: 200 }), {
 			sensitivity: SENSITIVITY.normal,
 			elapsedMinutes: 20,
 		})
-		expect(byKey(evals, "throughput").status).toBe("breached")
+		expect(byKey(evals, "throughput").status).toBe("healthy")
 	})
 
-	it("skips near-idle services", () => {
+	it("keeps near-idle services healthy", () => {
 		const evals = evaluateGoldenSignals(
 			goldenSeries(
 				{ requestCount: 0, errorCount: 0, p95Ms: 0 },
@@ -158,10 +158,10 @@ describe("evaluateGoldenSignals — throughput", () => {
 			),
 			normalConfig,
 		)
-		expect(byKey(evals, "throughput").status).toBe("skipped")
+		expect(byKey(evals, "throughput").status).toBe("healthy")
 	})
 
-	it("skips while too few requests were expected (low-rate service, early window)", () => {
+	it("keeps low-rate services healthy when too few requests were expected", () => {
 		// Baseline 72/h = 1.2/min; 20 elapsed minutes → 24 expected < 30.
 		const evals = evaluateGoldenSignals(
 			goldenSeries(
@@ -170,7 +170,7 @@ describe("evaluateGoldenSignals — throughput", () => {
 			),
 			{ sensitivity: SENSITIVITY.normal, elapsedMinutes: 20 },
 		)
-		expect(byKey(evals, "throughput").status).toBe("skipped")
+		expect(byKey(evals, "throughput").status).toBe("healthy")
 	})
 
 	it("never evaluates services whose hourly expectation stays under the floor", () => {
@@ -182,40 +182,45 @@ describe("evaluateGoldenSignals — throughput", () => {
 			),
 			{ sensitivity: SENSITIVITY.normal, elapsedMinutes: 59 },
 		)
-		expect(byKey(evals, "throughput").status).toBe("skipped")
+		expect(byKey(evals, "throughput").status).toBe("healthy")
 	})
 
-	// Rates 5/10/40 per minute → median 10, MAD-sigma ≈ 7.4, so m − 4σ < 0:
-	// the clamp floor (0.1m) is the operative threshold and only a near-total
-	// outage may fire.
-	const clampRegimeBaseline = [
-		...Array.from({ length: 7 }, () => ({ requestCount: 300, errorCount: 0, p95Ms: 200 })),
-		...Array.from({ length: 7 }, () => ({ requestCount: 600, errorCount: 0, p95Ms: 200 })),
-		...Array.from({ length: 7 }, () => ({ requestCount: 2400, errorCount: 0, p95Ms: 200 })),
-	]
-
-	it("stays healthy on a deep-but-volumed drop in the clamp regime (noise case)", () => {
-		// 25 requests in 30min = 0.83/min < 0.1m threshold, but volume is well
-		// above the outage ceiling (5% of 300 expected = 15) → quiet, not down.
+	it("does not treat an intermittent baseline as an always-on service", () => {
+		const intermittent = goldenBaseline().slice(0, 7)
 		const evals = evaluateGoldenSignals(
-			goldenSeries({ requestCount: 25, errorCount: 0, p95Ms: 200 }, clampRegimeBaseline),
+			goldenSeries({ requestCount: 0, errorCount: 0, p95Ms: 0 }, intermittent),
 			normalConfig,
 		)
 		expect(byKey(evals, "throughput").status).toBe("healthy")
 	})
 
-	it("still breaches on a near-total outage in the clamp regime", () => {
+	// Rates 5/10/40 per minute exercise a highly variable but well-covered
+	// baseline. Even here, only a near-total outage should affect health.
+	const highVarianceBaseline = [
+		...Array.from({ length: 7 }, () => ({ requestCount: 300, errorCount: 0, p95Ms: 200 })),
+		...Array.from({ length: 7 }, () => ({ requestCount: 600, errorCount: 0, p95Ms: 200 })),
+		...Array.from({ length: 7 }, () => ({ requestCount: 2400, errorCount: 0, p95Ms: 200 })),
+	]
+
+	it("stays healthy when a variable service still has meaningful traffic", () => {
+		// 25 requests in 30min = 0.83/min, above the 5% outage threshold of
+		// 0.5/min. This is quieter than usual, but it is not an outage.
 		const evals = evaluateGoldenSignals(
-			goldenSeries({ requestCount: 3, errorCount: 0, p95Ms: 200 }, clampRegimeBaseline),
+			goldenSeries({ requestCount: 25, errorCount: 0, p95Ms: 200 }, highVarianceBaseline),
+			normalConfig,
+		)
+		expect(byKey(evals, "throughput").status).toBe("healthy")
+	})
+
+	it("breaches on a near-total outage", () => {
+		const evals = evaluateGoldenSignals(
+			goldenSeries({ requestCount: 3, errorCount: 0, p95Ms: 200 }, highVarianceBaseline),
 			normalConfig,
 		)
 		expect(byKey(evals, "throughput").status).toBe("breached")
 	})
 
-	it("stays fireable on high-variance series (threshold never goes negative)", () => {
-		// MAD comparable to the median: m - k*sigma is deeply negative, so without
-		// the clamp the drop signal could never fire and a negative threshold
-		// would be persisted. A full outage must still breach via the 0.1m floor.
+	it("stays fireable on high-variance series with a non-negative outage threshold", () => {
 		const noisy = Array.from({ length: 21 }, (_, i) => ({
 			requestCount: i % 2 === 0 ? 600 : 12000,
 			errorCount: 0,

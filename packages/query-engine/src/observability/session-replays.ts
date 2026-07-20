@@ -75,8 +75,14 @@ export const getSessionTraces = Effect.fn("Observability.getSessionTraces")(func
 	})
 	const [maybeSession, maybeActivity] = yield* Effect.all(
 		[
-			executor.compiledQueryFirst(detailCompiled, { profile: "discovery" }),
-			executor.compiledQueryFirst(activityCompiled, { profile: "discovery" }),
+			executor.compiledQueryFirst(detailCompiled, {
+				profile: "discovery",
+				context: "sessionReplayDetail",
+			}),
+			executor.compiledQueryFirst(activityCompiled, {
+				profile: "discovery",
+				context: "sessionActivity",
+			}),
 		],
 		{ concurrency: 2 },
 	)
@@ -106,7 +112,10 @@ export const getSessionTraces = Effect.fn("Observability.getSessionTraces")(func
 	const summariesCompiled = CH.compile(CH.sessionTraceSummariesQuery({ traceIds }), {
 		orgId: executor.orgId,
 	})
-	const traces = yield* executor.compiledQuery(summariesCompiled, { profile: "list" })
+	const traces = yield* executor.compiledQuery(summariesCompiled, {
+		profile: "list",
+		context: "sessionTraceSummaries",
+	})
 
 	return { session, traces, totalTraceCount } satisfies SessionTracesOutput
 })

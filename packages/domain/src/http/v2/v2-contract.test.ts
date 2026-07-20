@@ -5,6 +5,7 @@ import { V2AlertIncident } from "./alert-incidents"
 import { V2AlertRule, V2AlertRuleMutationResponse } from "./alert-rules"
 import { V2ApiKey, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2DashboardMutation } from "./dashboards"
+import { V2ErrorIssue, V2ErrorIssueDetail } from "./error-issues"
 import { requiredScopeForRequest, scopeAllows, V2Scope } from "./auth"
 import {
 	decodeOffsetCursor,
@@ -98,6 +99,66 @@ describe("V2ApiKey wire format", () => {
 				txid: "not-a-txid",
 			}),
 		).toThrow()
+	})
+})
+
+describe("V2ErrorIssue wire format", () => {
+	const issueWire = {
+		id: encodePublicId("iss", UUID),
+		object: "error_issue" as const,
+		kind: "error" as const,
+		fingerprint_hash: "1234",
+		service_name: "checkout-api",
+		exception_type: "TimeoutError",
+		exception_message: "upstream timed out",
+		error_label: "TimeoutError: upstream timed out",
+		top_frame: "handler.ts:42",
+		workflow_state: "triage" as const,
+		priority: 0,
+		severity: "critical" as const,
+		severity_source: "detector" as const,
+		source_ref: null,
+		assigned_actor: null,
+		lease_holder: null,
+		lease_expires_at: null,
+		claimed_at: null,
+		notes: null,
+		first_seen_at: "2026-07-15T00:00:00.000Z",
+		last_seen_at: "2026-07-15T01:00:00.000Z",
+		occurrence_count: 12,
+		resolved_at: null,
+		snooze_until: null,
+		archived_at: null,
+		has_open_incident: true,
+	}
+
+	it("encodes the resource with snake_case fields and an iss_ public ID", () => {
+		const decoded = Schema.decodeUnknownSync(V2ErrorIssue)(issueWire)
+		expect(decoded.id).toBe(UUID)
+		const wire = Schema.encodeSync(V2ErrorIssue)(decoded)
+		expect(wire.id).toBe(encodePublicId("iss", UUID))
+		expect(wire.service_name).toBe("checkout-api")
+		expect("serviceName" in wire).toBe(false)
+	})
+
+	it("decodes the rich retrieve representation", () => {
+		const detail = Schema.decodeUnknownSync(V2ErrorIssueDetail)({
+			...issueWire,
+			timeseries: [{ bucket: "2026-07-15T01:00:00.000Z", count: 4 }],
+			sample_traces: [
+				{
+					trace_id: "0123456789abcdef0123456789abcdef",
+					span_id: "0123456789abcdef",
+					service_name: "checkout-api",
+					timestamp: "2026-07-15T01:00:00.000Z",
+					exception_message: "upstream timed out",
+					duration_micros: 1200,
+				},
+			],
+			incidents: [],
+		})
+		expect(detail.timeseries[0]?.count).toBe(4)
+		expect(detail.sample_traces[0]?.trace_id).toBe("0123456789abcdef0123456789abcdef")
 	})
 })
 
@@ -419,10 +480,7 @@ describe("scopes", () => {
 
 describe("telemetry contracts", () => {
 	it("round-trips the synthetic composite log ID", () => {
-		const internal = JSON.stringify([
-			"2026-07-15 12:00:00.123",
-			"00112233445566778899AABBCCDDEEFF",
-		])
+		const internal = JSON.stringify(["2026-07-15 12:00:00.123", "00112233445566778899AABBCCDDEEFF"])
 		const wire = Schema.encodeSync(LogPublicId)(internal)
 		expect(wire.startsWith("log_")).toBe(true)
 		expect(Schema.decodeSync(LogPublicId)(wire)).toBe(internal)
@@ -471,20 +529,22 @@ describe("telemetry contracts", () => {
 describe("list pagination", () => {
 	const items = Array.from({ length: 45 }, (_, index) => index)
 
-	it("paginates with default limit and opaque cursors", () => {
-		const first = Effect.runSync(paginateArray(items, {}))
-		expect(first.data).toHaveLength(20)
-		expect(first.has_more).toBe(true)
-		expect(first.next_cursor).not.toBeNull()
+	it.effect("paginates with default limit and opaque cursors", () =>
+		Effect.gen(function* () {
+			const first = yield* paginateArray(items, {})
+			expect(first.data).toHaveLength(20)
+			expect(first.has_more).toBe(true)
+			expect(first.next_cursor).not.toBeNull()
 
-		const second = Effect.runSync(paginateArray(items, { cursor: first.next_cursor! }))
-		expect(second.data[0]).toBe(20)
+			const second = yield* paginateArray(items, { cursor: first.next_cursor! })
+			expect(second.data[0]).toBe(20)
 
-		const third = Effect.runSync(paginateArray(items, { cursor: second.next_cursor!, limit: 20 }))
-		expect(third.data).toHaveLength(5)
-		expect(third.has_more).toBe(false)
-		expect(third.next_cursor).toBeNull()
-	})
+			const third = yield* paginateArray(items, { cursor: second.next_cursor!, limit: 20 })
+			expect(third.data).toHaveLength(5)
+			expect(third.has_more).toBe(false)
+			expect(third.next_cursor).toBeNull()
+		}),
+	)
 
 	it("cursor round-trips and rejects garbage", () => {
 		expect(decodeOffsetCursor(encodeOffsetCursor(1234))).toBe(1234)
@@ -492,29 +552,33 @@ describe("list pagination", () => {
 		expect(decodeOffsetCursor("off_-1")).toBeNull()
 	})
 
-	it("fails invalid cursors instead of silently restarting at page one", () => {
-		const result = Effect.runSync(Effect.result(paginateArray(items, { cursor: "garbage" })))
-		expect(Result.isFailure(result)).toBe(true)
-		if (Result.isFailure(result)) {
-			expect(result.failure.error.code).toBe("parameter_invalid")
-			expect(result.failure.error.param).toBe("cursor")
-		}
-	})
+	it.effect("fails invalid cursors instead of silently restarting at page one", () =>
+		Effect.gen(function* () {
+			const result = yield* Effect.result(paginateArray(items, { cursor: "garbage" }))
+			expect(Result.isFailure(result)).toBe(true)
+			if (Result.isFailure(result)) {
+				expect(result.failure.error.code).toBe("parameter_invalid")
+				expect(result.failure.error.param).toBe("cursor")
+			}
+		}),
+	)
 
-	it("uses storage lookahead and returns each row exactly once", () => {
-		const calls: Array<{ limit: number; offset: number }> = []
-		const fetch = ({ limit, offset }: { limit: number; offset: number }) => {
-			calls.push({ limit, offset })
-			return Effect.succeed(items.slice(offset, offset + limit))
-		}
-		const first = Effect.runSync(paginateOffsetQuery({ limit: 10 }, fetch))
-		const second = Effect.runSync(paginateOffsetQuery({ limit: 10, cursor: first.next_cursor! }, fetch))
-		expect(calls).toEqual([
-			{ limit: 11, offset: 0 },
-			{ limit: 11, offset: 10 },
-		])
-		expect([...first.data, ...second.data]).toEqual(items.slice(0, 20))
-	})
+	it.effect("uses storage lookahead and returns each row exactly once", () =>
+		Effect.gen(function* () {
+			const calls: Array<{ limit: number; offset: number }> = []
+			const fetch = ({ limit, offset }: { limit: number; offset: number }) => {
+				calls.push({ limit, offset })
+				return Effect.succeed(items.slice(offset, offset + limit))
+			}
+			const first = yield* paginateOffsetQuery({ limit: 10 }, fetch)
+			const second = yield* paginateOffsetQuery({ limit: 10, cursor: first.next_cursor! }, fetch)
+			expect(calls).toEqual([
+				{ limit: 11, offset: 0 },
+				{ limit: 11, offset: 10 },
+			])
+			expect([...first.data, ...second.data]).toEqual(items.slice(0, 20))
+		}),
+	)
 
 	it("enforces the shared limit range", () => {
 		const decode = Schema.decodeUnknownSync(ListQuery)

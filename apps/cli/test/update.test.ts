@@ -1,6 +1,25 @@
 import { describe, it } from "@effect/vitest"
-import { strictEqual } from "node:assert"
-import { CHECK_TTL_MS, isNewer, shouldCheck, stripV, targetTripleFor } from "../src/core/update"
+import { ok, strictEqual } from "node:assert"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { Duration, Effect } from "effect"
+import { FetchHttpClient } from "effect/unstable/http"
+import {
+	__testables,
+	CHECK_TTL_MS,
+	fetchLatestTag,
+	isNewer,
+	shouldCheck,
+	stripV,
+	targetTripleFor,
+} from "../src/core/update"
+
+const withFetch = <A, E, R>(effect: Effect.Effect<A, E, R>, fetchStub: typeof fetch) =>
+	effect.pipe(
+		Effect.provide(FetchHttpClient.layer),
+		Effect.provideService(FetchHttpClient.Fetch, fetchStub),
+	)
 
 describe("stripV", () => {
 	it("drops a leading v", () => {
@@ -77,5 +96,89 @@ describe("shouldCheck", () => {
 	it("checks exactly at the TTL boundary", () => {
 		const exactlyTtl = new Date(now - CHECK_TTL_MS).toISOString()
 		strictEqual(shouldCheck(exactlyTtl, now), true)
+	})
+})
+
+describe("update HTTP", () => {
+	it.effect("decodes the latest release tag without mutating global fetch", () =>
+		Effect.gen(function* () {
+			const fetchStub = (async () => Response.json({ tag_name: "v1.2.3" })) as typeof fetch
+			const tag = yield* withFetch(fetchLatestTag(), fetchStub)
+			strictEqual(tag, "v1.2.3")
+		}),
+	)
+
+	it.effect("maps non-2xx and decode failures to UpdateError", () =>
+		Effect.gen(function* () {
+			const statusError = yield* Effect.flip(
+				withFetch(
+					fetchLatestTag(),
+					(async () => new Response("unavailable", { status: 503 })) as typeof fetch,
+				),
+			)
+			strictEqual(statusError._tag, "@maple/cli/UpdateError")
+			ok(statusError.message.includes("503"))
+
+			const decodeError = yield* Effect.flip(
+				withFetch(fetchLatestTag(), (async () => new Response("not-json")) as typeof fetch),
+			)
+			strictEqual(decodeError._tag, "@maple/cli/UpdateError")
+			ok(decodeError.message.includes("decode"))
+		}),
+	)
+
+	it("aborts a tag request at its configured deadline", async () => {
+		let aborted = false
+		const fetchStub = ((input: string | URL | Request, init?: RequestInit) => {
+			const signal = input instanceof Request ? input.signal : init?.signal
+			return new Promise<Response>((_resolve, reject) => {
+				signal?.addEventListener("abort", () => {
+					aborted = true
+					reject(new DOMException("aborted", "AbortError"))
+				})
+			})
+		}) as typeof fetch
+		const error = await Effect.runPromise(Effect.flip(withFetch(fetchLatestTag(5), fetchStub)))
+		ok(error.message.includes("timed out"))
+		strictEqual(aborted, true)
+	})
+
+	it("downloads release bytes and reads checksums through the shared client", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "maple-update-http-"))
+		const destination = join(dir, "release.tar.gz")
+		const fetchStub = (async (input: string | URL | Request) => {
+			const url = input instanceof Request ? input.url : String(input)
+			return url.endsWith(".sha256")
+				? new Response("abc123  release.tar.gz\n")
+				: new Response("release-bytes")
+		}) as typeof fetch
+
+		try {
+			await Effect.runPromise(
+				withFetch(
+					__testables.downloadTo(
+						"https://release.test/release.tar.gz",
+						destination,
+						Duration.seconds(1),
+					),
+					fetchStub,
+				),
+			)
+			strictEqual(await readFile(destination, "utf8"), "release-bytes")
+			strictEqual(
+				await Effect.runPromise(
+					withFetch(
+						__testables.fetchText(
+							"https://release.test/release.tar.gz.sha256",
+							Duration.seconds(1),
+						),
+						fetchStub,
+					),
+				),
+				"abc123  release.tar.gz\n",
+			)
+		} finally {
+			await rm(dir, { recursive: true, force: true })
+		}
 	})
 })

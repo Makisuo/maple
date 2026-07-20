@@ -10,8 +10,16 @@ export class V2PaginationCursorLoopError extends Schema.TaggedErrorClass<V2Pagin
 	"@maple/web/services/V2PaginationCursorLoopError",
 	{
 		cursor: Schema.String,
+		message: Schema.String,
 	},
-) {}
+) {
+	static repeated(cursor: string): V2PaginationCursorLoopError {
+		return new V2PaginationCursorLoopError({
+			cursor,
+			message: `Pagination cursor repeated before the list completed: ${cursor}`,
+		})
+	}
+}
 
 /** Collect every page from a v2 list without imposing a hidden client-side cap. */
 export const collectV2Pages = <T, E, R>(
@@ -28,7 +36,7 @@ export const collectV2Pages = <T, E, R>(
 
 			if (!response.has_more || response.next_cursor === null) return data
 			if (seenCursors.has(response.next_cursor)) {
-				return yield* new V2PaginationCursorLoopError({ cursor: response.next_cursor })
+				return yield* V2PaginationCursorLoopError.repeated(response.next_cursor)
 			}
 
 			seenCursors.add(response.next_cursor)

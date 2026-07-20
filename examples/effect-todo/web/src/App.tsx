@@ -47,6 +47,7 @@ export function App() {
 		setError(null)
 		const exit = await removeTodo({ params: { id } })
 		if (Exit.isSuccess(exit)) refresh()
+		else setError("Failed to delete todo.")
 	}
 
 	return (
@@ -95,7 +96,19 @@ export function App() {
 						{loading && (
 							<li className="px-4 py-6 text-center text-sm text-slate-400">Loading…</li>
 						)}
-						{!loading && todos.length === 0 && (
+						{Result.isFailure(listResult) && (
+							<li className="flex items-center justify-center gap-3 px-4 py-6 text-sm text-rose-600 dark:text-rose-400">
+								<span>Failed to load todos.</span>
+								<button
+									type="button"
+									onClick={refresh}
+									className="rounded-md border border-rose-300 px-2 py-1 text-xs font-medium hover:bg-rose-50 dark:border-rose-800 dark:hover:bg-rose-950/40"
+								>
+									Try again
+								</button>
+							</li>
+						)}
+						{Result.isSuccess(listResult) && todos.length === 0 && (
 							<li className="px-4 py-6 text-center text-sm text-slate-400">
 								Nothing yet — add one above.
 							</li>

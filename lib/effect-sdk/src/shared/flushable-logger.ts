@@ -11,6 +11,7 @@ import * as OtlpResource from "effect/unstable/observability/OtlpResource"
 export interface LogBuffer {
 	readonly loggerLayer: Layer.Layer<never>
 	readonly drain: () => Array<LogRecord>
+	readonly restore: (items: ReadonlyArray<LogRecord>) => void
 	readonly setDisabled: (value: boolean) => void
 	readonly size: () => number
 }
@@ -34,6 +35,10 @@ export const makeLogBuffer = (options: { readonly excludeLogSpans?: boolean } = 
 			const items = buffer
 			buffer = []
 			return items
+		},
+		restore: (items) => {
+			if (disabled || items.length === 0) return
+			buffer = [...items, ...buffer].slice(0, MAX_BUFFER)
 		},
 		setDisabled: (value) => {
 			disabled = value

@@ -46,6 +46,7 @@ import { ThinkingIndicator } from "@/components/ai-elements/thinking-indicator"
 import { Tool, ToolRow, toolLabel } from "@/components/ai-elements/tool"
 import { ToolGroup } from "@/components/ai-elements/tool-group"
 import { ApprovalCard } from "./approval-card"
+import { makeChatApplyPayload } from "./chat-apply-payload"
 import type { UIMessage } from "@/components/ai-elements/types"
 
 type ToolPart = {
@@ -177,7 +178,7 @@ export function ChatConversation({
 			return next
 		})
 	const handleApprove = async (toolCallId: string, tool: string, input: unknown) => {
-		const exit = await applyProposal({ payload: { tool, input } })
+		const exit = await applyProposal({ payload: makeChatApplyPayload(tool, input) })
 		if (Exit.isSuccess(exit)) {
 			if (exit.value.isError) {
 				toast.error(exit.value.content || `Couldn't apply ${tool}`)
@@ -262,8 +263,9 @@ export function ChatConversation({
 									Ready to investigate
 								</p>
 								<p className="max-w-sm text-sm text-muted-foreground">
-									The {investigationNoun(investigationContext!.kind)} above is attached to every message
-									in this thread. Start with a suggestion or ask your own question.
+									The {investigationNoun(investigationContext!.kind)} above is attached to
+									every message in this thread. Start with a suggestion or ask your own
+									question.
 								</p>
 							</div>
 						) : isWidgetFixMode ? (

@@ -7,6 +7,7 @@ import {
 	IssueEscalationPolicyRule,
 	IssueEscalationPolicyUpsertRequest,
 	IssueListCursor,
+	IssueSeverityListCursor,
 	OrgId,
 	UserId,
 } from "@maple/domain/http"
@@ -22,6 +23,7 @@ import {
 	errorIssues,
 	errorIssueEvents,
 	errorIssueStates,
+	errorNotificationPolicies,
 	issueEscalations,
 	orgIngestKeys,
 } from "@maple/db"
@@ -150,6 +152,7 @@ const testConfig = () =>
 const makeWarehouseStub = (
 	scanRows: () => ReadonlyArray<Record<string, unknown>> = () => [],
 	onScan?: () => void,
+	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
 ): WarehouseQueryServiceShape => ({
 	query: () => Effect.die(new Error("unexpected warehouse query")),
 	sqlQuery: () => Effect.succeed([]),
@@ -159,6 +162,10 @@ const makeWarehouseStub = (
 			if (options?.context === "errorIssuesScan") {
 				onScan?.()
 				return compiled.castRows(scanRows())
+			}
+			// listIssues' deployment-environment filter (shaped like ErrorFingerprintsOutput).
+			if (options?.context === "errorIssueEnvFingerprints") {
+				return compiled.castRows(fingerprintRows?.() ?? [])
 			}
 			// Active-org discovery reads the same data the scan does, so model that
 			// consistency: surface the org iff it currently has error rows.
@@ -179,19 +186,24 @@ const makeErrorsLayer = (
 	scanRows?: () => ReadonlyArray<Record<string, unknown>>,
 	onScan?: () => void,
 	edgeBackend?: ReturnType<typeof makeMemoryBackend>,
+	fingerprintRows?: () => ReadonlyArray<Record<string, unknown>>,
+	dispatcher?: (typeof NotificationDispatcher)["Service"],
 ) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 	const databaseLive = testDb.layer
-	const dispatcherStub = Layer.succeed(NotificationDispatcher, {
-		dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
-	})
+	const dispatcherStub = Layer.succeed(
+		NotificationDispatcher,
+		dispatcher ?? {
+			dispatch: () => Effect.succeed({ delivered: 0, failed: 0 }),
+		},
+	)
 	return ErrorsService.layer.pipe(
 		Layer.provide(
 			Layer.mergeAll(
 				envLive,
 				databaseLive,
-				Layer.succeed(WarehouseQueryService, makeWarehouseStub(scanRows, onScan)),
+				Layer.succeed(WarehouseQueryService, makeWarehouseStub(scanRows, onScan, fingerprintRows)),
 				Layer.succeed(EdgeCacheService, makeEdgeCacheService(edgeBackend ?? makeMemoryBackend())),
 				dispatcherStub,
 			),
@@ -524,6 +536,43 @@ describe("ErrorsService.setSeverity", () => {
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 
+	it.effect("listIssues deploymentEnv filter keeps only warehouse-observed fingerprints", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const prodIssueId = asIssueId(randomUUID())
+			const otherIssueId = asIssueId(randomUUID())
+			yield* seedIssue(prodIssueId, { fingerprintHash: "111" })
+			yield* seedIssue(otherIssueId, { fingerprintHash: "222" })
+
+			const filtered = yield* errors.listIssues(ORG, { deploymentEnv: "production" })
+			assert.deepStrictEqual(
+				filtered.issues.map((i) => i.id),
+				[prodIssueId],
+			)
+
+			// The unfiltered list still returns both.
+			const all = yield* errors.listIssues(ORG, {})
+			assert.strictEqual(all.issues.length, 2)
+		}).pipe(
+			// The warehouse saw only fingerprint 111 in the selected environment.
+			Effect.provide(makeErrorsLayer(undefined, undefined, undefined, () => [{ fingerprintHash: "111" }])),
+		),
+	)
+
+	it.effect("listIssues deploymentEnv filter short-circuits when no fingerprints match", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			yield* seedIssue(asIssueId(randomUUID()))
+
+			const filtered = yield* errors.listIssues(ORG, { deploymentEnv: "staging" })
+			assert.deepStrictEqual(filtered.issues, [])
+			assert.strictEqual(filtered.nextCursor, undefined)
+		}).pipe(
+			// Default stub: the fingerprint lookup returns no rows for this env.
+			Effect.provide(makeErrorsLayer()),
+		),
+	)
+
 	it.effect("listIssues paginates with a keyset cursor", () =>
 		Effect.gen(function* () {
 			const errors = yield* ErrorsService
@@ -586,6 +635,56 @@ describe("ErrorsService.setSeverity", () => {
 			// Every issue appears exactly once across pages — no skips, no repeats.
 			assert.deepStrictEqual([...seen].sort(), [...ids].sort())
 			assert.strictEqual(new Set(seen).size, ids.length)
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+
+	it.effect("listIssues returns bounded actionable issues in severity order", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const now = yield* Clock.currentTimeMillis
+			const critical = asIssueId("00000000-0000-4000-8000-000000000001")
+			const high = asIssueId("00000000-0000-4000-8000-000000000002")
+			const medium = asIssueId("00000000-0000-4000-8000-000000000003")
+			const done = asIssueId("00000000-0000-4000-8000-000000000004")
+			const otherService = asIssueId("00000000-0000-4000-8000-000000000005")
+			const otherOrg = asIssueId("00000000-0000-4000-8000-000000000006")
+
+			yield* seedIssue(critical, {
+				severity: "critical",
+				workflowState: "triage",
+				lastSeenAt: new Date(now - 60_000),
+			})
+			yield* seedIssue(high, { severity: "high", workflowState: "in_progress" })
+			yield* seedIssue(medium, { severity: "medium", workflowState: "todo" })
+			yield* seedIssue(done, { severity: "critical", workflowState: "done" })
+			yield* seedIssue(otherService, { severity: "critical", serviceName: "catalog-api" })
+			yield* seedIssue(otherOrg, { orgId: asOrgId("org_errors_service_foreign"), severity: "critical" })
+
+			const first = yield* errors.listIssues(ORG, {
+				service: "checkout-api",
+				actionable: true,
+				sort: "severity",
+				limit: 2,
+			})
+			assert.deepStrictEqual(
+				first.issues.map((issue) => issue.id),
+				[critical, high],
+			)
+			assert.match(first.nextCursor ?? "", /^sev_/)
+
+			const cursor = Schema.decodeUnknownSync(IssueSeverityListCursor)(first.nextCursor?.slice(4))
+			const second = yield* errors.listIssues(ORG, {
+				service: "checkout-api",
+				actionable: true,
+				sort: "severity",
+				limit: 2,
+				cursor,
+			})
+			assert.deepStrictEqual(
+				second.issues.map((issue) => issue.id),
+				[medium],
+			)
+			assert.isUndefined(second.nextCursor)
 		}).pipe(Effect.provide(makeErrorsLayer())),
 	)
 })
@@ -842,6 +941,91 @@ describe("ErrorsService.runTick", () => {
 				1,
 			)
 		}).pipe(Effect.provide(makeErrorsLayer(() => rows)))
+	})
+
+	it.effect("overlapping ticks dispatch each incident notification exactly once", () => {
+		let rows: ReadonlyArray<Record<string, unknown>> = [scanRow()]
+		const dispatched: string[] = []
+		const countingDispatcher: (typeof NotificationDispatcher)["Service"] = {
+			dispatch: (_orgId, _destinationIds, context) =>
+				Effect.sync(() => {
+					dispatched.push(context.deliveryKey)
+					return { delivered: 1, failed: 0 }
+				}),
+		}
+		return Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const database = yield* Database
+			yield* TestClock.setTime(TICK_MS)
+			yield* seedIssue(asIssueId(randomUUID()))
+			// Enabled policy with a destination so incident open/resolve actually
+			// dispatches (the dispatcher itself is stubbed — no destination row needed).
+			yield* database.execute((db) =>
+				db.insert(errorNotificationPolicies).values({
+					orgId: ORG,
+					enabled: true,
+					destinationIdsJson: ["7d31c9e1-0000-4000-8000-000000000001"],
+					notifyOnResolve: true,
+					updatedAt: new Date(TICK_MS),
+					updatedBy: "test",
+				}),
+			)
+
+			yield* errors.runTick()
+			assert.lengthOf(
+				dispatched.filter((key) => key.endsWith(":open")),
+				1,
+			)
+
+			// Stale window elapsed, no fresh errors: two OVERLAPPING ticks race the
+			// open→resolved flip. The CAS lets exactly one dispatch the resolve.
+			rows = []
+			yield* TestClock.setTime(TICK_MS + 31 * 60_000)
+			const resolveResults = yield* Effect.all([errors.runTick(), errors.runTick()], {
+				concurrency: 2,
+			})
+			assert.strictEqual(
+				resolveResults.reduce((s, r) => s + r.incidentsResolved, 0),
+				1,
+			)
+			assert.lengthOf(
+				dispatched.filter((key) => key.endsWith(":resolve")),
+				1,
+			)
+
+			// Errors return: two OVERLAPPING ticks race the reopen. The state-row
+			// CAS lets exactly one insert the incident and dispatch its open.
+			const reopenMs = TICK_MS + 32 * 60_000
+			rows = [
+				scanRow({
+					firstSeen: toWarehouseDateTime(reopenMs - 60_000),
+					lastSeen: toWarehouseDateTime(reopenMs - 1_000),
+				}),
+			]
+			yield* TestClock.setTime(reopenMs)
+			const reopenResults = yield* Effect.all([errors.runTick(), errors.runTick()], {
+				concurrency: 2,
+			})
+			assert.strictEqual(
+				reopenResults.reduce((s, r) => s + r.incidentsOpened, 0),
+				1,
+			)
+			assert.lengthOf(
+				dispatched.filter((key) => key.endsWith(":open")),
+				2,
+			)
+
+			const issue = (yield* loadIssuesByFingerprint(SCAN_FINGERPRINT))[0]!
+			const incidents = yield* loadIncidentsForIssue(issue.id)
+			assert.lengthOf(incidents, 2)
+			const states = yield* database.execute((db) =>
+				db.select().from(errorIssueStates).where(eq(errorIssueStates.issueId, issue.id)),
+			)
+			assert.strictEqual(
+				states[0]?.openIncidentId,
+				incidents.find((incident) => incident.status === "open")?.id,
+			)
+		}).pipe(Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, countingDispatcher)))
 	})
 
 	it.effect(

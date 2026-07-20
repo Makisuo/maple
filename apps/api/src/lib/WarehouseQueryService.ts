@@ -106,9 +106,9 @@ const isEmptyJsonBodyError = (error: unknown): boolean =>
 	error instanceof SyntaxError && /unexpected end of json input/i.test(error.message)
 
 const boundedResponseFetch =
-	(maxBytes: number): typeof fetch =>
+	(maxBytes: number, requestFetch: typeof fetch = fetch): typeof fetch =>
 	async (input, init) => {
-		const response = await fetch(input, init)
+		const response = await requestFetch(input, init)
 		if (response.body === null) return response
 
 		const reader = response.body.getReader()
@@ -145,15 +145,18 @@ const boundedResponseFetch =
 		})
 	}
 
-const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSqlClient => {
-	const makeClient = (fetchAdapter?: typeof fetch) =>
+const createTinybirdSdkSqlClient = (
+	config: TinybirdBackendConfig,
+	requestFetch: typeof fetch = fetch,
+): WarehouseSqlClient => {
+	const makeClient = (fetchAdapter: typeof fetch = requestFetch) =>
 		new Tinybird({
 			baseUrl: config.host,
 			token: config.token,
 			datasources: {},
 			pipes: {},
 			devMode: false,
-			...(fetchAdapter === undefined ? {} : { fetch: fetchAdapter }),
+			fetch: fetchAdapter,
 		})
 	const client = makeClient()
 	const boundedClients = new Map<number, typeof client>()
@@ -162,8 +165,15 @@ const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSql
 			try {
 				// Tinybird Cloud currently defaults /v0/sql to JSON, while Tinybird Local
 				// defaults to tab-separated output. The SDK always calls response.json(), so
-				// make the expected wire format explicit for both environments.
-				const jsonSql = `${sql.trimEnd().replace(/;$/, "")}\nFORMAT JSON`
+				// make the expected wire format explicit for both environments. DSL-compiled
+				// queries already end with `FORMAT JSON` (profile SETTINGS are inserted
+				// before it by appendSettings) — appending a second FORMAT clause is a
+				// ClickHouse syntax error, so only add one when the query doesn't carry
+				// its own. The trailing-SETTINGS alternative covers SQL from callers that
+				// still emit the legacy `FORMAT JSON SETTINGS …` order.
+				const trimmed = sql.trimEnd().replace(/;$/, "")
+				const hasFormat = /\bFORMAT\s+\w+(\s+SETTINGS\s[^\n]*)?$/i.test(trimmed)
+				const jsonSql = hasFormat ? trimmed : `${trimmed}\nFORMAT JSON`
 				const limits = options?.responseLimits
 				// The SDK normally buffers through response.json(). Raw execution gets
 				// a fetch adapter that aborts before constructing an oversized Response.
@@ -171,7 +181,7 @@ const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSql
 				if (limits !== undefined) {
 					queryClient =
 						boundedClients.get(limits.maxBytes) ??
-						makeClient(boundedResponseFetch(limits.maxBytes))
+						makeClient(boundedResponseFetch(limits.maxBytes, requestFetch))
 					boundedClients.set(limits.maxBytes, queryClient)
 				}
 				const result = await queryClient.sql<Record<string, unknown>>(jsonSql)
@@ -193,7 +203,7 @@ const createTinybirdSdkSqlClient = (config: TinybirdBackendConfig): WarehouseSql
 			if (rows.length === 0) return
 			const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
 			const url = `${config.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`
-			const response = await fetch(url, {
+			const response = await requestFetch(url, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/x-ndjson",
@@ -256,7 +266,8 @@ export class WarehouseQueryService extends Context.Service<
 						url: clickhouseUrl.toString().replace(/\/$/, ""),
 						username: env.CLICKHOUSE_USER,
 						password: Option.match(env.CLICKHOUSE_PASSWORD, {
-							onNone: () => (kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : ""),
+							onNone: () =>
+								kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : "",
 							onSome: Redacted.value,
 						}),
 						database: env.CLICKHOUSE_DATABASE,
@@ -345,8 +356,7 @@ export class WarehouseQueryService extends Context.Service<
 						password: override.value.password,
 						database: override.value.database,
 					},
-					clientCacheKey:
-						purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
+					clientCacheKey: purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
 				}
 			}
 

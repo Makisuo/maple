@@ -1,16 +1,14 @@
 import { Link, useNavigate, createFileRoute } from "@tanstack/react-router"
 import { useCallback, useMemo } from "react"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Option, Schema } from "effect"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { MetricsGrid } from "@/components/dashboard/metrics-grid"
-import type {
-	ChartLegendMode,
-	ChartTooltipMode,
-} from "@maple/ui/components/charts/_shared/chart-types"
+import type { ChartLegendMode, ChartTooltipMode } from "@maple/ui/components/charts/_shared/chart-types"
 import { Tabs, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import {
 	getServiceDetailOverviewResultAtom,
@@ -222,19 +220,17 @@ function ServiceDetailContent() {
 							</TabsTrigger>
 						</TabsList>
 					</Tabs>
-					{/* Env scope drives every tab except Dependencies (whose bundle query
-					    has its own deploymentEnv semantics); hide it there so it can't
-					    imply a filter it doesn't drive. */}
-					{activeTab !== "dependencies" && (
-						<ServiceEnvironmentSwitcher
-							serviceName={serviceName}
-							startTime={effectiveStartTime}
-							endTime={effectiveEndTime}
-							environments={search.environments}
-							value={search.environments?.[0]}
-							onChange={handleEnvironmentChange}
-						/>
-					)}
+					{/* Env scope drives every tab — the Dependencies bundle takes the same
+					    single-select value via its deploymentEnv field (see
+					    toSingleDeploymentEnv). */}
+					<ServiceEnvironmentSwitcher
+						serviceName={serviceName}
+						startTime={effectiveStartTime}
+						endTime={effectiveEndTime}
+						environments={search.environments}
+						value={search.environments?.[0]}
+						onChange={handleEnvironmentChange}
+					/>
 					<div className="flex items-center gap-2">
 						<TimeRangeHeaderControls
 							startTime={search.startTime}
@@ -283,6 +279,7 @@ function ServiceDetailContent() {
 					timePreset={search.timePreset}
 					effectiveStartTime={effectiveStartTime}
 					effectiveEndTime={effectiveEndTime}
+					environments={search.environments}
 				/>
 			)}
 		</DashboardLayout>
@@ -309,16 +306,16 @@ function OverviewTab({
 	// One fetch for the whole Overview tab — the primary chart and the environment
 	// switcher's options (the switcher reads this same atom key, so it shares this
 	// round-trip instead of issuing its own overview query).
-	const overviewResult = useRetainedRefreshableResultValue(
-		getServiceDetailOverviewResultAtom({
-			data: {
-				serviceName,
-				startTime: effectiveStartTime,
-				endTime: effectiveEndTime,
-				environments,
-			},
-		}),
-	)
+	const overviewAtom = getServiceDetailOverviewResultAtom({
+		data: {
+			serviceName,
+			startTime: effectiveStartTime,
+			endTime: effectiveEndTime,
+			environments,
+		},
+	})
+	const overviewResult = useRetainedRefreshableResultValue(overviewAtom)
+	const refreshOverview = useAtomRefresh(overviewAtom)
 
 	// Sampling verdict from the already-loaded primary chart. Drives a separate,
 	// non-blocking fetch of the exact pre-sampling throughput (SpanMetrics `calls`)
@@ -410,6 +407,16 @@ function OverviewTab({
 		[detailPoints, isDetailLoading],
 	)
 
+	if (Result.isFailure(overviewResult)) {
+		return (
+			<QueryErrorState
+				error={overviewResult.cause}
+				titleOverride="Failed to load service overview"
+				onRetry={refreshOverview}
+			/>
+		)
+	}
+
 	return (
 		<div className="flex flex-col gap-3">
 			<MetricsGrid
@@ -433,23 +440,34 @@ function OverviewTab({
 				onViewAll={onShowOperations}
 			/>
 			<div className="grid gap-3 lg:grid-cols-2">
-				<ServiceErrorsPanel serviceName={serviceName} />
+				<ServiceErrorsPanel
+					serviceName={serviceName}
+					effectiveStartTime={effectiveStartTime}
+					effectiveEndTime={effectiveEndTime}
+					environments={environments}
+				/>
 				<ServiceRecentDeploys releases={releases} isLoading={isDetailLoading} />
+				{/* Usage + workloads are env-agnostic by design (rollup keyed
+				    org/hour/service; workload identity carries no env) — they flag
+				    themselves "all environments" when the page filter is active. */}
 				<ServiceUsagePanel
 					serviceName={serviceName}
 					effectiveStartTime={effectiveStartTime}
 					effectiveEndTime={effectiveEndTime}
+					envFilterActive={!!environments?.length}
 				/>
 				<ServiceWorkloadsPanel
 					serviceName={serviceName}
 					effectiveStartTime={effectiveStartTime}
 					effectiveEndTime={effectiveEndTime}
+					envFilterActive={!!environments?.length}
 				/>
 			</div>
 			<ServiceDependencyStrip
 				serviceName={serviceName}
 				effectiveStartTime={effectiveStartTime}
 				effectiveEndTime={effectiveEndTime}
+				environments={environments}
 				onViewAll={onShowDependencies}
 			/>
 		</div>

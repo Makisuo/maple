@@ -8,11 +8,7 @@ import { makeQueryEngineEvaluate, makeQueryEngineEvaluateSeries } from "@maple/q
 import { QueryEngineService } from "./QueryEngineService"
 import type { TenantContext } from "./AuthService"
 import { WarehouseQueryService, type WarehouseQueryServiceShape } from "../lib/WarehouseQueryService"
-import {
-	EdgeCacheService,
-	BucketCacheService,
-	type EdgeCacheServiceShape,
-} from "@maple/query-engine/caching"
+import { EdgeCacheService, BucketCacheService, type EdgeCacheServiceShape } from "@maple/query-engine/caching"
 import { CacheBackendLive } from "../lib/CacheBackendLive"
 import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 
@@ -254,23 +250,28 @@ describe("QueryEngineService.evaluate via bucket cache", () => {
 
 // --- cachedDirect: per-route TTL plumbing. ---
 
-// Records the `ttlSeconds` of every getOrCompute call so we can assert the
-// per-route TTL reaches the edge cache (and that omitting it defaults to 15s).
+// Records cache options so we can assert both TTL plumbing and the matching
+// time-snap window used by each direct route key.
 const makeRecordingEdge = (
-	calls: Array<{ bucket: string; ttlSeconds: number }>,
+	calls: Array<{ bucket: string; key: string; ttlSeconds: number }>,
 ): EdgeCacheServiceShape => ({
 	getOrCompute: (options, compute) => {
-		calls.push({ bucket: options.bucket, ttlSeconds: options.ttlSeconds })
+		calls.push({
+			bucket: options.bucket,
+			key: options.key,
+			ttlSeconds: typeof options.ttlSeconds === "function" ? -1 : options.ttlSeconds,
+		})
 		return Effect.map(compute, (value) => ({ value, hit: false }))
 	},
 	invalidate: () => Effect.void,
+	rawGetDetailed: () => Effect.succeed({ status: "miss" as const, value: Option.none(), readMs: 0 }),
 	rawGet: () => Effect.succeed(Option.none()),
 	rawPut: () => Effect.void,
 })
 
 describe("QueryEngineService.cachedDirect TTL", () => {
 	it.effect("passes the per-route ttlSeconds to the edge cache and defaults to 15s", () => {
-		const calls: Array<{ bucket: string; ttlSeconds: number }> = []
+		const calls: Array<{ bucket: string; key: string; ttlSeconds: number }> = []
 		const recordingEdge = Layer.succeed(EdgeCacheService, makeRecordingEdge(calls))
 		const counter = { n: 0 }
 		const layer = QueryEngineService.layer.pipe(
@@ -293,10 +294,110 @@ describe("QueryEngineService.cachedDirect TTL", () => {
 			// Omitted TTL falls back to the 15s default (the serviceOverview case).
 			yield* qe.cachedDirect(tenant, "serviceOverview", { a: 1 }, Effect.succeed([{ ok: true }]))
 
-			assert.deepStrictEqual(calls, [
-				{ bucket: "qe-direct", ttlSeconds: 3600 },
-				{ bucket: "qe-direct", ttlSeconds: 15 },
-			])
+			assert.deepStrictEqual(
+				calls.map(({ bucket, ttlSeconds }) => ({ bucket, ttlSeconds })),
+				[
+					{ bucket: "qe-direct", ttlSeconds: 3600 },
+					{ bucket: "qe-direct", ttlSeconds: 15 },
+				],
+			)
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("snaps direct cache keys to the route TTL, capped at one hour", () => {
+		const calls: Array<{ bucket: string; key: string; ttlSeconds: number }> = []
+		const recordingEdge = Layer.succeed(EdgeCacheService, makeRecordingEdge(calls))
+		const counter = { n: 0 }
+		const layer = QueryEngineService.layer.pipe(
+			Layer.provide(Layer.succeed(WarehouseQueryService, makeFullStub([], counter))),
+			Layer.provide(recordingEdge),
+			Layer.provide(BucketCacheService.layer.pipe(Layer.provide(recordingEdge))),
+			Layer.provide(makeConfig()),
+		)
+
+		return Effect.gen(function* () {
+			const qe = yield* QueryEngineService
+			const run = (route: string, second: string, ttlSeconds?: number) =>
+				qe.cachedDirect(
+					tenant,
+					route,
+					{
+						startTime: `2026-01-01 00:00:${second}`,
+						endTime: `2026-01-01 01:00:${second}`,
+					},
+					Effect.succeed([{ ok: true }]),
+					ttlSeconds,
+				)
+
+			// Both timestamps fall in the same 60-second cache window.
+			yield* run("serviceUsage", "05", 60)
+			yield* run("serviceUsage", "45", 60)
+			// The default remains 15 seconds, so these produce distinct keys.
+			yield* run("serviceOverview", "05")
+			yield* run("serviceOverview", "20")
+			// TTLs above one hour use the one-hour cap.
+			yield* qe.cachedDirect(
+				tenant,
+				"longRoute",
+				{ startTime: "2026-01-01 00:10:00", endTime: "2026-01-01 02:10:00" },
+				Effect.succeed([{ ok: true }]),
+				7200,
+			)
+			yield* qe.cachedDirect(
+				tenant,
+				"longRoute",
+				{ startTime: "2026-01-01 00:50:00", endTime: "2026-01-01 02:50:00" },
+				Effect.succeed([{ ok: true }]),
+				7200,
+			)
+
+			assert.strictEqual(calls[0]?.key, calls[1]?.key)
+			assert.notStrictEqual(calls[2]?.key, calls[3]?.key)
+			assert.strictEqual(calls[4]?.key, calls[5]?.key)
+		}).pipe(Effect.provide(layer))
+	})
+
+	it.effect("versions direct policies and canonicalizes set-like filters", () => {
+		const calls: Array<{ bucket: string; key: string; ttlSeconds: number }> = []
+		const recordingEdge = Layer.succeed(EdgeCacheService, makeRecordingEdge(calls))
+		const counter = { n: 0 }
+		const layer = QueryEngineService.layer.pipe(
+			Layer.provide(Layer.succeed(WarehouseQueryService, makeFullStub([], counter))),
+			Layer.provide(recordingEdge),
+			Layer.provide(BucketCacheService.layer.pipe(Layer.provide(recordingEdge))),
+			Layer.provide(makeConfig()),
+		)
+		const policy = { version: 2, ttlSeconds: 300, snapWindowSeconds: 60 } as const
+
+		return Effect.gen(function* () {
+			const qe = yield* QueryEngineService
+			yield* qe.cachedDirect(
+				tenant,
+				"serviceUsage",
+				{
+					startTime: "2026-01-01 00:00:05",
+					environments: ["production", "staging", "production"],
+				},
+				Effect.succeed([{ ok: true }]),
+				policy,
+			)
+			yield* qe.cachedDirect(
+				tenant,
+				"serviceUsage",
+				{
+					startTime: "2026-01-01 00:00:45",
+					environments: ["staging", "production"],
+				},
+				Effect.succeed([{ ok: true }]),
+				policy,
+			)
+
+			assert.strictEqual(calls[0]?.key, calls[1]?.key)
+			assert.match(calls[0]?.key ?? "", /^direct:v2:/)
+			assert.deepStrictEqual(
+				calls.map(({ ttlSeconds }) => ttlSeconds),
+				[300, 300],
+			)
 		}).pipe(Effect.provide(layer))
 	})
 })

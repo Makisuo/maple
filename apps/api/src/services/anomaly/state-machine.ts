@@ -35,12 +35,12 @@ export const DEFAULT_STATE_MACHINE_CONFIG: StateMachineConfig = {
 }
 
 /**
- * Per-signal overrides. Throughput drops need an extra breaching tick (15 min
- * sustained) — short quiet stretches on bursty services self-heal within two
- * ticks and shouldn't page.
+ * Per-signal overrides. Throughput outages need an extra breaching tick (15
+ * min sustained), but resolve as soon as traffic returns. The one-hour
+ * cooldown still prevents an edge-of-threshold series from flapping.
  */
 const STATE_MACHINE_CONFIG_OVERRIDES: Partial<Record<AnomalySignalType, Partial<StateMachineConfig>>> = {
-	throughput: { breachesToOpen: 3 },
+	throughput: { breachesToOpen: 3, healthyToResolve: 1 },
 }
 
 export const stateMachineConfigFor = (signalType: AnomalySignalType): StateMachineConfig => ({

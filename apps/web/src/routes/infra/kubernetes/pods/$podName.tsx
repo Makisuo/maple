@@ -1,12 +1,14 @@
 import { useState } from "react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { cn } from "@maple/ui/lib/utils"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { FolderIcon } from "@/components/icons"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
@@ -52,11 +54,11 @@ function PodDetailContent() {
 	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, preset)
 	const bucketSeconds = bucketSecondsFor(preset)
 
-	const summaryResult = useAtomValue(
-		podDetailSummaryResultAtom({
-			data: { podName, namespace, startTime, endTime },
-		}),
-	)
+	const summaryAtom = podDetailSummaryResultAtom({
+		data: { podName, namespace, startTime, endTime },
+	})
+	const summaryResult = useAtomValue(summaryAtom)
+	const refreshSummary = useAtomRefresh(summaryAtom)
 
 	const summary = Result.builder(summaryResult)
 		.onSuccess((r) => r.data)
@@ -123,7 +125,15 @@ function PodDetailContent() {
 					}
 				/>
 
-				{summary ? (
+				{Result.isInitial(summaryResult) ? (
+					<Skeleton className="h-24 w-full rounded-md" />
+				) : Result.isFailure(summaryResult) ? (
+					<QueryErrorState
+						error={summaryResult.cause}
+						titleOverride="Failed to load pod metrics"
+						onRetry={refreshSummary}
+					/>
+				) : summary ? (
 					<StatRail>
 						<StatRailItem
 							eyebrow="CPU vs limit"

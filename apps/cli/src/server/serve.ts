@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
 import { acquireChdb, type Chdb, type ChdbError } from "./chdb"
-import { buildInsertSql } from "./inserts"
+import { buildInsertStatements } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch } from "./otlp/encode"
 import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest } from "./otlp/proto"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
@@ -177,16 +177,18 @@ async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestRes
 	let accepted = 0
 	for (const batch of batches) {
 		if (batch.rowCount === 0) continue
-		try {
-			db.exec(buildInsertSql(batch.datasource, batch.ndjson))
-		} catch (error) {
-			return {
-				response: text(`chDB insert (${batch.datasource}): ${(error as Error).message}`, 500),
-				accepted,
-				requestBytes,
+		for (const statement of buildInsertStatements(batch.datasource, batch.ndjson)) {
+			try {
+				db.exec(statement.sql)
+			} catch (error) {
+				return {
+					response: text(`chDB insert (${batch.datasource}): ${(error as Error).message}`, 500),
+					accepted,
+					requestBytes,
+				}
 			}
+			accepted += statement.rowCount
 		}
-		accepted += batch.rowCount
 	}
 	return { response: json({ accepted }), accepted, requestBytes }
 }

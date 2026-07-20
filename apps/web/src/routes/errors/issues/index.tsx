@@ -1,27 +1,36 @@
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useReducer, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
-
-import { Unitflow, View } from "@maple/unitflow/react"
+import type { V2ErrorIssue } from "@maple/domain/http/v2"
+import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useListNavigation } from "@/hooks/use-list-navigation"
-import { useMountEffect } from "@/hooks/use-mount-effect"
 import { IssueGroup } from "@/components/errors/issue-group"
 import { IssuesBulkBar } from "@/components/errors/issues-bulk-bar"
 import { IssuesToolbar } from "@/components/errors/issues-toolbar"
 import { severityRank } from "@/components/errors/severity-badge"
 import { useIssueMutations } from "@/components/errors/use-issue-mutations"
 import type { SelectToggleEvent } from "@/components/errors/issue-row"
-import { ErrorIssuesModel, filterIssues } from "@/lib/models/error-issues-model"
 import {
 	clearedSelection,
 	type IssueSelectionMsg,
 	type IssueSelectionState,
+	initialIssueSelection,
 	toggledSelection,
+	updateIssueSelection,
 } from "@/lib/models/issue-selection"
-import { unitflowRuntime } from "@/lib/models/runtime"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
+import { runMapleApiV2 } from "@/lib/collections/api-runner"
+import {
+	appendUniqueErrorIssues,
+	buildErrorIssueListQuery,
+	errorIssueFromV2,
+	type ErrorIssueListQuery,
+} from "@/lib/services/error-issues"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Button } from "@maple/ui/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { ErrorState } from "@/components/common/error-state"
@@ -130,14 +139,22 @@ function IssuesSkeleton({ toolbar }: { toolbar: React.ReactNode }) {
 	)
 }
 
-function IssuesLoadError({ toolbar, message }: { toolbar: React.ReactNode; message?: string }) {
+function IssuesLoadError({
+	toolbar,
+	message,
+	onRetry = () => window.location.reload(),
+}: {
+	toolbar: React.ReactNode
+	message?: string
+	onRetry?: () => void
+}) {
 	return (
 		<IssuesPageFrame toolbar={toolbar}>
 			<div className="p-4">
 				<ErrorState
 					error={message ?? "The issues stream could not be loaded."}
 					title="Failed to load issues"
-					onRetry={() => window.location.reload()}
+					onRetry={onRetry}
 				/>
 			</div>
 		</IssuesPageFrame>
@@ -151,7 +168,23 @@ function IssuesPage() {
 	const severityFilter: SeverityFilterValue = search.severity ?? "all"
 	const kindFilter = search.kind ?? "all"
 
-	const mutations = useIssueMutations()
+	const listQuery = buildErrorIssueListQuery({
+		workflowState: activeFilter,
+		severity: severityFilter,
+		kind: kindFilter,
+	})
+	const result = useAtomValue(
+		MapleApiV2AtomClient.query("errorIssues", "list", {
+			query: listQuery,
+			reactivityKeys: ["errorIssues"],
+		}),
+	)
+	const refresh = useAtomRefresh(
+		MapleApiV2AtomClient.query("errorIssues", "list", {
+			query: listQuery,
+			reactivityKeys: ["errorIssues"],
+		}),
+	)
 
 	const toolbar = (totalCount?: number) => (
 		<IssuesToolbar
@@ -218,110 +251,94 @@ function IssuesPage() {
 		/>
 	)
 
+	if (Result.isInitial(result)) return <IssuesSkeleton toolbar={toolbar()} />
+	if (Result.isFailure(result)) {
+		return (
+			<IssuesLoadError
+				toolbar={toolbar()}
+				message="The issues list could not be loaded."
+				onRetry={refresh}
+			/>
+		)
+	}
+
 	return (
-		<Unitflow
-			runtime={unitflowRuntime}
-			rootModel={ErrorIssuesModel}
-			building={<IssuesSkeleton toolbar={toolbar()} />}
-			failed={() => <IssuesLoadError toolbar={toolbar()} />}
-		>
-			{(unit) => (
-				<IssuesModelBody
-					unit={unit}
-					toolbar={toolbar}
-					activeFilter={activeFilter}
-					severityFilter={severityFilter}
-					kindFilter={kindFilter}
-					mutations={mutations}
-				/>
-			)}
-		</Unitflow>
+		<IssuesReadyBody
+			key={`${activeFilter}:${severityFilter}:${kindFilter}`}
+			initialPage={result.value}
+			listQuery={listQuery}
+			toolbar={toolbar}
+			activeFilter={activeFilter}
+		/>
 	)
 }
 
-interface IssuesBodyProps {
-	toolbar: (totalCount?: number) => React.ReactNode
-	activeFilter: FilterValue
-	severityFilter: SeverityFilterValue
-	kindFilter: "all" | "error" | "alert"
-	mutations: ReturnType<typeof useIssueMutations>
-}
-
-/** The model-owned selection state + its dispatcher, bound from the model's
- * `ui` and threaded down to the rows and the bulk bar. */
 interface SelectionBinding {
 	selection: IssueSelectionState
 	dispatchSelection: (msg: IssueSelectionMsg) => void
 }
 
-const IssuesModelBody = View.make(
-	ErrorIssuesModel,
-	({ overview, selection, dispatchSelection }, props: IssuesBodyProps) => {
-		if (overview.phase === "loading") return <IssuesSkeleton toolbar={props.toolbar()} />
-		if (overview.phase === "error") {
-			return <IssuesLoadError toolbar={props.toolbar()} message={overview.message} />
-		}
-		return (
-			<IssuesReadyBody
-				allIssues={overview.issues}
-				selection={selection}
-				dispatchSelection={dispatchSelection}
-				{...props}
-			/>
-		)
-	},
-)
+const selectionReducer = (state: IssueSelectionState, message: IssueSelectionMsg): IssueSelectionState =>
+	updateIssueSelection(state, message)[0]
 
-/** Resets the model-owned selection on page entry and whenever the URL filters
- * change. The filters live above the `<Unitflow>` provider, so rather than an
- * effect that watches them, this null component is remounted by its `key` (and
- * on a fresh page mount, since the whole subtree unmounts on navigation away)
- * and fires `Cleared` — the sanctioned no-useEffect "re-run via key" pattern.
- * `hasSelection` gates the dispatch so the common empty-selection case (first
- * load, or a filter change with nothing selected) doesn't emit a no-op. */
-function ClearSelectionOnFilterChange({
-	dispatchSelection,
-	hasSelection,
-}: {
-	dispatchSelection: (msg: IssueSelectionMsg) => void
-	hasSelection: boolean
-}) {
-	useMountEffect(() => {
-		if (hasSelection) dispatchSelection(clearedSelection)
-	})
-	return null
+interface IssuesReadyBodyProps {
+	initialPage: {
+		readonly data: ReadonlyArray<V2ErrorIssue>
+		readonly next_cursor: string | null
+		readonly has_more: boolean
+	}
+	listQuery: ErrorIssueListQuery
+	toolbar: (totalCount?: number) => React.ReactNode
+	activeFilter: FilterValue
 }
 
-interface IssuesReadyBodyProps extends IssuesBodyProps, SelectionBinding {
-	allIssues: ReadonlyArray<ErrorIssueDocument>
-}
-
-function IssuesReadyBody({
-	allIssues,
-	activeFilter,
-	severityFilter,
-	kindFilter,
-	...props
-}: IssuesReadyBodyProps) {
+function IssuesReadyBody({ initialPage, listQuery, activeFilter, toolbar }: IssuesReadyBodyProps) {
+	const [selection, dispatchSelection] = useReducer(selectionReducer, initialIssueSelection)
+	const [extraIssues, setExtraIssues] = useState<ReadonlyArray<ErrorIssueDocument>>([])
+	const [nextCursorOverride, setNextCursorOverride] = useState<string | null | undefined>(undefined)
+	const [loadingMore, setLoadingMore] = useState(false)
+	const firstPageIssues = useMemo(() => initialPage.data.map(errorIssueFromV2), [initialPage.data])
 	const issues = useMemo(
-		() =>
-			filterIssues(allIssues, {
-				workflowState: activeFilter === "all" ? undefined : activeFilter,
-				severity: severityFilter === "all" ? undefined : severityFilter,
-				kind: kindFilter === "all" ? undefined : kindFilter,
-			}),
-		[allIssues, activeFilter, severityFilter, kindFilter],
+		() => appendUniqueErrorIssues(firstPageIssues, extraIssues),
+		[firstPageIssues, extraIssues],
 	)
+	const nextCursor = nextCursorOverride === undefined ? initialPage.next_cursor : nextCursorOverride
+
+	const resetLoadedPages = useCallback(() => {
+		setExtraIssues([])
+		setNextCursorOverride(undefined)
+		dispatchSelection(clearedSelection)
+	}, [])
+	const mutations = useIssueMutations(resetLoadedPages)
+
+	const loadMore = useCallback(async () => {
+		if (nextCursor === null || loadingMore) return
+		setLoadingMore(true)
+		try {
+			const page = await runMapleApiV2((client) =>
+				client.errorIssues.list({ query: { ...listQuery, cursor: nextCursor } }),
+			)
+			setExtraIssues((current) => appendUniqueErrorIssues(current, page.data.map(errorIssueFromV2)))
+			setNextCursorOverride(page.next_cursor)
+		} catch {
+			toast.error("More issues could not be loaded")
+		} finally {
+			setLoadingMore(false)
+		}
+	}, [listQuery, loadingMore, nextCursor])
 
 	return (
-		<>
-			<ClearSelectionOnFilterChange
-				key={`${activeFilter}:${severityFilter}:${kindFilter}`}
-				dispatchSelection={props.dispatchSelection}
-				hasSelection={props.selection.selectedIds.size > 0}
-			/>
-			<IssuesPageBody issues={issues} activeFilter={activeFilter} {...props} />
-		</>
+		<IssuesPageBody
+			issues={issues}
+			activeFilter={activeFilter}
+			toolbar={toolbar}
+			mutations={mutations}
+			selection={selection}
+			dispatchSelection={dispatchSelection}
+			hasMore={nextCursor !== null}
+			loadingMore={loadingMore}
+			onLoadMore={loadMore}
+		/>
 	)
 }
 
@@ -330,6 +347,9 @@ interface IssuesPageBodyProps extends SelectionBinding {
 	activeFilter: FilterValue
 	mutations: ReturnType<typeof useIssueMutations>
 	toolbar: (totalCount?: number) => React.ReactNode
+	hasMore: boolean
+	loadingMore: boolean
+	onLoadMore: () => void
 }
 
 function IssuesPageBody({
@@ -339,6 +359,9 @@ function IssuesPageBody({
 	selection,
 	dispatchSelection,
 	toolbar,
+	hasMore,
+	loadingMore,
+	onLoadMore,
 }: IssuesPageBodyProps) {
 	const selectedIds = selection.selectedIds
 	const grouped = useMemo(() => {
@@ -463,6 +486,19 @@ function IssuesPageBody({
 								onFocus={handleFocus}
 							/>
 						))}
+						{hasMore ? (
+							<div className="flex justify-center border-t border-border/60 p-3">
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									loading={loadingMore}
+									onClick={onLoadMore}
+								>
+									Load more
+								</Button>
+							</div>
+						) : null}
 					</div>
 				)}
 			</div>

@@ -6,8 +6,10 @@ import {
 	estimateLabelWidth,
 	layoutMarkerLabels,
 	MAX_LABEL_WIDTH,
+	MAX_LABELED_MARKERS,
 	type PositionedMarker,
 	type ReleasePoint,
+	shouldRenderLabels,
 } from "./marker-layout"
 
 const SHA_A = "a".repeat(40)
@@ -351,5 +353,33 @@ describe("estimateLabelWidth", () => {
 		expect(estimateLabelWidth("abc1234", 1)).toBeLessThan(estimateLabelWidth("abc1234", 3))
 		expect(estimateLabelWidth("", 1)).toBe(44) // min
 		expect(estimateLabelWidth("x".repeat(200), 5)).toBe(MAX_LABEL_WIDTH) // max
+	})
+})
+
+describe("shouldRenderLabels", () => {
+	const at = (id: string, x: number): PositionedMarker => ({
+		marker: { bucket: id, label: "abc1234", commits: [{ sha: `${id}-0`, count: 1 }] },
+		x,
+	})
+
+	it("keeps labels for a sparse marker set", () => {
+		const positioned = [at("m0", 100), at("m1", 400), at("m2", 700)]
+		expect(shouldRenderLabels(positioned, 0, 900)).toBe(true)
+	})
+
+	it("is true for an empty set (nothing to crowd)", () => {
+		expect(shouldRenderLabels([], 0, 900)).toBe(true)
+	})
+
+	it("drops to dashes-only when markers outnumber the hard cap", () => {
+		const positioned = Array.from({ length: MAX_LABELED_MARKERS + 1 }, (_, i) => at(`m${i}`, i * 100))
+		// Plenty of horizontal room — the count cap alone triggers dashes-only.
+		expect(shouldRenderLabels(positioned, 0, 10_000)).toBe(false)
+	})
+
+	it("drops to dashes-only when average spacing can't fit a minimum label", () => {
+		// 8 markers in a 300px plot: 37.5px each < MIN_LABEL_WIDTH + gap (50).
+		const positioned = Array.from({ length: 8 }, (_, i) => at(`m${i}`, 10 + i * 40))
+		expect(shouldRenderLabels(positioned, 0, 300)).toBe(false)
 	})
 })

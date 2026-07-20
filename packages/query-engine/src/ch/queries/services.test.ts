@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest"
+import { Effect } from "effect"
 import { compileCH, compileUnion } from "@maple-dev/clickhouse-builder"
 import {
 	serviceOverviewQuery,
 	serviceCatalogQuery,
+	serviceHealthSnapshotQuery,
+	serviceHealthSnapshotRowSchema,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
@@ -38,6 +41,53 @@ describe("serviceCatalogQuery", () => {
 		expect(sql).toContain("GROUP BY serviceName")
 		expect(sql).toContain("LIMIT 21")
 		expect(sql).toContain("OFFSET 20")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// serviceHealthSnapshotQuery
+// ---------------------------------------------------------------------------
+
+describe("serviceHealthSnapshotQuery", () => {
+	it("reads the hourly aggregate and merges weighted golden signals", () => {
+		const { sql } = compileCH(serviceHealthSnapshotQuery({ environments: ["production"] }), baseParams, {
+			rowSchema: serviceHealthSnapshotRowSchema,
+		})
+
+		expect(sql).toContain("FROM traces_aggregates_hourly")
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("IsEntryPoint = 1")
+		expect(sql).toContain("DeploymentEnv IN ('production')")
+		expect(sql).toContain("sum(WeightedCount) AS requestCount")
+		expect(sql).toContain("sum(WeightedErrorCount) AS errorCount")
+		expect(sql).toContain("quantilesTDigestWeightedMerge(0.95)(DurationQuantiles)")
+		expect(sql).toContain("GROUP BY serviceName, environment")
+		expect(sql).not.toContain("service_overview_spans")
+	})
+
+	it("coerces BYO ClickHouse string-encoded aggregates", () => {
+		const compiled = compileCH(serviceHealthSnapshotQuery({}), baseParams, {
+			rowSchema: serviceHealthSnapshotRowSchema,
+		})
+		const rows = Effect.runSync(
+			compiled.decodeRows([
+				{
+					serviceName: "checkout",
+					environment: "production",
+					requestCount: "1200",
+					errorCount: "24",
+					p95LatencyMs: "187.5",
+				},
+			]),
+		)
+
+		expect(rows[0]).toEqual({
+			serviceName: "checkout",
+			environment: "production",
+			requestCount: 1200,
+			errorCount: 24,
+			p95LatencyMs: 187.5,
+		})
 	})
 })
 
@@ -132,6 +182,7 @@ describe("serviceReleasesTimelineQuery", () => {
 		expect(sql).toContain("CommitSha != ''")
 		expect(sql).toContain("CommitSha AS commitSha")
 		expect(sql).toContain("count() AS count")
+		expect(sql).toContain("countIf(StatusCode = 'Error') AS errorCount")
 		expect(sql).toContain("GROUP BY bucket, commitSha")
 		expect(sql).toContain("ORDER BY bucket ASC")
 		expect(sql).toContain("LIMIT 1000")

@@ -146,6 +146,7 @@ describe("decideTransition", () => {
 	it("throughput requires a third consecutive breach to open", () => {
 		const config = stateMachineConfigFor("throughput")
 		expect(config.breachesToOpen).toBe(3)
+		expect(config.healthyToResolve).toBe(1)
 
 		const second = decideTransition(
 			state({ consecutiveBreaches: 1 }),
@@ -163,6 +164,16 @@ describe("decideTransition", () => {
 			nowMs,
 		)
 		expect(third.transition).toBe("open")
+	})
+
+	it("resolves a throughput incident on the first healthy tick", () => {
+		const decision = decideTransition(
+			state({ openIncidentId: "incident-1" }),
+			evaluation("healthy"),
+			stateMachineConfigFor("throughput"),
+			nowMs,
+		)
+		expect(decision.transition).toBe("resolve")
 	})
 
 	it("other signals keep the default two-breach open", () => {

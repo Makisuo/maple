@@ -25,6 +25,7 @@ import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LogsBenchRouteImport } from './routes/logs-bench'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as InfraBenchRouteImport } from './routes/infra-bench'
+import { Route as FlowLabRouteImport } from './routes/flow-lab'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as ChatRouteImport } from './routes/chat'
@@ -147,6 +148,11 @@ const IntegrationsRoute = IntegrationsRouteImport.update({
 const InfraBenchRoute = InfraBenchRouteImport.update({
   id: '/infra-bench',
   path: '/infra-bench',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FlowLabRoute = FlowLabRouteImport.update({
+  id: '/flow-lab',
+  path: '/flow-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DeveloperRoute = DeveloperRouteImport.update({
@@ -379,6 +385,7 @@ export interface FileRoutesByFullPath {
   '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
+  '/flow-lab': typeof FlowLabRoute
   '/infra-bench': typeof InfraBenchRoute
   '/integrations': typeof IntegrationsRoute
   '/logs-bench': typeof LogsBenchRoute
@@ -440,6 +447,7 @@ export interface FileRoutesByTo {
   '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
+  '/flow-lab': typeof FlowLabRoute
   '/infra-bench': typeof InfraBenchRoute
   '/integrations': typeof IntegrationsRoute
   '/logs-bench': typeof LogsBenchRoute
@@ -502,6 +510,7 @@ export interface FileRoutesById {
   '/chat': typeof ChatRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
+  '/flow-lab': typeof FlowLabRoute
   '/infra-bench': typeof InfraBenchRoute
   '/integrations': typeof IntegrationsRoute
   '/logs-bench': typeof LogsBenchRoute
@@ -565,6 +574,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/connectors'
     | '/developer'
+    | '/flow-lab'
     | '/infra-bench'
     | '/integrations'
     | '/logs-bench'
@@ -626,6 +636,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/connectors'
     | '/developer'
+    | '/flow-lab'
     | '/infra-bench'
     | '/integrations'
     | '/logs-bench'
@@ -687,6 +698,7 @@ export interface FileRouteTypes {
     | '/chat'
     | '/connectors'
     | '/developer'
+    | '/flow-lab'
     | '/infra-bench'
     | '/integrations'
     | '/logs-bench'
@@ -749,6 +761,7 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRoute
   ConnectorsRoute: typeof ConnectorsRoute
   DeveloperRoute: typeof DeveloperRoute
+  FlowLabRoute: typeof FlowLabRoute
   InfraBenchRoute: typeof InfraBenchRoute
   IntegrationsRoute: typeof IntegrationsRoute
   LogsBenchRoute: typeof LogsBenchRoute
@@ -918,6 +931,13 @@ declare module '@tanstack/react-router' {
       path: '/infra-bench'
       fullPath: '/infra-bench'
       preLoaderRoute: typeof InfraBenchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/flow-lab': {
+      id: '/flow-lab'
+      path: '/flow-lab'
+      fullPath: '/flow-lab'
+      preLoaderRoute: typeof FlowLabRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/developer': {
@@ -1229,6 +1249,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRoute,
   ConnectorsRoute: ConnectorsRoute,
   DeveloperRoute: DeveloperRoute,
+  FlowLabRoute: FlowLabRoute,
   InfraBenchRoute: InfraBenchRoute,
   IntegrationsRoute: IntegrationsRoute,
   LogsBenchRoute: LogsBenchRoute,

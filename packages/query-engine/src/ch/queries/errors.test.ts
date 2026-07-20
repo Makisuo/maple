@@ -7,6 +7,7 @@ import {
 	errorDetailTracesQuery,
 	errorsFacetsQuery,
 	errorIssuesQuery,
+	errorFingerprintsQuery,
 	tracesFacetsQuery,
 } from "./errors"
 
@@ -228,6 +229,25 @@ describe("errorIssuesQuery", () => {
 		expect(sql).toContain("FROM error_events")
 		expect(sql).not.toContain("FROM error_events_by_time")
 		expect(sql).toContain("FingerprintHash IN (toUInt64('123'))")
+	})
+})
+
+// ---------------------------------------------------------------------------
+// errorFingerprintsQuery
+// ---------------------------------------------------------------------------
+
+describe("errorFingerprintsQuery", () => {
+	it("compiles a distinct-fingerprint scan scoped by service and environment", () => {
+		const q = errorFingerprintsQuery({ services: ["api"], deploymentEnvs: ["production"] })
+		const { sql } = compileCH(q, baseParams)
+
+		expect(sql).toContain("FROM error_events_by_time")
+		expect(sql).toContain("toString(FingerprintHash) AS fingerprintHash")
+		expect(sql).toContain("ServiceName IN ('api')")
+		expect(sql).toContain("DeploymentEnv IN ('production')")
+		expect(sql).toContain("GROUP BY fingerprintHash")
+		expect(sql).toContain("LIMIT 1000")
+		expect(sql).toContain("FORMAT JSON")
 	})
 })
 

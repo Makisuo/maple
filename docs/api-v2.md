@@ -136,7 +136,7 @@ Implemented in phases; the pilot (`api_keys`) ships first and proves every conve
 | `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
 | `alerts/destinations` ✅             | CRUD + `test`                                                                                      | `alerts`                                 |
 | `alerts/incidents` ✅                | list/retrieve                                                                                      | `alerts`                                 |
-| `error_issues`                       | list/retrieve + `events`, `incidents`, `comments`, `transitions`, `assignee`, `severity`           | `errors`                                 |
+| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred             | `errors`                                 |
 | `investigations` ✅                  | list/retrieve/create/status                                                                        | `investigations`                         |
 | `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                           | `anomalies`                              |
 | `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                              | `recommendationIssues`                   |

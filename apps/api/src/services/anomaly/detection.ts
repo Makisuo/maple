@@ -7,9 +7,9 @@
 // in-progress hour is excluded). Robust bands via median/MAD with a sigma
 // floor so constant series (MAD = 0) aren't hair-triggers.
 //
-// A breach requires ALL of: statistical bound, ratio guard, absolute-delta
-// floor, and a volume floor. This keeps median/MAD from paging on tiny but
-// statistically significant wiggles on low-traffic series.
+// Error/latency breaches require statistical, ratio, absolute-delta, and
+// volume guards. Throughput is deliberately stricter: only a near-total loss
+// of a historically continuous traffic stream is service-health evidence.
 // ---------------------------------------------------------------------------
 
 import type { AnomalyIncidentSeverity, AnomalySensitivity, AnomalySignalType } from "@maple/domain/http"
@@ -150,9 +150,13 @@ const RATE_MIN_ELAPSED_MINUTES = 10
  */
 const THROUGHPUT_MIN_EXPECTED = 30
 /**
- * In the clamp regime (see below) a drop only fires when observed volume is
- * under this fraction of expected — i.e. a near-total outage.
+ * A missing hourly aggregate means the service had no traffic in that hour;
+ * it is not emitted as a zero-valued row. Require coverage across at least
+ * two-thirds of the 21 matched baseline hours before treating a service as
+ * continuously active and therefore eligible for outage detection.
  */
+const THROUGHPUT_MIN_BASELINE_SAMPLES = 14
+/** Only a near-total loss of an established traffic stream is a health issue. */
 const THROUGHPUT_OUTAGE_FRACTION = 0.05
 
 export function evaluateGoldenSignals(
@@ -249,32 +253,23 @@ export function evaluateGoldenSignals(
 	{
 		const signal: AnomalySignalType = "throughput"
 		const ratePerMin = config.elapsedMinutes > 0 ? currentCount / config.elapsedMinutes : currentCount
-		if (insufficientBaseline || config.elapsedMinutes < RATE_MIN_ELAPSED_MINUTES) {
+		if (config.elapsedMinutes < RATE_MIN_ELAPSED_MINUTES) {
 			evaluations.push(skipped(signal, serviceName, deploymentEnv, ratePerMin, currentCount))
 		} else {
 			const rates = baseline.map((b) => b.requestCount / 60)
 			const m = median(rates)
-			if (m * config.elapsedMinutes < THROUGHPUT_MIN_EXPECTED) {
-				// Too few expected requests so far: an observed zero is
-				// indistinguishable from a normal quiet stretch.
-				evaluations.push(skipped(signal, serviceName, deploymentEnv, ratePerMin, currentCount))
-			} else {
-				const sigma = robustSigma(rates, m, 0.5, 0.1)
-				// Clamp into [0.1m, 0.5m]: when MAD is large relative to the median,
-				// `m - k*sigma` goes negative and a bare min() would make the drop
-				// signal permanently un-fireable (ratePerMin >= 0 always). The 0.1m
-				// floor keeps severe outages detectable on high-variance series.
-				const threshold = Math.max(Math.min(m - k * sigma, m * 0.5), m * 0.1)
-				// Clamp regime: the statistical bound is vacuous (m - k*sigma <= 0),
-				// so the floor is doing the work and any quiet stretch would breach.
-				// There, only a near-total outage counts.
-				const outageOnly = m - k * sigma <= 0
-				const outageCeiling = Math.max(1, THROUGHPUT_OUTAGE_FRACTION * m * config.elapsedMinutes)
-				const breached = ratePerMin < threshold && (!outageOnly || currentCount < outageCeiling)
-				evaluations.push(
-					makeEval(signal, ratePerMin, m, sigma, threshold, breached, "warning", currentCount),
-				)
-			}
+			const sigma = robustSigma(rates, m, 0.5, 0.1)
+			const threshold = m * THROUGHPUT_OUTAGE_FRACTION
+			const hasContinuousBaseline = baseline.length >= THROUGHPUT_MIN_BASELINE_SAMPLES
+			const hasEnoughExpectedTraffic = m * config.elapsedMinutes >= THROUGHPUT_MIN_EXPECTED
+			const breached = hasContinuousBaseline && hasEnoughExpectedTraffic && ratePerMin < threshold
+
+			// Once the current window is mature, an ineligible series is healthy for
+			// this signal—not skipped. This lets stale incidents created by the old,
+			// overly broad drop detector recover instead of freezing open forever.
+			evaluations.push(
+				makeEval(signal, ratePerMin, m, sigma, threshold, breached, "warning", currentCount),
+			)
 		}
 	}
 

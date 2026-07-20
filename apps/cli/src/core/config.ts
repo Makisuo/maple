@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, type PlatformError, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, type PlatformError, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
 import * as os from "node:os"
 import * as path from "node:path"
@@ -64,19 +64,19 @@ const writeMerged = (
 
 export interface MapleConfigShape {
 	/** Remote API base URL (env `MAPLE_API_URL` overrides the stored value). */
-	readonly apiUrl: string | undefined
+	readonly apiUrl: Option.Option<string>
 	/** Remote bearer token (env `MAPLE_API_TOKEN` overrides the stored value). */
-	readonly token: string | undefined
-	readonly orgId: string | undefined
+	readonly token: Option.Option<Redacted.Redacted<string>>
+	readonly orgId: Option.Option<string>
 	/** Local binary base URL (env `MAPLE_LOCAL_URL`, else the default). */
 	readonly localUrl: string
-	readonly defaultMode: "local" | "remote" | undefined
+	readonly defaultMode: Option.Option<"local" | "remote">
 	/** API URL to use for `maple login` when none is passed. */
 	readonly defaultApiUrl: string
-	/** ISO timestamp of the last startup update check (undefined = never checked). */
-	readonly lastUpdateCheck: string | undefined
-	/** Latest release tag seen by the last update check, or undefined. */
-	readonly latestKnownVersion: string | undefined
+	/** ISO timestamp of the last startup update check (`None` = never checked). */
+	readonly lastUpdateCheck: Option.Option<string>
+	/** Latest release tag seen by the last update check, or `None`. */
+	readonly latestKnownVersion: Option.Option<string>
 	/** Persist config fields (merged with existing). */
 	readonly write: (next: StoredConfig) => Effect.Effect<void, PlatformError.PlatformError>
 	/** Remove the stored token (used by `maple logout`). */
@@ -96,14 +96,14 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 		const stored = yield* readStored(fs)
 		const env = process.env
 		return {
-			apiUrl: env.MAPLE_API_URL ?? stored.apiUrl,
-			token: env.MAPLE_API_TOKEN ?? stored.token,
-			orgId: env.MAPLE_ORG_ID ?? stored.orgId,
+			apiUrl: Option.fromNullishOr(env.MAPLE_API_URL ?? stored.apiUrl),
+			token: Option.map(Option.fromNullishOr(env.MAPLE_API_TOKEN ?? stored.token), Redacted.make),
+			orgId: Option.fromNullishOr(env.MAPLE_ORG_ID ?? stored.orgId),
 			localUrl: env.MAPLE_LOCAL_URL ?? defaultLocalUrl(env.MAPLE_LOCAL_BIND_HOST),
-			defaultMode: stored.defaultMode,
+			defaultMode: Option.fromNullishOr(stored.defaultMode),
 			defaultApiUrl: env.MAPLE_API_URL ?? DEFAULT_API_URL,
-			lastUpdateCheck: stored.lastUpdateCheck,
-			latestKnownVersion: stored.latestKnownVersion,
+			lastUpdateCheck: Option.fromNullishOr(stored.lastUpdateCheck),
+			latestKnownVersion: Option.fromNullishOr(stored.latestKnownVersion),
 			write: (next) => writeMerged(fs, (cur) => ({ ...cur, ...next })),
 			clearToken: () =>
 				writeMerged(fs, (cur) => {

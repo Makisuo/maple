@@ -222,18 +222,72 @@ export function buildEvaluateCacheKey(orgId: string, request: QueryEngineEvaluat
 }
 
 const DIRECT_CACHE_SNAP_KEYS = new Set(["startTime", "endTime"])
+const DIRECT_CACHE_SET_KEYS = new Set([
+	"commitShas",
+	"environments",
+	"namespaces",
+	"serviceNames",
+	"services",
+	"spanNames",
+])
 
-function normalizeDirectCacheValue(value: unknown, parentKey?: string): unknown {
+export interface DirectRouteCachePolicy {
+	/** Bump when response or key semantics change incompatibly. */
+	readonly version: number
+	readonly ttlSeconds: number
+	/** Time-key coalescing is independent from storage lifetime. */
+	readonly snapWindowSeconds: number
+}
+
+export type DirectRouteCachePolicyInput = number | DirectRouteCachePolicy
+
+export function makeDirectRouteCachePolicy(
+	options: {
+		readonly ttlSeconds?: number
+		readonly snapWindowSeconds?: number
+		readonly version?: number
+	} = {},
+): DirectRouteCachePolicy {
+	const ttlSeconds = Number.isFinite(options.ttlSeconds)
+		? Math.max(1, Math.floor(options.ttlSeconds!))
+		: CACHE_SNAP_S
+	const requestedSnap = options.snapWindowSeconds ?? ttlSeconds
+	const snapWindowSeconds = Number.isFinite(requestedSnap)
+		? Math.min(3600, Math.max(1, Math.floor(requestedSnap)))
+		: CACHE_SNAP_S
+	const version = Number.isFinite(options.version) ? Math.max(1, Math.floor(options.version!)) : 1
+	return { version, ttlSeconds, snapWindowSeconds }
+}
+
+export function resolveDirectRouteCachePolicy(
+	input: DirectRouteCachePolicyInput = CACHE_SNAP_S,
+): DirectRouteCachePolicy {
+	return typeof input === "number"
+		? makeDirectRouteCachePolicy({ ttlSeconds: input })
+		: makeDirectRouteCachePolicy(input)
+}
+
+function normalizeDirectCacheValue(value: unknown, snapWindowSeconds: number, parentKey?: string): unknown {
 	if (value == null) return value
 	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 		if (parentKey && DIRECT_CACHE_SNAP_KEYS.has(parentKey) && typeof value === "string") {
-			return snapSeconds(value)
+			return snapToWindow(value, snapWindowSeconds)
 		}
 		return value
 	}
 
 	if (Array.isArray(value)) {
-		return value.map((item) => normalizeDirectCacheValue(item))
+		const normalized = value.map((item) => normalizeDirectCacheValue(item, snapWindowSeconds))
+		if (
+			parentKey &&
+			DIRECT_CACHE_SET_KEYS.has(parentKey) &&
+			normalized.every((item) => ["string", "number", "boolean"].includes(typeof item))
+		) {
+			return [...new Map(normalized.map((item) => [JSON.stringify(item), item])).values()].sort(
+				(a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)),
+			)
+		}
+		return normalized
 	}
 
 	if (typeof value === "object") {
@@ -241,15 +295,24 @@ function normalizeDirectCacheValue(value: unknown, parentKey?: string): unknown 
 			Object.entries(value as Record<string, unknown>)
 				.filter(([, nestedValue]) => nestedValue !== undefined)
 				.sort(([left], [right]) => left.localeCompare(right))
-				.map(([key, nestedValue]) => [key, normalizeDirectCacheValue(nestedValue, key)]),
+				.map(([key, nestedValue]) => [
+					key,
+					normalizeDirectCacheValue(nestedValue, snapWindowSeconds, key),
+				]),
 		)
 	}
 
 	return String(value)
 }
 
-export function buildDirectRouteCacheKey(orgId: string, routeName: string, payload: unknown): string {
-	return `direct:${orgId}:${routeName}:${JSON.stringify(normalizeDirectCacheValue(payload))}`
+export function buildDirectRouteCacheKey(
+	orgId: string,
+	routeName: string,
+	payload: unknown,
+	policyInput: DirectRouteCachePolicyInput = CACHE_SNAP_S,
+): string {
+	const policy = resolveDirectRouteCachePolicy(policyInput)
+	return `direct:v${policy.version}:${orgId}:${routeName}:${JSON.stringify(normalizeDirectCacheValue(payload, policy.snapWindowSeconds))}`
 }
 
 const floorToBucketMs = (epochMs: number, bucketSeconds: number): number => {

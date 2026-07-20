@@ -48,6 +48,8 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceName: "my-worker",
 	// Optional: drop noisy spans before they hit OTLP (prefix match).
 	// dropSpanNames: ["McpServer/Notifications."],
+	// Optional: classify expected 4xx failures as successful spans.
+	// anticipatedErrorIdentifiers: ["@my-app/http/NotFoundError"],
 })
 
 const handler = HttpRouter.toWebHandler(Routes.pipe(Layer.provideMerge(telemetry.layer)))
@@ -63,16 +65,17 @@ export default {
 
 `telemetry.layer` MUST live in the same runtime as your routes — provide it to the layer composition you hand to `HttpRouter.toWebHandler`, not a separate per-request runtime, or your spans won't pick up the Tracer reference.
 
-When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are drained so they don't grow across the isolate's lifetime, but no requests are made. After a flush failure, each signal sleeps 60s before retrying so a broken collector doesn't get hammered.
+When `MAPLE_INGEST_KEY` is unset, the SDK runs in no-op mode: buffers are drained so they don't grow across the isolate's lifetime, but no requests are made. After a flush failure, the failed batch is restored ahead of newer telemetry and that signal sleeps 60s before retrying. Trace and log cooldowns are independent.
 
 ### Cloudflare-specific options
 
-| Option            | Description                                                                                                 |
-| ----------------- | ----------------------------------------------------------------------------------------------------------- |
-| `dropSpanNames`   | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`) |
-| `excludeLogSpans` | Skip Effect log spans in OTLP log attributes. Default `false`                                               |
-| `tracesPath`      | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                               |
-| `logsPath`        | OTLP logs path appended to `endpoint`. Default `/v1/logs`                                                   |
+| Option                        | Description                                                                                                 |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `anticipatedErrorIdentifiers` | Stable `_tag` / `Error.name` identifiers for expected 4xx failures; exported as `Ok` without an exception   |
+| `dropSpanNames`               | Span names whose prefix matches an entry are dropped before OTLP export (e.g. `"McpServer/Notifications."`) |
+| `excludeLogSpans`             | Skip Effect log spans in OTLP log attributes. Default `false`                                               |
+| `tracesPath`                  | OTLP traces path appended to `endpoint`. Default `/v1/traces`                                               |
+| `logsPath`                    | OTLP logs path appended to `endpoint`. Default `/v1/logs`                                                   |
 
 The same `MAPLE_ENDPOINT` / `MAPLE_INGEST_KEY` / `MAPLE_ENVIRONMENT` env vars apply, read from the Workers `env` binding.
 

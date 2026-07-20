@@ -834,7 +834,7 @@ const getCustomChartServiceDetailEffect = Effect.fn("QueryEngine.getCustomChartS
  */
 export interface ServiceDetailOverviewResult {
 	data: ServiceDetailTimeSeriesPoint[]
-	releases: ReadonlyArray<{ bucket: string; commitSha: CommitSha; count: number }>
+	releases: ReadonlyArray<{ bucket: string; commitSha: CommitSha; count: number; errorCount: number }>
 	environments: string[]
 }
 
@@ -885,6 +885,8 @@ const getServiceDetailOverviewEffect = Effect.fn("QueryEngine.getServiceDetailOv
 			bucket: toIsoBucket(r.bucket),
 			commitSha: r.commitSha,
 			count: Number(r.count),
+			// Optional in the response schema (API/web version-skew tolerance).
+			errorCount: Number(r.errorCount ?? 0),
 		})),
 		environments: [...result.environments],
 	} satisfies ServiceDetailOverviewResult

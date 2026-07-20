@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import type { InternalRpcInvalidInputError } from "@maple/domain/internal-rpc"
 import { callMcpToolRpc, submitDiagnosisRpc } from "./internal-rpc"
@@ -31,60 +31,60 @@ const unusedInvestigationService: InvestigationServiceShape = {
 }
 
 describe("internal RPC boundary", () => {
-	it("rejects invalid org IDs before MCP dispatch", async () => {
-		const error = await Effect.runPromise(
-			Effect.flip(
+	it.effect("rejects invalid org IDs before MCP dispatch", () =>
+		Effect.gen(function* () {
+			const error = yield* Effect.flip(
 				callMcpToolRpc({ orgId: " ", name: "inspect_trace", input: {} }) as Effect.Effect<
 					never,
 					InternalRpcInvalidInputError,
 					never
 				>,
-			),
-		)
-		expect(error._tag).toBe("@maple/internal-rpc/InvalidInputError")
-		expect(error.method).toBe("callMcpTool")
-	})
+			)
+			expect(error._tag).toBe("@maple/internal-rpc/InvalidInputError")
+			expect(error.method).toBe("callMcpTool")
+		}),
+	)
 
-	it("rejects invalid investigation IDs and model-produced reports", async () => {
-		for (const input of [
-			{ orgId: "org_1", investigationId: "not-a-uuid", report },
-			{ orgId: "org_1", investigationId, report: { summary: "incomplete" } },
-		]) {
-			const error = await Effect.runPromise(
-				Effect.flip(
+	it.effect("rejects invalid investigation IDs and model-produced reports", () =>
+		Effect.gen(function* () {
+			for (const input of [
+				{ orgId: "org_1", investigationId: "not-a-uuid", report },
+				{ orgId: "org_1", investigationId, report: { summary: "incomplete" } },
+			]) {
+				const error = yield* Effect.flip(
 					submitDiagnosisRpc(input).pipe(
 						Effect.provideService(InvestigationService, unusedInvestigationService),
 					),
-				),
-			)
-			expect(error._tag).toBe("@maple/internal-rpc/InvalidInputError")
-			if (error._tag !== "@maple/internal-rpc/InvalidInputError") {
-				throw new Error(`Expected invalid input, received ${error._tag}`)
+				)
+				expect(error._tag).toBe("@maple/internal-rpc/InvalidInputError")
+				if (error._tag !== "@maple/internal-rpc/InvalidInputError") {
+					throw new Error(`Expected invalid input, received ${error._tag}`)
+				}
+				expect(error.method).toBe("submitDiagnosis")
 			}
-			expect(error.method).toBe("submitDiagnosis")
-		}
-	})
+		}),
+	)
 
-	it("submits a decoded diagnosis to the org-scoped service", async () => {
-		const calls: Array<{ orgId: string; investigationId: string; summary: string }> = []
-		const expected = { id: investigationId, status: "diagnosed" } as never
-		const service: InvestigationServiceShape = {
-			...unusedInvestigationService,
-			submitDiagnosis: (orgId, id, request) =>
-				Effect.sync(() => {
-					calls.push({ orgId, investigationId: id, summary: request.report.summary })
-					return expected
-				}),
-		}
+	it.effect("submits a decoded diagnosis to the org-scoped service", () =>
+		Effect.gen(function* () {
+			const calls: Array<{ orgId: string; investigationId: string; summary: string }> = []
+			const expected = { id: investigationId, status: "diagnosed" } as never
+			const service: InvestigationServiceShape = {
+				...unusedInvestigationService,
+				submitDiagnosis: (orgId, id, request) =>
+					Effect.sync(() => {
+						calls.push({ orgId, investigationId: id, summary: request.report.summary })
+						return expected
+					}),
+			}
 
-		const result = await Effect.runPromise(
-			submitDiagnosisRpc({ orgId: "org_1", investigationId, report }).pipe(
+			const result = yield* submitDiagnosisRpc({ orgId: "org_1", investigationId, report }).pipe(
 				Effect.provideService(InvestigationService, service),
-			),
-		)
-		expect(result).toBe(expected)
-		expect(calls).toEqual([
-			{ orgId: "org_1", investigationId, summary: "Checkout latency doubled after deploy." },
-		])
-	})
+			)
+			expect(result).toBe(expected)
+			expect(calls).toEqual([
+				{ orgId: "org_1", investigationId, summary: "Checkout latency doubled after deploy." },
+			])
+		}),
+	)
 })

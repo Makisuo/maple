@@ -13,12 +13,48 @@ export const cacheMissesTotal = Metric.counter("query_engine.cache.misses_total"
 })
 
 export const bucketCacheBucketsHit = Metric.counter("query_engine.bucket_cache.buckets_hit_total", {
-	description: "Buckets served from the bucket cache without re-querying Tinybird",
+	description: "Requested buckets already covered by the bucket cache",
 	incremental: true,
 })
 
 export const bucketCacheBucketsMissed = Metric.counter("query_engine.bucket_cache.buckets_missed_total", {
-	description: "Buckets that were fetched from Tinybird and written to the bucket cache",
+	description: "Requested buckets not covered by the bucket cache at lookup time",
+	incremental: true,
+})
+
+export const bucketCacheBucketsRequested = Metric.counter(
+	"query_engine.bucket_cache.buckets_requested_total",
+	{
+		description: "Total buckets requested through the bucket cache",
+		incremental: true,
+	},
+)
+
+export const bucketCacheWarehouseQueries = Metric.counter(
+	"query_engine.bucket_cache.warehouse_queries_total",
+	{
+		description: "Warehouse queries issued to fill bucket cache gaps",
+		incremental: true,
+	},
+)
+
+export const bucketCacheSegmentHits = Metric.counter("query_engine.bucket_cache.segment_hits_total", {
+	description: "Bucket-cache segments read successfully",
+	incremental: true,
+})
+
+export const bucketCacheSegmentMisses = Metric.counter("query_engine.bucket_cache.segment_misses_total", {
+	description: "Bucket-cache segments absent or invalid",
+	incremental: true,
+})
+
+export const bucketCacheSegmentTimeouts = Metric.counter("query_engine.bucket_cache.segment_timeouts_total", {
+	description: "Bucket-cache segment reads that exceeded the read deadline",
+	incremental: true,
+})
+
+export const bucketCacheSegmentErrors = Metric.counter("query_engine.bucket_cache.segment_errors_total", {
+	description: "Bucket-cache segment reads that failed",
 	incremental: true,
 })
 

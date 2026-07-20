@@ -23,6 +23,7 @@ import {
 	testEnv,
 	type VcsRepo,
 } from "./harness"
+import { decodeGitCommitSha } from "./fixtures"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
@@ -195,7 +196,7 @@ describe("VcsCommitService.resolveCommitDetail", () => {
 
 				// It was persisted: now stored, no further provider calls.
 				const before = calls.commitGets
-				const stored = expectSome(yield* repo.findCommitBySha(orgId, SHA as never))
+				const stored = expectSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA)))
 				assert.strictEqual(
 					stored.repositoryId,
 					expectSome(yield* repo.resolveRepository(orgId, "github", "7")).id,

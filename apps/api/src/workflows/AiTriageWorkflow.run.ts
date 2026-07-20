@@ -22,7 +22,7 @@ import { createFlueClient } from "@flue/sdk"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
 import { aiTriageRuns, anomalyIncidents, errorIssueEvents } from "@maple/db"
 import { createMaplePgClient, type MaplePgClient } from "@maple/db/client"
-import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
+import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { AiTriageResult } from "@maple/domain/http"
 import {
 	AiTriageRunId,
@@ -177,7 +177,7 @@ const triageTelemetry = MapleCloudflareSDK.make({
 	serviceName: "maple-api",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 const GATE_STEP = { retries: { limit: 3, delay: "2 seconds", backoff: "exponential" } }

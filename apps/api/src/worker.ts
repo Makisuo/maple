@@ -1,6 +1,6 @@
 import type { MessageBatch, ScheduledController } from "@cloudflare/workers-types"
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
-import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
+import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import {
 	layerFromEnvRecord,
 	runScheduledEffect,
@@ -53,7 +53,7 @@ const telemetry = MapleCloudflareSDK.make({
 	dropSpanNames: ["McpServer/Notifications."],
 	// Expected 4xx outcomes (validation, not-found, unauthorized, …) record as
 	// Ok spans instead of errors — see @maple/domain/anticipated-errors.
-	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 // `HttpMiddleware.tracer` ends the root server span on a deferred macrotask
@@ -280,13 +280,23 @@ const handle = async (
 		return response
 	} catch (err) {
 		console.error("[worker] handler failed:", err)
+		const message = err instanceof Error ? err.message : String(err)
+		Effect.runFork(
+			Effect.logError("API worker handler failed").pipe(
+				Effect.annotateLogs({
+					error: message,
+					method: request.method,
+					url: request.url,
+				}),
+				Effect.provide(telemetry.layer),
+			),
+		)
 		if (isMcp && mcpFrame) {
 			console.error(
 				`[mcp-err] method=${mcpFrame.method} id=${mcpFrame.id}` + ` dur=${Date.now() - startedAt}ms`,
 			)
 		}
 		ctx.waitUntil(flushTelemetry(env))
-		const message = err instanceof Error ? err.message : String(err)
 		return new Response(`worker handler error: ${message}`, { status: 504 })
 	}
 }

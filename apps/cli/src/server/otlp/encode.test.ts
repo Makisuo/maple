@@ -41,6 +41,11 @@ const b64 = (h: string): string => Buffer.from(h, "hex").toString("base64")
 const javaAgentTracePayloadB64 =
 	"CvULCqUICiUKG2RlcGxveW1lbnQuZW52aXJvbm1lbnQubmFtZRIGCgR0ZXN0ChYKCWhvc3QuYXJjaBIJCgdhYXJjaDY0CisKCWhvc3QubmFtZRIeChx6aGFvamlydWlkZU1hY0Jvb2stQWlyLmxvY2FsCiMKDm9zLmRlc2NyaXB0aW9uEhEKD01hYyBPUyBYIDI2LjQuMQoTCgdvcy50eXBlEggKBmRhcndpbgoWCgpvcy52ZXJzaW9uEggKBjI2LjQuMQqgAQoUcHJvY2Vzcy5jb21tYW5kX2FyZ3MShwEqhAEKVQpTL1VzZXJzL3poYW9qaXJ1aS9MaWJyYXJ5L0phdmEvSmF2YVZpcnR1YWxNYWNoaW5lcy9vcGVuamRrLTIzL0NvbnRlbnRzL0hvbWUvYmluL2phdmEKKwopL3RtcC9tYXBsZS1qYXZhLWFnZW50LTdLMHcvT3RlbFJlcHJvLmphdmEKcAoXcHJvY2Vzcy5leGVjdXRhYmxlLnBhdGgSVQpTL1VzZXJzL3poYW9qaXJ1aS9MaWJyYXJ5L0phdmEvSmF2YVZpcnR1YWxNYWNoaW5lcy9vcGVuamRrLTIzL0NvbnRlbnRzL0hvbWUvYmluL2phdmEKEwoLcHJvY2Vzcy5waWQSBBjtpQIKVwobcHJvY2Vzcy5ydW50aW1lLmRlc2NyaXB0aW9uEjgKNk9yYWNsZSBDb3Jwb3JhdGlvbiBPcGVuSkRLIDY0LUJpdCBTZXJ2ZXIgVk0gMjMrMzctMjM2OQo1ChRwcm9jZXNzLnJ1bnRpbWUubmFtZRIdChtPcGVuSkRLIFJ1bnRpbWUgRW52aXJvbm1lbnQKJwoXcHJvY2Vzcy5ydW50aW1lLnZlcnNpb24SDAoKMjMrMzctMjM2OQo9ChNzZXJ2aWNlLmluc3RhbmNlLmlkEiYKJGQxZTI5NjA0LTI5ODYtNDlmZC1iNWJiLWU0ZjFhN2Q0ZjkyYwohCgxzZXJ2aWNlLm5hbWUSEQoPd2lzY2hvaWNlci11c2VyCj0KFXRlbGVtZXRyeS5kaXN0cm8ubmFtZRIkCiJvcGVudGVsZW1ldHJ5LWphdmEtaW5zdHJ1bWVudGF0aW9uCiQKGHRlbGVtZXRyeS5kaXN0cm8udmVyc2lvbhIICgYyLjI4LjEKIAoWdGVsZW1ldHJ5LnNkay5sYW5ndWFnZRIGCgRqYXZhCiUKEnRlbGVtZXRyeS5zZGsubmFtZRIPCg1vcGVudGVsZW1ldHJ5CiEKFXRlbGVtZXRyeS5zZGsudmVyc2lvbhIICgYxLjYyLjAKTwoXdmNzLnJlcG9zaXRvcnkudXJsLmZ1bGwSNAoyaHR0cHM6Ly9naXRodWIuY29tL1dpc2Nob2ljZXItWGlhbi93aXNjaG9pY2VyLXVzZXISoQMKMQohaW8ub3BlbnRlbGVtZXRyeS5qYXZhLWh0dHAtY2xpZW50EgwyLjI4LjEtYWxwaGESwgIKEGmLshO9k6DTrmM7fx2w70cSCD/XzWWx87T5KgNHRVQwAzkgsMwtvzK3GEEJ4tgtvzK3GEoVCgt0aHJlYWQubmFtZRIGCgRtYWluSi0KCHVybC5mdWxsEiEKH2h0dHA6Ly8xMjcuMC4wLjE6MTgwODEvcGluZz9pPTJKEwoLc2VydmVyLnBvcnQSBBihjQFKEwoKZXJyb3IudHlwZRIFCgM0MDRKHQoOc2VydmVyLmFkZHJlc3MSCwoJMTI3LjAuMC4xSiEKGG5ldHdvcmsucHJvdG9jb2wudmVyc2lvbhIFCgMxLjFKIAoZaHR0cC5yZXNwb25zZS5zdGF0dXNfY29kZRIDGJQDShwKE2h0dHAucmVxdWVzdC5tZXRob2QSBQoDR0VUSg8KCXRocmVhZC5pZBICGAF6AhgChQEDAQAAGidodHRwczovL29wZW50ZWxlbWV0cnkuaW8vc2NoZW1hcy8xLjM3LjAaJ2h0dHBzOi8vb3BlbnRlbGVtZXRyeS5pby9zY2hlbWFzLzEuMjQuMA=="
 
+// Minimal ExportTraceServiceRequest encoded with the upstream OTLP schema.
+// Span.flags is field 16, so its fixed32 key is the two-byte sequence 0x85 0x01.
+const pythonSpanFlagsPayloadHex =
+	"0a480a00124412420a1000000000000000000000000000000000120800000000000000002a0a776974682d666c6167733001390100000000000000410200000000000000850101000000"
+
 const attr = (key: string, str: string) => ({ key, value: { stringValue: str } })
 
 const sampleTraceReq = () => ({
@@ -272,6 +277,17 @@ describe("protobuf round-trip (proves vendored .proto field numbers)", () => {
 })
 
 describe("external OTLP protobuf compatibility", () => {
+	it("decodes a non-zero fixed32 span flags field emitted by the Python SDK", () => {
+		const decoded = decodeTraceRequest(Buffer.from(pythonSpanFlagsPayloadHex, "hex")) as {
+			resourceSpans: Array<{ scopeSpans: Array<{ spans: Array<{ name: string; flags: number }> }> }>
+		}
+		const span = decoded.resourceSpans[0]?.scopeSpans[0]?.spans[0]
+		expect(span).toMatchObject({ name: "with-flags", flags: 1 })
+
+		const [batch] = encodeTraces(decoded)
+		expect(batch).toMatchObject({ datasource: "traces", rowCount: 1 })
+	})
+
 	it("decodes a Java agent OTLP/HTTP traces payload captured from the wire", () => {
 		const decoded = decodeTraceRequest(Buffer.from(javaAgentTracePayloadB64, "base64"))
 		const [batch] = encodeTraces(decoded)

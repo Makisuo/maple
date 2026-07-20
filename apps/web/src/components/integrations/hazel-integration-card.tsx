@@ -1,22 +1,25 @@
-import { useEffect, useState } from "react"
-import { Exit } from "effect"
+import { useState } from "react"
+import { Exit, Option } from "effect"
 import { HazelStartConnectRequest } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
+import { ErrorState } from "@/components/common/error-state"
 import { BellIcon, ConnectionIcon, HazelIcon, LoaderIcon, ShieldIcon } from "@/components/icons"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { useMountEffect } from "@/hooks/use-mount-effect"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { HAZEL_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { IntegrationEmptyState } from "./integration-empty-state"
 
 export function HazelIntegrationCard() {
-	const statusResult = useAtomValue(
-		MapleApiAtomClient.query("integrations", "hazelStatus", {
-			reactivityKeys: ["hazelIntegrationStatus"],
-		}),
-	)
+	const statusAtom = MapleApiAtomClient.query("integrations", "hazelStatus", {
+		reactivityKeys: ["hazelIntegrationStatus"],
+	})
+	const statusResult = useAtomValue(statusAtom)
+	const refreshStatus = useAtomRefresh(statusAtom)
 
 	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "hazelStart"), {
 		mode: "promiseExit",
@@ -27,7 +30,7 @@ export function HazelIntegrationCard() {
 
 	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
 
-	useEffect(() => {
+	useMountEffect(() => {
 		function onMessage(event: MessageEvent) {
 			if (event.data?.type === "maple:integration:hazel") {
 				if (event.data.status === "success") {
@@ -39,11 +42,17 @@ export function HazelIntegrationCard() {
 		}
 		window.addEventListener("message", onMessage)
 		return () => window.removeEventListener("message", onMessage)
-	}, [])
+	})
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
-		.orElse(() => null)
+		.orElse(() =>
+			Result.isFailure(statusResult)
+				? Option.getOrNull(Option.map(statusResult.previousSuccess, (previous) => previous.value))
+				: null,
+		)
+	const isLoading = Result.isInitial(statusResult) && status === null
+	const loadFailed = Result.isFailure(statusResult) && status === null
 
 	async function handleConnect() {
 		const popup = window.open("", "maple-hazel-connect", "popup,width=520,height=640")
@@ -77,6 +86,18 @@ export function HazelIntegrationCard() {
 	}
 
 	const isConnected = status?.connected === true
+	if (isLoading) {
+		return <Skeleton className="h-32 w-full rounded-lg" />
+	}
+	if (loadFailed) {
+		return (
+			<ErrorState
+				error={statusResult.cause}
+				title="Failed to load the Hazel integration"
+				onRetry={refreshStatus}
+			/>
+		)
+	}
 
 	if (!isConnected) {
 		return (
@@ -127,8 +148,8 @@ export function HazelIntegrationCard() {
 						<Badge variant="success">Connected</Badge>
 					</div>
 					<p className="mt-1 text-xs text-muted-foreground">
-						Forward Maple alerts into a Hazel workspace via OAuth. Once connected, create a
-						Hazel destination to pick which workspace receives notifications.
+						Forward Maple alerts into a Hazel workspace via OAuth. Once connected, create a Hazel
+						destination to pick which workspace receives notifications.
 					</p>
 				</div>
 
@@ -152,9 +173,7 @@ export function HazelIntegrationCard() {
 						Reconnect
 					</Button>
 					<Button size="sm" onClick={handleDisconnect} disabled={busy !== null} variant="outline">
-						{busy === "disconnect" ? (
-							<LoaderIcon size={14} className="animate-spin" />
-						) : null}
+						{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Disconnect
 					</Button>
 				</div>

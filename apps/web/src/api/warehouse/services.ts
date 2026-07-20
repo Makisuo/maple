@@ -7,6 +7,7 @@ import {
 	ServiceName,
 	ServiceNamespace,
 	ServiceHealthBaselineRequest,
+	ServiceHealthSnapshotRequest,
 	ServiceOverviewRequest,
 } from "@maple/domain/http"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -229,6 +230,74 @@ const getServiceOverviewEffect = Effect.fn("QueryEngine.getServiceOverview")(fun
 	const coercedRows = result.data.map(coerceRow)
 	return {
 		data: aggregateByServiceEnvironment(coercedRows, durationSeconds),
+	}
+})
+
+// ---------------------------------------------------------------------------
+// Fast service-health snapshot (main overview)
+// ---------------------------------------------------------------------------
+
+export interface ServiceHealthSnapshot {
+	serviceName: string
+	environment: string
+	requestCount: number
+	errorCount: number
+	errorRate: number
+	p95LatencyMs: number
+	throughput: number
+}
+
+const GetServiceHealthSnapshotInput = Schema.Struct({
+	startTime: Schema.optional(dateTimeString),
+	endTime: Schema.optional(dateTimeString),
+	environments: Schema.optional(Schema.mutable(Schema.Array(DeploymentEnvironment))),
+})
+
+export type GetServiceHealthSnapshotInput = (typeof GetServiceHealthSnapshotInput)["Encoded"]
+
+export function getServiceHealthSnapshot({ data }: { data: GetServiceHealthSnapshotInput }) {
+	return getServiceHealthSnapshotEffect({ data })
+}
+
+const getServiceHealthSnapshotEffect = Effect.fn("QueryEngine.getServiceHealthSnapshot")(function* ({
+	data,
+}: {
+	data: GetServiceHealthSnapshotInput
+}) {
+	const input = yield* decodeInput(GetServiceHealthSnapshotInput, data ?? {}, "getServiceHealthSnapshot")
+	const fallback = defaultServicesTimeRange(yield* Clock.currentTimeMillis)
+	const startTime = input.startTime ?? fallback.startTime
+	const endTime = input.endTime ?? fallback.endTime
+	const durationSeconds = Math.max(
+		(warehouseDateTimeToMs(endTime) - warehouseDateTimeToMs(startTime)) / 1000,
+		1,
+	)
+
+	const response = yield* runWarehouseQuery("serviceHealthSnapshot", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.serviceHealthSnapshot({
+				payload: new ServiceHealthSnapshotRequest({
+					startTime,
+					endTime,
+					environments: input.environments,
+				}),
+			})
+		}),
+	)
+
+	return {
+		data: response.data.map(
+			(row): ServiceHealthSnapshot => ({
+				serviceName: String(row.serviceName),
+				environment: row.environment || "unknown",
+				requestCount: row.requestCount,
+				errorCount: row.errorCount,
+				errorRate: row.requestCount > 0 ? row.errorCount / row.requestCount : 0,
+				p95LatencyMs: row.p95LatencyMs,
+				throughput: row.requestCount / durationSeconds,
+			}),
+		),
 	}
 })
 

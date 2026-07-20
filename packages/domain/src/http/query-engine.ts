@@ -196,6 +196,28 @@ export class ServiceOverviewResponse extends Schema.Class<ServiceOverviewRespons
 	},
 ) {}
 
+export class ServiceHealthSnapshotRequest extends Schema.Class<ServiceHealthSnapshotRequest>(
+	"ServiceHealthSnapshotRequest",
+)({
+	startTime: TinybirdDateTime,
+	endTime: TinybirdDateTime,
+	environments: OptionalDeploymentEnvs,
+}) {}
+
+export class ServiceHealthSnapshotResponse extends Schema.Class<ServiceHealthSnapshotResponse>(
+	"ServiceHealthSnapshotResponse",
+)({
+	data: Schema.Array(
+		Schema.Struct({
+			serviceName: ServiceName,
+			environment: Schema.String,
+			requestCount: Schema.Number,
+			errorCount: Schema.Number,
+			p95LatencyMs: Schema.Number,
+		}),
+	),
+}) {}
+
 export class ServiceHealthBaselineRequest extends Schema.Class<ServiceHealthBaselineRequest>(
 	"ServiceHealthBaselineRequest",
 )({
@@ -534,6 +556,9 @@ export class ServiceDetailOverviewResponse extends Schema.Class<ServiceDetailOve
 			bucket: Schema.String,
 			commitSha: CommitSha,
 			count: Schema.Number,
+			// Error-status spans for this commit in this bucket. Optional so a web
+			// build deployed ahead of the API tolerates its absence (defaults to 0).
+			errorCount: Schema.optional(Schema.Number),
 		}),
 	),
 	// Distinct non-empty deployment environments this service reports in the
@@ -1378,9 +1403,7 @@ export class RawSqlExecuteRequest extends Schema.Class<RawSqlExecuteRequest>("Ra
 	displayType: RawSqlDisplayType,
 	startTime: TinybirdDateTime,
 	endTime: TinybirdDateTime,
-	granularitySeconds: Schema.optional(
-		Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0)),
-	),
+	granularitySeconds: Schema.optional(Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0))),
 }) {}
 
 export class RawSqlExecuteResponse extends Schema.Class<RawSqlExecuteResponse>("RawSqlExecuteResponse")({
@@ -1516,6 +1539,13 @@ export class QueryEngineApiGroup extends HttpApiGroup.make("queryEngine")
 		HttpApiEndpoint.post("serviceOverview", "/service-overview", {
 			payload: ServiceOverviewRequest,
 			success: ServiceOverviewResponse,
+			error: queryEngineEndpointErrors,
+		}),
+	)
+	.add(
+		HttpApiEndpoint.post("serviceHealthSnapshot", "/service-health-snapshot", {
+			payload: ServiceHealthSnapshotRequest,
+			success: ServiceHealthSnapshotResponse,
 			error: queryEngineEndpointErrors,
 		}),
 	)

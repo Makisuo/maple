@@ -8,10 +8,10 @@ import {
 	generateFingerprint,
 	mergeAndDeduplicateBuckets,
 	pointsToBuckets,
-	type BucketedCacheData,
+	type BucketCacheSegmentData,
 	type CachedBucket,
 } from "./bucket-cache"
-import { EdgeCacheService } from "./edge-cache"
+import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
 import { MemoryCacheBackendLive } from "./cache-backend"
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -164,6 +164,11 @@ const BucketLive = BucketCacheService.layer.pipe(
 	Layer.provide(MemoryCacheBackendLive),
 )
 
+const makeBucketLive = (backend: EdgeCacheBackend, readTimeoutMs?: number) =>
+	BucketCacheService.layer.pipe(
+		Layer.provide(Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs))),
+	)
+
 // These exercise the live cache backend and compute flux boundaries relative to
 // the real clock, so they run under it.live rather than the default TestClock.
 describe("BucketCacheService.getOrComputeBuckets", () => {
@@ -194,10 +199,14 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computeCalls.length, 1)
 			assert.deepStrictEqual(computeCalls[0], { startMs: 0, endMs: 3 * MIN })
 			assert.isTrue(first.bucketsMissed > 0)
+			assert.strictEqual(first.requestedBuckets, 3)
+			assert.strictEqual(first.warehouseQueryCount, 1)
 			assert.strictEqual(first.points.length, 3)
 
+			assert.strictEqual(second.bucketsHit, 3)
 			assert.strictEqual(second.bucketsMissed, 0)
 			assert.strictEqual(second.missingRangeCount, 0)
+			assert.strictEqual(second.warehouseQueryCount, 0)
 			assert.strictEqual(second.points.length, 3)
 		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
 	})
@@ -337,15 +346,17 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			const fingerprint = yield* Effect.promise(() =>
 				generateFingerprint(request.orgId, request.query, request.bucketSeconds),
 			)
-			const cacheKey = `v1:${request.orgId}:${fingerprint}`
+			const cacheKey = `v2:${request.orgId}:${fingerprint}:0`
 			// Cast through `unknown` because we're intentionally writing a
 			// non-current version to simulate a post-migration read.
 			const future = {
 				version: 99,
 				fingerprint,
 				bucketSeconds: 60,
+				segmentStartMs: 0,
+				segmentEndMs: 120 * MIN,
 				buckets: [],
-			} as unknown as BucketedCacheData
+			} as unknown as BucketCacheSegmentData
 			yield* edge.rawPut("qe-ts-buckets", cacheKey, future, 60)
 
 			const outcome = yield* svc.getOrComputeBuckets(request, compute)
@@ -353,6 +364,144 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 			assert.strictEqual(computed, 1)
 			assert.isTrue(outcome.bucketsMissed > 0)
 			assert.strictEqual(outcome.points.length, 3)
+		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+	})
+
+	it.live("treats a malformed segment payload as a miss instead of defecting", () => {
+		const request = {
+			orgId,
+			query: { source: "traces", kind: "timeseries", malformedTest: true },
+			bucketSeconds: 60,
+			startMs: 0,
+			endMs: MIN,
+		}
+		let computed = 0
+
+		return Effect.gen(function* () {
+			const edge = yield* EdgeCacheService
+			const svc = yield* BucketCacheService
+			const fingerprint = yield* Effect.promise(() =>
+				generateFingerprint(request.orgId, request.query, request.bucketSeconds),
+			)
+			yield* edge.rawPut("qe-ts-buckets", `v2:${request.orgId}:${fingerprint}:0`, "corrupt", 60)
+
+			const outcome = yield* svc.getOrComputeBuckets(request, () => {
+				computed++
+				return Effect.succeed([point(new Date(0).toISOString(), { v: 1 })])
+			})
+
+			assert.strictEqual(computed, 1)
+			assert.strictEqual(outcome.segmentsMissed, 1)
+			assert.strictEqual(outcome.points.length, 1)
+		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
+	})
+
+	it.live("stores bounded fixed-size segments instead of one growing query blob", () => {
+		const reads: string[] = []
+		const writes: Array<{ key: string; value: unknown }> = []
+		const backend: EdgeCacheBackend = {
+			get: async (_bucket, key) => {
+				reads.push(key)
+				return undefined
+			},
+			put: async (_bucket, key, value) => {
+				writes.push({ key, value })
+			},
+			delete: async () => {},
+		}
+		const request = {
+			orgId,
+			query: { source: "traces", kind: "timeseries" },
+			bucketSeconds: 60,
+			startMs: 0,
+			endMs: 5 * MIN,
+		}
+		const compute = ({ startMs, endMs }: { startMs: number; endMs: number }) => {
+			const points: TimeseriesPoint[] = []
+			for (let cursor = startMs; cursor < endMs; cursor += MIN) {
+				points.push(point(new Date(cursor).toISOString(), { v: cursor }))
+			}
+			return Effect.succeed(points)
+		}
+
+		return Effect.gen(function* () {
+			const svc = yield* BucketCacheService
+			const outcome = yield* svc.getOrComputeBuckets(request, compute)
+
+			assert.strictEqual(reads.length, 3)
+			assert.strictEqual(writes.length, 3)
+			assert.strictEqual(outcome.segmentsMissed, 3)
+			for (const write of writes) {
+				const segment = write.value as BucketCacheSegmentData
+				assert.isAtMost(segment.buckets.length, 2)
+				assert.strictEqual(segment.segmentEndMs - segment.segmentStartMs, 2 * MIN)
+			}
+		}).pipe(
+			Effect.provide(makeBucketLive(backend)),
+			Effect.provide(makeConfig({ QE_BUCKET_CACHE_SEGMENT_BUCKETS: "2" })),
+		)
+	})
+
+	it.live("recomputes after a segment timeout without overwriting unknown cache state", () => {
+		let writes = 0
+		let computes = 0
+		const backend: EdgeCacheBackend = {
+			get: async () => await new Promise<never>(() => {}),
+			put: async () => {
+				writes++
+			},
+			delete: async () => {},
+		}
+		const request = {
+			orgId,
+			query: { source: "logs", kind: "timeseries" },
+			bucketSeconds: 60,
+			startMs: 0,
+			endMs: 2 * MIN,
+		}
+
+		return Effect.gen(function* () {
+			const svc = yield* BucketCacheService
+			const outcome = yield* svc.getOrComputeBuckets(request, () => {
+				computes++
+				return Effect.succeed([point(new Date(0).toISOString(), { v: 1 })])
+			})
+
+			assert.strictEqual(computes, 1)
+			assert.strictEqual(writes, 0)
+			assert.strictEqual(outcome.segmentsTimedOut, 1)
+			assert.strictEqual(outcome.warehouseQueryCount, 1)
+		}).pipe(
+			Effect.provide(makeBucketLive(backend, 10)),
+			Effect.provide(makeConfig()),
+			Effect.timeout(200),
+		)
+	})
+
+	it.live("caches explicit empty-bucket coverage for sparse query results", () => {
+		let computes = 0
+		const request = {
+			orgId,
+			query: { source: "metrics", kind: "timeseries", filter: "no matches" },
+			bucketSeconds: 60,
+			startMs: 0,
+			endMs: 3 * MIN,
+		}
+
+		return Effect.gen(function* () {
+			const svc = yield* BucketCacheService
+			const compute = () => {
+				computes++
+				return Effect.succeed([] as ReadonlyArray<TimeseriesPoint>)
+			}
+			const first = yield* svc.getOrComputeBuckets(request, compute)
+			const second = yield* svc.getOrComputeBuckets(request, compute)
+
+			assert.strictEqual(computes, 1)
+			assert.strictEqual(first.warehouseQueryCount, 1)
+			assert.strictEqual(second.bucketsHit, 3)
+			assert.strictEqual(second.warehouseQueryCount, 0)
+			assert.deepStrictEqual(second.points, [])
 		}).pipe(Effect.provide(BucketLive), Effect.provide(makeConfig()))
 	})
 

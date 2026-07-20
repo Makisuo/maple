@@ -1,8 +1,10 @@
 // ---------------------------------------------------------------------------
-// Anticipated error tags
+// Anticipated error identifiers
 //
-// The set of domain HTTP error `_tag`s that represent *expected* client-facing
-// outcomes (4xx): validation, not-found, unauthorized, forbidden, conflict, …
+// The set of stable domain HTTP error identifiers that represent *expected*
+// client-facing outcomes (4xx): validation, not-found, unauthorized, forbidden,
+// conflict, … Tagged errors contribute `_tag`; v2 ErrorClass values contribute
+// their class identifier / `Error.name`.
 //
 // These are not bugs — they're normal business results. The telemetry SDK uses
 // this set to record spans that fail *entirely* with one of these errors as
@@ -12,12 +14,13 @@
 // rule (4xx → Ok, 5xx → Error).
 //
 // Derived (not hand-maintained) from the error classes themselves: every
-// `Schema.TaggedErrorClass` carries its `_tag` literal and an `httpApiStatus`
-// annotation on its AST, so a new 4xx error is picked up automatically. A 5xx
-// error (persistence/upstream failures) is intentionally excluded and keeps
-// tracing.
+// Both `Schema.TaggedErrorClass` and `Schema.ErrorClass` carry a stable
+// identifier plus an `httpApiStatus` annotation, so a new 4xx error is picked
+// up automatically. A 5xx error (persistence/upstream failures) is intentionally
+// excluded and keeps tracing.
 // ---------------------------------------------------------------------------
 import * as Http from "./http/index"
+import * as HttpV2 from "./http/v2/index"
 
 /** Read `obj[key]` when `obj` is an object/function that has it; `undefined` otherwise. */
 const prop = (obj: unknown, key: string): unknown =>
@@ -25,10 +28,12 @@ const prop = (obj: unknown, key: string): unknown =>
 		? (obj as Record<string, unknown>)[key]
 		: undefined
 
-/** The `_tag` literal of a `Schema.TaggedErrorClass` (`ast.fields._tag.schema.literal`). */
-const readTag = (value: unknown): string | undefined => {
+/** Stable runtime identifier: tagged errors use `_tag`; ErrorClass uses its class identifier/name. */
+const readIdentifier = (value: unknown): string | undefined => {
 	const literal = prop(prop(prop(prop(value, "fields"), "_tag"), "schema"), "literal")
-	return typeof literal === "string" ? literal : undefined
+	if (typeof literal === "string") return literal
+	const identifier = prop(value, "identifier")
+	return typeof identifier === "string" ? identifier : undefined
 }
 
 /** The `httpApiStatus` annotation on a schema's AST, when present. */
@@ -37,24 +42,30 @@ const readHttpStatus = (value: unknown): number | undefined => {
 	return typeof status === "number" ? status : undefined
 }
 
-const deriveAnticipatedTags = (): ReadonlySet<string> => {
-	const tags = new Set<string>()
-	for (const value of Object.values(Http)) {
+const deriveAnticipatedIdentifiers = (): ReadonlySet<string> => {
+	const identifiers = new Set<string>()
+	for (const value of [...Object.values(Http), ...Object.values(HttpV2)]) {
 		if (typeof value !== "function") continue
-		const tag = readTag(value)
-		if (tag === undefined) continue
+		const identifier = readIdentifier(value)
+		if (identifier === undefined) continue
 		const status = readHttpStatus(value)
 		if (status === undefined) continue
-		if (status >= 400 && status < 500) tags.add(tag)
+		if (status >= 400 && status < 500) identifiers.add(identifier)
 	}
-	return tags
+	return identifiers
 }
 
 /**
- * `_tag`s of all domain HTTP errors annotated with a 4xx `httpApiStatus`.
- * Pass `[...ANTICIPATED_ERROR_TAGS]` to the telemetry SDK's `anticipatedErrorTags`.
+ * Stable identifiers of all domain HTTP errors annotated with a 4xx `httpApiStatus`.
+ * Tagged errors contribute `_tag`; v2 ErrorClass values contribute `Error.name`.
  */
-export const ANTICIPATED_ERROR_TAGS: ReadonlySet<string> = deriveAnticipatedTags()
+export const ANTICIPATED_ERROR_IDENTIFIERS: ReadonlySet<string> = deriveAnticipatedIdentifiers()
 
-/** True when `tag` is a known anticipated (4xx) domain error tag. */
-export const isAnticipatedErrorTag = (tag: string): boolean => ANTICIPATED_ERROR_TAGS.has(tag)
+export const isAnticipatedErrorIdentifier = (identifier: string): boolean =>
+	ANTICIPATED_ERROR_IDENTIFIERS.has(identifier)
+
+/** @deprecated Use `ANTICIPATED_ERROR_IDENTIFIERS`. */
+export const ANTICIPATED_ERROR_TAGS = ANTICIPATED_ERROR_IDENTIFIERS
+
+/** @deprecated Use `isAnticipatedErrorIdentifier`. */
+export const isAnticipatedErrorTag = isAnticipatedErrorIdentifier

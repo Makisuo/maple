@@ -1,7 +1,7 @@
 import type { AlertDestinationRow } from "@maple/db"
-import { AlertDeliveryError } from "@maple/domain/http"
+import { AlertDeliveryError, AlertDestinationId } from "@maple/domain/http"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import {
 	buildAlertChatUrl,
 	buildDiscordEmbedsFromTemplate,
@@ -37,6 +37,7 @@ const baseContext: TemplateRenderContext = {
 
 const LINK = "https://web.localhost/alerts"
 const CHAT = "https://web.localhost/chat?mode=alert"
+const DESTINATION_ID = Schema.decodeUnknownSync(AlertDestinationId)("7c6b5a49-3821-4e0f-9d8c-7b6a59483726")
 
 /** Dispatch deps for non-email destinations — email sends must not happen. */
 const noEmailDeps: DispatchDeps = {
@@ -138,7 +139,7 @@ describe("buildDiscordEmbedsFromTemplate", () => {
 
 describe("dispatchDelivery", () => {
 	const destinationRow: AlertDestinationRow = {
-		id: "dest_1" as AlertDestinationRow["id"],
+		id: DESTINATION_ID,
 		orgId: "org_1" as AlertDestinationRow["orgId"],
 		name: "PagerDuty",
 		type: "pagerduty",
@@ -258,6 +259,56 @@ describe("dispatchDelivery", () => {
 			assert.instanceOf(error, AlertDeliveryError)
 			assert.strictEqual(error.destinationType, "email")
 			assert.include(error.message, "EMAIL binding is missing")
+		}),
+	)
+
+	it.effect("email: succeeds with annotation when only some members fail", () =>
+		Effect.gen(function* () {
+			const sent: string[] = []
+			const deps: DispatchDeps = {
+				sendEmail: (to) =>
+					to === "oncall@acme.test"
+						? Effect.fail(
+								new AlertDeliveryError({
+									message: "mailbox unavailable",
+									destinationType: "email",
+								}),
+							)
+						: Effect.sync(() => {
+								sent.push(to)
+							}),
+			}
+
+			const result = yield* dispatchDelivery(emailContext, "{}", failingFetch, 5_000, LINK, CHAT, deps)
+
+			assert.deepStrictEqual(sent, ["ops@acme.test"])
+			assert.include(result.providerMessage, "Emailed 1 of 2 members")
+			assert.include(result.providerMessage, "oncall@acme.test")
+			assert.include(result.providerMessage, "mailbox unavailable")
+		}),
+	)
+
+	it.effect("email: fails with the first member error when every member fails", () =>
+		Effect.gen(function* () {
+			const deps: DispatchDeps = {
+				sendEmail: () =>
+					Effect.fail(
+						new AlertDeliveryError({
+							message: "Cloudflare Email send timed out after 15s",
+							destinationType: "email",
+						}),
+					),
+			}
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(emailContext, "{}", failingFetch, 5_000, LINK, CHAT, deps),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.include(error.message, "failed for all 2 members")
+			// The verbatim member error must survive aggregation so retryability
+			// classification (timeout detection) keeps working upstream.
+			assert.include(error.message, "timed out")
 		}),
 	)
 })

@@ -9,6 +9,7 @@ import { Database } from "@/lib/DatabaseLive"
 import { EmailService } from "@/lib/EmailService"
 import { Env } from "@/lib/Env"
 import { WarehouseQueryService } from "@/lib/WarehouseQueryService"
+import { EdgeCacheService, makeEdgeCacheService, makeMemoryBackend } from "@maple/query-engine/caching"
 import { cleanupTestDbs, createTestDb, type TestDb } from "@/lib/test-pglite"
 import { DigestService } from "./DigestService"
 
@@ -76,7 +77,13 @@ const makeHarness = () => {
 	const testDb = createTestDb(createdDbs)
 	const base = testDb.layer.pipe(Layer.provideMerge(Env.layer), Layer.provide(testConfig()))
 	const layer = DigestService.layer.pipe(
-		Layer.provide(Layer.mergeAll(emailStub, warehouseStub)),
+		Layer.provide(
+			Layer.mergeAll(
+				emailStub,
+				warehouseStub,
+				Layer.succeed(EdgeCacheService, makeEdgeCacheService(makeMemoryBackend())),
+			),
+		),
 		Layer.provideMerge(base),
 	)
 	return { sends, layer }

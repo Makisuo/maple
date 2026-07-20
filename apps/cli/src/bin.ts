@@ -3,6 +3,7 @@ import { BunRuntime } from "@effect/platform-bun"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Effect, Layer } from "effect"
 import * as Command from "effect/unstable/cli/Command"
+import { FetchHttpClient } from "effect/unstable/http"
 import { cli } from "./cli"
 import { MapleConfig } from "./core/config"
 import { Mode } from "./core/mode"
@@ -20,6 +21,7 @@ const MainLayer = WarehouseExecutorFromMode.pipe(
 	Layer.provideMerge(Mode.layer),
 	Layer.provideMerge(MapleConfig.layer),
 	Layer.provideMerge(BunServices.layer),
+	Layer.provideMerge(FetchHttpClient.layer),
 )
 
 // Throttled, non-blocking "update available" notice before dispatching the

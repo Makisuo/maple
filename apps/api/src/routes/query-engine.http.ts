@@ -15,6 +15,7 @@ import {
 	ErrorDetailTracesResponse,
 	ErrorRateByServiceResponse,
 	ServiceOverviewResponse,
+	ServiceHealthSnapshotResponse,
 	ServiceHealthBaselineResponse,
 	ServiceApdexResponse,
 	ServiceDependenciesResponse,
@@ -67,7 +68,7 @@ import {
 	TraceId,
 	SpanId,
 } from "@maple/domain/http"
-import { Clock, Effect, Match, Option, Schema } from "effect"
+import { Clock, Config, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
 import { makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
@@ -89,10 +90,22 @@ import { buildBreakdownQuerySpec, buildTimeseriesQuerySpec } from "@maple/query-
 // span so a failed request names which sub-query broke.
 const mapExecError = <A, E, R>(effect: Effect.Effect<A, E, R>, context: string): Effect.Effect<A, E, R> =>
 	effect.pipe(
-		Effect.tapError(() =>
-			Effect.annotateCurrentSpan({ "maple.query_engine.failed_step": context }),
-		),
+		Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.query_engine.failed_step": context })),
 	)
+
+const isMissingServiceOperationsRollup = (error: unknown): boolean => {
+	if (typeof error !== "object" || error === null) return false
+	const candidate = error as {
+		readonly _tag?: unknown
+		readonly clickhouseType?: unknown
+		readonly message?: unknown
+	}
+	return (
+		candidate._tag === "@maple/http/errors/WarehouseConfigError" &&
+		(candidate.clickhouseType === "UNKNOWN_TABLE" ||
+			(typeof candidate.message === "string" && /service_operations_minutely/i.test(candidate.message)))
+	)
+}
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -110,7 +123,10 @@ const coerceStatusCode = (value: string): StatusCode =>
 // Build a ±1h partition-pruning window around a ClickHouse datetime string.
 const partitionWindowAround = (timestamp: string): { startTime: string; endTime: string } => {
 	const ms = parseWarehouseDateTime(timestamp)
-	return { startTime: formatWarehouseDateTime(ms - 3_600_000), endTime: formatWarehouseDateTime(ms + 3_600_000) }
+	return {
+		startTime: formatWarehouseDateTime(ms - 3_600_000),
+		endTime: formatWarehouseDateTime(ms + 3_600_000),
+	}
 }
 
 // Most traces opened without a timestamp are still recent (list rows carry
@@ -124,6 +140,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 	Effect.gen(function* () {
 		const queryEngine = yield* QueryEngineService
 		const warehouse = yield* WarehouseQueryService
+		const serviceOperationsRollupEnabled = yield* Config.boolean(
+			"SERVICE_OPERATIONS_ROLLUP_ENABLED",
+		).pipe(Config.withDefault(false))
 		const executeRawSql = makeExecuteRawSql<ExecutionTenant, WarehouseSqlError | RawSqlValidationError>(
 			warehouse,
 		)
@@ -160,19 +179,26 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 										warehouse
 											.compiledQueryFirst(
 												tenant,
-										CH.compile(
-									CH.traceTimeProbeQuery({ traceId: payload.traceId, narrowByTime }),
-											narrowByTime
-												? {
-														orgId: tenant.orgId,
-											startTime: formatWarehouseDateTime(nowMs - PROBE_RECENT_WINDOW_MS),
-													}
-												: { orgId: tenant.orgId },
-										),
-										{
-											profile: "discovery",
-									context: narrowByTime ? "spanHierarchyProbeRecent" : "spanHierarchyProbe",
-										},
+												CH.compile(
+													CH.traceTimeProbeQuery({
+														traceId: payload.traceId,
+														narrowByTime,
+													}),
+													narrowByTime
+														? {
+																orgId: tenant.orgId,
+																startTime: formatWarehouseDateTime(
+																	nowMs - PROBE_RECENT_WINDOW_MS,
+																),
+															}
+														: { orgId: tenant.orgId },
+												),
+												{
+													profile: "discovery",
+													context: narrowByTime
+														? "spanHierarchyProbeRecent"
+														: "spanHierarchyProbe",
+												},
 											)
 											.pipe(Effect.map(Option.getOrNull)),
 										"spanHierarchy probe failed",
@@ -441,6 +467,37 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					return new ServiceOverviewResponse({ data: rows })
 				}),
 			)
+			.handle("serviceHealthSnapshot", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const compiled = CH.compile(
+						CH.serviceHealthSnapshotQuery({ environments: payload.environments }),
+						{ orgId: tenant.orgId, startTime: payload.startTime, endTime: payload.endTime },
+						{ rowSchema: CH.serviceHealthSnapshotRowSchema },
+					)
+					const rows = yield* queryEngine.cachedDirect(
+						tenant,
+						"serviceHealthSnapshot",
+						payload,
+						mapExecError(
+							warehouse.compiledQuery(tenant, compiled, {
+								profile: "aggregation",
+								context: "serviceHealthSnapshot",
+							}),
+							"serviceHealthSnapshot query failed",
+						),
+					)
+					return new ServiceHealthSnapshotResponse({
+						data: rows.map((row) => ({
+							serviceName: decodeServiceName(row.serviceName),
+							environment: row.environment || "unknown",
+							requestCount: row.requestCount,
+							errorCount: row.errorCount,
+							p95LatencyMs: row.p95LatencyMs,
+						})),
+					})
+				}),
+			)
 			.handle("serviceHealthBaseline", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
@@ -638,9 +695,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						],
 						{ concurrency: 2 },
 					)
-					const latencyByService = new Map(
-						latencyRows.map((row) => [row.serviceName, row]),
-					)
+					const latencyByService = new Map(latencyRows.map((row) => [row.serviceName, row]))
 					const data = counterRows.map((row) => {
 						const latency = latencyByService.get(row.serviceName)
 						return {
@@ -706,15 +761,15 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 					const connectionsByKey = new Map(connectionRows.map((row) => [keyOf(row), row]))
 					const seen = new Set<string>()
 					type MergedStatsRow = {
-							readonly database: string
-							readonly branch?: string
-							readonly cpuMaxPercent: number
-							readonly memMaxPercent: number
-							readonly replicaLagMaxSeconds: number
-							readonly connectionsAvg: number
-							readonly connectionsMax: number
-						}
-						const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
+						readonly database: string
+						readonly branch?: string
+						readonly cpuMaxPercent: number
+						readonly memMaxPercent: number
+						readonly replicaLagMaxSeconds: number
+						readonly connectionsAvg: number
+						readonly connectionsMax: number
+					}
+					const data: Array<MergedStatsRow> = gaugeRows.map((row) => {
 						const key = keyOf(row)
 						seen.add(key)
 						const connections = connectionsByKey.get(key)
@@ -839,7 +894,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						}),
 						"cloudflareInfraZoneTimeseries query failed",
 					)
-					return new CloudflareInfraZoneTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
+					return new CloudflareInfraZoneTimeseriesResponse({
+						data: rows.map((row) => ({ ...row })),
+					})
 				}),
 			)
 			.handle("cloudflareInfraZoneDetail", ({ payload }) =>
@@ -1129,7 +1186,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 						}),
 						"cloudflareInfraWorkerTimeseries query failed",
 					)
-					return new CloudflareInfraWorkerTimeseriesResponse({ data: rows.map((row) => ({ ...row })) })
+					return new CloudflareInfraWorkerTimeseriesResponse({
+						data: rows.map((row) => ({ ...row })),
+					})
 				}),
 			)
 			.handle("serviceDetailOverview", ({ payload }) =>
@@ -1192,6 +1251,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							bucket: String(row.bucket),
 							commitSha: decodeCommitSha(row.commitSha),
 							count: Number(row.count),
+							errorCount: Number(row.errorCount),
 						})),
 						environments: environmentRows
 							.map((row) => String(row.environment ?? ""))
@@ -1511,23 +1571,60 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								startTime: payload.startTime,
 								endTime: payload.endTime,
 							}
-							// Keep production reads on the raw rollback path until the rollup has
-							// been deployed, backfilled under a write pause, and parity-verified on
-							// both managed Tinybird and every BYO ClickHouse backend.
-							const summaryCompiled = CH.compile(
-								CH.serviceOperationsSummaryRawQuery({
-									serviceName: payload.serviceName,
-									environments: payload.environments,
-									limit: payload.limit,
-								}),
-								params,
-								{ rowSchema: CH.serviceOperationsSummaryRowSchema },
+							yield* Effect.annotateCurrentSpan(
+								"query.rollup.enabled",
+								serviceOperationsRollupEnabled,
 							)
+							// The rollout flag stays off until migration 0008 is deployed,
+							// backfilled, and parity-checked. Disabling it restores the all-raw
+							// rollback path without changing the endpoint contract.
+							const summaryOptions = {
+								serviceName: payload.serviceName,
+								environments: payload.environments,
+								limit: payload.limit,
+							}
+							const runRawSummary = () =>
+								warehouse.compiledQuery(
+									tenant,
+									CH.compile(CH.serviceOperationsSummaryRawQuery(summaryOptions), params, {
+										rowSchema: CH.serviceOperationsSummaryRowSchema,
+									}),
+									{ profile: "aggregation", context: "serviceOperations" },
+								)
+							let useRollup = serviceOperationsRollupEnabled
+							const summaryEffect = useRollup
+								? warehouse
+										.compiledQuery(
+											tenant,
+											CH.compile(
+												CH.serviceOperationsSummaryQuery(summaryOptions),
+												params,
+												{
+													rowSchema: CH.serviceOperationsSummaryRowSchema,
+												},
+											),
+											{ profile: "aggregation", context: "serviceOperations" },
+										)
+										.pipe(
+											Effect.catch((error) => {
+												if (!isMissingServiceOperationsRollup(error))
+													return Effect.fail(error)
+												useRollup = false
+												return Effect.gen(function* () {
+													yield* Effect.logWarning(
+														"Service operations rollup is unavailable; using raw rollback path",
+													).pipe(Effect.annotateLogs({ orgId: tenant.orgId }))
+													yield* Effect.annotateCurrentSpan(
+														"query.rollup.fallback",
+														true,
+													)
+													return yield* runRawSummary()
+												})
+											}),
+										)
+								: runRawSummary()
 							const summaryRows = yield* mapExecError(
-								warehouse.compiledQuery(tenant, summaryCompiled, {
-									profile: "aggregation",
-									context: "serviceOperations",
-								}),
+								summaryEffect,
 								"serviceOperations query failed",
 							)
 							if (summaryRows.length === 0) {
@@ -1545,20 +1642,52 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							)
 							const requestedBucketSeconds = payload.bucketSeconds ?? windowSeconds / 50
 							const bucketSeconds = Math.max(1, Math.round(requestedBucketSeconds / 60)) * 60
-							const timeseriesCompiled = CH.compile(
-								CH.serviceOperationsTimeseriesRawQuery({
-									serviceName: payload.serviceName,
-									environments: payload.environments,
-									spanNames,
-								}),
-								{ ...params, bucketSeconds },
-								{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
-							)
+							const timeseriesOptions = {
+								serviceName: payload.serviceName,
+								environments: payload.environments,
+								spanNames,
+							}
+							const timeseriesParams = { ...params, bucketSeconds }
+							const runRawTimeseries = () =>
+								warehouse.compiledQuery(
+									tenant,
+									CH.compile(
+										CH.serviceOperationsTimeseriesRawQuery(timeseriesOptions),
+										timeseriesParams,
+										{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+									),
+									{ profile: "aggregation", context: "serviceOperationsTimeseries" },
+								)
+							const timeseriesEffect = useRollup
+								? warehouse
+										.compiledQuery(
+											tenant,
+											CH.compile(
+												CH.serviceOperationsTimeseriesQuery(timeseriesOptions),
+												timeseriesParams,
+												{ rowSchema: CH.serviceOperationsTimeseriesRowSchema },
+											),
+											{
+												profile: "aggregation",
+												context: "serviceOperationsTimeseries",
+											},
+										)
+										.pipe(
+											Effect.catch((error) =>
+												isMissingServiceOperationsRollup(error)
+													? Effect.gen(function* () {
+															yield* Effect.annotateCurrentSpan(
+																"query.rollup.fallback",
+																true,
+															)
+															return yield* runRawTimeseries()
+														})
+													: Effect.fail(error),
+											),
+										)
+								: runRawTimeseries()
 							const timeseriesRows = yield* mapExecError(
-								warehouse.compiledQuery(tenant, timeseriesCompiled, {
-									profile: "aggregation",
-									context: "serviceOperationsTimeseries",
-								}),
+								timeseriesEffect,
 								"serviceOperationsTimeseries query failed",
 							)
 

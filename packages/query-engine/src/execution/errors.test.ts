@@ -37,6 +37,14 @@ describe("mapWarehouseError", () => {
 			expect(mapped).toBeInstanceOf(WarehouseAuthError)
 			expect((mapped as WarehouseAuthError).upstreamStatus).toBe(401)
 		})
+
+		it("classifies Tinybird's invalid-token workspace-not-found message", () => {
+			const mapped = mapWarehouseError(
+				"p",
+				"invalid authentication token. Workspace not found, make sure you use the token host",
+			)
+			expect(mapped).toBeInstanceOf(WarehouseAuthError)
+		})
 	})
 
 	describe("upstream", () => {

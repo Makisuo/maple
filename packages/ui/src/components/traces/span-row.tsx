@@ -9,6 +9,7 @@ import { getServiceColor } from "../../lib/colors"
 import { getCacheInfo, cacheResultStyles } from "../../lib/cache"
 import { getHttpInfo, HTTP_METHOD_COLORS } from "../../lib/http"
 import { getCloudPlatform, outcomeBadgeStyle } from "../../lib/cloud-platforms"
+import { SPAN_KIND_LABELS } from "../../lib/span-category"
 import { PixelDurationBar } from "./pixel-duration-bar"
 import { ServiceDot } from "../service-dot"
 import { countDescendants } from "./auto-collapse"
@@ -30,13 +31,6 @@ const statusStyles: Record<string, string> = {
 	Unset: "bg-muted text-muted-foreground border-border",
 }
 
-const kindLabels: Record<string, string> = {
-	SPAN_KIND_SERVER: "Server",
-	SPAN_KIND_CLIENT: "Client",
-	SPAN_KIND_PRODUCER: "Producer",
-	SPAN_KIND_CONSUMER: "Consumer",
-	SPAN_KIND_INTERNAL: "Internal",
-}
 
 function SpanRowImpl({
 	span,
@@ -118,7 +112,8 @@ function SpanRowImpl({
 	const httpInfo = getHttpInfo(span)
 	const platform = getCloudPlatform(span.spanAttributes)
 	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
-	const kindLabel = kindLabels[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+	const kindLabel =
+		SPAN_KIND_LABELS[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
 
 	const barColor =
 		httpInfo?.statusCode && httpInfo.statusCode >= 500

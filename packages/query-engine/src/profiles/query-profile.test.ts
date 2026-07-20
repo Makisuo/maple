@@ -52,6 +52,31 @@ describe("appendSettings", () => {
 	it("appends max_block_size", () => {
 		expect(appendSettings("SELECT 1", { maxBlockSize: 512 })).toBe("SELECT 1 SETTINGS max_block_size=512")
 	})
+
+	// Regression: Tinybird rejects `FORMAT JSON SETTINGS …` with
+	// "Syntax error: failed at position … (FORMAT)" — SETTINGS must precede
+	// a trailing FORMAT clause.
+	it("inserts SETTINGS before a trailing FORMAT clause", () => {
+		expect(appendSettings("SELECT 1 FORMAT JSON", { maxExecutionTime: 15 })).toBe(
+			"SELECT 1 SETTINGS max_execution_time=15 FORMAT JSON",
+		)
+	})
+
+	it("inserts SETTINGS before FORMAT with a trailing semicolon and newlines", () => {
+		expect(appendSettings("SELECT 1\nFORMAT JSONEachRow;", { maxThreads: 2 })).toBe(
+			"SELECT 1 SETTINGS max_threads=2\nFORMAT JSONEachRow",
+		)
+	})
+
+	it("leaves a trailing FORMAT untouched when settings are empty", () => {
+		expect(appendSettings("SELECT 1 FORMAT JSON", {})).toBe("SELECT 1 FORMAT JSON")
+	})
+
+	it("only treats a FORMAT at the end of the query as the format clause", () => {
+		expect(appendSettings("SELECT formatDateTime(now(), '%F') AS format_col", { maxThreads: 2 })).toBe(
+			"SELECT formatDateTime(now(), '%F') AS format_col SETTINGS max_threads=2",
+		)
+	})
 })
 
 describe("stripTinybirdRestrictedSettings", () => {

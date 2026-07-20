@@ -236,7 +236,12 @@ function CommitCard({ commit, compact = false }: { commit: VcsCommitDetailRespon
 			</div>
 			<div className={cn("flex flex-col", compact ? "gap-2" : "gap-2.5", pad)}>
 				<div className="flex items-center gap-2.5">
-					<CommitAvatar url={commit.authorAvatarUrl} name={author} href={profileHref} compact={compact} />
+					<CommitAvatar
+						url={commit.authorAvatarUrl}
+						name={author}
+						href={profileHref}
+						compact={compact}
+					/>
 					<div className="flex min-w-0 flex-col leading-tight">
 						<ExternalText href={profileHref} className="truncate font-medium text-foreground">
 							{author}
@@ -449,7 +454,7 @@ function CopyableSha({ sha }: { sha: string }) {
 	)
 }
 
-function CommitAvatar({
+export function CommitAvatar({
 	url,
 	name,
 	href,
@@ -606,7 +611,7 @@ function formatExact(epochMs: number): string {
  *  - `short`: the compact "3h" form (no suffix, sub-minute collapses to "now") for
  *    the dense commit-list rows where horizontal space is tight.
  */
-function formatRelative(epochMs: number, { short = false }: { short?: boolean } = {}): string {
+export function formatRelative(epochMs: number, { short = false }: { short?: boolean } = {}): string {
 	const diff = Date.now() - epochMs
 	const suffix = short ? "" : " ago"
 	// Sub-minute floor. Default shows a live seconds tier ("Ns ago", "just now" for a

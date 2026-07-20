@@ -16,6 +16,8 @@ export interface FlowNodeData extends Record<string, unknown> {
 	count: number // Number of combined spans (1 if not combined)
 	combinedSpans: SpanNode[] // All spans in the group
 	aggregatedDuration: AggregatedDuration
+	/** Total trace duration — drives the per-card cost rail. */
+	totalDurationMs: number
 }
 
 export type FlowNode = Node<FlowNodeData, "span">
@@ -125,7 +127,7 @@ function hasAnyError(spans: SpanNode[]): boolean {
 }
 
 const NODE_WIDTH = 280
-const NODE_HEIGHT = 80
+const NODE_HEIGHT = 56
 const HORIZONTAL_SPACING = 80
 const VERTICAL_SPACING = 180
 
@@ -136,6 +138,7 @@ const VERTICAL_SPACING = 180
 export function transformSpansToFlow(
 	rootSpans: SpanNode[],
 	services: string[],
+	totalDurationMs: number,
 	selectedSpanId?: string,
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
 	const nodes: FlowNode[] = []
@@ -165,6 +168,7 @@ export function transformSpansToFlow(
 				count,
 				combinedSpans: spans,
 				aggregatedDuration: calculateAggregatedDuration(spans),
+				totalDurationMs,
 			},
 		})
 
@@ -175,24 +179,9 @@ export function transformSpansToFlow(
 				id: `${parentId}-${nodeId}`,
 				source: parentId,
 				target: nodeId,
-				// Add label for combined spans
-				...(count > 1 && {
-					label: `×${count}`,
-					labelStyle: {
-						fontSize: 11,
-						fontWeight: 600,
-						fill: "oklch(0.75 0.02 60)",
-					},
-					labelBgStyle: {
-						fill: "oklch(0.18 0.01 60)",
-						fillOpacity: 0.9,
-					},
-					labelBgPadding: [4, 6] as [number, number],
-					labelBgBorderRadius: 4,
-				}),
 				...(isError && {
 					style: {
-						stroke: "oklch(0.62 0.20 25)",
+						stroke: "var(--severity-error)",
 						strokeWidth: 2,
 					},
 				}),

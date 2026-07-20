@@ -151,7 +151,7 @@ describe("isRetryableUpstream", () => {
 })
 
 describe("execClickHouse", () => {
-	it.live("uses manual redirects and rejects every 3xx without following it", () =>
+	it.effect("uses manual redirects and rejects every 3xx without following it", () =>
 		Effect.gen(function* () {
 			let redirectMode: RequestRedirect | undefined
 			let calls = 0
@@ -206,7 +206,7 @@ describe("execClickHouse", () => {
 		}),
 	)
 
-	it.live("does NOT retry a 4xx rejection", () =>
+	it.effect("does NOT retry a 4xx rejection", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() => Promise.resolve(mockResponse("Syntax error", 400)))
 
@@ -218,7 +218,7 @@ describe("execClickHouse", () => {
 		}),
 	)
 
-	it.live("does NOT retry a ClickHouse 500 SQL error (carries the DB::Exception text)", () =>
+	it.effect("does NOT retry a ClickHouse 500 SQL error (carries the DB::Exception text)", () =>
 		Effect.gen(function* () {
 			const { state, fetchImpl } = makeFetch(() =>
 				Promise.resolve(mockResponse("Code: 60. DB::Exception: UNKNOWN_TABLE", 500)),

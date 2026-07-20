@@ -12,6 +12,7 @@ import {
 	type MarkerCommit,
 	type PositionedMarker,
 	layoutMarkerLabels,
+	shouldRenderLabels,
 } from "./marker-layout"
 
 // Hovering a dash for this long opens its card; the label is quicker because its
@@ -116,8 +117,8 @@ export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
 		}, CLOSE_GRACE)
 	}, [])
 
-	const groups = useMemo(() => {
-		if (!xScale || !plotArea || markers.length === 0) return []
+	const { groups, labeled } = useMemo(() => {
+		if (!xScale || !plotArea || markers.length === 0) return { groups: [] as LabelGroup[], labeled: true }
 		const positioned: PositionedMarker[] = []
 		for (const marker of markers) {
 			const x = xScale(marker.bucket)
@@ -126,7 +127,26 @@ export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
 			}
 		}
 		positioned.sort((a, b) => a.x - b.x)
-		return layoutMarkerLabels(positioned, plotArea.x, plotArea.x + plotArea.width)
+		const plotLeft = plotArea.x
+		const plotRight = plotArea.x + plotArea.width
+		if (!shouldRenderLabels(positioned, plotLeft, plotRight)) {
+			// Dashes-only mode: no label merging — every marker keeps its own dash and
+			// hover card (a zero-width "box" makes the card anchor sit on the dash).
+			return {
+				groups: positioned.map(
+					(p): LabelGroup => ({
+						key: p.marker.bucket,
+						dashXs: [p.x],
+						label: p.marker.label,
+						commits: [...p.marker.commits],
+						boxLeft: p.x,
+						boxWidth: 0,
+					}),
+				),
+				labeled: false,
+			}
+		}
+		return { groups: layoutMarkerLabels(positioned, plotLeft, plotRight), labeled: true }
 	}, [markers, xScale, plotArea])
 
 	if (!plotArea || groups.length === 0) return null
@@ -171,6 +191,7 @@ export function CommitMarkersLayer({ markers }: CommitMarkersLayerProps) {
 							group={group}
 							plotTop={plotArea.y}
 							plotHeight={plotArea.height}
+							showLabel={labeled}
 							active={hoverKey === group.key || openKey === group.key}
 							open={openKey === group.key}
 							onArmLine={() => arm(group.key, LINE_OPEN_DELAY)}
@@ -188,6 +209,9 @@ interface MarkerGroupProps {
 	group: LabelGroup
 	plotTop: number
 	plotHeight: number
+	/** False in dashes-only (dense) mode: the label chip is skipped and each dash
+	 * spans exactly the plot height, hover cards remaining the detail path. */
+	showLabel: boolean
 	active: boolean
 	open: boolean
 	onArmLine: () => void
@@ -199,6 +223,7 @@ function MarkerGroup({
 	group,
 	plotTop,
 	plotHeight,
+	showLabel,
 	active,
 	open,
 	onArmLine,
@@ -212,8 +237,9 @@ function MarkerGroup({
 	// Each dash rises from the label's lower edge (plotTop - LABEL_GAP) straight down
 	// through the plot, so it connects directly to the underside of the box — which the
 	// layout has centered over (and widened to span) the whole cluster. No tie line.
-	const dashTop = plotTop - LABEL_GAP
-	const dashHeight = Math.max(plotHeight + LABEL_GAP, 0)
+	// Without a label there's nothing to connect to, so the dash spans the plot exactly.
+	const dashTop = showLabel ? plotTop - LABEL_GAP : plotTop
+	const dashHeight = showLabel ? Math.max(plotHeight + LABEL_GAP, 0) : plotHeight
 	const badge = group.commits.length - 1
 	// The card anchors under the centre of the label box (the cluster's visual centre),
 	// not on any one dash, since a merged group has several.
@@ -258,44 +284,46 @@ function MarkerGroup({
 				style={{ position: "absolute", top: plotTop, left: anchorX, width: 0, height: 0 }}
 			/>
 
-			<div
-				onMouseEnter={onArmLabel}
-				onMouseLeave={onLeave}
-				{...stopHandlers}
-				style={{
-					position: "absolute",
-					left: group.boxLeft,
-					top: labelTop,
-					// Render at exactly the laid-out width (NOT w-fit) so the pill matches the
-					// box the placement math reserved — every owned dash sits under it and its
-					// vertical connects. Text is centered and truncates within.
-					width: group.boxWidth,
-					height: LABEL_HEIGHT,
-					pointerEvents: "auto",
-				}}
-				className={cn(
-					"flex cursor-pointer items-center justify-center gap-1 rounded-[5px] border px-1.5 font-mono text-[11px] leading-none backdrop-blur-sm transition-colors",
-					active
-						? "border-border bg-popover text-popover-foreground shadow-sm"
-						: "border-border/60 bg-popover/85 text-muted-foreground hover:text-popover-foreground",
-				)}
-			>
-				<span className="min-w-0 truncate" title={group.label}>
-					{group.label}
-				</span>
-				{badge > 0 ? (
-					<span
-						className={cn(
-							"shrink-0 rounded-[3px] px-1 text-[10px] tabular-nums",
-							active ? "bg-muted text-foreground" : "bg-muted/70 text-muted-foreground",
-						)}
-					>
-						{/* Cap the displayed count so a bucket with 100+ commits can't overflow the
-						    badge's reserved width (BADGE_PX). */}
-						+{Math.min(badge, 99)}
+			{showLabel ? (
+				<div
+					onMouseEnter={onArmLabel}
+					onMouseLeave={onLeave}
+					{...stopHandlers}
+					style={{
+						position: "absolute",
+						left: group.boxLeft,
+						top: labelTop,
+						// Render at exactly the laid-out width (NOT w-fit) so the pill matches the
+						// box the placement math reserved — every owned dash sits under it and its
+						// vertical connects. Text is centered and truncates within.
+						width: group.boxWidth,
+						height: LABEL_HEIGHT,
+						pointerEvents: "auto",
+					}}
+					className={cn(
+						"flex cursor-pointer items-center justify-center gap-1 rounded-[5px] border px-1.5 font-mono text-[11px] leading-none backdrop-blur-sm transition-colors",
+						active
+							? "border-border bg-popover text-popover-foreground shadow-sm"
+							: "border-border/60 bg-popover/85 text-muted-foreground hover:text-popover-foreground",
+					)}
+				>
+					<span className="min-w-0 truncate" title={group.label}>
+						{group.label}
 					</span>
-				) : null}
-			</div>
+					{badge > 0 ? (
+						<span
+							className={cn(
+								"shrink-0 rounded-[3px] px-1 text-[10px] tabular-nums",
+								active ? "bg-muted text-foreground" : "bg-muted/70 text-muted-foreground",
+							)}
+						>
+							{/* Cap the displayed count so a bucket with 100+ commits can't overflow the
+						    badge's reserved width (BADGE_PX). */}
+							+{Math.min(badge, 99)}
+						</span>
+					) : null}
+				</div>
+			) : null}
 
 			<MarkerCard
 				open={open}

@@ -118,6 +118,11 @@ export interface CloudflareOAuthServiceShape {
 	readonly disconnect: (
 		orgId: OrgId,
 	) => Effect.Effect<{ readonly disconnected: boolean }, IntegrationsPersistenceError>
+	/**
+	 * Stamp the org's connection as revoked so pollers stop retrying it every
+	 * tick; cleared automatically when the org reconnects. Best-effort.
+	 */
+	readonly markConnectionRevoked: (orgId: OrgId) => Effect.Effect<void>
 }
 
 export class CloudflareOAuthService extends Context.Service<
@@ -339,6 +344,7 @@ export class CloudflareOAuthService extends Context.Service<
 			getStatus,
 			getValidAccessToken,
 			disconnect,
+			markConnectionRevoked: oauth.markConnectionRevoked,
 		} satisfies CloudflareOAuthServiceShape
 	}),
 }) {

@@ -136,17 +136,17 @@ const post = async (url: string, headers: Record<string, string>, body: unknown)
 /** Default transport: plain `fetch` (server + Cloudflare). */
 export const fetchTransport: FlushTransport = { post }
 
-const flushSignal = async (
-	url: string,
-	headers: Record<string, string>,
-	body: () => unknown,
-	state: SignalState,
-	count: number,
-	signal: string,
-	transport: FlushTransport,
-	logPrefix: string,
-): Promise<void> => {
-	if (count === 0) return
+const flushSignal = async <A>(args: {
+	readonly url: string
+	readonly headers: Record<string, string>
+	readonly buffer: { readonly drain: () => Array<A>; readonly restore: (items: ReadonlyArray<A>) => void }
+	readonly body: (items: ReadonlyArray<A>) => unknown
+	readonly state: SignalState
+	readonly signal: string
+	readonly transport: FlushTransport
+	readonly logPrefix: string
+}): Promise<void> => {
+	const { url, headers, buffer, body, state, signal, transport, logPrefix } = args
 	if (state.disabledUntil && Date.now() < state.disabledUntil) {
 		console.warn(
 			`${logPrefix} ${signal} flush skipped (cooldown ${state.disabledUntil - Date.now()}ms remaining)`,
@@ -154,11 +154,29 @@ const flushSignal = async (
 		return
 	}
 	state.disabledUntil = 0
+	const batch = buffer.drain()
+	if (batch.length === 0) return
 	try {
-		await transport.post(url, headers, body())
+		await transport.post(url, headers, body(batch))
 	} catch (err) {
+		buffer.restore(batch)
 		state.disabledUntil = Date.now() + COOLDOWN_MS
 		console.error(`${logPrefix} ${signal} flush failed; cooldown 60s:`, err)
+	}
+}
+
+/** Serialize flush calls so concurrent timers/manual hooks cannot drain overlapping batches. */
+export const makeSerializedFlush = <Args extends ReadonlyArray<unknown>>(
+	run: (...args: Args) => Promise<void>,
+): ((...args: Args) => Promise<void>) => {
+	let tail: Promise<void> = Promise.resolve()
+	return (...args) => {
+		const next = tail.then(
+			() => run(...args),
+			() => run(...args),
+		)
+		tail = next.catch(() => undefined)
+		return next
 	}
 }
 
@@ -189,31 +207,27 @@ export const runFlush = async (args: {
 		return
 	}
 
-	const spanBatch = spans.drain()
-	const logBatch = logs.drain()
-	if (spanBatch.length === 0 && logBatch.length === 0) return
-
 	await Promise.all([
-		flushSignal(
-			r.tracesUrl,
-			r.headers,
-			() => makeTracesBody(spanBatch, r),
-			tracesState,
-			spanBatch.length,
-			"traces",
+		flushSignal({
+			url: r.tracesUrl,
+			headers: r.headers,
+			buffer: spans,
+			body: (items) => makeTracesBody(items, r),
+			state: tracesState,
+			signal: "traces",
 			transport,
 			logPrefix,
-		),
-		flushSignal(
-			r.logsUrl,
-			r.headers,
-			() => makeLogsBody(logBatch, r),
-			logsState,
-			logBatch.length,
-			"logs",
+		}),
+		flushSignal({
+			url: r.logsUrl,
+			headers: r.headers,
+			buffer: logs,
+			body: (items) => makeLogsBody(items, r),
+			state: logsState,
+			signal: "logs",
 			transport,
 			logPrefix,
-		),
+		}),
 	])
 }
 

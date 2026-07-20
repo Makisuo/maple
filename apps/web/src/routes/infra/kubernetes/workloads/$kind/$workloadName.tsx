@@ -1,12 +1,14 @@
 import { useState } from "react"
 import { Navigate, createFileRoute } from "@tanstack/react-router"
-import { Result, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomValue } from "@/lib/effect-atom"
 import { Schema } from "effect"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { cn } from "@maple/ui/lib/utils"
+import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
+import { QueryErrorState } from "@/components/common/query-error-state"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { GridIcon } from "@/components/icons"
 import { useInfraEnabled } from "@/hooks/use-infra-enabled"
@@ -72,30 +74,29 @@ function WorkloadDetailContent() {
 	const { startTime, endTime } = useEffectiveTimeRange(undefined, undefined, preset)
 	const bucketSeconds = bucketSecondsFor(preset)
 
-	const summaryResult = useAtomValue(
-		workloadDetailSummaryResultAtom({
-			data: {
-				kind: params.kind,
-				workloadName: params.workloadName,
-				namespace,
-				startTime,
-				endTime,
-			},
-		}),
-	)
-
-	const podsResult = useAtomValue(
-		listPodsResultAtom({
-			data: {
-				workloadKind: params.kind,
-				workloadName: params.workloadName,
-				namespaces: namespace ? [namespace] : undefined,
-				startTime,
-				endTime,
-				limit: 200,
-			},
-		}),
-	)
+	const summaryAtom = workloadDetailSummaryResultAtom({
+		data: {
+			kind: params.kind,
+			workloadName: params.workloadName,
+			namespace,
+			startTime,
+			endTime,
+		},
+	})
+	const podsAtom = listPodsResultAtom({
+		data: {
+			workloadKind: params.kind,
+			workloadName: params.workloadName,
+			namespaces: namespace ? [namespace] : undefined,
+			startTime,
+			endTime,
+			limit: 200,
+		},
+	})
+	const summaryResult = useAtomValue(summaryAtom)
+	const podsResult = useAtomValue(podsAtom)
+	const refreshSummary = useAtomRefresh(summaryAtom)
+	const refreshPods = useAtomRefresh(podsAtom)
 
 	const summary = Result.builder(summaryResult)
 		.onSuccess((r) => r.data)
@@ -159,7 +160,15 @@ function WorkloadDetailContent() {
 					}
 				/>
 
-				{summary ? (
+				{Result.isInitial(summaryResult) ? (
+					<Skeleton className="h-24 w-full rounded-md" />
+				) : Result.isFailure(summaryResult) ? (
+					<QueryErrorState
+						error={summaryResult.cause}
+						titleOverride="Failed to load workload metrics"
+						onRetry={refreshSummary}
+					/>
+				) : summary ? (
 					<StatRail>
 						<StatRailItem eyebrow="Pods" value={String(summary.podCount)} compact />
 						<StatRailItem
@@ -236,6 +245,14 @@ function WorkloadDetailContent() {
 				<div className="space-y-3">
 					<h3 className="text-sm font-medium">Pods</h3>
 					{Result.builder(podsResult)
+						.onInitial(() => <Skeleton className="h-28 w-full rounded-md" />)
+						.onError((error) => (
+							<QueryErrorState
+								error={error}
+								titleOverride="Failed to load workload pods"
+								onRetry={refreshPods}
+							/>
+						))
 						.onSuccess((r) => {
 							const pods = r.data
 							if (pods.length === 0) {
@@ -247,7 +264,7 @@ function WorkloadDetailContent() {
 							}
 							return <PodTable pods={pods} />
 						})
-						.orElse(() => null)}
+						.render()}
 				</div>
 			</div>
 		</DashboardLayout>

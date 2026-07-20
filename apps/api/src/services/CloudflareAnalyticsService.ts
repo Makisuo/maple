@@ -1695,6 +1695,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 				// failures record and retry next tick.
 				if (Result.isFailure(tokenResult)) {
 					const error = tokenResult.failure
+					if (error instanceof IntegrationsRevokedError) {
+						yield* oauth.markConnectionRevoked(orgId)
+					}
 					yield* recordOrgError(orgId, error.message, now, {
 						disable: error instanceof IntegrationsRevokedError,
 					})
@@ -1715,6 +1718,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 					const zonesResult = yield* Effect.result(listZones(accessToken, accountId, apiBaseUrl))
 					if (Result.isFailure(zonesResult)) {
 						const error = zonesResult.failure
+						if (error instanceof IntegrationsRevokedError) {
+							yield* oauth.markConnectionRevoked(orgId)
+						}
 						yield* recordOrgError(orgId, error.message, now, {
 							disable: error instanceof IntegrationsRevokedError,
 						})
@@ -1803,7 +1809,10 @@ export class CloudflareAnalyticsService extends Context.Service<
 						).pipe(
 							Effect.catchTag("@maple/http/errors/IntegrationsRevokedError", (error) =>
 								// Stop this org's loop; the seam disables + records health org-wide.
-								Ref.set(revokedRef, true).pipe(
+								// Also stamp the connection so pollAllOrgs skips it until reconnect
+								// (a mid-poll 401 never goes through the refresh path that stamps).
+								oauth.markConnectionRevoked(orgId).pipe(
+									Effect.andThen(Ref.set(revokedRef, true)),
 									Effect.as(
 										allPartsFailed(item, "revoked", error.message, {
 											orgWide: true,
@@ -1919,7 +1928,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 				db
 					.selectDistinct({ orgId: oauthConnections.orgId, scope: oauthConnections.scope })
 					.from(oauthConnections)
-					.where(eq(oauthConnections.provider, "cloudflare")),
+					// Revoked grants fail identically every tick until the org reconnects
+					// (which clears revokedAt) — skip them instead of re-erroring forever.
+					.where(and(eq(oauthConnections.provider, "cloudflare"), isNull(oauthConnections.revokedAt))),
 			)
 			// Orgs whose grant lacks the analytics scopes can't be polled — the status endpoint
 			// already surfaces that (analyticsCapable: false), so skipping them here avoids
@@ -2238,6 +2249,15 @@ export class CloudflareAnalyticsService extends Context.Service<
 						updatedAt: new Date(now),
 					})
 					.where(eq(cloudflareAnalyticsState.orgId, orgId)),
+			)
+			// Manual recovery path: also clear the revocation stamp so pollAllOrgs
+			// picks the org up again (reconnect clears it via upsertConnection, but
+			// resetOrgState may be invoked without a fresh OAuth round-trip).
+			yield* dbExecute((db) =>
+				db
+					.update(oauthConnections)
+					.set({ revokedAt: null })
+					.where(and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, "cloudflare"))),
 			)
 		})
 

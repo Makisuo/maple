@@ -8,7 +8,7 @@ export type {
 	CloudPlatformInfo,
 	CloudPlatformOutcome,
 } from "./types"
-export { outcomeBadgeStyle } from "./types"
+export { outcomeBadgeStyle, pickAttr } from "./types"
 
 // Registered platform adapters, checked in order. The trace views consume only
 // the normalized `CloudPlatformInfo`, so supporting a new provider is purely

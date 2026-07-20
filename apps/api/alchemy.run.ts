@@ -143,9 +143,16 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 					simple: { limit: 600, period: 60 },
 				}),
 				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
-				EMAIL: Cloudflare.Email.SendEmail("email", {
-					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
-				}),
+				// Production only: preview/stg workers run the same email crons against
+				// their own DB branches, so a binding here means every live stage sends
+				// its own copy of onboarding/digest/alert emails to real users.
+				...(stage.kind === "prd"
+					? {
+							EMAIL: Cloudflare.Email.SendEmail("email", {
+								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+							}),
+						}
+					: {}),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
 				...optionalSecret("TINYBIRD_SIGNING_KEY"),
@@ -170,6 +177,12 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				QE_BUCKET_CACHE_ENABLED: process.env.QE_BUCKET_CACHE_ENABLED?.trim() || "true",
 				QE_BUCKET_CACHE_TTL_SECONDS: process.env.QE_BUCKET_CACHE_TTL_SECONDS?.trim() || "86400",
 				QE_BUCKET_CACHE_FLUX_SECONDS: process.env.QE_BUCKET_CACHE_FLUX_SECONDS?.trim() || "60",
+				QE_BUCKET_CACHE_SEGMENT_BUCKETS: process.env.QE_BUCKET_CACHE_SEGMENT_BUCKETS?.trim() || "120",
+				QE_BUCKET_CACHE_READ_CONCURRENCY:
+					process.env.QE_BUCKET_CACHE_READ_CONCURRENCY?.trim() || "16",
+				EDGE_CACHE_READ_TIMEOUT_MS: process.env.EDGE_CACHE_READ_TIMEOUT_MS?.trim() || "250",
+				SERVICE_OPERATIONS_ROLLUP_ENABLED:
+					process.env.SERVICE_OPERATIONS_ROLLUP_ENABLED?.trim() || "false",
 				...optionalPlain("MAPLE_ENDPOINT"),
 				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
 				...optionalPlain("COMMIT_SHA"),

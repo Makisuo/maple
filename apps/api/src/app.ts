@@ -17,6 +17,7 @@ import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./routes/v2/attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
 import { HttpV2IngestKeysLive } from "./routes/v2/ingest-keys.http"
+import { HttpV2ErrorIssuesLive } from "./routes/v2/error-issues.http"
 import { HttpV2AnomaliesLive } from "./routes/v2/anomalies.http"
 import { HttpV2InvestigationsLive } from "./routes/v2/investigations.http"
 import { HttpV2OrganizationLive } from "./routes/v2/organization.http"
@@ -228,7 +229,9 @@ const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreSe
 const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 const DigestServiceLive = DigestService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EmailServiceLive)),
+	Layer.provideMerge(
+		Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EdgeCacheServiceLive, EmailServiceLive),
+	),
 )
 
 // VCS service wiring for the fetch-path worker. VcsSyncService (the sync
@@ -306,6 +309,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2AlertDestinationsLive,
 			HttpV2AlertIncidentsLive,
 			HttpV2IngestKeysLive,
+			HttpV2ErrorIssuesLive,
 			HttpV2AttributeMappingsLive,
 			HttpV2ScrapeTargetsLive,
 			HttpV2InstrumentationRecommendationsLive,

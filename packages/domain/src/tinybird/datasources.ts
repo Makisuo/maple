@@ -1295,6 +1295,14 @@ export const serviceOperationsMinutely = defineDatasource("service_operations_mi
 		sortingKey: ["OrgId", "ServiceName", "DeploymentEnv", "Minute", "SpanName"],
 		ttl: "toDate(Minute) + INTERVAL 90 DAY",
 	}),
+	// This datasource's TTL (90d) outlives the `traces` backfill source (30d);
+	// without a forward query Tinybird would rebuild the table from `traces`
+	// and drop rows older than 30 days.
+	forwardQuery: `SELECT
+		OrgId, Minute, ServiceName, DeploymentEnv,
+		CAST(SpanName, 'String') AS SpanName,
+		SpanCount, EstimatedSpanCount, ErrorCount, EstimatedErrorCount,
+		DurationSum, DurationQuantiles`,
 })
 
 export type ServiceOperationsMinutelyRow = InferRow<typeof serviceOperationsMinutely>

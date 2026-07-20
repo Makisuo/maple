@@ -42,11 +42,6 @@ vi.mock("./alerts", () => ({
 }))
 vi.mock("./api-keys", () => ({ createApiKeysCollection: collectionStub }))
 vi.mock("./dashboards", () => ({ createDashboardsCollection: collectionStub }))
-vi.mock("./errors", () => ({
-	createErrorIssuesCollection: collectionStub,
-	createActorsCollection: collectionStub,
-	createOpenErrorIncidentsCollection: collectionStub,
-}))
 
 // Each test wants isolated module state (generation counter + heal budget), so
 // re-import a fresh copy. Importing registry in the same epoch first hands back

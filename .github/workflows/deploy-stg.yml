@@ -51,5 +51,12 @@ jobs:
             - name: Run database migrations
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:migrate
 
+            # Re-grant table/sequence privileges to the runtime role after every
+            # migrate — table-rebuild migrations DROP+CREATE tables, which strips
+            # grants and leaves the deployed worker with "permission denied for
+            # table …" on every tick. See packages/db/scripts/grant-runtime-role.ts.
+            - name: Grant runtime role privileges
+              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:grant
+
             - name: Deploy STG stack with Alchemy
               run: bun run alchemy:deploy:stg

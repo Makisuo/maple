@@ -121,7 +121,10 @@ describe("ApiClient", () => {
 				),
 			)
 
-			assert.strictEqual(recorded[0]?.url, "http://api.test/api/internal/prometheus-scrape?targetId=target-1")
+			assert.strictEqual(
+				recorded[0]?.url,
+				"http://api.test/api/internal/prometheus-scrape?targetId=target-1",
+			)
 			assert.strictEqual(recorded[0]?.headers.authorization, "Bearer internal-token")
 			assert.strictEqual(response.status, 200)
 			assert.include(response.body, "up 1")
@@ -167,6 +170,26 @@ describe("ApiClient", () => {
 			assert.deepStrictEqual(JSON.parse(recorded[0]?.body ?? "[]"), [
 				{ targetId: VALID_TARGET.id, scrapedAt: 1750000000000, error: null },
 			])
+		}).pipe(Effect.provide(TestLayer)),
+	)
+
+	it.effect("surfaces a 503 result-persistence response so the scheduler can re-buffer", () =>
+		Effect.gen(function* () {
+			const client = yield* ApiClient
+			const error = yield* client
+				.reportResults([
+					{ targetId: VALID_TARGET.id, scrapedAt: 1750000000000, error: null } as never,
+				])
+				.pipe(
+					Effect.provideService(
+						FetchHttpClient.Fetch,
+						stubFetch([], () => new Response("persistence unavailable", { status: 503 })),
+					),
+					Effect.flip,
+				)
+
+			assert.strictEqual(error._tag, "@maple/scraper/ApiRequestError")
+			assert.strictEqual(error.status, 503)
 		}).pipe(Effect.provide(TestLayer)),
 	)
 })

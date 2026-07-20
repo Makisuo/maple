@@ -32,6 +32,7 @@ import { Env } from "../lib/Env"
  */
 
 const DELIVERY_TIMEOUT_MS = 15_000
+const NOTIFICATION_DELIVERY_CONCURRENCY = 5
 
 class NotificationDispatchError extends Data.TaggedError("@maple/api/services/NotificationDispatchError")<{
 	readonly message: string
@@ -249,7 +250,7 @@ const make: Effect.Effect<
 							"@maple/http/errors/AlertDeliveryError": () => Effect.succeed("failed" as const),
 						}),
 					),
-				{ concurrency: "unbounded" },
+				{ concurrency: NOTIFICATION_DELIVERY_CONCURRENCY },
 			)
 
 			return {

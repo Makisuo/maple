@@ -5,6 +5,7 @@ import { cn } from "@maple/ui/utils"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceDependenciesBundleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { toSingleDeploymentEnv } from "@/lib/services/environments"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { DatabaseIcon, GlobeIcon, NetworkNodesIcon, PaperPlaneIcon } from "@/components/icons"
 import type { DependencyKind } from "./dependency-type-badge"
@@ -15,6 +16,8 @@ interface ServiceDependencyStripProps {
 	serviceName: string
 	effectiveStartTime: string
 	effectiveEndTime: string
+	/** Page-level env filter (single-element by convention, see the route). */
+	environments?: string[]
 	/** Switches the page to the Dependencies tab (URL-driven). */
 	onViewAll: () => void
 }
@@ -42,11 +45,17 @@ export function ServiceDependencyStrip({
 	serviceName,
 	effectiveStartTime,
 	effectiveEndTime,
+	environments,
 	onViewAll,
 }: ServiceDependencyStripProps) {
 	const bundleResult = useRetainedRefreshableResultValue(
 		getServiceDependenciesBundleResultAtom({
-			data: { serviceName, startTime: effectiveStartTime, endTime: effectiveEndTime },
+			data: {
+				serviceName,
+				startTime: effectiveStartTime,
+				endTime: effectiveEndTime,
+				deploymentEnv: toSingleDeploymentEnv(environments),
+			},
 		}),
 	)
 
