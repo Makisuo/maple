@@ -166,9 +166,11 @@ const createTinybirdSdkSqlClient = (
 				// Tinybird Cloud currently defaults /v0/sql to JSON, while Tinybird Local
 				// defaults to tab-separated output. The SDK always calls response.json(), so
 				// make the expected wire format explicit for both environments. DSL-compiled
-				// queries already end with `FORMAT JSON` (optionally followed by profile
-				// SETTINGS) — appending a second FORMAT clause is a ClickHouse syntax error,
-				// so only add one when the query doesn't carry its own.
+				// queries already end with `FORMAT JSON` (profile SETTINGS are inserted
+				// before it by appendSettings) — appending a second FORMAT clause is a
+				// ClickHouse syntax error, so only add one when the query doesn't carry
+				// its own. The trailing-SETTINGS alternative covers SQL from callers that
+				// still emit the legacy `FORMAT JSON SETTINGS …` order.
 				const trimmed = sql.trimEnd().replace(/;$/, "")
 				const hasFormat = /\bFORMAT\s+\w+(\s+SETTINGS\s[^\n]*)?$/i.test(trimmed)
 				const jsonSql = hasFormat ? trimmed : `${trimmed}\nFORMAT JSON`
