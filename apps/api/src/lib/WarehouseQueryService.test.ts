@@ -726,6 +726,15 @@ describe("createTinybirdSdkSqlClient.sql FORMAT normalization", () => {
 		assert.match(sent, /FORMAT JSON$/)
 	})
 
+	it("does not double-append when profile SETTINGS precede FORMAT JSON", async () => {
+		// Canonical order emitted by appendSettings — Tinybird rejects the inverse.
+		const sent = await captureSql(
+			"SELECT 1 SETTINGS max_execution_time=15, max_memory_usage=1500000000\nFORMAT JSON",
+		)
+		assert.strictEqual(countFormats(sent), 1)
+		assert.match(sent, /SETTINGS max_execution_time=15, max_memory_usage=1500000000\nFORMAT JSON$/)
+	})
+
 	it("does not double-append when FORMAT JSON is followed by profile SETTINGS", async () => {
 		const sent = await captureSql(
 			"SELECT 1\nFORMAT JSON SETTINGS max_execution_time=15, max_memory_usage=1500000000",

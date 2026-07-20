@@ -69,6 +69,12 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				}),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
+				// Alert-rule evaluation runs Tinybird-scoped raw SQL through
+				// TinybirdOrgTokenService, which requires both of these — without them
+				// every tick fails with "TINYBIRD_SIGNING_KEY is required for
+				// Tinybird-scoped raw SQL" (same bindings as the api worker).
+				...optionalSecret("TINYBIRD_SIGNING_KEY"),
+				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
 				MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
 				MAPLE_DEFAULT_ORG_ID: process.env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.make(requireEnv("MAPLE_INGEST_KEY_ENCRYPTION_KEY")),

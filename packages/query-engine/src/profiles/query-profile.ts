@@ -126,8 +126,16 @@ export const stripTinybirdRestrictedSettings = (
 }
 
 /**
- * Append a ClickHouse `SETTINGS` clause to a SQL string. Returns the
- * input unchanged when no settings are provided.
+ * Matches a trailing `FORMAT <name>` clause (the DSL compiler terminates every
+ * query with `FORMAT JSON`). `SETTINGS` must precede `FORMAT` — Tinybird's
+ * ClickHouse rejects `FORMAT JSON SETTINGS …` with a syntax error.
+ */
+const trailingFormatRe = /\s+FORMAT\s+\w+\s*$/i
+
+/**
+ * Add a ClickHouse `SETTINGS` clause to a SQL string, inserting it before a
+ * trailing `FORMAT <name>` clause when present. Returns the input unchanged
+ * when no settings are provided.
  *
  * Caller must guarantee the SQL doesn't already contain a SETTINGS
  * clause — none of maple's DSL queries do today.
@@ -142,7 +150,14 @@ export const appendSettings = (sql: string, settings: WarehouseQuerySettings | u
 		}
 	}
 	if (parts.length === 0) return sql
-	return `${sql.replace(/;\s*$/, "")} SETTINGS ${parts.join(", ")}`
+	const clause = `SETTINGS ${parts.join(", ")}`
+	const trimmed = sql.replace(/;\s*$/, "")
+	const formatMatch = trimmed.match(trailingFormatRe)
+	if (formatMatch) {
+		const body = trimmed.slice(0, formatMatch.index)
+		return `${body} ${clause}${formatMatch[0]}`
+	}
+	return `${trimmed} ${clause}`
 }
 
 /**
