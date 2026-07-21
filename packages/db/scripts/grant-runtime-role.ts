@@ -15,9 +15,13 @@
  *
  * Two connection modes:
  *   1. DATABASE_URL set  → connect directly (stg / PR-preview CI, where the
- *      migrate step already has MAPLE_PG_URL). Runtime role defaults to that
- *      URL's username (the managed Hyperdrive is built from the same URL, so
- *      this is a harmless self-grant) unless MAPLE_PG_RUNTIME_ROLE overrides.
+ *      migrate step already has MAPLE_PG_URL). Runtime role defaults to the
+ *      session's `current_user` (the managed Hyperdrive is built from the same
+ *      URL, so this is a harmless self-grant) unless MAPLE_PG_RUNTIME_ROLE
+ *      overrides. It must come from the session and NOT from the URL's
+ *      username: PlanetScale connection strings carry a routing suffix
+ *      (`<role>.<branch-id>`) that is stripped before the server sees it, so
+ *      granting to the URL username fails with `role … does not exist`.
  *   2. branch arg only   → broker an ephemeral postgres-inheriting credential
  *      via `withBranchConnection` (prod `main`, applied out of band). The
  *      brokered URL's user is the migration role, NOT the runtime role, so
@@ -76,9 +80,23 @@ const grantStatements = (role: string): readonly string[] => {
  * Open a short-lived connection on `connectionUrl` and apply the grant pass for
  * `role`. Idempotent — safe to re-run on every deploy.
  */
-export const applyRuntimeGrants = async (connectionUrl: string, role: string): Promise<void> => {
+const sessionRole = async (sql: postgres.Sql): Promise<string> => {
+	const [row] = await sql`SELECT current_user`
+	const role: unknown = row?.current_user
+	if (typeof role !== "string" || role.length === 0) {
+		return fail("`SELECT current_user` returned no role — cannot determine who to grant to")
+	}
+	return role
+}
+
+export const applyRuntimeGrants = async (connectionUrl: string, explicitRole?: string): Promise<void> => {
 	const sql = postgres(connectionUrl, { max: 1, fetch_types: false })
 	try {
+		// No explicit role → self-grant to whoever this connection authenticated
+		// as. Asking the server (rather than parsing the URL) is what makes this
+		// work on PlanetScale, whose usernames carry a routing suffix.
+		const role = explicitRole ?? (await sessionRole(sql))
+		console.log(`→ Granting runtime privileges to "${role}"\n`)
 		for (const statement of grantStatements(role)) {
 			console.log(`  → ${statement}`)
 			await sql.unsafe(statement)
@@ -89,10 +107,9 @@ export const applyRuntimeGrants = async (connectionUrl: string, role: string): P
 	}
 }
 
-const resolveRole = (fallback?: string): string => {
+const requireRole = (): string => {
 	const explicit = process.env.MAPLE_PG_RUNTIME_ROLE?.trim()
 	if (explicit) return explicit
-	if (fallback) return fallback
 	return fail(
 		"MAPLE_PG_RUNTIME_ROLE is not set — cannot determine the runtime app role to grant. " +
 			"Set it to the role embedded in the prod Hyperdrive (maple-db) connection.",
@@ -103,27 +120,19 @@ const resolveRole = (fallback?: string): string => {
 if (import.meta.main) {
 	const directUrl = process.env.DATABASE_URL?.trim()
 	if (directUrl) {
-		// Mode 1: direct connection. Default the role to the URL's user — the
-		// managed Hyperdrive (stg / PR preview) is built from this same URL, so
-		// granting to that user is a self-grant no-op that future-proofs against
-		// the runtime/migrate roles ever diverging.
-		const fallback = (() => {
-			try {
-				return decodeURIComponent(new URL(directUrl).username) || undefined
-			} catch {
-				return undefined
-			}
-		})()
-		const role = resolveRole(fallback)
-		console.log(`→ Granting runtime privileges to "${role}" via DATABASE_URL\n`)
-		await applyRuntimeGrants(directUrl, role)
+		// Mode 1: direct connection. Without an override the grant targets the
+		// session's own role — the managed Hyperdrive (stg / PR preview) is built
+		// from this same URL, so that self-grant is a no-op which future-proofs
+		// against the runtime/migrate roles ever diverging.
+		console.log("→ Granting runtime privileges via DATABASE_URL")
+		await applyRuntimeGrants(directUrl, process.env.MAPLE_PG_RUNTIME_ROLE?.trim() || undefined)
 	} else {
 		// Mode 2: broker an ephemeral credential for the branch (prod path).
 		const branch = process.argv[2]?.trim()
 		if (!branch) {
 			fail("Usage: DATABASE_URL=… grant-runtime-role.ts   OR   grant-runtime-role.ts <branch>")
 		}
-		const role = resolveRole()
+		const role = requireRole()
 		await withBranchConnection(branch as string, async (connectionUrl) => {
 			console.log(`→ Granting runtime privileges to "${role}" on ${resolveDatabase()}/${branch}\n`)
 			await applyRuntimeGrants(connectionUrl, role)
