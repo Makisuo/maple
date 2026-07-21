@@ -167,7 +167,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 		return {
 			orgId: validOrgId,
 			userId: validUserId,
-			roles: apiKeyDefaultRoles,
+			roles: apiKeyResolved.value.roles ?? apiKeyDefaultRoles,
 			authMode: "self_hosted",
 			...(actorId ? { actorId } : {}),
 		} as McpTenantContext

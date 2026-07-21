@@ -117,7 +117,7 @@ export const ApiAuthorizationV2Layer = Layer.effect(
 						const tenant = new CurrentTenant.TenantSchema({
 							orgId: resolved.orgId,
 							userId: resolved.userId,
-							roles: apiKeyDefaultRoles,
+							roles: resolved.roles ?? apiKeyDefaultRoles,
 							authMode: "self_hosted",
 							...(resolved.scopes !== null ? { scopes: resolved.scopes } : {}),
 						})
