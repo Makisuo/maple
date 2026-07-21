@@ -13,17 +13,33 @@ const workersai = createWorkersAI({
 });
 
 /**
- * Must support function/tool calling — eve's default harness is tool-driven.
- * Override with WORKERS_AI_MODEL without editing code.
+ * Must support tool calling **while streaming** — eve's harness is tool-driven and
+ * always streams. That second half is the real constraint: several Workers AI
+ * models parse tool calls only on non-streaming requests and, when streamed, emit
+ * the model's raw tool-call JSON as ordinary text deltas. The agent then posts
+ * `{"type":"function","name":"ask_question",...}` into Slack verbatim.
+ *
+ * `@cf/meta/llama-3.3-70b-instruct-fp8-fast` has exactly that bug — non-streaming
+ * returns a proper `tool_calls` array, streaming returns the JSON as text (and
+ * even in the structured form it stringifies booleans: `"allowFreeform": "true"`).
+ * `@cf/zai-org/glm-5.2` streams OpenAI-shaped incremental `delta.tool_calls`
+ * chunks (name + id on the first, argument fragments keyed by `index` after) and
+ * finishes with `finish_reason: "tool_calls"`, which workers-ai-provider maps
+ * correctly. It also emits chain-of-thought on `reasoning_content`, which the
+ * provider routes to reasoning parts rather than message text.
+ *
+ * If you override WORKERS_AI_MODEL, verify streaming tool calls first — hit
+ * `/ai/run/<model>` with `stream: true` plus a `tools` array and confirm the SSE
+ * carries `delta.tool_calls`, not a JSON blob inside `response`.
  */
-const modelId = process.env.WORKERS_AI_MODEL ?? "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const modelId = process.env.WORKERS_AI_MODEL ?? "@cf/zai-org/glm-5.2";
 
 /**
  * Direct (non-Gateway) models carry no AI Gateway context-window metadata, which
- * eve's compaction needs — so declare it here. Llama 3.3 70B is 128K; override
+ * eve's compaction needs — so declare it here. glm-5.2 is 256K; override
  * with WORKERS_AI_CONTEXT_WINDOW if you switch models.
  */
-const contextWindowTokens = Number(process.env.WORKERS_AI_CONTEXT_WINDOW ?? 128_000);
+const contextWindowTokens = Number(process.env.WORKERS_AI_CONTEXT_WINDOW ?? 262_144);
 
 /**
  * Durable workflow state ("world").

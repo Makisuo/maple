@@ -32,8 +32,11 @@ COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 
 ENV NODE_ENV=production
-# Railway injects PORT; default for local `docker run`.
-ENV PORT=3000
-EXPOSE 3000
+# 8080 everywhere: matches the PORT Railway injects at runtime (which would otherwise
+# silently override a different value here), and keeps local `docker run` identical to prod.
+# If you change this, change it in all four places: here, EXPOSE, docker-entrypoint.sh's
+# fallback, and WORKFLOW_LOCAL_BASE_URL / the generated domain's port in README step 2.
+ENV PORT=8080
+EXPOSE 8080
 
 CMD ["./docker-entrypoint.sh"]

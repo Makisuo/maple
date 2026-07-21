@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -e
 
-: "${PORT:=3000}"
+: "${PORT:=8080}"
 export PORT
 
 # When the durable Postgres world is compiled in (see Dockerfile), apply its
