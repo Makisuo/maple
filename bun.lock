@@ -339,6 +339,15 @@
         "vitest": "catalog:",
       },
     },
+    "examples/alchemy-maple": {
+      "name": "@maple-examples/alchemy",
+      "devDependencies": {
+        "@maple-dev/alchemy": "workspace:*",
+        "alchemy": "2.0.0-beta.61",
+        "effect": "catalog:effect",
+        "typescript": "catalog:tooling",
+      },
+    },
     "examples/effect-todo": {
       "name": "@maple-examples/effect-todo",
       "version": "0.0.0",
@@ -360,6 +369,25 @@
         "tailwindcss": "catalog:tailwind",
         "typescript": "catalog:tooling",
         "vite": "catalog:",
+      },
+    },
+    "lib/alchemy-maple": {
+      "name": "@maple-dev/alchemy",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@effect/language-service": "catalog:effect",
+        "@effect/vitest": "4.0.0-beta.93",
+        "@maple/domain": "workspace:*",
+        "@types/node": "catalog:tooling",
+        "alchemy": "2.0.0-beta.61",
+        "effect": "catalog:effect",
+        "tsdown": "^0.21.7",
+        "typescript": "catalog:tooling",
+        "vitest": "catalog:",
+      },
+      "peerDependencies": {
+        "alchemy": ">=2.0.0-beta.61 <3",
+        "effect": ">=4.0.0-beta.93 || >=4.0.0",
       },
     },
     "lib/clickhouse-builder": {
@@ -1483,11 +1511,15 @@
 
     "@lix-js/server-protocol-schema": ["@lix-js/server-protocol-schema@0.1.1", "", {}, "sha512-jBeALB6prAbtr5q4vTuxnRZZv1M2rKe8iNqRQhFJ4Tv7150unEa0vKyz0hs8Gl3fUGsWaNJBh3J8++fpbrpRBQ=="],
 
+    "@maple-dev/alchemy": ["@maple-dev/alchemy@workspace:lib/alchemy-maple"],
+
     "@maple-dev/browser": ["@maple-dev/browser@workspace:packages/browser"],
 
     "@maple-dev/clickhouse-builder": ["@maple-dev/clickhouse-builder@workspace:lib/clickhouse-builder"],
 
     "@maple-dev/effect-sdk": ["@maple-dev/effect-sdk@workspace:lib/effect-sdk"],
+
+    "@maple-examples/alchemy": ["@maple-examples/alchemy@workspace:examples/alchemy-maple"],
 
     "@maple-examples/effect-todo": ["@maple-examples/effect-todo@workspace:examples/effect-todo"],
 
