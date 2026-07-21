@@ -1,11 +1,14 @@
+import { useEffect } from "react"
 import { useNavigate, createFileRoute } from "@tanstack/react-router"
 import { Schema } from "effect"
+import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { CloudflareAccountCard } from "@/components/integrations/cloudflare-account-card"
 import { GithubIntegrationCard } from "@/components/integrations/github-integration-card"
 import { HazelIntegrationCard } from "@/components/integrations/hazel-integration-card"
 import { PlanetScaleIntegrationCard } from "@/components/integrations/planetscale-integration-card"
+import { SlackIntegrationCard } from "@/components/integrations/slack-integration-card"
 import {
 	IntegrationCatalog,
 	IntegrationIconPlate,
@@ -22,8 +25,20 @@ import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon } from "@/components/ic
 
 const IntegrationsSearch = Schema.Struct({
 	integration: Schema.optional(
-		Schema.Literals(["cloudflare", "prometheus", "planetscale", "warpstream", "hazel", "github"]),
+		Schema.Literals([
+			"cloudflare",
+			"prometheus",
+			"planetscale",
+			"warpstream",
+			"hazel",
+			"github",
+			"slack",
+		]),
 	),
+	// Post-OAuth return params set by the Slack install callback redirect.
+	slack: Schema.optional(Schema.Literals(["connected", "error"])),
+	message: Schema.optional(Schema.String),
+	team: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/integrations")({
@@ -36,6 +51,21 @@ function IntegrationsPage() {
 	const navigate = useNavigate({ from: Route.fullPath })
 	const { visibleSections } = useVisibleSettingsSections()
 	const integration = search.integration
+
+	// Surface the Slack OAuth callback result once, then strip the return params
+	// from the URL so a refresh doesn't re-toast.
+	const slackReturn = search.slack
+	const slackMessage = search.message
+	const slackTeam = search.team
+	useEffect(() => {
+		if (!slackReturn) return
+		if (slackReturn === "connected") {
+			toast.success(slackTeam ? `Slack connected to ${slackTeam}` : "Slack connected")
+		} else {
+			toast.error(slackMessage ?? "Slack connection failed")
+		}
+		navigate({ search: { integration: "slack" }, replace: true })
+	}, [slackReturn, slackMessage, slackTeam, navigate])
 
 	// The hub shares the settings shell: same sidebar, "Integrations" highlighted.
 	const settingsSidebar = (
@@ -98,6 +128,8 @@ function IntegrationsPage() {
 					<GithubIntegrationCard />
 				) : integration === "planetscale" ? (
 					<PlanetScaleIntegrationCard />
+				) : integration === "slack" ? (
+					<SlackIntegrationCard />
 				) : (
 					// prometheus + warpstream share the generic scrape-target flow
 					<ScrapeTargetsSection sourceFilter="prometheus" />

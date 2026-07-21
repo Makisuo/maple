@@ -9,13 +9,22 @@ import {
 	HazelIcon,
 	PlanetScaleIcon,
 	PrometheusIcon,
+	SlackIcon,
 	WarpStreamIcon,
 } from "@/components/icons"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { scrapeTargetsListAtom } from "@/lib/services/atoms/scrape-target-atoms"
 
-export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warpstream" | "hazel" | "github"
+export type IntegrationId =
+	| "cloudflare"
+	| "prometheus"
+	| "planetscale"
+	| "warpstream"
+	| "hazel"
+	| "github"
+	| "slack"
 
 /**
  * Third-party brand accents for the icon-plate wash — no app token applies.
@@ -24,6 +33,7 @@ export type IntegrationId = "cloudflare" | "prometheus" | "planetscale" | "warps
 export const GITHUB_ACCENT = "#181717"
 export const HAZEL_ACCENT = "#F46F0F"
 export const CLOUDFLARE_ACCENT = "#F38020"
+export const SLACK_ACCENT = "#4A154B"
 
 export interface CatalogEntry {
 	readonly id: IntegrationId
@@ -95,6 +105,15 @@ const CATALOG: ReadonlyArray<CatalogEntry> = [
 		iconClassName: "text-foreground",
 		docsUrl: "https://maple.dev/docs/integrations/github",
 	},
+	{
+		id: "slack",
+		name: "Slack",
+		description:
+			"Install the Maple Slack app — ask Maple questions in Slack and route alerts to channels.",
+		icon: SlackIcon,
+		accent: SLACK_ACCENT,
+		docsUrl: "https://maple.dev/docs/integrations/slack",
+	},
 ]
 
 export const catalogEntry = (id: IntegrationId): CatalogEntry => CATALOG.find((entry) => entry.id === id)!
@@ -133,6 +152,11 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 	const githubResult = useAtomValue(
 		MapleApiAtomClient.query("integrations", "githubStatus", {
 			reactivityKeys: ["githubIntegrationStatus"],
+		}),
+	)
+	const slackResult = useAtomValue(
+		MapleApiV2AtomClient.query("slackIntegration", "status", {
+			reactivityKeys: ["slackIntegration"],
 		}),
 	)
 
@@ -200,6 +224,16 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		.onInitial(() => null)
 		.orElse(() => STATUS_UNAVAILABLE)
 
+	const slack: CardStatus | null = Result.builder(slackResult)
+		.onSuccess(
+			(status): CardStatus =>
+				status.installed
+					? { label: status.team_name ?? "Connected", variant: "success" }
+					: NOT_CONNECTED,
+		)
+		.onInitial(() => null)
+		.orElse(() => STATUS_UNAVAILABLE)
+
 	return {
 		cloudflare,
 		prometheus: scrapeStatus("prometheus"),
@@ -208,6 +242,7 @@ export function useIntegrationStatuses(): Partial<Record<IntegrationId, CardStat
 		warpstream: { label: "Via Prometheus", variant: "outline" },
 		hazel,
 		github,
+		slack,
 	}
 }
 

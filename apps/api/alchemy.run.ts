@@ -199,6 +199,9 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...optionalPlain("HAZEL_OAUTH_CLIENT_ID"),
 				...optionalSecret("HAZEL_OAUTH_CLIENT_SECRET"),
 				...optionalPlain("HAZEL_OAUTH_SCOPES"),
+				// Slack integration (bot install via OAuth v2)
+				...optionalPlain("SLACK_CLIENT_ID"),
+				...optionalSecret("SLACK_CLIENT_SECRET"),
 				...optionalPlain("GITHUB_APP_ID"),
 				...optionalPlain("GITHUB_APP_SLUG"),
 				...optionalSecret("GITHUB_APP_PRIVATE_KEY"),

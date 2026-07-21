@@ -8,6 +8,7 @@ import { OrganizationService } from "../../services/OrganizationService"
 import { OrgIngestKeysService } from "../../services/OrgIngestKeysService"
 import { RecommendationIssueService } from "../../services/RecommendationIssueService"
 import { ScrapeTargetsService } from "../../services/ScrapeTargetsService"
+import { SlackIntegrationService } from "../../services/SlackIntegrationService"
 import { ApiV2RateLimiter } from "../../services/ApiV2RateLimiter"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { QueryEngineService } from "../../services/QueryEngineService"
@@ -18,6 +19,7 @@ import { HttpV2ApiKeysLive } from "./api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./dashboards.http"
 import { HttpV2IngestKeysLive } from "./ingest-keys.http"
+import { HttpV2SlackIntegrationsLive } from "./integrations.http"
 import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
@@ -40,8 +42,26 @@ import {
  * the groups it does not exercise.
  */
 
+/**
+ * Inert SlackIntegrationService — the slack integration group is registered on
+ * MapleApiV2, so the full-API harnesses must satisfy it even when they don't
+ * exercise it. Provided directly onto the group layer below so it leaks no
+ * requirement into the harnesses.
+ */
+const SlackIntegrationServiceStubLayer = Layer.succeed(SlackIntegrationService, {
+	startInstall: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+	completeInstall: () =>
+		Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+	getStatus: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+	uninstall: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+	listChannels: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+	resolveForBot: () =>
+		Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+})
+
 export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,
+	HttpV2SlackIntegrationsLive.pipe(Layer.provide(SlackIntegrationServiceStubLayer)),
 	HttpV2DashboardsLive,
 	HttpV2AlertRulesLive,
 	HttpV2AlertDestinationsLive,

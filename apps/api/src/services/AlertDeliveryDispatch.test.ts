@@ -39,10 +39,17 @@ const LINK = "https://web.localhost/alerts"
 const CHAT = "https://web.localhost/chat?mode=alert"
 const DESTINATION_ID = Schema.decodeUnknownSync(AlertDestinationId)("7c6b5a49-3821-4e0f-9d8c-7b6a59483726")
 
+/** Slack-token resolver that must not be invoked for non-slack-bot destinations. */
+const failingSlackToken = () =>
+	Effect.fail(
+		new AlertDeliveryError({ message: "unexpected resolveSlackBotToken", destinationType: "slack-bot" }),
+	)
+
 /** Dispatch deps for non-email destinations — email sends must not happen. */
 const noEmailDeps: DispatchDeps = {
 	sendEmail: () =>
 		Effect.fail(new AlertDeliveryError({ message: "unexpected sendEmail", destinationType: "email" })),
+	resolveSlackBotToken: failingSlackToken,
 }
 
 describe("buildAlertChatUrl (Ask Maple AI link)", () => {
@@ -198,6 +205,95 @@ describe("dispatchDelivery", () => {
 		}),
 	)
 
+	const slackBotContext: DispatchContext = {
+		...pagerdutyContext,
+		destination: { ...destinationRow, name: "Slack bot", type: "slack-bot" },
+		publicConfig: { summary: "#incidents", channelLabel: "#incidents" },
+		secretConfig: { type: "slack-bot", channelId: "C0789CHAN", channelName: "incidents" },
+	}
+
+	const slackTokenDeps = (token = "xoxb-test-token"): DispatchDeps => ({
+		sendEmail: () =>
+			Effect.fail(new AlertDeliveryError({ message: "unexpected sendEmail", destinationType: "email" })),
+		resolveSlackBotToken: () => Effect.succeed(token),
+	})
+
+	it.effect("slack-bot: posts to chat.postMessage with the resolved bot token + channel", () =>
+		Effect.gen(function* () {
+			const calls: Array<{ url: string; auth: string | null; body: unknown }> = []
+			const fetchFn: typeof fetch = async (input, init) => {
+				calls.push({
+					url: String(input),
+					auth: new Headers(init?.headers).get("authorization"),
+					body: JSON.parse(String(init?.body)),
+				})
+				return new Response(JSON.stringify({ ok: true, ts: "1700000000.000100" }), { status: 200 })
+			}
+
+			const result = yield* dispatchDelivery(
+				slackBotContext,
+				"{}",
+				fetchFn,
+				5_000,
+				LINK,
+				CHAT,
+				slackTokenDeps(),
+			)
+
+			assert.strictEqual(calls.length, 1)
+			assert.strictEqual(calls[0]!.url, "https://slack.com/api/chat.postMessage")
+			assert.strictEqual(calls[0]!.auth, "Bearer xoxb-test-token")
+			assert.strictEqual((calls[0]!.body as { channel: string }).channel, "C0789CHAN")
+			assert.isArray((calls[0]!.body as { blocks: unknown[] }).blocks)
+			assert.strictEqual(result.providerReference, "1700000000.000100")
+			assert.strictEqual(result.responseCode, 200)
+		}),
+	)
+
+	it.effect("slack-bot: surfaces a not_in_channel logical error with an actionable message", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () =>
+				new Response(JSON.stringify({ ok: false, error: "not_in_channel" }), { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.strictEqual(error.destinationType, "slack-bot")
+			assert.include(error.message, "not_in_channel")
+			assert.include(error.message, "invite the Maple bot")
+		}),
+	)
+
+	it.effect("slack-bot: fails when the org has no active Slack installation", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () => {
+				throw new Error("fetch must not be called when token resolution fails")
+			}
+			const deps: DispatchDeps = {
+				sendEmail: () =>
+					Effect.fail(
+						new AlertDeliveryError({ message: "unexpected sendEmail", destinationType: "email" }),
+					),
+				resolveSlackBotToken: () =>
+					Effect.fail(
+						new AlertDeliveryError({
+							message: "Slack is not connected for this organization",
+							destinationType: "slack-bot",
+						}),
+					),
+			}
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, deps),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.include(error.message, "Slack is not connected")
+		}),
+	)
+
 	const failingFetch: typeof fetch = async () => {
 		throw new Error("fetch must not be called for email dispatch")
 	}
@@ -250,6 +346,7 @@ describe("dispatchDelivery", () => {
 							destinationType: "email",
 						}),
 					),
+				resolveSlackBotToken: failingSlackToken,
 			}
 
 			const error = yield* Effect.flip(
@@ -277,6 +374,7 @@ describe("dispatchDelivery", () => {
 						: Effect.sync(() => {
 								sent.push(to)
 							}),
+				resolveSlackBotToken: failingSlackToken,
 			}
 
 			const result = yield* dispatchDelivery(emailContext, "{}", failingFetch, 5_000, LINK, CHAT, deps)
@@ -298,6 +396,7 @@ describe("dispatchDelivery", () => {
 							destinationType: "email",
 						}),
 					),
+				resolveSlackBotToken: failingSlackToken,
 			}
 
 			const error = yield* Effect.flip(

@@ -10,12 +10,15 @@ import {
 	ProviderLogo,
 	type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { HazelIcon, LoaderIcon } from "@/components/icons"
+import { CircleInfoIcon, HazelIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { HazelChannelsListResponse } from "@maple/domain/http"
+import type { V2SlackChannelList } from "@maple/domain/http/v2"
 import { Exit } from "effect"
+import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
 import {
@@ -36,6 +39,14 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@maple/ui/components/ui/select"
+import {
+	Combobox,
+	ComboboxContent,
+	ComboboxEmpty,
+	ComboboxInput,
+	ComboboxItem,
+	ComboboxList,
+} from "@maple/ui/components/ui/combobox"
 import { Switch } from "@maple/ui/components/ui/switch"
 import { Avatar, AvatarFallback, AvatarImage } from "@maple/ui/components/ui/avatar"
 import { Checkbox } from "@maple/ui/components/ui/checkbox"
@@ -65,6 +76,9 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 	switch (form.type) {
 		case "hazel-oauth":
 			return form.hazelOrganizationId.trim().length > 0 && form.hazelChannelId.trim().length > 0
+		case "slack-bot":
+			// Editing keeps the stored channel when left untouched; creating requires a pick.
+			return isEditing || form.slackChannelId.trim().length > 0
 		// On create the secret is required; when editing, a blank value keeps the
 		// stored one.
 		case "discord":
@@ -526,6 +540,156 @@ function HazelOAuthFields({
 	)
 }
 
+/**
+ * Slack (bot) destination fields. Requires the org-level Slack app install (the
+ * bot token is resolved from the org's workspace at dispatch — no per-destination
+ * secret). When the app isn't installed we point the user at the integrations
+ * page; when it is, we let them pick a channel the bot can see.
+ */
+function SlackBotFields({
+	form,
+	onFormChange,
+	isEditing,
+}: {
+	form: DestinationFormState
+	onFormChange: (updater: (current: DestinationFormState) => DestinationFormState) => void
+	isEditing: boolean
+}) {
+	const statusResult = useAtomValue(
+		MapleApiV2AtomClient.query("slackIntegration", "status", {
+			reactivityKeys: ["slackIntegration"],
+		}),
+	)
+
+	const installed = Result.builder(statusResult)
+		.onSuccess((s) => s.installed)
+		.orElse(() => false)
+
+	const channelsAtom = installed
+		? MapleApiV2AtomClient.query("slackIntegration", "channels", {
+				reactivityKeys: ["slackIntegration", "slackChannels"],
+			})
+		: disabledResultAtom<V2SlackChannelList>()
+	const channelsResult = useAtomValue(channelsAtom)
+
+	const channels = Result.builder(channelsResult)
+		.onSuccess((c) => [...c.channels])
+		.orElse(() => [] as V2SlackChannelList["channels"][number][])
+	const channelsLoading = installed && channelsResult.waiting
+	const channelsFailed = Result.isFailure(channelsResult)
+
+	const statusPending = Result.isInitial(statusResult)
+	const statusFailed = Result.isFailure(statusResult)
+
+	if (statusPending) {
+		return <p className="text-[11px] text-muted-foreground">Checking your Slack connection…</p>
+	}
+
+	if (statusFailed) {
+		return (
+			<p className="text-xs text-destructive">
+				Couldn&apos;t check your Slack connection. This may be a temporary issue — try again.
+			</p>
+		)
+	}
+
+	if (!installed) {
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				<p className="text-xs text-muted-foreground">
+					The Maple Slack app isn&apos;t installed for this organization yet. Install it from the
+					integrations page, then come back to pick a channel.
+				</p>
+				<Link
+					to="/integrations"
+					search={{ integration: "slack" }}
+					className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+				>
+					Go to Slack integration →
+				</Link>
+			</div>
+		)
+	}
+
+	const label = (id: string): string => {
+		const channel = channels.find((c) => c.id === id)
+		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : ""
+		return channel.is_private ? `#${channel.name} (private)` : `#${channel.name}`
+	}
+
+	const selectedChannel = channels.find((c) => c.id === form.slackChannelId)
+
+	return (
+		<div className="space-y-1.5">
+			<Label htmlFor="destination-slack-channel" className="text-xs">
+				Channel
+			</Label>
+			<Combobox
+				value={form.slackChannelId || null}
+				itemToStringLabel={(value: string) => label(value)}
+				onValueChange={(value) => {
+					if (value == null) return
+					const channel = channels.find((c) => c.id === value)
+					onFormChange((current) => ({
+						...current,
+						slackChannelId: value,
+						slackChannelName: channel?.name ?? current.slackChannelName,
+					}))
+				}}
+			>
+				<ComboboxInput
+					id="destination-slack-channel"
+					placeholder={
+						channelsLoading
+							? "Loading channels…"
+							: isEditing && form.slackChannelName
+								? `#${form.slackChannelName}`
+								: "Search channels…"
+					}
+					className="w-full"
+				/>
+				<ComboboxContent>
+					<ComboboxEmpty>No matching channels.</ComboboxEmpty>
+					<ComboboxList>
+						{channels.map((channel) => (
+							<ComboboxItem key={channel.id} value={channel.id}>
+								<span className="flex items-center gap-2">
+									<span className="truncate">#{channel.name}</span>
+									{channel.is_private ? (
+										<span className="text-[10px] text-muted-foreground">private</span>
+									) : null}
+									{!channel.is_member ? (
+										<span className="text-[10px] text-warning">bot not in channel</span>
+									) : null}
+								</span>
+							</ComboboxItem>
+						))}
+					</ComboboxList>
+				</ComboboxContent>
+			</Combobox>
+			{channelsFailed ? (
+				<p className="text-[11px] text-destructive">
+					Couldn&apos;t load Slack channels. Try reopening this dialog.
+				</p>
+			) : channels.length === 0 && !channelsLoading ? (
+				<p className="text-[11px] text-muted-foreground">
+					No channels returned. Make sure the Maple bot has been added to at least one channel.
+				</p>
+			) : null}
+			<p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+				<CircleInfoIcon size={12} className="mt-0.5 shrink-0" />
+				<span>
+					For private channels — and public ones if posting fails — invite the bot with{" "}
+					<code className="rounded bg-muted px-1">/invite @Maple</code> in that channel.
+					{selectedChannel && !selectedChannel.is_member
+						? " The bot isn't in the selected channel yet."
+						: ""}
+				</span>
+			</p>
+		</div>
+	)
+}
+
 function FieldHelper({ provider }: { provider: DestinationProvider }) {
 	if (!provider.docsUrl) return null
 	return (
@@ -649,6 +813,14 @@ export function DestinationDialog({
 										/>
 									</div>
 								</>
+							)}
+
+							{form.type === "slack-bot" && (
+								<SlackBotFields
+									form={form}
+									onFormChange={onFormChange}
+									isEditing={isEditing}
+								/>
 							)}
 
 							{form.type === "pagerduty" && (

@@ -69,7 +69,7 @@ export const V2AlertDestination = Schema.Struct({
 	}),
 	type: AlertDestinationType.annotate({
 		description:
-			"The delivery channel: `slack`, `pagerduty`, `webhook`, `hazel`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
+			"The delivery channel: `slack`, `slack-bot`, `pagerduty`, `webhook`, `hazel`, `hazel-oauth`, `discord`, or `email`. Immutable after creation.",
 		examples: ["slack"],
 	}),
 	enabled: Schema.Boolean.annotate({
@@ -148,6 +148,22 @@ const V2SlackDestinationCreateParams = Schema.Struct({
 	),
 	enabled: enabledField,
 }).annotate({ identifier: "AlertDestinationCreateSlack", title: "Slack destination" })
+
+const V2SlackBotDestinationCreateParams = Schema.Struct({
+	type: Schema.Literal("slack-bot"),
+	name: nameField,
+	channel_id: NonEmptyString.annotate({
+		description: "The Slack channel id the bot posts to (e.g. `C0789CHAN`).",
+		examples: ["C0789CHAN"],
+	}),
+	channel_name: Schema.optionalKey(
+		NonEmptyString.annotate({
+			description: "Optional display name for the channel, e.g. `incidents`.",
+			examples: ["incidents"],
+		}),
+	),
+	enabled: enabledField,
+}).annotate({ identifier: "AlertDestinationCreateSlackBot", title: "Slack (bot) destination" })
 
 const V2PagerDutyDestinationCreateParams = Schema.Struct({
 	type: Schema.Literal("pagerduty"),
@@ -230,6 +246,7 @@ const V2EmailDestinationCreateParams = Schema.Struct({
 
 export const V2AlertDestinationCreateParams = Schema.Union([
 	V2SlackDestinationCreateParams,
+	V2SlackBotDestinationCreateParams,
 	V2PagerDutyDestinationCreateParams,
 	V2WebhookDestinationCreateParams,
 	V2HazelDestinationCreateParams,
@@ -267,6 +284,13 @@ export const V2AlertDestinationUpdateParams = Schema.Union([
 		channel_label: OptionalNonEmptyString,
 		enabled: Schema.optionalKey(Schema.Boolean),
 	}).annotate({ identifier: "AlertDestinationUpdateSlack", title: "Slack destination update" }),
+	Schema.Struct({
+		type: Schema.Literal("slack-bot"),
+		name: optionalNameField,
+		channel_id: Schema.optionalKey(Schema.String),
+		channel_name: OptionalNonEmptyString,
+		enabled: Schema.optionalKey(Schema.Boolean),
+	}).annotate({ identifier: "AlertDestinationUpdateSlackBot", title: "Slack (bot) destination update" }),
 	Schema.Struct({
 		type: Schema.Literal("pagerduty"),
 		name: optionalNameField,

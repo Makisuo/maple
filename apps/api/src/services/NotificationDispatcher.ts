@@ -22,6 +22,7 @@ import {
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
 import { parseBase64Aes256GcmKey } from "../lib/Crypto"
+import { resolveSlackBotTokenForDispatch } from "./SlackIntegrationService"
 import { Database } from "../lib/DatabaseLive"
 import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
@@ -187,7 +188,11 @@ const make: Effect.Effect<
 			DELIVERY_TIMEOUT_MS,
 			request.linkUrl,
 			chatUrl,
-			{ sendEmail },
+			{
+				sendEmail,
+				resolveSlackBotToken: (orgId) =>
+					resolveSlackBotTokenForDispatch(database, encryptionKey, orgId),
+			},
 		).pipe(Effect.tapError(() => Effect.annotateCurrentSpan({ "maple.delivery.outcome": "failed" })))
 		yield* Effect.annotateCurrentSpan({
 			"maple.delivery.outcome": "delivered",

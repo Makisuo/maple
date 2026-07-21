@@ -572,6 +572,13 @@ export interface DispatchDeps {
 	 * binding). Injected like `fetchFn` so this module stays dependency-free.
 	 */
 	readonly sendEmail: (to: string, subject: string, html: string) => Effect.Effect<void, AlertDeliveryError>
+	/**
+	 * Resolves the decrypted Slack bot token for an org from its
+	 * `slack_workspaces` row. Injected like `sendEmail` so this module stays
+	 * dependency-free — only the `slack-bot` destination arm invokes it. Fails
+	 * (AlertDeliveryError) when the org has no active Slack installation.
+	 */
+	readonly resolveSlackBotToken: (orgId: string) => Effect.Effect<string, AlertDeliveryError>
 }
 
 export const dispatchDelivery = (
@@ -628,6 +635,71 @@ export const dispatchDelivery = (
 						return {
 							providerMessage: "Delivered to Slack",
 							providerReference: null,
+							responseCode: response.status,
+						} as DispatchResult
+					}),
+				"slack-bot": (config) =>
+					Effect.gen(function* () {
+						const botToken = yield* deps.resolveSlackBotToken(context.destination.orgId)
+						const templated = renderTitleBody(context, "slack", linkUrl, chatUrl)
+						const blocks = templated
+							? buildSlackBlocksFromTemplate(
+									templated.title,
+									templated.body,
+									context,
+									linkUrl,
+									chatUrl,
+								)
+							: buildSlackBlocks(context, linkUrl, chatUrl)
+						const response = yield* runTimedFetch(
+							"slack-bot",
+							"Slack",
+							fetchFn,
+							timeoutMs,
+							() =>
+								fetchFn("https://slack.com/api/chat.postMessage", {
+									method: "POST",
+									headers: {
+										"content-type": "application/json; charset=utf-8",
+										authorization: `Bearer ${botToken}`,
+									},
+									body: JSON.stringify({
+										channel: config.channelId,
+										text:
+											templated?.title ??
+											`${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
+										blocks,
+									}),
+								}),
+						)
+						if (!response.ok) {
+							const detail = yield* readErrorBody(response)
+							return yield* Effect.fail(
+								makeDeliveryError(
+									`Slack delivery failed with ${response.status}${detail ? `: ${detail}` : ""}`,
+									"slack-bot",
+								),
+							)
+						}
+						// Slack Web API returns HTTP 200 with `{ ok: false, error }` on
+						// logical failures, so the JSON body — not the status — is the
+						// source of truth.
+						const payload = yield* Effect.tryPromise({
+							try: () => response.json() as Promise<{ ok?: boolean; error?: string; ts?: string }>,
+							catch: () =>
+								makeDeliveryError("Slack returned a non-JSON response", "slack-bot"),
+						})
+						if (!payload.ok) {
+							const error = payload.error ?? "unknown_error"
+							const message =
+								error === "not_in_channel" || error === "channel_not_found"
+									? `Slack rejected the message (${error}) — invite the Maple bot to the channel and try again`
+									: `Slack rejected the message: ${error}`
+							return yield* Effect.fail(makeDeliveryError(message, "slack-bot"))
+						}
+						return {
+							providerMessage: `Delivered to Slack #${config.channelName ?? config.channelId}`,
+							providerReference: payload.ts ?? null,
 							responseCode: response.status,
 						} as DispatchResult
 					}),

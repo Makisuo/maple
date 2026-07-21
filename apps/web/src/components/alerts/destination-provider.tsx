@@ -1,6 +1,6 @@
 import type { AlertDestinationType } from "@maple/domain/http"
 import { useState, type ReactNode } from "react"
-import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon } from "@/components/icons"
+import { CodeIcon, DiscordIcon, EnvelopeIcon, HazelIcon, SlackIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 
 const BRANDFETCH_CLIENT_ID = "1id0IQ-4i8Z46-n-DfQ"
@@ -37,6 +37,17 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		brandfetchDomain: "slack.com",
 		docsUrl: "https://api.slack.com/messaging/webhooks",
 		docsLabel: "Slack webhook docs",
+	},
+	"slack-bot": {
+		type: "slack-bot",
+		label: "Slack (bot)",
+		description: "Post alerts to a channel via the installed Maple Slack app — no webhook to manage.",
+		accent: "#4A154B",
+		accentBg: "rgba(74,21,75,0.30)",
+		accentText: "#E8C5EA",
+		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
+		docsUrl: "https://maple.dev/docs/integrations/slack",
+		docsLabel: "Slack integration guide",
 	},
 	pagerduty: {
 		type: "pagerduty",
@@ -99,6 +110,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
 	"slack",
+	"slack-bot",
 	"discord",
 	"email",
 	"pagerduty",

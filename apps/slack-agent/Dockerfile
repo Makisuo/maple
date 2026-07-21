@@ -26,6 +26,15 @@ COPY agent ./agent
 # compiled into eve's manifest), not at runtime. This must be set before the build
 # or the image silently falls back to the ephemeral on-disk local world.
 ENV EVE_WORKFLOW_WORLD=@workflow/world-postgres
+
+# IMPORTANT: the Maple MCP connection URL is built from MAPLE_API_BASE_URL and is
+# also baked into eve's manifest at BUILD time. Railway exposes service variables
+# as Docker build args when they are declared with ARG, so set MAPLE_API_BASE_URL
+# as a service variable and it becomes available here. If unset at build, the URL
+# silently bakes to the local-dev default (https://api.localhost).
+ARG MAPLE_API_BASE_URL
+ENV MAPLE_API_BASE_URL=${MAPLE_API_BASE_URL}
+
 RUN npm run build
 
 COPY docker-entrypoint.sh ./

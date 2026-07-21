@@ -120,6 +120,13 @@
       "when": 1784586724571,
       "tag": "0016_lowly_famine",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1784643744458,
+      "tag": "0017_fair_mandarin",
+      "breakpoints": true
     }
   ]
 }

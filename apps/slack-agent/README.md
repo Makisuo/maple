@@ -4,8 +4,10 @@ A general-purpose Slack agent built on the [eve](https://eve.dev) framework, **s
 Railway** (no Vercel). It answers `@mentions` and DMs, runs tools, and keeps durable multi-turn
 sessions.
 
-This is intentionally **generic** — no Maple domain logic yet. Get the loop working end-to-end
-first, then layer domain tools/instructions on top.
+It is **multi-workspace**: a single Slack app is distributed to many workspaces, and each
+workspace is linked to one Maple organization. Per-team installs (bot token + Maple API key) live
+in Maple's API; the agent resolves them per request and talks to Maple's MCP server for
+observability tools. See [Multi-workspace architecture](#multi-workspace-architecture).
 
 ## Architecture
 
@@ -15,7 +17,8 @@ first, then layer domain tools/instructions on top.
 | Host | **Railway** container running `eve start` (long-running Node) | eve's supported self-host model; edge Workers is blocked today by a workflow-world protocol gap |
 | Model | **Cloudflare Workers AI** via REST (`workers-ai-provider`), `@cf/zai-org/glm-5.2` | `createWorkersAI({ accountId, apiKey })` → an AI-SDK model, no Workers runtime needed; streams structured tool calls, 256K window (see Notes) |
 | Durability | **`@workflow/world-postgres`** (`5.0.0-beta.27`) + Railway Postgres | protocol-compatible with eve's vendored `@workflow/*` 5.0.0-beta line |
-| Slack | **self-managed** (`slackChannel()` + bot token + signing secret) | Vercel Connect is optional; eve verifies webhooks from the signing secret natively |
+| Slack | **self-managed, multi-workspace** (`slackChannel()` + custom `webhookVerifier` + per-team `botToken`) | one public app across many workspaces; static signing secret verifies inbound, per-team bot token resolved from the Maple API — see [Multi-workspace architecture](#multi-workspace-architecture) |
+| Maple | **resolve endpoint** (`/internal/slack/workspaces/:teamId`) + **MCP** (`/mcp`) | per-team install lookup (TTL-cached) and observability tools scoped per org |
 
 Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/v1/session/:id/stream`,
 `POST /eve/v1/slack` (Slack webhook), `GET /eve/v1/health`, and workflow callbacks under
@@ -26,9 +29,11 @@ Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/
 ```
 agent/
   agent.ts            # model (Workers AI) + workflow world selection
-  instructions.md     # system prompt
-  channels/slack.ts   # self-managed Slack channel
+  instructions.md     # system prompt (Maple domain guidance)
+  lib/maple.ts        # Maple resolve client (TTL cache), Slack sig verify, team→token bridge
+  channels/slack.ts   # multi-workspace Slack channel (webhookVerifier + per-team botToken)
   channels/eve.ts     # auth policy for the browser/API routes
+  connections/maple.ts # Maple MCP connection (per-workspace API key auth)
   tools/get_time.ts   # sample tool proving the tool loop
 Dockerfile            # node:24-slim (+bun for installs), eve build, entrypoint
 docker-entrypoint.sh  # runs the Postgres-world migration, then `eve start`
@@ -82,18 +87,26 @@ step 3 comes back and fills them in:
 
 ```yaml
 display_information:
-  name: Eve Agent
+  name: Maple
 features:
   bot_user:
-    display_name: eve-agent
+    display_name: maple
     always_online: true
 oauth_config:
+  # OAuth completes at the MAPLE API (not this agent). Maple stores the per-team
+  # install (bot token + Maple API key) that this agent later resolves.
+  redirect_urls:
+    - https://<your-maple-api-host>/oauth/slack/callback
   scopes:
     bot:
       - app_mentions:read   # receive @mentions
       - chat:write          # post replies
-      - im:history          # read DMs (message.im)
-      - im:write            # DM the user (auth challenges)
+      - chat:write.public   # post in channels the bot isn't a member of
+      - channels:read       # resolve public channel metadata
+      - groups:read         # resolve private channel metadata
+      - im:history          # read DM history (message.im)
+      - im:read             # resolve DM conversation metadata
+      - im:write            # open/DM the user
       - users:read          # attribute speakers
 settings:
   event_subscriptions:
@@ -105,10 +118,17 @@ settings:
     is_enabled: true
     request_url: https://<your-service>.up.railway.app/eve/v1/slack
   socket_mode_enabled: false
+  # Enable public distribution so multiple workspaces can install the app.
+  # (Slack → Manage Distribution → Activate Public Distribution; requires the
+  # redirect URL above and passing Slack's "Remove Hard Coded Information" check.)
+  org_deploy_enabled: false
 ```
 
-Install to your workspace, then copy the **Bot User OAuth Token** (`xoxb-…`) and the **Signing
-Secret** (Basic Information).
+Two request URLs point at **this agent** (Event Subscriptions + Interactivity → the Railway host);
+the OAuth **redirect URL** points at the **Maple API** — that is where install/OAuth completes and
+where the per-team bot token + Maple API key are stored for this agent to resolve. In
+single-workspace dev you can skip distribution: install to one workspace and set `SLACK_BOT_TOKEN`.
+Copy the **Signing Secret** (Basic Information) in all cases.
 
 ### 2. Create the Railway service
 
@@ -139,7 +159,16 @@ variables in (d), since two of them embed the URL.
 
 **d. Set service variables:**
   - `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`
-  - `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`
+  - `SLACK_SIGNING_SECRET` — per-app/static; HMAC-verifies every inbound webhook.
+  - `MAPLE_API_BASE_URL` — the Maple API base (e.g. `https://api.maple.dev`). **Also needed at build
+    time**: it forms the Maple MCP connection URL, which eve bakes into its manifest at build (like
+    `EVE_WORKFLOW_WORLD`). Railway exposes service variables as Docker build args (the Dockerfile
+    declares `ARG MAPLE_API_BASE_URL`), so setting it as a service variable covers both build and
+    runtime. If it is missing at build, the URL silently bakes to `https://api.localhost`.
+  - `MAPLE_INTERNAL_SERVICE_TOKEN` — the internal service token; the agent sends it as
+    `Authorization: Bearer maple_svc_<token>` to the resolve endpoint. Runtime-only.
+  - `SLACK_BOT_TOKEN` — **omit in multi-workspace production** (the bot token is resolved per team
+    from Maple). Set it only to run against a single workspace with no Maple mapping (dev).
   - `PORT=8080` — set it explicitly. Railway injects a `PORT` of its own that overrides the image's
     `ENV PORT`, so pinning it here is what makes the value deterministic rather than assigned.
   - `WORKFLOW_LOCAL_BASE_URL=http://localhost:8080` — the durable-run callback target. See the note
@@ -214,6 +243,73 @@ Finally, invite the bot to a channel — `/invite @eve-agent` — and `@mention`
 - `@mention` the bot → threaded reply with a typing indicator; ask "what time is it in Tokyo?" to
   exercise the `get_time` tool.
 - A follow-up mention in the same thread resumes the same durable session.
+
+## Multi-workspace architecture
+
+One Slack app, distributed publicly, installed into many workspaces. Each Slack **team** is linked
+to one Maple **organization**. The install (bot token + Maple API key) is created and stored by the
+**Maple API** during OAuth; this agent only ever *resolves* it.
+
+**Resolve endpoint (fixed contract, owned by the Maple API):**
+
+```
+GET {MAPLE_API_BASE_URL}/internal/slack/workspaces/{teamId}
+Authorization: Bearer maple_svc_{MAPLE_INTERNAL_SERVICE_TOKEN}
+
+200 → { "orgId": "...", "teamId": "...", "teamName": "..."|null,
+        "botToken": "xoxb-...", "mapleApiKey": "maple_ak_..." }
+404 → team not installed / revoked
+```
+
+`agent/lib/maple.ts` wraps this in `resolveWorkspace(teamId)` with an in-memory TTL cache (5 min
+positive, 30 s negative, in-flight de-dupe). It never caches 5xx/network errors as "not installed".
+
+**Inbound (webhook → which team):** `agent/channels/slack.ts` installs a custom `webhookVerifier`.
+Because a `webhookVerifier` is set, eve skips its built-in signing-secret check and this verifier
+owns verification: it HMAC-verifies the Slack **v0** signature (`v0:{timestamp}:{rawBody}`, SHA-256,
+5-minute skew reject, constant-time compare) against the static `SLACK_SIGNING_SECRET`, then parses
+`team_id` from the payload (top-level, `authorizations[]`, or `event.team`; absent for
+`url_verification`, which needs no token).
+
+**Outbound bot token (which team → token):** eve's `botToken` credential is **arg-less**
+(`() => Promise<string>`), so it receives no request context. Verified against eve@0.25.3
+(`node_modules/eve/dist/src`):
+
+- The webhook route runs the verifier, then dispatches the mention via
+  `waitUntil(dispatchInboundMessage(...))`; `botToken` is resolved *lazily inside that detached
+  dispatch* and again inside durable workflow steps when the reply is posted.
+- An `AsyncLocalStorage` established in the verifier via `enterWith` **does not survive** into that
+  detached dispatch — `await` restores the caller's context snapshot, so the store is gone by the
+  time `waitUntil` runs (reproduced with a faithful `enterWith → await → waitUntil` harness). eve's
+  own `runtimeSessionStorage` ALS carries only bundle-cache state, not `team_id`.
+
+So the token bridge is a **module-level record populated at verify time** (`agent/lib/maple.ts`):
+`enterTeam` (ALS, best-effort — harmless when it doesn't survive, and forward-compatible if a future
+eve preserves context) plus `recordTeam` (a most-recently-verified fallback read by
+`currentTeamId`). `resolveBotToken()` resolves current team → install token → else `SLACK_BOT_TOKEN`
+→ throw. **Caveat:** under genuinely concurrent inbound events from *different* teams the fallback
+can name the wrong team for a given outbound call. This fails **closed**, not cross-tenant — team A's
+bot token cannot post to team B's channel (Slack returns `invalid_auth` / `channel_not_found`), so a
+mis-resolution drops a reply rather than leaking one workspace's message into another. The clean fix
+belongs upstream (eve threading `team_id` into the credential resolver). `resolveWorkspace` itself is
+always correctly keyed by team.
+
+**MCP tools (per-workspace API key):** `agent/connections/maple.ts` connects to
+`{MAPLE_API_BASE_URL}/mcp` (streamable HTTP). Unlike `botToken`, the connection `auth` resolver
+receives the session context, and the Slack auth context carries `team_id` in
+`ctx.session.auth.current.attributes` (persisted with the session by eve's `buildSlackAuthContext`).
+So this path resolves the right org's `mapleApiKey` reliably — including in durable reply steps. If
+the workspace isn't linked, the resolver throws a clear message and the model (per
+`instructions.md`) tells the user to connect from the Maple dashboard → Integrations → Slack. The
+tool list is left **unfiltered**: the Maple MCP tool names are resolved at runtime from the live
+server, not known at authoring time, so an allow/block list would be a guess — restrict mutating
+tools server-side (or add a `tools.allow` here once the concrete names are confirmed).
+
+**Slack app manifest changes for multi-workspace** (see the manifest in
+[Deploy → step 1](#1-create-the-slack-app)): add the OAuth **redirect URL** pointing at the Maple
+API callback (`/oauth/slack/callback`), broaden the bot scopes to
+`app_mentions:read,chat:write,chat:write.public,channels:read,groups:read,im:history,im:read,im:write,users:read`,
+and **activate public distribution** so the app can be installed into any workspace.
 
 ## Notes
 

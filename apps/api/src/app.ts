@@ -17,6 +17,7 @@ import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./routes/v2/attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
 import { HttpV2IngestKeysLive } from "./routes/v2/ingest-keys.http"
+import { HttpV2SlackIntegrationsLive } from "./routes/v2/integrations.http"
 import { HttpV2ErrorIssuesLive } from "./routes/v2/error-issues.http"
 import { HttpV2AnomaliesLive } from "./routes/v2/anomalies.http"
 import { HttpV2InvestigationsLive } from "./routes/v2/investigations.http"
@@ -47,6 +48,7 @@ import { OAuthDiscoveryRouter } from "./routes/oauth-discovery.http"
 import { HttpOrgClickHouseSettingsLive } from "./routes/org-clickhouse-settings.http"
 import { HttpOrganizationsLive } from "./routes/organizations.http"
 import { PlanetScaleWebhookRouter } from "./routes/planetscale-webhook.http"
+import { SlackCallbackRouter, SlackInternalRouter } from "./routes/slack-integration.http"
 import { PrometheusScrapeProxyRouter } from "./routes/prometheus-scrape-proxy.http"
 import { ScraperInternalRouter } from "./routes/scraper-internal.http"
 import { VcsWebhookRouter } from "./routes/vcs-webhook.http"
@@ -90,6 +92,7 @@ import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryServ
 import { PlanetScaleOAuthService } from "./services/PlanetScaleOAuthService"
 import { PlanetScaleService } from "./services/PlanetScaleService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
+import { SlackIntegrationService } from "./services/SlackIntegrationService"
 import { WarehouseQueryService } from "./lib/WarehouseQueryService"
 import { OAuthStateRepository } from "./services/OAuthStateRepository"
 import { GithubAppClient } from "./services/vcs/vendor/github/GithubAppClient"
@@ -201,6 +204,13 @@ const NotificationDispatcherLive = NotificationDispatcher.layer.pipe(
 	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, EmailServiceLive)),
 )
 
+// Slack integration: OAuth install/callback, status, channels, uninstall, and
+// the internal bot-resolve endpoint. Needs ApiKeysService (mint the bot key) +
+// OAuthStateRepository (CSRF state) on top of the core services.
+const SlackIntegrationServiceLive = SlackIntegrationService.layer.pipe(
+	Layer.provideMerge(Layer.mergeAll(CoreServicesLive, OAuthStateRepository.layer)),
+)
+
 const ErrorsServiceLive = ErrorsService.layer.pipe(
 	Layer.provideMerge(
 		Layer.mergeAll(
@@ -268,6 +278,7 @@ export const MainLive = Layer.mergeAll(
 	DigestServiceLive,
 	DemoServiceLive,
 	VcsServicesLive,
+	SlackIntegrationServiceLive,
 )
 
 const ApiRoutes = HttpApiBuilder.layer(MapleApi).pipe(
@@ -308,6 +319,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2AlertDestinationsLive,
 			HttpV2AlertIncidentsLive,
 			HttpV2IngestKeysLive,
+			HttpV2SlackIntegrationsLive,
 			HttpV2ErrorIssuesLive,
 			HttpV2AttributeMappingsLive,
 			HttpV2ScrapeTargetsLive,
@@ -330,6 +342,8 @@ export const AllRoutes = Layer.mergeAll(
 	ApiRoutes,
 	ApiV2Routes,
 	IntegrationsCallbackRouter,
+	SlackCallbackRouter,
+	SlackInternalRouter,
 	OAuthDiscoveryRouter,
 	PlanetScaleWebhookRouter,
 	PrometheusScrapeProxyRouter,

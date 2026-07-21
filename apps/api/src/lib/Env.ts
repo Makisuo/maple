@@ -44,6 +44,8 @@ export interface EnvShape {
 	readonly HAZEL_OAUTH_CLIENT_ID: Option.Option<string>
 	readonly HAZEL_OAUTH_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly HAZEL_OAUTH_SCOPES: string
+	readonly SLACK_CLIENT_ID: Option.Option<string>
+	readonly SLACK_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_ID: Option.Option<string>
 	readonly GITHUB_APP_SLUG: Option.Option<string>
 	readonly GITHUB_APP_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
@@ -126,6 +128,8 @@ const envConfig = Config.all({
 		"HAZEL_OAUTH_SCOPES",
 		"openid email profile organizations:read channels:read channel-webhooks:write",
 	),
+	SLACK_CLIENT_ID: optionalString("SLACK_CLIENT_ID"),
+	SLACK_CLIENT_SECRET: optionalRedacted("SLACK_CLIENT_SECRET"),
 	GITHUB_APP_ID: optionalString("GITHUB_APP_ID"),
 	GITHUB_APP_SLUG: optionalString("GITHUB_APP_SLUG"),
 	GITHUB_APP_PRIVATE_KEY: optionalRedacted("GITHUB_APP_PRIVATE_KEY"),

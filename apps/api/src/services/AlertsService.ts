@@ -138,6 +138,7 @@ import {
 	type DestinationSecretConfig,
 	type EnrichedDestinationSecretConfig,
 } from "./AlertDestinationHydration"
+import { resolveSlackBotTokenForDispatch } from "./SlackIntegrationService"
 import { dateToMs } from "../lib/time"
 
 interface NormalizedRule {
@@ -579,6 +580,10 @@ const buildPublicConfig = (
 				summary: r.channelLabel?.trim() || "Slack incoming webhook",
 				channelLabel: normalizeOptionalString(r.channelLabel),
 			}),
+			"slack-bot": (r) => ({
+				summary: r.channelName?.trim() ? `#${r.channelName.trim()}` : "Slack channel",
+				channelLabel: r.channelName?.trim() ? `#${r.channelName.trim()}` : null,
+			}),
 			pagerduty: () => ({
 				summary: "PagerDuty Events API v2" as string,
 				channelLabel: null,
@@ -618,6 +623,11 @@ const buildSecretConfig = (
 			slack: (r) => ({
 				type: "slack" as const,
 				webhookUrl: r.webhookUrl.trim(),
+			}),
+			"slack-bot": (r) => ({
+				type: "slack-bot" as const,
+				channelId: r.channelId.trim(),
+				channelName: normalizeOptionalString(r.channelName) ?? null,
 			}),
 			pagerduty: (r) => ({
 				type: "pagerduty" as const,
@@ -1789,7 +1799,11 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 					deliveryTimeoutMs(),
 					context.linkUrl,
 					composeChatUrl(context),
-					{ sendEmail },
+					{
+						sendEmail,
+						resolveSlackBotToken: (orgId) =>
+							resolveSlackBotTokenForDispatch(database, encryptionKey, orgId),
+					},
 				)
 
 			const buildPayload = (context: DeliveryPayloadContext) => ({
@@ -2142,6 +2156,33 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 										(hydrated.secretConfig.type === "slack"
 											? hydrated.secretConfig.webhookUrl
 											: ""),
+								} satisfies DestinationSecretConfig,
+							}),
+						"slack-bot": (r) =>
+							Effect.succeed({
+								nextPublicConfig: {
+									summary:
+										normalizeOptionalString(r.channelName) != null
+											? `#${normalizeOptionalString(r.channelName)}`
+											: hydrated.publicConfig.summary,
+									channelLabel:
+										normalizeOptionalString(r.channelName) != null
+											? `#${normalizeOptionalString(r.channelName)}`
+											: hydrated.publicConfig.channelLabel,
+								} satisfies DestinationPublicConfig,
+								nextSecretConfig: {
+									type: "slack-bot" as const,
+									channelId:
+										normalizeOptionalString(r.channelId) ??
+										(hydrated.secretConfig.type === "slack-bot"
+											? hydrated.secretConfig.channelId
+											: ""),
+									channelName:
+										r.channelName === undefined
+											? hydrated.secretConfig.type === "slack-bot"
+												? hydrated.secretConfig.channelName
+												: null
+											: normalizeOptionalString(r.channelName) ?? null,
 								} satisfies DestinationSecretConfig,
 							}),
 						pagerduty: (r) =>
