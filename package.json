@@ -11,7 +11,7 @@
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev",
-    "dev:essentials": "turbo dev --filter=@maple/api --filter=@maple/ingest --filter=@maple/web --filter=@maple/scraper --filter=@maple/electric-sync",
+    "dev:essentials": "turbo dev --filter=@maple/api --filter=@maple/alerting --filter=@maple/ingest --filter=@maple/web --filter=@maple/scraper --filter=@maple/electric-sync",
     "docker:build": "COMPOSE_PARALLEL_LIMIT=1 docker compose build",
     "docker:up": "COMPOSE_PARALLEL_LIMIT=1 docker compose up --build",
     "db:up": "docker compose up -d postgres electric",
