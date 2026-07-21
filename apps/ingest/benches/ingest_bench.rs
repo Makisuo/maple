@@ -99,8 +99,15 @@ impl BenchFixture {
                 endpoint: format!("http://{addr}"),
                 token: "bench-token".to_string(),
                 queue_dir: queue_dir.clone(),
-                queue_max_bytes: 1024 * 1024 * 1024,
-                org_queue_max_bytes: 1024 * 1024 * 1024,
+                // Effectively uncapped: this benchmark measures accept latency
+                // (encode + WAL append + ack), not back-pressure. A single org
+                // hashes to a single shard, so every frame lands in one lane and
+                // the lane only truncates when the exporter's cursor fully catches
+                // up with the appender — which it never does under sustained
+                // bench load. With a finite cap, a fast runner simply writes more
+                // bytes than a slow one and the run fails with "WAL lane is full".
+                queue_max_bytes: u64::MAX,
+                org_queue_max_bytes: u64::MAX,
                 queue_channel_capacity: 100_000,
                 wal_shards: 4,
                 batch_max_rows: 5_000,
