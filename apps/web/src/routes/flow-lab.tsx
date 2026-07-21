@@ -10,7 +10,12 @@ export const Route = createFileRoute("/flow-lab")({
 	component: FlowLab,
 })
 
-const T0 = "2026-07-21 10:00:00.000"
+const T0_MS = new Date("2026-07-21T10:00:00.000Z").getTime()
+
+/** Trace-relative start time so edges get realistic "+Nms" start offsets. */
+function at(offsetMs: number): string {
+	return new Date(T0_MS + offsetMs).toISOString().replace("T", " ").replace("Z", "")
+}
 
 function row(overrides: Partial<SpanHierarchyRow> & { spanId: string; spanName: string }): SpanHierarchyRow {
 	return {
@@ -19,7 +24,7 @@ function row(overrides: Partial<SpanHierarchyRow> & { spanId: string; spanName: 
 		serviceName: "checkout-api",
 		spanKind: "SPAN_KIND_INTERNAL",
 		durationMs: 20,
-		startTime: T0,
+		startTime: at(0),
 		statusCode: "Ok",
 		statusMessage: "",
 		spanAttributes: "{}",
@@ -47,6 +52,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "edge",
+		startTime: at(2),
 		parentSpanId: "root",
 		spanName: "checkout-edge fetch",
 		serviceName: "edge-router",
@@ -61,6 +67,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "auth",
+		startTime: at(6),
 		parentSpanId: "root",
 		spanName: "SessionAuthn.verify",
 		serviceName: "identity",
@@ -68,12 +75,14 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "pricing",
+		startTime: at(16),
 		parentSpanId: "root",
 		spanName: "PricingEngine.calculateTotals",
 		durationMs: 96,
 	}),
 	row({
 		spanId: "cache-hit",
+		startTime: at(18),
 		parentSpanId: "pricing",
 		spanName: "cache.get price-book",
 		durationMs: 2,
@@ -86,6 +95,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "db-orders",
+		startTime: at(22),
 		parentSpanId: "pricing",
 		spanName: "SELECT orders",
 		spanKind: "SPAN_KIND_CLIENT",
@@ -99,6 +109,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "charge",
+		startTime: at(120),
 		parentSpanId: "root",
 		spanName: "POST",
 		spanKind: "SPAN_KIND_CLIENT",
@@ -111,6 +122,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "inventory",
+		startTime: at(340),
 		parentSpanId: "root",
 		spanName: "GET",
 		spanKind: "SPAN_KIND_CLIENT",
@@ -124,6 +136,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "cache-miss",
+		startTime: at(342),
 		parentSpanId: "inventory",
 		spanName: "cache.get stock",
 		durationMs: 1,
@@ -136,6 +149,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "publish",
+		startTime: at(430),
 		parentSpanId: "root",
 		spanName: "order.created publish",
 		spanKind: "SPAN_KIND_PRODUCER",
@@ -143,6 +157,7 @@ const ROWS: SpanHierarchyRow[] = [
 	}),
 	row({
 		spanId: "consume",
+		startTime: at(438),
 		parentSpanId: "publish",
 		spanName: "order.created process",
 		serviceName: "email-worker",
@@ -153,6 +168,7 @@ const ROWS: SpanHierarchyRow[] = [
 	...[1, 2, 3].map((i) =>
 		row({
 			spanId: `events-${i}`,
+			startTime: at(440 + i * 20),
 			parentSpanId: "consume",
 			spanName: "INSERT events",
 			serviceName: "email-worker",
@@ -167,6 +183,7 @@ const ROWS: SpanHierarchyRow[] = [
 	),
 	row({
 		spanId: "serialize",
+		startTime: at(470),
 		parentSpanId: "root",
 		spanName: "serialize response",
 		durationMs: 3,
