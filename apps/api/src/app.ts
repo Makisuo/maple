@@ -65,6 +65,8 @@ import { HazelOAuthService } from "./services/HazelOAuthService"
 import { InvestigationService } from "./services/InvestigationService"
 import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
+import { CliDeviceAuthService } from "./services/CliDeviceAuthService"
+import { McpOAuthService } from "./services/McpOAuthService"
 import { ApiV2RateLimiter } from "./services/ApiV2RateLimiter"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
@@ -138,6 +140,8 @@ const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
+	CliDeviceAuthService.layer,
+	McpOAuthService.layer,
 	CloudflareOAuthService.layer,
 	DashboardPersistenceService.layer,
 	HazelOAuthService.layer,

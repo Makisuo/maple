@@ -21,6 +21,7 @@ import { Route as QuickStartRouteImport } from './routes/quick-start'
 import { Route as QueryBuilderLabRouteImport } from './routes/query-builder-lab'
 import { Route as OverviewBenchRouteImport } from './routes/overview-bench'
 import { Route as OrgRequiredRouteImport } from './routes/org-required'
+import { Route as McpAuthorizeRouteImport } from './routes/mcp-authorize'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LogsBenchRouteImport } from './routes/logs-bench'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
@@ -28,6 +29,7 @@ import { Route as InfraBenchRouteImport } from './routes/infra-bench'
 import { Route as FlowLabRouteImport } from './routes/flow-lab'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
+import { Route as CliLoginRouteImport } from './routes/cli-login'
 import { Route as ChatRouteImport } from './routes/chat'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TracesIndexRouteImport } from './routes/traces/index'
@@ -130,6 +132,11 @@ const OrgRequiredRoute = OrgRequiredRouteImport.update({
   path: '/org-required',
   getParentRoute: () => rootRouteImport,
 } as any)
+const McpAuthorizeRoute = McpAuthorizeRouteImport.update({
+  id: '/mcp-authorize',
+  path: '/mcp-authorize',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -163,6 +170,11 @@ const DeveloperRoute = DeveloperRouteImport.update({
 const ConnectorsRoute = ConnectorsRouteImport.update({
   id: '/connectors',
   path: '/connectors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CliLoginRoute = CliLoginRouteImport.update({
+  id: '/cli-login',
+  path: '/cli-login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatRoute = ChatRouteImport.update({
@@ -383,6 +395,7 @@ const InfraKubernetesWorkloadsKindWorkloadNameRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/cli-login': typeof CliLoginRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
   '/flow-lab': typeof FlowLabRoute
@@ -390,6 +403,7 @@ export interface FileRoutesByFullPath {
   '/integrations': typeof IntegrationsRoute
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
+  '/mcp-authorize': typeof McpAuthorizeRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -445,6 +459,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/cli-login': typeof CliLoginRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
   '/flow-lab': typeof FlowLabRoute
@@ -452,6 +467,7 @@ export interface FileRoutesByTo {
   '/integrations': typeof IntegrationsRoute
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
+  '/mcp-authorize': typeof McpAuthorizeRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -508,6 +524,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/cli-login': typeof CliLoginRoute
   '/connectors': typeof ConnectorsRoute
   '/developer': typeof DeveloperRoute
   '/flow-lab': typeof FlowLabRoute
@@ -515,6 +532,7 @@ export interface FileRoutesById {
   '/integrations': typeof IntegrationsRoute
   '/logs-bench': typeof LogsBenchRoute
   '/mcp': typeof McpRoute
+  '/mcp-authorize': typeof McpAuthorizeRoute
   '/org-required': typeof OrgRequiredRoute
   '/overview-bench': typeof OverviewBenchRoute
   '/query-builder-lab': typeof QueryBuilderLabRoute
@@ -572,6 +590,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/chat'
+    | '/cli-login'
     | '/connectors'
     | '/developer'
     | '/flow-lab'
@@ -579,6 +598,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/logs-bench'
     | '/mcp'
+    | '/mcp-authorize'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -634,6 +654,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/chat'
+    | '/cli-login'
     | '/connectors'
     | '/developer'
     | '/flow-lab'
@@ -641,6 +662,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/logs-bench'
     | '/mcp'
+    | '/mcp-authorize'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -696,6 +718,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/chat'
+    | '/cli-login'
     | '/connectors'
     | '/developer'
     | '/flow-lab'
@@ -703,6 +726,7 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/logs-bench'
     | '/mcp'
+    | '/mcp-authorize'
     | '/org-required'
     | '/overview-bench'
     | '/query-builder-lab'
@@ -759,6 +783,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatRoute: typeof ChatRoute
+  CliLoginRoute: typeof CliLoginRoute
   ConnectorsRoute: typeof ConnectorsRoute
   DeveloperRoute: typeof DeveloperRoute
   FlowLabRoute: typeof FlowLabRoute
@@ -766,6 +791,7 @@ export interface RootRouteChildren {
   IntegrationsRoute: typeof IntegrationsRoute
   LogsBenchRoute: typeof LogsBenchRoute
   McpRoute: typeof McpRoute
+  McpAuthorizeRoute: typeof McpAuthorizeRoute
   OrgRequiredRoute: typeof OrgRequiredRoute
   OverviewBenchRoute: typeof OverviewBenchRoute
   QueryBuilderLabRoute: typeof QueryBuilderLabRoute
@@ -905,6 +931,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrgRequiredRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/mcp-authorize': {
+      id: '/mcp-authorize'
+      path: '/mcp-authorize'
+      fullPath: '/mcp-authorize'
+      preLoaderRoute: typeof McpAuthorizeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mcp': {
       id: '/mcp'
       path: '/mcp'
@@ -952,6 +985,13 @@ declare module '@tanstack/react-router' {
       path: '/connectors'
       fullPath: '/connectors'
       preLoaderRoute: typeof ConnectorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cli-login': {
+      id: '/cli-login'
+      path: '/cli-login'
+      fullPath: '/cli-login'
+      preLoaderRoute: typeof CliLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat': {
@@ -1247,6 +1287,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
+  CliLoginRoute: CliLoginRoute,
   ConnectorsRoute: ConnectorsRoute,
   DeveloperRoute: DeveloperRoute,
   FlowLabRoute: FlowLabRoute,
@@ -1254,6 +1295,7 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsRoute: IntegrationsRoute,
   LogsBenchRoute: LogsBenchRoute,
   McpRoute: McpRoute,
+  McpAuthorizeRoute: McpAuthorizeRoute,
   OrgRequiredRoute: OrgRequiredRoute,
   OverviewBenchRoute: OverviewBenchRoute,
   QueryBuilderLabRoute: QueryBuilderLabRoute,

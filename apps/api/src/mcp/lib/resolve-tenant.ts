@@ -48,6 +48,19 @@ const getBearerToken = (headers: Headers): string | undefined => {
 	return token
 }
 
+const firstForwardedValue = (value: string | null) => value?.split(",")[0]?.trim()
+
+export const mcpResourceForRequest = (request: Request) => {
+	const requestUrl = new URL(request.url)
+	const protocol =
+		firstForwardedValue(request.headers.get("x-forwarded-proto")) ?? requestUrl.protocol.slice(0, -1)
+	const host =
+		firstForwardedValue(request.headers.get("x-forwarded-host")) ??
+		request.headers.get("host") ??
+		requestUrl.host
+	return `${protocol}://${host}/mcp`
+}
+
 export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(function* (request: Request) {
 	const token = getBearerToken(request.headers)
 
@@ -123,15 +136,29 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 	)
 
 	if (Option.isSome(apiKeyResolved)) {
-		// Both standard and mcp-kind keys may use the MCP server; only
-		// scope-restricted v2 keys are rejected (MCP tools assume full access).
-		if (apiKeyResolved.value.scopes !== null) {
+		const resolved = apiKeyResolved.value
+		const expectedResource = mcpResourceForRequest(request)
+		const isMcpOAuthToken = resolved.mcpOAuthResource !== null
+		if (
+			isMcpOAuthToken &&
+			(resolved.kind !== "mcp" ||
+				resolved.mcpOAuthResource !== expectedResource ||
+				resolved.scopes?.includes("mcp:tools") !== true)
+		) {
+			return yield* new McpAuthInvalidError({
+				message: "OAuth token is not valid for this MCP resource",
+				reason: "invalid_target",
+			})
+		}
+		// Manual MCP/API keys remain legacy full-access credentials. Scoped keys
+		// are accepted only when they are audience-bound MCP OAuth tokens.
+		if (!isMcpOAuthToken && resolved.scopes !== null) {
 			return yield* new McpAuthInvalidError({
 				message: "Restricted API keys are not supported by the MCP server",
 				reason: "insufficient_scope",
 			})
 		}
-		const validOrgId = yield* decodeOrgId(apiKeyResolved.value.orgId).pipe(
+		const validOrgId = yield* decodeOrgId(resolved.orgId).pipe(
 			Effect.mapError(
 				(e) =>
 					new McpInvalidTenantError({
@@ -140,7 +167,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 					}),
 			),
 		)
-		const validUserId = yield* decodeUserId(apiKeyResolved.value.userId).pipe(
+		const validUserId = yield* decodeUserId(resolved.userId).pipe(
 			Effect.mapError(
 				(e) =>
 					new McpInvalidTenantError({
@@ -153,7 +180,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 		// Actor resolution: prefer an explicit agent override header, else the
 		// key's pinned agentActorId metadata. Both must be a valid ActorId; we
 		// silently drop malformed values rather than failing the request.
-		const keyActorId = extractAgentActorIdFromMetadata(apiKeyResolved.value.metadataJson)
+		const keyActorId = extractAgentActorIdFromMetadata(resolved.metadataJson)
 		const headerActorId = request.headers.get(AGENT_ACTOR_HEADER)
 		const actorIdCandidate = headerActorId ?? keyActorId
 		const actorIdOpt =
@@ -167,7 +194,7 @@ export const resolveMcpTenantContext = Effect.fn("resolveMcpTenantContext")(func
 		return {
 			orgId: validOrgId,
 			userId: validUserId,
-			roles: apiKeyResolved.value.roles ?? apiKeyDefaultRoles,
+			roles: resolved.roles ?? apiKeyDefaultRoles,
 			authMode: "self_hosted",
 			...(actorId ? { actorId } : {}),
 		} as McpTenantContext

@@ -31,6 +31,7 @@ export interface ResolvedApiKey {
 	readonly scopes: ReadonlyArray<string> | null
 	readonly roles: ReadonlyArray<RoleName> | null
 	readonly cliManaged: boolean
+	readonly mcpOAuthResource: string | null
 }
 
 const CliApiKeyMetadata = Schema.Struct({
@@ -51,12 +52,21 @@ const McpApiKeyMetadata = Schema.Struct({
 })
 const decodeMcpApiKeyMetadata = Schema.decodeUnknownOption(McpApiKeyMetadata)
 
+const McpOAuthApiKeyMetadata = Schema.Struct({
+	source: Schema.Literal("maple_mcp_oauth"),
+	roles: Schema.Array(RoleName),
+	clientId: Schema.String,
+	resource: Schema.String,
+})
+const decodeMcpOAuthApiKeyMetadata = Schema.decodeUnknownOption(McpOAuthApiKeyMetadata)
+
 /** Metadata `source` values that pin roles onto a key. */
-const ROLE_BEARING_SOURCES = ["maple_cli", "maple_mcp"] as const
+const ROLE_BEARING_SOURCES = ["maple_cli", "maple_mcp", "maple_mcp_oauth"] as const
 
 interface KeyRoleMetadata {
 	readonly roles: ReadonlyArray<RoleName> | null
 	readonly cliManaged: boolean
+	readonly mcpOAuthResource: string | null
 }
 
 /**
@@ -66,19 +76,31 @@ interface KeyRoleMetadata {
  */
 const readKeyRoleMetadata = (metadata: unknown): Option.Option<KeyRoleMetadata> => {
 	if (typeof metadata !== "object" || metadata === null || !("source" in metadata)) {
-		return Option.some({ roles: null, cliManaged: false })
+		return Option.some({ roles: null, cliManaged: false, mcpOAuthResource: null })
 	}
 
 	const source = (metadata as { source?: unknown }).source
 	const cli = decodeCliApiKeyMetadata(metadata)
-	if (Option.isSome(cli)) return Option.some({ roles: cli.value.roles, cliManaged: true })
+	if (Option.isSome(cli)) {
+		return Option.some({ roles: cli.value.roles, cliManaged: true, mcpOAuthResource: null })
+	}
 	const mcp = decodeMcpApiKeyMetadata(metadata)
-	if (Option.isSome(mcp)) return Option.some({ roles: mcp.value.roles, cliManaged: false })
+	if (Option.isSome(mcp)) {
+		return Option.some({ roles: mcp.value.roles, cliManaged: false, mcpOAuthResource: null })
+	}
+	const mcpOAuth = decodeMcpOAuthApiKeyMetadata(metadata)
+	if (Option.isSome(mcpOAuth)) {
+		return Option.some({
+			roles: mcpOAuth.value.roles,
+			cliManaged: false,
+			mcpOAuthResource: mcpOAuth.value.resource,
+		})
+	}
 
 	if (typeof source === "string" && (ROLE_BEARING_SOURCES as ReadonlyArray<string>).includes(source)) {
 		return Option.none()
 	}
-	return Option.some({ roles: null, cliManaged: false })
+	return Option.some({ roles: null, cliManaged: false, mcpOAuthResource: null })
 }
 
 const decodeApiKeyIdSync = Schema.decodeUnknownSync(ApiKeyId)
@@ -343,6 +365,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				scopes: row.value.scopes ?? null,
 				roles: roleMetadata.value.roles,
 				cliManaged: roleMetadata.value.cliManaged,
+				mcpOAuthResource: roleMetadata.value.mcpOAuthResource,
 			} satisfies ResolvedApiKey)
 		})
 

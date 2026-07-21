@@ -3,6 +3,7 @@ import { FileSystem } from "effect/FileSystem"
 import * as os from "node:os"
 import * as path from "node:path"
 import { defaultLocalUrl } from "../lib/local-address"
+import { deleteNativeCredential, readNativeCredential, writeNativeCredential } from "./credential-store"
 
 /**
  * On-disk CLI config, stored at `~/.maple/config.json` (mode 0600). The same
@@ -13,6 +14,9 @@ interface StoredConfig {
 	apiUrl?: string
 	token?: string
 	orgId?: string
+	userId?: string
+	credentialStore?: "keychain" | "file"
+	credentialManaged?: boolean
 	defaultMode?: "local" | "remote"
 	/** ISO timestamp of the last startup update check (throttles the GitHub probe). */
 	lastUpdateCheck?: string
@@ -68,6 +72,11 @@ export interface MapleConfigShape {
 	/** Remote bearer token (env `MAPLE_API_TOKEN` overrides the stored value). */
 	readonly token: Option.Option<Redacted.Redacted<string>>
 	readonly orgId: Option.Option<string>
+	readonly userId: Option.Option<string>
+	readonly credentialStore: Option.Option<"keychain" | "file">
+	readonly credentialManaged: boolean
+	readonly tokenSource: "env" | "keychain" | "file" | "none"
+	readonly envTokenOverride: boolean
 	/** Local binary base URL (env `MAPLE_LOCAL_URL`, else the default). */
 	readonly localUrl: string
 	readonly defaultMode: Option.Option<"local" | "remote">
@@ -79,8 +88,14 @@ export interface MapleConfigShape {
 	readonly latestKnownVersion: Option.Option<string>
 	/** Persist config fields (merged with existing). */
 	readonly write: (next: StoredConfig) => Effect.Effect<void, PlatformError.PlatformError>
-	/** Remove the stored token (used by `maple logout`). */
-	readonly clearToken: () => Effect.Effect<void, PlatformError.PlatformError>
+	readonly saveRemoteCredential: (next: {
+		readonly apiUrl: string
+		readonly token: string
+		readonly orgId: string
+		readonly userId: string
+		readonly managed: boolean
+	}) => Effect.Effect<"keychain" | "file", PlatformError.PlatformError>
+	readonly clearRemoteCredential: () => Effect.Effect<void, PlatformError.PlatformError>
 	/** Pin the default mode (used by `maple use local|remote`). */
 	readonly setDefaultMode: (mode: "local" | "remote") => Effect.Effect<void, PlatformError.PlatformError>
 	/** Drop the pinned default mode, reverting to auto-detect (`maple use auto`). */
@@ -95,20 +110,75 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 		const fs = yield* FileSystem
 		const stored = yield* readStored(fs)
 		const env = process.env
+		const resolvedApiUrl = env.MAPLE_API_URL ?? stored.apiUrl
+		const envToken = env.MAPLE_API_TOKEN
+		const nativeToken =
+			!envToken && !stored.token && stored.credentialStore === "keychain" && resolvedApiUrl
+				? yield* Effect.promise(() => readNativeCredential(resolvedApiUrl))
+				: undefined
+		const resolvedToken = envToken ?? stored.token ?? nativeToken
+		const tokenSource = envToken
+			? ("env" as const)
+			: stored.token
+				? ("file" as const)
+				: nativeToken
+					? ("keychain" as const)
+					: ("none" as const)
 		return {
-			apiUrl: Option.fromNullishOr(env.MAPLE_API_URL ?? stored.apiUrl),
-			token: Option.map(Option.fromNullishOr(env.MAPLE_API_TOKEN ?? stored.token), Redacted.make),
+			apiUrl: Option.fromNullishOr(resolvedApiUrl),
+			token: Option.map(Option.fromNullishOr(resolvedToken), Redacted.make),
 			orgId: Option.fromNullishOr(env.MAPLE_ORG_ID ?? stored.orgId),
+			userId: Option.fromNullishOr(stored.userId),
+			credentialStore: Option.fromNullishOr(stored.credentialStore),
+			credentialManaged: stored.credentialManaged === true,
+			tokenSource,
+			envTokenOverride: envToken !== undefined,
 			localUrl: env.MAPLE_LOCAL_URL ?? defaultLocalUrl(env.MAPLE_LOCAL_BIND_HOST),
 			defaultMode: Option.fromNullishOr(stored.defaultMode),
 			defaultApiUrl: env.MAPLE_API_URL ?? DEFAULT_API_URL,
 			lastUpdateCheck: Option.fromNullishOr(stored.lastUpdateCheck),
 			latestKnownVersion: Option.fromNullishOr(stored.latestKnownVersion),
 			write: (next) => writeMerged(fs, (cur) => ({ ...cur, ...next })),
-			clearToken: () =>
-				writeMerged(fs, (cur) => {
-					const { token: _token, ...rest } = cur
-					return rest
+			saveRemoteCredential: (next) =>
+				Effect.gen(function* () {
+					const storedInKeychain = yield* Effect.promise(() =>
+						writeNativeCredential(next.apiUrl, next.token),
+					)
+					if (!storedInKeychain) {
+						yield* Effect.promise(() => deleteNativeCredential(next.apiUrl))
+					}
+					yield* writeMerged(fs, (cur) => {
+						const { token: _token, ...withoutToken } = cur
+						return {
+							...withoutToken,
+							apiUrl: next.apiUrl,
+							orgId: next.orgId,
+							userId: next.userId,
+							credentialManaged: next.managed,
+							credentialStore: storedInKeychain ? "keychain" : "file",
+							...(storedInKeychain ? {} : { token: next.token }),
+						}
+					})
+					return storedInKeychain ? "keychain" : "file"
+				}),
+			clearRemoteCredential: () =>
+				Effect.gen(function* () {
+					const storedApiUrl = stored.apiUrl
+					if (storedApiUrl && stored.credentialStore === "keychain") {
+						yield* Effect.promise(() => deleteNativeCredential(storedApiUrl))
+					}
+					yield* writeMerged(fs, (cur) => {
+						const {
+							token: _token,
+							apiUrl: _apiUrl,
+							orgId: _orgId,
+							userId: _userId,
+							credentialStore: _store,
+							credentialManaged: _managed,
+							...rest
+						} = cur
+						return rest
+					})
 				}),
 			setDefaultMode: (mode) => writeMerged(fs, (cur) => ({ ...cur, defaultMode: mode })),
 			clearDefaultMode: () =>

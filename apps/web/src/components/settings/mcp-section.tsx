@@ -19,7 +19,7 @@ import { CodeBlock } from "@/components/quick-start/code-block"
 
 const mcpEndpoint = `${mcpUrl}/mcp`
 
-function generateConfig(client: "claude-code" | "cursor" | "windsurf" | "other", apiKey: string) {
+function generateConfig(client: "claude-code" | "cursor" | "windsurf" | "other", apiKey?: string) {
 	const isWindsurf = client === "windsurf"
 	const urlKey = isWindsurf ? "serverUrl" : "url"
 	const config = {
@@ -27,18 +27,18 @@ function generateConfig(client: "claude-code" | "cursor" | "windsurf" | "other",
 			maple: {
 				...(isWindsurf ? {} : { type: "http" }),
 				[urlKey]: mcpEndpoint,
-				headers: {
-					Authorization: `Bearer ${apiKey}`,
-				},
+				...(apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}),
 			},
 		},
 	}
 	return JSON.stringify(config, null, 2)
 }
 
-function generateCliCommand(apiKey: string) {
-	return `claude mcp add --transport http maple ${mcpEndpoint} \\
+function generateCliCommand(apiKey?: string) {
+	return apiKey
+		? `claude mcp add --transport http maple ${mcpEndpoint} \\
   --header "Authorization: Bearer ${apiKey}"`
+		: `claude mcp add --transport http maple ${mcpEndpoint}`
 }
 
 const CONFIG_FILE_HINTS: Record<string, string> = {
@@ -53,8 +53,6 @@ export function McpSection() {
 	const [createDialogOpen, setCreateDialogOpen] = useState(false)
 	const [createdSecret, setCreatedSecret] = useState<string | null>(null)
 	const [configTab, setConfigTab] = useState("claude-code")
-
-	const apiKeyPlaceholder = createdSecret ?? "<your-api-key>"
 
 	return (
 		<div className="max-w-3xl space-y-6">
@@ -87,7 +85,9 @@ export function McpSection() {
 						</InputGroupAddon>
 					</InputGroup>
 					<div className="flex flex-wrap items-center gap-2">
-						<p className="text-muted-foreground text-xs">Authenticate with an API key.</p>
+						<p className="text-muted-foreground text-xs">
+							Compatible clients open Maple in your browser and connect with OAuth.
+						</p>
 						{createdSecret && (
 							<p className="text-severity-info text-xs font-medium">
 								Key created. Config below is ready to copy.
@@ -95,7 +95,7 @@ export function McpSection() {
 						)}
 						<Button variant="outline" size="xs" onClick={() => setCreateDialogOpen(true)}>
 							<PlusIcon size={12} />
-							{createdSecret ? "Create another" : "Create API Key"}
+							{createdSecret ? "Create another" : "Use API key fallback"}
 						</Button>
 					</div>
 				</CardContent>
@@ -105,7 +105,7 @@ export function McpSection() {
 				<CardHeader>
 					<CardTitle>Quick Setup</CardTitle>
 					<CardDescription>
-						Copy the configuration for your editor and paste it into the config file.
+						Add the server URL. Your client will open Maple to approve access to a workspace.
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
@@ -120,7 +120,10 @@ export function McpSection() {
 							<div className="space-y-4">
 								<div className="space-y-2">
 									<p className="text-muted-foreground text-xs">Run in your terminal</p>
-									<CodeBlock code={generateCliCommand(apiKeyPlaceholder)} language="bash" />
+									<CodeBlock
+										code={generateCliCommand(createdSecret ?? undefined)}
+										language="bash"
+									/>
 								</div>
 								<div className="space-y-2">
 									<p className="text-muted-foreground text-xs">
@@ -130,7 +133,7 @@ export function McpSection() {
 										</code>
 									</p>
 									<CodeBlock
-										code={generateConfig("claude-code", apiKeyPlaceholder)}
+										code={generateConfig("claude-code", createdSecret ?? undefined)}
 										language="json"
 									/>
 								</div>
@@ -148,7 +151,7 @@ export function McpSection() {
 										</p>
 									)}
 									<CodeBlock
-										code={generateConfig(client, apiKeyPlaceholder)}
+										code={generateConfig(client, createdSecret ?? undefined)}
 										language="json"
 									/>
 								</div>
@@ -157,13 +160,13 @@ export function McpSection() {
 					</Tabs>
 					{!createdSecret && (
 						<p className="text-muted-foreground text-xs mt-3">
-							Need an API key?{" "}
+							Client does not support OAuth?{" "}
 							<button
 								type="button"
 								className="text-foreground underline underline-offset-2 hover:no-underline"
 								onClick={() => setCreateDialogOpen(true)}
 							>
-								Create one
+								Create an MCP key
 							</button>{" "}
 							or manage existing keys in{" "}
 							<Link

@@ -7,7 +7,7 @@ import { logs, logPatterns } from "./commands/logs"
 import { attributes } from "./commands/attributes"
 import { metrics, query } from "./commands/data"
 import { timeseries, breakdown, compare } from "./commands/analytics"
-import { login, logout, whoami } from "./commands/auth"
+import { auth, login, logout, whoami } from "./commands/auth"
 import { use } from "./commands/config"
 import { start, stop, reset, checkpoint, restore } from "./commands/server"
 import { update } from "./commands/update"
@@ -76,6 +76,7 @@ export const cli = Command.make("maple").pipe(
 		query,
 		// Auth / config
 		login,
+		auth,
 		logout,
 		whoami,
 		use,
