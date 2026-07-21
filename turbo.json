@@ -2,7 +2,7 @@
 	"$schema": "https://turborepo.com/schema.json",
 	"ui": "tui",
 	"globalPassThroughEnv": ["*"],
-	"concurrency": "100%",
+	"concurrency": "15",
 	"tasks": {
 		"build": {
 			"dependsOn": ["^build"],

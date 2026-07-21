@@ -3,6 +3,7 @@
 	"private": true,
 	"workspaces": [
 		"apps/*",
+		"!apps/slack-agent",
 		"packages/*",
 		"lib/*",
 		"examples/*"
