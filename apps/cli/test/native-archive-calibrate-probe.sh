@@ -54,6 +54,31 @@ fail() {
 
 if ! command -v jq >/dev/null 2>&1; then fail "jq is required"; fi
 if ! command -v curl >/dev/null 2>&1; then fail "curl is required"; fi
+if [[ ! -x /usr/bin/time ]]; then fail "/usr/bin/time is required"; fi
+
+TIME_PLATFORM="$(uname -s)"
+case "$TIME_PLATFORM" in
+	Darwin) TIME_ARGS=(-lp) ;;
+	Linux) TIME_ARGS=(-v) ;;
+	*) fail "unsupported /usr/bin/time platform: $TIME_PLATFORM" ;;
+esac
+
+parse_peak_rss() {
+	local report="$1"
+	case "$TIME_PLATFORM" in
+		Darwin)
+			awk 'tolower($0) ~ /maximum resident set size/ { print $1; exit }' "$report"
+			;;
+		Linux)
+			awk '/Maximum resident set size \(kbytes\):/ {
+				value=$0
+				sub(/^.*: */, "", value)
+				printf "%.0f\n", value * 1024
+				exit
+			}' "$report"
+			;;
+	esac
+}
 
 query() {
 	local sql="$1"
@@ -247,7 +272,7 @@ TRIAL_OP="$(jq -r '.operationId' <<<"$TRIAL_SESSION_JSON")"
 TRIAL_CKPT="$(jq -r '.checkpointId' <<<"$TRIAL_SESSION_JSON")"
 TRIAL_FP="$(jq -r '.manifestFingerprint' <<<"$TRIAL_SESSION_JSON")"
 TIME_OUT="$ROOT/trial-time.txt"
-if ! /usr/bin/time -lp "$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
+if ! /usr/bin/time "${TIME_ARGS[@]}" "$MAPLE" archive calibrate-run logs "$RANGE_DATE" \
 	--data-dir "$DATA" --archive-dir "$ARCHIVE" --scratch-root "$SCRATCH" \
 	--checkpoint-id "$TRIAL_CKPT" --checkpoint-fingerprint "$TRIAL_FP" --operation-id "$TRIAL_OP" \
 	--start-row 10 --sample-rows 10 \
@@ -271,7 +296,7 @@ OBSERVED_PHYSICAL="$(echo "$TRIAL_JSON" | jq -r '.physicalBytes')"
 OBSERVED_TEMP="$(echo "$TRIAL_JSON" | jq -r '.peakTempDiskBytes')"
 OBSERVED_EXPORT_WALL="$(echo "$TRIAL_JSON" | jq -r '.exportWallMs')"
 OBSERVED_ROWS="$(echo "$TRIAL_JSON" | jq -r '.rowCount')"
-OBSERVED_RSS="$(grep -i 'maximum resident set size' "$TIME_OUT" | awk '{print $1}')"
+OBSERVED_RSS="$(parse_peak_rss "$TIME_OUT")"
 [[ "$OBSERVED_RSS" =~ ^[0-9]+$ ]] || fail "could not parse observed peak RSS from /usr/bin/time"
 [[ "$OBSERVED_ROWS" -gt 0 ]] || fail "trial exported zero rows (held-out window empty — need more data)"
 # Close the trial session (release the pin + clear the record) now that the
