@@ -8,7 +8,6 @@ import {
 	archiveRoot,
 	assertNoSymlink,
 	assertNoSymlinkSync,
-	assertRealFile,
 	assertRealFileSync,
 	classifyArchivePathSync,
 	ensurePrivateDirectory,
@@ -143,7 +142,7 @@ const verifyGenerationEvidence = (
 	assertNoSymlinkSync(archiveDir, sourcePath, "archive generation")
 	const manifestPath = generationManifestPath(archiveDir, signal, rangeStart, generationId)
 	assertNoSymlinkSync(archiveDir, manifestPath, "archive generation manifest")
-	assertRealFile(manifestPath, "archive generation manifest")
+	assertRealFileSync(manifestPath, "archive generation manifest")
 	const manifestSha256 = sha256File(manifestPath)
 	const manifest = readArchiveGenerationManifest(archiveDir, signal, rangeStart, generationId)
 	if (
@@ -158,7 +157,7 @@ const verifyGenerationEvidence = (
 	for (const shard of manifest.shards as ReadonlyArray<ArchiveShardRecord>) {
 		const shardPath = join(sourcePath, "shards", shard.name)
 		assertNoSymlinkSync(archiveDir, shardPath, `archive shard ${shard.name}`)
-		assertRealFile(shardPath, `archive shard ${shard.name}`)
+		assertRealFileSync(shardPath, `archive shard ${shard.name}`)
 		const actualBytes = statSync(shardPath).size
 		if (actualBytes !== shard.bytes) {
 			throw new Error(
@@ -347,7 +346,7 @@ const readActiveGenerationIdStrict = (
 	const pointerPath = activePointerPath(archiveDir, signal, rangeDate)
 	if (!existsSync(pointerPath)) return null
 	assertNoSymlinkSync(archiveDir, pointerPath, "archive active pointer")
-	assertRealFile(pointerPath, "archive active pointer")
+	assertRealFileSync(pointerPath, "archive active pointer")
 	const raw = JSON.parse(readFileSync(pointerPath, "utf8")) as Record<string, unknown>
 	if (
 		raw.formatVersion !== 1 ||
@@ -378,7 +377,7 @@ const revalidateSource = (archiveDir: string, target: GcTarget | GcDeleteCandida
 		target.generationId,
 	)
 	assertNoSymlinkSync(archiveDir, manifestPath, "archive generation manifest")
-	assertRealFile(manifestPath, "archive generation manifest")
+	assertRealFileSync(manifestPath, "archive generation manifest")
 	const actualManifestSha = sha256File(manifestPath)
 	if (actualManifestSha !== target.manifestSha256) {
 		throw new Error(`archive gc target manifest changed after planning: ${sourcePath}`)
@@ -395,7 +394,7 @@ const revalidateSource = (archiveDir: string, target: GcTarget | GcDeleteCandida
 	for (const shardEv of target.shards) {
 		const shardPath = join(sourcePath, "shards", shardEv.name)
 		assertNoSymlinkSync(archiveDir, shardPath, `archive shard ${shardEv.name}`)
-		assertRealFile(shardPath, `archive shard ${shardEv.name}`)
+		assertRealFileSync(shardPath, `archive shard ${shardEv.name}`)
 		const actualSha = sha256File(shardPath)
 		if (actualSha !== shardEv.sha256) {
 			throw new Error(`archive gc target shard ${shardEv.name} changed after planning: ${sourcePath}`)

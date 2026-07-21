@@ -182,7 +182,7 @@ stop_server
 
 # Catalog rebuild recovers the index for each signal.
 for signal in logs traces metrics_sum metrics_gauge metrics_histogram metrics_exponential_histogram; do
-	"$MAPLE" archive rebuild "$signal" --archive-dir "$ARCHIVE" >/dev/null 2>&1 \
+	"$MAPLE" archive rebuild "$signal" --data-dir "$DATA" --archive-dir "$ARCHIVE" >/dev/null 2>&1 \
 		|| fail "catalog rebuild failed for $signal"
 done
 
