@@ -133,6 +133,21 @@ const ErrorIssueList = ListOf(V2ErrorIssue).annotate({
 	identifier: "ErrorIssueList",
 	title: "Error issue list",
 })
+
+export const V2ErrorIssueServiceCount = Schema.Struct({
+	service_name: Schema.String,
+	open_count: Schema.Number,
+}).annotate({
+	identifier: "ErrorIssueServiceCount",
+	title: "Error issue service count",
+	description: "Number of open (actionable-state) error issues for one service.",
+})
+export type V2ErrorIssueServiceCount = Schema.Schema.Type<typeof V2ErrorIssueServiceCount>
+
+const ErrorIssueServiceCountList = ListOf(V2ErrorIssueServiceCount).annotate({
+	identifier: "ErrorIssueServiceCountList",
+	title: "Error issue service count list",
+})
 const commonErrors = [V2InvalidRequestError, V2ServiceUnavailableError] as const
 
 export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
@@ -147,6 +162,20 @@ export class V2ErrorIssuesApiGroup extends HttpApiGroup.make("errorIssues")
 				summary: "List error issues",
 				description:
 					"Returns a bounded, cursor-paginated page of your organization's issues. Requires `error_issues:read`.",
+			}),
+		),
+	)
+	.add(
+		// Static path — must be registered before the `/:id` param route.
+		HttpApiEndpoint.get("serviceCounts", "/service_counts", {
+			success: ErrorIssueServiceCountList,
+			error: [...commonErrors],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "listErrorIssueServiceCounts",
+				summary: "List open issue counts by service",
+				description:
+					"Returns the number of open (actionable-state) error issues per service, in one call. Alert-kind issues are excluded. Requires `error_issues:read`.",
 			}),
 		),
 	)

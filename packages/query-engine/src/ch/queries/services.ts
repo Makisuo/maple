@@ -38,6 +38,7 @@ export interface ServiceOverviewOutput {
 	readonly p95LatencyMs: number
 	readonly p99LatencyMs: number
 	readonly estimatedSpanCount: number
+	readonly firstSeen: string
 }
 
 export interface ServiceCatalogOpts {
@@ -113,6 +114,10 @@ export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
 			// rows or `1 / acceptanceProbability` for spans carrying a `th:` value.
 			// Replaces the broken `sampledSpanCount * dominantWeight` approximation.
 			estimatedSpanCount: CH.sum($.SampleRate),
+			// Earliest span per (service, env, commit) inside the window — the
+			// list page derives deploy age / errors-since-deploy from this, so it
+			// is window-clamped by construction.
+			firstSeen: CH.min_($.Timestamp),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

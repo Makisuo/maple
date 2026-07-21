@@ -173,6 +173,23 @@ export const HttpV2ErrorIssuesLive = HttpApiBuilder.group(MapleApiV2, "errorIssu
 					}
 				}),
 			)
+			.handle("serviceCounts", () =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const counts = yield* errors
+						.countOpenIssuesByService(tenant.orgId)
+						.pipe(mapPersistenceError)
+					return {
+						object: "list" as const,
+						data: counts.map((row) => ({
+							service_name: row.serviceName,
+							open_count: row.openCount,
+						})),
+						has_more: false,
+						next_cursor: null,
+					}
+				}),
+			)
 			.handle("retrieve", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context

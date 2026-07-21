@@ -262,6 +262,17 @@ export interface ErrorsServiceShape {
 			readonly sort?: "last_seen" | "severity"
 		},
 	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError>
+	/**
+	 * Fleet-level open (actionable-state) error-issue counts grouped by service
+	 * name. One Postgres GROUP BY over the org's actionable subset; alert-kind
+	 * issues are excluded because their serviceName can be empty or synthetic.
+	 */
+	readonly countOpenIssuesByService: (
+		orgId: OrgId,
+	) => Effect.Effect<
+		ReadonlyArray<{ readonly serviceName: string; readonly openCount: number }>,
+		ErrorPersistenceError
+	>
 	readonly getIssue: (
 		orgId: OrgId,
 		issueId: ErrorIssueId,
@@ -1197,6 +1208,32 @@ const make: Effect.Effect<
 			)
 		},
 	)
+
+	const countOpenIssuesByService: ErrorsServiceShape["countOpenIssuesByService"] = Effect.fn(
+		"ErrorsService.countOpenIssuesByService",
+	)(function* (orgId) {
+		yield* Effect.annotateCurrentSpan({ orgId })
+		const rows = yield* dbExecute((db) =>
+			db
+				.select({
+					serviceName: errorIssues.serviceName,
+					openCount: sql<number>`count(*)::int`,
+				})
+				.from(errorIssues)
+				.where(
+					and(
+						eq(errorIssues.orgId, orgId),
+						inArray(errorIssues.workflowState, ACTIONABLE_WORKFLOW_STATES),
+						eq(errorIssues.kind, "error"),
+						isNull(errorIssues.archivedAt),
+					),
+				)
+				.groupBy(errorIssues.serviceName),
+		)
+		const counts = rows.filter((row) => row.serviceName !== "")
+		yield* Effect.annotateCurrentSpan({ serviceCount: counts.length })
+		return counts
+	})
 
 	const getIssue: ErrorsServiceShape["getIssue"] = Effect.fn("ErrorsService.getIssue")(
 		function* (orgId, issueId, opts) {
@@ -2914,6 +2951,7 @@ const make: Effect.Effect<
 
 	return ErrorsService.of({
 		listIssues,
+		countOpenIssuesByService,
 		getIssue,
 		transitionIssue,
 		claimIssue,

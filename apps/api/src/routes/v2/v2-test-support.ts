@@ -99,6 +99,7 @@ export const Phase1ResourceStubsLayer = Layer.mergeAll(
 	}),
 	Layer.succeed(ErrorsService, {
 		listIssues: die,
+		countOpenIssuesByService: die,
 		getIssue: die,
 		transitionIssue: die,
 		claimIssue: die,
