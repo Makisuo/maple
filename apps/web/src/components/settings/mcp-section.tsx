@@ -86,18 +86,17 @@ export function McpSection() {
 							</InputGroupButton>
 						</InputGroupAddon>
 					</InputGroup>
-					<div className="flex items-center gap-2">
+					<div className="flex flex-wrap items-center gap-2">
 						<p className="text-muted-foreground text-xs">Authenticate with an API key.</p>
-						{createdSecret ? (
+						{createdSecret && (
 							<p className="text-severity-info text-xs font-medium">
 								Key created. Config below is ready to copy.
 							</p>
-						) : (
-							<Button variant="outline" size="xs" onClick={() => setCreateDialogOpen(true)}>
-								<PlusIcon size={12} />
-								Create API Key
-							</Button>
 						)}
+						<Button variant="outline" size="xs" onClick={() => setCreateDialogOpen(true)}>
+							<PlusIcon size={12} />
+							{createdSecret ? "Create another" : "Create API Key"}
+						</Button>
 					</div>
 				</CardContent>
 			</Card>

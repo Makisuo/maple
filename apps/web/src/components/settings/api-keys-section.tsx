@@ -1,5 +1,6 @@
 import { useAtomSet } from "@/lib/effect-atom"
 import { useState, type ReactNode } from "react"
+import { Link } from "@tanstack/react-router"
 import { Exit } from "effect"
 import type { V2ApiKey } from "@maple/domain/http/v2"
 import { toast } from "sonner"
@@ -44,6 +45,8 @@ import {
 	TrashIcon,
 } from "@/components/icons"
 import { useApiKeyMutationSync, useApiKeysList } from "@/hooks/use-api-keys"
+import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
+import { formatBackendError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { CreateApiKeyDialog } from "./create-api-key-dialog"
 import { RollApiKeyDialog } from "./roll-api-key-dialog"
@@ -83,6 +86,7 @@ function formatRelative(timestamp: string | null): string | null {
 }
 
 export function ApiKeysSection() {
+	const isAdmin = useIsOrgAdmin()
 	const [createOpen, setCreateOpen] = useState(false)
 	const [revokeOpen, setRevokeOpen] = useState(false)
 	const [revokingKey, setRevokingKey] = useState<ApiKey | null>(null)
@@ -115,7 +119,8 @@ export function ApiKeysSection() {
 			toast.success("API key revoked")
 			void reconcileTxid(result.value.txid)
 		} else {
-			toast.error("Failed to revoke API key")
+			const { title, description } = formatBackendError(result)
+			toast.error(title, { description })
 		}
 		setIsRevoking(false)
 		setRevokeOpen(false)
@@ -162,7 +167,7 @@ export function ApiKeysSection() {
 								</div>
 							)}
 						</div>
-						<Button onClick={() => setCreateOpen(true)} size="sm">
+						<Button onClick={() => setCreateOpen(true)} size="sm" disabled={!isAdmin}>
 							<PlusIcon data-icon="inline-start" size={14} />
 							Create key
 						</Button>
@@ -182,7 +187,8 @@ export function ApiKeysSection() {
 								</EmptyMedia>
 								<EmptyTitle>Couldn't load API keys</EmptyTitle>
 								<EmptyDescription>
-									Something went wrong while loading your keys. Reload the page to try again.
+									Something went wrong while loading your keys. Reload the page to try
+									again.
 								</EmptyDescription>
 							</EmptyHeader>
 						</Empty>
@@ -198,7 +204,7 @@ export function ApiKeysSection() {
 								</EmptyDescription>
 							</EmptyHeader>
 							<EmptyContent>
-								<Button size="sm" onClick={() => setCreateOpen(true)}>
+								<Button size="sm" onClick={() => setCreateOpen(true)} disabled={!isAdmin}>
 									<PlusIcon data-icon="inline-start" size={14} />
 									Create key
 								</Button>
@@ -239,6 +245,19 @@ export function ApiKeysSection() {
 				</CardContent>
 			</Card>
 
+			{!isAdmin ? (
+				<p className="text-muted-foreground text-xs">
+					Only org admins can create API keys. For a key that connects your editor to Maple, use the{" "}
+					<Link
+						to="/mcp"
+						className="text-foreground underline underline-offset-2 hover:no-underline"
+					>
+						MCP
+					</Link>{" "}
+					page — you can create one of those yourself.
+				</p>
+			) : null}
+
 			<CreateApiKeyDialog open={createOpen} onOpenChange={setCreateOpen} />
 
 			<RollApiKeyDialog open={rollOpen} onOpenChange={setRollOpen} apiKey={rollingKey} />
@@ -254,8 +273,8 @@ export function ApiKeysSection() {
 							{revokingKey ? (
 								<>
 									<span className="text-foreground font-medium">{revokingKey.name}</span> (
-									<span className="font-mono text-xs">{revokingKey.key_prefix}</span>) will stop
-									working immediately. This action cannot be undone.
+									<span className="font-mono text-xs">{revokingKey.key_prefix}</span>) will
+									stop working immediately. This action cannot be undone.
 								</>
 							) : (
 								<>

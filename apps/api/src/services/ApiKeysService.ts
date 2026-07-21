@@ -11,6 +11,7 @@ import {
 	OrgId,
 	type PostgresTransactionId,
 	UserId,
+	RoleName,
 } from "@maple/domain/http"
 import { API_KEY_PREFIX, apiKeys, generateApiKey, hashApiKey, parseIngestKeyLookupHmacKey } from "@maple/db"
 import { and, desc, eq } from "drizzle-orm"
@@ -28,6 +29,56 @@ export interface ResolvedApiKey {
 	readonly metadataJson: string | null
 	/** v2 scope strings; null = legacy full access. */
 	readonly scopes: ReadonlyArray<string> | null
+	readonly roles: ReadonlyArray<RoleName> | null
+	readonly cliManaged: boolean
+}
+
+const CliApiKeyMetadata = Schema.Struct({
+	source: Schema.Literal("maple_cli"),
+	roles: Schema.Array(RoleName),
+	deviceName: Schema.String,
+})
+const decodeCliApiKeyMetadata = Schema.decodeUnknownOption(CliApiKeyMetadata)
+
+/**
+ * Metadata written when a member mints an MCP key for themselves: the creator's
+ * own roles are pinned to the key so it can never carry more authority than the
+ * user who created it (an absent `roles` resolves to `root` downstream).
+ */
+const McpApiKeyMetadata = Schema.Struct({
+	source: Schema.Literal("maple_mcp"),
+	roles: Schema.Array(RoleName),
+})
+const decodeMcpApiKeyMetadata = Schema.decodeUnknownOption(McpApiKeyMetadata)
+
+/** Metadata `source` values that pin roles onto a key. */
+const ROLE_BEARING_SOURCES = ["maple_cli", "maple_mcp"] as const
+
+interface KeyRoleMetadata {
+	readonly roles: ReadonlyArray<RoleName> | null
+	readonly cliManaged: boolean
+}
+
+/**
+ * Read the roles pinned onto a key by its metadata. Fails closed: metadata that
+ * declares a known role-bearing `source` but doesn't decode must not fall back
+ * to the null (= `root`) default, so the key is rejected outright.
+ */
+const readKeyRoleMetadata = (metadata: unknown): Option.Option<KeyRoleMetadata> => {
+	if (typeof metadata !== "object" || metadata === null || !("source" in metadata)) {
+		return Option.some({ roles: null, cliManaged: false })
+	}
+
+	const source = (metadata as { source?: unknown }).source
+	const cli = decodeCliApiKeyMetadata(metadata)
+	if (Option.isSome(cli)) return Option.some({ roles: cli.value.roles, cliManaged: true })
+	const mcp = decodeMcpApiKeyMetadata(metadata)
+	if (Option.isSome(mcp)) return Option.some({ roles: mcp.value.roles, cliManaged: false })
+
+	if (typeof source === "string" && (ROLE_BEARING_SOURCES as ReadonlyArray<string>).includes(source)) {
+		return Option.none()
+	}
+	return Option.some({ roles: null, cliManaged: false })
 }
 
 const decodeApiKeyIdSync = Schema.decodeUnknownSync(ApiKeyId)
@@ -118,6 +169,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				kind?: ApiKeyKind
 				scopes?: ReadonlyArray<string> | null
 				createdByEmail?: string | null
+				metadataJson?: unknown
 			},
 		) {
 			const id = decodeApiKeyIdSync(randomUUID())
@@ -147,6 +199,7 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 							createdAt: new Date(now),
 							createdBy: userId,
 							createdByEmail,
+							metadataJson: params.metadataJson,
 						})
 						.returning(txidColumn),
 				)
@@ -206,6 +259,10 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 							keyPrefix,
 							kind: existing.kind,
 							scopes: existing.scopes ?? null,
+							// Carry the role metadata across: a rolled key that lost it
+							// would resolve with the null (= `root`) default, silently
+							// escalating a CLI/MCP key beyond its creator's roles.
+							metadataJson: existing.metadataJson,
 							expiresAt: null,
 							createdAt: new Date(now),
 							createdBy: userId,
@@ -274,6 +331,9 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				if (row.value.expiresAt.getTime() < now) return Option.none()
 			}
 
+			const roleMetadata = readKeyRoleMetadata(row.value.metadataJson)
+			if (Option.isNone(roleMetadata)) return Option.none()
+
 			return Option.some({
 				orgId: decodeOrgIdSync(row.value.orgId),
 				userId: decodeUserIdSync(row.value.createdBy),
@@ -281,6 +341,8 @@ export class ApiKeysService extends Context.Service<ApiKeysService>()("@maple/ap
 				kind: row.value.kind,
 				metadataJson: row.value.metadataJson == null ? null : JSON.stringify(row.value.metadataJson),
 				scopes: row.value.scopes ?? null,
+				roles: roleMetadata.value.roles,
+				cliManaged: roleMetadata.value.cliManaged,
 			} satisfies ResolvedApiKey)
 		})
 
