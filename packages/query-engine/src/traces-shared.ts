@@ -100,7 +100,7 @@ export function httpDisplaySpanName(
 
 export function buildAttrFilterCondition(
 	af: AttributeFilter,
-	mapName: "SpanAttributes" | "ResourceAttributes",
+	mapName: "SpanAttributes" | "LogAttributes" | "ResourceAttributes",
 ): CH.Condition {
 	const mapExpr = CH.dynamicColumn<Record<string, string>>(mapName)
 	// Span attributes renamed across OTel semconv versions match either spelling,

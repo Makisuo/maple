@@ -13,6 +13,8 @@ import * as T from "@maple-dev/clickhouse-builder/types"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
 import { Logs, LogsAggregatesHourly } from "../tables"
 import { finalizeTimeseries } from "./series-cap"
+import type { AttributeFilter } from "../../query-engine"
+import { buildAttrFilterCondition } from "../../traces-shared"
 
 // ---------------------------------------------------------------------------
 // Shared options
@@ -21,15 +23,27 @@ import { finalizeTimeseries } from "./series-cap"
 interface LogsQueryOpts {
 	serviceName?: string
 	severity?: string
+	minSeverity?: number
 	traceId?: string
 	spanId?: string
 	search?: string
 	environments?: readonly string[]
 	namespaces?: readonly string[]
+	attributeFilters?: readonly AttributeFilter[]
+	resourceAttributeFilters?: readonly AttributeFilter[]
 	matchModes?: {
 		deploymentEnv?: "contains"
 		serviceNamespace?: "contains"
 	}
+}
+
+function logAttributeConditions(opts: LogsQueryOpts): CH.Condition[] {
+	return [
+		...(opts.attributeFilters ?? []).map((filter) => buildAttrFilterCondition(filter, "LogAttributes")),
+		...(opts.resourceAttributeFilters ?? []).map((filter) =>
+			buildAttrFilterCondition(filter, "ResourceAttributes"),
+		),
+	]
 }
 
 /** Stable identity for log records that do not carry a native OTel record ID. */
@@ -104,6 +118,9 @@ function canUseLogsAggregateInterior(opts: LogsQueryOpts): boolean {
 	if (opts.traceId) return false
 	if (opts.spanId) return false
 	if (opts.search) return false
+	if (opts.minSeverity !== undefined) return false
+	if (opts.attributeFilters?.length) return false
+	if (opts.resourceAttributeFilters?.length) return false
 	if (opts.matchModes?.deploymentEnv === "contains") return false
 	if (opts.matchModes?.serviceNamespace === "contains") return false
 	return true
@@ -159,7 +176,11 @@ export function canUseLogsAggregatesHourly(
 		return false
 	}
 	if (opts.traceId) return false
+	if (opts.spanId) return false
 	if (opts.search) return false
+	if (opts.minSeverity !== undefined) return false
+	if (opts.attributeFilters?.length) return false
+	if (opts.resourceAttributeFilters?.length) return false
 	// MV stores DeploymentEnv / ServiceNamespace as top-level columns; the
 	// `contains` substring match is only supported via positionCaseInsensitive on
 	// the raw map column.
@@ -237,8 +258,13 @@ export function logsTimeseriesQuery(opts: LogsTimeseriesOpts): CHQuery<ColumnDef
 			$.Timestamp.lte(param.dateTime("endTime")),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
+			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
+			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
+			CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
 			environmentCondition($, opts),
 			namespaceCondition($, opts),
+			...logAttributeConditions(opts),
 		])
 		.groupBy("bucket", "groupName")
 		.orderBy(["bucket", "asc"], ["groupName", "asc"])
@@ -304,8 +330,13 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 				...rawLogsTimeRange($),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+				opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
+				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
+				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
+				CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
 				environmentCondition($, opts),
 				namespaceCondition($, opts),
+				...logAttributeConditions(opts),
 			])
 			.groupBy("name")
 			.orderBy(["count", "desc"])
@@ -325,8 +356,13 @@ export function logsBreakdownQuery(opts: LogsBreakdownOpts): CHQuery<ColumnDefs,
 			rawLogEdgeCondition(),
 			CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 			CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+			opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
+			CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
+			CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
+			CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
 			environmentCondition($, opts),
 			namespaceCondition($, opts),
+			...logAttributeConditions(opts),
 		])
 		.groupBy("name")
 
@@ -377,11 +413,13 @@ export function logsCountQuery(opts: LogsQueryOpts): CHQuery<ColumnDefs, LogsCou
 				...rawLogsTimeRange($),
 				CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 				CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
+				opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 				CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 				CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 				CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
 				environmentCondition($, opts),
 				namespaceCondition($, opts),
+				...logAttributeConditions(opts),
 			])
 			.format("JSON")
 		return raw as unknown as CHQuery<ColumnDefs, LogsCountOutput, {}>
@@ -480,7 +518,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		$.Timestamp.lte(param.dateTime("endTime")),
 		CH.when(opts.serviceName, (v: string) => $.ServiceName.eq(v)),
 		CH.when(opts.severity, (v: string) => $.SeverityText.eq(v)),
-		CH.when(opts.minSeverity, (v: number) => $.SeverityNumber.gte(v)),
+		opts.minSeverity !== undefined ? $.SeverityNumber.gte(opts.minSeverity) : undefined,
 		CH.when(opts.traceId, (v: string) => $.TraceId.eq(v)),
 		CH.when(opts.spanId, (v: string) => $.SpanId.eq(v)),
 		CH.when(opts.cursor, (v: string) => $.Timestamp.lt(v)),
@@ -490,13 +528,13 @@ export function logsListQuery(opts: LogsListOpts) {
 						$.ServiceName.gt(opts.cursorIdentity.serviceName).or(
 							$.ServiceName.eq(opts.cursorIdentity.serviceName).and(
 								$.TraceId.gt(opts.cursorIdentity.traceId).or(
-								$.TraceId.eq(opts.cursorIdentity.traceId).and(
-									$.SpanId.gt(opts.cursorIdentity.spanId).or(
-										$.SpanId.eq(opts.cursorIdentity.spanId).and(
-											logRecordIdentity($).gt(opts.cursorIdentity.recordIdentity),
+									$.TraceId.eq(opts.cursorIdentity.traceId).and(
+										$.SpanId.gt(opts.cursorIdentity.spanId).or(
+											$.SpanId.eq(opts.cursorIdentity.spanId).and(
+												logRecordIdentity($).gt(opts.cursorIdentity.recordIdentity),
+											),
 										),
 									),
-								),
 								),
 							),
 						),
@@ -506,6 +544,7 @@ export function logsListQuery(opts: LogsListOpts) {
 		CH.when(opts.search, (v: string) => $.Body.ilike(`%${v}%`)),
 		environmentCondition($, opts),
 		namespaceCondition($, opts),
+		...logAttributeConditions(opts),
 	]
 
 	// Stage 1: cheap scan — only `Timestamp` is read. Compiled with placeholders

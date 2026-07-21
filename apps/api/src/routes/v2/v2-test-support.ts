@@ -28,7 +28,6 @@ import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
-	HttpV2QueryLive,
 	HttpV2ServiceMapLive,
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
@@ -61,7 +60,6 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
-	HttpV2QueryLive,
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {

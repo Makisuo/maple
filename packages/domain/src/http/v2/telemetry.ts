@@ -13,6 +13,7 @@ const PositiveFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterTh
 const NonNegativeFinite = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0))
 const BreakdownLimit = PositiveInteger.check(Schema.isLessThanOrEqualTo(100))
 const TimeseriesSeriesLimit = PositiveInteger.check(Schema.isLessThanOrEqualTo(100))
+const NonEmptyString = Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())
 
 export const LogPublicId = PublicId(PublicIdPrefixes.log, Schema.String).annotate({
 	identifier: "LogId",
@@ -40,6 +41,396 @@ export const V2TelemetryWindowQuery = Schema.Struct({
 	title: "Telemetry time window",
 })
 
+export const V2AttributeFilter = Schema.Union([
+	Schema.Struct({
+		key: NonEmptyString,
+		operator: Schema.Literal("exists"),
+		value: Schema.optionalKey(Schema.Never),
+		negated: Schema.optionalKey(Schema.Boolean),
+	}),
+	Schema.Struct({
+		key: NonEmptyString,
+		operator: Schema.Literals(["equals", "contains"]),
+		value: Schema.String,
+		negated: Schema.optionalKey(Schema.Boolean),
+	}),
+	Schema.Struct({
+		key: NonEmptyString,
+		operator: Schema.Literals(["gt", "gte", "lt", "lte"]),
+		value: Schema.Number.check(Schema.isFinite()),
+		negated: Schema.optionalKey(Schema.Boolean),
+	}),
+]).annotate({
+	identifier: "AttributeFilter",
+	title: "Attribute filter",
+	description:
+		"Matches an attribute by key. `exists` has no value, string operators require a string value, and numeric operators require a finite number.",
+})
+export type V2AttributeFilter = Schema.Schema.Type<typeof V2AttributeFilter>
+const AttributeFilterCollection = Schema.Array(V2AttributeFilter).check(Schema.isMaxLength(20))
+
+const TraceFilters = Schema.Struct({
+	service_name: Schema.optionalKey(ServiceName),
+	span_name: Schema.optionalKey(NonEmptyString),
+	status_code: Schema.optionalKey(Schema.Literals(["Ok", "Error", "Unset"])),
+	has_error: Schema.optionalKey(Schema.Boolean),
+	min_duration_ms: Schema.optionalKey(NonNegativeFinite),
+	max_duration_ms: Schema.optionalKey(NonNegativeFinite),
+	http_method: Schema.optionalKey(NonEmptyString),
+	http_route: Schema.optionalKey(NonEmptyString),
+	http_status_code: Schema.optionalKey(NonEmptyString),
+	deployment_environment: Schema.optionalKey(NonEmptyString),
+	service_namespace: Schema.optionalKey(NonEmptyString),
+	span_scope: Schema.optionalKey(Schema.Literal("root")),
+	attributes: Schema.optionalKey(AttributeFilterCollection),
+	resource_attributes: Schema.optionalKey(AttributeFilterCollection),
+}).annotate({ identifier: "TraceFilters", title: "Trace filters" })
+
+const LogFilters = Schema.Struct({
+	service_name: Schema.optionalKey(ServiceName),
+	severity: Schema.optionalKey(NonEmptyString),
+	minimum_severity: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 })),
+	),
+	trace_id: Schema.optionalKey(TraceId),
+	span_id: Schema.optionalKey(SpanId),
+	body_search: Schema.optionalKey(NonEmptyString),
+	deployment_environment: Schema.optionalKey(NonEmptyString),
+	service_namespace: Schema.optionalKey(NonEmptyString),
+	attributes: Schema.optionalKey(AttributeFilterCollection),
+	resource_attributes: Schema.optionalKey(AttributeFilterCollection),
+}).annotate({ identifier: "LogFilters", title: "Log filters" })
+
+const MetricType = Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])
+const MetricFilters = Schema.Struct({
+	metric_name: MetricName,
+	metric_type: MetricType,
+	service_name: Schema.optionalKey(ServiceName),
+}).annotate({ identifier: "MetricFilters", title: "Metric filters" })
+
+export const V2TimeseriesValuePoint = Schema.Struct({
+	timestamp: Timestamp,
+	value: Schema.Number,
+}).annotate({ identifier: "TimeseriesValuePoint", title: "Timeseries value point" })
+export const V2TimeseriesSeries = Schema.Struct({
+	group: Schema.NullOr(Schema.String),
+	points: Schema.Array(V2TimeseriesValuePoint),
+}).annotate({ identifier: "TimeseriesSeries", title: "Timeseries series" })
+export const V2BreakdownItem = Schema.Struct({
+	name: Schema.String,
+	value: Schema.Number,
+}).annotate({ identifier: "BreakdownItem", title: "Breakdown item" })
+
+const traceAggregations = [
+	"count",
+	"avg_duration",
+	"p50_duration",
+	"p95_duration",
+	"p99_duration",
+	"error_rate",
+	"apdex",
+] as const
+const traceGroupBy = ["service", "span_name", "status_code", "http_method", "attribute"] as const
+const metricTimeseriesAggregations = ["avg", "sum", "min", "max", "count", "rate", "increase"] as const
+const metricBreakdownAggregations = ["avg", "sum", "count"] as const
+
+const V2TraceTimeseriesParamsBase = Schema.Struct({
+	...RequiredTimeRange,
+	aggregation: Schema.Literals(traceAggregations),
+	filters: Schema.optionalKey(TraceFilters),
+	group_by: Schema.optionalKey(Schema.Literals(traceGroupBy)),
+	group_by_attribute_key: Schema.optionalKey(NonEmptyString),
+	bucket_seconds: Schema.optionalKey(PositiveInteger),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
+	apdex_threshold_ms: Schema.optionalKey(PositiveFinite),
+})
+export const V2TraceTimeseriesParams = V2TraceTimeseriesParamsBase.check(
+	Schema.makeFilter((value) => value.group_by !== "attribute" || !!value.group_by_attribute_key, {
+		message: "group_by=attribute requires group_by_attribute_key",
+	}),
+).annotate({
+	identifier: "TraceTimeseriesParams",
+	title: "Trace timeseries parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			aggregation: "p95_duration",
+			filters: { service_name: "api" },
+			group_by: "span_name",
+			bucket_seconds: 60,
+			series_limit: 50,
+		}),
+	],
+})
+
+const V2TraceBreakdownParamsBase = Schema.Struct({
+	...RequiredTimeRange,
+	aggregation: Schema.Literals(traceAggregations),
+	filters: Schema.optionalKey(TraceFilters),
+	group_by: Schema.Literals(traceGroupBy),
+	group_by_attribute_key: Schema.optionalKey(NonEmptyString),
+	limit: Schema.optionalKey(BreakdownLimit),
+	apdex_threshold_ms: Schema.optionalKey(PositiveFinite),
+})
+export const V2TraceBreakdownParams = V2TraceBreakdownParamsBase.check(
+	Schema.makeFilter((value) => value.group_by !== "attribute" || !!value.group_by_attribute_key, {
+		message: "group_by=attribute requires group_by_attribute_key",
+	}),
+).annotate({
+	identifier: "TraceBreakdownParams",
+	title: "Trace breakdown parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			aggregation: "error_rate",
+			group_by: "service",
+			limit: 20,
+		}),
+	],
+})
+
+export const V2LogTimeseriesParams = Schema.Struct({
+	...RequiredTimeRange,
+	aggregation: Schema.Literal("count"),
+	filters: Schema.optionalKey(LogFilters),
+	group_by: Schema.optionalKey(Schema.Literals(["service", "severity"])),
+	bucket_seconds: Schema.optionalKey(PositiveInteger),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
+}).annotate({
+	identifier: "LogTimeseriesParams",
+	title: "Log timeseries parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			aggregation: "count",
+			filters: { minimum_severity: 17 },
+			group_by: "severity",
+		}),
+	],
+})
+
+export const V2LogBreakdownParams = Schema.Struct({
+	...RequiredTimeRange,
+	aggregation: Schema.Literal("count"),
+	filters: Schema.optionalKey(LogFilters),
+	group_by: Schema.Literals(["service", "severity"]),
+	limit: Schema.optionalKey(BreakdownLimit),
+}).annotate({
+	identifier: "LogBreakdownParams",
+	title: "Log breakdown parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			aggregation: "count",
+			group_by: "service",
+			limit: 20,
+		}),
+	],
+})
+
+const V2MetricsTimeseriesParamsBase = Schema.Struct({
+	...RequiredTimeRange,
+	aggregation: Schema.Literals(metricTimeseriesAggregations),
+	filters: MetricFilters,
+	group_by: Schema.optionalKey(Schema.Literals(["service", "attribute", "resource_attribute"])),
+	group_by_attribute_key: Schema.optionalKey(NonEmptyString),
+	group_by_resource_attribute_key: Schema.optionalKey(NonEmptyString),
+	bucket_seconds: Schema.optionalKey(PositiveInteger),
+	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
+})
+export const V2MetricsTimeseriesParams = V2MetricsTimeseriesParamsBase.check(
+	Schema.makeFilter(
+		(value) =>
+			(value.group_by !== "attribute" || !!value.group_by_attribute_key) &&
+			(value.group_by !== "resource_attribute" || !!value.group_by_resource_attribute_key) &&
+			((value.aggregation !== "rate" && value.aggregation !== "increase") ||
+				value.filters.metric_type === "sum"),
+		{
+			message:
+				"Attribute grouping requires its attribute key, and rate/increase require filters.metric_type to be sum",
+		},
+	),
+).annotate({
+	identifier: "MetricsTimeseriesParams",
+	title: "Metrics timeseries parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			aggregation: "avg",
+			filters: { metric_name: "http.server.duration", metric_type: "histogram" },
+			group_by: "service",
+		}),
+	],
+})
+
+const V2MetricsBreakdownParamsBase = Schema.Struct({
+	...RequiredTimeRange,
+	aggregation: Schema.Literals(metricBreakdownAggregations),
+	filters: MetricFilters,
+	group_by: Schema.Literals(["service", "attribute", "resource_attribute"]),
+	group_by_attribute_key: Schema.optionalKey(NonEmptyString),
+	group_by_resource_attribute_key: Schema.optionalKey(NonEmptyString),
+	limit: Schema.optionalKey(BreakdownLimit),
+})
+export const V2MetricsBreakdownParams = V2MetricsBreakdownParamsBase.check(
+	Schema.makeFilter(
+		(value) =>
+			(value.group_by !== "attribute" || !!value.group_by_attribute_key) &&
+			(value.group_by !== "resource_attribute" || !!value.group_by_resource_attribute_key),
+		{ message: "Attribute grouping requires the corresponding attribute key" },
+	),
+).annotate({
+	identifier: "MetricsBreakdownParams",
+	title: "Metrics breakdown parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			aggregation: "sum",
+			filters: { metric_name: "http.server.request.size", metric_type: "histogram" },
+			group_by: "service",
+		}),
+	],
+})
+
+const timeseriesResultFields = {
+	start_time: Timestamp,
+	end_time: Timestamp,
+	bucket_seconds: PositiveInteger,
+	group_by: Schema.NullOr(Schema.String),
+	series: Schema.Array(V2TimeseriesSeries),
+} as const
+const breakdownResultFields = {
+	start_time: Timestamp,
+	end_time: Timestamp,
+	group_by: Schema.String,
+	data: Schema.Array(V2BreakdownItem),
+} as const
+
+export const V2TraceTimeseriesResult = Schema.Struct({
+	object: Schema.Literal("trace_timeseries"),
+	aggregation: Schema.Literals(traceAggregations),
+	...timeseriesResultFields,
+}).annotate({
+	identifier: "TraceTimeseriesResult",
+	title: "Trace timeseries result",
+	examples: [
+		wireExample({
+			object: "trace_timeseries",
+			aggregation: "count",
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			bucket_seconds: 60,
+			group_by: "service",
+			series: [{ group: "api", points: [{ timestamp: "2026-07-15T12:00:00.000Z", value: 42 }] }],
+		}),
+	],
+})
+export const V2TraceBreakdownResult = Schema.Struct({
+	object: Schema.Literal("trace_breakdown"),
+	aggregation: Schema.Literals(traceAggregations),
+	...breakdownResultFields,
+}).annotate({
+	identifier: "TraceBreakdownResult",
+	title: "Trace breakdown result",
+	examples: [
+		wireExample({
+			object: "trace_breakdown",
+			aggregation: "error_rate",
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			group_by: "service",
+			data: [{ name: "api", value: 0.05 }],
+		}),
+	],
+})
+export const V2LogTimeseriesResult = Schema.Struct({
+	object: Schema.Literal("log_timeseries"),
+	aggregation: Schema.Literal("count"),
+	...timeseriesResultFields,
+}).annotate({
+	identifier: "LogTimeseriesResult",
+	title: "Log timeseries result",
+	examples: [
+		wireExample({
+			object: "log_timeseries",
+			aggregation: "count",
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			bucket_seconds: 60,
+			group_by: null,
+			series: [{ group: null, points: [{ timestamp: "2026-07-15T12:00:00.000Z", value: 10 }] }],
+		}),
+	],
+})
+export const V2LogBreakdownResult = Schema.Struct({
+	object: Schema.Literal("log_breakdown"),
+	aggregation: Schema.Literal("count"),
+	...breakdownResultFields,
+}).annotate({
+	identifier: "LogBreakdownResult",
+	title: "Log breakdown result",
+	examples: [
+		wireExample({
+			object: "log_breakdown",
+			aggregation: "count",
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			group_by: "severity",
+			data: [{ name: "ERROR", value: 10 }],
+		}),
+	],
+})
+export const V2MetricTimeseriesResult = Schema.Struct({
+	object: Schema.Literal("metric_timeseries"),
+	aggregation: Schema.Literals(metricTimeseriesAggregations),
+	...timeseriesResultFields,
+}).annotate({
+	identifier: "MetricTimeseriesResult",
+	title: "Metric timeseries result",
+	examples: [
+		wireExample({
+			object: "metric_timeseries",
+			aggregation: "avg",
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			bucket_seconds: 60,
+			group_by: "service",
+			series: [{ group: "api", points: [{ timestamp: "2026-07-15T12:00:00.000Z", value: 42 }] }],
+		}),
+	],
+})
+export const V2MetricBreakdownResult = Schema.Struct({
+	object: Schema.Literal("metric_breakdown"),
+	aggregation: Schema.Literals(metricBreakdownAggregations),
+	...breakdownResultFields,
+}).annotate({
+	identifier: "MetricBreakdownResult",
+	title: "Metric breakdown result",
+	examples: [
+		wireExample({
+			object: "metric_breakdown",
+			aggregation: "sum",
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			group_by: "service",
+			data: [{ name: "api", value: 420 }],
+		}),
+	],
+})
+
+export type V2TraceTimeseriesResult = Schema.Schema.Type<typeof V2TraceTimeseriesResult>
+export type V2TraceBreakdownResult = Schema.Schema.Type<typeof V2TraceBreakdownResult>
+export type V2LogTimeseriesResult = Schema.Schema.Type<typeof V2LogTimeseriesResult>
+export type V2LogBreakdownResult = Schema.Schema.Type<typeof V2LogBreakdownResult>
+export type V2MetricTimeseriesResult = Schema.Schema.Type<typeof V2MetricTimeseriesResult>
+export type V2MetricBreakdownResult = Schema.Schema.Type<typeof V2MetricBreakdownResult>
+
 export const V2TraceSummary = Schema.Struct({
 	id: TraceId,
 	object: Schema.Literal("trace"),
@@ -48,8 +439,8 @@ export const V2TraceSummary = Schema.Struct({
 	root_span_name: Schema.String,
 	root_span_kind: Schema.String,
 	root_service_name: Schema.String,
-	status_code: Schema.String,
-	has_error: Schema.Boolean,
+	root_status_code: Schema.String,
+	root_has_error: Schema.Boolean,
 	deployment_environment: Schema.NullOr(Schema.String),
 	service_namespace: Schema.NullOr(Schema.String),
 	http_method: Schema.NullOr(Schema.String),
@@ -68,8 +459,8 @@ export const V2TraceSummary = Schema.Struct({
 			root_span_name: "GET /checkout",
 			root_span_kind: "Server",
 			root_service_name: "api",
-			status_code: "Ok",
-			has_error: false,
+			root_status_code: "Ok",
+			root_has_error: false,
 			deployment_environment: "production",
 			service_namespace: "checkout",
 			http_method: "GET",
@@ -121,18 +512,22 @@ export type V2Trace = Schema.Schema.Type<typeof V2Trace>
 export const V2TraceSearchParams = Schema.Struct({
 	...RequiredTimeRange,
 	...PostPagination,
-	service_name: Schema.optionalKey(ServiceName),
-	span_name: Schema.optionalKey(Schema.String),
-	has_error: Schema.optionalKey(Schema.Boolean),
-	min_duration_ms: Schema.optionalKey(NonNegativeFinite),
-	max_duration_ms: Schema.optionalKey(NonNegativeFinite),
-	http_method: Schema.optionalKey(Schema.String),
-	http_status_code: Schema.optionalKey(Schema.String),
-	deployment_environment: Schema.optionalKey(Schema.String),
-	service_namespace: Schema.optionalKey(Schema.String),
+	filters: Schema.optionalKey(TraceFilters),
 }).annotate({
 	identifier: "TraceSearchParams",
 	title: "Trace search parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			filters: {
+				service_name: "api",
+				has_error: true,
+				attributes: [{ key: "http.route", operator: "contains", value: "/checkout" }],
+			},
+			limit: 20,
+		}),
+	],
 })
 
 const TraceList = ListOf(V2TraceSummary).annotate({
@@ -151,6 +546,32 @@ export class V2TracesApiGroup extends HttpApiGroup.make("traces")
 				identifier: "searchTraces",
 				summary: "Search traces",
 				description: "Searches root traces in an explicit time window. Requires `traces:read`.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("timeseries", "/timeseries", {
+			payload: V2TraceTimeseriesParams,
+			success: V2TraceTimeseriesResult,
+			error: [...commonErrors],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "queryTraceTimeseries",
+				summary: "Query trace timeseries",
+				description: "Aggregates traces into chronological series. Requires `traces:read`.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("breakdown", "/breakdown", {
+			payload: V2TraceBreakdownParams,
+			success: V2TraceBreakdownResult,
+			error: [...commonErrors],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "queryTraceBreakdown",
+				summary: "Query trace breakdown",
+				description: "Aggregates traces by one dimension. Requires `traces:read`.",
 			}),
 		),
 	)
@@ -213,17 +634,19 @@ export type V2Log = Schema.Schema.Type<typeof V2Log>
 export const V2LogSearchParams = Schema.Struct({
 	...RequiredTimeRange,
 	...PostPagination,
-	service_name: Schema.optionalKey(ServiceName),
-	severity: Schema.optionalKey(Schema.String),
-	min_severity: Schema.optionalKey(
-		Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 255 })),
-	),
-	trace_id: Schema.optionalKey(TraceId),
-	span_id: Schema.optionalKey(SpanId),
-	search: Schema.optionalKey(Schema.String),
-	deployment_environment: Schema.optionalKey(Schema.String),
-	service_namespace: Schema.optionalKey(Schema.String),
-}).annotate({ identifier: "LogSearchParams", title: "Log search parameters" })
+	filters: Schema.optionalKey(LogFilters),
+}).annotate({
+	identifier: "LogSearchParams",
+	title: "Log search parameters",
+	examples: [
+		wireExample({
+			start_time: "2026-07-15T12:00:00.000Z",
+			end_time: "2026-07-15T13:00:00.000Z",
+			filters: { service_name: "api", minimum_severity: 17, body_search: "checkout" },
+			limit: 20,
+		}),
+	],
+})
 const LogList = ListOf(V2Log).annotate({
 	identifier: "LogList",
 	title: "Log list",
@@ -240,6 +663,32 @@ export class V2LogsApiGroup extends HttpApiGroup.make("logs")
 				identifier: "searchLogs",
 				summary: "Search logs",
 				description: "Searches logs in an explicit time window. Requires `logs:read`.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("timeseries", "/timeseries", {
+			payload: V2LogTimeseriesParams,
+			success: V2LogTimeseriesResult,
+			error: [...commonErrors],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "queryLogTimeseries",
+				summary: "Query log timeseries",
+				description: "Counts logs in chronological buckets. Requires `logs:read`.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("breakdown", "/breakdown", {
+			payload: V2LogBreakdownParams,
+			success: V2LogBreakdownResult,
+			error: [...commonErrors],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "queryLogBreakdown",
+				summary: "Query log breakdown",
+				description: "Counts logs by service or severity. Requires `logs:read`.",
 			}),
 		),
 	)
@@ -292,59 +741,6 @@ export const V2MetricListQuery = Schema.Struct({
 	search: Schema.optional(Schema.String),
 }).annotate({ identifier: "MetricListQuery", title: "Metric list query" })
 
-export const V2AttributeFilter = Schema.Struct({
-	key: Schema.String,
-	value: Schema.optionalKey(Schema.String),
-	mode: Schema.Literals(["equals", "exists", "gt", "gte", "lt", "lte", "contains"]),
-	negated: Schema.optionalKey(Schema.Boolean),
-}).annotate({ identifier: "AttributeFilter", title: "Attribute filter" })
-
-const MetricsMetric = Schema.Literals(["avg", "sum", "min", "max", "count", "rate", "increase"])
-const MetricType = Schema.Literals(["sum", "gauge", "histogram", "exponential_histogram"])
-const MetricsFilters = {
-	metric_name: MetricName,
-	metric_type: MetricType,
-	service_name: Schema.optionalKey(ServiceName),
-	group_by_attribute_key: Schema.optionalKey(Schema.String),
-	group_by_resource_attribute_key: Schema.optionalKey(Schema.String),
-	attribute_filters: Schema.optionalKey(Schema.Array(V2AttributeFilter)),
-	resource_attribute_filters: Schema.optionalKey(Schema.Array(V2AttributeFilter)),
-} as const
-
-export const V2MetricsTimeseriesParams = Schema.Struct({
-	...RequiredTimeRange,
-	metric: MetricsMetric,
-	...MetricsFilters,
-	group_by: Schema.optionalKey(
-		Schema.Array(Schema.Literals(["service", "attribute", "resource_attribute", "none"])),
-	),
-	bucket_seconds: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
-	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
-}).annotate({
-	identifier: "MetricsTimeseriesParams",
-	title: "Metrics timeseries parameters",
-})
-
-export const V2TimeseriesPoint = Schema.Struct({
-	bucket: Timestamp,
-	series: Schema.Record(Schema.String, Schema.Number),
-}).annotate({ identifier: "TimeseriesPoint", title: "Timeseries point" })
-export const V2BreakdownItem = Schema.Struct({
-	name: Schema.String,
-	value: Schema.Number,
-}).annotate({ identifier: "BreakdownItem", title: "Breakdown item" })
-export const V2StructuredQueryResult = Schema.Struct({
-	object: Schema.Literal("query_result"),
-	kind: Schema.Literals(["timeseries", "breakdown"]),
-	source: Schema.Literals(["traces", "logs", "metrics"]),
-	timeseries: Schema.Array(V2TimeseriesPoint),
-	breakdown: Schema.Array(V2BreakdownItem),
-}).annotate({
-	identifier: "StructuredQueryResult",
-	title: "Structured query result",
-})
-export type V2StructuredQueryResult = Schema.Schema.Type<typeof V2StructuredQueryResult>
-
 const MetricList = ListOf(V2Metric).annotate({
 	identifier: "MetricList",
 	title: "Metric list",
@@ -367,13 +763,26 @@ export class V2MetricsApiGroup extends HttpApiGroup.make("metrics")
 	.add(
 		HttpApiEndpoint.post("timeseries", "/timeseries", {
 			payload: V2MetricsTimeseriesParams,
-			success: V2StructuredQueryResult,
+			success: V2MetricTimeseriesResult,
 			error: [...commonErrors],
 		}).annotateMerge(
 			OpenApi.annotations({
 				identifier: "queryMetricsTimeseries",
 				summary: "Query metric timeseries",
 				description: "Executes one typed metric timeseries query. Requires `metrics:read`.",
+			}),
+		),
+	)
+	.add(
+		HttpApiEndpoint.post("breakdown", "/breakdown", {
+			payload: V2MetricsBreakdownParams,
+			success: V2MetricBreakdownResult,
+			error: [...commonErrors],
+		}).annotateMerge(
+			OpenApi.annotations({
+				identifier: "queryMetricBreakdown",
+				summary: "Query metric breakdown",
+				description: "Aggregates one metric by a single dimension. Requires `metrics:read`.",
 			}),
 		),
 	)
@@ -509,133 +918,5 @@ export class V2ServiceMapApiGroup extends HttpApiGroup.make("serviceMap")
 		OpenApi.annotations({
 			title: "Service Map",
 			description: "Service-to-service topology.",
-		}),
-	) {}
-
-const TracesMetric = Schema.Literals([
-	"count",
-	"avg_duration",
-	"p50_duration",
-	"p95_duration",
-	"p99_duration",
-	"error_rate",
-	"apdex",
-])
-const TraceFilters = Schema.Struct({
-	service_name: Schema.optionalKey(ServiceName),
-	span_name: Schema.optionalKey(Schema.String),
-	root_spans_only: Schema.optionalKey(Schema.Boolean),
-	errors_only: Schema.optionalKey(Schema.Boolean),
-	environments: Schema.optionalKey(Schema.Array(Schema.String)),
-	namespaces: Schema.optionalKey(Schema.Array(Schema.String)),
-	min_duration_ms: Schema.optionalKey(NonNegativeFinite),
-	max_duration_ms: Schema.optionalKey(NonNegativeFinite),
-	group_by_attribute_keys: Schema.optionalKey(Schema.Array(Schema.String)),
-	attribute_filters: Schema.optionalKey(Schema.Array(V2AttributeFilter)),
-	resource_attribute_filters: Schema.optionalKey(Schema.Array(V2AttributeFilter)),
-})
-const LogFilters = Schema.Struct({
-	service_name: Schema.optionalKey(ServiceName),
-	severity: Schema.optionalKey(Schema.String),
-	trace_id: Schema.optionalKey(TraceId),
-	search: Schema.optionalKey(Schema.String),
-	environments: Schema.optionalKey(Schema.Array(Schema.String)),
-	namespaces: Schema.optionalKey(Schema.Array(Schema.String)),
-})
-const MetricsFiltersSchema = Schema.Struct(MetricsFilters)
-
-const V2TracesTimeseriesSpec = Schema.Struct({
-	kind: Schema.Literal("timeseries"),
-	source: Schema.Literal("traces"),
-	metric: TracesMetric,
-	group_by: Schema.optionalKey(
-		Schema.Array(
-			Schema.Literals(["service", "span_name", "status_code", "http_method", "attribute", "none"]),
-		),
-	),
-	filters: Schema.optionalKey(TraceFilters),
-	bucket_seconds: Schema.optionalKey(PositiveInteger),
-	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
-	apdex_threshold_ms: Schema.optionalKey(PositiveFinite),
-})
-const V2LogsTimeseriesSpec = Schema.Struct({
-	kind: Schema.Literal("timeseries"),
-	source: Schema.Literal("logs"),
-	metric: Schema.Literal("count"),
-	group_by: Schema.optionalKey(Schema.Array(Schema.Literals(["service", "severity", "none"]))),
-	filters: Schema.optionalKey(LogFilters),
-	bucket_seconds: Schema.optionalKey(PositiveInteger),
-	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
-})
-const V2MetricsTimeseriesSpec = Schema.Struct({
-	kind: Schema.Literal("timeseries"),
-	source: Schema.Literal("metrics"),
-	metric: MetricsMetric,
-	group_by: Schema.optionalKey(
-		Schema.Array(Schema.Literals(["service", "attribute", "resource_attribute", "none"])),
-	),
-	filters: MetricsFiltersSchema,
-	bucket_seconds: Schema.optionalKey(PositiveInteger),
-	series_limit: Schema.optionalKey(TimeseriesSeriesLimit),
-})
-const V2TracesBreakdownSpec = Schema.Struct({
-	kind: Schema.Literal("breakdown"),
-	source: Schema.Literal("traces"),
-	metric: TracesMetric,
-	group_by: Schema.Literals(["service", "span_name", "status_code", "http_method", "attribute"]),
-	filters: Schema.optionalKey(TraceFilters),
-	limit: Schema.optionalKey(BreakdownLimit),
-	apdex_threshold_ms: Schema.optionalKey(PositiveFinite),
-})
-const V2LogsBreakdownSpec = Schema.Struct({
-	kind: Schema.Literal("breakdown"),
-	source: Schema.Literal("logs"),
-	metric: Schema.Literal("count"),
-	group_by: Schema.Literals(["service", "severity"]),
-	filters: Schema.optionalKey(LogFilters),
-	limit: Schema.optionalKey(BreakdownLimit),
-})
-const V2MetricsBreakdownSpec = Schema.Struct({
-	kind: Schema.Literal("breakdown"),
-	source: Schema.Literal("metrics"),
-	metric: Schema.Literals(["avg", "sum", "count"]),
-	group_by: Schema.Literals(["service", "attribute", "resource_attribute"]),
-	filters: MetricsFiltersSchema,
-	limit: Schema.optionalKey(BreakdownLimit),
-})
-export const V2QuerySpec = Schema.Union([
-	V2TracesTimeseriesSpec,
-	V2LogsTimeseriesSpec,
-	V2MetricsTimeseriesSpec,
-	V2TracesBreakdownSpec,
-	V2LogsBreakdownSpec,
-	V2MetricsBreakdownSpec,
-]).annotate({ identifier: "QuerySpec", title: "Query specification" })
-export type V2QuerySpec = Schema.Schema.Type<typeof V2QuerySpec>
-export const V2QueryParams = Schema.Struct({
-	...RequiredTimeRange,
-	query: V2QuerySpec,
-}).annotate({ identifier: "QueryParams", title: "Query parameters" })
-export class V2QueryApiGroup extends HttpApiGroup.make("query")
-	.add(
-		HttpApiEndpoint.post("execute", "/", {
-			payload: V2QueryParams,
-			success: V2StructuredQueryResult,
-			error: [...commonErrors],
-		}).annotateMerge(
-			OpenApi.annotations({
-				identifier: "executeQuery",
-				summary: "Execute a telemetry query",
-				description: "Executes a typed telemetry query. Requires `query:read`.",
-			}),
-		),
-	)
-	.prefix("/v2/query")
-	.middleware(AuthorizationV2)
-	.middleware(V2SchemaErrors)
-	.annotateMerge(
-		OpenApi.annotations({
-			title: "Query",
-			description: "Structured telemetry query execution.",
 		}),
 	) {}

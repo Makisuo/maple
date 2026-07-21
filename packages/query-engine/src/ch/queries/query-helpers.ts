@@ -93,6 +93,7 @@ interface TracesMatchModes {
 export interface TracesBaseWhereOpts {
 	serviceName?: string
 	spanName?: string
+	statusCode?: "Ok" | "Error" | "Unset"
 	rootOnly?: boolean
 	errorsOnly?: boolean
 	environments?: readonly string[]
@@ -175,6 +176,7 @@ export function tracesBaseWhereConditions(
 						.or(CH.positionCaseInsensitive(display, CH.lit(v)).gt(0))
 				: $.SpanName.eq(v).or(display.eq(v))
 		}),
+		CH.when(opts.statusCode, (v: string) => $.StatusCode.eq(v)),
 		CH.whenTrue(!!opts.rootOnly, () => $.SpanKind.in_("Server", "Consumer").or($.ParentSpanId.eq(""))),
 		errorsOnlyCondition($.StatusCode, opts.errorsOnly),
 	]

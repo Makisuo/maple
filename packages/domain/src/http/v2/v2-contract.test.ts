@@ -18,7 +18,12 @@ import {
 } from "./envelopes"
 import { notFound, permissionError, rateLimited, V2NotFoundError, V2RateLimitError } from "./errors"
 import { encodePublicId } from "./public-id"
-import { LogPublicId, V2QueryParams } from "./telemetry"
+import {
+	LogPublicId,
+	V2AttributeFilter,
+	V2MetricsTimeseriesParams,
+	V2TraceTimeseriesParams,
+} from "./telemetry"
 
 const UUID = "0f8fad5b-d9cb-469f-a165-70867728950e"
 
@@ -442,9 +447,13 @@ describe("scopes", () => {
 		})
 		for (const [path, family] of [
 			["/v2/traces/search", "traces"],
+			["/v2/traces/timeseries", "traces"],
+			["/v2/traces/breakdown", "traces"],
 			["/v2/logs/search", "logs"],
+			["/v2/logs/timeseries", "logs"],
+			["/v2/logs/breakdown", "logs"],
 			["/v2/metrics/timeseries", "metrics"],
-			["/v2/query", "query"],
+			["/v2/metrics/breakdown", "metrics"],
 		] as const) {
 			expect(requiredScopeForRequest("POST", path)).toEqual({ family, access: "read" })
 		}
@@ -486,41 +495,60 @@ describe("telemetry contracts", () => {
 		expect(Schema.decodeSync(LogPublicId)(wire)).toBe(internal)
 	})
 
-	it("decodes structured queries with trace attribute grouping", () => {
-		const structured = Schema.decodeUnknownSync(V2QueryParams)({
+	it("decodes signal-scoped trace timeseries with attribute grouping", () => {
+		const request = Schema.decodeUnknownSync(V2TraceTimeseriesParams)({
 			start_time: "2026-07-15T00:00:00.000Z",
 			end_time: "2026-07-15T01:00:00.000Z",
-			query: {
-				kind: "timeseries",
-				source: "traces",
-				metric: "count",
-				group_by: ["attribute"],
-				filters: { group_by_attribute_keys: ["http.route"] },
-			},
+			aggregation: "count",
+			group_by: "attribute",
+			group_by_attribute_key: "http.route",
 		})
-		expect(structured.query.kind).toBe("timeseries")
+		expect(request.group_by).toBe("attribute")
 	})
 
-	it("rejects raw SQL and invalid query budgets at the HTTP boundary", () => {
+	it("rejects invalid filters, grouping, metric compatibility, and budgets", () => {
 		const base = {
 			start_time: "2026-07-15T00:00:00.000Z",
 			end_time: "2026-07-15T01:00:00.000Z",
 		}
 		expect(() =>
-			Schema.decodeUnknownSync(V2QueryParams)({
+			Schema.decodeUnknownSync(V2TraceTimeseriesParams)({
 				...base,
-				query: { kind: "raw_sql", sql: "SELECT 1 WHERE $__orgFilter" },
+				aggregation: "count",
+				group_by: "attribute",
 			}),
 		).toThrow()
 		expect(() =>
-			Schema.decodeUnknownSync(V2QueryParams)({
+			Schema.decodeUnknownSync(V2TraceTimeseriesParams)({
 				...base,
-				query: {
-					kind: "timeseries",
-					source: "logs",
-					metric: "count",
-					bucket_seconds: 0,
+				aggregation: "count",
+				bucket_seconds: 0,
+			}),
+		).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(V2MetricsTimeseriesParams)({
+				...base,
+				aggregation: "rate",
+				filters: { metric_name: "requests", metric_type: "gauge" },
+			}),
+		).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(V2TraceTimeseriesParams)({
+				...base,
+				aggregation: "count",
+				filters: {
+					attributes: Array.from({ length: 21 }, (_, index) => ({
+						key: `key.${index}`,
+						operator: "exists",
+					})),
 				},
+			}),
+		).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(V2AttributeFilter)({
+				key: "http.status_code",
+				operator: "exists",
+				value: "500",
 			}),
 		).toThrow()
 	})

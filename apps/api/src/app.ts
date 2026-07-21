@@ -27,7 +27,6 @@ import { HttpV2SessionReplaysLive } from "./routes/v2/session-replays.http"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
-	HttpV2QueryLive,
 	HttpV2ServiceMapLive,
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
@@ -322,7 +321,6 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2MetricsLive,
 			HttpV2ServicesLive,
 			HttpV2ServiceMapLive,
-			HttpV2QueryLive,
 		),
 	),
 	Layer.provide(V2SchemaErrorsLive),

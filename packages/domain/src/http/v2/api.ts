@@ -16,7 +16,6 @@ import { V2SessionReplaysApiGroup } from "./session-replays"
 import {
 	V2LogsApiGroup,
 	V2MetricsApiGroup,
-	V2QueryApiGroup,
 	V2ServiceMapApiGroup,
 	V2ServicesApiGroup,
 	V2TracesApiGroup,
@@ -79,7 +78,6 @@ export class MapleApiV2 extends HttpApi.make("MapleApiV2")
 	.add(V2MetricsApiGroup)
 	.add(V2ServicesApiGroup)
 	.add(V2ServiceMapApiGroup)
-	.add(V2QueryApiGroup)
 	.middleware(V2UnexpectedErrors)
 	.annotateMerge(
 		OpenApi.annotations({

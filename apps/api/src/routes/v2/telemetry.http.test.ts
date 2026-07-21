@@ -25,6 +25,7 @@ const TRACE_ID = "7f3a4b5c6d7e8f901234567890abcdef"
 const SPAN_ID = "0123456789abcdef"
 const START = "2026-07-15T12:00:00.000Z"
 const END = "2026-07-15T13:00:00.000Z"
+const allowedWindow = () => ({ start_time: START, end_time: END })
 const windowQuery = `start_time=${encodeURIComponent(START)}&end_time=${encodeURIComponent(END)}`
 
 const createdDbs: TestDb[] = []
@@ -184,16 +185,28 @@ const warehouseStub: WarehouseQueryServiceShape = {
 }
 
 const queryEngineStub = {
-	execute: () =>
-		Effect.succeed(
+	execute: (_tenant, request) => {
+		if (request.query.kind === "breakdown") {
+			return Effect.succeed(
+				new QueryEngineExecuteResponse({
+					result: {
+						kind: "breakdown",
+						source: request.query.source,
+						data: [{ name: "api", value: 42 }],
+					},
+				}),
+			)
+		}
+		return Effect.succeed(
 			new QueryEngineExecuteResponse({
 				result: {
 					kind: "timeseries",
-					source: "metrics",
+					source: request.query.source,
 					data: [{ bucket: "2026-07-15 12:00:00", series: { all: 42 } }],
 				},
 			}),
-		),
+		)
+	},
 	evaluate: () => Effect.die(new Error("not used")),
 	evaluateRawSql: () => Effect.die(new Error("not used")),
 	evaluateSeries: () => Effect.die(new Error("not used")),
@@ -262,14 +275,29 @@ const makeHarness = (
 }
 
 describe("v2 telemetry reads over HTTP", () => {
-	it("serves all trace, log, metric, service, service-map, and query reads", async () => {
+	it("serves trace, log, metric, service, and service-map reads", async () => {
 		const harness = makeHarness()
 		const key = await harness.bootstrapKey()
 		const bounds = { start_time: START, end_time: END }
 
 		const traces = await harness.request("POST", "/v2/traces/search", key.secret, bounds)
 		expect(traces.status).toBe(200)
-		expect(traces.body.data[0]).toMatchObject({ object: "trace", id: TRACE_ID, has_error: true })
+		expect(traces.body.data[0]).toMatchObject({
+			object: "trace",
+			id: TRACE_ID,
+			root_has_error: true,
+		})
+		const traceSeries = await harness.request("POST", "/v2/traces/timeseries", key.secret, {
+			...bounds,
+			aggregation: "count",
+		})
+		expect(traceSeries.body).toMatchObject({ object: "trace_timeseries", aggregation: "count" })
+		const traceBreakdown = await harness.request("POST", "/v2/traces/breakdown", key.secret, {
+			...bounds,
+			aggregation: "count",
+			group_by: "service",
+		})
+		expect(traceBreakdown.body.data[0]).toEqual({ name: "api", value: 42 })
 
 		const trace = await harness.request("GET", `/v2/traces/${TRACE_ID}`, key.secret)
 		expect(trace.status).toBe(200)
@@ -286,6 +314,17 @@ describe("v2 telemetry reads over HTTP", () => {
 		const log = await harness.request("GET", `/v2/logs/${logs.body.data[0].id}`, key.secret)
 		expect(log.status).toBe(200)
 		expect(log.body.trace_id).toBe(TRACE_ID)
+		const logSeries = await harness.request("POST", "/v2/logs/timeseries", key.secret, {
+			...bounds,
+			aggregation: "count",
+		})
+		expect(logSeries.body.object).toBe("log_timeseries")
+		const logBreakdown = await harness.request("POST", "/v2/logs/breakdown", key.secret, {
+			...bounds,
+			aggregation: "count",
+			group_by: "service",
+		})
+		expect(logBreakdown.body.object).toBe("log_breakdown")
 
 		const metrics = await harness.request("GET", `/v2/metrics?${windowQuery}`, key.secret)
 		expect(metrics.status).toBe(200)
@@ -293,12 +332,21 @@ describe("v2 telemetry reads over HTTP", () => {
 
 		const metricSeries = await harness.request("POST", "/v2/metrics/timeseries", key.secret, {
 			...bounds,
-			metric: "avg",
-			metric_name: "http.server.duration",
-			metric_type: "histogram",
+			aggregation: "avg",
+			filters: { metric_name: "http.server.duration", metric_type: "histogram" },
 		})
 		expect(metricSeries.status).toBe(200)
-		expect(metricSeries.body.timeseries[0].series.all).toBe(42)
+		expect(metricSeries.body.series[0]).toEqual({
+			group: null,
+			points: [{ timestamp: START, value: 42 }],
+		})
+		const metricBreakdown = await harness.request("POST", "/v2/metrics/breakdown", key.secret, {
+			...bounds,
+			aggregation: "avg",
+			group_by: "service",
+			filters: { metric_name: "http.server.duration", metric_type: "histogram" },
+		})
+		expect(metricBreakdown.body.object).toBe("metric_breakdown")
 
 		const services = await harness.request("GET", `/v2/services?${windowQuery}`, key.secret)
 		expect(services.status).toBe(200)
@@ -309,17 +357,6 @@ describe("v2 telemetry reads over HTTP", () => {
 		const serviceMap = await harness.request("GET", `/v2/service_map?${windowQuery}`, key.secret)
 		expect(serviceMap.status).toBe(200)
 		expect(serviceMap.body.edges[0]).toMatchObject({ source_service: "api", target_service: "payments" })
-
-		const structured = await harness.request("POST", "/v2/query", key.secret, {
-			...bounds,
-			query: {
-				kind: "timeseries",
-				source: "metrics",
-				metric: "avg",
-				filters: { metric_name: "http.server.duration", metric_type: "histogram" },
-			},
-		})
-		expect(structured.status).toBe(200)
 
 		await harness.dispose()
 	})
@@ -332,11 +369,47 @@ describe("v2 telemetry reads over HTTP", () => {
 			end_time: END,
 		})
 		expect(allowed.status).toBe(200)
+		for (const [path, body] of [
+			["/v2/traces/timeseries", { ...allowedWindow(), aggregation: "count" }],
+			["/v2/traces/breakdown", { ...allowedWindow(), aggregation: "count", group_by: "service" }],
+		] as const) {
+			expect((await harness.request("POST", path, tracesKey.secret, body)).status).toBe(200)
+		}
 		const denied = await harness.request("POST", "/v2/logs/search", tracesKey.secret, {
 			start_time: START,
 			end_time: END,
 		})
 		expect(denied.status).toBe(403)
+		const logsKey = await harness.bootstrapKey(["logs:read"])
+		for (const [path, body] of [
+			["/v2/logs/search", allowedWindow()],
+			["/v2/logs/timeseries", { ...allowedWindow(), aggregation: "count" }],
+			["/v2/logs/breakdown", { ...allowedWindow(), aggregation: "count", group_by: "service" }],
+		] as const) {
+			expect((await harness.request("POST", path, logsKey.secret, body)).status).toBe(200)
+		}
+		const metricsKey = await harness.bootstrapKey(["metrics:read"])
+		for (const [path, body] of [
+			[
+				"/v2/metrics/timeseries",
+				{
+					...allowedWindow(),
+					aggregation: "avg",
+					filters: { metric_name: "http.server.duration", metric_type: "histogram" },
+				},
+			],
+			[
+				"/v2/metrics/breakdown",
+				{
+					...allowedWindow(),
+					aggregation: "avg",
+					group_by: "service",
+					filters: { metric_name: "http.server.duration", metric_type: "histogram" },
+				},
+			],
+		] as const) {
+			expect((await harness.request("POST", path, metricsKey.secret, body)).status).toBe(200)
+		}
 		const missingWindow = await harness.request("POST", "/v2/traces/search", tracesKey.secret, {})
 		expect(missingWindow.status).toBe(400)
 		const firstPage = await harness.request("POST", "/v2/traces/search", tracesKey.secret, {
@@ -367,12 +440,12 @@ describe("v2 telemetry reads over HTTP", () => {
 		const rootKey = await harness.bootstrapKey()
 		const malformedLog = await harness.request("GET", "/v2/logs/log_bad", rootKey.secret)
 		expect(malformedLog.status).toBe(400)
-		const rawSql = await harness.request("POST", "/v2/query", rootKey.secret, {
+		const removedQuery = await harness.request("POST", "/v2/query", rootKey.secret, {
 			start_time: START,
 			end_time: END,
 			query: { kind: "raw_sql", sql: "SELECT * FROM traces WHERE $__orgFilter" },
 		})
-		expect(rawSql.status).toBe(400)
+		expect(removedQuery.status).toBe(404)
 		await harness.dispose()
 	})
 
@@ -412,45 +485,129 @@ describe("v2 telemetry reads over HTTP", () => {
 		await harness.dispose()
 	})
 
+	it("enforces signal query windows, bucket budgets, and breakdown narrowing", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["traces:read"])
+		const searchTooWide = await harness.request("POST", "/v2/traces/search", key.secret, {
+			start_time: "2026-07-01T00:00:00.000Z",
+			end_time: "2026-07-09T00:00:00.000Z",
+		})
+		expect(searchTooWide.body.error.code).toBe("time_range_too_large")
+
+		const timeseriesTooWide = await harness.request("POST", "/v2/traces/timeseries", key.secret, {
+			start_time: "2026-06-01T00:00:00.000Z",
+			end_time: "2026-07-03T00:00:00.000Z",
+			aggregation: "count",
+		})
+		expect(timeseriesTooWide.body.error.code).toBe("time_range_too_large")
+		const tooManyBuckets = await harness.request("POST", "/v2/traces/timeseries", key.secret, {
+			...allowedWindow(),
+			aggregation: "count",
+			bucket_seconds: 1,
+		})
+		expect(tooManyBuckets.body.error).toMatchObject({
+			code: "bucket_count_too_large",
+			param: "bucket_seconds",
+		})
+
+		const wideBreakdown = {
+			start_time: "2026-07-01T00:00:00.000Z",
+			end_time: "2026-07-02T01:00:00.000Z",
+			aggregation: "count",
+			group_by: "service",
+		}
+		const unfiltered = await harness.request("POST", "/v2/traces/breakdown", key.secret, wideBreakdown)
+		expect(unfiltered.body.error).toMatchObject({
+			code: "breakdown_filter_required",
+			param: "filters",
+		})
+		const filtered = await harness.request("POST", "/v2/traces/breakdown", key.secret, {
+			...wideBreakdown,
+			filters: { service_name: "api" },
+		})
+		expect(filtered.status).toBe(200)
+		const breakdownTooWide = await harness.request("POST", "/v2/traces/breakdown", key.secret, {
+			...wideBreakdown,
+			start_time: "2026-06-01T00:00:00.000Z",
+			end_time: "2026-07-02T00:00:00.000Z",
+			filters: { service_name: "api" },
+		})
+		expect(breakdownTooWide.body.error.code).toBe("time_range_too_large")
+		await harness.dispose()
+	})
+
 	it("maps public trace attribute grouping onto the validated internal query", async () => {
 		let observedRequest: QueryEngineExecuteRequest | undefined
 		const queryEngine: QueryEngineServiceShape = {
 			...queryEngineStub,
-			execute: (_tenant, request) => {
+			execute: (tenant, request) => {
 				observedRequest = request
-				return queryEngineStub.execute()
+				return queryEngineStub.execute(tenant, request)
 			},
 		}
 		const harness = makeHarness(warehouseStub, queryEngine)
 		const key = await harness.bootstrapKey()
-		const response = await harness.request("POST", "/v2/query", key.secret, {
+		const response = await harness.request("POST", "/v2/traces/timeseries", key.secret, {
 			start_time: START,
 			end_time: END,
-			query: {
-				kind: "timeseries",
-				source: "traces",
-				metric: "count",
-				group_by: ["attribute"],
-				filters: { group_by_attribute_keys: ["http.route"] },
-			},
+			aggregation: "count",
+			group_by: "attribute",
+			group_by_attribute_key: "http.route",
 		})
 		expect(response.status).toBe(200)
 		expect(observedRequest?.query).toMatchObject({
 			seriesLimit: 50,
 			filters: { groupByAttributeKeys: ["http.route"] },
 		})
-		const excessiveLimit = await harness.request("POST", "/v2/query", key.secret, {
+		const excessiveLimit = await harness.request("POST", "/v2/traces/timeseries", key.secret, {
 			start_time: START,
 			end_time: END,
-			query: {
-				kind: "timeseries",
-				source: "traces",
-				metric: "count",
-				group_by: ["service"],
-				series_limit: 101,
-			},
+			aggregation: "count",
+			group_by: "service",
+			series_limit: 101,
 		})
 		expect(excessiveLimit.status).toBe(400)
+		await harness.dispose()
+	})
+
+	it("coerces BYO-ClickHouse numeric strings before encoding aggregation responses", async () => {
+		const queryEngine: QueryEngineServiceShape = {
+			...queryEngineStub,
+			execute: (_tenant, request) =>
+				Effect.succeed(
+					(request.query.kind === "breakdown"
+						? {
+								result: {
+									kind: "breakdown",
+									source: "metrics",
+									data: [{ name: "api", value: "42" }],
+								},
+							}
+						: {
+								result: {
+									kind: "timeseries",
+									source: "metrics",
+									data: [{ bucket: "2026-07-15 12:00:00", series: { all: "42" } }],
+								},
+							}) as unknown as QueryEngineExecuteResponse,
+				),
+		}
+		const harness = makeHarness(warehouseStub, queryEngine)
+		const key = await harness.bootstrapKey(["metrics:read"])
+		const filters = { metric_name: "http.server.duration", metric_type: "histogram" }
+		const timeseries = await harness.request("POST", "/v2/metrics/timeseries", key.secret, {
+			...allowedWindow(),
+			aggregation: "avg",
+			filters,
+		})
+		expect(timeseries.body.series[0].points[0].value).toBe(42)
+		const breakdown = await harness.request("POST", "/v2/metrics/breakdown", key.secret, {
+			...allowedWindow(),
+			aggregation: "avg",
+			group_by: "service",
+			filters,
+		})
+		expect(breakdown.body.data[0].value).toBe(42)
 		await harness.dispose()
 	})
 
@@ -468,7 +625,7 @@ describe("v2 telemetry reads over HTTP", () => {
 		const response = await harness.request("POST", "/v2/logs/search", key.secret, {
 			start_time: START,
 			end_time: END,
-			search: "checkout failed",
+			filters: { body_search: "checkout failed" },
 		})
 		expect(response.status).toBe(200)
 		expect(observedOptions?.settings).toMatchObject({ maxBlockSize: 512 })

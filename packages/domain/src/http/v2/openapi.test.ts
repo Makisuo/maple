@@ -128,14 +128,18 @@ describe("MapleApiV2 OpenAPI", () => {
 			"POST /v2/instrumentation/recommendations/{id}/reopen",
 			"POST /v2/investigations",
 			"POST /v2/investigations/{id}/status",
+			"POST /v2/logs/breakdown",
 			"POST /v2/logs/search",
+			"POST /v2/logs/timeseries",
+			"POST /v2/metrics/breakdown",
 			"POST /v2/metrics/timeseries",
-			"POST /v2/query",
 			"POST /v2/scrape_targets",
 			"POST /v2/scrape_targets/{id}/probe",
 			"POST /v2/session_replays/for_trace",
 			"POST /v2/session_replays/search",
+			"POST /v2/traces/breakdown",
 			"POST /v2/traces/search",
+			"POST /v2/traces/timeseries",
 			"PUT /v2/anomalies/incidents/{id}/issue",
 		])
 	})
@@ -213,6 +217,25 @@ describe("MapleApiV2 OpenAPI", () => {
 		)
 		// No internal / v2-prefixed / namespaced identifiers leaked into the public spec.
 		expect(names.some((n) => n.startsWith("V2") || n.includes("@maple") || n.includes("/"))).toBe(false)
+	})
+
+	it("freezes the signal-scoped telemetry operations, examples, and result schemas", () => {
+		expect(spec.paths?.["/v2/query"]).toBeUndefined()
+		for (const [path, operationId, resultSchema] of [
+			["/v2/traces/timeseries", "queryTraceTimeseries", "TraceTimeseriesResult"],
+			["/v2/traces/breakdown", "queryTraceBreakdown", "TraceBreakdownResult"],
+			["/v2/logs/timeseries", "queryLogTimeseries", "LogTimeseriesResult"],
+			["/v2/logs/breakdown", "queryLogBreakdown", "LogBreakdownResult"],
+			["/v2/metrics/timeseries", "queryMetricsTimeseries", "MetricTimeseriesResult"],
+			["/v2/metrics/breakdown", "queryMetricBreakdown", "MetricBreakdownResult"],
+		] as const) {
+			const op = operation("post", path)
+			expect(op.operationId).toBe(operationId)
+			expect(op.responses["200"].content["application/json"].schema.$ref).toBe(
+				`#/components/schemas/${resultSchema}`,
+			)
+			expect(schemas[resultSchema].examples).toHaveLength(1)
+		}
 	})
 
 	it("documents the ApiKey schema with a title, description, and a decodable example", () => {

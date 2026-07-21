@@ -13,12 +13,11 @@ import {
 	type V2Service,
 	type V2ServiceMapEdge,
 	type V2Span,
-	type V2StructuredQueryResult,
 	type V2TraceSummary,
 } from "@maple/domain/http/v2"
 import { CH, QueryEngineExecuteRequest } from "@maple/query-engine"
 import { LOGS_BODY_SEARCH_SETTINGS } from "@maple/query-engine/profiles"
-import { MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine/runtime"
+import { computeBucketSeconds, MAX_QUERY_RANGE_SECONDS } from "@maple/query-engine/runtime"
 import { Effect, Encoding, Option, Result, Schema } from "effect"
 import { WarehouseQueryService } from "../../lib/WarehouseQueryService"
 import { QueryEngineService } from "../../services/QueryEngineService"
@@ -55,6 +54,11 @@ const serviceCatalogRowSchema = Schema.Struct({
 
 const PARTITION_HINT_RADIUS_MS = 60 * 60 * 1000
 const PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT = 50
+const PUBLIC_BREAKDOWN_DEFAULT_LIMIT = 20
+const MAX_SEARCH_RANGE_SECONDS = 60 * 60 * 24 * 7
+const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
+const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
+const MAX_TIMESERIES_BUCKETS = 1_500
 
 const mapWarehouseError = (operation: string) => () => dependencyUnavailable(`${operation}_unavailable`)
 
@@ -65,7 +69,11 @@ const toWarehouseDateTime = (value: string, param: string) => {
 		: Effect.succeed(new Date(ms).toISOString().replace("T", " ").replace(/Z$/, ""))
 }
 
-const parseWindow = (start: string, end: string) =>
+const parseWindow = (
+	start: string,
+	end: string,
+	options: { readonly maxSeconds?: number; readonly rangeLabel?: string } = {},
+) =>
 	Effect.gen(function* () {
 		const startMs = Date.parse(start)
 		const endMs = Date.parse(end)
@@ -75,11 +83,12 @@ const parseWindow = (start: string, end: string) =>
 			)
 		}
 		const rangeSeconds = (endMs - startMs) / 1000
-		if (rangeSeconds > MAX_QUERY_RANGE_SECONDS) {
+		const maxSeconds = options.maxSeconds ?? MAX_QUERY_RANGE_SECONDS
+		if (rangeSeconds > maxSeconds) {
 			return yield* Effect.fail(
 				invalidRequest(
 					"time_range_too_large",
-					"Telemetry queries support a maximum time range of 31 days.",
+					`${options.rangeLabel ?? "Telemetry queries"} support a maximum time range of ${Math.floor(maxSeconds / 86_400)} days.`,
 					"start_time",
 				),
 			)
@@ -246,8 +255,8 @@ const toTraceSummary = (row: {
 	root_span_name: row.rootSpanName,
 	root_span_kind: row.rootSpanKind,
 	root_service_name: row.rootServiceName,
-	status_code: row.statusCode,
-	has_error: Number(row.hasError) !== 0,
+	root_status_code: row.statusCode,
+	root_has_error: Number(row.hasError) !== 0,
 	deployment_environment: row.deploymentEnvironment || null,
 	service_namespace: row.serviceNamespace || null,
 	http_method: row.httpMethod || null,
@@ -288,93 +297,146 @@ const attributeFilters = (
 	filters:
 		| ReadonlyArray<{
 				key: string
-				value?: string
-				mode: string
+				value?: string | number
+				operator: "equals" | "exists" | "gt" | "gte" | "lt" | "lte" | "contains"
 				negated?: boolean
 		  }>
 		| undefined,
 ) =>
 	filters?.map((filter) => ({
 		key: filter.key,
-		...(filter.value !== undefined ? { value: filter.value } : {}),
-		mode: filter.mode,
+		...(filter.value !== undefined ? { value: String(filter.value) } : {}),
+		mode: filter.operator,
 		...(filter.negated !== undefined ? { negated: filter.negated } : {}),
 	}))
 
-const toInternalQuery = (query: Record<string, any>): Record<string, any> => {
-	const mapped: Record<string, any> = {
-		kind: query.kind,
-		source: query.source,
-		metric: query.metric,
-		groupBy: query.group_by,
-		bucketSeconds: query.bucket_seconds,
-		seriesLimit:
-			query.kind === "timeseries"
-				? (query.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT)
-				: undefined,
-		limit: query.limit,
-		apdexThresholdMs: query.apdex_threshold_ms,
+const traceFilters = (filters: Record<string, any> | undefined, groupByAttributeKey?: string) => {
+	if (!filters && !groupByAttributeKey) return undefined
+	const httpFilters = [
+		...(filters?.http_method
+			? [{ key: "http.method", value: filters.http_method, mode: "equals" as const }]
+			: []),
+		...(filters?.http_route
+			? [{ key: "http.route", value: filters.http_route, mode: "equals" as const }]
+			: []),
+		...(filters?.http_status_code
+			? [{ key: "http.status_code", value: filters.http_status_code, mode: "equals" as const }]
+			: []),
+	]
+	return {
+		serviceName: filters?.service_name,
+		spanName: filters?.span_name,
+		statusCode: filters?.status_code,
+		rootSpansOnly: filters?.span_scope === "root" ? true : undefined,
+		errorsOnly: filters?.has_error,
+		environments: filters?.deployment_environment ? [filters.deployment_environment] : undefined,
+		namespaces: filters?.service_namespace ? [filters.service_namespace] : undefined,
+		minDurationMs: filters?.min_duration_ms,
+		maxDurationMs: filters?.max_duration_ms,
+		groupByAttributeKeys: groupByAttributeKey ? [groupByAttributeKey] : undefined,
+		attributeFilters: [...(attributeFilters(filters?.attributes) ?? []), ...httpFilters],
+		resourceAttributeFilters: attributeFilters(filters?.resource_attributes),
 	}
-	const filters = query.filters
-	if (filters) {
-		mapped.filters = {
-			serviceName: filters.service_name,
-			spanName: filters.span_name,
-			rootSpansOnly: filters.root_spans_only,
-			errorsOnly: filters.errors_only,
-			environments: filters.environments,
-			namespaces: filters.namespaces,
-			minDurationMs: filters.min_duration_ms,
-			maxDurationMs: filters.max_duration_ms,
-			severity: filters.severity,
-			traceId: filters.trace_id,
-			search: filters.search,
-			metricName: filters.metric_name,
-			metricType: filters.metric_type,
-			groupByAttributeKey: filters.group_by_attribute_key,
-			groupByAttributeKeys: filters.group_by_attribute_keys,
-			groupByResourceAttributeKey: filters.group_by_resource_attribute_key,
-			attributeFilters: attributeFilters(filters.attribute_filters),
-			resourceAttributeFilters: attributeFilters(filters.resource_attribute_filters),
-		}
-	}
-	return Object.fromEntries(Object.entries(mapped).filter(([, value]) => value !== undefined))
 }
 
-const structuredResult = (result: {
-	kind: "timeseries" | "breakdown"
-	source: "traces" | "logs" | "metrics"
-	data: ReadonlyArray<unknown>
-}): V2StructuredQueryResult => ({
-	object: "query_result",
-	kind: result.kind,
-	source: result.source,
-	timeseries:
-		result.kind === "timeseries"
-			? (result.data as ReadonlyArray<{ bucket: string; series: Record<string, number> }>).map(
-					(point) => ({ bucket: chToIso(point.bucket), series: point.series }),
-				)
-			: [],
-	breakdown: result.kind === "breakdown" ? (result.data as V2StructuredQueryResult["breakdown"]) : [],
+const logFilters = (filters: Record<string, any> | undefined) =>
+	filters
+		? {
+				serviceName: filters.service_name,
+				severity: filters.severity,
+				minSeverity: filters.minimum_severity,
+				traceId: filters.trace_id,
+				spanId: filters.span_id,
+				search: filters.body_search,
+				environments: filters.deployment_environment ? [filters.deployment_environment] : undefined,
+				namespaces: filters.service_namespace ? [filters.service_namespace] : undefined,
+				attributeFilters: attributeFilters(filters.attributes),
+				resourceAttributeFilters: attributeFilters(filters.resource_attributes),
+			}
+		: undefined
+
+const metricFilters = (
+	filters: Record<string, any>,
+	groupByAttributeKey?: string,
+	groupByResourceAttributeKey?: string,
+) => ({
+	metricName: filters.metric_name,
+	metricType: filters.metric_type,
+	serviceName: filters.service_name,
+	groupByAttributeKey,
+	groupByResourceAttributeKey,
 })
 
-const queryError = (error: unknown) => {
+const queryError = (signal: "trace" | "log" | "metric") => (error: unknown) => {
 	const tag = typeof error === "object" && error !== null && "_tag" in error ? String(error._tag) : ""
 	return tag.includes("Validation")
-		? invalidRequest("query_invalid", "The query specification is invalid.", "query")
-		: dependencyUnavailable("query_unavailable")
+		? invalidRequest(`${signal}_query_invalid`, "The aggregation request is invalid.", "aggregation")
+		: dependencyUnavailable(`${signal}_query_unavailable`)
 }
 
-const decodeQueryEngineRequest = (input: unknown) =>
+const decodeQueryEngineRequest = (input: unknown, signal: "trace" | "log" | "metric") =>
 	Schema.decodeUnknownEffect(QueryEngineExecuteRequest)(input).pipe(
 		Effect.mapError(() =>
-			invalidRequest("query_invalid", "The query specification is invalid.", "query"),
+			invalidRequest(`${signal}_query_invalid`, "The aggregation request is invalid.", "aggregation"),
 		),
 	)
+
+const validateTimeseriesBucket = (
+	startTime: string,
+	endTime: string,
+	rangeSeconds: number,
+	requestedBucketSeconds: number | undefined,
+) => {
+	const bucketSeconds =
+		requestedBucketSeconds ?? computeBucketSeconds(Date.parse(startTime), Date.parse(endTime))
+	return Math.floor(rangeSeconds / bucketSeconds) + 1 > MAX_TIMESERIES_BUCKETS
+		? Effect.fail(
+				invalidRequest(
+					"bucket_count_too_large",
+					"bucket_seconds produces more than 1,500 buckets.",
+					"bucket_seconds",
+				),
+			)
+		: Effect.succeed(bucketSeconds)
+}
+
+const validateBreakdownRange = (rangeSeconds: number, filters: unknown) => {
+	if (rangeSeconds <= MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS) return Effect.void
+	if (
+		filters &&
+		typeof filters === "object" &&
+		Object.values(filters).some((value) =>
+			Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null,
+		)
+	) {
+		return Effect.void
+	}
+	return Effect.fail(
+		invalidRequest(
+			"breakdown_filter_required",
+			"Breakdowns over 24 hours require at least one narrowing filter.",
+			"filters",
+		),
+	)
+}
+
+const pivotTimeseries = (
+	data: ReadonlyArray<{ readonly bucket: string; readonly series: Readonly<Record<string, number>> }>,
+	grouped: boolean,
+) => {
+	const names = [...new Set(data.flatMap((point) => Object.keys(point.series)))].sort()
+	return names.map((name) => ({
+		group: grouped ? name : null,
+		points: data
+			.filter((point) => name in point.series)
+			.map((point) => ({ timestamp: chToIso(point.bucket), value: Number(point.series[name]) })),
+	}))
+}
 
 export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
+		const queryEngine = yield* QueryEngineService
 
 		const hierarchy = Effect.fn("HttpV2Traces.hierarchy")(function* (
 			tenant: CurrentTenant.TenantSchema,
@@ -398,20 +460,30 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 			.handle("search", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const window = yield* parseWindow(payload.start_time, payload.end_time)
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_SEARCH_RANGE_SECONDS,
+						rangeLabel: "Trace search",
+					})
 					const limit = payload.limit ?? 20
 					const cursorParts = yield* decodeKeysetCursor(payload.cursor, "trc", 2)
+					const filters = payload.filters
+					const internalFilters = traceFilters(filters)
 					const compiled = CH.compile(
 						CH.traceSummariesQuery({
-							serviceName: payload.service_name,
-							spanName: payload.span_name,
-							hasError: payload.has_error,
-							minDurationMs: payload.min_duration_ms,
-							maxDurationMs: payload.max_duration_ms,
-							httpMethod: payload.http_method,
-							httpStatusCode: payload.http_status_code,
-							deploymentEnv: payload.deployment_environment,
-							namespace: payload.service_namespace,
+							serviceName: filters?.service_name,
+							spanName: filters?.span_name,
+							statusCode: filters?.status_code,
+							hasError: filters?.has_error,
+							minDurationMs: filters?.min_duration_ms,
+							maxDurationMs: filters?.max_duration_ms,
+							httpMethod: filters?.http_method,
+							httpRoute: filters?.http_route,
+							httpStatusCode: filters?.http_status_code,
+							deploymentEnv: filters?.deployment_environment,
+							namespace: filters?.service_namespace,
+							spanScope: filters?.span_scope,
+							attributeFilters: internalFilters?.attributeFilters,
+							resourceAttributeFilters: internalFilters?.resourceAttributeFilters,
 							limit: limit + 1,
 							cursor: cursorParts
 								? { timestamp: cursorParts[0]!, traceId: cursorParts[1]! }
@@ -433,6 +505,102 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 							hasMore && last
 								? encodeKeysetCursor("trc", [last.startTime, last.traceId])
 								: null,
+					}
+				}),
+			)
+			.handle("timeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_QUERY_RANGE_SECONDS,
+						rangeLabel: "Trace timeseries",
+					})
+					const bucketSeconds = yield* validateTimeseriesBucket(
+						payload.start_time,
+						payload.end_time,
+						window.rangeSeconds,
+						payload.bucket_seconds,
+					)
+					const request = yield* decodeQueryEngineRequest(
+						{
+							startTime: window.startTime,
+							endTime: window.endTime,
+							query: {
+								kind: "timeseries",
+								source: "traces",
+								metric: payload.aggregation,
+								groupBy: payload.group_by ? [payload.group_by] : undefined,
+								bucketSeconds,
+								seriesLimit: payload.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT,
+								apdexThresholdMs:
+									payload.aggregation === "apdex"
+										? (payload.apdex_threshold_ms ?? 500)
+										: undefined,
+								filters: traceFilters(payload.filters, payload.group_by_attribute_key),
+							},
+						},
+						"trace",
+					)
+					const response = yield* queryEngine
+						.execute(tenant, request)
+						.pipe(Effect.mapError(queryError("trace")))
+					if (response.result.kind !== "timeseries") {
+						return yield* Effect.fail(dependencyUnavailable("trace_query_unavailable"))
+					}
+					return {
+						object: "trace_timeseries" as const,
+						aggregation: payload.aggregation,
+						start_time: timestamp(payload.start_time),
+						end_time: timestamp(payload.end_time),
+						bucket_seconds: bucketSeconds,
+						group_by: payload.group_by ?? null,
+						series: pivotTimeseries(response.result.data, payload.group_by !== undefined),
+					}
+				}),
+			)
+			.handle("breakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_BREAKDOWN_RANGE_SECONDS,
+						rangeLabel: "Trace breakdown",
+					})
+					yield* validateBreakdownRange(window.rangeSeconds, payload.filters)
+					const request = yield* decodeQueryEngineRequest(
+						{
+							startTime: window.startTime,
+							endTime: window.endTime,
+							query: {
+								kind: "breakdown",
+								source: "traces",
+								metric: payload.aggregation,
+								groupBy: payload.group_by,
+								limit: payload.limit ?? PUBLIC_BREAKDOWN_DEFAULT_LIMIT,
+								apdexThresholdMs:
+									payload.aggregation === "apdex"
+										? (payload.apdex_threshold_ms ?? 500)
+										: undefined,
+								filters: traceFilters(payload.filters, payload.group_by_attribute_key),
+							},
+						},
+						"trace",
+					)
+					const response = yield* queryEngine
+						.execute(tenant, request)
+						.pipe(Effect.mapError(queryError("trace")))
+					if (response.result.kind !== "breakdown") {
+						return yield* Effect.fail(dependencyUnavailable("trace_query_unavailable"))
+					}
+					return {
+						object: "trace_breakdown" as const,
+						aggregation: payload.aggregation,
+						start_time: timestamp(payload.start_time),
+						end_time: timestamp(payload.end_time),
+						group_by: payload.group_by,
+						data: response.result.data.map((item) => ({
+							name: item.name,
+							value: Number(item.value),
+						})),
 					}
 				}),
 			)
@@ -486,25 +654,22 @@ export const HttpV2TracesLive = HttpApiBuilder.group(MapleApiV2, "traces", (hand
 export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers) =>
 	Effect.gen(function* () {
 		const warehouse = yield* WarehouseQueryService
+		const queryEngine = yield* QueryEngineService
 		return handlers
 			.handle("search", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const window = yield* parseWindow(payload.start_time, payload.end_time)
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_SEARCH_RANGE_SECONDS,
+						rangeLabel: "Log search",
+					})
 					const limit = payload.limit ?? 20
 					const cursorParts = yield* decodeKeysetCursor(payload.cursor, "log", 5)
+					const filters = payload.filters
+					const internalFilters = logFilters(filters)
 					const compiled = CH.compile(
 						CH.logsListQuery({
-							serviceName: payload.service_name,
-							severity: payload.severity,
-							minSeverity: payload.min_severity,
-							traceId: payload.trace_id,
-							spanId: payload.span_id,
-							search: payload.search,
-							environments: payload.deployment_environment
-								? [payload.deployment_environment]
-								: undefined,
-							namespaces: payload.service_namespace ? [payload.service_namespace] : undefined,
+							...internalFilters,
 							limit: limit + 1,
 							cursorIdentity: cursorParts
 								? {
@@ -522,7 +687,7 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 						.compiledQuery(tenant, compiled, {
 							profile: "list",
 							context: "v2LogSearch",
-							settings: payload.search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
+							settings: filters?.body_search ? LOGS_BODY_SEARCH_SETTINGS : undefined,
 						})
 						.pipe(Effect.mapError(mapWarehouseError("log_search")))
 					const dataRows = rows.slice(0, limit)
@@ -542,6 +707,94 @@ export const HttpV2LogsLive = HttpApiBuilder.group(MapleApiV2, "logs", (handlers
 										last.recordIdentity,
 									])
 								: null,
+					}
+				}),
+			)
+			.handle("timeseries", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_QUERY_RANGE_SECONDS,
+						rangeLabel: "Log timeseries",
+					})
+					const bucketSeconds = yield* validateTimeseriesBucket(
+						payload.start_time,
+						payload.end_time,
+						window.rangeSeconds,
+						payload.bucket_seconds,
+					)
+					const request = yield* decodeQueryEngineRequest(
+						{
+							startTime: window.startTime,
+							endTime: window.endTime,
+							query: {
+								kind: "timeseries",
+								source: "logs",
+								metric: "count",
+								groupBy: payload.group_by ? [payload.group_by] : undefined,
+								bucketSeconds,
+								seriesLimit: payload.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT,
+								filters: logFilters(payload.filters),
+							},
+						},
+						"log",
+					)
+					const response = yield* queryEngine
+						.execute(tenant, request)
+						.pipe(Effect.mapError(queryError("log")))
+					if (response.result.kind !== "timeseries") {
+						return yield* Effect.fail(dependencyUnavailable("log_query_unavailable"))
+					}
+					return {
+						object: "log_timeseries" as const,
+						aggregation: "count" as const,
+						start_time: timestamp(payload.start_time),
+						end_time: timestamp(payload.end_time),
+						bucket_seconds: bucketSeconds,
+						group_by: payload.group_by ?? null,
+						series: pivotTimeseries(response.result.data, payload.group_by !== undefined),
+					}
+				}),
+			)
+			.handle("breakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_BREAKDOWN_RANGE_SECONDS,
+						rangeLabel: "Log breakdown",
+					})
+					yield* validateBreakdownRange(window.rangeSeconds, payload.filters)
+					const request = yield* decodeQueryEngineRequest(
+						{
+							startTime: window.startTime,
+							endTime: window.endTime,
+							query: {
+								kind: "breakdown",
+								source: "logs",
+								metric: "count",
+								groupBy: payload.group_by,
+								limit: payload.limit ?? PUBLIC_BREAKDOWN_DEFAULT_LIMIT,
+								filters: logFilters(payload.filters),
+							},
+						},
+						"log",
+					)
+					const response = yield* queryEngine
+						.execute(tenant, request)
+						.pipe(Effect.mapError(queryError("log")))
+					if (response.result.kind !== "breakdown") {
+						return yield* Effect.fail(dependencyUnavailable("log_query_unavailable"))
+					}
+					return {
+						object: "log_breakdown" as const,
+						aggregation: "count" as const,
+						start_time: timestamp(payload.start_time),
+						end_time: timestamp(payload.end_time),
+						group_by: payload.group_by,
+						data: response.result.data.map((item) => ({
+							name: item.name,
+							value: Number(item.value),
+						})),
 					}
 				}),
 			)
@@ -623,36 +876,97 @@ export const HttpV2MetricsLive = HttpApiBuilder.group(MapleApiV2, "metrics", (ha
 			.handle("timeseries", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const window = yield* parseWindow(payload.start_time, payload.end_time)
-					const request = yield* decodeQueryEngineRequest({
-						startTime: window.startTime,
-						endTime: window.endTime,
-						query: {
-							kind: "timeseries",
-							source: "metrics",
-							metric: payload.metric,
-							groupBy: payload.group_by,
-							bucketSeconds: payload.bucket_seconds,
-							seriesLimit: payload.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT,
-							filters: {
-								metricName: payload.metric_name,
-								metricType: payload.metric_type,
-								serviceName: payload.service_name,
-								groupByAttributeKey: payload.group_by_attribute_key,
-								groupByResourceAttributeKey: payload.group_by_resource_attribute_key,
-								attributeFilters: attributeFilters(payload.attribute_filters),
-								resourceAttributeFilters: attributeFilters(
-									payload.resource_attribute_filters,
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_QUERY_RANGE_SECONDS,
+						rangeLabel: "Metric timeseries",
+					})
+					const bucketSeconds = yield* validateTimeseriesBucket(
+						payload.start_time,
+						payload.end_time,
+						window.rangeSeconds,
+						payload.bucket_seconds,
+					)
+					const request = yield* decodeQueryEngineRequest(
+						{
+							startTime: window.startTime,
+							endTime: window.endTime,
+							query: {
+								kind: "timeseries",
+								source: "metrics",
+								metric: payload.aggregation,
+								groupBy: payload.group_by ? [payload.group_by] : undefined,
+								bucketSeconds,
+								seriesLimit: payload.series_limit ?? PUBLIC_TIMESERIES_DEFAULT_SERIES_LIMIT,
+								filters: metricFilters(
+									payload.filters,
+									payload.group_by_attribute_key,
+									payload.group_by_resource_attribute_key,
 								),
 							},
 						},
-					})
+						"metric",
+					)
 					const response = yield* queryEngine
 						.execute(tenant, request)
-						.pipe(Effect.mapError(queryError))
-					if (response.result.kind !== "timeseries")
+						.pipe(Effect.mapError(queryError("metric")))
+					if (response.result.kind !== "timeseries") {
 						return yield* Effect.fail(dependencyUnavailable("metric_query_unavailable"))
-					return structuredResult(response.result)
+					}
+					return {
+						object: "metric_timeseries" as const,
+						aggregation: payload.aggregation,
+						start_time: timestamp(payload.start_time),
+						end_time: timestamp(payload.end_time),
+						bucket_seconds: bucketSeconds,
+						group_by: payload.group_by ?? null,
+						series: pivotTimeseries(response.result.data, payload.group_by !== undefined),
+					}
+				}),
+			)
+			.handle("breakdown", ({ payload }) =>
+				Effect.gen(function* () {
+					const tenant = yield* CurrentTenant.Context
+					const window = yield* parseWindow(payload.start_time, payload.end_time, {
+						maxSeconds: MAX_BREAKDOWN_RANGE_SECONDS,
+						rangeLabel: "Metric breakdown",
+					})
+					yield* validateBreakdownRange(window.rangeSeconds, payload.filters)
+					const request = yield* decodeQueryEngineRequest(
+						{
+							startTime: window.startTime,
+							endTime: window.endTime,
+							query: {
+								kind: "breakdown",
+								source: "metrics",
+								metric: payload.aggregation,
+								groupBy: payload.group_by,
+								limit: payload.limit ?? PUBLIC_BREAKDOWN_DEFAULT_LIMIT,
+								filters: metricFilters(
+									payload.filters,
+									payload.group_by_attribute_key,
+									payload.group_by_resource_attribute_key,
+								),
+							},
+						},
+						"metric",
+					)
+					const response = yield* queryEngine
+						.execute(tenant, request)
+						.pipe(Effect.mapError(queryError("metric")))
+					if (response.result.kind !== "breakdown") {
+						return yield* Effect.fail(dependencyUnavailable("metric_query_unavailable"))
+					}
+					return {
+						object: "metric_breakdown" as const,
+						aggregation: payload.aggregation,
+						start_time: timestamp(payload.start_time),
+						end_time: timestamp(payload.end_time),
+						group_by: payload.group_by,
+						data: response.result.data.map((item) => ({
+							name: item.name,
+							value: Number(item.value),
+						})),
+					}
 				}),
 			)
 	}),
@@ -806,28 +1120,6 @@ export const HttpV2ServiceMapLive = HttpApiBuilder.group(MapleApiV2, "serviceMap
 					end_time: timestamp(query.end_time),
 					edges: rows.map(toMapEdge),
 				}
-			}),
-		)
-	}),
-)
-
-export const HttpV2QueryLive = HttpApiBuilder.group(MapleApiV2, "query", (handlers) =>
-	Effect.gen(function* () {
-		const queryEngine = yield* QueryEngineService
-		return handlers.handle("execute", ({ payload }) =>
-			Effect.gen(function* () {
-				const tenant = yield* CurrentTenant.Context
-				const window = yield* parseWindow(payload.start_time, payload.end_time)
-				const request = yield* decodeQueryEngineRequest({
-					startTime: window.startTime,
-					endTime: window.endTime,
-					query: toInternalQuery(payload.query),
-				})
-				const response = yield* queryEngine.execute(tenant, request).pipe(Effect.mapError(queryError))
-				if (response.result.kind !== "timeseries" && response.result.kind !== "breakdown") {
-					return yield* Effect.fail(dependencyUnavailable("query_unavailable"))
-				}
-				return structuredResult(response.result)
 			}),
 		)
 	}),

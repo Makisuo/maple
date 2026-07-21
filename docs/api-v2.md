@@ -128,42 +128,41 @@ Stripe-style `expand[]` is deliberately omitted: responses embed the small, alwa
 
 Implemented in phases; the pilot (`api_keys`) ships first and proves every convention.
 
-| Resource                             | Endpoints                                                                                          | Backing v1 group / service               |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                   | `apiKeys` / `ApiKeysService`             |
-| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                              | `ingestKeys`                             |
-| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import         | `dashboards`                             |
-| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                               | `alerts`                                 |
-| `alerts/destinations` ✅             | CRUD + `test`                                                                                      | `alerts`                                 |
-| `alerts/incidents` ✅                | list/retrieve                                                                                      | `alerts`                                 |
-| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred             | `errors`                                 |
-| `investigations` ✅                  | list/retrieve/create/status                                                                        | `investigations`                         |
-| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                           | `anomalies`                              |
-| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                              | `recommendationIssues`                   |
-| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                          | `scrapeTargets`                          |
-| `attribute_mappings` ✅              | CRUD                                                                                               | `ingestAttributeMappings`                |
-| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred)   | `sessionReplays`                         |
-| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred             | `organizations`, `orgClickHouseSettings` |
-| `traces` ✅                          | `POST /v2/traces/search`, `GET /v2/traces/{trace_id}`, `GET /v2/traces/{trace_id}/spans/{span_id}` | `queryEngine`, `observability`           |
-| `logs` ✅                            | `POST /v2/logs/search`, `GET /v2/logs/{id}`                                                        | `queryEngine`                            |
-| `metrics` ✅                         | `GET /v2/metrics`, `POST /v2/metrics/timeseries`                                                   | `queryEngine`                            |
-| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                      | `queryEngine`                            |
-| `service_map` ✅                     | `GET /v2/service_map`                                                                              | `queryEngine`                            |
-| `query` ✅                           | `POST /v2/query` — structured telemetry queries                                                    | `queryEngine`                            |
+| Resource                             | Endpoints                                                                                        | Backing v1 group / service               |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| `api_keys` ✅ pilot                  | list/create/retrieve/roll/revoke, `scopes` param                                                 | `apiKeys` / `ApiKeysService`             |
+| `ingest_keys` ✅                     | retrieve, `POST …/public/roll`, `POST …/private/roll`                                            | `ingestKeys`                             |
+| `dashboards` ✅                      | CRUD + `versions` (list/retrieve/restore) + `templates` (list/instantiate) + Perses import       | `dashboards`                             |
+| `alerts/rules` ✅                    | CRUD + `test` + `preview` + `checks`                                                             | `alerts`                                 |
+| `alerts/destinations` ✅             | CRUD + `test`                                                                                    | `alerts`                                 |
+| `alerts/incidents` ✅                | list/retrieve                                                                                    | `alerts`                                 |
+| `error_issues` 🟡                    | list/retrieve ✅; `events`, `comments`, `transitions`, `assignee`, `severity` deferred           | `errors`                                 |
+| `investigations` ✅                  | list/retrieve/create/status                                                                      | `investigations`                         |
+| `anomalies` ✅                       | incidents list/retrieve/timeseries/resolve/link-issue + `PATCH` settings                         | `anomalies`                              |
+| `instrumentation/recommendations` ✅ | list + dismiss/reopen                                                                            | `recommendationIssues`                   |
+| `scrape_targets` ✅                  | CRUD + `probe` + `checks`                                                                        | `scrapeTargets`                          |
+| `attribute_mappings` ✅              | CRUD                                                                                             | `ingestAttributeMappings`                |
+| `session_replays` ✅                 | `search`/retrieve + events/transcript/`for_trace` (reduced; `facets`/`trace-summaries` deferred) | `sessionReplays`                         |
+| `organization` 🟡                    | retrieve (GET only shipped); update settings (incl. ClickHouse BYOC) + delete deferred           | `organizations`, `orgClickHouseSettings` |
+| `traces` ✅                          | search/timeseries/breakdown + direct trace/span reads                                            | `queryEngine`, `observability`           |
+| `logs` ✅                            | search/timeseries/breakdown + direct log reads                                                   | `queryEngine`                            |
+| `metrics` ✅                         | catalog + timeseries/breakdown                                                                   | `queryEngine`                            |
+| `services` ✅                        | `GET /v2/services`, `GET /v2/services/{name}`                                                    | `queryEngine`                            |
+| `service_map` ✅                     | `GET /v2/service_map`                                                                            | `queryEngine`                            |
 
 The long tail of ~40 query-engine RPC endpoints (facets, infra hosts/pods/nodes/workloads, Cloudflare/PlanetScale infra) starts in the internal RPC tier and is promoted into `/v2` individually as shapes stabilize.
 
 ### Telemetry reads
 
-Phase 2 exposes traces, logs, metrics, services, the service map, and the common query engine. Collection and aggregation operations require explicit ISO-8601 UTC `start_time` and `end_time`; `end_time` must be later than `start_time`, and ranges are capped at 31 days. Direct trace/span retrieval uses the `(OrgId, TraceId, SpanId)` sorting-key prefix so it returns the complete retained trace without a correctness-limiting timestamp window. Direct log retrieval derives its narrow partition window from the timestamp embedded in the log ID.
+Phase 2 exposes traces, logs, metrics, services, and the service map. Telemetry search and aggregation requests require explicit ISO-8601 UTC `start_time` and `end_time`. Search windows are capped at 7 days, timeseries at 31 days and 1,500 buckets, and breakdowns at 30 days. A breakdown over 24 hours requires an additional narrowing filter. Direct trace/span retrieval uses the `(OrgId, TraceId, SpanId)` sorting-key prefix so it returns the complete retained trace without a correctness-limiting timestamp window. Direct log retrieval derives its narrow partition window from the timestamp embedded in the log ID.
 
 Trace IDs, span IDs, metric names, and service names remain their native OpenTelemetry identifiers. Logs have no native record ID, so search results return a deterministic `log_…` ID containing a compact timestamp and a complete-record fingerprint. Malformed log IDs return `log_id_invalid`; records outside retention return `log_not_found`.
 
-All telemetry lists use the standard cursor envelope with a default limit of 20 and maximum of 100. Trace results are root-span summaries ordered by start time and trace ID. Log ordering includes timestamp plus the complete composite identity. Services are grouped by service name across namespaces and deployment environments. The service map includes only service-to-service edges in this version; database, external, and infrastructure nodes remain internal APIs.
+All telemetry lists use the standard cursor envelope with a default limit of 20 and maximum of 100. Trace search filters match any span by default and return the owning trace's root summary; `filters.span_scope: "root"` restricts matching to root spans. Trace results are ordered by start time and trace ID. Log ordering includes timestamp plus the complete composite identity. Attribute filters support equality, existence, substring, and numeric comparisons with optional negation; each attribute-filter collection is capped at 20 entries.
 
-`POST /v2/query` accepts `timeseries` and `breakdown` specifications for trace, log, and metric sources using snake_case fields. Responses use the common `query_result` envelope. Raw SQL is intentionally unavailable through the public API because tenant isolation must not depend on inspecting caller-authored SQL text. Warehouse diagnostics are never returned to callers.
+Each signal has explicit `POST …/timeseries` and `POST …/breakdown` operations. Requests use `aggregation`, optional scalar `group_by` for timeseries, required `group_by` for breakdowns, and nested `filters`. Timeseries responses contain chronological `series[].points`; breakdown responses contain ordered `data` entries. Inactive fields and query-engine terminology are never returned. Metric `rate` and `increase` require `metric_type: "sum"`; Apdex defaults to a 500 ms threshold.
 
-Telemetry scope families are `traces`, `logs`, `metrics`, `services`, `service_map`, and `query`. Search, timeseries, and query POSTs are read-only operations for scope enforcement, so `<family>:read` is sufficient.
+Telemetry scope families are `traces`, `logs`, `metrics`, `services`, and `service_map`. Search, timeseries, and breakdown POSTs are read-only operations for scope enforcement, so the corresponding `<family>:read` scope is sufficient. There is no generic `/v2/query`, raw SQL, facet, attribute-discovery, or raw OTel datapoint endpoint.
 
 Not in v2: org membership and invitations (delegated to Clerk; revisit if/when a members API is needed).
 
@@ -175,7 +174,7 @@ The dashboard can reconcile optimistic writes against ElectricSQL synced shapes 
 
 - **Phase 0 (this change)** — conventions doc, v2 primitives (`public-id`, `envelopes`, `errors`, `auth`), scoped API keys (schema + service + enforcement), `MapleApiV2` shell mounted at `/v2` with Scalar docs at `/v2/docs`, pilot resource `api_keys` end-to-end with tests.
 - **Phase 1 — core resources**: dashboards, alerts, error issues, scrape targets, ingest keys, attribute mappings, investigations, anomalies, recommendations, organization, session replays. Thin handler adapters over existing services; `txid` preserved.
-- **Phase 2 ✅ — telemetry reads**: traces/logs/metrics/services/service_map/query over `QueryEngineService`.
+- **Phase 2 ✅ — telemetry reads**: signal-scoped traces/logs/metrics query operations plus services/service_map over `QueryEngineService`.
 - **Phase 3 — internal RPC tier + dashboard migration**: `RpcGroup` contracts in `packages/domain/src/rpc/` served at `/rpc`; dashboard gets a `MapleApiV2AtomClient` (same wiring as `apps/web/src/lib/services/common/atom-client.ts`, pointed at `MapleApiV2`) plus an `RpcClient`; migrate group-by-group, deleting v1 groups as they empty. (Note: the billing-scoped 401 retry in `atom-client.ts` must follow billing to its RPC home.)
 - **Phase 4 — hardening**: `Idempotency-Key`, `Maple-Version` header enforcement. Per-key rate limiting is implemented.
 - **Phase 5 — events & webhooks**: `evt_` event objects, `GET /v2/events`, `/v2/webhook_endpoints` CRUD, HMAC-signed deliveries (`Maple-Signature`) via an outbox drained by the alerting worker.

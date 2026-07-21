@@ -79,9 +79,13 @@ const READ_ONLY_POST_PATHS = new Set([
 	"/v2/session_replays/for_trace",
 	"/v2/alerts/rules/preview",
 	"/v2/traces/search",
+	"/v2/traces/timeseries",
+	"/v2/traces/breakdown",
 	"/v2/logs/search",
+	"/v2/logs/timeseries",
+	"/v2/logs/breakdown",
 	"/v2/metrics/timeseries",
-	"/v2/query",
+	"/v2/metrics/breakdown",
 ])
 
 /**
