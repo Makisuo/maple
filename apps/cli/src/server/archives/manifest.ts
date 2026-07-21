@@ -257,7 +257,14 @@ const parseTuningRecord = (value: unknown): ArchiveTuningRecord => {
  */
 const requiredIso = (record: Record<string, unknown>, key: string): string => {
 	const value = requiredString(record, key)
-	if (!Number.isFinite(Date.parse(value))) throw new Error(`invalid archive manifest field: ${key}`)
+	const parsed = Date.parse(value)
+	// GC orders generations by these strings, so merely accepting anything
+	// Date.parse understands is unsafe: offsets and non-padded forms do not sort
+	// chronologically. Writers emit canonical UTC ISO strings; readers require
+	// the exact same representation.
+	if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== value) {
+		throw new Error(`invalid archive manifest field: ${key} (must be canonical UTC ISO-8601)`)
+	}
 	return value
 }
 

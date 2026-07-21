@@ -144,6 +144,19 @@ describe("archive generation manifest parser", () => {
 		)
 	})
 
+	it("rejects parseable but non-canonical manifest timestamps", () => {
+		for (const [field, value] of [
+			["createdAt", "2026-06-02T02:00:00.000+02:00"],
+			["createdAt", "2026-06-02T00:00:00Z"],
+			["rangeEndExclusive", "2026-06-02 00:00:00Z"],
+		] as const) {
+			throws(
+				() => parseArchiveGenerationManifest(validGenerationManifest({ [field]: value })),
+				/invalid archive manifest field|canonical UTC ISO-8601/i,
+			)
+		}
+	})
+
 	it("rejects a malformed shard name", () => {
 		const bad = validGenerationManifest({
 			shards: [{ ...validGenerationManifest().shards[0]!, name: "../escape.parquet" }],

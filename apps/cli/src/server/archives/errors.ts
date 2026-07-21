@@ -8,6 +8,8 @@ import { Schema } from "effect"
  */
 export class ArchiveError extends Schema.TaggedErrorClass<ArchiveError>()("@maple/cli/ArchiveError", {
 	message: Schema.String,
+	operation: Schema.optional(Schema.String),
+	cause: Schema.optional(Schema.String),
 }) {}
 
 /** Render an expected archive failure without Effect's diagnostic cause stack. */

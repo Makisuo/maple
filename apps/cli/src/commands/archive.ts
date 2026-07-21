@@ -10,7 +10,7 @@ import { createArchiveGeneration, runArchiveReconciliation } from "../server/arc
 import {
 	listActiveGenerations,
 	activeParquetPaths,
-	rebuildCatalog,
+	rebuildCatalogWithMaintenanceLock,
 	verifyActiveGenerations,
 } from "../server/archives/listing"
 import { runArchiveGc } from "../server/archives/gc"
@@ -218,8 +218,8 @@ const outputFlag = Flag.choice("output", ["summary", "paths", "json"]).pipe(
 )
 
 /** Build tuning overrides from parsed flags. */
-const tuningOverrides = (dataDir: string, archiveDir: string, scratchRoot: string): ArchiveTuningOverrides =>
-	({ archiveDir, scratchRoot, dataDir }) as ArchiveTuningOverrides
+const tuningOverrides = (archiveDir: string, scratchRoot: string): ArchiveTuningOverrides =>
+	({ archiveDir, scratchRoot }) satisfies ArchiveTuningOverrides
 
 /** Resolve the archive and scratch roots from flags, falling back to defaults. */
 const resolveRoots = (
@@ -280,7 +280,7 @@ export const archiveCreate = Command.make("create", {
 					tuningConfigIdentity = loaded.identity
 					tuning = resolveArchiveTuning({ ...loaded.overrides, archiveDir, scratchRoot })
 				} else {
-					tuning = resolveArchiveTuning(tuningOverrides(dataDir, archiveDir, scratchRoot))
+					tuning = resolveArchiveTuning(tuningOverrides(archiveDir, scratchRoot))
 				}
 			} catch (error) {
 				return yield* new ArchiveError({
@@ -357,14 +357,39 @@ export const archiveList = Command.make("list", {
 						message: `--output paths requires a signal argument; expected one of ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`,
 					})
 				}
-				const paths = activeParquetPaths(archiveDir, signalOpt)
+				const paths = yield* Effect.try({
+					try: () => activeParquetPaths(archiveDir, signalOpt),
+					catch: (error) =>
+						new ArchiveError({
+							operation: "list paths",
+							message: error instanceof Error ? error.message : String(error),
+							cause: error instanceof Error ? error.stack : undefined,
+						}),
+				})
 				yield* Effect.sync(() => process.stdout.write(`${paths.map((p) => `"${p}"`).join(",")}\n`))
 				return
 			}
-			const listing = listActiveGenerations(archiveDir)
+			const listing = yield* Effect.try({
+				try: () => listActiveGenerations(archiveDir),
+				catch: (error) =>
+					new ArchiveError({
+						operation: "list",
+						message: error instanceof Error ? error.message : String(error),
+						cause: error instanceof Error ? error.stack : undefined,
+					}),
+			})
 			if (a.output === "json") {
 				yield* Effect.sync(() => process.stdout.write(`${JSON.stringify(listing, null, 2)}\n`))
 				return
+			}
+			if (listing.errors.length > 0) {
+				const detail = listing.errors
+					.map((error) => `${error.signal}/${error.rangeStart || "(root)"}: ${error.error}`)
+					.join("; ")
+				return yield* new ArchiveError({
+					operation: "list summary",
+					message: `refusing archive summary because ${listing.errors.length} malformed range(s) were found: ${detail}`,
+				})
 			}
 			if (listing.active.length === 0) {
 				yield* Effect.sync(() =>
@@ -418,6 +443,7 @@ export const archiveVerify = Command.make("verify", {
 )
 
 export const archiveRebuild = Command.make("rebuild", {
+	dataDir: dataDirFlag,
 	archiveDir: archiveDirFlag,
 	signal: signalArgument,
 }).pipe(
@@ -429,12 +455,17 @@ export const archiveRebuild = Command.make("rebuild", {
 					message: `unknown signal '${a.signal}'; expected one of ${ARCHIVE_SIGNALS.map((s) => s.name).join(", ")}`,
 				})
 			}
-			const archiveDir = Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir()
+			const dataDir = resolve(Option.getOrUndefined(a.dataDir) ?? defaultDataDir())
+			const archiveDir = resolve(Option.getOrUndefined(a.archiveDir) ?? defaultArchiveDir())
 			const signalName: ArchiveSignalName = a.signal
 			const entries = yield* Effect.tryPromise({
-				try: () => rebuildCatalog(archiveDir, signalName),
+				try: () => rebuildCatalogWithMaintenanceLock(dataDir, archiveDir, signalName, randomUUID()),
 				catch: (error) =>
-					new ArchiveError({ message: error instanceof Error ? error.message : String(error) }),
+					new ArchiveError({
+						operation: "rebuild catalog",
+						message: error instanceof Error ? error.message : String(error),
+						cause: error instanceof Error ? error.stack : undefined,
+					}),
 			})
 			yield* Effect.sync(() =>
 				process.stdout.write(
@@ -1457,7 +1488,10 @@ export const archiveCalibrateSession = Command.make("calibrate-session", {
 				try: () =>
 					withMaintenanceLock(dataDir, operationId, async () => {
 						await reconcileCalibration(archiveDir, roots)
-						const resolved = await resolveCheckpoint(dataDir, parseCheckpointSelector(checkpointSelector))
+						const resolved = await resolveCheckpoint(
+							dataDir,
+							parseCheckpointSelector(checkpointSelector),
+						)
 						const manifestFingerprint = `${resolved.manifest.checkpointId}:${resolved.manifest.createdAt}:${resolved.manifest.backupBytes}`
 						await writeCalibrationRecord(archiveDir, {
 							phase: "intent",

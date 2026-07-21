@@ -16,7 +16,7 @@ BUNDLE="${1:?usage: $0 <bundle-dir> [libchdb-path]}"
 LIBCHDB="${2:-$BUNDLE/libchdb.so}"
 export MAPLE_LIBCHDB="$LIBCHDB"
 
-cd "$(dirname "$0")/../../.."  # apps/cli/test/x.sh -> apps/cli/test -> apps/cli -> apps -> repo root
+cd "$(dirname "$0")/../../.." || exit 1  # apps/cli/test/x.sh -> apps/cli/test -> apps/cli -> apps -> repo root
 PROBE_DIR="apps/cli/test/probes"
 
 pass=0

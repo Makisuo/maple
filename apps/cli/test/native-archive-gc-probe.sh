@@ -127,8 +127,7 @@ spawn_and_kill_gc() {
 		--data-dir "$data" --archive-dir "$archive" --scratch-root "$ROOT/scratch" \
 		--keep 0 --block-ms 60000 >"$ROOT/gc-worker.out" 2>&1 &
 	local pid=$!
-	local i
-	for i in $(seq 1 300); do
+	for _ in $(seq 1 300); do
 		[ -f "$marker/paused" ] && break
 		kill -0 "$pid" 2>/dev/null || { echo "      gc-worker exited before marker" >&2; return 1; }
 		sleep 0.1
@@ -208,7 +207,7 @@ verify_after_reconcile() {
 	fi
 	# No tombstone retains a generation dir.
 	local tombstone_gen
-	tombstone_gen=$(find "$archive/operations" -type d -name tombstones 2>/dev/null -exec sh -c 'for e in "$1"/*; do [ -e "$e" ] && echo x && break; done' _ {} \; | wc -l | tr -d ' ')
+	tombstone_gen=$(find "$archive/operations" -type d -name tombstones -exec sh -c 'for e in "$1"/*; do [ -e "$e" ] && echo x && break; done' _ {} \; 2>/dev/null | wc -l | tr -d ' ')
 	[ "$tombstone_gen" = "0" ] || errs="$errs tombstone-with-generations"
 	# No active operation journal.
 	local active_dir="$archive/operations/active"

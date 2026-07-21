@@ -36,7 +36,7 @@ import {
 	releaseCheckpointPin,
 	resolveCheckpoint,
 } from "../checkpoints"
-import { assertNoSymlinkSync, assertRealFileSync, classifyArchivePathSync } from "./paths"
+import { assertNoSymlinkSync, assertRealFileSync, classifyArchivePathSync, validateArchiveId } from "./paths"
 
 /** The calibration recovery record format version. */
 export const CALIBRATION_RECOVERY_FORMAT_VERSION = 1
@@ -91,14 +91,15 @@ export const calibrationRecoveryPath = (archiveDir: string): string =>
  * may only own `calibrate-<operationId>` beneath the scratch root — never an
  * arbitrary path. This is the ownership binding that was missing.
  */
-export const derivedScratchSubdir = (operationId: string): string => `calibrate-${operationId}`
+export const derivedScratchSubdir = (operationId: string): string =>
+	`calibrate-${validateArchiveId(operationId, "calibration operation")}`
 
 /**
  * DERIVE the exact owned sample directory from the archive root and operation
  * id. A recovery record may only own `<archiveDir>/calibration/samples/<op>`.
  */
 export const derivedSampleDir = (archiveDir: string, operationId: string): string =>
-	resolve(archiveDir, "calibration", "samples", operationId)
+	resolve(archiveDir, "calibration", "samples", validateArchiveId(operationId, "calibration operation"))
 
 /**
  * DERIVE the exact pin file path from the recorded pin id, so a crash between
@@ -108,7 +109,8 @@ export const derivedPinPath = (dataDir: string, checkpointId: string, pinId: str
 	pinFilePath(dataDir, checkpointId, pinId)
 
 /** Operation-specific pin purpose, validated on release. */
-export const calibrationPinPurpose = (operationId: string): string => `archive-calibrate:${operationId}`
+export const calibrationPinPurpose = (operationId: string): string =>
+	`archive-calibrate:${validateArchiveId(operationId, "calibration operation")}`
 
 /**
  * Strictly parse a recovery record, binding it to the expected roots AND
@@ -151,7 +153,10 @@ export const parseCalibrationRecoveryRecord = (
 			throw new Error(`invalid calibration recovery field: ${k}`)
 		return v
 	}
-	const operationId = str("operationId")
+	// Validate before deriving any filesystem path. Without this, an operation
+	// id such as `../../traces` resolves to an in-root but foreign directory and
+	// turns reconciliation into an archive deletion primitive.
+	const operationId = validateArchiveId(str("operationId"), "calibration operation")
 	const pinId = str("pinId")
 	const pinPurpose = str("pinPurpose")
 	if (pinPurpose !== calibrationPinPurpose(operationId)) {

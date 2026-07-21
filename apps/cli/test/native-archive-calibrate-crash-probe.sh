@@ -75,7 +75,7 @@ wait "$SERVER_PID" 2>/dev/null || true
 SERVER_PID=""
 
 # --- Seed an UNRELATED pin on the same checkpoint (must survive reconcile) ---
-UNRELATED_PIN_ID="$(uuidgen | tr 'A-Z' 'a-z')"
+UNRELATED_PIN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 UNRELATED_PIN_DIR="$DATA/backups/pins/$C1"
 UNRELATED_PIN="$UNRELATED_PIN_DIR/$UNRELATED_PIN_ID.json"
 mkdir -p "$UNRELATED_PIN_DIR"

@@ -167,7 +167,9 @@ verify_post_crash() {
 	else
 		# Not published: the pointer should be ABSENT (the crashed op never flipped it).
 		# (If a prior unrelated generation existed it'd be unchanged; here none does.)
-		[ -f "$pointer" ] && errs="$errs unexpected-pointer" || true
+		if [ -f "$pointer" ]; then
+			errs="$errs unexpected-pointer"
+		fi
 		local final_count
 		final_count=$(find "$archive/$SIGNAL/$RANGE_DATE/generations" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
 		[ "$final_count" -eq 0 ] || errs="$errs unpublished-final-generation($final_count)"

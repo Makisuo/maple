@@ -1033,7 +1033,7 @@ describe("calibration recovery — idempotent reconcile", () => {
 
 	it("refuses a record whose bound roots do not match (foreign record)", async () => {
 		await withRoots(async (roots) => {
-			const operationId = "x-y-z-w"
+			const operationId = "deadbeef-1111-4aaa-9bbb-deadbeefdead"
 			// writeCalibrationRecord validates derived paths from the archiveDir, so
 			// write a FOREIGN dataDir directly into the record file via a manual
 			// write (the bound-root check happens at parse, not write).
@@ -1042,10 +1042,10 @@ describe("calibration recovery — idempotent reconcile", () => {
 				formatVersion: 1,
 				phase: "intent",
 				operationId,
-				pinId: "p",
+				pinId: "11111111-2222-4333-8444-555555555555",
 				pinPurpose: calibrationPinPurpose(operationId),
 				pinPath: null,
-				checkpointId: "c",
+				checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
 				checkpointManifestFingerprint: "c:2026:1",
 				boundRoots: {
 					dataDir: "/different/data",
@@ -1066,20 +1066,58 @@ describe("calibration recovery — idempotent reconcile", () => {
 
 	it("refuses a record with non-derived owned paths (rejects arbitrary deletion targets)", async () => {
 		await withRoots(async (roots) => {
+			const operationId = "deadbeef-1111-4aaa-9bbb-deadbeefdead"
 			await rejects(
 				writeCalibrationRecord(roots.archiveDir, {
 					phase: "intent",
-					operationId: "op-x",
-					pinId: "pin-x",
-					pinPurpose: calibrationPinPurpose("op-x"),
+					operationId,
+					pinId: "11111111-2222-4333-8444-555555555555",
+					pinPurpose: calibrationPinPurpose(operationId),
 					pinPath: null,
-					checkpointId: "cp-x",
+					checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
 					checkpointManifestFingerprint: "cp:2026:1",
 					boundRoots: roots,
-					// Non-derived paths must be rejected: scratchSubdir !== calibrate-op-x.
+					// Non-derived paths must be rejected.
 					ownedPaths: { scratchSubdir: ".", sampleDir: roots.archiveDir },
 				}),
 				/!= derived|refusing/i,
+			)
+		})
+	})
+
+	it("rejects a traversal operation id before deriving or deleting owned paths", async () => {
+		await withRoots(async (roots) => {
+			const protectedDir = join(roots.archiveDir, "traces")
+			const protectedFile = join(protectedDir, "must-survive")
+			mkdirSync(protectedDir, { recursive: true })
+			writeFileSync(protectedFile, "archive data")
+			mkdirSync(join(roots.archiveDir, "calibration"), { recursive: true })
+			writeFileSync(
+				calibrationRecoveryPath(roots.archiveDir),
+				JSON.stringify({
+					formatVersion: 1,
+					phase: "cleanup",
+					operationId: "../../traces",
+					pinId: "11111111-2222-4333-8444-555555555555",
+					pinPurpose: "archive-calibrate:../../traces",
+					pinPath: null,
+					checkpointId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+					checkpointManifestFingerprint: "cp:2026:1",
+					boundRoots: roots,
+					ownedPaths: {
+						scratchSubdir: "calibrate-../../traces",
+						sampleDir: protectedDir,
+					},
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				}),
+			)
+
+			await rejects(reconcileCalibration(roots.archiveDir, roots), /invalid calibration operation ID/)
+			strictEqual(existsSync(protectedFile), true, "foreign archive data must not be deleted")
+			strictEqual(
+				existsSync(calibrationRecoveryPath(roots.archiveDir)),
+				true,
+				"malformed recovery evidence must be preserved",
 			)
 		})
 	})

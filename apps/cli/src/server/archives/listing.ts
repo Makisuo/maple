@@ -16,6 +16,7 @@ import {
 	signalRoot,
 } from "./paths"
 import { ARCHIVE_SIGNALS, type ArchiveSignalName } from "./signals"
+import { withMaintenanceLock } from "../checkpoints"
 
 // Archive read-side: listing, active-path resolution, and catalog rebuild.
 //
@@ -386,3 +387,17 @@ export const rebuildCatalog = async (
 	await durableWrite(path, serializeCatalogEntries(entries))
 	return entries
 }
+
+/**
+ * Operator-facing catalog rebuild entry point. Catalog reconstruction takes a
+ * snapshot of authoritative manifests and must therefore share the maintenance
+ * lock with create and GC; otherwise a stale snapshot can overwrite their
+ * freshly published catalog.
+ */
+export const rebuildCatalogWithMaintenanceLock = async (
+	dataDir: string,
+	archiveDir: string,
+	signal: ArchiveSignalName,
+	operationId: string,
+): Promise<ReadonlyArray<CatalogEntry>> =>
+	withMaintenanceLock(dataDir, operationId, () => rebuildCatalog(archiveDir, signal))

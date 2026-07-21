@@ -17,8 +17,10 @@ import {
 	activeParquetPaths,
 	listActiveGenerations,
 	rebuildCatalog,
+	rebuildCatalogWithMaintenanceLock,
 	verifyActiveGenerations,
 } from "../src/server/archives/listing"
+import { withMaintenanceLock } from "../src/server/checkpoints"
 import { type ArchiveGenerationManifest } from "../src/server/archives/manifest"
 import { CHDB_VERSION, MAPLE_VERSION } from "../src/version"
 import { SCHEMA_FINGERPRINT } from "../src/server/serve"
@@ -260,6 +262,19 @@ describe("archive listing", () => {
 })
 
 describe("archive catalog rebuild", () => {
+	it("serializes operator rebuilds with archive create and GC", async () => {
+		await withArchive(async (archiveDir) => {
+			const dataDir = join(archiveDir, "..", "data")
+			mkdirSync(dataDir, { recursive: true })
+			await withMaintenanceLock(dataDir, randomUUID(), async () => {
+				await rejects(
+					rebuildCatalogWithMaintenanceLock(dataDir, archiveDir, "traces", randomUUID()),
+					/maintenance.*(?:active|busy|held)|live owner/i,
+				)
+			})
+		})
+	})
+
 	it("rebuilds the catalog from manifests after truncation, including superseded generations", async () => {
 		await withArchive(async (archiveDir) => {
 			const old = randomUUID()
