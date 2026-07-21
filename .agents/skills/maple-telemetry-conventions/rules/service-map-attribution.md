@@ -7,7 +7,7 @@ The service map at `apps/web/src/routes/service-map.tsx` is built entirely from 
 | Rendered element | Source query | Required attribute | Lives on |
 |---|---|---|---|
 | Service-to-service edge | `service_map_edges_hourly_mv` | `peer.service` | Span (`Client` or `Producer` kind) |
-| Service-to-DB edge | `service_map_db_edges_hourly_mv` | `db.system` (and `peer.service` for the main edge) | Span |
+| Service-to-DB edge | `service_map_db_edges_hourly_mv` | `db.system.name` (legacy fallback: `db.system`) and `peer.service` | Span |
 | Platform badge (Cloudflare / AWS / Railway / k8s) | `service_platforms_hourly_mv` | `cloud.platform`, `cloud.provider`, optional `faas.name`, optional `k8s.*` | Resource |
 | Runtime icon (node / bun / deno / workerd / rust) | `service_platforms_hourly_mv` | `process.runtime.name` | Resource |
 | SDK badge | `service_platforms_hourly_mv` | `maple.sdk.type` | Resource |
@@ -54,17 +54,17 @@ Mirror the TS detection. Set the same keys with the same values — never invent
 | Call type | Span kind | Required attributes | Notes |
 |---|---|---|---|
 | Outbound HTTP / RPC | `Client` or `Producer` | `peer.service`; optional `server.address`, `http.request.method` | `peer.service` is the **logical** destination, not the host |
-| Database call | any | `db.system` (e.g. `clickhouse`, `tinybird`, `postgres`) and `peer.service` (same value) | Both keys; `db.system` powers the DB-edge query, `peer.service` powers the main edge query |
+| Database call | `Client` or `Producer` | `db.system.name` (e.g. `clickhouse`, `tinybird`, `postgresql`) and `peer.service` | `db.system.name` powers the DB edge; `peer.service` is the logical destination and may differ (for example chDB uses `clickhouse` + `chdb`) |
 | Message bus produce | `Producer` | `messaging.system`, `messaging.destination.name` | |
 
 ### TypeScript
 
 ```typescript
 yield* Effect.annotateCurrentSpan("peer.service", "tinybird")
-yield* Effect.annotateCurrentSpan("db.system", "tinybird")
+yield* Effect.annotateCurrentSpan("db.system.name", "tinybird")
 ```
 
-Canonical example: [apps/api/src/services/WarehouseQueryService.ts](../../../../apps/api/src/services/WarehouseQueryService.ts) `executeSql` — sets both `db.system` and `peer.service` from the resolved warehouse backend.
+Canonical example: [packages/query-engine/src/execution/executor.ts](../../../../packages/query-engine/src/execution/executor.ts) `executeSql` — sets both `db.system.name` and `peer.service` from the resolved warehouse backend.
 
 ### Rust
 
@@ -89,6 +89,7 @@ Keep these names consistent across services to avoid edge fragmentation on the m
 |---|---|
 | `tinybird` | Tinybird hosted warehouse |
 | `clickhouse` | Self-managed ClickHouse warehouse |
+| `chdb` | Embedded chDB behind the local Maple binary |
 | `collector` | Maple ingest's downstream OTLP collector |
 | `cloudflare-logpush` | Cloudflare logpush source |
 | `clerk` | Clerk auth |

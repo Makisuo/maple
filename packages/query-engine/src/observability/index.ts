@@ -2,10 +2,8 @@ export {
 	WarehouseExecutor,
 	type WarehouseExecutorError,
 	type WarehouseExecutorShape,
-	type ExecutorQueryOptions,
-	type ExecutorQuerySettings,
-	type ExecutorQueryProfile,
 } from "./WarehouseExecutor"
+export type { SqlQueryOptions } from "../profiles"
 export type * from "./types"
 export { toSpanResult, toLogEntry, toErrorSummary } from "./row-mappers"
 export { aggregateServiceRows, weightedAvg } from "./aggregation"

@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import { QueryEngineExecuteResponse } from "../query-engine"
-import { EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
+import { EdgeCacheIOError, EdgeCacheService, makeEdgeCacheService, type EdgeCacheBackend } from "./edge-cache"
 
 /**
  * In-memory backend that mirrors the Workers cache JSON-roundtrip:
@@ -30,10 +30,66 @@ const makeJsonRoundtripBackend = (): EdgeCacheBackend & {
 	}
 }
 
-const makeLayer = (backend: EdgeCacheBackend) =>
-	Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend))
+const makeLayer = (backend: EdgeCacheBackend, readTimeoutMs?: number) =>
+	Layer.succeed(EdgeCacheService, makeEdgeCacheService(backend, readTimeoutMs))
 
 describe("EdgeCacheService.getOrCompute (no schema)", () => {
+	it.live("fails open to computation when a backend read exceeds its deadline", () => {
+		let computeCalls = 0
+		const backend: EdgeCacheBackend = {
+			get: async () => await new Promise<never>(() => {}),
+			put: async () => {},
+			delete: async () => {},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const result = yield* cache.getOrCompute(
+				{ bucket: "slow", key: "k1", ttlSeconds: 30 },
+				Effect.sync(() => {
+					computeCalls += 1
+					return "computed"
+				}),
+			)
+
+			assert.deepStrictEqual(result, { value: "computed", hit: false })
+			assert.strictEqual(computeCalls, 1)
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
+	})
+
+	it.live("shares the complete slow read-or-compute operation across concurrent callers", () => {
+		let getCalls = 0
+		let computeCalls = 0
+		const backend: EdgeCacheBackend = {
+			get: async () => {
+				getCalls += 1
+				return await new Promise<never>(() => {})
+			},
+			put: async () => {},
+			delete: async () => {},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const options = { bucket: "slow", key: "shared", ttlSeconds: 30 } as const
+			const compute = Effect.sync(() => {
+				computeCalls += 1
+				return "computed"
+			})
+			const results = yield* Effect.all(
+				[cache.getOrCompute(options, compute), cache.getOrCompute(options, compute)],
+				{ concurrency: "unbounded" },
+			)
+
+			assert.strictEqual(getCalls, 1)
+			assert.strictEqual(computeCalls, 1)
+			assert.deepStrictEqual(
+				results.map(({ value }) => value),
+				["computed", "computed"],
+			)
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
+	})
+
 	it.effect("round-trips a plain object through the JSON cache backend", () => {
 		const backend = makeJsonRoundtripBackend()
 		let computeCalls = 0
@@ -68,12 +124,77 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 
 		return Effect.gen(function* () {
 			const cache = yield* EdgeCacheService
-			yield* cache.getOrCompute({ bucket: "ttl", key: "big", ttlSeconds: ttlBySize }, Effect.succeed({ n: 42 }))
-			yield* cache.getOrCompute({ bucket: "ttl", key: "small", ttlSeconds: ttlBySize }, Effect.succeed({ n: 3 }))
+			yield* cache.getOrCompute(
+				{ bucket: "ttl", key: "big", ttlSeconds: ttlBySize },
+				Effect.succeed({ n: 42 }),
+			)
+			yield* cache.getOrCompute(
+				{ bucket: "ttl", key: "small", ttlSeconds: ttlBySize },
+				Effect.succeed({ n: 3 }),
+			)
 
 			// The resolver runs against each freshly computed value, not a constant.
 			assert.deepStrictEqual(puts, [300, 15])
 		}).pipe(Effect.provide(makeLayer(backend)))
+	})
+})
+
+describe("EdgeCacheService.rawGet", () => {
+	it.live("reports hit, miss, and timeout outcomes without collapsing them", () => {
+		const backend: EdgeCacheBackend = {
+			get: async (bucket) => {
+				if (bucket === "hit") return { value: 42 }
+				if (bucket === "slow") return await new Promise<never>(() => {})
+				return undefined
+			},
+			put: async () => {},
+			delete: async () => {},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const hit = yield* cache.rawGetDetailed<{ value: number }>("hit", "key")
+			const miss = yield* cache.rawGetDetailed("miss", "key")
+			const timeout = yield* cache.rawGetDetailed("slow", "key")
+
+			assert.strictEqual(hit.status, "hit")
+			assert.isTrue(Option.isSome(hit.value))
+			assert.strictEqual(miss.status, "miss")
+			assert.isTrue(Option.isNone(miss.value))
+			assert.strictEqual(timeout.status, "timeout")
+			assert.isTrue(Option.isNone(timeout.value))
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
+	})
+
+	it.live("treats a backend read timeout as a cache miss", () => {
+		const backend: EdgeCacheBackend = {
+			get: async () => await new Promise<never>(() => {}),
+			put: async () => {},
+			delete: async () => {},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const result = yield* cache.rawGet("slow", "key")
+			assert.isTrue(Option.isNone(result))
+		}).pipe(Effect.provide(makeLayer(backend, 10)), Effect.timeout(200))
+	})
+
+	it.effect("retains EdgeCacheIOError for backend failures", () => {
+		const backend: EdgeCacheBackend = {
+			get: async () => {
+				throw new Error("kv unavailable")
+			},
+			put: async () => {},
+			delete: async () => {},
+		}
+
+		return Effect.gen(function* () {
+			const cache = yield* EdgeCacheService
+			const error = yield* cache.rawGet("failing", "key").pipe(Effect.flip)
+			assert.instanceOf(error, EdgeCacheIOError)
+			assert.strictEqual(error.cause, "kv unavailable")
+		}).pipe(Effect.provide(makeLayer(backend, 10)))
 	})
 })
 

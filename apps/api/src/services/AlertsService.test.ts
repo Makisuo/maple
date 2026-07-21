@@ -706,6 +706,161 @@ describe("AlertsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
 	})
 
+	it.effect("suppresses trigger and resolve notifications while an incident flaps", () => {
+		const testDb = createTestDb(trackedDbs)
+		const breachedRows = [
+			{
+				count: 200,
+				avgDuration: 40,
+				p50Duration: 20,
+				p95Duration: 120,
+				p99Duration: 240,
+				errorRate: 10,
+				satisfiedCount: 180,
+				toleratingCount: 10,
+				apdexScore: 0.925,
+			},
+		] as ReadonlyArray<Record<string, unknown>>
+		const healthyRows = [
+			{
+				count: 200,
+				avgDuration: 20,
+				p50Duration: 10,
+				p95Duration: 80,
+				p99Duration: 160,
+				errorRate: 0.5,
+				satisfiedCount: 195,
+				toleratingCount: 3,
+				apdexScore: 0.9825,
+			},
+		] as ReadonlyArray<Record<string, unknown>>
+		const state = { tracesAggregateRows: breachedRows }
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_flap")
+			const userId = asUserId("user_flap")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* createErrorRateRule(alerts, orgId, userId, destination.id)
+
+			const tick = Effect.gen(function* () {
+				yield* alerts.runSchedulerTick()
+				yield* TestClock.adjust(Duration.minutes(1))
+			})
+
+			// Flap 1: open (trigger delivered) then resolve (resolve delivered).
+			yield* tick
+			yield* tick
+			state.tracesAggregateRows = healthyRows
+			yield* tick
+			yield* tick
+
+			// Flap 2 within the renotify interval: incident opens again, but both
+			// its trigger and its resolve notifications are suppressed.
+			state.tracesAggregateRows = breachedRows
+			yield* tick
+			yield* tick
+			state.tracesAggregateRows = healthyRows
+			yield* tick
+			yield* tick
+
+			const incidents = yield* alerts.listIncidents(orgId)
+			const events = yield* alerts.listDeliveryEvents(orgId)
+
+			assert.lengthOf(incidents.incidents, 2)
+			assert.isTrue(incidents.incidents.every((incident) => incident.status === "resolved"))
+			// Only the first flap emailed: one trigger + one resolve, nothing for flap 2.
+			assert.deepStrictEqual(
+				events.events.map((event: { eventType: string }) => event.eventType).sort(),
+				["resolve", "trigger"],
+			)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: okFetch })))
+	})
+
+	it.effect("queues at most one renotify per interval while deliveries keep failing", () => {
+		const testDb = createTestDb(trackedDbs)
+		const state = {
+			tracesAggregateRows: [
+				{
+					count: 200,
+					avgDuration: 40,
+					p50Duration: 20,
+					p95Duration: 120,
+					p99Duration: 240,
+					errorRate: 10,
+					satisfiedCount: 180,
+					toleratingCount: 10,
+					apdexScore: 0.925,
+				},
+			] as ReadonlyArray<Record<string, unknown>>,
+		}
+		const failingFetch: typeof fetch = (async () =>
+			new Response("boom", { status: 500 })) as unknown as typeof fetch
+
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(DEFAULT_CLOCK_EPOCH_MS)
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_renotify_gate")
+			const userId = asUserId("user_renotify_gate")
+			const destination = yield* createWebhookDestination(alerts, orgId, userId)
+			yield* alerts.createRule(
+				orgId,
+				userId,
+				adminRoles,
+				new AlertRuleUpsertRequest({
+					name: "Checkout error rate",
+					severity: "critical",
+					enabled: true,
+					serviceNames: ["checkout"],
+					signalType: "error_rate",
+					comparator: "gt",
+					threshold: 5,
+					windowMinutes: 5,
+					minimumSampleCount: 10,
+					consecutiveBreachesRequired: 2,
+					consecutiveHealthyRequired: 2,
+					renotifyIntervalMinutes: 5,
+					destinationIds: [destination.id],
+				}),
+			)
+
+			// Trigger opens on the second tick; every delivery attempt fails with a
+			// retryable 500 for the whole test, so lastNotifiedAt can only advance
+			// via the queue-time gate.
+			for (let minute = 0; minute < 9; minute += 1) {
+				yield* alerts.runSchedulerTick()
+				yield* TestClock.adjust(Duration.minutes(1))
+			}
+
+			const events = yield* alerts.listDeliveryEvents(orgId)
+			const renotifyFirstAttempts = events.events.filter(
+				(event: { eventType: string; attemptNumber: number }) =>
+					event.eventType === "renotify" && event.attemptNumber === 1,
+			)
+			// Trigger at t=1min → renotify due at t=6min. Ticks at 7/8 min must NOT
+			// re-queue a fresh renotify chain even though nothing was delivered.
+			assert.lengthOf(renotifyFirstAttempts, 1)
+
+			const incidents = yield* alerts.listIncidents(orgId)
+			assert.lengthOf(incidents.incidents, 1)
+			assert.isNotNull(incidents.incidents[0]?.lastNotifiedAt)
+
+			// One interval after the queue-time advance, a second renotify chain starts.
+			for (let minute = 0; minute < 3; minute += 1) {
+				yield* alerts.runSchedulerTick()
+				yield* TestClock.adjust(Duration.minutes(1))
+			}
+			const eventsAfter = yield* alerts.listDeliveryEvents(orgId)
+			const renotifyChains = new Set(
+				eventsAfter.events
+					.filter((event: { eventType: string }) => event.eventType === "renotify")
+					.map((event: { deliveryKey: string }) => event.deliveryKey.split(":").at(-1)),
+			)
+			assert.strictEqual(renotifyChains.size, 2)
+		}).pipe(Effect.provide(makeLayer(testDb, makeWarehouseStub(state), { fetch: failingFetch })))
+	})
+
 	it.effect("skips unchanged alert_rule_states writes and refreshes on the 5-minute heartbeat", () => {
 		const testDb = createTestDb(trackedDbs)
 		// Healthy from the start: errorRate 1 stays below the threshold of 5.

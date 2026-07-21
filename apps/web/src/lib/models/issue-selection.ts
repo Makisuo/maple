@@ -6,10 +6,9 @@
  * shift-anchor logic (the fiddly part) is testable as plain data instead of
  * living in a `useState` + `useRef` + imperative-handler tangle in the route.
  *
- * The reducer lives here (not in `error-issues-model.ts`) so the pure logic is
- * importable without the model's Electric-collection dependencies. The model
- * (`ErrorIssuesModel`) wraps it in `Reducer.make` and republishes it through
- * `ui`; the URL-backed workflow/severity filters stay in the route.
+ * The reducer lives outside the route so the shift-range behavior stays
+ * independently testable. The route adapts its `[state, command]` result to
+ * React's `useReducer`; URL-backed filters remount that keyed subtree.
  */
 
 import { Command, type Reducer } from "@maple/unitflow/reducer"

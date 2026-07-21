@@ -20,6 +20,9 @@ export const oauthConnections = pgTable(
 		refreshTokenIv: text("refresh_token_iv"),
 		refreshTokenTag: text("refresh_token_tag"),
 		expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+		// Set when the provider rejects the token as revoked (IntegrationsRevokedError):
+		// pollers skip revoked connections until a reconnect clears this.
+		revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
 		createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
 		updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 	},

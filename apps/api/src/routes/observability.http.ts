@@ -1,6 +1,5 @@
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CurrentTenant, MapleApi, SpanId, TraceId } from "@maple/domain/http"
-import { ObservabilityApiError } from "@maple/domain/http/observability"
 import { Effect, Schema } from "effect"
 import {
 	listServices,
@@ -9,12 +8,12 @@ import {
 	findErrors,
 	diagnoseService,
 	searchLogs,
-	type WarehouseExecutorError,
 } from "@maple/query-engine/observability"
 import { makeWarehouseExecutorFromTenant } from "../lib/WarehouseQueryService"
 
-const mapError = (e: WarehouseExecutorError) =>
-	new ObservabilityApiError({ message: e.message, pipeName: e.pipeName, cause: e })
+// Warehouse errors propagate with their canonical per-tag HTTP statuses (503
+// transient, 429 quota, 400 validation, 502 otherwise) — declared on the
+// observability endpoints via `warehouseHttpErrors`. No 500-flatten here.
 
 const decodeTraceId = Schema.decodeSync(TraceId)
 const decodeSpanId = Schema.decodeSync(SpanId)
@@ -33,7 +32,6 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 					const tenant = yield* CurrentTenant.Context
 					const services = yield* listServices(payload).pipe(
 						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-						Effect.mapError(mapError),
 					)
 					return { services: [...services] }
 				}),
@@ -43,7 +41,6 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 					const tenant = yield* CurrentTenant.Context
 					return yield* searchTraces(payload).pipe(
 						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-						Effect.mapError(mapError),
 						Effect.map((r) => ({
 							...r,
 							spans: [...r.spans].map((s) => ({ ...s, attributes: { ...s.attributes } })),
@@ -56,7 +53,6 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 					const tenant = yield* CurrentTenant.Context
 					const result = yield* inspectTrace(payload.traceId).pipe(
 						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-						Effect.mapError(mapError),
 					)
 					return {
 						traceId: result.traceId,
@@ -73,7 +69,6 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 					const tenant = yield* CurrentTenant.Context
 					const errors = yield* findErrors(payload).pipe(
 						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-						Effect.mapError(mapError),
 					)
 					return { errors: [...errors] }
 				}),
@@ -83,7 +78,6 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 					const tenant = yield* CurrentTenant.Context
 					const result = yield* diagnoseService(payload).pipe(
 						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-						Effect.mapError(mapError),
 					)
 					return {
 						serviceName: result.serviceName,
@@ -103,7 +97,6 @@ export const HttpObservabilityLive = HttpApiBuilder.group(MapleApi, "observabili
 					const tenant = yield* CurrentTenant.Context
 					const result = yield* searchLogs(payload).pipe(
 						Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
-						Effect.mapError(mapError),
 					)
 					return {
 						timeRange: result.timeRange,

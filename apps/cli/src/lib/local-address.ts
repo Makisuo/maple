@@ -8,6 +8,21 @@ export const normalizeHost = (host: string): string => {
 	return trimmed.startsWith("[") && trimmed.endsWith("]") ? trimmed.slice(1, -1) : trimmed
 }
 
+/** Validate a bare listener/advertise host before it reaches URL construction
+ * or Bun.serve. Schemes, ports, paths, and whitespace are intentionally not
+ * accepted here; those belong to complete URLs, not host arguments. */
+export const validateHost = (host: string): string => {
+	const normalized = normalizeHost(host)
+	if (!normalized) throw new Error("expected a non-empty hostname or IP address")
+	if (/[\s/?#@]/.test(normalized)) {
+		throw new Error("expected a bare hostname or IP address without a scheme, port, or path")
+	}
+	if (!URL.canParse(serverUrl(normalized, 80))) {
+		throw new Error(`invalid hostname or IP address ${JSON.stringify(host)}`)
+	}
+	return normalized
+}
+
 export const resolveBindHost = (environmentValue: string | undefined): string =>
 	normalizeHost(environmentValue || DEFAULT_LOCAL_HOST) || DEFAULT_LOCAL_HOST
 

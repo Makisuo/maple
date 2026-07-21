@@ -7,6 +7,9 @@ export interface ReleasePoint {
 	commitSha: string
 	/** Span count for this commit in this bucket. */
 	count: number
+	/** Error-status span count for this commit in this bucket (markers ignore it;
+	 * the Recent-deploys panel aggregates it into a per-version error rate). */
+	errorCount?: number
 }
 
 export interface MarkerCommit {
@@ -163,6 +166,28 @@ export function buildCommitMarkers(
 export interface PositionedMarker {
 	marker: CommitMarker
 	x: number
+}
+
+/** Past this many markers the chart drops to dashes-only regardless of spacing —
+ * a chip row of 10+ labels is noise even when it technically fits. */
+export const MAX_LABELED_MARKERS = 10
+
+/**
+ * Whether the marker set is sparse enough for label chips to be useful. Under
+ * heavy deploy volume the greedy merge degenerates into one or two max-width
+ * boxes with big `+N` badges — technically non-overlapping, practically
+ * unreadable. Below this threshold the layer renders dashes only (hover cards
+ * remain the detail path, and the Recent-deploys panel is the canonical list).
+ */
+export function shouldRenderLabels(
+	positioned: ReadonlyArray<PositionedMarker>,
+	plotLeft: number,
+	plotRight: number,
+	gap = 6,
+): boolean {
+	if (positioned.length === 0) return true
+	if (positioned.length > MAX_LABELED_MARKERS) return false
+	return (plotRight - plotLeft) / positioned.length >= MIN_LABEL_WIDTH + gap
 }
 
 /** A laid-out label: one box that may gather several dashes merged by proximity. */

@@ -8,7 +8,7 @@ import { gunzipSync } from "node:zlib"
 import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
 import { acquireChdb, type Chdb, type ChdbError } from "./chdb"
-import { buildInsertSql } from "./inserts"
+import { buildInsertStatements } from "./inserts"
 import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch } from "./otlp/encode"
 import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest } from "./otlp/proto"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
@@ -37,6 +37,15 @@ export interface ServerOptions {
 	/** Serves the bundled SPA; omit to disable the UI (API-only). */
 	readonly assets?: AssetResolver
 }
+
+export class ServerBindError extends Schema.TaggedErrorClass<ServerBindError>()(
+	"@maple/cli/ServerBindError",
+	{
+		hostname: Schema.String,
+		port: Schema.Number,
+		message: Schema.String,
+	},
+) {}
 
 export const isBrowserOriginAllowed = (
 	requestUrl: URL,
@@ -168,16 +177,18 @@ async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestRes
 	let accepted = 0
 	for (const batch of batches) {
 		if (batch.rowCount === 0) continue
-		try {
-			db.exec(buildInsertSql(batch.datasource, batch.ndjson))
-		} catch (error) {
-			return {
-				response: text(`chDB insert (${batch.datasource}): ${(error as Error).message}`, 500),
-				accepted,
-				requestBytes,
+		for (const statement of buildInsertStatements(batch.datasource, batch.ndjson)) {
+			try {
+				db.exec(statement.sql)
+			} catch (error) {
+				return {
+					response: text(`chDB insert (${batch.datasource}): ${(error as Error).message}`, 500),
+					accepted,
+					requestBytes,
+				}
 			}
+			accepted += statement.rowCount
 		}
-		accepted += batch.rowCount
 	}
 	return { response: json({ accepted }), accepted, requestBytes }
 }
@@ -226,8 +237,11 @@ async function handleQuery(db: Chdb, req: Request): Promise<QueryResult> {
 	try {
 		out = db.query(forceJsonEachRow(sql))
 	} catch (error) {
+		// 400, not 500: a failing statement is a problem with the submitted SQL,
+		// and a 5xx would make the shared warehouse executor classify it as a
+		// transient upstream error and retry the identical query.
 		return {
-			response: text(`query failed: ${(error as Error).message}`, 500),
+			response: text(`query failed: ${(error as Error).message}`, 400),
 			rowCount: 0,
 			durationMs: Math.round(performance.now() - started),
 			sql,
@@ -266,7 +280,7 @@ const truncateSql = (sql: string) => (sql.length > MAX_DB_QUERY_TEXT ? sql.slice
  *  `startServer`). The effect always succeeds with a `Response`. */
 type SpanRunner = <A>(effect: Effect.Effect<A>) => Promise<A>
 
-// A rejected (4xx/5xx) ingest/query response, surfaced through the Effect error
+// A rejected 5xx ingest/query response, surfaced through the Effect error
 // channel. `message` carries the handler's descriptive body so the span records
 // a real `exception.message`; `response` is the original, untouched response we
 // hand back to the client in `recoverResponse`. (Failing with a bare `Response`
@@ -278,19 +292,20 @@ class IngestRejected extends Schema.TaggedErrorClass<IngestRejected>()("@maple/c
 	message: Schema.String,
 }) {}
 
-// The Effect tracer derives span status from the effect's outcome — success →
-// `Ok`, failure → `Error` (conventions say never set the status string by hand
-// in TS). So to mark a 4xx/5xx span `Error`, we fail *inside* the span with an
-// `IngestRejected` carrying the reason, then recover the original response with
-// `Effect.match` *outside* the span — the span has already closed `Error` by then.
-const failIfError = (response: Response): Effect.Effect<Response, IngestRejected> =>
+// The Effect tracer derives span status from the effect's outcome. OTel HTTP
+// Server semantics treat 4xx as a successful server outcome (the caller sent a
+// bad request) and only 5xx as Error. Annotate every rejection, but fail inside
+// the Server span only for 5xx; recover the original response outside the span.
+const recordServerResponse = (response: Response): Effect.Effect<Response, IngestRejected> =>
 	Effect.gen(function* () {
 		if (response.status >= 400) {
 			// Clone to read the body without consuming the response we return below.
 			const body = (yield* Effect.promise(() => response.clone().text())).trim()
 			const message = body.length > 0 ? body : `HTTP ${response.status}`
 			yield* Effect.annotateCurrentSpan({ "error.type": `HTTP ${response.status}` })
-			return yield* new IngestRejected({ response, status: response.status, message })
+			if (response.status >= 500) {
+				return yield* new IngestRejected({ response, status: response.status, message })
+			}
 		}
 		return response
 	})
@@ -312,7 +327,7 @@ const ingestSpan = (runSpan: SpanRunner, db: Chdb, signal: Signal, req: Request)
 					"maple.ingest.item_count": accepted,
 					"http.response.status_code": response.status,
 				})
-				return yield* failIfError(response)
+				return yield* recordServerResponse(response)
 			}).pipe(
 				Effect.withSpan(`POST /v1/${signal}`, {
 					kind: "server",
@@ -341,7 +356,7 @@ const querySpan = (runSpan: SpanRunner, db: Chdb, req: Request): Promise<Respons
 					"http.response.status_code": response.status,
 					...(sql ? { "db.query.text": truncateSql(sql), "db.query.length": sql.length } : {}),
 				})
-				return yield* failIfError(response)
+				return yield* recordServerResponse(response)
 			}).pipe(
 				Effect.withSpan("POST /local/query", {
 					kind: "server",
@@ -383,7 +398,7 @@ const makeFetch =
  *  order). Resolves with the bound port once listening. */
 export const startServer = (
 	options: ServerOptions,
-): Effect.Effect<{ readonly port: number }, ChdbError, Scope.Scope> =>
+): Effect.Effect<{ readonly port: number }, ChdbError | ServerBindError, Scope.Scope> =>
 	Effect.gen(function* () {
 		const db = yield* acquireChdb({
 			dataDir: options.dataDir,
@@ -400,14 +415,23 @@ export const startServer = (
 		)
 		const runSpan: SpanRunner = (effect) => telemetry.runPromise(effect)
 		const server = yield* Effect.acquireRelease(
-			Effect.sync(() =>
-				Bun.serve({
-					port: options.port,
-					hostname: options.hostname,
-					fetch: makeFetch(db, options, runSpan),
-				}),
-			),
+			Effect.try({
+				try: () =>
+					Bun.serve({
+						port: options.port,
+						hostname: options.hostname,
+						fetch: makeFetch(db, options, runSpan),
+					}),
+				catch: (error) =>
+					new ServerBindError({
+						hostname: options.hostname,
+						port: options.port,
+						message: `failed to bind ${options.hostname}:${options.port}: ${error instanceof Error ? error.message : String(error)}`,
+					}),
+			}),
 			(s) => Effect.promise(() => s.stop(true)),
 		)
 		return { port: server.port ?? options.port }
 	})
+
+export const __testables = { recordServerResponse }

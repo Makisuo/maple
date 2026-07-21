@@ -1,7 +1,6 @@
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { randomUUID } from "node:crypto"
 import {
-	GitCommitSha,
 	VcsInstallation,
 	VcsInstallationGoneError,
 	VcsProviderError,
@@ -45,6 +44,7 @@ import {
 	type VcsRepo,
 	WEBHOOK_SECRET,
 } from "./harness"
+import { decodeGitCommitSha } from "./fixtures"
 
 const trackedDbs: TestDb[] = []
 afterEach(() => cleanupTestDbs(trackedDbs))
@@ -203,10 +203,7 @@ describe("GithubProvider.webhookToJobs", () => {
 			// Push payloads carry no avatar URL — the provider derives one from the
 			// committer login against the commit's own host (here github.com), so the
 			// dashboard never has to patch a null avatar.
-			assert.strictEqual(
-				job.commits[0]!.authorAvatarUrl,
-				"https://github.com/octocat.png?size=64",
-			)
+			assert.strictEqual(job.commits[0]!.authorAvatarUrl, "https://github.com/octocat.png?size=64")
 		}).pipe(Effect.provide(providerLayer())),
 	)
 
@@ -233,10 +230,7 @@ describe("GithubProvider.webhookToJobs", () => {
 			})
 			const job = jobs[0]!
 			if (job.kind !== "push") return assert.fail("expected a push job")
-			assert.strictEqual(
-				job.commits[0]!.authorAvatarUrl,
-				"https://github.acme.com/octocat.png?size=64",
-			)
+			assert.strictEqual(job.commits[0]!.authorAvatarUrl, "https://github.acme.com/octocat.png?size=64")
 		}).pipe(Effect.provide(providerLayer())),
 	)
 
@@ -734,14 +728,14 @@ describe("VcsRepository", () => {
 			assert.ok(branches.filter((b) => b.name !== "main").every((b) => !b.isDefault))
 
 			yield* repo.upsertCommits(r, [mk(SHA_X, 100), mk(SHA_Y, 200)])
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_X as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_X))))
 
 			// Changing the tracked branch wipes the repo's stored (old-branch) commits.
 			yield* repo.changeTrackedBranch(orgId, r.id, "feature")
 			r = yield* repoFor(repo, orgId, "7")
 			assert.strictEqual(r.trackedBranch, "feature")
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_X as never)))
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_Y as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_X))))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_Y))))
 
 			// Reconcile: remote lacks "stale" → deleted; its name is returned.
 			const deleted = yield* repo.reconcileBranchDeletions(r.id, new Set(["main", "feature"]), {
@@ -824,7 +818,7 @@ describe("VcsRepository", () => {
 			])
 			assert.strictEqual(count, 1)
 
-			const commit = yield* repo.findCommitBySha(orgId, SHA as never)
+			const commit = yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA))
 			assert.ok(Option.isSome(commit))
 			assert.strictEqual(commit.value.authorLogin, "octocat")
 			assert.strictEqual(commit.value.repositoryId, repoRow.value.id)
@@ -846,18 +840,7 @@ describe("VcsRepository", () => {
 						(id, org_id, provider, external_installation_id, account_login, account_type,
 						 external_account_id, repository_selection, status, installed_by_user_id, created_at, updated_at)
 					 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now(), now())`,
-					[
-						randomUUID(),
-						"org_x",
-						"github",
-						"55",
-						"octo",
-						"team",
-						"1",
-						"all",
-						"active",
-						"user_1",
-					],
+					[randomUUID(), "org_x", "github", "55", "octo", "team", "1", "all", "active", "user_1"],
 				),
 			)
 			const exit = yield* repo.resolveInstallation("github", "55").pipe(Effect.exit)
@@ -926,12 +909,12 @@ describe("VcsRepository", () => {
 
 				assert.ok(Option.isNone(yield* repo.resolveInstallation("github", "42")))
 				assert.strictEqual((yield* reposOfInstallation(repo, "42", "all")).length, 0)
-				assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_42 as never)))
+				assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_42))))
 
 				// Installation 99 is untouched (delete was scoped to 42's repo ids).
 				assert.ok(Option.isSome(yield* repo.resolveInstallation("github", "99")))
 				assert.strictEqual((yield* reposOfInstallation(repo, "99", "all")).length, 1)
-				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_99 as never)))
+				assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_99))))
 
 				// Idempotent: purging again is a no-op, not an error.
 				yield* purgeInstallationFor(repo, orgId, "42")
@@ -1023,8 +1006,8 @@ describe("VcsRepository", () => {
 
 			const repoA = yield* repoFor(repo, orgA, "7")
 			const repoB = yield* repoFor(repo, orgB, "8")
-			const foundA = yield* repo.findCommitBySha(orgA, SHARED as never)
-			const foundB = yield* repo.findCommitBySha(orgB, SHARED as never)
+			const foundA = yield* repo.findCommitBySha(orgA, decodeGitCommitSha(SHARED))
+			const foundB = yield* repo.findCommitBySha(orgB, decodeGitCommitSha(SHARED))
 			assert.strictEqual(expectSome(foundA).repositoryId, repoA.id)
 			assert.strictEqual(expectSome(foundB).repositoryId, repoB.id)
 			// And never the other org's row.
@@ -1064,7 +1047,7 @@ describe("VcsRepository", () => {
 
 			const after = yield* repoFor(repo, orgId, "7")
 			assert.strictEqual(after.trackedBranch, "main") // untouched
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_X as never))) // not wiped
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_X)))) // not wiped
 		}).pipe(Effect.provide(repoLayer(testDb)))
 	})
 
@@ -1119,7 +1102,7 @@ describe("VcsRepository", () => {
 				},
 			])
 			// Stored lowercased → found by the lowercase form.
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, "a".repeat(40) as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha("a".repeat(40)))))
 		}).pipe(Effect.provide(repoLayer(testDb)))
 	})
 
@@ -1412,7 +1395,7 @@ describe("VcsSyncService orchestrator", () => {
 				}),
 			)
 			assert.ok(!(yield* repo.listBranchesByRepository(r.id)).some((b) => b.name === "feature/x"))
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			assert.strictEqual(sent.length, 0) // branch events make no GitHub/queue calls
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, repos: oneRepo })))
 	})
@@ -1433,7 +1416,7 @@ describe("VcsSyncService orchestrator", () => {
 			])
 			yield* repo.changeTrackedBranch(orgId, r.id, "release")
 			yield* repo.upsertCommits(r, [commit(SHA_A, 1)])
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 
 			yield* svc.processMessage(
 				Schema.encodeSync(VcsSyncJob)({
@@ -1450,7 +1433,7 @@ describe("VcsSyncService orchestrator", () => {
 			// backfill of the default enqueued.
 			const updated = yield* repoFor(repo, orgId, "7")
 			assert.strictEqual(updated.trackedBranch, "main")
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			const backfills = sent.filter((j) => j.kind === "sync-commits")
 			assert.strictEqual(backfills.length, 1)
 			assert.strictEqual(backfills[0]!.kind === "sync-commits" ? backfills[0]!.branch : "", "main")
@@ -1489,13 +1472,17 @@ describe("VcsSyncService orchestrator", () => {
 			// retarget to "main": commits wiped, exactly one backfill, for "main".
 			const updated = yield* repoFor(repo, orgId, "7")
 			assert.strictEqual(updated.trackedBranch, "main")
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			const backfills = sent.filter((j) => j.kind === "sync-commits")
 			assert.strictEqual(backfills.length, 1)
 			assert.strictEqual(backfills[0]!.kind === "sync-commits" ? backfills[0]!.branch : "", "main")
 		}).pipe(
 			Effect.provide(
-				orchestratorLayer(testDb, { sent, repos: oneRepo, branches: [{ name: "main", headSha: null }] }),
+				orchestratorLayer(testDb, {
+					sent,
+					repos: oneRepo,
+					branches: [{ name: "main", headSha: null }],
+				}),
 			),
 		)
 	})
@@ -1527,7 +1514,7 @@ describe("VcsSyncService orchestrator", () => {
 				"main",
 			)
 			// Forced ⇒ the payload is discarded (we re-walk instead), so SHA_A is not stored.
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, repos: oneRepo })))
 	})
 
@@ -1547,7 +1534,7 @@ describe("VcsSyncService orchestrator", () => {
 				commits: [commit(SHA_A, 1)],
 			}
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job)) // must not fail
-			const found = yield* repo.findCommitBySha(orgId, SHA_A as never)
+			const found = yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))
 			assert.ok(Option.isNone(found))
 			assert.strictEqual(sent.length, 0)
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
@@ -1577,7 +1564,7 @@ describe("VcsSyncService orchestrator", () => {
 			const branches = yield* repo.listBranchesByRepository(r.id)
 			assert.ok(branches.some((b) => b.name === "feature/x"))
 			// …and its commits are NOT stored — only the tracked branch's commits are.
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
 	})
 
@@ -1603,7 +1590,7 @@ describe("VcsSyncService orchestrator", () => {
 					commits: [commit(SHA_A, 1)],
 				}),
 			)
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
 	})
 
@@ -1629,7 +1616,7 @@ describe("VcsSyncService orchestrator", () => {
 					commits: [commit(SHA_A, 1)],
 				}),
 			)
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never))) // push landed…
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A)))) // push landed…
 			// …yet the sync status stays exactly as the backfill left it (untouched here).
 			const stored = yield* reposOfInstallation(repo, "42", "all")
 			assert.strictEqual(stored[0]!.syncStatus, "pending")
@@ -1734,7 +1721,7 @@ describe("VcsSyncService orchestrator", () => {
 			// The prior installation, its repos, and its commits are all hard-deleted…
 			assert.ok(Option.isNone(yield* repo.resolveInstallation("github", "11")))
 			assert.strictEqual((yield* reposOfInstallation(repo, "11", "all")).length, 0)
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, STALE_SHA as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(STALE_SHA))))
 
 			// …leaving exactly the new installation, which synced its own repo.
 			const remaining = (yield* repo.listInstallationsByOrg(orgId)).filter(
@@ -1780,8 +1767,8 @@ describe("VcsSyncService orchestrator", () => {
 				sinceMs: 0,
 			}
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job))
-			const a = yield* repo.findCommitBySha(orgId, SHA_A as never)
-			const b = yield* repo.findCommitBySha(orgId, SHA_B as never)
+			const a = yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))
+			const b = yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_B))
 			assert.ok(Option.isSome(a) && Option.isSome(b))
 			const stored = yield* reposOfInstallation(repo, "42", "all")
 			assert.strictEqual(stored[0]!.syncStatus, "ready")
@@ -1908,7 +1895,7 @@ describe("VcsSyncService orchestrator", () => {
 				commits: [commit(SHA_A, 1)],
 			}
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job)) // gated → must not fail
-			const a = yield* repo.findCommitBySha(orgId, SHA_A as never)
+			const a = yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))
 			assert.ok(Option.isNone(a)) // gate short-circuits before the upsert
 			const inst = yield* repo.resolveInstallation("github", "42")
 			assert.ok(Option.isSome(inst))
@@ -1968,7 +1955,7 @@ describe("VcsSyncService orchestrator", () => {
 			yield* seedRepo(repo)
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(backfillJob)) // must not fail
 			// The fetched commit was persisted…
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			// …the repo is marked backfilling (in progress, not ready)…
 			const stored = yield* reposOfInstallation(repo, "42", "all")
 			assert.strictEqual(stored[0]!.syncStatus, "backfilling")
@@ -2005,7 +1992,7 @@ describe("VcsSyncService orchestrator", () => {
 			yield* seedRepo(repo)
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(backfillJob)) // must not fail
 			// The fetched page was persisted and the repo marked backfilling…
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 			const stored = yield* reposOfInstallation(repo, "42", "all")
 			assert.strictEqual(stored[0]!.syncStatus, "backfilling")
 			// …and a continuation was requeued from the watermark with NO delay…
@@ -2127,7 +2114,7 @@ describe("VcsSyncService orchestrator", () => {
 			assert.strictEqual(all.length, 1)
 			assert.strictEqual(all[0]!.status, "removed")
 			// Its commits are retained (soft delete, not a purge).
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, repos: [] })))
 	})
 
@@ -2192,7 +2179,7 @@ describe("VcsSyncService orchestrator", () => {
 				commits: [commit(SHA_A, 1)],
 			}
 			yield* svc.processMessage(Schema.encodeSync(VcsSyncJob)(job)) // must not fail
-			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isNone(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
 	})
 
@@ -2228,7 +2215,9 @@ describe("VcsSyncService orchestrator", () => {
 			// …and reaches back exactly one window from the enqueue moment.
 			assert.ok(backfill.sinceMs >= before - BACKFILL_WINDOW_MS)
 			assert.ok(backfill.sinceMs <= after - BACKFILL_WINDOW_MS)
-		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent, branches: [{ name: "main", headSha: null }] })))
+		}).pipe(
+			Effect.provide(orchestratorLayer(testDb, { sent, branches: [{ name: "main", headSha: null }] })),
+		)
 	})
 
 	// A continuation must carry the original walk's `sinceMs` (and branch) unchanged —
@@ -2485,7 +2474,7 @@ describe("VcsSyncService orchestrator", () => {
 				}),
 			)
 			assert.ok((yield* repo.listBranchesByRepository(r.id)).some((b) => b.name === "main"))
-			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, SHA_A as never)))
+			assert.ok(Option.isSome(yield* repo.findCommitBySha(orgId, decodeGitCommitSha(SHA_A))))
 		}).pipe(Effect.provide(orchestratorLayer(testDb, { sent })))
 	})
 
@@ -2639,7 +2628,7 @@ describe("VcsSyncService orchestrator", () => {
 // validation fires at both the webhook decode boundary and on persistence.
 describe("git SHA validation (branded type)", () => {
 	it("GitCommitSha accepts mixed-case input and normalizes it to lowercase", () => {
-		const decode = Schema.decodeUnknownSync(GitCommitSha)
+		const decode = decodeGitCommitSha
 		// All-uppercase 40-hex is accepted and lowercased.
 		assert.strictEqual(decode("A".repeat(40)), "a".repeat(40))
 		// Mixed case round-trips to its lowercase form (so case never splits a row).

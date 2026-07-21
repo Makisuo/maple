@@ -767,7 +767,7 @@ export interface TracesRootListOutput {
 	readonly hasError: number
 }
 
-export interface TraceSummariesOpts {
+export interface TraceSummariesOpts extends TracesBaseWhereOpts {
 	serviceName?: string
 	spanName?: string
 	hasError?: boolean
@@ -777,6 +777,8 @@ export interface TraceSummariesOpts {
 	httpStatusCode?: string
 	deploymentEnv?: string
 	namespace?: string
+	spanScope?: "root"
+	httpRoute?: string
 	limit?: number
 	offset?: number
 	cursor?: { timestamp: string; traceId: string }
@@ -801,8 +803,47 @@ export interface TraceSummaryOutput {
 const argMin = <T>(value: CH.Expr<T>, ordering: CH.Expr<unknown>): CH.Expr<T> =>
 	compileFnCall<T>("argMin", value, ordering)
 
-/** Public trace catalog read over the root-span MV, ordered deterministically. */
+/**
+ * Public trace catalog read over the root-span MV, ordered deterministically.
+ * Signal filters match any span by default. A tenant/time-filtered `IN`
+ * semi-join selects owning TraceIds before the root-summary MV is read, avoiding
+ * a broad runtime JOIN while keeping the returned fields explicitly root-scoped.
+ */
 export function traceSummariesQuery(opts: TraceSummariesOpts) {
+	const attributeFilters = [
+		...(opts.attributeFilters ?? []),
+		...(opts.httpMethod ? [{ key: "http.method", mode: "equals" as const, value: opts.httpMethod }] : []),
+		...(opts.httpRoute ? [{ key: "http.route", mode: "equals" as const, value: opts.httpRoute }] : []),
+		...(opts.httpStatusCode
+			? [{ key: "http.status_code", mode: "equals" as const, value: opts.httpStatusCode }]
+			: []),
+	]
+	const spanFilters: TracesBaseWhereOpts = {
+		serviceName: opts.serviceName,
+		spanName: opts.spanName,
+		statusCode: opts.statusCode,
+		rootOnly: opts.spanScope === "root" ? true : undefined,
+		errorsOnly: opts.hasError,
+		environments: opts.environments ?? (opts.deploymentEnv ? [opts.deploymentEnv] : undefined),
+		namespaces: opts.namespaces ?? (opts.namespace ? [opts.namespace] : undefined),
+		minDurationMs: opts.minDurationMs,
+		maxDurationMs: opts.maxDurationMs,
+		attributeFilters,
+		resourceAttributeFilters: opts.resourceAttributeFilters,
+	}
+	const hasSpanFilters = Object.entries(spanFilters).some(([, value]) =>
+		Array.isArray(value) ? value.length > 0 : value !== undefined,
+	)
+	const matchingTraceIds = hasSpanFilters
+		? from(Traces)
+				.select(($) => ({ traceId: $.TraceId }))
+				.where(($) => tracesBaseWhereConditions($, spanFilters))
+				.groupBy("traceId")
+		: undefined
+	const matchingTraceIdsSql = matchingTraceIds
+		? compileCH(matchingTraceIds, {}, { skipFormat: true }).sql
+		: undefined
+
 	return from(TraceListMv)
 		.select(($) => ({
 			traceId: $.TraceId,
@@ -823,16 +864,7 @@ export function traceSummariesQuery(opts: TraceSummariesOpts) {
 			$.OrgId.eq(param.string("orgId")),
 			$.Timestamp.gte(param.dateTime("startTime")),
 			$.Timestamp.lte(param.dateTime("endTime")),
-			CH.when(opts.serviceName, (value: string) => $.ServiceName.eq(value)),
-			CH.when(opts.spanName, (value: string) => $.SpanName.eq(value)),
-			CH.when(opts.hasError, () => $.HasError.eq(1)),
-			CH.when(opts.hasError === false, () => $.HasError.eq(0)),
-			opts.minDurationMs !== undefined ? $.Duration.gte(opts.minDurationMs * 1000000) : undefined,
-			opts.maxDurationMs !== undefined ? $.Duration.lte(opts.maxDurationMs * 1000000) : undefined,
-			CH.when(opts.httpMethod, (value: string) => $.HttpMethod.eq(value)),
-			CH.when(opts.httpStatusCode, (value: string) => $.HttpStatusCode.eq(value)),
-			CH.when(opts.deploymentEnv, (value: string) => $.DeploymentEnv.eq(value)),
-			CH.when(opts.namespace, (value: string) => $.ServiceNamespace.eq(value)),
+			matchingTraceIdsSql ? CH.rawCond(`TraceId IN (${matchingTraceIdsSql})`) : undefined,
 			opts.cursor
 				? $.Timestamp.lt(opts.cursor.timestamp).or(
 						$.Timestamp.eq(opts.cursor.timestamp).and($.TraceId.lt(opts.cursor.traceId)),

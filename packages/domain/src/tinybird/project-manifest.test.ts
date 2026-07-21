@@ -11,6 +11,12 @@ describe("Tinybird project manifest", () => {
 
 		expect(manifest.datasources.some((resource) => resource.name === "logs")).toBe(true)
 		expect(manifest.pipes.some((resource) => resource.name === "trace_list_mv_mv")).toBe(true)
+		expect(manifest.datasources.some((resource) => resource.name === "service_operations_minutely")).toBe(
+			true,
+		)
+		expect(manifest.pipes.some((resource) => resource.name === "service_operations_minutely_mv")).toBe(
+			true,
+		)
 		expect(manifest.projectRevision).toBe(
 			createTinybirdProjectRevision(manifest.datasources, manifest.pipes),
 		)

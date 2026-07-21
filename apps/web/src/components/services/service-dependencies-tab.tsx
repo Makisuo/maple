@@ -3,6 +3,7 @@ import { cn } from "@maple/ui/utils"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceDependenciesBundleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { toSingleDeploymentEnv } from "@/lib/services/environments"
 import { formatLatency } from "@/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { DependencyTable, type DependencyRow } from "./dependency-table"
@@ -15,6 +16,8 @@ interface ServiceDependenciesTabProps {
 	timePreset?: string
 	effectiveStartTime: string
 	effectiveEndTime: string
+	/** Page-level env filter (single-element by convention, see the route). */
+	environments?: string[]
 }
 
 interface RawEdge {
@@ -57,12 +60,20 @@ export function ServiceDependenciesTab({
 	timePreset,
 	effectiveStartTime,
 	effectiveEndTime,
+	environments,
 }: ServiceDependenciesTabProps) {
 	// One fetch for the whole Dependencies tab — service, DB, and external edges in
-	// a single round-trip (was three separate atoms).
+	// a single round-trip (was three separate atoms). The atom key (incl. the
+	// derived deploymentEnv) matches ServiceDependencyStrip's, so switching from
+	// the Overview strip to this tab is a cache hit.
 	const bundleResult = useRetainedRefreshableResultValue(
 		getServiceDependenciesBundleResultAtom({
-			data: { serviceName, startTime: effectiveStartTime, endTime: effectiveEndTime },
+			data: {
+				serviceName,
+				startTime: effectiveStartTime,
+				endTime: effectiveEndTime,
+				deploymentEnv: toSingleDeploymentEnv(environments),
+			},
 		}),
 	)
 

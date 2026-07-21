@@ -1,0 +1,36 @@
+{
+	"name": "@maple-dev/alchemy",
+	"version": "0.1.0",
+	"description": "Alchemy provider for Maple resources — declare API keys, ingest keys, dashboards, alert destinations, and alert rules in your alchemy.run.ts",
+	"license": "MIT",
+	"files": [
+		"dist",
+		"README.md"
+	],
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs"
+		}
+	},
+	"scripts": {
+		"build": "tsdown",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@effect/language-service": "catalog:effect",
+		"@maple/domain": "workspace:*",
+		"@types/node": "catalog:tooling",
+		"alchemy": "2.0.0-beta.61",
+		"effect": "catalog:effect",
+		"tsdown": "^0.21.7",
+		"typescript": "catalog:tooling",
+		"vitest": "catalog:"
+	},
+	"peerDependencies": {
+		"alchemy": ">=2.0.0-beta.61 <3",
+		"effect": ">=4.0.0-beta.93 || >=4.0.0"
+	}
+}

@@ -1,191 +1,63 @@
 import { Effect, Schema } from "effect"
-import { compilePipeQuery } from "@maple/query-engine/ch"
-import { type WarehouseExecutorShape, type ExecutorQueryOptions } from "@maple/query-engine/observability"
-import { OrgId } from "@maple/domain/http"
-import {
-	WarehouseQueryError,
-	WarehouseSchemaDriftError,
-	WarehouseValidationError,
-} from "@maple/domain/http/warehouse-errors"
+import { OrgId, UserId } from "@maple/domain/http"
+import { makeWarehouseExecutor, type WarehouseSqlClient } from "@maple/query-engine/execution"
+import type { WarehouseExecutorShape } from "@maple/query-engine/observability"
 import { executeLocalQuery } from "@maple/query-engine/local"
 import { debugLog } from "../lib/debug"
 
-// Local mode is single-tenant: the Rust binary writes every row under this
+// Local mode is single-tenant: the local binary writes every row under this
 // OrgId, and every compiled query filters on it. `OrgId` is a non-empty trimmed
 // branded string, so "local" decodes cleanly (no cast needed).
 const LOCAL_ORG_ID = Schema.decodeUnknownSync(OrgId)("local")
+const LOCAL_USER_ID = Schema.decodeUnknownSync(UserId)("local")
 
-const toWarehouseError = (pipe: string) => (error: unknown) =>
-	new WarehouseQueryError({
-		message: error instanceof Error ? error.message : String(error),
-		pipeName: pipe,
-	})
+const LOCAL_TENANT = { orgId: LOCAL_ORG_ID, userId: LOCAL_USER_ID, authMode: "local" }
 
-// Cap `db.query.text` at 16 KB to match apps/api's WarehouseQueryService span.
-const MAX_DB_QUERY_TEXT = 16 * 1024
-const truncateSql = (sql: string) => (sql.length > MAX_DB_QUERY_TEXT ? sql.slice(0, MAX_DB_QUERY_TEXT) : sql)
-
-/**
- * A `WarehouseExecutor` shape backed by the local Maple binary's `/local/query`
- * endpoint. Both executor methods reduce to raw SQL against the embedded chDB:
- *
- *   - `sqlQuery` posts the SQL directly.
- *   - `query(pipe, params)` compiles the pipe name to SQL via the shared
- *     `compilePipeQuery` dispatcher (the same one the cloud uses), then posts it.
- *
- * This makes every `@maple/query-engine/observability` function — which only
- * depend on a `WarehouseExecutor` — work unchanged against local mode.
- */
-export const makeLocalWarehouseExecutorShape = (baseUrl: string): WarehouseExecutorShape => {
-	// Run SQL against the local server, timing the round-trip and (under --debug)
-	// printing the SQL + elapsed ms to stderr. The `finally` logs even on failure
-	// so a failing query still shows its SQL.
-	const exec = async <T>(sql: string, label: string): Promise<ReadonlyArray<T>> => {
+// The chDB driver: POST `/local/query` on the local binary. Runs the SQL,
+// timing the round-trip and (under --debug) printing the SQL + elapsed ms to
+// stderr. The `finally` logs even on failure so a failing query still shows
+// its SQL.
+const localChdbClient = (baseUrl: string): WarehouseSqlClient => ({
+	sql: async (sql) => {
 		const started = performance.now()
 		try {
-			return await executeLocalQuery<T>(sql, baseUrl)
+			return { data: await executeLocalQuery<Record<string, unknown>>(sql, baseUrl) }
 		} finally {
-			debugLog(`${label} · ${Math.round(performance.now() - started)}ms`, sql)
+			debugLog(`local query · ${Math.round(performance.now() - started)}ms`, sql)
 		}
-	}
-	return {
-		orgId: LOCAL_ORG_ID,
-		sqlQuery: <T = Record<string, unknown>>(sql: string, options?: ExecutorQueryOptions) =>
-			Effect.gen(function* () {
-				const started = performance.now()
-				const rows = yield* Effect.tryPromise({
-					try: () => exec<T>(sql, "sqlQuery"),
-					catch: toWarehouseError("sqlQuery"),
-				})
-				yield* Effect.annotateCurrentSpan({
-					"db.duration_ms": Math.round(performance.now() - started),
-					"result.rowCount": rows.length,
-				})
-				return rows
-			}).pipe(
-				Effect.withSpan("warehouse.sqlQuery", {
-					kind: "client",
-					attributes: {
-						"db.system.name": "clickhouse",
-						"peer.service": "chdb",
-						"db.query.text": truncateSql(sql),
-						"db.query.length": sql.length,
-						"query.context": "sqlQuery",
-						...(options?.profile ? { "query.profile": options.profile } : {}),
-					},
-				}),
-			),
-		compiledQuery: (compiled, options?: ExecutorQueryOptions) =>
-			Effect.gen(function* () {
-				const started = performance.now()
-				const rows = yield* Effect.tryPromise({
-					try: () => exec<Record<string, unknown>>(compiled.sql, "compiledQuery"),
-					catch: toWarehouseError("compiledQuery"),
-				})
-				yield* Effect.annotateCurrentSpan({
-					"db.duration_ms": Math.round(performance.now() - started),
-					"result.rowCount": rows.length,
-				})
-				return yield* compiled.decodeRows(rows).pipe(
-					Effect.mapError(
-						(error) =>
-							new WarehouseSchemaDriftError({
-								message: error.message,
-								pipeName: "compiledQuery",
-								cause: error,
-							}),
-					),
-				)
-			}).pipe(
-				Effect.withSpan("warehouse.compiledQuery", {
-					kind: "client",
-					attributes: {
-						"db.system.name": "clickhouse",
-						"peer.service": "chdb",
-						"db.query.text": truncateSql(compiled.sql),
-						"db.query.length": compiled.sql.length,
-						"query.context": "compiledQuery",
-						...(options?.profile ? { "query.profile": options.profile } : {}),
-					},
-				}),
-			),
-		compiledQueryFirst: (compiled, options?: ExecutorQueryOptions) =>
-			Effect.gen(function* () {
-				const started = performance.now()
-				const rows = yield* Effect.tryPromise({
-					try: () => exec<Record<string, unknown>>(compiled.sql, "compiledQueryFirst"),
-					catch: toWarehouseError("compiledQueryFirst"),
-				})
-				yield* Effect.annotateCurrentSpan({
-					"db.duration_ms": Math.round(performance.now() - started),
-					"result.rowCount": rows.length,
-				})
-				return yield* compiled.decodeFirstRow(rows).pipe(
-					Effect.mapError(
-						(error) =>
-							new WarehouseSchemaDriftError({
-								message: error.message,
-								pipeName: "compiledQueryFirst",
-								cause: error,
-							}),
-					),
-				)
-			}).pipe(
-				Effect.withSpan("warehouse.compiledQueryFirst", {
-					kind: "client",
-					attributes: {
-						"db.system.name": "clickhouse",
-						"peer.service": "chdb",
-						"db.query.text": truncateSql(compiled.sql),
-						"db.query.length": compiled.sql.length,
-						"query.context": "compiledQueryFirst",
-						...(options?.profile ? { "query.profile": options.profile } : {}),
-					},
-				}),
-			),
-		query: <T>(pipe: string, params: Record<string, unknown>, _options?: ExecutorQueryOptions) =>
-			Effect.gen(function* () {
-				const compiled = compilePipeQuery(pipe, { ...params, org_id: LOCAL_ORG_ID })
-				if (!compiled) {
-					return yield* new WarehouseValidationError({
-						message: `Unsupported pipe in local mode: ${pipe}`,
-						pipeName: pipe,
-					})
-				}
-				yield* Effect.annotateCurrentSpan({
-					"db.query.text": truncateSql(compiled.sql),
-					"db.query.length": compiled.sql.length,
-				})
-				const started = performance.now()
-				const rows = yield* Effect.tryPromise({
-					try: () => exec<Record<string, unknown>>(compiled.sql, pipe),
-					catch: toWarehouseError(pipe),
-				})
-				yield* Effect.annotateCurrentSpan({
-					"db.duration_ms": Math.round(performance.now() - started),
-					"result.rowCount": rows.length,
-				})
-				const decodedRows = yield* compiled.decodeRows(rows).pipe(
-					Effect.mapError(
-						(error) =>
-							new WarehouseSchemaDriftError({
-								message: error.message,
-								pipeName: pipe,
-								cause: error,
-							}),
-					),
-				)
-				// Type-erased executor boundary — mirrors WarehouseQueryService.asExecutor in apps/api.
-				return { data: decodedRows as ReadonlyArray<T> }
-			}).pipe(
-				Effect.withSpan("warehouse.query", {
-					kind: "client",
-					attributes: {
-						"db.system.name": "clickhouse",
-						"peer.service": "chdb",
-						"query.context": pipe,
-					},
-				}),
-			),
-	}
-}
+	},
+	insert: async () => {
+		// Local mode ingests via OTLP into the embedded chDB, never through the
+		// warehouse `ingest` path.
+		throw new Error("local mode is read-only through the warehouse executor — ingest via OTLP")
+	},
+})
+
+/**
+ * A `WarehouseExecutor` backed by the local Maple binary's `/local/query`
+ * endpoint — the REAL `makeWarehouseExecutor` from `@maple/query-engine`
+ * (spans, error classification, OrgId scoping) with a chDB client and a
+ * constant single-tenant route injected. The `chdb` backend dialect strips the
+ * trailing `FORMAT` (the local server owns the output format) and skips
+ * Tinybird's restricted-settings policy.
+ *
+ * This makes every `@maple/query-engine/observability` function — which only
+ * depends on a `WarehouseExecutor` — work unchanged against local mode, with
+ * the same `warehouse.backend="chdb"` span contract as the cloud.
+ */
+export const makeLocalWarehouseExecutorShape = (baseUrl: string): WarehouseExecutorShape =>
+	makeWarehouseExecutor({
+		createClient: () => localChdbClient(baseUrl),
+		resolveRoute: () =>
+			Effect.succeed({
+				source: "managed" as const,
+				config: {
+					kind: "chdb" as const,
+					url: baseUrl,
+					username: "",
+					password: "",
+					database: "default",
+				},
+				clientCacheKey: "local",
+			}),
+	}).asExecutor(LOCAL_TENANT)

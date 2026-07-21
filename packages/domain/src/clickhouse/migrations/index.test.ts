@@ -3,7 +3,10 @@ import { isBackfill, renderStatementFull, type BackfillSpec } from "../backfill"
 import { migration_0004_service_namespace_projections } from "./0004_service_namespace_projections"
 import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_error_columns"
 import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
-import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hyperdrive"
+import {
+	migration_0008_service_operations_minutely,
+	serviceOperationsMinutelyBackfill,
+} from "./0008_service_operations_minutely"
 import { migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -18,8 +21,29 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7])
-		expect(migrations.at(-1)).toBe(migration_0007_db_namespace_hyperdrive)
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
+		expect(migrations.at(-1)).toBe(migration_0008_service_operations_minutely)
+	})
+
+	it("adds the service-operation rollup and exposes a coordinated chunkable backfill", () => {
+		const statements = migration_0008_service_operations_minutely.statements
+		const sql = statements.map((statement) => renderStatementFull(statement, "default")).join("\n\n")
+
+		expect(sql).toContain("PARTITION BY toDate(Minute)")
+		expect(sql).toContain("ORDER BY (OrgId, ServiceName, DeploymentEnv, Minute, SpanName)")
+		expect(sql).toContain("TTL toDate(Minute) + INTERVAL 90 DAY")
+		expect(sql).toContain("SpanName String")
+		expect(sql).toContain("quantilesTDigestState(0.5, 0.95)(Duration)")
+		expect(sql).toContain("http.route")
+		expect(sql).toContain("http.server %")
+		expect(statements.filter(isBackfill)).toHaveLength(0)
+		expect(sql).not.toContain("TRUNCATE TABLE service_operations_minutely")
+		expect(serviceOperationsMinutelyBackfill.target).toBe("service_operations_minutely")
+		expect(serviceOperationsMinutelyBackfill.from).toBe("traces")
+		expect(serviceOperationsMinutelyBackfill.tsColumn).toBe("Timestamp")
+		expect(serviceOperationsMinutelyBackfill.groupBy).toBe(
+			"OrgId, Minute, ServiceName, DeploymentEnv, SpanName",
+		)
 	})
 
 	it("adds alert_checks error columns as idempotent ALTERs", () => {

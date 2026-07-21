@@ -49,6 +49,7 @@ import { registerSearchSessionsTool } from "./search-sessions"
 import { registerGetSessionTranscriptTool } from "./get-session-transcript"
 import { registerGetSessionTracesTool } from "./get-session-traces"
 import { registerServiceMapTool } from "./service-map"
+import { registerSourceCodeTools } from "./source-code"
 import type { McpToolError, McpToolRegistrar, McpToolResult } from "./types"
 import { registerUpdateDashboardTool } from "./update-dashboard"
 import { registerUpdateDashboardWidgetTool } from "./update-dashboard-widget"
@@ -126,6 +127,7 @@ const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
 	registerListServicesTool(registrar)
 	registerGetServiceTopOperationsTool(registrar)
 	registerGetInstrumentationRecommendationsTool(registrar)
+	registerSourceCodeTools(registrar)
 	registerListErrorIssuesTool(registrar)
 	registerTransitionErrorIssueTool(registrar)
 	registerSetIssueSeverityTool(registrar)

@@ -31,11 +31,11 @@ import {
 	type DirtyStorePolicy,
 	hostedDashboardUrl,
 	hostedUiOrigin,
-	normalizeHost,
 	resolveAdvertiseHost,
 	resolveBindHost,
 	serverProbeUrl,
 	serverUrl,
+	validateHost,
 } from "./server-args"
 
 /** A `maple start`/`maple stop` failure. The message is shown to the user and
@@ -55,8 +55,10 @@ const prettyPath = (p: string): string => {
 
 /** Public origin of the deployed local-mode dashboard SPA. Overridable for
  *  testing against staging (`local-staging.maple.dev`). */
+const DEFAULT_REMOTE_UI_URL = "https://local.maple.dev"
+
 const remoteUiUrl = (): Effect.Effect<string, ServerError> => {
-	const configured = process.env.MAPLE_LOCAL_UI_URL?.trim() || "https://local.maple.dev"
+	const configured = process.env.MAPLE_LOCAL_UI_URL?.trim() || DEFAULT_REMOTE_UI_URL
 	return Effect.try({
 		try: () => {
 			hostedUiOrigin(configured)
@@ -68,6 +70,15 @@ const remoteUiUrl = (): Effect.Effect<string, ServerError> => {
 			}),
 	})
 }
+
+const validatedHost = (source: string, value: string): Effect.Effect<string, ServerError> =>
+	Effect.try({
+		try: () => validateHost(value),
+		catch: (error) =>
+			new ServerError({
+				message: `invalid ${source}: ${error instanceof Error ? error.message : String(error)}`,
+			}),
+	})
 
 /** The startup banner shown once the server is listening. `dashboardUrl` is the
  *  URL the user should open (the auto-updating `local.maple.dev` by default, or
@@ -302,12 +313,15 @@ export const start = Command.make("start", {
 		Effect.fnUntraced(function* (a) {
 			const fs = yield* FileSystem
 			const dataDir = Option.getOrUndefined(a.dataDir) ?? defaultDataDir()
-			const bindHost = normalizeHost(a.host)
-			const hostedUiUrl = yield* remoteUiUrl()
-			const advertiseHost = resolveAdvertiseHost(
-				Option.getOrUndefined(a.advertiseHost),
-				process.env.MAPLE_LOCAL_ADVERTISE_HOST,
-				bindHost,
+			const bindHost = yield* validatedHost("--host / MAPLE_LOCAL_BIND_HOST", a.host)
+			const hostedUiUrl = a.offline ? DEFAULT_REMOTE_UI_URL : yield* remoteUiUrl()
+			const advertiseHost = yield* validatedHost(
+				"--advertise-host / MAPLE_LOCAL_ADVERTISE_HOST",
+				resolveAdvertiseHost(
+					Option.getOrUndefined(a.advertiseHost),
+					process.env.MAPLE_LOCAL_ADVERTISE_HOST,
+					bindHost,
+				),
 			)
 			const pidPath = pidFilePath(dataDir)
 

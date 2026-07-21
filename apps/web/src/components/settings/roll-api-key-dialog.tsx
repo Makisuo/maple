@@ -15,6 +15,7 @@ import {
 	DialogTitle,
 } from "@maple/ui/components/ui/dialog"
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
+import { formatBackendError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
 
@@ -44,7 +45,8 @@ export function RollApiKeyDialog({ open, onOpenChange, apiKey, onRolled }: RollA
 			onRolled?.()
 			void reconcileTxid(result.value.txid)
 		} else {
-			toast.error("Failed to roll API key")
+			const { title, description } = formatBackendError(result)
+			toast.error(title, { description })
 		}
 		setIsRolling(false)
 	}

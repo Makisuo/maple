@@ -4,11 +4,13 @@
 // DSL-based query definitions for service overview, releases, apdex, and usage.
 // ---------------------------------------------------------------------------
 
+import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
-import { from, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
+import { from, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { unionAll, type CHUnionQuery } from "@maple-dev/clickhouse-builder"
-import { ServiceOverviewSpans, ServiceUsage } from "../tables"
+import { ServiceOverviewSpans, ServiceUsage, TracesAggregatesHourly } from "../tables"
+import { CHNumber } from "../schema"
 import { apdexExprs, serviceOverviewWhereConditions } from "./query-helpers"
 
 // ---------------------------------------------------------------------------
@@ -128,6 +130,73 @@ export function serviceOverviewQuery(opts: ServiceOverviewOpts) {
 }
 
 // ---------------------------------------------------------------------------
+// Service health snapshot
+// ---------------------------------------------------------------------------
+
+export interface ServiceHealthSnapshotOpts {
+	environments?: readonly string[]
+	limit?: number
+}
+
+export interface ServiceHealthSnapshotOutput {
+	readonly serviceName: string
+	readonly environment: string
+	readonly requestCount: number
+	readonly errorCount: number
+	readonly p95LatencyMs: number
+}
+
+/**
+ * Fast metrics snapshot for the main overview's service-health section.
+ *
+ * This deliberately reads the generalized hourly aggregate rather than
+ * `service_overview_spans`: the dashboard only needs service + environment
+ * golden signals, so scanning raw entry-point rows (and then a second raw
+ * seven-day baseline) is wasted work. Quantile states are merged here, which
+ * also avoids the mathematically-invalid weighted average of per-commit p95s
+ * used by the richer service catalog response.
+ *
+ * Hour bounds are floored because the aggregate is hour-grain. The main
+ * overview uses multi-hour presets; including both boundary hours is the
+ * least-surprising approximation and keeps the current partial hour visible.
+ */
+export function serviceHealthSnapshotQuery(opts: ServiceHealthSnapshotOpts) {
+	const hourFloor = (name: string) => CH.toStartOfHour(CH.toDateTime(param.dateTime(name)))
+
+	return from(TracesAggregatesHourly)
+		.select(($) => ({
+			serviceName: $.ServiceName,
+			environment: $.DeploymentEnv,
+			requestCount: CH.rawExpr<number>("sum(WeightedCount)"),
+			errorCount: CH.rawExpr<number>("sum(WeightedErrorCount)"),
+			p95LatencyMs: CH.rawExpr<number>(
+				"arrayElement(quantilesTDigestWeightedMerge(0.95)(DurationQuantiles), 1) / 1000000",
+			),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.IsEntryPoint.eq(1),
+			$.Hour.gte(hourFloor("startTime")),
+			$.Hour.lte(hourFloor("endTime")),
+			opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
+		])
+		.groupBy("serviceName", "environment")
+		.orderBy(["requestCount", "desc"], ["serviceName", "asc"])
+		.limit(opts.limit ?? 500)
+		.format("JSON")
+}
+
+/** BYO ClickHouse string-number coercion for the snapshot response. */
+export const serviceHealthSnapshotRowSchema: CompiledQueryRowSchema<ServiceHealthSnapshotOutput> =
+	Schema.Struct({
+		serviceName: Schema.String,
+		environment: Schema.String,
+		requestCount: CHNumber,
+		errorCount: CHNumber,
+		p95LatencyMs: CHNumber,
+	})
+
+// ---------------------------------------------------------------------------
 // Service health baseline
 // ---------------------------------------------------------------------------
 
@@ -185,6 +254,7 @@ export interface ServiceReleasesTimelineOutput {
 	readonly bucket: string
 	readonly commitSha: string
 	readonly count: number
+	readonly errorCount: number
 }
 
 export function serviceReleasesTimelineQuery(opts: ServiceReleasesTimelineOpts) {
@@ -193,6 +263,7 @@ export function serviceReleasesTimelineQuery(opts: ServiceReleasesTimelineOpts) 
 			bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
 			commitSha: $.CommitSha,
 			count: CH.count(),
+			errorCount: CH.countIf($.StatusCode.eq("Error")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),

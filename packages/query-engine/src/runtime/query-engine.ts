@@ -29,7 +29,12 @@ import {
 } from "@maple/domain/http"
 import type { OrgId } from "@maple/domain"
 import { Array as Arr, Duration, Effect, Match, Option, Result, Schema } from "effect"
-import { LOGS_BODY_SEARCH_SETTINGS, type QueryProfileName, type WarehouseQuerySettings } from "../profiles"
+import {
+	LOGS_BODY_SEARCH_SETTINGS,
+	type QueryProfileName,
+	type SqlQueryOptions,
+	type WarehouseQuerySettings,
+} from "../profiles"
 import { computeBucketSeconds } from "../datetime"
 import { makeExecuteRawSql } from "./raw-sql"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
@@ -54,11 +59,7 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	readonly sqlQuery: (
 		tenant: T,
 		sql: string,
-		options?: {
-			readonly profile?: QueryProfileName
-			readonly context?: string
-			readonly settings?: WarehouseQuerySettings
-		},
+		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseError>
 	readonly rawSqlQuery: (
 		tenant: T,
@@ -68,11 +69,7 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
-		options?: {
-			readonly profile?: QueryProfileName
-			readonly context?: string
-			readonly settings?: WarehouseQuerySettings
-		},
+		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
 }
 
@@ -225,18 +222,72 @@ export function buildEvaluateCacheKey(orgId: string, request: QueryEngineEvaluat
 }
 
 const DIRECT_CACHE_SNAP_KEYS = new Set(["startTime", "endTime"])
+const DIRECT_CACHE_SET_KEYS = new Set([
+	"commitShas",
+	"environments",
+	"namespaces",
+	"serviceNames",
+	"services",
+	"spanNames",
+])
 
-function normalizeDirectCacheValue(value: unknown, parentKey?: string): unknown {
+export interface DirectRouteCachePolicy {
+	/** Bump when response or key semantics change incompatibly. */
+	readonly version: number
+	readonly ttlSeconds: number
+	/** Time-key coalescing is independent from storage lifetime. */
+	readonly snapWindowSeconds: number
+}
+
+export type DirectRouteCachePolicyInput = number | DirectRouteCachePolicy
+
+export function makeDirectRouteCachePolicy(
+	options: {
+		readonly ttlSeconds?: number
+		readonly snapWindowSeconds?: number
+		readonly version?: number
+	} = {},
+): DirectRouteCachePolicy {
+	const ttlSeconds = Number.isFinite(options.ttlSeconds)
+		? Math.max(1, Math.floor(options.ttlSeconds!))
+		: CACHE_SNAP_S
+	const requestedSnap = options.snapWindowSeconds ?? ttlSeconds
+	const snapWindowSeconds = Number.isFinite(requestedSnap)
+		? Math.min(3600, Math.max(1, Math.floor(requestedSnap)))
+		: CACHE_SNAP_S
+	const version = Number.isFinite(options.version) ? Math.max(1, Math.floor(options.version!)) : 1
+	return { version, ttlSeconds, snapWindowSeconds }
+}
+
+export function resolveDirectRouteCachePolicy(
+	input: DirectRouteCachePolicyInput = CACHE_SNAP_S,
+): DirectRouteCachePolicy {
+	return typeof input === "number"
+		? makeDirectRouteCachePolicy({ ttlSeconds: input })
+		: makeDirectRouteCachePolicy(input)
+}
+
+function normalizeDirectCacheValue(value: unknown, snapWindowSeconds: number, parentKey?: string): unknown {
 	if (value == null) return value
 	if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
 		if (parentKey && DIRECT_CACHE_SNAP_KEYS.has(parentKey) && typeof value === "string") {
-			return snapSeconds(value)
+			return snapToWindow(value, snapWindowSeconds)
 		}
 		return value
 	}
 
 	if (Array.isArray(value)) {
-		return value.map((item) => normalizeDirectCacheValue(item))
+		const normalized = value.map((item) => normalizeDirectCacheValue(item, snapWindowSeconds))
+		if (
+			parentKey &&
+			DIRECT_CACHE_SET_KEYS.has(parentKey) &&
+			normalized.every((item) => ["string", "number", "boolean"].includes(typeof item))
+		) {
+			return [...new Map(normalized.map((item) => [JSON.stringify(item), item])).values()].sort(
+				(a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)),
+			)
+		}
+		return normalized
 	}
 
 	if (typeof value === "object") {
@@ -244,15 +295,24 @@ function normalizeDirectCacheValue(value: unknown, parentKey?: string): unknown 
 			Object.entries(value as Record<string, unknown>)
 				.filter(([, nestedValue]) => nestedValue !== undefined)
 				.sort(([left], [right]) => left.localeCompare(right))
-				.map(([key, nestedValue]) => [key, normalizeDirectCacheValue(nestedValue, key)]),
+				.map(([key, nestedValue]) => [
+					key,
+					normalizeDirectCacheValue(nestedValue, snapWindowSeconds, key),
+				]),
 		)
 	}
 
 	return String(value)
 }
 
-export function buildDirectRouteCacheKey(orgId: string, routeName: string, payload: unknown): string {
-	return `direct:${orgId}:${routeName}:${JSON.stringify(normalizeDirectCacheValue(payload))}`
+export function buildDirectRouteCacheKey(
+	orgId: string,
+	routeName: string,
+	payload: unknown,
+	policyInput: DirectRouteCachePolicyInput = CACHE_SNAP_S,
+): string {
+	const policy = resolveDirectRouteCachePolicy(policyInput)
+	return `direct:v${policy.version}:${orgId}:${routeName}:${JSON.stringify(normalizeDirectCacheValue(payload, policy.snapWindowSeconds))}`
 }
 
 const floorToBucketMs = (epochMs: number, bucketSeconds: number): number => {
@@ -436,12 +496,33 @@ const validateListQuery = Effect.fn("QueryEngineService.validateListQuery")(func
 function hasNarrowingFilter(request: QueryEngineExecuteRequest): boolean {
 	if (!("filters" in request.query) || !request.query.filters) return false
 	const filters = request.query.filters as Record<string, unknown>
-	if (filters.serviceName || filters.spanName || filters.metricName || filters.traceId) return true
-	if (filters.errorsOnly || filters.rootOnly) return true
+	if (
+		filters.serviceName ||
+		filters.spanName ||
+		filters.metricName ||
+		filters.traceId ||
+		filters.spanId ||
+		filters.statusCode ||
+		filters.severity ||
+		filters.search ||
+		filters.minDurationMs !== undefined ||
+		filters.maxDurationMs !== undefined ||
+		filters.minSeverity !== undefined ||
+		filters.errorsOnly !== undefined ||
+		filters.rootOnly
+	) {
+		return true
+	}
 	const envs = filters.environments
 	if (Array.isArray(envs) && envs.length > 0) return true
 	const services = filters.services
 	if (Array.isArray(services) && services.length > 0) return true
+	const namespaces = filters.namespaces
+	if (Array.isArray(namespaces) && namespaces.length > 0) return true
+	const attributeFilters = filters.attributeFilters
+	if (Array.isArray(attributeFilters) && attributeFilters.length > 0) return true
+	const resourceAttributeFilters = filters.resourceAttributeFilters
+	if (Array.isArray(resourceAttributeFilters) && resourceAttributeFilters.length > 0) return true
 	return false
 }
 
@@ -807,6 +888,7 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 	return {
 		serviceName: filters?.serviceName as string | undefined,
 		spanName: filters?.spanName as string | undefined,
+		statusCode: filters?.statusCode as "Ok" | "Error" | "Unset" | undefined,
 		rootOnly: filters?.rootSpansOnly as boolean | undefined,
 		errorsOnly: filters?.errorsOnly as boolean | undefined,
 		environments: filters?.environments as string[] | undefined,
@@ -829,6 +911,22 @@ function extractTracesOpts(filters: Record<string, unknown> | undefined) {
 		excludedSpanNames: filters?.excludedSpanNames as readonly string[] | undefined,
 		excludedEnvironments: filters?.excludedEnvironments as readonly string[] | undefined,
 		excludedNamespaces: filters?.excludedNamespaces as readonly string[] | undefined,
+	}
+}
+
+function extractLogsOpts(filters: Record<string, unknown> | undefined) {
+	return {
+		serviceName: filters?.serviceName as string | undefined,
+		severity: filters?.severity as string | undefined,
+		minSeverity: filters?.minSeverity as number | undefined,
+		traceId: filters?.traceId as string | undefined,
+		spanId: filters?.spanId as string | undefined,
+		search: filters?.search as string | undefined,
+		environments: filters?.environments as string[] | undefined,
+		namespaces: filters?.namespaces as string[] | undefined,
+		matchModes: logsMatchModes(filters),
+		attributeFilters: filters?.attributeFilters as AttrFilterArray | undefined,
+		resourceAttributeFilters: filters?.resourceAttributeFilters as AttrFilterArray | undefined,
 	}
 }
 
@@ -1047,15 +1145,12 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "logs" && request.query.kind === "timeseries") {
+			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
 				CH.logsTimeseriesQuery({
-					serviceName: request.query.filters?.serviceName,
-					severity: request.query.filters?.severity,
-					environments: request.query.filters?.environments,
-					namespaces: request.query.filters?.namespaces,
-					matchModes: logsMatchModes(request.query.filters),
+					...opts,
 					groupBy: request.query.groupBy as string[] | undefined,
 					bucketSeconds: bucketSeconds!,
 					seriesLimit: request.query.seriesLimit,
@@ -1298,16 +1393,13 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "logs" && request.query.kind === "breakdown") {
+			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
 				CH.logsBreakdownQuery({
 					groupBy: request.query.groupBy as "service" | "severity",
-					serviceName: request.query.filters?.serviceName,
-					severity: request.query.filters?.severity,
-					environments: request.query.filters?.environments,
-					namespaces: request.query.filters?.namespaces,
-					matchModes: logsMatchModes(request.query.filters),
+					...opts,
 					limit: request.query.limit,
 				}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
@@ -1800,15 +1892,12 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 			})
 		}
 	} else if (query.source === "logs") {
+		const opts = extractLogsOpts(query.filters as Record<string, unknown> | undefined)
 		const rows = yield* executeCHQuery(
 			warehouse,
 			tenant,
 			CH.logsTimeseriesQuery({
-				serviceName: query.filters?.serviceName,
-				severity: query.filters?.severity,
-				environments: query.filters?.environments,
-				namespaces: query.filters?.namespaces,
-				matchModes: logsMatchModes(query.filters),
+				...opts,
 				groupBy: query.groupBy as readonly string[] | undefined,
 				bucketSeconds,
 			}),
@@ -1964,15 +2053,12 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 			}
 		} else if (request.query.source === "logs") {
 			const logsQuery = request.query
+			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
 				CH.logsTimeseriesQuery({
-					serviceName: request.query.filters?.serviceName,
-					severity: request.query.filters?.severity,
-					environments: request.query.filters?.environments,
-					namespaces: request.query.filters?.namespaces,
-					matchModes: logsMatchModes(request.query.filters),
+					...opts,
 					groupBy: logsQuery.groupBy as readonly string[] | undefined,
 					bucketSeconds,
 				}),

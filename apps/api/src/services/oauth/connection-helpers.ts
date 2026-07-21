@@ -17,7 +17,7 @@ import {
 	type OrgId,
 } from "@maple/domain/http"
 import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthConnectionRow } from "@maple/db"
-import { and, eq, lt } from "drizzle-orm"
+import { and, eq, isNull, lt } from "drizzle-orm"
 import { Clock, Effect, Redacted, Schema, Semaphore } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../../lib/Crypto"
@@ -196,9 +196,35 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					})
 					.onConflictDoUpdate({
 						target: [oauthConnections.orgId, oauthConnections.provider],
-						set: { ...values, updatedAt: new Date(currentTime) },
+						// Reconnecting with fresh tokens clears any prior revocation so
+						// pollers resume automatically.
+						set: { ...values, revokedAt: null, updatedAt: new Date(currentTime) },
 					}),
 			)
+
+		/**
+		 * Stamp the connection as revoked (idempotent — only the first stamp writes).
+		 * Pollers filter on `revokedAt IS NULL`, so a revoked grant stops being
+		 * retried every tick; `upsertConnection` (reconnect) clears the stamp.
+		 * Best-effort: bookkeeping must never mask the revocation error itself.
+		 */
+		const markConnectionRevoked = Effect.fn("OAuthConnectionHelpers.markConnectionRevoked")(
+			function* (orgId: OrgId) {
+				const currentTime = yield* Clock.currentTimeMillis
+				yield* dbExecute((db) =>
+					db
+						.update(oauthConnections)
+						.set({ revokedAt: new Date(currentTime) })
+						.where(
+							and(
+								eq(oauthConnections.orgId, orgId),
+								eq(oauthConnections.provider, provider),
+								isNull(oauthConnections.revokedAt),
+							),
+						),
+				).pipe(Effect.ignore)
+			},
+		)
 
 		/** Drop the org's connection row; reports whether anything was removed. */
 		const deleteConnection = (orgId: OrgId) =>
@@ -349,6 +375,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					}
 
 					if (!row.refreshTokenCiphertext || !row.refreshTokenIv || !row.refreshTokenTag) {
+						yield* markConnectionRevoked(orgId)
 						return yield* Effect.fail(
 							new IntegrationsRevokedError({
 								message: `${providerLabel} access token expired and no refresh token is stored — reconnect required`,
@@ -378,6 +405,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 								if (advanced && rowIsValid(latest, yield* Clock.currentTimeMillis)) {
 									return yield* accessTokenFromRow(latest)
 								}
+								yield* markConnectionRevoked(orgId)
 								return yield* Effect.fail(error)
 							}),
 						),
@@ -412,6 +440,7 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 			requireConnection,
 			upsertConnection,
 			deleteConnection,
+			markConnectionRevoked,
 			postForm,
 			exchangeAuthorizationCode,
 			refreshAccessToken,

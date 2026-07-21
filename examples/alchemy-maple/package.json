@@ -1,0 +1,12 @@
+{
+	"name": "@maple-examples/alchemy",
+	"private": true,
+	"type": "module",
+	"description": "Example: declaring Maple resources (dashboards, alerts, keys) in alchemy.run.ts via @maple-dev/alchemy",
+	"devDependencies": {
+		"@maple-dev/alchemy": "workspace:*",
+		"alchemy": "2.0.0-beta.61",
+		"effect": "catalog:effect",
+		"typescript": "catalog:tooling"
+	}
+}

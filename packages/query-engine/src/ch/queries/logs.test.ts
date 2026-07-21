@@ -92,11 +92,31 @@ describe("canUseLogsAggregatesHourly", () => {
 		expect(canUseLogsAggregatesHourly({ traceId: "abc" }, 3600)).toBe(false)
 		expect(canUseLogsAggregatesHourly({ search: "boom" }, 3600)).toBe(false)
 		expect(
+			canUseLogsAggregatesHourly({ attributeFilters: [{ key: "request.id", mode: "exists" }] }, 3600),
+		).toBe(false)
+		expect(
 			canUseLogsAggregatesHourly(
 				{ environments: ["prod"], matchModes: { deploymentEnv: "contains" } },
 				3600,
 			),
 		).toBe(false)
+	})
+
+	it("applies log and resource attribute filters on the raw table with tenant/time pruning", () => {
+		const { sql } = compileCH(
+			logsTimeseriesQuery({
+				bucketSeconds: 3600,
+				attributeFilters: [{ key: "request.id", mode: "equals", value: "req_123" }],
+				resourceAttributeFilters: [{ key: "cloud.region", mode: "exists" }],
+			}),
+			baseParams,
+		)
+		expect(sql).toContain("FROM logs")
+		expect(sql).not.toContain("FROM logs_aggregates_hourly")
+		expect(sql).toContain("OrgId = 'org_1'")
+		expect(sql).toContain("TimestampTime >= '2024-01-01 00:00:00'")
+		expect(sql).toContain("LogAttributes['request.id'] = 'req_123'")
+		expect(sql).toContain("mapContains(ResourceAttributes, 'cloud.region')")
 	})
 })
 

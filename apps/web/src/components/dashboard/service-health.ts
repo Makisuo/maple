@@ -1,9 +1,42 @@
 import type { SeverityLevel } from "@/components/infra/format"
 import type { ServiceLatencyBaseline } from "@/api/warehouse/services"
-import type { AlertIncidentDocument } from "@maple/domain/http"
+import type { AlertIncidentDocument, AnomalySignalType } from "@maple/domain/http"
 
-/** Health rollup for a single service, combining golden-signal metrics with live alerts. */
+/** Health rollup for a single service. */
 export type ServiceHealth = "healthy" | "degraded" | "unhealthy"
+
+export interface ServiceHealthCause {
+	severity: "warning" | "critical"
+	label: string
+	metric?: "error" | "latency" | "traffic"
+	direction?: "up" | "down"
+}
+
+/**
+ * Direction detected by each baseline anomaly. These are detector semantics,
+ * not a comparison with the latest sample: an incident can remain open while
+ * it is recovering, but it was still opened for the direction shown here.
+ */
+export function anomalyDirection(signalType: AnomalySignalType): "up" | "down" {
+	return signalType === "throughput" ? "down" : "up"
+}
+
+/**
+ * Incident-backed health used by the main overview. Unlike the legacy metric
+ * heuristic below, these causes have already passed either a user-authored
+ * alert rule or Maple's volume-aware seasonal anomaly detector.
+ */
+export function deriveServiceHealthFromCauses(causes: readonly ServiceHealthCause[]): ServiceHealth {
+	if (causes.some((cause) => cause.severity === "critical")) return "unhealthy"
+	if (causes.length > 0) return "degraded"
+	return "healthy"
+}
+
+export function primaryServiceHealthCause(
+	causes: readonly ServiceHealthCause[],
+): ServiceHealthCause | undefined {
+	return causes.find((cause) => cause.severity === "critical") ?? causes[0]
+}
 
 // Error-rate thresholds are global absolutes — an error ratio means the same
 // thing for every service. Error rate is a fraction (errors / requests).

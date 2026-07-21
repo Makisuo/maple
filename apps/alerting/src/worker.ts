@@ -1,5 +1,5 @@
 import {
-	ANTICIPATED_ERROR_TAGS,
+	ANTICIPATED_ERROR_IDENTIFIERS,
 	AlertsService,
 	AnomalyDetectionService,
 	BucketCacheService,
@@ -38,7 +38,7 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceName: "alerting",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 const buildLayer = (_env: Record<string, unknown>) => {
@@ -130,7 +130,9 @@ const buildLayer = (_env: Record<string, unknown>) => {
 	)
 
 	const DigestServiceLive = DigestService.layer.pipe(
-		Layer.provide(Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EmailServiceLive)),
+		Layer.provide(
+			Layer.mergeAll(BaseLive, WarehouseQueryServiceLive, EdgeCacheServiceLive, EmailServiceLive),
+		),
 	)
 
 	const OnboardingServiceLive = OnboardingService.layer.pipe(Layer.provide(BaseLive))
@@ -345,6 +347,21 @@ export default {
 		env: Record<string, unknown>,
 		ctx: ExecutionContextLike,
 	): Promise<void> {
+		// Non-prod stages (stg, PR previews) share live org data — stg's Hyperdrive
+		// points at the prod database — so their crons would iterate real orgs with
+		// stage-local Tinybird/Clerk credentials: every tick fails per-org and floods
+		// the error dashboards (and historically sent duplicate emails, see #237).
+		// Same gating philosophy as the prd-only EMAIL binding, with an explicit
+		// override for deliberately exercising crons on a non-prod stage.
+		const environment = typeof env.MAPLE_ENVIRONMENT === "string" ? env.MAPLE_ENVIRONMENT : ""
+		const allowNonProd =
+			env.MAPLE_ALERTING_ALLOW_NONPROD === "1" || env.MAPLE_ALERTING_ALLOW_NONPROD === "true"
+		if (environment !== "production" && !allowNonProd) {
+			console.log(
+				`Skipping alerting cron on non-production stage (MAPLE_ENVIRONMENT=${environment || "unset"}, cron=${event.cron}); set MAPLE_ALERTING_ALLOW_NONPROD=1 to run crons here`,
+			)
+			return
+		}
 		const program = Match.value(event.cron).pipe(
 			Match.when("*/5 * * * *", () =>
 				Effect.all([anomalyTick, cloudflareAnalyticsTick, planetScaleTick], {

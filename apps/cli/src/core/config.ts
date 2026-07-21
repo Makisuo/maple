@@ -1,8 +1,9 @@
-import { Clock, Context, Effect, Layer, type PlatformError, Schema } from "effect"
+import { Clock, Context, Effect, Layer, Option, Redacted, type PlatformError, Schema } from "effect"
 import { FileSystem } from "effect/FileSystem"
 import * as os from "node:os"
 import * as path from "node:path"
 import { defaultLocalUrl } from "../lib/local-address"
+import { deleteNativeCredential, readNativeCredential, writeNativeCredential } from "./credential-store"
 
 /**
  * On-disk CLI config, stored at `~/.maple/config.json` (mode 0600). The same
@@ -13,6 +14,9 @@ interface StoredConfig {
 	apiUrl?: string
 	token?: string
 	orgId?: string
+	userId?: string
+	credentialStore?: "keychain" | "file"
+	credentialManaged?: boolean
 	defaultMode?: "local" | "remote"
 	/** ISO timestamp of the last startup update check (throttles the GitHub probe). */
 	lastUpdateCheck?: string
@@ -64,23 +68,34 @@ const writeMerged = (
 
 export interface MapleConfigShape {
 	/** Remote API base URL (env `MAPLE_API_URL` overrides the stored value). */
-	readonly apiUrl: string | undefined
+	readonly apiUrl: Option.Option<string>
 	/** Remote bearer token (env `MAPLE_API_TOKEN` overrides the stored value). */
-	readonly token: string | undefined
-	readonly orgId: string | undefined
+	readonly token: Option.Option<Redacted.Redacted<string>>
+	readonly orgId: Option.Option<string>
+	readonly userId: Option.Option<string>
+	readonly credentialStore: Option.Option<"keychain" | "file">
+	readonly credentialManaged: boolean
+	readonly tokenSource: "env" | "keychain" | "file" | "none"
+	readonly envTokenOverride: boolean
 	/** Local binary base URL (env `MAPLE_LOCAL_URL`, else the default). */
 	readonly localUrl: string
-	readonly defaultMode: "local" | "remote" | undefined
+	readonly defaultMode: Option.Option<"local" | "remote">
 	/** API URL to use for `maple login` when none is passed. */
 	readonly defaultApiUrl: string
-	/** ISO timestamp of the last startup update check (undefined = never checked). */
-	readonly lastUpdateCheck: string | undefined
-	/** Latest release tag seen by the last update check, or undefined. */
-	readonly latestKnownVersion: string | undefined
+	/** ISO timestamp of the last startup update check (`None` = never checked). */
+	readonly lastUpdateCheck: Option.Option<string>
+	/** Latest release tag seen by the last update check, or `None`. */
+	readonly latestKnownVersion: Option.Option<string>
 	/** Persist config fields (merged with existing). */
 	readonly write: (next: StoredConfig) => Effect.Effect<void, PlatformError.PlatformError>
-	/** Remove the stored token (used by `maple logout`). */
-	readonly clearToken: () => Effect.Effect<void, PlatformError.PlatformError>
+	readonly saveRemoteCredential: (next: {
+		readonly apiUrl: string
+		readonly token: string
+		readonly orgId: string
+		readonly userId: string
+		readonly managed: boolean
+	}) => Effect.Effect<"keychain" | "file", PlatformError.PlatformError>
+	readonly clearRemoteCredential: () => Effect.Effect<void, PlatformError.PlatformError>
 	/** Pin the default mode (used by `maple use local|remote`). */
 	readonly setDefaultMode: (mode: "local" | "remote") => Effect.Effect<void, PlatformError.PlatformError>
 	/** Drop the pinned default mode, reverting to auto-detect (`maple use auto`). */
@@ -95,20 +110,75 @@ export class MapleConfig extends Context.Service<MapleConfig, MapleConfigShape>(
 		const fs = yield* FileSystem
 		const stored = yield* readStored(fs)
 		const env = process.env
+		const resolvedApiUrl = env.MAPLE_API_URL ?? stored.apiUrl
+		const envToken = env.MAPLE_API_TOKEN
+		const nativeToken =
+			!envToken && !stored.token && stored.credentialStore === "keychain" && resolvedApiUrl
+				? yield* Effect.promise(() => readNativeCredential(resolvedApiUrl))
+				: undefined
+		const resolvedToken = envToken ?? stored.token ?? nativeToken
+		const tokenSource = envToken
+			? ("env" as const)
+			: stored.token
+				? ("file" as const)
+				: nativeToken
+					? ("keychain" as const)
+					: ("none" as const)
 		return {
-			apiUrl: env.MAPLE_API_URL ?? stored.apiUrl,
-			token: env.MAPLE_API_TOKEN ?? stored.token,
-			orgId: env.MAPLE_ORG_ID ?? stored.orgId,
+			apiUrl: Option.fromNullishOr(resolvedApiUrl),
+			token: Option.map(Option.fromNullishOr(resolvedToken), Redacted.make),
+			orgId: Option.fromNullishOr(env.MAPLE_ORG_ID ?? stored.orgId),
+			userId: Option.fromNullishOr(stored.userId),
+			credentialStore: Option.fromNullishOr(stored.credentialStore),
+			credentialManaged: stored.credentialManaged === true,
+			tokenSource,
+			envTokenOverride: envToken !== undefined,
 			localUrl: env.MAPLE_LOCAL_URL ?? defaultLocalUrl(env.MAPLE_LOCAL_BIND_HOST),
-			defaultMode: stored.defaultMode,
+			defaultMode: Option.fromNullishOr(stored.defaultMode),
 			defaultApiUrl: env.MAPLE_API_URL ?? DEFAULT_API_URL,
-			lastUpdateCheck: stored.lastUpdateCheck,
-			latestKnownVersion: stored.latestKnownVersion,
+			lastUpdateCheck: Option.fromNullishOr(stored.lastUpdateCheck),
+			latestKnownVersion: Option.fromNullishOr(stored.latestKnownVersion),
 			write: (next) => writeMerged(fs, (cur) => ({ ...cur, ...next })),
-			clearToken: () =>
-				writeMerged(fs, (cur) => {
-					const { token: _token, ...rest } = cur
-					return rest
+			saveRemoteCredential: (next) =>
+				Effect.gen(function* () {
+					const storedInKeychain = yield* Effect.promise(() =>
+						writeNativeCredential(next.apiUrl, next.token),
+					)
+					if (!storedInKeychain) {
+						yield* Effect.promise(() => deleteNativeCredential(next.apiUrl))
+					}
+					yield* writeMerged(fs, (cur) => {
+						const { token: _token, ...withoutToken } = cur
+						return {
+							...withoutToken,
+							apiUrl: next.apiUrl,
+							orgId: next.orgId,
+							userId: next.userId,
+							credentialManaged: next.managed,
+							credentialStore: storedInKeychain ? "keychain" : "file",
+							...(storedInKeychain ? {} : { token: next.token }),
+						}
+					})
+					return storedInKeychain ? "keychain" : "file"
+				}),
+			clearRemoteCredential: () =>
+				Effect.gen(function* () {
+					const storedApiUrl = stored.apiUrl
+					if (storedApiUrl && stored.credentialStore === "keychain") {
+						yield* Effect.promise(() => deleteNativeCredential(storedApiUrl))
+					}
+					yield* writeMerged(fs, (cur) => {
+						const {
+							token: _token,
+							apiUrl: _apiUrl,
+							orgId: _orgId,
+							userId: _userId,
+							credentialStore: _store,
+							credentialManaged: _managed,
+							...rest
+						} = cur
+						return rest
+					})
 				}),
 			setDefaultMode: (mode) => writeMerged(fs, (cur) => ({ ...cur, defaultMode: mode })),
 			clearDefaultMode: () =>

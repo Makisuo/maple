@@ -11,14 +11,14 @@ import {
 } from "@maple/domain/http"
 import type { WarehouseQueryName } from "@maple/domain/warehouse-queries"
 import { compilePipeQuery, type CompiledQuery } from "../ch"
-import type { ExecutorQueryOptions, WarehouseExecutorShape } from "../observability"
+import type { WarehouseExecutorShape } from "../observability"
 import {
 	appendSettings,
 	type QueryProfileName,
 	resolveSettings,
 	stripTinybirdRestrictedSettings,
 } from "../profiles"
-import { mapWarehouseError, toWarehouseQueryError, type WarehouseSqlError } from "./errors"
+import { mapWarehouseError, toWarehouseQueryError } from "./errors"
 import { WarehouseResponseLimitError } from "./response-limits"
 import {
 	SQL_LOG_MAX,
@@ -27,9 +27,12 @@ import {
 	normalizeSqlForClickHouseClient,
 	truncateSql,
 } from "./fingerprint"
+import { BackendDialect } from "./backend"
+import { findIngestPinnedTable } from "./datasource-routing"
 import type {
 	ExecutionTenant,
 	ResolvedWarehouseConfig,
+	RoutePurpose,
 	SqlQueryOptions,
 	WarehouseExecutorDeps,
 	WarehouseQueryServiceShape,
@@ -45,9 +48,9 @@ interface CachedClient {
 }
 
 const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
-	config._tag === "clickhouse"
-		? `${config.provider}:clickhouse:${config.url}:${config.username}:${config.password}:${config.database}`
-		: `tinybird:${config.host}:${config.token}`
+	config.kind === "tinybird"
+		? `tinybird:${config.host}:${config.token}`
+		: `${config.kind}:${config.url}:${config.username}:${config.password}:${config.database}`
 
 // Only retry transient upstream failures (5xx, 408, 429, network blips). Non-transient
 // errors (auth, config, schema_drift, query) re-fail immediately — there's nothing to
@@ -140,32 +143,40 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 
 		// Control-plane datasources (e.g. alert_checks) are written via `ingest`,
 		// which is hard-pinned to the managed Tinybird pipeline. They do NOT exist
-		// in a per-org BYO ClickHouse, so their reads must pin to the same ingest
+		// in a per-org BYO ClickHouse, so their reads must route to the same ingest
 		// config to stay symmetric with the write — otherwise a BYO-CH org reads an
-		// empty table from its own ClickHouse.
-		const resolveFn =
-			execution === "raw"
-				? deps.resolveRawSqlConfig
-				: options?.pinToIngestConfig && deps.resolveIngestConfig
-					? deps.resolveIngestConfig
-					: deps.resolveConfig
-		const resolved = yield* resolveFn(tenant, pipe)
-		if (options?.pinToIngestConfig) yield* Effect.annotateCurrentSpan("query.routing", "ingest")
-		const peerService = resolved.config._tag === "clickhouse" ? "clickhouse" : "tinybird"
-		yield* Effect.annotateCurrentSpan("db.system.name", peerService)
-		yield* Effect.annotateCurrentSpan("peer.service", peerService)
-		// Tinybird's managed warehouse restricts some settings (e.g. max_block_size:
-		// "Usage of setting 'max_block_size' is restricted"). It is reached either via
-		// the Tinybird SDK (_tag "tinybird") or its ClickHouse-compatible gateway
-		// (_tag "clickhouse", when CLICKHOUSE_PROVIDER=tinybird); both enforce that
-		// policy. Vanilla ClickHouse supports those settings regardless of whether its
-		// credentials come from the environment or an org override.
-		const settings =
-			resolved.config.provider === "tinybird"
-				? stripTinybirdRestrictedSettings(resolveSettings(options))
-				: resolveSettings(options)
-		const sqlForClient =
-			resolved.config._tag === "clickhouse" ? normalizeSqlForClickHouseClient(sql) : sql
+		// empty table from its own ClickHouse. That routing is declared at the
+		// query definition (`.routing("ingest")` → `options.route`).
+		const purpose: RoutePurpose =
+			execution === "raw" ? "raw" : options?.route === "ingest" ? "ingest" : "read"
+		const resolved = yield* deps.resolveRoute(tenant, purpose, pipe)
+		// Safety net for the silent-empty-table failure: an ingest-pinned table
+		// read against an org's own BYO ClickHouse returns no rows, not an error.
+		if (purpose !== "ingest" && resolved.source === "org-byo") {
+			const pinnedTable = findIngestPinnedTable(sql)
+			if (pinnedTable !== undefined) {
+				yield* Effect.logWarning(
+					'Query reads an ingest-pinned datasource from a BYO ClickHouse — declare .routing("ingest") at the query definition',
+					{ pipe, table: pinnedTable, orgId: tenant.orgId },
+				)
+			}
+		}
+		// Legacy spelling of `warehouse.route: "ingest"` — dual-emitted until
+		// dashboards move to the `warehouse.*` attributes.
+		if (purpose === "ingest") yield* Effect.annotateCurrentSpan("query.routing", "ingest")
+		const dialect = BackendDialect[resolved.config.kind]
+		const clientSource = resolved.source === "org-byo" ? "org_override" : "managed"
+		yield* Effect.annotateCurrentSpan("warehouse.backend", resolved.config.kind)
+		yield* Effect.annotateCurrentSpan("warehouse.route", purpose)
+		yield* Effect.annotateCurrentSpan("warehouse.config_source", resolved.source)
+		yield* Effect.annotateCurrentSpan("clientSource", clientSource)
+		yield* Effect.annotateCurrentSpan("db.client", dialect.dbClient)
+		yield* Effect.annotateCurrentSpan("db.system.name", dialect.dbSystemName)
+		yield* Effect.annotateCurrentSpan("peer.service", dialect.peerService)
+		const settings = dialect.stripTinybirdRestrictedSettings
+			? stripTinybirdRestrictedSettings(resolveSettings(options))
+			: resolveSettings(options)
+		const sqlForClient = dialect.normalizeSqlForClient ? normalizeSqlForClickHouseClient(sql) : sql
 		const finalSql = appendSettings(sqlForClient, settings)
 		const sqlLength = finalSql.length
 		const sqlTruncated = sqlLength > SQL_TRACE_MAX
@@ -239,7 +250,10 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 					const nowMs = yield* Clock.currentTimeMillis
 					const elapsedMs = nowMs - sqlStartedMs
 					const totalElapsedMs = nowMs - startedAtMs
-					const attempts = yield* Ref.get(retryAttempts)
+					const failedTransientAttempts = yield* Ref.get(retryAttempts)
+					const attempts = isTransientUpstreamError(error)
+						? Math.max(0, failedTransientAttempts - 1)
+						: failedTransientAttempts
 					yield* Effect.annotateCurrentSpan("db.duration_ms", elapsedMs)
 					yield* Effect.annotateCurrentSpan("db.total_duration_ms", totalElapsedMs)
 					yield* Effect.annotateCurrentSpan("db.retry.attempts", attempts)
@@ -247,7 +261,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 						pipe,
 						context: options?.context,
 						orgId: tenant.orgId,
-						backend: resolved.config._tag,
+						backend: resolved.config.kind,
 						durationMs: elapsedMs,
 						retryAttempts: attempts,
 						errorTag: error._tag,
@@ -359,12 +373,21 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		return yield* executeSql(tenant, sql, "rawSqlQuery", options, "raw")
 	})
 
+	// A compiled query can carry `.routing("ingest")` from its definition — that
+	// wins over the (absent) per-call option so the table→routing knowledge
+	// lives next to the query, not at every call site.
+	const withCompiledRouting = <T>(
+		compiled: CompiledQuery<T>,
+		options?: SqlQueryOptions,
+	): SqlQueryOptions | undefined =>
+		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
+
 	const compiledQuery = Effect.fn("WarehouseQueryService.compiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
 		compiled: CompiledQuery<T>,
 		options?: SqlQueryOptions,
 	) {
-		const rows = yield* sqlQuery(tenant, compiled.sql, options)
+		const rows = yield* sqlQuery(tenant, compiled.sql, withCompiledRouting(compiled, options))
 		return yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
@@ -382,7 +405,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		compiled: CompiledQuery<T>,
 		options?: SqlQueryOptions,
 	) {
-		const rows = yield* sqlQuery(tenant, compiled.sql, options)
+		const rows = yield* sqlQuery(tenant, compiled.sql, withCompiledRouting(compiled, options))
 		return yield* compiled.decodeFirstRow(rows).pipe(
 			Effect.mapError(
 				(error) =>
@@ -407,14 +430,16 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		if (rows.length === 0) return
 
 		const label = `ingest:${datasource}`
-		// Writes resolve through the ingest-specific resolver when provided: the
-		// host points it at the managed Tinybird pipeline, never a per-org BYO
-		// ClickHouse READ override (routing writes through the override 500'd every
-		// insert and broke demo-seed onboarding). Falls back to the read resolver.
-		const resolveForIngest = deps.resolveIngestConfig ?? deps.resolveConfig
-		const resolved = yield* resolveForIngest(tenant, label).pipe(
-			Effect.mapError((error) => toWarehouseQueryError(label, error)),
-		)
+		// Writes resolve with purpose "ingest": the host routes them to the managed
+		// Tinybird pipeline, never a per-org BYO ClickHouse READ override (routing
+		// writes through the override 500'd every insert and broke demo-seed
+		// onboarding).
+		const resolved = yield* deps.resolveRoute(tenant, "ingest", label)
+		const dialect = BackendDialect[resolved.config.kind]
+		const clientSource = resolved.source === "org-byo" ? "org_override" : "managed"
+		yield* Effect.annotateCurrentSpan("warehouse.backend", resolved.config.kind)
+		yield* Effect.annotateCurrentSpan("warehouse.route", "ingest")
+		yield* Effect.annotateCurrentSpan("warehouse.config_source", resolved.source)
 
 		// Insert through the same client the read path uses (official
 		// @clickhouse/client-web for ClickHouse, Tinybird Events API for
@@ -426,75 +451,79 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			resolved.config,
 			yield* Clock.currentTimeMillis,
 		)
+		const insertStartedAtMs = yield* Clock.currentTimeMillis
 
 		yield* Effect.tryPromise({
 			try: () => client.insert(datasource, rows),
-			catch: (error) => toWarehouseQueryError(label, error),
+			// Classify like the read path so an auth failure or quota breach on
+			// insert surfaces with its real tag instead of a generic query error.
+			catch: (error) => mapWarehouseError(label, error),
 		}).pipe(
-			Effect.tapError((error) =>
-				Effect.logError("WarehouseQueryService.ingest failed", {
-					datasource,
-					rowCount: rows.length,
-					backend: resolved.config._tag,
-					errorTag: error._tag,
-					message: error.message,
-				}),
+			Effect.tap(() =>
+				Clock.currentTimeMillis.pipe(
+					Effect.flatMap((completedAtMs) =>
+						Effect.annotateCurrentSpan({
+							"db.duration_ms": completedAtMs - insertStartedAtMs,
+							"result.rowCount": rows.length,
+						}),
+					),
+				),
 			),
+			Effect.tapError((error) =>
+				Clock.currentTimeMillis.pipe(
+					Effect.flatMap((completedAtMs) =>
+						Effect.annotateCurrentSpan("db.duration_ms", completedAtMs - insertStartedAtMs),
+					),
+					Effect.andThen(
+						Effect.logError("WarehouseQueryService.ingest failed", {
+							datasource,
+							rowCount: rows.length,
+							backend: resolved.config.kind,
+							errorTag: error._tag,
+							message: error.message,
+						}),
+					),
+				),
+			),
+			Effect.withSpan("WarehouseQueryService.insert", {
+				kind: "client",
+				attributes: {
+					orgId: tenant.orgId,
+					"tenant.userId": tenant.userId,
+					"tenant.authMode": tenant.authMode,
+					clientSource,
+					"db.client": dialect.dbClient,
+					"db.system.name": dialect.dbSystemName,
+					"peer.service": dialect.peerService,
+					"warehouse.backend": resolved.config.kind,
+					"warehouse.route": "ingest",
+					"warehouse.config_source": resolved.source,
+					datasource,
+				},
+			}),
 		)
 	})
 
+	// The facade only binds the tenant and defaults `query.context` — the
+	// canonical `WarehouseQueryService.executeSql` span carries all
+	// instrumentation, so no extra span layer is added here.
 	const asExecutor = (tenant: ExecutionTenant): WarehouseExecutorShape => ({
 		orgId: tenant.orgId,
-		query: <T>(
-			pipe: WarehouseQueryName,
-			params: Record<string, unknown>,
-			options?: ExecutorQueryOptions,
-		) =>
-			query(tenant, { pipeName: pipe, params }, { ...options, context: `pipe:${pipe}` }).pipe(
+		query: <T>(pipe: WarehouseQueryName, params: Record<string, unknown>, options?: SqlQueryOptions) =>
+			query(tenant, { pipeName: pipe, params }, { context: `pipe:${pipe}`, ...options }).pipe(
 				Effect.map((response) => ({ data: response.data as unknown as ReadonlyArray<T> })),
-				Effect.withSpan("WarehouseExecutor.query", {
-					attributes: {
-						pipe,
-						orgId: tenant.orgId,
-						"query.profile": options?.profile,
-						"query.context": `pipe:${pipe}`,
-					},
-				}),
 			),
-		sqlQuery: <T>(sql: string, options?: ExecutorQueryOptions) =>
-			sqlQuery(tenant, sql, { ...options, context: "warehouseExecutor.sqlQuery" }).pipe(
+		sqlQuery: <T>(sql: string, options?: SqlQueryOptions) =>
+			sqlQuery(tenant, sql, { context: "warehouseExecutor.sqlQuery", ...options }).pipe(
 				Effect.map((rows) => rows as unknown as ReadonlyArray<T>),
-				Effect.withSpan("WarehouseExecutor.sqlQuery", {
-					attributes: {
-						orgId: tenant.orgId,
-						"query.profile": options?.profile,
-						"query.context": "warehouseExecutor.sqlQuery",
-					},
-				}),
 			),
-		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: ExecutorQueryOptions) =>
-			compiledQuery(tenant, compiled, { ...options, context: "warehouseExecutor.compiledQuery" }).pipe(
-				Effect.withSpan("WarehouseExecutor.compiledQuery", {
-					attributes: {
-						orgId: tenant.orgId,
-						"query.profile": options?.profile,
-						"query.context": "warehouseExecutor.compiledQuery",
-					},
-				}),
-			),
-		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: ExecutorQueryOptions) =>
+		compiledQuery: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
+			compiledQuery(tenant, compiled, { context: "warehouseExecutor.compiledQuery", ...options }),
+		compiledQueryFirst: <T>(compiled: CompiledQuery<T>, options?: SqlQueryOptions) =>
 			compiledQueryFirst(tenant, compiled, {
-				...options,
 				context: "warehouseExecutor.compiledQueryFirst",
-			}).pipe(
-				Effect.withSpan("WarehouseExecutor.compiledQueryFirst", {
-					attributes: {
-						orgId: tenant.orgId,
-						"query.profile": options?.profile,
-						"query.context": "warehouseExecutor.compiledQueryFirst",
-					},
-				}),
-			),
+				...options,
+			}),
 	})
 
 	return {

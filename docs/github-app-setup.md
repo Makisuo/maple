@@ -93,7 +93,7 @@ This is what closes the loop after a user installs your app, so Maple can record
 
 ## Step 5 — Set permissions
 
-Maple only **reads** commit and branch data. It never writes to your repositories.
+Maple only **reads** commit, branch, and source-file data. It never writes to your repositories. Read-only source access lets Maple's investigation agent correlate observed failures with the exact deployed revision when telemetry includes repository and commit attributes.
 
 1. Find **Permissions → Repository permissions**.
 2. Set the following, leaving every other permission at **No access**:

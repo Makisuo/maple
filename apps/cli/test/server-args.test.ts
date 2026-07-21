@@ -10,6 +10,7 @@ import {
 	resolveBindHost,
 	serverProbeUrl,
 	serverUrl,
+	validateHost,
 } from "../src/commands/server-args"
 
 describe("local server bind host", () => {
@@ -51,6 +52,15 @@ describe("local server bind host", () => {
 	it("reports malformed hosted UI URLs clearly", () => {
 		throws(() => hostedUiOrigin("not a url"), /invalid hosted UI URL.*absolute HTTP\(S\) URL/)
 		throws(() => hostedUiOrigin("file:///tmp/local-ui"), /invalid hosted UI URL.*absolute HTTP\(S\) URL/)
+	})
+
+	it("validates explicit bind and advertise hosts before URL construction", () => {
+		strictEqual(validateHost(" [::] "), "::")
+		strictEqual(validateHost(" maple.home.arpa "), "maple.home.arpa")
+		throws(() => validateHost("  "), /non-empty hostname/)
+		throws(() => validateHost("foo bar"), /bare hostname/)
+		throws(() => validateHost("https://maple.home.arpa"), /bare hostname/)
+		throws(() => validateHost("maple.home.arpa:4318"), /invalid hostname/)
 	})
 })
 

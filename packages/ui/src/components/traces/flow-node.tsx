@@ -1,24 +1,15 @@
 import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
-import {
-	CircleXmarkIcon,
-	NetworkNodesIcon,
-	PulseIcon,
-	ChevronRightIcon,
-	ChevronLeftIcon,
-	CodeIcon,
-	DatabaseIcon,
-	GlobeIcon,
-} from "../icons"
-import type { IconComponent } from "../icons"
+import { DatabaseIcon } from "../icons"
 
 import { cn } from "../../lib/utils"
 import { formatDuration } from "../../lib/format"
-import { getSpanColorStyle, extractClassName } from "../../lib/colors"
-import { getCacheInfo, cacheResultStyles, CACHE_OPERATION_COLORS } from "../../lib/cache"
+import { cacheResultStyles } from "../../lib/cache"
 import type { CacheInfo } from "../../lib/cache"
-import { getHttpInfo, HTTP_METHOD_COLORS } from "../../lib/http"
-import { getCloudPlatform, outcomeBadgeStyle } from "../../lib/cloud-platforms"
+import { describeSpan } from "../../lib/span-category"
+import type { SpanDescription } from "../../lib/span-category"
+import { outcomeBadgeStyle, pickAttr } from "../../lib/cloud-platforms"
+import { ServiceDot } from "../service-dot"
 import type { FlowNodeData, AggregatedDuration } from "./flow-utils"
 
 /**
@@ -46,34 +37,6 @@ function formatCombinedDuration(
 	}
 }
 
-function getSpanIcon(spanKind: string, isHttpRequest: boolean, isError: boolean): IconComponent {
-	if (isError) return CircleXmarkIcon
-	if (isHttpRequest) return NetworkNodesIcon
-
-	switch (spanKind) {
-		case "SPAN_KIND_SERVER":
-			return PulseIcon
-		case "SPAN_KIND_CLIENT":
-			return ChevronRightIcon
-		case "SPAN_KIND_PRODUCER":
-			return ChevronRightIcon
-		case "SPAN_KIND_CONSUMER":
-			return ChevronLeftIcon
-		case "SPAN_KIND_INTERNAL":
-			return CodeIcon
-		default:
-			return CodeIcon
-	}
-}
-
-const SPAN_KIND_LABELS: Record<string, string> = {
-	SPAN_KIND_SERVER: "Server",
-	SPAN_KIND_CLIENT: "Client",
-	SPAN_KIND_PRODUCER: "Producer",
-	SPAN_KIND_CONSUMER: "Consumer",
-	SPAN_KIND_INTERNAL: "Internal",
-}
-
 function CacheSystemIcon({ system, size = 12 }: { system: CacheInfo["system"]; size?: number }) {
 	const name = system?.toLowerCase()
 
@@ -99,12 +62,82 @@ function CacheSystemIcon({ system, size = 12 }: { system: CacheInfo["system"]; s
 		)
 	}
 
-	if (name === "memcached" || name === "memcache") {
-		return <DatabaseIcon size={size} className="shrink-0 text-current" />
-	}
-
-	// Generic fallback — small database icon
 	return <DatabaseIcon size={size} className="shrink-0 text-current" />
+}
+
+/** The most specific single-line description of what the span did. */
+function getPrimaryText(
+	span: { spanName: string; spanAttributes: Record<string, string> },
+	desc: SpanDescription,
+): string {
+	const { httpInfo, cacheInfo, category } = desc
+	if (category.id === "cache" && cacheInfo) {
+		const op = cacheInfo.operation?.toUpperCase()
+		const name = cacheInfo.name ?? span.spanName
+		return op ? `${op} ${name}` : name
+	}
+	if ((category.id === "http" || category.id === "server") && httpInfo) {
+		return `${httpInfo.method} ${httpInfo.route ?? span.spanName}`
+	}
+	if (category.id === "db") {
+		const operation = pickAttr(span.spanAttributes, "db.operation.name", "db.operation")
+		const table = pickAttr(span.spanAttributes, "db.collection.name")
+		if (operation) return table ? `${operation} ${table}` : operation
+	}
+	return span.spanName
+}
+
+function StatusBadge({
+	desc,
+	isError,
+	statusCode,
+}: {
+	desc: SpanDescription
+	isError: boolean
+	statusCode: string
+}) {
+	const { platform, cacheInfo, httpInfo } = desc
+	const base = "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+
+	if (platform?.outcome?.bad) {
+		return (
+			<span className={cn(base, outcomeBadgeStyle(true))} title={`${platform.label} outcome`}>
+				{platform.outcome.value}
+			</span>
+		)
+	}
+	if (cacheInfo?.result) {
+		return (
+			<span className={cn(base, "font-mono", cacheResultStyles[cacheInfo.result])}>
+				{cacheInfo.result === "hit" ? "HIT" : "MISS"}
+			</span>
+		)
+	}
+	if (httpInfo?.statusCode != null) {
+		const code = httpInfo.statusCode
+		return (
+			<span
+				className={cn(
+					base,
+					"font-mono",
+					code >= 200 && code < 300 && "bg-severity-info/15 text-severity-info",
+					code >= 300 && code < 400 && "bg-chart-p50/15 text-chart-p50",
+					code >= 400 && code < 500 && "bg-severity-warn/15 text-severity-warn",
+					code >= 500 && "bg-severity-error/15 text-severity-error",
+					code < 200 && "text-muted-foreground",
+				)}
+			>
+				{code}
+			</span>
+		)
+	}
+	if (isError) {
+		return <span className={cn(base, "bg-severity-error/15 text-severity-error")}>Error</span>
+	}
+	if (statusCode === "Ok") {
+		return <span className={cn(base, "bg-severity-info/15 text-severity-info")}>OK</span>
+	}
+	return null
 }
 
 interface FlowSpanNodeProps {
@@ -112,7 +145,7 @@ interface FlowSpanNodeProps {
 }
 
 export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodeProps) {
-	const { span, isSelected, count, aggregatedDuration } = data
+	const { span, isSelected, count, combinedSpans, aggregatedDuration, totalDurationMs } = data
 
 	if (span.isMissing) {
 		return (
@@ -125,25 +158,19 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 				/>
 				<div
 					className={cn(
-						"relative w-[280px] rounded-lg transition-all duration-200",
-						"flex flex-col overflow-hidden border-2 border-dashed border-muted-foreground/30",
+						"relative w-[280px] rounded-lg border-2 border-dashed border-muted-foreground/30 bg-card/50",
+						"flex flex-col gap-1 px-3 py-2 transition-all duration-200",
 						isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
 					)}
 				>
-					<div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] bg-muted/50 text-muted-foreground">
-						<span className="font-semibold">Missing Span</span>
+					<div className="flex items-center gap-1.5 min-w-0 text-[11px]">
+						<span className="font-semibold text-muted-foreground">Missing Span</span>
+						<span className="flex-1" />
+						<span className="font-mono text-muted-foreground/60 truncate" title={span.spanId}>
+							{span.spanId.slice(0, 8)}
+						</span>
 					</div>
-					<div className="px-3 py-2.5 bg-card/50">
-						<p
-							className="font-mono text-[11px] text-muted-foreground/70 truncate"
-							title={span.spanId}
-						>
-							{span.spanId.slice(0, 16)}
-						</p>
-						<p className="mt-1 text-[10px] text-muted-foreground/50 italic">
-							Not ingested or dropped
-						</p>
-					</div>
+					<div className="text-[10px] italic text-muted-foreground/50">Not ingested or dropped</div>
 				</div>
 				<Handle
 					type="source"
@@ -157,38 +184,30 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 
 	const isCombined = count > 1
 
-	const kindLabel = SPAN_KIND_LABELS[span.spanKind] || span.spanKind.replace("SPAN_KIND_", "")
-
-	// Detect HTTP span info
-	const httpInfo = getHttpInfo(span)
-	const isHttpRequest = !!httpInfo
-
-	// Detect cache span
-	const cacheInfo = getCacheInfo(span.spanAttributes)
-	const isCacheSpan = !!cacheInfo
-
-	// Detect a serverless/cloud platform span (Cloudflare, Vercel, …)
-	const platform = getCloudPlatform(span.spanAttributes)
+	const desc = describeSpan(span)
+	const { category, httpInfo, cacheInfo } = desc
 
 	// Detect error state: respect OTel status as source of truth
-	// Only fall back to HTTP status >= 500 when OTel status is not explicitly "Ok"
-	const isError = span.statusCode === "Error" || (span.statusCode !== "Ok" && (httpInfo?.isError ?? false))
+	// Only fall back to HTTP status >= 500 when OTel status is not explicitly "Ok".
+	// A combined group reads as error if any member errors (matches the edge logic).
+	const spanIsError = (s: { statusCode: string }, httpError: boolean) =>
+		s.statusCode === "Error" || (s.statusCode !== "Ok" && httpError)
+	const isError =
+		spanIsError(span, httpInfo?.isError ?? false) ||
+		(isCombined && combinedSpans.some((s) => s.statusCode === "Error"))
 
-	const colorStyle = isError ? {} : getSpanColorStyle(span.spanName, span.serviceName)
+	const primaryText = getPrimaryText(span, desc)
+	const { main, tooltip } = formatCombinedDuration(isCombined, span.durationMs, aggregatedDuration)
 
-	// Get the appropriate icon for this span. Platform spans get the provider mark
-	// (unless erroring or a cache span, which keep their more specific icons).
-	const SpanIcon = isCacheSpan
-		? DatabaseIcon
-		: platform && !isError
-			? platform.Icon
-			: getSpanIcon(span.spanKind, isHttpRequest, isError)
+	// Cost rail: this span's share of the whole trace, sqrt-scaled so small
+	// spans stay visible while slow spans still dominate the eye.
+	const railDurationMs = isCombined ? aggregatedDuration.avg : span.durationMs
+	const costFraction =
+		totalDurationMs > 0
+			? Math.min(1, Math.max(0.02, Math.sqrt(railDurationMs / totalDurationMs)))
+			: 0
 
-	// Extract class and function from span name (for non-HTTP spans)
-	const className = extractClassName(span.spanName)
-	const functionName = className
-		? span.spanName.slice(className.length + 1) // +1 for the . or ::
-		: span.spanName
+	const CategoryIcon = category.Icon
 
 	return (
 		<>
@@ -201,246 +220,69 @@ export const FlowSpanNode = memo(function FlowSpanNode({ data }: FlowSpanNodePro
 
 			<div
 				className={cn(
-					"relative w-[280px] rounded-lg shadow-sm transition-all duration-200",
-					"flex flex-col overflow-hidden hover:shadow-md",
-					isError && "shadow-destructive/10",
+					"relative w-[280px] rounded-lg border bg-card shadow-sm transition-all duration-200 hover:shadow-md",
+					isError && "border-severity-error/30 bg-severity-error/5 shadow-severity-error/10",
 					isSelected && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-md",
+					// Combined groups render as a card stack
+					isCombined &&
+						"before:absolute before:inset-0 before:-z-10 before:translate-x-1.5 before:translate-y-1.5 before:rounded-lg before:border before:bg-card",
 				)}
 			>
-				{/* Header with service and kind/type */}
-				<div
-					className={cn(
-						"flex items-center justify-between gap-2 px-3 py-2 text-[11px]",
-						isError ? "bg-destructive text-white" : "",
-					)}
-					style={!isError ? colorStyle : undefined}
-				>
-					<div className="flex items-center gap-1.5 min-w-0">
-						<SpanIcon size={14} className="shrink-0" />
-						<span className="font-semibold truncate">{span.serviceName}</span>
-					</div>
-					<span className="opacity-75 shrink-0">
-						{isCacheSpan
-							? (cacheInfo.system ?? "cache")
-							: platform
-								? platform.kind
-								: isHttpRequest
-									? "HTTP"
-									: kindLabel}
+				{isCombined && (
+					<span className="absolute -top-2 -right-2 rounded-full border bg-muted px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground shadow-sm">
+						×{count}
 					</span>
+				)}
+
+				<div className="flex items-center gap-2 p-2 pb-2.5 pr-2.5">
+					{/* Category icon chip — same tinted-badge idiom as status chips */}
+					<span
+						className={cn(
+							"flex size-6 shrink-0 items-center justify-center rounded-md",
+							isError
+								? "bg-severity-error/15 text-severity-error"
+								: cn(category.accent.soft, category.accent.text),
+						)}
+					>
+						{category.id === "cache" && cacheInfo?.system ? (
+							<CacheSystemIcon system={cacheInfo.system} size={13} />
+						) : (
+							<CategoryIcon size={13} />
+						)}
+					</span>
+
+					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+						{/* Row 1: operation + status */}
+						<div className="flex min-w-0 items-center gap-1.5">
+							<span
+								className="min-w-0 flex-1 truncate font-mono text-[11px] font-medium text-foreground"
+								title={primaryText}
+							>
+								{primaryText}
+							</span>
+							<StatusBadge desc={desc} isError={isError} statusCode={span.statusCode} />
+						</div>
+
+						{/* Row 2: service + category label + duration */}
+						<div className="flex min-w-0 items-center gap-1.5 text-[10px] text-muted-foreground">
+							<ServiceDot serviceName={span.serviceName} className="size-1.5" />
+							<span className="truncate">{span.serviceName}</span>
+							<span className="shrink-0 text-muted-foreground/50">·</span>
+							<span className="shrink-0">{category.label}</span>
+							<span className="flex-1" />
+							<span className="shrink-0 tabular-nums" title={tooltip}>
+								{main}
+							</span>
+						</div>
+					</div>
 				</div>
 
-				{/* Body + Footer wrapper with dotted border */}
-				<div
-					className={cn(
-						"border border-dashed border-t-0 rounded-b-lg",
-						isError ? "border-destructive/40" : "border-foreground/20",
-					)}
-				>
-					{/* Body - Cache, HTTP, or default */}
-					<div className="flex-1 px-3 py-2.5 bg-card">
-						{isCacheSpan ? (
-							<>
-								<div className="flex items-center gap-2">
-									{cacheInfo.operation && (
-										<span
-											className={cn(
-												"px-2 py-0.5 rounded font-mono text-[11px] font-bold text-white shrink-0",
-												CACHE_OPERATION_COLORS[cacheInfo.operation.toUpperCase()] ||
-													"bg-muted-foreground",
-											)}
-										>
-											{cacheInfo.operation.toUpperCase()}
-										</span>
-									)}
-									<span
-										className="font-mono text-xs text-foreground truncate"
-										title={cacheInfo.name || span.spanName}
-									>
-										{cacheInfo.name || span.spanName}
-									</span>
-								</div>
-								<div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
-									{(() => {
-										const { main, tooltip } = formatCombinedDuration(
-											isCombined,
-											span.durationMs,
-											aggregatedDuration,
-										)
-										return <span title={tooltip}>{main}</span>
-									})()}
-									{cacheInfo.result && (
-										<span
-											className={cn(
-												"px-1.5 py-0.5 rounded font-mono font-bold text-[10px]",
-												cacheResultStyles[cacheInfo.result],
-											)}
-										>
-											{cacheInfo.result === "hit" ? "HIT" : "MISS"}
-										</span>
-									)}
-								</div>
-							</>
-						) : isHttpRequest && httpInfo ? (
-							<>
-								<div className="flex items-center gap-2">
-									<span
-										className={cn(
-											"px-2 py-0.5 rounded font-mono text-[11px] font-bold text-white shrink-0",
-											HTTP_METHOD_COLORS[httpInfo.method] || "bg-muted-foreground",
-										)}
-									>
-										{httpInfo.method}
-									</span>
-									<span
-										className="font-mono text-xs text-foreground truncate"
-										title={httpInfo.route || span.spanName}
-									>
-										{httpInfo.route || span.spanName}
-									</span>
-								</div>
-								<div className="mt-2 flex items-center gap-2 text-[11px] text-muted-foreground tabular-nums">
-									{(() => {
-										const { main, tooltip } = formatCombinedDuration(
-											isCombined,
-											span.durationMs,
-											aggregatedDuration,
-										)
-										return <span title={tooltip}>{main}</span>
-									})()}
-									{httpInfo.statusCode != null && (
-										<span
-											className={cn(
-												"px-1.5 py-0.5 rounded font-mono font-bold",
-												httpInfo.statusCode >= 200 &&
-													httpInfo.statusCode < 300 &&
-													"bg-severity-info/15 text-severity-info",
-												httpInfo.statusCode >= 300 &&
-													httpInfo.statusCode < 400 &&
-													"bg-chart-p50/15 text-chart-p50",
-												httpInfo.statusCode >= 400 &&
-													httpInfo.statusCode < 500 &&
-													"bg-severity-warn/15 text-severity-warn",
-												httpInfo.statusCode >= 500 &&
-													"bg-severity-error/15 text-severity-error",
-												httpInfo.statusCode < 200 && "text-muted-foreground",
-											)}
-										>
-											{httpInfo.statusCode}
-										</span>
-									)}
-								</div>
-							</>
-						) : className ? (
-							<>
-								<div
-									className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold mb-1"
-									style={{
-										backgroundColor: `${colorStyle.backgroundColor}20`,
-										color: colorStyle.backgroundColor,
-									}}
-								>
-									{className}
-								</div>
-								<div
-									className="font-mono text-xs font-medium truncate text-foreground"
-									title={functionName}
-								>
-									{functionName}
-								</div>
-								<div className="mt-1.5 text-[11px] text-muted-foreground font-medium">
-									{(() => {
-										const { main, tooltip } = formatCombinedDuration(
-											isCombined,
-											span.durationMs,
-											aggregatedDuration,
-										)
-										return <span title={tooltip}>{main}</span>
-									})()}
-								</div>
-							</>
-						) : (
-							<>
-								<div className="font-mono text-xs font-medium truncate" title={span.spanName}>
-									{span.spanName}
-								</div>
-								<div className="mt-1.5 text-[11px] text-muted-foreground font-medium">
-									{(() => {
-										const { main, tooltip } = formatCombinedDuration(
-											isCombined,
-											span.durationMs,
-											aggregatedDuration,
-										)
-										return <span title={tooltip}>{main}</span>
-									})()}
-								</div>
-							</>
-						)}
-					</div>
-
-					{/* Footer - span status */}
-					<div className="flex items-center justify-between px-3 py-1.5 bg-muted/30 rounded-b-lg border-t border-dashed border-foreground/10 text-[10px]">
-						{platform?.outcome?.bad ? (
-							<span
-								className={cn(
-									"px-1.5 py-0.5 rounded text-[10px] font-semibold",
-									outcomeBadgeStyle(true),
-								)}
-								title={`${platform.label} outcome`}
-							>
-								{platform.outcome.value}
-							</span>
-						) : isCacheSpan && cacheInfo.result ? (
-							<span
-								className={cn(
-									"px-1.5 py-0.5 rounded text-[10px] font-semibold",
-									cacheResultStyles[cacheInfo.result],
-								)}
-							>
-								{cacheInfo.result === "hit" ? "HIT" : "MISS"}
-							</span>
-						) : isError ? (
-							<span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-severity-error/15 text-severity-error">
-								Error
-							</span>
-						) : span.statusCode === "Ok" ||
-						  (httpInfo?.statusCode != null &&
-								httpInfo.statusCode >= 200 &&
-								httpInfo.statusCode < 400) ? (
-							<span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-severity-info/15 text-severity-info">
-								OK
-							</span>
-						) : (
-							<span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-muted-foreground">
-								{span.statusCode}
-							</span>
-						)}
-						{isCacheSpan && cacheInfo.system ? (
-							<span className="flex items-center gap-1 text-muted-foreground/60 ml-2">
-								<CacheSystemIcon system={cacheInfo.system} size={11} />
-								<span className="font-mono truncate">{cacheInfo.system}</span>
-							</span>
-						) : platform?.edge && !isCombined ? (
-							<span
-								className="flex items-center gap-1 text-muted-foreground/60 ml-2"
-								title={platform.location ?? undefined}
-							>
-								<GlobeIcon size={11} className="shrink-0" />
-								<span className="font-mono truncate">{platform.edge}</span>
-							</span>
-						) : isCombined ? (
-							<span className="font-mono text-muted-foreground/60 truncate ml-2">
-								{count} spans
-							</span>
-						) : (
-							<span
-								className="font-mono text-muted-foreground/60 truncate ml-2"
-								title={span.spanId}
-							>
-								{span.spanId.slice(0, 8)}
-							</span>
-						)}
-					</div>
+				{/* Cost rail: span duration as share of the trace */}
+				<div className="absolute inset-x-0 bottom-0 h-[3px] overflow-hidden rounded-b-[7px] bg-muted/40">
+					<div
+						className={cn("h-full", isError ? "bg-severity-error" : category.accent.rail)}
+						style={{ width: `${costFraction * 100}%` }}
+					/>
 				</div>
 			</div>
 

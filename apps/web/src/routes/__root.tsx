@@ -63,7 +63,7 @@ const PUBLIC_PATHS = new Set([
 
 // Routes that render their own onboarding/billing UI and so must never be
 // gated on plan selection (neither redirected away nor blocked while loading).
-const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start"]
+const ALLOWED_WITHOUT_PLAN = ["/select-plan", "/quick-start", "/cli-login", "/mcp-authorize"]
 
 // Stable references so the AttributesProvider context value never changes
 // identity across renders (avoids re-rendering every CopyableValue consumer).

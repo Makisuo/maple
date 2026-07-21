@@ -1,4 +1,4 @@
-import { Clock, Context, Deferred, Effect, Layer, Option, Schema } from "effect"
+import { Clock, Config, Context, Deferred, Effect, Layer, Option, Schema } from "effect"
 import { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
 
 export { CacheBackend, type EdgeCacheBackend } from "./cache-backend"
@@ -48,6 +48,14 @@ export interface EdgeCacheInvalidateOptions {
 	readonly key: string
 }
 
+export type EdgeCacheReadStatus = "hit" | "miss" | "timeout"
+
+export interface EdgeCacheReadResult<A> {
+	readonly status: EdgeCacheReadStatus
+	readonly value: Option.Option<A>
+	readonly readMs: number
+}
+
 export interface EdgeCacheServiceShape {
 	readonly getOrCompute: <A, E, R, I = unknown>(
 		options: EdgeCacheGetOrComputeOptions<A, I>,
@@ -60,6 +68,10 @@ export interface EdgeCacheServiceShape {
 	 * failure is logged and swallowed (the entry simply expires via its TTL).
 	 */
 	readonly invalidate: (options: EdgeCacheInvalidateOptions) => Effect.Effect<void>
+	readonly rawGetDetailed: <A>(
+		bucket: string,
+		key: string,
+	) => Effect.Effect<EdgeCacheReadResult<A>, EdgeCacheIOError>
 	readonly rawGet: <A>(bucket: string, key: string) => Effect.Effect<Option.Option<A>, EdgeCacheIOError>
 	readonly rawPut: (
 		bucket: string,
@@ -85,7 +97,31 @@ const sha256Hex = async (input: string): Promise<string> => {
  * tests so they can substitute a fake backend (e.g. a JSON-roundtripping one)
  * without going through `detectWorkersCache`.
  */
-export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServiceShape => {
+export const DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS = 250
+
+export const makeEdgeCacheService = (
+	backend: EdgeCacheBackend,
+	readTimeoutMs = DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS,
+): EdgeCacheServiceShape => {
+	const boundedReadTimeoutMs = Number.isFinite(readTimeoutMs)
+		? Math.max(1, Math.floor(readTimeoutMs))
+		: DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS
+	const readBackend = (
+		bucket: string,
+		key: string,
+		nowMs: number,
+	): Promise<{ readonly value: unknown | undefined; readonly timedOut: boolean }> => {
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const deadline = new Promise<{ readonly value: undefined; readonly timedOut: true }>((resolve) => {
+			timer = setTimeout(() => resolve({ value: undefined, timedOut: true }), boundedReadTimeoutMs)
+		})
+		const read = Promise.resolve()
+			.then(() => backend.get(bucket, key, nowMs))
+			.then((value) => ({ value, timedOut: false as const }))
+		return Promise.race([read, deadline]).finally(() => {
+			if (timer !== undefined) clearTimeout(timer)
+		})
+	}
 	// Heterogeneous in-flight map keyed by bucket+hash; each entry stores a
 	// pre-typed awaiter Effect so callers never need to cast Deferred<any, any>.
 	const inFlight = new Map<string, DeferredAwaiter<any, any>>()
@@ -96,58 +132,30 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 	) {
 		const hash = yield* Effect.promise(() => sha256Hex(options.key))
 		const composite = `${options.bucket}:${hash}`
-		const nowMs = yield* Clock.currentTimeMillis
-
-		const cached = yield* Effect.tryPromise({
-			try: () => backend.get(options.bucket, hash, nowMs),
-			catch: (error) => error,
-		}).pipe(
-			Effect.tapError((error) =>
-				Effect.logWarning("Edge cache get failed; treating as miss").pipe(
-					Effect.annotateLogs({
-						bucket: options.bucket,
-						key: options.key,
-						hash,
-						error: String(error),
-					}),
-				),
-			),
-			Effect.orElseSucceed(() => undefined),
-		)
-		if (cached !== undefined) {
-			if (options.schema) {
-				const decoded = yield* Schema.decodeUnknownEffect(options.schema)(cached).pipe(
-					Effect.tapError((error) =>
-						Effect.logWarning("Edge cache decode failed; treating as miss").pipe(
-							Effect.annotateLogs({
-								bucket: options.bucket,
-								key: options.key,
-								hash,
-								error: String(error),
-							}),
-						),
-					),
-					Effect.option,
-				)
-				if (Option.isSome(decoded)) {
-					return { value: decoded.value, hit: true }
-				}
-				// Fall through to recompute on decode failure (poisoned/stale entry).
-			} else {
-				return { value: cached as A, hit: true }
-			}
-		}
+		yield* Effect.annotateCurrentSpan({
+			"cache.bucket": options.bucket,
+			"cache.hit": false,
+			"cache.read_ms": 0,
+			"cache.read_status": "pending",
+			"cache.read_timed_out": false,
+		})
 
 		const existing = inFlight.get(composite)
 		if (existing) {
 			const value = (yield* existing.await) as A
+			yield* Effect.annotateCurrentSpan({
+				"cache.hit": true,
+				"cache.dedup.waited": true,
+				"cache.read_status": "deduplicated",
+			})
 			return { value, hit: true }
 		}
 
 		const deferred = yield* Deferred.make<A, E>()
-		inFlight.set(composite, {
+		const awaiter = {
 			await: Deferred.await(deferred),
-		})
+		}
+		inFlight.set(composite, awaiter)
 
 		const writeAndPublish = Effect.fnUntraced(function* (value: A) {
 			const stored: unknown = options.schema
@@ -175,19 +183,76 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 			yield* Deferred.succeed(deferred, value)
 		})
 
-		const body = compute.pipe(
-			Effect.tap(writeAndPublish),
+		const body = Effect.gen(function* () {
+			const readStartedAt = yield* Clock.currentTimeMillis
+			const nowMs = readStartedAt
+			const read = yield* Effect.tryPromise({
+				try: () => readBackend(options.bucket, hash, nowMs),
+				catch: (error) => error,
+			}).pipe(
+				Effect.tapError((error) =>
+					Effect.logWarning("Edge cache get failed; treating as miss").pipe(
+						Effect.annotateLogs({
+							bucket: options.bucket,
+							key: options.key,
+							hash,
+							error: String(error),
+						}),
+					),
+				),
+				Effect.orElseSucceed(() => ({ value: undefined, timedOut: false as const })),
+			)
+			const readMs = (yield* Clock.currentTimeMillis) - readStartedAt
+			yield* Effect.annotateCurrentSpan({
+				"cache.read_ms": readMs,
+				"cache.read_status": read.timedOut ? "timeout" : read.value === undefined ? "miss" : "hit",
+				"cache.read_timed_out": read.timedOut,
+			})
+
+			if (read.value !== undefined) {
+				if (options.schema) {
+					const decoded = yield* Schema.decodeUnknownEffect(options.schema)(read.value).pipe(
+						Effect.tapError((error) =>
+							Effect.logWarning("Edge cache decode failed; treating as miss").pipe(
+								Effect.annotateLogs({
+									bucket: options.bucket,
+									key: options.key,
+									hash,
+									error: String(error),
+								}),
+							),
+						),
+						Effect.option,
+					)
+					if (Option.isSome(decoded)) {
+						yield* Deferred.succeed(deferred, decoded.value)
+						yield* Effect.annotateCurrentSpan("cache.hit", true)
+						return { value: decoded.value, hit: true }
+					}
+					// Fall through to recompute on decode failure (poisoned/stale entry).
+					yield* Effect.annotateCurrentSpan("cache.read_status", "decode_miss")
+				} else {
+					const value = read.value as A
+					yield* Deferred.succeed(deferred, value)
+					yield* Effect.annotateCurrentSpan("cache.hit", true)
+					return { value, hit: true }
+				}
+			}
+
+			const value = yield* compute
+			yield* writeAndPublish(value)
+			return { value, hit: false }
+		}).pipe(
 			Effect.tapError((error) => Deferred.fail(deferred, error)),
 			Effect.onInterrupt(() => Deferred.interrupt(deferred)),
 			Effect.ensuring(
 				Effect.sync(() => {
-					inFlight.delete(composite)
+					if (inFlight.get(composite) === awaiter) inFlight.delete(composite)
 				}),
 			),
 		)
 
-		const value = yield* body
-		return { value, hit: false }
+		return yield* body
 	})
 
 	const invalidate = Effect.fn("EdgeCacheService.invalidate")(function* (
@@ -220,10 +285,17 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 		)
 	})
 
-	const rawGet = Effect.fn("EdgeCache.rawGet")(function* <A>(bucket: string, key: string) {
-		const nowMs = yield* Clock.currentTimeMillis
-		return yield* Effect.tryPromise({
-			try: () => backend.get(bucket, key, nowMs),
+	const rawGetDetailed = Effect.fn("EdgeCache.rawGetDetailed")(function* <A>(bucket: string, key: string) {
+		yield* Effect.annotateCurrentSpan({
+			"cache.bucket": bucket,
+			"cache.hit": false,
+			"cache.read_ms": 0,
+			"cache.read_timed_out": false,
+		})
+		const readStartedAt = yield* Clock.currentTimeMillis
+		const nowMs = readStartedAt
+		const read = yield* Effect.tryPromise({
+			try: () => readBackend(bucket, key, nowMs),
 			catch: (cause) =>
 				new EdgeCacheIOError({
 					op: "get",
@@ -231,7 +303,21 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 					key,
 					cause: cause instanceof Error ? cause.message : String(cause),
 				}),
-		}).pipe(Effect.map((value) => (value === undefined ? Option.none<A>() : Option.some(value as A))))
+		})
+		const value = read.value === undefined ? Option.none<A>() : Option.some(read.value as A)
+		const status: EdgeCacheReadStatus = read.timedOut ? "timeout" : Option.isSome(value) ? "hit" : "miss"
+		const readMs = (yield* Clock.currentTimeMillis) - readStartedAt
+		yield* Effect.annotateCurrentSpan({
+			"cache.hit": Option.isSome(value),
+			"cache.read_ms": readMs,
+			"cache.read_status": status,
+			"cache.read_timed_out": read.timedOut,
+		})
+		return { status, value, readMs } satisfies EdgeCacheReadResult<A>
+	})
+
+	const rawGet = Effect.fn("EdgeCache.rawGet")(function* <A>(bucket: string, key: string) {
+		return (yield* rawGetDetailed<A>(bucket, key)).value
 	})
 
 	const rawPut = Effect.fn("EdgeCache.rawPut")(function* (
@@ -253,7 +339,7 @@ export const makeEdgeCacheService = (backend: EdgeCacheBackend): EdgeCacheServic
 		})
 	})
 
-	return { getOrCompute, invalidate, rawGet, rawPut } satisfies EdgeCacheServiceShape
+	return { getOrCompute, invalidate, rawGetDetailed, rawGet, rawPut } satisfies EdgeCacheServiceShape
 }
 
 export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCacheServiceShape>()(
@@ -268,7 +354,10 @@ export class EdgeCacheService extends Context.Service<EdgeCacheService, EdgeCach
 		this,
 		Effect.gen(function* () {
 			const backend = yield* CacheBackend
-			return EdgeCacheService.of(makeEdgeCacheService(backend))
+			const readTimeoutMs = yield* Config.number("EDGE_CACHE_READ_TIMEOUT_MS").pipe(
+				Config.withDefault(DEFAULT_EDGE_CACHE_READ_TIMEOUT_MS),
+			)
+			return EdgeCacheService.of(makeEdgeCacheService(backend, readTimeoutMs))
 		}),
 	)
 }

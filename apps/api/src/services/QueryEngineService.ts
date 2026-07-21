@@ -18,19 +18,20 @@ import {
 	makeQueryEngineExecute,
 	msToTinybirdDateTime,
 	reducePerGroupObservations,
+	resolveDirectRouteCachePolicy,
 	toEpochMs,
 	validateEvaluate,
 	withTimeout,
 	type BucketGroupObs,
 	type GroupedAlertObservation,
+	type DirectRouteCachePolicyInput,
 	type QueryEngineDirectError,
 	type QueryEngineRawSqlEvaluateRequest,
 	type QueryEngineRouteError,
 	type TimeRangeBounds,
 } from "@maple/query-engine/runtime"
 import type { TenantContext } from "./AuthService"
-import { BucketCacheService } from "@maple/query-engine/caching"
-import { EdgeCacheService } from "@maple/query-engine/caching"
+import { BucketCacheService, EdgeCacheService } from "@maple/query-engine/caching"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import * as QueryEngineMetrics from "../lib/QueryEngineMetrics"
 
@@ -77,17 +78,16 @@ export interface QueryEngineServiceShape {
 	) => Effect.Effect<ReadonlyArray<BucketGroupObs>, QueryEngineRouteError>
 	/**
 	 * Edge-cache a direct-route query keyed by `(orgId, routeName, payload)`.
-	 * `ttlSeconds` defaults to 15s (fits "current health" routes like
-	 * `serviceOverview`); pass a longer TTL for slow-moving routes whose payload
-	 * already snaps to a coarse window (e.g. `serviceHealthBaseline`, whose input
-	 * is hour-floored, so a 1h TTL yields ≤1 recompute/hour per key).
+	 * A numeric policy preserves the legacy TTL-aligned snap behavior. Routes can
+	 * instead pass a versioned policy to tune TTL and time-key snapping
+	 * independently without changing the storage service.
 	 */
 	readonly cachedDirect: <A>(
 		tenant: TenantContext,
 		routeName: string,
 		payload: unknown,
 		effect: Effect.Effect<A, QueryEngineDirectError>,
-		ttlSeconds?: number,
+		policy?: DirectRouteCachePolicyInput,
 	) => Effect.Effect<A, QueryEngineDirectError>
 }
 export class QueryEngineService extends Context.Service<QueryEngineService, QueryEngineServiceShape>()(
@@ -184,8 +184,17 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsHit, outcome.bucketsHit)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsMissed, outcome.bucketsMissed)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsRequested, outcome.requestedBuckets)
+				yield* Metric.update(
+					QueryEngineMetrics.bucketCacheWarehouseQueries,
+					outcome.warehouseQueryCount,
+				)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentHits, outcome.segmentsHit)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentMisses, outcome.segmentsMissed)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentTimeouts, outcome.segmentsTimedOut)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentErrors, outcome.segmentsErrored)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheMissingRanges, outcome.missingRangeCount)
-				yield* recordCacheOutcome(outcome.bucketsMissed === 0)
+				yield* recordCacheOutcome(outcome.warehouseQueryCount === 0)
 				yield* Effect.annotateCurrentSpan("cache.bucketsHit", outcome.bucketsHit)
 				yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 				yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
@@ -290,8 +299,17 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsHit, outcome.bucketsHit)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsMissed, outcome.bucketsMissed)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheBucketsRequested, outcome.requestedBuckets)
+				yield* Metric.update(
+					QueryEngineMetrics.bucketCacheWarehouseQueries,
+					outcome.warehouseQueryCount,
+				)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentHits, outcome.segmentsHit)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentMisses, outcome.segmentsMissed)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentTimeouts, outcome.segmentsTimedOut)
+				yield* Metric.update(QueryEngineMetrics.bucketCacheSegmentErrors, outcome.segmentsErrored)
 				yield* Metric.update(QueryEngineMetrics.bucketCacheMissingRanges, outcome.missingRangeCount)
-				yield* recordCacheOutcome(outcome.bucketsMissed === 0)
+				yield* recordCacheOutcome(outcome.warehouseQueryCount === 0)
 				yield* Effect.annotateCurrentSpan("cache.bucketsHit", outcome.bucketsHit)
 				yield* Effect.annotateCurrentSpan("cache.bucketsMissed", outcome.bucketsMissed)
 				yield* Effect.annotateCurrentSpan("cache.missingRangeCount", outcome.missingRangeCount)
@@ -360,19 +378,24 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				routeName: string,
 				payload: unknown,
 				effect: Effect.Effect<A, QueryEngineDirectError>,
-				ttlSeconds = 15,
+				policyInput: DirectRouteCachePolicyInput = 15,
 			) {
 				return yield* withTimeout(
 					Effect.gen(function* () {
 						const startMs = yield* Clock.currentTimeMillis
-						const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload)
+						const policy = resolveDirectRouteCachePolicy(policyInput)
+						const key = buildDirectRouteCacheKey(tenant.orgId, routeName, payload, policy)
 						const { value, hit } = yield* edgeCache.getOrCompute(
-							{ bucket: "qe-direct", key, ttlSeconds },
+							{ bucket: "qe-direct", key, ttlSeconds: policy.ttlSeconds },
 							effect,
 						)
 						yield* recordCacheOutcome(hit)
 						yield* Effect.annotateCurrentSpan("cache.hit", hit)
-						yield* Effect.annotateCurrentSpan("cache.ttlSeconds", ttlSeconds)
+						yield* Effect.annotateCurrentSpan({
+							"cache.policy_version": policy.version,
+							"cache.snap_window_seconds": policy.snapWindowSeconds,
+							"cache.ttlSeconds": policy.ttlSeconds,
+						})
 						yield* Metric.update(
 							QueryEngineMetrics.executeDurationMs,
 							(yield* Clock.currentTimeMillis) - startMs,

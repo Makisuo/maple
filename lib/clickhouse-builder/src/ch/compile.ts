@@ -46,6 +46,11 @@ export class CompiledQueryDecodeError extends Schema.TaggedErrorClass<CompiledQu
 
 export interface CompiledQuery<Output> {
 	readonly sql: string
+	/** Execution-routing metadata: `"ingest"` marks a query whose datasource only
+	 *  exists in the managed ingest pipeline (declared via `.routing("ingest")` at
+	 *  the query definition), so executors read it there instead of a per-org
+	 *  warehouse override. */
+	readonly routing?: "ingest"
 	/** Type-safe cast of raw query results. The cast is sound because the
 	 *  Output type is derived from the SELECT clause that produced the SQL. */
 	readonly castRows: (rows: ReadonlyArray<Record<string, unknown>>) => ReadonlyArray<Output>
@@ -67,6 +72,7 @@ export type CompiledQueryRowSchema<Output> = Schema.Schema<Output>
 const makeCompiledQuery = <Output>(
 	sql: string,
 	rowSchema?: CompiledQueryRowSchema<Output>,
+	routing?: "ingest",
 ): CompiledQuery<Output> => {
 	const decodeRow = rowSchema
 		? (Schema.decodeUnknownEffect(rowSchema) as (row: unknown) => Effect.Effect<Output, unknown, never>)
@@ -92,6 +98,7 @@ const makeCompiledQuery = <Output>(
 
 	return {
 		sql,
+		...(routing === undefined ? {} : { routing }),
 		castRows: (rows) => rows as unknown as ReadonlyArray<Output>,
 		decodeRows,
 		decodeFirstRow: (rows) => {
@@ -122,7 +129,8 @@ const makeCompiledQuery = <Output>(
 export const unsafeCompiledQuery = <Output>(args: {
 	readonly sql: string
 	readonly rowSchema?: CompiledQueryRowSchema<Output>
-}): CompiledQuery<Output> => makeCompiledQuery(args.sql, args.rowSchema)
+	readonly routing?: "ingest"
+}): CompiledQuery<Output> => makeCompiledQuery(args.sql, args.rowSchema, args.routing)
 
 export function compileCH<
 	Cols extends ColumnDefs,
@@ -231,7 +239,7 @@ export function compileCH<
 	}
 
 	return {
-		...makeCompiledQuery<Output>(sql, options?.rowSchema),
+		...makeCompiledQuery<Output>(sql, options?.rowSchema, state.routingValue),
 	}
 }
 

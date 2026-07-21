@@ -1,8 +1,56 @@
 import { describe, it } from "@effect/vitest"
-import { deepStrictEqual, rejects, strictEqual } from "node:assert"
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert"
+import { Effect, Exit, Tracer } from "effect"
 import { checkpointQueryUrl } from "../src/server/checkpoints"
-import { corsHeadersForAllowedOrigin, isBrowserOriginAllowed } from "../src/server/serve"
+import { __testables, corsHeadersForAllowedOrigin, isBrowserOriginAllowed } from "../src/server/serve"
 import { serverProbeUrl } from "../src/commands/server-args"
+
+const makeRecordingTracer = () => {
+	const spans: Array<Tracer.NativeSpan> = []
+	const tracer = Tracer.make({
+		span(options) {
+			const span = new Tracer.NativeSpan(options)
+			spans.push(span)
+			return span
+		},
+	})
+	return { spans, tracer }
+}
+
+describe("local HTTP server span status", () => {
+	it.effect("records a 4xx response as a successful Server span", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const response = yield* __testables
+				.recordServerResponse(new Response("invalid SQL", { status: 400 }))
+				.pipe(Effect.withSpan("POST /local/query", { kind: "server" }), Effect.withTracer(tracer))
+
+			strictEqual(response.status, 400)
+			const span = spans.find((candidate) => candidate.name === "POST /local/query")
+			ok(span)
+			strictEqual(span.attributes.get("error.type"), "HTTP 400")
+			ok(span.status._tag === "Ended" && Exit.isSuccess(span.status.exit))
+		}),
+	)
+
+	it.effect("records a 5xx response as a failed Server span", () =>
+		Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const exit = yield* __testables
+				.recordServerResponse(new Response("database unavailable", { status: 503 }))
+				.pipe(
+					Effect.withSpan("POST /local/query", { kind: "server" }),
+					Effect.withTracer(tracer),
+					Effect.exit,
+				)
+
+			ok(Exit.isFailure(exit))
+			const span = spans.find((candidate) => candidate.name === "POST /local/query")
+			ok(span)
+			ok(span.status._tag === "Ended" && Exit.isFailure(span.status.exit))
+		}),
+	)
+})
 
 describe("local listener addresses", () => {
 	it("reaches an IPv4 wildcard listener through the loopback probe URL", async () => {

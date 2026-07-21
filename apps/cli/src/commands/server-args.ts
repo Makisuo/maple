@@ -11,6 +11,7 @@ export {
 	resolveBindHost,
 	serverProbeUrl,
 	serverUrl,
+	validateHost,
 } from "../lib/local-address"
 
 export interface DetachedChildArgs {

@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useEffect } from "react"
+import { useMemo, useCallback, useEffect, useRef, useState } from "react"
 import {
 	ReactFlow,
 	Controls,
@@ -8,15 +8,27 @@ import {
 	useNodesState,
 	useEdgesState,
 	type Node,
+	type ReactFlowInstance,
 } from "@xyflow/react"
 import "@xyflow/react/dist/style.css"
 
 import { EyeIcon } from "../icons"
 
 import { Button } from "../ui/button"
+import { cn } from "../../lib/utils"
 import { getServiceColor } from "../../lib/colors"
+import { describeSpan, SPAN_CATEGORIES } from "../../lib/span-category"
+import { ServiceDot } from "../service-dot"
 import { FlowSpanNode } from "./flow-node"
-import { transformSpansToFlow, getLayoutedElements, findSpanById, type FlowNodeData } from "./flow-utils"
+import { TraceFlowEdge } from "./flow-edge"
+import {
+	transformSpansToFlow,
+	getLayoutedElements,
+	findSpanById,
+	type FlowNodeData,
+	type FlowNode,
+	type FlowEdge,
+} from "./flow-utils"
 import type { SpanNode } from "../../lib/types"
 
 interface TraceFlowViewProps {
@@ -32,31 +44,79 @@ const nodeTypes = {
 	span: FlowSpanNode,
 }
 
-const defaultEdgeOptions = {
-	type: "smoothstep",
-	animated: true,
-	style: {
-		strokeWidth: 2,
-		stroke: "oklch(0.45 0.02 60)",
-	},
+const edgeTypes = {
+	flowEdge: TraceFlowEdge,
 }
 
-export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpan }: TraceFlowViewProps) {
+const defaultEdgeOptions = {
+	animated: true,
+}
+
+export function TraceFlowView({
+	rootSpans,
+	totalDurationMs,
+	services,
+	selectedSpanId,
+	onSelectSpan,
+}: TraceFlowViewProps) {
+	// Selection is intentionally NOT part of this memo — it's applied by the
+	// effect below, so a selection change never re-layouts or refits the view.
 	const { initialNodes, initialEdges } = useMemo(() => {
-		const { nodes, edges } = transformSpansToFlow(rootSpans, services, selectedSpanId)
+		const { nodes, edges } = transformSpansToFlow(rootSpans, services, totalDurationMs)
 		const layouted = getLayoutedElements(nodes, edges, rootSpans)
 		return { initialNodes: layouted.nodes, initialEdges: layouted.edges }
-	}, [rootSpans, services, selectedSpanId])
+	}, [rootSpans, services, totalDurationMs])
+
+	// Only legend categories that actually occur in this trace
+	const presentCategories = useMemo(() => {
+		const ids = new Set(
+			initialNodes
+				.filter((n) => !n.data.span.isMissing)
+				.map((n) => describeSpan(n.data.span).category.id),
+		)
+		return SPAN_CATEGORIES.filter((c) => ids.has(c.id))
+	}, [initialNodes])
 
 	const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
-	const [edges] = useEdgesState(initialEdges)
+	const [edges, setEdges] = useEdgesState(initialEdges)
+	const [rfInstance, setRfInstance] = useState<ReactFlowInstance<FlowNode, FlowEdge> | null>(null)
+	const paneRef = useRef<HTMLDivElement | null>(null)
+	// Once the user pans/zooms themselves, stop auto-refitting under them.
+	const userMovedRef = useRef(false)
+
+	// Keep graph state in sync when the trace data arrives/changes after mount,
+	// and refit the viewport so the whole trace is visible without manual zooming.
+	useEffect(() => {
+		setNodes(initialNodes)
+		setEdges(initialEdges)
+		userMovedRef.current = false
+		if (!rfInstance) return
+		const frame = requestAnimationFrame(() => {
+			void rfInstance.fitView({ padding: 0.2, maxZoom: 1.5 })
+		})
+		return () => cancelAnimationFrame(frame)
+	}, [initialNodes, initialEdges, rfInstance, setNodes, setEdges])
+
+	// The pane's size settles after mount (tab activation, side panels, window
+	// resizes) — refit on resize until the user takes over the viewport.
+	useEffect(() => {
+		if (!rfInstance || !paneRef.current) return
+		const observer = new ResizeObserver(() => {
+			if (userMovedRef.current) return
+			requestAnimationFrame(() => {
+				if (!userMovedRef.current) void rfInstance.fitView({ padding: 0.2, maxZoom: 1.5 })
+			})
+		})
+		observer.observe(paneRef.current)
+		return () => observer.disconnect()
+	}, [rfInstance])
 
 	useEffect(() => {
 		setNodes((nds) =>
 			nds.map((node) => {
 				const nodeData = node.data as FlowNodeData
 				const isSelected =
-					nodeData.combinedSpans?.some((s) => s.spanId === selectedSpanId) ??
+					nodeData.combinedSpans.some((s) => s.spanId === selectedSpanId) ||
 					node.id === selectedSpanId
 				return {
 					...node,
@@ -93,10 +153,8 @@ export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpa
 					size="sm"
 					className="h-6 gap-1 text-xs"
 					onClick={() => {
-						const fitButton = document.querySelector(
-							".react-flow__controls-fitview",
-						) as HTMLButtonElement | null
-						fitButton?.click()
+						userMovedRef.current = false
+						void rfInstance?.fitView({ padding: 0.2, maxZoom: 1.5 })
 					}}
 				>
 					<EyeIcon size={12} />
@@ -104,13 +162,20 @@ export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpa
 				</Button>
 			</div>
 
-			<div className="flex-1 min-h-0">
+			<div ref={paneRef} className="flex-1 min-h-0">
 				<ReactFlow
 					nodes={nodes}
 					edges={edges}
 					onNodesChange={onNodesChange}
 					onNodeClick={handleNodeClick}
+					onInit={setRfInstance}
+					onMoveStart={(event) => {
+						// A user-initiated pan/zoom carries a source event;
+						// programmatic fitView moves pass null.
+						if (event) userMovedRef.current = true
+					}}
 					nodeTypes={nodeTypes}
+					edgeTypes={edgeTypes}
 					defaultEdgeOptions={defaultEdgeOptions}
 					nodesDraggable={false}
 					nodesConnectable={false}
@@ -127,7 +192,7 @@ export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpa
 						nodeColor={(node: Node) => {
 							const data = node.data as FlowNodeData
 							if (data.span.statusCode === "Error") {
-								return "oklch(0.62 0.20 25)"
+								return "var(--severity-error)"
 							}
 							return getServiceColor(data.span.serviceName)
 						}}
@@ -150,17 +215,35 @@ export function TraceFlowView({ rootSpans, services, selectedSpanId, onSelectSpa
 				<div className="flex items-center gap-3">
 					{services.map((service) => (
 						<div key={service} className="flex items-center gap-1.5">
-							<div
-								className="h-3 w-3"
-								style={{ backgroundColor: getServiceColor(service) }}
-							/>
+							<ServiceDot serviceName={service} className="size-2.5" />
 							<span className="font-medium">{service}</span>
 						</div>
 					))}
 				</div>
+				{presentCategories.length > 0 && (
+					<>
+						<span className="text-foreground/30">|</span>
+						<div className="flex items-center gap-3">
+							{presentCategories.map((category) => (
+								<div key={category.id} className="flex items-center gap-1.5">
+									<span
+										className={cn(
+											"flex size-3.5 items-center justify-center rounded-[4px]",
+											category.accent.soft,
+											category.accent.text,
+										)}
+									>
+										<category.Icon size={9} />
+									</span>
+									<span className="font-medium">{category.label}</span>
+								</div>
+							))}
+						</div>
+					</>
+				)}
 				<span className="flex-1" />
 				<div className="flex items-center gap-1.5">
-					<div className="h-3 w-3" style={{ backgroundColor: "oklch(0.62 0.20 25)" }} />
+					<span className="size-3.5 rounded-[4px] bg-severity-error/15 ring-1 ring-inset ring-severity-error/40" />
 					<span className="font-medium">Error</span>
 				</div>
 			</div>

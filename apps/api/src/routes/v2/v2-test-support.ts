@@ -18,6 +18,7 @@ import { HttpV2ApiKeysLive } from "./api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./dashboards.http"
 import { HttpV2IngestKeysLive } from "./ingest-keys.http"
+import { HttpV2ErrorIssuesLive } from "./error-issues.http"
 import { HttpV2AnomaliesLive } from "./anomalies.http"
 import { HttpV2InvestigationsLive } from "./investigations.http"
 import { HttpV2OrganizationLive } from "./organization.http"
@@ -27,7 +28,6 @@ import { HttpV2SessionReplaysLive } from "./session-replays.http"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
-	HttpV2QueryLive,
 	HttpV2ServiceMapLive,
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
@@ -47,6 +47,7 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2AlertDestinationsLive,
 	HttpV2AlertIncidentsLive,
 	HttpV2IngestKeysLive,
+	HttpV2ErrorIssuesLive,
 	HttpV2AttributeMappingsLive,
 	HttpV2ScrapeTargetsLive,
 	HttpV2InstrumentationRecommendationsLive,
@@ -59,7 +60,6 @@ export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2MetricsLive,
 	HttpV2ServicesLive,
 	HttpV2ServiceMapLive,
-	HttpV2QueryLive,
 )
 
 export const ApiV2RateLimiterAllowAllLayer = Layer.succeed(ApiV2RateLimiter, {

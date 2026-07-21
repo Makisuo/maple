@@ -145,6 +145,8 @@ export {
 export {
 	serviceOverviewQuery,
 	serviceCatalogQuery,
+	serviceHealthSnapshotQuery,
+	serviceHealthSnapshotRowSchema,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
 	serviceEnvironmentsQuery,
@@ -156,6 +158,8 @@ export {
 	type ServiceOverviewOutput,
 	type ServiceCatalogOpts,
 	type ServiceCatalogOutput,
+	type ServiceHealthSnapshotOpts,
+	type ServiceHealthSnapshotOutput,
 	type ServiceHealthBaselineOpts,
 	type ServiceHealthBaselineOutput,
 	type ServiceReleasesTimelineOpts,
@@ -184,6 +188,7 @@ export {
 	errorsSummaryQuery,
 	errorDetailTracesQuery,
 	errorIssuesQuery,
+	errorFingerprintsQuery,
 	errorIssueTimeseriesQuery,
 	errorIssueSampleTracesQuery,
 	type ErrorsByTypeOpts,
@@ -207,6 +212,8 @@ export {
 	type ErrorDetailTracesOutput,
 	type ErrorIssuesOpts,
 	type ErrorIssuesOutput,
+	type ErrorFingerprintsOpts,
+	type ErrorFingerprintsOutput,
 	type ErrorIssueTimeseriesOutput,
 	type ErrorIssueSampleTracesOutput,
 } from "./queries/errors"
@@ -294,8 +301,10 @@ export {
 // Queries — Service Operations (per-SpanName breakdown for the service detail page)
 export {
 	serviceOperationsSummaryQuery,
+	serviceOperationsSummaryRawQuery,
 	serviceOperationsSummaryRowSchema,
 	serviceOperationsTimeseriesQuery,
+	serviceOperationsTimeseriesRawQuery,
 	serviceOperationsTimeseriesRowSchema,
 	type ServiceOperationsSummaryOpts,
 	type ServiceOperationsSummaryOutput,

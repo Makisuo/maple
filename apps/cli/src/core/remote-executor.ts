@@ -1,10 +1,35 @@
-import { Effect, type Option } from "effect"
-import { type WarehouseExecutorShape, type ExecutorQueryOptions } from "@maple/query-engine/observability"
-import { WarehouseClientError, WarehouseQueryError } from "@maple/domain/http/warehouse-errors"
+import { Duration, Effect, Option, Schema, type Option as EffectOption } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
+import { type WarehouseExecutorShape, type SqlQueryOptions } from "@maple/query-engine/observability"
+import {
+	type WarehouseError,
+	WarehouseClientError,
+	WarehouseQueryError,
+	warehouseHttpErrors,
+} from "@maple/domain/http/warehouse-errors"
 import { debugLog } from "../lib/debug"
 
 const RAW_SQL_REMOTE_MESSAGE =
 	"Raw SQL (`maple query`) is only available in local mode. In remote mode, use the typed commands (services, traces, errors, logs, timeseries, …)."
+
+const WarehouseErrorSchema = Schema.Union([...warehouseHttpErrors])
+const WarehouseErrorEnvelope = Schema.Struct({ error: WarehouseErrorSchema })
+const decodeWarehouseErrorJson = Schema.decodeUnknownOption(Schema.fromJsonString(WarehouseErrorSchema))
+const decodeWarehouseErrorEnvelopeJson = Schema.decodeUnknownOption(
+	Schema.fromJsonString(WarehouseErrorEnvelope),
+)
+const RemoteQueryResponse = Schema.Struct({ data: Schema.optionalKey(Schema.Array(Schema.Unknown)) })
+const decodeRemoteQueryResponseJson = Schema.decodeUnknownSync(Schema.fromJsonString(RemoteQueryResponse))
+
+const decodeRemoteWarehouseError = (text: string): WarehouseError | undefined => {
+	const direct = decodeWarehouseErrorJson(text)
+	if (Option.isSome(direct)) return direct.value
+	const envelope = decodeWarehouseErrorEnvelopeJson(text)
+	return Option.isSome(envelope) ? envelope.value.error : undefined
+}
+
+const unsupported = <A>(pipeName: string): Effect.Effect<A, WarehouseClientError> =>
+	Effect.fail(new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName }))
 
 /**
  * A `WarehouseExecutor` shape backed by the remote Maple API's generic
@@ -21,67 +46,103 @@ const RAW_SQL_REMOTE_MESSAGE =
  *     routes through `query`, so this only affects raw SQL.)
  */
 export const makeRemoteWarehouseExecutorShape = (
+	client: HttpClient.HttpClient,
 	apiUrl: string,
 	token: string,
 	orgId: string,
 ): WarehouseExecutorShape => {
 	const endpoint = `${apiUrl.replace(/\/$/, "")}/api/tinybird/query`
+	const serverAddress = new URL(endpoint).hostname
 	return {
 		orgId,
-		query: <T>(pipe: string, params: Record<string, unknown>, _options?: ExecutorQueryOptions) =>
-			Effect.tryPromise({
-				try: async (): Promise<{ data: ReadonlyArray<T> }> => {
-					const started = performance.now()
-					try {
-						const res = await fetch(endpoint, {
-							method: "POST",
-							headers: {
-								"content-type": "application/json",
-								authorization: `Bearer ${token}`,
-							},
-							body: JSON.stringify({ pipe, params }),
-						})
-						if (!res.ok) {
-							const text = await res.text().catch(() => "")
-							throw new Error(`HTTP ${res.status}${text ? `: ${text}` : ""}`)
-						}
-						const json = (await res.json()) as { data?: ReadonlyArray<T> }
-						return { data: json.data ?? [] }
-					} finally {
-						// Server-side SQL isn't returned; log the pipe + params instead.
-						debugLog(
-							`${pipe} · ${Math.round(performance.now() - started)}ms`,
-							JSON.stringify(params),
+		query: <T>(pipe: string, params: Record<string, unknown>, options?: SqlQueryOptions) =>
+			Effect.gen(function* () {
+				const started = performance.now()
+				const request = HttpClientRequest.post(endpoint, {
+					headers: { authorization: `Bearer ${token}` },
+				}).pipe(HttpClientRequest.bodyText(JSON.stringify({ pipe, params }), "application/json"))
+				return yield* Effect.gen(function* () {
+					const response = yield* client
+						.execute(request)
+						.pipe(
+							Effect.mapError(
+								(error) =>
+									new WarehouseQueryError({
+										message: error.message,
+										pipeName: pipe,
+										cause: error,
+									}),
+							),
 						)
+					const text = yield* response.text.pipe(
+						Effect.mapError(
+							(error) =>
+								new WarehouseQueryError({
+									message: error.message,
+									pipeName: pipe,
+									cause: error,
+								}),
+						),
+					)
+					if (response.status < 200 || response.status >= 300) {
+						const decoded = decodeRemoteWarehouseError(text)
+						if (decoded !== undefined) return yield* decoded
+						return yield* new WarehouseQueryError({
+							message: `HTTP ${response.status}${text ? `: ${text}` : ""}`,
+							pipeName: pipe,
+							cause: text,
+						})
 					}
-				},
-				catch: (error) =>
-					new WarehouseQueryError({
-						message: error instanceof Error ? error.message : String(error),
-						pipeName: pipe,
+					const json = yield* Effect.try({
+						try: () => decodeRemoteQueryResponseJson(text),
+						catch: (error) =>
+							new WarehouseQueryError({
+								message: error instanceof Error ? error.message : String(error),
+								pipeName: pipe,
+								cause: error,
+							}),
+					})
+					return { data: (json.data ?? []) as ReadonlyArray<T> }
+				}).pipe(
+					Effect.timeoutOrElse({
+						duration: Duration.minutes(2),
+						orElse: () =>
+							Effect.fail(
+								new WarehouseQueryError({
+									message: "Remote warehouse query timed out after 2 minutes",
+									pipeName: pipe,
+									cause: "timeout",
+								}),
+							),
 					}),
+					Effect.ensuring(
+						Effect.sync(() =>
+							debugLog(
+								`${pipe} · ${Math.round(performance.now() - started)}ms`,
+								JSON.stringify(params),
+							),
+						),
+					),
+				)
 			}).pipe(
 				Effect.tap((result) => Effect.annotateCurrentSpan({ "result.rowCount": result.data.length })),
 				Effect.withSpan("warehouse.query", {
 					kind: "client",
 					attributes: {
 						"peer.service": "maple-api",
-						"db.system.name": "clickhouse",
-						"query.context": pipe,
+						"http.request.method": "POST",
+						"url.full": endpoint,
+						"server.address": serverAddress,
+						"query.context": options?.context ?? pipe,
+						"query.profile": options?.profile,
 					},
 				}),
 			),
-		sqlQuery: <T = Record<string, unknown>>(_sql: string, _options?: ExecutorQueryOptions) =>
-			Effect.fail(
-				new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName: "sqlQuery" }),
-			) as Effect.Effect<ReadonlyArray<T>, WarehouseClientError>,
-		compiledQuery: <T>(_compiled: unknown, _options?: ExecutorQueryOptions) =>
-			Effect.fail(
-				new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName: "compiledQuery" }),
-			) as Effect.Effect<ReadonlyArray<T>, WarehouseClientError>,
-		compiledQueryFirst: <T>(_compiled: unknown, _options?: ExecutorQueryOptions) =>
-			Effect.fail(
-				new WarehouseClientError({ message: RAW_SQL_REMOTE_MESSAGE, pipeName: "compiledQueryFirst" }),
-			) as Effect.Effect<Option.Option<T>, WarehouseClientError>,
+		sqlQuery: <T = Record<string, unknown>>(_sql: string, _options?: SqlQueryOptions) =>
+			unsupported<ReadonlyArray<T>>("sqlQuery"),
+		compiledQuery: <T>(_compiled: unknown, _options?: SqlQueryOptions) =>
+			unsupported<ReadonlyArray<T>>("compiledQuery"),
+		compiledQueryFirst: <T>(_compiled: unknown, _options?: SqlQueryOptions) =>
+			unsupported<EffectOption.Option<T>>("compiledQueryFirst"),
 	}
 }

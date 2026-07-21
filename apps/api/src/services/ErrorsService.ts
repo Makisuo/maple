@@ -31,6 +31,8 @@ import {
 	type IssueEscalationPolicyUpsertRequest,
 	IssueListCursor,
 	type IssueListCursorFields,
+	IssueSeverityListCursor,
+	type IssueSeverityListCursorFields,
 	type IssueKind,
 	type IssueSeverity,
 	type IssueSeveritySource,
@@ -78,9 +80,16 @@ import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
+import {
+	isOrgWarehouseQuarantined,
+	quarantineOnConfigClassCause,
+} from "../lib/warehouse-org-quarantine"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
+const encodeIssueSeverityListCursorRaw = Schema.encodeSync(IssueSeverityListCursor)
+const encodeIssueSeverityListCursor = (fields: IssueSeverityListCursorFields): string =>
+	`sev_${encodeIssueSeverityListCursorRaw(fields)}`
 const decodeErrorIncidentIdSync = Schema.decodeUnknownSync(ErrorIncidentDocument.fields.id)
 const decodeActorIdSync = Schema.decodeUnknownSync(ActorIdSchema)
 const decodeEventIdSync = Schema.decodeUnknownSync(ErrorIssueEventIdSchema)
@@ -98,6 +107,9 @@ const decodeStoredJsonRecord = Schema.decodeUnknownOption(
 const decodeStoredJsonArray = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))
 
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
+/** Fallback fingerprint-scan window for the issue list's env filter when the
+ *  caller provides no time range (30d ≈ the issue-list retention horizon). */
+const ENV_FINGERPRINT_DEFAULT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 const DEFAULT_EVENTS_LIMIT = 100
 const AUTO_RESOLVE_MINUTES = 30
 const TICK_WINDOW_MS = 2 * 60_000
@@ -121,6 +133,36 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = "system-errors-tick"
 const D1_INARRAY_CHUNK_SIZE = 90
+const ACTIONABLE_WORKFLOW_STATES: ReadonlyArray<WorkflowState> = [
+	"triage",
+	"todo",
+	"in_progress",
+	"in_review",
+]
+
+/** Shared SQL ordering expression for the UI's critical-first issue ordering. */
+const issueSeverityOrder = sql<number>`CASE ${errorIssues.severity}
+	WHEN 'critical' THEN 0
+	WHEN 'high' THEN 1
+	WHEN 'medium' THEN 2
+	WHEN 'low' THEN 3
+	ELSE 4
+END`
+
+const severitySortRank = (severity: IssueSeverity | null): number => {
+	switch (severity) {
+		case "critical":
+			return 0
+		case "high":
+			return 1
+		case "medium":
+			return 2
+		case "low":
+			return 3
+		case null:
+			return 4
+	}
+}
 
 export const describeCause = (cause: unknown): string | undefined => {
 	if (cause == null) return undefined
@@ -205,13 +247,19 @@ export interface ErrorsServiceShape {
 			readonly severity?: IssueSeverity | "unset"
 			readonly kind?: IssueKind
 			readonly service?: string
+			/** Only issues whose fingerprint the warehouse observed in this
+			 *  deployment environment (within startTime/endTime, defaulting to the
+			 *  trailing 30d). Costs one warehouse round-trip; excludes alert-kind
+			 *  issues (synthetic fingerprints carry no environment). */
 			readonly deploymentEnv?: string
 			readonly assignedActorId?: ActorId
 			readonly includeArchived?: boolean
 			readonly startTime?: string
 			readonly endTime?: string
 			readonly limit?: number
-			readonly cursor?: IssueListCursorFields
+			readonly cursor?: IssueListCursorFields | IssueSeverityListCursorFields
+			readonly actionable?: boolean
+			readonly sort?: "last_seen" | "severity"
 		},
 	) => Effect.Effect<ErrorIssuesListResponse, ErrorPersistenceError>
 	readonly getIssue: (
@@ -473,7 +521,6 @@ const make: Effect.Effect<
 		})
 		return yield* warehouse
 			.compiledQuery(systemTenant(knownOrgs[0] as OrgId), compiled, {
-				pinToIngestConfig: true,
 				// Bound the one cross-org scan (no OrgId predicate ⇒ can't prune the
 				// primary key): abort server-side at 5s instead of riding the ~30s
 				// client timeout when the warehouse is slow.
@@ -1010,17 +1057,60 @@ const make: Effect.Effect<
 
 	const listIssues: ErrorsServiceShape["listIssues"] = Effect.fn("ErrorsService.listIssues")(
 		function* (orgId, opts) {
+			const sort = opts.sort ?? "last_seen"
 			yield* Effect.annotateCurrentSpan({
 				orgId,
 				workflowState: opts.workflowState ?? "all",
 				limit: opts.limit ?? 100,
+				sort,
+				...(opts.deploymentEnv ? { deploymentEnv: opts.deploymentEnv } : {}),
 			})
 			const conditions = [eq(errorIssues.orgId, orgId)]
 			if (opts.workflowState) conditions.push(eq(errorIssues.workflowState, opts.workflowState))
+			if (opts.actionable)
+				conditions.push(inArray(errorIssues.workflowState, ACTIONABLE_WORKFLOW_STATES))
 			if (opts.severity === "unset") conditions.push(isNull(errorIssues.severity))
 			else if (opts.severity) conditions.push(eq(errorIssues.severity, opts.severity))
 			if (opts.kind) conditions.push(eq(errorIssues.kind, opts.kind))
 			if (opts.service) conditions.push(eq(errorIssues.serviceName, opts.service))
+			// `""` is a real filter (the raw value spans without a deployment env
+			// carry — the UI's synthetic "unknown" label), so check for undefined.
+			if (opts.deploymentEnv !== undefined) {
+				// Issue rows carry no environment (a fingerprint spans environments), so
+				// the env filter intersects against the fingerprints the warehouse saw in
+				// the selected environment over the requested window. Alert-kind issues
+				// have synthetic fingerprints that never match warehouse rows, so an env
+				// filter implicitly narrows the list to error-kind issues.
+				const nowMs = yield* Clock.currentTimeMillis
+				const endMs = opts.endTime ? parseWarehouseDateTime(opts.endTime) : Number.NaN
+				const startMs = opts.startTime ? parseWarehouseDateTime(opts.startTime) : Number.NaN
+				const scanEndMs = Number.isFinite(endMs) ? endMs : nowMs
+				const scanStartMs = Number.isFinite(startMs)
+					? startMs
+					: scanEndMs - ENV_FINGERPRINT_DEFAULT_WINDOW_MS
+				const compiled = CH.compile(
+					CH.errorFingerprintsQuery({
+						services: opts.service ? [opts.service] : undefined,
+						deploymentEnvs: [opts.deploymentEnv],
+					}),
+					{
+						orgId,
+						startTime: toTinybirdDateTime(scanStartMs),
+						endTime: toTinybirdDateTime(scanEndMs),
+					},
+				)
+				const fingerprintRows = yield* warehouse
+					.compiledQuery(systemTenant(orgId), compiled, { context: "errorIssueEnvFingerprints" })
+					.pipe(Effect.mapError((error) => makePersistenceError(error)))
+				const hashes = fingerprintRows
+					.map((row) => row.fingerprintHash)
+					.filter((hash) => hash.length > 0)
+				if (hashes.length === 0) {
+					yield* Effect.annotateCurrentSpan({ issueCount: 0, hasMore: false })
+					return new ErrorIssuesListResponse({ issues: [] })
+				}
+				conditions.push(inArray(errorIssues.fingerprintHash, hashes))
+			}
 			if (opts.assignedActorId) conditions.push(eq(errorIssues.assignedActorId, opts.assignedActorId))
 			if (!opts.includeArchived) conditions.push(isNull(errorIssues.archivedAt))
 			if (opts.endTime) {
@@ -1032,26 +1122,50 @@ const make: Effect.Effect<
 				if (Number.isFinite(startMs)) conditions.push(gt(errorIssues.lastSeenAt, new Date(startMs)))
 			}
 			if (opts.cursor) {
-				// Keyset continuation: strictly after the last row of the previous
-				// page in (lastSeenAt desc, id desc) order.
 				const cursorSeenAt = new Date(opts.cursor.lastSeenAt)
-				const keyset = or(
-					lt(errorIssues.lastSeenAt, cursorSeenAt),
-					and(eq(errorIssues.lastSeenAt, cursorSeenAt), lt(errorIssues.id, opts.cursor.id)),
-				)
+				// Keyset continuation must mirror the selected ordering exactly.
+				const keyset =
+					sort === "severity" && "severityRank" in opts.cursor
+						? or(
+								gt(issueSeverityOrder, opts.cursor.severityRank),
+								and(
+									eq(issueSeverityOrder, opts.cursor.severityRank),
+									or(
+										lt(errorIssues.lastSeenAt, cursorSeenAt),
+										and(
+											eq(errorIssues.lastSeenAt, cursorSeenAt),
+											lt(errorIssues.id, opts.cursor.id),
+										),
+									),
+								),
+							)
+						: or(
+								lt(errorIssues.lastSeenAt, cursorSeenAt),
+								and(
+									eq(errorIssues.lastSeenAt, cursorSeenAt),
+									lt(errorIssues.id, opts.cursor.id),
+								),
+							)
 				if (keyset) conditions.push(keyset)
 			}
 
 			const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500)
 			// Fetch one extra row: its presence means another page exists.
-			const fetched = yield* dbExecute((db) =>
-				db
+			const fetched = yield* dbExecute((db) => {
+				const query = db
 					.select()
 					.from(errorIssues)
 					.where(and(...conditions))
-					.orderBy(desc(errorIssues.lastSeenAt), desc(errorIssues.id))
-					.limit(limit + 1),
-			)
+				return (
+					sort === "severity"
+						? query.orderBy(
+								issueSeverityOrder,
+								desc(errorIssues.lastSeenAt),
+								desc(errorIssues.id),
+							)
+						: query.orderBy(desc(errorIssues.lastSeenAt), desc(errorIssues.id))
+				).limit(limit + 1)
+			})
 			const hasMore = fetched.length > limit
 			const rows = hasMore ? fetched.slice(0, limit) : fetched
 
@@ -1065,16 +1179,21 @@ const make: Effect.Effect<
 			const issuesResult = rows.map((r) => rowToIssue(r, openSet.has(r.id), actorMap))
 			yield* Effect.annotateCurrentSpan({ issueCount: issuesResult.length, hasMore })
 			const lastRow = rows.at(-1)
-			return new ErrorIssuesListResponse(
+			const nextCursor =
 				hasMore && lastRow
-					? {
-							issues: issuesResult,
-							nextCursor: encodeIssueListCursor({
+					? sort === "severity"
+						? encodeIssueSeverityListCursor({
+								severityRank: severitySortRank(lastRow.severity),
 								lastSeenAt: lastRow.lastSeenAt.getTime(),
 								id: decodeErrorIssueIdSync(lastRow.id),
-							}),
-						}
-					: { issues: issuesResult },
+							})
+						: encodeIssueListCursor({
+								lastSeenAt: lastRow.lastSeenAt.getTime(),
+								id: decodeErrorIssueIdSync(lastRow.id),
+							})
+					: undefined
+			return new ErrorIssuesListResponse(
+				nextCursor === undefined ? { issues: issuesResult } : { issues: issuesResult, nextCursor },
 			)
 		},
 	)
@@ -2367,23 +2486,14 @@ const make: Effect.Effect<
 							? "regression"
 							: "first_seen"
 					const incidentId = newErrorIncidentId()
-					yield* dbExecute((db) =>
-						db.insert(errorIncidents).values({
-							id: incidentId,
-							orgId,
-							issueId,
-							status: "open",
-							reason,
-							firstTriggeredAt: new Date(firstSeenMs),
-							lastTriggeredAt: new Date(lastSeenMs),
-							resolvedAt: null,
-							occurrenceCount: row.count,
-							createdAt: new Date(windowEndMs),
-							updatedAt: new Date(windowEndMs),
-						}),
-					)
 
-					yield* dbExecute((db) =>
+					// CAS the open slot BEFORE creating the incident or dispatching:
+					// overlapping ticks can both read openIncidentId == null, and the
+					// notify path below dispatches immediately (no outbox), so only the
+					// upsert winner may proceed. setWhere keeps the conflict-update a
+					// no-op when another tick already claimed the slot; RETURNING then
+					// yields zero rows for the loser.
+					const claimed = yield* dbExecute((db) =>
 						db
 							.insert(errorIssueStates)
 							.values({
@@ -2402,7 +2512,37 @@ const make: Effect.Effect<
 									openIncidentId: incidentId,
 									updatedAt: new Date(windowEndMs),
 								},
-							}),
+								setWhere: isNull(errorIssueStates.openIncidentId),
+							})
+							.returning({ openIncidentId: errorIssueStates.openIncidentId }),
+					)
+					const wonOpenSlot = claimed[0]?.openIncidentId === incidentId
+
+					if (!wonOpenSlot) {
+						// Lost the race: a concurrent tick opened the incident for this
+						// same scan window and already dispatched its notification. Do
+						// not bump occurrence counts here — the winner counted this
+						// window's occurrences on insert.
+						yield* Effect.logInfo("Skipping duplicate error incident open (lost CAS)").pipe(
+							Effect.annotateLogs({ orgId, issueId }),
+						)
+						return { touched: 1, opened: 0 }
+					}
+
+					yield* dbExecute((db) =>
+						db.insert(errorIncidents).values({
+							id: incidentId,
+							orgId,
+							issueId,
+							status: "open",
+							reason,
+							firstTriggeredAt: new Date(firstSeenMs),
+							lastTriggeredAt: new Date(lastSeenMs),
+							resolvedAt: null,
+							occurrenceCount: row.count,
+							createdAt: new Date(windowEndMs),
+							updatedAt: new Date(windowEndMs),
+						}),
 					)
 
 					yield* notifyIncidentOpened(orgId, policy, {
@@ -2484,9 +2624,12 @@ const make: Effect.Effect<
 					),
 				),
 		)
-		yield* Effect.forEach(staleIncidents, (incident) =>
+		const resolveOutcomes = yield* Effect.forEach(staleIncidents, (incident) =>
 			Effect.gen(function* () {
-				yield* dbExecute((db) =>
+				// CAS the status flip: overlapping ticks both list the incident as
+				// stale, and the resolve notification dispatches immediately — only
+				// the tick that wins the open→resolved transition may notify.
+				const flipped = yield* dbExecute((db) =>
 					db
 						.update(errorIncidents)
 						.set({
@@ -2494,8 +2637,12 @@ const make: Effect.Effect<
 							resolvedAt: new Date(windowEndMs),
 							updatedAt: new Date(windowEndMs),
 						})
-						.where(eq(errorIncidents.id, incident.id)),
+						.where(and(eq(errorIncidents.id, incident.id), eq(errorIncidents.status, "open")))
+						.returning({ id: errorIncidents.id }),
 				)
+				if (flipped.length === 0) {
+					return { resolved: 0 }
+				}
 				yield* dbExecute((db) =>
 					db
 						.update(errorIssueStates)
@@ -2530,9 +2677,10 @@ const make: Effect.Effect<
 						})
 					}
 				}
+				return { resolved: 1 }
 			}),
 		)
-		const incidentsResolved = staleIncidents.length
+		const incidentsResolved = resolveOutcomes.reduce((s, r) => s + r.resolved, 0)
 
 		let issuesArchived = 0
 		let issuesDeleted = 0
@@ -2643,6 +2791,10 @@ const make: Effect.Effect<
 		}
 	})
 
+	// Overlapping ticks are tolerated (there is no per-org claim lock): scan
+	// bookkeeping may repeat under overlap, but incident open/resolve
+	// transitions — and the notifications they dispatch — are CAS-guarded in
+	// processOrg, so users never receive duplicate incident emails.
 	const runTick: ErrorsServiceShape["runTick"] = Effect.fn("ErrorsService.runTick")(function* () {
 		const endMs = yield* Clock.currentTimeMillis
 		const startMs = endMs - TICK_WINDOW_MS
@@ -2692,7 +2844,18 @@ const make: Effect.Effect<
 		const results = yield* Effect.forEach(
 			[...knownOrgs],
 			(org) =>
-				processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org)).pipe(
+				Effect.gen(function* () {
+					// Orgs whose warehouse rejected queries with an auth/config-class error
+					// are parked (see warehouse-org-quarantine.ts) — retrying every tick
+					// fails identically until an operator repairs the org's config.
+					if (yield* isOrgWarehouseQuarantined(edgeCache, org)) {
+						yield* Effect.logInfo("Skipping org with quarantined warehouse").pipe(
+							Effect.annotateLogs({ orgId: org }),
+						)
+						return emptyResult
+					}
+					return yield* processOrg(org as OrgId, startMs, endMs, retentionRan, isActive(org))
+				}).pipe(
 					// Isolate genuine per-org failures/defects so one bad org can't fail the
 					// whole tick. Interrupts (isolate teardown) are NOT per-org failures —
 					// re-raise them so the tick cancels promptly instead of logging a
@@ -2701,12 +2864,19 @@ const make: Effect.Effect<
 						Cause.hasInterruptsOnly(cause)
 							? Effect.interrupt
 							: Effect.gen(function* () {
-									yield* Effect.logError("Error tick failed for org").pipe(
-										Effect.annotateLogs({
-											orgId: org,
-											error: Cause.pretty(cause),
-										}),
-									)
+									const quarantined = yield* quarantineOnConfigClassCause(edgeCache, org, cause, endMs)
+									if (quarantined) {
+										yield* Effect.logInfo(
+											"Org warehouse rejected queries with a config-class error; quarantined",
+										).pipe(Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }))
+									} else {
+										yield* Effect.logError("Error tick failed for org").pipe(
+											Effect.annotateLogs({
+												orgId: org,
+												error: Cause.pretty(cause),
+											}),
+										)
+									}
 									yield* Ref.update(orgFailures, (n) => n + 1)
 									return emptyResult
 								}),

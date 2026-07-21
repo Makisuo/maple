@@ -76,4 +76,8 @@ export function listRuleChecksQuery(opts: ListRuleChecksOpts) {
 		.limit(opts.limit)
 		.offset(opts.offset ?? 0)
 		.format("JSON")
+		// alert_checks is written via `ingest` (Tinybird-pinned) with no per-org
+		// MV, so reads must hit the same managed pipeline — otherwise a
+		// BYO-ClickHouse org reads an empty table from its own ClickHouse.
+		.routing("ingest")
 }

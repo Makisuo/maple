@@ -390,6 +390,22 @@ export const IssueListCursor = Schema.String.pipe(
 	Schema.decodeTo(Schema.fromJsonString(IssueListCursorFields)),
 ).annotate({ identifier: "@maple/IssueListCursor", title: "Issue List Cursor" })
 
+/** Alternate keyset used by the v2 urgency-sorted issue list. */
+export const IssueSeverityListCursorFields = Schema.Struct({
+	severityRank: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 4 })),
+	lastSeenAt: Schema.Number,
+	id: ErrorIssueId,
+}).annotate({ identifier: "@maple/IssueSeverityListCursorFields" })
+export type IssueSeverityListCursorFields = Schema.Schema.Type<typeof IssueSeverityListCursorFields>
+
+export const IssueSeverityListCursor = Schema.String.pipe(
+	Schema.decodeTo(Schema.String, {
+		decode: SchemaGetter.decodeBase64UrlString(),
+		encode: SchemaGetter.encodeBase64Url(),
+	}),
+	Schema.decodeTo(Schema.fromJsonString(IssueSeverityListCursorFields)),
+).annotate({ identifier: "@maple/IssueSeverityListCursor", title: "Issue Severity List Cursor" })
+
 const IssueListQuery = Schema.Struct({
 	cursor: Schema.optional(IssueListCursor),
 	workflowState: Schema.optional(WorkflowState),

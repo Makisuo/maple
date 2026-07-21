@@ -64,11 +64,24 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
-				EMAIL: Cloudflare.Email.SendEmail("email", {
-					allowedSenderAddresses: ["notifications@noreply.maple.dev"],
-				}),
+				// Production only: preview/stg workers run the same email crons against
+				// their own DB branches, so a binding here means every live stage sends
+				// its own copy of onboarding/digest/alert emails to real users.
+				...(stage.kind === "prd"
+					? {
+							EMAIL: Cloudflare.Email.SendEmail("email", {
+								allowedSenderAddresses: ["notifications@noreply.maple.dev"],
+							}),
+						}
+					: {}),
 				TINYBIRD_HOST: requireEnv("TINYBIRD_HOST"),
 				TINYBIRD_TOKEN: Redacted.make(requireEnv("TINYBIRD_TOKEN")),
+				// Alert-rule evaluation runs Tinybird-scoped raw SQL through
+				// TinybirdOrgTokenService, which requires both of these — without them
+				// every tick fails with "TINYBIRD_SIGNING_KEY is required for
+				// Tinybird-scoped raw SQL" (same bindings as the api worker).
+				...optionalSecret("TINYBIRD_SIGNING_KEY"),
+				...optionalPlain("TINYBIRD_WORKSPACE_ID"),
 				MAPLE_AUTH_MODE: process.env.MAPLE_AUTH_MODE?.trim() || "self_hosted",
 				MAPLE_DEFAULT_ORG_ID: process.env.MAPLE_DEFAULT_ORG_ID?.trim() || "default",
 				MAPLE_INGEST_KEY_ENCRYPTION_KEY: Redacted.make(requireEnv("MAPLE_INGEST_KEY_ENCRYPTION_KEY")),
@@ -81,6 +94,9 @@ export const createAlertingWorker = ({ stage, mapleDb }: CreateAlertingWorkerOpt
 				EMAIL_FROM: process.env.EMAIL_FROM?.trim() || "Maple <notifications@noreply.maple.dev>",
 				...optionalPlain("MAPLE_ENDPOINT"),
 				...optionalPlain("MAPLE_ENVIRONMENT", resolveDeploymentEnvironment(stage)),
+			// Non-prod stages skip all crons (they share live org data via the prod
+			// DB); set to "1" on a stage to deliberately exercise crons there.
+			...optionalPlain("MAPLE_ALERTING_ALLOW_NONPROD"),
 				...optionalPlain("COMMIT_SHA"),
 				MAPLE_INGEST_KEY: Redacted.make(requireEnv("MAPLE_OTEL_INGEST_KEY")),
 				...optionalSecret("MAPLE_ROOT_PASSWORD"),

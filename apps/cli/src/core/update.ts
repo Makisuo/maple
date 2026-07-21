@@ -13,7 +13,8 @@
 // rename swaps the directory entry, so the running process keeps its old inode
 // while new invocations pick up the new binary. Keep the triple/URL logic here
 // in sync with install.sh.
-import { Clock, Effect, Option, Schema } from "effect"
+import { Clock, Duration, Effect, Option, Schema } from "effect"
+import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { realpathSync } from "node:fs"
 import { chmod, mkdir, rename, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
@@ -31,6 +32,8 @@ const REPO = "Makisuo/maple"
 const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`
 /** Throttle window for the startup check — hit GitHub at most once per day. */
 export const CHECK_TTL_MS = 24 * 60 * 60 * 1000
+const CHECKSUM_TIMEOUT = Duration.seconds(30)
+const DOWNLOAD_TIMEOUT = Duration.minutes(2)
 
 // --- pure helpers (unit-tested) ----------------------------------------------
 
@@ -102,32 +105,50 @@ const resolveTarget: Effect.Effect<string, UpdateError> = Effect.suspend(() => {
 			)
 })
 
-/** Fetch the latest release tag from the GitHub API (keeps the leading "v" for
- *  URL building). Bounded by `timeoutMs` via AbortController. */
-export const fetchLatestTag = (timeoutMs = 5000): Effect.Effect<string, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const controller = new AbortController()
-			const timer = setTimeout(() => controller.abort(), timeoutMs)
-			try {
-				// GitHub rejects requests without a User-Agent; Accept pins the API version.
-				const res = await fetch(LATEST_API, {
-					headers: { "User-Agent": "maple-cli", Accept: "application/vnd.github+json" },
-					signal: controller.signal,
-				})
-				if (!res.ok) throw new Error(`GitHub API returned ${res.status} ${res.statusText}`)
-				const body = (await res.json()) as { tag_name?: string }
-				if (!body.tag_name) throw new Error("no published release found")
-				return body.tag_name
-			} finally {
-				clearTimeout(timer)
-			}
-		},
-		catch: (e) =>
-			new UpdateError({
-				message: `could not check for updates: ${e instanceof Error ? e.message : String(e)}`,
-			}),
+const toUpdateError = (prefix: string, error: unknown): UpdateError =>
+	new UpdateError({
+		message: `${prefix}: ${error instanceof Error ? error.message : String(error)}`,
 	})
+
+/** Fetch the latest release tag from the GitHub API (keeps the leading "v" for URL building). */
+export const fetchLatestTag = (timeoutMs = 5000): Effect.Effect<string, UpdateError, HttpClient.HttpClient> =>
+	Effect.gen(function* () {
+		const client = yield* HttpClient.HttpClient
+		const request = HttpClientRequest.get(LATEST_API, {
+			headers: { "User-Agent": "maple-cli", Accept: "application/vnd.github+json" },
+		})
+		const response = yield* client
+			.execute(request)
+			.pipe(Effect.mapError((error) => toUpdateError("could not check for updates", error)))
+		if (response.status < 200 || response.status >= 300) {
+			return yield* new UpdateError({
+				message: `could not check for updates: GitHub API returned ${response.status}`,
+			})
+		}
+		const text = yield* response.text.pipe(
+			Effect.mapError((error) => toUpdateError("could not read GitHub release response", error)),
+		)
+		const body = yield* Effect.try({
+			try: () => JSON.parse(text) as { tag_name?: string },
+			catch: (error) => toUpdateError("could not decode GitHub release response", error),
+		})
+		if (!body.tag_name) {
+			return yield* new UpdateError({
+				message: "could not check for updates: no published release found",
+			})
+		}
+		return body.tag_name
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: Duration.millis(timeoutMs),
+			orElse: () =>
+				Effect.fail(
+					new UpdateError({
+						message: `could not check for updates: timed out after ${timeoutMs}ms`,
+					}),
+				),
+		}),
+	)
 
 /** Directory holding the running `maple` binary and its sibling `libchdb.so`
  *  (the symlink on PATH resolves here). */
@@ -143,29 +164,62 @@ const mapFsError = (e: unknown, installDir: string): UpdateError => {
 	return new UpdateError({ message: e instanceof Error ? e.message : String(e) })
 }
 
-const downloadTo = (url: string, dest: string): Effect.Effect<void, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const res = await fetch(url, { headers: { "User-Agent": "maple-cli" } })
-			if (!res.ok) throw new Error(`download failed (${res.status} ${res.statusText}) for ${url}`)
-			// NB: `Bun.write(dest, res)` (writing the Response directly) hangs
-			// indefinitely on GitHub's redirect-backed release-asset streams — it
-			// never resolves. Buffer the body first, then write the bytes.
-			const body = await res.arrayBuffer()
-			await Bun.write(dest, body)
-		},
-		catch: (e) => new UpdateError({ message: e instanceof Error ? e.message : String(e) }),
-	})
+const downloadTo = (
+	url: string,
+	dest: string,
+	timeout: Duration.Input = DOWNLOAD_TIMEOUT,
+): Effect.Effect<void, UpdateError, HttpClient.HttpClient> =>
+	Effect.gen(function* () {
+		const client = yield* HttpClient.HttpClient
+		const response = yield* client
+			.execute(HttpClientRequest.get(url, { headers: { "User-Agent": "maple-cli" } }))
+			.pipe(Effect.mapError((error) => toUpdateError("release download failed", error)))
+		if (response.status < 200 || response.status >= 300) {
+			return yield* new UpdateError({
+				message: `download failed (${response.status}) for ${url}`,
+			})
+		}
+		// Buffer the redirect-backed release asset before Bun.write; passing the
+		// response stream directly can hang indefinitely.
+		const body = yield* response.arrayBuffer.pipe(
+			Effect.mapError((error) => toUpdateError("release download body failed", error)),
+		)
+		yield* Effect.tryPromise({
+			try: () => Bun.write(dest, body).then(() => undefined),
+			catch: (error) => toUpdateError("release download write failed", error),
+		})
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: timeout,
+			orElse: () =>
+				Effect.fail(new UpdateError({ message: "release download timed out after 2 minutes" })),
+		}),
+	)
 
-const fetchText = (url: string): Effect.Effect<string, UpdateError> =>
-	Effect.tryPromise({
-		try: async () => {
-			const res = await fetch(url, { headers: { "User-Agent": "maple-cli" } })
-			if (!res.ok) throw new Error(`could not fetch ${url} (${res.status} ${res.statusText})`)
-			return await res.text()
-		},
-		catch: (e) => new UpdateError({ message: e instanceof Error ? e.message : String(e) }),
-	})
+const fetchText = (
+	url: string,
+	timeout: Duration.Input = CHECKSUM_TIMEOUT,
+): Effect.Effect<string, UpdateError, HttpClient.HttpClient> =>
+	Effect.gen(function* () {
+		const client = yield* HttpClient.HttpClient
+		const response = yield* client
+			.execute(HttpClientRequest.get(url, { headers: { "User-Agent": "maple-cli" } }))
+			.pipe(Effect.mapError((error) => toUpdateError("checksum request failed", error)))
+		if (response.status < 200 || response.status >= 300) {
+			return yield* new UpdateError({ message: `could not fetch ${url} (${response.status})` })
+		}
+		return yield* response.text.pipe(
+			Effect.mapError((error) => toUpdateError("checksum response read failed", error)),
+		)
+	}).pipe(
+		Effect.timeoutOrElse({
+			duration: timeout,
+			orElse: () =>
+				Effect.fail(new UpdateError({ message: "checksum request timed out after 30 seconds" })),
+		}),
+	)
+
+export const __testables = { downloadTo, fetchText }
 
 const sha256File = (path: string): Effect.Effect<string, UpdateError> =>
 	Effect.tryPromise({
@@ -218,7 +272,9 @@ export interface UpdateResult {
 }
 
 /** Download, verify, and atomically install a release bundle in place. */
-export const performUpdate = (opts: { tag?: string } = {}): Effect.Effect<UpdateResult, UpdateError> =>
+export const performUpdate = (
+	opts: { tag?: string } = {},
+): Effect.Effect<UpdateResult, UpdateError, HttpClient.HttpClient> =>
 	Effect.gen(function* () {
 		const target = yield* resolveTarget
 		const tagRaw = opts.tag ?? (yield* fetchLatestTag(10_000))
@@ -314,28 +370,30 @@ const printNotice = (current: string, latest: string): void => {
  * notice to stderr when a newer release exists. Never blocks fatally and never
  * fails the command — every error path collapses to a no-op.
  */
-export const maybeNotifyUpdate: Effect.Effect<void, never, MapleConfig> = Effect.gen(function* () {
-	if (!shouldRunNotify(process.argv)) return
-	const config = yield* MapleConfig
-	const now = yield* Clock.currentTimeMillis
-	let latest = config.latestKnownVersion
+export const maybeNotifyUpdate: Effect.Effect<void, never, MapleConfig | HttpClient.HttpClient> = Effect.gen(
+	function* () {
+		if (!shouldRunNotify(process.argv)) return
+		const config = yield* MapleConfig
+		const now = yield* Clock.currentTimeMillis
+		let latest = Option.getOrUndefined(config.latestKnownVersion)
 
-	if (shouldCheck(config.lastUpdateCheck, now)) {
-		const fetched = yield* fetchLatestTag(1500).pipe(
-			Effect.map((tag) => Option.some(tag)),
-			Effect.catch(() => Effect.succeed(Option.none<string>())),
-		)
-		if (Option.isSome(fetched)) {
-			latest = fetched.value
-			yield* config.recordUpdateCheck(fetched.value).pipe(Effect.ignore)
-		} else {
-			// Record the timestamp even on failure so an offline machine backs off
-			// for the TTL instead of re-probing GitHub on every command.
-			yield* config.recordUpdateCheck().pipe(Effect.ignore)
+		if (shouldCheck(Option.getOrUndefined(config.lastUpdateCheck), now)) {
+			const fetched = yield* fetchLatestTag(1500).pipe(
+				Effect.map((tag) => Option.some(tag)),
+				Effect.catch(() => Effect.succeed(Option.none<string>())),
+			)
+			if (Option.isSome(fetched)) {
+				latest = fetched.value
+				yield* config.recordUpdateCheck(fetched.value).pipe(Effect.ignore)
+			} else {
+				// Record the timestamp even on failure so an offline machine backs off
+				// for the TTL instead of re-probing GitHub on every command.
+				yield* config.recordUpdateCheck().pipe(Effect.ignore)
+			}
 		}
-	}
 
-	if (latest && isNewer(MAPLE_VERSION, latest)) {
-		yield* Effect.sync(() => printNotice(MAPLE_VERSION, stripV(latest)))
-	}
-})
+		if (latest && isNewer(MAPLE_VERSION, latest)) {
+			yield* Effect.sync(() => printNotice(MAPLE_VERSION, stripV(latest)))
+		}
+	},
+)

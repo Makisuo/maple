@@ -32,6 +32,23 @@ export interface VcsWebhookRequest {
 	readonly rawBody: string
 }
 
+/** A provider-neutral code-search hit returned to the investigation layer. */
+export interface VcsCodeSearchMatch {
+	readonly path: string
+	readonly sha: string
+	readonly htmlUrl: string
+	readonly snippets: ReadonlyArray<string>
+}
+
+/** A text source file fetched from a repository at an explicit ref. */
+export interface VcsSourceFile {
+	readonly path: string
+	readonly sha: string
+	readonly htmlUrl: string
+	readonly size: number
+	readonly content: string
+}
+
 export interface VcsProviderClient {
 	readonly id: VcsProviderId
 
@@ -109,6 +126,28 @@ export interface VcsProviderClient {
 		sha: GitCommitSha,
 	) => Effect.Effect<
 		Option.Option<CommitUpsertInput>,
+		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError
+	>
+
+	/** Search source within one repository visible to this installation. */
+	readonly searchCode: (
+		installation: VcsInstallation,
+		repo: VcsRepositoryRef,
+		query: string,
+		opts: { readonly path?: string; readonly limit: number },
+	) => Effect.Effect<
+		ReadonlyArray<VcsCodeSearchMatch>,
+		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError | VcsRateLimitedError
+	>
+
+	/** Fetch a UTF-8 source file. `Option.none` is an expected missing path/ref. */
+	readonly fetchSourceFile: (
+		installation: VcsInstallation,
+		repo: VcsRepositoryRef,
+		path: string,
+		ref: string,
+	) => Effect.Effect<
+		Option.Option<VcsSourceFile>,
 		VcsProviderError | VcsInstallationGoneError | VcsRepoUnavailableError
 	>
 }

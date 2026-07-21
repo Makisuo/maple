@@ -6,8 +6,10 @@ import {
 	makeWarehouseExecutor,
 	toWarehouseQueryError,
 	WarehouseResponseLimitError,
+	type ClickHouseProtocolBackendConfig,
 	type ResolvedWarehouseConfig,
 	type SqlQueryOptions,
+	type TinybirdBackendConfig,
 	type WarehouseExecutorDeps,
 	type WarehouseQueryServiceShape,
 	type WarehouseSqlClient,
@@ -33,10 +35,7 @@ import { TinybirdOrgTokenService } from "../services/TinybirdOrgTokenService"
 // Re-export the executor types so existing import sites stay stable.
 export type { WarehouseQueryServiceShape, SqlQueryOptions }
 
-type ClickHouseConfig = Extract<ResolvedWarehouseConfig, { _tag: "clickhouse" }>
-type TinybirdConfig = Extract<ResolvedWarehouseConfig, { _tag: "tinybird" }>
-
-const createClickHouseSqlClient = (config: ClickHouseConfig): WarehouseSqlClient => {
+const createClickHouseSqlClient = (config: ClickHouseProtocolBackendConfig): WarehouseSqlClient => {
 	const client = createClickHouseClient({
 		url: config.url,
 		username: config.username,
@@ -107,9 +106,9 @@ const isEmptyJsonBodyError = (error: unknown): boolean =>
 	error instanceof SyntaxError && /unexpected end of json input/i.test(error.message)
 
 const boundedResponseFetch =
-	(maxBytes: number): typeof fetch =>
+	(maxBytes: number, requestFetch: typeof fetch = fetch): typeof fetch =>
 	async (input, init) => {
-		const response = await fetch(input, init)
+		const response = await requestFetch(input, init)
 		if (response.body === null) return response
 
 		const reader = response.body.getReader()
@@ -146,15 +145,18 @@ const boundedResponseFetch =
 		})
 	}
 
-const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient => {
-	const makeClient = (fetchAdapter?: typeof fetch) =>
+const createTinybirdSdkSqlClient = (
+	config: TinybirdBackendConfig,
+	requestFetch: typeof fetch = fetch,
+): WarehouseSqlClient => {
+	const makeClient = (fetchAdapter: typeof fetch = requestFetch) =>
 		new Tinybird({
 			baseUrl: config.host,
 			token: config.token,
 			datasources: {},
 			pipes: {},
 			devMode: false,
-			...(fetchAdapter === undefined ? {} : { fetch: fetchAdapter }),
+			fetch: fetchAdapter,
 		})
 	const client = makeClient()
 	const boundedClients = new Map<number, typeof client>()
@@ -163,8 +165,15 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 			try {
 				// Tinybird Cloud currently defaults /v0/sql to JSON, while Tinybird Local
 				// defaults to tab-separated output. The SDK always calls response.json(), so
-				// make the expected wire format explicit for both environments.
-				const jsonSql = `${sql.trimEnd().replace(/;$/, "")}\nFORMAT JSON`
+				// make the expected wire format explicit for both environments. DSL-compiled
+				// queries already end with `FORMAT JSON` (profile SETTINGS are inserted
+				// before it by appendSettings) — appending a second FORMAT clause is a
+				// ClickHouse syntax error, so only add one when the query doesn't carry
+				// its own. The trailing-SETTINGS alternative covers SQL from callers that
+				// still emit the legacy `FORMAT JSON SETTINGS …` order.
+				const trimmed = sql.trimEnd().replace(/;$/, "")
+				const hasFormat = /\bFORMAT\s+\w+(\s+SETTINGS\s[^\n]*)?$/i.test(trimmed)
+				const jsonSql = hasFormat ? trimmed : `${trimmed}\nFORMAT JSON`
 				const limits = options?.responseLimits
 				// The SDK normally buffers through response.json(). Raw execution gets
 				// a fetch adapter that aborts before constructing an oversized Response.
@@ -172,7 +181,7 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 				if (limits !== undefined) {
 					queryClient =
 						boundedClients.get(limits.maxBytes) ??
-						makeClient(boundedResponseFetch(limits.maxBytes))
+						makeClient(boundedResponseFetch(limits.maxBytes, requestFetch))
 					boundedClients.set(limits.maxBytes, queryClient)
 				}
 				const result = await queryClient.sql<Record<string, unknown>>(jsonSql)
@@ -194,7 +203,7 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 			if (rows.length === 0) return
 			const ndjson = rows.map((row) => JSON.stringify(row)).join("\n")
 			const url = `${config.host.replace(/\/$/, "")}/v0/events?name=${encodeURIComponent(datasource)}&wait=false`
-			const response = await fetch(url, {
+			const response = await requestFetch(url, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/x-ndjson",
@@ -210,8 +219,11 @@ const createTinybirdSdkSqlClient = (config: TinybirdConfig): WarehouseSqlClient 
 	}
 }
 
+// Driver selection follows `BackendDialect[kind].driver`: the `tinybird` kind is
+// the only one on the SDK; every ClickHouse-protocol kind (gateway, BYO/vanilla
+// CH, chdb) uses the official web client.
 const createClient = (config: ResolvedWarehouseConfig): WarehouseSqlClient =>
-	config._tag === "clickhouse" ? createClickHouseSqlClient(config) : createTinybirdSdkSqlClient(config)
+	config.kind === "tinybird" ? createTinybirdSdkSqlClient(config) : createClickHouseSqlClient(config)
 
 let sqlClientFactory: typeof createClient = createClient
 
@@ -224,18 +236,8 @@ export class WarehouseQueryService extends Context.Service<
 		const orgClickHouseSettings = yield* OrgClickHouseSettingsService
 		const orgTokens = yield* TinybirdOrgTokenService
 
-		/**
-		 * Resolve the upstream config for this tenant's queries.
-		 *
-		 * Resolution order:
-		 *   1. Per-org BYO ClickHouse row (`org_clickhouse_settings`)
-		 *   2. Env-level managed ClickHouse (`CLICKHOUSE_URL` set)
-		 *   3. Env-level managed Tinybird (`TINYBIRD_HOST` + `TINYBIRD_TOKEN`)
-		 */
-		// The managed (env-level) upstream: ClickHouse when CLICKHOUSE_URL is set,
-		// otherwise the managed Tinybird pipeline. This is the canonical WRITE
-		// target — demo-seed, service-map rollups and alert-check inserts all land
-		// here — and the read-path fallback when an org has no BYO override.
+		// The managed (env-level) READ upstream: the Tinybird CH-gateway or vanilla
+		// ClickHouse when CLICKHOUSE_URL is set, otherwise the managed Tinybird SDK.
 		const resolveManagedConfig = Effect.fn("WarehouseQueryService.resolveManagedConfig")(function* () {
 			if (Option.isSome(env.CLICKHOUSE_URL)) {
 				const configuredUrl = env.CLICKHOUSE_URL.value
@@ -254,16 +256,18 @@ export class WarehouseQueryService extends Context.Service<
 					})
 				}
 				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
-				const provider: "tinybird" | "clickhouse" =
-					env.CLICKHOUSE_PROVIDER === "tinybird" ? "tinybird" : "clickhouse"
+				const kind =
+					env.CLICKHOUSE_PROVIDER === "tinybird"
+						? ("tinybird-gateway" as const)
+						: ("clickhouse" as const)
 				return {
 					config: {
-						_tag: "clickhouse" as const,
-						provider,
+						kind,
 						url: clickhouseUrl.toString().replace(/\/$/, ""),
 						username: env.CLICKHOUSE_USER,
 						password: Option.match(env.CLICKHOUSE_PASSWORD, {
-							onNone: () => (provider === "tinybird" ? Redacted.value(env.TINYBIRD_TOKEN) : ""),
+							onNone: () =>
+								kind === "tinybird-gateway" ? Redacted.value(env.TINYBIRD_TOKEN) : "",
 							onSome: Redacted.value,
 						}),
 						database: env.CLICKHOUSE_DATABASE,
@@ -275,8 +279,7 @@ export class WarehouseQueryService extends Context.Service<
 			yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
 			return {
 				config: {
-					_tag: "tinybird" as const,
-					provider: "tinybird" as const,
+					kind: "tinybird" as const,
 					host: env.TINYBIRD_HOST,
 					token: Redacted.value(env.TINYBIRD_TOKEN),
 				},
@@ -285,51 +288,87 @@ export class WarehouseQueryService extends Context.Service<
 		})
 
 		/**
-		 * Read-path config. A per-org BYO ClickHouse row (`org_clickhouse_settings`)
-		 * overrides the managed upstream for that org's queries; otherwise we fall
-		 * back to the managed config.
+		 * The single routing decision: purpose → backend + credentials.
+		 *
+		 *   ingest → managed Tinybird Events API, always            (source: managed)
+		 *   read   → org BYO row? that org's ClickHouse             (source: org-byo)
+		 *            else env: tinybird-gateway|clickhouse|tinybird (source: managed)
+		 *   raw    → org BYO row? that org's ClickHouse             (source: org-byo)
+		 *            managed tinybird/gateway? org-scoped JWT       (source: org-jwt)
+		 *            managed vanilla CH? self-hosted mode only      (source: managed)
+		 *
+		 * Ingest notes (why writes NEVER follow the read routing):
+		 * - BILLING: this path bypasses the ingest gateway, where Autumn usage
+		 *   metering happens. Today's only `ingest` callers — demo seed, service-map
+		 *   rollups, alert checks — are derived/internal/demo data and deliberately
+		 *   unmetered. Net-new *customer* telemetry must go through the ingest
+		 *   gateway (as the Cloudflare edge-metrics poller does) so it is metered.
+		 * - When CLICKHOUSE_URL is set, the managed READ backend is a read-only
+		 *   query gateway that rejects inserts ("Only SELECT or DESCRIBE queries
+		 *   are supported. Got: InsertQuery"), and a per-org BYO override is a read
+		 *   concern. Tinybird is the only writable warehouse (TINYBIRD_HOST/TOKEN
+		 *   are required env). Routing writes anywhere else broke demo-seed
+		 *   onboarding.
+		 *
+		 * Raw-SQL isolation invariants (defense-in-depth, preserved verbatim):
+		 * BYO creds are already tenant-isolated; shared Tinybird gets a
+		 * datasource-scoped org JWT (works through both the SDK and the CH
+		 * gateway); a shared vanilla ClickHouse credential has no DB-enforced OrgId
+		 * scope, so raw SQL there is allowed only in single-org self-hosted mode.
 		 */
-		const resolveConfig: WarehouseExecutorDeps["resolveConfig"] = Effect.fn(
-			"WarehouseQueryService.resolveSqlConfig",
-		)(function* (tenant, label) {
+		const resolveRoute: WarehouseExecutorDeps["resolveRoute"] = Effect.fn(
+			"WarehouseQueryService.resolveRoute",
+		)(function* (tenant, purpose, label) {
+			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
+			yield* Effect.annotateCurrentSpan("warehouse.route", purpose)
+
+			if (purpose === "ingest") {
+				// Legacy attrs, dual-emitted until dashboards move to `warehouse.*`.
+				yield* Effect.annotateCurrentSpan("clientSource", "managed")
+				yield* Effect.annotateCurrentSpan("query.routing", "ingest")
+				yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
+				return {
+					source: "managed" as const,
+					config: {
+						kind: "tinybird" as const,
+						host: env.TINYBIRD_HOST,
+						token: Redacted.value(env.TINYBIRD_TOKEN),
+					},
+					clientCacheKey: "write:managed",
+				}
+			}
+
+			// A per-org BYO ClickHouse row (`org_clickhouse_settings`) overrides the
+			// managed upstream for that org's reads AND raw SQL (the credentials are
+			// already tenant-isolated).
 			const override = yield* orgClickHouseSettings
 				.resolveRuntimeConfig(tenant.orgId)
 				.pipe(Effect.mapError((error) => toWarehouseQueryError(label, error)))
-
 			if (Option.isSome(override)) {
 				yield* Effect.annotateCurrentSpan("clientSource", "org_override")
 				yield* Effect.annotateCurrentSpan("db.client", "clickhouse")
 				return {
+					source: "org-byo" as const,
 					config: {
-						_tag: "clickhouse" as const,
-						provider: "clickhouse" as const,
+						kind: "clickhouse" as const,
 						url: override.value.url,
 						username: override.value.user,
 						password: override.value.password,
 						database: override.value.database,
 					},
-					clientCacheKey: `read:${tenant.orgId}`,
+					clientCacheKey: purpose === "raw" ? `raw:${tenant.orgId}` : `read:${tenant.orgId}`,
 				}
 			}
 
 			yield* Effect.annotateCurrentSpan("clientSource", "managed")
-			return yield* resolveManagedConfig()
-		})
+			const managed = yield* resolveManagedConfig()
+			if (purpose === "read") return { source: "managed" as const, ...managed }
 
-		const resolveRawSqlConfig: WarehouseExecutorDeps["resolveRawSqlConfig"] = Effect.fn(
-			"WarehouseQueryService.resolveRawSqlConfig",
-		)(function* (tenant, label) {
-			const resolved = yield* resolveConfig(tenant, label)
+			// Raw SQL on the shared warehouse needs tenant isolation. Shared Tinybird
+			// is isolated with a datasource-scoped JWT; the same token works through
+			// both the SDK and Tinybird's ClickHouse-compatible gateway.
 			const clientCacheKey = `raw:${tenant.orgId}`
-
-			// Per-org BYO ClickHouse credentials already isolate the warehouse.
-			if (resolved.clientCacheKey !== "read:managed") {
-				return { ...resolved, clientCacheKey }
-			}
-
-			// Shared Tinybird is isolated with a datasource-scoped JWT. The same token
-			// works through both the SDK and Tinybird's ClickHouse-compatible gateway.
-			if (resolved.config.provider === "tinybird") {
+			if (managed.config.kind === "tinybird" || managed.config.kind === "tinybird-gateway") {
 				const jwt = yield* orgTokens.getOrgReadToken(tenant.orgId).pipe(
 					Effect.mapError(
 						(error) =>
@@ -342,10 +381,11 @@ export class WarehouseQueryService extends Context.Service<
 				)
 				yield* Effect.annotateCurrentSpan("maple.tinybird.token.scope", "org_jwt")
 				return {
+					source: "org-jwt" as const,
 					config:
-						resolved.config._tag === "tinybird"
-							? { ...resolved.config, token: jwt }
-							: { ...resolved.config, password: jwt },
+						managed.config.kind === "tinybird"
+							? { ...managed.config, token: jwt }
+							: { ...managed.config, password: jwt },
 					clientCacheKey,
 				}
 			}
@@ -359,50 +399,12 @@ export class WarehouseQueryService extends Context.Service<
 						"Raw SQL on managed vanilla ClickHouse is available only in single-org self-hosted mode",
 				})
 			}
-			return { ...resolved, clientCacheKey }
-		})
-
-		/**
-		 * Write-path config. Inserts (demo seed, service-map rollups, alert checks)
-		 * ALWAYS go to the Tinybird ingest pipeline (Events API) — never ClickHouse.
-		 *
-		 * BILLING: this path bypasses the ingest gateway, which is where Autumn usage
-		 * metering happens. Today's only `ingest` callers — demo seed, service-map
-		 * rollups, alert checks — are all derived/internal/demo data and deliberately
-		 * unmetered. Net-new *customer* telemetry must go through the ingest gateway
-		 * (as the Cloudflare edge-metrics poller does) so it is metered, not direct `ingest`.
-		 *
-		 * This is deliberately NOT `resolveManagedConfig()`: when `CLICKHOUSE_URL` is
-		 * set, the *managed* backend is a READ-ONLY ClickHouse query gateway that
-		 * rejects inserts ("DB::Exception: Only SELECT or DESCRIBE queries are
-		 * supported. Got: InsertQuery"). A per-org BYO ClickHouse override is also a
-		 * read concern. Tinybird is the only writable warehouse, so ingest pins to
-		 * it unconditionally (TINYBIRD_HOST/TOKEN are required env, always present).
-		 * Routing writes anywhere else broke demo-seed onboarding.
-		 */
-		const resolveIngestConfig: NonNullable<WarehouseExecutorDeps["resolveIngestConfig"]> = Effect.fn(
-			"WarehouseQueryService.resolveIngestConfig",
-		)(function* (tenant, _label) {
-			yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
-			yield* Effect.annotateCurrentSpan("clientSource", "managed")
-			yield* Effect.annotateCurrentSpan("query.routing", "ingest")
-			yield* Effect.annotateCurrentSpan("db.client", "tinybird-sdk")
-			return {
-				config: {
-					_tag: "tinybird" as const,
-					provider: "tinybird" as const,
-					host: env.TINYBIRD_HOST,
-					token: Redacted.value(env.TINYBIRD_TOKEN),
-				},
-				clientCacheKey: "write:managed",
-			}
+			return { source: "managed" as const, config: managed.config, clientCacheKey }
 		})
 
 		return makeWarehouseExecutor({
 			createClient: (config) => sqlClientFactory(config),
-			resolveConfig,
-			resolveRawSqlConfig,
-			resolveIngestConfig,
+			resolveRoute,
 		})
 	}),
 }) {

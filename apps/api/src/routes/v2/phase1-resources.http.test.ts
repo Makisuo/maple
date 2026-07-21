@@ -14,6 +14,15 @@ import {
 	AnomalyIncidentId,
 	AnomalyIncidentTimeseriesResponse,
 	AnomalyTimeseriesBucket,
+	ErrorIncidentDocument,
+	ErrorIssueDetailResponse,
+	ErrorIssueDocument,
+	ErrorIssueId,
+	ErrorIssueNotFoundError,
+	ErrorPersistenceError,
+	ErrorIssueSampleTrace,
+	ErrorIssuesListResponse,
+	ErrorIssueTimeseriesPoint,
 	InvestigationDocument,
 	InvestigationIncidentSubject,
 	InvestigationNotFoundError,
@@ -21,6 +30,8 @@ import {
 	InvestigationId,
 	IsoDateTimeString,
 	OrgId,
+	SpanId,
+	TraceId,
 	UserId,
 } from "@maple/domain/http"
 import { MapleApiV2, encodePublicId } from "@maple/domain/http/v2"
@@ -58,7 +69,10 @@ afterEach(() => cleanupTestDbs(createdDbs))
 const decodeInvId = Schema.decodeSync(InvestigationId)
 const decodeAnomId = Schema.decodeSync(AnomalyIncidentId)
 const decodeActorId = Schema.decodeSync(ActorId)
+const decodeIssueId = Schema.decodeSync(ErrorIssueId)
 const decodeIso = Schema.decodeSync(IsoDateTimeString)
+const decodeTraceId = Schema.decodeSync(TraceId)
+const decodeSpanId = Schema.decodeSync(SpanId)
 
 const INV_UUID = "11111111-1111-4111-8111-111111111111"
 const MISSING_INV_UUID = "33333333-3333-4333-8333-333333333333"
@@ -78,6 +92,7 @@ const MISSING_INV_ID = encodePublicId("inv", MISSING_INV_UUID)
 const ANOM_ID = encodePublicId("anom", ANOM_UUID)
 const MISSING_ANOM_ID = encodePublicId("anom", MISSING_ANOM_UUID)
 const ISS_ID = encodePublicId("iss", ISS_UUID)
+const ACTOR_ID = encodePublicId("actor", ACTOR_UUID)
 const ERROR_INCIDENT_ID = encodePublicId("einc", ERROR_INCIDENT_UUID)
 const CORRUPT_INV_ID = encodePublicId("inv", CORRUPT_INV_UUID)
 
@@ -199,6 +214,61 @@ const actorFixture = new ActorDocument({
 	lastActiveAt: null,
 })
 
+const errorIncidentFixture = new ErrorIncidentDocument({
+	id: Schema.decodeSync(ErrorIncidentDocument.fields.id)(ERROR_INCIDENT_UUID),
+	issueId: decodeIssueId(ISS_UUID),
+	status: "open",
+	reason: "first_seen",
+	firstTriggeredAt: decodeIso("2026-07-15T09:12:00.000Z"),
+	lastTriggeredAt: decodeIso("2026-07-15T09:18:00.000Z"),
+	resolvedAt: null,
+	occurrenceCount: 12,
+})
+
+const errorIssueFixture = new ErrorIssueDocument({
+	id: decodeIssueId(ISS_UUID),
+	kind: "error",
+	fingerprintHash: "1234",
+	serviceName: "checkout-api",
+	exceptionType: "TimeoutError",
+	exceptionMessage: "upstream timed out",
+	errorLabel: "TimeoutError: upstream timed out",
+	topFrame: "handler.ts:42",
+	workflowState: "triage",
+	priority: 0,
+	severity: "critical",
+	severitySource: "detector",
+	sourceRef: null,
+	assignedActor: actorFixture,
+	leaseHolder: null,
+	leaseExpiresAt: null,
+	claimedAt: null,
+	notes: null,
+	firstSeenAt: decodeIso("2026-07-15T09:00:00.000Z"),
+	lastSeenAt: decodeIso("2026-07-15T09:18:00.000Z"),
+	occurrenceCount: 12,
+	resolvedAt: null,
+	snoozeUntil: null,
+	archivedAt: null,
+	hasOpenIncident: true,
+})
+
+const errorIssueDetailFixture = new ErrorIssueDetailResponse({
+	issue: errorIssueFixture,
+	timeseries: [new ErrorIssueTimeseriesPoint({ bucket: decodeIso("2026-07-15T09:00:00.000Z"), count: 12 })],
+	sampleTraces: [
+		new ErrorIssueSampleTrace({
+			traceId: decodeTraceId("0123456789abcdef0123456789abcdef"),
+			spanId: decodeSpanId("0123456789abcdef"),
+			serviceName: "checkout-api",
+			timestamp: decodeIso("2026-07-15T09:18:00.000Z"),
+			exceptionMessage: "upstream timed out",
+			durationMicros: 1200,
+		}),
+	],
+	incidents: [errorIncidentFixture],
+})
+
 const die = () => Effect.die(new Error("not exercised in this test harness"))
 
 /** Empty warehouse — enough to exercise the session_replays envelope + 404 paths. */
@@ -233,12 +303,18 @@ const testConfig = () =>
 const ORG = Schema.decodeUnknownSync(OrgId)("org_phase1_e2e")
 const USER = Schema.decodeUnknownSync(UserId)("user_phase1_e2e")
 
-const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStub) => {
+const makeHarness = (
+	warehouseService: WarehouseQueryServiceShape = warehouseStub,
+	failIssueReads = false,
+) => {
 	const testDb = createTestDb(createdDbs)
 	const envLive = Env.layer.pipe(Layer.provide(testConfig()))
 
 	// Functional stubs for the groups under test — provided first so they win
 	// over the inert stubs in ConfigResourceServiceStubsLayer.
+	let lastIssueListCall: { readonly orgId: string; readonly options: Record<string, unknown> } | null = null
+	let lastIssueDetailCall: { readonly orgId: string; readonly options: Record<string, unknown> } | null =
+		null
 	const functionalStubs = Layer.mergeAll(
 		Layer.succeed(InvestigationService, {
 			listInvestigations: (_org, options) => {
@@ -294,11 +370,23 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 			getSettings: () => Effect.succeed(settingsFixture),
 			updateSettings: () => Effect.succeed(settingsFixture),
 		}),
-		// Functional ErrorsService for the anomalies issue-link audit path
-		// (ensureUserActor + recordAnomalyLinkEvent); everything else is inert.
+		// Functional issue reads plus the anomalies issue-link audit path.
 		Layer.succeed(ErrorsService, {
-			listIssues: die,
-			getIssue: die,
+			listIssues: (orgId, options) => {
+				lastIssueListCall = { orgId, options }
+				if (failIssueReads) {
+					return Effect.fail(new ErrorPersistenceError({ message: "database unavailable" }))
+				}
+				return Effect.succeed(new ErrorIssuesListResponse({ issues: [errorIssueFixture] }))
+			},
+			getIssue: (orgId, issueId, options) => {
+				lastIssueDetailCall = { orgId, options }
+				return failIssueReads
+					? Effect.fail(new ErrorPersistenceError({ message: "warehouse unavailable" }))
+					: issueId === errorIssueFixture.id
+						? Effect.succeed(errorIssueDetailFixture)
+						: Effect.fail(ErrorIssueNotFoundError.forIssue(issueId))
+			},
 			transitionIssue: die,
 			claimIssue: die,
 			heartbeatIssue: die,
@@ -386,12 +474,107 @@ const makeHarness = (warehouseService: WarehouseQueryServiceShape = warehouseStu
 	return {
 		request,
 		bootstrapKey,
+		lastIssueListCall: () => lastIssueListCall,
+		lastIssueDetailCall: () => lastIssueDetailCall,
 		dispose: async () => {
 			await disposeHandler()
 			await runtime.dispose()
 		},
 	}
 }
+
+describe("v2 error_issues over HTTP", () => {
+	it("lists bounded actionable service issues and retrieves rich detail", async () => {
+		const harness = makeHarness()
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const list = await harness.request(
+			"GET",
+			"/v2/error_issues?service_name=checkout-api&actionable=true&sort=severity&limit=5",
+			{ token: key.secret },
+		)
+		expect(list.status).toBe(200)
+		expect(list.body).toMatchObject({ object: "list", has_more: false, next_cursor: null })
+		expect(list.body.data[0]).toMatchObject({
+			id: ISS_ID,
+			object: "error_issue",
+			service_name: "checkout-api",
+			severity: "critical",
+			has_open_incident: true,
+			assigned_actor: { id: ACTOR_ID },
+		})
+		expect(harness.lastIssueListCall()).toMatchObject({
+			orgId: ORG,
+			options: { service: "checkout-api", actionable: true, sort: "severity", limit: 5 },
+		})
+
+		const detail = await harness.request(
+			"GET",
+			`/v2/error_issues/${ISS_ID}?start_time=2026-07-15T00%3A00%3A00.000Z&end_time=2026-07-16T00%3A00%3A00.000Z&bucket_seconds=300&sample_limit=10`,
+			{ token: key.secret },
+		)
+		expect(detail.status).toBe(200)
+		expect(detail.body.id).toBe(ISS_ID)
+		expect(detail.body.timeseries[0].count).toBe(12)
+		expect(detail.body.sample_traces[0].trace_id).toBe("0123456789abcdef0123456789abcdef")
+		expect(detail.body.incidents[0].id).toBe(ERROR_INCIDENT_ID)
+		expect(harness.lastIssueDetailCall()).toMatchObject({
+			orgId: ORG,
+			options: {
+				startTime: "2026-07-15T00:00:00.000Z",
+				endTime: "2026-07-16T00:00:00.000Z",
+				bucketSeconds: 300,
+				sampleLimit: 10,
+			},
+		})
+		await harness.dispose()
+	})
+
+	it("enforces scope, validates cursor sort, and maps missing issues to 404", async () => {
+		const harness = makeHarness()
+		const wrongScope = await harness.bootstrapKey(["dashboards:read"])
+		const forbidden = await harness.request("GET", "/v2/error_issues", { token: wrongScope.secret })
+		expect(forbidden.status).toBe(403)
+
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const mismatch = await harness.request(
+			"GET",
+			`/v2/error_issues?sort=severity&cursor=${encodeURIComponent("not-a-severity-cursor")}`,
+			{ token: key.secret },
+		)
+		expect(mismatch.status).toBe(400)
+		expect(mismatch.body.error.code).toBe("cursor_sort_mismatch")
+
+		const invalidActionable = await harness.request("GET", "/v2/error_issues?actionable=false", {
+			token: key.secret,
+		})
+		expect(invalidActionable.status).toBe(400)
+		const overLimit = await harness.request("GET", "/v2/error_issues?limit=101", {
+			token: key.secret,
+		})
+		expect(overLimit.status).toBe(400)
+
+		const missingId = encodePublicId("iss", "99999999-9999-4999-8999-999999999991")
+		const missing = await harness.request("GET", `/v2/error_issues/${missingId}`, { token: key.secret })
+		expect(missing.status).toBe(404)
+		expect(missing.body.error.code).toBe("error_issue_not_found")
+		await harness.dispose()
+	})
+
+	it("maps list and rich-retrieve dependency failures to v2 503 errors", async () => {
+		const harness = makeHarness(warehouseStub, true)
+		const key = await harness.bootstrapKey(["error_issues:read"])
+		const list = await harness.request("GET", "/v2/error_issues", { token: key.secret })
+		expect(list.status).toBe(503)
+		expect(list.body.error.type).toBe("api_error")
+
+		const detail = await harness.request("GET", `/v2/error_issues/${ISS_ID}`, {
+			token: key.secret,
+		})
+		expect(detail.status).toBe(503)
+		expect(detail.body.error.type).toBe("api_error")
+		await harness.dispose()
+	})
+})
 
 describe("v2 investigations over HTTP", () => {
 	it("lists and retrieves with wire shapes", async () => {

@@ -17,6 +17,7 @@ import { HttpV2ApiKeysLive } from "./routes/v2/api-keys.http"
 import { HttpV2AttributeMappingsLive } from "./routes/v2/attribute-mappings.http"
 import { HttpV2DashboardsLive } from "./routes/v2/dashboards.http"
 import { HttpV2IngestKeysLive } from "./routes/v2/ingest-keys.http"
+import { HttpV2ErrorIssuesLive } from "./routes/v2/error-issues.http"
 import { HttpV2AnomaliesLive } from "./routes/v2/anomalies.http"
 import { HttpV2InvestigationsLive } from "./routes/v2/investigations.http"
 import { HttpV2OrganizationLive } from "./routes/v2/organization.http"
@@ -26,7 +27,6 @@ import { HttpV2SessionReplaysLive } from "./routes/v2/session-replays.http"
 import {
 	HttpV2LogsLive,
 	HttpV2MetricsLive,
-	HttpV2QueryLive,
 	HttpV2ServiceMapLive,
 	HttpV2ServicesLive,
 	HttpV2TracesLive,
@@ -65,6 +65,8 @@ import { HazelOAuthService } from "./services/HazelOAuthService"
 import { InvestigationService } from "./services/InvestigationService"
 import { NotificationDispatcher } from "./services/NotificationDispatcher"
 import { ApiKeysService } from "./services/ApiKeysService"
+import { CliDeviceAuthService } from "./services/CliDeviceAuthService"
+import { McpOAuthService } from "./services/McpOAuthService"
 import { ApiV2RateLimiter } from "./services/ApiV2RateLimiter"
 import { AuthService } from "./services/AuthService"
 import { ApiAuthorizationLayer } from "./services/ApiAuthorizationLayer"
@@ -100,6 +102,7 @@ import { VcsCommitService } from "./services/vcs/VcsCommitService"
 import { VcsProviderRegistry } from "./services/vcs/VcsProviderRegistry"
 import { VcsRepository } from "./services/vcs/VcsRepository"
 import { VcsSyncQueue } from "./services/vcs/VcsSyncQueue"
+import { VcsSourceService } from "./services/vcs/VcsSourceService"
 import { API_CORS_OPTIONS } from "./lib/api-cors"
 
 const HealthRouter = HttpRouter.use((router) => router.add("GET", "/health", HttpServerResponse.text("OK")))
@@ -137,6 +140,8 @@ const ScrapeTargetsLive = ScrapeTargetsService.layer.pipe(
 const CoreServicesLive = Layer.mergeAll(
 	AuthService.layer,
 	ApiKeysService.layer,
+	CliDeviceAuthService.layer,
+	McpOAuthService.layer,
 	CloudflareOAuthService.layer,
 	DashboardPersistenceService.layer,
 	HazelOAuthService.layer,
@@ -227,7 +232,9 @@ const AiTriageServiceLive = AiTriageService.layer.pipe(Layer.provideMerge(CoreSe
 const InvestigationServiceLive = InvestigationService.layer.pipe(Layer.provideMerge(CoreServicesLive))
 
 const DigestServiceLive = DigestService.layer.pipe(
-	Layer.provideMerge(Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EmailServiceLive)),
+	Layer.provideMerge(
+		Layer.mergeAll(InfraLive, WarehouseQueryServiceLive, EdgeCacheServiceLive, EmailServiceLive),
+	),
 )
 
 // VCS service wiring for the fetch-path worker. VcsSyncService (the sync
@@ -247,6 +254,7 @@ const VcsServicesLive = Layer.mergeAll(
 	GithubConnectService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, GithubAppClientLive))),
 	// Routed via VcsProviderRegistry so no provider module is imported directly.
 	VcsCommitService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
+	VcsSourceService.layer.pipe(Layer.provide(Layer.mergeAll(VcsDataLive, VcsProviderRegistryLive))),
 ).pipe(Layer.provideMerge(InfraLive))
 
 export const MainLive = Layer.mergeAll(
@@ -304,6 +312,7 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2AlertDestinationsLive,
 			HttpV2AlertIncidentsLive,
 			HttpV2IngestKeysLive,
+			HttpV2ErrorIssuesLive,
 			HttpV2AttributeMappingsLive,
 			HttpV2ScrapeTargetsLive,
 			HttpV2InstrumentationRecommendationsLive,
@@ -316,7 +325,6 @@ const ApiV2Routes = HttpApiBuilder.layer(MapleApiV2).pipe(
 			HttpV2MetricsLive,
 			HttpV2ServicesLive,
 			HttpV2ServiceMapLive,
-			HttpV2QueryLive,
 		),
 	),
 	Layer.provide(V2SchemaErrorsLive),

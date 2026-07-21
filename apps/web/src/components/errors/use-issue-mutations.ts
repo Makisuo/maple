@@ -28,7 +28,7 @@ function logFailure(label: string, result: Exit.Exit<unknown, unknown>) {
 	console.error(`[issue-mutations] ${label} failed`, result.cause)
 }
 
-export function useIssueMutations() {
+export function useIssueMutations(onSuccess?: () => void) {
 	const transition = useAtomSet(MapleApiAtomClient.mutation("errors", "transitionIssue"), {
 		mode: "promiseExit",
 	})
@@ -45,6 +45,7 @@ export function useIssueMutations() {
 			reactivityKeys: [...INVALIDATE, `errorIssue:${issueId}`],
 		})
 		if (Exit.isSuccess(result)) {
+			onSuccess?.()
 			toast.success(`Moved to ${WORKFLOW_LABEL[toState]}`)
 		} else {
 			logFailure("transitionTo", result)
@@ -70,8 +71,10 @@ export function useIssueMutations() {
 		const failed = failures.length
 		failures.forEach((r) => logFailure("transitionMany", r))
 		if (failed === 0) {
+			onSuccess?.()
 			toast.success(`Moved ${issueIds.length} to ${WORKFLOW_LABEL[toState]}`)
 		} else if (failed < issueIds.length) {
+			onSuccess?.()
 			toast.warning(`Moved ${issueIds.length - failed} of ${issueIds.length}; ${failed} failed`, {
 				description: describeFailure(failures[0]!),
 			})
@@ -89,6 +92,7 @@ export function useIssueMutations() {
 			reactivityKeys: [...INVALIDATE, `errorIssue:${issueId}`],
 		})
 		if (Exit.isSuccess(result)) {
+			onSuccess?.()
 			toast.success("Claimed")
 		} else {
 			logFailure("claim", result)
@@ -104,6 +108,7 @@ export function useIssueMutations() {
 			reactivityKeys: [...INVALIDATE, `errorIssue:${issueId}`],
 		})
 		if (Exit.isSuccess(result)) {
+			onSuccess?.()
 			toast.success("Released")
 		} else {
 			logFailure("release", result)
@@ -119,6 +124,7 @@ export function useIssueMutations() {
 			reactivityKeys: [...INVALIDATE, `errorIssue:${issueId}`],
 		})
 		if (Exit.isSuccess(result)) {
+			onSuccess?.()
 			toast.success(value === null ? "Severity cleared" : `Severity set to ${value}`)
 		} else {
 			logFailure("setSeverity", result)

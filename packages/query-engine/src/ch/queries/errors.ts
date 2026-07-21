@@ -857,6 +857,44 @@ export function errorIssuesQuery(opts: ErrorIssuesOpts) {
 }
 
 // ---------------------------------------------------------------------------
+// Error fingerprints — distinct fingerprint hashes observed in a scope
+// ---------------------------------------------------------------------------
+
+export interface ErrorFingerprintsOpts {
+	services?: readonly string[]
+	deploymentEnvs?: readonly string[]
+	limit?: number
+}
+
+export interface ErrorFingerprintsOutput {
+	readonly fingerprintHash: string
+}
+
+/**
+ * The distinct error fingerprints seen for a service/environment scope in a
+ * window. Backs the issue list's deployment-environment filter: the Postgres
+ * `error_issues` rows carry no environment (a fingerprint spans environments),
+ * so the filter intersects against the fingerprints the warehouse actually
+ * observed in the selected environment.
+ */
+export function errorFingerprintsQuery(opts: ErrorFingerprintsOpts) {
+	return from(ErrorEventsByTime)
+		.select(($) => ({
+			fingerprintHash: CH.toString_($.FingerprintHash),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.Timestamp.gte(param.dateTime("startTime")),
+			$.Timestamp.lte(param.dateTime("endTime")),
+			opts.services?.length ? CH.inList($.ServiceName, opts.services) : undefined,
+			opts.deploymentEnvs?.length ? CH.inList($.DeploymentEnv, opts.deploymentEnvs) : undefined,
+		])
+		.groupBy("fingerprintHash")
+		.limit(opts.limit ?? 1000)
+		.format("JSON")
+}
+
+// ---------------------------------------------------------------------------
 // Error Issue timeseries — per-fingerprint occurrence bucket
 // ---------------------------------------------------------------------------
 

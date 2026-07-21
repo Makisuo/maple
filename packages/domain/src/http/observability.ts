@@ -2,6 +2,7 @@ import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 import { Schema } from "effect"
 import { SpanId, TraceId } from "../primitives"
 import { Authorization } from "./current-tenant"
+import { warehouseHttpErrors } from "./warehouse-errors"
 
 export { UnauthorizedError } from "./current-tenant"
 
@@ -96,7 +97,7 @@ const LogEntry = Schema.Struct({
 })
 
 interface SpanNodeResponse {
-	readonly spanId: string
+	readonly spanId: Schema.Schema.Type<typeof SpanId>
 	readonly parentSpanId: string
 	readonly spanName: string
 	readonly serviceName: string
@@ -108,7 +109,20 @@ interface SpanNodeResponse {
 	readonly children: ReadonlyArray<SpanNodeResponse>
 }
 
-const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
+interface SpanNodeEncoded {
+	readonly spanId: string
+	readonly parentSpanId: string
+	readonly spanName: string
+	readonly serviceName: string
+	readonly durationMs: number
+	readonly statusCode: string
+	readonly statusMessage: string
+	readonly attributes: Record<string, string>
+	readonly resourceAttributes: Record<string, string>
+	readonly children: ReadonlyArray<SpanNodeEncoded>
+}
+
+const SpanNode: Schema.Codec<SpanNodeResponse, SpanNodeEncoded> = Schema.Struct({
 	spanId: SpanId,
 	parentSpanId: Schema.String,
 	spanName: Schema.String,
@@ -118,7 +132,7 @@ const SpanNode: Schema.Codec<SpanNodeResponse> = Schema.Struct({
 	statusMessage: Schema.String,
 	attributes: Schema.Record(Schema.String, Schema.String),
 	resourceAttributes: Schema.Record(Schema.String, Schema.String),
-	children: Schema.Array(Schema.suspend((): Schema.Codec<SpanNodeResponse> => SpanNode)),
+	children: Schema.Array(Schema.suspend((): Schema.Codec<SpanNodeResponse, SpanNodeEncoded> => SpanNode)),
 })
 
 const InspectTraceResponse = Schema.Struct({
@@ -196,7 +210,7 @@ const SearchLogsRequest = Schema.Struct({
 	service: Schema.optionalKey(Schema.String),
 	severity: Schema.optionalKey(Schema.String),
 	search: Schema.optionalKey(Schema.String),
-	traceId: Schema.optionalKey(Schema.String),
+	traceId: Schema.optionalKey(TraceId),
 	limit: Schema.optionalKey(Schema.Number),
 	offset: Schema.optionalKey(Schema.Number),
 })
@@ -231,42 +245,42 @@ export class ObservabilityApiGroup extends HttpApiGroup.make("observability")
 		HttpApiEndpoint.post("listServices", "/services", {
 			payload: ListServicesRequest,
 			success: ListServicesResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("searchTraces", "/traces/search", {
 			payload: SearchTracesRequest,
 			success: SearchTracesResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("inspectTrace", "/traces/inspect", {
 			payload: InspectTraceRequest,
 			success: InspectTraceResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("findErrors", "/errors", {
 			payload: FindErrorsRequest,
 			success: FindErrorsResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("diagnoseService", "/diagnose", {
 			payload: DiagnoseServiceRequest,
 			success: DiagnoseServiceResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.add(
 		HttpApiEndpoint.post("searchLogs", "/logs", {
 			payload: SearchLogsRequest,
 			success: SearchLogsResponse,
-			error: ObservabilityApiError,
+			error: [ObservabilityApiError, ...warehouseHttpErrors],
 		}),
 	)
 	.prefix("/api/observability")

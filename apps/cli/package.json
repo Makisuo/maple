@@ -7,7 +7,7 @@
 	"type": "module",
 	"scripts": {
 		"start": "bun run src/bin.ts",
-		"test": "bun test test/*.test.ts src/server/otlp/encode.test.ts",
+		"test": "bun test test/*.test.ts src/server/otlp/encode.test.ts src/core/*.test.ts",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {

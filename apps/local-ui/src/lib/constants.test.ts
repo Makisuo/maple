@@ -24,6 +24,12 @@ describe("local UI endpoint selection", () => {
 		expect(localOtlpEndpointForLocation(page)).toBe("https://srvmini2.lan:4418")
 	})
 
+	it("keeps the Vite development UI same-origin for its proxied query and OTLP routes", () => {
+		const page = location("http://127.0.0.1:4319/")
+		expect(localApiBaseForLocation(page)).toBe("")
+		expect(localOtlpEndpointForLocation(page)).toBe("http://127.0.0.1:4319")
+	})
+
 	it("rejects malformed and out-of-range hosted port parameters", () => {
 		expect(localApiBaseForLocation(location("https://local.maple.dev/?port=not-a-port"))).toBe(
 			"http://127.0.0.1:4318",

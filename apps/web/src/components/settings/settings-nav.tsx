@@ -5,6 +5,7 @@ import { useMapleCustomer } from "@/hooks/use-maple-customer"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { hasBringYourOwnCloudAddOn } from "@/lib/billing/plan-gating"
+import { useIsOrgAdmin } from "@/hooks/use-is-org-admin"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import {
 	BellIcon,
@@ -120,6 +121,7 @@ export function useVisibleSettingsSections() {
 	// today, but keeping the hooks above the early return avoids a conditional-hook
 	// hazard if it ever becomes dynamic.
 	const sessionResult = useAtomValue(MapleApiAtomClient.query("auth", "session", {}))
+	const isAdmin = useIsOrgAdmin()
 	const { data: customer, isLoading: isCustomerLoading } = useMapleCustomer()
 	const { organization } = useOrganization()
 
@@ -152,9 +154,6 @@ export function useVisibleSettingsSections() {
 		}
 	}
 
-	const isAdmin = Result.builder(sessionResult)
-		.onSuccess((session) => session.roles.some((role) => role === "root" || role === "org:admin"))
-		.orElse(() => false)
 	const canAccessDataPlatform = isAdmin && hasBringYourOwnCloudAddOn(customer)
 	const hasAiMetadataFlag = organization?.publicMetadata?.bringyourownai === true
 	const canAccessAi = isAdmin && hasAiMetadataFlag

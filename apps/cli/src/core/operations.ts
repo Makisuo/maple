@@ -3,7 +3,7 @@
 // commands call these. Every operation returns an Effect requiring
 // `WarehouseExecutor` (provided by the local executor layer).
 
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import type { TracesMetric } from "@maple/query-engine"
 import {
 	WarehouseExecutor,
@@ -21,6 +21,10 @@ import {
 	findSlowTraces as obsFindSlowTraces,
 	topOperations as obsTopOperations,
 } from "@maple/query-engine/observability"
+import { WarehouseClientError } from "@maple/domain/http/warehouse-errors"
+import { executeLocalQuery } from "@maple/query-engine/local"
+import { fingerprintSql, mapWarehouseError, SQL_TRACE_MAX, truncateSql } from "@maple/query-engine/execution"
+import { Mode } from "./mode"
 import type { Range } from "./time"
 
 type AttrSource = "traces" | "metrics" | "services"
@@ -166,11 +170,65 @@ export const listMetrics = (p: { range: Range; service?: string; search?: string
 		return result.data
 	})
 
-/** Raw SQL escape hatch against the local chDB store. */
+/**
+ * Raw SQL escape hatch against the local chDB store — local mode only.
+ * Arbitrary user SQL carries no OrgId guarantee, so it deliberately bypasses
+ * the warehouse executor (whose `sqlQuery` enforces the OrgId scoping guard)
+ * and posts straight to the single-tenant `/local/query` endpoint.
+ */
+const executeRawLocalQuery = Effect.fn("WarehouseExecutor.rawQuery", { kind: "client" })(function* (
+	sql: string,
+	baseUrl: string,
+) {
+	const startedAtMs = yield* Clock.currentTimeMillis
+	yield* Effect.annotateCurrentSpan({
+		clientSource: "managed",
+		"db.client": "clickhouse",
+		"db.system.name": "clickhouse",
+		"peer.service": "chdb",
+		"warehouse.backend": "chdb",
+		"warehouse.route": "raw",
+		"warehouse.config_source": "managed",
+		"db.query.text": truncateSql(sql, SQL_TRACE_MAX),
+		"db.query.length": sql.length,
+		"db.query.truncated": sql.length > SQL_TRACE_MAX,
+		"db.query.fingerprint": fingerprintSql(sql),
+		"query.pipe": "rawSqlQuery",
+		"query.context": "cli.rawQuery",
+	})
+	const rows = yield* Effect.tryPromise({
+		try: () => executeLocalQuery<Record<string, unknown>>(sql, baseUrl),
+		catch: (error) => mapWarehouseError("rawQuery", error),
+	}).pipe(
+		Effect.tapError(() =>
+			Clock.currentTimeMillis.pipe(
+				Effect.flatMap((completedAtMs) =>
+					Effect.annotateCurrentSpan("db.duration_ms", completedAtMs - startedAtMs),
+				),
+			),
+		),
+	)
+	yield* Effect.annotateCurrentSpan("result.rowCount", rows.length)
+	yield* Effect.annotateCurrentSpan("db.duration_ms", (yield* Clock.currentTimeMillis) - startedAtMs)
+	return rows
+})
+
 export const rawQuery = (sql: string) =>
 	Effect.gen(function* () {
-		const executor = yield* WarehouseExecutor
-		return yield* executor.sqlQuery(sql)
+		const mode = yield* Mode
+		const resolved = yield* mode.resolve.pipe(
+			Effect.mapError(
+				(error) =>
+					new WarehouseClientError({ message: error.message, pipeName: "rawQuery", cause: error }),
+			),
+		)
+		if (resolved._tag !== "local") {
+			return yield* new WarehouseClientError({
+				message: "Raw SQL is only available in local mode",
+				pipeName: "rawQuery",
+			})
+		}
+		return yield* executeRawLocalQuery(sql, resolved.baseUrl)
 	})
 
 // Custom traces analytics share the `group_by_*` presence-flag convention the

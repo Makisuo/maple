@@ -12,6 +12,7 @@ import {
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
+import { eq } from "drizzle-orm"
 import { encryptAes256Gcm, parseBase64Aes256GcmKey } from "../lib/Crypto"
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
@@ -316,7 +317,7 @@ interface CompiledQueryStub {
 	calls: Array<{
 		sql: string
 		orgId: string
-		options: { pinToIngestConfig?: boolean; profile?: string; context?: string } | undefined
+		options: { route?: "ingest"; profile?: string; context?: string } | undefined
 	}>
 }
 
@@ -842,6 +843,32 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(result.skipped, 1)
 			assert.strictEqual(result.perOrg.length, 1)
 			assert.strictEqual(result.perOrg[0]!.skipped, "lease held by another tick")
+		}).pipe(Effect.provide(makeLayer(testDb, captured)))
+	})
+
+	it.effect("pollAllOrgs skips connections stamped revoked; resetOrgState clears the stamp", () => {
+		const testDb = createTestDb(trackedDbs)
+		const captured: CapturedIngest[] = []
+		return Effect.gen(function* () {
+			yield* TestClock.setTime(T0)
+			yield* seedConnection()
+			const database = yield* Database
+			yield* database.execute((db) =>
+				db
+					.update(oauthConnections)
+					.set({ revokedAt: new Date(T0 - MIN) })
+					.where(eq(oauthConnections.orgId, ORG)),
+			)
+			const service = yield* CloudflareAnalyticsService
+			const result = yield* service.pollAllOrgs()
+			assert.strictEqual(result.perOrg.length, 0)
+			assert.strictEqual(result.rowsIngested, 0)
+
+			yield* service.resetOrgState(ORG)
+			const rows = yield* database.execute((db) =>
+				db.select().from(oauthConnections).where(eq(oauthConnections.orgId, ORG)),
+			)
+			assert.isNull(rows[0]!.revokedAt)
 		}).pipe(Effect.provide(makeLayer(testDb, captured)))
 	})
 
@@ -1419,9 +1446,9 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(worker.totalRequests, 42)
 
 			// This org has no BYO-CH settings row (managed/Tinybird), so the gateway wrote its
-			// metrics to Tinybird — the usage read must pin to the ingest config to find them.
+			// metrics to Tinybird — the usage read must route to the ingest config to find them.
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.strictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+			assert.strictEqual(queryStub.calls[0]?.options?.route, "ingest")
 			assert.strictEqual(queryStub.calls[0]?.options?.profile, "aggregation")
 			assert.strictEqual(queryStub.calls[0]?.orgId, ORG)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
@@ -1435,13 +1462,13 @@ describe("CloudflareAnalyticsService", () => {
 			yield* TestClock.setTime(T0)
 			yield* seedConnection()
 			// Connected + schema_version == running version → gateway routes metrics to the
-			// org's own ClickHouse, so the read must NOT pin to the ingest (Tinybird) config.
+			// org's own ClickHouse, so the read must NOT route to the ingest (Tinybird) config.
 			yield* seedByoClickHouse()
 			const service = yield* CloudflareAnalyticsService
 			yield* service.getUsage(ORG)
 
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.notStrictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+			assert.notStrictEqual(queryStub.calls[0]?.options?.route, "ingest")
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
@@ -1453,13 +1480,13 @@ describe("CloudflareAnalyticsService", () => {
 			yield* TestClock.setTime(T0)
 			yield* seedConnection()
 			// Stale schema_version → gateway falls back to Tinybird for this org's metrics,
-			// so the read must pin to the ingest config (its own CH would be empty).
+			// so the read must route to the ingest config (its own CH would be empty).
 			yield* seedByoClickHouse({ schemaVersion: "stale-schema-version" })
 			const service = yield* CloudflareAnalyticsService
 			yield* service.getUsage(ORG)
 
 			assert.strictEqual(queryStub.calls.length, 1)
-			assert.strictEqual(queryStub.calls[0]?.options?.pinToIngestConfig, true)
+			assert.strictEqual(queryStub.calls[0]?.options?.route, "ingest")
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 

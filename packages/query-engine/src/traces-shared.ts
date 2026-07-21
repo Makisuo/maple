@@ -43,6 +43,7 @@ export const TRACE_LIST_MV_RESOURCE_MAP: Record<string, string> = {
 // ---------------------------------------------------------------------------
 
 import * as CH from "@maple-dev/clickhouse-builder/expr"
+import { normalizedSpanNameExpr } from "@maple/domain/tinybird/span-display-name"
 
 // ---------------------------------------------------------------------------
 // HTTP semconv coalescing
@@ -94,23 +95,12 @@ export function httpDisplaySpanName(
 	route: CH.Expr<string>,
 	urlPath: CH.Expr<string>,
 ): CH.Expr<string> {
-	return CH.if_(
-		spanName
-			.like("http.server %")
-			.or(spanName.in_("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
-			.and(route.neq("").or(urlPath.neq(""))),
-		CH.concat(
-			CH.if_(spanName.like("http.server %"), CH.replaceOne(spanName, "http.server ", ""), spanName),
-			CH.lit(" "),
-			CH.if_(route.neq(""), route, urlPath),
-		),
-		spanName,
-	)
+	return normalizedSpanNameExpr(spanName, route, urlPath)
 }
 
 export function buildAttrFilterCondition(
 	af: AttributeFilter,
-	mapName: "SpanAttributes" | "ResourceAttributes",
+	mapName: "SpanAttributes" | "LogAttributes" | "ResourceAttributes",
 ): CH.Condition {
 	const mapExpr = CH.dynamicColumn<Record<string, string>>(mapName)
 	// Span attributes renamed across OTel semconv versions match either spelling,

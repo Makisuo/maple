@@ -1,5 +1,5 @@
 import * as MapleCloudflareSDK from "@maple-dev/effect-sdk/cloudflare"
-import { ANTICIPATED_ERROR_TAGS } from "@maple/domain/anticipated-errors"
+import { ANTICIPATED_ERROR_IDENTIFIERS } from "@maple/domain/anticipated-errors"
 import { WorkerConfigProviderLayer } from "@maple/effect-cloudflare"
 import { Context, Effect, FileSystem, Layer, Path } from "effect"
 import { HttpMiddleware, HttpRouter } from "effect/unstable/http"
@@ -42,7 +42,7 @@ const telemetry = MapleCloudflareSDK.make({
 	serviceName: "electric-sync",
 	serviceNamespace: "backend",
 	repositoryUrl: "https://github.com/Makisuo/maple",
-	anticipatedErrorTags: [...ANTICIPATED_ERROR_TAGS],
+	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
 })
 
 // `HttpMiddleware.tracer` ends the root server span on a deferred macrotask, but

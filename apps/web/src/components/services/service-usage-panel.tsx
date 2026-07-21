@@ -11,6 +11,13 @@ interface ServiceUsagePanelProps {
 	serviceName: string
 	effectiveStartTime: string
 	effectiveEndTime: string
+	/**
+	 * True when the page has an environment filter active. This panel cannot
+	 * honor it (the `service_usage` rollup is keyed org/hour/service only), so
+	 * instead of silently showing blended numbers next to filtered charts it
+	 * labels itself "all environments".
+	 */
+	envFilterActive?: boolean
 }
 
 function formatCount(num: number): string {
@@ -56,6 +63,7 @@ export function ServiceUsagePanel({
 	serviceName,
 	effectiveStartTime,
 	effectiveEndTime,
+	envFilterActive,
 }: ServiceUsagePanelProps) {
 	const previous = previousWindow(effectiveStartTime, effectiveEndTime)
 
@@ -112,7 +120,15 @@ export function ServiceUsagePanel({
 	]
 
 	return (
-		<SectionCard title="Ingest this window" className={cn("transition-opacity", isWaiting && "opacity-60")}>
+		<SectionCard
+			title="Ingest this window"
+			action={
+				envFilterActive ? (
+					<span className="text-[10px] text-muted-foreground/60">all environments</span>
+				) : undefined
+			}
+			className={cn("transition-opacity", isWaiting && "opacity-60")}
+		>
 			<div className="grid grid-cols-2 gap-px sm:grid-cols-4">
 				{stats.map((stat) => {
 					const value = view.totals[stat.key]

@@ -16,7 +16,7 @@ const baseParams = {
 }
 
 describe("traceSummariesQuery", () => {
-	it("uses the trace-list ordering key with org/time filters and deterministic pagination", () => {
+	it("matches any span through a filtered semi-join and paginates root summaries deterministically", () => {
 		const { sql } = compileCH(
 			traceSummariesQuery({
 				serviceName: "api",
@@ -27,16 +27,24 @@ describe("traceSummariesQuery", () => {
 			baseParams,
 		)
 		expect(sql).toContain("FROM trace_list_mv")
-		expect(sql).toContain("OrgId = 'org_1'")
-		expect(sql).toContain("Timestamp >= '2024-01-01 00:00:00'")
-		expect(sql).toContain("Timestamp <= '2024-01-02 00:00:00'")
+		expect(sql.match(/OrgId = 'org_1'/g)).toHaveLength(2)
+		expect(sql.match(/Timestamp >= '2024-01-01 00:00:00'/g)).toHaveLength(2)
+		expect(sql.match(/Timestamp <= '2024-01-02 00:00:00'/g)).toHaveLength(2)
+		expect(sql).toMatch(/TraceId IN \(SELECT\s+TraceId AS traceId/)
+		expect(sql).toContain("FROM traces")
 		expect(sql).toContain("ServiceName = 'api'")
-		expect(sql).toContain("HasError = 1")
+		expect(sql).toContain("StatusCode = 'Error'")
 		expect(sql).toContain("GROUP BY traceId")
 		expect(sql).toContain("ORDER BY startTime DESC, traceId DESC")
 		expect(sql).toContain("LIMIT 21")
 		expect(sql).toContain("Timestamp < '2024-01-01 12:00:00'")
 		expect(sql).toContain("TraceId < 'trace123'")
+	})
+
+	it("restricts the matching subquery to root spans when spanScope=root", () => {
+		const { sql } = compileCH(traceSummariesQuery({ serviceName: "api", spanScope: "root" }), baseParams)
+		expect(sql).toMatch(/TraceId IN \(SELECT\s+TraceId AS traceId/)
+		expect(sql).toContain("SpanKind IN ('Server', 'Consumer')")
 	})
 })
 

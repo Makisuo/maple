@@ -627,6 +627,53 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 					Effect.mapError(toVcsError),
 				)
 
+			const searchCode: VcsProviderClient["searchCode"] = (installation, repo, query, opts) =>
+				client
+					.searchCode(
+						installation.externalInstallationId,
+						repo.owner,
+						repo.name,
+						query,
+						opts.path,
+						opts.limit,
+					)
+					.pipe(
+						Effect.map((result) =>
+							result.items.map((item) => ({
+								path: item.path,
+								sha: item.sha,
+								htmlUrl: item.html_url,
+								snippets: (item.text_matches ?? []).map((match) => match.fragment),
+							})),
+						),
+						Effect.mapError(toVcsError),
+					)
+
+			const fetchSourceFile: VcsProviderClient["fetchSourceFile"] = (installation, repo, path, ref) =>
+				client
+					.getSourceFile(installation.externalInstallationId, repo.owner, repo.name, path, ref)
+					.pipe(
+						Effect.map((file) =>
+							Option.some({
+								path: file.path,
+								sha: file.sha,
+								htmlUrl: file.html_url ?? `${repo.owner}/${repo.name}/${file.path}`,
+								size: file.size,
+								content:
+									file.encoding === "base64"
+										? Buffer.from(file.content.replace(/\s/g, ""), "base64").toString(
+												"utf8",
+											)
+										: file.content,
+							}),
+						),
+						Effect.catchTag("GithubAppError", (error) =>
+							error.status === 404
+								? Effect.succeed(Option.none())
+								: Effect.fail(toVcsCommitError(error)),
+						),
+					)
+
 			return {
 				id: PROVIDER,
 				webhookToJobs,
@@ -634,6 +681,8 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 				fetchCommits,
 				fetchBranches,
 				fetchCommit,
+				searchCode,
+				fetchSourceFile,
 			} satisfies VcsProviderClient
 		}),
 	},

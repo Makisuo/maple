@@ -17,6 +17,7 @@
 		"./warehouse-queries": "./src/warehouse-queries.ts",
 		"./tinybird": "./src/tinybird/index.ts",
 		"./tinybird/db-query-shape-sql": "./src/tinybird/db-query-shape-sql.ts",
+		"./tinybird/span-display-name": "./src/tinybird/span-display-name.ts",
 		"./clickhouse": "./src/clickhouse/index.ts",
 		"./where-clause": "./src/where-clause.ts",
 		"./http/observability": "./src/http/observability.ts",
@@ -27,6 +28,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
+		"@maple-dev/clickhouse-builder": "workspace:*",
 		"@tinybirdco/sdk": "catalog:tinybird",
 		"effect": "catalog:effect"
 	},

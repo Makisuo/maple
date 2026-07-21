@@ -11,6 +11,12 @@ interface ServiceWorkloadsPanelProps {
 	serviceName: string
 	effectiveStartTime: string
 	effectiveEndTime: string
+	/**
+	 * True when the page has an environment filter active. Workload identity
+	 * comes from span resource attributes with no environment key, so the panel
+	 * cannot honor the filter — it labels itself "all environments" instead.
+	 */
+	envFilterActive?: boolean
 }
 
 const KIND_LABEL: Record<ServiceWorkload["workloadKind"], string> = {
@@ -30,6 +36,7 @@ export function ServiceWorkloadsPanel({
 	serviceName,
 	effectiveStartTime,
 	effectiveEndTime,
+	envFilterActive,
 }: ServiceWorkloadsPanelProps) {
 	const result = useRetainedRefreshableResultValue(
 		getServiceWorkloadsResultAtom({
@@ -54,7 +61,15 @@ export function ServiceWorkloadsPanel({
 	const isWaiting = Result.isSuccess(result) && result.waiting
 
 	return (
-		<SectionCard title="Kubernetes" className={cn("transition-opacity", isWaiting && "opacity-60")}>
+		<SectionCard
+			title="Kubernetes"
+			action={
+				envFilterActive ? (
+					<span className="text-[10px] text-muted-foreground/60">all environments</span>
+				) : undefined
+			}
+			className={cn("transition-opacity", isWaiting && "opacity-60")}
+		>
 			<ul className="divide-y">
 				{workloads.map((workload) => (
 					<li

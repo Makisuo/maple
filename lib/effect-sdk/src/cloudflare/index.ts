@@ -35,6 +35,7 @@ import { Layer } from "effect"
 import {
 	buildResolved,
 	fetchTransport,
+	makeSerializedFlush,
 	type Resolved,
 	runFlush,
 	type SignalState,
@@ -84,11 +85,13 @@ export interface Config {
 	 */
 	readonly dropSpanNames?: ReadonlyArray<string> | undefined
 	/**
-	 * `_tag`s of *anticipated* failures (expected 4xx business errors). A span
+	 * Stable `_tag` / `Error.name` identifiers of anticipated 4xx failures. A span
 	 * whose failure is caused entirely by these is exported with status `Ok` and
 	 * no `exception` event, so it stays visible as a trace but never counts as an
-	 * error. See `SpanBufferOptions.anticipatedErrorTags`.
+	 * error.
 	 */
+	readonly anticipatedErrorIdentifiers?: ReadonlyArray<string> | undefined
+	/** @deprecated Use `anticipatedErrorIdentifiers`. */
 	readonly anticipatedErrorTags?: ReadonlyArray<string> | undefined
 	/** OTLP traces path appended to `endpoint`. Default `/v1/traces`. */
 	readonly tracesPath?: string | undefined
@@ -133,11 +136,16 @@ export const make = (config: Config = {}): Telemetry => {
 		dropPrefixes !== undefined && dropPrefixes.length > 0
 			? (name: string) => dropPrefixes.some((prefix) => name.startsWith(prefix))
 			: undefined
-	const anticipatedErrorTags =
-		config.anticipatedErrorTags !== undefined && config.anticipatedErrorTags.length > 0
-			? new Set(config.anticipatedErrorTags)
-			: undefined
-	const spans: SpanBuffer = makeSpanBuffer({ dropSpan, anticipatedErrorTags })
+	const anticipatedErrorIdentifiers = [
+		...(config.anticipatedErrorIdentifiers ?? []),
+		...(config.anticipatedErrorTags ?? []),
+	]
+	const anticipatedIdentifiers =
+		anticipatedErrorIdentifiers.length > 0 ? new Set(anticipatedErrorIdentifiers) : undefined
+	const spans: SpanBuffer = makeSpanBuffer({
+		dropSpan,
+		anticipatedErrorIdentifiers: anticipatedIdentifiers,
+	})
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
 
 	let resolved: Resolved | undefined = undefined
@@ -147,7 +155,7 @@ export const make = (config: Config = {}): Telemetry => {
 
 	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer)
 
-	const flush = async (env: Record<string, unknown>): Promise<void> => {
+	const flush = makeSerializedFlush(async (env: Record<string, unknown>): Promise<void> => {
 		if (resolved === undefined) {
 			resolved = resolveOnce(env, config)
 		}
@@ -169,7 +177,7 @@ export const make = (config: Config = {}): Telemetry => {
 				}
 			},
 		})
-	}
+	})
 
 	return { layer, flush }
 }

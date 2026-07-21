@@ -14,14 +14,6 @@ import {
 } from "./alerts"
 import { createApiKeysCollection, type ApiKeysCollection } from "./api-keys"
 import { createDashboardsCollection, type DashboardsCollection } from "./dashboards"
-import {
-	createActorsCollection,
-	createErrorIssuesCollection,
-	createOpenErrorIncidentsCollection,
-	type ActorsCollection,
-	type ErrorIssuesCollection,
-	type OpenErrorIncidentsCollection,
-} from "./errors"
 
 /**
  * The set of ElectricSQL-synced collections for one org. Collections are
@@ -38,9 +30,6 @@ export type OrgCollections = {
 	readonly alertRuleStates: AlertRuleStatesCollection
 	readonly alertIncidents: AlertIncidentsCollection
 	readonly alertDestinations: AlertDestinationsCollection
-	readonly errorIssues: ErrorIssuesCollection
-	readonly actors: ActorsCollection
-	readonly openErrorIncidents: OpenErrorIncidentsCollection
 }
 
 // Single live set at a time — the app shows one org at a time, and recreating on
@@ -225,9 +214,6 @@ const scheduleOrgCollectionsCleanup = (collections: OrgCollections): void => {
 	cleanupCollectionWhenIdle(collections.alertRuleStates)
 	cleanupCollectionWhenIdle(collections.alertIncidents)
 	cleanupCollectionWhenIdle(collections.alertDestinations)
-	cleanupCollectionWhenIdle(collections.errorIssues)
-	cleanupCollectionWhenIdle(collections.actors)
-	cleanupCollectionWhenIdle(collections.openErrorIncidents)
 }
 
 // Tracks the last org we resolved collections for, independent of `current`
@@ -253,9 +239,6 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 		alertRuleStates: createAlertRuleStatesCollection(orgId),
 		alertIncidents: createAlertIncidentsCollection(orgId),
 		alertDestinations: createAlertDestinationsCollection(orgId),
-		errorIssues: createErrorIssuesCollection(orgId),
-		actors: createActorsCollection(orgId),
-		openErrorIncidents: createOpenErrorIncidentsCollection(orgId),
 	}
 	// Tear down the previous org's shape streams after swapping so an in-flight
 	// read never resolves against the wrong org. Deferred (see

@@ -18,7 +18,13 @@ import {
 	getErrorsSummary,
 	getErrorsTimeseries,
 } from "@/api/warehouse/errors"
-import { getLog, getLogAttributeKeys, getLogsFacetValues, getLogsFacets, listLogs } from "@/api/warehouse/logs"
+import {
+	getLog,
+	getLogAttributeKeys,
+	getLogsFacetValues,
+	getLogsFacets,
+	listLogs,
+} from "@/api/warehouse/logs"
 import {
 	getMetricAttributeKeys,
 	getMetricSparklines,
@@ -69,7 +75,12 @@ import {
 	getCloudflareZoneTimeseries,
 } from "@/api/warehouse/cloudflare-infra"
 import { getPlanetScaleInfraTimeseries, getPlanetScaleQueryInsights } from "@/api/warehouse/planetscale-infra"
-import { getServiceHealthBaseline, getServiceOverview, getServicesFacets } from "@/api/warehouse/services"
+import {
+	getServiceHealthBaseline,
+	getServiceHealthSnapshot,
+	getServiceOverview,
+	getServicesFacets,
+} from "@/api/warehouse/services"
 import {
 	getResourceAttributeKeys,
 	getResourceAttributeValues,
@@ -174,6 +185,10 @@ export const getServicesFacetsResultAtom = makeQueryAtomFamily(getServicesFacets
 })
 
 export const getServiceOverviewResultAtom = makeQueryAtomFamily(getServiceOverview, {
+	staleTime: 30_000,
+})
+
+export const getServiceHealthSnapshotResultAtom = makeQueryAtomFamily(getServiceHealthSnapshot, {
 	staleTime: 30_000,
 })
 

@@ -117,7 +117,7 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 				const denied = unauthorized(req)
 				if (denied) return denied
 
-				const rows = yield* service.listAllEnabled().pipe(Effect.catch(() => Effect.succeed([])))
+				const rows = yield* service.listAllEnabled()
 
 				// One public ingest key per org (lazily created on first use, like
 				// onboarding does). The scraper ingests with this key so scraped
@@ -128,12 +128,9 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 					Effect.gen(function* () {
 						const cached = keyByOrg.get(orgId)
 						if (cached !== undefined) return cached
-						const key: string | null = yield* ingestKeys
+						const key: string = yield* ingestKeys
 							.getOrCreate(decodeOrgIdSync(orgId), SCRAPER_SYSTEM_USER)
-							.pipe(
-								Effect.map((keys): string | null => keys.publicKey),
-								Effect.catch(() => Effect.succeed(null)),
-							)
+							.pipe(Effect.map((keys) => keys.publicKey))
 						keyByOrg.set(orgId, key)
 						return key
 					})
@@ -171,7 +168,9 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 									if (Option.isSome(target)) {
 										targets.push(target.value)
 									} else {
-										yield* Effect.logWarning("Skipping scrape sub-target (invalid row)").pipe(
+										yield* Effect.logWarning(
+											"Skipping scrape sub-target (invalid row)",
+										).pipe(
 											Effect.annotateLogs({
 												scrapeTargetId: row.id,
 												orgId: row.orgId,
@@ -196,7 +195,15 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 				)
 
 				return yield* HttpServerResponse.json(targets)
-			}).pipe(Effect.withSpan("ScraperInternal.listTargets"))
+			}).pipe(
+				Effect.catch((error) =>
+					Effect.logError("Failed to build scraper target list").pipe(
+						Effect.annotateLogs({ error: error.message }),
+						Effect.as(errorText("Scraper target list unavailable", 503)),
+					),
+				),
+				Effect.withSpan("ScraperInternal.listTargets"),
+			)
 
 		const recordResults = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {
@@ -209,18 +216,18 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 				const results = yield* decodeScrapeResultsEffect(body.value).pipe(Effect.option)
 				if (Option.isNone(results)) return errorText("Invalid scrape results payload", 400)
 
-				yield* service
-					.recordScrapeResults(results.value)
-					.pipe(
-						Effect.catch((error) =>
-							Effect.logWarning("Failed to persist scrape results").pipe(
-								Effect.annotateLogs({ error: error.message }),
-							),
-						),
-					)
+				yield* service.recordScrapeResults(results.value)
 
 				return yield* HttpServerResponse.json({ recorded: results.value.length })
-			}).pipe(Effect.withSpan("ScraperInternal.recordResults"))
+			}).pipe(
+				Effect.catch((error) =>
+					Effect.logError("Failed to persist scrape results").pipe(
+						Effect.annotateLogs({ error: error.message }),
+						Effect.as(errorText("Scrape result persistence unavailable", 503)),
+					),
+				),
+				Effect.withSpan("ScraperInternal.recordResults"),
+			)
 
 		yield* router.add("GET", "/api/internal/scrape-targets", listTargets)
 		yield* router.add("POST", "/api/internal/scrape-results", recordResults)
