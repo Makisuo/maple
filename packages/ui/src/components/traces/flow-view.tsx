@@ -20,6 +20,7 @@ import { getServiceColor } from "../../lib/colors"
 import { describeSpan, SPAN_CATEGORIES } from "../../lib/span-category"
 import { ServiceDot } from "../service-dot"
 import { FlowSpanNode } from "./flow-node"
+import { TraceFlowEdge } from "./flow-edge"
 import {
 	transformSpansToFlow,
 	getLayoutedElements,
@@ -43,13 +44,12 @@ const nodeTypes = {
 	span: FlowSpanNode,
 }
 
+const edgeTypes = {
+	flowEdge: TraceFlowEdge,
+}
+
 const defaultEdgeOptions = {
-	type: "smoothstep",
 	animated: true,
-	style: {
-		strokeWidth: 2,
-		stroke: "oklch(0.45 0.02 60)",
-	},
 }
 
 export function TraceFlowView({
@@ -175,6 +175,7 @@ export function TraceFlowView({
 						if (event) userMovedRef.current = true
 					}}
 					nodeTypes={nodeTypes}
+					edgeTypes={edgeTypes}
 					defaultEdgeOptions={defaultEdgeOptions}
 					nodesDraggable={false}
 					nodesConnectable={false}

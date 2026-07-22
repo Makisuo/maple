@@ -4,6 +4,7 @@ import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
 import {
+	ChevronRightIcon,
 	CloudflareIcon,
 	GithubIcon,
 	HazelIcon,
@@ -12,6 +13,7 @@ import {
 	SlackIcon,
 	WarpStreamIcon,
 } from "@/components/icons"
+import { formatRelativeTime } from "@/lib/format"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
@@ -318,51 +320,492 @@ export function IntegrationIconPlate({
 	)
 }
 
+// ---------------------------------------------------------------------------
+// Overview model — the dense connected-row / available-card split. Derived from
+// the same list queries as `useIntegrationStatuses` (plus the cheap PlanetScale
+// inventory read); deliberately NO warehouse queries at hub level.
+// ---------------------------------------------------------------------------
+
+interface ConnectedOverview {
+	readonly kind: "connected"
+	readonly health: "healthy" | "attention"
+	/** Short state word next to the health dot ("Healthy", "Needs attention", "Suspended"). */
+	readonly stateLabel: string
+	/** Second line under the name ("Acme Corp", "@acme-corp · GitHub App"). */
+	readonly context: string | null
+	/** Headline stat ("12 repos synced", "2 of 3 targets enabled"). */
+	readonly stat: string | null
+	/** "synced 2m ago" — null when the integration has no sync concept (Hazel). */
+	readonly lastSyncLabel: string | null
+	/** Warning chip ("1 zone erroring") — presence implies `health: "attention"` visuals. */
+	readonly issue: string | null
+}
+
+interface AvailableOverview {
+	readonly kind: "available"
+	/** CTA verb: "Connect" for OAuth flows, "Set up" for DIY/scrape flows. */
+	readonly cta: "Connect" | "Set up"
+}
+
+interface UnavailableOverview {
+	readonly kind: "unavailable"
+}
+
+/** `null` = status query still loading. */
+export type IntegrationOverview = ConnectedOverview | AvailableOverview | UnavailableOverview | null
+
+const CONNECT: AvailableOverview = { kind: "available", cta: "Connect" }
+const SET_UP: AvailableOverview = { kind: "available", cta: "Set up" }
+const UNAVAILABLE: UnavailableOverview = { kind: "unavailable" }
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
+
+const syncedLabel = (ms: number | null | undefined, verb = "synced"): string | null =>
+	ms == null ? null : `${verb} ${formatRelativeTime(new Date(ms).toISOString())}`
+
+const maxMs = (values: ReadonlyArray<number | null | undefined>): number | null =>
+	values.reduce<number | null>((acc, v) => (v != null && (acc === null || v > acc) ? v : acc), null)
+
+export function useIntegrationOverviews(): Record<IntegrationId, IntegrationOverview> {
+	const cloudflareResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "cloudflareStatus", {
+			reactivityKeys: ["cloudflareIntegrationStatus"],
+		}),
+	)
+	const scrapeResult = useAtomValue(scrapeTargetsListAtom)
+	const planetscaleResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleStatus", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
+	// Poller-inventory read (no warehouse) — feeds the "N databases tracked" stat.
+	const planetscaleDbResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "planetscaleDatabases", {
+			reactivityKeys: ["planetscaleIntegrationStatus"],
+		}),
+	)
+	const hazelResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "hazelStatus", {
+			reactivityKeys: ["hazelIntegrationStatus"],
+		}),
+	)
+	const githubResult = useAtomValue(
+		MapleApiAtomClient.query("integrations", "githubStatus", {
+			reactivityKeys: ["githubIntegrationStatus"],
+		}),
+	)
+	const slackResult = useAtomValue(
+		MapleApiV2AtomClient.query("slackIntegration", "status", {
+			reactivityKeys: ["slackIntegration"],
+		}),
+	)
+
+	const cloudflare: IntegrationOverview = Result.builder(cloudflareResult)
+		.onSuccess((status): IntegrationOverview => {
+			if (!status.connected) return CONNECT
+			const zones = status.zones
+			const enabledZones = zones.filter((z) => z.enabled).length
+			const erroringZones = zones.filter((z) => z.enabled && z.lastError != null).length
+			const workersFailing = status.workers?.enabled === true && status.workers.lastError != null
+			const issue = !status.analyticsCapable
+				? "Update access"
+				: erroringZones > 0
+					? `${plural(erroringZones, "zone")} erroring`
+					: workersFailing
+						? "Workers sync failing"
+						: null
+			const statParts =
+				zones.length > 0 ? [`${enabledZones} of ${plural(zones.length, "zone")} streaming`] : []
+			if (status.workers?.enabled) statParts.push("Workers")
+			return {
+				kind: "connected",
+				health: issue ? "attention" : "healthy",
+				stateLabel: issue ? "Needs attention" : "Healthy",
+				context: status.accountName,
+				stat: statParts.length > 0 ? statParts.join(" · ") : null,
+				lastSyncLabel: syncedLabel(
+					maxMs([...zones.map((z) => z.lastSyncedAt), status.workers?.lastSyncedAt]),
+				),
+				issue,
+			}
+		})
+		.onInitial(() => null)
+		.orElse(() => UNAVAILABLE)
+
+	const scrapeOverview = (targetType: "prometheus" | "planetscale"): IntegrationOverview =>
+		Result.builder(scrapeResult)
+			.onSuccess((response): IntegrationOverview => {
+				const targets = response.data.filter((target) => target.target_type === targetType)
+				if (targets.length === 0) return targetType === "prometheus" ? SET_UP : CONNECT
+				const enabled = targets.filter((target) => target.enabled).length
+				const failing = targets.filter(
+					(target) => target.enabled && target.last_scrape_error != null,
+				).length
+				const noun = targetType === "planetscale" ? "org" : "target"
+				return {
+					kind: "connected",
+					health: failing > 0 ? "attention" : "healthy",
+					stateLabel: failing > 0 ? "Needs attention" : "Healthy",
+					context: plural(targets.length, `scrape ${noun}`),
+					stat: `${enabled} of ${targets.length} enabled`,
+					lastSyncLabel: syncedLabel(
+						maxMs(
+							targets.map((t) => (t.last_scrape_at ? Date.parse(t.last_scrape_at) : null)),
+						),
+						"scraped",
+					),
+					issue: failing > 0 ? `${plural(failing, noun)} failing` : null,
+				}
+			})
+			.onInitial(() => null)
+			.orElse(() => UNAVAILABLE)
+
+	const planetscaleDbCount: number | null = Result.builder(planetscaleDbResult)
+		.onSuccess((response): number | null => response.databases.length)
+		.onInitial((): number | null => null)
+		.orElse((): number | null => null)
+
+	const planetscale: IntegrationOverview = Result.builder(planetscaleResult)
+		.onSuccess((status): IntegrationOverview => {
+			// Manual (user-created scrape target) escape hatch — derive from targets.
+			if (!status.connected) return scrapeOverview("planetscale")
+			const issue = status.pendingOrgSelection
+				? "Finish org selection"
+				: status.metricsAuth === "missing"
+					? "Metrics setup pending"
+					: status.scrapeTarget?.lastScrapeError != null
+						? "Scrape failing"
+						: status.lastInventoryError != null
+							? "Inventory failing"
+							: null
+			return {
+				kind: "connected",
+				health: issue ? "attention" : "healthy",
+				stateLabel: issue ? "Needs attention" : "Healthy",
+				context: status.organization,
+				stat:
+					planetscaleDbCount != null && planetscaleDbCount > 0
+						? `${plural(planetscaleDbCount, "database")} tracked`
+						: status.scrapeTarget?.enabled
+							? "Metrics scraping on"
+							: null,
+				lastSyncLabel: syncedLabel(
+					maxMs([status.scrapeTarget?.lastScrapeAt, status.lastInventoryAt]),
+				),
+				issue,
+			}
+		})
+		.onInitial(() => null)
+		.orElse(() => UNAVAILABLE)
+
+	const hazel: IntegrationOverview = Result.builder(hazelResult)
+		.onSuccess(
+			(status): IntegrationOverview =>
+				status.connected
+					? {
+							kind: "connected",
+							health: "healthy",
+							stateLabel: "Healthy",
+							context: status.externalUserEmail,
+							stat: "Alert delivery ready",
+							// Hazel has no sync loop — deliveries are push-per-alert.
+							lastSyncLabel: null,
+							issue: null,
+						}
+					: CONNECT,
+		)
+		.onInitial(() => null)
+		.orElse(() => UNAVAILABLE)
+
+	const github: IntegrationOverview = Result.builder(githubResult)
+		.onSuccess((status): IntegrationOverview => {
+			if (status.state === "disconnected")
+				return {
+					kind: "connected",
+					health: "attention",
+					stateLabel: "Deactivated",
+					context: status.accountLogin ? `@${status.accountLogin} · GitHub App` : "GitHub App",
+					stat: null,
+					lastSyncLabel: null,
+					issue: "Reinstall the app",
+				}
+			if (status.state === "suspended")
+				return {
+					kind: "connected",
+					health: "attention",
+					stateLabel: "Suspended",
+					context: status.accountLogin ? `@${status.accountLogin} · GitHub App` : "GitHub App",
+					stat: null,
+					lastSyncLabel: null,
+					issue: "Suspended on GitHub",
+				}
+			if (!status.connected) return CONNECT
+			const active = status.repositories.filter((r) => r.status === "active")
+			const removed = status.repositories.length - active.length
+			const failing = active.filter((r) => r.lastSyncError != null).length
+			const issue =
+				failing > 0
+					? `${plural(failing, "repo")} failing`
+					: removed > 0
+						? `${plural(removed, "repo")} removed`
+						: null
+			return {
+				kind: "connected",
+				health: issue ? "attention" : "healthy",
+				stateLabel: issue ? "Needs attention" : "Healthy",
+				context: status.accountLogin ? `@${status.accountLogin} · GitHub App` : "GitHub App",
+				stat: active.length > 0 ? `${plural(active.length, "repo")} synced` : null,
+				lastSyncLabel: syncedLabel(maxMs(active.map((r) => r.lastSyncedAt))),
+				issue,
+			}
+		})
+		.onInitial(() => null)
+		.orElse(() => UNAVAILABLE)
+
+	const slack: IntegrationOverview = Result.builder(slackResult)
+		.onSuccess(
+			(status): IntegrationOverview =>
+				status.installed
+					? {
+							kind: "connected",
+							health: "healthy",
+							stateLabel: "Healthy",
+							context: status.team_name ?? null,
+							stat: "Alerts & agent ready",
+							// Slack has no sync loop — messages are push-per-alert/query.
+							lastSyncLabel: null,
+							issue: null,
+						}
+					: CONNECT,
+		)
+		.onInitial(() => null)
+		.orElse(() => UNAVAILABLE)
+
+	return {
+		cloudflare,
+		prometheus: scrapeOverview("prometheus"),
+		planetscale,
+		// WarpStream rides the generic Prometheus pipeline — always a set-up card.
+		warpstream: SET_UP,
+		hazel,
+		github,
+		slack,
+	}
+}
+
+/**
+ * Fleet summary chips ("4 connected · 2 need attention") — rendered by the route
+ * in the header bar. Shares atoms with the catalog, so no duplicate fetches.
+ */
+export function IntegrationsSummary() {
+	const overviews = useIntegrationOverviews()
+	const values = CATALOG.map((entry) => overviews[entry.id])
+	// Quiet until everything resolved — a partial count would be wrong.
+	if (values.some((value) => value === null)) return null
+	const connected = values.filter(
+		(value): value is ConnectedOverview => value?.kind === "connected",
+	)
+	if (connected.length === 0) return null
+	const attention = connected.filter((value) => value.health === "attention").length
+	return (
+		<div className="flex items-center gap-2">
+			<span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 px-2.5 py-0.5 text-xs text-muted-foreground">
+				<span className="size-1.5 rounded-full bg-success" aria-hidden />
+				{connected.length} connected
+			</span>
+			{attention > 0 && (
+				<span className="inline-flex items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2.5 py-0.5 text-xs text-warning-foreground">
+					<span className="size-1.5 rounded-full bg-warning" aria-hidden />
+					{attention} need attention
+				</span>
+			)}
+		</div>
+	)
+}
+
+function HealthDot({ health }: { health: "healthy" | "attention" | "unavailable" }) {
+	return (
+		<span
+			aria-hidden
+			className={cn(
+				"size-1.5 shrink-0 rounded-full",
+				health === "healthy" && "bg-success",
+				health === "attention" && "bg-warning",
+				health === "unavailable" && "bg-muted-foreground",
+			)}
+		/>
+	)
+}
+
+function ConnectedRow({
+	entry,
+	overview,
+	onSelect,
+}: {
+	entry: CatalogEntry
+	overview: ConnectedOverview | UnavailableOverview
+	onSelect: (id: IntegrationId) => void
+}) {
+	const connected = overview.kind === "connected" ? overview : null
+	return (
+		<motion.button
+			type="button"
+			variants={ITEM_VARIANTS}
+			onClick={() => onSelect(entry.id)}
+			className="group flex w-full items-center gap-4 px-4 py-3 text-left outline-none transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+		>
+			<IntegrationIconPlate
+				icon={entry.icon}
+				accent={entry.accent}
+				iconClassName={entry.iconClassName}
+				plateClassName="size-8 rounded-lg"
+				size={18}
+			/>
+			<span className="flex w-44 min-w-0 shrink-0 flex-col gap-0.5 2xl:w-52">
+				<span className="truncate text-sm font-semibold">{entry.name}</span>
+				{connected?.context && (
+					<span className="truncate text-xs text-muted-foreground">{connected.context}</span>
+				)}
+			</span>
+			<span className="flex w-28 shrink-0 items-center gap-2">
+				<HealthDot health={connected?.health ?? "unavailable"} />
+				<span className="truncate text-xs">
+					{connected?.stateLabel ?? "Status unavailable"}
+				</span>
+			</span>
+			{connected?.stat && (
+				<span className="hidden min-w-0 flex-1 truncate text-sm text-foreground/90 md:block">
+					{connected.stat}
+				</span>
+			)}
+			<span className="ml-auto flex shrink-0 items-center gap-3">
+				{connected?.lastSyncLabel && (
+					<span className="hidden w-28 text-right text-xs text-muted-foreground 2xl:block">
+						{connected.lastSyncLabel}
+					</span>
+				)}
+				{connected?.issue && (
+					<Badge variant="warning" size="sm" className="hidden sm:inline-flex">
+						{connected.issue}
+					</Badge>
+				)}
+				<ChevronRightIcon
+					size={14}
+					className="text-muted-foreground/70 transition-colors group-hover:text-foreground"
+				/>
+			</span>
+		</motion.button>
+	)
+}
+
+function AvailableCard({
+	entry,
+	cta,
+	onSelect,
+}: {
+	entry: CatalogEntry
+	cta: "Connect" | "Set up"
+	onSelect: (id: IntegrationId) => void
+}) {
+	return (
+		<motion.button
+			type="button"
+			variants={ITEM_VARIANTS}
+			onClick={() => onSelect(entry.id)}
+			className="group flex items-center gap-4 rounded-lg border border-border/60 bg-card p-4 text-left outline-none transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+		>
+			<IntegrationIconPlate
+				icon={entry.icon}
+				accent={entry.accent}
+				iconClassName={entry.iconClassName}
+				plateClassName="size-9 rounded-lg"
+				size={20}
+			/>
+			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+				<span className="truncate text-sm font-semibold">{entry.name}</span>
+				<span className="line-clamp-2 text-xs text-muted-foreground">{entry.description}</span>
+			</span>
+			{/* Styled as a button, but the whole card is the interactive element. */}
+			<span
+				className={cn(
+					"shrink-0 rounded-md border border-input px-3 py-1.5 text-xs font-medium transition-colors group-hover:border-ring/60",
+					cta === "Connect" ? "text-primary" : "text-foreground",
+				)}
+			>
+				{cta} →
+			</span>
+		</motion.button>
+	)
+}
+
+function SkeletonRow() {
+	return (
+		<div className="flex w-full items-center gap-4 px-4 py-3">
+			<Skeleton className="size-8 shrink-0 rounded-lg" />
+			<span className="flex w-52 shrink-0 flex-col gap-1.5">
+				<Skeleton className="h-3.5 w-24" />
+				<Skeleton className="h-3 w-32" />
+			</span>
+			<Skeleton className="h-3 w-20" />
+		</div>
+	)
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+	return (
+		<span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+			{children}
+		</span>
+	)
+}
+
 export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId) => void }) {
-	const statuses = useIntegrationStatuses()
+	const overviews = useIntegrationOverviews()
 	const reduceMotion = useReducedMotion()
+
+	const connected = CATALOG.flatMap((entry) => {
+		const overview = overviews[entry.id]
+		return overview !== null && (overview.kind === "connected" || overview.kind === "unavailable")
+			? [{ entry, overview }]
+			: []
+	})
+	const available = CATALOG.flatMap((entry) => {
+		const overview = overviews[entry.id]
+		return overview !== null && overview.kind === "available" ? [{ entry, overview }] : []
+	})
+	const loading = CATALOG.filter((entry) => overviews[entry.id] === null)
 
 	return (
 		<motion.div
-			// 3 columns only at 2xl — the page nests under two sidebars, so the content
-			// region is far narrower than the viewport; at xl, 3 cols crush the names.
-			className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3"
+			className="flex flex-col gap-6"
 			variants={GRID_VARIANTS}
-			// Reduced motion: render the cards in place with no staggered transform.
+			// Reduced motion: render everything in place with no staggered transform.
 			initial={reduceMotion ? false : "hidden"}
 			animate="show"
 		>
-			{CATALOG.map((entry) => {
-				const status = statuses[entry.id]
-				return (
-					<motion.button
-						key={entry.id}
-						type="button"
-						variants={ITEM_VARIANTS}
-						onClick={() => onSelect(entry.id)}
-						className="group flex items-start gap-4 rounded-lg border border-border/60 bg-card p-4 text-left outline-none transition-colors hover:border-border hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-					>
-						<IntegrationIconPlate
-							icon={entry.icon}
-							accent={entry.accent}
-							iconClassName={entry.iconClassName}
-						/>
-						<span className="flex min-w-0 flex-1 flex-col gap-1">
-							<span className="flex items-center justify-between gap-2">
-								<span className="truncate text-sm font-semibold">{entry.name}</span>
-								{status === null || status === undefined ? (
-									<Skeleton className="h-5 w-20 shrink-0 rounded-full" />
-								) : (
-									<Badge variant={status.variant} className="shrink-0">
-										{status.label}
-									</Badge>
-								)}
-							</span>
-							<span className="text-xs text-muted-foreground">{entry.description}</span>
-						</span>
-					</motion.button>
-				)
-			})}
+			{(connected.length > 0 || loading.length > 0) && (
+				<section className="flex flex-col gap-2">
+					<SectionLabel>Connected</SectionLabel>
+					<div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-card">
+						{connected.map(({ entry, overview }) => (
+							<ConnectedRow key={entry.id} entry={entry} overview={overview} onSelect={onSelect} />
+						))}
+						{loading.map((entry) => (
+							<SkeletonRow key={entry.id} />
+						))}
+					</div>
+				</section>
+			)}
+			{available.length > 0 && (
+				<section className="flex flex-col gap-2">
+					<SectionLabel>Available</SectionLabel>
+					<div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+						{available.map(({ entry, overview }) => (
+							<AvailableCard key={entry.id} entry={entry} cta={overview.cta} onSelect={onSelect} />
+						))}
+					</div>
+				</section>
+			)}
 		</motion.div>
 	)
 }

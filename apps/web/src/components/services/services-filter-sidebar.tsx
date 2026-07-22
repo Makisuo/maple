@@ -8,6 +8,10 @@ import { Route } from "@/routes/services/index"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import {
+	isServiceHealth,
+	useServiceHealthSummary,
+} from "@/components/services/use-service-health-summary"
+import {
 	FilterSidebarBody,
 	FilterSidebarError,
 	FilterSidebarFrame,
@@ -37,6 +41,16 @@ export function ServicesFilterSidebar() {
 	const facetsResult = useRefreshableAtomValue(facetsAtom)
 	const refreshFacets = useAtomRefresh(facetsAtom)
 
+	// Client-side facet: derived from the same cached overview/incident/anomaly
+	// atoms the table subscribes to — no extra requests, counts always agree
+	// with the table's health badges.
+	const healthSummary = useServiceHealthSummary({
+		startTime: effectiveStartTime,
+		endTime: effectiveEndTime,
+		environments: search.environments,
+		commitShas: search.commitShas,
+	})
+
 	const updateFilter = <K extends keyof typeof search>(key: K, value: (typeof search)[K]) => {
 		navigate({
 			search: (prev: Record<string, unknown>) => ({
@@ -57,7 +71,10 @@ export function ServicesFilterSidebar() {
 		})
 	}
 
-	const hasActiveFilters = (search.environments?.length ?? 0) > 0 || (search.commitShas?.length ?? 0) > 0
+	const hasActiveFilters =
+		(search.environments?.length ?? 0) > 0 ||
+		(search.commitShas?.length ?? 0) > 0 ||
+		search.health !== undefined
 
 	return Result.builder(facetsResult)
 		.onInitial(() => <LoadingState />)
@@ -69,6 +86,33 @@ export function ServicesFilterSidebar() {
 				<FilterSidebarFrame waiting={result.waiting}>
 					<FilterSidebarHeader canClear={hasActiveFilters} onClear={clearAllFilters} />
 					<FilterSidebarBody>
+						{healthSummary !== undefined && (
+							<>
+								<FilterSection
+									title="Health"
+									options={(["unhealthy", "degraded", "healthy"] as const).map(
+										(level) => ({
+											name: level,
+											count: healthSummary.counts[level],
+										}),
+									)}
+									selected={search.health === undefined ? [] : [search.health]}
+									onChange={(selected) => {
+										// Single-select semantics on a multi-select control: the
+										// newly toggled value wins; re-unchecking clears the filter.
+										const next = selected.find((value) => value !== search.health)
+										updateFilter(
+											"health",
+											next !== undefined && isServiceHealth(next)
+												? next
+												: undefined,
+										)
+									}}
+								/>
+								<Separator className="my-2" />
+							</>
+						)}
+
 						{(facets.environments.length ?? 0) > 0 && (
 							<>
 								<FilterSection

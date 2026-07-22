@@ -177,6 +177,50 @@ Checkpoint and restore operations share one maintenance lock. A live owner is
 reported as busy; uncertain ownership is preserved and blocks destructive
 maintenance.
 
+## Archive commands
+
+Local mode only. Export sealed UTC-day ranges of the six raw telemetry tables
+from immutable checkpoints into portable Parquet, queryable independently with
+DuckDB. See [Local telemetry archives](/docs/local-telemetry-archives) for the
+full architecture, calibration, and off-happy-path reference.
+
+### `maple archive create <range-date> <signal>`
+
+Seal one UTC day of one signal into a validated Parquet generation from a
+checkpoint. Resolves and pins the checkpoint (default: current), restores it to
+sacrificial scratch, exports bounded Parquet shards, validates row counts and
+checksums, atomically selects the generation, and releases the pin. The live
+store is never opened for export.
+
+| Argument / Flag   | Description                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------- |
+| `<range-date>`    | UTC day to seal, `YYYY-MM-DD`                                                                             |
+| `<signal>`        | `logs`, `traces`, `metrics_sum`, `metrics_gauge`, `metrics_histogram`, or `metrics_exponential_histogram` |
+| `--data-dir`      | Live chDB data directory (default: `~/.maple/data`)                                                       |
+| `--archive-dir`   | Archive root (default: `~/.maple/archive`)                                                                |
+| `--scratch-root`  | Restored-checkpoint scratch root (default: `~/.maple/scratch`)                                            |
+| `--checkpoint-id` | Archive from a specific checkpoint instead of the selected current                                        |
+
+A late-arrival re-export creates a new generation that supersedes the old one;
+the previous generation is retained but excluded from active listings and query
+paths.
+
+### `maple archive list`
+
+Report active archive generations. Superseded generations are retained on disk
+but never listed.
+
+| Flag                            | Description                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `--archive-dir`                 | Archive root (default: `~/.maple/archive`)                                                 |
+| `--output summary\|paths\|json` | `summary` (default), `paths` (machine-readable active Parquet paths for DuckDB), or `json` |
+| `--signal <name>`               | Required with `--output paths`; the signal whose active paths to emit                      |
+
+### `maple archive rebuild <signal>`
+
+Rebuild a signal's `catalog.jsonl` from the authoritative generation manifests,
+recovering from a truncated or missing catalog without rescanning Parquet bytes.
+
 ## Services
 
 ### `maple services`

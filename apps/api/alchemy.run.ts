@@ -142,6 +142,14 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 					namespaceId: 2026071801,
 					simple: { limit: 600, period: 60 },
 				}),
+				CLI_AUTH_RATE_LIMITER: Cloudflare.RateLimit("CLI_AUTH_RATE_LIMITER", {
+					namespaceId: 2026072101,
+					simple: { limit: 30, period: 60 },
+				}),
+				MCP_OAUTH_RATE_LIMITER: Cloudflare.RateLimit("MCP_OAUTH_RATE_LIMITER", {
+					namespaceId: 2026072102,
+					simple: { limit: 60, period: 60 },
+				}),
 				API_V2_RATE_LIMIT_PARTITION: formatMapleStage(stage),
 				// Production only: preview/stg workers run the same email crons against
 				// their own DB branches, so a binding here means every live stage sends

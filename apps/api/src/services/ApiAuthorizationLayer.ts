@@ -59,7 +59,7 @@ export const ApiAuthorizationLayer = Layer.effect(
 						const tenant = new CurrentTenant.TenantSchema({
 							orgId: resolved.orgId,
 							userId: resolved.userId,
-							roles: apiKeyDefaultRoles,
+							roles: resolved.roles ?? apiKeyDefaultRoles,
 							authMode: "self_hosted",
 						})
 						return yield* Effect.provideService(httpEffect, CurrentTenant.Context, tenant)

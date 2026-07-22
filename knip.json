@@ -38,6 +38,9 @@
 		"apps/local-ui": {
 			"entry": ["src/worker.ts", "alchemy.run.ts"]
 		},
+		"apps/cli": {
+			"entry": ["test/probes/*.ts", "test/archive-probe-helpers.ts", "test/merge-injection-probe.ts"]
+		},
 		"packages/domain": {
 			"entry": ["scripts/**/*.ts"]
 		},

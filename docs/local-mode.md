@@ -278,13 +278,18 @@ resolved per invocation:
    `GET <local-url>/health` ⇒ local. If neither is available the CLI prints an
    actionable error.
 
-Remote credentials live in `~/.maple/config.json` (mode `0600`), managed by:
+Remote credentials use the macOS Keychain or Linux Secret Service when available,
+with `~/.maple/config.json` (mode `0600`) as a fallback. Authentication is managed by:
 
 ```bash
-maple login --api-url https://api.maple.dev   # paste the token when prompted (or --token / stdin)
-maple whoami                                   # show the resolved mode + target
-maple logout                                   # forget the stored token
+maple auth login                               # browser + one-time device code
+maple auth login --api-url https://api.example.com
+maple auth login --with-token < token.txt      # non-interactive/manual fallback
+maple auth status                              # validate the active login
+maple auth logout                              # revoke browser-issued credentials and remove local state
 ```
+
+`maple login`, `maple whoami`, and `maple logout` remain compatibility aliases.
 
 Env overrides: `MAPLE_API_URL`, `MAPLE_API_TOKEN`, `MAPLE_LOCAL_URL`,
 `MAPLE_LOCAL_BIND_HOST`, and `MAPLE_LOCAL_ADVERTISE_HOST`.

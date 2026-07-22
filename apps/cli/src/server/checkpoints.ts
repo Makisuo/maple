@@ -38,6 +38,23 @@ export const CHECKPOINT_REOPEN_PROBE_ENV = "MAPLE_INTERNAL_CHECKPOINT_REOPEN_DAT
 
 const CheckpointUuid = Schema.String.check(Schema.isPattern(CHECKPOINT_ID))
 
+// Plain-string validation helpers used by the archive seams (pins, maintenance
+// lock, deterministic scratch dirs), which deal in journal-recorded string ids
+// rather than the branded checkpoint schema types above.
+const validateId = (value: string, kind: string): string => {
+	if (!CHECKPOINT_ID.test(value)) throw new Error(`invalid ${kind} ID: ${value}`)
+	return value.toLowerCase()
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value)
+
+const requiredString = (record: Record<string, unknown>, key: string): string => {
+	const value = record[key]
+	if (typeof value !== "string" || value.length === 0) throw new Error(`invalid ${key}`)
+	return value
+}
+
 export const CheckpointId = CheckpointUuid.pipe(Schema.brand("@maple/cli/CheckpointId"))
 export type CheckpointId = Schema.Schema.Type<typeof CheckpointId>
 
@@ -816,6 +833,21 @@ export const withRestoredCheckpoint = async <A>(
 	options: {
 		readonly scratchRoot?: string
 		readonly cleanup?: "always" | "never"
+		/**
+		 * A caller-supplied deterministic subdirectory name beneath scratchRoot,
+		 * instead of the default random `maple-checkpoint-<uuid>`. Used by the
+		 * archive generation journal so an interrupted operation records the exact
+		 * scratch path it owns and reconciliation can remove only that path.
+		 * Must be a single path segment (no separators) and not already in use.
+		 */
+		readonly scratchSubdir?: string
+		/**
+		 * Invoked after the owned scratch directory is created (and synced) but
+		 * BEFORE the checkpoint is restored into it. Used by the archive journal
+		 * to advance its phase to "scratch-allocated" so a kill during restore is
+		 * reconcilable. No-op for non-archive callers.
+		 */
+		readonly beforeRestore?: (scratchDataDir: string) => void | Promise<void>
 	},
 	use: (restored: {
 		readonly checkpointId: CheckpointId
@@ -838,11 +870,31 @@ export const withRestoredCheckpoint = async <A>(
 		throw new Error(`scratch root must not be a symlink: ${scratchRoot}`)
 	}
 	await mkdir(scratchRoot, { recursive: true })
-	const scratchParent = join(scratchRoot, `maple-checkpoint-${randomUUID()}`)
+	const scratchParentName = options.scratchSubdir ?? `maple-checkpoint-${randomUUID()}`
+	// A deterministic scratchSubdir (archive journal) must be a single path
+	// segment so it cannot escape the scratch root, and must not already exist so
+	// reuse after a crash is unambiguous (the caller reconciles the prior op
+	// before allocating a new one).
+	if (options.scratchSubdir !== undefined) {
+		if (
+			scratchParentName.length === 0 ||
+			scratchParentName.includes(sep) ||
+			scratchParentName.includes("/") ||
+			scratchParentName === "." ||
+			scratchParentName === ".."
+		) {
+			throw new Error(`invalid scratch subdirectory: ${scratchParentName}`)
+		}
+	}
+	const scratchParent = join(scratchRoot, scratchParentName)
 	await mkdir(scratchParent, { mode: 0o700 })
 	const scratchDataDir = join(scratchParent, "data")
 	let db: Chdb | undefined
 	try {
+		// The owned scratch dir now exists. Give the caller (archive journal) a
+		// seam to durably record that fact BEFORE the restore begins, so a kill
+		// mid-restore leaves a reconcilable "scratch-allocated" phase.
+		if (options.beforeRestore) await options.beforeRestore(scratchDataDir)
 		const restored = await restoreResolvedInto(resolvedCheckpoint, scratchDataDir)
 		db = restored.db
 		return await use({
@@ -1113,6 +1165,150 @@ const hasPins = async (dataDir: string, checkpointId: CheckpointId): Promise<boo
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return false
 		throw error
+	}
+}
+
+export interface CheckpointPin {
+	readonly formatVersion: 1
+	readonly pinId: string
+	readonly checkpointId: string
+	readonly purpose: string
+	readonly createdAt: string
+}
+
+/** Derive the exact pin-file path from a data dir, checkpoint id, and pin id. */
+export const pinFilePath = (dataDir: string, checkpointId: string, pinId: string): string =>
+	join(checkpointPinsRoot(dataDir), checkpointId, `${validateId(pinId, "pin")}.json`)
+
+const PIN_PURPOSE = /^[A-Za-z0-9 _./:-]{0,128}$/
+
+/**
+ * Acquire a persistent pin on a checkpoint so retention cannot delete its
+ * snapshot while the pin is held. The pin record is durably written under
+ * `backups/pins/<checkpoint-id>/<pin-id>.json`; `retireCheckpointIfEligible`
+ * already honors a non-empty pin directory. Callers that need pin acquisition
+ * to race neither GC nor a concurrent checkpoint operation should hold the
+ * maintenance lock (see {@link withMaintenanceLock}) while resolving and
+ * pinning. A stale pin over-retains data rather than risking deletion.
+ */
+export const acquireCheckpointPin = async (
+	dataDir: string,
+	checkpointId: string,
+	purpose = "archive",
+	pinId: string = randomUUID(),
+): Promise<string> => {
+	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
+	if (!PIN_PURPOSE.test(purpose)) throw new Error(`invalid checkpoint pin purpose: ${purpose}`)
+	const validatedPinId = validateId(pinId, "pin")
+	// A pin on a checkpoint that does not resolve cannot protect anything; force
+	// the caller to pin real, validated state.
+	await resolveCheckpoint(dataDir, validateCheckpointId(validatedCheckpointId))
+	const pinsRoot = checkpointPinsRoot(dataDir)
+	const pinDir = join(pinsRoot, validatedCheckpointId)
+	await ensurePrivateDirectory(pinsRoot)
+	await assertNoSymlink(checkpointRoot(dataDir), pinsRoot)
+	await ensurePrivateDirectory(pinDir)
+	await assertNoSymlink(pinsRoot, pinDir)
+	const path = pinFilePath(dataDir, validatedCheckpointId, validatedPinId)
+	// A deterministic caller-supplied pinId (archive journal) must target an
+	// unused path so post-crash ownership is unambiguous: the journal records
+	// this exact pinId before acquisition, and reconciliation releases exactly it.
+	if (existsSync(path)) {
+		throw new Error(`checkpoint pin already exists; refusing to overwrite: ${path}`)
+	}
+	const pin: CheckpointPin = {
+		formatVersion: 1,
+		pinId: validatedPinId,
+		checkpointId: validatedCheckpointId,
+		purpose,
+		createdAt: new Date().toISOString(),
+	}
+	await durableJson(path, pin)
+	return path
+}
+
+/**
+ * Validate one exact pin record without removing it. This is shared by session
+ * consumers and pin release so a same-path regular-file substitution cannot be
+ * mistaken for a live pin.
+ */
+export const assertCheckpointPinIdentity = async (
+	dataDir: string,
+	checkpointId: string,
+	pinPath: string,
+	expectedPurpose?: string,
+): Promise<CheckpointPin> => {
+	const validatedCheckpointId = validateId(checkpointId, "checkpoint")
+	const pinsRoot = checkpointPinsRoot(dataDir)
+	const pinDir = join(pinsRoot, validatedCheckpointId)
+	// The pin file must live directly under the named checkpoint's pin dir.
+	const resolvedPinPath = resolve(pinPath)
+	if (relative(pinDir, resolvedPinPath).startsWith(`..${sep}`)) {
+		throw new Error(`pin path escapes checkpoint pin directory: ${pinPath}`)
+	}
+	if (!resolvedPinPath.endsWith(".json") || dirname(resolvedPinPath) !== resolve(pinDir)) {
+		throw new Error(`pin path is not a direct child of the checkpoint pin directory: ${pinPath}`)
+	}
+	const baseName = basename(resolvedPinPath, ".json")
+	await assertNoSymlink(checkpointRoot(dataDir), pinsRoot)
+	await assertNoSymlink(pinsRoot, pinDir)
+	if (!existsSync(resolvedPinPath)) {
+		throw new Error(`checkpoint pin not found (already released?): ${pinPath}`)
+	}
+	await assertNoSymlink(pinDir, resolvedPinPath)
+	await assertRealFile(resolvedPinPath, "checkpoint pin")
+	const parsed = JSON.parse(await readFile(resolvedPinPath, "utf8")) as unknown
+	const expectedKeys = new Set(["formatVersion", "pinId", "checkpointId", "purpose", "createdAt"])
+	if (
+		!isRecord(parsed) ||
+		Object.keys(parsed).some((key) => !expectedKeys.has(key)) ||
+		[...expectedKeys].some((key) => !(key in parsed)) ||
+		parsed.formatVersion !== 1 ||
+		validateId(requiredString(parsed, "pinId"), "pin") !== baseName ||
+		validateId(requiredString(parsed, "checkpointId"), "checkpoint") !== validatedCheckpointId ||
+		(expectedPurpose !== undefined && requiredString(parsed, "purpose") !== expectedPurpose) ||
+		!PIN_PURPOSE.test(requiredString(parsed, "purpose")) ||
+		!Number.isFinite(Date.parse(requiredString(parsed, "createdAt")))
+	) {
+		throw new Error(`checkpoint pin identity mismatch: ${pinPath}`)
+	}
+	return parsed as unknown as CheckpointPin
+}
+
+/**
+ * Release a pin acquired by {@link acquireCheckpointPin}. Only the exact owned
+ * pin record at `pinPath` is removed. If the path is absent, belongs to a
+ * different checkpoint, or does not match the recorded pin identity, nothing is
+ * deleted and the call fails closed — over-retention is always preferred.
+ */
+export const releaseCheckpointPin = async (
+	dataDir: string,
+	checkpointId: string,
+	pinPath: string,
+	expectedPurpose?: string,
+): Promise<void> => {
+	await assertCheckpointPinIdentity(dataDir, checkpointId, pinPath, expectedPurpose)
+	const resolvedPinPath = resolve(pinPath)
+	await durableRemove(resolvedPinPath)
+}
+
+/**
+ * Run `fn` while holding the sibling maintenance lock so checkpoint creation,
+ * restore, reset, and archive operations cannot overlap. A live owner is busy;
+ * an unprovable owner fails closed; a provably dead owner is reconciled by
+ * exact operation identity (see {@link acquireMaintenance}). PID age alone never
+ * authorizes deletion. The lock is released when `fn` settles.
+ */
+export const withMaintenanceLock = async <A>(
+	dataDir: string,
+	operationId: string,
+	fn: () => A | Promise<A>,
+): Promise<A> => {
+	const release = await acquireMaintenance(dataDir, validateOperationId(operationId))
+	try {
+		return await fn()
+	} finally {
+		await release()
 	}
 }
 
@@ -1869,6 +2065,11 @@ export const newCheckpointId = (): CheckpointId => validateCheckpointId(randomUU
 export const newCheckpointOperationId = (): CheckpointOperationId => validateOperationId(randomUUID())
 export const newCheckpointQuarantineId = (): CheckpointQuarantineId => validateQuarantineId(randomUUID())
 export const parseCheckpointId = (value: unknown): CheckpointId => validateCheckpointId(value)
+
+// Archive seams record checkpoint selectors as plain journal strings; parse
+// them back into the typed selector accepted by `resolveCheckpoint`.
+export const parseCheckpointSelector = (value: string): "current" | "previous" | CheckpointId =>
+	value === "current" || value === "previous" ? value : validateCheckpointId(value)
 
 // Refuse pre-existing symlink roots even before an operation allocates paths.
 export const assertCheckpointRootSafe = (dataDir: string): void => {

@@ -1,4 +1,5 @@
 import type { Node, Edge } from "@xyflow/react"
+import { describeSpan } from "../../lib/span-category"
 import type { SpanNode } from "../../lib/types"
 
 export interface AggregatedDuration {
@@ -20,8 +21,44 @@ export interface FlowNodeData extends Record<string, unknown> {
 	totalDurationMs: number
 }
 
+export interface FlowEdgeData extends Record<string, unknown> {
+	/** Number of combined child spans this edge fans into (matches the ×N card badge). */
+	count: number
+	/** Total duration across the combined group, ms. */
+	durationMs: number
+	/** min/max across the group; both equal durationMs when count === 1. */
+	minMs: number
+	maxMs: number
+	/** Child group's share of the whole trace, 0..1. */
+	share: number
+	/**
+	 * Gap between parent start and earliest child start, ms. Omitted when a
+	 * timestamp is unparseable, either span is missing, or the gap is negative
+	 * (clock skew) — never show a misleading offset.
+	 */
+	startOffsetMs?: number
+	isError: boolean
+	/** Parent or child is a synthesized missing span. */
+	isMissing: boolean
+	/** Category accent text token of the target span, for the label pill. */
+	accentText: string
+}
+
 export type FlowNode = Node<FlowNodeData, "span">
-export type FlowEdge = Edge
+export type FlowEdge = Edge<FlowEdgeData>
+
+function computeStartOffsetMs(parentSpan: SpanNode, spans: SpanNode[]): number | undefined {
+	const parentStart = new Date(parentSpan.startTime).getTime()
+	if (!Number.isFinite(parentStart)) return undefined
+	let earliest = Infinity
+	for (const s of spans) {
+		const t = new Date(s.startTime).getTime()
+		if (Number.isFinite(t) && t < earliest) earliest = t
+	}
+	if (!Number.isFinite(earliest)) return undefined
+	const offset = earliest - parentStart
+	return offset >= 0 ? offset : undefined
+}
 
 /**
  * Check if two spans are duplicates (same spanName and serviceName)
@@ -147,11 +184,12 @@ export function transformSpansToFlow(
 	// First, combine consecutive duplicates starting from root spans
 	const combinedRoots = combineConsecutiveDuplicates(rootSpans)
 
-	function traverse(combinedNode: CombinedNode, parentId?: string) {
+	function traverse(combinedNode: CombinedNode, parentId?: string, parentSpan?: SpanNode) {
 		const { spans } = combinedNode
 		const nodeId = getCombinedNodeId(spans)
 		const primarySpan = spans[0] // Use first span as the primary representation
 		const count = spans.length
+		const aggregatedDuration = calculateAggregatedDuration(spans)
 
 		// Check if any span in the group is selected
 		const isSelected = spans.some((s) => s.spanId === selectedSpanId)
@@ -167,30 +205,39 @@ export function transformSpansToFlow(
 				isSelected,
 				count,
 				combinedSpans: spans,
-				aggregatedDuration: calculateAggregatedDuration(spans),
+				aggregatedDuration,
 				totalDurationMs,
 			},
 		})
 
 		// Create edge from parent (if any)
-		if (parentId) {
-			const isError = hasAnyError(spans)
+		if (parentId && parentSpan) {
+			const isMissing = primarySpan.isMissing === true || parentSpan.isMissing === true
 			edges.push({
 				id: `${parentId}-${nodeId}`,
 				source: parentId,
 				target: nodeId,
-				...(isError && {
-					style: {
-						stroke: "var(--severity-error)",
-						strokeWidth: 2,
-					},
-				}),
+				type: "flowEdge",
+				data: {
+					count,
+					durationMs: aggregatedDuration.total,
+					minMs: aggregatedDuration.min,
+					maxMs: aggregatedDuration.max,
+					share:
+						totalDurationMs > 0 ? Math.min(1, aggregatedDuration.total / totalDurationMs) : 0,
+					startOffsetMs: isMissing ? undefined : computeStartOffsetMs(parentSpan, spans),
+					isError: hasAnyError(spans),
+					isMissing,
+					accentText: primarySpan.isMissing
+						? "text-muted-foreground"
+						: describeSpan(primarySpan).category.accent.text,
+				},
 			})
 		}
 
 		// Traverse children
 		for (const child of combinedNode.children) {
-			traverse(child, nodeId)
+			traverse(child, nodeId, primarySpan)
 		}
 	}
 

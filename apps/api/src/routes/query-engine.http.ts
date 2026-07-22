@@ -70,7 +70,7 @@ import {
 } from "@maple/domain/http"
 import { Clock, Config, Effect, Match, Option, Schema } from "effect"
 import { QueryEngineService } from "../services/QueryEngineService"
-import { makeExecuteRawSql } from "@maple/query-engine/runtime"
+import { makeDirectRouteCachePolicy, makeExecuteRawSql } from "@maple/query-engine/runtime"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { traceCacheTtlSeconds } from "../lib/trace-detail-cache"
 import {
@@ -463,6 +463,9 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 							}),
 							"serviceOverview query failed",
 						),
+						// v2: rows gained per-commit `firstSeen`; the version bump keeps
+						// pre-upgrade cached rows (missing the field) from being served.
+						makeDirectRouteCachePolicy({ ttlSeconds: 15, version: 2 }),
 					)
 					return new ServiceOverviewResponse({ data: rows })
 				}),

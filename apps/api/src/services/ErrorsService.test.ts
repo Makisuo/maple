@@ -352,6 +352,37 @@ const seedIngestKey = (orgId: string) =>
 	})
 
 // ---------------------------------------------------------------------------
+// countOpenIssuesByService
+// ---------------------------------------------------------------------------
+
+describe("ErrorsService.countOpenIssuesByService", () => {
+	it.effect("groups actionable error issues by service, excluding done/alert/archived", () =>
+		Effect.gen(function* () {
+			const errors = yield* ErrorsService
+			const now = new Date()
+			yield* seedIssue(asIssueId(randomUUID()), { serviceName: "checkout-api" })
+			yield* seedIssue(asIssueId(randomUUID()), {
+				serviceName: "checkout-api",
+				workflowState: "in_progress",
+			})
+			yield* seedIssue(asIssueId(randomUUID()), { serviceName: "ingest", workflowState: "todo" })
+			// Non-actionable, alert-kind, archived, and empty-service rows are all excluded.
+			yield* seedIssue(asIssueId(randomUUID()), { serviceName: "checkout-api", workflowState: "done" })
+			yield* seedIssue(asIssueId(randomUUID()), { serviceName: "alerting", kind: "alert" })
+			yield* seedIssue(asIssueId(randomUUID()), { serviceName: "ingest", archivedAt: now })
+			yield* seedIssue(asIssueId(randomUUID()), { serviceName: "" })
+
+			const counts = yield* errors.countOpenIssuesByService(ORG)
+			const byService = new Map(counts.map((row) => [row.serviceName, row.openCount]))
+			assert.strictEqual(byService.get("checkout-api"), 2)
+			assert.strictEqual(byService.get("ingest"), 1)
+			assert.isFalse(byService.has("alerting"))
+			assert.isFalse(byService.has(""))
+		}).pipe(Effect.provide(makeErrorsLayer())),
+	)
+})
+
+// ---------------------------------------------------------------------------
 // setSeverity
 // ---------------------------------------------------------------------------
 

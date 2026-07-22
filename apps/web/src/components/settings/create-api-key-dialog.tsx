@@ -21,6 +21,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { ToggleGroup, ToggleGroupItem } from "@maple/ui/components/ui/toggle-group"
 import { useApiKeyMutationSync } from "@/hooks/use-api-keys"
+import { formatBackendError } from "@/lib/error-messages"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { buildApiKeyCreatePayload } from "./api-key-create-payload"
 import { ApiKeySecretReveal } from "./api-key-secret-reveal"
@@ -115,7 +116,8 @@ export function CreateApiKeyDialog({ open, onOpenChange, onCreated, kind }: Crea
 			onCreated?.(result.value.secret)
 			void reconcileTxid(result.value.txid)
 		} else {
-			toast.error("Failed to create API key")
+			const { title, description } = formatBackendError(result)
+			toast.error(title, { description })
 		}
 		setIsCreating(false)
 	}

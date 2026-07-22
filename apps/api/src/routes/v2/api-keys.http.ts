@@ -109,7 +109,14 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 			.handle("create", ({ payload }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* requireAdmin(tenant.roles, adminOnly("create"))
+					// MCP keys are per-developer credentials any member may mint for
+					// themselves; the creator's roles are pinned onto the key so it
+					// carries no more authority than they have (an unpinned key
+					// resolves as `root`). Standard API keys stay admin-only.
+					const isMcpKey = payload.kind === "mcp"
+					if (!isMcpKey) {
+						yield* requireAdmin(tenant.roles, adminOnly("create"))
+					}
 					const createdByEmail = yield* auth.getUserEmail(tenant.userId)
 					const created = yield* apiKeysService
 						.create(tenant.orgId, tenant.userId, {
@@ -119,6 +126,9 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 							kind: payload.kind,
 							scopes: payload.scopes,
 							createdByEmail,
+							...(isMcpKey
+								? { metadataJson: { source: "maple_mcp", roles: [...tenant.roles] } }
+								: {}),
 						})
 						.pipe(Effect.mapError(mapPersistenceError("create")))
 					return toV2ApiKeyWithSecret(created)
@@ -138,7 +148,16 @@ export const HttpV2ApiKeysLive = HttpApiBuilder.group(MapleApiV2, "apiKeys", (ha
 			.handle("revoke", ({ params }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* requireAdmin(tenant.roles, adminOnly("revoke"))
+					// Whoever can mint a key must be able to kill it: a member may
+					// revoke an MCP key they created themselves. Everything else
+					// stays admin-only.
+					const existing = yield* apiKeysService
+						.get(tenant.orgId, params.id)
+						.pipe(mapServiceError("revoke"))
+					const isOwnMcpKey = existing.kind === "mcp" && existing.createdBy === tenant.userId
+					if (!isOwnMcpKey) {
+						yield* requireAdmin(tenant.roles, adminOnly("revoke"))
+					}
 					const revoked = yield* apiKeysService
 						.revoke(tenant.orgId, params.id)
 						.pipe(mapServiceError("revoke"))

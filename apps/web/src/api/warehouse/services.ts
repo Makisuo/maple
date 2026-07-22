@@ -35,6 +35,9 @@ export interface CommitBreakdown {
 	commitSha: string
 	spanCount: number
 	percentage: number
+	errorCount: number
+	/** Earliest span for this commit inside the queried window ("" when unknown). */
+	firstSeen: string
 }
 
 export interface ServiceOverview {
@@ -76,6 +79,7 @@ interface CoercedRow {
 	p95LatencyMs: number
 	p99LatencyMs: number
 	estimatedSpanCount: number
+	firstSeen: string
 }
 
 function coerceRow(raw: Record<string, unknown>): CoercedRow {
@@ -92,6 +96,7 @@ function coerceRow(raw: Record<string, unknown>): CoercedRow {
 		p95LatencyMs: Number(raw.p95LatencyMs ?? 0),
 		p99LatencyMs: Number(raw.p99LatencyMs ?? 0),
 		estimatedSpanCount: Number(raw.estimatedSpanCount ?? 0),
+		firstSeen: String(raw.firstSeen ?? ""),
 	}
 }
 
@@ -151,13 +156,32 @@ function aggregateByServiceEnvironment(rows: CoercedRow[], durationSeconds: numb
 			}
 		}
 
-		const commits: CommitBreakdown[] = group
-			.map((r) => ({
-				commitSha: r.commitSha,
-				spanCount: r.spanCount,
-				percentage: totalSpans > 0 ? Math.round((r.spanCount / totalSpans) * 100) : 0,
-			}))
-			.sort((a, b) => b.percentage - a.percentage)
+		// Merge namespace variants of the same commit so a sha never appears twice
+		// and its firstSeen/error totals cover every variant.
+		const commitTotals = new Map<string, { spanCount: number; errorCount: number; firstSeen: string }>()
+		for (const r of group) {
+			const existing = commitTotals.get(r.commitSha)
+			if (existing) {
+				existing.spanCount += r.spanCount
+				existing.errorCount += r.errorCount
+				if (r.firstSeen !== "" && (existing.firstSeen === "" || r.firstSeen < existing.firstSeen)) {
+					existing.firstSeen = r.firstSeen
+				}
+			} else {
+				commitTotals.set(r.commitSha, {
+					spanCount: r.spanCount,
+					errorCount: r.errorCount,
+					firstSeen: r.firstSeen,
+				})
+			}
+		}
+		const commits: CommitBreakdown[] = Array.from(commitTotals, ([commitSha, totals]) => ({
+			commitSha,
+			spanCount: totals.spanCount,
+			percentage: totalSpans > 0 ? Math.round((totals.spanCount / totalSpans) * 100) : 0,
+			errorCount: totals.errorCount,
+			firstSeen: totals.firstSeen,
+		})).sort((a, b) => b.percentage - a.percentage)
 
 		results.push({
 			serviceName: representative.serviceName,

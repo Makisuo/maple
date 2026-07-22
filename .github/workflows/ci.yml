@@ -57,7 +57,16 @@ jobs:
 
             # shellcheck is preinstalled on the ubuntu-latest runner image.
             - name: shellcheck
-              run: shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh apps/cli/test/native-checkpoint-smoke.sh
+              run: >-
+                  shellcheck scripts/install.sh scripts/uninstall.sh scripts/build-local-binary.sh
+                  apps/cli/test/native-checkpoint-smoke.sh
+                  apps/cli/test/native-archive-smoke.sh
+                  apps/cli/test/native-archive-crash-recovery-probe.sh
+                  apps/cli/test/native-archive-adversarial-probe.sh
+                  apps/cli/test/native-archive-calibrate-crash-probe.sh
+                  apps/cli/test/native-archive-calibrate-probe.sh
+                  apps/cli/test/native-archive-gc-probe.sh
+                  apps/cli/test/native-archive-merge-probe.sh
 
             # Syntax-check the POSIX installers against the actual /bin/sh they claim.
             - name: sh -n
@@ -93,6 +102,100 @@ jobs:
               with:
                   name: native-checkpoint-failure-${{ github.run_id }}
                   path: ${{ runner.temp }}/maple-native-checkpoint
+                  if-no-files-found: ignore
+
+    local-archive-native:
+        name: Local archive native
+        runs-on: ubuntu-latest
+        timeout-minutes: 90
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - run: bun install --frozen-lockfile
+
+            - name: Install pinned DuckDB CLI
+              run: |
+                  curl -fsSL https://github.com/duckdb/duckdb/releases/download/v1.5.3/duckdb_cli-linux-amd64.gz \
+                    -o "$RUNNER_TEMP/duckdb.gz"
+                  echo "f05f3b448a9a1bc6e7ac27ff14dfe67bf5761b153c2002723365a456618ef35b  $RUNNER_TEMP/duckdb.gz" \
+                    | sha256sum --check --strict
+                  gunzip "$RUNNER_TEMP/duckdb.gz"
+                  chmod +x "$RUNNER_TEMP/duckdb"
+                  echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+
+            - name: Build native local bundle
+              run: scripts/build-local-binary.sh
+
+            - name: Run archive lifecycle smoke
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-smoke.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Run archive crash-recovery boundaries
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive-recovery
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-crash-recovery-probe.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Run archive adversarial integrity matrix
+              env:
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive-adversarial
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-adversarial-probe.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Run archive merge-safety probe
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive-merge
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-merge-probe.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Run archive calibration lifecycle
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive-calibration
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-calibrate-probe.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Run archive calibration crash recovery
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive-calibration-crash
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-calibrate-crash-probe.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Run archive GC crash recovery
+              env:
+                  KEEP_ROOT: "1"
+                  TMPDIR: ${{ runner.temp }}/maple-native-archive-gc
+              run: |
+                  mkdir -p "$TMPDIR"
+                  apps/cli/test/native-archive-gc-probe.sh "$GITHUB_WORKSPACE/dist"
+
+            - name: Upload archive failure evidence
+              if: ${{ failure() }}
+              uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4
+              with:
+                  name: native-archive-failure-${{ github.run_id }}
+                  path: |
+                      ${{ runner.temp }}/maple-native-archive
+                      ${{ runner.temp }}/maple-native-archive-recovery
+                      ${{ runner.temp }}/maple-native-archive-adversarial
+                      ${{ runner.temp }}/maple-native-archive-merge
+                      ${{ runner.temp }}/maple-native-archive-calibration
+                      ${{ runner.temp }}/maple-native-archive-calibration-crash
+                      ${{ runner.temp }}/maple-native-archive-gc
                   if-no-files-found: ignore
 
     service-map-perf:

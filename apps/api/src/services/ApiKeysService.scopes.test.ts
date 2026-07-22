@@ -71,6 +71,105 @@ describe("ApiKeysService scopes", () => {
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
+	it.effect("fails closed for malformed Maple CLI role metadata", () =>
+		Effect.gen(function* () {
+			const service = yield* ApiKeysService
+			const created = yield* service.create(ORG, USER, {
+				name: "broken cli",
+				metadataJson: { source: "maple_cli", roles: [42], deviceName: "laptop" },
+			})
+			expect(Option.isNone(yield* service.resolveByKey(created.secret))).toBe(true)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("resolves the roles pinned by MCP key metadata", () =>
+		Effect.gen(function* () {
+			const service = yield* ApiKeysService
+			const created = yield* service.create(ORG, USER, {
+				name: "member mcp",
+				kind: "mcp",
+				metadataJson: { source: "maple_mcp", roles: ["org:member"] },
+			})
+
+			const resolved = yield* service.resolveByKey(created.secret)
+			expect(Option.isSome(resolved)).toBe(true)
+			if (Option.isSome(resolved)) {
+				expect(resolved.value.roles).toEqual(["org:member"])
+				expect(resolved.value.cliManaged).toBe(false)
+			}
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("fails closed for malformed MCP role metadata", () =>
+		Effect.gen(function* () {
+			const service = yield* ApiKeysService
+			const created = yield* service.create(ORG, USER, {
+				name: "broken mcp",
+				kind: "mcp",
+				metadataJson: { source: "maple_mcp", roles: "org:member" },
+			})
+			expect(Option.isNone(yield* service.resolveByKey(created.secret))).toBe(true)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("resolves audience and roles from MCP OAuth metadata", () =>
+		Effect.gen(function* () {
+			const service = yield* ApiKeysService
+			const created = yield* service.create(ORG, USER, {
+				name: "oauth mcp",
+				kind: "mcp",
+				scopes: ["mcp:tools"],
+				metadataJson: {
+					source: "maple_mcp_oauth",
+					roles: ["org:member"],
+					clientId: "client_1",
+					resource: "https://api.example.com/mcp",
+				},
+			})
+			const resolved = yield* service.resolveByKey(created.secret)
+			expect(Option.isSome(resolved)).toBe(true)
+			if (Option.isSome(resolved)) {
+				expect(resolved.value.roles).toEqual(["org:member"])
+				expect(resolved.value.mcpOAuthResource).toBe("https://api.example.com/mcp")
+			}
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("fails closed for malformed MCP OAuth audience metadata", () =>
+		Effect.gen(function* () {
+			const service = yield* ApiKeysService
+			const created = yield* service.create(ORG, USER, {
+				name: "broken oauth mcp",
+				kind: "mcp",
+				scopes: ["mcp:tools"],
+				metadataJson: {
+					source: "maple_mcp_oauth",
+					roles: ["org:member"],
+					clientId: "client_1",
+				},
+			})
+			expect(Option.isNone(yield* service.resolveByKey(created.secret))).toBe(true)
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
+	it.effect("roll preserves pinned roles instead of escalating to the root default", () =>
+		Effect.gen(function* () {
+			const service = yield* ApiKeysService
+			const created = yield* service.create(ORG, USER, {
+				name: "laptop",
+				metadataJson: { source: "maple_cli", roles: ["org:member"], deviceName: "laptop" },
+			})
+
+			const rolled = yield* service.roll(ORG, USER, created.id, {})
+			const resolved = yield* service.resolveByKey(rolled.secret)
+			expect(Option.isSome(resolved)).toBe(true)
+			if (Option.isSome(resolved)) {
+				expect(resolved.value.roles).toEqual(["org:member"])
+				expect(resolved.value.cliManaged).toBe(true)
+			}
+		}).pipe(Effect.provide(makeLayer())),
+	)
+
 	it.effect("roll preserves the original key's scopes", () =>
 		Effect.gen(function* () {
 			const service = yield* ApiKeysService

@@ -110,6 +110,7 @@ describe("serviceOverviewQuery", () => {
 		expect(sql).toContain("quantile(0.5)(Duration) / 1000000 AS p50LatencyMs")
 		expect(sql).toContain("quantile(0.95)(Duration) / 1000000 AS p95LatencyMs")
 		expect(sql).toContain("quantile(0.99)(Duration) / 1000000 AS p99LatencyMs")
+		expect(sql).toContain("min(Timestamp) AS firstSeen")
 		expect(sql).toContain("GROUP BY serviceName, serviceNamespace, environment, commitSha")
 		expect(sql).toContain("ORDER BY throughput DESC")
 		expect(sql).toContain("LIMIT 100")

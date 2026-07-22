@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Schema } from "effect"
+import { ConfigProvider, Context, Effect, Layer, ManagedRuntime, Option, Schema } from "effect"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { OrgId, UserId } from "@maple/domain/http"
@@ -102,15 +102,39 @@ const makeHarness = (
 	const ORG = Schema.decodeUnknownSync(OrgId)("org_e2e")
 	const USER = Schema.decodeUnknownSync(UserId)("user_e2e")
 
-	const bootstrapKey = (scopes?: ReadonlyArray<string>, kind: "standard" | "mcp" = "standard") =>
+	const bootstrapKey = (
+		scopes?: ReadonlyArray<string>,
+		kind: "standard" | "mcp" = "standard",
+		options: { metadataJson?: unknown; userId?: UserId } = {},
+	) =>
 		runtime.runPromise(
 			Effect.gen(function* () {
 				const service = yield* ApiKeysService
-				return yield* service.create(ORG, USER, {
+				return yield* service.create(ORG, options.userId ?? USER, {
 					name: scopes === undefined ? "root-key" : `scoped:${scopes.join(",")}`,
 					scopes,
 					kind,
+					...(options.metadataJson !== undefined ? { metadataJson: options.metadataJson } : {}),
 				})
+			}),
+		)
+
+	/**
+	 * A caller with a real, non-admin role. Keys resolve with `roles: null`
+	 * (= `root`) unless their metadata pins roles, which is how the CLI login
+	 * flow issues member-scoped credentials.
+	 */
+	const bootstrapMemberKey = (userId: UserId = USER) =>
+		bootstrapKey(undefined, "standard", {
+			userId,
+			metadataJson: { source: "maple_cli", roles: ["org:member"], deviceName: "laptop" },
+		})
+
+	const resolveKey = (secret: string) =>
+		runtime.runPromise(
+			Effect.gen(function* () {
+				const service = yield* ApiKeysService
+				return yield* service.resolveByKey(secret)
 			}),
 		)
 
@@ -125,7 +149,11 @@ const makeHarness = (
 	return {
 		request,
 		bootstrapKey,
+		bootstrapMemberKey,
 		bootstrapSession,
+		resolveKey,
+		ORG,
+		USER,
 		closeDatabase: () => testDb.close(),
 		dispose: async () => {
 			await disposeHandler()
@@ -310,6 +338,70 @@ describe("v2 api_keys over HTTP", () => {
 		expect(revoked.status).toBe(200)
 		expect(revoked.body.revoked).toBe(true)
 		expect(revoked.body.txid).toMatch(/^\d+$/)
+		await harness.dispose()
+	})
+
+	it("lets a non-admin member create an MCP key that carries their own roles", async () => {
+		const harness = makeHarness()
+		const member = await harness.bootstrapMemberKey()
+
+		const created = await harness.request("POST", "/v2/api_keys", {
+			token: member.secret,
+			body: { name: "my editor", kind: "mcp" },
+		})
+		expect(created.status).toBe(200)
+		expect(created.body.kind).toBe("mcp")
+
+		// The minted key must not resolve as `root` — it inherits the member's roles.
+		const resolved = await harness.resolveKey(created.body.secret)
+		expect(Option.isSome(resolved)).toBe(true)
+		if (Option.isSome(resolved)) {
+			expect(resolved.value.roles).toEqual(["org:member"])
+		}
+		await harness.dispose()
+	})
+
+	it("still refuses standard API keys for a non-admin member", async () => {
+		const harness = makeHarness()
+		const member = await harness.bootstrapMemberKey()
+
+		const { status, body } = await harness.request("POST", "/v2/api_keys", {
+			token: member.secret,
+			body: { name: "ci" },
+		})
+		expect(status).toBe(403)
+		expect(body.error).toEqual({
+			type: "permission_error",
+			code: "insufficient_permissions",
+			message: "Only org admins can create API keys",
+		})
+		await harness.dispose()
+	})
+
+	it("lets a member revoke their own MCP key but not anyone else's key", async () => {
+		const harness = makeHarness()
+		const member = await harness.bootstrapMemberKey()
+
+		const own = await harness.request("POST", "/v2/api_keys", {
+			token: member.secret,
+			body: { name: "my editor", kind: "mcp" },
+		})
+		expect(own.status).toBe(200)
+
+		const revoked = await harness.request("DELETE", `/v2/api_keys/${own.body.id}`, {
+			token: member.secret,
+		})
+		expect(revoked.status).toBe(200)
+		expect(revoked.body.revoked).toBe(true)
+
+		const other = Schema.decodeUnknownSync(UserId)("user_other")
+		const foreign = await harness.bootstrapKey(undefined, "mcp", { userId: other })
+		const { encodePublicId } = await import("@maple/domain/http/v2")
+		const denied = await harness.request("DELETE", `/v2/api_keys/${encodePublicId("key", foreign.id)}`, {
+			token: member.secret,
+		})
+		expect(denied.status).toBe(403)
+		expect(denied.body.error.code).toBe("insufficient_permissions")
 		await harness.dispose()
 	})
 
