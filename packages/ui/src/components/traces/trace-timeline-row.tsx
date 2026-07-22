@@ -158,6 +158,10 @@ function SpanBar({
 	// Off-screen → don't render (overflow-hidden also clips, this skips the node entirely).
 	if (leftPct > 100 || leftPct + rawWidthPct < 0) return null
 
+	// Bar continues beyond the visible window? Show edge chevrons (Jaeger's clipping-left/right).
+	const clipLeft = leftPct < 0
+	const clipRight = leftPct + rawWidthPct > 100
+
 	// Clamp the rendered rect to a bounded range around the visible column. When zoomed in
 	// hard, a span spanning the whole trace would otherwise resolve to a multi-million-percent
 	// (gigapixel) node; overflow-hidden clips anything past the column, so this is visually
@@ -167,27 +171,78 @@ function SpanBar({
 	const widthPct = Math.max(0, right - left)
 
 	const barPx = (widthPct / 100) * timelineWidthPx
-	const showName = barPx > 56
-	const showDuration = barPx > 140
+	// Label room is what's actually on screen, not the bar's full width — a bar whose
+	// tail barely enters the view must not try to fit its name inside.
+	const visiblePx = ((Math.min(right, 100) - Math.max(left, 0)) / 100) * timelineWidthPx
+	const showName = visiblePx > 56
+	const showDuration = visiblePx > 140
+	// A clipped-left bar keeps its label pinned to the visible edge (Sentry's sticky label).
+	// px, not % — CSS percentage padding resolves against the parent cell, not the bar.
+	// Capped so at least ~60px of label room remains inside the bar.
+	const offscreenLeftPx = clipLeft ? ((0 - left) / 100) * timelineWidthPx : 0
+	const labelIndentPx = Math.min(offscreenLeftPx, Math.max(0, barPx - 60))
+
+	// Too small for an inside name → put it beside the bar, on the side with more room
+	// (Jaeger's hintSide heuristic). Rendered as a sibling so it isn't clipped by the bar.
+	const outsideLabelSide: "right" | "left" | null = showName
+		? null
+		: right < 70
+			? "right"
+			: left > 30
+				? "left"
+				: null
 
 	return (
-		<div
-			className="absolute top-1/2 -translate-y-1/2 flex items-center overflow-hidden whitespace-nowrap font-mono text-[11px]"
-			style={{
-				left: `${left}%`,
-				width: `max(2px, ${widthPct}%)`,
-				height: ROW_HEIGHT - 8,
-				backgroundColor: bar.fill,
-				borderLeft: `3px solid ${bar.borderColor}`,
-			}}
-		>
-			{showName && <span className="truncate px-1.5 text-foreground/90">{bar.span.spanName}</span>}
-			{showDuration && (
-				<span className="ml-auto shrink-0 px-1.5 text-foreground/50 tabular-nums">
-					{formatDuration(bar.span.durationMs)}
+		<>
+			<div
+				className="absolute top-1/2 -translate-y-1/2 flex items-center overflow-hidden whitespace-nowrap font-mono text-[11px]"
+				style={{
+					left: `${left}%`,
+					width: `max(2px, ${widthPct}%)`,
+					height: ROW_HEIGHT - 8,
+					backgroundColor: bar.fill,
+					borderLeft: `3px solid ${bar.borderColor}`,
+					paddingLeft: labelIndentPx > 0 ? labelIndentPx : undefined,
+				}}
+			>
+				{showName && <span className="truncate px-1.5 text-foreground/90">{bar.span.spanName}</span>}
+				{showDuration && (
+					<span className="ml-auto shrink-0 px-1.5 text-foreground/50 tabular-nums">
+						{formatDuration(bar.span.durationMs)}
+					</span>
+				)}
+			</div>
+			{outsideLabelSide && (
+				<span
+					className="pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[10px] text-muted-foreground/80"
+					style={
+						outsideLabelSide === "right"
+							? { left: `${right}%`, marginLeft: 5 }
+							: { left: `${left}%`, transform: "translate(calc(-100% - 5px), -50%)" }
+					}
+				>
+					{bar.span.spanName} · {formatDuration(bar.span.durationMs)}
 				</span>
 			)}
-		</div>
+			{clipLeft && (
+				<span
+					className="pointer-events-none absolute left-0.5 top-1/2 -translate-y-1/2 font-mono text-[9px] leading-none"
+					style={{ color: bar.borderColor }}
+					aria-hidden
+				>
+					‹
+				</span>
+			)}
+			{clipRight && (
+				<span
+					className="pointer-events-none absolute right-0.5 top-1/2 -translate-y-1/2 font-mono text-[9px] leading-none"
+					style={{ color: bar.borderColor }}
+					aria-hidden
+				>
+					›
+				</span>
+			)}
+		</>
 	)
 }
 

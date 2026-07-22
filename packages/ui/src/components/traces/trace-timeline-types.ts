@@ -29,7 +29,7 @@ export interface TimelineState {
 
 export type TimelineAction =
 	| { type: "RESET"; state: TimelineState }
-	| { type: "SET_VIEWPORT"; viewport: ViewportState }
+	| { type: "SET_VIEWPORT"; viewport: ViewportState; traceStartMs: number; traceEndMs: number }
 	| { type: "ZOOM"; centerMs: number; factor: number; traceStartMs: number; traceEndMs: number }
 	| { type: "PAN"; deltaMs: number; traceStartMs: number; traceEndMs: number }
 	| { type: "ZOOM_TO_SPAN"; startMs: number; endMs: number; traceStartMs: number; traceEndMs: number }

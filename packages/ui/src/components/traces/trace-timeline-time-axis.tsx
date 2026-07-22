@@ -13,7 +13,7 @@ export function TraceTimelineTimeAxis({ viewport, ticks, traceStartMs }: TraceTi
 
 	return (
 		<div
-			className="sticky top-0 z-20 flex items-end border-b border-border bg-background/95 backdrop-blur-sm px-0"
+			className="relative flex items-end border-b border-border bg-background px-0"
 			style={{ height: TIME_AXIS_HEIGHT }}
 		>
 			{ticks.map((offsetMs) => {

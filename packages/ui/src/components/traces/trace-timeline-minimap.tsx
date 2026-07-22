@@ -2,6 +2,7 @@ import * as React from "react"
 import type { SpanNode } from "../../lib/types"
 import type { ViewportState } from "./trace-timeline-types"
 import { MINIMAP_HEIGHT } from "./trace-timeline-types"
+import { formatDuration } from "../../lib/format"
 import { getValueHue } from "../../lib/colors"
 import { resolveColorValue, isStatusCodePreset, type ColorByField } from "./color-by"
 
@@ -20,9 +21,14 @@ interface MinimapSpan {
 	leftPercent: number
 	widthPercent: number
 	bgColor: string
+	isError: boolean
 }
 
 const NEUTRAL_MINIMAP_BG = "oklch(0.50 0.02 0)"
+/** Errors pop in the minimap so a trace-scale error scan works (Honeycomb pattern). */
+const ERROR_MINIMAP_BG = "oklch(0.62 0.22 25)"
+/** Movement (px) before a press outside the viewport rect becomes a reframe drag instead of a jump. */
+const REFRAME_THRESHOLD_PX = 3
 
 function collectMinimapSpans(
 	rootSpans: SpanNode[],
@@ -45,7 +51,7 @@ function collectMinimapSpans(
 		const isError = node.statusCode === "Error"
 		let bgColor: string
 		if (isError && !statusPreset) {
-			bgColor = "oklch(0.50 0.18 25)"
+			bgColor = ERROR_MINIMAP_BG
 		} else {
 			const value = resolveColorValue(node, colorBy)
 			const hue = getValueHue(value)
@@ -59,12 +65,15 @@ function collectMinimapSpans(
 			leftPercent: clampedLeft,
 			widthPercent: Math.min(widthPercent, 100 - clampedLeft),
 			bgColor,
+			isError,
 		})
 
 		node.children.forEach(visit)
 	}
 
 	rootSpans.forEach(visit)
+	// Errors last → painted on top of same-position siblings.
+	spans.sort((a, b) => Number(a.isError) - Number(b.isError))
 	return { spans, maxDepth }
 }
 
@@ -77,30 +86,42 @@ export function TraceTimelineMinimap({
 	onViewportChange,
 }: TraceTimelineMinimapProps) {
 	const containerRef = React.useRef<HTMLDivElement>(null)
+	const guideRef = React.useRef<HTMLDivElement>(null)
 	const dragRef = React.useRef<{
-		type: "pan" | "resize-left" | "resize-right"
+		type: "pan" | "resize-left" | "resize-right" | "reframe"
 		startX: number
+		moved: boolean
 		startViewport: ViewportState
 	} | null>(null)
+	/** Live reframe preview, in minimap % — anchor and cursor ends, unordered. */
+	const [reframePreview, setReframePreview] = React.useState<{ a: number; b: number } | null>(null)
 
 	const traceDuration = traceEndMs - traceStartMs
 
-	const { spans } = React.useMemo(
+	const { spans, maxDepth } = React.useMemo(
 		() => collectMinimapSpans(rootSpans, traceStartMs, traceDuration, colorBy),
 		[rootSpans, traceStartMs, traceDuration, colorBy],
 	)
 
-	const ROW_H = 3
+	// Fit every depth level inside the strip: deep traces compress the row pitch evenly
+	// instead of piling everything past a fixed depth onto the bottom row.
+	const pitch = Math.max(1, Math.min(4, Math.floor((MINIMAP_HEIGHT - 4) / (maxDepth + 1))))
+	const rowH = Math.max(1, pitch - 1)
 
 	// Viewport rectangle position
 	const vpLeftPercent = ((viewport.startMs - traceStartMs) / traceDuration) * 100
 	const vpWidthPercent = ((viewport.endMs - viewport.startMs) / traceDuration) * 100
 
+	const pctFromEvent = React.useCallback((clientX: number) => {
+		const rect = containerRef.current?.getBoundingClientRect()
+		if (!rect || rect.width === 0) return 0
+		return ((clientX - rect.left) / rect.width) * 100
+	}, [])
+
 	const handleMouseDown = React.useCallback(
 		(e: React.MouseEvent) => {
 			if (!containerRef.current) return
-			const rect = containerRef.current.getBoundingClientRect()
-			const clickPercent = ((e.clientX - rect.left) / rect.width) * 100
+			const clickPercent = pctFromEvent(e.clientX)
 
 			// Check if clicking on viewport edges (resize) or inside viewport (pan)
 			const edgeThreshold = 2 // percent
@@ -111,6 +132,7 @@ export function TraceTimelineMinimap({
 				dragRef.current = {
 					type: "resize-left",
 					startX: e.clientX,
+					moved: false,
 					startViewport: { ...viewport },
 				}
 			} else if (
@@ -120,38 +142,42 @@ export function TraceTimelineMinimap({
 				dragRef.current = {
 					type: "resize-right",
 					startX: e.clientX,
+					moved: false,
 					startViewport: { ...viewport },
 				}
 			} else if (clickPercent >= vpLeftPercent && clickPercent <= vpLeftPercent + vpWidthPercent) {
 				dragRef.current = {
 					type: "pan",
 					startX: e.clientX,
+					moved: false,
 					startViewport: { ...viewport },
 				}
 			} else {
-				// Click outside viewport: jump viewport center to click position
-				const clickMs = traceStartMs + (clickPercent / 100) * traceDuration
-				const vpDuration = viewport.endMs - viewport.startMs
-				onViewportChange({
-					startMs: clickMs - vpDuration / 2,
-					endMs: clickMs + vpDuration / 2,
-				})
+				// Outside the viewport rect: a drag draws a new range (Jaeger's reframe);
+				// a plain click (no movement) jumps the viewport center — resolved on mouseup.
+				dragRef.current = {
+					type: "reframe",
+					startX: e.clientX,
+					moved: false,
+					startViewport: { ...viewport },
+				}
 			}
 
 			e.preventDefault()
 		},
-		[viewport, vpLeftPercent, vpWidthPercent, traceStartMs, traceDuration, onViewportChange],
+		[viewport, vpLeftPercent, vpWidthPercent, pctFromEvent],
 	)
 
 	React.useEffect(() => {
 		const handleMouseMove = (e: MouseEvent) => {
-			if (!dragRef.current || !containerRef.current) return
+			const d = dragRef.current
+			if (!d || !containerRef.current) return
 			const rect = containerRef.current.getBoundingClientRect()
-			const deltaPercent = ((e.clientX - dragRef.current.startX) / rect.width) * 100
+			const deltaPercent = ((e.clientX - d.startX) / rect.width) * 100
 			const deltaMs = (deltaPercent / 100) * traceDuration
-			const sv = dragRef.current.startViewport
+			const sv = d.startViewport
 
-			switch (dragRef.current.type) {
+			switch (d.type) {
 				case "pan":
 					onViewportChange({
 						startMs: sv.startMs + deltaMs,
@@ -170,11 +196,45 @@ export function TraceTimelineMinimap({
 						endMs: Math.max(sv.endMs + deltaMs, sv.startMs + traceDuration * 0.01),
 					})
 					break
+				case "reframe": {
+					if (!d.moved && Math.abs(e.clientX - d.startX) <= REFRAME_THRESHOLD_PX) return
+					d.moved = true
+					const a = ((d.startX - rect.left) / rect.width) * 100
+					const b = ((e.clientX - rect.left) / rect.width) * 100
+					setReframePreview({ a, b })
+					break
+				}
 			}
 		}
 
-		const handleMouseUp = () => {
+		const handleMouseUp = (e: MouseEvent) => {
+			const d = dragRef.current
 			dragRef.current = null
+			if (!d) return
+			if (d.type !== "reframe") return
+			setReframePreview(null)
+			const rect = containerRef.current?.getBoundingClientRect()
+			if (!rect || rect.width === 0) return
+			if (d.moved) {
+				// Commit the previewed range (either drag direction).
+				const aPct = ((d.startX - rect.left) / rect.width) * 100
+				const bPct = ((e.clientX - rect.left) / rect.width) * 100
+				const lo = Math.min(aPct, bPct)
+				const hi = Math.max(aPct, bPct)
+				onViewportChange({
+					startMs: traceStartMs + (lo / 100) * traceDuration,
+					endMs: traceStartMs + (hi / 100) * traceDuration,
+				})
+			} else {
+				// Plain click: jump viewport center to the clicked position.
+				const clickPercent = ((e.clientX - rect.left) / rect.width) * 100
+				const clickMs = traceStartMs + (clickPercent / 100) * traceDuration
+				const vpDuration = d.startViewport.endMs - d.startViewport.startMs
+				onViewportChange({
+					startMs: clickMs - vpDuration / 2,
+					endMs: clickMs + vpDuration / 2,
+				})
+			}
 		}
 
 		window.addEventListener("mousemove", handleMouseMove)
@@ -183,7 +243,40 @@ export function TraceTimelineMinimap({
 			window.removeEventListener("mousemove", handleMouseMove)
 			window.removeEventListener("mouseup", handleMouseUp)
 		}
-	}, [traceDuration, onViewportChange])
+	}, [traceDuration, traceStartMs, onViewportChange])
+
+	// Hover guide: vertical line + time readout, written imperatively (no re-render per pixel).
+	const handleHoverMove = React.useCallback(
+		(e: React.MouseEvent) => {
+			const node = guideRef.current
+			const rect = containerRef.current?.getBoundingClientRect()
+			if (!node || !rect || rect.width === 0) return
+			if (dragRef.current) {
+				node.style.display = "none"
+				return
+			}
+			const x = e.clientX - rect.left
+			node.style.display = "block"
+			node.style.transform = `translateX(${x}px)`
+			const label = node.firstElementChild as HTMLElement | null
+			if (label) {
+				label.textContent = `+${formatDuration((x / rect.width) * traceDuration)}`
+				label.style.transform = x > rect.width - 70 ? "translateX(calc(-100% - 5px))" : "translateX(5px)"
+			}
+		},
+		[traceDuration],
+	)
+
+	const handleHoverLeave = React.useCallback(() => {
+		if (guideRef.current) guideRef.current.style.display = "none"
+	}, [])
+
+	const handleDoubleClick = React.useCallback(() => {
+		onViewportChange({ startMs: traceStartMs, endMs: traceEndMs })
+	}, [onViewportChange, traceStartMs, traceEndMs])
+
+	const previewLo = reframePreview ? Math.min(reframePreview.a, reframePreview.b) : null
+	const previewHi = reframePreview ? Math.max(reframePreview.a, reframePreview.b) : null
 
 	return (
 		<div
@@ -191,6 +284,10 @@ export function TraceTimelineMinimap({
 			className="relative border-b border-border bg-muted/10 cursor-crosshair select-none"
 			style={{ height: MINIMAP_HEIGHT }}
 			onMouseDown={handleMouseDown}
+			onMouseMove={handleHoverMove}
+			onMouseLeave={handleHoverLeave}
+			onDoubleClick={handleDoubleClick}
+			title="Drag to select a range · click to jump · double-click to fit"
 		>
 			{/* Minimap bars */}
 			<div className="absolute inset-x-0 inset-y-0 px-0" style={{ paddingTop: 2, paddingBottom: 2 }}>
@@ -199,10 +296,10 @@ export function TraceTimelineMinimap({
 						key={s.spanId}
 						className="absolute"
 						style={{
-							top: Math.min(s.depth * (ROW_H + 1) + 2, MINIMAP_HEIGHT - ROW_H - 2),
+							top: Math.min(2 + s.depth * pitch, MINIMAP_HEIGHT - rowH - 2),
 							left: `${s.leftPercent}%`,
 							width: `${Math.max(s.widthPercent, 0.2)}%`,
-							height: ROW_H,
+							height: rowH,
 							backgroundColor: s.bgColor,
 						}}
 					/>
@@ -219,6 +316,23 @@ export function TraceTimelineMinimap({
 				style={{ left: `${vpLeftPercent + vpWidthPercent}%`, right: 0 }}
 			/>
 
+			{/* Reframe preview (drag-in-progress) */}
+			{previewLo !== null && previewHi !== null && (
+				<div
+					className="absolute inset-y-0 border-x border-primary/70 bg-primary/15 pointer-events-none"
+					style={{ left: `${previewLo}%`, width: `${previewHi - previewLo}%` }}
+				/>
+			)}
+
+			{/* Hover guide: line + time readout (imperative) */}
+			<div
+				ref={guideRef}
+				className="pointer-events-none absolute inset-y-0 left-0 w-px bg-foreground/40"
+				style={{ display: "none" }}
+			>
+				<span className="absolute top-0 whitespace-nowrap bg-background/90 px-1 font-mono text-[9px] leading-3 text-muted-foreground" />
+			</div>
+
 			{/* Viewport indicator */}
 			<div
 				className="absolute inset-y-0 border-x-2 border-primary/60 cursor-grab active:cursor-grabbing"
@@ -226,7 +340,11 @@ export function TraceTimelineMinimap({
 					left: `${vpLeftPercent}%`,
 					width: `${Math.max(vpWidthPercent, 1)}%`,
 				}}
-			/>
+			>
+				{/* Resize affordances — hit detection lives in handleMouseDown; these only set the cursor. */}
+				<div className="absolute inset-y-0 -left-1 w-2 cursor-ew-resize" />
+				<div className="absolute inset-y-0 -right-1 w-2 cursor-ew-resize" />
+			</div>
 		</div>
 	)
 }
