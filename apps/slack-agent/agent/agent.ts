@@ -13,6 +13,27 @@ const workersai = createWorkersAI({
 });
 
 /**
+ * Surface missing model credentials at boot instead of only at the first model
+ * call. This module is evaluated both by `eve build` (where the credentials
+ * are legitimately absent — the Docker build only passes MAPLE_API_BASE_URL)
+ * and again when the compiled server boots, so we suppress the warning when
+ * the process is an `eve build` invocation (argv carries "build"; the runtime
+ * server is `node .output/server/index.mjs`, and `eve dev` — where the warning
+ * is useful — carries "dev"). A warn, never a throw: build-time safety of the
+ * empty-string fallback above is intentional.
+ */
+const missingModelEnv = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_TOKEN"].filter(
+  (name) => !process.env[name],
+);
+const isEveBuildInvocation = process.argv.includes("build");
+if (missingModelEnv.length > 0 && !isEveBuildInvocation) {
+  console.warn(
+    `[startup] ${missingModelEnv.join(" and ")} ${missingModelEnv.length === 1 ? "is" : "are"} not set. ` +
+      `The service will start, but every Workers AI model call will fail until ${missingModelEnv.length === 1 ? "it is" : "they are"} configured.`,
+  );
+}
+
+/**
  * Must support tool calling **while streaming** — eve's harness is tool-driven and
  * always streams. That second half is the real constraint: several Workers AI
  * models parse tool calls only on non-streaming requests and, when streamed, emit

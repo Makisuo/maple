@@ -17,7 +17,11 @@ export type DestinationProvider = {
 	accent: string
 	/** subtle background tint for the logo tile */
 	accentBg: string
-	/** readable brand color for text/borders on dark surfaces — falls back to `accent` if omitted */
+	/**
+	 * Readable brand color for text/borders — falls back to `accent` if omitted.
+	 * Use a `light-dark()` value when the brand color only reads on one theme;
+	 * consumers must combine it with `color-mix()` (not hex-alpha concatenation).
+	 */
 	accentText?: string
 	brandfetchDomain?: string
 	monogram?: { letter: string; gradient: [string, string] }
@@ -29,11 +33,12 @@ export type DestinationProvider = {
 export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 	slack: {
 		type: "slack",
-		label: "Slack",
-		description: "Post alerts to a Slack channel via incoming webhook.",
+		label: "Slack (webhook)",
+		description: "Post alerts to a Slack channel via an incoming webhook you manage.",
 		accent: "#4A154B",
 		accentBg: "rgba(74,21,75,0.30)",
-		accentText: "#E8C5EA",
+		// Slack's pale-lilac only reads on dark; aubergine holds AA on light.
+		accentText: "light-dark(#4A154B, #E8C5EA)",
 		brandfetchDomain: "slack.com",
 		docsUrl: "https://api.slack.com/messaging/webhooks",
 		docsLabel: "Slack webhook docs",
@@ -44,7 +49,7 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 		description: "Post alerts to a channel via the installed Maple Slack app — no webhook to manage.",
 		accent: "#4A154B",
 		accentBg: "rgba(74,21,75,0.30)",
-		accentText: "#E8C5EA",
+		accentText: "light-dark(#4A154B, #E8C5EA)",
 		fallbackIcon: ({ size = 22, className }) => <SlackIcon size={size} className={className} />,
 		docsUrl: "https://maple.dev/docs/integrations/slack",
 		docsLabel: "Slack integration guide",
@@ -108,9 +113,10 @@ export const PROVIDERS: Record<AlertDestinationType, DestinationProvider> = {
 	},
 }
 
+// The recommended bot flow leads; the legacy webhook entry trails it.
 export const DESTINATION_TYPES: ReadonlyArray<AlertDestinationType> = [
-	"slack",
 	"slack-bot",
+	"slack",
 	"discord",
 	"email",
 	"pagerduty",

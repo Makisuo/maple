@@ -30,6 +30,7 @@ import { EmailService } from "../lib/EmailService"
 import { OrgMembersError, OrgMembersService, type OrgMember } from "./OrgMembersService"
 import { QueryEngineService } from "./QueryEngineService"
 import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
+import { decryptAes256Gcm } from "../lib/Crypto"
 
 const trackedDbs: TestDb[] = []
 
@@ -1820,6 +1821,98 @@ describe("AlertsService", () => {
 				makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows }), {
 					fetch: fetchImpl,
 				}),
+			),
+		)
+	})
+
+	it.effect("slack-bot update merges channel fields into the stored secret config", () => {
+		const testDb = createTestDb(trackedDbs)
+		// Mirrors MAPLE_INGEST_KEY_ENCRYPTION_KEY in makeConfig() above.
+		const secretKey = Buffer.alloc(32, 5)
+		return Effect.gen(function* () {
+			const alerts = yield* AlertsService
+			const orgId = asOrgId("org_slackbot_update")
+			const userId = asUserId("user_slackbot_update")
+
+			const created = yield* alerts.createDestination(orgId, userId, adminRoles, {
+				type: "slack-bot",
+				name: "Slack bot",
+				enabled: true,
+				channelId: "C111ORIG",
+				channelName: "alerts",
+			})
+			assert.strictEqual(created.type, "slack-bot")
+			assert.strictEqual(created.summary, "#alerts")
+
+			const readSecret = Effect.fn(function* () {
+				const row = yield* Effect.promise(() =>
+					queryFirstRow<{ secret_ciphertext: string; secret_iv: string; secret_tag: string }>(
+						testDb,
+						"select secret_ciphertext, secret_iv, secret_tag from alert_destinations where id = $1",
+						[created.id],
+					),
+				)
+				assert.isDefined(row)
+				const json = yield* decryptAes256Gcm(
+					{ ciphertext: row!.secret_ciphertext, iv: row!.secret_iv, tag: row!.secret_tag },
+					secretKey,
+					(message) => new Error(message),
+				)
+				return JSON.parse(json) as { type: string; channelId: string; channelName: string | null }
+			})
+
+			// A name-only update (channelId + channelName undefined) keeps both
+			// stored channel fields untouched.
+			const renamed = yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
+				type: "slack-bot",
+				name: "Renamed bot",
+			})
+			assert.strictEqual(renamed.name, "Renamed bot")
+			assert.strictEqual(renamed.summary, "#alerts")
+			assert.deepStrictEqual(yield* readSecret(), {
+				type: "slack-bot",
+				channelId: "C111ORIG",
+				channelName: "alerts",
+			})
+
+			// A provided channelName replaces the stored one; the omitted channelId
+			// survives.
+			const relabeled = yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
+				type: "slack-bot",
+				channelName: "incidents",
+			})
+			assert.strictEqual(relabeled.summary, "#incidents")
+			assert.strictEqual(relabeled.channelLabel, "#incidents")
+			assert.deepStrictEqual(yield* readSecret(), {
+				type: "slack-bot",
+				channelId: "C111ORIG",
+				channelName: "incidents",
+			})
+
+			// A blank channelId falls back to the stored value instead of wiping it.
+			yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
+				type: "slack-bot",
+				channelId: "   ",
+			})
+			assert.deepStrictEqual(yield* readSecret(), {
+				type: "slack-bot",
+				channelId: "C111ORIG",
+				channelName: "incidents",
+			})
+
+			// A real channelId replaces the stored one; channelName stays.
+			yield* alerts.updateDestination(orgId, userId, adminRoles, created.id, {
+				type: "slack-bot",
+				channelId: "C222NEXT",
+			})
+			assert.deepStrictEqual(yield* readSecret(), {
+				type: "slack-bot",
+				channelId: "C222NEXT",
+				channelName: "incidents",
+			})
+		}).pipe(
+			Effect.provide(
+				makeLayer(testDb, makeWarehouseStub({ tracesAggregateRows: emptyWarehouseRows })),
 			),
 		)
 	})

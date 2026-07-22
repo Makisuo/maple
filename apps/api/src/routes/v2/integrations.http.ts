@@ -9,6 +9,7 @@ import type {
 } from "@maple/domain/http/v2"
 import {
 	MapleApiV2,
+	isoTimestampOrNull,
 	notFound,
 	permissionError,
 	serviceUnavailable,
@@ -19,7 +20,7 @@ import { requireAdmin } from "../../lib/auth"
 import type { SlackChannelSummary, SlackInstallStatus } from "../../services/SlackIntegrationService"
 import { SLACK_CALLBACK_PATH, SlackIntegrationService } from "../../services/SlackIntegrationService"
 
-const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
+export const resolveRequestOrigin = (req: HttpServerRequest.HttpServerRequest): string => {
 	const headers = req.headers as Record<string, string | undefined>
 	const forwardedHost = headers["x-forwarded-host"]
 	const forwardedProto = headers["x-forwarded-proto"]
@@ -41,7 +42,7 @@ const toStatus = (status: SlackInstallStatus): V2SlackIntegrationStatus => ({
 	team_id: status.teamId,
 	team_name: status.teamName,
 	bot_user_id: status.botUserId,
-	installed_at: status.installedAt != null ? new Date(status.installedAt).toISOString() : null,
+	installed_at: isoTimestampOrNull(status.installedAt),
 })
 
 const toChannelList = (channels: ReadonlyArray<SlackChannelSummary>): V2SlackChannelList => ({
@@ -63,7 +64,16 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					const status = yield* slack.getStatus(tenant.orgId).pipe(
-						Effect.mapError(() => serviceUnavailable("Slack integration status is unavailable")),
+						Effect.tapError((error) =>
+							Effect.logError("Slack integration status failed", {
+								tag: error._tag,
+								message: error.message,
+							}),
+						),
+						Effect.catchTags({
+							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+								Effect.fail(serviceUnavailable(error.message)),
+						}),
 					)
 					return toStatus(status)
 				}),
@@ -102,7 +112,16 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 						),
 					)
 					yield* slack.uninstall(tenant.orgId).pipe(
-						Effect.mapError(() => serviceUnavailable("Failed to uninstall the Slack app")),
+						Effect.tapError((error) =>
+							Effect.logError("Slack integration uninstall failed", {
+								tag: error._tag,
+								message: error.message,
+							}),
+						),
+						Effect.catchTags({
+							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
+								Effect.fail(serviceUnavailable(error.message)),
+						}),
 					)
 					return {
 						object: "slack_integration" as const,
@@ -119,8 +138,6 @@ export const HttpV2SlackIntegrationsLive = HttpApiBuilder.group(MapleApiV2, "sla
 								Effect.fail(notFound(error.message)),
 							"@maple/http/errors/IntegrationsUpstreamError": (error) =>
 								Effect.fail(upstreamError("slack_upstream_error", error.message)),
-							"@maple/http/errors/IntegrationsValidationError": (error) =>
-								Effect.fail(serviceUnavailable(error.message)),
 							"@maple/http/errors/IntegrationsPersistenceError": (error) =>
 								Effect.fail(serviceUnavailable(error.message)),
 						}),

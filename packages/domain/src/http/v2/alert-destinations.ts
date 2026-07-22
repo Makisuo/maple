@@ -287,7 +287,7 @@ export const V2AlertDestinationUpdateParams = Schema.Union([
 	Schema.Struct({
 		type: Schema.Literal("slack-bot"),
 		name: optionalNameField,
-		channel_id: Schema.optionalKey(Schema.String),
+		channel_id: OptionalNonEmptyString,
 		channel_name: OptionalNonEmptyString,
 		enabled: Schema.optionalKey(Schema.Boolean),
 	}).annotate({ identifier: "AlertDestinationUpdateSlackBot", title: "Slack (bot) destination update" }),

@@ -46,6 +46,12 @@ export interface EnvShape {
 	readonly HAZEL_OAUTH_SCOPES: string
 	readonly SLACK_CLIENT_ID: Option.Option<string>
 	readonly SLACK_CLIENT_SECRET: Option.Option<Redacted.Redacted<string>>
+	/**
+	 * Optional dedicated bearer secret for the internal Slack-bot resolve
+	 * endpoint, so the Railway bot can hold a token distinct from the
+	 * MCP-internal `INTERNAL_SERVICE_TOKEN`. Falls back to that token when unset.
+	 */
+	readonly SLACK_INTERNAL_SERVICE_TOKEN: Option.Option<Redacted.Redacted<string>>
 	readonly GITHUB_APP_ID: Option.Option<string>
 	readonly GITHUB_APP_SLUG: Option.Option<string>
 	readonly GITHUB_APP_PRIVATE_KEY: Option.Option<Redacted.Redacted<string>>
@@ -130,6 +136,7 @@ const envConfig = Config.all({
 	),
 	SLACK_CLIENT_ID: optionalString("SLACK_CLIENT_ID"),
 	SLACK_CLIENT_SECRET: optionalRedacted("SLACK_CLIENT_SECRET"),
+	SLACK_INTERNAL_SERVICE_TOKEN: optionalRedacted("SLACK_INTERNAL_SERVICE_TOKEN"),
 	GITHUB_APP_ID: optionalString("GITHUB_APP_ID"),
 	GITHUB_APP_SLUG: optionalString("GITHUB_APP_SLUG"),
 	GITHUB_APP_PRIVATE_KEY: optionalRedacted("GITHUB_APP_PRIVATE_KEY"),

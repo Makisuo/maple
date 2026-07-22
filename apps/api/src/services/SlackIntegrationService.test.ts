@@ -1,6 +1,7 @@
 import { createCipheriv, randomBytes } from "node:crypto"
 import { afterEach, assert, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OrgId, UserId } from "@maple/domain/http"
 import { Env } from "../lib/Env"
@@ -46,13 +47,37 @@ const makeConfig = (slackConfigured = true) =>
 		}),
 	)
 
-const makeLayer = (testDb: TestDb, slackConfigured = true) =>
+const makeLayer = (
+	testDb: TestDb,
+	slackConfigured = true,
+	apiKeysLayer: typeof ApiKeysService.layer = ApiKeysService.layer,
+) =>
 	SlackIntegrationService.layer.pipe(
-		Layer.provide(Layer.mergeAll(ApiKeysService.layer, OAuthStateRepository.layer)),
+		Layer.provide(Layer.mergeAll(apiKeysLayer, OAuthStateRepository.layer)),
 		Layer.provide(testDb.layer),
 		Layer.provide(Env.layer),
 		Layer.provide(makeConfig(slackConfigured)),
 	)
+
+/** Mirror of the service's (unexported) `SLACK_STATE_TTL_MS` — 10 minutes. */
+const SLACK_STATE_TTL_MS = 10 * 60_000
+
+/**
+ * Wrap the real ApiKeysService so `create` runs `inject` first. `apiKeys.create`
+ * is the only seam between completeInstall's cross-org pre-check and its
+ * transaction, so this lets a test interleave a "concurrent" write there and
+ * exercise the transactional (setWhere) race path.
+ */
+const apiKeysWithInjectedCreate = (inject: () => Promise<void>) =>
+	Layer.effect(
+		ApiKeysService,
+		Effect.gen(function* () {
+			const real = yield* ApiKeysService
+			const create: typeof real.create = (...args) =>
+				Effect.promise(inject).pipe(Effect.flatMap(() => real.create(...args)))
+			return { ...real, create } as typeof real
+		}),
+	).pipe(Layer.provide(ApiKeysService.layer)) as typeof ApiKeysService.layer
 
 /** The pure dispatch helper needs only Database — build a minimal layer for it. */
 const databaseLayer = (testDb: TestDb) => testDb.layer
@@ -81,6 +106,28 @@ const slackOAuthFetch = (teamRef: { current: { id: string; name: string } }): ty
 		}
 		return Promise.reject(new Error(`unexpected fetch: ${url}`))
 	}) as typeof globalThis.fetch
+
+const OAUTH_URL = "https://slack.com/api/oauth.v2.access"
+const CONVERSATIONS_URL = "https://slack.com/api/conversations.list"
+
+/** A fetch stub scoped to one Slack endpoint; anything else rejects. */
+const slackApiFetch = (
+	prefix: string,
+	respond: (url: string, call: number) => Response | Promise<Response>,
+): typeof globalThis.fetch => {
+	let call = 0
+	return ((input: RequestInfo | URL) => {
+		const url = String(input)
+		if (!url.startsWith(prefix)) return Promise.reject(new Error(`unexpected fetch: ${url}`))
+		return Promise.resolve(respond(url, call++))
+	}) as typeof globalThis.fetch
+}
+
+const withFetch = (
+	testDb: TestDb,
+	fetchImpl: typeof globalThis.fetch,
+	apiKeysLayer?: typeof ApiKeysService.layer,
+) => Layer.mergeAll(makeLayer(testDb, true, apiKeysLayer), Layer.succeed(FetchHttpClient.Fetch, fetchImpl))
 
 const stateFromInstallUrl = (url: string): string => {
 	const state = new URL(url).searchParams.get("state")
@@ -175,27 +222,21 @@ describe("SlackIntegrationService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
-	it.effect("completeInstall rejects an expired state (and burns it)", () => {
+	it.effect("completeInstall rejects a state past SLACK_STATE_TTL_MS (and burns it)", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
-			yield* Effect.promise(() =>
-				executeSql(
-					testDb,
-					// @effect/vitest it.effect freezes the Clock at epoch 0 (1970), so an
-					// "expired" state must sit before that — use a pre-1970 timestamp.
-					`INSERT INTO oauth_auth_states (state, org_id, provider, initiated_by_user_id, redirect_uri, created_at, expires_at)
-					 VALUES ($1,$2,$3,$4,$5, timestamptz '1969-01-01 00:00:00+00', timestamptz '1969-06-01 00:00:00+00')`,
-					["expired-state", "org_a", "slack", "user_a", "https://cb"],
-				),
-			)
 			const slack = yield* SlackIntegrationService
-			const error = yield* Effect.flip(slack.completeInstall("code_1", "expired-state"))
+			// Create the state through the real flow at the frozen TestClock time,
+			// then advance the clock just past the TTL — the service reads
+			// Clock.currentTimeMillis, so this verifies the actual expiry window.
+			const start = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
+			const state = stateFromInstallUrl(start.url)
+			yield* TestClock.adjust(SLACK_STATE_TTL_MS + 1)
+			const error = yield* Effect.flip(slack.completeInstall("code_1", state))
 			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
 			assert.include(error.message, "expired")
 			const remaining = yield* Effect.promise(() =>
-				queryFirstRow(testDb, "SELECT state FROM oauth_auth_states WHERE state = $1", [
-					"expired-state",
-				]),
+				queryFirstRow(testDb, "SELECT state FROM oauth_auth_states WHERE state = $1", [state]),
 			)
 			assert.isUndefined(remaining)
 		}).pipe(Effect.provide(makeLayer(testDb)))
@@ -401,5 +442,396 @@ describe("SlackIntegrationService", () => {
 			)
 			assert.isTrue(rejected, "second active row for the same org should violate the unique index")
 		}).pipe(Effect.provide(databaseLayer(testDb)))
+	})
+
+	// --- Cross-org rebind rejection -----------------------------------------
+
+	it.effect("completeInstall rejects binding a team actively installed on another org (pre-check)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const teamRef = { current: { id: "T-shared", name: "Shared" } }
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+
+			// org_a installs T-shared.
+			const s1 = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
+			yield* slack.completeInstall("code_1", stateFromInstallUrl(s1.url))
+
+			// org_b tries to install the SAME team → forbidden.
+			const s2 = yield* slack.startInstall(asOrgId("org_b"), asUserId("user_b"), "https://cb")
+			const error = yield* Effect.flip(slack.completeInstall("code_2", stateFromInstallUrl(s2.url)))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsForbiddenError")
+			assert.include(error.message, "different Maple organization")
+
+			// org_a's binding is untouched...
+			const bound = yield* Effect.promise(() =>
+				queryFirstRow<{ org_id: string; revoked_at: string | null }>(
+					testDb,
+					"SELECT org_id, revoked_at FROM slack_workspaces WHERE team_id = 'T-shared'",
+				),
+			)
+			assert.strictEqual(bound?.org_id, "org_a")
+			assert.isNull(bound?.revoked_at)
+
+			// ...and org_b ends up with no active workspace at all.
+			const orgBActive = yield* Effect.promise(() =>
+				queryFirstRow<{ n: number }>(
+					testDb,
+					"SELECT count(*)::int AS n FROM slack_workspaces WHERE org_id = 'org_b' AND revoked_at IS NULL",
+				),
+			)
+			assert.strictEqual(orgBActive?.n, 0)
+			const status = yield* slack.getStatus(asOrgId("org_b"))
+			assert.strictEqual(status.installed, false)
+		}).pipe(Effect.provide(withFetch(testDb, slackOAuthFetch(teamRef))))
+	})
+
+	it.effect("completeInstall rejects a cross-org rebind that lands after the pre-check (transactional race)", () => {
+		const testDb = createTestDb(trackedDbs)
+		const teamRef = { current: { id: "T-race", name: "Race" } }
+		// Injected between the pre-check and the transaction (apiKeys.create is the
+		// only seam in between): a "concurrent" install binds T-race to org_victim.
+		let injected = false
+		const inject = async () => {
+			if (injected) return
+			injected = true
+			await insertWorkspace(testDb, {
+				id: "sw_victim",
+				orgId: "org_victim",
+				teamId: "T-race",
+				teamName: "Victim",
+				botToken: "xoxb-victim",
+				apiKey: "maple_ak_victim",
+			})
+		}
+		return Effect.gen(function* () {
+			// org_b already has an active workspace for a different team — the
+			// aborted transaction must roll back the revoke-others step for it.
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_b_old",
+					orgId: "org_b",
+					teamId: "T-old",
+					teamName: "Old",
+					botToken: "xoxb-old",
+					apiKey: "maple_ak_old",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const start = yield* slack.startInstall(asOrgId("org_b"), asUserId("user_b"), "https://cb")
+			const error = yield* Effect.flip(slack.completeInstall("code_r", stateFromInstallUrl(start.url)))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsForbiddenError")
+			assert.isTrue(injected, "the conflicting row must have been injected mid-install")
+
+			// The victim org's binding is unchanged.
+			const victim = yield* Effect.promise(() =>
+				queryFirstRow<{ org_id: string; revoked_at: string | null }>(
+					testDb,
+					"SELECT org_id, revoked_at FROM slack_workspaces WHERE team_id = 'T-race'",
+				),
+			)
+			assert.strictEqual(victim?.org_id, "org_victim")
+			assert.isNull(victim?.revoked_at)
+
+			// org_b's prior workspace is still active — the in-transaction
+			// revocation rolled back with the aborted upsert.
+			const oldRow = yield* Effect.promise(() =>
+				queryFirstRow<{ revoked_at: string | null }>(
+					testDb,
+					"SELECT revoked_at FROM slack_workspaces WHERE team_id = 'T-old'",
+				),
+			)
+			assert.isNull(oldRow?.revoked_at)
+		}).pipe(Effect.provide(withFetch(testDb, slackOAuthFetch(teamRef), apiKeysWithInjectedCreate(inject))))
+	})
+
+	// --- exchangeCode failure paths (via completeInstall) ---------------------
+
+	it.effect("completeInstall surfaces Slack's ok:false as a validation error carrying Slack's error string", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+			const start = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
+			const state = stateFromInstallUrl(start.url)
+			// Boundary check: at exactly the TTL the state is still valid, so the
+			// flow proceeds past expiry and into the (failing) code exchange.
+			yield* TestClock.adjust(SLACK_STATE_TTL_MS)
+			const error = yield* Effect.flip(slack.completeInstall("code_bad", state))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
+			assert.include(error.message, "invalid_code")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(OAUTH_URL, () => jsonResponse({ ok: false, error: "invalid_code" })),
+				),
+			),
+		)
+	})
+
+	it.effect("completeInstall maps a non-JSON OAuth response to an upstream error", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+			const start = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
+			const error = yield* Effect.flip(slack.completeInstall("code_1", stateFromInstallUrl(start.url)))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(
+						OAUTH_URL,
+						() =>
+							new Response("<html>maintenance</html>", {
+								status: 200,
+								headers: { "content-type": "text/html" },
+							}),
+					),
+				),
+			),
+		)
+	})
+
+	it.effect("completeInstall maps an undecodable OAuth payload to an upstream error", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+			const start = yield* slack.startInstall(asOrgId("org_a"), asUserId("user_a"), "https://cb")
+			const error = yield* Effect.flip(slack.completeInstall("code_1", stateFromInstallUrl(start.url)))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+		}).pipe(
+			// `ok` must be a boolean — a JSON payload with the wrong shape fails decode.
+			Effect.provide(
+				withFetch(testDb, slackApiFetch(OAUTH_URL, () => jsonResponse({ ok: "yes", team: 42 }))),
+			),
+		)
+	})
+
+	// --- listChannels ----------------------------------------------------------
+
+	it.effect("listChannels fails not-connected when the org has no active workspace", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const slack = yield* SlackIntegrationService
+			const error = yield* Effect.flip(slack.listChannels(asOrgId("org_none")))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsNotConnectedError")
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("listChannels returns a single page with field defaulting", () => {
+		const testDb = createTestDb(trackedDbs)
+		const urls: string[] = []
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc1",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			assert.deepStrictEqual(channels, [
+				{ id: "C1", name: "general", isPrivate: true, isMember: true },
+				// Missing name/is_private/is_member default to id/false/false.
+				{ id: "C2", name: "C2", isPrivate: false, isMember: false },
+			])
+			assert.strictEqual(urls.length, 1)
+			const first = new URL(urls[0]!)
+			assert.isNull(first.searchParams.get("cursor"))
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, (url) => {
+						urls.push(url)
+						return jsonResponse({
+							ok: true,
+							channels: [
+								{ id: "C1", name: "general", is_private: true, is_member: true },
+								{ id: "C2" },
+							],
+						})
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels follows next_cursor across pages and stops on an empty cursor", () => {
+		const testDb = createTestDb(trackedDbs)
+		const urls: string[] = []
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc2",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			assert.deepStrictEqual(
+				channels.map((c) => c.id),
+				["C1", "C2"],
+			)
+			assert.strictEqual(urls.length, 2)
+			assert.isNull(new URL(urls[0]!).searchParams.get("cursor"))
+			assert.strictEqual(new URL(urls[1]!).searchParams.get("cursor"), "cursor-2")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, (url, call) => {
+						urls.push(url)
+						return call === 0
+							? jsonResponse({
+									ok: true,
+									channels: [{ id: "C1", name: "one" }],
+									response_metadata: { next_cursor: "cursor-2" },
+								})
+							: // Slack signals "done" with an empty next_cursor.
+								jsonResponse({
+									ok: true,
+									channels: [{ id: "C2", name: "two" }],
+									response_metadata: { next_cursor: "" },
+								})
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels caps pagination at SLACK_MAX_CHANNEL_PAGES pages", () => {
+		const testDb = createTestDb(trackedDbs)
+		let calls = 0
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc3",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const channels = yield* slack.listChannels(asOrgId("org_lc"))
+			// The mock ALWAYS hands back a next_cursor — the walk must stop at the
+			// page cap (SLACK_MAX_CHANNEL_PAGES = 3) instead of looping forever.
+			assert.strictEqual(calls, 3)
+			assert.deepStrictEqual(
+				channels.map((c) => c.id),
+				["C-page-0", "C-page-1", "C-page-2"],
+			)
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, (_url, call) => {
+						calls++
+						return jsonResponse({
+							ok: true,
+							channels: [{ id: `C-page-${call}` }],
+							response_metadata: { next_cursor: "more" },
+						})
+					}),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels maps Slack ok:false to an upstream error", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc4",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const error = yield* Effect.flip(slack.listChannels(asOrgId("org_lc")))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+			assert.include(error.message, "invalid_auth")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, () => jsonResponse({ ok: false, error: "invalid_auth" })),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels maps a non-JSON response to an upstream error", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc5",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const error = yield* Effect.flip(slack.listChannels(asOrgId("org_lc")))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+		}).pipe(
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(
+						CONVERSATIONS_URL,
+						() =>
+							new Response("gateway timeout", {
+								status: 200,
+								headers: { "content-type": "text/plain" },
+							}),
+					),
+				),
+			),
+		)
+	})
+
+	it.effect("listChannels maps an undecodable payload to an upstream error", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			yield* Effect.promise(() =>
+				insertWorkspace(testDb, {
+					id: "sw_lc6",
+					orgId: "org_lc",
+					teamId: "T-LC",
+					teamName: "LC",
+					botToken: "xoxb-lc-token",
+					apiKey: "maple_ak_lc",
+				}),
+			)
+			const slack = yield* SlackIntegrationService
+			const error = yield* Effect.flip(slack.listChannels(asOrgId("org_lc")))
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+		}).pipe(
+			// channels must be an array of objects with a string id.
+			Effect.provide(
+				withFetch(
+					testDb,
+					slackApiFetch(CONVERSATIONS_URL, () => jsonResponse({ ok: true, channels: [{ id: 42 }] })),
+				),
+			),
+		)
 	})
 })

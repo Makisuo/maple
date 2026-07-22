@@ -51,9 +51,23 @@ export const SLACK_BOT_SCOPES = [
 	"users:read",
 ].join(",")
 
+/**
+ * Thrown inside the install transaction (throwing is the only way to make a
+ * drizzle transaction roll back) when the same-team upsert is blocked by an
+ * active binding owned by another org. Caught by `instanceof` immediately
+ * around the transaction and converted into a discriminated result — it never
+ * escapes `completeInstall`.
+ */
+class SlackCrossOrgConflict extends Error {
+	constructor() {
+		super("Slack workspace is actively bound to a different organization")
+		this.name = "SlackCrossOrgConflict"
+	}
+}
+
 const decodeApiKeyIdOption = Schema.decodeUnknownOption(ApiKeyId)
-const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
-const decodeUserIdSync = Schema.decodeUnknownSync(UserId)
+const decodeOrgId = Schema.decodeUnknownEffect(OrgId)
+const decodeUserId = Schema.decodeUnknownEffect(UserId)
 
 // --- Slack API response shapes ---------------------------------------------
 
@@ -117,18 +131,34 @@ export interface SlackBotResolution {
 	readonly mapleApiKey: string
 }
 
+/**
+ * Wire schema for the FIXED internal resolve response contract
+ * (`GET /internal/slack/workspaces/:teamId`). The Railway-hosted bot is built
+ * against exactly these keys — do not rename or drop fields.
+ */
+export const SlackBotResolutionResponseSchema = Schema.Struct({
+	orgId: Schema.String,
+	teamId: Schema.String,
+	teamName: Schema.NullOr(Schema.String),
+	botToken: Schema.String,
+	mapleApiKey: Schema.String,
+})
+
 // --- Shared decrypt helper (also used by the alert dispatch path) -----------
 
-const loadActiveWorkspaceByOrg = (database: DatabaseShape, orgId: string) =>
-	database
-		.execute((db) =>
-			db
-				.select()
-				.from(slackWorkspaces)
-				.where(and(eq(slackWorkspaces.orgId, orgId), isNull(slackWorkspaces.revokedAt)))
-				.limit(1),
-		)
-		.pipe(Effect.map((rows) => rows[0] ?? null))
+const loadActiveWorkspaceByOrg = Effect.fnUntraced(function* (
+	database: DatabaseShape,
+	orgId: string,
+) {
+	const rows = yield* database.execute((db) =>
+		db
+			.select()
+			.from(slackWorkspaces)
+			.where(and(eq(slackWorkspaces.orgId, orgId), isNull(slackWorkspaces.revokedAt)))
+			.limit(1),
+	)
+	return Option.fromNullishOr(rows[0])
+})
 
 /**
  * Resolve the decrypted Slack bot token for an org's active installation.
@@ -136,39 +166,41 @@ const loadActiveWorkspaceByOrg = (database: DatabaseShape, orgId: string) =>
  * worker) so those dispatchers do not need the full SlackIntegrationService.
  * Fails with an {@link AlertDeliveryError} when there is no active install.
  */
-export const resolveSlackBotTokenForDispatch = (
-	database: DatabaseShape,
-	encryptionKey: Buffer,
-	orgId: string,
-): Effect.Effect<string, AlertDeliveryError> =>
-	Effect.gen(function* () {
-		const row = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
-			Effect.mapError(
-				(error) =>
-					new AlertDeliveryError({
-						message: `Failed to load Slack installation: ${error.message}`,
-						destinationType: "slack-bot",
-					}),
-			),
-		)
-		if (!row) {
-			return yield* Effect.fail(
+export const resolveSlackBotTokenForDispatch = Effect.fn(
+	"SlackIntegrationService.resolveSlackBotTokenForDispatch",
+)(function* (database: DatabaseShape, encryptionKey: Buffer, orgId: string) {
+	yield* Effect.annotateCurrentSpan({ orgId })
+	const row = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
+		Effect.mapError(
+			(error) =>
 				new AlertDeliveryError({
-					message: "Slack is not connected for this organization — install the Maple Slack app",
+					message: `Failed to load Slack installation: ${error.message}`,
 					destinationType: "slack-bot",
 				}),
-			)
-		}
-		return yield* decryptAes256Gcm(
-			{ ciphertext: row.botTokenCiphertext, iv: row.botTokenIv, tag: row.botTokenTag },
-			encryptionKey,
-			() =>
-				new AlertDeliveryError({
-					message: "Failed to decrypt stored Slack bot token",
-					destinationType: "slack-bot",
-				}),
+		),
+	)
+	if (Option.isNone(row)) {
+		return yield* Effect.fail(
+			new AlertDeliveryError({
+				message: "Slack is not connected for this organization — install the Maple Slack app",
+				destinationType: "slack-bot",
+			}),
 		)
-	})
+	}
+	return yield* decryptAes256Gcm(
+		{
+			ciphertext: row.value.botTokenCiphertext,
+			iv: row.value.botTokenIv,
+			tag: row.value.botTokenTag,
+		},
+		encryptionKey,
+		() =>
+			new AlertDeliveryError({
+				message: "Failed to decrypt stored Slack bot token",
+				destinationType: "slack-bot",
+			}),
+	)
+})
 
 // --- Service ----------------------------------------------------------------
 
@@ -201,10 +233,7 @@ export interface SlackIntegrationServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<
 		ReadonlyArray<SlackChannelSummary>,
-		| IntegrationsNotConnectedError
-		| IntegrationsUpstreamError
-		| IntegrationsPersistenceError
-		| IntegrationsValidationError
+		IntegrationsNotConnectedError | IntegrationsUpstreamError | IntegrationsPersistenceError
 	>
 	readonly resolveForBot: (
 		teamId: string,
@@ -275,6 +304,7 @@ export class SlackIntegrationService extends Context.Service<
 			userId: UserId,
 			callbackUrl: string,
 		) {
+			yield* Effect.annotateCurrentSpan({ orgId })
 			const { clientId } = yield* requireOAuthClient
 			const state = randomBytes(24).toString("base64url")
 			const now = yield* Clock.currentTimeMillis
@@ -324,24 +354,35 @@ export class SlackIntegrationService extends Context.Service<
 			)
 			const json = yield* response.json.pipe(
 				Effect.mapError(
-					() => new IntegrationsUpstreamError({ message: "Slack OAuth returned a non-JSON response" }),
+					(error) =>
+						new IntegrationsUpstreamError({
+							message: `Slack OAuth returned a non-JSON response: ${error.message}`,
+						}),
 				),
 			)
 			const decoded = yield* decodeOAuthAccess(json).pipe(
 				Effect.mapError(
-					() => new IntegrationsUpstreamError({ message: "Slack OAuth returned an unexpected payload" }),
+					(error) =>
+						new IntegrationsUpstreamError({
+							message: `Slack OAuth returned an unexpected payload: ${error.message}`,
+						}),
 				),
 			)
-			if (!decoded.ok || !decoded.access_token || !decoded.team?.id) {
+			const accessToken = decoded.access_token
+			const team = decoded.team
+			if (!decoded.ok || !accessToken || !team?.id) {
 				return yield* Effect.fail(
 					new IntegrationsValidationError({
 						message: `Slack authorization failed: ${decoded.error ?? "missing token or team"}`,
 					}),
 				)
 			}
-			return decoded as typeof decoded & {
-				access_token: string
-				team: { id: string; name?: string }
+			return {
+				accessToken,
+				teamId: team.id,
+				teamName: team.name ?? null,
+				botUserId: decoded.bot_user_id ?? null,
+				scope: decoded.scope ?? null,
 			}
 		})
 
@@ -371,19 +412,41 @@ export class SlackIntegrationService extends Context.Service<
 			// Single-use: burn the state before doing any side effects.
 			yield* states.deleteByState(state).pipe(Effect.mapError(toPersistenceError))
 
-			const orgId = decodeOrgIdSync(row.orgId)
+			const orgId = yield* decodeOrgId(row.orgId).pipe(
+				Effect.mapError(
+					(error) =>
+						new IntegrationsPersistenceError({
+							message: `Stored Slack OAuth state has an invalid orgId: ${error.message}`,
+						}),
+				),
+			)
+			yield* Effect.annotateCurrentSpan({ orgId })
+			const initiatedByUserId = yield* decodeUserId(row.initiatedByUserId).pipe(
+				Effect.mapError(
+					(error) =>
+						new IntegrationsPersistenceError({
+							message: `Stored Slack OAuth state has an invalid userId: ${error.message}`,
+						}),
+				),
+			)
 			const access = yield* exchangeCode(code, row.redirectUri, clientId, clientSecret)
-			const teamId = access.team.id
-			const teamName = access.team.name ?? null
+			const teamId = access.teamId
+			const teamName = access.teamName
 
 			// Reject re-binding a team that is actively installed on a different org.
 			const existingByTeam = yield* database
 				.execute((db) =>
 					db.select().from(slackWorkspaces).where(eq(slackWorkspaces.teamId, teamId)).limit(1),
 				)
-				.pipe(Effect.mapError(toPersistenceError))
-			const priorRow = existingByTeam[0] ?? null
-			if (priorRow && priorRow.orgId !== orgId && priorRow.revokedAt === null) {
+				.pipe(
+					Effect.mapError(toPersistenceError),
+					Effect.map((rows) => Option.fromNullishOr(rows[0])),
+				)
+			if (
+				Option.isSome(existingByTeam) &&
+				existingByTeam.value.orgId !== orgId &&
+				existingByTeam.value.revokedAt === null
+			) {
 				return yield* Effect.fail(
 					new IntegrationsForbiddenError({
 						message:
@@ -391,10 +454,11 @@ export class SlackIntegrationService extends Context.Service<
 					}),
 				)
 			}
+			const priorRow = Option.getOrUndefined(existingByTeam)
 
 			// Mint a full-access MCP-kind API key for the bot; capture the plaintext.
 			const created = yield* apiKeys
-				.create(orgId, decodeUserIdSync(row.initiatedByUserId), {
+				.create(orgId, initiatedByUserId, {
 					name: `Slack bot (${teamName ?? teamId})`,
 					kind: "mcp",
 					scopes: null,
@@ -408,7 +472,7 @@ export class SlackIntegrationService extends Context.Service<
 					),
 				)
 
-			const botTokenEnc = yield* encryptValue(access.access_token)
+			const botTokenEnc = yield* encryptValue(access.accessToken)
 			const apiKeyEnc = yield* encryptValue(created.secret)
 
 			const values = {
@@ -416,7 +480,7 @@ export class SlackIntegrationService extends Context.Service<
 				orgId,
 				teamId,
 				teamName,
-				botUserId: access.bot_user_id ?? null,
+				botUserId: access.botUserId,
 				scope: access.scope ?? SLACK_BOT_SCOPES,
 				botTokenCiphertext: botTokenEnc.ciphertext,
 				botTokenIv: botTokenEnc.iv,
@@ -436,79 +500,88 @@ export class SlackIntegrationService extends Context.Service<
 			// same-org install of a different team replaces the old one), then upsert
 			// the new/refreshed row. The `setWhere` guard makes the cross-org rejection
 			// race-safe: a concurrent install of the same team by a different org can't
-			// clobber the existing binding — the update is skipped and we roll back with
-			// a recognizable sentinel. The partial unique index on (org_id) is the
-			// backstop that ultimately enforces the single-active-row invariant.
-			const CROSS_ORG_SENTINEL = "SLACK_CROSS_ORG_CONFLICT"
+			// clobber the existing binding — the update is skipped and we abort the
+			// transaction (throwing is the only way to make drizzle roll back), then
+			// convert the abort into a discriminated `crossOrgConflict` result. The
+			// partial unique index on (org_id) is the backstop that ultimately enforces
+			// the single-active-row invariant.
 			const writeResult = yield* database
-				.execute<{ revokedOtherKeyIds: Array<string | null> }>((db) =>
-					db.transaction(async (tx) => {
-						const revokedOthers = await tx
-							.update(slackWorkspaces)
-							.set({ revokedAt: new Date(now), updatedAt: new Date(now) })
-							.where(
-								and(
-									eq(slackWorkspaces.orgId, orgId),
-									isNull(slackWorkspaces.revokedAt),
-									ne(slackWorkspaces.teamId, teamId),
-								),
-							)
-							.returning({ apiKeyId: slackWorkspaces.apiKeyId })
+				.execute<
+					| { readonly _tag: "ok"; readonly revokedOtherKeyIds: Array<string | null> }
+					| { readonly _tag: "crossOrgConflict" }
+				>(async (db) => {
+					try {
+						return await db.transaction(async (tx) => {
+							const revokedOthers = await tx
+								.update(slackWorkspaces)
+								.set({ revokedAt: new Date(now), updatedAt: new Date(now) })
+								.where(
+									and(
+										eq(slackWorkspaces.orgId, orgId),
+										isNull(slackWorkspaces.revokedAt),
+										ne(slackWorkspaces.teamId, teamId),
+									),
+								)
+								.returning({ apiKeyId: slackWorkspaces.apiKeyId })
 
-						const upserted = await tx
-							.insert(slackWorkspaces)
-							.values(values)
-							.onConflictDoUpdate({
-								target: slackWorkspaces.teamId,
-								// Only allow overwriting a same-team row that belongs to this
-								// org or has already been revoked — never an active binding
-								// owned by another org.
-								setWhere: or(
-									eq(slackWorkspaces.orgId, orgId),
-									isNotNull(slackWorkspaces.revokedAt),
-								),
-								set: {
-									orgId: values.orgId,
-									teamName: values.teamName,
-									botUserId: values.botUserId,
-									scope: values.scope,
-									botTokenCiphertext: values.botTokenCiphertext,
-									botTokenIv: values.botTokenIv,
-									botTokenTag: values.botTokenTag,
-									apiKeyId: values.apiKeyId,
-									apiKeySecretCiphertext: values.apiKeySecretCiphertext,
-									apiKeySecretIv: values.apiKeySecretIv,
-									apiKeySecretTag: values.apiKeySecretTag,
-									installedByUserId: values.installedByUserId,
-									createdAt: values.createdAt,
-									updatedAt: values.updatedAt,
-									revokedAt: null,
-								},
-							})
-							.returning({ id: slackWorkspaces.id })
+							const upserted = await tx
+								.insert(slackWorkspaces)
+								.values(values)
+								.onConflictDoUpdate({
+									target: slackWorkspaces.teamId,
+									// Only allow overwriting a same-team row that belongs to this
+									// org or has already been revoked — never an active binding
+									// owned by another org.
+									setWhere: or(
+										eq(slackWorkspaces.orgId, orgId),
+										isNotNull(slackWorkspaces.revokedAt),
+									),
+									set: {
+										orgId: values.orgId,
+										teamName: values.teamName,
+										botUserId: values.botUserId,
+										scope: values.scope,
+										botTokenCiphertext: values.botTokenCiphertext,
+										botTokenIv: values.botTokenIv,
+										botTokenTag: values.botTokenTag,
+										apiKeyId: values.apiKeyId,
+										apiKeySecretCiphertext: values.apiKeySecretCiphertext,
+										apiKeySecretIv: values.apiKeySecretIv,
+										apiKeySecretTag: values.apiKeySecretTag,
+										installedByUserId: values.installedByUserId,
+										createdAt: values.createdAt,
+										updatedAt: values.updatedAt,
+										revokedAt: null,
+									},
+								})
+								.returning({ id: slackWorkspaces.id })
 
-						// Zero rows means the same-team conflict hit an active row owned by a
-						// different org (the setWhere blocked it) — abort so revoke-others
-						// rolls back too.
-						if (upserted.length === 0) throw new Error(CROSS_ORG_SENTINEL)
+							// Zero rows means the same-team conflict hit an active row owned by a
+							// different org (the setWhere blocked it) — abort so revoke-others
+							// rolls back too.
+							if (upserted.length === 0) throw new SlackCrossOrgConflict()
 
-						return {
-							revokedOtherKeyIds: revokedOthers.map((r) => r.apiKeyId),
+							return {
+								_tag: "ok" as const,
+								revokedOtherKeyIds: revokedOthers.map((r) => r.apiKeyId),
+							}
+						})
+					} catch (error) {
+						if (error instanceof SlackCrossOrgConflict) {
+							return { _tag: "crossOrgConflict" as const }
 						}
+						throw error
+					}
+				})
+				.pipe(Effect.mapError(toPersistenceError))
+			if (writeResult._tag === "crossOrgConflict") {
+				return yield* Effect.fail(
+					new IntegrationsForbiddenError({
+						message:
+							"This Slack workspace is already connected to a different Maple organization. Uninstall it there first.",
 					}),
 				)
-				.pipe(
-					Effect.catchTag("@maple/api/lib/DatabaseError", (error) =>
-						Effect.fail(
-							error.message.includes(CROSS_ORG_SENTINEL)
-								? new IntegrationsForbiddenError({
-										message:
-											"This Slack workspace is already connected to a different Maple organization. Uninstall it there first.",
-									})
-								: toPersistenceError(error),
-						),
-					),
-				)
+			}
 
 			// Best-effort: revoke the API keys of every workspace this install
 			// replaced — the prior same-team row (whose key we just rotated) and any
@@ -527,32 +600,37 @@ export class SlackIntegrationService extends Context.Service<
 		})
 
 		const getStatus = Effect.fn("SlackIntegrationService.getStatus")(function* (orgId: OrgId) {
-			const row = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
+			yield* Effect.annotateCurrentSpan({ orgId })
+			const rowOption = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
 				Effect.mapError(toPersistenceError),
 			)
-			if (!row) {
-				return {
-					installed: false,
-					teamId: null,
-					teamName: null,
-					botUserId: null,
-					installedAt: null,
-				} satisfies SlackInstallStatus
-			}
-			return {
-				installed: true,
-				teamId: row.teamId,
-				teamName: row.teamName,
-				botUserId: row.botUserId,
-				installedAt: row.createdAt.getTime(),
-			} satisfies SlackInstallStatus
+			return Option.match(rowOption, {
+				onNone: () =>
+					({
+						installed: false,
+						teamId: null,
+						teamName: null,
+						botUserId: null,
+						installedAt: null,
+					}) satisfies SlackInstallStatus,
+				onSome: (row) =>
+					({
+						installed: true,
+						teamId: row.teamId,
+						teamName: row.teamName,
+						botUserId: row.botUserId,
+						installedAt: row.createdAt.getTime(),
+					}) satisfies SlackInstallStatus,
+			})
 		})
 
 		const uninstall = Effect.fn("SlackIntegrationService.uninstall")(function* (orgId: OrgId) {
-			const row = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
+			yield* Effect.annotateCurrentSpan({ orgId })
+			const rowOption = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
 				Effect.mapError(toPersistenceError),
 			)
-			if (!row) return { uninstalled: false }
+			if (Option.isNone(rowOption)) return { uninstalled: false }
+			const row = rowOption.value
 			const now = yield* Clock.currentTimeMillis
 			// Revoke the minted API key (best-effort — bookkeeping must not fail the uninstall).
 			if (row.apiKeyId) {
@@ -572,84 +650,117 @@ export class SlackIntegrationService extends Context.Service<
 			return { uninstalled: true }
 		})
 
+		/** Fetch one `conversations.list` page; returns the page's channels + next cursor. */
+		const fetchChannelPage = Effect.fnUntraced(function* (
+			botToken: string,
+			cursor: Option.Option<string>,
+		) {
+			const params = new URLSearchParams({
+				types: "public_channel,private_channel",
+				exclude_archived: "true",
+				limit: "200",
+			})
+			Option.map(cursor, (value) => params.set("cursor", value))
+			const response = yield* httpClient
+				.get(`${SLACK_CONVERSATIONS_LIST_URL}?${params.toString()}`, {
+					headers: { authorization: `Bearer ${botToken}`, accept: "application/json" },
+				})
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							new IntegrationsUpstreamError({
+								message: `Slack conversations.list failed: ${error.message}`,
+							}),
+					),
+				)
+			const json = yield* response.json.pipe(
+				Effect.mapError(
+					(error) =>
+						new IntegrationsUpstreamError({
+							message: `Slack conversations.list returned a non-JSON response: ${error.message}`,
+						}),
+				),
+			)
+			const decoded = yield* decodeConversationsList(json).pipe(
+				Effect.mapError(
+					(error) =>
+						new IntegrationsUpstreamError({
+							message: `Slack conversations.list returned an unexpected payload: ${error.message}`,
+						}),
+				),
+			)
+			if (!decoded.ok) {
+				return yield* Effect.fail(
+					new IntegrationsUpstreamError({
+						message: `Slack conversations.list error: ${decoded.error ?? "unknown"}`,
+					}),
+				)
+			}
+			const channels: ReadonlyArray<SlackChannelSummary> = (decoded.channels ?? []).map(
+				(channel) => ({
+					id: channel.id,
+					name: channel.name ?? channel.id,
+					isPrivate: channel.is_private ?? false,
+					isMember: channel.is_member ?? false,
+				}),
+			)
+			// Slack signals "no more pages" with a missing or empty next_cursor.
+			const next = decoded.response_metadata?.next_cursor
+			return { channels, next: next ? Option.some(next) : Option.none<string>() }
+		})
+
+		/**
+		 * Cursor-driven page walk with pure accumulation, capped at
+		 * {@link SLACK_MAX_CHANNEL_PAGES} pages.
+		 */
+		const collectChannelPages = (
+			botToken: string,
+			cursor: Option.Option<string>,
+			page: number,
+			acc: ReadonlyArray<SlackChannelSummary>,
+		): Effect.Effect<
+			ReadonlyArray<SlackChannelSummary>,
+			IntegrationsUpstreamError | IntegrationsPersistenceError
+		> =>
+			page >= SLACK_MAX_CHANNEL_PAGES
+				? Effect.succeed(acc)
+				: fetchChannelPage(botToken, cursor).pipe(
+						Effect.flatMap(({ channels, next }) =>
+							Option.match(next, {
+								onNone: () => Effect.succeed([...acc, ...channels]),
+								onSome: (nextCursor) =>
+									collectChannelPages(botToken, Option.some(nextCursor), page + 1, [
+										...acc,
+										...channels,
+									]),
+							}),
+						),
+					)
+
 		const listChannels = Effect.fn("SlackIntegrationService.listChannels")(function* (orgId: OrgId) {
-			const row = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
+			yield* Effect.annotateCurrentSpan({ orgId })
+			const rowOption = yield* loadActiveWorkspaceByOrg(database, orgId).pipe(
 				Effect.mapError(toPersistenceError),
 			)
-			if (!row) {
+			if (Option.isNone(rowOption)) {
 				return yield* Effect.fail(
 					new IntegrationsNotConnectedError({
 						message: "Slack is not connected for this organization",
 					}),
 				)
 			}
+			const row = rowOption.value
 			const botToken = yield* decryptValue({
 				ciphertext: row.botTokenCiphertext,
 				iv: row.botTokenIv,
 				tag: row.botTokenTag,
 			})
-
-			const channels: Array<SlackChannelSummary> = []
-			let cursor: string | undefined
-			for (let page = 0; page < SLACK_MAX_CHANNEL_PAGES; page++) {
-				const params = new URLSearchParams({
-					types: "public_channel,private_channel",
-					exclude_archived: "true",
-					limit: "200",
-				})
-				if (cursor) params.set("cursor", cursor)
-				const response = yield* httpClient
-					.get(`${SLACK_CONVERSATIONS_LIST_URL}?${params.toString()}`, {
-						headers: { authorization: `Bearer ${botToken}`, accept: "application/json" },
-					})
-					.pipe(
-						Effect.mapError(
-							(error) =>
-								new IntegrationsUpstreamError({
-									message: `Slack conversations.list failed: ${error.message}`,
-								}),
-						),
-					)
-				const json = yield* response.json.pipe(
-					Effect.mapError(
-						() =>
-							new IntegrationsUpstreamError({
-								message: "Slack conversations.list returned a non-JSON response",
-							}),
-					),
-				)
-				const decoded = yield* decodeConversationsList(json).pipe(
-					Effect.mapError(
-						() =>
-							new IntegrationsUpstreamError({
-								message: "Slack conversations.list returned an unexpected payload",
-							}),
-					),
-				)
-				if (!decoded.ok) {
-					return yield* Effect.fail(
-						new IntegrationsUpstreamError({
-							message: `Slack conversations.list error: ${decoded.error ?? "unknown"}`,
-						}),
-					)
-				}
-				for (const channel of decoded.channels ?? []) {
-					channels.push({
-						id: channel.id,
-						name: channel.name ?? channel.id,
-						isPrivate: channel.is_private ?? false,
-						isMember: channel.is_member ?? false,
-					})
-				}
-				const next = decoded.response_metadata?.next_cursor
-				if (!next) break
-				cursor = next
-			}
-			return channels
+			return yield* collectChannelPages(botToken, Option.none(), 0, [])
 		})
 
 		const resolveForBot = Effect.fn("SlackIntegrationService.resolveForBot")(function* (teamId: string) {
-			const rows = yield* database
+			yield* Effect.annotateCurrentSpan({ teamId })
+			const rowOption: Option.Option<SlackWorkspaceRow> = yield* database
 				.execute((db) =>
 					db
 						.select()
@@ -657,15 +768,18 @@ export class SlackIntegrationService extends Context.Service<
 						.where(and(eq(slackWorkspaces.teamId, teamId), isNull(slackWorkspaces.revokedAt)))
 						.limit(1),
 				)
-				.pipe(Effect.mapError(toPersistenceError))
-			const row: SlackWorkspaceRow | undefined = rows[0]
-			if (!row) {
+				.pipe(
+					Effect.mapError(toPersistenceError),
+					Effect.map((rows) => Option.fromNullishOr(rows[0])),
+				)
+			if (Option.isNone(rowOption)) {
 				return yield* Effect.fail(
 					new IntegrationsNotConnectedError({
 						message: "No active Slack installation for this team",
 					}),
 				)
 			}
+			const row = rowOption.value
 			const botToken = yield* decryptValue({
 				ciphertext: row.botTokenCiphertext,
 				iv: row.botTokenIv,

@@ -11,7 +11,6 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from "@maple/ui/components/ui/alert-dialog"
-import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
@@ -117,7 +116,7 @@ export function SlackIntegrationCard() {
 				icon={SlackIcon}
 				accent={SLACK_ACCENT}
 				title="Add Maple to Slack"
-				description="Install the Maple Slack app so your team can ask Maple about their services, traces, and errors right in Slack — and route fired alerts into channels."
+				description="Install the Maple Slack app so your team can ask Maple about services, traces, and errors from Slack — and route fired alerts into channels."
 				features={[
 					{
 						icon: ChatBubbleSparkleIcon,
@@ -162,7 +161,10 @@ export function SlackIntegrationCard() {
 					<div>
 						<div className="flex items-center gap-2">
 							<h3 className="text-sm font-semibold">Slack</h3>
-							<Badge variant="success">Connected</Badge>
+							<span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+								<span className="size-2 shrink-0 rounded-full bg-success" aria-hidden />
+								Connected
+							</span>
 						</div>
 						<p className="mt-1 text-xs text-muted-foreground">
 							The Maple bot answers questions in Slack and delivers alerts to channels. Create a
@@ -170,16 +172,18 @@ export function SlackIntegrationCard() {
 						</p>
 					</div>
 
-					<div className="flex flex-col gap-1 rounded-md bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground">
-						{status?.team_name ? (
-							<div>
-								Workspace: <span className="text-foreground">{status.team_name}</span>
-							</div>
-						) : null}
-						{status?.installed_at ? (
-							<div>Installed {formatAlertDateTime(status.installed_at)}</div>
-						) : null}
-					</div>
+					{status?.team_name || status?.installed_at ? (
+						<div className="flex flex-col gap-1 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+							{status?.team_name ? (
+								<div>
+									Workspace: <span className="text-foreground">{status.team_name}</span>
+								</div>
+							) : null}
+							{status?.installed_at ? (
+								<div>Installed {formatAlertDateTime(status.installed_at)}</div>
+							) : null}
+						</div>
+					) : null}
 
 					<div className="flex flex-wrap gap-2">
 						<Button
@@ -213,9 +217,9 @@ export function SlackIntegrationCard() {
 					<AlertDialogFooter>
 						<AlertDialogCancel>Cancel</AlertDialogCancel>
 						<AlertDialogAction
+							variant="destructive"
 							onClick={handleUninstall}
 							disabled={busy !== null}
-							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
 							{busy === "uninstall" ? <LoaderIcon size={14} className="animate-spin" /> : null}
 							Disconnect

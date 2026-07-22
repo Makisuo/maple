@@ -1,8 +1,12 @@
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { Effect, Option, Redacted } from "effect"
+import { Effect, Option, Redacted, Schema } from "effect"
 import { timingSafeEqual } from "node:crypto"
 import { Env } from "../lib/Env"
-import { SlackIntegrationService, SLACK_CALLBACK_PATH } from "../services/SlackIntegrationService"
+import {
+	SlackIntegrationService,
+	SlackBotResolutionResponseSchema,
+	SLACK_CALLBACK_PATH,
+} from "../services/SlackIntegrationService"
 
 const INTERNAL_SERVICE_PREFIX = "maple_svc_"
 
@@ -34,7 +38,7 @@ export const SlackCallbackRouter = HttpRouter.use((router) =>
 		) {
 			const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
 			if (Option.isNone(urlOption)) {
-				return redirect({ slack: "error", message: "Malformed callback URL" })
+				return redirect({ slack: "error", slack_message: "Malformed callback URL" })
 			}
 			const url = urlOption.value
 			const code = url.searchParams.get("code")
@@ -42,10 +46,10 @@ export const SlackCallbackRouter = HttpRouter.use((router) =>
 			const oauthError = url.searchParams.get("error")
 
 			if (oauthError) {
-				return redirect({ slack: "error", message: oauthError })
+				return redirect({ slack: "error", slack_message: oauthError })
 			}
 			if (!code || !state) {
-				return redirect({ slack: "error", message: "Missing code or state in callback" })
+				return redirect({ slack: "error", slack_message: "Missing code or state in callback" })
 			}
 
 			return yield* slack.completeInstall(code, state).pipe(
@@ -58,21 +62,21 @@ export const SlackCallbackRouter = HttpRouter.use((router) =>
 				Effect.map((result) =>
 					redirect({
 						slack: "connected",
-						...(result.teamName ? { team: result.teamName } : {}),
+						...(result.teamName ? { slack_team: result.teamName } : {}),
 					}),
 				),
 				Effect.catchTags({
 					"@maple/http/errors/IntegrationsValidationError": (error) =>
-						Effect.succeed(redirect({ slack: "error", message: error.message })),
+						Effect.succeed(redirect({ slack: "error", slack_message: error.message })),
 					"@maple/http/errors/IntegrationsForbiddenError": (error) =>
-						Effect.succeed(redirect({ slack: "error", message: error.message })),
+						Effect.succeed(redirect({ slack: "error", slack_message: error.message })),
 					"@maple/http/errors/IntegrationsUpstreamError": () =>
 						Effect.succeed(
-							redirect({ slack: "error", message: "Failed to complete the Slack connection" }),
+							redirect({ slack: "error", slack_message: "Failed to complete the Slack connection" }),
 						),
 					"@maple/http/errors/IntegrationsPersistenceError": () =>
 						Effect.succeed(
-							redirect({ slack: "error", message: "Failed to complete the Slack connection" }),
+							redirect({ slack: "error", slack_message: "Failed to complete the Slack connection" }),
 						),
 				}),
 			)
@@ -106,11 +110,19 @@ const isValidServiceBearer = (
 	)
 }
 
+/** Non-empty, trimmed `:teamId` path param. */
+const decodeTeamIdParam = Schema.decodeUnknownOption(
+	Schema.String.pipe(Schema.check(Schema.isMinLength(1), Schema.isTrimmed())),
+)
+
+const encodeBotResolution = Schema.encodeUnknownEffect(SlackBotResolutionResponseSchema)
+
 /**
  * Internal endpoint for the Railway-hosted Slack bot. Given a Slack `teamId`,
  * returns the bound org's decrypted bot token + minted Maple API key so the bot
- * can act on the org's behalf. Guarded by the shared internal-service token
- * (`Authorization: Bearer maple_svc_<INTERNAL_SERVICE_TOKEN>`).
+ * can act on the org's behalf. Guarded by a dedicated internal-service token
+ * (`Authorization: Bearer maple_svc_<SLACK_INTERNAL_SERVICE_TOKEN>`), falling
+ * back to the shared `INTERNAL_SERVICE_TOKEN` when the dedicated one is unset.
  *
  * Response contract (FIXED — the bot is built against it):
  *   200 → { orgId, teamId, teamName, botToken, mapleApiKey }
@@ -120,37 +132,53 @@ export const SlackInternalRouter = HttpRouter.use((router) =>
 	Effect.gen(function* () {
 		const slack = yield* SlackIntegrationService
 		const env = yield* Env
-		const internalToken = Option.match(env.INTERNAL_SERVICE_TOKEN, {
-			onNone: () => undefined,
-			onSome: Redacted.value,
-		})
+		// Prefer the Slack-bot-specific secret so the Railway bot can hold a token
+		// distinct from the MCP-internal one; fall back to the shared token.
+		const internalToken = Option.match(
+			Option.orElse(env.SLACK_INTERNAL_SERVICE_TOKEN, () => env.INTERNAL_SERVICE_TOKEN),
+			{
+				onNone: () => undefined,
+				onSome: Redacted.value,
+			},
+		)
+
+		const logAccess = (teamId: string, outcome: "found" | "not-found" | "unauthorized") =>
+			Effect.logInfo("Slack internal resolve access", { teamId, outcome })
 
 		const handle = Effect.fn("slack.internalResolve")(function* (
 			req: HttpServerRequest.HttpServerRequest,
 		) {
-			if (!internalToken) return errorText("Internal service token is not configured", 401)
+			const params = yield* HttpRouter.params
+			const teamIdOption = decodeTeamIdParam(
+				typeof params.teamId === "string" ? decodeURIComponent(params.teamId) : undefined,
+			)
+			const teamId = Option.getOrElse(teamIdOption, () => "")
+			if (!internalToken) {
+				yield* logAccess(teamId, "unauthorized")
+				return errorText("Internal service token is not configured", 401)
+			}
 			if (!isValidServiceBearer(req.headers.authorization, internalToken)) {
+				yield* logAccess(teamId, "unauthorized")
 				return errorText("Unauthorized", 401)
 			}
-			const url = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
-			const pathname = Option.match(url, { onNone: () => "", onSome: (u) => u.pathname })
-			const teamId = decodeURIComponent(pathname.split("/").pop() ?? "")
-			if (!teamId) return errorText("Missing teamId", 400)
+			if (Option.isNone(teamIdOption)) return errorText("Missing teamId", 400)
 
-			const resolution = yield* slack.resolveForBot(teamId).pipe(
+			const resolution = yield* slack.resolveForBot(teamIdOption.value).pipe(
+				Effect.map(Option.some),
 				Effect.catchTag("@maple/http/errors/IntegrationsNotConnectedError", () =>
-					Effect.succeed(null),
+					Effect.succeedNone,
 				),
 			)
-			if (resolution === null) {
-				return errorText("No active Slack installation for this team", 404)
-			}
-			return yield* HttpServerResponse.json({
-				orgId: resolution.orgId,
-				teamId: resolution.teamId,
-				teamName: resolution.teamName,
-				botToken: resolution.botToken,
-				mapleApiKey: resolution.mapleApiKey,
+			return yield* Option.match(resolution, {
+				onNone: () =>
+					logAccess(teamId, "not-found").pipe(
+						Effect.as(errorText("No active Slack installation for this team", 404)),
+					),
+				onSome: (resolved) =>
+					logAccess(teamId, "found").pipe(
+						Effect.andThen(encodeBotResolution(resolved).pipe(Effect.orDie)),
+						Effect.flatMap((encoded) => HttpServerResponse.json(encoded)),
+					),
 			})
 		})
 

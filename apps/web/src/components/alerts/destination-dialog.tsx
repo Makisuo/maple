@@ -10,14 +10,14 @@ import {
 	ProviderLogo,
 	type DestinationProvider,
 } from "@/components/alerts/destination-provider"
-import { CircleInfoIcon, HazelIcon, LoaderIcon } from "@/components/icons"
+import { CircleInfoIcon, ExternalLinkIcon, HazelIcon, LoaderIcon } from "@/components/icons"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
-import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import type { HazelChannelsListResponse } from "@maple/domain/http"
 import type { V2SlackChannelList } from "@maple/domain/http/v2"
-import { Exit } from "effect"
+import { Exit, Option } from "effect"
 import { Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { Button } from "@maple/ui/components/ui/button"
@@ -561,9 +561,16 @@ function SlackBotFields({
 		}),
 	)
 
-	const installed = Result.builder(statusResult)
-		.onSuccess((s) => s.installed)
-		.orElse(() => false)
+	// Fall back to the last good status on a failed refetch so an already-valid
+	// form isn't hard-swapped to an error paragraph mid-edit.
+	const status = Result.builder(statusResult)
+		.onSuccess((s) => s)
+		.orElse(() =>
+			Result.isFailure(statusResult)
+				? Option.getOrNull(Option.map(statusResult.previousSuccess, (previous) => previous.value))
+				: null,
+		)
+	const installed = status?.installed === true
 
 	const channelsAtom = installed
 		? MapleApiV2AtomClient.query("slackIntegration", "channels", {
@@ -571,6 +578,7 @@ function SlackBotFields({
 			})
 		: disabledResultAtom<V2SlackChannelList>()
 	const channelsResult = useAtomValue(channelsAtom)
+	const refreshChannels = useAtomRefresh(channelsAtom)
 
 	const channels = Result.builder(channelsResult)
 		.onSuccess((c) => [...c.channels])
@@ -578,18 +586,24 @@ function SlackBotFields({
 	const channelsLoading = installed && channelsResult.waiting
 	const channelsFailed = Result.isFailure(channelsResult)
 
-	const statusPending = Result.isInitial(statusResult)
-	const statusFailed = Result.isFailure(statusResult)
+	const statusPending = Result.isInitial(statusResult) && status === null
+	const statusFailed = Result.isFailure(statusResult) && status === null
 
 	if (statusPending) {
-		return <p className="text-[11px] text-muted-foreground">Checking your Slack connection…</p>
+		return (
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				<p className="text-xs text-muted-foreground">Checking your Slack connection…</p>
+			</div>
+		)
 	}
 
 	if (statusFailed) {
 		return (
-			<p className="text-xs text-destructive">
-				Couldn&apos;t check your Slack connection. This may be a temporary issue — try again.
-			</p>
+			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
+				<p className="text-xs text-destructive">
+					Couldn&apos;t check your Slack connection. This may be a temporary issue — try again.
+				</p>
+			</div>
 		)
 	}
 
@@ -598,22 +612,33 @@ function SlackBotFields({
 			<div className="space-y-2 rounded-md border border-dashed border-border/60 p-3">
 				<p className="text-xs text-muted-foreground">
 					The Maple Slack app isn&apos;t installed for this organization yet. Install it from the
-					integrations page, then come back to pick a channel.
+					integrations page (opens in a new tab), then come back to pick a channel.
 				</p>
-				<Link
-					to="/integrations"
-					search={{ integration: "slack" }}
-					className="inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-2 hover:underline"
+				<Button
+					type="button"
+					size="sm"
+					variant="outline"
+					render={
+						<Link
+							to="/integrations"
+							search={{ integration: "slack" }}
+							target="_blank"
+							rel="noreferrer"
+						/>
+					}
 				>
-					Go to Slack integration →
-				</Link>
+					Open Slack integration
+					<ExternalLinkIcon size={14} />
+				</Button>
 			</div>
 		)
 	}
 
 	const label = (id: string): string => {
 		const channel = channels.find((c) => c.id === id)
-		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : ""
+		// Unknown id (stale/stored channel not in the fetched list): prefer the
+		// stored name, but never render an empty label — show the raw id.
+		if (!channel) return form.slackChannelName ? `#${form.slackChannelName}` : id
 		return channel.is_private ? `#${channel.name} (private)` : `#${channel.name}`
 	}
 
@@ -659,7 +684,9 @@ function SlackBotFields({
 										<span className="text-[10px] text-muted-foreground">private</span>
 									) : null}
 									{!channel.is_member ? (
-										<span className="text-[10px] text-warning">bot not in channel</span>
+										<span className="text-[11px] text-warning-foreground">
+											bot not in channel
+										</span>
 									) : null}
 								</span>
 							</ComboboxItem>
@@ -668,9 +695,12 @@ function SlackBotFields({
 				</ComboboxContent>
 			</Combobox>
 			{channelsFailed ? (
-				<p className="text-[11px] text-destructive">
-					Couldn&apos;t load Slack channels. Try reopening this dialog.
-				</p>
+				<div className="flex items-center gap-2">
+					<p className="text-[11px] text-destructive">Couldn&apos;t load Slack channels.</p>
+					<Button type="button" size="xs" variant="ghost" onClick={refreshChannels}>
+						Retry
+					</Button>
+				</div>
 			) : channels.length === 0 && !channelsLoading ? (
 				<p className="text-[11px] text-muted-foreground">
 					No channels returned. Make sure the Maple bot has been added to at least one channel.

@@ -37,8 +37,8 @@ const IntegrationsSearch = Schema.Struct({
 	),
 	// Post-OAuth return params set by the Slack install callback redirect.
 	slack: Schema.optional(Schema.Literals(["connected", "error"])),
-	message: Schema.optional(Schema.String),
-	team: Schema.optional(Schema.String),
+	slack_message: Schema.optional(Schema.String),
+	slack_team: Schema.optional(Schema.String),
 })
 
 export const Route = createFileRoute("/integrations")({
@@ -55,14 +55,18 @@ function IntegrationsPage() {
 	// Surface the Slack OAuth callback result once, then strip the return params
 	// from the URL so a refresh doesn't re-toast.
 	const slackReturn = search.slack
-	const slackMessage = search.message
-	const slackTeam = search.team
+	const slackMessage = search.slack_message
+	const slackTeam = search.slack_team
 	useEffect(() => {
 		if (!slackReturn) return
+		// Keyed toast: StrictMode double-invokes effects, and the navigate below can
+		// re-run the effect before the params are stripped — the id dedupes both.
 		if (slackReturn === "connected") {
-			toast.success(slackTeam ? `Slack connected to ${slackTeam}` : "Slack connected")
+			toast.success(slackTeam ? `Slack connected to ${slackTeam}` : "Slack connected", {
+				id: "slack-oauth",
+			})
 		} else {
-			toast.error(slackMessage ?? "Slack connection failed")
+			toast.error(slackMessage ?? "Slack connection failed", { id: "slack-oauth" })
 		}
 		navigate({ search: { integration: "slack" }, replace: true })
 	}, [slackReturn, slackMessage, slackTeam, navigate])

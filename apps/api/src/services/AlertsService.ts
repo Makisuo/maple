@@ -2158,16 +2158,17 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											: ""),
 								} satisfies DestinationSecretConfig,
 							}),
-						"slack-bot": (r) =>
-							Effect.succeed({
+						"slack-bot": (r) => {
+							const channelName = normalizeOptionalString(r.channelName)
+							return Effect.succeed({
 								nextPublicConfig: {
 									summary:
-										normalizeOptionalString(r.channelName) != null
-											? `#${normalizeOptionalString(r.channelName)}`
+										channelName != null
+											? `#${channelName}`
 											: hydrated.publicConfig.summary,
 									channelLabel:
-										normalizeOptionalString(r.channelName) != null
-											? `#${normalizeOptionalString(r.channelName)}`
+										channelName != null
+											? `#${channelName}`
 											: hydrated.publicConfig.channelLabel,
 								} satisfies DestinationPublicConfig,
 								nextSecretConfig: {
@@ -2182,9 +2183,10 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 											? hydrated.secretConfig.type === "slack-bot"
 												? hydrated.secretConfig.channelName
 												: null
-											: normalizeOptionalString(r.channelName) ?? null,
+											: channelName ?? null,
 								} satisfies DestinationSecretConfig,
-							}),
+							})
+						},
 						pagerduty: (r) =>
 							Effect.succeed({
 								nextPublicConfig: hydrated.publicConfig,

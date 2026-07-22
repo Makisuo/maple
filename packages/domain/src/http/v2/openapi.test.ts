@@ -1,8 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
+import {
+	SlackBotAlertDestinationConfig,
+	UpdateSlackBotAlertDestinationConfig,
+} from "../alerts"
 import { MapleApiV2 } from "./api"
-import { V2AlertDestinationMutationResponse } from "./alert-destinations"
+import {
+	V2AlertDestinationCreateParams,
+	V2AlertDestinationMutationResponse,
+	V2AlertDestinationUpdateParams,
+} from "./alert-destinations"
+import { V2SlackChannelList, V2SlackIntegrationStatus } from "./integrations"
 import { V2AnomalyIncident, V2AnomalyIncidentTimeseries, V2AnomalySettings } from "./anomalies"
 import { V2ApiKey, V2ApiKeyCreateParams, V2ApiKeyMutationResponse, V2ApiKeyWithSecret } from "./api-keys"
 import { V2Investigation } from "./investigations"
@@ -309,6 +318,89 @@ describe("MapleApiV2 OpenAPI", () => {
 		).not.toThrow()
 		expect(mutation.properties.txid.$ref).toBe("#/components/schemas/_maple_PostgresTransactionId")
 		expect(operation("post", "/v2/alerts/destinations").responses["200"]).toBeDefined()
+	})
+
+	it("documents the Slack integration schemas with decodable wire examples", () => {
+		const status = schemas["SlackIntegration"]
+		expect(status, "SlackIntegration component present").toBeDefined()
+		expect(status.examples).toHaveLength(1)
+		const decodedStatus = Schema.decodeUnknownSync(V2SlackIntegrationStatus)(status.examples[0])
+		expect(decodedStatus.object).toBe("slack_integration")
+		expect(decodedStatus.installed).toBe(true)
+		expect(decodedStatus.team_id).toBe("T0123ABCD")
+
+		// The channel list carries no authored example — freeze a wire-shape one here.
+		expect(schemas["SlackChannelList"], "SlackChannelList component present").toBeDefined()
+		const channelList = Schema.decodeUnknownSync(V2SlackChannelList)({
+			object: "slack_integration.channel_list",
+			channels: [{ id: "C0789CHAN", name: "incidents", is_private: false, is_member: true }],
+		})
+		expect(channelList.object).toBe("slack_integration.channel_list")
+		expect(channelList.channels[0]?.id).toBe("C0789CHAN")
+	})
+
+	it("decodes slack-bot destination create/update params and rejects a blank channel_id", () => {
+		expect(schemas["AlertDestinationCreateSlackBot"], "create component present").toBeDefined()
+		expect(schemas["AlertDestinationUpdateSlackBot"], "update component present").toBeDefined()
+
+		const created = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
+			type: "slack-bot",
+			name: "On-call Slack",
+			channel_id: "C0789CHAN",
+			channel_name: "incidents",
+			enabled: true,
+		})
+		expect(created.type).toBe("slack-bot")
+
+		// channel_name is optional on create.
+		const minimal = Schema.decodeUnknownSync(V2AlertDestinationCreateParams)({
+			type: "slack-bot",
+			name: "On-call Slack",
+			channel_id: "C0789CHAN",
+			enabled: true,
+		})
+		expect(minimal.type).toBe("slack-bot")
+
+		const updated = Schema.decodeUnknownSync(V2AlertDestinationUpdateParams)({
+			type: "slack-bot",
+			channel_name: "alerts",
+		})
+		expect(updated.type).toBe("slack-bot")
+
+		// channel_id was tightened to a non-empty optional string — an explicit
+		// blank must fail decoding instead of silently wiping the stored channel.
+		expect(() =>
+			Schema.decodeUnknownSync(V2AlertDestinationUpdateParams)({
+				type: "slack-bot",
+				channel_id: "",
+			}),
+		).toThrow()
+	})
+
+	it("decodes the internal slack-bot destination config schemas", () => {
+		const config = Schema.decodeUnknownSync(SlackBotAlertDestinationConfig)({
+			type: "slack-bot",
+			name: "Slack bot",
+			channelId: "C0789CHAN",
+			channelName: "incidents",
+			enabled: true,
+		})
+		expect(config.channelId).toBe("C0789CHAN")
+
+		const update = Schema.decodeUnknownSync(UpdateSlackBotAlertDestinationConfig)({
+			channelName: "alerts",
+		})
+		expect(update.channelName).toBe("alerts")
+
+		// Same tightening as the v2 params: a blank channelId must fail decoding.
+		expect(() => Schema.decodeUnknownSync(UpdateSlackBotAlertDestinationConfig)({ channelId: "" })).toThrow()
+		expect(() =>
+			Schema.decodeUnknownSync(SlackBotAlertDestinationConfig)({
+				type: "slack-bot",
+				name: "Slack bot",
+				channelId: "",
+			}),
+		).toThrow()
 	})
 
 	it("documents the public-ID and Scope primitives with examples", () => {

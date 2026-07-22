@@ -8,7 +8,7 @@ import {
 	type AlertSignalType,
 } from "@maple/domain/http"
 import type { AlertDestinationRow } from "@maple/db"
-import { Clock, Duration, Effect, Match, Option } from "effect"
+import { Clock, Duration, Effect, Match, Option, Schema } from "effect"
 import type { EnrichedDestinationSecretConfig } from "./AlertDestinationHydration"
 import { safeFetch } from "../lib/url-validator"
 // Circular with ./alert-email (it imports our formatting helpers); safe — both
@@ -246,6 +246,18 @@ export const formatObservedSummary = (context: ObservedContext): string => {
 
 const makeDeliveryError = (message: string, destinationType?: AlertDestinationType) =>
 	new AlertDeliveryError({ message, destinationType })
+
+/**
+ * Slack Web API `chat.postMessage` response envelope. Slack returns HTTP 200
+ * with `{ ok: false, error }` on logical failures, so the body is the source
+ * of truth.
+ */
+const SlackPostMessageResponseSchema = Schema.Struct({
+	ok: Schema.optionalKey(Schema.Boolean),
+	error: Schema.optionalKey(Schema.String),
+	ts: Schema.optionalKey(Schema.String),
+})
+const decodeSlackPostMessageResponse = Schema.decodeUnknownEffect(SlackPostMessageResponseSchema)
 
 const runTimedFetch = <A>(
 	destinationType: AlertDestinationType,
@@ -684,11 +696,19 @@ export const dispatchDelivery = (
 						// Slack Web API returns HTTP 200 with `{ ok: false, error }` on
 						// logical failures, so the JSON body — not the status — is the
 						// source of truth.
-						const payload = yield* Effect.tryPromise({
-							try: () => response.json() as Promise<{ ok?: boolean; error?: string; ts?: string }>,
+						const rawPayload = yield* Effect.tryPromise({
+							try: () => response.json(),
 							catch: () =>
 								makeDeliveryError("Slack returned a non-JSON response", "slack-bot"),
 						})
+						const payload = yield* decodeSlackPostMessageResponse(rawPayload).pipe(
+							Effect.mapError((error) =>
+								makeDeliveryError(
+									`Slack returned an unexpected response payload: ${error.message}`,
+									"slack-bot",
+								),
+							),
+						)
 						if (!payload.ok) {
 							const error = payload.error ?? "unknown_error"
 							const message =

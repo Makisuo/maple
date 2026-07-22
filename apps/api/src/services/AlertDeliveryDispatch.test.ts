@@ -1,7 +1,8 @@
 import type { AlertDestinationRow } from "@maple/db"
 import { AlertDeliveryError, AlertDestinationId } from "@maple/domain/http"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Fiber, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import {
 	buildAlertChatUrl,
 	buildDiscordEmbedsFromTemplate,
@@ -266,6 +267,71 @@ describe("dispatchDelivery", () => {
 		}),
 	)
 
+	it.effect("slack-bot: a hung fetch times out via the Clock and fails typed", () =>
+		Effect.gen(function* () {
+			// Never settles — only the Clock-driven timeoutOrElse can end this.
+			const fetchFn: typeof fetch = () => new Promise<Response>(() => {})
+
+			const fiber = yield* Effect.forkChild(
+				Effect.flip(
+					dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+				),
+				{ startImmediately: true },
+			)
+			yield* TestClock.adjust("6 seconds")
+			const error = yield* Fiber.join(fiber)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.strictEqual(error.destinationType, "slack-bot")
+			assert.include(error.message, "timed out after 5000ms")
+		}),
+	)
+
+	it.effect("slack-bot: a non-JSON 200 response fails typed", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () => new Response("gateway says hi", { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.strictEqual(error.destinationType, "slack-bot")
+			assert.include(error.message, "non-JSON response")
+		}),
+	)
+
+	it.effect("slack-bot: a JSON payload that fails the response schema fails typed", () =>
+		Effect.gen(function* () {
+			// Valid JSON, but `ok` is a string — SlackPostMessageResponseSchema rejects it.
+			const fetchFn: typeof fetch = async () =>
+				new Response(JSON.stringify({ ok: "yes", ts: 123 }), { status: 200 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.strictEqual(error.destinationType, "slack-bot")
+			assert.include(error.message, "unexpected response payload")
+		}),
+	)
+
+	it.effect("slack-bot: an HTTP-level failure surfaces the status and body", () =>
+		Effect.gen(function* () {
+			const fetchFn: typeof fetch = async () => new Response("upstream exploded", { status: 500 })
+
+			const error = yield* Effect.flip(
+				dispatchDelivery(slackBotContext, "{}", fetchFn, 5_000, LINK, CHAT, slackTokenDeps()),
+			)
+
+			assert.instanceOf(error, AlertDeliveryError)
+			assert.strictEqual(error.destinationType, "slack-bot")
+			assert.include(error.message, "Slack delivery failed with 500")
+			assert.include(error.message, "upstream exploded")
+		}),
+	)
+
 	it.effect("slack-bot: fails when the org has no active Slack installation", () =>
 		Effect.gen(function* () {
 			const fetchFn: typeof fetch = async () => {
@@ -318,6 +384,13 @@ describe("dispatchDelivery", () => {
 					Effect.sync(() => {
 						sent.push({ to, subject, html })
 					}),
+				resolveSlackBotToken: () =>
+					Effect.fail(
+						new AlertDeliveryError({
+							message: "resolveSlackBotToken not available in this test",
+							destinationType: "slack-bot",
+						}),
+					),
 			}
 
 			const result = yield* dispatchDelivery(emailContext, "{}", failingFetch, 5_000, LINK, CHAT, deps)

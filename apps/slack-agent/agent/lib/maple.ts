@@ -73,6 +73,15 @@ const cache = new Map<string, CacheEntry>();
 const inFlight = new Map<string, Promise<MapleWorkspace | null>>();
 
 /**
+ * Test-only: clears the module-level TTL cache and in-flight de-dupe map so
+ * each test starts from a cold cache. Not used by production code.
+ */
+export function resetWorkspaceCacheForTests(): void {
+  cache.clear();
+  inFlight.clear();
+}
+
+/**
  * Resolves the Maple install for a Slack team, cached in-memory.
  *
  * Returns `null` when the team is not installed / has been revoked (the

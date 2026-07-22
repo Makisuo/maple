@@ -282,7 +282,7 @@ export class UpdateSlackBotAlertDestinationConfig extends Schema.Class<UpdateSla
 	"UpdateSlackBotAlertDestinationConfig",
 )({
 	name: OptionalNonEmptyString,
-	channelId: Schema.optionalKey(Schema.String),
+	channelId: OptionalNonEmptyString,
 	channelName: OptionalNonEmptyString,
 	enabled: Schema.optionalKey(Schema.Boolean),
 }) {}

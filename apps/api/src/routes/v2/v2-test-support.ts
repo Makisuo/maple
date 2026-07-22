@@ -48,16 +48,23 @@ import {
  * exercise it. Provided directly onto the group layer below so it leaks no
  * requirement into the harnesses.
  */
-const SlackIntegrationServiceStubLayer = Layer.succeed(SlackIntegrationService, {
-	startInstall: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-	completeInstall: () =>
-		Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-	getStatus: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-	uninstall: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-	listChannels: () => Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-	resolveForBot: () =>
-		Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
-})
+const SlackIntegrationServiceStubLayer = Layer.succeed(
+	SlackIntegrationService,
+	SlackIntegrationService.of({
+		startInstall: () =>
+			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+		completeInstall: () =>
+			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+		getStatus: () =>
+			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+		uninstall: () =>
+			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+		listChannels: () =>
+			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+		resolveForBot: () =>
+			Effect.die(new Error("SlackIntegrationService is not available in this test harness")),
+	}),
+)
 
 export const AllV2GroupLayersLive = Layer.mergeAll(
 	HttpV2ApiKeysLive,

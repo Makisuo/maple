@@ -70,6 +70,13 @@ Postgres to iterate on model + tools. To exercise the Postgres world locally: ru
 > its manifest. It must be set when `eve build` runs. Setting it only as a runtime variable leaves
 > you silently on the ephemeral on-disk world. The Dockerfile sets it before `bun run build`.
 
+Run the tests (bun's native runner; covers the signature verification, `team_id` parsing, and the
+resolve cache in `agent/lib/maple.ts` — no network, fetch is stubbed):
+
+```bash
+bun test
+```
+
 Drive the HTTP contract without the UI:
 
 ```bash
@@ -174,7 +181,13 @@ variables in (d), since two of them embed the URL.
   - `WORKFLOW_LOCAL_BASE_URL=http://localhost:8080` — the durable-run callback target. See the note
     below for why this is loopback and not the public host.
   - (`EVE_WORKFLOW_WORLD` is already baked into the image at build time — no need to set it.)
-  - optional: `ROUTE_AUTH_BASIC_PASSWORD` to lock the non-Slack HTTP routes.
+  - `ROUTE_AUTH_BASIC_PASSWORD` (+ optional `ROUTE_AUTH_BASIC_USER`, default `admin`) — locks the
+    non-Slack HTTP routes (session/stream) behind HTTP Basic. **Effectively required in
+    production**: route auth fails closed on Railway — if the password is unset at boot, the
+    service generates a random one-boot password and logs it once (`[route-auth]` in the deploy
+    logs) rather than serving those routes publicly. The Slack webhook and `/eve/v1/health` are
+    unaffected either way. (`railway.json` has no mechanism to declare required variables, so this
+    is enforced at boot instead.)
 
 Deploy. The entrypoint applies the Postgres-world schema, then starts eve. Check
 `https://<your-service>.up.railway.app/eve/v1/health`.
@@ -357,8 +370,13 @@ and **activate public distribution** so the app can be installed into any worksp
 
   The SSE must carry `delta.tool_calls`, not a JSON blob inside `response`. Also set
   `WORKERS_AI_CONTEXT_WINDOW` to the new model's window.
-- **Auth:** `agent/channels/eve.ts` leaves the browser/API routes public unless
-  `ROUTE_AUTH_BASIC_PASSWORD` is set. The Slack webhook is always signature-verified independently.
+- **Auth:** `agent/channels/eve.ts` fails closed in deployed environments (`RAILWAY_ENVIRONMENT_NAME`
+  set, or `NODE_ENV=production`): the browser/API routes always require HTTP Basic there. With
+  `ROUTE_AUTH_BASIC_PASSWORD` set that's your stable credential; without it, a random per-boot
+  password is generated and logged once at startup (`[route-auth]`), so the routes are never
+  public in production. Purely local runs without a password keep the old open-demo behavior.
+  The Slack webhook is always signature-verified independently, and `/eve/v1/health` is a separate
+  unauthenticated route (Railway's healthcheck is unaffected).
 - Edge Cloudflare Workers isn't used because the only Cloudflare Durable-Objects workflow world is
   built against an older `@workflow` protocol than eve 0.25 requires. Revisit when a `5.0.0-beta`
   Cloudflare world ships.

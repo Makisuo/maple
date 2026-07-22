@@ -27,9 +27,18 @@ const webhookVerifier: SlackWebhookVerifier = async (request, body) => {
   const signingSecret = process.env.SLACK_SIGNING_SECRET;
   if (!signingSecret) {
     // No secret → cannot verify anything. Reject (returning falsy rejects).
+    // Slack disables event subscriptions after repeated delivery failures, so
+    // make the two rejection causes distinguishable in Railway logs. Never log
+    // the secret or signature values themselves.
+    console.warn(
+      "[slack-webhook] Rejected inbound Slack webhook: SLACK_SIGNING_SECRET is not set, so no request can be verified.",
+    );
     return false;
   }
   if (!verifySlackV0Signature(body, request.headers, signingSecret)) {
+    console.warn(
+      "[slack-webhook] Rejected inbound Slack webhook: v0 signature verification failed (missing headers, stale timestamp, or signature mismatch — check that SLACK_SIGNING_SECRET matches the Slack app).",
+    );
     return false;
   }
 
