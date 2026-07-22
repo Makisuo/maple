@@ -215,6 +215,23 @@ export const buildUpstreamShapeUrl = (args: {
 	return url.toString()
 }
 
+/**
+ * Electric Cloud authenticates every shape request with a source `secret`
+ * (paired with `source_id`); self-hosted Electric (local docker) needs neither.
+ * A config carrying exactly ONE of the two is incoherent — most commonly a
+ * deploy that inherited a shared `ELECTRIC_URL` + `ELECTRIC_SOURCE_ID` from the
+ * secret store but no matching `ELECTRIC_SECRET` (e.g. a PR preview whose per-PR
+ * Electric source step was skipped because the CLI token isn't provisioned).
+ * Forwarding that upstream is a guaranteed 401 `MISSING_SECRET` from Electric
+ * Cloud, which surfaces as a hard-broken shape stream in the browser. Instead we
+ * treat it as "not configured" and take the same 503 graceful-degrade path as a
+ * missing `ELECTRIC_URL`. Pure + exported so the coherence rule is unit-tested.
+ */
+export const isElectricConfigCoherent = (creds: {
+	readonly sourceId: string | undefined
+	readonly secret: string | undefined
+}): boolean => (creds.sourceId === undefined) === (creds.secret === undefined)
+
 const errorText = (message: string, status: number) =>
 	HttpServerResponse.text(message, {
 		status,
@@ -233,13 +250,31 @@ export const ElectricSyncRouter = HttpRouter.use((router) =>
 			onNone: () => undefined,
 			onSome: Redacted.value,
 		})
+		// Electric Cloud needs `source_id` + `secret` together; a half-configured
+		// deploy would forward a doomed unauthenticated request (401 MISSING_SECRET).
+		// Detect it once at isolate startup and disable sync (503 below) rather than
+		// per-request, and log so the misconfiguration is discoverable in telemetry.
+		const configCoherent = isElectricConfigCoherent({ sourceId, secret })
+		if (electricUrl && !configCoherent) {
+			yield* Effect.logWarning(
+				"Electric sync disabled: incoherent Cloud credentials — set both ELECTRIC_SOURCE_ID and ELECTRIC_SECRET, or neither",
+			).pipe(
+				Effect.annotateLogs({
+					hasSourceId: sourceId !== undefined,
+					hasSecret: secret !== undefined,
+				}),
+			)
+		}
 
 		const handle = (req: HttpServerRequest.HttpServerRequest) =>
 			Effect.gen(function* () {
-				// Not configured (e.g. self-hosted without an Electric container) →
-				// 503; the web app's collections degrade and it keeps using its
-				// existing effect-atom fetches.
-				if (!electricUrl) return errorText("Electric sync is not configured", 503)
+				// Not configured (self-hosted without an Electric container, or a
+				// half-configured Cloud deploy missing its source secret) → 503; the
+				// web app's collections degrade and it keeps using its existing
+				// effect-atom fetches.
+				if (!electricUrl || !configCoherent) {
+					return errorText("Electric sync is not configured", 503)
+				}
 
 				const requestUrl = new URL(req.url, "http://internal")
 				const shapeParam = requestUrl.searchParams.get("shape")

@@ -1,5 +1,10 @@
 import { assert, describe, it } from "@effect/vitest"
-import { buildUpstreamShapeUrl, isShapeName, shapeResponseHeaders } from "./shape.http"
+import {
+	buildUpstreamShapeUrl,
+	isElectricConfigCoherent,
+	isShapeName,
+	shapeResponseHeaders,
+} from "./shape.http"
 
 const parse = (raw: string) => {
 	const url = new URL(raw)
@@ -20,6 +25,24 @@ describe("isShapeName", () => {
 		// Must not be fooled by prototype keys.
 		assert.isFalse(isShapeName("toString"))
 		assert.isFalse(isShapeName("constructor"))
+	})
+})
+
+describe("isElectricConfigCoherent", () => {
+	it("accepts self-hosted (neither source id nor secret)", () => {
+		assert.isTrue(isElectricConfigCoherent({ sourceId: undefined, secret: undefined }))
+	})
+
+	it("accepts Electric Cloud (both source id and secret)", () => {
+		assert.isTrue(isElectricConfigCoherent({ sourceId: "src_1", secret: "sh_secret" }))
+	})
+
+	it("rejects a source id without a secret (the skipped-per-PR-source case)", () => {
+		assert.isFalse(isElectricConfigCoherent({ sourceId: "src_1", secret: undefined }))
+	})
+
+	it("rejects a secret without a source id", () => {
+		assert.isFalse(isElectricConfigCoherent({ sourceId: undefined, secret: "sh_secret" }))
 	})
 })
 
