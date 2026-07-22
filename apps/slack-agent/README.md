@@ -110,6 +110,7 @@ oauth_config:
       - chat:write          # post replies
       - chat:write.public   # post in channels the bot isn't a member of
       - channels:read       # resolve public channel metadata
+      - channels:history
       - groups:read         # resolve private channel metadata
       - im:history          # read DM history (message.im)
       - im:read             # resolve DM conversation metadata
