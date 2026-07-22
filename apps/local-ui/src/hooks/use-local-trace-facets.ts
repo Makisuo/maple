@@ -3,15 +3,11 @@ import { CH } from "@maple/query-engine"
 import { executeLocalCompiledQuery } from "@/lib/query"
 import { LOCAL_ORG_ID } from "../lib/constants"
 import { boundsForRange } from "../lib/time"
-import type { FilterOption } from "../components/filter-section"
+import type { FilterOption } from "@maple/ui/components/filters/filter-section"
+import type { DurationStats } from "@maple/ui/components/filters/duration-range-filter"
 import type { TraceFilters } from "./use-local-traces"
 
-export interface DurationStats {
-	minDurationMs: number
-	maxDurationMs: number
-	p50DurationMs: number
-	p95DurationMs: number
-}
+export type { DurationStats }
 
 export interface TraceFacets {
 	services: FilterOption[]

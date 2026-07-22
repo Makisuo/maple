@@ -3,7 +3,7 @@ import { CH } from "@maple/query-engine"
 import { executeLocalCompiledQuery } from "@/lib/query"
 import { LOCAL_ORG_ID } from "../lib/constants"
 import { boundsForRange } from "../lib/time"
-import type { FilterOption } from "../components/filter-section"
+import type { FilterOption } from "@maple/ui/components/filters/filter-section"
 
 /**
  * Distinct service names in the window, shaped as filter options. Drives the

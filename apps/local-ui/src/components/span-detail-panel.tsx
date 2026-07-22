@@ -1,3 +1,8 @@
+// Intentionally divergent from the web app's `@/components/traces/span-detail-panel`:
+// that one is wired to effect-atom, infra correlation, and timezone preferences local
+// mode doesn't have. The shareable pieces (AttributesTable, SeverityBadge,
+// HttpSpanLabel, format/colors libs) already come from @maple/ui.
+
 import { useState } from "react"
 import { toast } from "sonner"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"

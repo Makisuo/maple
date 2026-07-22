@@ -11,9 +11,9 @@ import { useLocalTraces, type TraceFilters } from "../hooks/use-local-traces"
 import { useLocalTraceFacets } from "../hooks/use-local-trace-facets"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
-import { DurationRangeFilter } from "../components/duration-range-filter"
-import { FilterSection, SearchableFilterSection, SingleCheckboxFilter } from "../components/filter-section"
-import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "../components/filter-sidebar"
+import { DurationRangeFilter } from "@maple/ui/components/filters/duration-range-filter"
+import { FilterSection, SearchableFilterSection, SingleCheckboxFilter } from "@maple/ui/components/filters/filter-section"
+import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
 import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
@@ -69,7 +69,7 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 	const facetSelect = (key: string) => (vals: string[]) => setParams({ [key]: vals.at(-1) ?? null })
 
 	const sidebar = (
-		<FilterSidebarFrame waiting={facets.isFetching}>
+		<FilterSidebarFrame className="w-56 shrink-0 px-4" waiting={facets.isFetching}>
 			<FilterSidebarHeader
 				canClear={hasActiveFilters}
 				onClear={() =>
@@ -121,9 +121,14 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 				<DurationRangeFilter
 					minValue={filters.minDurationMs}
 					maxValue={filters.maxDurationMs}
-					onMinChange={(v) => setParams({ minDur: v != null ? String(v) : null })}
-					onMaxChange={(v) => setParams({ maxDur: v != null ? String(v) : null })}
+					onRangeChange={(min, max) =>
+						setParams({
+							minDur: min != null ? String(Math.round(min)) : null,
+							maxDur: max != null ? String(Math.round(max)) : null,
+						})
+					}
 					durationStats={facets.data?.durationStats}
+					debounceMs={300}
 				/>
 				<FilterSection
 					title="HTTP Method"
