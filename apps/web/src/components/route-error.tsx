@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { AlertWarningIcon, CircleQuestionIcon, HouseIcon } from "@/components/icons"
 import { Button, buttonVariants } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+import { useNetworkAutoRetry } from "@/hooks/use-network-auto-retry"
 import { formatBackendError } from "@/lib/error-messages"
 import { isChunkLoadError, shouldAttemptChunkReload } from "@/lib/chunk-reload"
 
@@ -17,8 +18,16 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 		}
 	}, [isStaleChunk])
 
-	const { title, description } = formatBackendError(error)
+	const formatted = formatBackendError(error)
+	const { title, description } = formatted
 	const stack = error instanceof Error ? error.stack : undefined
+
+	const retry = () => {
+		reset()
+		router.invalidate()
+	}
+	// Route-loader transport failures self-heal without a manual reload.
+	useNetworkAutoRetry(formatted.kind === "network" && !isStaleChunk, retry)
 
 	return (
 		<Empty className="min-h-[60vh]">
@@ -38,8 +47,7 @@ function RouteError({ error, reset }: ErrorComponentProps) {
 							window.location.reload()
 							return
 						}
-						reset()
-						router.invalidate()
+						retry()
 					}}
 				>
 					{isStaleChunk ? "Reload" : "Try again"}

@@ -5,6 +5,8 @@ import { isChunkLoadError } from "./chunk-reload"
 export interface FormattedError {
 	readonly title: string
 	readonly description: string
+	/** `"network"` = transient connectivity failure; safe to auto-retry. */
+	readonly kind?: "network"
 }
 
 const QUOTA_DESCRIPTIONS: Record<string, string> = {
@@ -250,6 +252,8 @@ export const formatBackendError = (input: unknown): FormattedError => {
 			return {
 				title: "Cannot reach Maple API",
 				description: "Check your connection — data will resume once the API is reachable.",
+				// A bad URL never self-heals — only transport failures auto-retry.
+				...(reasonTag === "TransportError" ? { kind: "network" as const } : {}),
 			}
 		}
 		if (status !== undefined && status >= 500) {
@@ -274,6 +278,7 @@ export const formatBackendError = (input: unknown): FormattedError => {
 			return {
 				title: "Cannot reach Maple API",
 				description: "Check your connection — data will resume once the API is reachable.",
+				kind: "network",
 			}
 		}
 		return {
