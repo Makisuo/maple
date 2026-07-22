@@ -14,15 +14,20 @@ import {
 	IntegrationIconPlate,
 	IntegrationsSummary,
 	catalogEntry,
+	useIntegrationOverviews,
 	useIntegrationStatuses,
 	type IntegrationId,
 } from "@/components/integrations/integration-catalog"
+import {
+	IntegrationConnectProvider,
+	useIntegrationConnect,
+} from "@/components/integrations/integration-connect"
 import { ScrapeTargetsSection } from "@/components/settings/scrape-targets-section"
 import { SettingsNav, useVisibleSettingsSections } from "@/components/settings/settings-nav"
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon } from "@/components/icons"
+import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon, LoaderIcon } from "@/components/icons"
 
 const IntegrationsSearch = Schema.Struct({
 	integration: Schema.optional(
@@ -98,50 +103,52 @@ function IntegrationsPage() {
 	const entry = catalogEntry(integration)
 
 	return (
-		<DashboardLayout
-			breadcrumbs={[
-				{ label: "Settings", href: "/settings" },
-				{ label: "Integrations", href: "/integrations" },
-				{ label: entry.name },
-			]}
-			titleContent={<IntegrationHeader integration={integration} />}
-			filterSidebar={settingsSidebar}
-		>
-			<div className="space-y-4">
-				{integration === "warpstream" && (
-					<Alert variant="info">
-						<CircleInfoIcon />
-						<AlertDescription>
-							WarpStream clusters are scraped as Prometheus targets — point a target at an
-							agent&apos;s <code className="font-mono text-xs">:8080/metrics</code> endpoint
-							or the hosted Prometheus endpoint with Basic auth.{" "}
-							<a
-								href="https://maple.dev/docs/integrations/warpstream"
-								target="_blank"
-								rel="noreferrer"
-								className="text-foreground underline underline-offset-2 hover:no-underline"
-							>
-								Setup guide
-							</a>
-						</AlertDescription>
-					</Alert>
-				)}
-				{integration === "cloudflare" ? (
-					<CloudflareAccountCard />
-				) : integration === "hazel" ? (
-					<HazelIntegrationCard />
-				) : integration === "github" ? (
-					<GithubIntegrationCard />
-				) : integration === "planetscale" ? (
-					<PlanetScaleIntegrationCard />
-				) : integration === "slack" ? (
-					<SlackIntegrationCard />
-				) : (
-					// prometheus + warpstream share the generic scrape-target flow
-					<ScrapeTargetsSection sourceFilter="prometheus" />
-				)}
-			</div>
-		</DashboardLayout>
+		<IntegrationConnectProvider integration={integration}>
+			<DashboardLayout
+				breadcrumbs={[
+					{ label: "Settings", href: "/settings" },
+					{ label: "Integrations", href: "/integrations" },
+					{ label: entry.name },
+				]}
+				titleContent={<IntegrationHeader integration={integration} />}
+				filterSidebar={settingsSidebar}
+			>
+				<div className="space-y-4">
+					{integration === "warpstream" && (
+						<Alert variant="info">
+							<CircleInfoIcon />
+							<AlertDescription>
+								WarpStream clusters are scraped as Prometheus targets — point a target at an
+								agent&apos;s <code className="font-mono text-xs">:8080/metrics</code> endpoint
+								or the hosted Prometheus endpoint with Basic auth.{" "}
+								<a
+									href="https://maple.dev/docs/integrations/warpstream"
+									target="_blank"
+									rel="noreferrer"
+									className="text-foreground underline underline-offset-2 hover:no-underline"
+								>
+									Setup guide
+								</a>
+							</AlertDescription>
+						</Alert>
+					)}
+					{integration === "cloudflare" ? (
+						<CloudflareAccountCard />
+					) : integration === "hazel" ? (
+						<HazelIntegrationCard />
+					) : integration === "github" ? (
+						<GithubIntegrationCard />
+					) : integration === "planetscale" ? (
+						<PlanetScaleIntegrationCard />
+					) : integration === "slack" ? (
+						<SlackIntegrationCard />
+					) : (
+						// prometheus + warpstream share the generic scrape-target flow
+						<ScrapeTargetsSection sourceFilter="prometheus" />
+					)}
+				</div>
+			</DashboardLayout>
+		</IntegrationConnectProvider>
 	)
 }
 
@@ -149,6 +156,13 @@ function IntegrationHeader({ integration }: { integration: IntegrationId }) {
 	const navigate = useNavigate({ from: Route.fullPath })
 	const entry = catalogEntry(integration)
 	const status = useIntegrationStatuses()[integration]
+	// Provided by IntegrationConnectProvider for OAuth integrations; null for scrape-based
+	// ones — which is also the "no header Connect button" signal. Only shown while the
+	// integration is genuinely available (not connected, not errored, not still loading).
+	const connectFlow = useIntegrationConnect()
+	const overview = useIntegrationOverviews()[integration]
+	const showConnect = connectFlow !== null && overview?.kind === "available"
+	const EntryIcon = entry.icon
 
 	return (
 		<div className="flex items-center gap-3">
@@ -171,17 +185,31 @@ function IntegrationHeader({ integration }: { integration: IntegrationId }) {
 				<h1 className="text-lg font-semibold">{entry.name}</h1>
 				{status ? <Badge variant={status.variant}>{status.label}</Badge> : null}
 			</div>
-			{entry.docsUrl ? (
-				<a
-					href={entry.docsUrl}
-					target="_blank"
-					rel="noreferrer"
-					className="ml-auto inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-				>
-					Docs
-					<ExternalLinkIcon size={12} />
-				</a>
-			) : null}
+			<div className="ml-auto flex items-center gap-3">
+				{entry.docsUrl ? (
+					<a
+						href={entry.docsUrl}
+						target="_blank"
+						rel="noreferrer"
+						className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+					>
+						Docs
+						<ExternalLinkIcon size={12} />
+					</a>
+				) : null}
+				{showConnect ? (
+					<Button size="sm" onClick={connectFlow.connect} disabled={connectFlow.busy}>
+						{connectFlow.busy ? (
+							<LoaderIcon size={14} className="animate-spin" />
+						) : (
+							// No iconClassName here — the glyph inherits the button's text color,
+							// same as the in-card Connect buttons.
+							<EntryIcon size={14} />
+						)}
+						Connect {entry.name}
+					</Button>
+				) : null}
+			</div>
 		</div>
 	)
 }

@@ -12,9 +12,12 @@ import {
 	EmptyTitle,
 } from "@maple/ui/components/ui/empty"
 import { Button } from "@maple/ui/components/ui/button"
+import { Separator } from "@maple/ui/components/ui/separator"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@maple/ui/components/ui/tabs"
 import { CircleWarningIcon, ConnectionIcon } from "@maple/ui/components/icons"
 import { LOCAL_OTLP_ENDPOINT, localApiBase } from "../lib/constants"
+import { DOCS_CLI_REFERENCE, DOCS_LOCAL_MODE_INSTALL, INSTALL_METHODS } from "../lib/links"
 import { CopyableField } from "./copyable-field"
 
 export function EmptyState({ icon, title, hint }: { icon?: ReactNode; title: string; hint?: ReactNode }) {
@@ -80,7 +83,14 @@ export function DisconnectedState({ onRetry }: { onRetry: () => void }) {
 					Start your local Maple backend and this view connects automatically.
 				</EmptyDescription>
 			</EmptyHeader>
-			<EmptyContent className="w-full max-w-sm items-stretch gap-3">
+			<EmptyContent className="w-full max-w-md items-stretch gap-3 text-left">
+				<InstallCommands />
+
+				<Separator />
+
+				<span className="text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+					Already installed?
+				</span>
 				<CopyableField label="Start Maple" value="maple start" />
 				<CopyableField label="Expecting" value={LOCAL_OTLP_ENDPOINT} />
 				<p className="text-left text-xs text-muted-foreground">
@@ -97,17 +107,52 @@ export function DisconnectedState({ onRetry }: { onRetry: () => void }) {
 					<Button variant="outline" size="sm" onClick={onRetry}>
 						Try again
 					</Button>
-					<a
-						href="https://maple.dev/docs"
-						target="_blank"
-						rel="noopener noreferrer"
-						className="text-xs text-muted-foreground underline underline-offset-2 hover:no-underline"
-					>
-						Documentation
-					</a>
+					<span className="flex items-center gap-2 text-xs text-muted-foreground">
+						<DocsLink href={DOCS_LOCAL_MODE_INSTALL}>Local mode</DocsLink>
+						<span aria-hidden="true">·</span>
+						<DocsLink href={DOCS_CLI_REFERENCE}>CLI reference</DocsLink>
+					</span>
 				</div>
 			</EmptyContent>
 		</Empty>
+	)
+}
+
+/**
+ * Homebrew / install-script commands for the `maple` binary — the disconnected
+ * screen is the one place where the user may not have the CLI at all, so the
+ * install path lives right next to "start it". Commands mirror the landing
+ * page's install tabs (see `lib/links.ts`).
+ */
+function InstallCommands() {
+	return (
+		<Tabs defaultValue={INSTALL_METHODS[0].id} className="gap-2">
+			<TabsList variant="underline" className="justify-start">
+				{INSTALL_METHODS.map((method) => (
+					<TabsTrigger key={method.id} value={method.id}>
+						{method.label}
+					</TabsTrigger>
+				))}
+			</TabsList>
+			{INSTALL_METHODS.map((method) => (
+				<TabsContent key={method.id} value={method.id} className="mt-0">
+					<CopyableField label="" value={method.command} />
+				</TabsContent>
+			))}
+		</Tabs>
+	)
+}
+
+function DocsLink({ href, children }: { href: string; children: ReactNode }) {
+	return (
+		<a
+			href={href}
+			target="_blank"
+			rel="noopener noreferrer"
+			className="underline underline-offset-2 hover:no-underline"
+		>
+			{children}
+		</a>
 	)
 }
 

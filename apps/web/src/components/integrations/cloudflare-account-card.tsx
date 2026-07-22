@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import { Exit } from "effect"
-import { CloudflareStartConnectRequest } from "@maple/domain/http"
 import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
@@ -9,19 +8,21 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { toast } from "sonner"
 
-import {
-	BoltIcon,
-	CircleWarningIcon,
-	CloudflareIcon,
-	GlobeIcon,
-	LoaderIcon,
-	ShieldIcon,
-} from "@/components/icons"
-import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
+import { CircleWarningIcon, CloudflareIcon, LoaderIcon } from "@/components/icons"
+import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { formatNumber } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
-import { IntegrationEmptyState } from "./integration-empty-state"
+import { useIntegrationConnect } from "./integration-connect"
+import {
+	IntegrationEmpty,
+	IntegrationEmptyCard,
+	IntegrationEmptyFeature,
+	IntegrationEmptyFeatures,
+	IntegrationEmptyFooter,
+	IntegrationEmptyHint,
+	IntegrationEmptyMedia,
+} from "./integration-empty-state"
 import {
 	CloudflareZoneBoard,
 	ResourceRow,
@@ -49,7 +50,6 @@ export function CloudflareAccountCard() {
 		reactivityKeys: ["cloudflareIntegrationStatus"],
 	})
 	const statusResult = useAtomValue(statusQuery)
-	const refreshStatus = useAtomRefresh(statusQuery)
 
 	// Warehouse-derived ingest volume: loads independently so the card renders instantly
 	// from status and the usage columns hydrate (or silently stay absent) afterwards.
@@ -57,52 +57,19 @@ export function CloudflareAccountCard() {
 		reactivityKeys: ["cloudflareIntegrationUsage"],
 	})
 	const usageResult = useAtomValue(usageQuery)
-	const refreshUsage = useAtomRefresh(usageQuery)
 
-	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "cloudflareStart"), {
-		mode: "promiseExit",
-	})
 	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "cloudflareDisconnect"), {
 		mode: "promiseExit",
 	})
 
-	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
-	const popupRef = useRef<Window | null>(null)
-	const [popupOpen, setPopupOpen] = useState(false)
-
-	// The OAuth popup returns to this same SPA and posts a success message before closing —
-	// refresh status (and usage) so the card flips to Connected without a manual page reload.
-	useEffect(() => {
-		function onMessage(event: MessageEvent) {
-			if (event.data?.type === "maple:integration:cloudflare") {
-				if (event.data.status === "success") {
-					toast.success("Cloudflare account connected")
-					refreshStatus()
-					refreshUsage()
-				} else if (event.data.status === "error") {
-					toast.error(event.data.message ?? "Cloudflare connection failed")
-				}
-			}
-		}
-		window.addEventListener("message", onMessage)
-		return () => window.removeEventListener("message", onMessage)
-	}, [refreshStatus, refreshUsage])
-
-	// Cross-origin popups fire no "closed" event, so poll the handle. When it closes,
-	// refresh immediately — covers the case where the success message never arrives
-	// (popup closed manually or blocked) so the card can't get stuck on the stale view.
-	useEffect(() => {
-		if (!popupOpen) return
-		const id = setInterval(() => {
-			if (popupRef.current?.closed ?? true) {
-				popupRef.current = null
-				setPopupOpen(false)
-				refreshStatus()
-				refreshUsage()
-			}
-		}, 500)
-		return () => clearInterval(id)
-	}, [popupOpen, refreshStatus, refreshUsage])
+	// Connect flow (popup, busy, refresh-on-return) lives in IntegrationConnectProvider —
+	// shared with the drill-in header's Connect button.
+	const connectFlow = useIntegrationConnect()
+	if (connectFlow === null) {
+		throw new Error("CloudflareAccountCard must be rendered inside IntegrationConnectProvider")
+	}
+	const [disconnectBusy, setDisconnectBusy] = useState(false)
+	const actionBusy = connectFlow.busy || disconnectBusy
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
@@ -136,9 +103,7 @@ export function CloudflareAccountCard() {
 	const unmatchedZoneServices = useMemo(() => {
 		if (!usage || !status) return []
 		const known = new Set(status.zones.map((zone) => zone.name))
-		return usage.services.filter(
-			(service) => service.kind === "zone" && !known.has(service.displayName),
-		)
+		return usage.services.filter((service) => service.kind === "zone" && !known.has(service.displayName))
 	}, [usage, status])
 
 	// The first account-wide failure across zones/workers (revoked token, missing config, denied
@@ -173,41 +138,12 @@ export function CloudflareAccountCard() {
 		})
 	}
 
-	async function handleConnect() {
-		// Open the popup synchronously (inside the click) so the browser doesn't block it,
-		// then point it at the authorize URL once the start call returns.
-		const popup = window.open("", "maple-cloudflare-connect", "popup,width=520,height=680")
-		popupRef.current = popup
-		if (popup) setPopupOpen(true)
-		setBusy("connect")
-		const result = await startConnect({
-			payload: new CloudflareStartConnectRequest({ returnTo: window.location.href }),
-			reactivityKeys: ["cloudflareIntegrationStatus"],
-		})
-		setBusy(null)
-		if (Exit.isSuccess(result)) {
-			const url = result.value.redirectUrl
-			if (popup && !popup.closed) {
-				popup.location.href = url
-			} else {
-				const reopened = window.open(url, "maple-cloudflare-connect", "popup,width=520,height=680")
-				popupRef.current = reopened
-				if (reopened) setPopupOpen(true)
-			}
-		} else {
-			popup?.close()
-			popupRef.current = null
-			setPopupOpen(false)
-			toast.error("Failed to start Cloudflare connect flow")
-		}
-	}
-
 	async function handleDisconnect() {
-		setBusy("disconnect")
+		setDisconnectBusy(true)
 		const result = await disconnect({
 			reactivityKeys: ["cloudflareIntegrationStatus", "cloudflareIntegrationUsage"],
 		})
-		setBusy(null)
+		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
 			toast.success("Cloudflare account disconnected")
 		} else {
@@ -218,8 +154,8 @@ export function CloudflareAccountCard() {
 	const isConnected = status?.connected === true
 
 	const connectButton = (label: string, variant?: "outline") => (
-		<Button size="sm" onClick={handleConnect} disabled={busy !== null} variant={variant}>
-			{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+		<Button size="sm" onClick={connectFlow.connect} disabled={actionBusy} variant={variant}>
+			{connectFlow.busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 			{label}
 		</Button>
 	)
@@ -247,39 +183,42 @@ export function CloudflareAccountCard() {
 
 	if (!isConnected) {
 		return (
-			<IntegrationEmptyState
-				icon={CloudflareIcon}
-				accent={CLOUDFLARE_ACCENT}
-				title="Connect your Cloudflare account"
-				description="See traffic and Workers analytics from your Cloudflare account in Maple — connect once, nothing to configure in the Cloudflare dashboard."
-				features={[
-					{
-						icon: GlobeIcon,
-						title: "Zone analytics",
-						description: "Traffic, cache hit rate, and errors for every zone under Infrastructure.",
-					},
-					{
-						icon: BoltIcon,
-						title: "Workers on the map",
-						description: "Scripts join the service map with request volume and errors.",
-					},
-					{
-						icon: ShieldIcon,
-						title: "DNS & security",
-						description: "DNS records, hosts, and WAF activity per zone.",
-					},
-				]}
-				footer="You'll authorize Maple in a Cloudflare popup."
-			>
-				<Button onClick={handleConnect} disabled={busy !== null}>
-					{busy === "connect" ? (
-						<LoaderIcon size={16} className="animate-spin" />
-					) : (
-						<CloudflareIcon size={16} />
-					)}
-					Connect Cloudflare
-				</Button>
-			</IntegrationEmptyState>
+			<IntegrationEmpty icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT}>
+				<IntegrationEmptyFeatures>
+					<IntegrationEmptyFeature
+						label="Zone analytics"
+						title="Requests & cache per zone"
+						description="Traffic, cache hit rate, and errors for every zone under Infrastructure."
+					/>
+					<IntegrationEmptyFeature
+						label="Workers"
+						title="Scripts on the service map"
+						description="Every Worker appears as a node with request volume and errors wired into traces."
+					/>
+					<IntegrationEmptyFeature
+						label="DNS & security"
+						title="Firewall events with context"
+						description="DNS records, hosts, and WAF activity land alongside your traces and logs."
+					/>
+				</IntegrationEmptyFeatures>
+				<IntegrationEmptyCard>
+					<IntegrationEmptyMedia />
+					<IntegrationEmptyHint>
+						Your zones and Workers will appear here after connecting.
+					</IntegrationEmptyHint>
+					<Button onClick={connectFlow.connect} disabled={actionBusy}>
+						{connectFlow.busy ? (
+							<LoaderIcon size={16} className="animate-spin" />
+						) : (
+							<CloudflareIcon size={16} />
+						)}
+						Connect Cloudflare
+					</Button>
+					<IntegrationEmptyFooter>
+						Read-only OAuth · takes about a minute · disconnect anytime
+					</IntegrationEmptyFooter>
+				</IntegrationEmptyCard>
+			</IntegrationEmpty>
 		)
 	}
 
@@ -332,8 +271,8 @@ export function CloudflareAccountCard() {
 
 				<div className="flex shrink-0 items-center gap-1.5">
 					{connectButton("Reconnect", "outline")}
-					<Button size="sm" onClick={handleDisconnect} disabled={busy !== null} variant="outline">
-						{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+					<Button size="sm" onClick={handleDisconnect} disabled={actionBusy} variant="outline">
+						{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Disconnect
 					</Button>
 				</div>

@@ -46,9 +46,7 @@ import { Switch } from "@maple/ui/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { cn } from "@maple/ui/lib/utils"
 import {
-	BellIcon,
 	BoltIcon,
-	ChartBarIcon,
 	CircleCheckIcon,
 	CircleInfoIcon,
 	CircleWarningIcon,
@@ -68,7 +66,15 @@ import { formatDuration, formatNumber, formatRelativeTime } from "@/lib/format"
 import { diagnoseScrapeError } from "@/lib/scrape-error-diagnosis"
 import { scheduledStatusFromChecks, scheduledStatusFromRollup } from "@/lib/scrape-target-status"
 import { catalogEntry } from "../integrations/integration-catalog"
-import { IntegrationEmptyState } from "../integrations/integration-empty-state"
+import {
+	IntegrationEmpty,
+	IntegrationEmptyCard,
+	IntegrationEmptyFeature,
+	IntegrationEmptyFeatures,
+	IntegrationEmptyFooter,
+	IntegrationEmptyHint,
+	IntegrationEmptyMedia,
+} from "../integrations/integration-empty-state"
 
 type ScrapeTarget = V2ScrapeTarget
 type ScrapeTargetCheck = V2ScrapeTargetCheck
@@ -133,23 +139,23 @@ function checksFromResult(result: ScrapeTargetChecksResult): ScrapeTargetCheck[]
 
 const COPY = {
 	description: "Scrape Prometheus exporters and inspect scheduled scrape health.",
-	emptyTitle: "No scrape targets",
-	emptyDescription: "Add a Prometheus exporter endpoint to start scraping metrics.",
+	emptyHint: "Targets you add will appear here with per-run scrape health.",
+	emptyFooter: "Any Prometheus-compatible endpoint · scraped on your schedule",
 	features: [
 		{
-			icon: ChartBarIcon,
-			title: "Metrics explorer",
-			description: "Scraped metrics land alongside your OTel metrics, ready to chart.",
+			label: "Metrics explorer",
+			title: "Scraped metrics, ready to chart",
+			description: "Scraped metrics land alongside your OTel metrics in the explorer.",
 		},
 		{
-			icon: BellIcon,
-			title: "Dashboards & alerts",
+			label: "Dashboards & alerts",
+			title: "Widgets and thresholds",
 			description: "Build dashboard widgets and threshold alerts on any scraped metric.",
 		},
 		{
-			icon: PulseIcon,
-			title: "Scrape health",
-			description: "Every run is checked on a schedule, with per-target history.",
+			label: "Scrape health",
+			title: "Every run checked",
+			description: "Scheduled probes with per-target history and error diagnosis.",
 		},
 	],
 } as const
@@ -390,19 +396,26 @@ export function ScrapeTargetsSection({
 						</Button>
 					</div>
 				) : targets.length === 0 ? (
-					<IntegrationEmptyState
+					<IntegrationEmpty
 						icon={emptyEntry?.icon ?? FireIcon}
 						accent={emptyEntry?.accent ?? "#E6522C"}
 						iconClassName={emptyEntry?.iconClassName}
-						title={copy.emptyTitle}
-						description={copy.emptyDescription}
-						features={copy.features}
 					>
-						<Button onClick={openAddDialog}>
-							<PlusIcon size={16} />
-							Add Target
-						</Button>
-					</IntegrationEmptyState>
+						<IntegrationEmptyFeatures>
+							{copy.features.map((feature) => (
+								<IntegrationEmptyFeature key={feature.label} {...feature} />
+							))}
+						</IntegrationEmptyFeatures>
+						<IntegrationEmptyCard>
+							<IntegrationEmptyMedia />
+							<IntegrationEmptyHint>{copy.emptyHint}</IntegrationEmptyHint>
+							<Button onClick={openAddDialog}>
+								<PlusIcon size={16} />
+								Add Target
+							</Button>
+							<IntegrationEmptyFooter>{copy.emptyFooter}</IntegrationEmptyFooter>
+						</IntegrationEmptyCard>
+					</IntegrationEmpty>
 				) : (
 					<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
 						<div className="divide-y overflow-hidden rounded-lg border bg-card">

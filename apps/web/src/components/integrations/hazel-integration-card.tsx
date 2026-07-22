@@ -1,18 +1,25 @@
 import { useState } from "react"
 import { Exit, Option } from "effect"
-import { HazelStartConnectRequest } from "@maple/domain/http"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
 import { ErrorState } from "@/components/common/error-state"
-import { BellIcon, ConnectionIcon, HazelIcon, LoaderIcon, ShieldIcon } from "@/components/icons"
-import { useMountEffect } from "@/hooks/use-mount-effect"
+import { HazelIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { HAZEL_ACCENT, IntegrationIconPlate } from "./integration-catalog"
-import { IntegrationEmptyState } from "./integration-empty-state"
+import { useIntegrationConnect } from "./integration-connect"
+import {
+	IntegrationEmpty,
+	IntegrationEmptyCard,
+	IntegrationEmptyFeature,
+	IntegrationEmptyFeatures,
+	IntegrationEmptyFooter,
+	IntegrationEmptyHint,
+	IntegrationEmptyMedia,
+} from "./integration-empty-state"
 
 export function HazelIntegrationCard() {
 	const statusAtom = MapleApiAtomClient.query("integrations", "hazelStatus", {
@@ -21,28 +28,18 @@ export function HazelIntegrationCard() {
 	const statusResult = useAtomValue(statusAtom)
 	const refreshStatus = useAtomRefresh(statusAtom)
 
-	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "hazelStart"), {
-		mode: "promiseExit",
-	})
 	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "hazelDisconnect"), {
 		mode: "promiseExit",
 	})
 
-	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
-
-	useMountEffect(() => {
-		function onMessage(event: MessageEvent) {
-			if (event.data?.type === "maple:integration:hazel") {
-				if (event.data.status === "success") {
-					toast.success("Hazel connected")
-				} else if (event.data.status === "error") {
-					toast.error(event.data.message ?? "Hazel connection failed")
-				}
-			}
-		}
-		window.addEventListener("message", onMessage)
-		return () => window.removeEventListener("message", onMessage)
-	})
+	// Connect flow (popup, busy, refresh-on-return) lives in IntegrationConnectProvider —
+	// shared with the drill-in header's Connect button.
+	const connectFlow = useIntegrationConnect()
+	if (connectFlow === null) {
+		throw new Error("HazelIntegrationCard must be rendered inside IntegrationConnectProvider")
+	}
+	const [disconnectBusy, setDisconnectBusy] = useState(false)
+	const actionBusy = connectFlow.busy || disconnectBusy
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
@@ -54,30 +51,12 @@ export function HazelIntegrationCard() {
 	const isLoading = Result.isInitial(statusResult) && status === null
 	const loadFailed = Result.isFailure(statusResult) && status === null
 
-	async function handleConnect() {
-		const popup = window.open("", "maple-hazel-connect", "popup,width=520,height=640")
-		setBusy("connect")
-		const result = await startConnect({
-			payload: new HazelStartConnectRequest({ returnTo: window.location.href }),
-			reactivityKeys: ["hazelIntegrationStatus"],
-		})
-		setBusy(null)
-		if (Exit.isSuccess(result)) {
-			const url = result.value.redirectUrl
-			if (popup) popup.location.href = url
-			else window.open(url, "maple-hazel-connect", "popup,width=520,height=640")
-		} else {
-			popup?.close()
-			toast.error("Failed to start Hazel connect flow")
-		}
-	}
-
 	async function handleDisconnect() {
-		setBusy("disconnect")
+		setDisconnectBusy(true)
 		const result = await disconnect({
 			reactivityKeys: ["hazelIntegrationStatus", "hazelWorkspaces"],
 		})
-		setBusy(null)
+		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
 			toast.success("Hazel disconnected")
 		} else {
@@ -101,39 +80,42 @@ export function HazelIntegrationCard() {
 
 	if (!isConnected) {
 		return (
-			<IntegrationEmptyState
-				icon={HazelIcon}
-				accent={HAZEL_ACCENT}
-				title="Connect Hazel"
-				description="Forward Maple alerts into a Hazel workspace via OAuth. Once connected, create a Hazel destination to pick which workspace receives notifications."
-				features={[
-					{
-						icon: BellIcon,
-						title: "Alert delivery",
-						description: "Fired alerts post straight into a Hazel channel.",
-					},
-					{
-						icon: ConnectionIcon,
-						title: "Channel routing",
-						description: "Each destination picks the workspace and channel that gets notified.",
-					},
-					{
-						icon: ShieldIcon,
-						title: "Escalations",
-						description: "Use Hazel as a step in escalation policies.",
-					},
-				]}
-				footer="You'll authorize Maple in your Hazel workspace."
-			>
-				<Button onClick={handleConnect} disabled={busy !== null}>
-					{busy === "connect" ? (
-						<LoaderIcon size={16} className="animate-spin" />
-					) : (
-						<HazelIcon size={16} />
-					)}
-					Connect Hazel
-				</Button>
-			</IntegrationEmptyState>
+			<IntegrationEmpty icon={HazelIcon} accent={HAZEL_ACCENT}>
+				<IntegrationEmptyFeatures>
+					<IntegrationEmptyFeature
+						label="Alert delivery"
+						title="Alerts post to Hazel"
+						description="Fired alerts land straight in the channel you pick."
+					/>
+					<IntegrationEmptyFeature
+						label="Channel routing"
+						title="Workspace per destination"
+						description="Each destination picks the workspace and channel that gets notified."
+					/>
+					<IntegrationEmptyFeature
+						label="Escalations"
+						title="A step in your policies"
+						description="Use Hazel as a delivery step inside escalation chains."
+					/>
+				</IntegrationEmptyFeatures>
+				<IntegrationEmptyCard>
+					<IntegrationEmptyMedia />
+					<IntegrationEmptyHint>
+						Alert destinations will appear here after connecting your workspace.
+					</IntegrationEmptyHint>
+					<Button onClick={connectFlow.connect} disabled={actionBusy}>
+						{connectFlow.busy ? (
+							<LoaderIcon size={16} className="animate-spin" />
+						) : (
+							<HazelIcon size={16} />
+						)}
+						Connect Hazel
+					</Button>
+					<IntegrationEmptyFooter>
+						You'll authorize Maple in your Hazel workspace.
+					</IntegrationEmptyFooter>
+				</IntegrationEmptyCard>
+			</IntegrationEmpty>
 		)
 	}
 
@@ -168,12 +150,12 @@ export function HazelIntegrationCard() {
 				) : null}
 
 				<div className="flex flex-wrap gap-2">
-					<Button size="sm" onClick={handleConnect} disabled={busy !== null} variant="outline">
-						{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+					<Button size="sm" onClick={connectFlow.connect} disabled={actionBusy} variant="outline">
+						{connectFlow.busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Reconnect
 					</Button>
-					<Button size="sm" onClick={handleDisconnect} disabled={busy !== null} variant="outline">
-						{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+					<Button size="sm" onClick={handleDisconnect} disabled={actionBusy} variant="outline">
+						{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Disconnect
 					</Button>
 				</div>

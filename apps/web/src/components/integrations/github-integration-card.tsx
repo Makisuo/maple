@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { Exit, Option } from "effect"
 import {
 	GithubSetTrackedBranchRequest,
-	GithubStartConnectRequest,
 	type GithubIntegrationStatus,
 	type GithubRepoSummary,
 	type VcsRepoSyncStatus,
@@ -25,23 +24,29 @@ import { toast } from "sonner"
 
 import {
 	ArrowRotateClockwiseIcon,
-	ChartLineIcon,
 	CheckIcon,
 	ChevronDownIcon,
 	CircleCheckIcon,
 	CircleWarningIcon,
 	ClockIcon,
-	DatabaseIcon,
 	ExternalLinkIcon,
 	GithubIcon,
-	HistoryIcon,
 	LoaderIcon,
 	TrashIcon,
 } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { GITHUB_ACCENT, IntegrationIconPlate } from "./integration-catalog"
-import { IntegrationEmptyState } from "./integration-empty-state"
+import { useIntegrationConnect, type IntegrationConnect } from "./integration-connect"
+import {
+	IntegrationEmpty,
+	IntegrationEmptyCard,
+	IntegrationEmptyFeature,
+	IntegrationEmptyFeatures,
+	IntegrationEmptyFooter,
+	IntegrationEmptyHint,
+	IntegrationEmptyMedia,
+} from "./integration-empty-state"
 
 /** How often to re-fetch status while the connect flow / background sync is active. */
 const POLL_INTERVAL_MS = 3_000
@@ -83,9 +88,6 @@ export function GithubIntegrationCard() {
 	const statusResult = useAtomValue(statusQuery)
 	const refreshStatus = useAtomRefresh(statusQuery)
 
-	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "githubStart"), {
-		mode: "promiseExit",
-	})
 	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "githubDisconnect"), {
 		mode: "promiseExit",
 	})
@@ -98,7 +100,13 @@ export function GithubIntegrationCard() {
 		{ mode: "promiseExit" },
 	)
 
-	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
+	// Connect flow (popup, busy, refresh-on-return, post-close grace window) lives in
+	// IntegrationConnectProvider — shared with the drill-in header's Connect button.
+	const connectFlow = useIntegrationConnect()
+	if (connectFlow === null) {
+		throw new Error("GithubIntegrationCard must be rendered inside IntegrationConnectProvider")
+	}
+	const [disconnectBusy, setDisconnectBusy] = useState(false)
 	// Separate from the query's `waiting` flag — only true on an explicit Refresh click, not background polls.
 	const [refreshing, setRefreshing] = useState(false)
 	// Repo awaiting delete confirmation; id of the repo currently being deleted (shows spinner).
@@ -106,24 +114,7 @@ export function GithubIntegrationCard() {
 	const [deletingRepoId, setDeletingRepoId] = useState<string | null>(null)
 	// Disconnect is a full purge (repos + commit history), so it routes through a confirmation.
 	const [confirmingDisconnect, setConfirmingDisconnect] = useState(false)
-	const popupRef = useRef<Window | null>(null)
-	const [popupOpen, setPopupOpen] = useState(false)
 	const [forcePoll, setForcePoll] = useState(false)
-
-	useEffect(() => {
-		function onMessage(event: MessageEvent) {
-			if (event.data?.type === "maple:integration:github") {
-				if (event.data.status === "success") {
-					toast.success("GitHub connected")
-					refreshStatus()
-				} else if (event.data.status === "error") {
-					toast.error(event.data.message ?? "GitHub connection failed")
-				}
-			}
-		}
-		window.addEventListener("message", onMessage)
-		return () => window.removeEventListener("message", onMessage)
-	}, [refreshStatus])
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
@@ -145,28 +136,14 @@ export function GithubIntegrationCard() {
 	const syncing =
 		status?.connected === true &&
 		status.repositories.some((r) => r.syncStatus === "pending" || r.syncStatus === "backfilling")
-	const shouldPoll = popupOpen || forcePoll || syncing
+	// popupActive covers the connect popup plus the provider's post-close grace window.
+	const shouldPoll = connectFlow.popupActive || forcePoll || syncing
 
 	useEffect(() => {
 		if (!shouldPoll) return
 		const id = setInterval(() => refreshStatus(), POLL_INTERVAL_MS)
 		return () => clearInterval(id)
 	}, [shouldPoll, refreshStatus])
-
-	// Cross-origin popups fire no "closed" event, so poll the handle. When it closes,
-	// open the grace window and refresh immediately rather than waiting a poll tick.
-	useEffect(() => {
-		if (!popupOpen) return
-		const id = setInterval(() => {
-			if (popupRef.current?.closed ?? true) {
-				popupRef.current = null
-				setPopupOpen(false)
-				setForcePoll(true)
-				refreshStatus()
-			}
-		}, 500)
-		return () => clearInterval(id)
-	}, [popupOpen, refreshStatus])
 
 	useEffect(() => {
 		if (!forcePoll) return
@@ -186,37 +163,10 @@ export function GithubIntegrationCard() {
 		return () => clearTimeout(id)
 	}, [refreshing])
 
-	async function handleConnect() {
-		const popup = window.open("", "maple-github-connect", "popup,width=600,height=720")
-		popupRef.current = popup
-		if (popup) setPopupOpen(true)
-		setBusy("connect")
-		const result = await startConnect({
-			payload: new GithubStartConnectRequest({ returnTo: window.location.href }),
-			reactivityKeys: ["githubIntegrationStatus"],
-		})
-		setBusy(null)
-		if (Exit.isSuccess(result)) {
-			const url = result.value.redirectUrl
-			if (popup && !popup.closed) {
-				popup.location.href = url
-			} else {
-				const reopened = window.open(url, "maple-github-connect", "popup,width=600,height=720")
-				popupRef.current = reopened
-				if (reopened) setPopupOpen(true)
-			}
-		} else {
-			popup?.close()
-			popupRef.current = null
-			setPopupOpen(false)
-			toast.error("Failed to start GitHub connect flow")
-		}
-	}
-
 	async function handleDisconnect() {
-		setBusy("disconnect")
+		setDisconnectBusy(true)
 		const result = await disconnect({ reactivityKeys: ["githubIntegrationStatus"] })
-		setBusy(null)
+		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
 			toast.success("GitHub disconnected")
 		} else {
@@ -268,23 +218,19 @@ export function GithubIntegrationCard() {
 			) : status?.connected ? (
 				<ConnectedView
 					status={status}
-					busy={busy}
+					connectFlow={connectFlow}
+					disconnectBusy={disconnectBusy}
 					refreshing={refreshing}
 					deletingRepoId={deletingRepoId}
 					onRefresh={handleManualRefresh}
-					onManage={handleConnect}
 					onRequestDisconnect={() => setConfirmingDisconnect(true)}
 					onRequestDelete={setRepoToDelete}
 					onSetTrackedBranch={handleSetTrackedBranch}
 				/>
 			) : status?.state === "disconnected" || status?.state === "suspended" ? (
-				<DeactivatedState
-					status={status}
-					busy={busy === "connect"}
-					onReconnect={handleConnect}
-				/>
+				<DeactivatedState status={status} connectFlow={connectFlow} />
 			) : (
-				<NotConnectedState busy={busy === "connect"} onConnect={handleConnect} />
+				<NotConnectedState connectFlow={connectFlow} />
 			)}
 
 			<AlertDialog
@@ -380,38 +326,44 @@ function LoadFailedState({ onRetry }: { onRetry: () => void }) {
 }
 
 /** First-run empty state: explains the value and offers the single connect action. */
-function NotConnectedState({ busy, onConnect }: { busy: boolean; onConnect: () => void }) {
+function NotConnectedState({ connectFlow }: { connectFlow: IntegrationConnect }) {
 	return (
-		<IntegrationEmptyState
-			icon={GithubIcon}
-			accent={GITHUB_ACCENT}
-			iconClassName="text-foreground"
-			title="Connect your GitHub organization"
-			description="Install the Maple GitHub App to sync repositories and commit history across your org. Track one branch per repo — backfill runs in the background once connected."
-			features={[
-				{
-					icon: ChartLineIcon,
-					title: "Deploy markers",
-					description: "Commits appear on service charts, so metric shifts line up with deploys.",
-				},
-				{
-					icon: HistoryIcon,
-					title: "Commit context",
-					description: "Commit SHAs on traces resolve to message, author, and a GitHub link.",
-				},
-				{
-					icon: DatabaseIcon,
-					title: "Org-wide sync",
-					description: "One tracked branch per repo, with history backfilled automatically.",
-				},
-			]}
-			footer="You'll choose which repositories to share during install."
-		>
-			<Button onClick={onConnect} disabled={busy}>
-				{busy ? <LoaderIcon size={16} className="animate-spin" /> : <GithubIcon size={16} />}
-				Connect GitHub
-			</Button>
-		</IntegrationEmptyState>
+		<IntegrationEmpty icon={GithubIcon} accent={GITHUB_ACCENT} iconClassName="text-foreground">
+			<IntegrationEmptyFeatures>
+				<IntegrationEmptyFeature
+					label="Deploy markers"
+					title="Commits on service charts"
+					description="Metric shifts line up with the deploys that caused them."
+				/>
+				<IntegrationEmptyFeature
+					label="Commit context"
+					title="SHAs resolve to authors"
+					description="Commit SHAs on traces resolve to message, author, and a GitHub link."
+				/>
+				<IntegrationEmptyFeature
+					label="Org-wide sync"
+					title="One tracked branch per repo"
+					description="History backfills automatically in the background after install."
+				/>
+			</IntegrationEmptyFeatures>
+			<IntegrationEmptyCard>
+				<IntegrationEmptyMedia />
+				<IntegrationEmptyHint>
+					Your repositories and commits will appear here after installing.
+				</IntegrationEmptyHint>
+				<Button onClick={connectFlow.connect} disabled={connectFlow.busy}>
+					{connectFlow.busy ? (
+						<LoaderIcon size={16} className="animate-spin" />
+					) : (
+						<GithubIcon size={16} />
+					)}
+					Connect GitHub
+				</Button>
+				<IntegrationEmptyFooter>
+					You'll choose which repositories to share during install.
+				</IntegrationEmptyFooter>
+			</IntegrationEmptyCard>
+		</IntegrationEmpty>
 	)
 }
 
@@ -424,19 +376,17 @@ function NotConnectedState({ busy, onConnect }: { busy: boolean; onConnect: () =
  */
 function DeactivatedState({
 	status,
-	busy,
-	onReconnect,
+	connectFlow,
 }: {
 	status: GithubIntegrationStatus
-	busy: boolean
-	onReconnect: () => void
+	connectFlow: IntegrationConnect
 }) {
+	const { connect: onReconnect, busy } = connectFlow
 	const suspended = status.state === "suspended"
 	const account = status.accountLogin ? (
 		<>
 			{" "}
-			for{" "}
-			<span className="font-medium text-foreground">@{status.accountLogin}</span>
+			for <span className="font-medium text-foreground">@{status.accountLogin}</span>
 		</>
 	) : null
 	const repoCount = status.repositories.length
@@ -477,8 +427,8 @@ function DeactivatedState({
 
 			{repoCount > 0 ? (
 				<p className="text-xs text-muted-foreground">
-					{repoCount} {repoCount === 1 ? "repository" : "repositories"} and their commit history
-					are preserved.
+					{repoCount} {repoCount === 1 ? "repository" : "repositories"} and their commit history are
+					preserved.
 				</p>
 			) : null}
 
@@ -501,25 +451,26 @@ function DeactivatedState({
 
 function ConnectedView({
 	status,
-	busy,
+	connectFlow,
+	disconnectBusy,
 	refreshing,
 	deletingRepoId,
 	onRefresh,
-	onManage,
 	onRequestDisconnect,
 	onRequestDelete,
 	onSetTrackedBranch,
 }: {
 	status: GithubIntegrationStatus
-	busy: "connect" | "disconnect" | null
+	connectFlow: IntegrationConnect
+	disconnectBusy: boolean
 	refreshing: boolean
 	deletingRepoId: string | null
 	onRefresh: () => void
-	onManage: () => void
 	onRequestDisconnect: () => void
 	onRequestDelete: (repo: GithubRepoSummary) => void
 	onSetTrackedBranch: (repo: GithubRepoSummary, branch: string) => Promise<void>
 }) {
+	const actionBusy = connectFlow.busy || disconnectBusy
 	const activeRepos = status.repositories.filter((r) => r.status === "active")
 	const removedRepos = status.repositories.filter((r) => r.status === "removed")
 	const counts = {
@@ -567,18 +518,15 @@ function ConnectedView({
 
 				<div className="flex items-center gap-1.5">
 					<Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing}>
-						<ArrowRotateClockwiseIcon
-							size={14}
-							className={refreshing ? "animate-spin" : ""}
-						/>
+						<ArrowRotateClockwiseIcon size={14} className={refreshing ? "animate-spin" : ""} />
 						Refresh
 					</Button>
-					<Button size="sm" variant="outline" onClick={onManage} disabled={busy !== null}>
-						{busy === "connect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+					<Button size="sm" variant="outline" onClick={connectFlow.connect} disabled={actionBusy}>
+						{connectFlow.busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Manage
 					</Button>
-					<Button size="sm" variant="outline" onClick={onRequestDisconnect} disabled={busy !== null}>
-						{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+					<Button size="sm" variant="outline" onClick={onRequestDisconnect} disabled={actionBusy}>
+						{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 						Disconnect
 					</Button>
 				</div>

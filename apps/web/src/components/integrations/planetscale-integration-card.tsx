@@ -1,10 +1,6 @@
-import { useEffect, useRef, useState } from "react"
+import { useState } from "react"
 import { Cause, Exit } from "effect"
-import {
-	PlanetScaleMetricsTokenRequest,
-	PlanetScaleSelectOrganizationRequest,
-	PlanetScaleStartConnectRequest,
-} from "@maple/domain/http"
+import { PlanetScaleMetricsTokenRequest, PlanetScaleSelectOrganizationRequest } from "@maple/domain/http"
 import { Alert, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
@@ -22,20 +18,20 @@ import { Label } from "@maple/ui/components/ui/label"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
-import {
-	ChartLineIcon,
-	CheckIcon,
-	CircleWarningIcon,
-	LoaderIcon,
-	MagnifierIcon,
-	NetworkNodesIcon,
-	PlanetScaleIcon,
-} from "@/components/icons"
+import { CheckIcon, CircleWarningIcon, LoaderIcon, PlanetScaleIcon } from "@/components/icons"
 import { cn } from "@maple/ui/utils"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { IntegrationIconPlate, catalogEntry } from "./integration-catalog"
-import { IntegrationEmptyState } from "./integration-empty-state"
+import { useIntegrationConnect } from "./integration-connect"
+import {
+	IntegrationEmpty,
+	IntegrationEmptyCard,
+	IntegrationEmptyFeature,
+	IntegrationEmptyFeatures,
+	IntegrationEmptyHint,
+	IntegrationEmptyMedia,
+} from "./integration-empty-state"
 import { PlanetScaleMetricsHealth } from "./planetscale-metrics-health"
 
 const PLANETSCALE_ENTRY = catalogEntry("planetscale")
@@ -61,48 +57,19 @@ export function PlanetScaleIntegrationCard() {
 	const statusResult = useAtomValue(statusQuery)
 	const refreshStatus = useAtomRefresh(statusQuery)
 
-	const startConnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleStart"), {
-		mode: "promiseExit",
-	})
 	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "planetscaleDisconnect"), {
 		mode: "promiseExit",
 	})
 
-	const [busy, setBusy] = useState<"connect" | "disconnect" | null>(null)
+	// Connect flow (popup, busy, refresh-on-return) lives in IntegrationConnectProvider —
+	// shared with the drill-in header's Connect button.
+	const connectFlow = useIntegrationConnect()
+	if (connectFlow === null) {
+		throw new Error("PlanetScaleIntegrationCard must be rendered inside IntegrationConnectProvider")
+	}
+	const [disconnectBusy, setDisconnectBusy] = useState(false)
+	const actionBusy = connectFlow.busy || disconnectBusy
 	const [pickerOpen, setPickerOpen] = useState(false)
-	const popupRef = useRef<Window | null>(null)
-	const [popupOpen, setPopupOpen] = useState(false)
-
-	// The OAuth popup posts a message before closing — refresh status so the card
-	// flips to Connected (or to the org picker) without a manual page reload.
-	useEffect(() => {
-		function onMessage(event: MessageEvent) {
-			if (event.data?.type === "maple:integration:planetscale") {
-				if (event.data.status === "success") {
-					refreshStatus()
-				} else if (event.data.status === "error") {
-					toast.error(event.data.message ?? "PlanetScale connection failed")
-				}
-			}
-		}
-		window.addEventListener("message", onMessage)
-		return () => window.removeEventListener("message", onMessage)
-	}, [refreshStatus])
-
-	// Cross-origin popups fire no "closed" event, so poll the handle. When it
-	// closes, refresh immediately — covers the case where the success message
-	// never arrives (popup closed manually or blocked).
-	useEffect(() => {
-		if (!popupOpen) return
-		const id = setInterval(() => {
-			if (popupRef.current?.closed ?? true) {
-				popupRef.current = null
-				setPopupOpen(false)
-				refreshStatus()
-			}
-		}, 500)
-		return () => clearInterval(id)
-	}, [popupOpen, refreshStatus])
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
@@ -110,41 +77,12 @@ export function PlanetScaleIntegrationCard() {
 	const isConnected = status?.connected === true
 	const pendingOrgSelection = status?.pendingOrgSelection === true
 
-	async function handleConnect() {
-		// Open the popup synchronously (inside the click) so the browser doesn't
-		// block it, then point it at the authorize URL once the start call returns.
-		const popup = window.open("", "maple-planetscale-connect", "popup,width=520,height=680")
-		popupRef.current = popup
-		if (popup) setPopupOpen(true)
-		setBusy("connect")
-		const result = await startConnect({
-			payload: new PlanetScaleStartConnectRequest({ returnTo: window.location.href }),
-			reactivityKeys: ["planetscaleIntegrationStatus"],
-		})
-		setBusy(null)
-		if (Exit.isSuccess(result)) {
-			const url = result.value.redirectUrl
-			if (popup && !popup.closed) {
-				popup.location.href = url
-			} else {
-				const reopened = window.open(url, "maple-planetscale-connect", "popup,width=520,height=680")
-				popupRef.current = reopened
-				if (reopened) setPopupOpen(true)
-			}
-		} else {
-			popup?.close()
-			popupRef.current = null
-			setPopupOpen(false)
-			toast.error(extractErrorMessage(result) ?? "Failed to start PlanetScale connect flow")
-		}
-	}
-
 	async function handleDisconnect() {
-		setBusy("disconnect")
+		setDisconnectBusy(true)
 		const result = await disconnect({
 			reactivityKeys: ["planetscaleIntegrationStatus", "scrapeTargets"],
 		})
-		setBusy(null)
+		setDisconnectBusy(false)
 		if (Exit.isSuccess(result)) {
 			toast.success("PlanetScale organization disconnected")
 			refreshStatus()
@@ -204,39 +142,43 @@ export function PlanetScaleIntegrationCard() {
 
 	if (!isConnected) {
 		return (
-			<IntegrationEmptyState
+			<IntegrationEmpty
 				icon={PlanetScaleIcon}
 				accent={PLANETSCALE_ENTRY.accent}
-				title="Connect your PlanetScale organization"
-				description="Authorize Maple in PlanetScale and databases, branches, query insights, and webhooks connect instantly. Branch metrics take one more paste: a read-only service token, since PlanetScale only exposes its metrics endpoints to service tokens."
-				features={[
-					{
-						icon: NetworkNodesIcon,
-						title: "Service map",
-						description: "Databases join the map, linked to the services that query them.",
-					},
-					{
-						icon: MagnifierIcon,
-						title: "Query insights",
-						description: "Top queries per branch — calls, rows read, and time per query.",
-					},
-					{
-						icon: ChartLineIcon,
-						title: "Branch health",
-						description: "CPU, memory, connections, and replication lag per branch.",
-					},
-				]}
-				footer="You'll authorize Maple in a PlanetScale popup; a read_metrics_endpoints service token completes metrics afterwards."
+				iconClassName={PLANETSCALE_ENTRY.iconClassName}
 			>
-				<Button onClick={handleConnect} disabled={busy !== null}>
-					{busy === "connect" ? (
-						<LoaderIcon size={16} className="animate-spin" />
-					) : (
-						<PlanetScaleIcon size={16} />
-					)}
-					Connect PlanetScale
-				</Button>
-			</IntegrationEmptyState>
+				<IntegrationEmptyFeatures>
+					<IntegrationEmptyFeature
+						label="Service map"
+						title="Databases join the map"
+						description="Linked to the services that query them, with branches tracked automatically."
+					/>
+					<IntegrationEmptyFeature
+						label="Query insights"
+						title="Top queries per branch"
+						description="Calls, rows read, and time per query — proxied straight from PlanetScale."
+					/>
+					<IntegrationEmptyFeature
+						label="Branch health"
+						title="CPU, memory, replication"
+						description="Connections and replication lag per branch, scraped on a schedule."
+					/>
+				</IntegrationEmptyFeatures>
+				<IntegrationEmptyCard>
+					<IntegrationEmptyMedia />
+					<IntegrationEmptyHint>
+						Your databases and branches will appear here after connecting.
+					</IntegrationEmptyHint>
+					<Button onClick={connectFlow.connect} disabled={actionBusy}>
+						{connectFlow.busy ? (
+							<LoaderIcon size={16} className="animate-spin" />
+						) : (
+							<PlanetScaleIcon size={16} />
+						)}
+						Connect PlanetScale
+					</Button>
+				</IntegrationEmptyCard>
+			</IntegrationEmpty>
 		)
 	}
 
@@ -258,13 +200,17 @@ export function PlanetScaleIntegrationCard() {
 								{status?.metricsAuth === "missing" ? (
 									<>
 										Connected to{" "}
-										<span className="font-medium text-foreground">{status?.organization}</span>
+										<span className="font-medium text-foreground">
+											{status?.organization}
+										</span>
 										{" — inventory, insights, and webhooks are live."}
 									</>
 								) : (
 									<>
 										Streaming branch metrics from{" "}
-										<span className="font-medium text-foreground">{status?.organization}</span>
+										<span className="font-medium text-foreground">
+											{status?.organization}
+										</span>
 									</>
 								)}
 							</p>
@@ -276,12 +222,12 @@ export function PlanetScaleIntegrationCard() {
 							size="sm"
 							variant="outline"
 							onClick={() => setPickerOpen(true)}
-							disabled={busy !== null}
+							disabled={actionBusy}
 						>
 							Change organization
 						</Button>
-						<Button size="sm" variant="outline" onClick={handleDisconnect} disabled={busy !== null}>
-							{busy === "disconnect" ? <LoaderIcon size={14} className="animate-spin" /> : null}
+						<Button size="sm" variant="outline" onClick={handleDisconnect} disabled={actionBusy}>
+							{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
 							Disconnect
 						</Button>
 					</div>
@@ -305,14 +251,12 @@ export function PlanetScaleIntegrationCard() {
 							<AlertTitle>Database inventory unavailable</AlertTitle>
 							<AlertDescription>
 								The authorization can read metrics but not databases — grant the OAuth
-								application the{" "}
-								<code className="font-mono text-xs">read_databases</code> scope so Maple can
-								link databases on the service map, then reconnect.
+								application the <code className="font-mono text-xs">read_databases</code>{" "}
+								scope so Maple can link databases on the service map, then reconnect.
 							</AlertDescription>
 						</Alert>
 					</div>
 				) : null}
-
 			</div>
 
 			<PlanetScaleWebhookSetup />
@@ -418,10 +362,10 @@ function PlanetScaleMetricsSetup({
 						<Badge variant="warning">1 step left</Badge>
 					</div>
 					<p className="text-xs text-muted-foreground">
-						PlanetScale only exposes branch metrics (CPU, connections, replication lag) to
-						service tokens. Create one in the organization settings with just the{" "}
-						<code className="font-mono">read_metrics_endpoints</code> permission and paste it
-						here — everything else already runs on the OAuth authorization.
+						PlanetScale only exposes branch metrics (CPU, connections, replication lag) to service
+						tokens. Create one in the organization settings with just the{" "}
+						<code className="font-mono">read_metrics_endpoints</code> permission and paste it here
+						— everything else already runs on the OAuth authorization.
 					</p>
 				</div>
 			)}
@@ -451,7 +395,11 @@ function PlanetScaleMetricsSetup({
 					</div>
 					<div className="flex items-center gap-1.5">
 						{metricsAuth === "service_token" ? (
-							<Button variant="outline" onClick={() => setFormOpen(false)} disabled={submitting}>
+							<Button
+								variant="outline"
+								onClick={() => setFormOpen(false)}
+								disabled={submitting}
+							>
 								Cancel
 							</Button>
 						) : null}
@@ -523,8 +471,8 @@ function PlanetScaleOrgPicker(props: {
 	if (Result.isFailure(organizationsResult)) {
 		return (
 			<p className="text-xs text-muted-foreground">
-				Couldn&apos;t list the authorized PlanetScale organizations — the authorization may have
-				been revoked. Disconnect and connect again.
+				Couldn&apos;t list the authorized PlanetScale organizations — the authorization may have been
+				revoked. Disconnect and connect again.
 			</p>
 		)
 	}

@@ -14,6 +14,7 @@ import {
 import { Separator } from "@maple/ui/components/ui/separator"
 import { ConnectionIcon } from "@maple/ui/components/icons"
 import { LOCAL_OTLP_ENDPOINT } from "../lib/constants"
+import { DOCS_LOCAL_MODE_SEND_TELEMETRY } from "../lib/links"
 import { CopyableField } from "./copyable-field"
 
 export function ConnectButton() {
@@ -68,12 +69,12 @@ function ConnectPanel() {
 
 			<div className="flex items-center justify-end text-xs">
 				<a
-					href="https://maple.dev/docs"
+					href={DOCS_LOCAL_MODE_SEND_TELEMETRY}
 					target="_blank"
 					rel="noopener noreferrer"
 					className="text-muted-foreground underline underline-offset-2 hover:no-underline"
 				>
-					Documentation
+					OTLP setup docs
 				</a>
 			</div>
 		</div>

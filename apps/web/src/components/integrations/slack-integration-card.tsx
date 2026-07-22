@@ -16,19 +16,21 @@ import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { toast } from "sonner"
 
 import { ErrorState } from "@/components/common/error-state"
-import {
-	BellIcon,
-	ChatBubbleSparkleIcon,
-	ConnectionIcon,
-	LoaderIcon,
-	SlackIcon,
-} from "@/components/icons"
+import { LoaderIcon, SlackIcon } from "@/components/icons"
 import { Result, useAtomRefresh, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { formatAlertDateTime, getExitErrorMessage } from "@/lib/alerts/form-utils"
 import { IntegrationIconPlate, SLACK_ACCENT } from "./integration-catalog"
-import { IntegrationEmptyState } from "./integration-empty-state"
+import {
+	IntegrationEmpty,
+	IntegrationEmptyCard,
+	IntegrationEmptyFeature,
+	IntegrationEmptyFeatures,
+	IntegrationEmptyFooter,
+	IntegrationEmptyHint,
+	IntegrationEmptyMedia,
+} from "./integration-empty-state"
 
 /**
  * First-class Slack connection card: install the Maple Slack app via OAuth (a
@@ -112,43 +114,44 @@ export function SlackIntegrationCard() {
 
 	if (!isInstalled) {
 		return (
-			<IntegrationEmptyState
-				icon={SlackIcon}
-				accent={SLACK_ACCENT}
-				title="Add Maple to Slack"
-				description="Install the Maple Slack app so your team can ask Maple about services, traces, and errors from Slack — and route fired alerts into channels."
-				features={[
-					{
-						icon: ChatBubbleSparkleIcon,
-						title: "Ask Maple",
-						description: "Mention the bot to query services, traces, and errors from Slack.",
-					},
-					{
-						icon: BellIcon,
-						title: "Alert delivery",
-						description: "Route alert rules to any channel the bot can post to.",
-					},
-					{
-						icon: ConnectionIcon,
-						title: "Channel routing",
-						description: "Each alert destination picks the channel that gets notified.",
-					},
-				]}
-				footer={
-					isAdmin
-						? "You'll approve the install in your Slack workspace."
-						: "Only organization admins can install the Slack app."
-				}
-			>
-				<Button onClick={handleInstall} disabled={!isAdmin || busy !== null}>
-					{busy === "install" ? (
-						<LoaderIcon size={16} className="animate-spin" />
-					) : (
-						<SlackIcon size={16} />
-					)}
-					Add to Slack
-				</Button>
-			</IntegrationEmptyState>
+			<IntegrationEmpty icon={SlackIcon} accent={SLACK_ACCENT}>
+				<IntegrationEmptyFeatures>
+					<IntegrationEmptyFeature
+						label="Ask Maple"
+						title="Query from Slack"
+						description="Mention the bot to query services, traces, and errors from Slack."
+					/>
+					<IntegrationEmptyFeature
+						label="Alert delivery"
+						title="Alerts post to channels"
+						description="Route alert rules to any channel the bot can post to."
+					/>
+					<IntegrationEmptyFeature
+						label="Channel routing"
+						title="Channel per destination"
+						description="Each alert destination picks the channel that gets notified."
+					/>
+				</IntegrationEmptyFeatures>
+				<IntegrationEmptyCard>
+					<IntegrationEmptyMedia />
+					<IntegrationEmptyHint>
+						Slack destinations will appear here after you add Maple to your workspace.
+					</IntegrationEmptyHint>
+					<Button onClick={handleInstall} disabled={!isAdmin || busy !== null}>
+						{busy === "install" ? (
+							<LoaderIcon size={16} className="animate-spin" />
+						) : (
+							<SlackIcon size={16} />
+						)}
+						Add to Slack
+					</Button>
+					<IntegrationEmptyFooter>
+						{isAdmin
+							? "You'll approve the install in your Slack workspace."
+							: "Only organization admins can install the Slack app."}
+					</IntegrationEmptyFooter>
+				</IntegrationEmptyCard>
+			</IntegrationEmpty>
 		)
 	}
 

@@ -1,172 +1,174 @@
+import { Children, createContext, isValidElement, use } from "react"
 import type React from "react"
 
 import { motion, useReducedMotion } from "motion/react"
 
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@maple/ui/components/ui/empty"
 import { cn } from "@maple/ui/lib/utils"
 import { IntegrationIconPlate } from "./integration-catalog"
 
 /**
- * Brand take on `EmptyMedia variant="icon"`: a brand-washed icon plate with two
- * plain plates fanned behind it (the same ±10° / scale geometry the shared Empty
- * media uses), so every integration empty state reads as one family.
+ * Brand identity shared by every part of the empty state — provided once by
+ * `IntegrationEmpty` so `IntegrationEmptyMedia` (and anything else that renders
+ * the provider mark) never needs it re-passed.
  */
-function IntegrationEmptyMedia({
+interface IntegrationEmptyContextValue {
+	icon: React.ComponentType<{ size?: number; className?: string }>
+	accent: string
+	/** Set for monochrome marks (GitHub) — glyph tints via className, wash goes neutral. */
+	iconClassName?: string
+}
+
+const IntegrationEmptyContext = createContext<IntegrationEmptyContextValue | null>(null)
+
+function useIntegrationEmptyContext(caller: string): IntegrationEmptyContextValue {
+	const context = use(IntegrationEmptyContext)
+	if (context === null) {
+		throw new Error(`<${caller}> must be rendered inside <IntegrationEmpty>`)
+	}
+	return context
+}
+
+/**
+ * The shared drill-in empty state, one compound family for every integration's
+ * not-connected / no-items view:
+ *
+ * ```tsx
+ * <IntegrationEmpty icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT}>
+ *   <IntegrationEmptyFeatures>
+ *     <IntegrationEmptyFeature label="Zone analytics" title="…" description="…" />
+ *   </IntegrationEmptyFeatures>
+ *   <IntegrationEmptyCard>
+ *     <IntegrationEmptyMedia />
+ *     <IntegrationEmptyHint>…appears here after connecting.</IntegrationEmptyHint>
+ *     <Button>…</Button>
+ *     <IntegrationEmptyFooter>Read-only OAuth · …</IntegrationEmptyFooter>
+ *   </IntegrationEmptyCard>
+ * </IntegrationEmpty>
+ * ```
+ */
+export function IntegrationEmpty({
 	icon,
 	accent,
 	iconClassName,
-}: {
-	icon: React.ComponentType<{ size?: number; className?: string }>
-	accent: string
-	iconClassName?: string
+	className,
+	children,
+}: IntegrationEmptyContextValue & {
+	className?: string
+	children: React.ReactNode
 }) {
-	const backer = "absolute bottom-px size-12 rounded-xl border border-border/60 bg-card"
 	return (
-		<div className="relative mb-6 flex items-end justify-center">
-			<span
-				aria-hidden
-				className={cn(backer, "origin-bottom-left -translate-x-1.5 -rotate-10 scale-90")}
-			/>
-			<span
-				aria-hidden
-				className={cn(backer, "origin-bottom-right translate-x-1.5 rotate-10 scale-90")}
-			/>
+		<IntegrationEmptyContext value={{ icon, accent, iconClassName }}>
+			<div className={cn("flex flex-col gap-4", className)}>{children}</div>
+		</IntegrationEmptyContext>
+	)
+}
+
+/** One value-prop tile's copy — the shape config objects (e.g. scrape-target COPY) use. */
+export interface IntegrationFeatureCopy {
+	label: string
+	title: string
+	description: string
+}
+
+/**
+ * The what-you-get row above the empty card: staggered grid of value-prop tiles.
+ * Owns the motion wrappers (per-index delay) so tiles animate reliably no matter
+ * where the `IntegrationEmptyFeature` children were rendered.
+ */
+export function IntegrationEmptyFeatures({ children }: { children: React.ReactNode }) {
+	const reduceMotion = useReducedMotion()
+	return (
+		<ul className="grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
+			{Children.toArray(children).map((child, index) => (
+				<motion.li
+					// Children.toArray prefixes existing keys; tiles are a static list, so this is stable.
+					key={isValidElement(child) ? child.key : index}
+					className="flex flex-col gap-2 rounded-lg border border-border/60 bg-card px-4 py-3.5"
+					initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+					animate={{ opacity: 1, y: 0 }}
+					transition={{
+						duration: 0.32,
+						ease: [0.16, 1, 0.3, 1],
+						delay: 0.05 + index * 0.05,
+					}}
+				>
+					{child}
+				</motion.li>
+			))}
+		</ul>
+	)
+}
+
+/** One value-prop tile: uppercase eyebrow, headline, one-line description. Informational only. */
+export function IntegrationEmptyFeature({ label, title, description }: IntegrationFeatureCopy) {
+	return (
+		<>
+			<span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
+			<span className="text-base/5 font-semibold tracking-tight">{title}</span>
+			<p className="text-xs/4 text-muted-foreground">{description}</p>
+		</>
+	)
+}
+
+/**
+ * The dashed waiting-room card. Children compose freely — typically
+ * `IntegrationEmptyMedia`, an `IntegrationEmptyHint`, the primary action
+ * Button, and an `IntegrationEmptyFooter`; the gap handles spacing.
+ */
+export function IntegrationEmptyCard({
+	className,
+	children,
+}: {
+	className?: string
+	children: React.ReactNode
+}) {
+	return (
+		<div
+			className={cn(
+				"flex min-h-70 flex-col items-center justify-center gap-4 rounded-lg border border-dashed border-input px-6 py-10 text-center",
+				className,
+			)}
+		>
+			{children}
+		</div>
+	)
+}
+
+/**
+ * The fanned brand mark: two muted provider glyphs tilted behind a larger
+ * brand-washed center plate, bottom-aligned like a hand of cards. Reads
+ * icon/accent from `IntegrationEmpty`.
+ */
+export function IntegrationEmptyMedia() {
+	const { icon: Icon, accent, iconClassName } = useIntegrationEmptyContext("IntegrationEmptyMedia")
+	// Slightly smaller, dimmer, and lower than the center plate — depth, not clutter.
+	const backer =
+		"absolute bottom-0.5 flex size-11 items-center justify-center rounded-[10px] border border-border/60 bg-muted text-muted-foreground/70 opacity-80"
+	return (
+		<div aria-hidden className="relative mb-1 flex h-16 shrink-0 items-end justify-center">
+			<span className={cn(backer, "origin-bottom -translate-x-8 -rotate-10")}>
+				<Icon size={20} />
+			</span>
+			<span className={cn(backer, "origin-bottom translate-x-8 rotate-10")}>
+				<Icon size={20} />
+			</span>
 			<IntegrationIconPlate
-				icon={icon}
+				icon={Icon}
 				accent={accent}
 				iconClassName={iconClassName}
-				size={24}
-				plateClassName="relative size-12 rounded-xl"
+				size={28}
+				plateClassName="relative size-14 rounded-xl shadow-lg shadow-black/10"
 			/>
 		</div>
 	)
 }
 
-/** One value-prop tile in the not-connected feature grid. */
-export interface IntegrationFeature {
-	icon: React.ComponentType<{ size?: number; className?: string }>
-	title: string
-	description: string
+/** The one-line "what will appear here" promise. */
+export function IntegrationEmptyHint({ children }: { children: React.ReactNode }) {
+	return <p className="max-w-xl text-balance text-sm text-muted-foreground">{children}</p>
 }
 
-const GRID_VARIANTS = {
-	hidden: {},
-	show: {
-		transition: { staggerChildren: 0.05, delayChildren: 0.05 },
-	},
-}
-
-const ITEM_VARIANTS = {
-	hidden: { opacity: 0, y: 6 },
-	show: {
-		opacity: 1,
-		y: 0,
-		transition: { duration: 0.32, ease: [0.16, 1, 0.3, 1] as const },
-	},
-}
-
-/**
- * The what-you-get grid: one quiet tile per feature, brand-tinted glyph chip,
- * title, one-line description. Informational only — no hover/click affordances.
- */
-function FeatureGrid({
-	features,
-	accent,
-	monochrome,
-}: {
-	features: ReadonlyArray<IntegrationFeature>
-	accent: string
-	/** Monochrome brand marks (GitHub) have a near-invisible accent on one theme — tint neutrally. */
-	monochrome: boolean
-}) {
-	const reduceMotion = useReducedMotion()
-	// Same fallback rule as IntegrationIconPlate: a mark that needed a color override
-	// has an accent too dark/light to tint with, so derive the chip wash from the
-	// theme-aware neutral instead.
-	const wash = monochrome ? "var(--muted-foreground)" : accent
-	return (
-		<motion.ul
-			className="grid w-full max-w-2xl grid-cols-1 gap-2 text-left sm:grid-cols-3"
-			variants={GRID_VARIANTS}
-			initial={reduceMotion ? false : "hidden"}
-			animate="show"
-		>
-			{features.map((feature) => {
-				const Icon = feature.icon
-				return (
-					<motion.li
-						key={feature.title}
-						variants={ITEM_VARIANTS}
-						className="flex flex-col gap-1.5 rounded-lg border border-border/60 bg-card/50 p-3"
-					>
-						<div className="flex items-center gap-2">
-							<span
-								className="flex size-6 shrink-0 items-center justify-center rounded-md"
-								style={{
-									background: `color-mix(in srgb, ${wash} 12%, transparent)`,
-									color: monochrome ? "var(--foreground)" : accent,
-								}}
-								aria-hidden
-							>
-								<Icon size={13} />
-							</span>
-							<span className="font-medium text-sm">{feature.title}</span>
-						</div>
-						<p className="text-xs text-muted-foreground">{feature.description}</p>
-					</motion.li>
-				)
-			})}
-		</motion.ul>
-	)
-}
-
-/**
- * The shared integration empty state — one shape for every drill-in's not-connected /
- * no-items view: brand triple-stacked icon, title, description, optional feature
- * tiles, a primary action, and optional helper text. Keeps GitHub/Hazel/Cloudflare/scrape aligned.
- */
-export function IntegrationEmptyState({
-	icon,
-	accent,
-	iconClassName,
-	title,
-	description,
-	features,
-	children,
-	footer,
-	className,
-}: {
-	icon: React.ComponentType<{ size?: number; className?: string }>
-	accent: string
-	iconClassName?: string
-	title: string
-	description: React.ReactNode
-	/** Optional value-prop tiles rendered as a feature grid between the copy and the action. */
-	features?: ReadonlyArray<IntegrationFeature>
-	/** Primary action(s). */
-	children?: React.ReactNode
-	/** Helper text shown under the action. */
-	footer?: React.ReactNode
-	className?: string
-}) {
-	return (
-		<Empty className={cn("rounded-lg border border-border/60 bg-card py-12 md:py-12", className)}>
-			<EmptyHeader>
-				<IntegrationEmptyMedia icon={icon} accent={accent} iconClassName={iconClassName} />
-				<EmptyTitle className="text-base">{title}</EmptyTitle>
-				<EmptyDescription>{description}</EmptyDescription>
-			</EmptyHeader>
-
-			{features && features.length > 0 ? (
-				<FeatureGrid features={features} accent={accent} monochrome={iconClassName != null} />
-			) : null}
-
-			{children || footer ? (
-				<EmptyContent>
-					{children}
-					{footer ? <p className="text-xs text-muted-foreground">{footer}</p> : null}
-				</EmptyContent>
-			) : null}
-		</Empty>
-	)
+/** Quiet reassurance line under the action ("Read-only OAuth · takes about a minute · …"). */
+export function IntegrationEmptyFooter({ children }: { children: React.ReactNode }) {
+	return <p className="text-xs text-muted-foreground">{children}</p>
 }
