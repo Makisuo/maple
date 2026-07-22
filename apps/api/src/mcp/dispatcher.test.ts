@@ -18,6 +18,13 @@ describe("MCP dispatcher", () => {
 		}),
 	)
 
+	it("emits an object-typed inputSchema for every tool (strict MCP clients require it)", () => {
+		for (const definition of mapleToolDefinitions) {
+			const inputSchema = toInputSchema(definition.schema)
+			expect(inputSchema.type, `${definition.name} inputSchema.type`).toBe("object")
+		}
+	})
+
 	it.effect("returns MCP validation feedback for invalid model tool input", () =>
 		Effect.gen(function* () {
 			const result = yield* callMcpTool("inspect_trace", {}) as unknown as Effect.Effect<

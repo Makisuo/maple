@@ -69,9 +69,25 @@ export interface MapleToolDefinition {
 
 export const toInputSchema = (schema: Schema.Top): Record<string, unknown> => {
 	const document = Schema.toJsonSchemaDocument(schema)
-	return Object.keys(document.definitions).length > 0
-		? { ...document.schema, $defs: document.definitions }
-		: document.schema
+	const base =
+		Object.keys(document.definitions).length > 0
+			? { ...document.schema, $defs: document.definitions }
+			: document.schema
+	// MCP requires the top-level inputSchema to be an object schema (`type: "object"`).
+	// Effect emits `{ anyOf: [{ type: "object" }, { type: "array" }] }` for an empty
+	// `Struct({})` (a no-parameter tool), which strict MCP clients reject — the Vercel
+	// AI SDK's `tools/list` Zod validator fails on `inputSchema.type` and drops EVERY
+	// tool from the connection. Normalize a no-property struct to an explicit empty
+	// object schema. `$ref` roots (hoisted schemas) already carry a valid object type.
+	if (base.type !== "object" && !("$ref" in base)) {
+		return {
+			type: "object",
+			properties: {},
+			additionalProperties: false,
+			...("$defs" in base ? { $defs: base.$defs } : {}),
+		}
+	}
+	return base
 }
 
 const collectMapleToolDefinitions = (): ReadonlyArray<MapleToolDefinition> => {
