@@ -14,6 +14,8 @@ export interface IngestConnection {
 	serviceCount: number
 	/** First real service name, if any — handy for "we're seeing X" copy. */
 	firstRealService?: string
+	/** Spans per minute across real services, averaged over the 1h window. */
+	spansPerMinute: number
 	/** The org's public ingest key (empty string until loaded / when denied). */
 	apiKey: string
 	/** Force an immediate re-poll of the service overview. */
@@ -50,11 +52,13 @@ export function useIngestConnection({ poll = true }: UseIngestConnectionOptions 
 	)
 	const firstRealService =
 		typeof realServices[0]?.serviceName === "string" ? (realServices[0].serviceName as string) : undefined
+	const spansPerMinute = realServices.reduce((sum, s) => sum + (s.spanCount ?? 0), 0) / 60
 
 	return {
 		status: realServices.length > 0 ? "connected" : "waiting",
 		serviceCount: realServices.length,
 		firstRealService,
+		spansPerMinute,
 		apiKey,
 		refresh,
 	}

@@ -42,20 +42,29 @@ interface GuidedSetupProps {
 }
 
 /**
+ * Per-org framework selection for the guided ingestion flow, defaulting from the
+ * quick-start qualify answers. Shared by `GuidedSetup` and the ingestion
+ * settings page (which composes the picker into its own section header).
+ */
+export function useGuidedFramework() {
+	const { orgId } = useAuth()
+	const { selectedFramework, setSelectedFramework, qualifyAnswers } = useQuickStart(orgId)
+
+	const roleDefault = qualifyAnswers.role ? ROLE_DEFAULT_FRAMEWORK[qualifyAnswers.role] : "nodejs"
+	return { framework: selectedFramework ?? roleDefault, setFramework: setSelectedFramework }
+}
+
+/**
  * Framework picker + Install / Instrument / Claude Code tabs. The shared body of
  * the guided ingestion flow, used by the dashboard setup checklist and the
  * ingestion settings page. Selection persists via the per-org quick-start atom.
  */
 export function GuidedSetup({ apiKey, showCredentials = false }: GuidedSetupProps) {
-	const { orgId } = useAuth()
-	const { selectedFramework, setSelectedFramework, qualifyAnswers } = useQuickStart(orgId)
-
-	const roleDefault = qualifyAnswers.role ? ROLE_DEFAULT_FRAMEWORK[qualifyAnswers.role] : "nodejs"
-	const framework = selectedFramework ?? roleDefault
+	const { framework, setFramework } = useGuidedFramework()
 
 	return (
 		<div className="space-y-4">
-			<FrameworkPicker selected={framework} onSelect={setSelectedFramework} />
+			<FrameworkPicker selected={framework} onSelect={setFramework} />
 			<ConnectInstructions
 				framework={framework}
 				apiKey={apiKey}
@@ -65,56 +74,77 @@ export function GuidedSetup({ apiKey, showCredentials = false }: GuidedSetupProp
 	)
 }
 
-function FrameworkPicker({
+export function FrameworkPicker({
 	selected,
 	onSelect,
+	compact = false,
 }: {
 	selected: FrameworkId
 	onSelect: (id: FrameworkId) => void
+	/** Pill chips without the "Pick your stack" label — for section headers. */
+	compact?: boolean
 }) {
+	const chips = (
+		<div className="flex flex-wrap gap-1.5">
+			{sdkSnippets.map((snippet) => {
+				const Icon = frameworkIconMap[snippet.language]
+				const active = selected === snippet.language
+				return (
+					<button
+						key={snippet.language}
+						type="button"
+						onClick={() => onSelect(snippet.language)}
+						className={cn(
+							"flex items-center gap-1.5 border font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+							compact
+								? "rounded-full px-2.5 py-1 font-mono text-[11px] leading-3.5"
+								: "rounded-lg px-3 py-2 text-xs gap-2",
+							active
+								? compact
+									? "border-primary text-primary"
+									: "border-primary bg-primary/10 text-primary"
+								: compact
+									? "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+									: "border-border hover:border-foreground/30",
+						)}
+					>
+						<Icon size={compact ? 12 : 14} />
+						{snippet.label}
+					</button>
+				)
+			})}
+		</div>
+	)
+
+	if (compact) return chips
+
 	return (
 		<div className="space-y-2">
 			<span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
 				Pick your stack
 			</span>
-			<div className="flex flex-wrap gap-2">
-				{sdkSnippets.map((snippet) => {
-					const Icon = frameworkIconMap[snippet.language]
-					const active = selected === snippet.language
-					return (
-						<button
-							key={snippet.language}
-							type="button"
-							onClick={() => onSelect(snippet.language)}
-							className={cn(
-								"flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
-								active
-									? "border-primary bg-primary/10 text-primary"
-									: "border-border hover:border-foreground/30",
-							)}
-						>
-							<Icon size={14} />
-							{snippet.label}
-						</button>
-					)
-				})}
-			</div>
+			{chips}
 		</div>
 	)
 }
 
-function ConnectInstructions({
+export function ConnectInstructions({
 	framework,
 	apiKey,
-	showCredentials,
+	showCredentials = false,
+	variant = "boxed",
 }: {
 	framework: FrameworkId
 	apiKey: string
-	showCredentials: boolean
+	showCredentials?: boolean
+	/** `flush` drops the outer border/background so the tabs sit directly in a parent card. */
+	variant?: "boxed" | "flush"
 }) {
 	const snippet = sdkSnippets.find((s) => s.language === framework)
 
 	if (!snippet) return null
+
+	const contentPadding = variant === "boxed" ? "p-3" : "px-4 pt-3 pb-4"
 
 	function interpolate(template: string) {
 		return template
@@ -123,9 +153,9 @@ function ConnectInstructions({
 	}
 
 	const tabs = (
-		<div className="rounded-lg border bg-card overflow-hidden">
+		<div className={variant === "boxed" ? "rounded-lg border bg-card overflow-hidden" : undefined}>
 			<Tabs defaultValue="install" className="flex flex-col">
-				<div className="border-b px-3">
+				<div className={cn("border-b", variant === "boxed" ? "px-3" : "px-4")}>
 					<TabsList variant="underline" className="h-9">
 						<TabsTrigger value="install">Install</TabsTrigger>
 						<TabsTrigger value="instrument">Instrument</TabsTrigger>
@@ -133,7 +163,7 @@ function ConnectInstructions({
 					</TabsList>
 				</div>
 
-				<TabsContent value="install" className="overflow-auto p-3 mt-0">
+				<TabsContent value="install" className={cn("overflow-auto mt-0", contentPadding)}>
 					{typeof snippet.install === "string" ? (
 						<CodeBlock code={snippet.install} language="shell" />
 					) : (
@@ -141,11 +171,11 @@ function ConnectInstructions({
 					)}
 				</TabsContent>
 
-				<TabsContent value="instrument" className="overflow-auto p-3 mt-0">
+				<TabsContent value="instrument" className={cn("overflow-auto mt-0", contentPadding)}>
 					<CodeBlock code={interpolate(snippet.instrument)} language={snippet.label.toLowerCase()} />
 				</TabsContent>
 
-				<TabsContent value="claude-code" className="overflow-auto p-3 mt-0 space-y-2">
+				<TabsContent value="claude-code" className={cn("overflow-auto mt-0 space-y-2", contentPadding)}>
 					<p className="text-xs text-muted-foreground">
 						Run this prompt in Claude Code (or Codex / Cursor with the skill installed). The{" "}
 						<code className="rounded bg-muted px-1">maple-onboard</code> skill walks every service
