@@ -2183,7 +2183,7 @@ export const alert_heading = () => `컨텍스트가 붙어 있는 알림`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_title = () => `알림 규칙`
+export const alert_rules_title = () => `에러율부터 raw SQL까지`
 
 
 /**
@@ -2191,7 +2191,7 @@ export const alert_rules_title = () => `알림 규칙`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_desc = () => `에러율, P95/P99 레이턴시, Apdex, 처리량, 커스텀 메트릭, 커스텀 쿼리 등 7가지 내장 시그널 유형. 심각도 레벨, 인시던트 추적, 자동 해결 포함.`
+export const alert_rules_desc = () => `에러율, P95/P99 레이턴시, Apdex, 처리량, 임의의 메트릭 — 프리셋으로 부족하면 쿼리를 직접 작성하세요. 윈도우, 임계값, 심각도는 모두 자유롭게.`
 
 
 /**
@@ -2199,7 +2199,7 @@ export const alert_rules_desc = () => `에러율, P95/P99 레이턴시, Apdex, �
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_route_title = () => `어디로든 라우팅`
+export const alert_route_title = () => `팀이 일하는 곳으로`
 
 
 /**
@@ -2207,7 +2207,7 @@ export const alert_route_title = () => `어디로든 라우팅`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_route_desc = () => `알림을 Slack, Discord, PagerDuty 또는 임의의 웹훅으로 보내세요. 팀이 이미 일하는 곳으로 알림이 갑니다.`
+export const alert_route_desc = () => `Slack, Discord, PagerDuty, 이메일, Hazel, 임의의 웹훅. 하나의 규칙을 여러 대상에 연결하세요 — 온콜은 페이지를, 채널은 요약을 받습니다.`
 
 
 /**
@@ -2248,6 +2248,54 @@ export const alert_acknowledge = () => `확인`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const alert_webhook_note = () => `+ 임의의 커스텀 웹훅 엔드포인트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_lede = () => `임계값 및 이상 탐지 규칙이 실시간 텔레메트리를 상시 감시합니다. 알림이 발생하면 원인이 된 트레이스, 영향 범위, 원클릭 AI 진단이 함께 도착합니다 — 숫자 하나만 오지 않습니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_incidents_title = () => `노이즈가 아닌 인시던트`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_incidents_desc = () => `발생한 규칙은 인시던트를 열고, 지속되는 동안 재알림하며, 수치가 회복되면 자동으로 해결됩니다. 그룹별로 확장하고, 저장 전에 실제 데이터로 미리 확인하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_ai_note = () => `모든 알림에 AI 진단 링크 포함`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_dest_email = () => `이메일`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_dest_webhook = () => `웹훅`
 
 
 /**
@@ -2432,6 +2480,14 @@ export const footer_service_catalog = () => `서비스 카탈로그`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_error_tracking = () => `에러 추적`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_alerting = () => `알림`
 
 
 /**

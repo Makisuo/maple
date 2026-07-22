@@ -1,0 +1,462 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../../components/Nav.astro";
+import FeatureHero from "../../components/FeatureHero.astro";
+import FeatureDetailGrid from "../../components/FeatureDetailGrid.astro";
+import RelatedFeatures from "../../components/RelatedFeatures.astro";
+import SeoHead from "../../components/SeoHead.astro";
+import Breadcrumb from "../../components/Breadcrumb.astro";
+import BottomCTA from "../../components/BottomCTA.astro";
+import FAQ from "../../components/FAQ.astro";
+import Footer from "../../components/Footer.astro";
+import LiveAlertFeed from "../../components/live/LiveAlertFeed.astro";
+
+const pageTitle = "Alerting | Maple";
+const pageDescription =
+    "Threshold and anomaly alerting for OpenTelemetry data. Route notifications to Slack, Discord, PagerDuty, email, Hazel, or any webhook — with incidents, group fan-out, and one-click AI diagnosis.";
+
+// Stated plainly for AI extraction: these are the supported notification destinations.
+const destinations = [
+    {
+        name: "Slack",
+        description: "Post alerts to a Slack channel via incoming webhook.",
+        delivery: "→ #incidents · 200 OK",
+    },
+    {
+        name: "Discord",
+        description: "Send alerts to a Discord channel via webhook.",
+        delivery: "→ #alerts · 204",
+    },
+    {
+        name: "PagerDuty",
+        description: "Trigger incidents through a PagerDuty Events API v2 integration key.",
+        delivery: "→ Events API v2 · trigger",
+    },
+    {
+        name: "Email",
+        description: "Email workspace members directly — no external service required.",
+        delivery: "→ oncall@acme.dev",
+    },
+    {
+        name: "Webhook",
+        description: "POST a signed JSON payload to any HTTPS endpoint you control.",
+        delivery: "→ POST /hooks/maple · signed",
+    },
+    {
+        name: "Hazel",
+        description: "Connect via OAuth or webhook and route alerts into Hazel.",
+        delivery: "→ routed · OAuth",
+    },
+];
+
+// Group fan-out rows — one rule, one incident per group-by value.
+const fanoutGroups = [
+    { group: "region=eu-west-1", value: "4.7%", firing: true, delivery: "slack #incidents · pagerduty" },
+    { group: "region=us-east-1", value: "0.8%", firing: false, delivery: "quiet" },
+    { group: "region=ap-south-1", value: "1.1%", firing: false, delivery: "quiet" },
+];
+
+// Incident lifecycle — timestamps from the same incident as the demo card.
+const lifecycle = [
+    {
+        time: "14:35:08",
+        title: "Triggered",
+        desc: "error rate 4.7% ≥ 2%, sustained for 5m — incident opened",
+        color: "var(--severity-error)",
+    },
+    {
+        time: "14:35:10",
+        title: "Notified",
+        desc: "slack #incidents · pagerduty — 2s after trigger, AI diagnosis link attached",
+        color: "var(--primary)",
+    },
+    {
+        time: "14:50:08",
+        title: "Renotified",
+        desc: "still firing at 3.9% — same incident, no duplicate",
+        color: "var(--severity-warn)",
+    },
+    {
+        time: "15:04:20",
+        title: "Auto-resolved",
+        desc: "back under 2% for 10m — resolution posted to every destination",
+        color: "var(--severity-info)",
+    },
+];
+
+const alertingFaqs = [
+    {
+        question: "What alerting destinations does Maple support?",
+        answer:
+            "Maple delivers alert notifications to Slack, Discord, PagerDuty, email, Hazel, and any custom webhook. A single alert rule can notify multiple destinations at once — page on-call in PagerDuty while a summary lands in Slack.",
+    },
+    {
+        question: "What can I alert on?",
+        answer:
+            "Built-in signals cover error rate, P95/P99 latency, Apdex, and throughput, plus any custom metric. When the presets aren't enough, you can alert on a custom query with full comparator control — above, below, equal, or inside/outside a range.",
+    },
+    {
+        question: "Does Maple support anomaly detection?",
+        answer:
+            "Yes. Alongside threshold rules, Maple runs anomaly detection over your telemetry and can open triage issues automatically when a signal deviates from its baseline.",
+    },
+    {
+        question: "How does Maple reduce alert noise?",
+        answer:
+            "A firing rule opens an incident that renotifies while it's still active and auto-resolves when the numbers recover. Rules can fan out per group-by value so one rule covers every region or service, and you can preview any rule against real historical data before saving it.",
+    },
+    {
+        question: "Do alert notifications include AI diagnosis?",
+        answer:
+            "Every notification includes a link that opens an AI diagnosis of the incident in Maple, pre-loaded with the relevant traces, errors, and context.",
+    },
+];
+---
+
+<Layout title={pageTitle} description={pageDescription} ogType="article">
+    <SeoHead title={pageTitle} description={pageDescription} />
+    <Nav />
+    <Breadcrumb items={[{ label: "Home", href: "/" }, { label: "Features", href: "/#features" }, { label: "Alerting" }]} />
+    <FeatureHero
+        label="Alerting"
+        title="Alerts with the context attached"
+        subtitle="Threshold and anomaly rules over your live telemetry. When one fires, the notification carries the trace, the blast radius, and a one-click AI diagnosis."
+    />
+
+    <!-- Section 1: rule evaluation chart → firing incident, staged on dot grid -->
+    <section class="relative overflow-hidden py-16 md:py-24">
+        <div
+            class="absolute inset-0 pointer-events-none"
+            aria-hidden="true"
+            style="
+                background-image: radial-gradient(oklch(1 0 0 / 5%) 1px, transparent 1px);
+                background-size: 22px 22px;
+                mask-image: radial-gradient(ellipse 75% 55% at 50% 40%, black, transparent 75%);
+                -webkit-mask-image: radial-gradient(ellipse 75% 55% at 50% 40%, black, transparent 75%);
+            "
+        ></div>
+
+        <div class="relative mx-auto max-w-6xl px-6">
+            <div class="mb-10 max-w-2xl">
+                <span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+                    Rule evaluation
+                </span>
+                <h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+                    From threshold breach to incident
+                </h2>
+                <p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+                    The evaluator watches the signal, not snapshots: a breach has to hold for the full persistence
+                    window before anything pages. Preview any rule against real history and see exactly where it
+                    would have fired — before you save it.
+                </p>
+            </div>
+
+            <div class="relative grid grid-cols-1 lg:grid-cols-[1.15fr_auto_1fr] items-stretch gap-4">
+                <div
+                    class="absolute inset-0 pointer-events-none -z-10"
+                    aria-hidden="true"
+                    style="box-shadow: 0 0 160px 32px oklch(0.70 0.16 60 / 0.08);"
+                ></div>
+
+                <!-- Left: rule + evaluation chart -->
+                <div class="live-frame">
+                    <div class="live-frame__head">
+                        <span>alerts · rule preview</span>
+                        <span>last 45m</span>
+                    </div>
+                    <div class="px-4 pt-3.5 pb-1 text-[11.5px] leading-relaxed">
+                        <span class="text-fg-muted">rule</span>
+                        <span class="text-fg"> error_rate</span><span class="text-fg-muted">&lbrace;service=</span><span class="text-primary">"payments"</span><span class="text-fg-muted">&rbrace;</span>
+                        <span class="text-[color:var(--severity-warn)]"> &gt; 2%</span>
+                        <span class="text-fg-muted"> for </span><span class="text-fg">5m</span>
+                        <span class="text-fg-muted"> · group by </span><span class="text-fg">region</span>
+                    </div>
+                    <div class="px-2 pb-2">
+                        <svg viewBox="0 0 560 232" class="w-full h-auto" role="img" aria-label="Error rate rising from 1% to 4.7%, crossing the 2% threshold and firing after the 5-minute persistence window">
+                            <!-- baseline + top gridline -->
+                            <line x1="40" y1="190" x2="540" y2="190" stroke="var(--border)" stroke-width="1"></line>
+                            <line x1="40" y1="10" x2="540" y2="10" stroke="var(--border)" stroke-width="1" opacity="0.4"></line>
+
+                            <!-- y-axis labels -->
+                            <text x="32" y="14" text-anchor="end" font-size="9" fill="var(--muted-foreground)" font-family="var(--font-mono)">5%</text>
+                            <text x="32" y="193" text-anchor="end" font-size="9" fill="var(--muted-foreground)" font-family="var(--font-mono)">0%</text>
+
+                            <!-- breach region fill -->
+                            <polygon
+                                points="380,118 400,89.2 435,58.4 460,38.8 500,24.4 540,20.8 540,118"
+                                fill="var(--severity-error)"
+                                opacity="0.1"
+                            ></polygon>
+
+                            <!-- threshold line -->
+                            <line x1="40" y1="118" x2="540" y2="118" stroke="var(--severity-warn)" stroke-width="1" stroke-dasharray="4 4" opacity="0.75"></line>
+                            <text x="44" y="112" font-size="9" fill="var(--severity-warn)" font-family="var(--font-mono)">threshold 2%</text>
+
+                            <!-- signal: normal segment -->
+                            <polyline
+                                points="40,157.6 80,150.4 120,161.2 160,154 200,157.6 240,146.8 280,154 320,150.4 360,132.4 380,118"
+                                fill="none"
+                                stroke="var(--foreground)"
+                                stroke-opacity="0.65"
+                                stroke-width="1.5"
+                                stroke-linejoin="round"
+                            ></polyline>
+                            <!-- signal: breach segment -->
+                            <polyline
+                                points="380,118 400,89.2 435,58.4 460,38.8 500,24.4 540,20.8"
+                                fill="none"
+                                stroke="var(--severity-error)"
+                                stroke-width="1.5"
+                                stroke-linejoin="round"
+                            ></polyline>
+
+                            <!-- fired marker: after the 5m persistence window -->
+                            <line x1="435" y1="48" x2="435" y2="196" stroke="var(--severity-error)" stroke-width="1" opacity="0.45"></line>
+                            <circle cx="435" cy="58.4" r="3" fill="var(--severity-error)"></circle>
+                            <text x="441" y="46" font-size="9" fill="var(--severity-error)" font-family="var(--font-mono)">fired · 14:35</text>
+
+                            <!-- persistence bracket -->
+                            <line x1="380" y1="202" x2="435" y2="202" stroke="var(--muted-foreground)" stroke-width="1"></line>
+                            <line x1="380" y1="199" x2="380" y2="205" stroke="var(--muted-foreground)" stroke-width="1"></line>
+                            <line x1="435" y1="199" x2="435" y2="205" stroke="var(--muted-foreground)" stroke-width="1"></line>
+                            <text x="407" y="214" text-anchor="middle" font-size="8.5" fill="var(--muted-foreground)" font-family="var(--font-mono)">for 5m</text>
+
+                            <!-- time ticks -->
+                            <text x="40" y="228" font-size="9" fill="var(--muted-foreground)" font-family="var(--font-mono)">14:00</text>
+                            <text x="207" y="228" text-anchor="middle" font-size="9" fill="var(--muted-foreground)" font-family="var(--font-mono)">14:15</text>
+                            <text x="373" y="228" text-anchor="middle" font-size="9" fill="var(--muted-foreground)" font-family="var(--font-mono)">14:30</text>
+                            <text x="540" y="228" text-anchor="end" font-size="9" fill="var(--muted-foreground)" font-family="var(--font-mono)">14:45</text>
+                        </svg>
+                    </div>
+                    <div class="px-4 py-2.5 border-t border-border text-[11px] text-fg-muted">
+                        preview: this rule would have fired <span class="text-fg tabular-nums">once</span> in the shown window · <span class="text-fg">region=eu-west-1</span>
+                    </div>
+                </div>
+
+                <!-- Connector arrow -->
+                <div class="hidden lg:flex flex-col items-center justify-center px-2">
+                    <svg viewBox="0 0 80 24" width="80" height="24" aria-hidden="true">
+                        <defs>
+                            <linearGradient id="breach-incident-grad" x1="0" y1="0" x2="80" y2="0" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stop-color="var(--severity-warn)" stop-opacity="0.4"></stop>
+                                <stop offset="100%" stop-color="var(--primary)" stop-opacity="0.85"></stop>
+                            </linearGradient>
+                        </defs>
+                        <line x1="0" y1="12" x2="62" y2="12" stroke="url(#breach-incident-grad)" stroke-width="1.5" stroke-dasharray="3 3"></line>
+                        <polygon points="62,7 74,12 62,17" fill="var(--primary)"></polygon>
+                    </svg>
+                    <span class="mt-2 max-w-[10rem] text-center text-[9.5px] font-mono uppercase tracking-wider text-fg-muted leading-snug">
+                        5m elapsed — incident opened
+                    </span>
+                </div>
+
+                <!-- Right: the resulting incident -->
+                <div class="flex flex-col justify-center">
+                    <LiveAlertFeed />
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 2: group fan-out -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="mb-10 max-w-2xl">
+                <span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+                    Group fan-out
+                </span>
+                <h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+                    One rule watches every region
+                </h2>
+                <p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+                    Add a group-by and the rule evaluates each value independently. Every region, service, or
+                    endpoint gets its own incident — a spike in eu-west-1 never hides behind a healthy global
+                    average, and only the group that breached pages anyone.
+                </p>
+            </div>
+
+            <div class="live-frame max-w-3xl">
+                <div class="live-frame__head">
+                    <span>alerts · group fan-out</span>
+                    <span>3 groups · 1 firing</span>
+                </div>
+                <div class="divide-y divide-border text-[12px]">
+                    {
+                        fanoutGroups.map((g) => (
+                            <div class="grid grid-cols-[auto_1fr_auto] sm:grid-cols-[auto_1fr_auto_auto] items-center gap-x-3 gap-y-1 px-4 py-3">
+                                <span
+                                    class="size-1.5 rounded-full shrink-0"
+                                    style={`background: ${g.firing ? "var(--severity-error)" : "var(--severity-info)"};`}
+                                    aria-hidden="true"
+                                ></span>
+                                <span class={g.firing ? "text-fg" : "text-fg-muted"}>{g.group}</span>
+                                <span class={`tabular-nums text-right ${g.firing ? "text-[color:var(--severity-error)]" : "text-fg-muted"}`}>
+                                    {g.value}
+                                </span>
+                                <span class="col-span-full sm:col-span-1 pl-4 sm:pl-0 sm:w-64 text-[11px] text-fg-muted sm:text-right">
+                                    {g.firing ? (
+                                        <>
+                                            <span class="text-[color:var(--severity-error)] font-medium uppercase tracking-[0.1em] text-[10px]">firing</span>
+                                            <span> · {g.delivery}</span>
+                                        </>
+                                    ) : (
+                                        <span>ok · {g.delivery}</span>
+                                    )}
+                                </span>
+                            </div>
+                        ))
+                    }
+                </div>
+                <div class="px-4 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted">
+                    each group opens and resolves its own incident
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 3: every supported destination, stated plainly. -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="mb-10 max-w-2xl">
+                <span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+                    Destinations
+                </span>
+                <h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+                    Every destination Maple supports
+                </h2>
+                <p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+                    Alert rules deliver to Slack, Discord, PagerDuty, email, Hazel, and any custom webhook. Attach as
+                    many destinations to a rule as you want — each gets its own notification template.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-px bg-border border border-border">
+                {
+                    destinations.map((d) => (
+                        <div class="bg-bg p-6 md:p-7">
+                            <div class="flex items-center gap-2.5 mb-2">
+                                {d.name === "Slack" && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="#E8C5EA" aria-hidden="true">
+                                        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z" />
+                                    </svg>
+                                )}
+                                {d.name === "Discord" && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="#C7CDFF" aria-hidden="true">
+                                        <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+                                    </svg>
+                                )}
+                                {d.name === "PagerDuty" && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="#06AC38" aria-hidden="true">
+                                        <path d="M16.965 1.18C15.085.164 13.769 0 10.683 0H3.73v14.55h6.926c2.743 0 4.8-.164 6.61-1.37 1.975-1.303 3.004-3.484 3.004-6.007 0-2.716-1.262-4.896-3.305-5.994zm-5.5 10.326h-4.21V3.113l3.977-.027c3.62-.028 5.43 1.234 5.43 4.128 0 3.113-2.248 4.292-5.197 4.292zM3.73 17.61h3.525V24H3.73z" />
+                                    </svg>
+                                )}
+                                {d.name === "Email" && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+                                        <path d="M4 6h16v12H4z" stroke="#E8872A" stroke-width="1.8" stroke-linejoin="round" />
+                                        <path d="m4 7 8 6 8-6" stroke="#E8872A" stroke-width="1.8" stroke-linejoin="round" />
+                                    </svg>
+                                )}
+                                {d.name === "Webhook" && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden="true">
+                                        <path d="M8 6c-2 0-2 2-2 3s0 3-3 3c3 0 3 2 3 3s0 3 2 3M16 6c2 0 2 2 2 3s0 3 3 3c-3 0-3 2-3 3s0 3-2 3" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                                    </svg>
+                                )}
+                                {d.name === "Hazel" && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 266 219" width="16" height="16" fill="#F46F0F" aria-hidden="true">
+                                        <path fill-rule="evenodd" clip-rule="evenodd" d="M155 124.5C167.16 122 187.95 109.3 194.35 96.5H194.35C186.18 82.16 159.85 55 119.85 61C117.85 55.83 111.35 43.4 101.35 35C89.35 43 36.85 167.5 93.35 219C65.35 210.16 7.65 178.6 0.85 123C-7.64 53.5 48.85 8.5 98.85 8.5C113.44 8.5 132.42 10.75 151.99 13.08C199.45 18.73 250.35 24.78 250.35 0C270.18 29 289 137.5 172.5 183.5C172.84 182.02 173.22 180.49 173.61 178.92C177.93 161.62 183.42 139.63 155 124.5ZM146 88.5C146 93.19 142.19 97 137.5 97C132.80 97 129 93.19 129 88.5C129 83.80 132.80 80 137.5 80C142.19 80 146 83.80 146 88.5ZM120.78 136.70C92.00 138.35 87.77 156.55 89.25 165.44C89.25 169.30 95.96 172.51 102.08 175.45C107.69 178.13 112.82 180.59 111.89 183.10C109.95 188.35 100.57 188.57 96.12 188.03C99.90 198.70 111.00 219.39 125.23 216.77C139.46 214.14 150.02 196.51 153.53 188.03C149.49 188.85 137.76 186.38 137.76 181.46C137.76 179.71 140.55 178.54 144.14 177.01C150.71 174.23 160 170.31 160 159.70C159.03 139.99 136.95 135.33 126.04 135.47C128.30 127.59 134.80 124.25 137.76 123.56C136.79 118.97 132.78 117.27 130.89 117C123.45 122.58 121.05 132.46 120.78 136.70Z" />
+                                    </svg>
+                                )}
+                                <h3 class="text-[15px] font-semibold text-fg leading-snug">{d.name}</h3>
+                            </div>
+                            <p class="text-[13px] text-fg-muted leading-relaxed">{d.description}</p>
+                            <p class="mt-3 font-mono text-[10.5px] text-fg-muted">
+                                <span class="text-primary">{d.delivery.slice(0, 1)}</span>{d.delivery.slice(1)}
+                            </p>
+                        </div>
+                    ))
+                }
+            </div>
+        </div>
+    </section>
+
+    <!-- Section 4: incident lifecycle -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <div class="mb-12 max-w-2xl">
+                <span class="inline-flex items-center rounded-full border border-border bg-card/60 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted">
+                    Incident lifecycle
+                </span>
+                <h2 class="mt-4 font-display text-2xl md:text-3xl font-semibold leading-tight tracking-tight text-fg">
+                    Incidents that resolve themselves
+                </h2>
+                <p class="mt-3 text-sm md:text-base text-fg-muted leading-relaxed">
+                    A firing rule opens exactly one incident. It renotifies while the breach is still hot, and when
+                    the numbers recover it closes itself and says so — nobody has to remember to post the all-clear.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-x-8 gap-y-10">
+                {
+                    lifecycle.map((step) => (
+                        <div class="relative border-t border-border pt-5">
+                            <span
+                                class="absolute -top-[3.5px] left-0 size-1.5 rounded-full"
+                                style={`background: ${step.color};`}
+                                aria-hidden="true"
+                            ></span>
+                            <span class="font-mono text-[11px] tabular-nums text-fg-muted">{step.time}</span>
+                            <h3 class="mt-1.5 text-[14px] font-semibold text-fg">{step.title}</h3>
+                            <p class="mt-1.5 text-[12px] text-fg-muted leading-relaxed">{step.desc}</p>
+                        </div>
+                    ))
+                }
+            </div>
+        </div>
+    </section>
+
+    <!-- Detail Grid -->
+    <section class="py-16 md:py-24">
+        <div class="mx-auto max-w-6xl px-6">
+            <FeatureDetailGrid
+                items={[
+                    {
+                        title: "From error rate to raw SQL",
+                        description:
+                            "Error rate, P95/P99 latency, Apdex, throughput, any metric — and when the presets run out, write the query yourself.",
+                    },
+                    {
+                        title: "Anomaly detection",
+                        description:
+                            "Baseline-aware detection watches your signals and opens triage issues when something drifts — no threshold required.",
+                    },
+                    {
+                        title: "Group fan-out",
+                        description:
+                            "One rule per group-by value: every region, service, or endpoint gets its own incident instead of one blended average.",
+                    },
+                    {
+                        title: "Incidents, not noise",
+                        description:
+                            "A firing rule opens an incident, renotifies while it's still hot, and auto-resolves when the numbers recover.",
+                    },
+                    {
+                        title: "Preview before you ship",
+                        description:
+                            "Run any rule against real history and see exactly what the evaluator will see — before you ever save it.",
+                    },
+                    {
+                        title: "AI diagnosis built in",
+                        description:
+                            "Every notification links to an AI diagnosis pre-loaded with the incident's traces, errors, and context.",
+                    },
+                ]}
+            />
+        </div>
+    </section>
+
+    <FAQ items={alertingFaqs} />
+
+    <RelatedFeatures current="alerting" />
+    <BottomCTA />
+    <Footer />
+</Layout>

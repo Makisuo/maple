@@ -2183,7 +2183,7 @@ export const alert_heading = () => `コンテキスト付きのアラート`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_title = () => `アラートルール`
+export const alert_rules_title = () => `エラー率から生SQLまで`
 
 
 /**
@@ -2191,7 +2191,7 @@ export const alert_rules_title = () => `アラートルール`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_desc = () => `エラー率、P95/P99レイテンシ、Apdex、スループット、カスタムメトリクス、カスタムクエリの7種類の組み込みシグナル。重大度レベル、インシデント追跡、自動解決付き。`
+export const alert_rules_desc = () => `エラー率、P95/P99レイテンシ、Apdex、スループット、任意のメトリクス。プリセットで足りなければ、クエリを自分で書けます。ウィンドウ、しきい値、重大度はすべて自由に。`
 
 
 /**
@@ -2199,7 +2199,7 @@ export const alert_rules_desc = () => `エラー率、P95/P99レイテンシ、A
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_route_title = () => `どこへでもルーティング`
+export const alert_route_title = () => `普段いる場所に通知`
 
 
 /**
@@ -2207,7 +2207,7 @@ export const alert_route_title = () => `どこへでもルーティング`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_route_desc = () => `アラートをSlack、Discord、PagerDuty、任意のWebhookへ。チームが普段いる場所に通知が届きます。`
+export const alert_route_desc = () => `Slack、Discord、PagerDuty、メール、Hazel、任意のWebhook。1つのルールを複数の宛先へ — オンコールにはページ、チャンネルにはサマリーを。`
 
 
 /**
@@ -2248,6 +2248,54 @@ export const alert_acknowledge = () => `確認`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const alert_webhook_note = () => `+ 任意のカスタムWebhookエンドポイント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_lede = () => `しきい値と異常検知のルールが、ライブなテレメトリを常時監視。発火した通知には、原因となったトレース、影響範囲、ワンクリックのAI診断が添付されます — 数字が届くだけではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_incidents_title = () => `ノイズではなくインシデント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_incidents_desc = () => `発火したルールはインシデントを開き、続く間は再通知し、数値が回復すれば自動で解決。グループごとにファンアウトし、保存前に実データでプレビューできます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_ai_note = () => `すべての通知にAI診断リンク付き`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_dest_email = () => `メール`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_dest_webhook = () => `Webhook`
 
 
 /**
@@ -2432,6 +2480,14 @@ export const footer_service_catalog = () => `サービスカタログ`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_error_tracking = () => `エラートラッキング`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_alerting = () => `アラート`
 
 
 /**

@@ -7,6 +7,7 @@ import LiveTrace from "../../components/live/LiveTrace.astro";
 import LiveLogStream from "../../components/live/LiveLogStream.astro";
 import LiveServiceMap from "../../components/live/LiveServiceMap.astro";
 import LiveMcpTranscript from "../../components/live/LiveMcpTranscript.astro";
+import Alerting from "../../components/Alerting.astro";
 import BillComparison from "../../components/BillComparison.astro";
 import Quickstart from "../../components/Quickstart.astro";
 import Footer from "../../components/Footer.astro";
@@ -85,6 +86,8 @@ const pageDescription = m.page_home_desc();
             <LiveMcpTranscript />
         </div>
     </section>
+
+    <Alerting />
 
     <BillComparison />
     <Quickstart />

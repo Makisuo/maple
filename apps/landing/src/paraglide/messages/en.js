@@ -2183,7 +2183,7 @@ export const alert_heading = () => `Alerts with the context attached`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_title = () => `Alert rules`
+export const alert_rules_title = () => `From error rate to raw SQL`
 
 
 /**
@@ -2191,7 +2191,7 @@ export const alert_rules_title = () => `Alert rules`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_rules_desc = () => `7 built-in signal types — error rate, P95/P99 latency, Apdex, throughput, custom metrics, and custom queries. With severity levels, incident tracking, and auto-resolution.`
+export const alert_rules_desc = () => `Error rate, P95/P99 latency, Apdex, throughput, any metric — and when the presets run out, write the query yourself. You set the window, the threshold, and the severity.`
 
 
 /**
@@ -2199,7 +2199,7 @@ export const alert_rules_desc = () => `7 built-in signal types — error rate, P
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_route_title = () => `Route everywhere`
+export const alert_route_title = () => `Paged where you work`
 
 
 /**
@@ -2207,7 +2207,7 @@ export const alert_route_title = () => `Route everywhere`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const alert_route_desc = () => `Push alerts to Slack, Discord, PagerDuty, or any webhook. Your team gets notified where they already work.`
+export const alert_route_desc = () => `Slack, Discord, PagerDuty, email, Hazel, or any webhook. Wire one rule to as many destinations as you want — on-call gets paged while the channel gets the summary.`
 
 
 /**
@@ -2248,6 +2248,54 @@ export const alert_acknowledge = () => `Acknowledge`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const alert_webhook_note = () => `+ any custom webhook endpoint`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_lede = () => `Threshold and anomaly rules watch your live telemetry around the clock. When one fires, the page arrives with the trace that tripped it, the blast radius, and a one-click AI diagnosis — not just a number that crossed a line.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_incidents_title = () => `Incidents, not noise`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_incidents_desc = () => `A firing rule opens an incident, renotifies while it's still hot, and auto-resolves when the numbers recover. Fan out per group. Preview against real history before you ship it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_ai_note = () => `AI diagnosis linked in every notification`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_dest_email = () => `Email`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const alert_dest_webhook = () => `Webhook`
 
 
 /**
@@ -2432,6 +2480,14 @@ export const footer_service_catalog = () => `Service Catalog`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_error_tracking = () => `Error Tracking`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_alerting = () => `Alerting`
 
 
 /**

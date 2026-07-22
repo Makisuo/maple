@@ -9,6 +9,7 @@ import LiveLogsVolumeChart from "../components/live/LiveLogsVolumeChart.tsx";
 import LiveServiceMap from "../components/live/LiveServiceMap.astro";
 import LiveMcpTranscript from "../components/live/LiveMcpTranscript.astro";
 import LiveBrowserSessions from "../components/live/LiveBrowserSessions.astro";
+import Alerting from "../components/Alerting.astro";
 import Kubernetes from "../components/Kubernetes.astro";
 import BillComparison from "../components/BillComparison.astro";
 import Quickstart from "../components/Quickstart.astro";
@@ -154,7 +155,10 @@ const homeFaqs = [
         </div>
     </section>
 
-    <!-- 07 — Kubernetes. Prose left, workload table right. -->
+    <!-- 07 — Alerting. Centered stage: incident artifact + every destination. -->
+    <Alerting />
+
+    <!-- 08 — Kubernetes. Prose left, workload table right. -->
     <Kubernetes />
 
     <BillComparison />
