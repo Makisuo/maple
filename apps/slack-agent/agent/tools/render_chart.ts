@@ -92,7 +92,19 @@ export default defineTool({
       const { Resvg } = await import("@resvg/resvg-js");
       const png = new Resvg(svg, {
         fitTo: { mode: "zoom", value: 2 },
-        font: { loadSystemFonts: true },
+        // resvg 2.x's loadSystemFonts is a silent no-op on Linux without the
+        // fontconfig package (fontdb reads /etc/fonts/fonts.conf to find font
+        // dirs), which drops every glyph from the PNG. Point it straight at
+        // the font dirs the Dockerfile populates instead; missing dirs are
+        // tolerated, and loadSystemFonts stays on as the local-dev fallback.
+        font: {
+          loadSystemFonts: true,
+          fontDirs: [
+            "/usr/share/fonts/truetype/geist-mono",
+            "/usr/share/fonts/truetype/dejavu",
+          ],
+          defaultFontFamily: "Geist Mono",
+        },
       })
         .render()
         .asPng();
