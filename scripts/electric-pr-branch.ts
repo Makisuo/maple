@@ -276,7 +276,10 @@ const maskAndExport = (entries: Record<string, string>, secrets: ReadonlyArray<s
 const up = async (environmentName: string): Promise<void> => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
-	const databaseUrl = requireEnv("MAPLE_PG_URL")
+	// Electric Cloud's create-source validation wants the long `postgresql://`
+	// scheme (all its docs/examples use it; the short form drew a generic
+	// "Input validation failed"). planetscale-pr-branch.ts emits `postgres://`.
+	const databaseUrl = requireEnv("MAPLE_PG_URL").replace(/^postgres:\/\//, "postgresql://")
 	// Defense-in-depth: mask the connection string so any incidental echo (CLI
 	// output, error text) is scrubbed in CI. The command echo already redacts it.
 	maskSecret(databaseUrl)
