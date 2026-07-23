@@ -153,9 +153,12 @@ interface BranchCredential {
 /**
  * Mint a Postgres ROLE for the preview branch (`pscale password` is Vitess-only).
  * The CI credential runs migrations (DDL) AND backs the preview app, so it
- * inherits `postgres`. The branch is deleted on PR close, which revokes the
- * role — but a TTL is a safety net in case `down` never runs. JSON field names
- * have drifted across CLI releases, so accept the known spellings.
+ * inherits `postgres`; `--with-replication` additionally stamps the REPLICATION
+ * role *attribute* (attributes are never inherited through membership), which
+ * Electric's create-source database probe requires of the connecting role
+ * (scripts/electric-pr-branch.ts). The branch is deleted on PR close, which
+ * revokes the role — but a TTL is a safety net in case `down` never runs. JSON
+ * field names have drifted across CLI releases, so accept the known spellings.
  */
 const createCredential = (database: string, branchName: string): BranchCredential => {
 	// Unique per run so it never collides with a residual role on the freshly
@@ -171,6 +174,7 @@ const createCredential = (database: string, branchName: string): BranchCredentia
 			roleName,
 			"--inherited-roles",
 			"postgres",
+			"--with-replication",
 			"--ttl",
 			"24h",
 			"--format",

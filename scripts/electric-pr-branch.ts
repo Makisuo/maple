@@ -358,12 +358,14 @@ const up = async (environmentName: string): Promise<void> => {
 	//    auto-manage publishing. `--wait` blocks until the service is active so the
 	//    alchemy deploy right after binds to a live source (CLI default 300s cap).
 	// Electric's create-source probe requires the connecting role to carry the
-	// REPLICATION *attribute*. The CI credential (planetscale-pr-branch.ts) is a
-	// role with `--inherited-roles postgres` — but role attributes are never
-	// inherited through membership, so the minted role reports
-	// rolreplication=false and Electric answers "Database validation failed".
-	// Grant the attribute in-place: directly first, then via SET ROLE postgres
-	// (attribute checks use the session role) on the same pinned connection.
+	// REPLICATION *attribute* (never inherited through role membership — the
+	// `--inherited-roles postgres` grant alone leaves rolreplication=false and
+	// Electric answers a bare "Database validation failed"). The credential is
+	// minted with `pscale role create --with-replication` in
+	// planetscale-pr-branch.ts; verify here so a regression fails with a precise
+	// message instead of Electric's opaque one. In-place ALTER is NOT possible:
+	// both direct ALTER and SET ROLE postgres get "permission denied to alter
+	// role" on PlanetScale.
 	{
 		// Bun's built-in Postgres client — avoids a workspace dep from a root script.
 		// Non-literal specifier so tsc doesn't require bun-types to resolve it.
@@ -371,39 +373,21 @@ const up = async (environmentName: string): Promise<void> => {
 		const { SQL } = (await import(bunSpecifier)) as {
 			SQL: new (url: string) => {
 				(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
-				begin: (fn: (tx: any) => Promise<void>) => Promise<void>
 				end: () => Promise<void>
 			}
 		}
 		const sql = new SQL(databaseUrl)
 		try {
-			const hasReplication = async (): Promise<boolean> => {
-				const [row] = await sql`SELECT rolreplication FROM pg_roles WHERE rolname = current_user`
-				return row?.rolreplication === true
-			}
-			if (!(await hasReplication())) {
-				try {
-					await sql`ALTER ROLE CURRENT_USER WITH REPLICATION`
-				} catch {
-					// begin() pins one connection so SET LOCAL ROLE + ALTER share a
-					// session; ALTER ROLE takes an identifier, so quote the role name.
-					const [who] = await sql`SELECT current_user AS name`
-					const quoted = `"${String(who?.name ?? "").replaceAll('"', '""')}"`
-					await sql.begin(async (tx) => {
-						await tx`SET LOCAL ROLE postgres`
-						await tx.unsafe(`ALTER ROLE ${quoted} WITH REPLICATION`)
-					})
-				}
-			}
-			if (!(await hasReplication())) {
+			const [row] = await sql`SELECT rolreplication FROM pg_roles WHERE rolname = current_user`
+			if (row?.rolreplication !== true) {
 				fail(
-					"CI role lacks the REPLICATION attribute and it could not be granted — Electric's database validation will reject the source",
+					"CI role lacks the REPLICATION attribute — ensure planetscale-pr-branch.ts mints it with `--with-replication` (Electric's database validation rejects the source otherwise)",
 				)
 			}
 			console.log("✓ CI role carries REPLICATION")
 		} catch (error) {
 			fail(
-				`Could not verify/grant REPLICATION on the branch role: ${error instanceof Error ? error.message : String(error)}`,
+				`Could not verify REPLICATION on the branch role: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		} finally {
 			await sql.end()
