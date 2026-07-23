@@ -274,11 +274,24 @@ const up = async (environmentName: string): Promise<void> => {
 		await waitUntilEnvironmentGone(projectId, environmentName)
 	}
 
-	// 2. Create the per-PR environment under the project.
-	const createdEnv = runElectric(
+	// 2. Create the per-PR environment under the project. Environment deletion is
+	//    asynchronous server-side: the env drops out of `list` right away, but the
+	//    name stays reserved briefly, so `create` can transiently answer "an
+	//    environment with this name already exists" (VALIDATION_ERROR, exit 4).
+	//    Retry name conflicts with backoff instead of failing the deploy.
+	let createdEnv = runElectric(
 		["environments", "create", "--project", projectId, "--name", environmentName, "--json"],
 		{ secret: true },
 	)
+	const createDeadline = Date.now() + GONE_TIMEOUT_MS
+	while (createdEnv.exitCode !== 0 && isAlreadyExists(createdEnv) && Date.now() < createDeadline) {
+		console.log(`… name ${environmentName} still reserved by the deleted environment; retrying create`)
+		await sleep(GONE_POLL_MS)
+		createdEnv = runElectric(
+			["environments", "create", "--project", projectId, "--name", environmentName, "--json"],
+			{ secret: true },
+		)
+	}
 	if (createdEnv.exitCode !== 0) {
 		fail(
 			isAlreadyExists(createdEnv)
