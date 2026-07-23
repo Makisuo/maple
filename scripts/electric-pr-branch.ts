@@ -354,26 +354,59 @@ const up = async (environmentName: string): Promise<void> => {
 	//    alchemy deploy right after binds to a live source (CLI default 300s cap).
 	const manualPublishing = !/^(false|0)$/i.test(process.env.ELECTRIC_MANUAL_TABLE_PUBLISHING?.trim() ?? "")
 	const extraArgs = (process.env.ELECTRIC_SERVICE_EXTRA_ARGS?.trim() || "").split(/\s+/).filter(Boolean)
-	const createdSvc = runElectric(
-		[
-			"services",
-			"create",
-			"postgres",
-			"--environment",
-			environmentId as string,
-			"--database-url",
-			databaseUrl,
-			"--region",
-			region,
-			...(manualPublishing ? ["--manual-table-publishing"] : []),
-			"--wait",
-			...extraArgs,
-			"--json",
-		],
-		{ secret: true },
-	)
-	if (createdSvc.exitCode !== 0) {
-		fail(`Failed to create Electric Postgres source in environment ${environmentName}`)
+	const bareUrl = databaseUrl.split("?")[0] as string
+	// The Cloud API answers a bare "Input validation failed" without naming the
+	// offending field. Attempt the full-fidelity create first, then degrade the
+	// two suspects (the `--manual-table-publishing` option object and the
+	// `?sslmode=` query string) one at a time so a single CI run isolates the
+	// culprit — the accepted variant is logged (inputs only, never values).
+	const attempts: ReadonlyArray<{ label: string; url: string; manual: boolean }> = [
+		{ label: "full: manual-publishing + query string", url: databaseUrl, manual: manualPublishing },
+		...(manualPublishing ? [{ label: "no manual-table-publishing", url: databaseUrl, manual: false }] : []),
+		...(bareUrl !== databaseUrl
+			? [{ label: "query string stripped", url: bareUrl, manual: manualPublishing }]
+			: []),
+		...(manualPublishing && bareUrl !== databaseUrl
+			? [{ label: "bare URL, no manual-table-publishing", url: bareUrl, manual: false }]
+			: []),
+	]
+	let createdSvc: CliResult | undefined
+	for (const attempt of attempts) {
+		const result = runElectric(
+			[
+				"services",
+				"create",
+				"postgres",
+				"--environment",
+				environmentId,
+				"--database-url",
+				attempt.url,
+				"--region",
+				region,
+				...(attempt.manual ? ["--manual-table-publishing"] : []),
+				"--wait",
+				...extraArgs,
+				"--json",
+			],
+			{ secret: true },
+		)
+		if (result.exitCode === 0) {
+			console.log(`✓ services create postgres accepted variant: ${attempt.label}`)
+			createdSvc = result
+			break
+		}
+		const validation = /VALIDATION_ERROR|Input validation failed/i.test(`${result.stdout}\n${result.stderr}`)
+		console.log(`… services create variant rejected (${attempt.label})`)
+		if (!validation) {
+			// A non-validation failure (network, provisioning error) won't be fixed
+			// by degrading inputs — surface it instead of masking it with retries.
+			fail(`Failed to create Electric Postgres source in environment ${environmentName}`)
+		}
+	}
+	if (!createdSvc) {
+		return fail(
+			`Failed to create Electric Postgres source in environment ${environmentName} (all variants rejected)`,
+		)
 	}
 	// v0.0.10 result: { id, status, sourceSecret } — the postgres service IS the
 	// shape-API source, so its id is the `source_id` the sync worker forwards.
