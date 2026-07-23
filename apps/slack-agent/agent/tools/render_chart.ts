@@ -37,8 +37,10 @@ const inputSchema = z.object({
   unit: z
     .enum(["number", "percent", "duration_ms", "bytes", "requests_per_sec"])
     .describe("Unit of the values; drives axis and label formatting."),
+  // Not z.tuple(): tuples serialize to the draft-07 `items: [..]` array form,
+  // which Workers AI rejects as an invalid 2020-12 tool schema.
   points: z
-    .array(z.tuple([z.number(), z.number()]))
+    .array(z.array(z.number()).length(2))
     .min(1)
     .max(500)
     .describe(
@@ -58,13 +60,14 @@ export default defineTool({
     "a text sparkline for you to include when the image cannot be rendered or uploaded.",
   inputSchema,
   async execute(input, ctx) {
+    const points = input.points.map((p): [number, number] => [p[0]!, p[1]!]);
     const spec: ChartSpec = {
       title: input.title,
       kind: input.kind,
       unit: input.unit,
-      points: input.points,
+      points,
     };
-    const values = [...input.points]
+    const values = [...points]
       .sort((a, b) => a[0] - b[0])
       .map(([, v]) => v);
     const latest = values[values.length - 1]!;
