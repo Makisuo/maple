@@ -7,19 +7,25 @@
  *   bun scripts/electric-pr-branch.ts up   <pr-number>
  *   bun scripts/electric-pr-branch.ts down <pr-number>
  *
- * `up` (re)creates an Electric Cloud **environment** `pr-<n>` and a Postgres
- * **service** (the sync "source") inside it, pointed at this PR's PlanetScale
- * branch — deleting any existing environment first so every deploy starts fresh
- * (parity with the PlanetScale reset: each push empties the branch's DB and
- * mints a fresh credential, so the previous source points at dropped tables). It
- * then exports `ELECTRIC_URL` / `ELECTRIC_SOURCE_ID` / `ELECTRIC_SECRET` to
+ * `up` ensures an Electric Cloud **environment** for this PR and (re)creates the
+ * Postgres **service** (the sync "source") inside it, pointed at this PR's
+ * PlanetScale branch. The environment is REUSED across deploys; only the
+ * services are reset (deleted + recreated) each run — the service is what points
+ * at the now-dropped tables/rotated creds after the PlanetScale in-place reset.
+ * Environments are NOT delete+recreated because Electric soft-deletes them:
+ * a deleted environment disappears from `environments list` immediately but its
+ * name stays reserved (observed >13 min, possibly forever), so recreating
+ * `pr-<n>` right after deleting it fails with "name already exists". If the
+ * base name is stuck from an earlier delete, `up` falls back to a suffixed name
+ * `pr-<n>-r<run-id>`; matching everywhere is by exact name OR `pr-<n>-` prefix.
+ * It then exports `ELECTRIC_URL` / `ELECTRIC_SOURCE_ID` / `ELECTRIC_SECRET` to
  * $GITHUB_ENV so the subsequent `alchemy:deploy:pr` binds the standalone
  * apps/electric-sync worker to this source (see apps/electric-sync/alchemy.run.ts).
  *
- * `down` deletes the `pr-<n>` environment (called on PR close, after
- * `alchemy:destroy:pr`). Environment deletion cascades its service. Each source
- * counts against the Electric plan's max-databases cap and holds a PlanetScale
- * replication slot, so `down` on close is mandatory.
+ * `down` deletes every `pr-<n>`/`pr-<n>-*` environment (called on PR close,
+ * after `alchemy:destroy:pr`). Environment deletion cascades its services. Each
+ * source counts against the Electric plan's max-databases cap and holds a
+ * PlanetScale replication slot, so `down` on close is mandatory.
  *
  * Depends on the PlanetScale `up` step having exported MAPLE_PG_URL (the direct
  * 5432 connection string) and the `drizzle-kit migrate` step having applied
@@ -68,8 +74,10 @@ import { appendFileSync } from "node:fs"
 type Subcommand = "up" | "down"
 
 const FAILURE = 1
-const GONE_TIMEOUT_MS = 2 * 60 * 1000
-const GONE_POLL_MS = 5_000
+// Short grace for eventual consistency on env-name conflicts before falling
+// back to a suffixed name (the base name may be soft-delete-reserved for good).
+const CREATE_RETRY_ATTEMPTS = 3
+const CREATE_RETRY_MS = 5_000
 const DEFAULT_ELECTRIC_URL = "https://api.electric-sql.cloud"
 const DEFAULT_REGION = "us-east-1"
 
@@ -189,7 +197,7 @@ const pick = (value: unknown, ...keys: string[]): string | undefined => {
 const asArray = (value: unknown): ReadonlyArray<unknown> => {
 	if (Array.isArray(value)) return value
 	if (typeof value === "object" && value !== null) {
-		for (const key of ["environments", "data", "items", "results"]) {
+		for (const key of ["environments", "services", "data", "items", "results"]) {
 			const nested = (value as Record<string, unknown>)[key]
 			if (Array.isArray(nested)) return nested
 		}
@@ -197,32 +205,50 @@ const asArray = (value: unknown): ReadonlyArray<unknown> => {
 	return []
 }
 
-/** Resolve the id of the environment named `environmentName`, or undefined if none. */
-const findEnvironmentId = (projectId: string, environmentName: string): string | undefined => {
+/** `pr-<n>` itself plus suffix-fallback names (`pr-<n>-r123`); never `pr-<n>7`. */
+const matchesEnvironmentName = (base: string, name: string | undefined): boolean =>
+	name === base || (name !== undefined && name.startsWith(`${base}-`))
+
+/** All environments whose name is `base` or `base-*`, oldest-listed first. */
+const findEnvironments = (projectId: string, base: string): ReadonlyArray<{ id: string; name: string }> => {
 	// `--project` is a required option; output shape: { environments: [{ id, name, createdAt }] }.
 	const listed = runElectric(["environments", "list", "--project", projectId, "--json"], { secret: true })
 	if (listed.exitCode !== 0) {
 		return isNotFound(listed)
-			? undefined
+			? []
 			: fail(`Failed to list Electric environments (exit ${listed.exitCode})`)
 	}
-	const match = asArray(parseJson(listed.stdout, "environments list")).find(
-		(entry) => pick(entry, "name") === environmentName,
-	)
-	return match ? pick(match, "id", "environment_id", "env_id") : undefined
+	return asArray(parseJson(listed.stdout, "environments list")).flatMap((entry) => {
+		const id = pick(entry, "id", "environmentId")
+		const name = pick(entry, "name")
+		return id && matchesEnvironmentName(base, name) ? [{ id, name: name as string }] : []
+	})
 }
 
-const waitUntilEnvironmentGone = async (projectId: string, environmentName: string): Promise<void> => {
-	const deadline = Date.now() + GONE_TIMEOUT_MS
-	while (Date.now() < deadline) {
-		if (!findEnvironmentId(projectId, environmentName)) {
-			console.log(`✓ Environment ${environmentName} deleted`)
-			return
-		}
-		console.log(`… waiting for environment ${environmentName} to finish deleting`)
-		await sleep(GONE_POLL_MS)
+const deleteEnvironment = (env: { id: string; name: string }): void => {
+	const removed = runElectric(["environments", "delete", env.id, "--force"])
+	if (removed.exitCode !== 0 && !isNotFound(removed)) {
+		fail(`Failed to delete Electric environment ${env.name} (${env.id})`)
 	}
-	fail(`Timed out waiting for environment ${environmentName} to delete`)
+}
+
+/** Delete every service in the environment (the reused env's stale sources). */
+const resetServices = (environmentId: string): void => {
+	const listed = runElectric(["services", "list", "--environment", environmentId, "--json"], {
+		secret: true,
+	})
+	if (listed.exitCode !== 0) {
+		if (isNotFound(listed)) return
+		fail(`Failed to list services in environment ${environmentId}`)
+	}
+	for (const entry of asArray(parseJson(listed.stdout, "services list"))) {
+		const serviceId = pick(entry, "id", "serviceId")
+		if (!serviceId) continue
+		const removed = runElectric(["services", "delete", serviceId, "--force"])
+		if (removed.exitCode !== 0 && !isNotFound(removed)) {
+			fail(`Failed to delete stale Electric service ${serviceId}`)
+		}
+	}
 }
 
 // Register a value with GitHub Actions' log masker. Only emitted in CI — locally
@@ -262,53 +288,59 @@ const up = async (environmentName: string): Promise<void> => {
 	const electricUrl = process.env.ELECTRIC_CLOUD_URL?.trim() || DEFAULT_ELECTRIC_URL
 	const region = process.env.ELECTRIC_REGION?.trim() || DEFAULT_REGION
 
-	// 1. Reset: delete any existing `pr-<n>` environment first. Its source points
-	//    at the now-recreated PlanetScale branch (deleted DB + rotated creds), so a
-	//    reused environment would sync nothing. Recreate for a clean, valid source.
-	const existingId = findEnvironmentId(projectId, environmentName)
-	if (existingId) {
-		const deleted = runElectric(["environments", "delete", existingId, "--force"])
-		if (deleted.exitCode !== 0 && !isNotFound(deleted)) {
-			fail(`Failed to reset (delete) existing environment ${environmentName}`)
-		}
-		await waitUntilEnvironmentGone(projectId, environmentName)
-	}
-
-	// 2. Create the per-PR environment under the project. Environment deletion is
-	//    asynchronous server-side: the env drops out of `list` right away, but the
-	//    name stays reserved briefly, so `create` can transiently answer "an
-	//    environment with this name already exists" (VALIDATION_ERROR, exit 4).
-	//    Retry name conflicts with backoff instead of failing the deploy.
-	let createdEnv = runElectric(
-		["environments", "create", "--project", projectId, "--name", environmentName, "--json"],
-		{ secret: true },
-	)
-	const createDeadline = Date.now() + GONE_TIMEOUT_MS
-	while (createdEnv.exitCode !== 0 && isAlreadyExists(createdEnv) && Date.now() < createDeadline) {
-		console.log(`… name ${environmentName} still reserved by the deleted environment; retrying create`)
-		await sleep(GONE_POLL_MS)
-		createdEnv = runElectric(
+	// 1.+2. Resolve the per-PR environment: REUSE an existing one (resetting its
+	//    services — they point at the now-recreated PlanetScale branch with dropped
+	//    tables + rotated creds), or create a fresh one. Never delete+recreate the
+	//    environment itself: deletion soft-reserves the name (see header) and the
+	//    recreate would conflict.
+	const existing = findEnvironments(projectId, environmentName)
+	let environmentId: string
+	if (existing.length > 0) {
+		const [reused, ...extras] = existing as [{ id: string; name: string }, ...typeof existing]
+		environmentId = reused.id
+		console.log(`✓ Reusing Electric environment ${reused.name}; resetting its services`)
+		// Extras are leftovers from earlier suffix fallbacks — free their caps/slots.
+		for (const extra of extras) deleteEnvironment(extra)
+		resetServices(environmentId)
+	} else {
+		// Create the base name; brief retry for eventual consistency, then fall back
+		// to a unique suffixed name if the base is soft-delete-reserved.
+		let createdEnv = runElectric(
 			["environments", "create", "--project", projectId, "--name", environmentName, "--json"],
 			{ secret: true },
 		)
-	}
-	if (createdEnv.exitCode !== 0) {
-		fail(
-			isAlreadyExists(createdEnv)
-				? `Environment ${environmentName} still exists after reset — delete it manually and retry`
-				: `Failed to create Electric environment ${environmentName}`,
+		for (let attempt = 0; createdEnv.exitCode !== 0 && isAlreadyExists(createdEnv); attempt++) {
+			if (attempt >= CREATE_RETRY_ATTEMPTS) {
+				const fallbackName = `${environmentName}-r${process.env.GITHUB_RUN_ID?.trim() || Date.now()}`
+				console.log(`… name ${environmentName} is reserved by a deleted environment; using ${fallbackName}`)
+				createdEnv = runElectric(
+					["environments", "create", "--project", projectId, "--name", fallbackName, "--json"],
+					{ secret: true },
+				)
+				break
+			}
+			console.log(`… name ${environmentName} reported as existing but not listed; retrying create`)
+			await sleep(CREATE_RETRY_MS)
+			createdEnv = runElectric(
+				["environments", "create", "--project", projectId, "--name", environmentName, "--json"],
+				{ secret: true },
+			)
+		}
+		if (createdEnv.exitCode !== 0) {
+			fail(`Failed to create Electric environment ${environmentName}`)
+		}
+		// v0.0.10 prints { environmentId } — the bare `id` spellings are kept as fallbacks
+		// in case a future CLI aligns with its own README (which documents `.id`).
+		const created = pick(
+			parseJson(createdEnv.stdout, "environments create"),
+			"environmentId",
+			"id",
+			"environment_id",
 		)
-	}
-	// v0.0.10 prints { environmentId } — the bare `id` spellings are kept as fallbacks
-	// in case a future CLI aligns with its own README (which documents `.id`).
-	const environmentId = pick(
-		parseJson(createdEnv.stdout, "environments create"),
-		"environmentId",
-		"id",
-		"environment_id",
-	)
-	if (!environmentId) {
-		fail("`electric environments create --json` returned no environment id")
+		if (!created) {
+			fail("`electric environments create --json` returned no environment id")
+		}
+		environmentId = created as string
 	}
 
 	// 3. Create the Postgres source pointed at the PR branch's direct connection.
@@ -374,16 +406,11 @@ const up = async (environmentName: string): Promise<void> => {
 const down = (environmentName: string): void => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
-	const environmentId = findEnvironmentId(projectId, environmentName)
-	if (!environmentId) {
-		console.log(`✓ Environment ${environmentName} removed (or already gone)`)
-		return
+	// Delete the base env AND any suffix-fallback envs (`pr-<n>-r*`).
+	for (const env of findEnvironments(projectId, environmentName)) {
+		deleteEnvironment(env)
 	}
-	const removed = runElectric(["environments", "delete", environmentId, "--force"])
-	if (removed.exitCode !== 0 && !isNotFound(removed)) {
-		fail(`Failed to delete Electric environment ${environmentName}`)
-	}
-	console.log(`✓ Environment ${environmentName} removed (or already gone)`)
+	console.log(`✓ Environment(s) ${environmentName}* removed (or already gone)`)
 }
 
 const main = async (): Promise<void> => {

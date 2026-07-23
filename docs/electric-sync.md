@@ -160,9 +160,10 @@ PR previews provision an ephemeral Electric Cloud **environment** `pr-<n>` + a
 Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
 `scripts/electric-pr-branch.ts` (`up`/`down <pr-number>`, driven from
 `.github/workflows/deploy-pr-preview.yml`) uses `@electric-sql/cli`
-(`ELECTRIC_API_TOKEN` auth) to, on open/synchronize: reset any existing `pr-<n>`
-environment, create a fresh one under `ELECTRIC_PROJECT_ID`, create a `postgres`
-source pointed at the PR branch's `MAPLE_PG_URL` (direct 5432), and export
+(`ELECTRIC_API_TOKEN` auth) to, on open/synchronize: reuse (or create under
+`ELECTRIC_PROJECT_ID`) the `pr-<n>` environment, reset its services, create a
+fresh `postgres` source pointed at the PR branch's `MAPLE_PG_URL` (direct 5432,
+`--wait`ed until active), and export
 `ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` to `$GITHUB_ENV` (bound to
 the electric-sync worker by alchemy). On close it deletes the environment
 (cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay
