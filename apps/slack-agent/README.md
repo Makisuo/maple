@@ -30,7 +30,7 @@ Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/
 agent/
   agent.ts            # model (Workers AI) + workflow world selection
   instructions.md     # system prompt (Maple domain guidance)
-  lib/maple.ts        # Maple resolve client (TTL cache), Slack sig verify, team→token bridge
+  lib/maple.ts        # Maple resolve client (TTL cache), Slack sig verify, per-team bot token
   channels/slack.ts   # multi-workspace Slack channel (webhookVerifier + per-team botToken)
   channels/eve.ts     # auth policy for the browser/API routes
   connections/maple.ts # Maple MCP connection (per-workspace API key auth)
@@ -70,8 +70,8 @@ Postgres to iterate on model + tools. To exercise the Postgres world locally: ru
 > its manifest. It must be set when `eve build` runs. Setting it only as a runtime variable leaves
 > you silently on the ephemeral on-disk world. The Dockerfile sets it before `bun run build`.
 
-Run the tests (bun's native runner; covers the signature verification, `team_id` parsing, and the
-resolve cache in `agent/lib/maple.ts` — no network, fetch is stubbed):
+Run the tests (bun's native runner; covers the signature verification, bot-token resolution, and
+the resolve cache in `agent/lib/maple.ts` — no network, fetch is stubbed):
 
 ```bash
 bun test
@@ -278,35 +278,26 @@ Authorization: Bearer maple_svc_{MAPLE_INTERNAL_SERVICE_TOKEN}
 `agent/lib/maple.ts` wraps this in `resolveWorkspace(teamId)` with an in-memory TTL cache (5 min
 positive, 30 s negative, in-flight de-dupe). It never caches 5xx/network errors as "not installed".
 
-**Inbound (webhook → which team):** `agent/channels/slack.ts` installs a custom `webhookVerifier`.
+**Inbound (webhook verification):** `agent/channels/slack.ts` installs a custom `webhookVerifier`.
 Because a `webhookVerifier` is set, eve skips its built-in signing-secret check and this verifier
 owns verification: it HMAC-verifies the Slack **v0** signature (`v0:{timestamp}:{rawBody}`, SHA-256,
-5-minute skew reject, constant-time compare) against the static `SLACK_SIGNING_SECRET`, then parses
-`team_id` from the payload (top-level, `authorizations[]`, or `event.team`; absent for
-`url_verification`, which needs no token).
+5-minute skew reject, constant-time compare) against the static `SLACK_SIGNING_SECRET`.
 
-**Outbound bot token (which team → token):** eve's `botToken` credential is **arg-less**
-(`() => Promise<string>`), so it receives no request context. Verified against eve@0.25.3
-(`node_modules/eve/dist/src`):
+**Outbound bot token (which team → token):** upstream eve's `botToken` credential is **arg-less**
+(`() => Promise<string>`), so it receives no request context — the exact subject of open issue
+[vercel/eve#222](https://github.com/vercel/eve/issues/222). We carry a small patch
+(`patches/eve@0.25.3.patch`, applied via bun `patchedDependencies`; the Dockerfile copies `patches/`
+before `bun install`) that threads `{ teamId, channelId, threadTs }` from `buildSlackBinding` — whose
+call sites all already hold `teamId` — into the credential function, and does the same for the three
+HITL/interaction call sites in `interactions.js` (modal open, answered-card `chat.update`s). With it,
+every outbound reply path (post, ephemeral, DM, typing, refresh, uploads, `slack.request`, HITL)
+resolves the token for the correct team explicitly, including inside durable workflow steps. The
+patch mirrors the resolver shape proposed in #222 and can be dropped when upstream ships it.
 
-- The webhook route runs the verifier, then dispatches the mention via
-  `waitUntil(dispatchInboundMessage(...))`; `botToken` is resolved *lazily inside that detached
-  dispatch* and again inside durable workflow steps when the reply is posted.
-- An `AsyncLocalStorage` established in the verifier via `enterWith` **does not survive** into that
-  detached dispatch — `await` restores the caller's context snapshot, so the store is gone by the
-  time `waitUntil` runs (reproduced with a faithful `enterWith → await → waitUntil` harness). eve's
-  own `runtimeSessionStorage` ALS carries only bundle-cache state, not `team_id`.
-
-So the token bridge is a **module-level record populated at verify time** (`agent/lib/maple.ts`):
-`enterTeam` (ALS, best-effort — harmless when it doesn't survive, and forward-compatible if a future
-eve preserves context) plus `recordTeam` (a most-recently-verified fallback read by
-`currentTeamId`). `resolveBotToken()` resolves current team → install token → else `SLACK_BOT_TOKEN`
-→ throw. **Caveat:** under genuinely concurrent inbound events from *different* teams the fallback
-can name the wrong team for a given outbound call. This fails **closed**, not cross-tenant — team A's
-bot token cannot post to team B's channel (Slack returns `invalid_auth` / `channel_not_found`), so a
-mis-resolution drops a reply rather than leaking one workspace's message into another. The clean fix
-belongs upstream (eve threading `team_id` into the credential resolver). `resolveWorkspace` itself is
-always correctly keyed by team.
+`resolveBotToken(context?)` (`agent/lib/maple.ts`) resolves `context.teamId` via the resolve
+endpoint → else `SLACK_BOT_TOKEN` → throw. The env fallback serves single-workspace dev and the
+one path the patch does not cover — eve's inbound-attachment file fetch, constructed once at
+channel definition with no per-event context, which calls the credential with no argument.
 
 **MCP tools (per-workspace API key):** `agent/connections/maple.ts` connects to
 `{MAPLE_API_BASE_URL}/mcp` (streamable HTTP). Unlike `botToken`, the connection `auth` resolver

@@ -32,5 +32,8 @@
   },
   "engines": {
     "node": ">=24"
+  },
+  "patchedDependencies": {
+    "eve@0.25.3": "patches/eve@0.25.3.patch"
   }
 }

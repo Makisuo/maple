@@ -16,7 +16,10 @@ COPY --from=oven/bun:1.3-slim /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 
 # Install deps first for layer caching, from the committed bun.lock.
+# patches/ must be present before install: package.json's patchedDependencies
+# applies patches/eve@*.patch (multi-workspace botToken context, vercel/eve#222).
 COPY package.json bun.lock ./
+COPY patches ./patches
 RUN bun install --frozen-lockfile
 
 COPY tsconfig.json ./

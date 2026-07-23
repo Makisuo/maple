@@ -1,36 +1,9 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-/**
- * Maple API integration for the multi-workspace Slack agent.
- *
- * This module owns three concerns:
- *   1. Resolving per-Slack-team install credentials from Maple's internal
- *      resolve endpoint, with an in-memory TTL cache (`resolveWorkspace`).
- *   2. Verifying inbound Slack webhook signatures (`verifySlackV0Signature`)
- *      and extracting the `team_id` (`parseSlackTeamId`).
- *   3. Bridging "which Slack team is this?" to eve's *arg-less* `botToken`
- *      credential function (`resolveBotToken`), which receives no request
- *      context of its own. See the "Team-context bridging" note below.
- */
-
-// ── Env ─────────────────────────────────────────────────────────────────────
-
-/**
- * Local-dev default for the Maple API base. Overridden by MAPLE_API_BASE_URL.
- */
 const MAPLE_API_BASE_URL_DEFAULT = "https://api.localhost";
 
 /**
  * Base URL of the Maple API (e.g. https://api.maple.dev). No trailing slash.
- *
- * NOTE: the Maple MCP connection's `url` is built from this and is **baked into
- * eve's compiled manifest at build time** (like `EVE_WORKFLOW_WORLD`). So
- * `MAPLE_API_BASE_URL` must be set when `eve build` runs for the production URL
- * to bake correctly — a runtime-only value is too late for the connection URL.
- * This helper never throws (it falls back to the local-dev default) so `eve
- * build` / `eve dev` work out of the box; the runtime `fetch` path still fails
- * loudly on a genuinely-missing service token.
  */
 export function mapleApiBaseUrl(): string {
   const raw = process.env.MAPLE_API_BASE_URL;
@@ -45,8 +18,6 @@ function mapleServiceToken(): string {
   if (!raw) throw new Error("MAPLE_INTERNAL_SERVICE_TOKEN is not set.");
   return raw;
 }
-
-// ── resolveWorkspace: TTL-cached team → credentials ─────────────────────────
 
 /** A resolved Maple workspace install for one Slack team. */
 export interface MapleWorkspace {
@@ -146,73 +117,30 @@ async function fetchWorkspace(teamId: string): Promise<MapleWorkspace | null> {
   };
 }
 
-// ── Team-context bridging (verifier → arg-less botToken) ─────────────────────
-//
-// eve's `botToken` credential is `() => Promise<string> | string` — arg-less,
-// so it cannot be told which Slack team the current outbound call is for.
-//
-// What we verified in eve@0.25.3 (node_modules/eve/dist/src):
-//   * The webhook route reads the raw body, runs our `webhookVerifier`, then
-//     dispatches the mention via `waitUntil(dispatchInboundMessage(...))`
-//     (slackChannel.js). `botToken` is resolved lazily *inside* that detached
-//     dispatch (api.js `resolveSlackBotToken`), and again later inside durable
-//     workflow steps when the reply is posted.
-//   * We tested whether an AsyncLocalStorage established in the verifier via
-//     `enterWith` survives into that detached dispatch. It does NOT: `await`
-//     restores the caller's context snapshot, so a store entered inside the
-//     awaited verifier is lost by the time `waitUntil` runs. (Reproduced with a
-//     faithful enterWith→await→waitUntil harness — the token read returned the
-//     fallback.)
-//   * eve's own `runtimeSessionStorage` ALS carries only bundle-cache state
-//     (RuntimeSession), not the Slack `team_id`, so it can't carry it either.
-//
-// Therefore the arg-less `botToken` cannot see `team_id` through any ambient
-// eve channel. We bridge with a module-level record populated at verify time:
-//   * `enterTeam` is still called (via ALS) as the most-precise signal — it is
-//     harmless when it doesn't survive, and makes this forward-compatible if a
-//     future eve version preserves context into dispatch.
-//   * `recordTeam` sets a module-level most-recently-verified team as the
-//     fallback read by `currentTeamId`.
-//
-// Caveat (documented in the README): under genuinely concurrent inbound events
-// from *different* teams, the module fallback can name the wrong team for a
-// given outbound call. This fails *closed*, not silently cross-tenant: a bot
-// token for team A cannot post to team B's channel — Slack rejects it
-// (`channel_not_found` / `invalid_auth`) — so a mis-resolution drops a reply
-// rather than leaking one workspace's messages into another. `resolveWorkspace`
-// itself is fully keyed by team and always correct. The clean fix belongs
-// upstream (eve threading `team_id` into the credential resolver).
+// ── Bot token resolution ────────────────────────────────────────────────────
 
-interface TeamStore {
-  readonly teamId: string;
-}
-
-const teamStorage = new AsyncLocalStorage<TeamStore>();
-let lastVerifiedTeamId: string | undefined;
-
-/** Best-effort ALS marker for the current team (see note above). */
-export function enterTeam(teamId: string): void {
-  teamStorage.enterWith({ teamId });
-}
-
-/** Module-level fallback record of the most-recently-verified team. */
-export function recordTeam(teamId: string): void {
-  lastVerifiedTeamId = teamId;
-}
-
-/** The team for the current outbound call: ALS first, then module fallback. */
-export function currentTeamId(): string | undefined {
-  return teamStorage.getStore()?.teamId ?? lastVerifiedTeamId;
+/**
+ * Context our patched eve (patches/eve@0.25.3.patch) passes to the `botToken`
+ * credential. All fields are optional: the one unpatched eve path (the
+ * inbound-attachment file fetch) calls the credential with no argument, which
+ * is why the env fallback in `resolveBotToken` exists.
+ */
+export interface SlackTokenContext {
+  readonly teamId?: string;
+  readonly channelId?: string;
+  readonly threadTs?: string;
 }
 
 /**
- * Resolves the Slack bot token for eve's arg-less `botToken` credential.
+ * Resolves the Slack bot token for eve's `botToken` credential.
  *
- * Order: current team's install token → `SLACK_BOT_TOKEN` env (single-workspace
- * dev fallback) → throw.
+ * Order: `context.teamId` via `resolveWorkspace` → `SLACK_BOT_TOKEN` env
+ * (single-workspace dev / context-less paths) → throw.
  */
-export async function resolveBotToken(): Promise<string> {
-  const teamId = currentTeamId();
+export async function resolveBotToken(
+  context?: SlackTokenContext,
+): Promise<string> {
+  const teamId = context?.teamId;
   if (teamId) {
     const ws = await resolveWorkspace(teamId);
     if (ws) return ws.botToken;
@@ -261,38 +189,4 @@ export function verifySlackV0Signature(
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
-}
-
-/**
- * Extracts the Slack `team_id` from a raw webhook body. Handles the standard
- * event-callback top-level field, the `authorizations[]` fallback (Enterprise
- * Grid), and the `event.team` fallback. Returns undefined for payloads without
- * one (e.g. `url_verification`).
- */
-export function parseSlackTeamId(rawBody: string): string | undefined {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(rawBody);
-  } catch {
-    return undefined;
-  }
-  if (typeof payload !== "object" || payload === null) return undefined;
-  const p = payload as Record<string, unknown>;
-
-  if (typeof p.team_id === "string" && p.team_id.length > 0) return p.team_id;
-
-  const auths = p.authorizations;
-  if (Array.isArray(auths) && auths.length > 0) {
-    const first = auths[0] as Record<string, unknown> | undefined;
-    if (first && typeof first.team_id === "string" && first.team_id.length > 0) {
-      return first.team_id;
-    }
-  }
-
-  const event = p.event;
-  if (typeof event === "object" && event !== null) {
-    const team = (event as Record<string, unknown>).team;
-    if (typeof team === "string" && team.length > 0) return team;
-  }
-  return undefined;
 }

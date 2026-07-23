@@ -17,8 +17,8 @@ process.env.MAPLE_INTERNAL_SERVICE_TOKEN = "test-service-token";
 delete process.env.SLACK_BOT_TOKEN;
 
 import {
-  parseSlackTeamId,
   resetWorkspaceCacheForTests,
+  resolveBotToken,
   resolveWorkspace,
   verifySlackV0Signature,
 } from "./maple.js";
@@ -117,55 +117,6 @@ describe("verifySlackV0Signature", () => {
     expect(
       verifySlackV0Signature(body, slackHeaders(sign(body, ts), ts), SIGNING_SECRET),
     ).toBe(false);
-  });
-});
-
-// ── parseSlackTeamId ────────────────────────────────────────────────────────
-
-describe("parseSlackTeamId", () => {
-  test("reads the top-level team_id (standard event callback)", () => {
-    const body = JSON.stringify({
-      type: "event_callback",
-      team_id: "T0TOP",
-      event: { type: "app_mention", team: "T0EVENT" },
-    });
-    expect(parseSlackTeamId(body)).toBe("T0TOP");
-  });
-
-  test("falls back to authorizations[0].team_id (Enterprise Grid)", () => {
-    const body = JSON.stringify({
-      type: "event_callback",
-      authorizations: [{ team_id: "T0AUTH", user_id: "U1" }],
-    });
-    expect(parseSlackTeamId(body)).toBe("T0AUTH");
-  });
-
-  test("falls back to event.team", () => {
-    const body = JSON.stringify({
-      type: "event_callback",
-      event: { type: "message", team: "T0EVENT" },
-    });
-    expect(parseSlackTeamId(body)).toBe("T0EVENT");
-  });
-
-  test("returns undefined for url_verification payloads", () => {
-    const body = JSON.stringify({
-      type: "url_verification",
-      challenge: "abc",
-      token: "tok",
-    });
-    expect(parseSlackTeamId(body)).toBeUndefined();
-  });
-
-  test("ignores empty-string team ids", () => {
-    const body = JSON.stringify({ team_id: "", event: { team: "" } });
-    expect(parseSlackTeamId(body)).toBeUndefined();
-  });
-
-  test("returns undefined for invalid JSON and non-object payloads", () => {
-    expect(parseSlackTeamId("not json {")).toBeUndefined();
-    expect(parseSlackTeamId('"a string"')).toBeUndefined();
-    expect(parseSlackTeamId("null")).toBeUndefined();
   });
 });
 
@@ -324,5 +275,59 @@ describe("resolveWorkspace", () => {
   test("rejects incomplete resolve payloads", async () => {
     installFetchStub(() => Response.json({ orgId: "org_1" }));
     await expect(resolveWorkspace("T1")).rejects.toThrow(/incomplete payload/);
+  });
+});
+
+// ── resolveBotToken: patched credential context → env fallback ──────────────
+
+describe("resolveBotToken", () => {
+  beforeEach(() => {
+    resetWorkspaceCacheForTests();
+    delete process.env.SLACK_BOT_TOKEN;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.SLACK_BOT_TOKEN;
+  });
+
+  test("resolves via the context teamId", async () => {
+    const stub = installFetchStub(() =>
+      Response.json({ ...WORKSPACE_PAYLOAD, teamId: "T_CTX", botToken: "xoxb-ctx" }),
+    );
+
+    expect(await resolveBotToken({ teamId: "T_CTX" })).toBe("xoxb-ctx");
+    expect(stub.calls[0]?.url).toBe(
+      "https://maple-api.test/internal/slack/workspaces/T_CTX",
+    );
+  });
+
+  test("falls back to SLACK_BOT_TOKEN when called without context", async () => {
+    const stub = installFetchStub(() => Response.json(WORKSPACE_PAYLOAD));
+
+    process.env.SLACK_BOT_TOKEN = "xoxb-env";
+    expect(await resolveBotToken()).toBe("xoxb-env");
+    expect(stub.calls.length).toBe(0);
+  });
+
+  test("throws when called without context and no env fallback exists", async () => {
+    installFetchStub(() => Response.json(WORKSPACE_PAYLOAD));
+
+    await expect(resolveBotToken()).rejects.toThrow(/No current Slack team context/);
+  });
+
+  test("falls back to SLACK_BOT_TOKEN when the team is not installed", async () => {
+    installFetchStub(() => new Response(null, { status: 404 }));
+
+    process.env.SLACK_BOT_TOKEN = "xoxb-env";
+    expect(await resolveBotToken({ teamId: "T_UNINSTALLED" })).toBe("xoxb-env");
+  });
+
+  test("throws when the team is unlinked and no env fallback exists", async () => {
+    installFetchStub(() => new Response(null, { status: 404 }));
+
+    await expect(resolveBotToken({ teamId: "T_UNINSTALLED" })).rejects.toThrow(
+      /not linked/,
+    );
   });
 });

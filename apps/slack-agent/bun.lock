@@ -18,6 +18,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "eve@0.25.3": "patches/eve@0.25.3.patch",
+  },
   "overrides": {
     "ai": "^7.0.26",
   },
