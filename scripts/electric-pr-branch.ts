@@ -276,10 +276,15 @@ const maskAndExport = (entries: Record<string, string>, secrets: ReadonlyArray<s
 const up = async (environmentName: string): Promise<void> => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
-	// Electric Cloud's create-source validation wants the long `postgresql://`
-	// scheme (all its docs/examples use it; the short form drew a generic
-	// "Input validation failed"). planetscale-pr-branch.ts emits `postgres://`.
-	const databaseUrl = requireEnv("MAPLE_PG_URL").replace(/^postgres:\/\//, "postgresql://")
+	// Electric Cloud's create-source input validation wants the long
+	// `postgresql://` scheme and accepts `?sslmode=require` — NOT `verify-full`
+	// (rejected as "Input validation failed") and not a bare URL either (passes
+	// input validation, then the server's TLS-less probe of PlanetScale draws
+	// "Database validation failed"). See electric.ax/docs/sync/integrations/planetscale.
+	// planetscale-pr-branch.ts emits `postgres://...?sslmode=verify-full`.
+	const databaseUrl = requireEnv("MAPLE_PG_URL")
+		.replace(/^postgres:\/\//, "postgresql://")
+		.replace(/([?&])sslmode=[^&]*/, "$1sslmode=require")
 	// Defense-in-depth: mask the connection string so any incidental echo (CLI
 	// output, error text) is scrubbed in CI. The command echo already redacts it.
 	maskSecret(databaseUrl)
