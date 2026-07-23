@@ -78,6 +78,9 @@ const FAILURE = 1
 // back to a suffixed name (the base name may be soft-delete-reserved for good).
 const CREATE_RETRY_ATTEMPTS = 3
 const CREATE_RETRY_MS = 5_000
+// Own activation poll (the CLI's --wait caps at 300s and discards state on timeout).
+const ACTIVE_TIMEOUT_MS = 10 * 60 * 1000
+const ACTIVE_POLL_MS = 10_000
 const DEFAULT_ELECTRIC_URL = "https://api.electric-sql.cloud"
 const DEFAULT_REGION = "us-east-1"
 
@@ -396,65 +399,68 @@ const up = async (environmentName: string): Promise<void> => {
 
 	const manualPublishing = !/^(false|0)$/i.test(process.env.ELECTRIC_MANUAL_TABLE_PUBLISHING?.trim() ?? "")
 	const extraArgs = (process.env.ELECTRIC_SERVICE_EXTRA_ARGS?.trim() || "").split(/\s+/).filter(Boolean)
-	const bareUrl = databaseUrl.split("?")[0] as string
-	// The Cloud API answers a bare "Input validation failed" without naming the
-	// offending field. Attempt the full-fidelity create first, then degrade the
-	// two suspects (the `--manual-table-publishing` option object and the
-	// `?sslmode=` query string) one at a time so a single CI run isolates the
-	// culprit — the accepted variant is logged (inputs only, never values).
-	const attempts: ReadonlyArray<{ label: string; url: string; manual: boolean }> = [
-		{ label: "full: manual-publishing + query string", url: databaseUrl, manual: manualPublishing },
-		...(manualPublishing ? [{ label: "no manual-table-publishing", url: databaseUrl, manual: false }] : []),
-		...(bareUrl !== databaseUrl
-			? [{ label: "query string stripped", url: bareUrl, manual: manualPublishing }]
-			: []),
-		...(manualPublishing && bareUrl !== databaseUrl
-			? [{ label: "bare URL, no manual-table-publishing", url: bareUrl, manual: false }]
-			: []),
-	]
-	let createdSvc: CliResult | undefined
-	for (const attempt of attempts) {
-		const result = runElectric(
-			[
-				"services",
-				"create",
-				"postgres",
-				"--environment",
-				environmentId,
-				"--database-url",
-				attempt.url,
-				"--region",
-				region,
-				...(attempt.manual ? ["--manual-table-publishing"] : []),
-				"--wait",
-				...extraArgs,
-				"--json",
-			],
-			{ secret: true },
-		)
-		if (result.exitCode === 0) {
-			console.log(`✓ services create postgres accepted variant: ${attempt.label}`)
-			createdSvc = result
-			break
-		}
-		const validation = /VALIDATION_ERROR|Input validation failed/i.test(`${result.stdout}\n${result.stderr}`)
-		console.log(`… services create variant rejected (${attempt.label})`)
-		if (!validation) {
-			// A non-validation failure (network, provisioning error) won't be fixed
-			// by degrading inputs — surface it instead of masking it with retries.
-			fail(`Failed to create Electric Postgres source in environment ${environmentName}`)
-		}
-	}
-	if (!createdSvc) {
-		return fail(
-			`Failed to create Electric Postgres source in environment ${environmentName} (all variants rejected)`,
-		)
+	// Create WITHOUT the CLI's `--wait` (hard 300s cap that discards the service
+	// state on timeout — run 30037847577); capture id+secret immediately, then
+	// poll `services get` ourselves with a longer budget, logging status
+	// transitions and dumping the non-secret service state if it never activates.
+	const createdSvc = runElectric(
+		[
+			"services",
+			"create",
+			"postgres",
+			"--environment",
+			environmentId,
+			"--database-url",
+			databaseUrl,
+			"--region",
+			region,
+			...(manualPublishing ? ["--manual-table-publishing"] : []),
+			...extraArgs,
+			"--json",
+		],
+		{ secret: true },
+	)
+	if (createdSvc.exitCode !== 0) {
+		fail(`Failed to create Electric Postgres source in environment ${environmentName}`)
 	}
 	// v0.0.10 result: { id, status, sourceSecret } — the postgres service IS the
 	// shape-API source, so its id is the `source_id` the sync worker forwards.
 	const service = parseJson(createdSvc.stdout, "services create postgres")
 	const sourceId = pick(service, "id", "serviceId", "sourceId")
 	let secret = pick(service, "sourceSecret", "secret", "source_secret")
+
+	// 3b. Wait for the service to become active before the alchemy deploy binds it.
+	if (sourceId) {
+		const deadline = Date.now() + ACTIVE_TIMEOUT_MS
+		let lastStatus = pick(service, "status") ?? "unknown"
+		console.log(`… service ${sourceId} status: ${lastStatus}`)
+		while (lastStatus !== "active") {
+			if (lastStatus === "error" || Date.now() >= deadline) {
+				const got = runElectric(["services", "get", sourceId, "--json"], { secret: true })
+				const detail = got.exitCode === 0 ? parseJson(got.stdout, "services get") : undefined
+				const summary = ["status", "name", "type", "region", "error", "errorMessage", "statusMessage"]
+					.map((key) => [key, pick(detail, key)] as const)
+					.filter(([, value]) => value !== undefined)
+					.map(([key, value]) => `${key}=${value}`)
+					.join(" ")
+				fail(
+					lastStatus === "error"
+						? `Electric source ${sourceId} entered error state (${summary})`
+						: `Timed out waiting for Electric source ${sourceId} to activate (last: ${summary || lastStatus})`,
+				)
+			}
+			await sleep(ACTIVE_POLL_MS)
+			const polled = runElectric(["services", "get", sourceId, "--json"], { secret: true })
+			const status = polled.exitCode === 0 ? pick(parseJson(polled.stdout, "services get"), "status") : undefined
+			if (status && status !== lastStatus) {
+				console.log(`… service ${sourceId} status: ${status}`)
+				lastStatus = status
+			} else if (status) {
+				lastStatus = status
+			}
+		}
+		console.log(`✓ Electric source ${sourceId} is active`)
+	}
 
 	// 4. Fetch the source secret if `create` didn't already return it.
 	if (!secret && sourceId) {
