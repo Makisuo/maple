@@ -25,7 +25,11 @@ import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey } from "../
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { decodeDiscoveryConfig } from "./planetscale/discovery-config"
-import { HttpSdResponse, subTargetsFromGroup } from "./PlanetScaleDiscoveryService"
+import {
+	HttpSdResponse,
+	PlanetScaleDiscoveryService,
+	subTargetsFromGroup,
+} from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService, planetScaleBearerHeader } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
 
@@ -52,7 +56,9 @@ export interface PlanetScaleDetectedPermissions {
 }
 
 export interface PlanetScaleConnectionServiceShape {
-	readonly getStatus: (orgId: OrgId) => Effect.Effect<PlanetScaleIntegrationStatus, IntegrationsPersistenceError>
+	readonly getStatus: (
+		orgId: OrgId,
+	) => Effect.Effect<PlanetScaleIntegrationStatus, IntegrationsPersistenceError>
 	/**
 	 * Bind the org's stored OAuth grant to one PlanetScale organization. Called
 	 * from the OAuth callback (single-org auto-bind) and the org-picker endpoint;
@@ -98,7 +104,9 @@ export interface PlanetScaleConnectionServiceShape {
 		orgId: OrgId,
 	) => Effect.Effect<PlanetScaleConnectionRow | null, IntegrationsPersistenceError>
 	/** Webhook endpoint path + decrypted HMAC secret for manual setup (admin-gated at the route). */
-	readonly webhookConfig: (orgId: OrgId) => Effect.Effect<
+	readonly webhookConfig: (
+		orgId: OrgId,
+	) => Effect.Effect<
 		{ readonly configured: boolean; readonly path: string | null; readonly secret: string | null },
 		IntegrationsPersistenceError
 	>
@@ -121,6 +129,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 		const env = yield* Env
 		const scrapeTargetsService = yield* ScrapeTargetsService
 		const psOAuth = yield* PlanetScaleOAuthService
+		const discovery = yield* PlanetScaleDiscoveryService
 		const httpClient = yield* HttpClient.HttpClient
 		const encryptionKey = yield* parseBase64Aes256GcmKey(
 			Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -196,9 +205,7 @@ export class PlanetScaleConnectionService extends Context.Service<
 					if (sd.status === 401 || sd.status === 403) return "rejected" as const
 					if (sd.status < 200 || sd.status >= 300) return "inconclusive" as const
 
-					const groups = yield* decodeHttpSd(sd.text).pipe(
-						Effect.catch(() => Effect.succeed(null)),
-					)
+					const groups = yield* decodeHttpSd(sd.text).pipe(Effect.catch(() => Effect.succeed(null)))
 					if (groups === null) return "inconclusive" as const
 
 					// subTargetsFromGroup already SSRF-validates the discovered URLs.
@@ -212,7 +219,9 @@ export class PlanetScaleConnectionService extends Context.Service<
 						: ("rejected" as const)
 				}).pipe(
 					Effect.catchTag("@maple/http/errors/IntegrationsUpstreamError", (error) =>
-						Effect.logWarning("PlanetScale data-plane scrape probe failed; keeping SD result").pipe(
+						Effect.logWarning(
+							"PlanetScale data-plane scrape probe failed; keeping SD result",
+						).pipe(
 							Effect.annotateLogs({ organization, error: error.message }),
 							Effect.as("inconclusive" as const),
 						),
@@ -368,7 +377,9 @@ export class PlanetScaleConnectionService extends Context.Service<
 					db
 						.select()
 						.from(scrapeTargets)
-						.where(and(eq(scrapeTargets.orgId, orgId), eq(scrapeTargets.targetType, "planetscale"))),
+						.where(
+							and(eq(scrapeTargets.orgId, orgId), eq(scrapeTargets.targetType, "planetscale")),
+						),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
 			return (
@@ -376,17 +387,6 @@ export class PlanetScaleConnectionService extends Context.Service<
 					(row) => decodeDiscoveryConfig(row.discoveryConfigJson)?.organization === organization,
 				) ?? null
 			)
-		})
-
-		const setManagedBy = Effect.fn("PlanetScaleConnectionService.setManagedBy")(function* (
-			targetId: string,
-			managedBy: string,
-		) {
-			yield* database
-				.execute((db) =>
-					db.update(scrapeTargets).set({ managedBy }).where(eq(scrapeTargets.id, targetId)),
-				)
-				.pipe(Effect.mapError(toPersistenceError))
 		})
 
 		// Typed on the concrete scrape-target error union so a new tag added to
@@ -409,143 +409,224 @@ export class PlanetScaleConnectionService extends Context.Service<
 			}
 		}
 
-		const finalizeOrgSelection = Effect.fn("PlanetScaleConnectionService.finalizeOrgSelection")(function* (
-			orgId: OrgId,
-			request: Pick<
-				PlanetScaleSelectOrganizationRequest,
-				"organization" | "includeBranches" | "excludeBranches"
-			>,
-		) {
-			yield* Effect.annotateCurrentSpan({ orgId })
-			const organization = request.organization.trim()
+		const finalizeOrgSelection = Effect.fn("PlanetScaleConnectionService.finalizeOrgSelection")(
+			function* (
+				orgId: OrgId,
+				request: Pick<
+					PlanetScaleSelectOrganizationRequest,
+					"organization" | "includeBranches" | "excludeBranches"
+				>,
+			) {
+				yield* Effect.annotateCurrentSpan({ orgId })
+				const organization = request.organization.trim()
 
-			const { accessToken } = yield* psOAuth.getValidAccessToken(orgId)
+				const { accessToken } = yield* psOAuth.getValidAccessToken(orgId)
 
-			// The grant is the authority on which orgs may be bound — a slug outside
-			// it would provision a scrape target that 403s on every scrape.
-			const grantedOrgs = yield* psOAuth.listOrganizations(orgId)
-			if (!grantedOrgs.some((org) => org.name === organization)) {
-				return yield* Effect.fail(
-					new IntegrationsValidationError({
-						message: `The PlanetScale authorization does not grant access to organization "${organization}" — re-authorize or pick another organization.`,
-					}),
-				)
-			}
-
-			// Probe what the grant can do against this org (readMetricsEndpoints
-			// requires an actual data-plane scrape to pass — see probePermissions).
-			// The metrics endpoints only document service-token auth, so a failing
-			// bearer probe does NOT block the binding — inventory/insights/webhooks
-			// work on the grant, and scraping stays paused until a service token is
-			// added via setMetricsToken (the card's follow-up step).
-			const { permissions } = yield* probePermissions(organization, accessToken)
-
-			// Attribution comes from the grant, so finalize behaves identically when
-			// called from the tenantless OAuth callback and the picker endpoint. The
-			// grant row must exist here — getValidAccessToken just used it.
-			const connectedByUserId = yield* psOAuth.connectedByUserId(orgId)
-			if (connectedByUserId === null) {
-				return yield* Effect.fail(
-					new IntegrationsNotConnectedError({
-						message: "PlanetScale is not connected for this organization",
-					}),
-				)
-			}
-
-			const now = yield* Clock.currentTimeMillis
-			const existing = yield* selectConnection(orgId)
-			const connectionId = existing?.id ?? randomUUID()
-			const managedBy = managedByForConnection(connectionId)
-
-			// Provision or adopt the scrape target that feeds branch metrics. Managed
-			// targets carry no credentials — the scraper resolves the OAuth grant at
-			// scrape time (authType "planetscale_oauth").
-			const adoptable = yield* findAdoptableTarget(orgId, organization)
-			let scrapeTargetId: string
-			if (adoptable !== null) {
-				// An adopted row with working service-token credentials keeps them —
-				// that's the auth the metrics endpoints actually accept. Only
-				// credential-less rows switch to grant-resolved auth, and those stay
-				// enabled only if the bearer probe passed.
-				const keepsToken =
-					adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
-				yield* scrapeTargetsService
-					.update(orgId, decodeScrapeTargetIdSync(adoptable.id), {
-						...(keepsToken ? {} : { authType: "planetscale_oauth" }),
-						...(request.includeBranches !== undefined
-							? { includeBranches: request.includeBranches }
-							: {}),
-						...(request.excludeBranches !== undefined
-							? { excludeBranches: request.excludeBranches }
-							: {}),
-						enabled: keepsToken || permissions.readMetricsEndpoints,
-					})
-					.pipe(Effect.mapError(mapScrapeTargetError))
-				scrapeTargetId = adoptable.id
-			} else {
-				const created = yield* scrapeTargetsService
-					.create(orgId, {
-						name: `PlanetScale (${organization})`,
-						targetType: "planetscale",
-						organization,
-						authType: "planetscale_oauth",
-						...(request.includeBranches !== undefined
-							? { includeBranches: request.includeBranches }
-							: {}),
-						...(request.excludeBranches !== undefined
-							? { excludeBranches: request.excludeBranches }
-							: {}),
-						// Paused until a service token arrives when the bearer probe
-						// failed — an enabled target would just 401 every scrape.
-						enabled: permissions.readMetricsEndpoints,
-					})
-					.pipe(Effect.mapError(mapScrapeTargetError))
-				scrapeTargetId = created.id
-			}
-			yield* setManagedBy(scrapeTargetId, managedBy)
-
-			if (existing !== null) {
-				yield* database
-					.execute((db) =>
-						db
-							.update(planetscaleConnections)
-							.set({
-								psOrganization: organization,
-								connectedByUserId,
-								scrapeTargetId,
-								detectedPermissionsJson: { ...permissions },
-								updatedAt: new Date(now),
-							})
-							.where(eq(planetscaleConnections.id, existing.id)),
-					)
-					.pipe(Effect.mapError(toPersistenceError))
-			} else {
-				// Per-connection webhook HMAC secret, minted once at first binding.
-				const webhookSecret = randomBytes(32).toString("hex")
-				const encryptedWebhookSecret = yield* encryptAes256Gcm(webhookSecret, encryptionKey, () =>
-					toPersistenceError(new Error("Failed to encrypt PlanetScale webhook secret")),
-				)
-				yield* database
-					.execute((db) =>
-						db.insert(planetscaleConnections).values({
-							id: connectionId,
-							orgId,
-							psOrganization: organization,
-							connectedByUserId,
-							scrapeTargetId,
-							webhookSecretCiphertext: encryptedWebhookSecret.ciphertext,
-							webhookSecretIv: encryptedWebhookSecret.iv,
-							webhookSecretTag: encryptedWebhookSecret.tag,
-							detectedPermissionsJson: { ...permissions },
-							createdAt: new Date(now),
-							updatedAt: new Date(now),
+				// The grant is the authority on which orgs may be bound — a slug outside
+				// it would provision a scrape target that 403s on every scrape.
+				const grantedOrgs = yield* psOAuth.listOrganizations(orgId)
+				if (!grantedOrgs.some((org) => org.name === organization)) {
+					return yield* Effect.fail(
+						new IntegrationsValidationError({
+							message: `The PlanetScale authorization does not grant access to organization "${organization}" — re-authorize or pick another organization.`,
 						}),
 					)
-					.pipe(Effect.mapError(toPersistenceError))
-			}
+				}
 
-			return yield* getStatus(orgId)
-		})
+				// Probe what the grant can do against this org (readMetricsEndpoints
+				// requires an actual data-plane scrape to pass — see probePermissions).
+				// The metrics endpoints only document service-token auth, so a failing
+				// bearer probe does NOT block the binding — inventory/insights/webhooks
+				// work on the grant, and scraping stays paused until a service token is
+				// added via setMetricsToken (the card's follow-up step).
+				const { permissions } = yield* probePermissions(organization, accessToken)
+
+				// Attribution comes from the grant, so finalize behaves identically when
+				// called from the tenantless OAuth callback and the picker endpoint. The
+				// grant row must exist here — getValidAccessToken just used it.
+				const connectedByUserId = yield* psOAuth.connectedByUserId(orgId)
+				if (connectedByUserId === null) {
+					return yield* Effect.fail(
+						new IntegrationsNotConnectedError({
+							message: "PlanetScale is not connected for this organization",
+						}),
+					)
+				}
+
+				const now = yield* Clock.currentTimeMillis
+				const existing = yield* selectConnection(orgId)
+				const connectionId = existing?.id ?? randomUUID()
+				const managedBy = managedByForConnection(connectionId)
+
+				// Provision or adopt the scrape target that feeds branch metrics. Managed
+				// targets carry no credentials — the scraper resolves the OAuth grant at
+				// scrape time (authType "planetscale_oauth").
+				const adoptable = yield* findAdoptableTarget(orgId, organization)
+				let scrapeTargetId: string
+				let createdTarget = false
+				if (adoptable !== null) {
+					// An adopted row with working service-token credentials keeps them —
+					// that's the auth the metrics endpoints actually accept. Only
+					// credential-less rows switch to grant-resolved auth, and those stay
+					// enabled only if the bearer probe passed.
+					const keepsToken =
+						adoptable.authType === "token" && adoptable.authCredentialsCiphertext !== null
+					yield* scrapeTargetsService
+						.update(orgId, decodeScrapeTargetIdSync(adoptable.id), {
+							...(keepsToken ? {} : { authType: "planetscale_oauth" }),
+							...(request.includeBranches !== undefined
+								? { includeBranches: request.includeBranches }
+								: {}),
+							...(request.excludeBranches !== undefined
+								? { excludeBranches: request.excludeBranches }
+								: {}),
+							enabled: keepsToken || permissions.readMetricsEndpoints,
+						})
+						.pipe(Effect.mapError(mapScrapeTargetError))
+					scrapeTargetId = adoptable.id
+				} else {
+					const created = yield* scrapeTargetsService
+						.create(orgId, {
+							name: `PlanetScale (${organization})`,
+							targetType: "planetscale",
+							organization,
+							authType: "planetscale_oauth",
+							...(request.includeBranches !== undefined
+								? { includeBranches: request.includeBranches }
+								: {}),
+							...(request.excludeBranches !== undefined
+								? { excludeBranches: request.excludeBranches }
+								: {}),
+							// Paused until a service token arrives when the bearer probe
+							// failed — an enabled target would just 401 every scrape.
+							enabled: permissions.readMetricsEndpoints,
+						})
+						.pipe(Effect.mapError(mapScrapeTargetError))
+					scrapeTargetId = created.id
+					createdTarget = true
+				}
+
+				// Encrypt before opening the transaction so it only covers database I/O.
+				// The secret is minted once and retained across organization rebindings.
+				const encryptedWebhookSecret =
+					existing === null
+						? yield* encryptAes256Gcm(randomBytes(32).toString("hex"), encryptionKey, () =>
+								toPersistenceError(new Error("Failed to encrypt PlanetScale webhook secret")),
+							)
+						: null
+
+				const retiredTargets = yield* database
+					.execute((db) =>
+						db.transaction(async (tx) => {
+							const claimed = await tx
+								.update(scrapeTargets)
+								.set({ managedBy })
+								.where(
+									and(eq(scrapeTargets.orgId, orgId), eq(scrapeTargets.id, scrapeTargetId)),
+								)
+								.returning({ id: scrapeTargets.id })
+							if (claimed.length !== 1) {
+								throw new Error(
+									"Replacement PlanetScale scrape target disappeared before binding",
+								)
+							}
+
+							if (existing !== null) {
+								const rebound = await tx
+									.update(planetscaleConnections)
+									.set({
+										psOrganization: organization,
+										connectedByUserId,
+										scrapeTargetId,
+										detectedPermissionsJson: { ...permissions },
+										updatedAt: new Date(now),
+									})
+									.where(eq(planetscaleConnections.id, existing.id))
+									.returning({ id: planetscaleConnections.id })
+								if (rebound.length !== 1) {
+									throw new Error("PlanetScale connection disappeared before rebinding")
+								}
+
+								if (
+									existing.scrapeTargetId === null ||
+									existing.scrapeTargetId === scrapeTargetId
+								) {
+									return []
+								}
+
+								// Ownership is part of the predicate: a target transferred by a
+								// concurrent operation is never removed by this connection.
+								return tx
+									.delete(scrapeTargets)
+									.where(
+										and(
+											eq(scrapeTargets.orgId, orgId),
+											eq(scrapeTargets.id, existing.scrapeTargetId),
+											eq(scrapeTargets.managedBy, managedBy),
+										),
+									)
+									.returning({ id: scrapeTargets.id })
+							}
+
+							if (encryptedWebhookSecret === null) {
+								throw new Error("Missing webhook secret for new PlanetScale connection")
+							}
+							const inserted = await tx
+								.insert(planetscaleConnections)
+								.values({
+									id: connectionId,
+									orgId,
+									psOrganization: organization,
+									connectedByUserId,
+									scrapeTargetId,
+									webhookSecretCiphertext: encryptedWebhookSecret.ciphertext,
+									webhookSecretIv: encryptedWebhookSecret.iv,
+									webhookSecretTag: encryptedWebhookSecret.tag,
+									detectedPermissionsJson: { ...permissions },
+									createdAt: new Date(now),
+									updatedAt: new Date(now),
+								})
+								.returning({ id: planetscaleConnections.id })
+							if (inserted.length !== 1) {
+								throw new Error("Failed to persist PlanetScale connection")
+							}
+							return []
+						}),
+					)
+					.pipe(
+						Effect.mapError(toPersistenceError),
+						Effect.tapError(() =>
+							createdTarget
+								? scrapeTargetsService
+										.delete(orgId, decodeScrapeTargetIdSync(scrapeTargetId))
+										.pipe(
+											Effect.catchTag(
+												"@maple/http/errors/ScrapeTargetNotFoundError",
+												() => Effect.void,
+											),
+											Effect.catch((error) =>
+												Effect.logWarning(
+													"Failed to compensate newly created PlanetScale target after binding failure",
+												).pipe(
+													Effect.annotateLogs({
+														orgId,
+														scrapeTargetId,
+														error: String(error),
+													}),
+												),
+											),
+										)
+								: Effect.void,
+						),
+					)
+
+				yield* Effect.forEach(retiredTargets, (target) => discovery.invalidate(target.id), {
+					discard: true,
+				})
+
+				return yield* getStatus(orgId)
+			},
+		)
 
 		const setMetricsToken = Effect.fn("PlanetScaleConnectionService.setMetricsToken")(function* (
 			orgId: OrgId,
@@ -588,7 +669,8 @@ export class PlanetScaleConnectionService extends Context.Service<
 			if (target === null) {
 				return yield* Effect.fail(
 					new IntegrationsPersistenceError({
-						message: "The managed scrape target is missing — disconnect and reconnect PlanetScale.",
+						message:
+							"The managed scrape target is missing — disconnect and reconnect PlanetScale.",
 					}),
 				)
 			}
@@ -612,14 +694,12 @@ export class PlanetScaleConnectionService extends Context.Service<
 				// owns it (a user-created row adopted by a *different* connection stays).
 				const target = yield* selectManagedTarget(connection)
 				if (target !== null && target.managedBy === managedByForConnection(connection.id)) {
-					yield* scrapeTargetsService
-						.delete(orgId, decodeScrapeTargetIdSync(target.id))
-						.pipe(
-							Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
-								Effect.succeed(undefined),
-							),
-							Effect.mapError(toPersistenceError),
-						)
+					yield* scrapeTargetsService.delete(orgId, decodeScrapeTargetIdSync(target.id)).pipe(
+						Effect.catchTag("@maple/http/errors/ScrapeTargetNotFoundError", () =>
+							Effect.succeed(undefined),
+						),
+						Effect.mapError(toPersistenceError),
+					)
 				}
 
 				yield* database

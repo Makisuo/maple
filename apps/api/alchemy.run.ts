@@ -115,8 +115,13 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		// `api` worker is both producer (binding) and consumer (Queues.Consumer
 		// below). Local dev is wired separately in wrangler.jsonc so miniflare runs
 		// it in-process.
+		const vcsSyncQueueName = resolveWorkerName("vcs-sync", stage)
 		const vcsSyncQueue = yield* Cloudflare.Queues.Queue("vcs-sync", {
-			name: resolveWorkerName("vcs-sync", stage),
+			name: vcsSyncQueueName,
+		})
+		const planetScaleWebhookQueueName = resolveWorkerName("planetscale-webhooks", stage)
+		const planetScaleWebhookQueue = yield* Cloudflare.Queues.Queue("planetscale-webhooks", {
+			name: planetScaleWebhookQueueName,
 		})
 
 		const worker = (yield* Cloudflare.Worker("api", {
@@ -136,6 +141,9 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),
 				MCP_SESSIONS: mcpSessions,
 				VCS_SYNC_QUEUE: vcsSyncQueue,
+				VCS_SYNC_QUEUE_NAME: vcsSyncQueueName,
+				PLANETSCALE_WEBHOOK_QUEUE: planetScaleWebhookQueue,
+				PLANETSCALE_WEBHOOK_QUEUE_NAME: planetScaleWebhookQueueName,
 				CLICKHOUSE_SCHEMA_APPLY_WORKFLOW: schemaApplyWorkflow,
 				AI_TRIAGE_WORKFLOW: aiTriageWorkflow,
 				API_V2_RATE_LIMITER: Cloudflare.RateLimit("API_V2_RATE_LIMITER", {
@@ -244,6 +252,16 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 		// Attach the api worker as the vcs-sync queue consumer (v1 `eventSources`).
 		yield* Cloudflare.Queues.Consumer("vcs-sync-consumer", {
 			queueId: vcsSyncQueue.queueId,
+			scriptName: worker.workerName,
+			settings: {
+				batchSize: 10,
+				maxConcurrency: 2,
+				maxRetries: 3,
+				maxWaitTimeMs: 5000,
+			},
+		})
+		yield* Cloudflare.Queues.Consumer("planetscale-webhooks-consumer", {
+			queueId: planetScaleWebhookQueue.queueId,
 			scriptName: worker.workerName,
 			settings: {
 				batchSize: 10,

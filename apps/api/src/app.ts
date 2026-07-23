@@ -89,6 +89,7 @@ import { QueryEngineService } from "./services/QueryEngineService"
 import { RecommendationIssueService } from "./services/RecommendationIssueService"
 import { PlanetScaleConnectionService } from "./services/PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./services/PlanetScaleDiscoveryService"
+import { PlanetScaleWebhookQueue } from "./services/planetscale/PlanetScaleWebhookQueue"
 import { PlanetScaleOAuthService } from "./services/PlanetScaleOAuthService"
 import { PlanetScaleService } from "./services/PlanetScaleService"
 import { ScrapeTargetsService } from "./services/ScrapeTargetsService"
@@ -152,9 +153,10 @@ const CoreServicesLive = Layer.mergeAll(
 	OrganizationService.layer,
 	PlanetScaleOAuthLive,
 	PlanetScaleDiscoveryLive,
+	PlanetScaleWebhookQueue.layer,
 	ScrapeTargetsLive,
 	PlanetScaleConnectionService.layer.pipe(
-		Layer.provide(Layer.mergeAll(ScrapeTargetsLive, PlanetScaleOAuthLive)),
+		Layer.provide(Layer.mergeAll(ScrapeTargetsLive, PlanetScaleDiscoveryLive, PlanetScaleOAuthLive)),
 	),
 	PlanetScaleService.layer.pipe(Layer.provide(PlanetScaleOAuthLive)),
 	IngestAttributeMappingService.layer,

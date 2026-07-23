@@ -96,4 +96,14 @@ describe("dashboard template query specs", () => {
 		}
 		expect(queryBuilderQueries).toBeGreaterThan(0)
 	})
+
+	it("uses PlanetScale's canonical discovery label keys", () => {
+		const template = DASHBOARD_TEMPLATES.find((candidate) => candidate.id === "planetscale")
+		expect(template).toBeDefined()
+		const encoded = JSON.stringify(template?.build({ database: "shop" }))
+		expect(encoded).toContain("attr.planetscale_database_name")
+		expect(encoded).toContain("attr.planetscale_branch_name")
+		expect(encoded).not.toContain('"attr.planetscale_database"')
+		expect(encoded).not.toContain('"attr.planetscale_branch"')
+	})
 })

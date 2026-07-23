@@ -84,17 +84,20 @@ const OrganizationSchema = Schema.Struct({
 	name: Schema.String,
 })
 const OrganizationsPageSchema = Schema.Struct({ data: Schema.Array(OrganizationSchema) })
-const decodeOrganizationsPage = Schema.decodeUnknownEffect(
-	Schema.fromJsonString(OrganizationsPageSchema),
-)
+const decodeOrganizationsPage = Schema.decodeUnknownEffect(Schema.fromJsonString(OrganizationsPageSchema))
 
-/**
- * `GET /oauth/token/info` is doorkeeper-style: a VALID presented token answers
- * 200 with the token's details (scope, expires_in, resource_owner_id — no RFC
- * 7662 `active` field), an invalid one answers 401 `invalid_token`. The verdict
- * is therefore the status code, not a body field. Verified live 2026-07-13.
- */
 type TokenIntrospectionVerdict = "valid" | "invalid" | "unknown"
+const TokenInfoSchema = Schema.Union([
+	// PlanetScale's current public contract.
+	Schema.Struct({ active: Schema.Boolean }),
+	// Legacy Doorkeeper responses observed from the live endpoint omit `active`
+	// but identify the token's owner. Requiring that marker prevents arbitrary
+	// 2xx JSON objects from being treated as valid tokens.
+	Schema.Struct({
+		resource_owner_id: Schema.Union([Schema.String, Schema.Number]),
+	}),
+])
+const decodeTokenInfo = Schema.decodeUnknownEffect(Schema.fromJsonString(TokenInfoSchema))
 
 const CurrentUserSchema = Schema.Struct({
 	id: Schema.String,
@@ -156,9 +159,7 @@ export interface PlanetScaleOAuthServiceShape {
 	/** Whether a grant is stored for the org (drives pendingOrgSelection). */
 	readonly hasConnection: (orgId: OrgId) => Effect.Effect<boolean, IntegrationsPersistenceError>
 	/** Who authorized the stored grant (null when not connected). */
-	readonly connectedByUserId: (
-		orgId: OrgId,
-	) => Effect.Effect<string | null, IntegrationsPersistenceError>
+	readonly connectedByUserId: (orgId: OrgId) => Effect.Effect<string | null, IntegrationsPersistenceError>
 	/** Drop the stored grant. PlanetScale documents no revoke endpoint. */
 	readonly disconnect: (
 		orgId: OrgId,
@@ -196,14 +197,12 @@ export class PlanetScaleOAuthService extends Context.Service<
 				const text = yield* res.text
 				return { status: res.status, text }
 			}).pipe(
-				Effect.mapError(
-					(error) =>
-						toUpstreamError(`PlanetScale API request failed: ${error.message}`),
+				Effect.mapError((error) =>
+					toUpstreamError(`PlanetScale API request failed: ${error.message}`),
 				),
 				Effect.timeoutOrElse({
 					duration: REQUEST_TIMEOUT,
-					orElse: () =>
-						Effect.fail(toUpstreamError(`PlanetScale API request timed out: ${path}`)),
+					orElse: () => Effect.fail(toUpstreamError(`PlanetScale API request timed out: ${path}`)),
 				}),
 			)
 		})
@@ -226,10 +225,20 @@ export class PlanetScaleOAuthService extends Context.Service<
 				const res = yield* httpClient.execute(request)
 				const text = yield* res.text
 				if (res.status >= 200 && res.status < 300) {
-					// The token-info body carries scope/expiry/owner ids, never the token
-					// itself — safe (and load-bearing) to log for diagnosis.
+					const tokenInfo = yield* decodeTokenInfo(text).pipe(Effect.option)
+					if (Option.isNone(tokenInfo)) {
+						yield* Effect.logWarning("PlanetScale token introspection returned invalid JSON")
+						return "unknown" satisfies TokenIntrospectionVerdict
+					}
+					const active = "active" in tokenInfo.value ? tokenInfo.value.active : undefined
+					if (active === false) {
+						yield* Effect.logInfo("PlanetScale auth server reports an inactive token")
+						return "invalid" satisfies TokenIntrospectionVerdict
+					}
+					// `active: true` is the documented response. A missing field is the
+					// legacy Doorkeeper body observed from the live endpoint.
 					yield* Effect.logInfo("PlanetScale auth server accepted the token on introspection", {
-						body: text.slice(0, 300),
+						contract: active === true ? "active" : "legacy",
 					})
 					return "valid" satisfies TokenIntrospectionVerdict
 				}
@@ -249,10 +258,10 @@ export class PlanetScaleOAuthService extends Context.Service<
 					duration: REQUEST_TIMEOUT,
 					orElse: () => Effect.succeed("unknown" satisfies TokenIntrospectionVerdict),
 				}),
-				Effect.catchCause((cause) =>
-					Effect.logWarning("PlanetScale token introspection failed", { cause }).pipe(
-						Effect.as("unknown" satisfies TokenIntrospectionVerdict),
-					),
+				Effect.catch((error) =>
+					Effect.logWarning("PlanetScale token introspection failed", {
+						error: String(error),
+					}).pipe(Effect.as("unknown" satisfies TokenIntrospectionVerdict)),
 				),
 			)
 		})
@@ -347,11 +356,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 			const stateRow = yield* oauth.requireStateRow(state)
 			yield* oauth.deleteAuthState(state)
 
-			const tokenResponse = yield* oauth.exchangeAuthorizationCode(
-				config,
-				code,
-				stateRow.redirectUri,
-			)
+			const tokenResponse = yield* oauth.exchangeAuthorizationCode(config, code, stateRow.redirectUri)
 
 			const orgId = decodeOrgId(stateRow.orgId)
 			yield* Effect.annotateCurrentSpan({ orgId })
@@ -490,9 +495,7 @@ export class PlanetScaleOAuthService extends Context.Service<
 			return yield* fetchOrganizations(accessToken)
 		})
 
-		const hasConnection = Effect.fn("PlanetScaleOAuthService.hasConnection")(function* (
-			orgId: OrgId,
-		) {
+		const hasConnection = Effect.fn("PlanetScaleOAuthService.hasConnection")(function* (orgId: OrgId) {
 			yield* Effect.annotateCurrentSpan({ orgId })
 			const row = yield* oauth.loadConnection(orgId)
 			return row !== null

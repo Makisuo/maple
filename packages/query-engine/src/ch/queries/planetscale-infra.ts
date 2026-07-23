@@ -60,7 +60,10 @@ export function planetscaleInfraTimeseriesSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...ALL_METRIC_NAMES),
-			$.Attributes.get("planetscale_database").eq(param.string("database")),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).eq(param.string("database")),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])

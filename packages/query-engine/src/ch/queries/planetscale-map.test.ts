@@ -29,9 +29,11 @@ describe("planetscaleGaugesSQL", () => {
 		expect(sql).toContain("planetscale_mysql_replica_lag_seconds")
 		expect(sql).toContain("planetscale_postgres_replica_lag_seconds")
 		// Rows without the discovery label can't be attributed to a database.
-		expect(sql).toContain("planetscale_database'] != ''")
+		expect(sql).toContain(
+			"coalesce(nullIf(Attributes['planetscale_database_name'], ''), Attributes['planetscale_database']) != ''",
+		)
 		expect(sql).toContain("GROUP BY database")
-		expect(sql).not.toContain("planetscale_branch")
+		expect(sql).not.toContain("planetscale_branch_name")
 		expect(sql).toContain("FORMAT JSON")
 	})
 
@@ -40,9 +42,13 @@ describe("planetscaleGaugesSQL", () => {
 			...baseParams,
 			database: "main-db",
 		})
-		expect(sql).toContain("planetscale_branch']")
+		expect(sql).toContain(
+			"coalesce(nullIf(Attributes['planetscale_branch_name'], ''), Attributes['planetscale_branch'])",
+		)
 		expect(sql).toContain("GROUP BY database, branch")
-		expect(sql).toContain("planetscale_database'] = 'main-db'")
+		expect(sql).toContain(
+			"coalesce(nullIf(Attributes['planetscale_database_name'], ''), Attributes['planetscale_database']) = 'main-db'",
+		)
 	})
 
 	it("escapes single quotes in orgId", () => {

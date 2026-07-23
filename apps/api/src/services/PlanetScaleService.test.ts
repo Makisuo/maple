@@ -43,7 +43,7 @@ const makeLayer = (testDb: TestDb) => {
 	return Layer.mergeAll(
 		PlanetScaleService.layer.pipe(Layer.provide(oauthLive)),
 		PlanetScaleConnectionService.layer.pipe(
-			Layer.provide(Layer.mergeAll(scrapeTargetsLive, oauthLive)),
+			Layer.provide(Layer.mergeAll(scrapeTargetsLive, discoveryLive, oauthLive)),
 		),
 		oauthLive,
 	).pipe(Layer.provide(testDb.layer), Layer.provide(Env.layer), Layer.provide(makeConfig()))
@@ -155,8 +155,10 @@ describe("PlanetScaleService", () => {
 			const second = yield* service.pollAllOrgs()
 			assert.strictEqual(second.skipped, 1)
 			assert.strictEqual(second.refreshed, 0)
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
 	it.effect("queryInsights proxies top queries, defaulting to the production branch", () => {
@@ -216,6 +218,9 @@ describe("PlanetScaleService", () => {
 			// Branch defaulted to the inventory's production branch.
 			assert.strictEqual(result.branch, "main")
 			assert.isTrue(insightCalls[0]?.includes("/databases/main-db/branches/main/insights"))
+			const insightUrl = new URL(insightCalls[0]!)
+			assert.strictEqual(insightUrl.searchParams.get("sort"), "totalTime")
+			assert.strictEqual(insightUrl.searchParams.get("dir"), "desc")
 			assert.isNull(result.unavailableReason)
 			assert.strictEqual(result.rows.length, 1)
 			const row = result.rows[0]!
@@ -223,8 +228,10 @@ describe("PlanetScaleService", () => {
 			assert.strictEqual(row.queryCount, 420)
 			assert.strictEqual(row.p99LatencyMillis, 140)
 			assert.strictEqual(row.lastRunAt, Date.UTC(2026, 6, 10, 12, 0, 0))
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
 	it.effect("queryInsights soft-fails when the token lacks read_database", () => {
@@ -253,11 +260,13 @@ describe("PlanetScaleService", () => {
 
 			assert.strictEqual(result.rows.length, 0)
 			assert.include(result.unavailableReason ?? "", "read_database")
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
-	it.effect('queryInsights soft-fails with a not-found message on 404', () => {
+	it.effect("queryInsights soft-fails with a not-found message on 404", () => {
 		const testDb = createTestDb(trackedDbs)
 		const baseStub = stubApi({ databases: [], branchesByDatabase: {} })
 		const stub = (async (input: string | URL | Request) => {
@@ -282,12 +291,14 @@ describe("PlanetScaleService", () => {
 			})
 
 			assert.strictEqual(result.rows.length, 0)
-			assert.include(result.unavailableReason ?? "", 'no insights')
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+			assert.include(result.unavailableReason ?? "", "no insights")
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
-	it.effect('queryInsights soft-fails with the upstream status on a 5xx', () => {
+	it.effect("queryInsights soft-fails with the upstream status on a 5xx", () => {
 		const testDb = createTestDb(trackedDbs)
 		const baseStub = stubApi({ databases: [], branchesByDatabase: {} })
 		const stub = (async (input: string | URL | Request) => {
@@ -312,9 +323,11 @@ describe("PlanetScaleService", () => {
 			})
 
 			assert.strictEqual(result.rows.length, 0)
-			assert.include(result.unavailableReason ?? "", 'HTTP 500')
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+			assert.include(result.unavailableReason ?? "", "HTTP 500")
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
 	it.effect("queryInsights defaults to the first inventoried branch when none is production", () => {
@@ -354,8 +367,10 @@ describe("PlanetScaleService", () => {
 			assert.strictEqual(result.branch, "dev")
 			assert.isTrue(insightCalls[0]?.includes("/branches/dev/insights"))
 			assert.isNull(result.unavailableReason)
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 
 	it.effect("a missing grant fails the org's tick without killing the fleet", () => {
@@ -440,7 +455,9 @@ describe("PlanetScaleService", () => {
 				rows.map((row) => row.name),
 				["main-db"],
 			)
-		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))))
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
 	})
 })
