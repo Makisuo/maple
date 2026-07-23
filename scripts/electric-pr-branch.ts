@@ -678,6 +678,36 @@ const up = async (environmentName: string): Promise<void> => {
 		console.log(`✓ Electric source ${sourceId} is active`)
 	}
 
+	// 3b'. Hand the Cloud source's publication(s) to `postgres`. The Electric
+	//     (replication) role that created them is a pscale_api_* role, which
+	//     PlanetScale never makes grantable — so a LATER deploy's reset role
+	//     could not assume it to DROP the publication, and the in-place reset
+	//     would always fall back to delete → recreate. Reassigning to postgres
+	//     (which every pscale role inherits, including the Electric role
+	//     itself — so Electric keeps effective ownership) makes the next reset
+	//     able to drop it. Non-fatal: failure only costs the next deploy time.
+	{
+		const sql = await openSql(databaseUrl)
+		try {
+			const pubs = (await sql`
+				SELECT p.pubname FROM pg_publication p
+				JOIN pg_roles r ON r.oid = p.pubowner
+				WHERE p.pubname LIKE 'cloud\\_electric\\_pub\\_%' AND r.rolname <> 'postgres'`) as Array<{
+				pubname: string
+			}>
+			for (const { pubname } of pubs) {
+				await sql.unsafe(`ALTER PUBLICATION ${quoteIdent(pubname)} OWNER TO postgres`)
+				console.log(`→ Reassigned publication ${pubname} owner → postgres`)
+			}
+		} catch (error) {
+			console.log(
+				`⚠ Could not reassign cloud publication ownership to postgres (${error instanceof Error ? error.message : String(error)}) — next deploy's in-place reset may fall back to delete → recreate`,
+			)
+		} finally {
+			await sql.end()
+		}
+	}
+
 	// 3c. Manual table publishing: add the synced tables to the Cloud source's
 	//     own publication (it ignores `electric_publication_default` — see the
 	//     helper's doc comment). Without this every shape request 400s with

@@ -116,6 +116,16 @@ jobs:
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:grant
 
+            # Reassign everything this run's ephemeral role created to `postgres`
+            # so the NEXT deploy's role (which inherits postgres) can drop it —
+            # pscale_api_* roles are not grantable to each other, so without this
+            # the in-place reset always fails on the prior run's objects and
+            # falls back to the ~9-minute delete → recreate path. See
+            # packages/db/scripts/normalize-preview-ownership.ts.
+            - name: Normalize preview branch ownership
+              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:normalize-preview
+
             # Create/refresh an Electric Cloud environment `pr-<n>` + a Postgres
             # source pointed at this PR's PlanetScale branch (MAPLE_PG_URL), and
             # export ELECTRIC_URL/ELECTRIC_SOURCE_ID/ELECTRIC_SECRET to GITHUB_ENV so

@@ -27,12 +27,17 @@
  *      at this point — its environment is torn down by electric-pr-branch.ts
  *      later in the same deploy — so it gets swept on the NEXT deploy.)
  *
- * Ownership: the previous deploy's objects are owned by that run's ephemeral
- * `ci-pr-*` role (24h TTL). This run's role can't drop them on ownership alone,
- * so we first `GRANT <owner> TO CURRENT_USER` for every schema/publication
- * owner we don't already have (works while the old role still exists; once PS
- * reaps an expired role its objects fall to a role we already inherit). Each
- * grant is best-effort — the drops that follow are the real test.
+ * Ownership: the previous deploy hands everything it created to `postgres`
+ * before finishing (packages/db/scripts/normalize-preview-ownership.ts after
+ * migrate; scripts/electric-pr-branch.ts for the Electric cloud publication),
+ * and every pscale role inherits `postgres` — so this run's role owns the
+ * prior run's objects through that membership and the drops below just work.
+ * The `GRANT <owner> TO CURRENT_USER` loop that follows is a legacy
+ * best-effort fallback for branches provisioned before normalization existed;
+ * expect it to fail on PlanetScale (pscale_api_* roles are not grantable —
+ * "permission denied to grant role", run 30051727304) — the drops that follow
+ * are the real test, and their failure pushes the caller onto the
+ * delete → recreate fallback.
  *
  * Exits non-zero if the reset cannot be completed; the caller falls back to
  * the slow delete + recreate path, so failure here costs time, not correctness.

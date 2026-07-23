@@ -504,10 +504,12 @@ const main = async () => {
 		// Every deploy must start from an EMPTY branch (parity with the old
 		// per-PR empty D1), but a full branch provision costs ~9 minutes — so the
 		// branch is created once per PR and RESET in SQL on subsequent deploys.
-		// The reset also solves the ownership problem that used to force delete →
-		// recreate: the prior run's `drizzle`/`public` objects belong to that
-		// run's ephemeral role (24h TTL), and the reset script assumes those
-		// owner roles before dropping.
+		// The ownership problem that used to force delete → recreate is solved at
+		// the END of each deploy, not here: the prior run reassigned its
+		// `drizzle`/`public` objects and publications to `postgres`
+		// (db:normalize-preview + electric-pr-branch.ts), which this run's role
+		// inherits — pscale_api_* roles themselves are never grantable, so the
+		// reset could not take over their objects any other way.
 		const show = runPscale(["branch", "show", database, branchName, "--format", "json"], {
 			secret: true,
 		})
