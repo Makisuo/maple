@@ -189,7 +189,19 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 interface SqlClient {
 	(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+	unsafe: (query: string) => Promise<Array<Record<string, unknown>>>
 	end: () => Promise<void>
+}
+
+// Identifier guard for the few places we must interpolate names into SQL
+// (ALTER TABLE/PUBLICATION take identifiers, not parameters). Same pattern as
+// packages/db/scripts/reset-preview-branch.ts.
+const IDENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_$.-]*$/
+const quoteIdent = (name: string): string => {
+	if (!IDENT_PATTERN.test(name)) {
+		fail(`Refusing to interpolate unsafe identifier ${JSON.stringify(name)}`)
+	}
+	return `"${name}"`
 }
 
 // Bun's built-in Postgres client — avoids a workspace dep from a root script.
@@ -229,27 +241,69 @@ const logReplicationSlots = async (databaseUrl: string): Promise<void> => {
  * ELECTRIC_MANUAL_TABLE_PUBLISHING setting prevents Electric from adding it`.
  * The drizzle migrations (0009/0011/0014) keep `electric_publication_default`
  * as the source of truth for which tables sync, so we copy its membership into
- * every cloud publication here. We connect as the same role Electric does (the
- * URL handed to `services create`), so we own the cloud publication. Adding a
- * table additionally requires OWNING the table, and the synced tables are owned
- * by the ephemeral migrate-step pscale role — so the block first assumes each
- * table-owner role via `GRANT <owner> TO CURRENT_USER` (the same trick
- * reset-preview-branch.ts uses; it works because every pscale role inherits
- * `postgres`, which holds admin over the ephemeral roles). The whole copy runs
- * server-side in one DO block (identifier quoting via format(%I), no string
- * interpolation) and is idempotent.
+ * every cloud publication here.
+ *
+ * Ownership choreography (all of this is PlanetScale-shaped):
+ *   - ALTER PUBLICATION ... ADD TABLE requires owning BOTH the publication and
+ *     the table. The Electric role (the creds handed to `services create`) owns
+ *     the cloud publication, but the tables are owned by the migrate-step role.
+ *   - Replication roles cannot RECEIVE role grants on PlanetScale (the
+ *     two-role-split gotcha), so `GRANT <table-owner> TO <electric role>` is a
+ *     dead end (run 30050755374: still "must be owner of table actors").
+ *   - Every pscale role inherits `postgres`, though. So the MAIN role (which
+ *     owns the tables and is a member of `postgres`) reassigns the synced
+ *     tables to `postgres` via ALTER TABLE ... OWNER TO — permitted because
+ *     the target is a role it belongs to. From then on the Electric role owns
+ *     the tables through its own `postgres` membership, and future ephemeral
+ *     migrate roles can still run DDL on them the same way.
+ *
+ * Each statement runs client-side and logs its own error — server-side RAISE
+ * NOTICE output is discarded by the client, which made the first attempt's
+ * failure invisible. Identifiers go through quoteIdent(); everything is
+ * idempotent (owner reassignment skips postgres-owned tables, the mirror only
+ * adds missing tables).
  */
-const publishTablesToCloudPublications = async (databaseUrl: string): Promise<void> => {
-	const sql = await openSql(databaseUrl)
+const publishTablesToCloudPublications = async (mainUrl: string, electricUrl: string): Promise<void> => {
+	// Phase 1 (main role): move the synced tables' ownership to `postgres`.
+	const main = await openSql(mainUrl)
 	try {
-		const wanted = await sql`
-			SELECT schemaname, tablename FROM pg_publication_tables
-			WHERE pubname = 'electric_publication_default'`
+		const wanted = (await main`
+			SELECT pt.schemaname, pt.tablename, r.rolname AS owner
+			FROM pg_publication_tables pt
+			JOIN pg_namespace n ON n.nspname = pt.schemaname
+			JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = pt.tablename
+			JOIN pg_roles r ON r.oid = c.relowner
+			WHERE pt.pubname = 'electric_publication_default'`) as Array<{
+			schemaname: string
+			tablename: string
+			owner: string
+		}>
 		if (wanted.length === 0) {
 			fail(
 				"electric_publication_default has no tables — did the drizzle migrations (0009_electric_publication et al.) run against this branch?",
 			)
 		}
+		const [who] = await main`SELECT current_user AS user`
+		console.log(
+			`ℹ synced tables (as ${String(who?.user)}): ${wanted.map((t) => `${t.tablename}(owner=${t.owner})`).join(", ")}`,
+		)
+		for (const t of wanted.filter((t) => t.owner !== "postgres")) {
+			try {
+				await main.unsafe(`ALTER TABLE ${quoteIdent(t.schemaname)}.${quoteIdent(t.tablename)} OWNER TO postgres`)
+				console.log(`→ Reassigned ${t.schemaname}.${t.tablename} owner ${t.owner} → postgres`)
+			} catch (error) {
+				fail(
+					`Could not reassign ${t.schemaname}.${t.tablename} to postgres (owner ${t.owner}): ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
+	} finally {
+		await main.end()
+	}
+
+	// Phase 2 (electric role): mirror the table list into the cloud publication(s).
+	const sql = await openSql(electricUrl)
+	try {
 		// The cloud publication appears when the source finishes provisioning;
 		// poll briefly in case activation raced ahead of it.
 		const deadline = Date.now() + PUBLICATION_TIMEOUT_MS
@@ -265,49 +319,33 @@ const publishTablesToCloudPublications = async (databaseUrl: string): Promise<vo
 			}
 			await sleep(PUBLICATION_POLL_MS)
 		}
-		await sql`
-			DO $$
-			DECLARE own record; pub record; tbl record;
-			BEGIN
-				-- Assume every role owning a synced table that we don't already hold
-				-- (directly or by inheritance) — ALTER PUBLICATION ... ADD TABLE
-				-- requires table ownership. Best-effort per role; a genuinely missing
-				-- grant surfaces as the ALTER's own error below.
-				FOR own IN
-					SELECT DISTINCT r.rolname
-					FROM pg_publication_tables pt
-					JOIN pg_namespace n ON n.nspname = pt.schemaname
-					JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = pt.tablename
-					JOIN pg_roles r ON r.oid = c.relowner
-					WHERE pt.pubname = 'electric_publication_default'
-						AND NOT pg_has_role(current_user, r.oid, 'USAGE')
-						AND r.rolname NOT LIKE 'pg\\_%'
-				LOOP
-					BEGIN
-						EXECUTE format('GRANT %I TO CURRENT_USER', own.rolname);
-						RAISE NOTICE 'assumed table-owner role %', own.rolname;
-					EXCEPTION WHEN OTHERS THEN
-						RAISE NOTICE 'could not assume table-owner role %: %', own.rolname, SQLERRM;
-					END;
-				END LOOP;
-
-				FOR pub IN SELECT pubname FROM pg_publication WHERE pubname LIKE 'cloud\\_electric\\_pub\\_%' LOOP
-					FOR tbl IN
-						SELECT schemaname, tablename FROM pg_publication_tables
-						WHERE pubname = 'electric_publication_default'
-						EXCEPT
-						SELECT schemaname, tablename FROM pg_publication_tables
-						WHERE pubname = pub.pubname
-					LOOP
-						EXECUTE format('ALTER PUBLICATION %I ADD TABLE %I.%I', pub.pubname, tbl.schemaname, tbl.tablename);
-					END LOOP;
-				END LOOP;
-			END $$`
+		const missing = (await sql`
+			SELECT p.pubname, d.schemaname, d.tablename
+			FROM pg_publication p
+			CROSS JOIN pg_publication_tables d
+			WHERE p.pubname LIKE 'cloud\\_electric\\_pub\\_%'
+				AND d.pubname = 'electric_publication_default'
+				AND NOT EXISTS (
+					SELECT 1 FROM pg_publication_tables x
+					WHERE x.pubname = p.pubname
+						AND x.schemaname = d.schemaname AND x.tablename = d.tablename
+				)`) as Array<{ pubname: string; schemaname: string; tablename: string }>
+		for (const m of missing) {
+			try {
+				await sql.unsafe(
+					`ALTER PUBLICATION ${quoteIdent(m.pubname)} ADD TABLE ${quoteIdent(m.schemaname)}.${quoteIdent(m.tablename)}`,
+				)
+			} catch (error) {
+				fail(
+					`Could not add ${m.schemaname}.${m.tablename} to publication ${m.pubname}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+		}
 		const membership = await sql`
 			SELECT pubname, count(*)::int AS tables FROM pg_publication_tables
 			WHERE pubname LIKE 'cloud\\_electric\\_pub\\_%' GROUP BY pubname`
 		console.log(
-			`✓ Published ${wanted.length} synced tables to the cloud publication(s): ${JSON.stringify(membership)}`,
+			`✓ Cloud publication membership after mirroring (${missing.length} added): ${JSON.stringify(membership)}`,
 		)
 	} catch (error) {
 		fail(
@@ -632,7 +670,10 @@ const up = async (environmentName: string): Promise<void> => {
 	//     helper's doc comment). Without this every shape request 400s with
 	//     "missing from the publication cloud_electric_pub_svc_...".
 	if (manualPublishing) {
-		await publishTablesToCloudPublications(databaseUrl)
+		// Phase 1 needs the MAIN role (table owner); phase 2 the Electric role
+		// (cloud-publication owner). Fall back to the electric URL if the main
+		// credential is absent (older wiring) — phase 1 then no-ops or fails loudly.
+		await publishTablesToCloudPublications(process.env.MAPLE_PG_URL?.trim() || databaseUrl, databaseUrl)
 	}
 
 	// 4. Fetch the source secret if `create` didn't already return it.
