@@ -33,12 +33,34 @@
  *   ELECTRIC_CLOUD_URL            Cloud shape API base to export as ELECTRIC_URL (default
  *                                 https://api.electric-sql.cloud); deliberately NOT the
  *                                 local-dev `ELECTRIC_URL` (docker), which would be wrong here
- *   ELECTRIC_REGION              source region (default us-east-1)
- *   ELECTRIC_PUBLICATION         if set, passed as `--publication <name>` to `services create`
- *                                 (prod uses `electric_publication_default` in manual-publishing mode)
- *   ELECTRIC_SERVICE_EXTRA_ARGS  extra space-separated flags for `services create postgres`
- *                                 (escape hatch for e.g. a manual-table-publishing flag)
- *   ELECTRIC_CLI                  override the CLI invocation (default `bunx @electric-sql/cli`)
+ *   ELECTRIC_REGION               source region (default us-east-1; CLI accepts
+ *                                 us-east-1 | eu-west-1 | ca-west-1)
+ *   ELECTRIC_MANUAL_TABLE_PUBLISHING
+ *                                 "false"/"0" disables the `--manual-table-publishing` flag
+ *                                 (default ON: prod runs manual publishing against
+ *                                 `electric_publication_default`, which migration
+ *                                 `0009_electric_publication` has already created on the PR
+ *                                 branch by the time this script runs)
+ *   ELECTRIC_SERVICE_EXTRA_ARGS   extra space-separated flags for `services create postgres`
+ *   ELECTRIC_CLI                  override the CLI invocation (default pins the interface
+ *                                 this script was written against: `bunx @electric-sql/cli@0.0.10`)
+ *
+ * CLI interface notes (verified against @electric-sql/cli 0.0.10 — bump the pin
+ * only after re-verifying these):
+ *   - `--json` / `-q` are GLOBAL options (root command); subcommands read them from
+ *     the root, and commander accepts them before or after the subcommand.
+ *   - `--json` errors go to STDERR as {"error","message","exitCode"}; exit codes are
+ *     1 generic, 2 auth, 3 not-found, 4 validation, 5 conflict.
+ *   - `environments create --json` prints { environmentId } (NOT `id`).
+ *   - `environments list --project <id> --json` prints { environments: [{ id, name, createdAt }] }.
+ *   - `environments delete <id> --force` (--force mandatory: --json mode and
+ *     token-auth non-interactive mode both refuse to prompt).
+ *   - `services create postgres --environment <id> --database-url <url> --region <r>`
+ *     supports --manual-table-publishing (no `--publication <name>` flag exists; the
+ *     publication name is Electric's default `electric_publication_default`) and
+ *     --wait (poll until active, 300s default). Its --json result carries
+ *     { id, status, sourceSecret } — the service id IS the shape-API source_id.
+ *   - `services get-secret <id> --json` prints { secret }.
  */
 import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
@@ -86,7 +108,9 @@ interface CliResult {
 // The CLI reads ELECTRIC_API_TOKEN from the inherited environment; we never pass
 // it as a flag (keeps it out of the process arg list / logs).
 const cliInvocation = (): [string, string[]] => {
-	const [program, ...prefix] = (process.env.ELECTRIC_CLI?.trim() || "bunx @electric-sql/cli").split(/\s+/)
+	const [program, ...prefix] = (process.env.ELECTRIC_CLI?.trim() || "bunx @electric-sql/cli@0.0.10").split(
+		/\s+/,
+	)
 	return [program as string, prefix]
 }
 
@@ -123,11 +147,22 @@ const runElectric = (args: string[], opts?: { secret?: boolean }): CliResult => 
 	return { exitCode: proc.status ?? FAILURE, stdout, stderr }
 }
 
+// CLI exit codes (v0.0.10): 3 = not found, 5 = conflict. Text matching kept as a
+// fallback for messages surfaced with a generic exit code.
+const EXIT_NOT_FOUND = 3
+const EXIT_CONFLICT = 5
+
 const isNotFound = (result: CliResult): boolean =>
-	/not found|does not exist|no such|unknown environment/i.test(`${result.stdout}\n${result.stderr}`)
+	result.exitCode === EXIT_NOT_FOUND ||
+	/"error":\s*"NOT_FOUND"|not found|does not exist|no such|unknown environment/i.test(
+		`${result.stdout}\n${result.stderr}`,
+	)
 
 const isAlreadyExists = (result: CliResult): boolean =>
-	/already exists|already been taken|name is taken|duplicate/i.test(`${result.stdout}\n${result.stderr}`)
+	result.exitCode === EXIT_CONFLICT ||
+	/"error":\s*"CONFLICT"|already exists|already been taken|name is taken|duplicate/i.test(
+		`${result.stdout}\n${result.stderr}`,
+	)
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -164,11 +199,8 @@ const asArray = (value: unknown): ReadonlyArray<unknown> => {
 
 /** Resolve the id of the environment named `environmentName`, or undefined if none. */
 const findEnvironmentId = (projectId: string, environmentName: string): string | undefined => {
-	// `list` may or may not accept `--project`; fall back to an unscoped list.
-	let listed = runElectric(["environments", "list", "--project", projectId, "--json"], { secret: true })
-	if (listed.exitCode !== 0) {
-		listed = runElectric(["environments", "list", "--json"], { secret: true })
-	}
+	// `--project` is a required option; output shape: { environments: [{ id, name, createdAt }] }.
+	const listed = runElectric(["environments", "list", "--project", projectId, "--json"], { secret: true })
 	if (listed.exitCode !== 0) {
 		return isNotFound(listed)
 			? undefined
@@ -254,23 +286,25 @@ const up = async (environmentName: string): Promise<void> => {
 				: `Failed to create Electric environment ${environmentName}`,
 		)
 	}
+	// v0.0.10 prints { environmentId } — the bare `id` spellings are kept as fallbacks
+	// in case a future CLI aligns with its own README (which documents `.id`).
 	const environmentId = pick(
 		parseJson(createdEnv.stdout, "environments create"),
+		"environmentId",
 		"id",
 		"environment_id",
-		"env_id",
 	)
 	if (!environmentId) {
 		fail("`electric environments create --json` returned no environment id")
 	}
 
 	// 3. Create the Postgres source pointed at the PR branch's direct connection.
-	//    ELECTRIC_PUBLICATION / ELECTRIC_SERVICE_EXTRA_ARGS let ops select the
-	//    existing `electric_publication_default` / manual-publishing mode (matching
-	//    prod) once the exact flags are confirmed — see docs/electric-sync.md.
-	const publicationArgs = process.env.ELECTRIC_PUBLICATION?.trim()
-		? ["--publication", process.env.ELECTRIC_PUBLICATION.trim()]
-		: []
+	//    Manual table publishing (prod parity: Electric reads the migration-owned
+	//    `electric_publication_default` instead of trying to own the tables) is the
+	//    default; set ELECTRIC_MANUAL_TABLE_PUBLISHING=false to let Electric
+	//    auto-manage publishing. `--wait` blocks until the service is active so the
+	//    alchemy deploy right after binds to a live source (CLI default 300s cap).
+	const manualPublishing = !/^(false|0)$/i.test(process.env.ELECTRIC_MANUAL_TABLE_PUBLISHING?.trim() ?? "")
 	const extraArgs = (process.env.ELECTRIC_SERVICE_EXTRA_ARGS?.trim() || "").split(/\s+/).filter(Boolean)
 	const createdSvc = runElectric(
 		[
@@ -283,7 +317,8 @@ const up = async (environmentName: string): Promise<void> => {
 			databaseUrl,
 			"--region",
 			region,
-			...publicationArgs,
+			...(manualPublishing ? ["--manual-table-publishing"] : []),
+			"--wait",
 			...extraArgs,
 			"--json",
 		],
@@ -292,20 +327,19 @@ const up = async (environmentName: string): Promise<void> => {
 	if (createdSvc.exitCode !== 0) {
 		fail(`Failed to create Electric Postgres source in environment ${environmentName}`)
 	}
+	// v0.0.10 result: { id, status, sourceSecret } — the postgres service IS the
+	// shape-API source, so its id is the `source_id` the sync worker forwards.
 	const service = parseJson(createdSvc.stdout, "services create postgres")
-	const serviceId = pick(service, "id", "service_id")
-	let sourceId = pick(service, "source_id", "sourceId")
-	let secret = pick(service, "secret", "source_secret", "sourceSecret")
+	const sourceId = pick(service, "id", "serviceId", "sourceId")
+	let secret = pick(service, "sourceSecret", "secret", "source_secret")
 
 	// 4. Fetch the source secret if `create` didn't already return it.
-	if ((!sourceId || !secret) && serviceId) {
-		const fetched = runElectric(["services", "get-secret", serviceId, "--json"], { secret: true })
+	if (!secret && sourceId) {
+		const fetched = runElectric(["services", "get-secret", sourceId, "--json"], { secret: true })
 		if (fetched.exitCode !== 0) {
-			fail(`Failed to fetch the source secret for service ${serviceId}`)
+			fail(`Failed to fetch the source secret for service ${sourceId}`)
 		}
-		const secretJson = parseJson(fetched.stdout, "services get-secret")
-		sourceId = sourceId ?? pick(secretJson, "source_id", "sourceId", "id")
-		secret = secret ?? pick(secretJson, "secret", "source_secret", "sourceSecret")
+		secret = pick(parseJson(fetched.stdout, "services get-secret"), "secret", "sourceSecret")
 	}
 	if (!sourceId || !secret) {
 		fail("Could not resolve the Electric source_id + secret from the CLI output")
