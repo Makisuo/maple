@@ -1,0 +1,98 @@
+name: Cleanup Preview Orphans
+
+# Safety net for PR-preview resources the close-event teardown misses.
+# The `pull_request: closed` teardown in deploy-pr-preview.yml is best-effort:
+#   - GitHub silently creates NO workflow run for the `closed` event of a PR
+#     that conflicts with its base branch (stale PRs closed without merging —
+#     e.g. #111/#143/#168 never got a close run at all).
+#   - `pull_request` events execute the PR branch's OWN workflow-file version,
+#     so teardown fixes on main never retro-apply to already-open PRs
+#     (e.g. #211/#214 closed with the pre-#215 skip-chain and orphaned).
+#   - A deploy landing after close (delayed event / re-run) can recreate the
+#     branch right after teardown deleted it (e.g. #180).
+# PS-DEV branches bill for time used, so orphans cost real money every hour.
+# The same failure modes leak Electric Cloud `pr-<n>` environments (each holds
+# a PlanetScale replication slot + a plan max-databases slot) and Tinybird
+# `pr_<n>` branches (they share compute with production), so all three
+# lifecycle scripts run their `sweep` subcommand here.
+
+on:
+    schedule:
+        # Every 6 hours — orphaned PS-DEV branches bill continuously.
+        - cron: "17 */6 * * *"
+    workflow_dispatch:
+
+permissions:
+    contents: read
+    pull-requests: read # sweep checks each pr-<n> branch's PR state
+    id-token: write # Infisical OIDC machine-identity auth
+
+concurrency:
+    group: cleanup-preview-orphans
+    cancel-in-progress: false
+
+jobs:
+    sweep:
+        runs-on: blacksmith-4vcpu-ubuntu-2404
+        # Deliberately NOT in the `pr-preview` environment: its required manual
+        # approval exists to keep PR-controlled code away from secrets, but this
+        # job only ever runs trusted code from main — and approval would stall
+        # every scheduled run. If the Infisical machine identity's OIDC subject
+        # is scoped to the pr-preview environment, add a subject for
+        # `repo:<org>/<repo>:ref:refs/heads/main` in Infisical.
+        env:
+            INFISICAL_ENV_SLUG: dev
+        steps:
+            - name: Checkout
+              uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - name: Setup mise (toolchain)
+              uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - name: Load deployment secrets from Infisical
+              uses: Infisical/secrets-action@77ab1f4ccd183a543cb5b42435fbd181189f4995 # v1.0.16
+              with:
+                  method: "oidc"
+                  identity-id: ${{ secrets.INFISICAL_MACHINE_IDENTITY_ID }}
+                  project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+                  env-slug: ${{ env.INFISICAL_ENV_SLUG }}
+                  export-type: "env"
+                  secret-path: "/"
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Install PlanetScale CLI
+              if: ${{ env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              uses: planetscale/setup-pscale-action@v1
+
+            # Mirrors the deploy workflow's gating: until the Infisical `dev`
+            # environment carries the PlanetScale service token, the sweep SKIPs
+            # cleanly instead of failing on every schedule tick.
+            - name: Sweep orphaned PlanetScale PR branches
+              if: ${{ env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: bun scripts/planetscale-pr-branch.ts sweep
+
+            # Gated like the deploy workflow's Electric steps: until Infisical
+            # carries ELECTRIC_API_TOKEN (+ ELECTRIC_PROJECT_ID), skip cleanly.
+            # `!cancelled()` keeps the later sweeps running even when an earlier
+            # one fails — the sweeps are independent safety nets.
+            - name: Sweep orphaned Electric Cloud PR environments
+              if: ${{ !cancelled() && env.ELECTRIC_API_TOKEN != '' }}
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: bun scripts/electric-pr-branch.ts sweep
+
+            # The single-file installer used by deploy-pr-preview.yml — branch
+            # commands live in the real `tb` CLI, not `bunx tinybird`.
+            - name: Install Tinybird CLI
+              if: ${{ !cancelled() && env.TINYBIRD_TOKEN != '' }}
+              run: curl https://tinybird.co | sh
+
+            - name: Sweep orphaned Tinybird PR branches
+              if: ${{ !cancelled() && env.TINYBIRD_TOKEN != '' }}
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: bun scripts/tinybird-pr-branch.ts sweep

@@ -97,6 +97,11 @@ jobs:
             # bind to the branch.
             - name: Create/refresh PlanetScale PR branch
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              # GITHUB_TOKEN lets the script refuse to provision when the PR is
+              # already closed — a delayed/re-run deploy after teardown would
+              # otherwise recreate the branch with nothing left to delete it.
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/planetscale-pr-branch.ts up "$PR_NUMBER"
 
             - name: Run database migrations

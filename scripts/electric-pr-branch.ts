@@ -4,8 +4,9 @@
  * Sibling of scripts/planetscale-pr-branch.ts and scripts/tinybird-pr-branch.ts
  * with the same up/down contract.
  *
- *   bun scripts/electric-pr-branch.ts up   <pr-number>
- *   bun scripts/electric-pr-branch.ts down <pr-number>
+ *   bun scripts/electric-pr-branch.ts up    <pr-number>
+ *   bun scripts/electric-pr-branch.ts down  <pr-number>
+ *   bun scripts/electric-pr-branch.ts sweep
  *
  * `up` ensures an Electric Cloud **environment** for this PR and (re)creates the
  * Postgres **service** (the sync "source") inside it, pointed at this PR's
@@ -26,6 +27,13 @@
  * after `alchemy:destroy:pr`). Environment deletion cascades its services. Each
  * source counts against the Electric plan's max-databases cap and holds a
  * PlanetScale replication slot, so `down` on close is mandatory.
+ *
+ * `sweep` deletes every `pr-<n>`/`pr-<n>-*` environment whose PR is already
+ * closed. The close-event teardown is best-effort only (GitHub creates no
+ * `closed` run for conflicted PRs; close runs execute the PR branch's own old
+ * workflow version; post-close redeploys recreate resources) — the scheduled
+ * cleanup-preview-orphans workflow runs `sweep` as the safety net, mirroring
+ * scripts/planetscale-pr-branch.ts.
  *
  * Depends on the PlanetScale `up` step having exported MAPLE_PG_URL (the direct
  * 5432 connection string) and the `drizzle-kit migrate` step having applied
@@ -78,7 +86,7 @@
 import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
 
-type Subcommand = "up" | "down"
+type Subcommand = "up" | "down" | "sweep"
 
 const FAILURE = 1
 // Short grace for eventual consistency on env-name conflicts before falling
@@ -101,8 +109,13 @@ const fail = (message: string): never => {
 
 const parseArgs = (): { subcommand: Subcommand; environmentName: string } => {
 	const [, , rawSubcommand, rawPr] = process.argv
-	if (rawSubcommand !== "up" && rawSubcommand !== "down") {
-		fail(`Usage: bun scripts/electric-pr-branch.ts <up|down> <pr-number> (got "${rawSubcommand ?? ""}")`)
+	if (rawSubcommand !== "up" && rawSubcommand !== "down" && rawSubcommand !== "sweep") {
+		fail(
+			`Usage: bun scripts/electric-pr-branch.ts <up|down> <pr-number> | sweep (got "${rawSubcommand ?? ""}")`,
+		)
+	}
+	if (rawSubcommand === "sweep") {
+		return { subcommand: "sweep", environmentName: "" }
 	}
 	// PR number is digits only and the only untrusted input that lands in a name.
 	const prNumber = (rawPr ?? "").trim()
@@ -701,6 +714,89 @@ const up = async (environmentName: string): Promise<void> => {
 	console.log(`✓ Electric environment ${environmentName} ready; preview electric-sync will bind to it.`)
 }
 
+/**
+ * PR state via the GitHub REST API. Returns "unknown" when no token/repo is
+ * available (local runs) or the API call fails — callers must treat "unknown"
+ * as "don't block", never as "closed". Same contract as
+ * scripts/planetscale-pr-branch.ts.
+ */
+const fetchPrState = async (prNumber: string): Promise<"open" | "closed" | "unknown"> => {
+	const repo = process.env.GITHUB_REPOSITORY?.trim()
+	const token = (process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()
+	if (!repo || !token) return "unknown"
+	try {
+		const response = await fetch(`https://api.github.com/repos/${repo}/pulls/${prNumber}`, {
+			headers: {
+				Authorization: `Bearer ${token}`,
+				Accept: "application/vnd.github+json",
+				"X-GitHub-Api-Version": "2022-11-28",
+			},
+		})
+		if (!response.ok) {
+			console.log(`⚠ Could not look up PR #${prNumber} state (HTTP ${response.status})`)
+			return "unknown"
+		}
+		const parsed = (await response.json()) as { state?: string }
+		return parsed.state === "open" ? "open" : parsed.state === "closed" ? "closed" : "unknown"
+	} catch (error) {
+		console.log(
+			`⚠ Could not look up PR #${prNumber} state (${error instanceof Error ? error.message : String(error)})`,
+		)
+		return "unknown"
+	}
+}
+
+/**
+ * Delete every `pr-<n>`/`pr-<n>-*` environment whose PR is closed. Only names
+ * matching the PR shape (base `pr-<digits>` plus its suffix-fallback variants
+ * `pr-<digits>-*`) are candidates — anything else in the project is never
+ * touched. Environments whose PR state cannot be determined are skipped
+ * (deleting on uncertainty risks tearing down a live preview).
+ */
+const sweep = async (): Promise<void> => {
+	requireEnv("ELECTRIC_API_TOKEN")
+	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
+	const listed = runElectric(["environments", "list", "--project", projectId, "--json"], { secret: true })
+	if (listed.exitCode !== 0) {
+		if (isNotFound(listed)) {
+			console.log("✓ No environments to sweep")
+			return
+		}
+		fail(`Failed to list Electric environments (exit ${listed.exitCode})`)
+	}
+	const candidates = asArray(parseJson(listed.stdout, "environments list")).flatMap((entry) => {
+		const id = pick(entry, "id", "environmentId")
+		const name = pick(entry, "name")
+		const match = name ? /^pr-(\d+)(?:-|$)/.exec(name) : null
+		return id && name && match ? [{ id, name, prNumber: match[1] as string }] : []
+	})
+	console.log(
+		`Found ${candidates.length} pr-* environment(s): ${candidates.map((c) => c.name).join(", ") || "—"}`,
+	)
+
+	const failures: string[] = []
+	for (const candidate of candidates) {
+		const state = await fetchPrState(candidate.prNumber)
+		if (state === "open") {
+			console.log(`… keeping ${candidate.name} (PR #${candidate.prNumber} is open)`)
+			continue
+		}
+		if (state === "unknown") {
+			console.log(`⚠ skipping ${candidate.name} (PR #${candidate.prNumber} state unknown)`)
+			continue
+		}
+		console.log(`… deleting orphan ${candidate.name} (PR #${candidate.prNumber} is closed)`)
+		const removed = runElectric(["environments", "delete", candidate.id, "--force"])
+		if (removed.exitCode !== 0 && !isNotFound(removed)) {
+			failures.push(candidate.name)
+		}
+	}
+	if (failures.length > 0) {
+		fail(`Failed to delete orphan environment(s): ${failures.join(", ")}`)
+	}
+	console.log("✓ Sweep complete")
+}
+
 const down = (environmentName: string): void => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
@@ -715,6 +811,8 @@ const main = async (): Promise<void> => {
 	const { subcommand, environmentName } = parseArgs()
 	if (subcommand === "up") {
 		await up(environmentName)
+	} else if (subcommand === "sweep") {
+		await sweep()
 	} else {
 		down(environmentName)
 	}
