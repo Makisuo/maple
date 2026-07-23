@@ -107,6 +107,91 @@ const isCreateWaitTimeout = (result: CliResult): boolean =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Cluster parameters Electric Cloud requires of the branch
+ * (electric.ax/docs/integrations/planetscale): failover-capable replication
+ * slots (Electric always creates its slot with failover=true) and headroom for
+ * its 20-connection pool. Fresh PS-DEV branches ship sync_replication_slots=off,
+ * hot_standby_feedback=off, max_connections=25 — Electric's source then hangs in
+ * `pending` forever. Applied via `pscale branch resize --parameters` (queues a
+ * change request; may restart the cluster), skipped when already satisfied.
+ */
+const ELECTRIC_PGCONF: ReadonlyArray<{ key: string; want: string; atLeast?: number }> = [
+	{ key: "sync_replication_slots", want: "on" },
+	{ key: "hot_standby_feedback", want: "on" },
+	{ key: "max_connections", want: "100", atLeast: 100 },
+]
+const PARAMS_APPLY_TIMEOUT_MS = 5 * 60 * 1000
+const PARAMS_POLL_MS = 10_000
+
+// Bun's built-in Postgres client (non-literal specifier so tsc doesn't need bun-types).
+const readSettings = async (connectionUrl: string): Promise<Map<string, string>> => {
+	const bunSpecifier = "bun"
+	const { SQL } = (await import(bunSpecifier)) as {
+		SQL: new (url: string) => {
+			(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+			end: () => Promise<void>
+		}
+	}
+	const sql = new SQL(connectionUrl)
+	try {
+		const [row] = await sql`
+			SELECT current_setting('sync_replication_slots') AS sync_replication_slots,
+			       current_setting('hot_standby_feedback') AS hot_standby_feedback,
+			       current_setting('max_connections') AS max_connections`
+		return new Map(Object.entries(row ?? {}).map(([key, value]) => [key, String(value)]))
+	} finally {
+		await sql.end()
+	}
+}
+
+const unsatisfied = (settings: Map<string, string>) =>
+	ELECTRIC_PGCONF.filter(({ key, want, atLeast }) => {
+		const current = settings.get(key)
+		if (current === undefined) return true
+		return atLeast !== undefined ? Number(current) < atLeast : current !== want
+	})
+
+const ensureClusterParameters = async (
+	database: string,
+	branchName: string,
+	connectionUrl: string,
+): Promise<void> => {
+	const missing = unsatisfied(await readSettings(connectionUrl))
+	if (missing.length === 0) {
+		console.log("✓ Electric cluster parameters already satisfied")
+		return
+	}
+	console.log(`… applying cluster parameters: ${missing.map((p) => `${p.key}=${p.want}`).join(", ")}`)
+	const resized = runPscale([
+		"branch",
+		"resize",
+		database,
+		branchName,
+		...missing.flatMap((p) => ["--parameters", `pgconf.${p.key}=${p.want}`]),
+		"--wait",
+	])
+	if (resized.exitCode !== 0) {
+		fail(`Failed to apply cluster parameters to branch ${branchName}`)
+	}
+	// The change may restart the cluster; poll until the live settings reflect it.
+	const deadline = Date.now() + PARAMS_APPLY_TIMEOUT_MS
+	for (;;) {
+		try {
+			if (unsatisfied(await readSettings(connectionUrl)).length === 0) {
+				console.log("✓ Electric cluster parameters applied")
+				return
+			}
+		} catch {
+			// Transient connect failures during the restart window are expected.
+		}
+		if (Date.now() >= deadline) {
+			return fail(`Cluster parameters did not take effect on branch ${branchName} in time`)
+		}
+		await sleep(PARAMS_POLL_MS)
+	}
+}
+
 const waitUntilReady = async (database: string, branchName: string): Promise<void> => {
 	const deadline = Date.now() + READY_TIMEOUT_MS
 	while (Date.now() < deadline) {
@@ -281,8 +366,11 @@ const main = async () => {
 
 		if (branchExists) {
 			// Reuse: wait out any in-flight provisioning, then reset in place.
+			// Parameters go first — a cluster restart mid-reset would be worse, and
+			// once set they persist, so this is a cheap no-op check on later deploys.
 			await waitUntilReady(database, branchName)
 			const credential = createCredential(database, branchName)
+			await ensureClusterParameters(database, branchName, credential.url)
 			if (resetBranchInPlace(credential.url)) {
 				maskAndExport({ MAPLE_PG_URL: credential.url }, [credential.password])
 				return
@@ -304,6 +392,7 @@ const main = async () => {
 		await createAndAwaitBranch(database, branchName)
 
 		const credential = createCredential(database, branchName)
+		await ensureClusterParameters(database, branchName, credential.url)
 		// One connection string — alchemy.run.ts parses it into the Hyperdrive
 		// origin, the migrate step + scripts use it as-is.
 		maskAndExport({ MAPLE_PG_URL: credential.url }, [credential.password])
