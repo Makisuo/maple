@@ -171,24 +171,65 @@ const ensureClusterParameters = async (
 		...missing.flatMap((p) => ["--parameters", `pgconf.${p.key}=${p.want}`]),
 		"--wait",
 	])
-	if (resized.exitCode !== 0) {
-		fail(`Failed to apply cluster parameters to branch ${branchName}`)
-	}
-	// The change may restart the cluster; poll until the live settings reflect it.
-	const deadline = Date.now() + PARAMS_APPLY_TIMEOUT_MS
-	for (;;) {
-		try {
-			if (unsatisfied(await readSettings(connectionUrl)).length === 0) {
-				console.log("✓ Electric cluster parameters applied")
-				return
+	if (resized.exitCode === 0) {
+		// The change may restart the cluster; poll until the live settings reflect it.
+		const deadline = Date.now() + PARAMS_APPLY_TIMEOUT_MS
+		for (;;) {
+			try {
+				if (unsatisfied(await readSettings(connectionUrl)).length === 0) {
+					console.log("✓ Electric cluster parameters applied")
+					return
+				}
+			} catch {
+				// Transient connect failures during the restart window are expected.
 			}
-		} catch {
-			// Transient connect failures during the restart window are expected.
+			if (Date.now() >= deadline) {
+				return fail(`Cluster parameters did not take effect on branch ${branchName} in time`)
+			}
+			await sleep(PARAMS_POLL_MS)
 		}
-		if (Date.now() >= deadline) {
-			return fail(`Cluster parameters did not take effect on branch ${branchName} in time`)
+	}
+	// The CI service token may lack branch-change permission ("User does not have
+	// permission to perform this action"). Fall back to ALTER SYSTEM for the
+	// SIGHUP-reloadable settings (works as `postgres`; max_connections needs a
+	// restart and stays out of reach — the Electric source compensates with a
+	// small --db-pool-size). Non-fatal: previews should deploy either way, and
+	// granting the token resize access later self-heals this path.
+	console.log("… branch resize not permitted; trying ALTER SYSTEM for reloadable settings")
+	try {
+		const bunSpecifier = "bun"
+		const { SQL } = (await import(bunSpecifier)) as {
+			SQL: new (opts: { url: string; max: number }) => {
+				(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+				unsafe: (query: string) => Promise<unknown>
+				end: () => Promise<void>
+			}
 		}
-		await sleep(PARAMS_POLL_MS)
+		// max:1 pins a single session: SET ROLE must apply to the same connection
+		// the ALTER SYSTEM statements run on (which also cannot be batched — an
+		// implicit multi-statement transaction would reject ALTER SYSTEM).
+		const sql = new SQL({ url: connectionUrl, max: 1 })
+		try {
+			await sql`SET ROLE postgres`
+			for (const { key, want, atLeast } of missing) {
+				if (atLeast !== undefined) continue // restart-required (max_connections) — skip
+				await sql.unsafe(`ALTER SYSTEM SET ${key} = '${want}'`)
+			}
+			await sql`SELECT pg_reload_conf()`
+		} finally {
+			await sql.end()
+		}
+		await sleep(2_000)
+		const still = unsatisfied(await readSettings(connectionUrl))
+		console.log(
+			still.length === 0
+				? "✓ Electric cluster parameters applied via ALTER SYSTEM"
+				: `⚠ cluster parameters still unsatisfied: ${still.map((p) => p.key).join(", ")} — Electric sync may stay pending (grant the PlanetScale service token branch-resize access to fix permanently)`,
+		)
+	} catch (error) {
+		console.log(
+			`⚠ ALTER SYSTEM fallback failed (${error instanceof Error ? error.message : String(error)}) — Electric sync may stay pending`,
+		)
 	}
 }
 

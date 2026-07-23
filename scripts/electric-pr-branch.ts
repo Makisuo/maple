@@ -445,6 +445,11 @@ const up = async (environmentName: string): Promise<void> => {
 			"--region",
 			region,
 			...(manualPublishing ? ["--manual-table-publishing"] : []),
+			// Electric's default pool is 20 connections; the PR branch may be stuck
+			// at PlanetScale's max_connections=25 (raising it needs a branch resize
+			// the CI token may not be allowed to make), so keep the pool small.
+			"--db-pool-size",
+			process.env.ELECTRIC_DB_POOL_SIZE?.trim() || "5",
 			...extraArgs,
 			"--json",
 		],
