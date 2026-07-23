@@ -411,13 +411,28 @@ const up = async (environmentName: string): Promise<void> => {
 			}
 			console.log("✓ CI role carries REPLICATION")
 			// Electric creates FAILOVER-enabled slots; PlanetScale demands these two
-			// settings for that (electric.ax/docs/integrations/planetscale). Log them
-			// so a stuck-pending source is explainable from the step log alone.
+			// settings for that (electric.ax/docs/integrations/planetscale). Log the
+			// full checklist so a rejected/stuck source is explainable from the step
+			// log alone.
 			const [settings] = await sql`
-				SELECT current_setting('sync_replication_slots') AS sync_replication_slots,
+				SELECT current_setting('wal_level') AS wal_level,
+				       current_setting('sync_replication_slots') AS sync_replication_slots,
 				       current_setting('hot_standby_feedback') AS hot_standby_feedback,
-				       current_setting('max_connections') AS max_connections`
+				       current_setting('max_connections') AS max_connections,
+				       (SELECT count(*)::int FROM pg_publication WHERE pubname = 'electric_publication_default') AS publication`
 			console.log(`ℹ cluster settings: ${JSON.stringify(settings)}`)
+			// Dry-run the thing Electric actually needs: create (and drop) a logical
+			// slot. If this fails, its error text is the real reason behind
+			// Electric's opaque "Database validation failed".
+			try {
+				await sql`SELECT pg_create_logical_replication_slot('maple_ci_probe', 'pgoutput')`
+				await sql`SELECT pg_drop_replication_slot('maple_ci_probe')`
+				console.log("✓ logical replication slot probe succeeded")
+			} catch (error) {
+				console.log(
+					`⚠ logical slot probe failed: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
 		} catch (error) {
 			fail(
 				`Could not verify REPLICATION on the branch role: ${error instanceof Error ? error.message : String(error)}`,
