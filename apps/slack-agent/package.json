@@ -25,6 +25,7 @@
     "@workflow/world-postgres": "5.0.0-beta.27",
     "ai": "^7.0.26",
     "eve": "^0.25.2",
+    "just-bash": "^3.1.0",
     "workers-ai-provider": "^3.3.1",
     "zod": "4.4.3"
   },
