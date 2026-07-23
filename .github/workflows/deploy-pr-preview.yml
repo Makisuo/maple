@@ -90,10 +90,11 @@ jobs:
             # they SKIP cleanly (the check stays green) rather than fail every PR.
             # Adding the token activates per-PR preview deploys automatically.
 
-            # Create/refresh the ephemeral PlanetScale Postgres branch `pr-<n>`
-            # (created empty — parity with the old per-PR empty D1), mint a
-            # credential, and export MAPLE_PG_URL to GITHUB_ENV so the migrate +
-            # Alchemy steps below bind to the branch.
+            # Ensure the ephemeral PlanetScale Postgres branch `pr-<n>` exists
+            # and is empty (created once per PR — ~9 min provision — then reset
+            # in SQL on later deploys), mint a credential, and export
+            # MAPLE_PG_URL to GITHUB_ENV so the migrate + Alchemy steps below
+            # bind to the branch.
             - name: Create/refresh PlanetScale PR branch
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: bun scripts/planetscale-pr-branch.ts up "$PR_NUMBER"

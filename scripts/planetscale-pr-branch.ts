@@ -6,13 +6,23 @@
  *   bun scripts/planetscale-pr-branch.ts up   <pr-number>
  *   bun scripts/planetscale-pr-branch.ts down <pr-number>
  *
- * `up` (re)creates an ephemeral PlanetScale branch `pr-<n>` — deleting any
- * existing one first so every deploy starts from an EMPTY, freshly-owned branch
- * (exact parity with the old per-PR empty D1; see the reset rationale in `main`),
- * waits until it is ready, mints a branch credential,
- * and exports `MAPLE_PG_URL` (one connection string, direct 5432) to $GITHUB_ENV
- * — alchemy.run.ts parses it into the pr Hyperdrive origin, and the
- * `drizzle-kit migrate` workflow step uses it as-is.
+ * `up` ensures an ephemeral PlanetScale branch `pr-<n>` exists and is EMPTY,
+ * mints a branch credential, and exports `MAPLE_PG_URL` (one connection string,
+ * direct 5432) to $GITHUB_ENV — alchemy.run.ts parses it into the pr Hyperdrive
+ * origin, and the `drizzle-kit migrate` workflow step uses it as-is.
+ *
+ * Provisioning a PS-DEV Postgres branch takes ~9 minutes, so `up` only CREATES
+ * the branch on the PR's first deploy. Subsequent deploys reuse the branch and
+ * reset it in SQL (packages/db scripts/reset-preview-branch.ts — drops the
+ * drizzle + public schemas, publications, and stale replication slots), which
+ * takes seconds and leaves migrate replaying onto an effectively fresh DB. If
+ * that reset fails for any reason we fall back to the old delete → recreate
+ * path, so it can only cost time, never correctness.
+ *
+ * `pscale branch create --wait` enforces its OWN ~10-minute cap and exits
+ * non-zero with "branch creation timed out" while the branch keeps provisioning
+ * server-side — so a create timeout is treated as non-fatal and we keep polling
+ * `branch show` ourselves.
  *
  * `down` deletes the branch (called on PR close, after `alchemy:destroy:pr`,
  * which removes the Hyperdrive config). Branch deletion also revokes its
@@ -25,6 +35,7 @@
  */
 import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 
 type Subcommand = "up" | "down"
 
@@ -84,6 +95,12 @@ const isAlreadyExists = (result: CliResult): boolean =>
 
 const isNotFound = (result: CliResult): boolean =>
 	/not found|does not exist/i.test(`${result.stdout}\n${result.stderr}`)
+
+// `pscale branch create --wait` gives up after ~10 minutes with this message
+// while the branch continues provisioning server-side. Not a failure — we take
+// over the waiting with our own `branch show` poll.
+const isCreateWaitTimeout = (result: CliResult): boolean =>
+	/timed out/i.test(`${result.stdout}\n${result.stderr}`)
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -203,33 +220,81 @@ const maskAndExport = (entries: Record<string, string>, secrets: ReadonlyArray<s
 	console.log(`✓ Exported ${Object.keys(entries).join(", ")} to GITHUB_ENV`)
 }
 
+/**
+ * Create the branch and wait until it's ready. Tolerates "already exists"
+ * (a concurrent/earlier create) and the CLI's own `--wait` timeout — in both
+ * cases the branch is (still) provisioning, so `waitUntilReady` takes over.
+ */
+const createAndAwaitBranch = async (database: string, branchName: string): Promise<void> => {
+	const create = runPscale(["branch", "create", database, branchName, "--wait"])
+	if (create.exitCode !== 0 && !isAlreadyExists(create) && !isCreateWaitTimeout(create)) {
+		fail(`Failed to create branch ${branchName}`)
+	}
+	if (create.exitCode !== 0 && isCreateWaitTimeout(create)) {
+		console.log(`… \`pscale branch create --wait\` hit its own timeout; polling until ready ourselves`)
+	}
+	await waitUntilReady(database, branchName)
+}
+
+/**
+ * Fast path for a reused branch: reset it to empty via SQL (see
+ * packages/db/scripts/reset-preview-branch.ts). Returns false on failure so the
+ * caller can fall back to delete → recreate.
+ */
+const resetBranchInPlace = (connectionUrl: string): boolean => {
+	const dbPackageDir = fileURLToPath(new URL("../packages/db", import.meta.url))
+	console.log(`$ bun run --cwd packages/db db:reset-preview`)
+	const proc = spawnSync("bun", ["run", "--cwd", dbPackageDir, "db:reset-preview"], {
+		encoding: "utf8",
+		stdio: "inherit",
+		env: { ...process.env, DATABASE_URL: connectionUrl },
+	})
+	return proc.status === 0
+}
+
 const main = async () => {
 	const { subcommand, branchName } = parseArgs()
 	const database = process.env.PLANETSCALE_DATABASE?.trim() || "maple"
 
 	if (subcommand === "up") {
-		// Reset to a clean, EMPTY branch on every deploy (parity with the old
-		// per-PR empty D1). A REUSED branch keeps the prior run's `drizzle` schema +
-		// `__drizzle_migrations`, owned by that run's ephemeral role — which carries
-		// a 24h TTL. Once it expires the objects are orphaned, and the next run's
-		// fresh role can no longer operate on them, so `drizzle-kit migrate` exits
-		// non-zero (after a bare "schema drizzle already exists" notice). Delete →
-		// recreate guarantees a fresh DB whose `drizzle` objects this run's role owns.
-		const existing = runPscale(["branch", "delete", database, branchName, "--force"])
-		if (existing.exitCode !== 0 && !isNotFound(existing)) {
-			fail(`Failed to reset (delete) existing branch ${branchName}`)
-		}
-		if (existing.exitCode === 0) {
-			// Deletion is async — wait until it's actually gone before recreating the
-			// same name, otherwise `branch create` races the teardown.
-			await waitUntilGone(database, branchName)
+		// Every deploy must start from an EMPTY branch (parity with the old
+		// per-PR empty D1), but a full branch provision costs ~9 minutes — so the
+		// branch is created once per PR and RESET in SQL on subsequent deploys.
+		// The reset also solves the ownership problem that used to force delete →
+		// recreate: the prior run's `drizzle`/`public` objects belong to that
+		// run's ephemeral role (24h TTL), and the reset script assumes those
+		// owner roles before dropping.
+		const show = runPscale(["branch", "show", database, branchName, "--format", "json"], {
+			secret: true,
+		})
+		const branchExists = show.exitCode === 0
+		if (!branchExists && !isNotFound(show)) {
+			fail(`Could not determine whether branch ${branchName} exists`)
 		}
 
-		const create = runPscale(["branch", "create", database, branchName, "--wait"])
-		if (create.exitCode !== 0 && !isAlreadyExists(create)) {
-			fail(`Failed to create branch ${branchName}`)
+		if (branchExists) {
+			// Reuse: wait out any in-flight provisioning, then reset in place.
+			await waitUntilReady(database, branchName)
+			const credential = createCredential(database, branchName)
+			if (resetBranchInPlace(credential.url)) {
+				maskAndExport({ MAPLE_PG_URL: credential.url }, [credential.password])
+				return
+			}
+			// Fallback: the old slow-but-certain path. Deleting the branch revokes
+			// the credential minted above, so a fresh one is minted after recreate.
+			console.log(`… in-place reset failed; falling back to delete → recreate`)
+			const existing = runPscale(["branch", "delete", database, branchName, "--force"])
+			if (existing.exitCode !== 0 && !isNotFound(existing)) {
+				fail(`Failed to reset (delete) existing branch ${branchName}`)
+			}
+			if (existing.exitCode === 0) {
+				// Deletion is async — wait until it's actually gone before recreating
+				// the same name, otherwise `branch create` races the teardown.
+				await waitUntilGone(database, branchName)
+			}
 		}
-		await waitUntilReady(database, branchName)
+
+		await createAndAwaitBranch(database, branchName)
 
 		const credential = createCredential(database, branchName)
 		// One connection string — alchemy.run.ts parses it into the Hyperdrive

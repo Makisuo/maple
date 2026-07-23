@@ -10,8 +10,8 @@
  * `up` (re)creates an Electric Cloud **environment** `pr-<n>` and a Postgres
  * **service** (the sync "source") inside it, pointed at this PR's PlanetScale
  * branch — deleting any existing environment first so every deploy starts fresh
- * (exact parity with the PlanetScale reset: each push recreates the branch, so
- * the previous source now points at a deleted DB with rotated credentials). It
+ * (parity with the PlanetScale reset: each push empties the branch's DB and
+ * mints a fresh credential, so the previous source points at dropped tables). It
  * then exports `ELECTRIC_URL` / `ELECTRIC_SOURCE_ID` / `ELECTRIC_SECRET` to
  * $GITHUB_ENV so the subsequent `alchemy:deploy:pr` binds the standalone
  * apps/electric-sync worker to this source (see apps/electric-sync/alchemy.run.ts).
@@ -254,7 +254,12 @@ const up = async (environmentName: string): Promise<void> => {
 				: `Failed to create Electric environment ${environmentName}`,
 		)
 	}
-	const environmentId = pick(parseJson(createdEnv.stdout, "environments create"), "id", "environment_id", "env_id")
+	const environmentId = pick(
+		parseJson(createdEnv.stdout, "environments create"),
+		"id",
+		"environment_id",
+		"env_id",
+	)
 	if (!environmentId) {
 		fail("`electric environments create --json` returned no environment id")
 	}
@@ -309,7 +314,11 @@ const up = async (environmentName: string): Promise<void> => {
 	// 5. Hand the source creds to the rest of the workflow. alchemy binds these to
 	//    the electric-sync worker; the proxy forwards them to {ELECTRIC_URL}/v1/shape.
 	maskAndExport(
-		{ ELECTRIC_URL: electricUrl, ELECTRIC_SOURCE_ID: sourceId as string, ELECTRIC_SECRET: secret as string },
+		{
+			ELECTRIC_URL: electricUrl,
+			ELECTRIC_SOURCE_ID: sourceId as string,
+			ELECTRIC_SECRET: secret as string,
+		},
 		[secret as string],
 	)
 	console.log(`✓ Electric environment ${environmentName} ready; preview electric-sync will bind to it.`)

@@ -17,6 +17,7 @@
 		"db:push": "drizzle-kit push --config ./drizzle.config.ts",
 		"db:studio": "drizzle-kit studio --config ./drizzle.config.ts",
 		"db:grant": "bun scripts/grant-runtime-role.ts",
+		"db:reset-preview": "bun scripts/reset-preview-branch.ts",
 		"ps:apply-schema": "bun scripts/planetscale-apply-schema.ts"
 	},
 	"dependencies": {
