@@ -230,10 +230,14 @@ const logReplicationSlots = async (databaseUrl: string): Promise<void> => {
  * The drizzle migrations (0009/0011/0014) keep `electric_publication_default`
  * as the source of truth for which tables sync, so we copy its membership into
  * every cloud publication here. We connect as the same role Electric does (the
- * URL handed to `services create`), so we own the cloud publication; adding a
- * table also requires table ownership, which the role reaches via its inherited
- * `postgres` grant. The whole copy runs server-side in one DO block (identifier
- * quoting via format(%I), no string interpolation) and is idempotent.
+ * URL handed to `services create`), so we own the cloud publication. Adding a
+ * table additionally requires OWNING the table, and the synced tables are owned
+ * by the ephemeral migrate-step pscale role — so the block first assumes each
+ * table-owner role via `GRANT <owner> TO CURRENT_USER` (the same trick
+ * reset-preview-branch.ts uses; it works because every pscale role inherits
+ * `postgres`, which holds admin over the ephemeral roles). The whole copy runs
+ * server-side in one DO block (identifier quoting via format(%I), no string
+ * interpolation) and is idempotent.
  */
 const publishTablesToCloudPublications = async (databaseUrl: string): Promise<void> => {
 	const sql = await openSql(databaseUrl)
@@ -263,8 +267,30 @@ const publishTablesToCloudPublications = async (databaseUrl: string): Promise<vo
 		}
 		await sql`
 			DO $$
-			DECLARE pub record; tbl record;
+			DECLARE own record; pub record; tbl record;
 			BEGIN
+				-- Assume every role owning a synced table that we don't already hold
+				-- (directly or by inheritance) — ALTER PUBLICATION ... ADD TABLE
+				-- requires table ownership. Best-effort per role; a genuinely missing
+				-- grant surfaces as the ALTER's own error below.
+				FOR own IN
+					SELECT DISTINCT r.rolname
+					FROM pg_publication_tables pt
+					JOIN pg_namespace n ON n.nspname = pt.schemaname
+					JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = pt.tablename
+					JOIN pg_roles r ON r.oid = c.relowner
+					WHERE pt.pubname = 'electric_publication_default'
+						AND NOT pg_has_role(current_user, r.oid, 'USAGE')
+						AND r.rolname NOT LIKE 'pg\\_%'
+				LOOP
+					BEGIN
+						EXECUTE format('GRANT %I TO CURRENT_USER', own.rolname);
+						RAISE NOTICE 'assumed table-owner role %', own.rolname;
+					EXCEPTION WHEN OTHERS THEN
+						RAISE NOTICE 'could not assume table-owner role %: %', own.rolname, SQLERRM;
+					END;
+				END LOOP;
+
 				FOR pub IN SELECT pubname FROM pg_publication WHERE pubname LIKE 'cloud\\_electric\\_pub\\_%' LOOP
 					FOR tbl IN
 						SELECT schemaname, tablename FROM pg_publication_tables
