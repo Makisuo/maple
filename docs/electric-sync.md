@@ -162,8 +162,12 @@ Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
 `.github/workflows/deploy-pr-preview.yml`) uses `@electric-sql/cli`
 (`ELECTRIC_API_TOKEN` auth) to, on open/synchronize: reuse (or create under
 `ELECTRIC_PROJECT_ID`) the `pr-<n>` environment, reset its services, create a
-fresh `postgres` source pointed at the PR branch's `MAPLE_PG_URL` (direct 5432,
-`--wait`ed until active), and export
+fresh `postgres` source pointed at the PR branch's `MAPLE_PG_ELECTRIC_URL`
+(direct 5432 through a dedicated `--with-replication` role — Electric requires
+the REPLICATION role *attribute*, which is never inherited; the main CI role
+stays non-replication because PlanetScale replication roles aren't grantable,
+which would break the in-place reset's role assumption), polled until active,
+and export
 `ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` to `$GITHUB_ENV` (bound to
 the electric-sync worker by alchemy). On close it deletes the environment
 (cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay

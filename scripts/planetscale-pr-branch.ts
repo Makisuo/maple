@@ -279,18 +279,24 @@ interface BranchCredential {
 /**
  * Mint a Postgres ROLE for the preview branch (`pscale password` is Vitess-only).
  * The CI credential runs migrations (DDL) AND backs the preview app, so it
- * inherits `postgres`; `--with-replication` additionally stamps the REPLICATION
- * role *attribute* (attributes are never inherited through membership), which
- * Electric's create-source database probe requires of the connecting role
- * (scripts/electric-pr-branch.ts). The branch is deleted on PR close, which
- * revokes the role — but a TTL is a safety net in case `down` never runs. JSON
- * field names have drifted across CLI releases, so accept the known spellings.
+ * inherits `postgres`. It must NOT carry `--with-replication`: PlanetScale does
+ * not make replication-attribute roles grantable, so the NEXT deploy's role
+ * cannot assume it ("permission denied to grant role") and the in-place reset
+ * degrades to the ~9-min delete → recreate path on every push. Electric gets its
+ * own replication-attribute role instead (mintReplicationCredential). The branch
+ * is deleted on PR close, which revokes the roles — but a TTL is a safety net in
+ * case `down` never runs. JSON field names have drifted across CLI releases, so
+ * accept the known spellings.
  */
-const createCredential = (database: string, branchName: string): BranchCredential => {
+const createCredential = (
+	database: string,
+	branchName: string,
+	opts?: { readonly replication?: boolean; readonly suffix?: string },
+): BranchCredential => {
 	// Unique per run so it never collides with a residual role on the freshly
 	// recreated branch. Roles carry a 24h TTL and are revoked when the branch is
 	// deleted (on the next deploy's reset, or on PR close).
-	const roleName = `ci-${branchName}-${process.pid}-${Date.now()}`
+	const roleName = `ci-${branchName}-${process.pid}-${Date.now()}${opts?.suffix ?? ""}`
 	const result = runPscale(
 		[
 			"role",
@@ -300,7 +306,7 @@ const createCredential = (database: string, branchName: string): BranchCredentia
 			roleName,
 			"--inherited-roles",
 			"postgres",
-			"--with-replication",
+			...(opts?.replication ? ["--with-replication"] : []),
 			"--ttl",
 			"24h",
 			"--format",
@@ -413,7 +419,11 @@ const main = async () => {
 			const credential = createCredential(database, branchName)
 			await ensureClusterParameters(database, branchName, credential.url)
 			if (resetBranchInPlace(credential.url)) {
-				maskAndExport({ MAPLE_PG_URL: credential.url }, [credential.password])
+				const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
+				maskAndExport(
+					{ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url },
+					[credential.password, electric.password],
+				)
 				return
 			}
 			// Fallback: the old slow-but-certain path. Deleting the branch revokes
@@ -434,9 +444,17 @@ const main = async () => {
 
 		const credential = createCredential(database, branchName)
 		await ensureClusterParameters(database, branchName, credential.url)
-		// One connection string — alchemy.run.ts parses it into the Hyperdrive
-		// origin, the migrate step + scripts use it as-is.
-		maskAndExport({ MAPLE_PG_URL: credential.url }, [credential.password])
+		// MAPLE_PG_URL — alchemy.run.ts parses it into the Hyperdrive origin, the
+		// migrate step + scripts use it as-is. MAPLE_PG_ELECTRIC_URL — the same
+		// branch through a replication-attribute role, consumed only by
+		// scripts/electric-pr-branch.ts (Electric requires REPLICATION of its
+		// connecting role; the main role must stay non-replication to keep the
+		// in-place reset's role assumption working).
+		const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
+		maskAndExport(
+			{ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url },
+			[credential.password, electric.password],
+		)
 		return
 	}
 

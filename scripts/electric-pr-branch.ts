@@ -35,7 +35,9 @@
  * (`sv_live_...`) from the environment. Config:
  *   ELECTRIC_API_TOKEN            CLI auth token (required; also the workflow gate)
  *   ELECTRIC_PROJECT_ID           parent project id for the per-PR environment (required)
- *   MAPLE_PG_URL                  PR branch direct connection string (required on `up`)
+ *   MAPLE_PG_ELECTRIC_URL         PR branch connection string via the replication-
+ *                                 attribute role (preferred; minted by planetscale-pr-branch.ts)
+ *   MAPLE_PG_URL                  fallback connection string (required on `up` if the above is unset)
  *   ELECTRIC_CLOUD_URL            Cloud shape API base to export as ELECTRIC_URL (default
  *                                 https://api.electric-sql.cloud); deliberately NOT the
  *                                 local-dev `ELECTRIC_URL` (docker), which would be wrong here
@@ -310,13 +312,16 @@ const maskAndExport = (entries: Record<string, string>, secrets: ReadonlyArray<s
 const up = async (environmentName: string): Promise<void> => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
+	// Prefer the replication-attribute credential (MAPLE_PG_ELECTRIC_URL, minted
+	// separately because the main CI role must stay non-replication for the
+	// in-place reset to work); fall back to MAPLE_PG_URL for older wiring.
 	// Electric Cloud's create-source input validation wants the long
 	// `postgresql://` scheme and accepts `?sslmode=require` — NOT `verify-full`
 	// (rejected as "Input validation failed") and not a bare URL either (passes
 	// input validation, then the server's TLS-less probe of PlanetScale draws
 	// "Database validation failed"). See electric.ax/docs/sync/integrations/planetscale.
 	// planetscale-pr-branch.ts emits `postgres://...?sslmode=verify-full`.
-	const databaseUrl = requireEnv("MAPLE_PG_URL")
+	const databaseUrl = (process.env.MAPLE_PG_ELECTRIC_URL?.trim() || requireEnv("MAPLE_PG_URL"))
 		.replace(/^postgres:\/\//, "postgresql://")
 		.replace(/([?&])sslmode=[^&]*/, "$1sslmode=require")
 	// Defense-in-depth: mask the connection string so any incidental echo (CLI
