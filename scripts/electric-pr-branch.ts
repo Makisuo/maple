@@ -177,6 +177,37 @@ const isAlreadyExists = (result: CliResult): boolean =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+interface SqlClient {
+	(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+	end: () => Promise<void>
+}
+
+// Bun's built-in Postgres client — avoids a workspace dep from a root script.
+// Non-literal specifier so tsc doesn't require bun-types to resolve it.
+const openSql = async (url: string): Promise<SqlClient> => {
+	const bunSpecifier = "bun"
+	const { SQL } = (await import(bunSpecifier)) as { SQL: new (url: string) => SqlClient }
+	return new SQL(url)
+}
+
+/** Log the branch's replication slots — tells us whether Electric ever got one in. */
+const logReplicationSlots = async (databaseUrl: string): Promise<void> => {
+	try {
+		const sql = await openSql(databaseUrl)
+		try {
+			const slots = await sql`
+				SELECT slot_name, slot_type, active, failover, synced,
+				       wal_status, invalidation_reason
+				FROM pg_replication_slots`
+			console.log(`ℹ replication slots: ${JSON.stringify(slots)}`)
+		} finally {
+			await sql.end()
+		}
+	} catch (error) {
+		console.log(`ℹ slot inspection failed: ${error instanceof Error ? error.message : String(error)}`)
+	}
+}
+
 const parseJson = (stdout: string, context: string): unknown => {
 	try {
 		return JSON.parse(stdout)
@@ -370,16 +401,7 @@ const up = async (environmentName: string): Promise<void> => {
 	// both direct ALTER and SET ROLE postgres get "permission denied to alter
 	// role" on PlanetScale.
 	{
-		// Bun's built-in Postgres client — avoids a workspace dep from a root script.
-		// Non-literal specifier so tsc doesn't require bun-types to resolve it.
-		const bunSpecifier = "bun"
-		const { SQL } = (await import(bunSpecifier)) as {
-			SQL: new (url: string) => {
-				(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
-				end: () => Promise<void>
-			}
-		}
-		const sql = new SQL(databaseUrl)
+		const sql = await openSql(databaseUrl)
 		try {
 			const [row] = await sql`SELECT rolreplication FROM pg_roles WHERE rolname = current_user`
 			if (row?.rolreplication !== true) {
@@ -388,6 +410,14 @@ const up = async (environmentName: string): Promise<void> => {
 				)
 			}
 			console.log("✓ CI role carries REPLICATION")
+			// Electric creates FAILOVER-enabled slots; PlanetScale demands these two
+			// settings for that (electric.ax/docs/integrations/planetscale). Log them
+			// so a stuck-pending source is explainable from the step log alone.
+			const [settings] = await sql`
+				SELECT current_setting('sync_replication_slots') AS sync_replication_slots,
+				       current_setting('hot_standby_feedback') AS hot_standby_feedback,
+				       current_setting('max_connections') AS max_connections`
+			console.log(`ℹ cluster settings: ${JSON.stringify(settings)}`)
 		} catch (error) {
 			fail(
 				`Could not verify REPLICATION on the branch role: ${error instanceof Error ? error.message : String(error)}`,
@@ -436,6 +466,7 @@ const up = async (environmentName: string): Promise<void> => {
 		console.log(`… service ${sourceId} status: ${lastStatus}`)
 		while (lastStatus !== "active") {
 			if (lastStatus === "error" || Date.now() >= deadline) {
+				await logReplicationSlots(databaseUrl)
 				const got = runElectric(["services", "get", sourceId, "--json"], { secret: true })
 				const detail = got.exitCode === 0 ? parseJson(got.stdout, "services get") : undefined
 				const summary = ["status", "name", "type", "region", "error", "errorMessage", "statusMessage"]
