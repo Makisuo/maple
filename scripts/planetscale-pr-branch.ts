@@ -40,7 +40,10 @@ import { fileURLToPath } from "node:url"
 type Subcommand = "up" | "down"
 
 const FAILURE = 1
-const READY_TIMEOUT_MS = 10 * 60 * 1000
+// Our own polling budget on top of `pscale branch create --wait`'s built-in
+// ~10-minute cap: a PS-DEV branch usually provisions in ~9 minutes but has been
+// observed to exceed 10, so give the show-poll another 15.
+const READY_TIMEOUT_MS = 15 * 60 * 1000
 const READY_POLL_MS = 10_000
 
 const fail = (message: string): never => {
