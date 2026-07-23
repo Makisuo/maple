@@ -45,10 +45,15 @@
  *                                 us-east-1 | eu-west-1 | ca-west-1)
  *   ELECTRIC_MANUAL_TABLE_PUBLISHING
  *                                 "false"/"0" disables the `--manual-table-publishing` flag
- *                                 (default ON: prod runs manual publishing against
- *                                 `electric_publication_default`, which migration
- *                                 `0009_electric_publication` has already created on the PR
- *                                 branch by the time this script runs)
+ *                                 (default ON — Electric must never need to own the tables
+ *                                 on PlanetScale). NOTE: Electric Cloud does NOT read
+ *                                 `electric_publication_default`; each Cloud source creates
+ *                                 its own publication (`cloud_electric_pub_svc_<name>`) and
+ *                                 manual publishing means WE must add the synced tables to
+ *                                 THAT publication. After the source activates, this script
+ *                                 mirrors the table list from the migration-owned
+ *                                 `electric_publication_default` (0009/0011/0014) into the
+ *                                 Cloud source's publication.
  *   ELECTRIC_SERVICE_EXTRA_ARGS   extra space-separated flags for `services create postgres`
  *   ELECTRIC_CLI                  override the CLI invocation (default pins the interface
  *                                 this script was written against: `bunx @electric-sql/cli@0.0.10`)
@@ -65,7 +70,7 @@
  *     token-auth non-interactive mode both refuse to prompt).
  *   - `services create postgres --environment <id> --database-url <url> --region <r>`
  *     supports --manual-table-publishing (no `--publication <name>` flag exists; the
- *     publication name is Electric's default `electric_publication_default`) and
+ *     Cloud source generates its own publication named `cloud_electric_pub_svc_<name>`) and
  *     --wait (poll until active, 300s default). Its --json result carries
  *     { id, status, sourceSecret } — the service id IS the shape-API source_id.
  *   - `services get-secret <id> --json` prints { secret }.
@@ -83,6 +88,9 @@ const CREATE_RETRY_MS = 5_000
 // Own activation poll (the CLI's --wait caps at 300s and discards state on timeout).
 const ACTIVE_TIMEOUT_MS = 10 * 60 * 1000
 const ACTIVE_POLL_MS = 10_000
+// The Cloud source creates its publication around activation; brief poll for it.
+const PUBLICATION_TIMEOUT_MS = 2 * 60 * 1000
+const PUBLICATION_POLL_MS = 5_000
 const DEFAULT_ELECTRIC_URL = "https://api.electric-sql.cloud"
 const DEFAULT_REGION = "us-east-1"
 
@@ -207,6 +215,80 @@ const logReplicationSlots = async (databaseUrl: string): Promise<void> => {
 		}
 	} catch (error) {
 		console.log(`ℹ slot inspection failed: ${error instanceof Error ? error.message : String(error)}`)
+	}
+}
+
+/**
+ * Mirror the synced-table list into Electric Cloud's per-service publication.
+ *
+ * With `--manual-table-publishing`, Electric Cloud does NOT read
+ * `electric_publication_default` — each Cloud source creates its own publication
+ * (`cloud_electric_pub_svc_<name>`) and refuses to add tables to it, so a shape
+ * request for an unpublished table fails with `Database table "public.<t>" is
+ * missing from the publication "cloud_electric_pub_svc_..." and the
+ * ELECTRIC_MANUAL_TABLE_PUBLISHING setting prevents Electric from adding it`.
+ * The drizzle migrations (0009/0011/0014) keep `electric_publication_default`
+ * as the source of truth for which tables sync, so we copy its membership into
+ * every cloud publication here. We connect as the same role Electric does (the
+ * URL handed to `services create`), so we own the cloud publication; adding a
+ * table also requires table ownership, which the role reaches via its inherited
+ * `postgres` grant. The whole copy runs server-side in one DO block (identifier
+ * quoting via format(%I), no string interpolation) and is idempotent.
+ */
+const publishTablesToCloudPublications = async (databaseUrl: string): Promise<void> => {
+	const sql = await openSql(databaseUrl)
+	try {
+		const wanted = await sql`
+			SELECT schemaname, tablename FROM pg_publication_tables
+			WHERE pubname = 'electric_publication_default'`
+		if (wanted.length === 0) {
+			fail(
+				"electric_publication_default has no tables — did the drizzle migrations (0009_electric_publication et al.) run against this branch?",
+			)
+		}
+		// The cloud publication appears when the source finishes provisioning;
+		// poll briefly in case activation raced ahead of it.
+		const deadline = Date.now() + PUBLICATION_TIMEOUT_MS
+		let publications: Array<Record<string, unknown>> = []
+		for (;;) {
+			publications = await sql`
+				SELECT pubname FROM pg_publication WHERE pubname LIKE 'cloud\\_electric\\_pub\\_%'`
+			if (publications.length > 0) break
+			if (Date.now() >= deadline) {
+				return fail(
+					"Electric Cloud never created its cloud_electric_pub_svc_* publication on the branch — cannot publish the synced tables",
+				)
+			}
+			await sleep(PUBLICATION_POLL_MS)
+		}
+		await sql`
+			DO $$
+			DECLARE pub record; tbl record;
+			BEGIN
+				FOR pub IN SELECT pubname FROM pg_publication WHERE pubname LIKE 'cloud\\_electric\\_pub\\_%' LOOP
+					FOR tbl IN
+						SELECT schemaname, tablename FROM pg_publication_tables
+						WHERE pubname = 'electric_publication_default'
+						EXCEPT
+						SELECT schemaname, tablename FROM pg_publication_tables
+						WHERE pubname = pub.pubname
+					LOOP
+						EXECUTE format('ALTER PUBLICATION %I ADD TABLE %I.%I', pub.pubname, tbl.schemaname, tbl.tablename);
+					END LOOP;
+				END LOOP;
+			END $$`
+		const membership = await sql`
+			SELECT pubname, count(*)::int AS tables FROM pg_publication_tables
+			WHERE pubname LIKE 'cloud\\_electric\\_pub\\_%' GROUP BY pubname`
+		console.log(
+			`✓ Published ${wanted.length} synced tables to the cloud publication(s): ${JSON.stringify(membership)}`,
+		)
+	} catch (error) {
+		fail(
+			`Failed to publish synced tables to the Electric Cloud publication: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	} finally {
+		await sql.end()
 	}
 }
 
@@ -391,10 +473,11 @@ const up = async (environmentName: string): Promise<void> => {
 	}
 
 	// 3. Create the Postgres source pointed at the PR branch's direct connection.
-	//    Manual table publishing (prod parity: Electric reads the migration-owned
-	//    `electric_publication_default` instead of trying to own the tables) is the
-	//    default; set ELECTRIC_MANUAL_TABLE_PUBLISHING=false to let Electric
-	//    auto-manage publishing. `--wait` blocks until the service is active so the
+	//    Manual table publishing (Electric must never need to own the tables on
+	//    PlanetScale) is the default; set ELECTRIC_MANUAL_TABLE_PUBLISHING=false
+	//    to let Electric auto-manage publishing. Note the Cloud source creates its
+	//    OWN publication (cloud_electric_pub_svc_<name>) — step 3c mirrors the
+	//    migration-owned table list into it. `--wait` blocks until the service is active so the
 	//    alchemy deploy right after binds to a live source (CLI default 300s cap).
 	// Electric's create-source probe requires the connecting role to carry the
 	// REPLICATION *attribute* (never inherited through role membership — the
@@ -516,6 +599,14 @@ const up = async (environmentName: string): Promise<void> => {
 			}
 		}
 		console.log(`✓ Electric source ${sourceId} is active`)
+	}
+
+	// 3c. Manual table publishing: add the synced tables to the Cloud source's
+	//     own publication (it ignores `electric_publication_default` — see the
+	//     helper's doc comment). Without this every shape request 400s with
+	//     "missing from the publication cloud_electric_pub_svc_...".
+	if (manualPublishing) {
+		await publishTablesToCloudPublications(databaseUrl)
 	}
 
 	// 4. Fetch the source secret if `create` didn't already return it.
