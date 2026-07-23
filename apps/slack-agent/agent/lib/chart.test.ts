@@ -105,10 +105,25 @@ describe("renderChartSvg", () => {
     expect(svg).not.toContain("<b>");
   });
 
-  test("area charts add a fill under the line", () => {
-    expect(renderChartSvg(spec({ kind: "area" }))).toContain(
-      "rgba(42, 120, 214, 0.18)",
-    );
+  test("area charts add a gradient fill under the line", () => {
+    const svg = renderChartSvg(spec({ kind: "area" }));
+    expect(svg).toContain("<linearGradient");
+    expect(svg).toContain('fill="url(#areaFill)"');
+  });
+
+  test("draws the Maple dark card surface", () => {
+    const svg = renderChartSvg(spec());
+    expect(svg).toContain('fill="#1e1b17"'); // --card (dark)
+    expect(svg).toContain('stroke="#2a2520"'); // --border (dark)
+    expect(svg).toContain("Geist Mono");
+  });
+
+  test("series color follows the unit's semantic token", () => {
+    // latency → --chart-p95 amber; throughput → --chart-throughput purple
+    expect(renderChartSvg(spec({ unit: "duration_ms" }))).toContain("#e8872a");
+    expect(
+      renderChartSvg(spec({ unit: "requests_per_sec" })),
+    ).toContain("#9281e1");
   });
 
   test("bar charts render one path per point", () => {

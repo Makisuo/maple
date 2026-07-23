@@ -17,9 +17,10 @@ WORKDIR /app
 
 # Fonts for chart rendering: agent/tools/render_chart.ts rasterizes SVG text
 # via @resvg/resvg-js with loadSystemFonts — node:24-slim ships no fonts, so
-# titles/labels would silently render blank without this.
+# titles/labels would silently render blank without this. `woff2` provides
+# woff2_decompress for the Geist Mono step below (resvg reads TTF, not woff2).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends fonts-dejavu-core \
+  && apt-get install -y --no-install-recommends fonts-dejavu-core woff2 \
   && rm -rf /var/lib/apt/lists/*
 
 # Install deps first for layer caching, from the committed bun.lock.
@@ -28,6 +29,16 @@ RUN apt-get update \
 COPY package.json bun.lock ./
 COPY patches ./patches
 RUN bun install --frozen-lockfile
+
+# Geist Mono — the Maple product font, used by chart rendering (agent/lib/chart.ts).
+# @fontsource-variable/geist-mono ships woff2 only; decompress the latin faces to
+# TTF where resvg's loadSystemFonts scans.
+RUN mkdir -p /usr/share/fonts/truetype/geist-mono \
+  && for f in node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2 \
+              node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-ext-wght-normal.woff2; do \
+       woff2_decompress "$f" \
+       && mv "${f%.woff2}.ttf" /usr/share/fonts/truetype/geist-mono/; \
+     done
 
 COPY tsconfig.json ./
 COPY agent ./agent
