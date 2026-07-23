@@ -357,31 +357,57 @@ const up = async (environmentName: string): Promise<void> => {
 	//    default; set ELECTRIC_MANUAL_TABLE_PUBLISHING=false to let Electric
 	//    auto-manage publishing. `--wait` blocks until the service is active so the
 	//    alchemy deploy right after binds to a live source (CLI default 300s cap).
-	// TEMP DIAGNOSTIC (remove once the Electric "Database validation failed" is
-	// solved): print the branch's replication-relevant state. No secrets — only
-	// settings/booleans.
-	try {
+	// Electric's create-source probe requires the connecting role to carry the
+	// REPLICATION *attribute*. The CI credential (planetscale-pr-branch.ts) is a
+	// role with `--inherited-roles postgres` — but role attributes are never
+	// inherited through membership, so the minted role reports
+	// rolreplication=false and Electric answers "Database validation failed".
+	// Grant the attribute in-place: directly first, then via SET ROLE postgres
+	// (attribute checks use the session role) on the same pinned connection.
+	{
 		// Bun's built-in Postgres client — avoids a workspace dep from a root script.
 		// Non-literal specifier so tsc doesn't require bun-types to resolve it.
 		const bunSpecifier = "bun"
 		const { SQL } = (await import(bunSpecifier)) as {
 			SQL: new (url: string) => {
 				(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
+				begin: (fn: (tx: any) => Promise<void>) => Promise<void>
 				end: () => Promise<void>
 			}
 		}
 		const sql = new SQL(databaseUrl)
-		const [diag] = await sql`
-			SELECT current_setting('wal_level') AS wal_level,
-			       current_setting('max_replication_slots') AS max_replication_slots,
-			       current_setting('max_wal_senders') AS max_wal_senders,
-			       (SELECT rolreplication FROM pg_roles WHERE rolname = current_user) AS role_replication,
-			       (SELECT count(*)::int FROM pg_publication WHERE pubname = 'electric_publication_default') AS publication,
-			       current_setting('server_version') AS server_version`
-		console.log(`ℹ branch replication state: ${JSON.stringify(diag)}`)
-		await sql.end()
-	} catch (error) {
-		console.log(`ℹ branch diagnostic failed: ${error instanceof Error ? error.message : String(error)}`)
+		try {
+			const hasReplication = async (): Promise<boolean> => {
+				const [row] = await sql`SELECT rolreplication FROM pg_roles WHERE rolname = current_user`
+				return row?.rolreplication === true
+			}
+			if (!(await hasReplication())) {
+				try {
+					await sql`ALTER ROLE CURRENT_USER WITH REPLICATION`
+				} catch {
+					// begin() pins one connection so SET LOCAL ROLE + ALTER share a
+					// session; ALTER ROLE takes an identifier, so quote the role name.
+					const [who] = await sql`SELECT current_user AS name`
+					const quoted = `"${String(who?.name ?? "").replaceAll('"', '""')}"`
+					await sql.begin(async (tx) => {
+						await tx`SET LOCAL ROLE postgres`
+						await tx.unsafe(`ALTER ROLE ${quoted} WITH REPLICATION`)
+					})
+				}
+			}
+			if (!(await hasReplication())) {
+				fail(
+					"CI role lacks the REPLICATION attribute and it could not be granted — Electric's database validation will reject the source",
+				)
+			}
+			console.log("✓ CI role carries REPLICATION")
+		} catch (error) {
+			fail(
+				`Could not verify/grant REPLICATION on the branch role: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		} finally {
+			await sql.end()
+		}
 	}
 
 	const manualPublishing = !/^(false|0)$/i.test(process.env.ELECTRIC_MANUAL_TABLE_PUBLISHING?.trim() ?? "")
