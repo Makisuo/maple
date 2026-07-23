@@ -16,6 +16,12 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.205.0",
+    "@opentelemetry/resources": "^2.0.0",
+    "@opentelemetry/sdk-node": "^0.205.0",
+    "@opentelemetry/semantic-conventions": "^1.36.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@workflow/world-postgres": "5.0.0-beta.27",
     "ai": "^7.0.26",
     "eve": "^0.25.2",

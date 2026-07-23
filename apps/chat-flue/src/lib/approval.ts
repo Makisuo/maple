@@ -9,7 +9,10 @@ import { baseToolName } from "./mcp.ts"
  * performing the mutation. The web client renders an approval card from that
  * result and performs the real mutation (via Maple's existing API) on approve.
  *
- * Keep in sync with the mutating tools in apps/api/src/mcp/tools.
+ * Keep in sync — three mirrored copies, no shared import:
+ *   - apps/api/src/mcp/tools/mutating.ts (the source of truth)
+ *   - apps/chat-flue/src/lib/approval.ts (this file)
+ *   - apps/slack-agent/agent/lib/approval.ts
  */
 export const MUTATING_TOOL_NAMES: ReadonlySet<string> = new Set([
 	// dashboards

@@ -15,6 +15,13 @@ COPY --from=oven/bun:1.3-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 
+# Fonts for chart rendering: agent/tools/render_chart.ts rasterizes SVG text
+# via @resvg/resvg-js with loadSystemFonts — node:24-slim ships no fonts, so
+# titles/labels would silently render blank without this.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends fonts-dejavu-core \
+  && rm -rf /var/lib/apt/lists/*
+
 # Install deps first for layer caching, from the committed bun.lock.
 # patches/ must be present before install: package.json's patchedDependencies
 # applies patches/eve@*.patch (multi-workspace botToken context, vercel/eve#222).

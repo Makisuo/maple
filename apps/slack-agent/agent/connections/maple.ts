@@ -1,5 +1,6 @@
 import { defineMcpClientConnection } from "eve/connections";
 import type { ConnectionAuthResolver } from "eve/connections";
+import { mapleToolApproval } from "#lib/approval.js";
 import { mapleApiBaseUrl, resolveWorkspace } from "#lib/maple.js";
 
 /**
@@ -19,8 +20,10 @@ import { mapleApiBaseUrl, resolveWorkspace } from "#lib/maple.js";
  *
  * tools filter: left unfiltered. The tool names exposed by the Maple MCP server
  * are resolved at runtime from the live server, not known at authoring time, so
- * an allow/block list would be a guess. Blocking mutations should be enforced
- * server-side (or added here once the concrete tool names are confirmed).
+ * an allow/block list would be a guess. The safety boundary is the `approval`
+ * policy instead (agent/lib/approval.ts): mutating tools pause for a Slack
+ * approve/deny prompt, and on approve the real MCP tool executes — matching
+ * chat-flue's full-list-plus-gates posture.
  */
 
 const NOT_LINKED_MESSAGE =
@@ -46,4 +49,5 @@ export default defineMcpClientConnection({
     "Maple observability platform: query the connected organization's " +
     "OpenTelemetry services, traces, spans, errors, logs and metrics.",
   auth: resolveAuth,
+  approval: mapleToolApproval,
 });

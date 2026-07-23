@@ -29,12 +29,21 @@ Key routes (all served by the one container): `POST /eve/v1/session`, `GET /eve/
 ```
 agent/
   agent.ts            # model (Workers AI) + workflow world selection
-  instructions.md     # system prompt (Maple domain guidance)
+  instructions.md     # system prompt (Slack-adapted port of chat-flue's SYSTEM_PROMPT)
+  instructions/maple-app-url.ts # injects MAPLE_APP_BASE_URL for deep links at session start
+  instrumentation.ts  # OTel NodeSDK export to Maple's ingest (maple-slack-agent service)
+  skills/dashboard-builder/     # test-before-propose dashboard workflow (load_skill)
+  skills/incident-investigation/ # alert/incident root-cause procedure (load_skill)
   lib/maple.ts        # Maple resolve client (TTL cache), Slack sig verify, per-team bot token
+  lib/approval.ts     # mutating-tool set + HITL approval policy for the MCP connection
+  hooks/outcome-log.ts # unconditional turn/tool failure logging (Railway logs)
   channels/slack.ts   # multi-workspace Slack channel (webhookVerifier + per-team botToken)
   channels/eve.ts     # auth policy for the browser/API routes
-  connections/maple.ts # Maple MCP connection (per-workspace API key auth)
+  connections/maple.ts # Maple MCP connection (per-workspace API key auth + approval gate)
   tools/get_time.ts   # sample tool proving the tool loop
+  tools/render_chart.ts # renders a PNG chart in-process and posts it into the thread
+  lib/chart.ts        # pure SVG chart renderer + unicode-sparkline fallback
+  lib/slack-upload.ts # Slack external-upload flow (files.getUploadURLExternal → complete)
 Dockerfile            # node:24-slim (+bun for installs), eve build, entrypoint
 docker-entrypoint.sh  # runs the Postgres-world migration, then `eve start`
 railway.json          # DOCKERFILE builder, /eve/v1/health healthcheck
@@ -111,6 +120,7 @@ oauth_config:
       - chat:write.public   # post in channels the bot isn't a member of
       - channels:read       # resolve public channel metadata
       - channels:history
+      - files:write         # upload rendered chart images (render_chart tool)
       - groups:read         # resolve private channel metadata
       - im:history          # read DM history (message.im)
       - im:read             # resolve DM conversation metadata
@@ -258,6 +268,60 @@ Finally, invite the bot to a channel — `/invite @eve-agent` — and `@mention`
   exercise the `get_time` tool.
 - A follow-up mention in the same thread resumes the same durable session.
 
+## Parity with the web chat (chat-flue)
+
+This agent mirrors the Maple capabilities of `apps/chat-flue` (the Flue web chat) **without
+sharing code** — each capability is re-expressed in eve's native idiom (see
+`docs/slack-agent-chat-flue-parity.md` for the full matrix):
+
+- **Prompts:** `agent/instructions.md` is the Slack-adapted port of chat-flue's `SYSTEM_PROMPT`
+  (tool prefix `maple__<tool>` instead of `mcp__maple__<tool>`; inline `<<maple:...>>` cards
+  replaced with Slack markdown + deep links built from `MAPLE_APP_BASE_URL`).
+- **Modes → skills:** chat-flue's dashboard-builder and investigate modes are progressive-
+  disclosure skills (`agent/skills/dashboard-builder/`, `agent/skills/incident-investigation/`)
+  the model loads via `load_skill`. Alert context comes from the Slack thread (Maple delivers
+  alert notifications into Slack), not from a request payload.
+- **Approvals — the one behavioral difference:** chat-flue uses propose-then-apply (the tool
+  returns a `proposed` marker; the web client performs the mutation) because Flue has no
+  human-in-the-loop interrupt. eve has native HITL: `agent/lib/approval.ts` gates the same
+  `MUTATING_TOOL_NAMES` set behind a Slack approve/deny card, and **on approve the real MCP
+  tool executes** with the workspace's `mapleApiKey` — approval is consent; the Maple API
+  boundary still enforces authorization. App-principal (automated/scheduled) turns are denied
+  mutations outright. The mutating-tool set is mirrored, not imported — keep in sync with
+  `apps/api/src/mcp/tools/mutating.ts` (source of truth) and `apps/chat-flue/src/lib/approval.ts`.
+- **Telemetry:** `agent/instrumentation.ts` exports AI SDK spans to Maple's ingest as service
+  `maple-slack-agent` when `MAPLE_INGEST_KEY` is set (no-op otherwise). Model inputs/outputs are
+  never recorded; Slack team/channel/thread/user land as `maple.slack.*` span attributes.
+  `agent/hooks/outcome-log.ts` logs turn outcomes + tool failures unconditionally (Railway logs).
+- **Deliberately not ported:** page context and widget-fix mode (web-only payloads), the
+  `submit_diagnosis` tool (the thread reply *is* the report), and the headless triage workflow
+  (apps/api invokes chat-flue for that).
+- **Beyond parity — chart images:** the authored `render_chart` tool renders a time-series
+  chart in-process (hand-rolled SVG → `@resvg/resvg-js`, no headless browser or external chart
+  service) and posts it into the thread via Slack's external-upload flow with the per-team bot
+  token (needs the `files:write` scope; the Dockerfile installs `fonts-dejavu-core` for text
+  rasterization). On render/upload failure it returns a Unicode sparkline for the model to
+  inline. This is net-new: chat-flue renders no images anywhere.
+
+Env vars added by this parity work (set on Railway; all runtime-only):
+
+| Var | Purpose |
+| --- | --- |
+| `MAPLE_APP_BASE_URL` | Web-app base for deep links in replies (default `https://app.maple.dev`) |
+| `MAPLE_INGEST_KEY` | Maple ingest key; enables the OTel export when set |
+| `MAPLE_ENDPOINT` | Ingest gateway base (default `https://ingest.maple.dev`) |
+| `MAPLE_ENVIRONMENT` | Deployment env label on spans (falls back to `RAILWAY_ENVIRONMENT_NAME`) |
+
+Manual acceptance in a linked workspace: (a) "how are things looking?" routes through
+`system_health`; (b) "create an alert rule for checkout p95" produces a Slack approval card —
+approve executes, deny is acknowledged without retry, and a parked approval survives a container
+restart (Postgres world); (c) an @mention in an alert-notification thread loads the
+incident-investigation skill and scopes queries to the alert window; (d) "build me a dashboard
+for checkout" loads the dashboard-builder skill and test-queries before proposing; (e) spans for
+(a)–(d) visible in Maple under `maple-slack-agent`. For (b), also verify the approval card's
+post/`chat.update` paths resolve the right per-team token — they ride the
+`patches/eve@0.25.3.patch` interaction call sites, so re-verify after any eve upgrade.
+
 ## Multi-workspace architecture
 
 One Slack app, distributed publicly, installed into many workspaces. Each Slack **team** is linked
@@ -313,7 +377,7 @@ tools server-side (or add a `tools.allow` here once the concrete names are confi
 **Slack app manifest changes for multi-workspace** (see the manifest in
 [Deploy → step 1](#1-create-the-slack-app)): add the OAuth **redirect URL** pointing at the Maple
 API callback (`/oauth/slack/callback`), broaden the bot scopes to
-`app_mentions:read,chat:write,chat:write.public,channels:read,groups:read,im:history,im:read,im:write,users:read`,
+`app_mentions:read,chat:write,chat:write.public,channels:read,files:write,groups:read,im:history,im:read,im:write,users:read`,
 and **activate public distribution** so the app can be installed into any workspace.
 
 ## Notes

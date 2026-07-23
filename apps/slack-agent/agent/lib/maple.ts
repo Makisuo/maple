@@ -13,6 +13,20 @@ export function mapleApiBaseUrl(): string {
   );
 }
 
+const MAPLE_APP_BASE_URL_DEFAULT = "https://app.maple.dev";
+
+/**
+ * Base URL of the Maple web app (e.g. https://app.maple.dev), used for deep
+ * links in Slack replies. No trailing slash.
+ */
+export function mapleAppBaseUrl(): string {
+  const raw = process.env.MAPLE_APP_BASE_URL;
+  return (raw && raw.length > 0 ? raw : MAPLE_APP_BASE_URL_DEFAULT).replace(
+    /\/+$/u,
+    "",
+  );
+}
+
 function mapleServiceToken(): string {
   const raw = process.env.MAPLE_INTERNAL_SERVICE_TOKEN;
   if (!raw) throw new Error("MAPLE_INTERNAL_SERVICE_TOKEN is not set.");
