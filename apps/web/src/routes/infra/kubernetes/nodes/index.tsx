@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -26,7 +27,6 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const nodesSearchSchema = Schema.Struct({
-	search: Schema.optional(Schema.String),
 	nodeNames: OptionalStringArrayParam,
 	clusters: OptionalStringArrayParam,
 	environments: OptionalStringArrayParam,
@@ -51,6 +51,7 @@ function NodesPage() {
 function NodesPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const [searchText, setSearchText] = useState("")
 
 	const { startTime, endTime } = useEffectiveTimeRange(
 		search.startTime,
@@ -69,7 +70,6 @@ function NodesPageContent() {
 			data: {
 				startTime,
 				endTime,
-				search: search.search?.trim() || undefined,
 				...filters,
 			},
 		}),
@@ -80,7 +80,6 @@ function NodesPageContent() {
 			data: {
 				startTime,
 				endTime,
-				search: search.search?.trim() || undefined,
 			},
 		}),
 	)
@@ -96,6 +95,7 @@ function NodesPageContent() {
 	}
 
 	const onClearFilters = () => {
+		setSearchText("")
 		navigate({
 			search: {
 				startTime: search.startTime,
@@ -150,13 +150,12 @@ function NodesPageContent() {
 						.onError((err) => <QueryErrorState error={err} />)
 						.onSuccess((response, result) => {
 							const nodes = response.data
-							const hasAnyFilter =
-								!!search.search?.trim() ||
+							const hasStructuredFilter =
 								(filters.nodeNames?.length ?? 0) > 0 ||
 								(filters.clusters?.length ?? 0) > 0 ||
 								(filters.environments?.length ?? 0) > 0
 
-							if (nodes.length === 0 && !hasAnyFilter) {
+							if (nodes.length === 0 && !hasStructuredFilter) {
 								return (
 									<Empty className="py-16">
 										<EmptyHeader>
@@ -173,14 +172,19 @@ function NodesPageContent() {
 								)
 							}
 
+							const q = searchText.trim().toLowerCase()
+							const filtered = q
+								? nodes.filter((n) => n.nodeName.toLowerCase().includes(q))
+								: nodes
+
 							return (
 								<div
 									className={`space-y-4 transition-opacity ${
 										result.waiting ? "opacity-60" : ""
 									}`}
 								>
-									{nodes.length >= 4 && (
-										<NodeHoneycomb nodes={nodes} referenceTime={endTime} />
+									{filtered.length >= 4 && (
+										<NodeHoneycomb nodes={filtered} referenceTime={endTime} />
 									)}
 									<div className="flex items-center justify-between gap-3">
 										<InputGroup className="w-64">
@@ -190,28 +194,14 @@ function NodesPageContent() {
 											<InputGroupInput
 												size="sm"
 												placeholder="Search nodes…"
-												value={search.search ?? ""}
-												onChange={(e) =>
-													navigate({
-														search: (prev) => ({
-															...prev,
-															search: e.target.value || undefined,
-														}),
-													})
-												}
+												value={searchText}
+												onChange={(e) => setSearchText(e.target.value)}
 											/>
-											{search.search && (
+											{searchText && (
 												<InputGroupAddon align="inline-end">
 													<InputGroupButton
 														aria-label="Clear search"
-														onClick={() =>
-															navigate({
-																search: (prev) => ({
-																	...prev,
-																	search: undefined,
-																}),
-															})
-														}
+														onClick={() => setSearchText("")}
 													>
 														<XmarkIcon />
 													</InputGroupButton>
@@ -219,14 +209,29 @@ function NodesPageContent() {
 											)}
 										</InputGroup>
 										<span className="text-xs text-muted-foreground">
-											{nodes.length} {nodes.length === 1 ? "node" : "nodes"}
+											{filtered.length} {filtered.length === 1 ? "node" : "nodes"}
 										</span>
 									</div>
-									<NodeTable
-										nodes={nodes}
-										waiting={result.waiting}
-										referenceTime={endTime}
-									/>
+									{q && filtered.length === 0 ? (
+										<Empty className="py-12">
+											<EmptyHeader>
+												<EmptyMedia variant="icon">
+													<MagnifierIcon size={16} />
+												</EmptyMedia>
+												<EmptyTitle>No nodes match “{searchText}”</EmptyTitle>
+												<EmptyDescription>
+													Try a different name, or clear the search to see all
+													nodes.
+												</EmptyDescription>
+											</EmptyHeader>
+										</Empty>
+									) : (
+										<NodeTable
+											nodes={filtered}
+											waiting={result.waiting}
+											referenceTime={endTime}
+										/>
+									)}
 								</div>
 							)
 						})

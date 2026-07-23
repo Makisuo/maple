@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -29,7 +30,6 @@ const WorkloadKindLiteral = Schema.Literals(["deployment", "statefulset", "daemo
 
 const workloadsSearchSchema = Schema.Struct({
 	kind: Schema.optional(WorkloadKindLiteral),
-	search: Schema.optional(Schema.String),
 	workloadNames: OptionalStringArrayParam,
 	namespaces: OptionalStringArrayParam,
 	clusters: OptionalStringArrayParam,
@@ -62,6 +62,7 @@ const KIND_LABEL: Record<WorkloadKind, string> = {
 function WorkloadsPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const [searchText, setSearchText] = useState("")
 	const kind: WorkloadKind = search.kind ?? "deployment"
 
 	const { startTime, endTime } = useEffectiveTimeRange(
@@ -84,7 +85,6 @@ function WorkloadsPageContent() {
 				kind,
 				startTime,
 				endTime,
-				search: search.search?.trim() || undefined,
 				...filters,
 			},
 		}),
@@ -96,7 +96,6 @@ function WorkloadsPageContent() {
 				kind,
 				startTime,
 				endTime,
-				search: search.search?.trim() || undefined,
 			},
 		}),
 	)
@@ -112,6 +111,7 @@ function WorkloadsPageContent() {
 	}
 
 	const onClearFilters = () => {
+		setSearchText("")
 		navigate({
 			search: {
 				kind: search.kind,
@@ -198,15 +198,14 @@ function WorkloadsPageContent() {
 						.onError((err) => <QueryErrorState error={err} />)
 						.onSuccess((response, result) => {
 							const wls = response.data
-							const hasAnyFilter =
-								!!search.search?.trim() ||
+							const hasStructuredFilter =
 								(filters.workloadNames?.length ?? 0) > 0 ||
 								(filters.namespaces?.length ?? 0) > 0 ||
 								(filters.clusters?.length ?? 0) > 0 ||
 								(filters.environments?.length ?? 0) > 0 ||
 								(filters.computeTypes?.length ?? 0) > 0
 
-							if (wls.length === 0 && !hasAnyFilter) {
+							if (wls.length === 0 && !hasStructuredFilter) {
 								return (
 									<Empty className="py-16">
 										<EmptyHeader>
@@ -225,6 +224,11 @@ function WorkloadsPageContent() {
 								)
 							}
 
+							const q = searchText.trim().toLowerCase()
+							const filtered = q
+								? wls.filter((w) => w.workloadName.toLowerCase().includes(q))
+								: wls
+
 							return (
 								<div
 									className={`space-y-4 transition-opacity ${
@@ -239,28 +243,14 @@ function WorkloadsPageContent() {
 											<InputGroupInput
 												size="sm"
 												placeholder="Search…"
-												value={search.search ?? ""}
-												onChange={(e) =>
-													navigate({
-														search: (prev) => ({
-															...prev,
-															search: e.target.value || undefined,
-														}),
-													})
-												}
+												value={searchText}
+												onChange={(e) => setSearchText(e.target.value)}
 											/>
-											{search.search && (
+											{searchText && (
 												<InputGroupAddon align="inline-end">
 													<InputGroupButton
 														aria-label="Clear search"
-														onClick={() =>
-															navigate({
-																search: (prev) => ({
-																	...prev,
-																	search: undefined,
-																}),
-															})
-														}
+														onClick={() => setSearchText("")}
 													>
 														<XmarkIcon />
 													</InputGroupButton>
@@ -268,15 +258,31 @@ function WorkloadsPageContent() {
 											)}
 										</InputGroup>
 										<span className="text-xs text-muted-foreground">
-											{wls.length} {wls.length === 1 ? "workload" : "workloads"}
+											{filtered.length}{" "}
+											{filtered.length === 1 ? "workload" : "workloads"}
 										</span>
 									</div>
-									<WorkloadTable
-										workloads={wls}
-										kind={kind}
-										waiting={result.waiting}
-										referenceTime={endTime}
-									/>
+									{q && filtered.length === 0 ? (
+										<Empty className="py-12">
+											<EmptyHeader>
+												<EmptyMedia variant="icon">
+													<MagnifierIcon size={16} />
+												</EmptyMedia>
+												<EmptyTitle>No workloads match “{searchText}”</EmptyTitle>
+												<EmptyDescription>
+													Try a different name, or clear the search to see all
+													workloads.
+												</EmptyDescription>
+											</EmptyHeader>
+										</Empty>
+									) : (
+										<WorkloadTable
+											workloads={filtered}
+											kind={kind}
+											waiting={result.waiting}
+											referenceTime={endTime}
+										/>
+									)}
 								</div>
 							)
 						})
