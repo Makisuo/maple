@@ -95,7 +95,13 @@ export function ParameterDialog({
 					))}
 				</DialogPanel>
 				<DialogFooter>
-					<Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={submitting}>
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onClick={onCancel}
+						disabled={submitting}
+					>
 						Cancel
 					</Button>
 					<Button type="button" size="sm" disabled={!canSubmit} onClick={handleSubmit}>

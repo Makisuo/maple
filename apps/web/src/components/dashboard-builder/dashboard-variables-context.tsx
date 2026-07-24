@@ -89,7 +89,9 @@ function readVariableOptions(
 	if (source.kind === "attribute") {
 		const atom =
 			source.scope === "resource"
-				? getResourceAttributeValuesResultAtom({ data: { ...window, attributeKey: source.attributeKey } })
+				? getResourceAttributeValuesResultAtom({
+						data: { ...window, attributeKey: source.attributeKey },
+					})
 				: getSpanAttributeValuesResultAtom({ data: { ...window, attributeKey: source.attributeKey } })
 		const result = get(atom)
 		if (!Result.isSuccess(result)) {

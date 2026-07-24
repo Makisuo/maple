@@ -12,11 +12,7 @@
  * in-flight state live with the data they mutate.
  */
 
-import type {
-	AlertDeliveryEventDocument,
-	AlertIncidentDocument,
-	AlertRuleDocument,
-} from "@maple/domain/http"
+import type { AlertDeliveryEventDocument, AlertIncidentDocument, AlertRuleDocument } from "@maple/domain/http"
 import { Event, Model, Mutation, Query, Registry, Store } from "@maple/unitflow"
 import * as Db from "@maple/unitflow/db"
 import * as Clock from "effect/Clock"
@@ -110,7 +106,10 @@ export const deriveOverview = (inputs: OverviewInputs): AlertsOverviewReady => {
 	const rules = [...inputs.rules].sort((a, b) => byIsoDesc(a.updatedAt, b.updatedAt))
 	const incidentCutoff = now - INCIDENT_WINDOW_MS
 	const incidents = inputs.incidents
-		.filter((incident) => incident.status === "open" || Date.parse(incident.lastTriggeredAt) >= incidentCutoff)
+		.filter(
+			(incident) =>
+				incident.status === "open" || Date.parse(incident.lastTriggeredAt) >= incidentCutoff,
+		)
 		.sort((a, b) => byIsoDesc(a.lastTriggeredAt, b.lastTriggeredAt))
 
 	const openIncidents = incidents.filter((incident) => incident.status === "open")
@@ -170,8 +169,7 @@ const buildOverview = (sources: OverviewSources): AlertsOverviewData => {
 	// states are secondary/derived (the old tab read them via useAlertRuleStates,
 	// which had no error channel and degraded to []): a failing states shape must
 	// not blank the overview, it falls back to the rule doc's lastEvaluation* fields.
-	const message =
-		collectionFailureMessage(sources.rules) ?? collectionFailureMessage(sources.incidents)
+	const message = collectionFailureMessage(sources.rules) ?? collectionFailureMessage(sources.incidents)
 	if (message !== null) {
 		return { phase: "error", message }
 	}
@@ -220,7 +218,10 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 	make: () =>
 		Effect.gen(function* () {
 			const orgKey = yield* makeOrgCollectionsKey
-			const rules = yield* Db.fromCollectionByKey(orgKey, (key) => getOrgCollections(orgIdOf(key)).alertRules)
+			const rules = yield* Db.fromCollectionByKey(
+				orgKey,
+				(key) => getOrgCollections(orgIdOf(key)).alertRules,
+			)
 			const states = yield* Db.fromCollectionByKey(
 				orgKey,
 				(key) => getOrgCollections(orgIdOf(key)).alertRuleStates,
@@ -267,7 +268,9 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 			const clock = Store.make(yield* Clock.currentTimeMillis)
 			yield* Registry.run(
 				Stream.tick(CLOCK_TICK).pipe(
-					Stream.mapEffect(() => Effect.flatMap(Clock.currentTimeMillis, (ms) => Store.set(clock, ms))),
+					Stream.mapEffect(() =>
+						Effect.flatMap(Clock.currentTimeMillis, (ms) => Store.set(clock, ms)),
+					),
 				),
 			)
 
@@ -279,7 +282,9 @@ export class AlertsOverviewModel extends Model.Service<AlertsOverviewModel>()("m
 						states: statesState,
 						incidents: incidentsState,
 						// Failed/loading deliveries degrade to [] — same as the tab's orElse.
-						deliveries: AsyncResult.isSuccess(deliveriesState) ? deliveriesState.value.events : [],
+						deliveries: AsyncResult.isSuccess(deliveriesState)
+							? deliveriesState.value.events
+							: [],
 						now,
 					}),
 			)

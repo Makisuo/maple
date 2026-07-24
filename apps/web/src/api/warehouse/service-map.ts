@@ -289,7 +289,10 @@ export interface CloudflareService {
 	cpuP99Ms?: number
 }
 
-function transformCloudflareService(row: Record<string, unknown>, durationSeconds: number): CloudflareService {
+function transformCloudflareService(
+	row: Record<string, unknown>,
+	durationSeconds: number,
+): CloudflareService {
 	const serviceName = String(row.serviceName ?? "")
 	const displayName = serviceName.startsWith(WORKER_SERVICE_PREFIX)
 		? serviceName.slice(WORKER_SERVICE_PREFIX.length)

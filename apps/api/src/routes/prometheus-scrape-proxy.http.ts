@@ -91,9 +91,9 @@ export const PrometheusScrapeProxyRouter = HttpRouter.use((router) =>
 						"@maple/http/errors/ScrapeTargetUpstreamError": (error) =>
 							Effect.succeed(errorText(error.message, 502)),
 						"@maple/http/errors/ScrapeTargetAuthError": (error) =>
-							Effect.annotateCurrentSpan({ "maple.scrape.auth_failure_reason": error.reason }).pipe(
-								Effect.as(errorText(`[auth:${error.reason}] ${error.message}`, 502)),
-							),
+							Effect.annotateCurrentSpan({
+								"maple.scrape.auth_failure_reason": error.reason,
+							}).pipe(Effect.as(errorText(`[auth:${error.reason}] ${error.message}`, 502))),
 					}),
 				)
 			})

@@ -12,11 +12,7 @@ import { useChatTabs, type ChatTab } from "@/hooks/use-chat-tabs"
 import { ChatSidebar } from "./chat-sidebar"
 import { ChatConversation } from "./chat-conversation"
 import { FlueClientProvider } from "./flue-client-provider"
-import {
-	investigationTabId,
-	investigationTabTitle,
-	type InvestigationContext,
-} from "./investigation-context"
+import { investigationTabId, investigationTabTitle, type InvestigationContext } from "./investigation-context"
 import { widgetFixTabId, widgetFixTabTitle, type WidgetFixContext } from "./widget-fix-context"
 import { useMapleOrganizationId } from "@/hooks/use-maple-organization"
 
@@ -38,8 +34,8 @@ export function ChatPage({
 	sharedTabId,
 	sharedTitle,
 }: ChatPageProps) {
-	const orgId = useMapleOrganizationId();
-	if (!orgId) return null;
+	const orgId = useMapleOrganizationId()
+	if (!orgId) return null
 	return (
 		<FlueClientProvider>
 			{sharedTabId ? (
@@ -65,7 +61,13 @@ interface ChatPageInnerProps {
 	widgetFixContext?: WidgetFixContext
 }
 
-function ChatPageInner({ orgId, urlTabId, mode, investigationContext, widgetFixContext }: ChatPageInnerProps) {
+function ChatPageInner({
+	orgId,
+	urlTabId,
+	mode,
+	investigationContext,
+	widgetFixContext,
+}: ChatPageInnerProps) {
 	const { tabs, activeTabId, createTab, closeTab, setActiveTab, renameTab, ensureTab } = useChatTabs(
 		orgId,
 		urlTabId,
@@ -143,7 +145,9 @@ function ChatPageInner({ orgId, urlTabId, mode, investigationContext, widgetFixC
 	useAppHotkey("chat.newTab", () => createTab())
 
 	const investigationTab =
-		mode === "investigation" && investigationContext ? investigationTabId(investigationContext) : undefined
+		mode === "investigation" && investigationContext
+			? investigationTabId(investigationContext)
+			: undefined
 	const widgetFixTab =
 		mode === "widget-fix" && widgetFixContext ? widgetFixTabId(widgetFixContext) : undefined
 
@@ -162,7 +166,13 @@ function ChatPageInner({ orgId, urlTabId, mode, investigationContext, widgetFixC
 								isActive={tab.id === activeTabId}
 								onFirstMessage={(id, text) => renameTab(id, text)}
 								onLoadingChange={handleLoadingChange}
-								mode={isInvestigationTab ? "investigation" : isWidgetFixTab ? "widget-fix" : undefined}
+								mode={
+									isInvestigationTab
+										? "investigation"
+										: isWidgetFixTab
+											? "widget-fix"
+											: undefined
+								}
 								investigationContext={isInvestigationTab ? investigationContext : undefined}
 								widgetFixContext={isWidgetFixTab ? widgetFixContext : undefined}
 							/>

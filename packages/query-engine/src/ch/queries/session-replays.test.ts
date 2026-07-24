@@ -111,6 +111,30 @@ describe("sessionReplaysListQuery userId filter", () => {
 	})
 })
 
+// The list marks metadata-only sessions ("No recording") from the SDK's
+// `maple.session.recorded` resource attribute. It must survive every branch —
+// the fast path and all three subquery-wrapping ones — or the badge silently
+// disappears whenever a filter is applied.
+describe("sessionReplaysListQuery recording marker", () => {
+	const MARKER = "ResourceAttributes['maple.session.recorded']"
+
+	it("projects the marker on the unfiltered fast path", () => {
+		const { sql } = compileCH(sessionReplaysListQuery({}), { ...baseParams, ...WINDOW })
+		expect(sql).toContain(`argMax(${MARKER}, Version) AS recorded`)
+		// Read out of the row's own resource map — never a join that would undo
+		// this query's partition pruning.
+		expect(sql).not.toContain("session_replay_events")
+	})
+
+	it("carries the marker through the duration, active-time, and event branches", () => {
+		for (const opts of [{ durationMinMs: 1_000 }, { activeTimeMinMs: 1_000 }, { eventType: "error" }]) {
+			const { sql } = compileCH(sessionReplaysListQuery(opts), { ...baseParams, ...WINDOW })
+			expect(sql, JSON.stringify(opts)).toContain(`argMax(${MARKER}, Version) AS recorded`)
+			expect(sql, JSON.stringify(opts)).toContain("recorded")
+		}
+	})
+})
+
 describe("sessionReplaysFacetsQuery userId filter", () => {
 	it("narrows every facet branch by the exact UserId", () => {
 		const q = sessionReplaysFacetsQuery({ userId: "user_123" })

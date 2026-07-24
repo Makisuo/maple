@@ -89,16 +89,25 @@ export const make = Effect.gen(function* () {
 					),
 				)
 			}
-			const response = yield* httpClient.execute(req).pipe(
-				Effect.mapError(
-					(error) => new MapleApiError({ status: 0, message: `Maple API request failed: ${error.message}` }),
-				),
-			)
+			const response = yield* httpClient
+				.execute(req)
+				.pipe(
+					Effect.mapError(
+						(error) =>
+							new MapleApiError({
+								status: 0,
+								message: `Maple API request failed: ${error.message}`,
+							}),
+					),
+				)
 			// Drain the body either way so the connection is released.
 			const text = yield* response.text.pipe(
 				Effect.mapError(
 					(error) =>
-						new MapleApiError({ status: response.status, message: `Failed to read response: ${error.message}` }),
+						new MapleApiError({
+							status: response.status,
+							message: `Failed to read response: ${error.message}`,
+						}),
 				),
 			)
 			if (response.status >= 200 && response.status < 300) {
@@ -129,8 +138,7 @@ export const make = Effect.gen(function* () {
 })
 
 /** Live client: {@link MapleEnvironment} + the runtime's global `fetch`. */
-export const MapleApiLive = () =>
-	Layer.effect(MapleApi, make).pipe(Layer.provide(FetchHttpClient.layer))
+export const MapleApiLive = () => Layer.effect(MapleApi, make).pipe(Layer.provide(FetchHttpClient.layer))
 
 /**
  * Fetch every page of a v2 list endpoint (`{ object: "list", data, has_more,
@@ -146,7 +154,9 @@ export const listAll = (
 		do {
 			const sep = path.includes("?") ? "&" : "?"
 			const page = (yield* api.get(
-				cursor === null ? `${path}${sep}limit=100` : `${path}${sep}limit=100&cursor=${encodeURIComponent(cursor)}`,
+				cursor === null
+					? `${path}${sep}limit=100`
+					: `${path}${sep}limit=100&cursor=${encodeURIComponent(cursor)}`,
 			)) as { data?: ReadonlyArray<unknown>; has_more?: boolean; next_cursor?: string | null }
 			items.push(...(page.data ?? []))
 			cursor = page.has_more === true && typeof page.next_cursor === "string" ? page.next_cursor : null

@@ -87,7 +87,11 @@ export function describeCloudflareError(raw: string): CloudflareErrorInfo {
 	const has = (...needles: Array<string>) => needles.some((n) => s.includes(n))
 
 	if (has("revoked", "no longer valid"))
-		return { summary: "Cloudflare access was revoked — reconnect to resume.", tone: "error", scope: "account" }
+		return {
+			summary: "Cloudflare access was revoked — reconnect to resume.",
+			tone: "error",
+			scope: "account",
+		}
 	if (has("lacks the analytics scopes", "scope"))
 		return { summary: "Reconnect to grant Maple analytics access.", tone: "warning", scope: "account" }
 	if (has("cloudflare_oauth_client_id", "is required", "ingest key unavailable"))
@@ -97,13 +101,29 @@ export function describeCloudflareError(raw: string): CloudflareErrorInfo {
 			scope: "account",
 		}
 	if (has("not authenticated", "not authorized", "unauthorized", "access denied"))
-		return { summary: "Cloudflare denied the request — reconnect to refresh access.", tone: "error", scope: "account" }
+		return {
+			summary: "Cloudflare denied the request — reconnect to refresh access.",
+			tone: "error",
+			scope: "account",
+		}
 	if (has("no longer present"))
-		return { summary: "This zone was removed from your Cloudflare account.", tone: "warning", scope: "resource" }
+		return {
+			summary: "This zone was removed from your Cloudflare account.",
+			tone: "warning",
+			scope: "resource",
+		}
 	if (has("not enabled", "disabled"))
-		return { summary: "Analytics isn't enabled for this zone in Cloudflare.", tone: "warning", scope: "resource" }
+		return {
+			summary: "Analytics isn't enabled for this zone in Cloudflare.",
+			tone: "warning",
+			scope: "resource",
+		}
 	if (has("unknown field", "cannot query"))
-		return { summary: "Some analytics aren't available on this Cloudflare plan.", tone: "warning", scope: "resource" }
+		return {
+			summary: "Some analytics aren't available on this Cloudflare plan.",
+			tone: "warning",
+			scope: "resource",
+		}
 
 	return { summary: raw, tone: "error", scope: "resource" }
 }
@@ -185,10 +205,20 @@ export function zoneStatus(entry: ZoneEntry, usageLoaded: boolean): ZoneStatusIn
 	const showInlineError = err != null && !accountPaused && err.scope === "resource"
 
 	if (!enabled) {
-		return { kind: "disabled", dot: "bg-muted-foreground/40", detail: "Disabled", detailClass: "text-muted-foreground" }
+		return {
+			kind: "disabled",
+			dot: "bg-muted-foreground/40",
+			detail: "Disabled",
+			detailClass: "text-muted-foreground",
+		}
 	}
 	if (accountPaused) {
-		return { kind: "paused", dot: "bg-muted-foreground/40", detail: "Paused", detailClass: "text-muted-foreground" }
+		return {
+			kind: "paused",
+			dot: "bg-muted-foreground/40",
+			detail: "Paused",
+			detailClass: "text-muted-foreground",
+		}
 	}
 	if (showInlineError && err && lastError) {
 		const isError = err.tone === "error"
@@ -203,12 +233,20 @@ export function zoneStatus(entry: ZoneEntry, usageLoaded: boolean): ZoneStatusIn
 		return {
 			kind: "live",
 			dot: "bg-success",
-			detail: usage?.lastDataAt != null ? `Last data ${relativeFromMs(usage.lastDataAt)}` : "Receiving data",
+			detail:
+				usage?.lastDataAt != null
+					? `Last data ${relativeFromMs(usage.lastDataAt)}`
+					: "Receiving data",
 			detailClass: "text-muted-foreground",
 		}
 	}
 	if (usageLoaded && lastSyncedAt) {
-		return { kind: "no-data", dot: "bg-warning", detail: "No data in last 24h", detailClass: "text-warning-foreground" }
+		return {
+			kind: "no-data",
+			dot: "bg-warning",
+			detail: "No data in last 24h",
+			detailClass: "text-warning-foreground",
+		}
 	}
 	if (lastSyncedAt) {
 		return {
@@ -218,7 +256,12 @@ export function zoneStatus(entry: ZoneEntry, usageLoaded: boolean): ZoneStatusIn
 			detailClass: "text-muted-foreground",
 		}
 	}
-	return { kind: "no-data", dot: "bg-warning", detail: "Waiting for first data", detailClass: "text-warning-foreground" }
+	return {
+		kind: "no-data",
+		dot: "bg-warning",
+		detail: "Waiting for first data",
+		detailClass: "text-warning-foreground",
+	}
 }
 
 /**
@@ -253,9 +296,7 @@ function ResourceRow({
 					{name}
 				</span>
 				{/* In a narrow card the status column is hidden, so surface the detail under the name. */}
-				<div className={cn("mt-0.5 text-[11px] @lg:hidden", status.detailClass)}>
-					{status.detail}
-				</div>
+				<div className={cn("mt-0.5 text-[11px] @lg:hidden", status.detailClass)}>{status.detail}</div>
 			</div>
 			<div
 				className={cn(
@@ -284,7 +325,10 @@ function ResourceRow({
 			<Link
 				to="/infra/cloudflare/$zoneName"
 				params={{ zoneName: zoneLink }}
-				className={cn(rowClass, "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none")}
+				className={cn(
+					rowClass,
+					"hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
+				)}
 			>
 				{body}
 			</Link>
@@ -331,7 +375,9 @@ function ZoneChip({
 		>
 			{dot ? <span aria-hidden className={cn("size-1.5 rounded-full", dot)} /> : null}
 			{label}
-			<span className={cn("tabular-nums", active ? "text-muted-foreground" : "text-muted-foreground/70")}>
+			<span
+				className={cn("tabular-nums", active ? "text-muted-foreground" : "text-muted-foreground/70")}
+			>
 				{count}
 			</span>
 		</button>
@@ -371,7 +417,13 @@ export function CloudflareZoneBoard({
 	)
 
 	const counts = useMemo(() => {
-		const tally: Record<ZoneStatusKind, number> = { live: 0, issue: 0, "no-data": 0, paused: 0, disabled: 0 }
+		const tally: Record<ZoneStatusKind, number> = {
+			live: 0,
+			issue: 0,
+			"no-data": 0,
+			paused: 0,
+			disabled: 0,
+		}
 		for (const zone of decorated) tally[zone.status.kind] += 1
 		return tally
 	}, [decorated])
@@ -431,7 +483,12 @@ export function CloudflareZoneBoard({
 					aria-label="Filter zones by status"
 					className="ml-auto flex flex-wrap items-center gap-1.5"
 				>
-					<ZoneChip label="All" count={decorated.length} active={filter === "all"} onClick={activeChip("all")} />
+					<ZoneChip
+						label="All"
+						count={decorated.length}
+						active={filter === "all"}
+						onClick={activeChip("all")}
+					/>
 					{CHIP_ORDER.filter((kind) => counts[kind] > 0).map((kind) => (
 						<ZoneChip
 							key={kind}
@@ -466,7 +523,6 @@ export function CloudflareZoneBoard({
 
 			{banner ? <div className="px-3 pt-3">{banner}</div> : null}
 			<div className="flex flex-col">
-
 				{/* Sortable column header — aligns with the row's leading status-dot via an invisible spacer. */}
 				<div className="flex items-center gap-3 border-b border-border/60 px-3 py-2">
 					<span aria-hidden className="size-1.5 shrink-0" />
@@ -500,9 +556,7 @@ export function CloudflareZoneBoard({
 
 				{sorted.length === 0 ? (
 					<div className="px-3 py-10 text-center text-[12px] text-muted-foreground">
-						{query
-							? `No zones match "${search.trim()}".`
-							: "No zones in this state."}
+						{query ? `No zones match "${search.trim()}".` : "No zones in this state."}
 					</div>
 				) : (
 					// Plain max-height + overflow container (not the Base UI ScrollArea, whose `h-full`

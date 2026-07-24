@@ -49,9 +49,13 @@ export type CollectionState<T> = AsyncResult.AsyncResult<ReadonlyArray<T>, Colle
 const snapshot = <T extends object>(collection: Collection<T, any, any>): CollectionState<T> => {
 	switch (collection.status) {
 		case "error":
-			return AsyncResult.fail(new CollectionError({ reason: "load-failed", message: "Collection failed to load" }))
+			return AsyncResult.fail(
+				new CollectionError({ reason: "load-failed", message: "Collection failed to load" }),
+			)
 		case "cleaned-up":
-			return AsyncResult.fail(new CollectionError({ reason: "cleaned-up", message: "Collection has been cleaned up" }))
+			return AsyncResult.fail(
+				new CollectionError({ reason: "cleaned-up", message: "Collection has been cleaned up" }),
+			)
 		case "idle":
 		case "loading":
 			return AsyncResult.initial(true)
@@ -152,7 +156,10 @@ const watchStuck = <T>(
 				yield* Store.set(
 					store,
 					AsyncResult.fail(
-						new CollectionError({ reason: "load-timeout", message: "Collection timed out while loading" }),
+						new CollectionError({
+							reason: "load-timeout",
+							message: "Collection timed out while loading",
+						}),
 					),
 				)
 				if (onStuck) yield* Effect.sync(onStuck)
@@ -247,7 +254,11 @@ export const liveQuery = <TContext extends Context>(
 					}),
 				),
 				(collection) => Effect.promise(() => collection.cleanup()),
-			).pipe(Effect.map((collection) => changes<GetResult<TContext>>(collection, options?.startSync ?? true))),
+			).pipe(
+				Effect.map((collection) =>
+					changes<GetResult<TContext>>(collection, options?.startSync ?? true),
+				),
+			),
 		)
 		yield* Registry.run(collectionChanges.pipe(Stream.mapEffect((state) => Store.set(store, state))))
 		return store

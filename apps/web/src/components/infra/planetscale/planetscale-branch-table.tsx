@@ -21,10 +21,10 @@ export function PlanetScaleBranchTable({
 	branchInfoByName: ReadonlyMap<string, { production: boolean; ready: boolean }>
 	waiting?: boolean
 }) {
-	const { sorted, sortKey, sortDir, handleSort } = useTableSort<PlanetScaleBranchStat, SortKey>(
-		branches,
-		{ initialKey: "connectionsAvg", stringKeys: ["branch"] },
-	)
+	const { sorted, sortKey, sortDir, handleSort } = useTableSort<PlanetScaleBranchStat, SortKey>(branches, {
+		initialKey: "connectionsAvg",
+		stringKeys: ["branch"],
+	})
 
 	return (
 		<TableShell
@@ -90,7 +90,9 @@ export function PlanetScaleBranchTable({
 						className="flex items-center gap-4 border-b border-border/40 px-4 py-3 last:border-0"
 					>
 						<div className="flex min-w-[200px] flex-1 items-center gap-2 overflow-hidden">
-							<span className="truncate font-mono text-[13px] text-foreground">{row.branch}</span>
+							<span className="truncate font-mono text-[13px] text-foreground">
+								{row.branch}
+							</span>
 							{info?.production ? (
 								<Badge variant="outline" className="shrink-0">
 									production

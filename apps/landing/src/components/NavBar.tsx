@@ -396,10 +396,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								</span>
 								{stars != null && <span className="tabular-nums">{formatStars(stars)}</span>}
 							</a>
-							<a
-								href="https://app.maple.dev"
-								className={buttonVariants({ size: "sm" })}
-							>
+							<a href="https://app.maple.dev" className={buttonVariants({ size: "sm" })}>
 								<CTAButton />
 							</a>
 						</div>

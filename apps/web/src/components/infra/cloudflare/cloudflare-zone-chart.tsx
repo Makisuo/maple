@@ -72,7 +72,13 @@ function metricValue(agg: ZoneAgg, metric: CloudflareZoneMetric): number {
  * counts per bucket first and derives ratios from the pooled counts — never an
  * average of ratios.
  */
-export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId }: CloudflareZoneChartProps) {
+export function CloudflareZoneChart({
+	buckets,
+	metric,
+	topZones,
+	waiting,
+	syncId,
+}: CloudflareZoneChartProps) {
 	const { data, series } = useMemo(() => {
 		const topSet = new Set(topZones)
 		const byBucketZone = new Map<string, Map<string, ZoneAgg>>()
@@ -119,10 +125,7 @@ export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId
 	}, [topZones])
 
 	const config = useMemo<ChartConfig>(
-		() =>
-			Object.fromEntries(
-				series.map((name) => [name, { label: name, color: seriesColor.get(name) }]),
-			),
+		() => Object.fromEntries(series.map((name) => [name, { label: name, color: seriesColor.get(name) }])),
 		[series, seriesColor],
 	)
 
@@ -146,7 +149,11 @@ export function CloudflareZoneChart({ buckets, metric, topZones, waiting, syncId
 						syncId={syncId}
 						syncMethod="value"
 					>
-						<CartesianGrid strokeDasharray={CHART_GRID_DASH} stroke="var(--border)" vertical={false} />
+						<CartesianGrid
+							strokeDasharray={CHART_GRID_DASH}
+							stroke="var(--border)"
+							vertical={false}
+						/>
 						<XAxis
 							dataKey="time"
 							tickLine={false}

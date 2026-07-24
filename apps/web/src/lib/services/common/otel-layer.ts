@@ -28,10 +28,12 @@ const telemetry = MapleFlush.make({
 	// Expected 4xx API responses (the maple-web → maple-api edge surfaces these
 	// as client-span failures) record as Ok instead of errors.
 	anticipatedErrorIdentifiers: [...ANTICIPATED_ERROR_IDENTIFIERS],
-	// Maple's dashboard prioritizes operator responsiveness over self-replay.
-	// Keep lightweight session metadata and trace/log correlation, but do not
-	// run rrweb DOM capture, compression, and upload loops in every open tab.
-	replay: { enabled: false },
+	// rrweb self-recording. #225 disabled this while the recorder was pathological
+	// (full-buffer re-stringify per flush, 30s DOM checkouts, unbounded buffer);
+	// that same PR fixed all three (serialize-once at emit, 5-min checkouts, 4MB
+	// cap, idle-scheduled flush), so it is back on. The perf-bench build sets
+	// VITE_MAPLE_REPLAY=off — see playwright.config.ts.
+	replay: { enabled: import.meta.env.VITE_MAPLE_REPLAY !== "off" },
 })
 
 export const mapleOtelLayer = telemetry.layer

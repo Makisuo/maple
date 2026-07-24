@@ -44,7 +44,10 @@ export function InvestigationSidebar({
 			<Group label="Assessment">
 				<Row label="Severity">
 					{result ? (
-						<Badge variant="outline" className={cn("capitalize", SEVERITY_TONE[result.severityAssessment])}>
+						<Badge
+							variant="outline"
+							className={cn("capitalize", SEVERITY_TONE[result.severityAssessment])}
+						>
 							{SEVERITY_LABEL[result.severityAssessment]}
 						</Badge>
 					) : (
@@ -62,7 +65,9 @@ export function InvestigationSidebar({
 					<div className="grid grid-cols-[88px_1fr] items-baseline gap-x-3 py-0.5">
 						<span className="text-xs text-muted-foreground">{subject.headline.label}</span>
 						<div className="flex min-w-0 flex-col items-end gap-0.5">
-							<span className="font-mono text-sm tabular-nums text-foreground">{subject.headline.primary}</span>
+							<span className="font-mono text-sm tabular-nums text-foreground">
+								{subject.headline.primary}
+							</span>
 							{subject.headline.secondary ? (
 								<span
 									className={cn(

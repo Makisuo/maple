@@ -1114,12 +1114,22 @@ export interface AlertsServiceShape {
 		ruleId: AlertRuleId,
 		options: {
 			readonly groupKey?: string
+			readonly status?: AlertCheckDocument["status"]
 			readonly since?: string
 			readonly until?: string
 			readonly limit?: number
-			readonly offset?: number
+			readonly beforeTimestamp?: string
+			readonly beforeGroupKey?: string
 		},
 	) => Effect.Effect<AlertChecksListResponse, AlertPersistenceError | AlertNotFoundError>
+	readonly summarizeRuleChecks: (
+		orgId: OrgId,
+		ruleId: AlertRuleId,
+		options: {
+			readonly since: string
+			readonly until: string
+		},
+	) => Effect.Effect<AlertChecksSummary, AlertPersistenceError | AlertNotFoundError | AlertValidationError>
 	readonly listDeliveryEvents: (
 		orgId: OrgId,
 	) => Effect.Effect<AlertDeliveryEventsListResponse, AlertPersistenceError>
@@ -1135,6 +1145,33 @@ export interface AlertsServiceShape {
 		// inside the per-rule Effect.catch in the scheduler tick, so the tick
 		// itself never surfaces them.
 	>
+}
+
+export interface AlertChecksSummaryPoint {
+	readonly bucket: string
+	readonly groupKey: string
+	readonly totalCount: number
+	readonly breachedCount: number
+	readonly healthyCount: number
+	readonly skippedCount: number
+	readonly errorCount: number
+	readonly transitionCount: number
+	readonly observedValue: number | null
+	readonly threshold: number
+}
+
+export interface AlertChecksSummary {
+	readonly bucketSeconds: number
+	readonly topGroupKeys: ReadonlyArray<string>
+	readonly points: ReadonlyArray<AlertChecksSummaryPoint>
+	readonly totals: {
+		readonly total: number
+		readonly breached: number
+		readonly healthy: number
+		readonly skipped: number
+		readonly error: number
+		readonly transitions: number
+	}
 }
 
 export interface ListAlertIncidentsOptions {
@@ -3139,10 +3176,12 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				ruleId: AlertRuleId,
 				options: {
 					readonly groupKey?: string
+					readonly status?: AlertCheckDocument["status"]
 					readonly since?: string
 					readonly until?: string
 					readonly limit?: number
-					readonly offset?: number
+					readonly beforeTimestamp?: string
+					readonly beforeGroupKey?: string
 				},
 			) {
 				// Verify the rule exists and belongs to this org before querying Tinybird.
@@ -3169,22 +3208,33 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 
 				const since = options.since != null ? toTinybirdSqlDateTime64(options.since) : null
 				const until = options.until != null ? toTinybirdSqlDateTime64(options.until) : null
+				const beforeTimestamp =
+					options.beforeTimestamp != null ? toTinybirdSqlDateTime64(options.beforeTimestamp) : null
 				const hasGroupKey = options.groupKey != null && options.groupKey !== ""
 
 				const compiled = CH.compile(
 					CH.listRuleChecksQuery({
 						limit,
-						offset: Math.max(Math.trunc(options.offset ?? 0), 0),
 						groupKey: hasGroupKey ? options.groupKey : undefined,
+						status: options.status,
 						since: since ?? undefined,
 						until: until ?? undefined,
+						beforeTimestamp: beforeTimestamp ?? undefined,
+						beforeGroupKey: beforeTimestamp != null ? (options.beforeGroupKey ?? "") : undefined,
 					}),
 					{
 						orgId,
 						ruleId,
 						...(hasGroupKey ? { groupKey: options.groupKey } : {}),
+						...(options.status != null ? { status: options.status } : {}),
 						...(since != null ? { since } : {}),
 						...(until != null ? { until } : {}),
+						...(beforeTimestamp != null
+							? {
+									beforeTimestamp,
+									beforeGroupKey: options.beforeGroupKey ?? "",
+								}
+							: {}),
 					},
 				)
 
@@ -3253,6 +3303,118 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				})
 
 				return new AlertChecksListResponse({ checks })
+			})
+
+			const summarizeRuleChecks = Effect.fn("AlertsService.summarizeRuleChecks")(function* (
+				orgId: OrgId,
+				ruleId: AlertRuleId,
+				options: { readonly since: string; readonly until: string },
+			) {
+				const ruleRow = yield* dbExecute((db) =>
+					db
+						.select({ id: alertRules.id })
+						.from(alertRules)
+						.where(and(eq(alertRules.orgId, orgId), eq(alertRules.id, ruleId)))
+						.limit(1),
+				)
+				if (ruleRow.length === 0) {
+					return yield* new AlertNotFoundError({
+						message: "Alert rule not found",
+						resourceType: "alert_rule",
+						resourceId: ruleId,
+					})
+				}
+
+				const startMs = Date.parse(options.since)
+				const endMs = Date.parse(options.until)
+				const maxRangeMs = 365 * 24 * 60 * 60 * 1000
+				if (
+					!Number.isFinite(startMs) ||
+					!Number.isFinite(endMs) ||
+					endMs <= startMs ||
+					endMs - startMs > maxRangeMs
+				) {
+					return yield* Effect.fail(
+						makeValidationError(
+							"Alert check summaries require a valid range of at most 365 days",
+						),
+					)
+				}
+				const since = toTinybirdSqlDateTime64(options.since)
+				const until = toTinybirdSqlDateTime64(options.until)
+				if (since == null || until == null) {
+					return yield* Effect.fail(makeValidationError("Invalid alert check summary range"))
+				}
+
+				// At most 720 time buckets; minute alignment keeps the boundaries
+				// stable across refreshes and matches alert evaluation granularity.
+				const bucketSeconds = Math.max(1, Math.ceil((endMs - startMs) / 1000 / 720 / 60)) * 60
+				const tenant = systemTenant(orgId)
+				const groupRows = yield* warehouse
+					.compiledQuery(
+						tenant,
+						CH.compile(CH.alertCheckGroupTotalsQuery({ since, until, limit: 20 }), {
+							orgId,
+							ruleId,
+							since,
+							until,
+						}),
+						{ profile: "aggregation", context: "alertCheckSummaryGroups" },
+					)
+					.pipe(
+						Effect.mapError(
+							(error) =>
+								new AlertPersistenceError({
+									message: `Failed to summarize alert check groups: ${error.message}`,
+								}),
+						),
+					)
+				const topGroupKeys = groupRows.map((row) => String(row.groupKey ?? ""))
+				const rows = yield* warehouse
+					.compiledQuery(
+						tenant,
+						CH.compile(CH.alertChecksSummaryQuery({ topGroupKeys }), {
+							orgId,
+							ruleId,
+							since,
+							until,
+							bucketSeconds,
+						}),
+						{ profile: "aggregation", context: "alertCheckSummary" },
+					)
+					.pipe(
+						Effect.mapError(
+							(error) =>
+								new AlertPersistenceError({
+									message: `Failed to summarize alert checks: ${error.message}`,
+								}),
+						),
+					)
+
+				const points: AlertChecksSummaryPoint[] = rows.map((row) => ({
+					bucket: String(row.bucket),
+					groupKey: String(row.groupKey ?? ""),
+					totalCount: Number(row.totalCount ?? 0),
+					breachedCount: Number(row.breachedCount ?? 0),
+					healthyCount: Number(row.healthyCount ?? 0),
+					skippedCount: Number(row.skippedCount ?? 0),
+					errorCount: Number(row.errorCount ?? 0),
+					transitionCount: Number(row.transitionCount ?? 0),
+					observedValue: row.observedValue == null ? null : Number(row.observedValue),
+					threshold: Number(row.threshold ?? 0),
+				}))
+				const totals = points.reduce(
+					(acc, point) => ({
+						total: acc.total + point.totalCount,
+						breached: acc.breached + point.breachedCount,
+						healthy: acc.healthy + point.healthyCount,
+						skipped: acc.skipped + point.skippedCount,
+						error: acc.error + point.errorCount,
+						transitions: acc.transitions + point.transitionCount,
+					}),
+					{ total: 0, breached: 0, healthy: 0, skipped: 0, error: 0, transitions: 0 },
+				)
+				return { bucketSeconds, topGroupKeys, points, totals } satisfies AlertChecksSummary
 			})
 
 			const listDeliveryEvents = Effect.fn("AlertsService.listDeliveryEvents")(function* (
@@ -4782,6 +4944,7 @@ export class AlertsService extends Context.Service<AlertsService, AlertsServiceS
 				listIncidents,
 				getIncident,
 				listRuleChecks,
+				summarizeRuleChecks,
 				listDeliveryEvents,
 				runSchedulerTick,
 			} satisfies AlertsServiceShape

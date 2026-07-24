@@ -54,7 +54,10 @@ Bun.serve({
 				const derived = createHash("sha256").update(verifier).digest("base64url")
 				if (issued.challenge !== derived) {
 					console.log("[mock-cf] PKCE MISMATCH", { expected: issued.challenge, derived })
-					return json({ error: "invalid_grant", error_description: "PKCE verification failed" }, 400)
+					return json(
+						{ error: "invalid_grant", error_description: "PKCE verification failed" },
+						400,
+					)
 				}
 				issuedCodes.delete(code)
 				return json({
@@ -150,7 +153,10 @@ const zoneFixture = (id: string, name: string) => ({
 	type: "full",
 })
 
-const MOCK_ZONES = [zoneFixture("mock-zone-1", "example.com"), zoneFixture("mock-zone-2", "assets.example.com")]
+const MOCK_ZONES = [
+	zoneFixture("mock-zone-1", "example.com"),
+	zoneFixture("mock-zone-2", "assets.example.com"),
+]
 
 const datasetSettings = () => ({
 	enabled: true,
@@ -197,20 +203,38 @@ const httpAnalyticsData = (variables: Record<string, unknown> | undefined) => {
 					{
 						count: 40 + jitter(bucket, zi, 30),
 						avg: { sampleInterval: 10 },
-						sum: { edgeResponseBytes: 800_000 + jitter(bucket, zi + 10, 400_000), visits: 25 + jitter(bucket, zi + 20, 20) },
-						dimensions: { datetimeFiveMinutes: bucket, cacheStatus: "hit", edgeResponseStatus: 200 },
+						sum: {
+							edgeResponseBytes: 800_000 + jitter(bucket, zi + 10, 400_000),
+							visits: 25 + jitter(bucket, zi + 20, 20),
+						},
+						dimensions: {
+							datetimeFiveMinutes: bucket,
+							cacheStatus: "hit",
+							edgeResponseStatus: 200,
+						},
 					},
 					{
 						count: 12 + jitter(bucket, zi + 30, 10),
 						avg: { sampleInterval: 10 },
-						sum: { edgeResponseBytes: 300_000 + jitter(bucket, zi + 40, 150_000), visits: 8 + jitter(bucket, zi + 50, 6) },
-						dimensions: { datetimeFiveMinutes: bucket, cacheStatus: "miss", edgeResponseStatus: 200 },
+						sum: {
+							edgeResponseBytes: 300_000 + jitter(bucket, zi + 40, 150_000),
+							visits: 8 + jitter(bucket, zi + 50, 6),
+						},
+						dimensions: {
+							datetimeFiveMinutes: bucket,
+							cacheStatus: "miss",
+							edgeResponseStatus: 200,
+						},
 					},
 					{
 						count: 1 + jitter(bucket, zi + 60, 3),
 						avg: { sampleInterval: 10 },
 						sum: { edgeResponseBytes: 20_000, visits: 1 },
-						dimensions: { datetimeFiveMinutes: bucket, cacheStatus: "dynamic", edgeResponseStatus: 503 },
+						dimensions: {
+							datetimeFiveMinutes: bucket,
+							cacheStatus: "dynamic",
+							edgeResponseStatus: 503,
+						},
 					},
 				]),
 				latency: buckets.map((bucket) => ({
@@ -238,24 +262,40 @@ const workersAnalyticsData = (variables: Record<string, unknown> | undefined) =>
 				{
 					invocations: buckets.flatMap((bucket) => [
 						{
-							sum: { requests: 120 + jitter(bucket, 200, 60), errors: jitter(bucket, 210, 4), subrequests: 40 },
+							sum: {
+								requests: 120 + jitter(bucket, 200, 60),
+								errors: jitter(bucket, 210, 4),
+								subrequests: 40,
+							},
 							quantiles: {
 								cpuTimeP50: 1200 + jitter(bucket, 220, 800),
 								cpuTimeP99: 8000 + jitter(bucket, 230, 4000),
 								durationP50: 0.004,
 								durationP99: 0.06,
 							},
-							dimensions: { datetimeFiveMinutes: bucket, scriptName: "mock-api-worker", status: "success" },
+							dimensions: {
+								datetimeFiveMinutes: bucket,
+								scriptName: "mock-api-worker",
+								status: "success",
+							},
 						},
 						{
-							sum: { requests: jitter(bucket, 240, 5), errors: jitter(bucket, 240, 5), subrequests: 0 },
+							sum: {
+								requests: jitter(bucket, 240, 5),
+								errors: jitter(bucket, 240, 5),
+								subrequests: 0,
+							},
 							quantiles: {
 								cpuTimeP50: 900,
 								cpuTimeP99: 5000,
 								durationP50: 0.003,
 								durationP99: 0.04,
 							},
-							dimensions: { datetimeFiveMinutes: bucket, scriptName: "mock-api-worker", status: "scriptThrewException" },
+							dimensions: {
+								datetimeFiveMinutes: bucket,
+								scriptName: "mock-api-worker",
+								status: "scriptThrewException",
+							},
 						},
 					]),
 				},

@@ -109,6 +109,24 @@ export const ServiceOverviewSpans = table("service_overview_spans", {
 	SampleRate: T.float64,
 })
 
+export const ServiceOverviewHourly = table("service_overview_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	ServiceNamespace: T.string,
+	CommitSha: T.string,
+	SpanCount: T.uint64,
+	EstimatedSpanCount: T.float64,
+	ErrorCount: T.uint64,
+	EstimatedErrorCount: T.float64,
+	DurationSum: T.float64,
+	DurationQuantiles: T.string,
+	FirstSeen: T.dateTime,
+	ApdexSatisfiedCount: T.uint64,
+	ApdexToleratingCount: T.uint64,
+})
+
 export const ErrorSpans = table("error_spans", {
 	OrgId: T.string,
 	Timestamp: T.dateTime,
@@ -416,6 +434,20 @@ export const ServicePlatformsHourly = table("service_platforms_hourly", {
 	MapleSdkType: T.string,
 	ProcessRuntimeName: T.string,
 	SpanCount: T.uint64,
+})
+
+export const ServiceOperationsHourly = table("service_operations_hourly", {
+	OrgId: T.string,
+	Hour: T.dateTime,
+	ServiceName: T.string,
+	DeploymentEnv: T.string,
+	SpanName: T.string,
+	SpanCount: T.uint64,
+	EstimatedSpanCount: T.float64,
+	ErrorCount: T.uint64,
+	EstimatedErrorCount: T.float64,
+	DurationSum: T.float64,
+	DurationQuantiles: T.string,
 })
 
 export const AlertChecks = table("alert_checks", {

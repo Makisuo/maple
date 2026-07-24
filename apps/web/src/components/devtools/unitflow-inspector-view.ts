@@ -21,7 +21,10 @@ const MAX_DEPTH = 16
 
 /** Walk `cause` pointers to the topmost ancestor still present in the buffer (a
  * cause evicted from the ring is treated as a root). Cycle- and depth-guarded. */
-const climb = (event: DebugEvent, bySeq: Map<number, DebugEvent>): { readonly root: number; readonly depth: number } => {
+const climb = (
+	event: DebugEvent,
+	bySeq: Map<number, DebugEvent>,
+): { readonly root: number; readonly depth: number } => {
 	let current = event
 	let depth = 0
 	const seen = new Set<number>([current.seq])
@@ -41,7 +44,10 @@ const climb = (event: DebugEvent, bySeq: Map<number, DebugEvent>): { readonly ro
  * indented by depth. Groups are ordered newest-root-first; within a group,
  * events keep seq order. This is the "what caused what" view.
  */
-export const buildCausalGroups = (events: ReadonlyArray<DebugEvent>, limit: number): ReadonlyArray<CausalGroup> => {
+export const buildCausalGroups = (
+	events: ReadonlyArray<DebugEvent>,
+	limit: number,
+): ReadonlyArray<CausalGroup> => {
 	const bySeq = new Map(events.map((event) => [event.seq, event]))
 	const recent = events.slice(Math.max(0, events.length - limit))
 	const groups = new Map<number, { root: number; items: Array<{ event: DebugEvent; depth: number }> }>()
@@ -69,7 +75,9 @@ export const filterEvents = (
 		needle === ""
 			? events
 			: events.filter(
-					(event) => event.name.toLowerCase().includes(needle) || event.type.toLowerCase().includes(needle),
+					(event) =>
+						event.name.toLowerCase().includes(needle) ||
+						event.type.toLowerCase().includes(needle),
 				)
 	return matched.slice(Math.max(0, matched.length - limit)).reverse()
 }
@@ -110,7 +118,9 @@ export const previewValue = (value: unknown): string => {
 export type EventTypeVariant = "info" | "success" | "secondary" | "warning"
 
 /** Badge styling + label per event type. */
-export const eventTypeMeta = (type: DebugEvent["type"]): { readonly label: string; readonly variant: EventTypeVariant } => {
+export const eventTypeMeta = (
+	type: DebugEvent["type"],
+): { readonly label: string; readonly variant: EventTypeVariant } => {
 	switch (type) {
 		case "emit":
 			return { label: "emit", variant: "info" }

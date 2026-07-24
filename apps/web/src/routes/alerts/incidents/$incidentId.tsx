@@ -88,7 +88,9 @@ function AlertIncidentPage() {
 				<Empty>
 					<EmptyHeader>
 						<EmptyTitle>Incident not found</EmptyTitle>
-						<EmptyDescription>It may have been resolved and pruned, or the link is stale.</EmptyDescription>
+						<EmptyDescription>
+							It may have been resolved and pruned, or the link is stale.
+						</EmptyDescription>
 					</EmptyHeader>
 					<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
 						Back to alerts

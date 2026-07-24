@@ -15,7 +15,9 @@ const makeStub = (
 		calls.push(`${method} ${path}`)
 		const handler = routes[`${method} ${path}`]
 		if (handler === undefined) {
-			return Effect.fail<MapleError>(new MapleNotFoundError({ status: 404, message: `no route: ${method} ${path}` }))
+			return Effect.fail<MapleError>(
+				new MapleNotFoundError({ status: 404, message: `no route: ${method} ${path}` }),
+			)
 		}
 		return handler(body)
 	}
@@ -49,10 +51,7 @@ const wireDashboard = {
 	updated_at: "2026-07-01T12:00:00.000Z",
 }
 
-const runWithProvider = <A>(
-	api: MapleApiShape,
-	program: Effect.Effect<A, unknown, any>,
-): Promise<A> =>
+const runWithProvider = <A>(api: MapleApiShape, program: Effect.Effect<A, unknown, any>): Promise<A> =>
 	Effect.runPromise(
 		program.pipe(
 			Effect.provide(DashboardProvider().pipe(Layer.provide(Layer.succeed(MapleApi, api)))),
@@ -261,7 +260,8 @@ describe("ApiKeyProvider", () => {
 	it("recreates when the key was revoked out-of-band", async () => {
 		const stub = makeStub({
 			"GET /v2/api_keys/key_abc": () => Effect.succeed({ ...wireApiKey, revoked: true }),
-			"POST /v2/api_keys": () => Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
+			"POST /v2/api_keys": () =>
+				Effect.succeed({ ...wireApiKey, id: "key_new", secret: "maple_ak_secret2" }),
 		})
 		const attributes = await runWithProvider(
 			stub.api,

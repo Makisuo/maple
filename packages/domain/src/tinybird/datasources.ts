@@ -339,7 +339,7 @@ export const serviceMapEdgesHourly = defineDatasource("service_map_edges_hourly"
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "SourceService", "TargetService"],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -374,26 +374,12 @@ export const serviceMapDbEdgesHourly = defineDatasource("service_map_db_edges_ho
 		SampleRateSum: t.simpleAggregateFunction("sum", t.float64()),
 		DbNamespace: t.string().lowCardinality(),
 	},
-	// The 90d rollup TTL outlives the 30d `traces` source, so a deploy that
-	// re-points the MV can't reconstruct the full window from `traces`. Carry
-	// existing rows forward (non-destructive) instead — same pattern as the other
-	// hourly rollups (`service_map_db_query_shapes_hourly`, `logs_aggregates_hourly`,
-	// `service_platforms_hourly`). The DbNamespace add-deploy (migration 0006) is
-	// COMPLETE — the column now exists in the deployed datasource and is populated,
-	// so the forward query carries it through unchanged. Re-defaulting it (the old
-	// `defaultValueOfTypeName(...)`) would overwrite the values accumulated since,
-	// which Tinybird rejects on every later deploy.
-	forwardQuery: `SELECT
-    OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
-    CallCount, ErrorCount, DurationSumMs, MaxDurationMs,
-    SampledSpanCount, UnsampledSpanCount, SampleRateSum,
-    DbNamespace`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		// DbNamespace is a grouping dimension, so it must live in the sorting key —
 		// AggregatingMergeTree collapses non-key, non-aggregate columns on merge.
 		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem", "DbNamespace"],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -451,22 +437,8 @@ export const serviceMapDbQueryShapesHourly = defineDatasource("service_map_db_qu
 		// DbNamespace sits before QueryKey: the detail panel filters by
 		// (ServiceName, DbSystem, DbNamespace) and aggregates over QueryKey.
 		sortingKey: ["OrgId", "Hour", "DeploymentEnv", "ServiceName", "DbSystem", "DbNamespace", "QueryKey"],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
-	// The 90d rollup TTL outlives the 30d `traces` source, so a backfill from
-	// `traces` can't reconstruct the full window. Carry existing rows forward
-	// (non-destructive deploy) instead — same pattern as the other hourly
-	// rollups (`logs_aggregates_hourly`, `service_usage_hourly`). The DbNamespace
-	// add-deploy (migration 0006) is COMPLETE — the column now exists in the
-	// deployed datasource and is populated, so the forward query carries it through
-	// unchanged. Re-defaulting it (the old `defaultValueOfTypeName(...)`) would
-	// overwrite the values accumulated since, which Tinybird rejects on every later deploy.
-	forwardQuery: `SELECT
-    OrgId, Hour, ServiceName, DbSystem, DeploymentEnv,
-    QueryKey, QueryLabel, SampleStatement,
-    CallCount, ErrorCount, EstimatedCount, EstimatedErrorCount,
-    WeightedDurationSumMs, DurationQuantiles,
-    DbNamespace`,
 })
 
 export type ServiceMapDbQueryShapesHourlyRow = InferRow<typeof serviceMapDbQueryShapesHourly>
@@ -521,7 +493,7 @@ export const serviceExternalEdgesHourly = defineDatasource("service_external_edg
 			"TargetSystem",
 			"TargetName",
 		],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -564,7 +536,7 @@ export const serviceAddressResolutionsHourly = defineDatasource("service_address
 			"ParentServerAddress",
 			"ResolvedTargetService",
 		],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -602,27 +574,10 @@ export const servicePlatformsHourly = defineDatasource("service_platforms_hourly
 		ProcessRuntimeName: t.simpleAggregateFunction("max", t.string()),
 		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
-	// The K8sStatefulSetName/K8sDaemonSetName/K8sNamespaceName columns were added
-	// after this datasource already held data. This MV's 90-day TTL outlives the
-	// `traces` source's 30-day TTL, so a re-populate from `traces` couldn't refill
-	// the 30-90 day window; the add-deploy forward-migrated existing rows in place,
-	// defaulting the new columns to '' (the sentinel the `max()` platform
-	// classifier treats as "attribute not present"). That one-time migration is
-	// COMPLETE — the columns now exist in the deployed datasource and are
-	// populated, so the forward query carries them through unchanged. Re-defaulting
-	// them (the old `defaultValueOfTypeName(...)`) would overwrite the values
-	// accumulated since, which Tinybird rejects on every later deploy.
-	forwardQuery: `SELECT
-    OrgId, Hour, ServiceName, DeploymentEnv,
-    K8sCluster, K8sPodName, K8sDeploymentName,
-    K8sStatefulSetName,
-    K8sDaemonSetName,
-    K8sNamespaceName,
-    CloudPlatform, CloudProvider, FaasName, MapleSdkType, ProcessRuntimeName, SpanCount`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		sortingKey: ["OrgId", "Hour", "ServiceName", "DeploymentEnv"],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -666,6 +621,46 @@ export const serviceOverviewSpans = defineDatasource("service_overview_spans", {
 })
 
 export type ServiceOverviewSpansRow = InferRow<typeof serviceOverviewSpans>
+
+/**
+ * Hour-grain service overview metrics retained independently from the 30-day
+ * entry-point span projection. This is the durable source for service
+ * existence, golden signals, release markers, and environment/namespace
+ * discovery on long dashboard windows.
+ *
+ * Apdex columns use the service dashboard's fixed T=500ms threshold. Arbitrary
+ * Apdex thresholds continue to use the raw/projection path inside its shorter
+ * retention window.
+ */
+export const serviceOverviewHourly = defineDatasource("service_overview_hourly", {
+	description:
+		"Hourly service entry-point aggregates with release dimensions, sampling-aware counts, latency states, and fixed-500ms Apdex counts.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Hour: t.dateTime(),
+		ServiceName: t.string().lowCardinality(),
+		DeploymentEnv: t.string().lowCardinality(),
+		ServiceNamespace: t.string().lowCardinality(),
+		CommitSha: t.string().lowCardinality(),
+		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedSpanCount: t.simpleAggregateFunction("sum", t.float64()),
+		ErrorCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
+		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
+		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95, 0.99)", t.uint64()),
+		FirstSeen: t.simpleAggregateFunction("min", t.dateTime()),
+		ApdexSatisfiedCount: t.simpleAggregateFunction("sum", t.uint64()),
+		ApdexToleratingCount: t.simpleAggregateFunction("sum", t.uint64()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toYYYYMM(Hour)",
+		sortingKey: ["OrgId", "ServiceName", "Hour", "DeploymentEnv", "ServiceNamespace", "CommitSha"],
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
+	}),
+})
+
+export type ServiceOverviewHourlyRow = InferRow<typeof serviceOverviewHourly>
 
 /**
  * Pre-materialized error spans for the errors page.
@@ -1256,7 +1251,7 @@ export const alertChecks = defineDatasource("alert_checks", {
 	engine: engine.mergeTree({
 		partitionKey: "toDate(Timestamp)",
 		sortingKey: ["OrgId", "RuleId", "GroupKey", "Timestamp"],
-		ttl: "toDate(Timestamp) + INTERVAL 90 DAY",
+		ttl: "toDate(Timestamp) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -1306,6 +1301,37 @@ export const serviceOperationsMinutely = defineDatasource("service_operations_mi
 })
 
 export type ServiceOperationsMinutelyRow = InferRow<typeof serviceOperationsMinutely>
+
+/**
+ * Hour-grain companion to service_operations_minutely. It keeps the normalized
+ * operation identity and mergeable latency state for one year without paying
+ * the minute-level row cardinality for the full horizon.
+ */
+export const serviceOperationsHourly = defineDatasource("service_operations_hourly", {
+	description:
+		"Hourly service operation metrics merged from the minutely rollup for one-year operation history.",
+	jsonPaths: false,
+	schema: {
+		OrgId: t.string().lowCardinality(),
+		Hour: t.dateTime(),
+		ServiceName: t.string().lowCardinality(),
+		DeploymentEnv: t.string().lowCardinality(),
+		SpanName: t.string(),
+		SpanCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedSpanCount: t.simpleAggregateFunction("sum", t.float64()),
+		ErrorCount: t.simpleAggregateFunction("sum", t.uint64()),
+		EstimatedErrorCount: t.simpleAggregateFunction("sum", t.float64()),
+		DurationSum: t.simpleAggregateFunction("sum", t.float64()),
+		DurationQuantiles: t.aggregateFunction("quantilesTDigest(0.5, 0.95)", t.uint64()),
+	},
+	engine: engine.aggregatingMergeTree({
+		partitionKey: "toYYYYMM(Hour)",
+		sortingKey: ["OrgId", "ServiceName", "DeploymentEnv", "Hour", "SpanName"],
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
+	}),
+})
+
+export type ServiceOperationsHourlyRow = InferRow<typeof serviceOperationsHourly>
 
 /**
  * Generalized hourly aggregating MV target for traces. Stores partial state
@@ -1371,7 +1397,7 @@ export const tracesAggregatesHourly = defineDatasource("traces_aggregates_hourly
 			"IsEntryPoint",
 			"DeploymentEnv",
 		],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 })
 
@@ -1457,25 +1483,13 @@ export const logsAggregatesHourly = defineDatasource("logs_aggregates_hourly", {
 		SizeBytes: t.simpleAggregateFunction("sum", t.uint64()),
 		ServiceNamespace: t.string().lowCardinality(),
 	},
-	// ServiceNamespace was added after this 90-day aggregate already held data
-	// (the source `logs` table only retains 30 days, so the full window could not
-	// be rebuilt — the add-deploy defaulted the new dimension to '' in place).
-	// That one-time migration is COMPLETE: the column now exists in the deployed
-	// datasource and is populated. The forward query therefore carries every
-	// column — including ServiceNamespace — through unchanged. Re-defaulting it
-	// (the old `defaultValueOfTypeName(...) AS ServiceNamespace`) would overwrite
-	// the values accumulated since, which Tinybird rejects on every later deploy.
-	forwardQuery: `SELECT
-    OrgId, Hour, ServiceName, SeverityText, DeploymentEnv,
-    Count, SizeBytes,
-    ServiceNamespace`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		// ServiceNamespace is a grouping dimension, so it must live in the sorting
 		// key (like DeploymentEnv) — AggregatingMergeTree collapses non-key,
 		// non-aggregate columns on merge otherwise.
 		sortingKey: ["OrgId", "Hour", "ServiceName", "SeverityText", "DeploymentEnv", "ServiceNamespace"],
-		ttl: "toDate(Hour) + INTERVAL 90 DAY",
+		ttl: "toDate(Hour) + INTERVAL 365 DAY",
 	}),
 	indexes: [
 		{

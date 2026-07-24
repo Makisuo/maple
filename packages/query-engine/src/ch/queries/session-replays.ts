@@ -109,6 +109,9 @@ export interface SessionReplaysListOutput {
 	readonly clickCount: number
 	readonly errorCount: number
 	readonly traceCount: number
+	/** The SDK's `maple.session.recorded` marker: `"true"`, `"false"`, or `""`
+	 *  for sessions written before the SDK stamped it (absent map key). */
+	readonly recorded: string
 	/** Count of distilled events matching the event predicates. Present only when an
 	 *  `event*` filter is set (the event INNER JOIN selects it); absent otherwise. */
 	readonly matchCount?: number
@@ -151,6 +154,11 @@ export function sessionReplaysListQuery(
 			clickCount: argMax($.ClickCount, $.Version),
 			errorCount: argMax($.ErrorCount, $.Version),
 			traceCount: arrayLength(argMax($.TraceIds, $.Version)),
+			// Lets the list mark metadata-only sessions instead of sending the
+			// reader into a detail page with no recording. Reads out of the
+			// already-selected resource map — no join against session_replay_events,
+			// which would undo this query's partition pruning.
+			recorded: argMax($.ResourceAttributes.get("maple.session.recorded"), $.Version),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -217,6 +225,7 @@ export function sessionReplaysListQuery(
 				clickCount: $.clickCount,
 				errorCount: $.errorCount,
 				traceCount: $.traceCount,
+				recorded: $.recorded,
 				matchCount: $.e.matchCount,
 			}))
 			.where(($: any) => {
@@ -273,6 +282,7 @@ export function sessionReplaysListQuery(
 				clickCount: $.clickCount,
 				errorCount: $.errorCount,
 				traceCount: $.traceCount,
+				recorded: $.recorded,
 			}))
 			.where(($) => {
 				// The LEFT JOIN yields NULL activeTimeMs for sessions with no
@@ -314,6 +324,7 @@ export function sessionReplaysListQuery(
 			clickCount: $.clickCount,
 			errorCount: $.errorCount,
 			traceCount: $.traceCount,
+			recorded: $.recorded,
 		}))
 		.where(($) => [
 			// durationMs is NULL for in-progress (Version=1-only) sessions; leaving

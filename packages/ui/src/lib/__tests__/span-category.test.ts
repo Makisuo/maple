@@ -2,11 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import { describeSpan } from "../span-category"
 
-const span = (input: {
-	spanName: string
-	spanKind?: string
-	spanAttributes?: Record<string, string>
-}) => ({
+const span = (input: { spanName: string; spanKind?: string; spanAttributes?: Record<string, string> }) => ({
 	spanName: input.spanName,
 	spanKind: input.spanKind ?? "SPAN_KIND_INTERNAL",
 	spanAttributes: input.spanAttributes ?? {},
@@ -74,12 +70,12 @@ describe("describeSpan", () => {
 	})
 
 	it("categorizes producer and consumer spans as messaging", () => {
-		expect(describeSpan(span({ spanName: "publish", spanKind: "SPAN_KIND_PRODUCER" })).category).toMatchObject(
-			{ id: "messaging", label: "Producer" },
-		)
-		expect(describeSpan(span({ spanName: "receive", spanKind: "SPAN_KIND_CONSUMER" })).category).toMatchObject(
-			{ id: "messaging", label: "Consumer" },
-		)
+		expect(
+			describeSpan(span({ spanName: "publish", spanKind: "SPAN_KIND_PRODUCER" })).category,
+		).toMatchObject({ id: "messaging", label: "Producer" })
+		expect(
+			describeSpan(span({ spanName: "receive", spanKind: "SPAN_KIND_CONSUMER" })).category,
+		).toMatchObject({ id: "messaging", label: "Consumer" })
 	})
 
 	it("categorizes a Class.method span as function", () => {
@@ -97,7 +93,9 @@ describe("describeSpan", () => {
 	})
 
 	it("handles unknown and empty span kinds without crashing", () => {
-		expect(describeSpan(span({ spanName: "x", spanKind: "SPAN_KIND_WEIRD" })).category.label).toBe("WEIRD")
+		expect(describeSpan(span({ spanName: "x", spanKind: "SPAN_KIND_WEIRD" })).category.label).toBe(
+			"WEIRD",
+		)
 		expect(describeSpan(span({ spanName: "x", spanKind: "" })).category).toMatchObject({
 			id: "internal",
 			label: "Internal",

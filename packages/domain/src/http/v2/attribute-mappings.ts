@@ -14,10 +14,7 @@ import { PublicId, PublicIdPrefixes } from "./public-id"
 const wireExample = <A>(example: object): A => example as A
 
 /** `amap_…` public ID ⇄ internal `IngestAttributeMappingId` (raw UUID). */
-export const AttributeMappingPublicId = PublicId(
-	PublicIdPrefixes.attributeMapping,
-	IngestAttributeMappingId,
-)
+export const AttributeMappingPublicId = PublicId(PublicIdPrefixes.attributeMapping, IngestAttributeMappingId)
 
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1), Schema.isTrimmed())
 
@@ -35,12 +32,14 @@ const attributeMappingExample = {
 } as const
 
 const sourceContextField = IngestMappingSourceContext.annotate({
-	description: "Where the source attribute lives: `span` (span attributes) or `resource` (resource attributes).",
+	description:
+		"Where the source attribute lives: `span` (span attributes) or `resource` (resource attributes).",
 	examples: ["resource"],
 })
 
 const operationField = IngestMappingOperation.annotate({
-	description: "`move` renames the attribute (removes the source key); `copy` duplicates it under the target key.",
+	description:
+		"`move` renames the attribute (removes the source key); `copy` duplicates it under the target key.",
 	examples: ["copy"],
 })
 

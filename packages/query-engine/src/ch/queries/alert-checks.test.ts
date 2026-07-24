@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { compileCH } from "@maple-dev/clickhouse-builder"
-import { listRuleChecksQuery } from "./alert-checks"
+import { alertCheckGroupTotalsQuery, alertChecksSummaryQuery, listRuleChecksQuery } from "./alert-checks"
 
 const baseParams = {
 	orgId: "org_1",
@@ -59,10 +59,61 @@ describe("listRuleChecksQuery", () => {
 		expect(sql).toContain("OrgId = 'org\\'evil'")
 	})
 
-	it("respects the limit argument", () => {
-		const q = listRuleChecksQuery({ limit: 42, offset: 84 })
-		const { sql } = compileCH(q, baseParams)
+	it("applies status and the compound keyset cursor", () => {
+		const q = listRuleChecksQuery({
+			limit: 42,
+			status: "breached",
+			beforeTimestamp: "2024-01-02 03:04:05.000",
+			beforeGroupKey: "svc=worker",
+		})
+		const { sql } = compileCH(q, {
+			...baseParams,
+			status: "breached",
+			beforeTimestamp: "2024-01-02 03:04:05.000",
+			beforeGroupKey: "svc=worker",
+		})
 		expect(sql).toContain("LIMIT 42")
-		expect(sql).toContain("OFFSET 84")
+		expect(sql).toContain("Status = 'breached'")
+		expect(sql).toContain("Timestamp < '2024-01-02 03:04:05.000'")
+		expect(sql).toContain("GroupKey > 'svc=worker'")
+		expect(sql).not.toContain("OFFSET")
+	})
+})
+
+describe("alert history summaries", () => {
+	it("limits the group-ranking query", () => {
+		const { sql } = compileCH(
+			alertCheckGroupTotalsQuery({
+				since: "2024-01-01 00:00:00",
+				until: "2024-12-31 23:59:59",
+				limit: 20,
+			}),
+			{
+				...baseParams,
+				since: "2024-01-01 00:00:00",
+				until: "2024-12-31 23:59:59",
+			},
+		)
+		expect(sql).toContain("GROUP BY groupKey")
+		expect(sql).toContain("ORDER BY totalCount DESC")
+		expect(sql).toContain("LIMIT 20")
+	})
+
+	it("buckets top groups and folds the remainder into other", () => {
+		const { sql } = compileCH(
+			alertChecksSummaryQuery({
+				topGroupKeys: ["svc=api", "svc=worker"],
+			}),
+			{
+				...baseParams,
+				since: "2024-01-01 00:00:00",
+				until: "2024-12-31 23:59:59",
+				bucketSeconds: 43_200,
+			},
+		)
+		expect(sql).toContain("toStartOfInterval")
+		expect(sql).toContain("43200")
+		expect(sql).toContain("'__other__'")
+		expect(sql).toContain("countIf")
 	})
 })

@@ -52,8 +52,8 @@ Both the Trace API spec and the Trace SDK spec carry the document-level banner:
 This means: unless a specific subsection is explicitly marked otherwise, treat it as **Stable**
 (locked against breaking changes). A number of subsections — mostly newer extension points — are
 explicitly marked **Development** (pre-release, can still change) inline; these are called out
-throughout this doc. `TraceIdRatioBased`'s *configuration/creation* API is Stable, but its
-*algorithm* compatibility is separately flagged (see §[Samplers](#samplers)). No section in either
+throughout this doc. `TraceIdRatioBased`'s _configuration/creation_ API is Stable, but its
+_algorithm_ compatibility is separately flagged (see §[Samplers](#samplers)). No section in either
 document is marked **Experimental** or **Deprecated** at time of writing (2026), though
 `TraceIdRatioBased` is textually described as "deprecated in favor of" `ProbabilitySampler` (a
 **Development**-status component) — see §[Samplers](#samplers) for the exact deprecation timeline
@@ -70,13 +70,13 @@ A `SpanContext` is the serializable portion of a `Span` — the part that must b
 process boundaries. `SpanContext`s are **immutable**. The representation conforms to the
 [W3C TraceContext spec](https://www.w3.org/TR/trace-context/).
 
-| Field | Rule |
-| --- | --- |
-| `TraceId` | 16-byte array; **valid** iff it has at least one non-zero byte (all-zero = invalid) |
-| `SpanId` | 8-byte array; **valid** iff it has at least one non-zero byte (all-zero = invalid) |
+| Field        | Rule                                                                                                                                                                                                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TraceId`    | 16-byte array; **valid** iff it has at least one non-zero byte (all-zero = invalid)                                                                                                                                                                                          |
+| `SpanId`     | 8-byte array; **valid** iff it has at least one non-zero byte (all-zero = invalid)                                                                                                                                                                                           |
 | `TraceFlags` | Present on every span context (unlike `TraceState`). Currently defines two flags: `Sampled` ([W3C sampled flag](https://www.w3.org/TR/trace-context-2/#sampled-flag)) and `Random` ([W3C random-trace-id flag](https://www.w3.org/TR/trace-context-2/#random-trace-id-flag)) |
-| `TraceState` | List of tracing-system-specific key-value pairs; lets multiple tracing systems co-participate in one trace; fully defined by [W3C `tracestate`](https://www.w3.org/TR/trace-context-2/#tracestate-header) |
-| `IsRemote` | Boolean — was this `SpanContext` received from another process, or locally generated? |
+| `TraceState` | List of tracing-system-specific key-value pairs; lets multiple tracing systems co-participate in one trace; fully defined by [W3C `tracestate`](https://www.w3.org/TR/trace-context-2/#tracestate-header)                                                                    |
+| `IsRemote`   | Boolean — was this `SpanContext` received from another process, or locally generated?                                                                                                                                                                                        |
 
 Normative rules:
 
@@ -110,8 +110,8 @@ span per trace. A `Span` encapsulates: name, an immutable `SpanContext`, a paren
 `SpanContext` / null), `SpanKind`, start/end timestamps, `Attributes`, a list of `Link`s, a list of
 timestamped `Event`s, and a `Status`.
 
-**Span name:** "the most general string that identifies a (statistically) interesting *class of
-Spans*" rather than a per-instance identifier — generality is prioritized over human-readability
+**Span name:** "the most general string that identifies a (statistically) interesting _class of
+Spans_" rather than a per-instance identifier — generality is prioritized over human-readability
 (e.g. `get_account` is good; `get_account/42` is not, due to cardinality; `get_account/{accountId}`
 is also acceptable using the HTTP-route form).
 
@@ -134,17 +134,17 @@ logic, but alternative implementations **MUST NOT** allow callers to create `Spa
 - In languages with implicit context propagation, span creation **MUST NOT** set the new span as
   the active span in the current `Context` by default (MAY be offered as a separate operation).
 - Required/accepted parameters:
-  - **Name** — required.
-  - **Parent `Context`** or an explicit "root span" indication. The API **MUST NOT** accept a
-    `Span` or `SpanContext` directly as parent — only a full `Context`. (See
-    [Determining the Parent Span from a Context](#determining-the-parent-span-from-a-context).)
-  - **`SpanKind`** — defaults to `SpanKind.Internal` if unspecified.
-  - **`Attributes`** — empty collection assumed if not given. "The API documentation MUST state
-    that adding attributes at span creation is preferred to calling `SetAttribute` later, as
-    samplers can only consider information already present during span creation."
-  - **`Link`s** — an ordered sequence, see §[Link](#link).
-  - **Start timestamp** — defaults to current time; "SHOULD only be set when span creation time
-    has already passed" (i.e. don't pass "now" explicitly).
+    - **Name** — required.
+    - **Parent `Context`** or an explicit "root span" indication. The API **MUST NOT** accept a
+      `Span` or `SpanContext` directly as parent — only a full `Context`. (See
+      [Determining the Parent Span from a Context](#determining-the-parent-span-from-a-context).)
+    - **`SpanKind`** — defaults to `SpanKind.Internal` if unspecified.
+    - **`Attributes`** — empty collection assumed if not given. "The API documentation MUST state
+      that adding attributes at span creation is preferred to calling `SetAttribute` later, as
+      samplers can only consider information already present during span creation."
+    - **`Link`s** — an ordered sequence, see §[Link](#link).
+    - **Start timestamp** — defaults to current time; "SHOULD only be set when span creation time
+      has already passed" (i.e. don't pass "now" explicitly).
 - Root spans: "Implementations MUST provide an option to create a `Span` as a root span, and MUST
   generate a new `TraceId` for each root span created." For a non-root span, `TraceId` **MUST**
   match the parent's, and the child **MUST** inherit all of the parent's `TraceState` values by
@@ -173,17 +173,17 @@ decision" — a capability links added later do not have (see §[Add Link](#add-
 "With the exception of the function to retrieve the Span's SpanContext and `IsRecording`, none of
 the below may be called after the Span is finished."
 
-| Operation | Key normative rule |
-| --- | --- |
-| **Get Context** | MUST return the `SpanContext`; usable even after the span ends; MUST be the same value for the entire span lifetime. MAY be called `GetContext`. |
-| **IsRecording** | See dedicated subsection below. |
-| **Set Attributes** | MUST provide a single-attribute setter (`SetAttribute`); MAY provide a batch setter. Duplicate keys overwrite. Samplers only ever see attributes present at creation time — later changes can't affect their decision. |
-| **Add Events** | MUST provide `AddEvent(name, attributes?, timestamp?)`; timestamp defaults to call time if omitted. Events SHOULD preserve recording order (may differ from timestamp order if custom timestamps are used out-of-order). An event's timestamp may legally fall before span start / after span end — no normalization is required. |
-| **Add Link** | MUST support adding links post-creation (see §[Add Link](#add-link)) — but these "may not be considered by Samplers." |
-| **Set Status** | See §[Set Status](#set-status). |
-| **UpdateName** | Changes span name post-creation; sampling behavior thereafter is implementation-defined, since samplers can't retroactively reconsider. |
-| **End** | See dedicated subsection below. |
-| **Record Exception** | Language-specific specialization of `AddEvent` for exceptions (see below). |
+| Operation            | Key normative rule                                                                                                                                                                                                                                                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Get Context**      | MUST return the `SpanContext`; usable even after the span ends; MUST be the same value for the entire span lifetime. MAY be called `GetContext`.                                                                                                                                                                                  |
+| **IsRecording**      | See dedicated subsection below.                                                                                                                                                                                                                                                                                                   |
+| **Set Attributes**   | MUST provide a single-attribute setter (`SetAttribute`); MAY provide a batch setter. Duplicate keys overwrite. Samplers only ever see attributes present at creation time — later changes can't affect their decision.                                                                                                            |
+| **Add Events**       | MUST provide `AddEvent(name, attributes?, timestamp?)`; timestamp defaults to call time if omitted. Events SHOULD preserve recording order (may differ from timestamp order if custom timestamps are used out-of-order). An event's timestamp may legally fall before span start / after span end — no normalization is required. |
+| **Add Link**         | MUST support adding links post-creation (see §[Add Link](#add-link)) — but these "may not be considered by Samplers."                                                                                                                                                                                                             |
+| **Set Status**       | See §[Set Status](#set-status).                                                                                                                                                                                                                                                                                                   |
+| **UpdateName**       | Changes span name post-creation; sampling behavior thereafter is implementation-defined, since samplers can't retroactively reconsider.                                                                                                                                                                                           |
+| **End**              | See dedicated subsection below.                                                                                                                                                                                                                                                                                                   |
+| **Record Exception** | Language-specific specialization of `AddEvent` for exceptions (see below).                                                                                                                                                                                                                                                        |
 
 #### IsRecording
 
@@ -212,13 +212,13 @@ Overrides the default `Unset` status. `Status` = `{ StatusCode, Description? }`.
 `Description` **MUST** only be used with `StatusCode=Error` (an empty description is treated as
 absent); it **MUST be ignored** for `Ok`/`Unset`.
 
-| `StatusCode` | Meaning |
-| --- | --- |
-| `Unset` | The default status. |
-| `Ok` | "The operation has been validated by an Application developer or Operator to have completed successfully." |
-| `Error` | The operation contains an error. |
+| `StatusCode` | Meaning                                                                                                    |
+| ------------ | ---------------------------------------------------------------------------------------------------------- |
+| `Unset`      | The default status.                                                                                        |
+| `Ok`         | "The operation has been validated by an Application developer or Operator to have completed successfully." |
+| `Error`      | The operation contains an error.                                                                           |
 
-These "form a total order: `Ok > Error > Unset`" — setting `Ok` overrides any prior *or future*
+These "form a total order: `Ok > Error > Unset`" — setting `Ok` overrides any prior _or future_
 attempt to set `Error`/`Unset`. Additional rules:
 
 - An attempt to set `Unset` explicitly **SHOULD** be ignored.
@@ -237,7 +237,7 @@ attempt to set `Error`/`Unset`. Additional rules:
 
 > **Maple note:** the spec's enum spelling (`Unset`/`Ok`/`Error`) is exactly the title-case string
 > Maple stores (CLAUDE.md: "Span Status Codes: Use title case"). The OTLP wire proto uses a
-> *different*, uppercase, prefixed spelling — `STATUS_CODE_UNSET` / `STATUS_CODE_OK` /
+> _different_, uppercase, prefixed spelling — `STATUS_CODE_UNSET` / `STATUS_CODE_OK` /
 > `STATUS_CODE_ERROR` (see the
 > [OTLP trace.proto `Status.StatusCode`](https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/trace/v1/trace.proto)).
 > The API spec explicitly notes the OTLP proto refers to `Description` as `message`. Any ingest
@@ -300,18 +300,18 @@ This "MUST be fully implemented in the API, and SHOULD NOT be overridable."
 vs. incoming-external-request, and (2) request/response vs. deferred execution. "In order for
 `SpanKind` to be meaningful, callers SHOULD arrange that a single Span does not serve more than one
 purpose" — e.g. a server-handling span should not double as the span for an outgoing RPC it makes;
-instrumentation should start a *new* span before injecting `SpanContext` for an outgoing call.
+instrumentation should start a _new_ span before injecting `SpanContext` for an outgoing call.
 
-| `SpanKind` | Call direction | Communication style | Definition |
-| --- | --- | --- | --- |
-| `SERVER` | incoming | request/response | Covers server-side handling of a remote request while the client awaits a response. |
-| `CLIENT` | outgoing | request/response | Describes a request to a remote service where the client awaits a response. When propagated, a `CLIENT` span usually becomes the parent of a remote `SERVER` span. |
-| `PRODUCER` | outgoing | deferred execution | Initiation/scheduling of a local or remote operation; often ends before the correlated `CONSUMER` span even starts. In batched messaging, each individual message needs its own `PRODUCER` span. |
-| `CONSUMER` | incoming | deferred execution | Processing of an operation initiated by a producer that does not wait for the outcome. |
-| `INTERNAL` | (n/a) | (n/a) | **Default value.** An internal operation, as opposed to one with remote parents/children. |
+| `SpanKind` | Call direction | Communication style | Definition                                                                                                                                                                                       |
+| ---------- | -------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SERVER`   | incoming       | request/response    | Covers server-side handling of a remote request while the client awaits a response.                                                                                                              |
+| `CLIENT`   | outgoing       | request/response    | Describes a request to a remote service where the client awaits a response. When propagated, a `CLIENT` span usually becomes the parent of a remote `SERVER` span.                               |
+| `PRODUCER` | outgoing       | deferred execution  | Initiation/scheduling of a local or remote operation; often ends before the correlated `CONSUMER` span even starts. In batched messaging, each individual message needs its own `PRODUCER` span. |
+| `CONSUMER` | incoming       | deferred execution  | Processing of an operation initiated by a producer that does not wait for the outcome.                                                                                                           |
+| `INTERNAL` | (n/a)          | (n/a)               | **Default value.** An internal operation, as opposed to one with remote parents/children.                                                                                                        |
 
 Notes: a `CLIENT` span may have a `CLIENT` child, or a `PRODUCER` may have a local `CLIENT` child —
-kind describes the *edge*, not a strict alternating pattern. Technology-specific semantic
+kind describes the _edge_, not a strict alternating pattern. Technology-specific semantic
 conventions document the expected kind per operation type (e.g. DB client calls use `CLIENT`; if a
 DB client itself talks HTTP, the nested HTTP instrumentation creates its own nested `CLIENT` spans).
 
@@ -363,17 +363,17 @@ per-dependency-injection-scope configuration).
 
 **Get a Tracer** — `TracerProvider` **MUST** provide this. Accepted parameters:
 
-| Param | Required? | Notes |
-| --- | --- | --- |
-| `name` | required | "SHOULD uniquely identify the instrumentation scope" (library/package/module/class name). Invalid (null/empty) input **MUST** still return a working no-op-free `Tracer`, not null/an exception — its `name` **SHOULD** be set to empty string and an invalid-input message **SHOULD** be logged. Implementations *may* ignore `name` entirely if "named" tracers aren't supported. |
-| `version` | optional | Instrumentation scope version, e.g. `"1.0.0"`. |
-| `schema_url` | optional, since 1.4.0 | Schema URL recorded in emitted telemetry. |
-| `attributes` | optional, since 1.13.0 | Instrumentation scope attributes to associate with emitted telemetry. |
+| Param        | Required?              | Notes                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------ | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`       | required               | "SHOULD uniquely identify the instrumentation scope" (library/package/module/class name). Invalid (null/empty) input **MUST** still return a working no-op-free `Tracer`, not null/an exception — its `name` **SHOULD** be set to empty string and an invalid-input message **SHOULD** be logged. Implementations _may_ ignore `name` entirely if "named" tracers aren't supported. |
+| `version`    | optional               | Instrumentation scope version, e.g. `"1.0.0"`.                                                                                                                                                                                                                                                                                                                                      |
+| `schema_url` | optional, since 1.4.0  | Schema URL recorded in emitted telemetry.                                                                                                                                                                                                                                                                                                                                           |
+| `attributes` | optional, since 1.13.0 | Instrumentation scope attributes to associate with emitted telemetry.                                                                                                                                                                                                                                                                                                               |
 
-Two `Tracer`s are *identical* if all params match, *distinct* otherwise. "Implementations MUST NOT
+Two `Tracer`s are _identical_ if all params match, _distinct_ otherwise. "Implementations MUST NOT
 require users to repeatedly obtain a `Tracer` again with the same identity to pick up configuration
 changes" — either the old `Tracer` picks up new config live, or it keeps working with stale config;
-either is compliant as long as re-acquisition isn't *required*.
+either is compliant as long as re-acquisition isn't _required_.
 
 **Tracer operations:** `Tracer` **MUST** provide span creation; **SHOULD** provide an `Enabled()`
 check (see §[Tracer (SDK)](#tracerprovider--tracer-sdk) for the SDK-level semantics driving its
@@ -415,7 +415,7 @@ the API **MUST** return a non-recording `Span` wrapping whatever `SpanContext` w
 it **SHOULD** be returned directly (no new object). If the parent context has no span at all, an
 **empty** non-recording span **MUST** be returned — all-zero `SpanContext`, empty `TraceState`,
 unsampled flags. Net effect: a `SpanContext` supplied by a configured `Propagator` still flows
-through to children and eventually `Inject`, but no *new* `SpanContext` gets created without an SDK.
+through to children and eventually `Inject`, but no _new_ `SpanContext` gets created without an SDK.
 
 ---
 
@@ -464,7 +464,7 @@ shorthand helpers (select tracers by name/pattern, disable specific tracers, dis
 **`TracerConfig` (Development):** currently one field, `enabled` (default `true`). A disabled
 `Tracer` **MUST** behave like the API's no-op/no-SDK `Tracer`. `enabled` directly determines
 `Enabled()`'s return value (`false` → `Enabled()` returns `false`; `true` → returns `true`).
-Implementations don't need config changes to be *immediately* visible to `Enabled()` callers, but
+Implementations don't need config changes to be _immediately_ visible to `Enabled()` callers, but
 they **MUST** be eventually visible.
 
 **`Enabled` (SDK semantics, Development flag inside a Stable-by-default method):** **MUST** return
@@ -490,7 +490,7 @@ and exporters, so it defines two SDK-internal contracts:
   Implementations MAY choose not to expose the full parent `Context`, but MUST expose at least the
   full parent `SpanContext`. May or may not be mutable.
 - **Read/write span** — everything a readable span has, plus the full write API, and callers
-  **MUST** be able to obtain the *same* `Span` instance/type that span-creation returned to the user
+  **MUST** be able to obtain the _same_ `Span` instance/type that span-creation returned to the user
   (e.g. passed as a parameter, or via a getter).
 
 ---
@@ -498,9 +498,9 @@ and exporters, so it defines two SDK-internal contracts:
 ## 12. Sampling (SDK) {#sampling-sdk}
 
 **Stability: mixed** — the core `Sampler`/`ShouldSample` contract, `AlwaysOn`/`AlwaysOff`, and
-`TraceIdRatioBased`'s *configuration/creation* surface are **Stable**; `ProbabilitySampler`,
+`TraceIdRatioBased`'s _configuration/creation_ surface are **Stable**; `ProbabilitySampler`,
 `CompositeSampler`/`ComposableSampler` and the whole explicit-randomness / `Random`-flag apparatus
-are **Development**; `TraceIdRatioBased`'s *algorithm compatibility* note is separately flagged
+are **Development**; `TraceIdRatioBased`'s _algorithm compatibility_ note is separately flagged
 **Development** even though the sampler itself is Stable.
 **Source:** https://opentelemetry.io/docs/specs/otel/trace/sdk/#sampling
 
@@ -508,19 +508,19 @@ Sampling controls collection noise/overhead. Two API-level signals govern it:
 
 - **`IsRecording`** on `Span` — if `false`, all data is discarded. `SpanProcessor`s **MUST** only
   receive spans with `IsRecording == true`; `SpanExporter`s **SHOULD NOT** receive them unless
-  `Sampled` is *also* set.
+  `Sampled` is _also_ set.
 - **`Sampled`** flag in `TraceFlags` on `SpanContext` — propagates to children via `SpanContext`;
-  indicates the span *has been* sampled and will be exported. Exporters **MUST** receive spans with
+  indicates the span _has been_ sampled and will be exported. Exporters **MUST** receive spans with
   `Sampled == true` and **SHOULD NOT** receive ones without it.
 
 ### Recording × Sampled reaction table
 
 | `IsRecording` | `Sampled` | Processor receives? | Exporter receives? |
-| --- | --- | --- | --- |
-| true | true | true | true |
-| true | false | true | false |
-| false | true | **Not allowed** | **Not allowed** |
-| false | false | false | false |
+| ------------- | --------- | ------------------- | ------------------ |
+| true          | true      | true                | true               |
+| true          | false     | true                | false              |
+| false         | true      | **Not allowed**     | **Not allowed**    |
+| false         | false     | false               | false              |
 
 `IsRecording=false, Sampled=true` is a forbidden combination: "the OpenTelemetry SDK MUST NOT allow
 this combination" because it would create gaps in the distributed trace. `IsRecording=true,
@@ -533,7 +533,7 @@ Sampled=false` is legal and means "this span records data but its children likel
 ### SDK span creation order
 
 When creating a span, the SDK **MUST** act as if, in order: (1) use the parent's trace ID if valid,
-else generate a new one — *before* calling `ShouldSample`, which requires a valid trace ID as
+else generate a new one — _before_ calling `ShouldSample`, which requires a valid trace ID as
 input; (2) call the `Sampler`'s `ShouldSample`; (3) generate a new span ID regardless of the
 sampling decision (so other components — logs, exception handling — can rely on a unique span ID
 even for a non-recording span); (4) construct the span per the `ShouldSample` decision (a
@@ -545,17 +545,17 @@ non-recording result MAY reuse the same "wrap a SpanContext" mechanism as the no
 span), the new span's `TraceId` (MUST match the parent's if parent has a valid trace ID), span
 name, `SpanKind`, initial `Attributes`, and the collection of `Link`s. Returns a `SamplingResult`:
 
-| `SamplingResult` field | Meaning |
-| --- | --- |
-| `Decision` | One of `DROP` / `RECORD_ONLY` / `RECORD_AND_SAMPLE` — see table below. |
-| Attributes | Additional span attributes to add; the returned object MUST be immutable. |
-| `Tracestate` | The `TraceState` for the new `SpanContext`. If the sampler returns an *empty* `Tracestate`, the existing one is cleared — so samplers that don't intend to change it SHOULD pass through the incoming value unmodified. |
+| `SamplingResult` field | Meaning                                                                                                                                                                                                                 |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Decision`             | One of `DROP` / `RECORD_ONLY` / `RECORD_AND_SAMPLE` — see table below.                                                                                                                                                  |
+| Attributes             | Additional span attributes to add; the returned object MUST be immutable.                                                                                                                                               |
+| `Tracestate`           | The `TraceState` for the new `SpanContext`. If the sampler returns an _empty_ `Tracestate`, the existing one is cleared — so samplers that don't intend to change it SHOULD pass through the incoming value unmodified. |
 
-| `Decision` | `IsRecording` | `Sampled` flag |
-| --- | --- | --- |
-| `DROP` | `false` — span not recorded, all events/attributes dropped | not set |
-| `RECORD_ONLY` | `true` | **MUST NOT** be set |
-| `RECORD_AND_SAMPLE` | `true` | **MUST** be set |
+| `Decision`          | `IsRecording`                                              | `Sampled` flag      |
+| ------------------- | ---------------------------------------------------------- | ------------------- |
+| `DROP`              | `false` — span not recorded, all events/attributes dropped | not set             |
+| `RECORD_ONLY`       | `true`                                                     | **MUST NOT** be set |
+| `RECORD_AND_SAMPLE` | `true`                                                     | **MUST** be set     |
 
 **`GetDescription`** — returns the sampler's name/config as a debug string (e.g.
 `"TraceIdRatioBased{0.000100}"`); MAY change over time (e.g. under dynamic reconfiguration);
@@ -565,28 +565,28 @@ callers **SHOULD NOT** cache it.
 
 **Default sampler: `ParentBased(root=AlwaysOn)`.**
 
-| Sampler | Status | Behavior |
-| --- | --- | --- |
-| `AlwaysOn` | Stable | Always returns `RECORD_AND_SAMPLE`. Description MUST be `AlwaysOnSampler`. |
-| `AlwaysOff` | Stable | Always returns `DROP`. Description MUST be `AlwaysOffSampler`. |
-| `TraceIdRatioBased` | Stable (config/creation API); algorithm compatibility notes are Development | Deterministic hash of `TraceId` decides sampling; ignores parent `Sampled` flag (compose with `ParentBased` to respect it). A given ratio MUST sample a superset of what any lower-ratio instance would sample (monotonic — lets a backend sample at a higher rate than the frontend safely). **Deprecation note:** being phased out in favor of `ProbabilitySampler`; "OpenTelemetry SDK implementors SHALL NOT remove or modify the behavior of the original `TraceIdRatioBased` sampler until at least January 1, 2027," after which they're encouraged to silently swap in an equally-configured `ProbabilitySampler`. Exact hash algorithm was never specified — cross-SDK/cross-version results may differ, so it's recommended only as a *root* sampler. |
-| `ProbabilitySampler` | Development | Composable-style ratio sampler built on W3C Trace Context Level 2's 56 bits of randomness (see [Probability Sampling in TraceState](https://opentelemetry.io/docs/specs/otel/trace/tracestate-probability-sampling/)). Ignores parent `Sampled` flag (compose with `ParentBased`). Configured with a ratio in `[2^-56, 1.0]`; on `ShouldSample`, compares randomness value `R` against rejection threshold `T` derived from the ratio — `R >= T` ⇒ `RECORD_AND_SAMPLE`, sets `ot=th:T` in tracestate; else `DROP`. |
-| `ParentBased` | Stable | Decorator dispatching on parent shape — see table below. |
-| `JaegerRemoteSampler` | Stable | Periodically pulls sampling config from a remote endpoint (Jaeger Collector or OTel Collector implementing the [Remote Sampling API](https://www.jaegertracing.io/docs/2.14/architecture/apis/#remote-sampling-configuration)); can assign different strategies per span name (e.g. `/product` at 10%, `/admin` at 100%, never `/metrics`). Configurable: `endpoint`, `polling interval`, `initial sampler` (used before first fetch). |
-| `AlwaysRecord` | Stable | Decorator: converts a wrapped sampler's `DROP` into `RECORD_ONLY` (all other decisions pass through unchanged) so every span reaches processors (e.g. for span-to-metrics) without necessarily being exported. |
-| `CompositeSampler` / `ComposableSampler` | Development | Implements `Sampler` by delegating to a `ComposableSampler.GetSamplingIntent` (threshold + `adjusted_count_reliable` + optional attribute/tracestate providers), then deriving/compares a randomness value `R` against the returned threshold to reach the final decision. Built-in composables: `ComposableAlwaysOn`, `ComposableAlwaysOff`, `ComposableProbability` (ratio `[2^-56, 1.0]`), `ComposableParentThreshold` (propagate parent's decision/threshold), `ComposableRuleBased` (predicate → sampler rule list, first match wins), `ComposableAnnotating` (delegate + extra attributes on sampled spans). |
+| Sampler                                  | Status                                                                      | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AlwaysOn`                               | Stable                                                                      | Always returns `RECORD_AND_SAMPLE`. Description MUST be `AlwaysOnSampler`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `AlwaysOff`                              | Stable                                                                      | Always returns `DROP`. Description MUST be `AlwaysOffSampler`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `TraceIdRatioBased`                      | Stable (config/creation API); algorithm compatibility notes are Development | Deterministic hash of `TraceId` decides sampling; ignores parent `Sampled` flag (compose with `ParentBased` to respect it). A given ratio MUST sample a superset of what any lower-ratio instance would sample (monotonic — lets a backend sample at a higher rate than the frontend safely). **Deprecation note:** being phased out in favor of `ProbabilitySampler`; "OpenTelemetry SDK implementors SHALL NOT remove or modify the behavior of the original `TraceIdRatioBased` sampler until at least January 1, 2027," after which they're encouraged to silently swap in an equally-configured `ProbabilitySampler`. Exact hash algorithm was never specified — cross-SDK/cross-version results may differ, so it's recommended only as a _root_ sampler. |
+| `ProbabilitySampler`                     | Development                                                                 | Composable-style ratio sampler built on W3C Trace Context Level 2's 56 bits of randomness (see [Probability Sampling in TraceState](https://opentelemetry.io/docs/specs/otel/trace/tracestate-probability-sampling/)). Ignores parent `Sampled` flag (compose with `ParentBased`). Configured with a ratio in `[2^-56, 1.0]`; on `ShouldSample`, compares randomness value `R` against rejection threshold `T` derived from the ratio — `R >= T` ⇒ `RECORD_AND_SAMPLE`, sets `ot=th:T` in tracestate; else `DROP`.                                                                                                                                                                                                                                              |
+| `ParentBased`                            | Stable                                                                      | Decorator dispatching on parent shape — see table below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `JaegerRemoteSampler`                    | Stable                                                                      | Periodically pulls sampling config from a remote endpoint (Jaeger Collector or OTel Collector implementing the [Remote Sampling API](https://www.jaegertracing.io/docs/2.14/architecture/apis/#remote-sampling-configuration)); can assign different strategies per span name (e.g. `/product` at 10%, `/admin` at 100%, never `/metrics`). Configurable: `endpoint`, `polling interval`, `initial sampler` (used before first fetch).                                                                                                                                                                                                                                                                                                                          |
+| `AlwaysRecord`                           | Stable                                                                      | Decorator: converts a wrapped sampler's `DROP` into `RECORD_ONLY` (all other decisions pass through unchanged) so every span reaches processors (e.g. for span-to-metrics) without necessarily being exported.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `CompositeSampler` / `ComposableSampler` | Development                                                                 | Implements `Sampler` by delegating to a `ComposableSampler.GetSamplingIntent` (threshold + `adjusted_count_reliable` + optional attribute/tracestate providers), then deriving/compares a randomness value `R` against the returned threshold to reach the final decision. Built-in composables: `ComposableAlwaysOn`, `ComposableAlwaysOff`, `ComposableProbability` (ratio `[2^-56, 1.0]`), `ComposableParentThreshold` (propagate parent's decision/threshold), `ComposableRuleBased` (predicate → sampler rule list, first match wins), `ComposableAnnotating` (delegate + extra attributes on sampled spans).                                                                                                                                              |
 
 **`ParentBased` dispatch table** — required param `root(Sampler)`; optional params
 `remoteParentSampled` (default `AlwaysOn`), `remoteParentNotSampled` (default `AlwaysOff`),
 `localParentSampled` (default `AlwaysOn`), `localParentNotSampled` (default `AlwaysOff`):
 
-| Parent | `IsRemote()` | `IsSampled()` | Delegate invoked |
-| --- | --- | --- | --- |
-| absent | n/a | n/a | `root()` |
-| present | true | true | `remoteParentSampled()` |
-| present | true | false | `remoteParentNotSampled()` |
-| present | false | true | `localParentSampled()` |
-| present | false | false | `localParentNotSampled()` |
+| Parent  | `IsRemote()` | `IsSampled()` | Delegate invoked           |
+| ------- | ------------ | ------------- | -------------------------- |
+| absent  | n/a          | n/a           | `root()`                   |
+| present | true         | true          | `remoteParentSampled()`    |
+| present | true         | false         | `remoteParentNotSampled()` |
+| present | false        | true          | `localParentSampled()`     |
+| present | false        | false         | `localParentNotSampled()`  |
 
 ### Sampling requirements — TraceID randomness (Development)
 
@@ -617,14 +617,14 @@ implemented, the SDK **MUST** expose a way to change it via `TracerProvider` con
 Discarding an attribute/event/link due to a limit **SHOULD** log a message — but **MUST** be logged
 **at most once per span** (not once per discarded item) to avoid log spam.
 
-| Limit | Default | Env var | Notes |
-| --- | --- | --- | --- |
-| `AttributeCountLimit` (common) | 128 | `OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT` (falls back to `OTEL_ATTRIBUTE_COUNT_LIMIT`) | Max attributes per span. |
+| Limit                                | Default  | Env var                                                                                      | Notes                                                                                                                                                                                        |
+| ------------------------------------ | -------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AttributeCountLimit` (common)       | 128      | `OTEL_SPAN_ATTRIBUTE_COUNT_LIMIT` (falls back to `OTEL_ATTRIBUTE_COUNT_LIMIT`)               | Max attributes per span.                                                                                                                                                                     |
 | `AttributeValueLengthLimit` (common) | no limit | `OTEL_SPAN_ATTRIBUTE_VALUE_LENGTH_LIMIT` (falls back to `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`) | Max attribute value length; strings/byte-arrays MUST be truncated to the limit; for arrays of strings/AnyValue, the limit applies per-element; all other value shapes MUST NOT be truncated. |
-| `EventCountLimit` | 128 | `OTEL_SPAN_EVENT_COUNT_LIMIT` | Max events per span. |
-| `LinkCountLimit` | 128 | `OTEL_SPAN_LINK_COUNT_LIMIT` | Max links per span. |
-| `AttributePerEventCountLimit` | 128 | `OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT` | Max attributes per event. |
-| `AttributePerLinkCountLimit` | 128 | `OTEL_LINK_ATTRIBUTE_COUNT_LIMIT` | Max attributes per link. |
+| `EventCountLimit`                    | 128      | `OTEL_SPAN_EVENT_COUNT_LIMIT`                                                                | Max events per span.                                                                                                                                                                         |
+| `LinkCountLimit`                     | 128      | `OTEL_SPAN_LINK_COUNT_LIMIT`                                                                 | Max links per span.                                                                                                                                                                          |
+| `AttributePerEventCountLimit`        | 128      | `OTEL_EVENT_ATTRIBUTE_COUNT_LIMIT`                                                           | Max attributes per event.                                                                                                                                                                    |
+| `AttributePerLinkCountLimit`         | 128      | `OTEL_LINK_ATTRIBUTE_COUNT_LIMIT`                                                            | Max attributes per link.                                                                                                                                                                     |
 
 **Source (env vars):** https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#batch-span-processor
 and the neighboring "Span limits" / "Attribute limits" tables on that same page.
@@ -635,7 +635,7 @@ non-empty strings; key casing is preserved and case-sensitive (differently-cased
 keys). Attribute values **MUST** be one of the types defined by `AnyValue` (string, boolean,
 double-precision float, signed 64-bit integer, byte array, homogeneous/nested arrays, maps, and
 empty). Verified against the raw spec source (`specification/common/README.md` on `main`,
-2026-07): "The attribute value MUST be one of types defined in AnyValue." *Note:* earlier spec
+2026-07): "The attribute value MUST be one of types defined in AnyValue." _Note:_ earlier spec
 versions restricted plain `Attribute` values to only primitives and homogeneous primitive arrays
 (no maps/nesting); the current spec unifies `Attribute` with the broader `AnyValue` definition
 used by log bodies. When validating third-party producers instrumented with older SDKs, expect
@@ -655,7 +655,7 @@ interface exposing `generateSpanIdBytes()` / `generateTraceIdBytes()`). Vendor-s
 generators (e.g. AWS X-Ray's ID format) **MUST NOT** be maintained/distributed as part of
 OpenTelemetry's own core packages.
 
-**(Development)** Custom `IdGenerator`s **SHOULD** self-identify when *all* generated TraceIDs meet
+**(Development)** Custom `IdGenerator`s **SHOULD** self-identify when _all_ generated TraceIDs meet
 the W3C Trace Context Level 2 randomness bar, so the SDK can set the `Random` trace flag
 accordingly — typically inferred statically via a marker interface rather than per-call.
 
@@ -678,13 +678,13 @@ users to implement and register custom processors.
 The `SpanProcessor` interface **MUST** declare `OnStart`, `OnEnd`, `Shutdown`, `ForceFlush`, and
 **SHOULD** declare `OnEnding`.
 
-| Method | Timing / threading | Contract |
-| --- | --- | --- |
-| `OnStart(span, parentContext)` | Synchronous, on the span-starting thread | MUST NOT block/throw. Multiple processors' `OnStart` run in registration order. `span` is a read/write span; keeping a reference and observing live updates SHOULD work (e.g. a processor that periodically inspects all active spans from a background thread). `parentContext` is the SDK-determined parent (explicit / current / empty, per what was requested). Returns void. |
-| `OnEnding(span)` — **Development** | Synchronous, inside `Span.End()`, *before* `OnEnd` | Called once the end timestamp is computed (its own duration is excluded from span duration) but while the span is **still mutable** (`SetAttribute`/`AddLink`/`AddEvent` still legal). MUST NOT block/throw. Multiple processors' `OnEnding` run in registration order; the SDK MUST guarantee no other thread can modify the span once the first `OnEnding` starts — only synchronous in-callback modification is allowed from that point. **All** registered `OnEnding` callbacks run before **any** `OnEnd` callback runs. |
-| `OnEnd(span)` | Synchronous, inside `Span.End()`, after end timestamp is set | MUST NOT block/throw. `span` is a readable span; even if technically mutable, modifying it here is not allowed (already ended). |
-| `Shutdown()` | — | SHOULD be called only once; subsequent `OnStart`/`OnEnd`/`ForceFlush` calls SHOULD be gracefully ignored. MUST include the effects of `ForceFlush`. SHOULD report success/failure/timeout and SHOULD complete/abort within some timeout. |
-| `ForceFlush()` | — | Hint to complete any in-flight span work "as soon as possible, preferably before returning." If the processor has an exporter, it SHOULD `Export` everything not yet exported, then call the exporter's `ForceFlush` — built-in processors **MUST** do so. If a timeout is set, the processor MUST prioritize the timeout over completeness (may abort/skip calls). SHOULD report outcome; SHOULD only be called when "absolutely necessary" (e.g. FaaS suspend-after-invocation risk). |
+| Method                             | Timing / threading                                           | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------- | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OnStart(span, parentContext)`     | Synchronous, on the span-starting thread                     | MUST NOT block/throw. Multiple processors' `OnStart` run in registration order. `span` is a read/write span; keeping a reference and observing live updates SHOULD work (e.g. a processor that periodically inspects all active spans from a background thread). `parentContext` is the SDK-determined parent (explicit / current / empty, per what was requested). Returns void.                                                                                                                                             |
+| `OnEnding(span)` — **Development** | Synchronous, inside `Span.End()`, _before_ `OnEnd`           | Called once the end timestamp is computed (its own duration is excluded from span duration) but while the span is **still mutable** (`SetAttribute`/`AddLink`/`AddEvent` still legal). MUST NOT block/throw. Multiple processors' `OnEnding` run in registration order; the SDK MUST guarantee no other thread can modify the span once the first `OnEnding` starts — only synchronous in-callback modification is allowed from that point. **All** registered `OnEnding` callbacks run before **any** `OnEnd` callback runs. |
+| `OnEnd(span)`                      | Synchronous, inside `Span.End()`, after end timestamp is set | MUST NOT block/throw. `span` is a readable span; even if technically mutable, modifying it here is not allowed (already ended).                                                                                                                                                                                                                                                                                                                                                                                               |
+| `Shutdown()`                       | —                                                            | SHOULD be called only once; subsequent `OnStart`/`OnEnd`/`ForceFlush` calls SHOULD be gracefully ignored. MUST include the effects of `ForceFlush`. SHOULD report success/failure/timeout and SHOULD complete/abort within some timeout.                                                                                                                                                                                                                                                                                      |
+| `ForceFlush()`                     | —                                                            | Hint to complete any in-flight span work "as soon as possible, preferably before returning." If the processor has an exporter, it SHOULD `Export` everything not yet exported, then call the exporter's `ForceFlush` — built-in processors **MUST** do so. If a timeout is set, the processor MUST prioritize the timeout over completeness (may abort/skip calls). SHOULD report outcome; SHOULD only be called when "absolutely necessary" (e.g. FaaS suspend-after-invocation risk).                                       |
 
 ### Built-in processors
 
@@ -703,12 +703,12 @@ since previous export timer ended/completed, the queue reaches `maxExportBatchSi
 `ForceFlush()` is called. An empty queue at export time MAY export an empty batch or skip export
 entirely (implementation's choice).
 
-| Parameter | Default | Env var | Meaning |
-| --- | --- | --- | --- |
-| `maxQueueSize` | 2048 | `OTEL_BSP_MAX_QUEUE_SIZE` | Spans beyond this are dropped once the queue is full. |
-| `scheduledDelayMillis` | 5000 | `OTEL_BSP_SCHEDULE_DELAY` | Max delay between consecutive exports. |
-| `exportTimeoutMillis` | 30000 | `OTEL_BSP_EXPORT_TIMEOUT` | How long a single export may run before being cancelled. |
-| `maxExportBatchSize` | 512 | `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | Max spans per export call; must be ≤ `maxQueueSize`; reaching this triggers an export even before `scheduledDelayMillis` elapses. |
+| Parameter              | Default | Env var                          | Meaning                                                                                                                           |
+| ---------------------- | ------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `maxQueueSize`         | 2048    | `OTEL_BSP_MAX_QUEUE_SIZE`        | Spans beyond this are dropped once the queue is full.                                                                             |
+| `scheduledDelayMillis` | 5000    | `OTEL_BSP_SCHEDULE_DELAY`        | Max delay between consecutive exports.                                                                                            |
+| `exportTimeoutMillis`  | 30000   | `OTEL_BSP_EXPORT_TIMEOUT`        | How long a single export may run before being cancelled.                                                                          |
+| `maxExportBatchSize`   | 512     | `OTEL_BSP_MAX_EXPORT_BATCH_SIZE` | Max spans per export call; must be ≤ `maxQueueSize`; reaching this triggers an export even before `scheduledDelayMillis` elapses. |
 
 **Source (env vars):** https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#batch-span-processor
 
@@ -731,11 +731,11 @@ requirements.
 **Interface:** MUST support `Export`, `Shutdown`, `ForceFlush` (typically one interface per signal,
 e.g. `SpanExporter`).
 
-| Method | Contract |
-| --- | --- |
+| Method          | Contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Export(batch)` | Exports a batch of readable spans (serialize + transmit, typically). "should not be called concurrently with other Export calls for the same exporter instance" — but the underlying transmission work MAY still happen concurrently under the hood (language-specific). **MUST NOT block indefinitely** — must time out with `Failure` after a reasonable upper limit. Retry logic is the **exporter's** responsibility, not the built-in processors' — "The default SDK's Span Processors SHOULD NOT implement retry logic" since it's protocol/backend-specific (e.g. [OTLP](https://opentelemetry.io/docs/specs/otlp/) defines its own send/retry logic). Returns an `ExportResult`: `Success` ("the batch has been successfully exported" — e.g. delivered over the wire) or `Failure` ("exporting failed. The batch must be dropped," e.g. unserializable data). |
-| `Shutdown()` | Opportunity for exporter cleanup; called on SDK shutdown. Should be called only once; after it, subsequent `Export` calls are disallowed and **should return `Failure`**. Should not block indefinitely even if flushing to an unavailable destination. |
-| `ForceFlush()` | Hint that any spans already received prior to the call should be exported "as soon as possible, preferably before returning." SHOULD report success/failure/timeout; SHOULD only be called when "absolutely necessary" (same FaaS-suspend rationale as the processor's `ForceFlush`); SHOULD complete/abort within some timeout. |
+| `Shutdown()`    | Opportunity for exporter cleanup; called on SDK shutdown. Should be called only once; after it, subsequent `Export` calls are disallowed and **should return `Failure`**. Should not block indefinitely even if flushing to an unavailable destination.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `ForceFlush()`  | Hint that any spans already received prior to the call should be exported "as soon as possible, preferably before returning." SHOULD report success/failure/timeout; SHOULD only be called when "absolutely necessary" (same FaaS-suspend rationale as the processor's `ForceFlush`); SHOULD complete/abort within some timeout.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 **Concurrency:** `ForceFlush` and `Shutdown` **MUST** be safe to call concurrently on a `SpanExporter`.
 
@@ -745,12 +745,12 @@ e.g. `SpanExporter`).
 
 **Source:** https://opentelemetry.io/docs/specs/otel/trace/sdk/#concurrency-requirements
 
-| Component | Requirement |
-| --- | --- |
-| TracerProvider | Tracer creation, `ForceFlush`, `Shutdown` MUST be safe for concurrent calls. |
-| Sampler | `ShouldSample` and `GetDescription` MUST be safe for concurrent calls. |
-| Span processor | All methods MUST be safe for concurrent calls. |
-| Span Exporter | `ForceFlush` and `Shutdown` MUST be safe for concurrent calls (per-instance `Export` itself must NOT be called concurrently — see above). |
+| Component      | Requirement                                                                                                                               |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| TracerProvider | Tracer creation, `ForceFlush`, `Shutdown` MUST be safe for concurrent calls.                                                              |
+| Sampler        | `ShouldSample` and `GetDescription` MUST be safe for concurrent calls.                                                                    |
+| Span processor | All methods MUST be safe for concurrent calls.                                                                                            |
+| Span Exporter  | `ForceFlush` and `Shutdown` MUST be safe for concurrent calls (per-instance `Export` itself must NOT be called concurrently — see above). |
 
 ---
 
@@ -775,12 +775,12 @@ for SDKs generally).
 **Source:** https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/#general-sdk-configuration
 (Trace Sampler / Trace Exporter subsections)
 
-| Env var | Default | Accepted values / meaning |
-| --- | --- | --- |
-| `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | `always_on` (`AlwaysOnSampler`), `always_off` (`AlwaysOffSampler`), `traceidratio` (`TraceIdRatioBased`), `parentbased_always_on` (`ParentBased(root=AlwaysOnSampler)`), `parentbased_always_off` (`ParentBased(root=AlwaysOffSampler)`), `parentbased_traceidratio` (`ParentBased(root=TraceIdRatioBased)`), `parentbased_jaeger_remote` (`ParentBased(root=JaegerRemoteSampler)`), `jaeger_remote` (`JaegerRemoteSampler`), `xray` (AWS X-Ray centralized sampling — third-party). |
-| `OTEL_TRACES_SAMPLER_ARG` | unset | Meaning depends on the selected sampler. For `traceidratio` / `parentbased_traceidratio`: "Sampling probability, a number in the [0..1] range, e.g. '0.25'. Default is 1.0 if unset." For `jaeger_remote` / `parentbased_jaeger_remote`: a comma-separated list of `endpoint`, `pollingIntervalMs`, `initialSamplingRate`. |
-| `OTEL_TRACES_EXPORTER` | `otlp` | `otlp`, `zipkin`, `console`, `logging` (deprecated alias), `none`. |
-| `OTEL_PROPAGATORS` | `tracecontext,baggage` | Ordered list of propagators to install globally (not trace-specific, but governs how `SpanContext`/`Baggage` cross process boundaries). |
+| Env var                   | Default                 | Accepted values / meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OTEL_TRACES_SAMPLER`     | `parentbased_always_on` | `always_on` (`AlwaysOnSampler`), `always_off` (`AlwaysOffSampler`), `traceidratio` (`TraceIdRatioBased`), `parentbased_always_on` (`ParentBased(root=AlwaysOnSampler)`), `parentbased_always_off` (`ParentBased(root=AlwaysOffSampler)`), `parentbased_traceidratio` (`ParentBased(root=TraceIdRatioBased)`), `parentbased_jaeger_remote` (`ParentBased(root=JaegerRemoteSampler)`), `jaeger_remote` (`JaegerRemoteSampler`), `xray` (AWS X-Ray centralized sampling — third-party). |
+| `OTEL_TRACES_SAMPLER_ARG` | unset                   | Meaning depends on the selected sampler. For `traceidratio` / `parentbased_traceidratio`: "Sampling probability, a number in the [0..1] range, e.g. '0.25'. Default is 1.0 if unset." For `jaeger_remote` / `parentbased_jaeger_remote`: a comma-separated list of `endpoint`, `pollingIntervalMs`, `initialSamplingRate`.                                                                                                                                                           |
+| `OTEL_TRACES_EXPORTER`    | `otlp`                  | `otlp`, `zipkin`, `console`, `logging` (deprecated alias), `none`.                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `OTEL_PROPAGATORS`        | `tracecontext,baggage`  | Ordered list of propagators to install globally (not trace-specific, but governs how `SpanContext`/`Baggage` cross process boundaries).                                                                                                                                                                                                                                                                                                                                              |
 
 ---
 

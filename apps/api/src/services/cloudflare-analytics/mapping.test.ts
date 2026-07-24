@@ -132,7 +132,7 @@ describe("mapHttpGroups", () => {
 		assert.strictEqual(origin[0]!.metric_unit, "ms")
 	})
 
-	it("keeps the top-N hosts and folds the tail into \"other\"", () => {
+	it('keeps the top-N hosts and folds the tail into "other"', () => {
 		const hosts = Array.from({ length: 25 }, (_, i) => `h${i}.example.com`)
 		const groups = hosts.map((host, i) => ({
 			// h0 heaviest → h24 lightest, so exactly h20..h24 fold into "other".
@@ -155,7 +155,10 @@ describe("mapHttpGroups", () => {
 		assert.isFalse(emittedHosts.has("h24.example.com"))
 		// Folding relabels, never drops: total ABR-adjusted requests are preserved.
 		const total = requestRows.reduce((sum, row) => sum + row.value, 0)
-		assert.strictEqual(total, groups.reduce((sum, g) => sum + g.count * 10, 0))
+		assert.strictEqual(
+			total,
+			groups.reduce((sum, g) => sum + g.count * 10, 0),
+		)
 	})
 
 	it("emits no gauges in degraded (no-quantiles) mode and skips zero counters", () => {
@@ -204,7 +207,11 @@ describe("mapWorkersGroups", () => {
 		const stale = {
 			sum: { requests: 7, errors: 0, subrequests: 0 },
 			quantiles: null,
-			dimensions: { datetimeFiveMinutes: BUCKET, scriptName: "maple-alerting-pr-42", status: "success" },
+			dimensions: {
+				datetimeFiveMinutes: BUCKET,
+				scriptName: "maple-alerting-pr-42",
+				status: "success",
+			},
 		}
 		const { sumRows } = mapWorkersGroups({
 			...input,
@@ -277,7 +284,7 @@ describe("mapFirewallGroups", () => {
 })
 
 describe("mapDnsGroups", () => {
-	it("folds query names past the top N into \"other\" and keeps response codes", () => {
+	it('folds query names past the top N into "other" and keeps response codes', () => {
 		const groups = Array.from({ length: MAX_DNS_QUERY_NAMES + 5 }, (_, i) => ({
 			count: 100 - i,
 			avg: { sampleInterval: 1 },
@@ -436,8 +443,14 @@ describe("query documents", () => {
 		assert.include(dns, "dns: dnsAnalyticsAdaptiveGroups")
 		assert.include(dns, "queryName")
 		assert.include(dns, "responseCode")
-		assert.include(queueBacklogSelection({ withQuantiles: true }), "queueBacklog: queueBacklogAdaptiveGroups")
-		assert.include(queueConsumersSelection({ withQuantiles: true }), "queueConsumers: queueConsumerMetricsAdaptiveGroups")
+		assert.include(
+			queueBacklogSelection({ withQuantiles: true }),
+			"queueBacklog: queueBacklogAdaptiveGroups",
+		)
+		assert.include(
+			queueConsumersSelection({ withQuantiles: true }),
+			"queueConsumers: queueConsumerMetricsAdaptiveGroups",
+		)
 		const doQ = durableObjectsSelection({ withQuantiles: true })
 		assert.include(doQ, "durableObjects: durableObjectsInvocationsAdaptiveGroups")
 		assert.include(doQ, "wallTimeP99")

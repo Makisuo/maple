@@ -156,7 +156,10 @@ export function LogTraceTimeline({ currentLog, onLogSelect }: LogTraceTimelinePr
 												</span>
 												{log.serviceName !== currentLog.serviceName && (
 													<span className="flex max-w-[72px] shrink-0 items-center gap-1 truncate text-[10px] text-muted-foreground/60">
-														<ServiceDot serviceName={log.serviceName} className="size-1.5" />
+														<ServiceDot
+															serviceName={log.serviceName}
+															className="size-1.5"
+														/>
 														<span className="truncate">{log.serviceName}</span>
 													</span>
 												)}

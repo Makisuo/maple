@@ -231,6 +231,20 @@ describe("v2 alerts over HTTP", () => {
 		const checks = await harness.request("GET", `/v2/alerts/rules/${ruleId}/checks`, key.secret)
 		expect(checks.status).toBe(200)
 		expect(checks.body).toMatchObject({ object: "list", data: [], has_more: false })
+		const summary = await harness.request(
+			"GET",
+			`/v2/alerts/rules/${ruleId}/checks/summary?since=2025-01-01T00%3A00%3A00.000Z&until=2025-12-31T00%3A00%3A00.000Z`,
+			key.secret,
+		)
+		expect(summary.status).toBe(200)
+		expect(summary.body).toMatchObject({
+			object: "alert_check.summary",
+			top_group_keys: [],
+			totals: { total: 0 },
+			points: [],
+		})
+		expect(summary.body.bucket_seconds).toBeGreaterThan(0)
+		expect((364 * 24 * 60 * 60) / summary.body.bucket_seconds).toBeLessThanOrEqual(720)
 
 		const incidents = await harness.request("GET", "/v2/alerts/incidents", key.secret)
 		expect(incidents.status).toBe(200)
@@ -285,12 +299,9 @@ describe("v2 alerts over HTTP", () => {
 		expect(created.status, JSON.stringify(created.body)).toBe(200)
 		expect(created.body.raw_query_sql).toContain("$__orgFilter")
 
-		const patched = await harness.request(
-			"PATCH",
-			`/v2/alerts/rules/${created.body.id}`,
-			key.secret,
-			{ signal_type: "error_rate" },
-		)
+		const patched = await harness.request("PATCH", `/v2/alerts/rules/${created.body.id}`, key.secret, {
+			signal_type: "error_rate",
+		})
 		expect(patched.status, JSON.stringify(patched.body)).toBe(200)
 		expect(patched.body.signal_type).toBe("error_rate")
 		expect(patched.body.raw_query_sql).toBeNull()
@@ -376,10 +387,16 @@ describe("v2 alerts over HTTP", () => {
 			...warehouseStub,
 			compiledQuery: (_tenant, compiled, options) => {
 				if (options?.context !== "listAlertChecks") return compiled.decodeRows([]).pipe(Effect.orDie)
-				const match = /LIMIT\s+(\d+)\s+OFFSET\s+(\d+)/i.exec(compiled.sql)
-				const limit = Number(match?.[1] ?? 100)
-				const offset = Number(match?.[2] ?? 0)
-				return compiled.decodeRows(checkRows.slice(offset, offset + limit)).pipe(Effect.orDie)
+				const limit = Number(/LIMIT\s+(\d+)/i.exec(compiled.sql)?.[1] ?? 100)
+				const before = /Timestamp < '([^']+)'/i.exec(compiled.sql)?.[1]
+				const status = /Status = '([^']+)'/i.exec(compiled.sql)?.[1]
+				const beforeMs = before === undefined ? undefined : Date.parse(`${before.replace(" ", "T")}Z`)
+				const rows = checkRows.filter(
+					(row) =>
+						(beforeMs === undefined || Date.parse(row.timestamp) < beforeMs) &&
+						(status === undefined || row.status === status),
+				)
+				return compiled.decodeRows(rows.slice(0, limit)).pipe(Effect.orDie)
 			},
 		}
 		const harness = makeHarness(pagedWarehouse)
@@ -416,6 +433,15 @@ describe("v2 alerts over HTTP", () => {
 		} while (cursor !== null)
 
 		expect(seen.size).toBe(2_005)
+
+		const filtered = await harness.request(
+			"GET",
+			`/v2/alerts/rules/${created.body.id}/checks?limit=10&status=healthy`,
+			key.secret,
+		)
+		expect(filtered.status).toBe(200)
+		expect(filtered.body.data).toHaveLength(10)
+		expect(filtered.body.data.every((check: { status: string }) => check.status === "healthy")).toBe(true)
 		await harness.dispose()
 	})
 

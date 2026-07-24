@@ -19,7 +19,8 @@ describe("annotateAuthSpan", () => {
 			assert.strictEqual(span.attributes.get("maple.org_id"), "org_test")
 			assert.strictEqual(span.attributes.get("tenant.userId"), "user_test")
 			assert.strictEqual(span.attributes.get("maple.api_key.id"), "key_test")
-		}).pipe(Effect.withSpan("test-root")))
+		}).pipe(Effect.withSpan("test-root")),
+	)
 
 	it.effect("tags the current span as session and omits the key id", () =>
 		Effect.gen(function* () {
@@ -29,5 +30,6 @@ describe("annotateAuthSpan", () => {
 			assert.strictEqual(span.attributes.get("maple.org_id"), "org_test")
 			assert.strictEqual(span.attributes.get("tenant.userId"), "user_test")
 			assert.strictEqual(span.attributes.get("maple.api_key.id"), undefined)
-		}).pipe(Effect.withSpan("test-root")))
+		}).pipe(Effect.withSpan("test-root")),
+	)
 })

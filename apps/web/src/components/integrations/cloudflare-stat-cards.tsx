@@ -35,7 +35,8 @@ function StatCard({
 			<span className="text-xs text-muted-foreground">{caption}</span>
 		</>
 	)
-	const frame = "flex min-w-0 flex-1 flex-col gap-2.5 rounded-lg border border-border/60 bg-card px-4 py-3.5"
+	const frame =
+		"flex min-w-0 flex-1 flex-col gap-2.5 rounded-lg border border-border/60 bg-card px-4 py-3.5"
 	if (href) {
 		return (
 			<Link

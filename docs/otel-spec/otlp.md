@@ -16,26 +16,26 @@ Source: https://opentelemetry.io/docs/specs/otlp/ · https://opentelemetry.io/bl
 
 ## Transports: gRPC vs HTTP
 
-| Transport | Default port | Encoding | Notes |
-|---|---|---|---|
-| OTLP/gRPC | **4317** | Protobuf (unary calls) | HTTP/2-based; server MAY multiplex gRPC and HTTP on the same port |
-| OTLP/HTTP | **4318** | Protobuf (binary) or JSON | Implementations MAY use HTTP/1.1 or HTTP/2 |
+| Transport | Default port | Encoding                  | Notes                                                             |
+| --------- | ------------ | ------------------------- | ----------------------------------------------------------------- |
+| OTLP/gRPC | **4317**     | Protobuf (unary calls)    | HTTP/2-based; server MAY multiplex gRPC and HTTP on the same port |
+| OTLP/HTTP | **4318**     | Protobuf (binary) or JSON | Implementations MAY use HTTP/1.1 or HTTP/2                        |
 
 ### Default URL paths (OTLP/HTTP)
 
-| Signal | Path | Stability |
-|---|---|---|
-| Traces | `/v1/traces` | Stable |
-| Metrics | `/v1/metrics` | Stable |
-| Logs | `/v1/logs` | Stable |
+| Signal   | Path                      | Stability   |
+| -------- | ------------------------- | ----------- |
+| Traces   | `/v1/traces`              | Stable      |
+| Metrics  | `/v1/metrics`             | Stable      |
+| Logs     | `/v1/logs`                | Stable      |
 | Profiles | `/v1development/profiles` | Development |
 
 ### Content types
 
-| Encoding | `Content-Type` |
-|---|---|
+| Encoding        | `Content-Type`           |
+| --------------- | ------------------------ |
 | Binary protobuf | `application/x-protobuf` |
-| JSON | `application/json` |
+| JSON            | `application/json`       |
 
 ### Compression
 
@@ -120,24 +120,24 @@ Source: https://opentelemetry.io/docs/specs/otlp/ · https://github.com/open-tel
 
 ### gRPC status codes — retryable matrix
 
-| gRPC code | Retryable? |
-|---|---|
-| CANCELLED | Yes |
-| UNKNOWN | No |
-| INVALID_ARGUMENT | No |
-| DEADLINE_EXCEEDED | Yes |
-| NOT_FOUND | No |
-| ALREADY_EXISTS | No |
-| PERMISSION_DENIED | No |
-| UNAUTHENTICATED | No |
-| RESOURCE_EXHAUSTED | Only if server signals recoverability (via `RetryInfo`) |
-| FAILED_PRECONDITION | No |
-| ABORTED | Yes |
-| OUT_OF_RANGE | Yes |
-| UNIMPLEMENTED | No |
-| INTERNAL | No |
-| UNAVAILABLE | Yes |
-| DATA_LOSS | Yes |
+| gRPC code           | Retryable?                                              |
+| ------------------- | ------------------------------------------------------- |
+| CANCELLED           | Yes                                                     |
+| UNKNOWN             | No                                                      |
+| INVALID_ARGUMENT    | No                                                      |
+| DEADLINE_EXCEEDED   | Yes                                                     |
+| NOT_FOUND           | No                                                      |
+| ALREADY_EXISTS      | No                                                      |
+| PERMISSION_DENIED   | No                                                      |
+| UNAUTHENTICATED     | No                                                      |
+| RESOURCE_EXHAUSTED  | Only if server signals recoverability (via `RetryInfo`) |
+| FAILED_PRECONDITION | No                                                      |
+| ABORTED             | Yes                                                     |
+| OUT_OF_RANGE        | Yes                                                     |
+| UNIMPLEMENTED       | No                                                      |
+| INTERNAL            | No                                                      |
+| UNAVAILABLE         | Yes                                                     |
+| DATA_LOSS           | Yes                                                     |
 
 - Retryable: **"indicate that telemetry data processing failed, and the client SHOULD record the error and may retry exporting the same data."**
 - Non-retryable: **"indicate that telemetry data processing failed, and the client MUST NOT retry sending the same telemetry data."**
@@ -147,15 +147,15 @@ Source: https://opentelemetry.io/docs/specs/otlp/ · https://github.com/open-tel
 
 ### HTTP status codes — retryable matrix
 
-| HTTP status | Retryable? | Notes |
-|---|---|---|
-| 200 | n/a | Success (full or partial) |
-| 400 Bad Request | **No** | Undecodable/permanently invalid request; client MUST NOT retry |
-| 429 Too Many Requests | **Yes** | Throttling; MAY carry `Retry-After` |
-| 502 Bad Gateway | **Yes** | |
-| 503 Service Unavailable | **Yes** | Overload; MAY carry `Retry-After` |
-| 504 Gateway Timeout | **Yes** | |
-| other 4xx/5xx | **No** | **"All other `4xx` or `5xx` response status codes MUST NOT be retried."** |
+| HTTP status             | Retryable? | Notes                                                                     |
+| ----------------------- | ---------- | ------------------------------------------------------------------------- |
+| 200                     | n/a        | Success (full or partial)                                                 |
+| 400 Bad Request         | **No**     | Undecodable/permanently invalid request; client MUST NOT retry            |
+| 429 Too Many Requests   | **Yes**    | Throttling; MAY carry `Retry-After`                                       |
+| 502 Bad Gateway         | **Yes**    |                                                                           |
+| 503 Service Unavailable | **Yes**    | Overload; MAY carry `Retry-After`                                         |
+| 504 Gateway Timeout     | **Yes**    |                                                                           |
+| other 4xx/5xx           | **No**     | **"All other `4xx` or `5xx` response status codes MUST NOT be retried."** |
 
 - Error body: **"The response body for all `HTTP 4xx` and `HTTP 5xx` responses MUST be a Protobuf-encoded `Status` message that describes the problem."** — this applies regardless of whether the request was binary or JSON encoded.
 - Bad data: **"If the processing of the request fails because the request contains data that cannot be decoded or is otherwise invalid and such failure is permanent, then the server MUST respond with `HTTP 400 Bad Request`."**
@@ -182,13 +182,13 @@ Source: https://opentelemetry.io/docs/specs/otlp/
 
 OTLP/HTTP JSON starts from the proto3 standard JSON mapping but overrides it in ways that matter for anyone hand-constructing or parsing OTLP JSON (e.g. Maple's ingest-dummy script):
 
-| Aspect | Standard protobuf JSON | **OTLP/JSON rule** |
-|---|---|---|
-| `trace_id`/`span_id` (`bytes`) | base64 | **Case-insensitive hex-encoded string.** Example: `{"traceId": "5B8EFFF798038103D269B633813FC60C"}` |
-| Field names | configurable | **lowerCamelCase only** — original (snake_case) field names are **not valid**. Example: `droppedAttributesCount`, not `dropped_attributes_count` |
-| Enums | name string OR number, receiver's choice | **Numbers only — enum name strings MUST NOT be used.** Example: `{"kind": 2}`, not `{"kind": "SPAN_KIND_SERVER"}` |
-| `int64`/`uint64` | string | Same as standard: **encoded as decimal strings**; **"either numbers or strings are accepted when decoding"** |
-| Unknown fields | mapping-defined | **"OTLP/JSON receivers MUST ignore message fields with unknown names and MUST unmarshal the message as if the unknown field was not present"** (forward compatibility) |
+| Aspect                         | Standard protobuf JSON                   | **OTLP/JSON rule**                                                                                                                                                     |
+| ------------------------------ | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trace_id`/`span_id` (`bytes`) | base64                                   | **Case-insensitive hex-encoded string.** Example: `{"traceId": "5B8EFFF798038103D269B633813FC60C"}`                                                                    |
+| Field names                    | configurable                             | **lowerCamelCase only** — original (snake_case) field names are **not valid**. Example: `droppedAttributesCount`, not `dropped_attributes_count`                       |
+| Enums                          | name string OR number, receiver's choice | **Numbers only — enum name strings MUST NOT be used.** Example: `{"kind": 2}`, not `{"kind": "SPAN_KIND_SERVER"}`                                                      |
+| `int64`/`uint64`               | string                                   | Same as standard: **encoded as decimal strings**; **"either numbers or strings are accepted when decoding"**                                                           |
+| Unknown fields                 | mapping-defined                          | **"OTLP/JSON receivers MUST ignore message fields with unknown names and MUST unmarshal the message as if the unknown field was not present"** (forward compatibility) |
 
 These are normative MUSTs for any OTLP/JSON server, including Maple's ingest gateway when it accepts `Content-Type: application/json`.
 
@@ -339,17 +339,17 @@ Source: https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentele
 
 All options are defined generically and per-signal (`TRACES`/`METRICS`/`LOGS`); **"Each configuration option MUST be overridable by a signal specific option"** — signal-specific always wins over the generic one.
 
-| Env var (generic → per-signal suffix pattern) | Default | Values / format |
-|---|---|---|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` → `_TRACES_ENDPOINT` / `_METRICS_ENDPOINT` / `_LOGS_ENDPOINT` | `http://localhost:4318` (HTTP), `http://localhost:4317` (gRPC) | URL (scheme+host+port[+path]) |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` → `_TRACES_PROTOCOL` / etc. | `http/protobuf` | `grpc`, `http/protobuf`, `http/json` |
-| `OTEL_EXPORTER_OTLP_HEADERS` → `_TRACES_HEADERS` / etc. | none | W3C Baggage-style `key1=value1,key2=value2` (no `;`); values always strings |
-| `OTEL_EXPORTER_OTLP_TIMEOUT` → `_TRACES_TIMEOUT` / etc. | `10s` | duration |
-| `OTEL_EXPORTER_OTLP_COMPRESSION` → `_TRACES_COMPRESSION` / etc. | none specified (SIG picks a sensible default) | `none`, `gzip` |
-| `OTEL_EXPORTER_OTLP_INSECURE` → `_TRACES_INSECURE` / etc. | `false` | bool; gRPC-only (HTTP uses the endpoint's scheme). Legacy `OTEL_EXPORTER_OTLP_SPAN_INSECURE`/`_METRIC_INSECURE` SHOULD still be supported |
-| `OTEL_EXPORTER_OTLP_CERTIFICATE` → `_TRACES_CERTIFICATE` / etc. | none | PEM file path (trusted server cert) |
-| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE` → `_TRACES_CLIENT_CERTIFICATE` / etc. | none | PEM file path (mTLS client cert/chain) |
-| `OTEL_EXPORTER_OTLP_CLIENT_KEY` → `_TRACES_CLIENT_KEY` / etc. | none | PEM file path (mTLS client private key) |
+| Env var (generic → per-signal suffix pattern)                                               | Default                                                        | Values / format                                                                                                                           |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` → `_TRACES_ENDPOINT` / `_METRICS_ENDPOINT` / `_LOGS_ENDPOINT` | `http://localhost:4318` (HTTP), `http://localhost:4317` (gRPC) | URL (scheme+host+port[+path])                                                                                                             |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` → `_TRACES_PROTOCOL` / etc.                                   | `http/protobuf`                                                | `grpc`, `http/protobuf`, `http/json`                                                                                                      |
+| `OTEL_EXPORTER_OTLP_HEADERS` → `_TRACES_HEADERS` / etc.                                     | none                                                           | W3C Baggage-style `key1=value1,key2=value2` (no `;`); values always strings                                                               |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` → `_TRACES_TIMEOUT` / etc.                                     | `10s`                                                          | duration                                                                                                                                  |
+| `OTEL_EXPORTER_OTLP_COMPRESSION` → `_TRACES_COMPRESSION` / etc.                             | none specified (SIG picks a sensible default)                  | `none`, `gzip`                                                                                                                            |
+| `OTEL_EXPORTER_OTLP_INSECURE` → `_TRACES_INSECURE` / etc.                                   | `false`                                                        | bool; gRPC-only (HTTP uses the endpoint's scheme). Legacy `OTEL_EXPORTER_OTLP_SPAN_INSECURE`/`_METRIC_INSECURE` SHOULD still be supported |
+| `OTEL_EXPORTER_OTLP_CERTIFICATE` → `_TRACES_CERTIFICATE` / etc.                             | none                                                           | PEM file path (trusted server cert)                                                                                                       |
+| `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE` → `_TRACES_CLIENT_CERTIFICATE` / etc.               | none                                                           | PEM file path (mTLS client cert/chain)                                                                                                    |
+| `OTEL_EXPORTER_OTLP_CLIENT_KEY` → `_TRACES_CLIENT_KEY` / etc.                               | none                                                           | PEM file path (mTLS client private key)                                                                                                   |
 
 ### Endpoint path-appending rule — generic vs per-signal
 
@@ -375,11 +375,11 @@ Source: https://opentelemetry.io/docs/specs/otel/protocol/exporter/
 - OTLP/JSON encoding deviations: https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding
 - Exporter configuration (env vars): https://opentelemetry.io/docs/specs/otel/protocol/exporter/
 - opentelemetry-proto repo (all `.proto` sources): https://github.com/open-telemetry/opentelemetry-proto
-  - Trace: `opentelemetry/proto/trace/v1/trace.proto`
-  - Logs: `opentelemetry/proto/logs/v1/logs.proto`
-  - Metrics: `opentelemetry/proto/metrics/v1/metrics.proto`
-  - Common (`AnyValue`/`KeyValue`/`InstrumentationScope`): `opentelemetry/proto/common/v1/common.proto`
-  - Resource: `opentelemetry/proto/resource/v1/resource.proto`
-  - Collector services (`Export` RPCs, partial-success messages): `opentelemetry/proto/collector/{trace,metrics,logs}/v1/*_service.proto`
+    - Trace: `opentelemetry/proto/trace/v1/trace.proto`
+    - Logs: `opentelemetry/proto/logs/v1/logs.proto`
+    - Metrics: `opentelemetry/proto/metrics/v1/metrics.proto`
+    - Common (`AnyValue`/`KeyValue`/`InstrumentationScope`): `opentelemetry/proto/common/v1/common.proto`
+    - Resource: `opentelemetry/proto/resource/v1/resource.proto`
+    - Collector services (`Export` RPCs, partial-success messages): `opentelemetry/proto/collector/{trace,metrics,logs}/v1/*_service.proto`
 - Profiles (Development/Alpha, separate proto fork for active WG work): https://github.com/open-telemetry/opentelemetry-proto-profile · https://opentelemetry.io/blog/2026/profiles-alpha/
 - opentelemetry-proto stability policy (Development/Alpha/Beta/RC grades): https://github.com/open-telemetry/opentelemetry-proto/blob/main/docs/specification.md

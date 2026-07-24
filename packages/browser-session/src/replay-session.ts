@@ -72,6 +72,8 @@ export function startReplaySession(options: ReplaySessionOptions): ReplaySession
 				serviceVersion: options.serviceVersion,
 				clickCount: clickCount ?? 0,
 				traceIds: status === "ended" ? getObservedTraceIds() : undefined,
+				// This path *is* the recorder — every row it posts has rrweb chunks.
+				recorded: true,
 			}),
 			keepalive,
 		)

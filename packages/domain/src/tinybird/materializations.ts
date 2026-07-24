@@ -8,6 +8,7 @@ import {
 	serviceExternalEdgesHourly,
 	servicePlatformsHourly,
 	serviceOverviewSpans,
+	serviceOverviewHourly,
 	errorSpans,
 	errorEvents,
 	errorEventsByTime,
@@ -20,6 +21,7 @@ import {
 	metricCatalog,
 	spanMetricsCallsHourly,
 	serviceOperationsMinutely,
+	serviceOperationsHourly,
 } from "./datasources"
 import {
 	DB_NAMESPACE_ATTR_SQL,
@@ -292,6 +294,42 @@ export const serviceOverviewSpansMv = defineMaterializedView("service_overview_s
           ResourceAttributes['service.namespace'] AS ServiceNamespace
         FROM traces
         WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''
+      `,
+		}),
+	],
+})
+
+/**
+ * Durable service-level rollup for one-year overview and catalog queries.
+ * Entry-point semantics intentionally match service_overview_spans_mv.
+ */
+export const serviceOverviewHourlyMv = defineMaterializedView("service_overview_hourly_mv", {
+	description:
+		"Pre-aggregates service entry-point spans hourly by environment, namespace, and commit for one-year service history.",
+	datasource: serviceOverviewHourly,
+	nodes: [
+		node({
+			name: "service_overview_hourly_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(toDateTime(Timestamp)) AS Hour,
+          ServiceName,
+          ResourceAttributes['deployment.environment'] AS DeploymentEnv,
+          ResourceAttributes['service.namespace'] AS ServiceNamespace,
+          ResourceAttributes['deployment.commit_sha'] AS CommitSha,
+          count() AS SpanCount,
+          sum(SampleRate) AS EstimatedSpanCount,
+          countIf(StatusCode = 'Error') AS ErrorCount,
+          sumIf(SampleRate, StatusCode = 'Error') AS EstimatedErrorCount,
+          sum(toFloat64(Duration)) AS DurationSum,
+          quantilesTDigestState(0.5, 0.95, 0.99)(Duration) AS DurationQuantiles,
+          min(toDateTime(Timestamp)) AS FirstSeen,
+          countIf(StatusCode != 'Error' AND Duration < 500000000) AS ApdexSatisfiedCount,
+          countIf(StatusCode != 'Error' AND Duration >= 500000000 AND Duration < 2000000000) AS ApdexToleratingCount
+        FROM traces
+        WHERE SpanKind IN ('Server', 'Consumer') OR ParentSpanId = ''
+        GROUP BY OrgId, Hour, ServiceName, DeploymentEnv, ServiceNamespace, CommitSha
       `,
 		}),
 	],
@@ -1212,6 +1250,37 @@ export const serviceOperationsMinutelyMv = defineMaterializedView("service_opera
           quantilesTDigestState(0.5, 0.95)(Duration) AS DurationQuantiles
         FROM traces
         GROUP BY OrgId, Minute, ServiceName, DeploymentEnv, SpanName
+      `,
+		}),
+	],
+})
+
+/**
+ * Cascading hourly rollup. It consumes the already-normalized minutely insert
+ * stream, so HTTP route normalization happens once and the t-digest state is
+ * merged rather than finalized and rebuilt.
+ */
+export const serviceOperationsHourlyMv = defineMaterializedView("service_operations_hourly_mv", {
+	description: "Merges minutely service-operation aggregates into an hour-grain one-year rollup.",
+	datasource: serviceOperationsHourly,
+	nodes: [
+		node({
+			name: "service_operations_hourly_mv_node",
+			sql: `
+        SELECT
+          OrgId,
+          toStartOfHour(Minute) AS Hour,
+          ServiceName,
+          DeploymentEnv,
+          SpanName,
+          sum(SpanCount) AS SpanCount,
+          sum(EstimatedSpanCount) AS EstimatedSpanCount,
+          sum(ErrorCount) AS ErrorCount,
+          sum(EstimatedErrorCount) AS EstimatedErrorCount,
+          sum(DurationSum) AS DurationSum,
+          quantilesTDigestMergeState(0.5, 0.95)(DurationQuantiles) AS DurationQuantiles
+        FROM service_operations_minutely
+        GROUP BY OrgId, Hour, ServiceName, DeploymentEnv, SpanName
       `,
 		}),
 	],

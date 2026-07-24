@@ -19,10 +19,7 @@ export { Toolbar, ToolbarSearch, ToolbarStat } from "@maple/ui/components/toolba
  */
 export function RefreshButton({ className }: { className?: string }) {
 	const queryClient = useQueryClient()
-	const onRefresh = useCallback(
-		() => queryClient.invalidateQueries({ queryKey: ["local"] }),
-		[queryClient],
-	)
+	const onRefresh = useCallback(() => queryClient.invalidateQueries({ queryKey: ["local"] }), [queryClient])
 	return <SharedRefreshButton onRefresh={onRefresh} className={className} />
 }
 

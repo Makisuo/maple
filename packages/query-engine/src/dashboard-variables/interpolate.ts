@@ -77,10 +77,12 @@ function interpolateWhereClause(input: string, values: VariableValues): string {
 		const refs = collectVariableRefs(clause)
 		const dropped = refs.some((name) => values[name]?.isAll === true)
 		if (dropped) continue
-		kept.push(replaceRefs(clause, (name) => {
-			const variable = values[name]
-			return variable === undefined ? null : variable.value
-		}))
+		kept.push(
+			replaceRefs(clause, (name) => {
+				const variable = values[name]
+				return variable === undefined ? null : variable.value
+			}),
+		)
 	}
 	return kept.join(" AND ")
 }

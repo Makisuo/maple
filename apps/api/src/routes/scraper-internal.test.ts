@@ -72,7 +72,10 @@ describe("toInternalScrapeTarget", () => {
 
 	it.effect("drops rows that violate the schema brands instead of failing the list", () =>
 		Effect.gen(function* () {
-			const outOfRange = yield* toInternalScrapeTarget({ ...baseRow, scrapeIntervalSeconds: 2 }, INGEST_KEY)
+			const outOfRange = yield* toInternalScrapeTarget(
+				{ ...baseRow, scrapeIntervalSeconds: 2 },
+				INGEST_KEY,
+			)
 			assert.isTrue(Option.isNone(outOfRange))
 		}),
 	)

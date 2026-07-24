@@ -1,8 +1,14 @@
 import { assert, describe, it } from "@effect/vitest"
 import { VcsQueueError, type VcsSyncJob } from "@maple/domain/http"
 import { WorkerEnvironment } from "@maple/effect-cloudflare"
-import { Effect, Exit, Layer } from "effect"
-import { QUEUE_BATCH_MAX_BYTES, QUEUE_BATCH_MAX_MESSAGES, VcsSyncQueue } from "@/services/vcs/VcsSyncQueue"
+import { Effect, Exit, Layer, Tracer } from "effect"
+import {
+	MESSAGING_DESTINATION,
+	MESSAGING_SYSTEM,
+	QUEUE_BATCH_MAX_BYTES,
+	QUEUE_BATCH_MAX_MESSAGES,
+	VcsSyncQueue,
+} from "@/services/vcs/VcsSyncQueue"
 import { findError } from "./harness"
 
 type CapturedMessage = { readonly body: unknown }
@@ -83,6 +89,47 @@ const pushJob = (i: number, messageBytes: number): VcsSyncJob => ({
 
 const provideQueue = (layer: Layer.Layer<WorkerEnvironment>) =>
 	Effect.provide(VcsSyncQueue.layer.pipe(Layer.provide(layer)))
+
+/** Records every span so the producer span's kind and messaging attributes are assertable. */
+const makeRecordingTracer = () => {
+	const spans: Array<Tracer.NativeSpan> = []
+	const tracer = Tracer.make({
+		span(options) {
+			const span = new Tracer.NativeSpan(options)
+			spans.push(span)
+			return span
+		},
+	})
+	return { spans, tracer }
+}
+
+// Producer kind + messaging.system/destination are what put the queue on the
+// service map as an external dependency; an Internal span with neither is
+// invisible there. The consumer side (vcs-sync-runtime) mirrors these.
+describe("VcsSyncQueue producer spans", () => {
+	it.effect("sends emit Producer-kind spans with messaging semconv attributes", () => {
+		const { layer } = fakeQueueEnv()
+		return Effect.gen(function* () {
+			const { spans, tracer } = makeRecordingTracer()
+			const queue = yield* VcsSyncQueue
+
+			yield* queue.sendBatch([installSyncJob(1)]).pipe(Effect.withTracer(tracer))
+			yield* queue.send(installSyncJob(2)).pipe(Effect.withTracer(tracer))
+
+			const produced = spans.filter((span) => span.name.startsWith("VcsSyncQueue."))
+			assert.deepStrictEqual(produced.map((span) => span.name).sort(), [
+				"VcsSyncQueue.send",
+				"VcsSyncQueue.sendBatch",
+			])
+			for (const span of produced) {
+				assert.strictEqual(span.kind, "producer", `${span.name} is Producer-kind`)
+				assert.strictEqual(span.attributes.get("messaging.system"), MESSAGING_SYSTEM)
+				assert.strictEqual(span.attributes.get("messaging.destination.name"), MESSAGING_DESTINATION)
+				assert.strictEqual(span.attributes.get("messaging.operation.name"), "send")
+			}
+		}).pipe(provideQueue(layer))
+	})
+})
 
 describe("VcsSyncQueue.sendBatch chunking", () => {
 	it.effect("splits a list over the message-count cap into capped chunks", () => {

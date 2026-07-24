@@ -10,12 +10,12 @@ For a single-binary experience without Docker, see [docs/local-mode.md](docs/loc
 
 Install the pinned toolchain (recommended via [mise](https://mise.en.dev)):
 
-| Tool   | Used for                                      |
-| ------ | --------------------------------------------- |
-| Bun    | JS/TS apps, scripts, tests                    |
-| Node   | Some scripts (e.g. mobile)                    |
-| Rust   | `apps/ingest` (OTLP gateway)                  |
-| Docker | Postgres, ClickHouse, OTel collector          |
+| Tool   | Used for                             |
+| ------ | ------------------------------------ |
+| Bun    | JS/TS apps, scripts, tests           |
+| Node   | Some scripts (e.g. mobile)           |
+| Rust   | `apps/ingest` (OTLP gateway)         |
+| Docker | Postgres, ClickHouse, OTel collector |
 
 First-time bootstrap:
 
@@ -131,11 +131,11 @@ docker compose -f docker-compose.development.yml up -d
 
 This starts:
 
-| Service          | Ports              | Purpose                                      |
-| ---------------- | ------------------ | -------------------------------------------- |
-| `postgres`       | `5499 → 5432`      | App DB for `wrangler dev` (Hyperdrive local) |
-| `clickhouse`     | `8123`, `9000`     | Telemetry warehouse                          |
-| `otel-collector` | `4317`, `4318`, `13133` | OTLP ingest → ClickHouse via mapleexporter |
+| Service          | Ports                   | Purpose                                      |
+| ---------------- | ----------------------- | -------------------------------------------- |
+| `postgres`       | `5499 → 5432`           | App DB for `wrangler dev` (Hyperdrive local) |
+| `clickhouse`     | `8123`, `9000`          | Telemetry warehouse                          |
+| `otel-collector` | `4317`, `4318`, `13133` | OTLP ingest → ClickHouse via mapleexporter   |
 
 The collector reads `.env.local` and uses `MAPLE_CLICKHOUSE_PASSWORD=maple` from compose
 overrides. Ensure ClickHouse credentials in `.env.local` match (`maple` / `maple`).
@@ -178,22 +178,22 @@ cd apps/api && bun dev:app
 
 Default URL: `http://localhost:3472`
 
-| Variable | Required | Notes |
-| -------- | -------- | ----- |
-| `MAPLE_INGEST_KEY_ENCRYPTION_KEY` | yes | `openssl rand -base64 32` |
-| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes | `openssl rand -hex 32` |
-| `MAPLE_AUTH_MODE` | yes | `self_hosted` or `clerk` |
-| `MAPLE_ROOT_PASSWORD` | yes* | *Required when `MAPLE_AUTH_MODE=self_hosted` |
-| `MAPLE_DEFAULT_ORG_ID` | yes | Default `default`; must match ingest org override |
-| `TINYBIRD_HOST` | yes | Placeholder OK when using `CLICKHOUSE_URL` |
-| `TINYBIRD_TOKEN` | yes | Placeholder OK when using `CLICKHOUSE_URL` |
-| `TINYBIRD_SIGNING_KEY` / `TINYBIRD_WORKSPACE_ID` | with Tinybird raw SQL | Explicit JWT signing configuration; never derived from `TINYBIRD_TOKEN` |
-| `CLICKHOUSE_URL` | recommended | `http://localhost:8123` for local ClickHouse stack |
-| `CLICKHOUSE_PROVIDER` | optional | `tinybird` (default) or `clickhouse`; set `clickhouse` for env-level vanilla/self-managed ClickHouse |
-| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | with CH | Match docker-compose (`maple` / `maple` / `default`) |
-| `INTERNAL_SERVICE_TOKEN` | recommended | Shared with scraper + chat-flue |
-| `SD_INTERNAL_TOKEN` | optional | Prometheus scraper internal API auth |
-| `CLERK_*` | clerk mode | See `.env.example` |
+| Variable                                                          | Required              | Notes                                                                                                |
+| ----------------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------- |
+| `MAPLE_INGEST_KEY_ENCRYPTION_KEY`                                 | yes                   | `openssl rand -base64 32`                                                                            |
+| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY`                                | yes                   | `openssl rand -hex 32`                                                                               |
+| `MAPLE_AUTH_MODE`                                                 | yes                   | `self_hosted` or `clerk`                                                                             |
+| `MAPLE_ROOT_PASSWORD`                                             | yes\*                 | \*Required when `MAPLE_AUTH_MODE=self_hosted`                                                        |
+| `MAPLE_DEFAULT_ORG_ID`                                            | yes                   | Default `default`; must match ingest org override                                                    |
+| `TINYBIRD_HOST`                                                   | yes                   | Placeholder OK when using `CLICKHOUSE_URL`                                                           |
+| `TINYBIRD_TOKEN`                                                  | yes                   | Placeholder OK when using `CLICKHOUSE_URL`                                                           |
+| `TINYBIRD_SIGNING_KEY` / `TINYBIRD_WORKSPACE_ID`                  | with Tinybird raw SQL | Explicit JWT signing configuration; never derived from `TINYBIRD_TOKEN`                              |
+| `CLICKHOUSE_URL`                                                  | recommended           | `http://localhost:8123` for local ClickHouse stack                                                   |
+| `CLICKHOUSE_PROVIDER`                                             | optional              | `tinybird` (default) or `clickhouse`; set `clickhouse` for env-level vanilla/self-managed ClickHouse |
+| `CLICKHOUSE_USER` / `CLICKHOUSE_PASSWORD` / `CLICKHOUSE_DATABASE` | with CH               | Match docker-compose (`maple` / `maple` / `default`)                                                 |
+| `INTERNAL_SERVICE_TOKEN`                                          | recommended           | Shared with scraper + chat-flue                                                                      |
+| `SD_INTERNAL_TOKEN`                                               | optional              | Prometheus scraper internal API auth                                                                 |
+| `CLERK_*`                                                         | clerk mode            | See `.env.example`                                                                                   |
 
 Loads env via `--env-file ../../.env.local` (wrangler). Requires docker Postgres running
 (`bun run db:migrate:local`).
@@ -206,14 +206,14 @@ cd apps/web && bun dev:app
 
 Default URL: `http://localhost:3471`
 
-| Variable | Required | Notes |
-| -------- | -------- | ----- |
-| `VITE_API_BASE_URL` | yes | `http://localhost:3472` (or portless `https://api.localhost`) |
-| `VITE_MAPLE_AUTH_MODE` | yes | Mirror `MAPLE_AUTH_MODE` |
-| `VITE_INGEST_URL` | optional | Defaults derived; set if ingest port differs |
-| `VITE_FLUE_CHAT_URL` | optional | Chat agent URL when testing Flue chat |
-| `VITE_CLERK_*` | clerk mode | Publishable key + sign-in URLs |
-| `VITE_MAPLE_INGEST_KEY` | optional | Browser self-telemetry via ingest |
+| Variable                | Required   | Notes                                                         |
+| ----------------------- | ---------- | ------------------------------------------------------------- |
+| `VITE_API_BASE_URL`     | yes        | `http://localhost:3472` (or portless `https://api.localhost`) |
+| `VITE_MAPLE_AUTH_MODE`  | yes        | Mirror `MAPLE_AUTH_MODE`                                      |
+| `VITE_INGEST_URL`       | optional   | Defaults derived; set if ingest port differs                  |
+| `VITE_FLUE_CHAT_URL`    | optional   | Chat agent URL when testing Flue chat                         |
+| `VITE_CLERK_*`          | clerk mode | Publishable key + sign-in URLs                                |
+| `VITE_MAPLE_INGEST_KEY` | optional   | Browser self-telemetry via ingest                             |
 
 Sign in (self-hosted): use the org/user you create with `MAPLE_ROOT_PASSWORD`.
 Clerk dev login: see [CLAUDE.md](CLAUDE.md).
@@ -227,18 +227,18 @@ cd apps/ingest && bun dev:app
 Default port: `3473` (`INGEST_PORT` / `PORT` override). `.env.example` uses `3474`; pick one
 port and keep `VITE_*` / `MAPLE_INGEST_PUBLIC_URL` consistent.
 
-| Variable | Required | Notes |
-| -------- | -------- | ----- |
-| `INGEST_FORWARD_OTLP_ENDPOINT` | yes | `http://127.0.0.1:4318` for local collector |
-| `INGEST_WRITE_MODE` | recommended | `forward` for ClickHouse stack (default `tinybird`) |
-| `MAPLE_INGEST_KEY_ENCRYPTION_KEY` | yes* | *Required for postgres key store / ClickHouse direct path |
-| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes | Same value as API |
-| `MAPLE_SELF_HOSTED_MODE` | recommended | `single_tenant` → static key store (no DB) |
-| `MAPLE_ORG_ID_OVERRIDE` | with static | Must match `MAPLE_DEFAULT_ORG_ID` |
-| `MAPLE_PG_URL` | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store |
-| `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode | When `INGEST_WRITE_MODE=tinybird` or `dual` |
-| `INGEST_PORT` | optional | Default from port / env |
-| `INGEST_REQUIRE_TLS` | optional | `false` locally |
+| Variable                           | Required       | Notes                                                                   |
+| ---------------------------------- | -------------- | ----------------------------------------------------------------------- |
+| `INGEST_FORWARD_OTLP_ENDPOINT`     | yes            | `http://127.0.0.1:4318` for local collector                             |
+| `INGEST_WRITE_MODE`                | recommended    | `forward` for ClickHouse stack (default `tinybird`)                     |
+| `MAPLE_INGEST_KEY_ENCRYPTION_KEY`  | yes\*          | \*Required for postgres key store / ClickHouse direct path              |
+| `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` | yes            | Same value as API                                                       |
+| `MAPLE_SELF_HOSTED_MODE`           | recommended    | `single_tenant` → static key store (no DB)                              |
+| `MAPLE_ORG_ID_OVERRIDE`            | with static    | Must match `MAPLE_DEFAULT_ORG_ID`                                       |
+| `MAPLE_PG_URL`                     | postgres store | `postgres://maple:maple@localhost:5499/maple` if not using static store |
+| `TINYBIRD_HOST` / `TINYBIRD_TOKEN` | tinybird mode  | When `INGEST_WRITE_MODE=tinybird` or `dual`                             |
+| `INGEST_PORT`                      | optional       | Default from port / env                                                 |
+| `INGEST_REQUIRE_TLS`               | optional       | `false` locally                                                         |
 
 Sources `../../.env.local` automatically. Requires Rust toolchain.
 
@@ -252,13 +252,13 @@ cd apps/scraper && bun dev
 
 Default health port: `3475`
 
-| Variable | Required | Notes |
-| -------- | -------- | ----- |
-| `MAPLE_API_URL` | optional | Default `http://127.0.0.1:3472` |
-| `MAPLE_INGEST_URL` | optional | Default `http://127.0.0.1:3474` |
-| `SD_INTERNAL_TOKEN` | optional | Default `maple-sd-dev-token`; match API's `SD_INTERNAL_TOKEN` |
-| `SCRAPER_CONCURRENCY` | optional | Default `10` |
-| `PORT` | optional | Health endpoint, default `3475` |
+| Variable              | Required | Notes                                                         |
+| --------------------- | -------- | ------------------------------------------------------------- |
+| `MAPLE_API_URL`       | optional | Default `http://127.0.0.1:3472`                               |
+| `MAPLE_INGEST_URL`    | optional | Default `http://127.0.0.1:3474`                               |
+| `SD_INTERNAL_TOKEN`   | optional | Default `maple-sd-dev-token`; match API's `SD_INTERNAL_TOKEN` |
+| `SCRAPER_CONCURRENCY` | optional | Default `10`                                                  |
+| `PORT`                | optional | Health endpoint, default `3475`                               |
 
 Loads `../../.env.local` via `bun --env-file`.
 
@@ -281,14 +281,14 @@ cd apps/chat-flue
 bun flue dev --target node --env ../../.env.local
 ```
 
-| Variable | Required | Notes |
-| -------- | -------- | ----- |
-| `INTERNAL_SERVICE_TOKEN` | yes | Must match API; sent as `Bearer maple_svc_<token>` to MCP |
-| `MAPLE_API_URL` | yes | `http://localhost:3472` (wrangler `vars` / env) |
-| `MAPLE_CHAT_MODEL` | optional | Workers AI id (`cloudflare/@cf/...`) or OpenRouter (`openrouter/...`) |
-| `MAPLE_AUTH_MODE` / `MAPLE_ROOT_PASSWORD` / `CLERK_*` | yes | Auth middleware on `/agents/*` |
-| `MAPLE_INGEST_KEY` | optional | Self-telemetry export |
-| `MAPLE_ENDPOINT` | optional | OTLP base URL, default production ingest |
+| Variable                                              | Required | Notes                                                                 |
+| ----------------------------------------------------- | -------- | --------------------------------------------------------------------- |
+| `INTERNAL_SERVICE_TOKEN`                              | yes      | Must match API; sent as `Bearer maple_svc_<token>` to MCP             |
+| `MAPLE_API_URL`                                       | yes      | `http://localhost:3472` (wrangler `vars` / env)                       |
+| `MAPLE_CHAT_MODEL`                                    | optional | Workers AI id (`cloudflare/@cf/...`) or OpenRouter (`openrouter/...`) |
+| `MAPLE_AUTH_MODE` / `MAPLE_ROOT_PASSWORD` / `CLERK_*` | yes      | Auth middleware on `/agents/*`                                        |
+| `MAPLE_INGEST_KEY`                                    | optional | Self-telemetry export                                                 |
+| `MAPLE_ENDPOINT`                                      | optional | OTLP base URL, default production ingest                              |
 
 Cloudflare target needs a Cloudflare account with Workers AI. Node target with an
 `openrouter/*` model requires `OPENROUTER_API_KEY` in `.env.local`.
@@ -309,21 +309,21 @@ bun dev
 proc_list_title: Maple
 
 procs:
-  web:
-    shell: bun dev:app
-    cwd: apps/web
-  api:
-    shell: bun dev:app
-    cwd: apps/api
-  ingest:
-    shell: bun dev:app
-    cwd: apps/ingest
-  scraper:
-    shell: bun dev
-    cwd: apps/scraper
-  chat-flue:
-    shell: bun flue dev --target node --env ../../.env.local
-    cwd: apps/chat-flue
+    web:
+        shell: bun dev:app
+        cwd: apps/web
+    api:
+        shell: bun dev:app
+        cwd: apps/api
+    ingest:
+        shell: bun dev:app
+        cwd: apps/ingest
+    scraper:
+        shell: bun dev
+        cwd: apps/scraper
+    chat-flue:
+        shell: bun flue dev --target node --env ../../.env.local
+        cwd: apps/chat-flue
 ```
 
 Run with `mprocs development.mprocs.yaml`.
@@ -355,14 +355,14 @@ Vitest uses embedded PGlite — no Docker Postgres required for unit tests.
 
 ## Troubleshooting
 
-| Symptom | Check |
-| ------- | ----- |
-| API fails on startup | Missing `MAPLE_INGEST_KEY_*`, `MAPLE_ROOT_PASSWORD`, or `TINYBIRD_*` |
-| Ingest 401 on OTLP | Static key store: use `maple_pk_…` prefix; postgres store: seed keys via API |
-| Empty traces UI | ClickHouse schema applied? Collector running? `INGEST_WRITE_MODE=forward`? |
-| API DB errors | `docker compose … up -d postgres` + `bun run db:migrate:local` |
+| Symptom                  | Check                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------ |
+| API fails on startup     | Missing `MAPLE_INGEST_KEY_*`, `MAPLE_ROOT_PASSWORD`, or `TINYBIRD_*`                       |
+| Ingest 401 on OTLP       | Static key store: use `maple_pk_…` prefix; postgres store: seed keys via API               |
+| Empty traces UI          | ClickHouse schema applied? Collector running? `INGEST_WRITE_MODE=forward`?                 |
+| API DB errors            | `docker compose … up -d postgres` + `bun run db:migrate:local`                             |
 | Ingest/API HMAC mismatch | `MAPLE_INGEST_KEY_LOOKUP_HMAC_KEY` must be identical; compare startup fingerprints in logs |
-| Chat MCP tools fail | `INTERNAL_SERVICE_TOKEN` mismatch or API not running |
+| Chat MCP tools fail      | `INTERNAL_SERVICE_TOKEN` mismatch or API not running                                       |
 
 ## Further reading
 

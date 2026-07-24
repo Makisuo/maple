@@ -1,4 +1,16 @@
-import { Cause, Clock, Context, Duration, Effect, Fiber, Layer, Ref, Result, Schedule, Semaphore } from "effect"
+import {
+	Cause,
+	Clock,
+	Context,
+	Duration,
+	Effect,
+	Fiber,
+	Layer,
+	Ref,
+	Result,
+	Schedule,
+	Semaphore,
+} from "effect"
 import { ScrapeResultReport, type InternalScrapeTarget } from "@maple/domain/http"
 import { ApiClient, ApiRequestError } from "./ApiClient"
 import { convertFamiliesToOtlp } from "./prometheus/otlp"
@@ -53,8 +65,7 @@ export interface ScrapeOutcome {
 }
 
 /** A scrape outcome that must escalate the delay instead of holding cadence. */
-export const shouldBackOff = (outcome: ScrapeOutcome): boolean =>
-	outcome.rateLimited || outcome.authFailed
+export const shouldBackOff = (outcome: ScrapeOutcome): boolean => outcome.rateLimited || outcome.authFailed
 
 /**
  * The target period before a target's next scrape. The happy path returns the
@@ -383,8 +394,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 
 				yield* Effect.forEach(
 					current,
-					([id, entry]) =>
-						next.has(id) ? Effect.void : Fiber.interrupt(entry.fiber),
+					([id, entry]) => (next.has(id) ? Effect.void : Fiber.interrupt(entry.fiber)),
 					{ discard: true },
 				)
 

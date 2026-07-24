@@ -208,7 +208,11 @@ export const maybeEnqueueTriage: (
 			yield* database.execute((db) =>
 				db
 					.update(aiTriageRuns)
-					.set({ status: "failed", error: "workflow_binding_unavailable", updatedAt: new Date(nowMs) })
+					.set({
+						status: "failed",
+						error: "workflow_binding_unavailable",
+						updatedAt: new Date(nowMs),
+					})
 					.where(eq(aiTriageRuns.id, runId)),
 			)
 			return { enqueued: false, runId, reason: "no_binding" as const }

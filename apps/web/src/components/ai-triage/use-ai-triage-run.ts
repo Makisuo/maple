@@ -48,7 +48,11 @@ export interface AiTriageRunState {
  * Lifted out of `AiTriageCard` so a page can drive several surfaces (a scorecard
  * rail + a report body) from a single run, instead of the card owning it all.
  */
-export function useAiTriageRun({ incidentKind, incidentId, issueId }: UseAiTriageRunParams): AiTriageRunState {
+export function useAiTriageRun({
+	incidentKind,
+	incidentId,
+	issueId,
+}: UseAiTriageRunParams): AiTriageRunState {
 	const reactivityKeys = ["aiTriageRuns", `aiTriage:${incidentKind}:${incidentId ?? issueId ?? ""}`]
 	const runsQueryAtom = MapleApiAtomClient.query("aiTriage", "listRuns", {
 		query:

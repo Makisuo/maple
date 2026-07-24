@@ -31,9 +31,7 @@ export function useAlertRuleStates(ruleId?: AlertRuleId): ReadonlyArray<AlertRul
 }
 
 /** Group state rows per rule id, for overview-style consumers. */
-export function statesByRuleId(
-	states: ReadonlyArray<AlertRuleStateRow>,
-): Map<string, AlertRuleStateRow[]> {
+export function statesByRuleId(states: ReadonlyArray<AlertRuleStateRow>): Map<string, AlertRuleStateRow[]> {
 	const map = new Map<string, AlertRuleStateRow[]>()
 	for (const state of states) {
 		const list = map.get(state.rule_id)

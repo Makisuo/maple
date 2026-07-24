@@ -31,7 +31,6 @@ const statusStyles: Record<string, string> = {
 	Unset: "bg-muted text-muted-foreground border-border",
 }
 
-
 function SpanRowImpl({
 	span,
 	totalDurationMs,
@@ -112,8 +111,7 @@ function SpanRowImpl({
 	const httpInfo = getHttpInfo(span)
 	const platform = getCloudPlatform(span.spanAttributes)
 	const statusStyle = statusStyles[span.statusCode] ?? statusStyles.Unset
-	const kindLabel =
-		SPAN_KIND_LABELS[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
+	const kindLabel = SPAN_KIND_LABELS[span.spanKind] ?? span.spanKind?.replace("SPAN_KIND_", "") ?? "Unknown"
 
 	const barColor =
 		httpInfo?.statusCode && httpInfo.statusCode >= 500
@@ -173,9 +171,7 @@ function SpanRowImpl({
 						/>
 					)}
 					<ServiceDot serviceName={span.serviceName} className="size-1.5" />
-					<span style={{ color: getServiceColor(span.serviceName) }}>
-						{span.serviceName}
-					</span>
+					<span style={{ color: getServiceColor(span.serviceName) }}>{span.serviceName}</span>
 					<span className="text-muted-foreground/60">{kindLabel}</span>
 				</span>
 

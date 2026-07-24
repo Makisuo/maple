@@ -44,6 +44,30 @@ const WINDOW_MARGIN_MS = 60 * 60 * 1000 // 1h slack on each side (clock skew, la
 // (no failing test would catch it), so keep them in lockstep.
 const MAX_SESSION_MS = 24 * 60 * 60 * 1000
 
+/**
+ * Read the SDK's `maple.session.recorded` marker out of a session's
+ * JSON-encoded resource attributes (`session_replays.ResourceAttributes`).
+ *
+ * Returns `undefined` when the marker is absent — sessions written before the
+ * SDK stamped it, and any row whose attributes fail to parse. Callers must
+ * treat that as "unknown", not "not recorded", and fall back to the session
+ * status + chunk count.
+ */
+export function recordedMarker(resourceAttributes: string | null | undefined): boolean | undefined {
+	if (!resourceAttributes) return undefined
+	let parsed: unknown
+	try {
+		parsed = JSON.parse(resourceAttributes)
+	} catch {
+		return undefined
+	}
+	if (typeof parsed !== "object" || parsed === null) return undefined
+	const marker = (parsed as Record<string, unknown>)["maple.session.recorded"]
+	if (marker === "true") return true
+	if (marker === "false") return false
+	return undefined
+}
+
 /** A warehouse partition-pruning window, shared by the session-detail atom callers. */
 export interface ReplayPartitionWindow {
 	readonly windowStart: string

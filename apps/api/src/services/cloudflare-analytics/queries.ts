@@ -354,7 +354,9 @@ const QueueConsumersGroup = Schema.Struct({
 })
 export type QueueConsumersGroupShape = typeof QueueConsumersGroup.Type
 
-const QueueConsumersAccountNode = Schema.Struct({ queueConsumers: nullable(Schema.Array(QueueConsumersGroup)) })
+const QueueConsumersAccountNode = Schema.Struct({
+	queueConsumers: nullable(Schema.Array(QueueConsumersGroup)),
+})
 export const decodeQueueConsumersAccountNode = Schema.decodeUnknownEffect(QueueConsumersAccountNode)
 
 // ---------------------------------------------------------------------------
@@ -386,7 +388,9 @@ const DurableObjectsGroup = Schema.Struct({
 })
 export type DurableObjectsGroupShape = typeof DurableObjectsGroup.Type
 
-const DurableObjectsAccountNode = Schema.Struct({ durableObjects: nullable(Schema.Array(DurableObjectsGroup)) })
+const DurableObjectsAccountNode = Schema.Struct({
+	durableObjects: nullable(Schema.Array(DurableObjectsGroup)),
+})
 export const decodeDurableObjectsAccountNode = Schema.decodeUnknownEffect(DurableObjectsAccountNode)
 
 // ---------------------------------------------------------------------------

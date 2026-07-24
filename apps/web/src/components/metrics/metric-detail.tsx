@@ -227,12 +227,7 @@ function MetricDetailContent({
 
 			<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
 				<div className="flex min-w-0 flex-col gap-4">
-					<MetricChart
-						draft={draft}
-						unit={summary.unit}
-						startTime={startTime}
-						endTime={endTime}
-					/>
+					<MetricChart draft={draft} unit={summary.unit} startTime={startTime} endTime={endTime} />
 					<MetricBreakdown
 						draft={draft}
 						breakdownKey={state.bd}

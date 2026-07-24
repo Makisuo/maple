@@ -398,7 +398,10 @@ function generateRuntimeMetrics(
 				value: Math.max(
 					1,
 					Math.round(
-						8 + 3 * Math.sin(point / 15 + serviceIdx * 2.3) + (Math.random() - 0.5) * 4 + lagSpikeMs,
+						8 +
+							3 * Math.sin(point / 15 + serviceIdx * 2.3) +
+							(Math.random() - 0.5) * 4 +
+							lagSpikeMs,
 					),
 				),
 			})

@@ -259,7 +259,11 @@ const getMetricAttributeValuesEffect = Effect.fn("QueryEngine.getMetricAttribute
 }: {
 	data: GetMetricAttributeValuesInput
 }) {
-	const input = yield* decodeInput(GetMetricAttributeValuesInputSchema, data ?? {}, "getMetricAttributeValues")
+	const input = yield* decodeInput(
+		GetMetricAttributeValuesInputSchema,
+		data ?? {},
+		"getMetricAttributeValues",
+	)
 
 	yield* Effect.annotateCurrentSpan("attributeKey", input.attributeKey)
 

@@ -20,7 +20,10 @@ import { ALERT_TEMPLATES, type AlertTemplate } from "@/lib/alerts/templates"
  * module so `templates.ts` stays React-free beyond its display icons.
  */
 const TILE_TONE: Record<AlertTemplate["id"], { glyph: string; hoverBorder: string }> = {
-	high_error_rate: { glyph: "bg-chart-error/10 text-chart-error", hoverBorder: "hover:border-chart-error/50" },
+	high_error_rate: {
+		glyph: "bg-chart-error/10 text-chart-error",
+		hoverBorder: "hover:border-chart-error/50",
+	},
 	slow_p95: { glyph: "bg-chart-p95/10 text-chart-p95", hoverBorder: "hover:border-chart-p95/50" },
 	slow_p99: { glyph: "bg-chart-p99/10 text-chart-p99", hoverBorder: "hover:border-chart-p99/50" },
 	low_apdex: { glyph: "bg-chart-apdex/10 text-chart-apdex", hoverBorder: "hover:border-chart-apdex/50" },
@@ -104,7 +107,15 @@ function QuietMonitor() {
 				<title>A steady signal running below an unset alert threshold</title>
 				{/* Dashed amber threshold — the line a rule would place. */}
 				<g className="infra-ref-line">
-					<line x1="10" y1="26" x2="290" y2="26" className="stroke-primary" strokeWidth="1.5" opacity="0.55" />
+					<line
+						x1="10"
+						y1="26"
+						x2="290"
+						y2="26"
+						className="stroke-primary"
+						strokeWidth="1.5"
+						opacity="0.55"
+					/>
 				</g>
 				{/* Live, steady signal well below the threshold. */}
 				<polyline

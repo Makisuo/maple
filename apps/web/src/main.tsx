@@ -135,10 +135,7 @@ function ClerkInnerApp() {
 	// Stable identity across Clerk session touches that don't change
 	// sign-in/org, so EffectRouterProvider doesn't see a new context prop on
 	// every Clerk-internal update.
-	const context = useMemo(
-		() => ({ auth: { isAuthenticated: !!isSignedIn, orgId } }),
-		[isSignedIn, orgId],
-	)
+	const context = useMemo(() => ({ auth: { isAuthenticated: !!isSignedIn, orgId } }), [isSignedIn, orgId])
 
 	if (!settled) return <BootSplash />
 

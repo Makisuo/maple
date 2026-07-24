@@ -2,13 +2,7 @@ import { useMemo, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/lib/utils"
 
-import {
-	deriveHostStatus,
-	formatPercent,
-	formatRelative,
-	severityLevel,
-	type HostStatus,
-} from "./format"
+import { deriveHostStatus, formatPercent, formatRelative, severityLevel, type HostStatus } from "./format"
 import {
 	HoneycombSection,
 	type HoneycombCell,

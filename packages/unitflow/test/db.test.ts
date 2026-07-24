@@ -22,14 +22,17 @@ const makeTodos = (initial: ReadonlyArray<Todo> = []) =>
 		}),
 	)
 
-const rowsOf = <T>(state: AsyncResult.AsyncResult<ReadonlyArray<T>, Db.CollectionError>): ReadonlyArray<T> => {
+const rowsOf = <T>(
+	state: AsyncResult.AsyncResult<ReadonlyArray<T>, Db.CollectionError>,
+): ReadonlyArray<T> => {
 	assert.strictEqual(state._tag, "Success")
 	return state._tag === "Success" ? state.value : []
 }
 
 /** Synced rows carry virtual props (`$synced`); compare on the data fields only. */
-const todosOf = (state: AsyncResult.AsyncResult<ReadonlyArray<Todo>, Db.CollectionError>): ReadonlyArray<Todo> =>
-	rowsOf(state).map(({ id, label }) => ({ id, label }))
+const todosOf = (
+	state: AsyncResult.AsyncResult<ReadonlyArray<Todo>, Db.CollectionError>,
+): ReadonlyArray<Todo> => rowsOf(state).map(({ id, label }) => ({ id, label }))
 
 const successWith =
 	(length: number) =>
@@ -198,39 +201,39 @@ const settle = Effect.gen(function* () {
 
 const isLoadTimeout = <T>(state: AsyncResult.AsyncResult<ReadonlyArray<T>, Db.CollectionError>): boolean =>
 	AsyncResult.isFailure(state) &&
-	state.cause.reasons.some(
-		(reason) => reason._tag === "Fail" && reason.error.reason === "load-timeout",
-	)
+	state.cause.reasons.some((reason) => reason._tag === "Fail" && reason.error.reason === "load-timeout")
 
 describe("stuck watchdog", () => {
-	it.effect("fails with load-timeout after the stuck window, fires onStuck, and recovers on a late ready", () =>
-		Effect.gen(function* () {
-			const stub = stuckCollectionStub<Todo>()
-			let stuckCalls = 0
-			const store = yield* Db.fromCollection(asCollection(stub), {
-				stuckTimeoutMs: 30_000,
-				onStuck: () => {
-					stuckCalls += 1
-				},
-			})
-			yield* settle
+	it.effect(
+		"fails with load-timeout after the stuck window, fires onStuck, and recovers on a late ready",
+		() =>
+			Effect.gen(function* () {
+				const stub = stuckCollectionStub<Todo>()
+				let stuckCalls = 0
+				const store = yield* Db.fromCollection(asCollection(stub), {
+					stuckTimeoutMs: 30_000,
+					onStuck: () => {
+						stuckCalls += 1
+					},
+				})
+				yield* settle
 
-			// Still inside the window: loading is not yet "stuck".
-			yield* TestClock.adjust("29 seconds")
-			yield* settle
-			assert.isTrue(AsyncResult.isInitial(yield* Store.get(store)))
-			assert.strictEqual(stuckCalls, 0)
+				// Still inside the window: loading is not yet "stuck".
+				yield* TestClock.adjust("29 seconds")
+				yield* settle
+				assert.isTrue(AsyncResult.isInitial(yield* Store.get(store)))
+				assert.strictEqual(stuckCalls, 0)
 
-			yield* TestClock.adjust("1 second")
-			yield* settle
-			assert.isTrue(isLoadTimeout(yield* Store.get(store)))
-			assert.strictEqual(stuckCalls, 1)
+				yield* TestClock.adjust("1 second")
+				yield* settle
+				assert.isTrue(isLoadTimeout(yield* Store.get(store)))
+				assert.strictEqual(stuckCalls, 1)
 
-			// The subscription stayed live: a late ready overwrites the failure.
-			stub.setReady([{ id: 1, label: "late" }])
-			const recovered = yield* Store.waitFor(store, successWith(1), { timeout: "1 second" })
-			assert.deepStrictEqual(todosOf(recovered), [{ id: 1, label: "late" }])
-		}).pipe(Effect.provide(Registry.layer)),
+				// The subscription stayed live: a late ready overwrites the failure.
+				stub.setReady([{ id: 1, label: "late" }])
+				const recovered = yield* Store.waitFor(store, successWith(1), { timeout: "1 second" })
+				assert.deepStrictEqual(todosOf(recovered), [{ id: 1, label: "late" }])
+			}).pipe(Effect.provide(Registry.layer)),
 	)
 
 	it.effect("any emission resets the stuck window", () =>

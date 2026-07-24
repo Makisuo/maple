@@ -6,25 +6,26 @@ p1_count: 3
 timestamp: 2026-07-03T15-41-54Z
 slug: hboard-builder-config-variables-manager-dialog-tsx
 ---
+
 # Critique — feat/cloudflare-oauth UI surfaces (Cloudflare integration card + dashboard variables)
 
 Scope: `apps/web/src/components/integrations/cloudflare-account-card.tsx`, `integration-catalog.tsx`, `/integrations` route; `dashboard-builder/config/variables-manager-dialog.tsx`, `toolbar/variable-selects.tsx`, `toolbar/dashboard-toolbar.tsx`, `dashboard-variables-context.tsx`, `/dashboards/$dashboardId`. Register: product.
 
 ## Design Health Score
 
-| # | Heuristic | Score | Key Issue |
-|---|-----------|-------|-----------|
-| 1 | Visibility of System Status | 3 | CF status dots/detail excellent; variable chips give no signal whether any widget consumes `$name` |
-| 2 | Match System / Real World | 4 | Grafana-vocabulary end-to-end (`var-` URL params, "Include All", Query/Custom/Textbox) — verified live |
-| 3 | User Control and Freedom | 2 | Disconnect fires immediately with zero confirmation; dialog Escape silently discards edits |
-| 4 | Consistency and Standards | 3 | House `@maple/ui` vocabulary throughout; CF is the only catalog entry without a `docsUrl` |
-| 5 | Error Prevention | 2 | "Name is required." on pristine draft; deleting a widget-referenced variable saves with no warning; 0-option custom variable saves to a dead "—" chip |
-| 6 | Recognition Rather Than Recall | 3 | Inline `$service` hint is great; "any"/"—" chip values require recall |
-| 7 | Flexibility and Efficiency | 3 | Chips + URL params + edit-mode shortcut; no keyboard path into the manager; comma-split custom options can't express commas |
-| 8 | Aesthetic and Minimalist Design | 3 | Dense but disciplined CF card; expanded quiet-zone list repeats "no data in last 24h" ×28 in amber |
-| 9 | Error Recovery | 3 | Status-fetch failure correctly does NOT masquerade as "not connected"; recovery copy is only "refresh the page" |
-| 10 | Help and Documentation | 2 | First-run explainer box is excellent; Cloudflare has no docs link anywhere; `analyticsCapable` banner doesn't say what's missing |
-| **Total** | | **28/40** | **Good — solid foundation, address weak areas** |
+| #         | Heuristic                       | Score     | Key Issue                                                                                                                                             |
+| --------- | ------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1         | Visibility of System Status     | 3         | CF status dots/detail excellent; variable chips give no signal whether any widget consumes `$name`                                                    |
+| 2         | Match System / Real World       | 4         | Grafana-vocabulary end-to-end (`var-` URL params, "Include All", Query/Custom/Textbox) — verified live                                                |
+| 3         | User Control and Freedom        | 2         | Disconnect fires immediately with zero confirmation; dialog Escape silently discards edits                                                            |
+| 4         | Consistency and Standards       | 3         | House `@maple/ui` vocabulary throughout; CF is the only catalog entry without a `docsUrl`                                                             |
+| 5         | Error Prevention                | 2         | "Name is required." on pristine draft; deleting a widget-referenced variable saves with no warning; 0-option custom variable saves to a dead "—" chip |
+| 6         | Recognition Rather Than Recall  | 3         | Inline `$service` hint is great; "any"/"—" chip values require recall                                                                                 |
+| 7         | Flexibility and Efficiency      | 3         | Chips + URL params + edit-mode shortcut; no keyboard path into the manager; comma-split custom options can't express commas                           |
+| 8         | Aesthetic and Minimalist Design | 3         | Dense but disciplined CF card; expanded quiet-zone list repeats "no data in last 24h" ×28 in amber                                                    |
+| 9         | Error Recovery                  | 3         | Status-fetch failure correctly does NOT masquerade as "not connected"; recovery copy is only "refresh the page"                                       |
+| 10        | Help and Documentation          | 2         | First-run explainer box is excellent; Cloudflare has no docs link anywhere; `analyticsCapable` banner doesn't say what's missing                      |
+| **Total** |                                 | **28/40** | **Good — solid foundation, address weak areas**                                                                                                       |
 
 ## Anti-Patterns Verdict
 
@@ -47,25 +48,25 @@ This is confident, house-consistent product UI that a Grafana/Datadog-fluent use
 ## Priority Issues
 
 1. **[P1] Disconnect has no confirmation** (`cloudflare-account-card.tsx:291-302, 498-501`)
-   - Why: one misclick (8px from "Reconnect") destroys an account-level OAuth connection feeding 27 zones + Workers ingestion; success is just a toast.
-   - Fix: AlertDialog stating consequences ("Stops collecting traffic analytics for N zones and Workers") with a destructive-styled confirm.
-   - Suggested command: `$impeccable harden`
+    - Why: one misclick (8px from "Reconnect") destroys an account-level OAuth connection feeding 27 zones + Workers ingestion; success is just a toast.
+    - Fix: AlertDialog stating consequences ("Stops collecting traffic analytics for N zones and Workers") with a destructive-styled confirm.
+    - Suggested command: `$impeccable harden`
 2. **[P1] Long variable names break the toolbar chip** (`variable-selects.tsx:121`)
-   - Why: label span lacks `truncate`/`min-w-0`; verified live (scrollWidth 326 vs clientWidth 254) — value and chevron clipped invisible.
-   - Fix: `truncate` on label, `shrink-0` protection for value + chevron.
-   - Suggested command: `$impeccable polish`
+    - Why: label span lacks `truncate`/`min-w-0`; verified live (scrollWidth 326 vs clientWidth 254) — value and chevron clipped invisible.
+    - Fix: `truncate` on label, `shrink-0` protection for value + chevron.
+    - Suggested command: `$impeccable polish`
 3. **[P1] Deleting a widget-referenced variable is silent** (`variables-manager-dialog.tsx:178-183` + save path)
-   - Why: widgets interpolating `$name` silently break or mis-query after save.
-   - Fix: diff removed names against widget params on save; warn "2 widgets reference $service".
-   - Suggested command: `$impeccable harden`
+    - Why: widgets interpolating `$name` silently break or mis-query after save.
+    - Fix: diff removed names against widget params on save; warn "2 widgets reference $service".
+    - Suggested command: `$impeccable harden`
 4. **[P2] Validation error on pristine draft** (`variables-manager-dialog.tsx:94-99` with auto-created empty draft at `:152-155`)
-   - Why: the first frame of the feature is an error state — scolds before the user acts.
-   - Fix: suppress "Name is required" until touched or Save attempted.
-   - Suggested command: `$impeccable polish`
+    - Why: the first frame of the feature is an error state — scolds before the user acts.
+    - Fix: suppress "Name is required" until touched or Save attempted.
+    - Suggested command: `$impeccable polish`
 5. **[P2] Quiet-zone expanded list repeats "no data in last 24h" ×28 in amber**
-   - Why: amber signals "attention needed" for parked domains that will never have data; pure noise after the group header already said it.
-   - Fix: drop per-row detail inside the expanded quiet group; neutral dot; reserve amber for enabled-but-silent collectors.
-   - Suggested command: `$impeccable distill`
+    - Why: amber signals "attention needed" for parked domains that will never have data; pure noise after the group header already said it.
+    - Fix: drop per-row detail inside the expanded quiet group; neutral dot; reserve amber for enabled-but-silent collectors.
+    - Suggested command: `$impeccable distill`
 
 ## Persona Red Flags
 
@@ -79,7 +80,7 @@ This is confident, house-consistent product UI that a Grafana/Datadog-fluent use
 
 - Catalog description leaks roadmap language: "the foundation for one-click Workers telemetry" (`integration-catalog.tsx:46-47`).
 - CF entry lacks `docsUrl` — only drill-in without a Docs link.
-- Explainer box appears only when the dialog *opened* empty (`variables-manager-dialog.tsx:151, 205`); deleting all rows shows just the button.
+- Explainer box appears only when the dialog _opened_ empty (`variables-manager-dialog.tsx:151, 205`); deleting all rows shows just the button.
 - Variables chip collapses to unlabeled `+` once ≥1 variable exists (`variable-selects.tsx:57`).
 - Zone tooltips use native `title` with `\n` joins — inconsistent with styled tooltips, unavailable to keyboard/touch (`cloudflare-account-card.tsx:107-114`).
 - `disabled` chip during options load drops out of tab order mid-hydration (`variable-selects.tsx:117`).

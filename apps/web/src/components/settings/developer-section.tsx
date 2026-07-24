@@ -93,17 +93,17 @@ export function DeveloperSection({ onNavigateToApiKeys }: { onNavigateToApiKeys:
 								prefixed object IDs, cursor-paginated lists, and scoped API keys.
 							</CardDescription>
 						</div>
-							<Button
-								size="sm"
-								render={
-									<a
-										href={docsUrl}
-										target="_blank"
-										rel="noopener noreferrer"
-										aria-label="Open API reference"
-									/>
-								}
-							>
+						<Button
+							size="sm"
+							render={
+								<a
+									href={docsUrl}
+									target="_blank"
+									rel="noopener noreferrer"
+									aria-label="Open API reference"
+								/>
+							}
+						>
 							<CodeIcon data-icon="inline-start" size={14} />
 							Open API reference
 						</Button>

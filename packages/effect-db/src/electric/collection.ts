@@ -118,14 +118,17 @@ function createBackoffOnError(
 		// stopped stream instead of a loop.
 		const errorStatus = (error as { status?: number })?.status
 		if (errorStatus === 401) {
-			logVia(runtime, "warning", "Authentication error (401), stopping stream and requesting recovery", {
-				collectionId,
-				status: 401,
-			})
+			logVia(
+				runtime,
+				"warning",
+				"Authentication error (401), stopping stream and requesting recovery",
+				{
+					collectionId,
+					status: 401,
+				},
+			)
 			if (typeof window !== "undefined") {
-				window.dispatchEvent(
-					new CustomEvent("collection:auth-error", { detail: { collectionId } }),
-				)
+				window.dispatchEvent(new CustomEvent("collection:auth-error", { detail: { collectionId } }))
 			}
 			// Return undefined to stop syncing this (stale-token) stream
 			return

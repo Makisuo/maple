@@ -50,9 +50,7 @@ const usage = (total: Record<string, number>): BillingUsage["total"] =>
 
 describe("estimateCycleCost", () => {
 	it("returns null with no active subscription", () => {
-		expect(
-			estimateCycleCost({ customer: buildCustomer([]), plans: [startupPlan], usage: {} }),
-		).toBeNull()
+		expect(estimateCycleCost({ customer: buildCustomer([]), plans: [startupPlan], usage: {} })).toBeNull()
 		expect(estimateCycleCost({ customer: undefined, plans: [startupPlan], usage: {} })).toBeNull()
 		expect(
 			estimateCycleCost({

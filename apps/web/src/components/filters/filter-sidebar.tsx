@@ -1,10 +1,7 @@
 // Frame/header/body/loading are promoted to @maple/ui (shared with the local-mode UI).
 // FilterSidebarError stays here: it binds the app's ErrorState.
 import { Separator } from "@maple/ui/components/ui/separator"
-import {
-	FilterSidebarFrame,
-	FilterSidebarHeader,
-} from "@maple/ui/components/filters/filter-sidebar"
+import { FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
 import { ErrorState } from "@/components/common/error-state"
 
 export {

@@ -20,7 +20,12 @@ import { oauthAuthStates, oauthConnections, type OAuthAuthStateRow, type OAuthCo
 import { and, eq, isNull, lt } from "drizzle-orm"
 import { Clock, Effect, Redacted, Schema, Semaphore } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { decryptAes256Gcm, encryptAes256Gcm, parseBase64Aes256GcmKey, type EncryptedValue } from "../../lib/Crypto"
+import {
+	decryptAes256Gcm,
+	encryptAes256Gcm,
+	parseBase64Aes256GcmKey,
+	type EncryptedValue,
+} from "../../lib/Crypto"
 import type { DatabaseClient, DatabaseShape } from "../../lib/DatabaseLive"
 import type { EnvShape } from "../../lib/Env"
 import { msToDate } from "../../lib/time"
@@ -89,7 +94,8 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 
 		const toPersistenceError = (cause: unknown) =>
 			new IntegrationsPersistenceError({
-				message: cause instanceof Error ? cause.message : `${providerLabel} integration database error`,
+				message:
+					cause instanceof Error ? cause.message : `${providerLabel} integration database error`,
 			})
 
 		const dbExecute = <T>(fn: (db: DatabaseClient) => Promise<T>) =>
@@ -123,30 +129,30 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		const deleteAuthState = (state: string) =>
 			dbExecute((db) => db.delete(oauthAuthStates).where(eq(oauthAuthStates.state, state)))
 
-		const requireStateRow = Effect.fn("OAuthConnectionHelpers.requireStateRow")(
-			function* (state: string) {
-				const rows = yield* dbExecute((db) =>
-					db.select().from(oauthAuthStates).where(eq(oauthAuthStates.state, state)).limit(1),
+		const requireStateRow = Effect.fn("OAuthConnectionHelpers.requireStateRow")(function* (
+			state: string,
+		) {
+			const rows = yield* dbExecute((db) =>
+				db.select().from(oauthAuthStates).where(eq(oauthAuthStates.state, state)).limit(1),
+			)
+			const row = rows[0]
+			if (!row) {
+				return yield* Effect.fail(
+					new IntegrationsValidationError({
+						message: "OAuth state not recognized — restart the connect flow",
+					}),
 				)
-				const row = rows[0]
-				if (!row) {
-					return yield* Effect.fail(
-						new IntegrationsValidationError({
-							message: "OAuth state not recognized — restart the connect flow",
-						}),
-					)
-				}
-				if (row.expiresAt.getTime() < (yield* Clock.currentTimeMillis)) {
-					yield* deleteAuthState(state)
-					return yield* Effect.fail(
-						new IntegrationsValidationError({
-							message: "OAuth state expired — restart the connect flow",
-						}),
-					)
-				}
-				return row satisfies OAuthAuthStateRow
-			},
-		)
+			}
+			if (row.expiresAt.getTime() < (yield* Clock.currentTimeMillis)) {
+				yield* deleteAuthState(state)
+				return yield* Effect.fail(
+					new IntegrationsValidationError({
+						message: "OAuth state expired — restart the connect flow",
+					}),
+				)
+			}
+			return row satisfies OAuthAuthStateRow
+		})
 
 		const loadConnection = (orgId: OrgId) =>
 			dbExecute((db) =>
@@ -157,19 +163,19 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 					.limit(1),
 			).pipe(Effect.map((rows) => rows[0] ?? null))
 
-		const requireConnection = Effect.fn("OAuthConnectionHelpers.requireConnection")(
-			function* (orgId: OrgId) {
-				const row = yield* loadConnection(orgId)
-				if (!row) {
-					return yield* Effect.fail(
-						new IntegrationsNotConnectedError({
-							message: `${providerLabel} is not connected for this organization`,
-						}),
-					)
-				}
-				return row satisfies OAuthConnectionRow
-			},
-		)
+		const requireConnection = Effect.fn("OAuthConnectionHelpers.requireConnection")(function* (
+			orgId: OrgId,
+		) {
+			const row = yield* loadConnection(orgId)
+			if (!row) {
+				return yield* Effect.fail(
+					new IntegrationsNotConnectedError({
+						message: `${providerLabel} is not connected for this organization`,
+					}),
+				)
+			}
+			return row satisfies OAuthConnectionRow
+		})
 
 		/**
 		 * Write (or overwrite) the org's connection in one statement — the unique
@@ -208,23 +214,23 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		 * retried every tick; `upsertConnection` (reconnect) clears the stamp.
 		 * Best-effort: bookkeeping must never mask the revocation error itself.
 		 */
-		const markConnectionRevoked = Effect.fn("OAuthConnectionHelpers.markConnectionRevoked")(
-			function* (orgId: OrgId) {
-				const currentTime = yield* Clock.currentTimeMillis
-				yield* dbExecute((db) =>
-					db
-						.update(oauthConnections)
-						.set({ revokedAt: new Date(currentTime) })
-						.where(
-							and(
-								eq(oauthConnections.orgId, orgId),
-								eq(oauthConnections.provider, provider),
-								isNull(oauthConnections.revokedAt),
-							),
+		const markConnectionRevoked = Effect.fn("OAuthConnectionHelpers.markConnectionRevoked")(function* (
+			orgId: OrgId,
+		) {
+			const currentTime = yield* Clock.currentTimeMillis
+			yield* dbExecute((db) =>
+				db
+					.update(oauthConnections)
+					.set({ revokedAt: new Date(currentTime) })
+					.where(
+						and(
+							eq(oauthConnections.orgId, orgId),
+							eq(oauthConnections.provider, provider),
+							isNull(oauthConnections.revokedAt),
 						),
-				).pipe(Effect.ignore)
-			},
-		)
+					),
+			).pipe(Effect.ignore)
+		})
 
 		/** Drop the org's connection row; reports whether anything was removed. */
 		const deleteConnection = (orgId: OrgId) =>
@@ -299,55 +305,57 @@ export const makeOAuthConnectionHelpers = (options: MakeOAuthConnectionHelpersOp
 		 * the grant itself is gone (revoked / rotated away), not a transient
 		 * upstream failure.
 		 */
-		const refreshAccessToken = Effect.fn("OAuthConnectionHelpers.refreshAccessToken")(
-			function* (config: OAuthTokenEndpointConfig, refreshToken: string) {
-				const { status, text } = yield* postForm(config.tokenUrl, {
-					grant_type: "refresh_token",
-					refresh_token: refreshToken,
-					client_id: config.clientId,
-					...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
-				})
-				if (status === 400 || status === 401) {
-					return yield* Effect.fail(
-						new IntegrationsRevokedError({
-							message: `${providerLabel} connection no longer authorized — reconnect required`,
-						}),
-					)
-				}
-				if (status < 200 || status >= 300) {
-					return yield* Effect.fail(toUpstreamError(`Token refresh failed with ${status}`, status))
-				}
-				return yield* parseTokenPayload(text)
-			},
-		)
-
-		const persistRefreshedTokens = Effect.fn("OAuthConnectionHelpers.persistRefreshedTokens")(
-			function* (row: OAuthConnectionRow, tokenResponse: OAuthTokenResponse) {
-				const accessEnc = yield* encryptValue(tokenResponse.access_token)
-				const refreshEnc = tokenResponse.refresh_token
-					? yield* encryptValue(tokenResponse.refresh_token)
-					: null
-				const currentTime = yield* Clock.currentTimeMillis
-				const expiresAt =
-					tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
-				yield* dbExecute((db) =>
-					db
-						.update(oauthConnections)
-						.set({
-							accessTokenCiphertext: accessEnc.ciphertext,
-							accessTokenIv: accessEnc.iv,
-							accessTokenTag: accessEnc.tag,
-							refreshTokenCiphertext: refreshEnc?.ciphertext ?? row.refreshTokenCiphertext,
-							refreshTokenIv: refreshEnc?.iv ?? row.refreshTokenIv,
-							refreshTokenTag: refreshEnc?.tag ?? row.refreshTokenTag,
-							expiresAt: msToDate(expiresAt),
-							updatedAt: new Date(currentTime),
-						})
-						.where(eq(oauthConnections.id, row.id)),
+		const refreshAccessToken = Effect.fn("OAuthConnectionHelpers.refreshAccessToken")(function* (
+			config: OAuthTokenEndpointConfig,
+			refreshToken: string,
+		) {
+			const { status, text } = yield* postForm(config.tokenUrl, {
+				grant_type: "refresh_token",
+				refresh_token: refreshToken,
+				client_id: config.clientId,
+				...(config.clientSecret ? { client_secret: Redacted.value(config.clientSecret) } : {}),
+			})
+			if (status === 400 || status === 401) {
+				return yield* Effect.fail(
+					new IntegrationsRevokedError({
+						message: `${providerLabel} connection no longer authorized — reconnect required`,
+					}),
 				)
-				return tokenResponse.access_token
-			},
-		)
+			}
+			if (status < 200 || status >= 300) {
+				return yield* Effect.fail(toUpstreamError(`Token refresh failed with ${status}`, status))
+			}
+			return yield* parseTokenPayload(text)
+		})
+
+		const persistRefreshedTokens = Effect.fn("OAuthConnectionHelpers.persistRefreshedTokens")(function* (
+			row: OAuthConnectionRow,
+			tokenResponse: OAuthTokenResponse,
+		) {
+			const accessEnc = yield* encryptValue(tokenResponse.access_token)
+			const refreshEnc = tokenResponse.refresh_token
+				? yield* encryptValue(tokenResponse.refresh_token)
+				: null
+			const currentTime = yield* Clock.currentTimeMillis
+			const expiresAt =
+				tokenResponse.expires_in != null ? currentTime + tokenResponse.expires_in * 1000 : null
+			yield* dbExecute((db) =>
+				db
+					.update(oauthConnections)
+					.set({
+						accessTokenCiphertext: accessEnc.ciphertext,
+						accessTokenIv: accessEnc.iv,
+						accessTokenTag: accessEnc.tag,
+						refreshTokenCiphertext: refreshEnc?.ciphertext ?? row.refreshTokenCiphertext,
+						refreshTokenIv: refreshEnc?.iv ?? row.refreshTokenIv,
+						refreshTokenTag: refreshEnc?.tag ?? row.refreshTokenTag,
+						expiresAt: msToDate(expiresAt),
+						updatedAt: new Date(currentTime),
+					})
+					.where(eq(oauthConnections.id, row.id)),
+			)
+			return tokenResponse.access_token
+		})
 
 		const rowIsValid = (row: OAuthConnectionRow, currentTime: number) =>
 			row.expiresAt == null || row.expiresAt.getTime() - currentTime > OAUTH_REFRESH_LEEWAY_MS

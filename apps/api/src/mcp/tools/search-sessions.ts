@@ -30,14 +30,18 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 			has_errors: optionalBooleanParam("Only sessions with at least one recorded error"),
 			duration_min_ms: optionalNumberParam("Only sessions at least this long (ms)"),
 			duration_max_ms: optionalNumberParam("Only sessions at most this long (ms)"),
-			active_min_ms: optionalNumberParam("Only sessions with at least this much active (non-idle) time (ms)"),
+			active_min_ms: optionalNumberParam(
+				"Only sessions with at least this much active (non-idle) time (ms)",
+			),
 			active_max_ms: optionalNumberParam("Only sessions with at most this much active time (ms)"),
 			// In-session event refinement (what happened)
 			event_type: optionalStringParam(
 				"Match sessions that contain this event type: navigation, click, input, console, network, or error",
 			),
 			level: optionalStringParam("Console/error level to match (e.g. error, warn)"),
-			http_status_min: optionalNumberParam("Match sessions with a network request status >= this (e.g. 500)"),
+			http_status_min: optionalNumberParam(
+				"Match sessions with a network request status >= this (e.g. 500)",
+			),
 			url_contains: optionalStringParam("Substring match on an in-session event/page URL"),
 			message_contains: optionalStringParam("Substring match on an in-session console/error message"),
 			trace_id: optionalStringParam("Only sessions that observed this trace id"),
@@ -109,7 +113,16 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 			// ClickHouse serializes 64-bit integer aggregates (`length()`, `count()`)
 			// as JSON strings while the Tinybird path returns numbers; coerce every
 			// numeric at the edge (same as get_session_traces / the http handler).
-			const headers = ["User", "Started", "Duration", "Browser", "Device", "Country", "Errors", "Entry URL"]
+			const headers = [
+				"User",
+				"Started",
+				"Duration",
+				"Browser",
+				"Device",
+				"Country",
+				"Errors",
+				"Entry URL",
+			]
 			if (hasEventFilter) headers.push("Matches")
 
 			const rows = sessions.map((s) => {

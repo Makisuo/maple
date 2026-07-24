@@ -201,6 +201,7 @@ export const AlertsServiceStubLayer = Layer.succeed(AlertsService, {
 	listIncidents: die,
 	getIncident: die,
 	listRuleChecks: die,
+	summarizeRuleChecks: die,
 	listDeliveryEvents: die,
 	runSchedulerTick: die,
 })

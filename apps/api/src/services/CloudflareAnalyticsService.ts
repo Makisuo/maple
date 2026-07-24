@@ -1566,85 +1566,85 @@ export class CloudflareAnalyticsService extends Context.Service<
 		 * config disappeared upstream — mirrors the PlanetScale inventory reconcile so identity
 		 * is kept if a config re-appears.
 		 */
-		const reconcileHyperdriveConfigs = Effect.fn(
-			"CloudflareAnalyticsService.reconcileHyperdriveConfigs",
-		)(function* (orgId: OrgId, configs: ReadonlyArray<CloudflareHyperdriveConfig>, now: number) {
-			yield* Effect.annotateCurrentSpan({
-				orgId,
-				"maple.cloudflare.hyperdrive_config_count": configs.length,
-			})
-			const existingRows = yield* dbExecute((db) =>
-				db
-					.select()
-					.from(cloudflareHyperdriveConfigs)
-					.where(eq(cloudflareHyperdriveConfigs.orgId, orgId)),
-			)
-			const existingByConfigId = new Map(existingRows.map((row) => [row.configId, row]))
-			const upstreamIds = new Set(configs.map((config) => config.id))
+		const reconcileHyperdriveConfigs = Effect.fn("CloudflareAnalyticsService.reconcileHyperdriveConfigs")(
+			function* (orgId: OrgId, configs: ReadonlyArray<CloudflareHyperdriveConfig>, now: number) {
+				yield* Effect.annotateCurrentSpan({
+					orgId,
+					"maple.cloudflare.hyperdrive_config_count": configs.length,
+				})
+				const existingRows = yield* dbExecute((db) =>
+					db
+						.select()
+						.from(cloudflareHyperdriveConfigs)
+						.where(eq(cloudflareHyperdriveConfigs.orgId, orgId)),
+				)
+				const existingByConfigId = new Map(existingRows.map((row) => [row.configId, row]))
+				const upstreamIds = new Set(configs.map((config) => config.id))
 
-			yield* Effect.forEach(
-				configs,
-				(config) => {
-					const values = {
-						name: config.name,
-						originHost: config.origin.host,
-						originPort: config.origin.port,
-						originScheme: config.origin.scheme,
-						originDatabase: config.origin.database,
-						originUser: config.origin.user,
-						deletedAt: null,
-						updatedAt: new Date(now),
-					}
-					const existing = existingByConfigId.get(config.id)
-					return existing !== undefined
-						? dbExecute((db) =>
-								db
-									.update(cloudflareHyperdriveConfigs)
-									.set(values)
-									.where(eq(cloudflareHyperdriveConfigs.id, existing.id)),
-							)
-						: dbExecute((db) =>
-								db.insert(cloudflareHyperdriveConfigs).values({
-									id: randomUUID(),
-									orgId,
-									configId: config.id,
-									createdAt: new Date(now),
-									...values,
-								}),
-							)
-				},
-				{ concurrency: 4, discard: true },
-			)
+				yield* Effect.forEach(
+					configs,
+					(config) => {
+						const values = {
+							name: config.name,
+							originHost: config.origin.host,
+							originPort: config.origin.port,
+							originScheme: config.origin.scheme,
+							originDatabase: config.origin.database,
+							originUser: config.origin.user,
+							deletedAt: null,
+							updatedAt: new Date(now),
+						}
+						const existing = existingByConfigId.get(config.id)
+						return existing !== undefined
+							? dbExecute((db) =>
+									db
+										.update(cloudflareHyperdriveConfigs)
+										.set(values)
+										.where(eq(cloudflareHyperdriveConfigs.id, existing.id)),
+								)
+							: dbExecute((db) =>
+									db.insert(cloudflareHyperdriveConfigs).values({
+										id: randomUUID(),
+										orgId,
+										configId: config.id,
+										createdAt: new Date(now),
+										...values,
+									}),
+								)
+					},
+					{ concurrency: 4, discard: true },
+				)
 
-			yield* Effect.forEach(
-				existingRows.filter((row) => !upstreamIds.has(row.configId) && row.deletedAt === null),
-				(row) =>
-					dbExecute((db) =>
-						db
-							.update(cloudflareHyperdriveConfigs)
-							.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
-							.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
-					),
-				{ concurrency: 4, discard: true },
-			)
-		})
-
-		const listHyperdriveConfigsForOrg = Effect.fn(
-			"CloudflareAnalyticsService.listHyperdriveConfigs",
-		)(function* (orgId: OrgId) {
-			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			return yield* dbExecute((db) =>
-				db
-					.select()
-					.from(cloudflareHyperdriveConfigs)
-					.where(
-						and(
-							eq(cloudflareHyperdriveConfigs.orgId, orgId),
-							isNull(cloudflareHyperdriveConfigs.deletedAt),
+				yield* Effect.forEach(
+					existingRows.filter((row) => !upstreamIds.has(row.configId) && row.deletedAt === null),
+					(row) =>
+						dbExecute((db) =>
+							db
+								.update(cloudflareHyperdriveConfigs)
+								.set({ deletedAt: new Date(now), updatedAt: new Date(now) })
+								.where(eq(cloudflareHyperdriveConfigs.id, row.id)),
 						),
-					),
-			)
-		})
+					{ concurrency: 4, discard: true },
+				)
+			},
+		)
+
+		const listHyperdriveConfigsForOrg = Effect.fn("CloudflareAnalyticsService.listHyperdriveConfigs")(
+			function* (orgId: OrgId) {
+				yield* Effect.annotateCurrentSpan("orgId", orgId)
+				return yield* dbExecute((db) =>
+					db
+						.select()
+						.from(cloudflareHyperdriveConfigs)
+						.where(
+							and(
+								eq(cloudflareHyperdriveConfigs.orgId, orgId),
+								isNull(cloudflareHyperdriveConfigs.deletedAt),
+							),
+						),
+				)
+			},
+		)
 
 		// ------------------------------------------------------------------
 		// Per-org poll
@@ -1930,7 +1930,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 					.from(oauthConnections)
 					// Revoked grants fail identically every tick until the org reconnects
 					// (which clears revokedAt) — skip them instead of re-erroring forever.
-					.where(and(eq(oauthConnections.provider, "cloudflare"), isNull(oauthConnections.revokedAt))),
+					.where(
+						and(eq(oauthConnections.provider, "cloudflare"), isNull(oauthConnections.revokedAt)),
+					),
 			)
 			// Orgs whose grant lacks the analytics scopes can't be polled — the status endpoint
 			// already surfaces that (analyticsCapable: false), so skipping them here avoids
@@ -2286,7 +2288,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 				db
 					.update(oauthConnections)
 					.set({ revokedAt: null })
-					.where(and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, "cloudflare"))),
+					.where(
+						and(eq(oauthConnections.orgId, orgId), eq(oauthConnections.provider, "cloudflare")),
+					),
 			)
 		})
 

@@ -7,10 +7,7 @@ import { FilterSection } from "@/components/traces/filter-section"
 import { Route } from "@/routes/services/index"
 import { Separator } from "@maple/ui/components/ui/separator"
 import { getServicesFacetsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import {
-	isServiceHealth,
-	useServiceHealthSummary,
-} from "@/components/services/use-service-health-summary"
+import { isServiceHealth, useServiceHealthSummary } from "@/components/services/use-service-health-summary"
 import {
 	FilterSidebarBody,
 	FilterSidebarError,
@@ -90,12 +87,10 @@ export function ServicesFilterSidebar() {
 							<>
 								<FilterSection
 									title="Health"
-									options={(["unhealthy", "degraded", "healthy"] as const).map(
-										(level) => ({
-											name: level,
-											count: healthSummary.counts[level],
-										}),
-									)}
+									options={(["unhealthy", "degraded", "healthy"] as const).map((level) => ({
+										name: level,
+										count: healthSummary.counts[level],
+									}))}
 									selected={search.health === undefined ? [] : [search.health]}
 									onChange={(selected) => {
 										// Single-select semantics on a multi-select control: the
@@ -103,9 +98,7 @@ export function ServicesFilterSidebar() {
 										const next = selected.find((value) => value !== search.health)
 										updateFilter(
 											"health",
-											next !== undefined && isServiceHealth(next)
-												? next
-												: undefined,
+											next !== undefined && isServiceHealth(next) ? next : undefined,
 										)
 									}}
 								/>

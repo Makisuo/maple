@@ -124,124 +124,132 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 	// The preview series is the preferred source; when it's empty/unavailable the
 	// recorded checks become the series instead, so a rule whose preview fails
 	// still gets a chart from its evaluation history.
-	const { chartData, seriesKeys, isMultiSeries, source, sampleCounts, statuses, noDataBands, provisionalTs } =
-		React.useMemo((): {
-			chartData: ChartPoint[]
-			seriesKeys: string[]
-			isMultiSeries: boolean
-			source: SignalSource
-			/** t → total samples across groups (tooltip). */
-			sampleCounts: Map<number, number>
-			/** t → worst per-bucket status across groups (tooltip). */
-			statuses: Map<number, string>
-			/** Merged spans where NO group observed data — hatched on the chart. */
-			noDataBands: Array<{ x1: number; x2: number }>
-			/** x-coords of the trailing in-progress window (tooltip). */
-			provisionalTs: Set<number>
-		} => {
-			const sampleCounts = new Map<number, number>()
-			const statuses = new Map<number, string>()
-			const provisionalTs = new Set<number>()
-			const previewSeries = preview?.series ?? []
-			// An entirely-valueless preview (every window no-data) charts nothing
-			// useful — fall through to checks/placeholder instead of an empty grid.
-			const hasPreviewPoints = previewSeries.some((s) => s.points.some((p) => p.value != null))
+	const {
+		chartData,
+		seriesKeys,
+		isMultiSeries,
+		source,
+		sampleCounts,
+		statuses,
+		noDataBands,
+		provisionalTs,
+	} = React.useMemo((): {
+		chartData: ChartPoint[]
+		seriesKeys: string[]
+		isMultiSeries: boolean
+		source: SignalSource
+		/** t → total samples across groups (tooltip). */
+		sampleCounts: Map<number, number>
+		/** t → worst per-bucket status across groups (tooltip). */
+		statuses: Map<number, string>
+		/** Merged spans where NO group observed data — hatched on the chart. */
+		noDataBands: Array<{ x1: number; x2: number }>
+		/** x-coords of the trailing in-progress window (tooltip). */
+		provisionalTs: Set<number>
+	} => {
+		const sampleCounts = new Map<number, number>()
+		const statuses = new Map<number, string>()
+		const provisionalTs = new Set<number>()
+		const previewSeries = preview?.series ?? []
+		// An entirely-valueless preview (every window no-data) charts nothing
+		// useful — fall through to checks/placeholder instead of an empty grid.
+		const hasPreviewPoints = previewSeries.some((s) => s.points.some((p) => p.value != null))
 
-			if (hasPreviewPoints) {
-				const keys = previewSeries.map((s) => s.groupKey)
-				const single = keys.length === 1
-				const byT = new Map<number, ChartPoint>()
-				const statusRank: Record<string, number> = { healthy: 0, skipped: 1, breached: 2 }
-				// Points plot at the window CLOSE — the moment the evaluator observes
-				// the window — matching check timestamps and reaching the axis edge.
-				const stepMs = (preview?.bucketSeconds ?? 60) * 1000
-				// t → window bounds + how many of the bucket's points carried data.
-				const buckets = new Map<number, { x1: number; x2: number; points: number; withData: number }>()
-				for (const series of previewSeries) {
-					const key = single ? SINGLE_KEY : series.groupKey
-					for (const point of series.points) {
-						const open = Date.parse(point.bucket)
-						if (!Number.isFinite(open)) continue
-						// The provisional window is shorter than a full step — close it at
-						// the domain edge instead of overshooting it.
-						const t = point.provisional ? Math.min(open + stepMs, domain.max) : open + stepMs
-						let row = byT.get(t)
-						if (!row) {
-							row = { t }
-							byT.set(t, row)
-						}
-						row[key] = point.value
-						sampleCounts.set(t, (sampleCounts.get(t) ?? 0) + point.sampleCount)
-						const prev = statuses.get(t)
-						if (prev == null || (statusRank[point.status] ?? 0) > (statusRank[prev] ?? 0)) {
-							statuses.set(t, point.status)
-						}
-						if (point.provisional) provisionalTs.add(t)
-						let bucket = buckets.get(t)
-						if (!bucket) {
-							bucket = { x1: open, x2: t, points: 0, withData: 0 }
-							buckets.set(t, bucket)
-						}
-						bucket.points += 1
-						if (point.value != null) bucket.withData += 1
+		if (hasPreviewPoints) {
+			const keys = previewSeries.map((s) => s.groupKey)
+			const single = keys.length === 1
+			const byT = new Map<number, ChartPoint>()
+			const statusRank: Record<string, number> = { healthy: 0, skipped: 1, breached: 2 }
+			// Points plot at the window CLOSE — the moment the evaluator observes
+			// the window — matching check timestamps and reaching the axis edge.
+			const stepMs = (preview?.bucketSeconds ?? 60) * 1000
+			// t → window bounds + how many of the bucket's points carried data.
+			const buckets = new Map<number, { x1: number; x2: number; points: number; withData: number }>()
+			for (const series of previewSeries) {
+				const key = single ? SINGLE_KEY : series.groupKey
+				for (const point of series.points) {
+					const open = Date.parse(point.bucket)
+					if (!Number.isFinite(open)) continue
+					// The provisional window is shorter than a full step — close it at
+					// the domain edge instead of overshooting it.
+					const t = point.provisional ? Math.min(open + stepMs, domain.max) : open + stepMs
+					let row = byT.get(t)
+					if (!row) {
+						row = { t }
+						byT.set(t, row)
 					}
-				}
-				// Runs of windows where every group came back empty → merged hatched bands.
-				const noDataBands: Array<{ x1: number; x2: number }> = []
-				const emptyBuckets = Array.from(buckets.values())
-					.filter((b) => b.points > 0 && b.withData === 0)
-					.sort((a, b) => a.x1 - b.x1)
-				for (const bucket of emptyBuckets) {
-					const last = noDataBands[noDataBands.length - 1]
-					if (last && bucket.x1 <= last.x2 + 1) last.x2 = bucket.x2
-					else noDataBands.push({ x1: bucket.x1, x2: bucket.x2 })
-				}
-				const rows = downsample(Array.from(byT.values()).sort((a, b) => a.t - b.t))
-				return {
-					chartData: rows,
-					seriesKeys: single ? [SINGLE_KEY] : keys,
-					isMultiSeries: !single,
-					source: "preview",
-					sampleCounts,
-					statuses,
-					noDataBands,
-					provisionalTs,
+					row[key] = point.value
+					sampleCounts.set(t, (sampleCounts.get(t) ?? 0) + point.sampleCount)
+					const prev = statuses.get(t)
+					if (prev == null || (statusRank[point.status] ?? 0) > (statusRank[prev] ?? 0)) {
+						statuses.set(t, point.status)
+					}
+					if (point.provisional) provisionalTs.add(t)
+					let bucket = buckets.get(t)
+					if (!bucket) {
+						bucket = { x1: open, x2: t, points: 0, withData: 0 }
+						buckets.set(t, bucket)
+					}
+					bucket.points += 1
+					if (point.value != null) bucket.withData += 1
 				}
 			}
-
-			if (checks.length > 0) {
-				const rows: ChartPoint[] = downsample(
-					checks
-						.map((check) => ({
-							t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
-							[SINGLE_KEY]: check.observedValue,
-						}))
-						.filter((row) => Number.isFinite(row.t))
-						.sort((a, b) => a.t - b.t),
-				)
-				return {
-					chartData: rows,
-					seriesKeys: [SINGLE_KEY],
-					isMultiSeries: false,
-					source: "checks",
-					sampleCounts,
-					statuses,
-					noDataBands: [],
-					provisionalTs,
-				}
+			// Runs of windows where every group came back empty → merged hatched bands.
+			const noDataBands: Array<{ x1: number; x2: number }> = []
+			const emptyBuckets = Array.from(buckets.values())
+				.filter((b) => b.points > 0 && b.withData === 0)
+				.sort((a, b) => a.x1 - b.x1)
+			for (const bucket of emptyBuckets) {
+				const last = noDataBands[noDataBands.length - 1]
+				if (last && bucket.x1 <= last.x2 + 1) last.x2 = bucket.x2
+				else noDataBands.push({ x1: bucket.x1, x2: bucket.x2 })
 			}
-
+			const rows = downsample(Array.from(byT.values()).sort((a, b) => a.t - b.t))
 			return {
-				chartData: [],
+				chartData: rows,
+				seriesKeys: single ? [SINGLE_KEY] : keys,
+				isMultiSeries: !single,
+				source: "preview",
+				sampleCounts,
+				statuses,
+				noDataBands,
+				provisionalTs,
+			}
+		}
+
+		if (checks.length > 0) {
+			const rows: ChartPoint[] = downsample(
+				checks
+					.map((check) => ({
+						t: new Date(normalizeTimestampInput(check.timestamp)).getTime(),
+						[SINGLE_KEY]: check.observedValue,
+					}))
+					.filter((row) => Number.isFinite(row.t))
+					.sort((a, b) => a.t - b.t),
+			)
+			return {
+				chartData: rows,
 				seriesKeys: [SINGLE_KEY],
 				isMultiSeries: false,
-				source: "none",
+				source: "checks",
 				sampleCounts,
 				statuses,
 				noDataBands: [],
 				provisionalTs,
 			}
-		}, [preview, checks, domain.max])
+		}
+
+		return {
+			chartData: [],
+			seriesKeys: [SINGLE_KEY],
+			isMultiSeries: false,
+			source: "none",
+			sampleCounts,
+			statuses,
+			noDataBands: [],
+			provisionalTs,
+		}
+	}, [preview, checks, domain.max])
 
 	const hasSignal = chartData.length > 0
 
@@ -392,13 +400,21 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 
 	const chartArea = hasSignal ? (
 		<ChartContainer config={chartConfig} className="aspect-auto w-full" style={{ height: CHART_HEIGHT }}>
-			<ComposedChart data={chartData} accessibilityLayer margin={{ top: 8, right: PLOT_RIGHT, bottom: 0, left: 0 }}>
+			<ComposedChart
+				data={chartData}
+				accessibilityLayer
+				margin={{ top: 8, right: PLOT_RIGHT, bottom: 0, left: 0 }}
+			>
 				<defs>
 					<linearGradient id="alert-signal-fill" x1="0" y1="0" x2="0" y2="1">
 						{breachAbove ? (
 							<>
 								<stop offset={0} stopColor="var(--destructive)" stopOpacity={0.32} />
-								<stop offset={splitOffset} stopColor="var(--destructive)" stopOpacity={0.08} />
+								<stop
+									offset={splitOffset}
+									stopColor="var(--destructive)"
+									stopOpacity={0.08}
+								/>
 								<stop offset={splitOffset} stopColor={SERIES_COLORS[0]} stopOpacity={0.12} />
 								<stop offset={1} stopColor={SERIES_COLORS[0]} stopOpacity={0.02} />
 							</>
@@ -406,7 +422,11 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 							<>
 								<stop offset={0} stopColor={SERIES_COLORS[0]} stopOpacity={0.12} />
 								<stop offset={splitOffset} stopColor={SERIES_COLORS[0]} stopOpacity={0.05} />
-								<stop offset={splitOffset} stopColor="var(--destructive)" stopOpacity={0.08} />
+								<stop
+									offset={splitOffset}
+									stopColor="var(--destructive)"
+									stopOpacity={0.08}
+								/>
 								<stop offset={1} stopColor="var(--destructive)" stopOpacity={0.3} />
 							</>
 						) : (
@@ -423,7 +443,15 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 						height={6}
 						patternTransform="rotate(45)"
 					>
-						<line x1={0} y1={0} x2={0} y2={6} stroke="var(--muted-foreground)" strokeOpacity={0.25} strokeWidth={1.5} />
+						<line
+							x1={0}
+							y1={0}
+							x2={0}
+							y2={6}
+							stroke="var(--muted-foreground)"
+							strokeOpacity={0.25}
+							strokeWidth={1.5}
+						/>
 					</pattern>
 				</defs>
 				<CartesianGrid vertical={false} />
@@ -506,13 +534,18 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 								<span className="flex items-center gap-2">
 									<span
 										className="size-2.5 shrink-0 rounded-[2px]"
-										style={{ backgroundColor: chartConfig[name as string]?.color ?? "var(--chart-1)" }}
+										style={{
+											backgroundColor:
+												chartConfig[name as string]?.color ?? "var(--chart-1)",
+										}}
 									/>
 									<span className="text-muted-foreground">
 										{chartConfig[name as string]?.label ?? name}
 									</span>
 									<span className="font-mono font-medium">
-										{typeof value === "number" ? formatSignalValue(signalType, value) : "—"}
+										{typeof value === "number"
+											? formatSignalValue(signalType, value)
+											: "—"}
 									</span>
 								</span>
 							)}
@@ -527,7 +560,9 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 						iconType="circle"
 						iconSize={8}
 						wrapperStyle={{ overflowX: "auto", overflowY: "hidden", whiteSpace: "nowrap" }}
-						formatter={(value: string) => <span className="text-xs text-muted-foreground">{value}</span>}
+						formatter={(value: string) => (
+							<span className="text-xs text-muted-foreground">{value}</span>
+						)}
 					/>
 				)}
 
@@ -624,8 +659,7 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 
 			{showWouldFire && wouldFireBands.length > 0 && (
 				<p className="text-[11px] text-muted-foreground">
-					Shaded: rule would have fired (approximate — the live scheduler evaluates every
-					minute).
+					Shaded: rule would have fired (approximate — the live scheduler evaluates every minute).
 				</p>
 			)}
 			{hasSignal && source === "preview" && noDataBands.length > 0 && (
@@ -666,18 +700,14 @@ export const AlertRuleChart = React.memo(function AlertRuleChart({
 	)
 })
 
-function Placeholder({
-	children,
-	tone,
-}: {
-	children: React.ReactNode
-	tone?: "destructive"
-}) {
+function Placeholder({ children, tone }: { children: React.ReactNode; tone?: "destructive" }) {
 	return (
 		<div
 			className={cn(
 				"flex w-full items-center justify-center rounded-md border border-dashed px-6 text-center",
-				tone === "destructive" ? "border-destructive/40 bg-destructive/5" : "border-border/60 bg-muted/20",
+				tone === "destructive"
+					? "border-destructive/40 bg-destructive/5"
+					: "border-border/60 bg-muted/20",
 			)}
 			style={{ height: CHART_HEIGHT }}
 		>
@@ -694,7 +724,9 @@ function RailLegend({ hasIncidents, hasErrors }: { hasIncidents: boolean; hasErr
 			<LegendChip className="bg-muted-foreground/30">Skipped</LegendChip>
 			{hasErrors && <LegendChip className="bg-warning">Failed</LegendChip>}
 			{hasIncidents && (
-				<LegendChip className="bg-destructive/15 ring-1 ring-inset ring-destructive/40">Incident</LegendChip>
+				<LegendChip className="bg-destructive/15 ring-1 ring-inset ring-destructive/40">
+					Incident
+				</LegendChip>
 			)}
 		</div>
 	)

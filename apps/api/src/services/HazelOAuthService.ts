@@ -16,11 +16,7 @@ import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/
 import { Env, type EnvShape } from "../lib/Env"
 import { Database } from "../lib/DatabaseLive"
 import { msToDate } from "../lib/time"
-import {
-	makeOAuthConnectionHelpers,
-	OAUTH_STATE_TTL_MS,
-	toUpstreamError,
-} from "./oauth/connection-helpers"
+import { makeOAuthConnectionHelpers, OAUTH_STATE_TTL_MS, toUpstreamError } from "./oauth/connection-helpers"
 
 const HAZEL_PROVIDER = "hazel"
 
@@ -90,35 +86,33 @@ interface ResolvedHazelOAuthConfig extends ResolvedHazelOAuthEnv {
 	readonly userInfoUrl: string
 }
 
-const resolveEnv = Effect.fn("HazelOAuthService.resolveEnv")(
-	function* (env: EnvShape) {
-		const requireSome = <A>(
-			opt: Option.Option<A>,
-			message: string,
-		): Effect.Effect<A, IntegrationsValidationError> =>
-			Option.match(opt, {
-				onNone: () => Effect.fail(new IntegrationsValidationError({ message })),
-				onSome: (value) => Effect.succeed(value),
-			})
+const resolveEnv = Effect.fn("HazelOAuthService.resolveEnv")(function* (env: EnvShape) {
+	const requireSome = <A>(
+		opt: Option.Option<A>,
+		message: string,
+	): Effect.Effect<A, IntegrationsValidationError> =>
+		Option.match(opt, {
+			onNone: () => Effect.fail(new IntegrationsValidationError({ message })),
+			onSome: (value) => Effect.succeed(value),
+		})
 
-		const clientId = yield* requireSome(
-			env.HAZEL_OAUTH_CLIENT_ID,
-			"HAZEL_OAUTH_CLIENT_ID is required to use the Hazel integration",
-		)
-		const clientSecretRedacted = yield* requireSome(
-			env.HAZEL_OAUTH_CLIENT_SECRET,
-			"HAZEL_OAUTH_CLIENT_SECRET is required to use the Hazel integration",
-		)
+	const clientId = yield* requireSome(
+		env.HAZEL_OAUTH_CLIENT_ID,
+		"HAZEL_OAUTH_CLIENT_ID is required to use the Hazel integration",
+	)
+	const clientSecretRedacted = yield* requireSome(
+		env.HAZEL_OAUTH_CLIENT_SECRET,
+		"HAZEL_OAUTH_CLIENT_SECRET is required to use the Hazel integration",
+	)
 
-		return {
-			clientId,
-			clientSecret: clientSecretRedacted,
-			discoveryUrl: env.HAZEL_OAUTH_DISCOVERY_URL,
-			scopes: env.HAZEL_OAUTH_SCOPES,
-			apiBaseUrl: env.HAZEL_API_BASE_URL.replace(/\/$/, ""),
-		} satisfies ResolvedHazelOAuthEnv
-	},
-)
+	return {
+		clientId,
+		clientSecret: clientSecretRedacted,
+		discoveryUrl: env.HAZEL_OAUTH_DISCOVERY_URL,
+		scopes: env.HAZEL_OAUTH_SCOPES,
+		apiBaseUrl: env.HAZEL_API_BASE_URL.replace(/\/$/, ""),
+	} satisfies ResolvedHazelOAuthEnv
+})
 
 interface HazelOAuthAccessToken {
 	readonly accessToken: string
@@ -229,36 +223,32 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 				env,
 			})
 
-			const fetchDiscoveryDocument = Effect.fn("HazelOAuthService.fetchDiscoveryDocument")(
-				function* (discoveryUrl: string) {
-					const response = yield* httpClient
-						.get(discoveryUrl, { headers: { accept: "application/json" } })
-						.pipe(
-							Effect.mapError((cause) =>
-								toUpstreamError(`OIDC discovery fetch failed: ${cause.message}`),
-							),
-						)
-					if (response.status < 200 || response.status >= 300) {
-						return yield* Effect.fail(
-							toUpstreamError(`OIDC discovery returned ${response.status}`, response.status),
-						)
-					}
-					const json = yield* response.json.pipe(
+			const fetchDiscoveryDocument = Effect.fn("HazelOAuthService.fetchDiscoveryDocument")(function* (
+				discoveryUrl: string,
+			) {
+				const response = yield* httpClient
+					.get(discoveryUrl, { headers: { accept: "application/json" } })
+					.pipe(
 						Effect.mapError((cause) =>
-							toUpstreamError("OIDC discovery returned a non-JSON response", undefined, cause),
+							toUpstreamError(`OIDC discovery fetch failed: ${cause.message}`),
 						),
 					)
-					return yield* decodeDiscoveryDocument(json).pipe(
-						Effect.mapError((cause) =>
-							toUpstreamError(
-								"OIDC discovery returned an unexpected payload",
-								undefined,
-								cause,
-							),
-						),
+				if (response.status < 200 || response.status >= 300) {
+					return yield* Effect.fail(
+						toUpstreamError(`OIDC discovery returned ${response.status}`, response.status),
 					)
-				},
-			)
+				}
+				const json = yield* response.json.pipe(
+					Effect.mapError((cause) =>
+						toUpstreamError("OIDC discovery returned a non-JSON response", undefined, cause),
+					),
+				)
+				return yield* decodeDiscoveryDocument(json).pipe(
+					Effect.mapError((cause) =>
+						toUpstreamError("OIDC discovery returned an unexpected payload", undefined, cause),
+					),
+				)
+			})
 
 			const cachedDiscovery = yield* Ref.make<{
 				url: string
@@ -333,37 +323,38 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 				}
 			})
 
-			const fetchUserInfo = Effect.fn("HazelOAuthService.fetchUserInfo")(
-				function* (config: ResolvedHazelOAuthConfig, accessToken: string) {
-					const response = yield* httpClient
-						.get(config.userInfoUrl, {
-							headers: {
-								authorization: `Bearer ${accessToken}`,
-								accept: "application/json",
-							},
-						})
-						.pipe(
-							Effect.mapError((cause) =>
-								toUpstreamError(`Userinfo fetch failed: ${cause.message}`),
-							),
-						)
-					if (response.status < 200 || response.status >= 300) {
-						return yield* Effect.fail(
-							toUpstreamError(`Userinfo fetch failed with ${response.status}`, response.status),
-						)
-					}
-					const json = yield* response.json.pipe(
+			const fetchUserInfo = Effect.fn("HazelOAuthService.fetchUserInfo")(function* (
+				config: ResolvedHazelOAuthConfig,
+				accessToken: string,
+			) {
+				const response = yield* httpClient
+					.get(config.userInfoUrl, {
+						headers: {
+							authorization: `Bearer ${accessToken}`,
+							accept: "application/json",
+						},
+					})
+					.pipe(
 						Effect.mapError((cause) =>
-							toUpstreamError("Userinfo returned a non-JSON response", undefined, cause),
+							toUpstreamError(`Userinfo fetch failed: ${cause.message}`),
 						),
 					)
-					return yield* decodeUserInfo(json).pipe(
-						Effect.mapError((cause) =>
-							toUpstreamError("Userinfo returned an unexpected payload", undefined, cause),
-						),
+				if (response.status < 200 || response.status >= 300) {
+					return yield* Effect.fail(
+						toUpstreamError(`Userinfo fetch failed with ${response.status}`, response.status),
 					)
-				},
-			)
+				}
+				const json = yield* response.json.pipe(
+					Effect.mapError((cause) =>
+						toUpstreamError("Userinfo returned a non-JSON response", undefined, cause),
+					),
+				)
+				return yield* decodeUserInfo(json).pipe(
+					Effect.mapError((cause) =>
+						toUpstreamError("Userinfo returned an unexpected payload", undefined, cause),
+					),
+				)
+			})
 
 			const completeConnect = Effect.fn("HazelOAuthService.completeConnect")(function* (
 				code: string,
@@ -560,11 +551,13 @@ export class HazelOAuthService extends Context.Service<HazelOAuthService, HazelO
 						accept: "application/json",
 					},
 				}).pipe(HttpClientRequest.bodyJsonUnsafe(body))
-				const response = yield* httpClient.execute(request).pipe(
-					Effect.mapError((cause) =>
-						toUpstreamError(`Hazel webhook provisioning failed: ${cause.message}`),
-					),
-				)
+				const response = yield* httpClient
+					.execute(request)
+					.pipe(
+						Effect.mapError((cause) =>
+							toUpstreamError(`Hazel webhook provisioning failed: ${cause.message}`),
+						),
+					)
 				if (response.status === 401) {
 					return yield* Effect.fail(
 						new IntegrationsRevokedError({

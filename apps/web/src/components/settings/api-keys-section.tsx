@@ -383,12 +383,7 @@ function ApiKeyRow({
 			)}
 		>
 			<div className="flex min-w-0 flex-1 items-center gap-2.5">
-				<div
-					className={cn(
-						"flex size-7 shrink-0 items-center justify-center rounded-md",
-						tileClass,
-					)}
-				>
+				<div className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", tileClass)}>
 					<Icon size={13} />
 				</div>
 				<div className="flex min-w-0 flex-col gap-0.5">
@@ -418,7 +413,9 @@ function ApiKeyRow({
 				</div>
 			</div>
 
-			<code className={cn(COL.prefix, "text-foreground/55 truncate font-mono text-[11px] tracking-tight")}>
+			<code
+				className={cn(COL.prefix, "text-foreground/55 truncate font-mono text-[11px] tracking-tight")}
+			>
 				{apiKey.key_prefix}
 			</code>
 

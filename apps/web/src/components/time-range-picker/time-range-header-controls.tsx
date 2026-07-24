@@ -5,6 +5,7 @@ import { XmarkIcon } from "@/components/icons"
 import { TimeRangePicker } from "./time-range-picker"
 import { ReloadControls } from "./reload-controls"
 import type { TimeRange } from "./types"
+import type { TimePreset } from "@/lib/time-utils"
 
 interface TimeRangeHeaderControlsProps {
 	startTime?: string
@@ -12,6 +13,8 @@ interface TimeRangeHeaderControlsProps {
 	presetValue?: string
 	defaultPreset?: string
 	onTimeChange: (range: TimeRange) => void
+	presets?: ReadonlyArray<TimePreset>
+	maxRangeSeconds?: number
 }
 
 export function TimeRangeHeaderControls({
@@ -20,6 +23,8 @@ export function TimeRangeHeaderControls({
 	presetValue,
 	defaultPreset = "12h",
 	onTimeChange,
+	presets,
+	maxRangeSeconds,
 }: TimeRangeHeaderControlsProps) {
 	const hasCustomRange = !presetValue && !!startTime
 
@@ -32,6 +37,8 @@ export function TimeRangeHeaderControls({
 					presetValue={presetValue}
 					onChange={onTimeChange}
 					hotkey
+					presets={presets}
+					maxRangeSeconds={maxRangeSeconds}
 				/>
 				{hasCustomRange && (
 					<Button

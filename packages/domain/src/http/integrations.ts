@@ -152,22 +152,22 @@ export class CloudflareServiceUsage extends Schema.Class<CloudflareServiceUsage>
 }) {}
 
 /** Warehouse-derived Cloudflare ingest usage for the org, fixed at the last 24h hourly. */
-export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageResponse>(
-	"CloudflareUsageResponse",
-)({
-	windowStart: Schema.Number,
-	windowEnd: Schema.Number,
-	bucketSeconds: Schema.Number,
-	totalRequests: Schema.Number,
-	/**
-	 * Total requests in the previous window `[windowStart − 24h, windowStart)` — backs the
-	 * "vs previous 24h" delta. optionalKey only for deploy-window compat; always sent.
-	 */
-	previousTotalRequests: Schema.optionalKey(Schema.Number),
-	/** Org-wide mitigated firewall events (block/challenge) in the current window. Always sent. */
-	firewallBlockedEvents: Schema.optionalKey(Schema.Number),
-	services: Schema.Array(CloudflareServiceUsage),
-}) {}
+export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageResponse>("CloudflareUsageResponse")(
+	{
+		windowStart: Schema.Number,
+		windowEnd: Schema.Number,
+		bucketSeconds: Schema.Number,
+		totalRequests: Schema.Number,
+		/**
+		 * Total requests in the previous window `[windowStart − 24h, windowStart)` — backs the
+		 * "vs previous 24h" delta. optionalKey only for deploy-window compat; always sent.
+		 */
+		previousTotalRequests: Schema.optionalKey(Schema.Number),
+		/** Org-wide mitigated firewall events (block/challenge) in the current window. Always sent. */
+		firewallBlockedEvents: Schema.optionalKey(Schema.Number),
+		services: Schema.Array(CloudflareServiceUsage),
+	},
+) {}
 
 /**
  * Live top-hosts/top-paths lookup for one zone, proxied straight to Cloudflare's GraphQL
@@ -186,16 +186,16 @@ export class CloudflareTopTrafficRequest extends Schema.Class<CloudflareTopTraff
 	limit: Schema.optionalKey(Schema.Number),
 }) {}
 
-export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>(
-	"CloudflareTopTrafficRow",
-)({
-	/** Hostname or path, depending on the requested dimension. */
-	key: Schema.String,
-	/** ABR-adjusted request estimate. */
-	requests: Schema.Number,
-	bytes: Schema.Number,
-	errors5xx: Schema.Number,
-}) {}
+export class CloudflareTopTrafficRow extends Schema.Class<CloudflareTopTrafficRow>("CloudflareTopTrafficRow")(
+	{
+		/** Hostname or path, depending on the requested dimension. */
+		key: Schema.String,
+		/** ABR-adjusted request estimate. */
+		requests: Schema.Number,
+		bytes: Schema.Number,
+		errors5xx: Schema.Number,
+	},
+) {}
 
 export class CloudflareTopTrafficResponse extends Schema.Class<CloudflareTopTrafficResponse>(
 	"CloudflareTopTrafficResponse",

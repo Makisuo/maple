@@ -687,49 +687,47 @@ const benchmarkSample = Effect.fn("bench.sample")(function* (
 			{ discard: true },
 		)
 
-		const runs: RunMetrics[] = yield* Effect.forEach(
-			Array.from({ length: runsPerQuery }),
-			() =>
-				Effect.gen(function* () {
-					const res = yield* ch.run(replaySql)
-					if (res.status !== 200) {
-						return yield* Effect.fail(
-							new UpstreamStatusError({
-								source: "ClickHouse",
-								status: res.status,
-								message: res.body.slice(0, 200),
-							}),
-						)
-					}
-					const log = yield* ch.queryLog(res.queryId)
-					const fromSummary = (key: string) =>
-						Option.match(res.summary, {
-							onNone: () => null,
-							onSome: (s) => (s[key] !== undefined ? Number(s[key]) : null),
-						})
-					return {
-						wallMs: res.wallMs,
-						serverElapsedMs: Option.match(log, {
-							onNone: () => {
-								const ns = fromSummary("elapsed_ns")
-								return ns == null ? null : ns / 1e6
-							},
-							onSome: (l) => l.queryDurationMs,
+		const runs: RunMetrics[] = yield* Effect.forEach(Array.from({ length: runsPerQuery }), () =>
+			Effect.gen(function* () {
+				const res = yield* ch.run(replaySql)
+				if (res.status !== 200) {
+					return yield* Effect.fail(
+						new UpstreamStatusError({
+							source: "ClickHouse",
+							status: res.status,
+							message: res.body.slice(0, 200),
 						}),
-						readRows: Option.match(log, {
-							onNone: () => fromSummary("read_rows"),
-							onSome: (l) => l.readRows,
-						}),
-						readBytes: Option.match(log, {
-							onNone: () => fromSummary("read_bytes"),
-							onSome: (l) => l.readBytes,
-						}),
-						memoryUsage: Option.match(log, {
-							onNone: () => null,
-							onSome: (l) => l.memoryUsage,
-						}),
-					} satisfies RunMetrics
-				}),
+					)
+				}
+				const log = yield* ch.queryLog(res.queryId)
+				const fromSummary = (key: string) =>
+					Option.match(res.summary, {
+						onNone: () => null,
+						onSome: (s) => (s[key] !== undefined ? Number(s[key]) : null),
+					})
+				return {
+					wallMs: res.wallMs,
+					serverElapsedMs: Option.match(log, {
+						onNone: () => {
+							const ns = fromSummary("elapsed_ns")
+							return ns == null ? null : ns / 1e6
+						},
+						onSome: (l) => l.queryDurationMs,
+					}),
+					readRows: Option.match(log, {
+						onNone: () => fromSummary("read_rows"),
+						onSome: (l) => l.readRows,
+					}),
+					readBytes: Option.match(log, {
+						onNone: () => fromSummary("read_bytes"),
+						onSome: (l) => l.readBytes,
+					}),
+					memoryUsage: Option.match(log, {
+						onNone: () => null,
+						onSome: (l) => l.memoryUsage,
+					}),
+				} satisfies RunMetrics
+			}),
 		)
 
 		const wallValues = runs.map((r) => r.wallMs)

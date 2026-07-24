@@ -70,15 +70,11 @@ export function useAlertRulePreview(
 		// The rule params require a non-empty name; the preview doesn't care,
 		// so substitute a placeholder while the user hasn't typed one yet.
 		const rule = buildRuleCreateParamsV2(
-			deferredForm.name.trim().length > 0
-				? deferredForm
-				: { ...deferredForm, name: "Untitled rule" },
+			deferredForm.name.trim().length > 0 ? deferredForm : { ...deferredForm, name: "Untitled rule" },
 		)
 		return {
 			rule,
-			start_time: IsoDateTimeString.make(
-				new Date(normalizeTimestampInput(startTime)).toISOString(),
-			),
+			start_time: IsoDateTimeString.make(new Date(normalizeTimestampInput(startTime)).toISOString()),
 			end_time: IsoDateTimeString.make(new Date(normalizeTimestampInput(endTime)).toISOString()),
 		}
 	}, [deferredForm, startTime, endTime])

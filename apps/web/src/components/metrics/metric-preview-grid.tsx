@@ -172,10 +172,7 @@ function GridPage({
 	)
 }
 
-function namesOfType(
-	entries: ReadonlyArray<MetricPreviewEntry>,
-	metricType: SparklineMetricType,
-): string[] {
+function namesOfType(entries: ReadonlyArray<MetricPreviewEntry>, metricType: SparklineMetricType): string[] {
 	return entries.filter((entry) => entry.metricType === metricType).map((entry) => entry.metricName)
 }
 
@@ -196,11 +193,7 @@ function useTypeSparklines(
 	)
 }
 
-function usePageSparklines(
-	entries: ReadonlyArray<MetricPreviewEntry>,
-	startTime: string,
-	endTime: string,
-) {
+function usePageSparklines(entries: ReadonlyArray<MetricPreviewEntry>, startTime: string, endTime: string) {
 	// One hook call per metric type — a fixed set, so hook order is stable.
 	const sumResult = useTypeSparklines("sum", namesOfType(entries, "sum"), startTime, endTime)
 	const gaugeResult = useTypeSparklines("gauge", namesOfType(entries, "gauge"), startTime, endTime)

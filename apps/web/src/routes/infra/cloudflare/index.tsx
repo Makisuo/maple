@@ -10,17 +10,23 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { CloudflareIcon } from "@/components/icons"
 import { PageHero } from "@/components/infra/primitives/page-hero"
-import { CloudflareKpiCards, CloudflareKpiCardsLoading } from "@/components/infra/cloudflare/cloudflare-kpi-cards"
+import {
+	CloudflareKpiCards,
+	CloudflareKpiCardsLoading,
+} from "@/components/infra/cloudflare/cloudflare-kpi-cards"
 import { CloudflareNotConnected } from "@/components/infra/cloudflare/cloudflare-not-connected"
 import { CloudflarePlatformSection } from "@/components/infra/cloudflare/cloudflare-platform-table"
-import { CloudflareWorkerTable, CloudflareWorkerTableLoading } from "@/components/infra/cloudflare/cloudflare-worker-table"
-import { CloudflareZoneChart } from "@/components/infra/cloudflare/cloudflare-zone-chart"
-import { CloudflareZoneTable, CloudflareZoneTableLoading } from "@/components/infra/cloudflare/cloudflare-zone-table"
-import { COLOR_PALETTE } from "@/components/infra/chart-utils"
 import {
-	OTHER_ZONES_COLOR,
-	chartBucketSeconds,
-} from "@/components/infra/cloudflare/constants"
+	CloudflareWorkerTable,
+	CloudflareWorkerTableLoading,
+} from "@/components/infra/cloudflare/cloudflare-worker-table"
+import { CloudflareZoneChart } from "@/components/infra/cloudflare/cloudflare-zone-chart"
+import {
+	CloudflareZoneTable,
+	CloudflareZoneTableLoading,
+} from "@/components/infra/cloudflare/cloudflare-zone-table"
+import { COLOR_PALETTE } from "@/components/infra/chart-utils"
+import { OTHER_ZONES_COLOR, chartBucketSeconds } from "@/components/infra/cloudflare/constants"
 import {
 	cloudflareWorkersResultAtom,
 	cloudflareZonesResultAtom,
@@ -161,8 +167,8 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 					</EmptyMedia>
 					<EmptyTitle>No Cloudflare traffic in this window</EmptyTitle>
 					<EmptyDescription>
-						Analytics ingest in 5-minute batches shortly after the integration connects. Widen
-						the time range or check back in a few minutes.
+						Analytics ingest in 5-minute batches shortly after the integration connects. Widen the
+						time range or check back in a few minutes.
 					</EmptyDescription>
 				</EmptyHeader>
 			</Empty>
@@ -185,73 +191,79 @@ function CloudflareData({ startTime, endTime }: { startTime: string; endTime: st
 							{response.zones.length > 0 && (
 								<CloudflareKpiCards zones={response.zones} buckets={timeseries?.buckets} />
 							)}
-							{response.zones.length > 0 && timeseries && timeseries.buckets.length > 0 && zoneSeries && (
-								<div className="space-y-2">
-									{(zoneSeries.top.length > 1 || zoneSeries.otherCount > 0) && (
-										<div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
-											{zoneSeries.top.map((name, idx) => (
-												<Link
-													key={name}
-													to="/infra/cloudflare/$zoneName"
-													params={{ zoneName: name }}
-													className="group inline-flex items-center gap-1.5"
-												>
-													<span
-														aria-hidden
-														className="size-1.5 rounded-full"
-														style={{ background: COLOR_PALETTE[idx % COLOR_PALETTE.length] }}
-													/>
-													<span className="text-[11px] text-muted-foreground transition-colors group-hover:text-foreground">
-														{name}
+							{response.zones.length > 0 &&
+								timeseries &&
+								timeseries.buckets.length > 0 &&
+								zoneSeries && (
+									<div className="space-y-2">
+										{(zoneSeries.top.length > 1 || zoneSeries.otherCount > 0) && (
+											<div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1">
+												{zoneSeries.top.map((name, idx) => (
+													<Link
+														key={name}
+														to="/infra/cloudflare/$zoneName"
+														params={{ zoneName: name }}
+														className="group inline-flex items-center gap-1.5"
+													>
+														<span
+															aria-hidden
+															className="size-1.5 rounded-full"
+															style={{
+																background:
+																	COLOR_PALETTE[idx % COLOR_PALETTE.length],
+															}}
+														/>
+														<span className="text-[11px] text-muted-foreground transition-colors group-hover:text-foreground">
+															{name}
+														</span>
+													</Link>
+												))}
+												{zoneSeries.otherCount > 0 && (
+													<span className="inline-flex items-center gap-1.5">
+														<span
+															aria-hidden
+															className="size-1.5 rounded-full"
+															style={{ background: OTHER_ZONES_COLOR }}
+														/>
+														<span className="text-[11px] text-muted-foreground">
+															Other zones ({zoneSeries.otherCount})
+														</span>
 													</span>
-												</Link>
-											))}
-											{zoneSeries.otherCount > 0 && (
-												<span className="inline-flex items-center gap-1.5">
-													<span
-														aria-hidden
-														className="size-1.5 rounded-full"
-														style={{ background: OTHER_ZONES_COLOR }}
-													/>
-													<span className="text-[11px] text-muted-foreground">
-														Other zones ({zoneSeries.otherCount})
-													</span>
-												</span>
-											)}
+												)}
+											</div>
+										)}
+										<div className="grid gap-4 lg:grid-cols-2">
+											<CloudflareZoneChart
+												buckets={timeseries.buckets}
+												metric="requests"
+												topZones={zoneSeries.top}
+												waiting={timeseriesWaiting}
+												syncId="cf-zones"
+											/>
+											<CloudflareZoneChart
+												buckets={timeseries.buckets}
+												metric="errorRate"
+												topZones={zoneSeries.top}
+												waiting={timeseriesWaiting}
+												syncId="cf-zones"
+											/>
+											<CloudflareZoneChart
+												buckets={timeseries.buckets}
+												metric="cacheHitRate"
+												topZones={zoneSeries.top}
+												waiting={timeseriesWaiting}
+												syncId="cf-zones"
+											/>
+											<CloudflareZoneChart
+												buckets={timeseries.buckets}
+												metric="bytes"
+												topZones={zoneSeries.top}
+												waiting={timeseriesWaiting}
+												syncId="cf-zones"
+											/>
 										</div>
-									)}
-									<div className="grid gap-4 lg:grid-cols-2">
-										<CloudflareZoneChart
-											buckets={timeseries.buckets}
-											metric="requests"
-											topZones={zoneSeries.top}
-											waiting={timeseriesWaiting}
-											syncId="cf-zones"
-										/>
-										<CloudflareZoneChart
-											buckets={timeseries.buckets}
-											metric="errorRate"
-											topZones={zoneSeries.top}
-											waiting={timeseriesWaiting}
-											syncId="cf-zones"
-										/>
-										<CloudflareZoneChart
-											buckets={timeseries.buckets}
-											metric="cacheHitRate"
-											topZones={zoneSeries.top}
-											waiting={timeseriesWaiting}
-											syncId="cf-zones"
-										/>
-										<CloudflareZoneChart
-											buckets={timeseries.buckets}
-											metric="bytes"
-											topZones={zoneSeries.top}
-											waiting={timeseriesWaiting}
-											syncId="cf-zones"
-										/>
 									</div>
-								</div>
-							)}
+								)}
 							<section className="space-y-3">
 								<h2 className="text-sm font-medium text-foreground">
 									Zones

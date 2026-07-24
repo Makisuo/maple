@@ -425,7 +425,7 @@ Format 3 treats resource costs directionally: a lower observed RSS, wall time,
 compression ratio, physical-byte count, or temporary-disk peak is safe; only a
 regression beyond tolerance fails. Write operations emit only format 3. For
 upgrade compatibility, the loader also accepts a format-2 document only when
-its *entire* held-out evidence matches one coherent historical policy: either
+its _entire_ held-out evidence matches one coherent historical policy: either
 the original symmetric comparison or the brief directional format-2 form. It
 rejects a document that mixes those representations across the selected
 evidence and attempts.

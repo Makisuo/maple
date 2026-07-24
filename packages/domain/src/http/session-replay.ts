@@ -63,6 +63,10 @@ export const SessionReplayListItem = Schema.Struct({
 	clickCount: Schema.Number,
 	errorCount: Schema.Number,
 	traceCount: Schema.Number,
+	/** The SDK's `maple.session.recorded` marker. `"true"` / `"false"`, or `""`
+	 *  for sessions written before the SDK stamped it — treat that as unknown,
+	 *  not as "not recorded". */
+	recorded: Schema.String,
 })
 
 export class ListReplaysResponse extends Schema.Class<ListReplaysResponse>("ListReplaysResponse")({

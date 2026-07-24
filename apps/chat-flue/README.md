@@ -9,12 +9,12 @@ the architecture before the full rebuild. See the plan at
 
 ## What's here
 
-| File                                | Role                                                                                                                                                                         |
-| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| File                                | Role                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `src/agents/maple-chat.ts`          | The addressable chat agent. `export const route` exposes it at `POST/GET /agents/maple-chat/:id`; Workers AI model + API Worker RPC → Maple MCP tools (`mcp__maple__*`). |
-| `src/lib/env.ts`                    | Worker bindings/vars (`AI`, `MAPLE_API_RPC`, `INTERNAL_SERVICE_TOKEN`).                                                                                                      |
-| `src/lib/org.ts`                    | Recovers `orgId` from the `"<orgId>:<tabId>"` instance id.                                                                                                                   |
-| `flue.config.ts` / `wrangler.jsonc` | Flue + Cloudflare build config (Workers AI `AI` binding, DO migrations).                                                                                                     |
+| `src/lib/env.ts`                    | Worker bindings/vars (`AI`, `MAPLE_API_RPC`, `INTERNAL_SERVICE_TOKEN`).                                                                                                  |
+| `src/lib/org.ts`                    | Recovers `orgId` from the `"<orgId>:<tabId>"` instance id.                                                                                                               |
+| `flue.config.ts` / `wrangler.jsonc` | Flue + Cloudflare build config (Workers AI `AI` binding, DO migrations).                                                                                                 |
 
 > No `src/app.ts` yet — it's **optional**, and without it Flue serves the agent
 > via its generated app. Phase 1 adds `src/app.ts` (a Hono app mounting

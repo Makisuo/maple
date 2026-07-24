@@ -53,12 +53,22 @@ function requestsRatioDataSource(opts: {
 					hidden: true,
 				},
 				{
-					...makeQueryDraft({ ...base, id: `${opts.idPrefix}-den`, name: "B", whereClause: opts.where }),
+					...makeQueryDraft({
+						...base,
+						id: `${opts.idPrefix}-den`,
+						name: "B",
+						whereClause: opts.where,
+					}),
 					hidden: true,
 				},
 			],
 			formulas: [
-				{ id: `${opts.idPrefix}-ratio`, name: opts.formulaName, expression: "A / B * 100", legend: opts.legend },
+				{
+					id: `${opts.idPrefix}-ratio`,
+					name: opts.formulaName,
+					expression: "A / B * 100",
+					legend: opts.legend,
+				},
 			],
 			comparison: { mode: "none", includePercentChange: true },
 			debug: false,

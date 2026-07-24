@@ -1,8 +1,4 @@
-import type {
-	AlertDeliveryEventDocument,
-	AlertIncidentDocument,
-	AlertRuleDocument,
-} from "@maple/domain/http"
+import type { AlertDeliveryEventDocument, AlertIncidentDocument, AlertRuleDocument } from "@maple/domain/http"
 import type { AlertRuleStateRow } from "@/lib/collections/alerts"
 
 /**
@@ -37,8 +33,7 @@ const lastEvaluatedMs = (
 	rule: AlertRuleDocument,
 	states: ReadonlyArray<AlertRuleStateRow>,
 ): number | null => {
-	let latest: number | null =
-		rule.lastEvaluatedAt != null ? new Date(rule.lastEvaluatedAt).getTime() : null
+	let latest: number | null = rule.lastEvaluatedAt != null ? new Date(rule.lastEvaluatedAt).getTime() : null
 	for (const state of states) {
 		if (state.last_evaluated_at == null) continue
 		const t = new Date(state.last_evaluated_at).getTime()
@@ -103,8 +98,7 @@ export function deriveRuleStatus(input: {
 		return {
 			status: "firing",
 			attention,
-			reason:
-				openIncidents.length === 1 ? "1 open incident" : `${openIncidents.length} open incidents`,
+			reason: openIncidents.length === 1 ? "1 open incident" : `${openIncidents.length} open incidents`,
 		}
 	}
 

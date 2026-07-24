@@ -6,7 +6,14 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/comp
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Card } from "@maple/ui/components/ui/card"
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
+import {
+	Empty,
+	EmptyContent,
+	EmptyDescription,
+	EmptyHeader,
+	EmptyMedia,
+	EmptyTitle,
+} from "@maple/ui/components/ui/empty"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Spinner } from "@maple/ui/components/ui/spinner"
 import { cn } from "@maple/ui/lib/utils"
@@ -49,7 +56,13 @@ const CONFIDENCE_FILL: Record<string, { count: number; bar: string; text: string
 }
 
 /** Three-segment certainty meter — encodes the AI's own confidence as a real signal. */
-export function ConfidenceMeter({ confidence, showLabel = true }: { confidence: string; showLabel?: boolean }) {
+export function ConfidenceMeter({
+	confidence,
+	showLabel = true,
+}: {
+	confidence: string
+	showLabel?: boolean
+}) {
 	const tone = CONFIDENCE_FILL[confidence] ?? CONFIDENCE_FILL.low
 	return (
 		<div className="flex items-center gap-2" aria-label={`Confidence: ${confidence}`}>
@@ -161,7 +174,15 @@ export function AiTriageCard({ incidentKind, incidentId, issueId, onOpenChat }: 
 		)
 	}
 
-	return <DiagnosisReadout run={run} result={result} onOpenChat={onOpenChat} onRerun={startRun} rerunning={isStarting} />
+	return (
+		<DiagnosisReadout
+			run={run}
+			result={result}
+			onOpenChat={onOpenChat}
+			onRerun={startRun}
+			rerunning={isStarting}
+		/>
+	)
 }
 
 /** The "investigating…" placeholder, shared by the active-run and auto-start states. */
@@ -241,7 +262,10 @@ function DiagnosisReadout({
 
 	return (
 		<Card className="relative gap-0 overflow-hidden p-0">
-			<span aria-hidden className={cn("absolute inset-y-0 left-0 z-10 w-1", SEVERITY_ACCENT[severity])} />
+			<span
+				aria-hidden
+				className={cn("absolute inset-y-0 left-0 z-10 w-1", SEVERITY_ACCENT[severity])}
+			/>
 
 			{/* Banner — what's wrong, front and center */}
 			<div className="space-y-1.5 px-4 py-3 pl-5">
@@ -263,7 +287,9 @@ function DiagnosisReadout({
 					<ConfidenceMeter confidence={result.confidence} showLabel={false} />
 				</div>
 				<p className="text-sm font-medium leading-snug text-foreground">{result.suspectedCause}</p>
-				<p className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">{result.summary}</p>
+				<p className="line-clamp-2 text-[13px] leading-snug text-muted-foreground">
+					{result.summary}
+				</p>
 			</div>
 
 			{/* Blast radius */}
@@ -289,7 +315,9 @@ function DiagnosisReadout({
 						{traceEvidence.map((item, index) => (
 							<li key={index} className="space-y-1">
 								{item.note ? (
-									<p className="text-[13px] leading-snug text-muted-foreground">{item.note}</p>
+									<p className="text-[13px] leading-snug text-muted-foreground">
+										{item.note}
+									</p>
 								) : null}
 								{item.traceIds.length || item.logPatterns.length ? (
 									<div className="flex flex-wrap items-center gap-1">

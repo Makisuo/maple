@@ -98,7 +98,9 @@ const capitalize = (s: string): string => (s.length === 0 ? s : `${s[0]!.toUpper
 /** Map a legacy alert chat context onto the generic investigation shape (back-compat shim). */
 export const alertContextToInvestigation = (alert: AlertContext): InvestigationContext => {
 	const { breach } = narrowAlertSignal(alert)
-	const observed = breach ? `${breach.observed} vs ${breach.threshold}` : `${alert.value ?? "n/a"} vs ${alert.threshold}`
+	const observed = breach
+		? `${breach.observed} vs ${breach.threshold}`
+		: `${alert.value ?? "n/a"} vs ${alert.threshold}`
 	return {
 		kind: "alert",
 		id: alert.incidentId ?? alert.ruleId,

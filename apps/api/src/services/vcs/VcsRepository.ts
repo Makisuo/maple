@@ -774,13 +774,17 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 						await tx
 							.update(vcsRepositories)
 							.set({ trackedBranch: branch, updatedAt: now })
-							.where(and(eq(vcsRepositories.orgId, orgId), eq(vcsRepositories.id, repositoryId)))
+							.where(
+								and(eq(vcsRepositories.orgId, orgId), eq(vcsRepositories.id, repositoryId)),
+							)
 						// Org-scope the commit wipe too: without it, an id belonging to
 						// another org would no-op the update but still delete that org's
 						// commits. Mirrors the org-scoped delete in purgeRepository.
 						await tx
 							.delete(vcsCommits)
-							.where(and(eq(vcsCommits.orgId, orgId), eq(vcsCommits.repositoryId, repositoryId)))
+							.where(
+								and(eq(vcsCommits.orgId, orgId), eq(vcsCommits.repositoryId, repositoryId)),
+							)
 					}),
 				)
 				.pipe(Effect.mapError(toPersistenceError))
@@ -910,7 +914,10 @@ export class VcsRepository extends Context.Service<VcsRepository>()("@maple/api/
 						await tx
 							.delete(vcsInstallations)
 							.where(
-								and(eq(vcsInstallations.orgId, orgId), eq(vcsInstallations.id, installationId)),
+								and(
+									eq(vcsInstallations.orgId, orgId),
+									eq(vcsInstallations.id, installationId),
+								),
 							)
 					}),
 				)

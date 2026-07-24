@@ -50,7 +50,9 @@ const RUNTIME_ROLE_PATTERN = /^[A-Za-z_][A-Za-z0-9_$.-]*$/
 
 const quoteIdent = (role: string): string => {
 	if (!RUNTIME_ROLE_PATTERN.test(role)) {
-		fail(`Refusing to grant to unsafe role name ${JSON.stringify(role)} (allowed: ${RUNTIME_ROLE_PATTERN})`)
+		fail(
+			`Refusing to grant to unsafe role name ${JSON.stringify(role)} (allowed: ${RUNTIME_ROLE_PATTERN})`,
+		)
 	}
 	return `"${role}"`
 }

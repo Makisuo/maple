@@ -73,7 +73,10 @@ const desiredBody = (props: DashboardProps) => ({
 const drifted = (props: DashboardProps, observed: Schema.Schema.Type<typeof WireDashboard>): boolean => {
 	const body = desiredBody(props) as Record<string, unknown>
 	return Object.keys(body).some(
-		(key) => !deepEqual(body[key], (observed as unknown as Record<string, unknown>)[key], { stripNullish: true }),
+		(key) =>
+			!deepEqual(body[key], (observed as unknown as Record<string, unknown>)[key], {
+				stripNullish: true,
+			}),
 	)
 }
 

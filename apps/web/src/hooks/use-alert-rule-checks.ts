@@ -6,17 +6,36 @@ import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 
 const asAlertRuleId = Schema.decodeSync(AlertRuleId)
 
-/**
- * v2 lists are cursor-paginated at 100 items per page, while a rule-detail time
- * window regularly holds hundreds of checks (a 24h window at 5-minute windows is
- * 288+ before grouping). Follow `next_cursor` until the window is exhausted,
- * capped at the old v1 single-response ceiling (2000 checks = 20 pages).
- */
-const MAX_CHECK_PAGES = 20
 const PAGE_LIMIT = 100
 
 export interface AlertRuleChecksResponse {
 	readonly checks: ReadonlyArray<AlertCheckDocument>
+	readonly hasMore: boolean
+	readonly nextCursor: string | null
+	readonly summary: {
+		readonly bucketSeconds: number
+		readonly topGroupKeys: ReadonlyArray<string>
+		readonly totals: {
+			readonly total: number
+			readonly breached: number
+			readonly healthy: number
+			readonly skipped: number
+			readonly error: number
+			readonly transitions: number
+		}
+		readonly points: ReadonlyArray<{
+			readonly bucket: string
+			readonly groupKey: string
+			readonly totalCount: number
+			readonly breachedCount: number
+			readonly healthyCount: number
+			readonly skippedCount: number
+			readonly errorCount: number
+			readonly transitionCount: number
+			readonly observedValue: number | null
+			readonly threshold: number
+		}>
+	}
 }
 
 // Keyed by `ruleId|since|until` — a range change selects a fresh atom, matching
@@ -30,23 +49,45 @@ const checksAtomFamily = Atom.family((key: string) => {
 	return MapleApiV2AtomClient.runtime.atom(
 		Effect.gen(function* () {
 			const client = yield* MapleApiV2AtomClient
-			const checks: AlertCheckDocument[] = []
-			let cursor: string | undefined
-			for (let page = 0; page < MAX_CHECK_PAGES; page++) {
-				const response = yield* client.alertRules.checks({
-					params: { id: ruleId },
-					query: {
-						since,
-						until,
-						limit: PAGE_LIMIT,
-						...(cursor !== undefined ? { cursor } : {}),
-					},
-				})
-				for (const check of response.data) checks.push(v2CheckToDocument(check))
-				if (!response.has_more || response.next_cursor === null) break
-				cursor = response.next_cursor
-			}
-			return { checks } satisfies AlertRuleChecksResponse
+			const [response, summary] = yield* Effect.all(
+				[
+					client.alertRules.checks({
+						params: { id: ruleId },
+						query: {
+							since,
+							until,
+							limit: PAGE_LIMIT,
+						},
+					}),
+					client.alertRules.checksSummary({
+						params: { id: ruleId },
+						query: { since, until },
+					}),
+				],
+				{ concurrency: "unbounded" },
+			)
+			return {
+				checks: response.data.map(v2CheckToDocument),
+				hasMore: response.has_more,
+				nextCursor: response.next_cursor,
+				summary: {
+					bucketSeconds: summary.bucket_seconds,
+					topGroupKeys: summary.top_group_keys,
+					totals: summary.totals,
+					points: summary.points.map((point) => ({
+						bucket: point.bucket,
+						groupKey: point.group_key,
+						totalCount: point.total_count,
+						breachedCount: point.breached_count,
+						healthyCount: point.healthy_count,
+						skippedCount: point.skipped_count,
+						errorCount: point.error_count,
+						transitionCount: point.transition_count,
+						observedValue: point.observed_value,
+						threshold: point.threshold,
+					})),
+				},
+			} satisfies AlertRuleChecksResponse
 		}),
 	)
 })

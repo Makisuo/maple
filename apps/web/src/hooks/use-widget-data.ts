@@ -5,10 +5,7 @@ import { Effect, Schedule, Schema } from "effect"
 import { useDashboardTimeRange } from "@/components/dashboard-builder/dashboard-providers"
 import { useDashboardVariablesOptional } from "@/components/dashboard-builder/dashboard-variables-context"
 import { getServerFunction } from "@/components/dashboard-builder/data-source-registry"
-import {
-	hasUnresolvedVariableRefs,
-	interpolateWidgetParams,
-} from "@/lib/dashboard-variables/interpolate"
+import { hasUnresolvedVariableRefs, interpolateWidgetParams } from "@/lib/dashboard-variables/interpolate"
 import type { DashboardWidget, WidgetDataSource } from "@/components/dashboard-builder/types"
 
 /**

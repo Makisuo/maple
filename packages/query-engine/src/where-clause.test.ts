@@ -188,7 +188,7 @@ describe("parseWhereClause", () => {
 	})
 
 	it("does not split on AND inside quoted values", () => {
-		const result = parseWhereClause('span.name = "buy and sell" AND service.name = \'ship AND handle\'')
+		const result = parseWhereClause("span.name = \"buy and sell\" AND service.name = 'ship AND handle'")
 		expect(result.clauses).toEqual([
 			{ key: "span.name", operator: "=", value: "buy and sell" },
 			{ key: "service.name", operator: "=", value: "ship AND handle" },

@@ -586,7 +586,9 @@ describe("ErrorsService.setSeverity", () => {
 			assert.strictEqual(all.issues.length, 2)
 		}).pipe(
 			// The warehouse saw only fingerprint 111 in the selected environment.
-			Effect.provide(makeErrorsLayer(undefined, undefined, undefined, () => [{ fingerprintHash: "111" }])),
+			Effect.provide(
+				makeErrorsLayer(undefined, undefined, undefined, () => [{ fingerprintHash: "111" }]),
+			),
 		),
 	)
 
@@ -1056,7 +1058,9 @@ describe("ErrorsService.runTick", () => {
 				states[0]?.openIncidentId,
 				incidents.find((incident) => incident.status === "open")?.id,
 			)
-		}).pipe(Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, countingDispatcher)))
+		}).pipe(
+			Effect.provide(makeErrorsLayer(() => rows, undefined, undefined, undefined, countingDispatcher)),
+		)
 	})
 
 	it.effect(

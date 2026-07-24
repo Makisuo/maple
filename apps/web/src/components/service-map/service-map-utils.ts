@@ -11,7 +11,11 @@ import type { ServiceOverview } from "@/api/warehouse/services"
 import type { ServiceWorkload } from "@/api/warehouse/service-infra"
 import { getServiceColor, getValueHue } from "@maple/ui/colors"
 import { getDbNodeColor, PLANETSCALE_COLOR, resolveDbNodePresentation } from "./service-map-db"
-import { matchHyperdriveConfigs, type HyperdriveConfigInput, type HyperdriveNodeInfo } from "./service-map-hyperdrive"
+import {
+	matchHyperdriveConfigs,
+	type HyperdriveConfigInput,
+	type HyperdriveNodeInfo,
+} from "./service-map-hyperdrive"
 
 interface ServiceNodeInfra {
 	podCount: number

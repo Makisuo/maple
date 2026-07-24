@@ -105,7 +105,10 @@ describe("deriveOverview", () => {
 				makeRule({ id: RULE_B, updatedAt: iso(60_000) }),
 			],
 			incidents: [
-				makeIncident({ id: "00000000-0000-4000-8000-0000000000f1", lastTriggeredAt: iso(3 * 60_000) }),
+				makeIncident({
+					id: "00000000-0000-4000-8000-0000000000f1",
+					lastTriggeredAt: iso(3 * 60_000),
+				}),
 				makeIncident({ id: "00000000-0000-4000-8000-0000000000f2", lastTriggeredAt: iso(60_000) }),
 			],
 			states: [],
@@ -121,10 +124,7 @@ describe("deriveOverview", () => {
 
 	it("derives per-rule statuses and tallies health counts", () => {
 		const overview = deriveOverview({
-			rules: [
-				makeRule({ id: RULE_A }),
-				makeRule({ id: RULE_B, enabled: false }),
-			],
+			rules: [makeRule({ id: RULE_A }), makeRule({ id: RULE_B, enabled: false })],
 			incidents: [makeIncident({ ruleId: RULE_A })],
 			states: [makeState({ rule_id: RULE_A })],
 			deliveryEvents: [],
@@ -183,7 +183,13 @@ describe("deriveOverview", () => {
 	})
 
 	it("spans a 24h timeline ending at now", () => {
-		const overview = deriveOverview({ rules: [], incidents: [], states: [], deliveryEvents: [], now: NOW })
+		const overview = deriveOverview({
+			rules: [],
+			incidents: [],
+			states: [],
+			deliveryEvents: [],
+			now: NOW,
+		})
 		expect(overview.timelineRange).toEqual({ min: NOW - DAY_MS, max: NOW })
 	})
 })

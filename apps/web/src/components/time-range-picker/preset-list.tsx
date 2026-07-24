@@ -1,20 +1,21 @@
-import { PRESET_OPTIONS, type TimePreset } from "@/lib/time-utils"
+import type { TimePreset } from "@/lib/time-utils"
 import { cn } from "@maple/ui/utils"
 
 interface PresetListProps {
 	selectedValue?: string
 	onSelect: (preset: TimePreset) => void
 	onCustomClick: () => void
+	presets: ReadonlyArray<TimePreset>
 }
 
-export function PresetList({ selectedValue, onSelect, onCustomClick }: PresetListProps) {
+export function PresetList({ selectedValue, onSelect, onCustomClick, presets }: PresetListProps) {
 	return (
 		<div className="flex h-full flex-col py-2">
 			<div className="px-3 pb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/80">
 				Presets
 			</div>
 			<div className="flex flex-col">
-				{PRESET_OPTIONS.map((preset) => {
+				{presets.map((preset) => {
 					const active = selectedValue === preset.value
 					return (
 						<button

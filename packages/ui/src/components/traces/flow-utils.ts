@@ -223,8 +223,7 @@ export function transformSpansToFlow(
 					durationMs: aggregatedDuration.total,
 					minMs: aggregatedDuration.min,
 					maxMs: aggregatedDuration.max,
-					share:
-						totalDurationMs > 0 ? Math.min(1, aggregatedDuration.total / totalDurationMs) : 0,
+					share: totalDurationMs > 0 ? Math.min(1, aggregatedDuration.total / totalDurationMs) : 0,
 					startOffsetMs: isMissing ? undefined : computeStartOffsetMs(parentSpan, spans),
 					isError: hasAnyError(spans),
 					isMissing,

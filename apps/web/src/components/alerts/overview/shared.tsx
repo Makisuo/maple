@@ -1,7 +1,4 @@
-import type {
-	AlertDestinationDocument,
-	AlertIncidentDocument,
-} from "@maple/domain/http"
+import type { AlertDestinationDocument, AlertIncidentDocument } from "@maple/domain/http"
 
 import { CircleWarningIcon } from "@/components/icons"
 import { ProviderLogo } from "@/components/alerts/destination-provider"

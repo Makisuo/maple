@@ -110,7 +110,9 @@ export function ActiveIncidentsTable({
 									noun="incident"
 									colSpan={6}
 								/>
-								{group.items.map((incident) => renderRow(incident, `${group.key}:${incident.id}`))}
+								{group.items.map((incident) =>
+									renderRow(incident, `${group.key}:${incident.id}`),
+								)}
 							</Fragment>
 						))
 					) : (

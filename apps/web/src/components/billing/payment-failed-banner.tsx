@@ -37,10 +37,7 @@ export function PaymentFailedBanner() {
 					flowing.
 				</AlertDescription>
 				<AlertAction>
-					<Button
-						size="sm"
-						onClick={() => openCustomerPortal({ returnUrl: window.location.href })}
-					>
+					<Button size="sm" onClick={() => openCustomerPortal({ returnUrl: window.location.href })}>
 						Update payment method
 					</Button>
 				</AlertAction>

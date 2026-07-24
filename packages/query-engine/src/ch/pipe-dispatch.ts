@@ -270,6 +270,7 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 							commitShas: str("commit_shas")?.split(",").filter(Boolean),
 						}),
 						{ orgId, startTime, endTime },
+						{ rowSchema: CH.serviceOverviewRowSchema },
 					),
 				),
 			),
@@ -295,6 +296,7 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 					CH.compile(
 						CH.serviceReleasesTimelineQuery({ serviceName: String(params.service_name) }),
 						{ orgId, startTime, endTime, bucketSeconds: int("bucket_seconds", 300)! },
+						{ rowSchema: CH.serviceReleasesTimelineRowSchema },
 					),
 				),
 			),
@@ -306,6 +308,7 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 							apdexThresholdMs: int("apdex_threshold_ms", 500),
 						}),
 						{ orgId, startTime, endTime, bucketSeconds: int("bucket_seconds", 60)! },
+						{ rowSchema: CH.serviceApdexTimeseriesRowSchema },
 					),
 				),
 			),
@@ -488,12 +491,15 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 				const metricType = parseMetricType(str("metric_type"))
 				if (metricName && metricType) {
 					return eraseType(
-						CH.compile(CH.metricScopedAttributeKeysQuery({ metricType, limit: int("limit", 200) }), {
-							orgId,
-							startTime,
-							endTime,
-							metricName,
-						}),
+						CH.compile(
+							CH.metricScopedAttributeKeysQuery({ metricType, limit: int("limit", 200) }),
+							{
+								orgId,
+								startTime,
+								endTime,
+								metricName,
+							},
+						),
 					)
 				}
 				return eraseType(

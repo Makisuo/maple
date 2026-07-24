@@ -18,6 +18,17 @@ export interface QuickSelectOption {
 	value: string
 }
 
+export function isTimeRangeWithin(
+	range: { startTime: string; endTime: string },
+	maxRangeSeconds: number,
+): boolean {
+	const durationSeconds =
+		(Date.parse(normalizeTimestampInput(range.endTime)) -
+			Date.parse(normalizeTimestampInput(range.startTime))) /
+		1000
+	return Number.isFinite(durationSeconds) && durationSeconds >= 0 && durationSeconds <= maxRangeSeconds
+}
+
 const TIME_UNITS: Record<string, (date: Date, amount: number) => Date> = {
 	m: subMinutes,
 	h: subHours,
@@ -53,6 +64,7 @@ export function relativeToAbsolute(shorthand: string): { startTime: string; endT
 }
 
 export function presetLabel(shorthand: string): string {
+	if (shorthand === "12mo") return "Last 1 year"
 	// Check PRESET_OPTIONS first for exact match
 	const preset = PRESET_OPTIONS.find((p) => p.value === shorthand)
 	if (preset) return preset.label
@@ -166,6 +178,27 @@ export const PRESET_OPTIONS: TimePreset[] = [
 		label: "Last 1 month",
 		value: "1mo",
 		getRange: () => relativeToAbsolute("1mo")!,
+	},
+]
+
+export const LONG_RANGE_PRESET_OPTIONS: TimePreset[] = [
+	...PRESET_OPTIONS,
+	{
+		label: "Last 3 months",
+		value: "3mo",
+		getRange: () => relativeToAbsolute("3mo")!,
+	},
+	{
+		label: "Last 6 months",
+		value: "6mo",
+		getRange: () => relativeToAbsolute("6mo")!,
+	},
+	{
+		label: "Last 1 year",
+		value: "12mo",
+		// The service and alert endpoints enforce an exact 365-day maximum.
+		// A calendar 12-month subtraction can span 366 days across leap day.
+		getRange: () => relativeToAbsolute("365d")!,
 	},
 ]
 

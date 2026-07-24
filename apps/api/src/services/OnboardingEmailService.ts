@@ -146,9 +146,7 @@ export class OnboardingEmailService extends Context.Service<OnboardingEmailServi
 
 						const orgId = OrgId.make(org.id)
 						const orgCreatedAt =
-							typeof org.createdAt === "number"
-								? org.createdAt
-								: yield* Clock.currentTimeMillis
+							typeof org.createdAt === "number" ? org.createdAt : yield* Clock.currentTimeMillis
 
 						yield* onboarding.ensureRow(
 							orgId,

@@ -16,12 +16,7 @@ import type {
 } from "@/api/warehouse/cloudflare-infra"
 import { formatLatency, formatNumber } from "@/lib/format"
 import { CHART_EMPTY_MESSAGE, CHART_GRID_DASH, makeBucketLabeler, transformRows } from "../chart-utils"
-import {
-	CACHE_STATUS_COLORS,
-	CACHE_STATUS_ORDER,
-	STATUS_CLASS_COLORS,
-	STATUS_CLASS_ORDER,
-} from "./constants"
+import { CACHE_STATUS_COLORS, CACHE_STATUS_ORDER, STATUS_CLASS_COLORS, STATUS_CLASS_ORDER } from "./constants"
 
 const CHART_HEIGHT = 200
 
@@ -124,7 +119,11 @@ export function StackedBreakdownChart({ title, rows, colors, order, syncId }: St
 								</linearGradient>
 							))}
 						</defs>
-						<CartesianGrid strokeDasharray={CHART_GRID_DASH} stroke="var(--border)" vertical={false} />
+						<CartesianGrid
+							strokeDasharray={CHART_GRID_DASH}
+							stroke="var(--border)"
+							vertical={false}
+						/>
 						<XAxis
 							dataKey="time"
 							tickLine={false}
@@ -281,8 +280,8 @@ export function CloudflareZoneLatencyChart({
 		return (
 			<ChartCard title="Latency percentiles" legend={null}>
 				<p className="px-3 pb-3 pt-1.5 font-mono text-[11px] text-muted-foreground">
-					No timing quantiles for this window — Cloudflare only exposes zone latency percentiles
-					on some plans.
+					No timing quantiles for this window — Cloudflare only exposes zone latency percentiles on
+					some plans.
 				</p>
 			</ChartCard>
 		)
@@ -305,7 +304,11 @@ export function CloudflareZoneLatencyChart({
 					syncId={syncId}
 					syncMethod="value"
 				>
-					<CartesianGrid strokeDasharray={CHART_GRID_DASH} stroke="var(--border)" vertical={false} />
+					<CartesianGrid
+						strokeDasharray={CHART_GRID_DASH}
+						stroke="var(--border)"
+						vertical={false}
+					/>
 					<XAxis
 						dataKey="time"
 						tickLine={false}

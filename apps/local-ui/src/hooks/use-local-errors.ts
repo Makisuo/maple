@@ -90,10 +90,7 @@ export function useLocalErrorsFacets(filters: ErrorsFilters) {
 }
 
 /** Most recently errored traces for one fingerprint (expanded row). */
-export function useLocalErrorTraces(
-	fingerprintHash: string | undefined,
-	filters: ErrorsFilters,
-) {
+export function useLocalErrorTraces(fingerprintHash: string | undefined, filters: ErrorsFilters) {
 	return useQuery({
 		queryKey: ["local", "errors", "traces", fingerprintHash, filters],
 		enabled: !!fingerprintHash,

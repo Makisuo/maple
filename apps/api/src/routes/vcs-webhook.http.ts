@@ -44,7 +44,6 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 					if (Option.isNone(bodyOpt) || bodyOpt.value.length === 0) {
 						yield* Effect.annotateCurrentSpan({
 							"http.response.status_code": 400,
-							"otel.status_code": "Ok",
 							"vcs.webhook.outcome": "rejected",
 							"vcs.webhook.reason": "empty_body",
 						})
@@ -59,7 +58,6 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 								Effect.flatMap(() =>
 									Effect.annotateCurrentSpan({
 										"http.response.status_code": 202,
-										"otel.status_code": "Ok",
 										"vcs.webhook.outcome": "handled",
 										"vcs.webhook.jobs_enqueued": jobs.length,
 									}),
@@ -71,7 +69,6 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 							"@maple/http/errors/VcsWebhookSignatureError": (error) =>
 								Effect.annotateCurrentSpan({
 									"http.response.status_code": 401,
-									"otel.status_code": "Ok",
 									"error.type": error._tag,
 									"vcs.webhook.outcome": "rejected",
 									"vcs.webhook.reason": "signature_rejected",
@@ -79,7 +76,6 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 							"@maple/http/errors/VcsWebhookParseError": (error) =>
 								Effect.annotateCurrentSpan({
 									"http.response.status_code": 400,
-									"otel.status_code": "Ok",
 									"error.type": error._tag,
 									"vcs.webhook.outcome": "rejected",
 									"vcs.webhook.reason": "parse_rejected",
@@ -88,7 +84,6 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 							"@maple/http/errors/VcsQueueError": (error) =>
 								Effect.annotateCurrentSpan({
 									"http.response.status_code": 500,
-									"otel.status_code": "Error",
 									"error.type": error._tag,
 									"vcs.webhook.outcome": "failed",
 									"vcs.webhook.reason": "enqueue_failed",
@@ -99,12 +94,18 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 										),
 									),
 									Effect.flatMap(() =>
-								Effect.fail(new EnqueueFailure({ message: error.message })),
-							),
+										Effect.fail(new EnqueueFailure({ message: error.message })),
+									),
 								),
 						}),
 					)
 				}).pipe(
+					// Span status comes from the Effect exit, not an attribute — a rejection
+					// that returns a response exits Ok, and only the enqueue failure below
+					// propagates far enough to mark this span Error. Do NOT hand-stamp an
+					// `otel.status_code` attribute here: this SDK never reads it (that
+					// spelling is load-bearing only in the Rust gateway's tracing bridge), so
+					// it is dead weight that reads as authoritative.
 					Effect.withSpan("VcsWebhook.receive", {
 						attributes: { "vcs.provider": provider.id },
 					}),
@@ -115,18 +116,20 @@ export const VcsWebhookRouter = HttpRouter.use((router) =>
 				)
 			}
 
-			yield* Effect.forEach(
-				registry.ids,
-				(id) =>
-					registry.resolve(id).pipe(
+		yield* Effect.forEach(
+			registry.ids,
+			(id) =>
+				registry
+					.resolve(id)
+					.pipe(
 						Effect.flatMap((provider) =>
-						router.add(
-							"POST",
-							`/api/integrations/${id}/webhook`,
-							makeHandler(provider, `/api/integrations/${id}/webhook`),
+							router.add(
+								"POST",
+								`/api/integrations/${id}/webhook`,
+								makeHandler(provider, `/api/integrations/${id}/webhook`),
+							),
 						),
 					),
-				),
 			{ discard: true },
 		)
 	}),

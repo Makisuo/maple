@@ -277,11 +277,7 @@ describe("applyDeclutter — namespace collapse", () => {
 
 	it("collapsing both endpoints' namespaces links the two aggregates", () => {
 		const { nodes, edges } = graph()
-		const result = applyDeclutter(
-			nodes,
-			edges,
-			state({ collapsedNamespaces: ["payments", "platform"] }),
-		)
+		const result = applyDeclutter(nodes, edges, state({ collapsedNamespaces: ["payments", "platform"] }))
 		const link = result.edges.find(
 			(e) => e.id === edgeIdFor(nsAggregateId("platform"), nsAggregateId("payments")),
 		)

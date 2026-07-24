@@ -30,7 +30,13 @@ const MAX_CHART_HOSTS = 8
 
 type SortKey = "host" | "requests" | "errorRate" | "cacheHitRate" | "bytes"
 
-function HostTable({ totals, waiting }: { totals: ReadonlyArray<CloudflareZoneHostTotal>; waiting?: boolean }) {
+function HostTable({
+	totals,
+	waiting,
+}: {
+	totals: ReadonlyArray<CloudflareZoneHostTotal>
+	waiting?: boolean
+}) {
 	const { sorted, sortKey, sortDir, handleSort } = useTableSort<CloudflareZoneHostTotal, SortKey>(totals, {
 		initialKey: "requests",
 		stringKeys: ["host"],
@@ -152,7 +158,11 @@ export function CloudflareZoneHostsSection({
 			const chartHostSet = new Set(chartHosts)
 			const rows = data.buckets
 				.filter((bucket) => bucket.host !== "" && chartHostSet.has(bucket.host))
-				.map((bucket) => ({ bucket: bucket.bucket, attributeValue: bucket.host, value: bucket.requests }))
+				.map((bucket) => ({
+					bucket: bucket.bucket,
+					attributeValue: bucket.host,
+					value: bucket.requests,
+				}))
 
 			return (
 				<div className={`space-y-4 transition-opacity ${r.waiting ? "opacity-60" : ""}`}>

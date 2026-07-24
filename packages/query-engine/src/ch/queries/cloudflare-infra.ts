@@ -16,12 +16,7 @@
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import {
-	from,
-	param,
-	type ColumnAccessor,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
 

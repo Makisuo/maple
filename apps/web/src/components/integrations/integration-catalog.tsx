@@ -409,9 +409,7 @@ export function useIntegrationOverviews(): Record<IntegrationId, IntegrationOver
 					context: plural(targets.length, `scrape ${noun}`),
 					stat: `${enabled} of ${targets.length} enabled`,
 					lastSyncLabel: syncedLabel(
-						maxMs(
-							targets.map((t) => (t.last_scrape_at ? Date.parse(t.last_scrape_at) : null)),
-						),
+						maxMs(targets.map((t) => (t.last_scrape_at ? Date.parse(t.last_scrape_at) : null))),
 						"scraped",
 					),
 					issue: failing > 0 ? `${plural(failing, noun)} failing` : null,
@@ -542,9 +540,7 @@ export function IntegrationsSummary() {
 	const values = CATALOG.map((entry) => overviews[entry.id])
 	// Quiet until everything resolved — a partial count would be wrong.
 	if (values.some((value) => value === null)) return null
-	const connected = values.filter(
-		(value): value is ConnectedOverview => value?.kind === "connected",
-	)
+	const connected = values.filter((value): value is ConnectedOverview => value?.kind === "connected")
 	if (connected.length === 0) return null
 	const attention = connected.filter((value) => value.health === "attention").length
 	return (
@@ -609,9 +605,7 @@ function ConnectedRow({
 			</span>
 			<span className="flex w-28 shrink-0 items-center gap-2">
 				<HealthDot health={connected?.health ?? "unavailable"} />
-				<span className="truncate text-xs">
-					{connected?.stateLabel ?? "Status unavailable"}
-				</span>
+				<span className="truncate text-xs">{connected?.stateLabel ?? "Status unavailable"}</span>
 			</span>
 			{connected?.stat && (
 				<span className="hidden min-w-0 flex-1 truncate text-sm text-foreground/90 md:block">
@@ -728,7 +722,12 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 					<SectionLabel>Connected</SectionLabel>
 					<div className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/60 bg-card">
 						{connected.map(({ entry, overview }) => (
-							<ConnectedRow key={entry.id} entry={entry} overview={overview} onSelect={onSelect} />
+							<ConnectedRow
+								key={entry.id}
+								entry={entry}
+								overview={overview}
+								onSelect={onSelect}
+							/>
 						))}
 						{loading.map((entry) => (
 							<SkeletonRow key={entry.id} />
@@ -741,7 +740,12 @@ export function IntegrationCatalog({ onSelect }: { onSelect: (id: IntegrationId)
 					<SectionLabel>Available</SectionLabel>
 					<div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
 						{available.map(({ entry, overview }) => (
-							<AvailableCard key={entry.id} entry={entry} cta={overview.cta} onSelect={onSelect} />
+							<AvailableCard
+								key={entry.id}
+								entry={entry}
+								cta={overview.cta}
+								onSelect={onSelect}
+							/>
 						))}
 					</div>
 				</section>

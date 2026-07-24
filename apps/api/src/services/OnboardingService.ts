@@ -121,8 +121,12 @@ export class OnboardingService extends Context.Service<OnboardingService>()(
 								...(input.demoDataRequested != null
 									? { demoDataRequested: input.demoDataRequested }
 									: {}),
-								...(input.markOnboardingComplete ? { onboardingCompletedAt: new Date(now) } : {}),
-								...(input.markChecklistDismissed ? { checklistDismissedAt: new Date(now) } : {}),
+								...(input.markOnboardingComplete
+									? { onboardingCompletedAt: new Date(now) }
+									: {}),
+								...(input.markChecklistDismissed
+									? { checklistDismissedAt: new Date(now) }
+									: {}),
 								...(userId != null ? { userId } : {}),
 								...(email != null ? { email } : {}),
 								updatedAt: new Date(now),

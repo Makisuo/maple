@@ -144,13 +144,16 @@ export {
 // Queries — Services
 export {
 	serviceOverviewQuery,
+	serviceOverviewRowSchema,
 	serviceCatalogQuery,
 	serviceHealthSnapshotQuery,
 	serviceHealthSnapshotRowSchema,
 	serviceHealthBaselineQuery,
 	serviceReleasesTimelineQuery,
+	serviceReleasesTimelineRowSchema,
 	serviceEnvironmentsQuery,
 	serviceApdexTimeseriesQuery,
+	serviceApdexTimeseriesRowSchema,
 	serviceUsageQuery,
 	serviceUsageWithPreviousQuery,
 	servicesFacetsQuery,
@@ -315,8 +318,14 @@ export {
 // Queries — Alert Checks (historical rule evaluations)
 export {
 	listRuleChecksQuery,
+	alertCheckGroupTotalsQuery,
+	alertChecksSummaryQuery,
 	type ListRuleChecksOpts,
 	type ListRuleChecksOutput,
+	type AlertCheckGroupTotalsOpts,
+	type AlertCheckGroupTotalsOutput,
+	type AlertChecksSummaryOpts,
+	type AlertChecksSummaryOutput,
 } from "./queries/alert-checks"
 
 // Queries — Cloudflare integration usage (integrations-page ingest proof)

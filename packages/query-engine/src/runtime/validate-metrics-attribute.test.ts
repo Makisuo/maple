@@ -13,7 +13,10 @@ const makeRequest = (query: MetricsTimeseriesQuery) =>
 		sampleCountStrategy: "metric_data_points",
 	})
 
-const baseFilters = { metricName: Schema.decodeUnknownSync(MetricName)("cpu.usage"), metricType: "gauge" as const }
+const baseFilters = {
+	metricName: Schema.decodeUnknownSync(MetricName)("cpu.usage"),
+	metricType: "gauge" as const,
+}
 
 describe("validateMetricsAttributeFilters", () => {
 	it.effect("rejects groupBy=attribute when groupByAttributeKey is missing", () =>
@@ -30,7 +33,10 @@ describe("validateMetricsAttributeFilters", () => {
 
 			assert.strictEqual(error._tag, "@maple/http/errors/QueryEngineValidationError")
 			if (error._tag === "@maple/http/errors/QueryEngineValidationError") {
-				assert.include(error.details.join("; "), "groupBy=attribute requires filters.groupByAttributeKey")
+				assert.include(
+					error.details.join("; "),
+					"groupBy=attribute requires filters.groupByAttributeKey",
+				)
 			}
 		}),
 	)
@@ -120,7 +126,10 @@ describe("validateMetricsAttributeFilters", () => {
 
 			assert.strictEqual(error._tag, "@maple/http/errors/QueryEngineValidationError")
 			if (error._tag === "@maple/http/errors/QueryEngineValidationError") {
-				assert.include(error.details.join("; "), "groupBy cannot combine attribute and resource_attribute")
+				assert.include(
+					error.details.join("; "),
+					"groupBy cannot combine attribute and resource_attribute",
+				)
 			}
 		}),
 	)

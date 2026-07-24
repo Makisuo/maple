@@ -19,9 +19,7 @@ describe("cloudflareUsageQuery", () => {
 		const { sql } = compileCH(cloudflareUsageQuery(), baseParams)
 		expect(sql).toContain("FROM metrics_sum")
 		expect(sql).toContain("OrgId = 'org_1'")
-		expect(sql).toContain(
-			"MetricName IN ('cloudflare.http.requests', 'cloudflare.worker.requests')",
-		)
+		expect(sql).toContain("MetricName IN ('cloudflare.http.requests', 'cloudflare.worker.requests')")
 		expect(sql).toContain("toStartOfInterval(TimeUnix, INTERVAL 3600 SECOND)")
 		expect(sql).toContain("sum(Value) AS requests")
 		expect(sql).toContain("count() AS datapoints")

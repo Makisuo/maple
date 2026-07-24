@@ -240,7 +240,9 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						const tenant = yield* CurrentTenant.Context
 						if (payload.endTime <= payload.startTime) {
 							return yield* Effect.fail(
-								new IntegrationsValidationError({ message: "endTime must be after startTime" }),
+								new IntegrationsValidationError({
+									message: "endTime must be after startTime",
+								}),
 							)
 						}
 						const limit = Math.min(Math.max(Math.floor(payload.limit ?? 15), 1), 50)
@@ -250,10 +252,7 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 						// a sub-minute window to zero width and cache the resulting empty result.
 						const MINUTE = 60_000
 						const startMs = Math.floor(payload.startTime / MINUTE) * MINUTE
-						const endMs = Math.max(
-							Math.ceil(payload.endTime / MINUTE) * MINUTE,
-							startMs + MINUTE,
-						)
+						const endMs = Math.max(Math.ceil(payload.endTime / MINUTE) * MINUTE, startMs + MINUTE)
 						const compute = Effect.gen(function* () {
 							const { accessToken } = yield* cloudflare.getValidAccessToken(tenant.orgId)
 							const zoneRows = yield* database
@@ -811,108 +810,116 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 				label: "PlanetScale",
 			})
 
-		const handle = Effect.fn("integrations.hazelOAuthCallback")(
-			function* (req: HttpServerRequest.HttpServerRequest) {
-				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
-				if (Option.isNone(urlOption)) {
-					return htmlResponse(
-						hazelCallbackPage({
-							status: "error",
-							message: "Malformed callback URL",
-							returnTo: null,
-						}),
-						400,
-					)
-				}
-				const url = urlOption.value
-				const code = url.searchParams.get("code")
-				const state = url.searchParams.get("state")
-				const oauthError = url.searchParams.get("error")
-				const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
+		const handle = Effect.fn("integrations.hazelOAuthCallback")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+			if (Option.isNone(urlOption)) {
+				return htmlResponse(
+					hazelCallbackPage({
+						status: "error",
+						message: "Malformed callback URL",
+						returnTo: null,
+					}),
+					400,
+				)
+			}
+			const url = urlOption.value
+			const code = url.searchParams.get("code")
+			const state = url.searchParams.get("state")
+			const oauthError = url.searchParams.get("error")
+			const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
 
-				if (oauthError) {
-					return htmlResponse(
-						hazelCallbackPage({
-							status: "error",
-							message: oauthErrorDescription || "Hazel returned an error",
-							returnTo: null,
-						}),
-						400,
-					)
-				}
+			if (oauthError) {
+				return htmlResponse(
+					hazelCallbackPage({
+						status: "error",
+						message: oauthErrorDescription || "Hazel returned an error",
+						returnTo: null,
+					}),
+					400,
+				)
+			}
 
-				if (!code || !state) {
-					return htmlResponse(
-						hazelCallbackPage({
-							status: "error",
-							message: "Missing code or state in callback",
-							returnTo: null,
-						}),
-						400,
-					)
-				}
+			if (!code || !state) {
+				return htmlResponse(
+					hazelCallbackPage({
+						status: "error",
+						message: "Missing code or state in callback",
+						returnTo: null,
+					}),
+					400,
+				)
+			}
 
-				return yield* hazel.completeConnect(code, state).pipe(
-					// The callback page reduces failures to short human copy — make sure the real
-					// cause still lands in the server log for diagnosis.
-					Effect.tapError((error) =>
-						Effect.logError("Hazel OAuth completeConnect failed", {
-							tag: error._tag,
-							message: error.message,
+			return yield* hazel.completeConnect(code, state).pipe(
+				// The callback page reduces failures to short human copy — make sure the real
+				// cause still lands in the server log for diagnosis.
+				Effect.tapError((error) =>
+					Effect.logError("Hazel OAuth completeConnect failed", {
+						tag: error._tag,
+						message: error.message,
+					}),
+				),
+				Effect.map((result) =>
+					htmlResponse(
+						hazelCallbackPage({
+							status: "success",
+							message: "You can close this window and return to Maple.",
+							returnTo: result.returnTo,
 						}),
 					),
-					Effect.map((result) =>
+				),
+				Effect.catchTag("@maple/http/errors/IntegrationsValidationError", (error) =>
+					Effect.succeed(
 						htmlResponse(
 							hazelCallbackPage({
-								status: "success",
-								message: "You can close this window and return to Maple.",
-								returnTo: result.returnTo,
+								status: "error",
+								message: error.message,
+								returnTo: null,
 							}),
+							400,
 						),
 					),
-					Effect.catchTag("@maple/http/errors/IntegrationsValidationError", (error) =>
+				),
+				Effect.catchTags({
+					"@maple/http/errors/IntegrationsUpstreamError": () =>
 						Effect.succeed(
 							htmlResponse(
 								hazelCallbackPage({
 									status: "error",
-									message: error.message,
+									message: "Failed to complete Hazel connection",
 									returnTo: null,
 								}),
 								400,
 							),
 						),
-					),
-					Effect.catchTags({
-						"@maple/http/errors/IntegrationsUpstreamError": () =>
-							Effect.succeed(
-								htmlResponse(
-									hazelCallbackPage({
-										status: "error",
-										message: "Failed to complete Hazel connection",
-										returnTo: null,
-									}),
-									400,
-								),
+					"@maple/http/errors/IntegrationsPersistenceError": () =>
+						Effect.succeed(
+							htmlResponse(
+								hazelCallbackPage({
+									status: "error",
+									message: "Failed to complete Hazel connection",
+									returnTo: null,
+								}),
+								400,
 							),
-						"@maple/http/errors/IntegrationsPersistenceError": () =>
-							Effect.succeed(
-								htmlResponse(
-									hazelCallbackPage({
-										status: "error",
-										message: "Failed to complete Hazel connection",
-										returnTo: null,
-									}),
-									400,
-								),
-							),
-					}),
-				)
-			},
-		)
+						),
+				}),
+			)
+		})
 
 		yield* router.add("GET", "/api/integrations/hazel/callback", handle)
 
-		const handleGithub = Effect.fn("integrations.githubOAuthCallback")(
+		// Server-kind with the HTTP identity attributes stamped by hand: the auto
+		// server span is suppressed for OAuth callbacks (it would record the
+		// authorization `code` and connect `state` in `url.full` / `url.query` —
+		// see ApiObservabilityLive), so this span is the callback's only trace root.
+		// It carries the route and outcome, never the query string.
+		const handleGithub = Effect.fn("integrations.githubOAuthCallback", {
+			kind: "server",
+			attributes: { "http.route": GITHUB_CALLBACK_PATH, "http.request.method": "GET" },
+		})(
 			function* (req: HttpServerRequest.HttpServerRequest) {
 				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
 				if (Option.isNone(urlOption)) {
@@ -1028,6 +1035,11 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 					}),
 				)
 			},
+			// Every branch above returns a response rather than failing, so the status
+			// is the only signal separating a completed connect from a rejection.
+			Effect.tap((response) =>
+				Effect.annotateCurrentSpan({ "http.response.status_code": response.status }),
+			),
 		)
 
 		yield* router.add("GET", "/api/integrations/github/callback", handleGithub)
@@ -1035,168 +1047,170 @@ export const IntegrationsCallbackRouter = HttpRouter.use((router) =>
 		const cloudflareErrorPage = (message: string) =>
 			htmlResponse(cloudflareCallbackPage({ status: "error", message, returnTo: null }), 400)
 
-		const handleCloudflare = Effect.fn("integrations.cloudflareOAuthCallback")(
-			function* (req: HttpServerRequest.HttpServerRequest) {
-				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
-				if (Option.isNone(urlOption)) {
-					return cloudflareErrorPage("Malformed callback URL")
-				}
-				const url = urlOption.value
-				const code = url.searchParams.get("code")
-				const state = url.searchParams.get("state")
-				const oauthError = url.searchParams.get("error")
-				const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
+		const handleCloudflare = Effect.fn("integrations.cloudflareOAuthCallback")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+			if (Option.isNone(urlOption)) {
+				return cloudflareErrorPage("Malformed callback URL")
+			}
+			const url = urlOption.value
+			const code = url.searchParams.get("code")
+			const state = url.searchParams.get("state")
+			const oauthError = url.searchParams.get("error")
+			const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
 
-				if (oauthError) {
-					return cloudflareErrorPage(oauthErrorDescription || "Cloudflare returned an error")
-				}
+			if (oauthError) {
+				return cloudflareErrorPage(oauthErrorDescription || "Cloudflare returned an error")
+			}
 
-				if (!code || !state) {
-					return cloudflareErrorPage("Missing code or state in callback")
-				}
+			if (!code || !state) {
+				return cloudflareErrorPage("Missing code or state in callback")
+			}
 
-				return yield* cloudflare.completeConnect(code, state).pipe(
-					// The callback page reduces failures to short human copy — make sure the real
-					// cause still lands in the server log for diagnosis.
-					Effect.tapError((error) =>
-						Effect.logError("Cloudflare OAuth completeConnect failed", {
-							tag: error._tag,
-							message: error.message,
-						}),
-					),
-					// Reconnect writes fresh tokens, but rows a prior revoked-token error disabled
-					// (`recordOrgError(..., { disable: true })`) have no other re-enable path for the
-					// account-scoped workers anchor row — clear that state now so polling resumes
-					// immediately instead of staying dead until something else touches the rows. This
-					// must never fail the callback page: the connection itself already succeeded.
-					Effect.tap((result) =>
-						cloudflareAnalytics.resetOrgState(result.orgId).pipe(
-							Effect.catchCause((cause) =>
-								Effect.logWarning("cloudflare post-connect state reset failed", {
-									orgId: result.orgId,
-									error: Cause.pretty(cause),
-								}),
-							),
-						),
-					),
-					Effect.map((result) =>
-						htmlResponse(
-							cloudflareCallbackPage({
-								status: "success",
-								message: "You can close this window and return to Maple.",
-								returnTo: result.returnTo,
+			return yield* cloudflare.completeConnect(code, state).pipe(
+				// The callback page reduces failures to short human copy — make sure the real
+				// cause still lands in the server log for diagnosis.
+				Effect.tapError((error) =>
+					Effect.logError("Cloudflare OAuth completeConnect failed", {
+						tag: error._tag,
+						message: error.message,
+					}),
+				),
+				// Reconnect writes fresh tokens, but rows a prior revoked-token error disabled
+				// (`recordOrgError(..., { disable: true })`) have no other re-enable path for the
+				// account-scoped workers anchor row — clear that state now so polling resumes
+				// immediately instead of staying dead until something else touches the rows. This
+				// must never fail the callback page: the connection itself already succeeded.
+				Effect.tap((result) =>
+					cloudflareAnalytics.resetOrgState(result.orgId).pipe(
+						Effect.catchCause((cause) =>
+							Effect.logWarning("cloudflare post-connect state reset failed", {
+								orgId: result.orgId,
+								error: Cause.pretty(cause),
 							}),
 						),
 					),
-					Effect.catchTags({
-						// Validation/upstream messages are our own sanitized strings (they embed
-						// Cloudflare's OAuth error text) — showing them turns "it failed" into
-						// something actionable.
-						"@maple/http/errors/IntegrationsValidationError": (error) =>
-							Effect.succeed(cloudflareErrorPage(error.message)),
-						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-							Effect.succeed(cloudflareErrorPage(error.message)),
-						"@maple/http/errors/IntegrationsRevokedError": () =>
-							Effect.succeed(
-								cloudflareErrorPage("Cloudflare rejected the authorization — reconnect and try again"),
+				),
+				Effect.map((result) =>
+					htmlResponse(
+						cloudflareCallbackPage({
+							status: "success",
+							message: "You can close this window and return to Maple.",
+							returnTo: result.returnTo,
+						}),
+					),
+				),
+				Effect.catchTags({
+					// Validation/upstream messages are our own sanitized strings (they embed
+					// Cloudflare's OAuth error text) — showing them turns "it failed" into
+					// something actionable.
+					"@maple/http/errors/IntegrationsValidationError": (error) =>
+						Effect.succeed(cloudflareErrorPage(error.message)),
+					"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+						Effect.succeed(cloudflareErrorPage(error.message)),
+					"@maple/http/errors/IntegrationsRevokedError": () =>
+						Effect.succeed(
+							cloudflareErrorPage(
+								"Cloudflare rejected the authorization — reconnect and try again",
 							),
-						"@maple/http/errors/IntegrationsPersistenceError": () =>
-							Effect.succeed(cloudflareErrorPage("Failed to complete Cloudflare connection")),
-					}),
-				)
-			},
-		)
+						),
+					"@maple/http/errors/IntegrationsPersistenceError": () =>
+						Effect.succeed(cloudflareErrorPage("Failed to complete Cloudflare connection")),
+				}),
+			)
+		})
 
 		yield* router.add("GET", "/api/integrations/cloudflare/callback", handleCloudflare)
 
 		const planetscaleErrorPage = (message: string) =>
 			htmlResponse(planetscaleCallbackPage({ status: "error", message, returnTo: null }), 400)
 
-		const handlePlanetScale = Effect.fn("integrations.planetscaleOAuthCallback")(
-			function* (req: HttpServerRequest.HttpServerRequest) {
-				const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
-				if (Option.isNone(urlOption)) {
-					return planetscaleErrorPage("Malformed callback URL")
-				}
-				const url = urlOption.value
-				const code = url.searchParams.get("code")
-				const state = url.searchParams.get("state")
-				const oauthError = url.searchParams.get("error")
-				const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
+		const handlePlanetScale = Effect.fn("integrations.planetscaleOAuthCallback")(function* (
+			req: HttpServerRequest.HttpServerRequest,
+		) {
+			const urlOption = Option.liftThrowable(() => new URL(req.url, "http://localhost"))()
+			if (Option.isNone(urlOption)) {
+				return planetscaleErrorPage("Malformed callback URL")
+			}
+			const url = urlOption.value
+			const code = url.searchParams.get("code")
+			const state = url.searchParams.get("state")
+			const oauthError = url.searchParams.get("error")
+			const oauthErrorDescription = url.searchParams.get("error_description") ?? oauthError
 
-				if (oauthError) {
-					return planetscaleErrorPage(oauthErrorDescription || "PlanetScale returned an error")
-				}
+			if (oauthError) {
+				return planetscaleErrorPage(oauthErrorDescription || "PlanetScale returned an error")
+			}
 
-				if (!code || !state) {
-					return planetscaleErrorPage("Missing code or state in callback")
-				}
+			if (!code || !state) {
+				return planetscaleErrorPage("Missing code or state in callback")
+			}
 
-				return yield* planetscaleOAuth.completeConnect(code, state).pipe(
-					// Single-org grants finish here (bind + provision the scrape target);
-					// multi-org grants leave the org picker to the dashboard. A finalize
-					// failure (e.g. missing read_metrics_endpoints scope) surfaces on the
-					// callback page — this is the moment the user can act on it.
-					Effect.flatMap((result) =>
-						result.organizations.length === 1
-							? planetscaleConnection
-									.finalizeOrgSelection(result.orgId, {
-										organization: result.organizations[0]!.name,
-									})
-									.pipe(
-										Effect.map(() => ({
-											returnTo: result.returnTo,
-											message: `Connected to ${result.organizations[0]!.name}. You can close this window and return to Maple.`,
-										})),
-									)
-							: Effect.succeed({
-									returnTo: result.returnTo,
-									message:
-										"Authorization complete. Choose which PlanetScale organization to connect back in Maple.",
-								}),
-					),
-					// The callback page reduces failures to short human copy — make sure the real
-					// cause still lands in the server log for diagnosis.
-					Effect.tapError((error) =>
-						Effect.logError("PlanetScale OAuth completeConnect failed", {
-							tag: error._tag,
-							message: error.message,
+			return yield* planetscaleOAuth.completeConnect(code, state).pipe(
+				// Single-org grants finish here (bind + provision the scrape target);
+				// multi-org grants leave the org picker to the dashboard. A finalize
+				// failure (e.g. missing read_metrics_endpoints scope) surfaces on the
+				// callback page — this is the moment the user can act on it.
+				Effect.flatMap((result) =>
+					result.organizations.length === 1
+						? planetscaleConnection
+								.finalizeOrgSelection(result.orgId, {
+									organization: result.organizations[0]!.name,
+								})
+								.pipe(
+									Effect.map(() => ({
+										returnTo: result.returnTo,
+										message: `Connected to ${result.organizations[0]!.name}. You can close this window and return to Maple.`,
+									})),
+								)
+						: Effect.succeed({
+								returnTo: result.returnTo,
+								message:
+									"Authorization complete. Choose which PlanetScale organization to connect back in Maple.",
+							}),
+				),
+				// The callback page reduces failures to short human copy — make sure the real
+				// cause still lands in the server log for diagnosis.
+				Effect.tapError((error) =>
+					Effect.logError("PlanetScale OAuth completeConnect failed", {
+						tag: error._tag,
+						message: error.message,
+					}),
+				),
+				Effect.map(({ returnTo, message }) =>
+					htmlResponse(
+						planetscaleCallbackPage({
+							status: "success",
+							message,
+							returnTo,
 						}),
 					),
-					Effect.map(({ returnTo, message }) =>
-						htmlResponse(
-							planetscaleCallbackPage({
-								status: "success",
-								message,
-								returnTo,
-							}),
+				),
+				Effect.catchTags({
+					// Validation/upstream messages are our own sanitized strings — showing
+					// them turns "it failed" into something actionable.
+					"@maple/http/errors/IntegrationsValidationError": (error) =>
+						Effect.succeed(planetscaleErrorPage(error.message)),
+					"@maple/http/errors/IntegrationsUpstreamError": (error) =>
+						Effect.succeed(planetscaleErrorPage(error.message)),
+					"@maple/http/errors/IntegrationsNotConnectedError": () =>
+						Effect.succeed(
+							planetscaleErrorPage(
+								"PlanetScale connection not found — restart the connect flow",
+							),
 						),
-					),
-					Effect.catchTags({
-						// Validation/upstream messages are our own sanitized strings — showing
-						// them turns "it failed" into something actionable.
-						"@maple/http/errors/IntegrationsValidationError": (error) =>
-							Effect.succeed(planetscaleErrorPage(error.message)),
-						"@maple/http/errors/IntegrationsUpstreamError": (error) =>
-							Effect.succeed(planetscaleErrorPage(error.message)),
-						"@maple/http/errors/IntegrationsNotConnectedError": () =>
-							Effect.succeed(
-								planetscaleErrorPage(
-									"PlanetScale connection not found — restart the connect flow",
-								),
+					"@maple/http/errors/IntegrationsRevokedError": () =>
+						Effect.succeed(
+							planetscaleErrorPage(
+								"PlanetScale rejected the authorization — reconnect and try again",
 							),
-						"@maple/http/errors/IntegrationsRevokedError": () =>
-							Effect.succeed(
-								planetscaleErrorPage(
-									"PlanetScale rejected the authorization — reconnect and try again",
-								),
-							),
-						"@maple/http/errors/IntegrationsPersistenceError": () =>
-							Effect.succeed(planetscaleErrorPage("Failed to complete PlanetScale connection")),
-					}),
-				)
-			},
-		)
+						),
+					"@maple/http/errors/IntegrationsPersistenceError": () =>
+						Effect.succeed(planetscaleErrorPage("Failed to complete PlanetScale connection")),
+				}),
+			)
+		})
 
 		yield* router.add("GET", "/api/integrations/planetscale/callback", handlePlanetScale)
 	}),

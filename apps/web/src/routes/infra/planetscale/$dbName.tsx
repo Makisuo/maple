@@ -4,13 +4,7 @@ import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@maple/ui/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@maple/ui/components/ui/select"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -190,7 +184,12 @@ function PlanetScaleDatabaseData({
 	return (
 		<div className="space-y-6">
 			<div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-				<PlanetScaleChart buckets={buckets} metric="connectionsAvg" waiting={waiting} syncId="ps-db" />
+				<PlanetScaleChart
+					buckets={buckets}
+					metric="connectionsAvg"
+					waiting={waiting}
+					syncId="ps-db"
+				/>
 				<PlanetScaleChart buckets={buckets} metric="cpuMaxPercent" waiting={waiting} syncId="ps-db" />
 				<PlanetScaleChart buckets={buckets} metric="memMaxPercent" waiting={waiting} syncId="ps-db" />
 				<PlanetScaleChart
@@ -226,9 +225,7 @@ function PlanetScaleDatabaseData({
 						<Select
 							items={Object.fromEntries(insightsBranches.map((name) => [name, name]))}
 							value={insightsBranch ?? insightsBranches[0] ?? null}
-							onValueChange={(value: string | null) =>
-								setInsightsBranch(value ?? undefined)
-							}
+							onValueChange={(value: string | null) => setInsightsBranch(value ?? undefined)}
 						>
 							<SelectTrigger size="sm" className="w-44 font-mono text-xs">
 								<SelectValue placeholder="Branch" />

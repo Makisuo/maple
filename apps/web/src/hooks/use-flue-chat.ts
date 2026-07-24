@@ -52,7 +52,7 @@ const toChatStatus = (status: AgentStatus): ChatStatus => {
  * and merge them back into the rendered transcript.
  */
 export function useFlueChat({ tabId, context }: UseFlueChatOptions): UseFlueChatResult {
-	const orgId = useMapleOrganizationId();
+	const orgId = useMapleOrganizationId()
 	const conversationId = orgId ? `${orgId}:${tabId}` : undefined
 	const agent = useFlueAgent({ name: AGENT_NAME, id: conversationId, history: "all" })
 

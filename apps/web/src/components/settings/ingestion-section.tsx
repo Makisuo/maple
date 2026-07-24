@@ -69,7 +69,10 @@ function StatusBanner({ connection }: { connection: IngestConnection }) {
 			{connected ? (
 				<span className="bg-severity-info size-2 shrink-0 rounded-full" />
 			) : (
-				<PulseIcon size={12} className="text-primary shrink-0 animate-pulse motion-reduce:animate-none" />
+				<PulseIcon
+					size={12}
+					className="text-primary shrink-0 animate-pulse motion-reduce:animate-none"
+				/>
 			)}
 			<span className="text-sm font-medium whitespace-nowrap">
 				{connected ? "Receiving telemetry" : "Waiting for telemetry"}
@@ -176,7 +179,10 @@ function CredentialRow({
 						title={isVisible ? "Hide" : "Reveal"}
 						disabled={disabled}
 					>
-						<EyeIcon size={13} className={isVisible ? "text-foreground" : "text-muted-foreground"} />
+						<EyeIcon
+							size={13}
+							className={isVisible ? "text-foreground" : "text-muted-foreground"}
+						/>
 					</Button>
 				)}
 				<Button
@@ -345,7 +351,9 @@ export function IngestionSection() {
 				<div className="bg-card flex flex-col rounded-lg border">
 					<div className="flex flex-wrap items-start gap-x-6 gap-y-3 px-4 pt-4 pb-3">
 						<div className="flex min-w-[260px] flex-col gap-1">
-							<h3 className="text-sm font-medium whitespace-nowrap">Send your first telemetry</h3>
+							<h3 className="text-sm font-medium whitespace-nowrap">
+								Send your first telemetry
+							</h3>
 							<p className="text-muted-foreground text-xs">
 								Point your OpenTelemetry SDK at Maple, or let Claude Code wire it up for you.
 							</p>

@@ -112,7 +112,9 @@ function SecurityTopTable({
 					<div className="hidden w-[130px] truncate font-mono text-[12px] text-foreground/80 md:block">
 						{row.source}
 					</div>
-					<div className="w-[130px] truncate font-mono text-[12px] text-foreground/80">{row.action}</div>
+					<div className="w-[130px] truncate font-mono text-[12px] text-foreground/80">
+						{row.action}
+					</div>
 					<div className="hidden w-[180px] truncate font-mono text-[12px] text-foreground/80 lg:block">
 						{row.host}
 					</div>

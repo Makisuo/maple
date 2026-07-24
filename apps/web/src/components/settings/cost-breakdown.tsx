@@ -46,7 +46,9 @@ export function CostBreakdown({ estimate }: { estimate: CycleCostEstimate }) {
 				<div className="flex items-baseline justify-between gap-4 py-2.5">
 					<p className="text-sm font-medium">Estimated total</p>
 					<span className="text-sm font-semibold tabular-nums">
-						{estimate.partial && <span className="text-muted-foreground font-normal">at least </span>}
+						{estimate.partial && (
+							<span className="text-muted-foreground font-normal">at least </span>
+						)}
 						{formatCurrency(estimate.total, estimate.currency)}
 					</span>
 				</div>

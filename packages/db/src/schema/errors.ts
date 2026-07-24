@@ -1,4 +1,14 @@
-import { boolean, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core"
+import {
+	boolean,
+	index,
+	integer,
+	jsonb,
+	pgTable,
+	primaryKey,
+	text,
+	timestamp,
+	uniqueIndex,
+} from "drizzle-orm/pg-core"
 import type {
 	ActorId,
 	ErrorIncidentId,

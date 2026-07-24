@@ -18,7 +18,11 @@ function makePayload(id: string, overrides: Record<string, unknown> = {}): Recor
 	}
 }
 
-function makeRow(id: string, updatedAt: string, payloadOverrides: Record<string, unknown> = {}): DashboardRow {
+function makeRow(
+	id: string,
+	updatedAt: string,
+	payloadOverrides: Record<string, unknown> = {},
+): DashboardRow {
 	return {
 		org_id: "org_test",
 		id,

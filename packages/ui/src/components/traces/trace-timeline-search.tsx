@@ -43,7 +43,9 @@ export function TraceTimelineSearch({
 			{query && (
 				<>
 					<span className="text-[10px] font-mono text-muted-foreground shrink-0 tabular-nums">
-						{currentMatch > 0 ? `${currentMatch}/${matchCount}` : `${matchCount} of ${totalCount}`}
+						{currentMatch > 0
+							? `${currentMatch}/${matchCount}`
+							: `${matchCount} of ${totalCount}`}
 					</span>
 					<button
 						type="button"

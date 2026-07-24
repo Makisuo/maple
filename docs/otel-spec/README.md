@@ -17,17 +17,17 @@ are the spec's own, recorded per section.
 
 ## Files
 
-| File | Scope | Headline stability |
-| --- | --- | --- |
-| [traces.md](traces.md) | Trace API & SDK: span model, SpanKind, status, samplers, processors, span limits, ID generators | Stable (several subsections Development) |
-| [metrics.md](metrics.md) | Metrics API, SDK & data model: instruments, temporality, exemplars, views, exponential histograms, cardinality | Stable (reset-detection notes Development) |
-| [logs.md](logs.md) | Log data model, severity, bridge API, SDK, events-as-logs | Data model & bridge API Stable; events Development |
-| [context-propagation.md](context-propagation.md) | Context, W3C traceparent/tracestate, baggage, B3/Jaeger interop | Stable (OTel `ot=` tracestate extension Development) |
-| [otlp.md](otlp.md) | OTLP protocol: transports, partial success, retry semantics, JSON encoding, exporter env vars | Stable for traces/metrics/logs; profiles Development |
-| [resource-and-config.md](resource-and-config.md) | Resource spec & merge rules, resource semconv, consolidated SDK env-var table, declarative config, entities | Resource Stable; declarative config Stable (`OTEL_CONFIG_FILE`); entities Development |
-| [semantic-conventions.md](semantic-conventions.md) | Naming rules, requirement levels, HTTP/DB/messaging/RPC/exceptions/code/gen-ai domains, schema-URL migrations | HTTP & DB Stable; RPC RC; messaging & gen-ai Development |
-| [stability-and-compliance.md](stability-and-compliance.md) | Stability taxonomies, versioning guarantees, compliance matrix, error-handling & performance principles, instrumentation guidelines | Meta-spec (see per-section labels) |
-| [emerging-and-compat.md](emerging-and-compat.md) | Profiles signal, telemetry schemas deep-dive, Prometheus/OpenMetrics interop, OpenTracing/OpenCensus shims | Profiles Alpha/Development; schemas Stable (file format 1.1.0 Development); shims Deprecated |
+| File                                                       | Scope                                                                                                                               | Headline stability                                                                           |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| [traces.md](traces.md)                                     | Trace API & SDK: span model, SpanKind, status, samplers, processors, span limits, ID generators                                     | Stable (several subsections Development)                                                     |
+| [metrics.md](metrics.md)                                   | Metrics API, SDK & data model: instruments, temporality, exemplars, views, exponential histograms, cardinality                      | Stable (reset-detection notes Development)                                                   |
+| [logs.md](logs.md)                                         | Log data model, severity, bridge API, SDK, events-as-logs                                                                           | Data model & bridge API Stable; events Development                                           |
+| [context-propagation.md](context-propagation.md)           | Context, W3C traceparent/tracestate, baggage, B3/Jaeger interop                                                                     | Stable (OTel `ot=` tracestate extension Development)                                         |
+| [otlp.md](otlp.md)                                         | OTLP protocol: transports, partial success, retry semantics, JSON encoding, exporter env vars                                       | Stable for traces/metrics/logs; profiles Development                                         |
+| [resource-and-config.md](resource-and-config.md)           | Resource spec & merge rules, resource semconv, consolidated SDK env-var table, declarative config, entities                         | Resource Stable; declarative config Stable (`OTEL_CONFIG_FILE`); entities Development        |
+| [semantic-conventions.md](semantic-conventions.md)         | Naming rules, requirement levels, HTTP/DB/messaging/RPC/exceptions/code/gen-ai domains, schema-URL migrations                       | HTTP & DB Stable; RPC RC; messaging & gen-ai Development                                     |
+| [stability-and-compliance.md](stability-and-compliance.md) | Stability taxonomies, versioning guarantees, compliance matrix, error-handling & performance principles, instrumentation guidelines | Meta-spec (see per-section labels)                                                           |
+| [emerging-and-compat.md](emerging-and-compat.md)           | Profiles signal, telemetry schemas deep-dive, Prometheus/OpenMetrics interop, OpenTracing/OpenCensus shims                          | Profiles Alpha/Development; schemas Stable (file format 1.1.0 Development); shims Deprecated |
 
 ## Maple's three compliance surfaces
 

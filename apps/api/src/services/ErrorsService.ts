@@ -80,10 +80,7 @@ import { dateToMs, msToDate } from "../lib/time"
 import { NotificationDispatcher } from "./NotificationDispatcher"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
-import {
-	isOrgWarehouseQuarantined,
-	quarantineOnConfigClassCause,
-} from "../lib/warehouse-org-quarantine"
+import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 
 const decodeErrorIssueIdSync = Schema.decodeUnknownSync(ErrorIssueDocument.fields.id)
 const encodeIssueListCursor = Schema.encodeSync(IssueListCursor)
@@ -101,9 +98,7 @@ const decodeSpanIdSync = Schema.decodeUnknownSync(SpanIdSchema)
 
 // Lenient decoders for JSON stored in jsonb columns. Decode failures fall back
 // to an empty/null value at each call site — stored blobs are best-effort.
-const decodeStoredJsonRecord = Schema.decodeUnknownOption(
-	Schema.Record(Schema.String, Schema.Unknown),
-)
+const decodeStoredJsonRecord = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeStoredJsonArray = Schema.decodeUnknownOption(Schema.Array(Schema.Unknown))
 
 const DEFAULT_DETAIL_WINDOW_MS = 24 * 60 * 60 * 1000
@@ -554,7 +549,12 @@ const make: Effect.Effect<
 				// reuse it instead of fanning out to all known orgs. Best-effort.
 				Effect.tap((active) =>
 					edgeCache
-						.rawPut(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY, [...active], ACTIVE_ORGS_CACHE_TTL_S)
+						.rawPut(
+							ACTIVE_ORGS_CACHE_BUCKET,
+							ACTIVE_ORGS_CACHE_KEY,
+							[...active],
+							ACTIVE_ORGS_CACHE_TTL_S,
+						)
 						.pipe(Effect.ignore),
 				),
 				// Fail CLOSED on a genuine discovery failure: reuse the last-known active
@@ -568,13 +568,22 @@ const make: Effect.Effect<
 									"Error active-org discovery failed; reusing last-known active set",
 								).pipe(Effect.annotateLogs({ error: Cause.pretty(cause) }))
 								const cached = yield* edgeCache
-									.rawGet<ReadonlyArray<string>>(ACTIVE_ORGS_CACHE_BUCKET, ACTIVE_ORGS_CACHE_KEY)
+									.rawGet<ReadonlyArray<string>>(
+										ACTIVE_ORGS_CACHE_BUCKET,
+										ACTIVE_ORGS_CACHE_KEY,
+									)
 									.pipe(Effect.orElseSucceed(() => Option.none<ReadonlyArray<string>>()))
 								const active = new Set<string>(byo)
-								for (const orgId of Option.getOrElse(cached, () => [] as ReadonlyArray<string>)) {
+								for (const orgId of Option.getOrElse(
+									cached,
+									() => [] as ReadonlyArray<string>,
+								)) {
 									active.add(orgId)
 								}
-								yield* Effect.annotateCurrentSpan({ activeOrgs: active.size, failedClosed: true })
+								yield* Effect.annotateCurrentSpan({
+									activeOrgs: active.size,
+									failedClosed: true,
+								})
 								return active as ReadonlySet<string>
 							}),
 				),
@@ -2020,9 +2029,7 @@ const make: Effect.Effect<
 	// Escalation policy (per-org severity → destination routing).
 	// ---------------------------------------------------------------
 
-	const decodeEscalationRules = Schema.decodeUnknownOption(
-		Schema.Array(IssueEscalationPolicyRule),
-	)
+	const decodeEscalationRules = Schema.decodeUnknownOption(Schema.Array(IssueEscalationPolicyRule))
 
 	const escalationRowToDocument = (row: IssueEscalationPolicyRow | null) =>
 		new IssueEscalationPolicyDocument({
@@ -2901,11 +2908,18 @@ const make: Effect.Effect<
 						Cause.hasInterruptsOnly(cause)
 							? Effect.interrupt
 							: Effect.gen(function* () {
-									const quarantined = yield* quarantineOnConfigClassCause(edgeCache, org, cause, endMs)
+									const quarantined = yield* quarantineOnConfigClassCause(
+										edgeCache,
+										org,
+										cause,
+										endMs,
+									)
 									if (quarantined) {
 										yield* Effect.logInfo(
 											"Org warehouse rejected queries with a config-class error; quarantined",
-										).pipe(Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }))
+										).pipe(
+											Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+										)
 									} else {
 										yield* Effect.logError("Error tick failed for org").pipe(
 											Effect.annotateLogs({

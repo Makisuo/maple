@@ -36,7 +36,11 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 			const status: CollectionStatus = collection.status
 
 			if (status === "error") {
-				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" })))
+				get.setSelf(
+					AsyncResult.fail(
+						new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }),
+					),
+				)
 				return
 			}
 
@@ -46,7 +50,14 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 			}
 
 			if (status === "cleaned-up") {
-				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" })))
+				get.setSelf(
+					AsyncResult.fail(
+						new TanStackDBError({
+							message: "Collection has been cleaned up",
+							reason: "cleaned-up",
+						}),
+					),
+				)
 				return
 			}
 
@@ -63,7 +74,9 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
-			return AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }))
+			return AsyncResult.fail(
+				new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }),
+			)
 		}
 
 		if (status === "loading" || status === "idle") {
@@ -71,7 +84,9 @@ export const makeCollectionAtom = <T extends object, TKey extends string | numbe
 		}
 
 		if (status === "cleaned-up") {
-			return AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" }))
+			return AsyncResult.fail(
+				new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" }),
+			)
 		}
 
 		// Get current data
@@ -98,7 +113,11 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			const status: CollectionStatus = collection.status
 
 			if (status === "error") {
-				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" })))
+				get.setSelf(
+					AsyncResult.fail(
+						new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }),
+					),
+				)
 				return
 			}
 
@@ -108,7 +127,14 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 			}
 
 			if (status === "cleaned-up") {
-				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" })))
+				get.setSelf(
+					AsyncResult.fail(
+						new TanStackDBError({
+							message: "Collection has been cleaned up",
+							reason: "cleaned-up",
+						}),
+					),
+				)
 				return
 			}
 
@@ -126,7 +152,9 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
-			return AsyncResult.fail(new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }))
+			return AsyncResult.fail(
+				new TanStackDBError({ message: "Collection failed to load", reason: "load-failed" }),
+			)
 		}
 
 		if (status === "loading" || status === "idle") {
@@ -134,7 +162,9 @@ export const makeSingleCollectionAtom = <T extends object, TKey extends string |
 		}
 
 		if (status === "cleaned-up") {
-			return AsyncResult.fail(new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" }))
+			return AsyncResult.fail(
+				new TanStackDBError({ message: "Collection has been cleaned up", reason: "cleaned-up" }),
+			)
 		}
 
 		// Get current data (single result)
@@ -167,7 +197,11 @@ export const makeQuery = <TContext extends Context>(
 			const status: CollectionStatus = collection.status
 
 			if (status === "error") {
-				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Query failed to load", reason: "load-failed" })))
+				get.setSelf(
+					AsyncResult.fail(
+						new TanStackDBError({ message: "Query failed to load", reason: "load-failed" }),
+					),
+				)
 				return
 			}
 
@@ -177,7 +211,14 @@ export const makeQuery = <TContext extends Context>(
 			}
 
 			if (status === "cleaned-up") {
-				get.setSelf(AsyncResult.fail(new TanStackDBError({ message: "Query collection has been cleaned up", reason: "cleaned-up" })))
+				get.setSelf(
+					AsyncResult.fail(
+						new TanStackDBError({
+							message: "Query collection has been cleaned up",
+							reason: "cleaned-up",
+						}),
+					),
+				)
 				return
 			}
 
@@ -197,7 +238,9 @@ export const makeQuery = <TContext extends Context>(
 		const status: CollectionStatus = collection.status
 
 		if (status === "error") {
-			return AsyncResult.fail(new TanStackDBError({ message: "Query failed to load", reason: "load-failed" }))
+			return AsyncResult.fail(
+				new TanStackDBError({ message: "Query failed to load", reason: "load-failed" }),
+			)
 		}
 
 		if (status === "loading" || status === "idle") {
@@ -205,7 +248,12 @@ export const makeQuery = <TContext extends Context>(
 		}
 
 		if (status === "cleaned-up") {
-			return AsyncResult.fail(new TanStackDBError({ message: "Query collection has been cleaned up", reason: "cleaned-up" }))
+			return AsyncResult.fail(
+				new TanStackDBError({
+					message: "Query collection has been cleaned up",
+					reason: "cleaned-up",
+				}),
+			)
 		}
 
 		// Get current data - handle both single and array results

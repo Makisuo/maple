@@ -98,9 +98,7 @@ export const resolveResource = Effect.fn("resolveResource")(function* (config: R
 	const endpoint = config.endpoint ?? Option.getOrUndefined(envEndpoint) ?? DEFAULT_MAPLE_ENDPOINT
 
 	const envIngestKey = yield* EnvConfig.ingestKey
-	const ingestKey = config.ingestKey
-		? Redacted.make(config.ingestKey)
-		: Option.getOrUndefined(envIngestKey)
+	const ingestKey = config.ingestKey ? Redacted.make(config.ingestKey) : Option.getOrUndefined(envIngestKey)
 
 	const envServiceVersion = yield* EnvConfig.serviceVersion
 	const serviceVersion = config.serviceVersion ?? Option.getOrUndefined(envServiceVersion)
@@ -110,8 +108,7 @@ export const resolveResource = Effect.fn("resolveResource")(function* (config: R
 	// Prefer the platform-provided commit SHA; fall back to serviceVersion only
 	// when it is itself SHA-shaped. Never shell out to git at runtime.
 	const headRevision =
-		Option.getOrUndefined(envServiceVersion) ??
-		(isCommitSha(serviceVersion) ? serviceVersion : undefined)
+		Option.getOrUndefined(envServiceVersion) ?? (isCommitSha(serviceVersion) ? serviceVersion : undefined)
 
 	const envEnvironment = yield* EnvConfig.environment
 	const environment = config.environment ?? envEnvironment

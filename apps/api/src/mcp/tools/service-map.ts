@@ -34,7 +34,8 @@ export function registerServiceMapTool(server: McpToolRegistrar) {
 			}).pipe(
 				Effect.provide(makeWarehouseExecutorFromTenant(tenant)),
 				Effect.mapError(
-					(e) => new McpQueryError({ message: e.message, pipeName: "service_dependencies", cause: e }),
+					(e) =>
+						new McpQueryError({ message: e.message, pipeName: "service_dependencies", cause: e }),
 				),
 			)
 

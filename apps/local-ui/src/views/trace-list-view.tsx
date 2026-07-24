@@ -12,8 +12,16 @@ import { useLocalTraceFacets } from "../hooks/use-local-trace-facets"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE } from "../lib/time"
 import { DurationRangeFilter } from "@maple/ui/components/filters/duration-range-filter"
-import { FilterSection, SearchableFilterSection, SingleCheckboxFilter } from "@maple/ui/components/filters/filter-section"
-import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
+import {
+	FilterSection,
+	SearchableFilterSection,
+	SingleCheckboxFilter,
+} from "@maple/ui/components/filters/filter-section"
+import {
+	FilterSidebarBody,
+	FilterSidebarFrame,
+	FilterSidebarHeader,
+} from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { parseAttributes } from "@maple/ui/lib/span-tree"
 import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"

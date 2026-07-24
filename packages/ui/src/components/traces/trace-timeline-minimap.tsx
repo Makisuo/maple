@@ -261,7 +261,8 @@ export function TraceTimelineMinimap({
 			const label = node.firstElementChild as HTMLElement | null
 			if (label) {
 				label.textContent = `+${formatDuration((x / rect.width) * traceDuration)}`
-				label.style.transform = x > rect.width - 70 ? "translateX(calc(-100% - 5px))" : "translateX(5px)"
+				label.style.transform =
+					x > rect.width - 70 ? "translateX(calc(-100% - 5px))" : "translateX(5px)"
 			}
 		},
 		[traceDuration],

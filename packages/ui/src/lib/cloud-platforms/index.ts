@@ -24,8 +24,10 @@ export { outcomeBadgeStyle, pickAttr } from "./types"
 // specific first. The `databaseAdapter` (generic `db.*` semconv) is a broad
 // last resort — a serverless span and a DB-client span are disjoint in practice,
 // but keep provider adapters ahead of it regardless.
-const ADAPTERS: ReadonlyArray<{ detect: (a: Record<string, string>) => CloudPlatformInfo | null }> =
-	[cloudflareAdapter, databaseAdapter]
+const ADAPTERS: ReadonlyArray<{ detect: (a: Record<string, string>) => CloudPlatformInfo | null }> = [
+	cloudflareAdapter,
+	databaseAdapter,
+]
 
 /** First adapter that recognizes these span attributes, normalized; else null. */
 export function getCloudPlatform(attrs: Record<string, string>): CloudPlatformInfo | null {

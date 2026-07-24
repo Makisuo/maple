@@ -17,6 +17,14 @@ describe("Tinybird project manifest", () => {
 		expect(manifest.pipes.some((resource) => resource.name === "service_operations_minutely_mv")).toBe(
 			true,
 		)
+		expect(manifest.datasources.some((resource) => resource.name === "service_overview_hourly")).toBe(
+			true,
+		)
+		expect(manifest.pipes.some((resource) => resource.name === "service_overview_hourly_mv")).toBe(true)
+		expect(manifest.datasources.some((resource) => resource.name === "service_operations_hourly")).toBe(
+			true,
+		)
+		expect(manifest.pipes.some((resource) => resource.name === "service_operations_hourly_mv")).toBe(true)
 		expect(manifest.projectRevision).toBe(
 			createTinybirdProjectRevision(manifest.datasources, manifest.pipes),
 		)

@@ -25,6 +25,12 @@ export interface SessionMetaRowInput {
 	readonly clickCount?: number | undefined
 	/** Trace ids observed during the session — attached to `ended` rows. */
 	readonly traceIds?: ReadonlyArray<string> | undefined
+	/**
+	 * Whether an rrweb recording accompanies this session. `false` when replay is
+	 * off or unsampled, so the UI can label the session "Not recorded" instead of
+	 * rendering a player with nothing to play.
+	 */
+	readonly recorded: boolean
 }
 
 /**
@@ -51,6 +57,10 @@ export function buildSessionMetaRow(input: SessionMetaRowInput): Record<string, 
 		device_type: ua.deviceType,
 		service_name: input.serviceName,
 		resource_attributes: {
+			// Does this session have a replay to play back? Read by the Sessions UI
+			// to distinguish a metadata-only session from one still uploading chunks.
+			// `maple.*` vendor namespace, per the telemetry conventions.
+			"maple.session.recorded": input.recorded ? "true" : "false",
 			...(input.environment
 				? {
 						// Dual-emit: legacy key (pre-extracted by Tinybird MVs) + canonical.

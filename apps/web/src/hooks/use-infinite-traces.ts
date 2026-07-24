@@ -3,10 +3,7 @@ import { Result } from "@/lib/effect-atom"
 import { Effect } from "effect"
 
 import { listTraces, type Trace, type TracesResponse } from "@/api/warehouse/traces"
-import {
-	listTracesResultAtom,
-	type QueryAtomFailure,
-} from "@/lib/services/atoms/warehouse-query-atoms"
+import { listTracesResultAtom, type QueryAtomFailure } from "@/lib/services/atoms/warehouse-query-atoms"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { useTableRefreshTimeRange } from "@/hooks/use-table-refresh-time-range"
 import type { TracesSearchParams } from "@/routes/traces"

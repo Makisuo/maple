@@ -136,38 +136,40 @@ export const getCloudflareZones = Effect.fn("QueryEngine.getCloudflareZones")(fu
 	}
 })
 
-export const getCloudflareZoneTimeseries = Effect.fn("QueryEngine.getCloudflareZoneTimeseries")(
-	function* ({ data }: { data: CloudflareInfraTimeseriesInput }) {
-		const input = yield* decodeInput(TimeseriesInputSchema, data, "getCloudflareZoneTimeseries")
-		const result = yield* runWarehouseQuery("cloudflareInfraZoneTimeseries", () =>
-			Effect.gen(function* () {
-				const client = yield* MapleApiAtomClient
-				return yield* client.queryEngine.cloudflareInfraZoneTimeseries({
-					payload: new CloudflareInfraZoneTimeseriesRequest({
-						startTime: input.startTime,
-						endTime: input.endTime,
-						bucketSeconds: input.bucketSeconds,
-					}),
-				})
-			}),
-		)
-		return {
-			buckets: result.data.map((row): CloudflareZoneTimeseriesRow => {
-				const serviceName = String(row.serviceName ?? "")
-				return {
-					serviceName,
-					zoneName: stripPrefix(serviceName, ZONE_SERVICE_PREFIX),
-					bucket: String(row.bucket ?? ""),
-					requests: Number(row.requests ?? 0),
-					errors5xx: Number(row.errors5xx ?? 0),
-					cacheHits: Number(row.cacheHits ?? 0),
-					bytes: Number(row.bytes ?? 0),
-					visits: Number(row.visits ?? 0),
-				}
-			}),
-		}
-	},
-)
+export const getCloudflareZoneTimeseries = Effect.fn("QueryEngine.getCloudflareZoneTimeseries")(function* ({
+	data,
+}: {
+	data: CloudflareInfraTimeseriesInput
+}) {
+	const input = yield* decodeInput(TimeseriesInputSchema, data, "getCloudflareZoneTimeseries")
+	const result = yield* runWarehouseQuery("cloudflareInfraZoneTimeseries", () =>
+		Effect.gen(function* () {
+			const client = yield* MapleApiAtomClient
+			return yield* client.queryEngine.cloudflareInfraZoneTimeseries({
+				payload: new CloudflareInfraZoneTimeseriesRequest({
+					startTime: input.startTime,
+					endTime: input.endTime,
+					bucketSeconds: input.bucketSeconds,
+				}),
+			})
+		}),
+	)
+	return {
+		buckets: result.data.map((row): CloudflareZoneTimeseriesRow => {
+			const serviceName = String(row.serviceName ?? "")
+			return {
+				serviceName,
+				zoneName: stripPrefix(serviceName, ZONE_SERVICE_PREFIX),
+				bucket: String(row.bucket ?? ""),
+				requests: Number(row.requests ?? 0),
+				errors5xx: Number(row.errors5xx ?? 0),
+				cacheHits: Number(row.cacheHits ?? 0),
+				bytes: Number(row.bytes ?? 0),
+				visits: Number(row.visits ?? 0),
+			}
+		}),
+	}
+})
 
 export interface CloudflareZoneStatusBucket {
 	bucket: string
@@ -481,47 +483,47 @@ export interface CloudflareDurableObjectRow {
 
 const QUEUE_SERVICE_PREFIX = "cloudflare-queue/"
 
-export const getCloudflarePlatformResources = Effect.fn(
-	"QueryEngine.getCloudflarePlatformResources",
-)(function* ({ data }: { data: CloudflareInfraTimeRangeInput }) {
-	const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflarePlatformResources")
-	const result = yield* runWarehouseQuery("cloudflareInfraPlatformResources", () =>
-		Effect.gen(function* () {
-			const client = yield* MapleApiAtomClient
-			return yield* client.queryEngine.cloudflareInfraPlatformResources({
-				payload: new CloudflareInfraPlatformResourcesRequest({
-					startTime: input.startTime,
-					endTime: input.endTime,
-				}),
-			})
-		}),
-	)
-	return {
-		queues: result.queues.map((row): CloudflareQueueRow => {
-			const serviceName = String(row.serviceName ?? "")
-			return {
-				serviceName,
-				queueName: stripPrefix(serviceName, QUEUE_SERVICE_PREFIX),
-				backlogMessages: Number(row.backlogMessages ?? 0),
-				backlogMessagesMax: Number(row.backlogMessagesMax ?? 0),
-				backlogBytes: Number(row.backlogBytes ?? 0),
-				consumerConcurrency: Number(row.consumerConcurrency ?? 0),
-			}
-		}),
-		durableObjects: result.durableObjects.map((row): CloudflareDurableObjectRow => {
-			const serviceName = String(row.serviceName ?? "")
-			const requests = Number(row.requests ?? 0)
-			const errors = Number(row.errors ?? 0)
-			return {
-				serviceName,
-				scriptName: stripPrefix(serviceName, WORKER_SERVICE_PREFIX),
-				requests,
-				errors,
-				errorRate: ratio(errors, requests),
-			}
-		}),
-	}
-})
+export const getCloudflarePlatformResources = Effect.fn("QueryEngine.getCloudflarePlatformResources")(
+	function* ({ data }: { data: CloudflareInfraTimeRangeInput }) {
+		const input = yield* decodeInput(TimeRangeInputSchema, data, "getCloudflarePlatformResources")
+		const result = yield* runWarehouseQuery("cloudflareInfraPlatformResources", () =>
+			Effect.gen(function* () {
+				const client = yield* MapleApiAtomClient
+				return yield* client.queryEngine.cloudflareInfraPlatformResources({
+					payload: new CloudflareInfraPlatformResourcesRequest({
+						startTime: input.startTime,
+						endTime: input.endTime,
+					}),
+				})
+			}),
+		)
+		return {
+			queues: result.queues.map((row): CloudflareQueueRow => {
+				const serviceName = String(row.serviceName ?? "")
+				return {
+					serviceName,
+					queueName: stripPrefix(serviceName, QUEUE_SERVICE_PREFIX),
+					backlogMessages: Number(row.backlogMessages ?? 0),
+					backlogMessagesMax: Number(row.backlogMessagesMax ?? 0),
+					backlogBytes: Number(row.backlogBytes ?? 0),
+					consumerConcurrency: Number(row.consumerConcurrency ?? 0),
+				}
+			}),
+			durableObjects: result.durableObjects.map((row): CloudflareDurableObjectRow => {
+				const serviceName = String(row.serviceName ?? "")
+				const requests = Number(row.requests ?? 0)
+				const errors = Number(row.errors ?? 0)
+				return {
+					serviceName,
+					scriptName: stripPrefix(serviceName, WORKER_SERVICE_PREFIX),
+					requests,
+					errors,
+					errorRate: ratio(errors, requests),
+				}
+			}),
+		}
+	},
+)
 
 const TopTrafficInputSchema = Schema.Struct({
 	zoneName: Schema.String,
@@ -581,4 +583,3 @@ export const getCloudflareTopTraffic = Effect.fn("Integrations.getCloudflareTopT
 		),
 	}
 })
-

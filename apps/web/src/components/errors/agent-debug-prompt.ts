@@ -53,8 +53,7 @@ export function formatAgentDebugPrompt(input: AgentDebugPromptInput): string {
 	}
 
 	if (typeof occurrenceCount === "number") {
-		const seen =
-			firstSeen && lastSeen ? ` (first seen ${firstSeen}, last seen ${lastSeen})` : ""
+		const seen = firstSeen && lastSeen ? ` (first seen ${firstSeen}, last seen ${lastSeen})` : ""
 		const across =
 			typeof affectedServicesCount === "number" && affectedServicesCount > 1
 				? ` across ${affectedServicesCount} services`

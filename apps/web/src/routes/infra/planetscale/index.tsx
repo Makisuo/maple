@@ -130,10 +130,7 @@ function PlanetScaleData({
 	const stats = Result.builder(statsResult)
 		.onSuccess((r) => r.databases)
 		.orElse(() => [])
-	const statsByName = useMemo(
-		() => new Map(stats.map((row) => [row.database.toLowerCase(), row])),
-		[stats],
-	)
+	const statsByName = useMemo(() => new Map(stats.map((row) => [row.database.toLowerCase(), row])), [stats])
 
 	const totals = useMemo(() => {
 		let connections = 0

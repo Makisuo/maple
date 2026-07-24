@@ -8,10 +8,11 @@ import type { TracesMetric } from "../../query-engine"
 import { compileCH, compileFnCall } from "@maple-dev/clickhouse-builder"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
 import { param } from "@maple-dev/clickhouse-builder"
-import { from, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
+import { from, fromUnion, unionAll, type CHQuery, type ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { Table } from "@maple-dev/clickhouse-builder"
 import {
 	ServiceOverviewSpans,
+	ServiceOverviewHourly,
 	TraceDetailSpans,
 	TraceListMv,
 	Traces,
@@ -315,6 +316,115 @@ export function tracesTimeseriesQuery(
 	opts: TracesTimeseriesOpts,
 ): CHQuery<ColumnDefs, TracesTimeseriesOutput, {}> {
 	const apdexThresholdMs = opts.apdexThresholdMs ?? 500
+	const canUseAnnualServiceOverview =
+		opts.allMetrics === true &&
+		apdexThresholdMs === 500 &&
+		opts.rootOnly === true &&
+		(opts.bucketSeconds ?? 0) >= 3600 &&
+		(opts.groupBy == null || opts.groupBy.length === 0) &&
+		opts.spanName == null &&
+		opts.statusCode == null &&
+		!opts.errorsOnly &&
+		opts.minDurationMs == null &&
+		opts.maxDurationMs == null &&
+		!opts.excludedSpanNames?.length &&
+		!opts.attributeFilters?.length &&
+		!opts.resourceAttributeFilters?.length &&
+		!Object.values(opts.matchModes ?? {}).includes("contains")
+
+	if (canUseAnnualServiceOverview) {
+		const startHour = "toStartOfHour(toDateTime(__PARAM_startTime__))"
+		const endHour = "toStartOfHour(toDateTime(__PARAM_endTime__))"
+		const firstFullHour = `if(toDateTime(__PARAM_startTime__) = ${startHour}, ${startHour}, ${startHour} + INTERVAL 1 HOUR)`
+		const rawEdges = from(ServiceOverviewSpans)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+				bCount: CH.count(),
+				bEstimatedSpanCount: CH.sum($.SampleRate),
+				bErrorCount: CH.countIf($.StatusCode.eq("Error")),
+				bDurationSum: CH.sum(CH.rawExpr<number>("toFloat64(Duration)")),
+				bDurationQuantiles: CH.rawExpr<string>("quantilesTDigestState(0.5, 0.95, 0.99)(Duration)"),
+				bSatisfiedCount: CH.countIf($.StatusCode.neq("Error").and($.Duration.lt(500_000_000))),
+				bToleratingCount: CH.countIf(
+					$.StatusCode.neq("Error")
+						.and($.Duration.gte(500_000_000))
+						.and($.Duration.lt(2_000_000_000)),
+				),
+			}))
+			.where(($) => [
+				...serviceOverviewWhereConditions($, opts),
+				CH.rawCond(`(Timestamp < ${firstFullHour} OR Timestamp >= ${endHour})`),
+			])
+			.groupBy("bucket")
+
+		const hourlyInterior = from(ServiceOverviewHourly)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval($.Hour, param.int("bucketSeconds")),
+				bCount: CH.sum($.SpanCount),
+				bEstimatedSpanCount: CH.sum($.EstimatedSpanCount),
+				bErrorCount: CH.sum($.ErrorCount),
+				bDurationSum: CH.sum($.DurationSum),
+				bDurationQuantiles: CH.rawExpr<string>(
+					"quantilesTDigestMergeState(0.5, 0.95, 0.99)(DurationQuantiles)",
+				),
+				bSatisfiedCount: CH.sum($.ApdexSatisfiedCount),
+				bToleratingCount: CH.sum($.ApdexToleratingCount),
+			}))
+			.where(($) => [
+				$.OrgId.eq(param.string("orgId")),
+				$.Hour.gte(CH.rawExpr<string>(firstFullHour)),
+				$.Hour.lt(CH.rawExpr<string>(endHour)),
+				opts.serviceName ? $.ServiceName.eq(opts.serviceName) : undefined,
+				opts.environments?.length ? CH.inList($.DeploymentEnv, opts.environments) : undefined,
+				opts.namespaces?.length ? CH.inList($.ServiceNamespace, opts.namespaces) : undefined,
+				opts.commitShas?.length ? CH.inList($.CommitSha, opts.commitShas) : undefined,
+				opts.excludedServiceNames?.length
+					? CH.notInList($.ServiceName, opts.excludedServiceNames)
+					: undefined,
+				opts.excludedEnvironments?.length
+					? CH.notInList($.DeploymentEnv, opts.excludedEnvironments)
+					: undefined,
+				opts.excludedNamespaces?.length
+					? CH.notInList($.ServiceNamespace, opts.excludedNamespaces)
+					: undefined,
+			])
+			.groupBy("bucket")
+
+		const annual = fromUnion(unionAll(rawEdges, hourlyInterior), "service_metric_windows")
+			.select(($) => {
+				const total = CH.sum($.bCount)
+				const satisfied = CH.sum($.bSatisfiedCount)
+				const tolerating = CH.sum($.bToleratingCount)
+				const quantiles = "quantilesTDigestMerge(0.5, 0.95, 0.99)(bDurationQuantiles)"
+				return {
+					bucket: $.bucket,
+					groupName: CH.lit("all"),
+					count: total,
+					avgDuration: CH.rawExpr<number>(
+						"if(sum(bCount) > 0, sum(bDurationSum) / sum(bCount) / 1000000, 0)",
+					),
+					p50Duration: CH.rawExpr<number>(`arrayElement(${quantiles}, 1) / 1000000`),
+					p95Duration: CH.rawExpr<number>(`arrayElement(${quantiles}, 2) / 1000000`),
+					p99Duration: CH.rawExpr<number>(`arrayElement(${quantiles}, 3) / 1000000`),
+					errorRate: CH.rawExpr<number>("if(sum(bCount) > 0, sum(bErrorCount) / sum(bCount), 0)"),
+					satisfiedCount: satisfied,
+					toleratingCount: tolerating,
+					apdexScore: CH.if_(
+						total.gt(0),
+						CH.round_(satisfied.div(total).add(tolerating.mul(0.5).div(total)), 4),
+						CH.lit(0),
+					),
+					estimatedSpanCount: CH.sum($.bEstimatedSpanCount),
+				}
+			})
+			.groupBy("bucket", "groupName")
+			.orderBy(["bucket", "asc"], ["groupName", "asc"])
+		return finalizeTimeseries(annual, TRACES_TS_COLUMNS, "count", opts) as unknown as CHQuery<
+			ColumnDefs,
+			TracesTimeseriesOutput,
+			{}
+		>
+	}
 
 	if (
 		!opts.allMetrics &&

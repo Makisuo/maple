@@ -3,13 +3,7 @@ import { afterEach, describe, expect, it } from "@effect/vitest"
 import { AiTriageRunCreateRequest, OrgId } from "@maple/domain/http"
 import { Effect, Layer, Schema } from "effect"
 import { AiTriageService } from "./AiTriageService"
-import {
-	cleanupTestDbs,
-	createTestDb,
-	executeSql,
-	queryFirstRow,
-	type TestDb,
-} from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 
 const createdDbs: TestDb[] = []
 

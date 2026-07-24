@@ -82,6 +82,10 @@ describe("standalone session emission (client)", () => {
 		expect(row.url_initial).toBe("https://app.example.com/dashboard")
 		expect(row.resource_attributes["deployment.environment"]).toBe("test")
 		expect(row.resource_attributes["deployment.commit_sha"]).toBe("abc123")
+		// This path posts metadata only — no rrweb chunks follow it. The marker is
+		// what lets the Sessions UI say "not recorded" instead of rendering a
+		// player over nothing.
+		expect(row.resource_attributes["maple.session.recorded"]).toBe("false")
 	})
 
 	it("normalizes cleared identity to an anonymous session row", async () => {
@@ -142,10 +146,7 @@ describe("standalone session emission (client)", () => {
 		// Expire the session, then emit another span: the old session must get an
 		// ended row carrying the first span's trace id, the new one an active row.
 		const stale = JSON.parse(store.get("maple.session")!)
-		store.set(
-			"maple.session",
-			JSON.stringify({ ...stale, lastActivityAt: Date.now() - 31 * 60_000 }),
-		)
+		store.set("maple.session", JSON.stringify({ ...stale, lastActivityAt: Date.now() - 31 * 60_000 }))
 		await Effect.runPromise(
 			Effect.succeed(undefined).pipe(Effect.withSpan("op-2"), Effect.provide(telemetry.layer)),
 		)

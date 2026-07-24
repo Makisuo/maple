@@ -96,7 +96,10 @@ describe("Database execute span instrumentation", () => {
 						await tx
 							.insert(orgOnboardingState)
 							.values({ orgId: "org_tx_test", createdAt: now, updatedAt: now })
-						await tx.select().from(orgOnboardingState).where(eq(orgOnboardingState.orgId, "org_tx_test"))
+						await tx
+							.select()
+							.from(orgOnboardingState)
+							.where(eq(orgOnboardingState.orgId, "org_tx_test"))
 					}),
 				)
 				.pipe(Effect.withTracer(tracer))

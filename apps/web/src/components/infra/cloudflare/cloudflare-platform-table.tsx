@@ -66,7 +66,12 @@ function QueueTable({ queues, waiting }: { queues: ReadonlyArray<CloudflareQueue
 						align="right"
 						width="w-[110px]"
 					/>
-					<ColumnHead label="Backlog size" align="right" width="w-[110px]" hidden="hidden md:flex" />
+					<ColumnHead
+						label="Backlog size"
+						align="right"
+						width="w-[110px]"
+						hidden="hidden md:flex"
+					/>
 					<ColumnHead<QueueSortKey>
 						label="Consumers"
 						sortKey="consumerConcurrency"
@@ -161,13 +166,7 @@ function DurableObjectTable({
 	)
 }
 
-export function CloudflarePlatformSection({
-	startTime,
-	endTime,
-}: {
-	startTime: string
-	endTime: string
-}) {
+export function CloudflarePlatformSection({ startTime, endTime }: { startTime: string; endTime: string }) {
 	const result = useAtomValue(cloudflarePlatformResourcesResultAtom({ data: { startTime, endTime } }))
 
 	return Result.builder(result)

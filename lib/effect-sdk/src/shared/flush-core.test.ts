@@ -20,7 +20,9 @@ const resolved = buildResolved(
 )
 
 const recordSpan = (spans: ReturnType<typeof makeSpanBuffer>, name: string) =>
-	Effect.runPromise(Effect.succeed(undefined).pipe(Effect.withSpan(name), Effect.provide(spans.tracerLayer)))
+	Effect.runPromise(
+		Effect.succeed(undefined).pipe(Effect.withSpan(name), Effect.provide(spans.tracerLayer)),
+	)
 
 const recordLog = (logs: ReturnType<typeof makeLogBuffer>, message: string) =>
 	Effect.runPromise(Effect.logInfo(message).pipe(Effect.provide(logs.loggerLayer)))

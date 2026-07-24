@@ -202,7 +202,8 @@ const normalizeFetchedCommit = (commit: GithubApiCommit, now: number): CommitUps
 		authorLogin: commit.author?.login ?? null,
 		// REST commits normally carry the user's `avatar_url`; fall back to the
 		// login-derived avatar for the (rare) case the field is absent.
-		authorAvatarUrl: commit.author?.avatar_url ?? githubAvatarUrl(commit.html_url, commit.author?.login ?? null),
+		authorAvatarUrl:
+			commit.author?.avatar_url ?? githubAvatarUrl(commit.html_url, commit.author?.login ?? null),
 		authoredAt,
 		committedAt: committedAt ?? authoredAt ?? now,
 		htmlUrl: commit.html_url,
@@ -482,9 +483,7 @@ export class GithubProvider extends Context.Service<GithubProvider, VcsProviderC
 					return yield* Match.value(event).pipe(
 						Match.when("push", () => mapPush(parsed, now)),
 						Match.when("installation", () => mapInstallation(parsed)),
-						Match.when("installation_repositories", () =>
-							mapInstallationRepositories(parsed),
-						),
+						Match.when("installation_repositories", () => mapInstallationRepositories(parsed)),
 						Match.when("create", () => mapRefEvent("created")(parsed)),
 						Match.when("delete", () => mapRefEvent("deleted")(parsed)),
 						Match.orElse(() =>

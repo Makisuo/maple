@@ -172,60 +172,75 @@ describe("InvestigationService", () => {
 		Effect.gen(function* () {
 			const service = yield* InvestigationService
 			const error = yield* Effect.flip(
-				service.updateStatus(ORG, asInvestigationId("00000000-0000-4000-8000-000000000001"), "resolved"),
+				service.updateStatus(
+					ORG,
+					asInvestigationId("00000000-0000-4000-8000-000000000001"),
+					"resolved",
+				),
 			)
 			assert.instanceOf(error, InvestigationNotFoundError)
 		}).pipe(Effect.provide(makeLayer())),
 	)
 
-	it.effect("submit_diagnosis writes the issue-linked ai_triage event exactly once across re-diagnosis", () => {
-		const harness = makeHarness()
-		const raw = createMaplePgliteClient(harness.testDb.pglite) as unknown as MaplePgClient
-		const issueId = asIssueId(randomUUID())
-		return Effect.gen(function* () {
-			const service = yield* InvestigationService
-			// Forcing the service (above) builds the DB layer + runs migrations on the
-			// shared PGlite, so the raw client can now seed the linked error issue.
-			const now = new Date()
-			yield* Effect.promise(() =>
-				raw.insert(errorIssues).values({
-					id: issueId,
-					orgId: ORG,
-					fingerprintHash: "98765432109876543210",
-					serviceName: "checkout-api",
-					exceptionType: "TimeoutError",
-					exceptionMessage: "upstream timed out",
-					topFrame: "",
-					firstSeenAt: now,
-					lastSeenAt: now,
-					createdAt: now,
-					updatedAt: now,
-				}),
-			)
-
-			const created = yield* service.createInvestigation(
-				ORG,
-				null,
-				new InvestigationCreateRequest({
-					subject: new InvestigationIncidentSubject({
-						type: "incident",
-						incidentKind: "error",
-						incidentId: "err_issue_link_1",
-						issueId,
+	it.effect(
+		"submit_diagnosis writes the issue-linked ai_triage event exactly once across re-diagnosis",
+		() => {
+			const harness = makeHarness()
+			const raw = createMaplePgliteClient(harness.testDb.pglite) as unknown as MaplePgClient
+			const issueId = asIssueId(randomUUID())
+			return Effect.gen(function* () {
+				const service = yield* InvestigationService
+				// Forcing the service (above) builds the DB layer + runs migrations on the
+				// shared PGlite, so the raw client can now seed the linked error issue.
+				const now = new Date()
+				yield* Effect.promise(() =>
+					raw.insert(errorIssues).values({
+						id: issueId,
+						orgId: ORG,
+						fingerprintHash: "98765432109876543210",
+						serviceName: "checkout-api",
+						exceptionType: "TimeoutError",
+						exceptionMessage: "upstream timed out",
+						topFrame: "",
+						firstSeenAt: now,
+						lastSeenAt: now,
+						createdAt: now,
+						updatedAt: now,
 					}),
-				}),
-			)
+				)
 
-			// Two diagnosis writes (retry / re-diagnosis): the deterministic event id +
-			// onConflictDoNothing must collapse them to a single timeline event.
-			yield* service.submitDiagnosis(ORG, created.id, new SubmitDiagnosisRequest({ report: sampleReport() }))
-			yield* service.submitDiagnosis(ORG, created.id, new SubmitDiagnosisRequest({ report: sampleReport() }))
+				const created = yield* service.createInvestigation(
+					ORG,
+					null,
+					new InvestigationCreateRequest({
+						subject: new InvestigationIncidentSubject({
+							type: "incident",
+							incidentKind: "error",
+							incidentId: "err_issue_link_1",
+							issueId,
+						}),
+					}),
+				)
 
-			const events = yield* Effect.promise(() =>
-				raw.select().from(errorIssueEvents).where(eq(errorIssueEvents.issueId, issueId)),
-			)
-			const aiTriageEvents = events.filter((e) => e.type === "ai_triage")
-			assert.strictEqual(aiTriageEvents.length, 1)
-		}).pipe(Effect.provide(harness.layer))
-	})
+				// Two diagnosis writes (retry / re-diagnosis): the deterministic event id +
+				// onConflictDoNothing must collapse them to a single timeline event.
+				yield* service.submitDiagnosis(
+					ORG,
+					created.id,
+					new SubmitDiagnosisRequest({ report: sampleReport() }),
+				)
+				yield* service.submitDiagnosis(
+					ORG,
+					created.id,
+					new SubmitDiagnosisRequest({ report: sampleReport() }),
+				)
+
+				const events = yield* Effect.promise(() =>
+					raw.select().from(errorIssueEvents).where(eq(errorIssueEvents.issueId, issueId)),
+				)
+				const aiTriageEvents = events.filter((e) => e.type === "ai_triage")
+				assert.strictEqual(aiTriageEvents.length, 1)
+			}).pipe(Effect.provide(harness.layer))
+		},
+	)
 })

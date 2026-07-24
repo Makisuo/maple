@@ -58,6 +58,7 @@ const PUBLIC_BREAKDOWN_DEFAULT_LIMIT = 20
 const MAX_SEARCH_RANGE_SECONDS = 60 * 60 * 24 * 7
 const MAX_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24 * 30
 const MAX_UNFILTERED_BREAKDOWN_RANGE_SECONDS = 60 * 60 * 24
+const MAX_SUMMARY_RANGE_SECONDS = 60 * 60 * 24 * 365
 const MAX_TIMESERIES_BUCKETS = 1_500
 
 const mapWarehouseError = (operation: string) => () => dependencyUnavailable(`${operation}_unavailable`)
@@ -1035,7 +1036,10 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 			.handle("list", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const window = yield* parseWindow(query.start_time, query.end_time)
+					const window = yield* parseWindow(query.start_time, query.end_time, {
+						maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+						rangeLabel: "Service queries",
+					})
 					const page = yield* paginateOffsetQuery(query, ({ limit, offset }) =>
 						execute(tenant, window, {
 							deploymentEnvironment: query.deployment_environment,
@@ -1050,7 +1054,10 @@ export const HttpV2ServicesLive = HttpApiBuilder.group(MapleApiV2, "services", (
 			.handle("retrieve", ({ params, query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					const window = yield* parseWindow(query.start_time, query.end_time)
+					const window = yield* parseWindow(query.start_time, query.end_time, {
+						maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+						rangeLabel: "Service queries",
+					})
 					const rows = yield* execute(tenant, window, {
 						serviceName: params.name,
 						limit: 1,
@@ -1095,7 +1102,10 @@ export const HttpV2ServiceMapLive = HttpApiBuilder.group(MapleApiV2, "serviceMap
 		return handlers.handle("retrieve", ({ query }) =>
 			Effect.gen(function* () {
 				const tenant = yield* CurrentTenant.Context
-				const window = yield* parseWindow(query.start_time, query.end_time)
+				const window = yield* parseWindow(query.start_time, query.end_time, {
+					maxSeconds: MAX_SUMMARY_RANGE_SECONDS,
+					rangeLabel: "Service map queries",
+				})
 				const compiled = query.service_name
 					? CH.compile(
 							CH.serviceDependenciesForServiceQuery({

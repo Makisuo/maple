@@ -217,7 +217,8 @@ export const rowToAlertRuleDocument = (
 		renotifyIntervalMinutes: row.renotify_interval_minutes,
 		metricName: row.metric_name,
 		metricType: row.metric_type != null ? asMetricType(row.metric_type) : null,
-		metricAggregation: row.metric_aggregation != null ? asMetricAggregation(row.metric_aggregation) : null,
+		metricAggregation:
+			row.metric_aggregation != null ? asMetricAggregation(row.metric_aggregation) : null,
 		apdexThresholdMs: row.apdex_threshold_ms,
 		queryBuilderDraft:
 			row.query_builder_draft_json == null

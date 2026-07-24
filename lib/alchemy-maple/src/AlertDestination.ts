@@ -106,7 +106,10 @@ const desiredBody = (props: AlertDestinationProps): Record<string, unknown> => {
  * Observable drift only — secrets are write-only, so the server can never
  * disagree with them; they change via prop changes (caught in `diff`).
  */
-const drifted = (props: AlertDestinationProps, observed: Schema.Schema.Type<typeof WireDestination>): boolean =>
+const drifted = (
+	props: AlertDestinationProps,
+	observed: Schema.Schema.Type<typeof WireDestination>,
+): boolean =>
 	props.name !== observed.name ||
 	(props.enabled ?? true) !== observed.enabled ||
 	(props.type === "slack" &&
@@ -130,7 +133,10 @@ export const AlertDestinationProvider = () =>
 				diff: Effect.fn(function* ({ news, olds, output }) {
 					if (!isResolved(news)) return undefined
 					// `type` is immutable server-side — changing it replaces the destination.
-					if ((output?.type ?? olds?.type) !== undefined && news.type !== (output?.type ?? olds?.type)) {
+					if (
+						(output?.type ?? olds?.type) !== undefined &&
+						news.type !== (output?.type ?? olds?.type)
+					) {
 						return { action: "replace" } as const
 					}
 					if (olds !== undefined && !deepEqual(olds, news, { stripNullish: true })) {

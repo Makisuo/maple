@@ -8,9 +8,13 @@ describe("isActivePlanSubscription", () => {
 
 	it("is false for add-on, auto-enabled, and free plans", () => {
 		expect(isActivePlanSubscription({ planId: "byoc", status: "active", addOn: true })).toBe(false)
-		expect(isActivePlanSubscription({ planId: "starter", status: "active", autoEnable: true })).toBe(false)
+		expect(isActivePlanSubscription({ planId: "starter", status: "active", autoEnable: true })).toBe(
+			false,
+		)
 		expect(isActivePlanSubscription({ planId: "free", status: "active" })).toBe(false)
-		expect(isActivePlanSubscription({ planId: "x", status: "active", plan: { name: "Free" } })).toBe(false)
+		expect(isActivePlanSubscription({ planId: "x", status: "active", plan: { name: "Free" } })).toBe(
+			false,
+		)
 	})
 
 	it("is false for non-active status and empty/missing input", () => {

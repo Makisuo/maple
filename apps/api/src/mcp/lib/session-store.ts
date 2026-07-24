@@ -36,9 +36,7 @@ export const persistSession = (kv: SessionsBinding, sessionId: string): Promise<
 		kv.put(sessionId, JSON.stringify(payload), { expirationTtl: SESSION_TTL_SECONDS }),
 	).pipe(
 		Effect.catchCause((cause) =>
-			Effect.logError("[mcp-session-kv] put failed").pipe(
-				Effect.annotateLogs({ sessionId, cause }),
-			),
+			Effect.logError("[mcp-session-kv] put failed").pipe(Effect.annotateLogs({ sessionId, cause })),
 		),
 		Effect.runPromise,
 	)

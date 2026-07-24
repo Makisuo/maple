@@ -1,10 +1,5 @@
 import { isActivePlanSubscription } from "@maple/domain/billing"
-import type {
-	BillingBalance,
-	BillingCustomer,
-	BillingSubscription,
-	CatalogPlan,
-} from "@maple/domain/http"
+import type { BillingBalance, BillingCustomer, BillingSubscription, CatalogPlan } from "@maple/domain/http"
 
 type Customer = BillingCustomer
 

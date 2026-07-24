@@ -39,7 +39,10 @@ export function ReplaySurface({
 	 *  keeps the controls inside the figure. */
 	detachedTransport?: boolean
 }) {
-	const { status, error, figureRef, surfaceRef, mountRef, isFullscreen } = useReplayPlayer()
+	const { status, error, sessionActive, figureRef, surfaceRef, mountRef, isFullscreen } = useReplayPlayer()
+	// A scrubber over a session that has no recording is a dead control; drop the
+	// whole transport rather than offer it.
+	const showTransport = status !== "unrecorded"
 
 	// Page-wide Space/←/→ transport — Space to play/pause, arrows to seek ±5s.
 	useReplayKeyboardShortcuts()
@@ -87,9 +90,16 @@ export function ReplaySurface({
 							</PlayerMessage>
 						)}
 						{status === "empty" && (
+							<PlayerMessage spinner={sessionActive}>
+								{sessionActive
+									? "Recording in progress — frames appear as chunks finish uploading."
+									: "This recording is too short to play back."}
+							</PlayerMessage>
+						)}
+						{status === "unrecorded" && (
 							<PlayerMessage>
-								No playable frames yet. The session may still be recording, or its event blobs
-								have expired.
+								This session wasn’t recorded. Replay is off or unsampled for this app — its
+								traces and events are still below.
 							</PlayerMessage>
 						)}
 					</div>
@@ -98,7 +108,7 @@ export function ReplaySurface({
 
 			{/* Transport stays inside the figure unless the caller renders it detached
 			    below the surface. Fullscreen always keeps the controls in the figure. */}
-			{(!detachedTransport || isFullscreen) && (
+			{showTransport && (!detachedTransport || isFullscreen) && (
 				<>
 					<ReplayControls />
 					{/* Legend for the scrubber's action-marker dots — otherwise the colors
@@ -120,9 +130,11 @@ export function ReplaySurface({
  * match the height of the video block while the controls span their own row.
  */
 export function ReplayTransport() {
-	const { isFullscreen } = useReplayPlayer()
+	const { isFullscreen, status } = useReplayPlayer()
 	// In fullscreen the controls live inside the fullscreen figure.
 	if (isFullscreen) return null
+	// Nothing was ever recorded — see `showTransport` in `<ReplaySurface>`.
+	if (status === "unrecorded") return null
 	return (
 		<div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
 			<ReplayControls detached />

@@ -234,6 +234,33 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 			// Tokens last ~1h; cache is per-isolate (externalInstallationId → token + expiry).
 			const installationTokens = new Map<string, { token: string; expiresAtMs: number }>()
 
+			// Every GitHub REST call goes through here so the dependency is a real
+			// Client-kind span: `peer.service` is what draws the GitHub node/edge on
+			// the service map, and the HTTP attributes make an upstream 5xx or a
+			// throttle attributable without reading logs.
+			//
+			// `url.path` (not `url.full`) on purpose — the query carries pagination
+			// but also `search/code?q=…`, i.e. the caller's raw search text, which has
+			// no business in telemetry. Tokens travel in headers, never the URL.
+			const tracedFetch = Effect.fn("GithubAppClient.request", {
+				kind: "client",
+				attributes: { "peer.service": "github" },
+			})(function* (url: string, init: RequestInit | undefined, errorMessage: string) {
+				const parsed = Option.liftThrowable(() => new URL(url))()
+				yield* Effect.annotateCurrentSpan({
+					"http.request.method": init?.method ?? "GET",
+					...(Option.isSome(parsed)
+						? { "server.address": parsed.value.host, "url.path": parsed.value.pathname }
+						: {}),
+				})
+				const response = yield* Effect.tryPromise({
+					try: () => http.fetch(url, init),
+					catch: (cause) => new GithubAppError({ message: errorMessage, cause }),
+				})
+				yield* Effect.annotateCurrentSpan({ "http.response.status_code": response.status })
+				return response
+			})
+
 			// Run a request, riding out short rate limits inline and surfacing longer
 			// ones as a GithubAppError carrying `retryAfterSeconds`.
 			const rateLimitedFetch = (request: Effect.Effect<Response, GithubAppError>) =>
@@ -364,23 +391,19 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				const config = yield* resolveConfig
 				const jwt = yield* mintAppJwt(config)
 				const response = yield* rateLimitedFetch(
-					Effect.tryPromise({
-						try: () =>
-							http.fetch(
-								`${config.apiBaseUrl}/app/installations/${externalInstallationId}/access_tokens`,
-								{
-									method: "POST",
-									headers: {
-										authorization: `Bearer ${jwt}`,
-										accept: "application/vnd.github+json",
-										"x-github-api-version": GITHUB_API_VERSION,
-										"user-agent": USER_AGENT,
-									},
-								},
-							),
-						catch: (cause) =>
-							new GithubAppError({ message: "Installation token request failed", cause }),
-					}),
+					tracedFetch(
+						`${config.apiBaseUrl}/app/installations/${externalInstallationId}/access_tokens`,
+						{
+							method: "POST",
+							headers: {
+								authorization: `Bearer ${jwt}`,
+								accept: "application/vnd.github+json",
+								"x-github-api-version": GITHUB_API_VERSION,
+								"user-agent": USER_AGENT,
+							},
+						},
+						"Installation token request failed",
+					),
 				)
 				// A non-rate-limit failure here is the installation auth gate — the
 				// authoritative "installation gone / suspended" signal (rate limits were
@@ -405,19 +428,18 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 
 			const authedGet = (_config: ResolvedAppConfig, token: string, url: string) =>
 				rateLimitedFetch(
-					Effect.tryPromise({
-						try: () =>
-							http.fetch(url, {
-								headers: {
-									authorization: `token ${token}`,
-									accept: "application/vnd.github+json",
-									"x-github-api-version": GITHUB_API_VERSION,
-									"user-agent": USER_AGENT,
-								},
-							}),
-						catch: (cause) =>
-							new GithubAppError({ message: `GitHub request failed: ${url}`, cause }),
-					}),
+					tracedFetch(
+						url,
+						{
+							headers: {
+								authorization: `token ${token}`,
+								accept: "application/vnd.github+json",
+								"x-github-api-version": GITHUB_API_VERSION,
+								"user-agent": USER_AGENT,
+							},
+						},
+						`GitHub request failed: ${url}`,
+					),
 				)
 
 			const listInstallationRepositories = Effect.fn("GithubAppClient.listInstallationRepositories")(
@@ -602,18 +624,18 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 					.join(" ")
 				const params = new URLSearchParams({ q: query, per_page: String(limit), page: "1" })
 				const response = yield* rateLimitedFetch(
-					Effect.tryPromise({
-						try: () =>
-							http.fetch(`${config.apiBaseUrl}/search/code?${params.toString()}`, {
-								headers: {
-									authorization: `token ${token}`,
-									accept: "application/vnd.github.text-match+json",
-									"x-github-api-version": GITHUB_API_VERSION,
-									"user-agent": USER_AGENT,
-								},
-							}),
-						catch: (cause) => new GithubAppError({ message: "GitHub code search failed", cause }),
-					}),
+					tracedFetch(
+						`${config.apiBaseUrl}/search/code?${params.toString()}`,
+						{
+							headers: {
+								authorization: `token ${token}`,
+								accept: "application/vnd.github.text-match+json",
+								"x-github-api-version": GITHUB_API_VERSION,
+								"user-agent": USER_AGENT,
+							},
+						},
+						"GitHub code search failed",
+					),
 				)
 				if (!response.ok) return yield* failure(response, "Search code", "repository")
 				const json = yield* parseJson(response, "Search code")
@@ -657,19 +679,18 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 				const config = yield* resolveConfig
 				const jwt = yield* mintAppJwt(config)
 				const response = yield* rateLimitedFetch(
-					Effect.tryPromise({
-						try: () =>
-							http.fetch(`${config.apiBaseUrl}/app/installations/${externalInstallationId}`, {
-								headers: {
-									authorization: `Bearer ${jwt}`,
-									accept: "application/vnd.github+json",
-									"x-github-api-version": GITHUB_API_VERSION,
-									"user-agent": USER_AGENT,
-								},
-							}),
-						catch: (cause) =>
-							new GithubAppError({ message: "Get installation request failed", cause }),
-					}),
+					tracedFetch(
+						`${config.apiBaseUrl}/app/installations/${externalInstallationId}`,
+						{
+							headers: {
+								authorization: `Bearer ${jwt}`,
+								accept: "application/vnd.github+json",
+								"x-github-api-version": GITHUB_API_VERSION,
+								"user-agent": USER_AGENT,
+							},
+						},
+						"Get installation request failed",
+					),
 				)
 				if (!response.ok) return yield* failure(response, "Get installation", "installation")
 				const json = yield* parseJson(response, "Get installation")
@@ -701,20 +722,19 @@ export class GithubAppClient extends Context.Service<GithubAppClient>()(
 					code,
 				})
 				const response = yield* rateLimitedFetch(
-					Effect.tryPromise({
-						try: () =>
-							http.fetch(`${GITHUB_OAUTH_BASE_URL}/login/oauth/access_token`, {
-								method: "POST",
-								headers: {
-									accept: "application/json",
-									"content-type": "application/x-www-form-urlencoded",
-									"user-agent": USER_AGENT,
-								},
-								body: body.toString(),
-							}),
-						catch: (cause) =>
-							new GithubAppError({ message: "GitHub OAuth code exchange failed", cause }),
-					}),
+					tracedFetch(
+						`${GITHUB_OAUTH_BASE_URL}/login/oauth/access_token`,
+						{
+							method: "POST",
+							headers: {
+								accept: "application/json",
+								"content-type": "application/x-www-form-urlencoded",
+								"user-agent": USER_AGENT,
+							},
+							body: body.toString(),
+						},
+						"GitHub OAuth code exchange failed",
+					),
 				)
 				if (!response.ok) return yield* failure(response, "GitHub OAuth code exchange")
 				const json = yield* parseJson(response, "GitHub OAuth code exchange")

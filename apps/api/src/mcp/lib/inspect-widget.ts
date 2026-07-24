@@ -743,7 +743,11 @@ function summarizeOutcome(widget: DashboardWidget, outcome: InspectionOutcome): 
 	}
 	if (outcome.kind === "raw_sql") {
 		const verdict: WidgetInspectionVerdict =
-			outcome.data.status === "error" ? "broken" : outcome.data.rowCount === 0 ? "suspicious" : "looks_healthy"
+			outcome.data.status === "error"
+				? "broken"
+				: outcome.data.rowCount === 0
+					? "suspicious"
+					: "looks_healthy"
 		const note =
 			outcome.data.status === "error"
 				? `Raw SQL failed: ${outcome.data.error ?? "unknown error"}`

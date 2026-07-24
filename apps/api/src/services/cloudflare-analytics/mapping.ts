@@ -155,10 +155,7 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 	const hostWeights = new Map<string, number>()
 	for (const group of input.groups) {
 		const host = group.dimensions.clientRequestHTTPHost ?? "unknown"
-		hostWeights.set(
-			host,
-			(hostWeights.get(host) ?? 0) + abrCount(group.count, group.avg?.sampleInterval),
-		)
+		hostWeights.set(host, (hostWeights.get(host) ?? 0) + abrCount(group.count, group.avg?.sampleInterval))
 	}
 	const topHosts = topNKeys(hostWeights, MAX_HTTP_HOSTS)
 
@@ -183,7 +180,16 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 		for (const [metricName, description, unit, value] of counters) {
 			if (value <= 0) continue
 			sumRows.push(
-				sumRow({ bucket, metricName, description, unit, attributes, serviceName, resourceAttributes, value }),
+				sumRow({
+					bucket,
+					metricName,
+					description,
+					unit,
+					attributes,
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
 			)
 		}
 	}
@@ -238,10 +244,7 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 }
 
 /** Weight-rank an unbounded dimension across a window and fold the tail into {@link OTHER_BUCKET}. */
-const foldTail = (
-	weights: ReadonlyMap<string, number>,
-	n: number,
-): ((key: string) => string) => {
+const foldTail = (weights: ReadonlyMap<string, number>, n: number): ((key: string) => string) => {
 	const top = topNKeys(weights, n)
 	return (key) => (top.has(key) ? key : OTHER_BUCKET)
 }
@@ -313,10 +316,7 @@ export const mapDnsGroups = (input: MapDnsGroupsInput): CloudflareMetricRows => 
 	const nameWeights = new Map<string, number>()
 	for (const group of input.groups) {
 		const name = group.dimensions.queryName ?? "unknown"
-		nameWeights.set(
-			name,
-			(nameWeights.get(name) ?? 0) + abrCount(group.count, group.avg?.sampleInterval),
-		)
+		nameWeights.set(name, (nameWeights.get(name) ?? 0) + abrCount(group.count, group.avg?.sampleInterval))
 	}
 	const foldName = foldTail(nameWeights, MAX_DNS_QUERY_NAMES)
 
@@ -399,9 +399,7 @@ export interface MapQueueConsumersGroupsInput {
 	readonly groups: ReadonlyArray<QueueConsumersGroupShape>
 }
 
-export const mapQueueConsumersGroups = (
-	input: MapQueueConsumersGroupsInput,
-): CloudflareMetricRows => {
+export const mapQueueConsumersGroups = (input: MapQueueConsumersGroupsInput): CloudflareMetricRows => {
 	const gaugeRows: MetricGaugeRow[] = []
 	for (const group of input.groups) {
 		const concurrency = group.avg?.concurrency
@@ -431,9 +429,7 @@ export interface MapDurableObjectsGroupsInput {
 	readonly liveScripts?: ReadonlySet<string> | null
 }
 
-export const mapDurableObjectsGroups = (
-	input: MapDurableObjectsGroupsInput,
-): CloudflareMetricRows => {
+export const mapDurableObjectsGroups = (input: MapDurableObjectsGroupsInput): CloudflareMetricRows => {
 	const sumRows: MetricSumRow[] = []
 	const gaugeRows: MetricGaugeRow[] = []
 	for (const group of input.groups) {
@@ -456,7 +452,16 @@ export const mapDurableObjectsGroups = (
 		for (const [metricName, description, unit, value] of counters) {
 			if (value <= 0) continue
 			sumRows.push(
-				sumRow({ bucket, metricName, description, unit, attributes: {}, serviceName, resourceAttributes, value }),
+				sumRow({
+					bucket,
+					metricName,
+					description,
+					unit,
+					attributes: {},
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
 			)
 		}
 
@@ -523,7 +528,16 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 		for (const [metricName, description, unit, value] of counters) {
 			if (value <= 0) continue
 			sumRows.push(
-				sumRow({ bucket, metricName, description, unit, attributes, serviceName, resourceAttributes, value }),
+				sumRow({
+					bucket,
+					metricName,
+					description,
+					unit,
+					attributes,
+					serviceName,
+					resourceAttributes,
+					value,
+				}),
 			)
 		}
 
@@ -533,8 +547,18 @@ export const mapWorkersGroups = (input: MapWorkersGroupsInput): CloudflareMetric
 		const gauges: ReadonlyArray<readonly [string, string, string, number | null | undefined]> = [
 			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.5", scale(quantiles.cpuTimeP50, 1 / 1000)],
 			[METRIC_WORKER_CPU_TIME, "Worker CPU time", "0.99", scale(quantiles.cpuTimeP99, 1 / 1000)],
-			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.5", scale(quantiles.durationP50, 1000)],
-			[METRIC_WORKER_DURATION, "Worker duration (wall time billed)", "0.99", scale(quantiles.durationP99, 1000)],
+			[
+				METRIC_WORKER_DURATION,
+				"Worker duration (wall time billed)",
+				"0.5",
+				scale(quantiles.durationP50, 1000),
+			],
+			[
+				METRIC_WORKER_DURATION,
+				"Worker duration (wall time billed)",
+				"0.99",
+				scale(quantiles.durationP99, 1000),
+			],
 		]
 		for (const [metricName, description, quantile, value] of gauges) {
 			if (value == null) continue

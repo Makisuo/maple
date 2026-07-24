@@ -62,18 +62,16 @@ export const makeRemoteWarehouseExecutorShape = (
 					headers: { authorization: `Bearer ${token}` },
 				}).pipe(HttpClientRequest.bodyText(JSON.stringify({ pipe, params }), "application/json"))
 				return yield* Effect.gen(function* () {
-					const response = yield* client
-						.execute(request)
-						.pipe(
-							Effect.mapError(
-								(error) =>
-									new WarehouseQueryError({
-										message: error.message,
-										pipeName: pipe,
-										cause: error,
-									}),
-							),
-						)
+					const response = yield* client.execute(request).pipe(
+						Effect.mapError(
+							(error) =>
+								new WarehouseQueryError({
+									message: error.message,
+									pipeName: pipe,
+									cause: error,
+								}),
+						),
+					)
 					const text = yield* response.text.pipe(
 						Effect.mapError(
 							(error) =>

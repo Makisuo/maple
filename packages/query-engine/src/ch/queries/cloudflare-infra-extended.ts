@@ -16,12 +16,7 @@
 
 import { Schema } from "effect"
 import * as CH from "@maple-dev/clickhouse-builder/expr"
-import {
-	from,
-	param,
-	type ColumnAccessor,
-	type CompiledQueryRowSchema,
-} from "@maple-dev/clickhouse-builder"
+import { from, param, type ColumnAccessor, type CompiledQueryRowSchema } from "@maple-dev/clickhouse-builder"
 import { CHNumber } from "../schema"
 import { MetricsGauge, MetricsSum } from "../tables"
 
@@ -339,10 +334,7 @@ export function cloudflareQueueGaugesSQL() {
 			backlogMessages: avgWhere($.Value, backlogMessagesCond($)),
 			backlogMessagesMax: CH.maxIf($.Value, backlogMessagesCond($)),
 			backlogBytes: avgWhere($.Value, $.MetricName.eq("cloudflare.queue.backlog.bytes")),
-			consumerConcurrency: avgWhere(
-				$.Value,
-				$.MetricName.eq("cloudflare.queue.consumer.concurrency"),
-			),
+			consumerConcurrency: avgWhere($.Value, $.MetricName.eq("cloudflare.queue.consumer.concurrency")),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
@@ -366,10 +358,7 @@ export function cloudflareDurableObjectCountersSQL() {
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
-			$.MetricName.in_(
-				"cloudflare.durable_object.requests",
-				"cloudflare.durable_object.errors",
-			),
+			$.MetricName.in_("cloudflare.durable_object.requests", "cloudflare.durable_object.errors"),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])

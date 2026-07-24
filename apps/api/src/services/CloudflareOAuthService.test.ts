@@ -48,7 +48,12 @@ const mockCloudflareFetch =
 					errors: [],
 					messages: [],
 					result: accounts,
-					result_info: { count: accounts.length, page: 1, per_page: 50, total_count: accounts.length },
+					result_info: {
+						count: accounts.length,
+						page: 1,
+						per_page: 50,
+						total_count: accounts.length,
+					},
 				}),
 			)
 		}
@@ -117,11 +122,9 @@ describe("CloudflareOAuthService", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			const service = yield* CloudflareOAuthService
-			const { redirectUrl, state } = yield* service.startConnect(
-				asOrgId("org_a"),
-				asUserId("user_a"),
-				{ callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback" },
-			)
+			const { redirectUrl, state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: "https://api.example.com/api/integrations/cloudflare/callback",
+			})
 
 			const url = new URL(redirectUrl)
 			assert.strictEqual(url.origin + url.pathname, "https://dash.cloudflare.com/oauth2/auth")
@@ -211,7 +214,9 @@ describe("CloudflareOAuthService", () => {
 		return Effect.gen(function* () {
 			const service = yield* CloudflareOAuthService
 			// No state row was ever seeded — a forged/expired-and-purged callback.
-			const error = yield* service.completeConnect("auth-code", "state-that-was-never-issued").pipe(Effect.flip)
+			const error = yield* service
+				.completeConnect("auth-code", "state-that-was-never-issued")
+				.pipe(Effect.flip)
 			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsValidationError")
 			if (error._tag === "@maple/http/errors/IntegrationsValidationError") {
 				assert.include(error.message, "OAuth state not recognized")
@@ -375,7 +380,10 @@ describe("CloudflareOAuthService", () => {
 			// Two racers on an expired token: without single-flight both refresh, the loser's
 			// rotated-token 400 falsely surfaces as IntegrationsRevokedError.
 			const [a, b] = yield* Effect.all(
-				[service.getValidAccessToken(asOrgId("org_a")), service.getValidAccessToken(asOrgId("org_a"))],
+				[
+					service.getValidAccessToken(asOrgId("org_a")),
+					service.getValidAccessToken(asOrgId("org_a")),
+				],
 				{ concurrency: 2 },
 			)
 			assert.strictEqual(a.accessToken, "cf-access-token-refreshed")
@@ -479,7 +487,9 @@ describe("CloudflareOAuthService", () => {
 			)
 			assert.isUndefined(row)
 		}).pipe(
-			Effect.provide(Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts, counters))),
+			Effect.provide(
+				Layer.mergeAll(makeLayer(testDb, withOAuthApp), withMockFetch(accounts, counters)),
+			),
 		)
 	})
 

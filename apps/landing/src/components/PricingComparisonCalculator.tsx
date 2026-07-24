@@ -15,7 +15,9 @@ export function PricingComparisonCalculator() {
 	return (
 		<div>
 			<div className="mb-px flex flex-wrap items-center gap-x-4 gap-y-2 border border-[oklch(0.3_0.02_60)] px-4 py-3">
-				<span className="text-[10px] uppercase tracking-wider text-[oklch(0.5_0.02_60)]">Compare against</span>
+				<span className="text-[10px] uppercase tracking-wider text-[oklch(0.5_0.02_60)]">
+					Compare against
+				</span>
 				<div role="tablist" aria-label="Compare against" className="inline-flex flex-wrap gap-1">
 					{COMPETITORS.map((c) => {
 						const active = c === competitor

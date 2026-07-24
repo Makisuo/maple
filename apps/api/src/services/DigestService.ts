@@ -23,10 +23,7 @@ import { EmailService } from "../lib/EmailService"
 import { Env } from "../lib/Env"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import { EdgeCacheService } from "@maple/query-engine/caching"
-import {
-	isOrgWarehouseQuarantined,
-	quarantineOnConfigClassCause,
-} from "../lib/warehouse-org-quarantine"
+import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 
 const SYSTEM_DIGEST_USER = UserId.make("system-digest")
 const ROOT_ROLE = RoleName.make("root")
@@ -292,13 +289,13 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 					],
 					{ concurrency: 5 },
 				).pipe(
-				Effect.mapError(
-					(error) =>
-						new DigestPersistenceError({
-							message: `Failed to fetch digest data from Tinybird: ${error instanceof Error ? error.message : String(error)}`,
-						}),
-				),
-			)
+					Effect.mapError(
+						(error) =>
+							new DigestPersistenceError({
+								message: `Failed to fetch digest data from Tinybird: ${error instanceof Error ? error.message : String(error)}`,
+							}),
+					),
+				)
 
 			// Split UNION ALL'd rows by period discriminator
 			const overviewRows = overviewResponse.data as Array<ServiceOverviewCompareRow>
@@ -387,7 +384,10 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						requests,
 						errorRate: requests > 0 ? ((Number(s.errorCount) || 0) / requests) * 100 : 0,
 						p95Ms: Number(s.p95LatencyMs) || 0,
-						requestsDelta: delta(requests, prevThroughputByService.get(String(s.serviceName)) ?? 0),
+						requestsDelta: delta(
+							requests,
+							prevThroughputByService.get(String(s.serviceName)) ?? 0,
+						),
 					}
 				})
 				// Float the unhealthiest services to the top so problems surface
@@ -738,7 +738,10 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 											inArray(digestSubscriptions.id, orgSubIds),
 											or(
 												isNull(digestSubscriptions.lastAttemptedAt),
-												lt(digestSubscriptions.lastAttemptedAt, new Date(todayStartMs)),
+												lt(
+													digestSubscriptions.lastAttemptedAt,
+													new Date(todayStartMs),
+												),
 											),
 										),
 									)
@@ -760,7 +763,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 						const claimedSubs = orgSubs.filter((s) => claimedIds.has(s.id))
 
 						if (claimedSubs.length < orgSubs.length) {
-							yield* Effect.logInfo("Skipping digest subscriptions already attempted today").pipe(
+							yield* Effect.logInfo(
+								"Skipping digest subscriptions already attempted today",
+							).pipe(
 								Effect.annotateLogs({
 									orgId: rawOrgId,
 									skippedCount: orgSubs.length - claimedSubs.length,
@@ -832,7 +837,9 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 								if (quarantined) {
 									yield* Effect.logInfo(
 										"Org warehouse rejected queries with a config-class error; quarantined",
-									).pipe(Effect.annotateLogs({ orgId: rawOrgId, error: Cause.pretty(cause) }))
+									).pipe(
+										Effect.annotateLogs({ orgId: rawOrgId, error: Cause.pretty(cause) }),
+									)
 								} else {
 									yield* Effect.logError("Digest failed for org").pipe(
 										Effect.annotateLogs({

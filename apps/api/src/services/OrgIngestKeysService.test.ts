@@ -161,9 +161,11 @@ describe("OrgIngestKeysService", () => {
 				queryFirstRow<{
 					public_key_hash: string
 					private_key_hash: string
-				}>(testDb, "SELECT public_key_hash, private_key_hash FROM org_ingest_keys WHERE org_id = $1", [
-					"org_a",
-				]),
+				}>(
+					testDb,
+					"SELECT public_key_hash, private_key_hash FROM org_ingest_keys WHERE org_id = $1",
+					["org_a"],
+				),
 			)
 
 			assert.isDefined(row)

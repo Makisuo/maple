@@ -5,7 +5,11 @@ import { Schema } from "effect"
 import { toAlertContext } from "@/components/chat/alert-context"
 import { decodeInvestigationRef } from "@/components/chat/investigation-context"
 import { InvestigationView } from "@/components/investigations/investigation-view"
-import { subjectFromAlertContext, subjectFromAnomaly, subjectFromError } from "@/components/investigations/subject"
+import {
+	subjectFromAlertContext,
+	subjectFromAnomaly,
+	subjectFromError,
+} from "@/components/investigations/subject"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
@@ -39,8 +43,8 @@ function InvestigationPage() {
 					<EmptyHeader>
 						<EmptyTitle>Open an investigation from its source</EmptyTitle>
 						<EmptyDescription>
-							Investigations are launched from an alert, anomaly, or error. Head to one of those and
-							choose "Investigate with Maple AI".
+							Investigations are launched from an alert, anomaly, or error. Head to one of those
+							and choose "Investigate with Maple AI".
 						</EmptyDescription>
 					</EmptyHeader>
 					<Button variant="outline" size="sm" render={<Link to="/errors" />}>
@@ -114,7 +118,9 @@ function ErrorInvestigation({ id }: { id: string }) {
 			const latestIncidentId =
 				(detail.incidents.find((i) => i.status === "open") ?? detail.incidents[0])?.id ?? null
 			return (
-				<InvestigationView subject={subjectFromError(detail.issue, { totalInWindow, latestIncidentId })} />
+				<InvestigationView
+					subject={subjectFromError(detail.issue, { totalInWindow, latestIncidentId })}
+				/>
 			)
 		})
 		.render()
@@ -139,8 +145,6 @@ function AlertInvestigation({ incidentId }: { incidentId: string }) {
 		return <NotFoundShell message="This alert incident may have been resolved and pruned." />
 	}
 
-	const subject = subjectFromAlertContext(toAlertContext(rule, incident), {
-		...(incident.errorIssueId ? { issueId: incident.errorIssueId } : {}),
-	})
+	const subject = subjectFromAlertContext(toAlertContext(rule, incident), (incident.errorIssueId ? { issueId: incident.errorIssueId } : {}))
 	return <InvestigationView subject={subject} />
 }

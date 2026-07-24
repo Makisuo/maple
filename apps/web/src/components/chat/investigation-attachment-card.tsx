@@ -61,7 +61,9 @@ export function InvestigationAttachmentCard({
 							<span className="size-0.5 rounded-full bg-muted-foreground/40" aria-hidden />
 							<span className="font-mono normal-case tracking-normal">#{shortId(ctx.id)}</span>
 						</div>
-						<div className="mt-1 truncate text-[13px] font-medium text-foreground">{ctx.title}</div>
+						<div className="mt-1 truncate text-[13px] font-medium text-foreground">
+							{ctx.title}
+						</div>
 						{ctx.facts.length > 0 ? (
 							<ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5">
 								{ctx.facts.map((fact) => (

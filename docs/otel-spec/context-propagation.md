@@ -17,11 +17,11 @@ before treating anything here as authoritative for a compliance decision.
 
 - Maple's Rust ingest gateway (`apps/ingest`) is primarily an **OTLP receiver**, not an HTTP
   trace-context propagator: incoming spans already carry `TraceId` / `SpanId` / `ParentSpanId` /
-  `TraceState` as OTLP fields (populated upstream by the *sending* SDK's propagator before OTLP
+  `TraceState` as OTLP fields (populated upstream by the _sending_ SDK's propagator before OTLP
   export), and these are inserted verbatim into ClickHouse/Tinybird (see
   `apps/ingest/src/clickhouse_insert_mappings.rs`, columns `TraceId`, `SpanId`, `ParentSpanId`,
   `TraceState`). Maple does not need to parse a `traceparent` HTTP header to ingest span data.
-- Where W3C TraceContext propagation *does* apply directly to Maple: the ingest gateway's own
+- Where W3C TraceContext propagation _does_ apply directly to Maple: the ingest gateway's own
   **self-instrumentation** (`apps/ingest` exports its own OTLP traces per
   `docs/otel-spec/context-propagation.md`'s sibling doc on self-observability — see root
   `CLAUDE.md` "Self-Observability" section) and any outbound HTTP calls the API/web app makes that
@@ -33,7 +33,7 @@ before treating anything here as authoritative for a compliance decision.
   `TraceId` came from a variety of upstream propagators (W3C, but also legacy B3/Jaeger bridged by
   some customer collectors). The ingest gateway should treat a **128-bit** `TraceId` and a
   **64-bit** `SpanId`/`ParentSpanId` as the canonical OTel shapes; anything shorter (e.g. a 64-bit
-  B3 trace ID zero-padded to 128 bits) is a valid *interop* case, not a data error — see
+  B3 trace ID zero-padded to 128 bits) is a valid _interop_ case, not a data error — see
   [B3/Jaeger interop notes](#b3-and-jaeger-reference-level) below.
 - `Baggage` is orthogonal to span data: **baggage entries do not automatically become span
   attributes**. If Maple ever wants baggage values (e.g. a customer's `user.id` propagated via
@@ -70,19 +70,19 @@ captured.
 
 ### Core operations
 
-| Operation | Signature (conceptual) | Notes |
-|---|---|---|
-| `CreateKey` | `(name: string) -> Key` | `name` is for debugging only. "Multiple calls to `CreateKey` with the same name SHOULD NOT return the same value unless language constraints dictate otherwise" — keys are unforgeable/opaque, not string-keyed maps. |
-| `GetValue` | `(context, key) -> value` | Read-only lookup against a given `Context`. |
-| `SetValue` | `(context, key, value) -> Context` | Returns a **new** `Context`; does not mutate the input. |
+| Operation   | Signature (conceptual)             | Notes                                                                                                                                                                                                                 |
+| ----------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CreateKey` | `(name: string) -> Key`            | `name` is for debugging only. "Multiple calls to `CreateKey` with the same name SHOULD NOT return the same value unless language constraints dictate otherwise" — keys are unforgeable/opaque, not string-keyed maps. |
+| `GetValue`  | `(context, key) -> value`          | Read-only lookup against a given `Context`.                                                                                                                                                                           |
+| `SetValue`  | `(context, key, value) -> Context` | Returns a **new** `Context`; does not mutate the input.                                                                                                                                                               |
 
 ### Implicit-context operations (languages with implicit/ambient context, e.g. via thread-locals or async-local storage)
 
-| Operation | Purpose |
-|---|---|
-| `Get Current Context` | Returns the `Context` associated with the current execution unit. |
-| `Attach` | Associates a given `Context` with the current execution unit; returns a **token** for later restoration. |
-| `Detach` | Resets the current context using the token returned by `Attach`; implementations are expected to be able to signal incorrect call ordering (e.g. detaching out of order/detaching twice). |
+| Operation             | Purpose                                                                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Get Current Context` | Returns the `Context` associated with the current execution unit.                                                                                                                         |
+| `Attach`              | Associates a given `Context` with the current execution unit; returns a **token** for later restoration.                                                                                  |
+| `Detach`              | Resets the current context using the token returned by `Attach`; implementations are expected to be able to signal incorrect call ordering (e.g. detaching out of order/detaching twice). |
 
 Attach/detach is explicitly a stack-like discipline: detach with the token you got from the
 matching attach, not just "restore to whatever was current a moment ago" — misuse (double-detach,
@@ -102,10 +102,10 @@ for HTTP-style string-keyed carriers.
 
 ### `TextMapPropagator`
 
-| Method | Contract |
-|---|---|
-| `Fields(carrier)` | Returns the list of propagation field/header names this propagator uses for a given carrier type — lets a caller pre-clear those fields before re-injecting into a reused carrier ("If your carrier is reused, you should delete the fields here before calling Inject"). |
-| `Inject(context, carrier, setter?)` | Writes values from `context` into `carrier` using `setter`. |
+| Method                               | Contract                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Fields(carrier)`                    | Returns the list of propagation field/header names this propagator uses for a given carrier type — lets a caller pre-clear those fields before re-injecting into a reused carrier ("If your carrier is reused, you should delete the fields here before calling Inject").                                                                                 |
+| `Inject(context, carrier, setter?)`  | Writes values from `context` into `carrier` using `setter`.                                                                                                                                                                                                                                                                                               |
 | `Extract(context, carrier, getter?)` | Reads values from `carrier`, returns a **new** `Context` (per Context's immutability rule) with the extracted values layered on top of the passed-in `context`. **On parse failure, the implementation MUST NOT throw and MUST NOT store a new value** — i.e., extraction failures degrade to a no-op, they never crash the caller or poison the context. |
 
 ### `Setter` / `Getter` carrier interfaces
@@ -117,7 +117,7 @@ for HTTP-style string-keyed carriers.
   for HTTP-like carriers this "MUST be case insensitive."
 - **Getter.Keys(carrier)** — returns all keys in the carrier; enables prefix/pattern-based
   extraction (the doc calls out B3's `X-B3-*` family as the motivating example).
-- **Getter.GetAll(carrier, key)** — returns *all* values for a repeated key, in original order
+- **Getter.GetAll(carrier, key)** — returns _all_ values for a repeated key, in original order
   (relevant for headers that can legitimately repeat). Noted as pre-stable in some language
   implementations.
 
@@ -143,20 +143,20 @@ TraceContext + W3C Baggage.
 
 Source: https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/
 
-| Env var | Description | Default |
-|---|---|---|
+| Env var            | Description                                                          | Default                |
+| ------------------ | -------------------------------------------------------------------- | ---------------------- |
 | `OTEL_PROPAGATORS` | Comma-separated list of propagators to register, composited together | `tracecontext,baggage` |
 
-| Value | Propagator | Status |
-|---|---|---|
-| `tracecontext` | W3C Trace Context | Stable |
-| `baggage` | W3C Baggage | Stable |
-| `b3` | B3 Single header | — |
-| `b3multi` | B3 Multi header | — |
-| `jaeger` | Jaeger `uber-trace-id` | **Deprecated** |
-| `xray` | AWS X-Ray (third-party format) | — |
-| `ottrace` | OT Trace | **Deprecated** |
-| `none` | No automatically configured propagator | — |
+| Value          | Propagator                             | Status         |
+| -------------- | -------------------------------------- | -------------- |
+| `tracecontext` | W3C Trace Context                      | Stable         |
+| `baggage`      | W3C Baggage                            | Stable         |
+| `b3`           | B3 Single header                       | —              |
+| `b3multi`      | B3 Multi header                        | —              |
+| `jaeger`       | Jaeger `uber-trace-id`                 | **Deprecated** |
+| `xray`         | AWS X-Ray (third-party format)         | —              |
+| `ottrace`      | OT Trace                               | **Deprecated** |
+| `none`         | No automatically configured propagator | —              |
 
 Values **MUST be deduplicated** so a propagator is only registered once even if named twice (or
 implied twice by other config).
@@ -194,12 +194,12 @@ Example: `traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
 
 ### Field-by-field
 
-| Field | Size | Encoding | Invalid value | On invalid, receiver behavior |
-|---|---|---|---|---|
-| `version` | 1 byte | 2 lowercase hex digits | `ff` is explicitly forbidden | Reject/ignore the header |
-| `trace-id` | 16 bytes | 32 lowercase hex chars | All-zero (`00000000000000000000000000000000`) | Invalid — vendors **must ignore** a `traceparent` with an invalid trace-id (i.e., treat as if no `traceparent` was received; start a new trace) |
-| `parent-id` (a.k.a. span-id) | 8 bytes | 16 lowercase hex chars | All-zero (`0000000000000000`) | Invalid — same treatment: ignore the header |
-| `trace-flags` | 1 byte | 2 lowercase hex digits | — (all 256 bit-patterns are structurally valid) | Only the least-significant bit is currently defined |
+| Field                        | Size     | Encoding               | Invalid value                                   | On invalid, receiver behavior                                                                                                                   |
+| ---------------------------- | -------- | ---------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`                    | 1 byte   | 2 lowercase hex digits | `ff` is explicitly forbidden                    | Reject/ignore the header                                                                                                                        |
+| `trace-id`                   | 16 bytes | 32 lowercase hex chars | All-zero (`00000000000000000000000000000000`)   | Invalid — vendors **must ignore** a `traceparent` with an invalid trace-id (i.e., treat as if no `traceparent` was received; start a new trace) |
+| `parent-id` (a.k.a. span-id) | 8 bytes  | 16 lowercase hex chars | All-zero (`0000000000000000`)                   | Invalid — same treatment: ignore the header                                                                                                     |
+| `trace-flags`                | 1 byte   | 2 lowercase hex digits | — (all 256 bit-patterns are structurally valid) | Only the least-significant bit is currently defined                                                                                             |
 
 ### Sampled flag (§3.2.2.5.1... i.e. the trace-flags LSB)
 
@@ -219,9 +219,9 @@ to `0` by a conforming producer that doesn't understand them (don't invent bit m
   chars after the first dash, `parent-id` as the next 16 hex chars, and the sampled bit from the
   `trace-flags` byte that follows — then ignore any additional trailing fields the newer version
   might append.
-  - If the header is shorter than the minimum length required to contain those three fields
-    (roughly, under ~55 characters for the version-00 shape), the receiver should not attempt to
-    parse it and should restart the trace (treat as if absent) rather than guess.
+    - If the header is shorter than the minimum length required to contain those three fields
+      (roughly, under ~55 characters for the version-00 shape), the receiver should not attempt to
+      parse it and should restart the trace (treat as if absent) rather than guess.
 - When forwarding an unknown-version header onward, unknown/未定义 flag bits must be reset to zero
   on the outgoing request (don't blindly forward bits you don't understand as if you understood
   them).
@@ -260,10 +260,10 @@ chr          = %x20 / nblk-chr
 
 ### Key rules
 
-| Key form | Format | Purpose |
-|---|---|---|
-| Simple key | lowercase alphanum + `_ - * /`, ≤256 chars | Single-tenant vendor identifier, e.g. `congo` |
-| Multi-tenant key | `tenant-id@system-id` | Lets a multi-tenant vendor (`system-id`) namespace by `tenant-id` so lookups can jump straight to `@system-id` |
+| Key form         | Format                                     | Purpose                                                                                                        |
+| ---------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Simple key       | lowercase alphanum + `_ - * /`, ≤256 chars | Single-tenant vendor identifier, e.g. `congo`                                                                  |
+| Multi-tenant key | `tenant-id@system-id`                      | Lets a multi-tenant vendor (`system-id`) namespace by `tenant-id` so lookups can jump straight to `@system-id` |
 
 ### Value rules
 
@@ -271,20 +271,20 @@ Opaque, printable-ASCII (`0x20`–`0x7E`), **excluding** comma and `=`; max **25
 
 ### Limits
 
-| Limit | Value |
-|---|---|
-| Max list-members | 32 |
-| Max total header size a vendor should be able to propagate | 512 characters |
-| Truncation strategy when trimming to fit | Drop entries over 128 characters first; then drop from the end of the list; only whole list-members may be dropped, never partially |
+| Limit                                                      | Value                                                                                                                               |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Max list-members                                           | 32                                                                                                                                  |
+| Max total header size a vendor should be able to propagate | 512 characters                                                                                                                      |
+| Truncation strategy when trimming to fit                   | Drop entries over 128 characters first; then drop from the end of the list; only whole list-members may be dropped, never partially |
 
 ### Mutation rules (§3.4/"Mutating the tracestate field")
 
 - A participant adding a new entry inserts it **at the front (left)** of the list.
 - A participant updating its own existing entry **moves it to the front** (as if delete +
   re-add).
-- Only one entry per key is allowed — it represents that vendor's *last* position in the trace; a
+- Only one entry per key is allowed — it represents that vendor's _last_ position in the trace; a
   vendor re-entering the trace overwrites its previous entry rather than appending a duplicate.
-  When a vendor is only reading (not modifying) an entry, order of all *other*, unmodified
+  When a vendor is only reading (not modifying) an entry, order of all _other_, unmodified
   list-members must be preserved.
 - Deleting keys: a vendor should not delete keys it did not itself generate — the spec's guidance
   is that removing another vendor's entry breaks that vendor's correlation ability, so participants
@@ -301,16 +301,16 @@ under the key `ot`, itself an internal `;`-separated set of sub-keys (e.g. `ot=t
 capped at 256 characters total for that entry. Individual instrumentation libraries get their own
 separate list-member keys rather than writing into the shared `ot` entry.
 
-| Sub-key | Meaning | Format |
-|---|---|---|
-| `th` | Sampling **threshold** (rejection threshold `T`), conveys effective sampling probability. `0` = 100% sampling. Probability = `(2^56 - Threshold) / 2^56`. | 1–14 lowercase hex digits (right-padded conceptually to 56 bits) |
-| `rv` | Explicit **randomness value** — an alternative source of the common random value `R` used for consistent sampling decisions, instead of relying on the trailing bits of the `trace-id` | Exactly 14 lowercase hex digits |
-| `p` | Legacy/older probability encoding predating `th`/`rv` | — |
+| Sub-key | Meaning                                                                                                                                                                                | Format                                                           |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `th`    | Sampling **threshold** (rejection threshold `T`), conveys effective sampling probability. `0` = 100% sampling. Probability = `(2^56 - Threshold) / 2^56`.                              | 1–14 lowercase hex digits (right-padded conceptually to 56 bits) |
+| `rv`    | Explicit **randomness value** — an alternative source of the common random value `R` used for consistent sampling decisions, instead of relying on the trailing bits of the `trace-id` | Exactly 14 lowercase hex digits                                  |
+| `p`     | Legacy/older probability encoding predating `th`/`rv`                                                                                                                                  | —                                                                |
 
 This mechanism underpins **OTel consistent probability sampling**: every participant compares the
 shared randomness `R` (from `rv`, or else derived from the low 7 bytes of the `trace-id`) against
 its own rejection threshold `T` (`th`), so independently-configured samplers along a trace make
-*consistent* keep/drop decisions without needing to agree out-of-band. This whole area is marked
+_consistent_ keep/drop decisions without needing to agree out-of-band. This whole area is marked
 **Development** stability in the OTel spec — do not treat it as a compliance requirement, but do
 recognize `ot=th:...;rv:...` if you see it in customer `tracestate` values.
 
@@ -323,12 +323,12 @@ recognize `ot=th:...;rv:...` if you see it in customer `tracestate` values.
 **Stability: Stable.**
 Source: https://opentelemetry.io/docs/specs/otel/baggage/api/
 
-| Operation | Signature | Notes |
-|---|---|---|
-| `Get Value` | `(baggage, name) -> value \| absent` | Simple lookup. |
-| `Get All Values` | `(baggage) -> [(name, value, metadata)]` | Order is **not significant**; may be exposed as an iterator or immutable collection. |
-| `Set Value` | `(baggage, name, value, metadata?) -> Baggage` | Returns a new `Baggage`; `metadata` is "an opaque wrapper for a string with no semantic meaning" to the API itself (vendor-defined use, e.g. W3C's `property` syntax). |
-| `Remove Value` | `(baggage, name) -> Baggage` | Returns a new `Baggage` without that entry. |
+| Operation        | Signature                                      | Notes                                                                                                                                                                  |
+| ---------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Get Value`      | `(baggage, name) -> value \| absent`           | Simple lookup.                                                                                                                                                         |
+| `Get All Values` | `(baggage) -> [(name, value, metadata)]`       | Order is **not significant**; may be exposed as an iterator or immutable collection.                                                                                   |
+| `Set Value`      | `(baggage, name, value, metadata?) -> Baggage` | Returns a new `Baggage`; `metadata` is "an opaque wrapper for a string with no semantic meaning" to the API itself (vendor-defined use, e.g. W3C's `property` syntax). |
+| `Remove Value`   | `(baggage, name) -> Baggage`                   | Returns a new `Baggage` without that entry.                                                                                                                            |
 
 Entry shape: **key** — any non-empty valid UTF-8 string, case-sensitive; **value** — any valid
 UTF-8 string, case-sensitive; **metadata** — optional opaque string. Exactly one value is
@@ -368,10 +368,10 @@ outside the allowed set must be percent-encoded per RFC 3986.
 
 #### Limits
 
-| Limit | Requirement |
-|---|---|
-| Max list-members | Implementations **must** propagate all list-members when the total is **64 or fewer** |
-| Max header size | Implementations **must** propagate the full baggage-string when it is **8192 bytes or fewer** |
+| Limit             | Requirement                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Max list-members  | Implementations **must** propagate all list-members when the total is **64 or fewer**                                                                   |
+| Max header size   | Implementations **must** propagate the full baggage-string when it is **8192 bytes or fewer**                                                           |
 | Over either limit | Implementations **may** drop list-members to come back into compliance (no single normative drop order is mandated the way `tracestate` prescribes one) |
 
 No minimum-length constraint is specified for individual keys/values.
@@ -401,13 +401,13 @@ deprecation noted at https://opentelemetry.io/docs/specs/otel/context/api-propag
 
 ### B3 multi-header format
 
-| Header | Format |
-|---|---|
-| `X-B3-TraceId` | 16 (64-bit) or 32 (128-bit) lowercase hex chars |
-| `X-B3-SpanId` | 16 lowercase hex chars (64-bit) |
-| `X-B3-ParentSpanId` | 16 lowercase hex chars; optional, absent on root spans |
-| `X-B3-Sampled` | `1` = accept/sampled, `0` = deny/not-sampled; absent = defer decision downstream |
-| `X-B3-Flags` | Debug flag; `1` implies an accept/sampled decision, overriding `X-B3-Sampled` |
+| Header              | Format                                                                           |
+| ------------------- | -------------------------------------------------------------------------------- |
+| `X-B3-TraceId`      | 16 (64-bit) or 32 (128-bit) lowercase hex chars                                  |
+| `X-B3-SpanId`       | 16 lowercase hex chars (64-bit)                                                  |
+| `X-B3-ParentSpanId` | 16 lowercase hex chars; optional, absent on root spans                           |
+| `X-B3-Sampled`      | `1` = accept/sampled, `0` = deny/not-sampled; absent = defer decision downstream |
+| `X-B3-Flags`        | Debug flag; `1` implies an accept/sampled decision, overriding `X-B3-Sampled`    |
 
 ### B3 single-header format
 

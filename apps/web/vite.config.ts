@@ -45,6 +45,10 @@ export default defineConfig(({ mode }) => {
 		// Injected at deploy time (CI sets VITE_COMMIT_SHA=github.sha); stamped onto
 		// browser telemetry as `deployment.commit_sha` / `service.version`.
 		"VITE_COMMIT_SHA",
+		// "off" disables rrweb self-recording. The perf bench sets it via
+		// process.env (playwright.config.ts) and must win over any `.env*` value,
+		// or bench runs would record and post sessions to real ingest.
+		"VITE_MAPLE_REPLAY",
 	] as const
 	const define: Record<string, string> = {}
 	for (const key of overrideKeys) {

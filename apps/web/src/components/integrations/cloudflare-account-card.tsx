@@ -283,8 +283,8 @@ export function CloudflareAccountCard() {
 				<>
 					{banner}
 					<p className="text-xs text-muted-foreground">
-						Traffic data starts arriving within a few minutes — your zones and Workers will
-						appear here.
+						Traffic data starts arriving within a few minutes — your zones and Workers will appear
+						here.
 					</p>
 				</>
 			)}

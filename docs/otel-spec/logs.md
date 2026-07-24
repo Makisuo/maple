@@ -80,20 +80,20 @@ All fields are conceptually optional at the data-model level (a valid `LogRecord
 fields populated — see [§2.4](#24-minimal-validity--missing-fields)); the table below states each
 field's type, meaning, and the specific SHOULD/MUST guidance the spec attaches to it.
 
-| Field | Type | Meaning | Requirement-level notes |
-|---|---|---|---|
-| `Timestamp` | `uint64` nanoseconds since Unix epoch | Time the event occurred, per the **origin clock** (i.e., the producer's clock, which may be unsynchronized) | Optional. May be omitted for early instrumentation phases per the spec's incremental-adoption note. |
-| `ObservedTimestamp` | `uint64` nanoseconds since Unix epoch | Time the OpenTelemetry collection/observation system (SDK, collector, receiver) **first observed/recorded** the event, e.g. file-read time for tailed logs | SHOULD be set when the event's true origin timestamp is unavailable or untrusted. If unspecified by an SDK's `Emit`, the SDK **SHOULD** set it to current time (see [§4 SDK](#41-logrecord-lifecycle--observedtimestamp-default)). |
-| `TraceId` | byte sequence (16 bytes on the wire) | W3C Trace Context trace identifier for the request being processed when the log was emitted | Optional. |
-| `SpanId` | byte sequence (8 bytes on the wire) | Identifier of the specific span being processed when the log was emitted | Optional, but **if `SpanId` is present, `TraceId` SHOULD also be present.** |
-| `TraceFlags` | 1 byte | W3C trace flags (currently only defines the `SAMPLED` bit) | Optional. |
-| `SeverityText` | string | The **original**, source-native string representation of severity (e.g. `"WARN"`, `"ERR"`, framework-specific spelling) — preserved as-is, not normalized | Optional. |
-| `SeverityNumber` | integer, 0–24 | The **normalized** severity, mapped onto OpenTelemetry's fixed 1–24 numeric scale (0 = unspecified) | Optional. See full table in [§2.2](#22-severitynumber-reference-table). |
-| `Body` | `AnyValue` | The log payload: a human-readable message string, **or** structured data (maps/arrays/scalars) | Optional. Body **MUST support `AnyValue`** so structured logs from applications survive without lossy stringification. |
-| `Resource` | `Resource` | Describes the entity producing the log (same `Resource` model as traces/metrics) | Optional at the data-model layer; in practice always populated by the SDK. |
-| `InstrumentationScope` | `InstrumentationScope` | The logger (name/version/schema_url/attributes) that emitted the record; stable across many log events from the same source | Optional at the data-model layer; populated by the SDK. |
-| `Attributes` | collection of key-value pairs | Additional structured data about this **specific occurrence** (as opposed to `Resource`, which describes the origin) | Optional. Subject to the same attribute limits as spans (count/length limits, see [§4.3](#43-logrecord-limits)). |
-| `EventName` | string | Identifies the **class/type** of the event this log record represents | Optional. A non-empty `EventName` makes this record an **Event** — see [§5](#5-events). |
+| Field                  | Type                                  | Meaning                                                                                                                                                    | Requirement-level notes                                                                                                                                                                                                            |
+| ---------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Timestamp`            | `uint64` nanoseconds since Unix epoch | Time the event occurred, per the **origin clock** (i.e., the producer's clock, which may be unsynchronized)                                                | Optional. May be omitted for early instrumentation phases per the spec's incremental-adoption note.                                                                                                                                |
+| `ObservedTimestamp`    | `uint64` nanoseconds since Unix epoch | Time the OpenTelemetry collection/observation system (SDK, collector, receiver) **first observed/recorded** the event, e.g. file-read time for tailed logs | SHOULD be set when the event's true origin timestamp is unavailable or untrusted. If unspecified by an SDK's `Emit`, the SDK **SHOULD** set it to current time (see [§4 SDK](#41-logrecord-lifecycle--observedtimestamp-default)). |
+| `TraceId`              | byte sequence (16 bytes on the wire)  | W3C Trace Context trace identifier for the request being processed when the log was emitted                                                                | Optional.                                                                                                                                                                                                                          |
+| `SpanId`               | byte sequence (8 bytes on the wire)   | Identifier of the specific span being processed when the log was emitted                                                                                   | Optional, but **if `SpanId` is present, `TraceId` SHOULD also be present.**                                                                                                                                                        |
+| `TraceFlags`           | 1 byte                                | W3C trace flags (currently only defines the `SAMPLED` bit)                                                                                                 | Optional.                                                                                                                                                                                                                          |
+| `SeverityText`         | string                                | The **original**, source-native string representation of severity (e.g. `"WARN"`, `"ERR"`, framework-specific spelling) — preserved as-is, not normalized  | Optional.                                                                                                                                                                                                                          |
+| `SeverityNumber`       | integer, 0–24                         | The **normalized** severity, mapped onto OpenTelemetry's fixed 1–24 numeric scale (0 = unspecified)                                                        | Optional. See full table in [§2.2](#22-severitynumber-reference-table).                                                                                                                                                            |
+| `Body`                 | `AnyValue`                            | The log payload: a human-readable message string, **or** structured data (maps/arrays/scalars)                                                             | Optional. Body **MUST support `AnyValue`** so structured logs from applications survive without lossy stringification.                                                                                                             |
+| `Resource`             | `Resource`                            | Describes the entity producing the log (same `Resource` model as traces/metrics)                                                                           | Optional at the data-model layer; in practice always populated by the SDK.                                                                                                                                                         |
+| `InstrumentationScope` | `InstrumentationScope`                | The logger (name/version/schema_url/attributes) that emitted the record; stable across many log events from the same source                                | Optional at the data-model layer; populated by the SDK.                                                                                                                                                                            |
+| `Attributes`           | collection of key-value pairs         | Additional structured data about this **specific occurrence** (as opposed to `Resource`, which describes the origin)                                       | Optional. Subject to the same attribute limits as spans (count/length limits, see [§4.3](#43-logrecord-limits)).                                                                                                                   |
+| `EventName`            | string                                | Identifies the **class/type** of the event this log record represents                                                                                      | Optional. A non-empty `EventName` makes this record an **Event** — see [§5](#5-events).                                                                                                                                            |
 
 Source: https://opentelemetry.io/docs/specs/otel/logs/data-model/#log-and-event-record-definition
 
@@ -102,33 +102,33 @@ Source: https://opentelemetry.io/docs/specs/otel/logs/data-model/#log-and-event-
 The severity scale is a fixed 1–24 integer range divided into six named bands, each with a
 "finer-grained" sub-level (`+1`..`+4`) for systems whose native severities don't align exactly:
 
-| SeverityNumber | Name | Meaning |
-|---|---|---|
-| 0 | *(unspecified)* | No severity information; `SeverityNumber` omitted/zero. |
-| 1 | `TRACE` | A fine-grained debugging event. Typically disabled by default. |
-| 2 | `TRACE2` | |
-| 3 | `TRACE3` | |
-| 4 | `TRACE4` | |
-| 5 | `DEBUG` | A debugging event. |
-| 6 | `DEBUG2` | |
-| 7 | `DEBUG3` | |
-| 8 | `DEBUG4` | |
-| 9 | `INFO` | An informational event. Indicates that an event happened. |
-| 10 | `INFO2` | |
-| 11 | `INFO3` | |
-| 12 | `INFO4` | |
-| 13 | `WARN` | A warning event. Not an error but is likely more important than an informational event. |
-| 14 | `WARN2` | |
-| 15 | `WARN3` | |
-| 16 | `WARN4` | |
-| 17 | `ERROR` | An error event. Something went wrong. |
-| 18 | `ERROR2` | |
-| 19 | `ERROR3` | |
-| 20 | `ERROR4` | |
-| 21 | `FATAL` | A fatal error such as an application or system crash. |
-| 22 | `FATAL2` | |
-| 23 | `FATAL3` | |
-| 24 | `FATAL4` | |
+| SeverityNumber | Name            | Meaning                                                                                 |
+| -------------- | --------------- | --------------------------------------------------------------------------------------- |
+| 0              | _(unspecified)_ | No severity information; `SeverityNumber` omitted/zero.                                 |
+| 1              | `TRACE`         | A fine-grained debugging event. Typically disabled by default.                          |
+| 2              | `TRACE2`        |                                                                                         |
+| 3              | `TRACE3`        |                                                                                         |
+| 4              | `TRACE4`        |                                                                                         |
+| 5              | `DEBUG`         | A debugging event.                                                                      |
+| 6              | `DEBUG2`        |                                                                                         |
+| 7              | `DEBUG3`        |                                                                                         |
+| 8              | `DEBUG4`        |                                                                                         |
+| 9              | `INFO`          | An informational event. Indicates that an event happened.                               |
+| 10             | `INFO2`         |                                                                                         |
+| 11             | `INFO3`         |                                                                                         |
+| 12             | `INFO4`         |                                                                                         |
+| 13             | `WARN`          | A warning event. Not an error but is likely more important than an informational event. |
+| 14             | `WARN2`         |                                                                                         |
+| 15             | `WARN3`         |                                                                                         |
+| 16             | `WARN4`         |                                                                                         |
+| 17             | `ERROR`         | An error event. Something went wrong.                                                   |
+| 18             | `ERROR2`        |                                                                                         |
+| 19             | `ERROR3`        |                                                                                         |
+| 20             | `ERROR4`        |                                                                                         |
+| 21             | `FATAL`         | A fatal error such as an application or system crash.                                   |
+| 22             | `FATAL2`        |                                                                                         |
+| 23             | `FATAL3`        |                                                                                         |
+| 24             | `FATAL4`        |                                                                                         |
 
 Normative guidance for producers mapping a **source system's own severities** onto this scale:
 
@@ -210,7 +210,7 @@ application developers to call directly in everyday code**. The primary audience
 
 - **Log appender / bridge authors** — people writing the glue that lets an existing logging
   library (Log4j, Winston, `slog`, Python `logging`, etc.) emit through OpenTelemetry.
-- Secondarily, instrumentation and instrumented-library authors, who *may* call it directly, though
+- Secondarily, instrumentation and instrumented-library authors, who _may_ call it directly, though
   a language may offer a more ergonomic wrapper for that purpose.
 
 This matters for Maple only insofar as we should not expect our own application code (if we ever
@@ -308,12 +308,12 @@ Passes each finished `LogRecord` to its configured `exporter` **immediately**, s
 Buffers records into batches before handing them to the exporter. Configurable parameters and
 **their environment variables** (general SDK env var spec):
 
-| Parameter | Env var | Default | Notes |
-|---|---|---|---|
-| Max queue size | `OTEL_BLRP_MAX_QUEUE_SIZE` | `2048` | Maximum number of `LogRecord`s buffered before drop. |
-| Scheduled delay | `OTEL_BLRP_SCHEDULE_DELAY` | `1000` (ms) | Delay between consecutive batch exports. |
-| Export timeout | `OTEL_BLRP_EXPORT_TIMEOUT` | `30000` (ms) | Max time allowed for a single export call. |
-| Max export batch size | `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | `512` | Must be `<=` max queue size. |
+| Parameter             | Env var                           | Default      | Notes                                                |
+| --------------------- | --------------------------------- | ------------ | ---------------------------------------------------- |
+| Max queue size        | `OTEL_BLRP_MAX_QUEUE_SIZE`        | `2048`       | Maximum number of `LogRecord`s buffered before drop. |
+| Scheduled delay       | `OTEL_BLRP_SCHEDULE_DELAY`        | `1000` (ms)  | Delay between consecutive batch exports.             |
+| Export timeout        | `OTEL_BLRP_EXPORT_TIMEOUT`        | `30000` (ms) | Max time allowed for a single export call.           |
+| Max export batch size | `OTEL_BLRP_MAX_EXPORT_BATCH_SIZE` | `512`        | Must be `<=` max queue size.                         |
 
 All numeric values must be positive. (`BLRP` = **B**atch **L**og**R**ecord **P**rocessor — same
 naming pattern as `BSP` for spans.)
@@ -336,10 +336,10 @@ Source: https://opentelemetry.io/docs/specs/otel/logs/sdk/#logrecordexporter
 
 The SDK enforces the same family of attribute limits used for spans, applied to `LogRecord.Attributes`:
 
-| Parameter | Env var | Default | Notes |
-|---|---|---|---|
-| Attribute count limit | `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT` | `128` | Non-negative integer; extra attributes past this count are dropped (and counted in `dropped_attributes_count` on the wire). |
-| Attribute value length limit | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT` | no limit | Non-negative integer; truncates attribute values longer than this. |
+| Parameter                    | Env var                                       | Default  | Notes                                                                                                                       |
+| ---------------------------- | --------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Attribute count limit        | `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`        | `128`    | Non-negative integer; extra attributes past this count are dropped (and counted in `dropped_attributes_count` on the wire). |
+| Attribute value length limit | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT` | no limit | Non-negative integer; truncates attribute values longer than this.                                                          |
 
 Source: https://opentelemetry.io/docs/specs/otel/logs/sdk/#logrecord-limits and
 https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/configuration/sdk-environment-variables.md
@@ -347,9 +347,9 @@ https://github.com/open-telemetry/opentelemetry-specification/blob/main/specific
 
 ### 4.6 Exporter selection
 
-| Env var | Default | Known values |
-|---|---|---|
-| `OTEL_LOGS_EXPORTER` | `otlp` | `otlp`, `console`, `logging` (deprecated alias for `console`), `none`. Implementations may accept a comma-separated list to configure multiple exporters simultaneously. |
+| Env var              | Default | Known values                                                                                                                                                             |
+| -------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OTEL_LOGS_EXPORTER` | `otlp`  | `otlp`, `console`, `logging` (deprecated alias for `console`), `none`. Implementations may accept a comma-separated list to configure multiple exporters simultaneously. |
 
 Source: https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/configuration/sdk-environment-variables.md
 (§ "Exporter Selection")
@@ -368,7 +368,7 @@ Source: https://opentelemetry.io/docs/specs/otel/logs/sdk/#concurrency-requireme
 ## 5. Events
 
 **Stability: Development / actively changing (2026).** This is the area of the spec most in flux
-— report here reflects the *current* normative direction, not a settled long-term API.
+— report here reflects the _current_ normative direction, not a settled long-term API.
 
 ### 5.1 Current model: Events are log-based, not a separate signal
 
@@ -436,16 +436,16 @@ Source: https://opentelemetry.io/blog/2026/deprecating-span-events/
 
 ## 6. Stability summary
 
-| Area | Stability (as stated by spec) | Source |
-|---|---|---|
-| Logs Data Model | Stable | https://opentelemetry.io/docs/specs/otel/logs/data-model/ |
-| Data Model Appendix (mappings) | Stable | https://opentelemetry.io/docs/specs/otel/logs/data-model-appendix/ |
-| Logs API ("Bridge API") | Stable, except Ergonomic API (Development) | https://opentelemetry.io/docs/specs/otel/logs/api/ |
-| Logs SDK | Stable, except `LoggerConfigurator`/`LoggerConfig`/`Enabled`-filtering/event-to-span-event-bridge processor (Development) | https://opentelemetry.io/docs/specs/otel/logs/sdk/ |
-| OTLP Logs wire format (`logs.proto`) | Stable (part of OTLP) | https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto |
-| Events (semantic-convention layer, `EventName`) | **Development** | https://opentelemetry.io/docs/specs/semconv/general/events/ |
-| Span Events API (`Span.AddEvent`) | **Deprecated** (transition to log-based events in progress) | https://opentelemetry.io/blog/2026/deprecating-span-events/ |
-| Standalone Event API/SDK (`logs/event-api.md`) | **Removed** — folded into Logs Data Model / API | (confirmed absent on `main`; last present at tag [v1.35.0](https://github.com/open-telemetry/opentelemetry-specification/blob/v1.35.0/specification/logs/event-api.md)) |
+| Area                                            | Stability (as stated by spec)                                                                                             | Source                                                                                                                                                                  |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Logs Data Model                                 | Stable                                                                                                                    | https://opentelemetry.io/docs/specs/otel/logs/data-model/                                                                                                               |
+| Data Model Appendix (mappings)                  | Stable                                                                                                                    | https://opentelemetry.io/docs/specs/otel/logs/data-model-appendix/                                                                                                      |
+| Logs API ("Bridge API")                         | Stable, except Ergonomic API (Development)                                                                                | https://opentelemetry.io/docs/specs/otel/logs/api/                                                                                                                      |
+| Logs SDK                                        | Stable, except `LoggerConfigurator`/`LoggerConfig`/`Enabled`-filtering/event-to-span-event-bridge processor (Development) | https://opentelemetry.io/docs/specs/otel/logs/sdk/                                                                                                                      |
+| OTLP Logs wire format (`logs.proto`)            | Stable (part of OTLP)                                                                                                     | https://github.com/open-telemetry/opentelemetry-proto/blob/main/opentelemetry/proto/logs/v1/logs.proto                                                                  |
+| Events (semantic-convention layer, `EventName`) | **Development**                                                                                                           | https://opentelemetry.io/docs/specs/semconv/general/events/                                                                                                             |
+| Span Events API (`Span.AddEvent`)               | **Deprecated** (transition to log-based events in progress)                                                               | https://opentelemetry.io/blog/2026/deprecating-span-events/                                                                                                             |
+| Standalone Event API/SDK (`logs/event-api.md`)  | **Removed** — folded into Logs Data Model / API                                                                           | (confirmed absent on `main`; last present at tag [v1.35.0](https://github.com/open-telemetry/opentelemetry-specification/blob/v1.35.0/specification/logs/event-api.md)) |
 
 ---
 

@@ -7,6 +7,7 @@ import { migration_0005_alert_checks_error_columns } from "./0005_alert_checks_e
 import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
 import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hyperdrive"
 import { migration_0008_service_operations_minutely } from "./0008_service_operations_minutely"
+import { migration_0009_one_year_service_history } from "./0009_one_year_service_history"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -44,6 +45,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0006_db_edge_namespace,
 	migration_0007_db_namespace_hyperdrive,
 	migration_0008_service_operations_minutely,
+	migration_0009_one_year_service_history,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied

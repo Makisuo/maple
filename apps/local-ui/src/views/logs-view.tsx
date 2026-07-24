@@ -13,7 +13,11 @@ import { DEFAULT_RANGE } from "../lib/time"
 import { normalizeLog, type LocalLog } from "../lib/log-shape"
 import { LogDetailSheet } from "../components/log-detail-sheet"
 import { FilterSection, SearchableFilterSection } from "@maple/ui/components/filters/filter-section"
-import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
+import {
+	FilterSidebarBody,
+	FilterSidebarFrame,
+	FilterSidebarHeader,
+} from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
@@ -63,7 +67,10 @@ export function LogsView() {
 	const hasActiveFilters = !!service || !!severity
 
 	const sidebar = (
-		<FilterSidebarFrame className="w-56 shrink-0 px-4" waiting={services.isFetching || severities.isFetching}>
+		<FilterSidebarFrame
+			className="w-56 shrink-0 px-4"
+			waiting={services.isFetching || severities.isFetching}
+		>
 			<FilterSidebarHeader
 				canClear={hasActiveFilters}
 				onClear={() => setParams({ service: null, severity: null })}

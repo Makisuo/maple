@@ -1,19 +1,9 @@
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { Schema } from "effect"
-import {
-	ScrapeAuthType,
-	ScrapeIntervalSeconds,
-	ScrapeTargetId,
-	ScrapeTargetType,
-} from "../../primitives"
+import { ScrapeAuthType, ScrapeIntervalSeconds, ScrapeTargetId, ScrapeTargetType } from "../../primitives"
 import { AuthorizationV2, V2SchemaErrors } from "./auth"
 import { ListOf, ListQuery, Timestamp } from "./envelopes"
-import {
-	V2InvalidRequestError,
-	V2NotFoundError,
-	V2ServiceUnavailableError,
-	V2UpstreamError,
-} from "./errors"
+import { V2InvalidRequestError, V2NotFoundError, V2ServiceUnavailableError, V2UpstreamError } from "./errors"
 import { PublicId, PublicIdPrefixes } from "./public-id"
 
 /** See api-keys.ts: examples are authored in wire (encoded) shape. */
@@ -170,7 +160,8 @@ export const V2ScrapeTargetCreateParams = Schema.Struct({
 	),
 	auth_credentials: Schema.optionalKey(
 		Schema.NullOr(Schema.String).annotate({
-			description: "Credentials for the target endpoint, matching `auth_type`. Write-only — never returned.",
+			description:
+				"Credentials for the target endpoint, matching `auth_type`. Write-only — never returned.",
 		}),
 	),
 	enabled: Schema.optionalKey(
@@ -204,7 +195,8 @@ export const V2ScrapeTargetUpdateParams = Schema.Struct({
 	),
 	include_branches: Schema.optionalKey(
 		Schema.Array(Schema.String).annotate({
-			description: "PlanetScale only — branch glob allowlist (empty array clears it; omit = unchanged).",
+			description:
+				"PlanetScale only — branch glob allowlist (empty array clears it; omit = unchanged).",
 		}),
 	),
 	exclude_branches: Schema.optionalKey(

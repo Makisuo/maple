@@ -103,7 +103,8 @@ const isMissingServiceOperationsRollup = (error: unknown): boolean => {
 	return (
 		candidate._tag === "@maple/http/errors/WarehouseConfigError" &&
 		(candidate.clickhouseType === "UNKNOWN_TABLE" ||
-			(typeof candidate.message === "string" && /service_operations_minutely/i.test(candidate.message)))
+			(typeof candidate.message === "string" &&
+				/service_operations_(?:minutely|hourly)/i.test(candidate.message)))
 	)
 }
 
@@ -1649,6 +1650,7 @@ export const HttpQueryEngineLive = HttpApiBuilder.group(MapleApi, "queryEngine",
 								serviceName: payload.serviceName,
 								environments: payload.environments,
 								spanNames,
+								bucketSeconds,
 							}
 							const timeseriesParams = { ...params, bucketSeconds }
 							const runRawTimeseries = () =>

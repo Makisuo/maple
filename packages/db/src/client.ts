@@ -51,10 +51,8 @@ export const createMaplePgClient = (
 export type MaplePgClient = ReturnType<typeof drizzlePostgres<typeof schema>>
 
 /** Drizzle over an embedded PGlite instance — local dev and vitest. */
-export const createMaplePgliteClient = (
-	pglite: PGlite,
-	options?: Pick<MaplePgClientOptions, "onQuery">,
-) => drizzlePglite(pglite, { schema, logger: toDrizzleLogger(options?.onQuery) })
+export const createMaplePgliteClient = (pglite: PGlite, options?: Pick<MaplePgClientOptions, "onQuery">) =>
+	drizzlePglite(pglite, { schema, logger: toDrizzleLogger(options?.onQuery) })
 
 export type MaplePgliteClient = ReturnType<typeof createMaplePgliteClient>
 

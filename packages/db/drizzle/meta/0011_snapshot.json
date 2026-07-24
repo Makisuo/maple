@@ -983,11 +983,7 @@
 			"compositePrimaryKeys": {
 				"alert_rule_states_org_id_rule_id_group_key_pk": {
 					"name": "alert_rule_states_org_id_rule_id_group_key_pk",
-					"columns": [
-						"org_id",
-						"rule_id",
-						"group_key"
-					]
+					"columns": ["org_id", "rule_id", "group_key"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -1518,10 +1514,7 @@
 			"compositePrimaryKeys": {
 				"anomaly_detector_states_org_id_detector_key_pk": {
 					"name": "anomaly_detector_states_org_id_detector_key_pk",
-					"columns": [
-						"org_id",
-						"detector_key"
-					]
+					"columns": ["org_id", "detector_key"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -2403,10 +2396,7 @@
 			"compositePrimaryKeys": {
 				"dashboard_versions_org_id_id_pk": {
 					"name": "dashboard_versions_org_id_id_pk",
-					"columns": [
-						"org_id",
-						"id"
-					]
+					"columns": ["org_id", "id"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -2522,10 +2512,7 @@
 			"compositePrimaryKeys": {
 				"dashboards_org_id_id_pk": {
 					"name": "dashboards_org_id_id_pk",
-					"columns": [
-						"org_id",
-						"id"
-					]
+					"columns": ["org_id", "id"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -3131,10 +3118,7 @@
 			"compositePrimaryKeys": {
 				"error_issue_states_org_id_issue_id_pk": {
 					"name": "error_issue_states_org_id_issue_id_pk",
-					"columns": [
-						"org_id",
-						"issue_id"
-					]
+					"columns": ["org_id", "issue_id"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -4660,9 +4644,7 @@
 			"compositePrimaryKeys": {
 				"org_ingest_keys_org_id_pk": {
 					"name": "org_ingest_keys_org_id_pk",
-					"columns": [
-						"org_id"
-					]
+					"columns": ["org_id"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -4823,9 +4805,7 @@
 			"compositePrimaryKeys": {
 				"org_clickhouse_settings_org_id_pk": {
 					"name": "org_clickhouse_settings_org_id_pk",
-					"columns": [
-						"org_id"
-					]
+					"columns": ["org_id"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -4927,9 +4907,7 @@
 			"compositePrimaryKeys": {
 				"org_clickhouse_schema_apply_runs_org_id_pk": {
 					"name": "org_clickhouse_schema_apply_runs_org_id_pk",
-					"columns": [
-						"org_id"
-					]
+					"columns": ["org_id"]
 				}
 			},
 			"uniqueConstraints": {},
@@ -5036,12 +5014,8 @@
 					"name": "scrape_target_checks_target_id_scrape_targets_id_fk",
 					"tableFrom": "scrape_target_checks",
 					"tableTo": "scrape_targets",
-					"columnsFrom": [
-						"target_id"
-					],
-					"columnsTo": [
-						"id"
-					],
+					"columnsFrom": ["target_id"],
+					"columnsTo": ["id"],
 					"onDelete": "cascade",
 					"onUpdate": "no action"
 				}

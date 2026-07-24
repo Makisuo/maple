@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
 import { Exit, Schema } from "effect"
-import { Fragment, useMemo, useState } from "react"
+import { Fragment, useCallback, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
@@ -13,7 +13,7 @@ import { useEffectiveTimeRange } from "@/hooks/use-effective-time-range"
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh-context"
 import { applyTimeRangeSearch } from "@/components/time-range-picker/search"
-import { presetLabel, formatTimeRangeDisplay } from "@/lib/time-utils"
+import { LONG_RANGE_PRESET_OPTIONS, presetLabel, formatTimeRangeDisplay } from "@/lib/time-utils"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { AlertRuleChart } from "@/components/alerts/alert-rule-chart"
 import { IncidentTimelineStrip } from "@/components/alerts/incident-timeline-strip"
@@ -30,23 +30,20 @@ import {
 	formatAlertDuration,
 	computeIncidentStats,
 	getExitErrorMessage,
+	v2CheckToDocument,
 } from "@/lib/alerts/form-utils"
 import { RuleDiagnosisPanel } from "@/components/alerts/rule-detail/rule-diagnosis-panel"
 import { useAlertRuleStates } from "@/hooks/use-alert-rule-states"
 import {
 	AlertRuleId,
+	AlertCheckDocument,
 	IsoDateTimeString,
 	type AiTriageResult,
-	type AlertCheckDocument,
 	type AlertDestinationDocument,
 	type AlertIncidentDocument,
 	type AlertRuleDocument,
 } from "@maple/domain/http"
-import {
-	useAlertDestinationsList,
-	useAlertIncidentsList,
-	useAlertRulesList,
-} from "@/hooks/use-alerts-list"
+import { useAlertDestinationsList, useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { AiTriageCard } from "@/components/ai-triage/ai-triage-card"
 import { AlertChatSheet } from "@/components/alerts/alert-chat-sheet"
 import { toAlertContext, type AlertContext } from "@/components/chat/alert-context"
@@ -75,6 +72,7 @@ import {
 import { useAlertRulePreview } from "@/hooks/use-alert-rule-preview"
 import { tokenizeSql } from "@/lib/sql-highlight"
 import { formatSql } from "@/lib/sql-format"
+import { runMapleApiV2 } from "@/lib/collections/api-runner"
 
 const tabValues = ["overview", "history"] as const
 type RuleDetailTab = (typeof tabValues)[number]
@@ -85,6 +83,7 @@ const NO_RULES: ReadonlyArray<AlertRuleDocument> = []
 const NO_INCIDENTS: ReadonlyArray<AlertIncidentDocument> = []
 const NO_CHECKS: ReadonlyArray<AlertCheckDocument> = []
 const NO_DESTINATIONS: ReadonlyArray<AlertDestinationDocument> = []
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60
 
 // Decode the raw `$ruleId` URL segment into its branded id once, at the route
 // boundary, so the branded value threads through the checks/states queries
@@ -176,6 +175,13 @@ function RuleDetailContent() {
 				.orElse(() => NO_CHECKS),
 		[checksResult],
 	)
+	const checksPage = useMemo(
+		() =>
+			Result.builder(checksResult)
+				.onSuccess((response) => response)
+				.orElse(() => null),
+		[checksResult],
+	)
 	const destinations = useMemo(
 		() =>
 			Result.builder(destinationsResult)
@@ -192,6 +198,44 @@ function RuleDetailContent() {
 	)
 
 	const rule = useMemo(() => rules.find((r) => r.id === ruleId) ?? null, [rules, ruleId])
+	const chartChecks = useMemo(() => {
+		if (rule == null || checksPage == null || checksPage.summary.points.length === 0) return checks
+		return checksPage.summary.points.map((point) => {
+			const status: AlertCheckDocument["status"] =
+				point.errorCount > 0
+					? "error"
+					: point.breachedCount > 0
+						? "breached"
+						: point.healthyCount > 0
+							? "healthy"
+							: "skipped"
+			const bucketStart = IsoDateTimeString.make(point.bucket)
+			const bucketEnd = IsoDateTimeString.make(
+				new Date(Date.parse(point.bucket) + checksPage.summary.bucketSeconds * 1000).toISOString(),
+			)
+			return new AlertCheckDocument({
+				timestamp: bucketStart,
+				groupKey: point.groupKey,
+				status,
+				signalType: rule.signalType,
+				comparator: rule.comparator,
+				threshold: point.threshold,
+				thresholdUpper: rule.thresholdUpper,
+				observedValue: point.observedValue,
+				sampleCount: point.totalCount,
+				windowMinutes: Math.max(1, Math.round(checksPage.summary.bucketSeconds / 60)),
+				windowStart: bucketStart,
+				windowEnd: bucketEnd,
+				consecutiveBreaches: 0,
+				consecutiveHealthy: 0,
+				incidentId: null,
+				incidentTransition: point.transitionCount > 0 ? "continued" : "none",
+				evaluationDurationMs: 0,
+				errorMessage: null,
+				errorCategory: null,
+			})
+		})
+	}, [checks, checksPage, rule])
 
 	const ruleIncidents = useMemo(
 		() =>
@@ -207,10 +251,7 @@ function RuleDetailContent() {
 
 	// Memoized so RuleDiagnosisPanel's buildDiagnosis memo can hold — a fresh
 	// filter() identity here recomputed the whole diagnosis every render.
-	const openRuleIncidents = useMemo(
-		() => ruleIncidents.filter((i) => i.status === "open"),
-		[ruleIncidents],
-	)
+	const openRuleIncidents = useMemo(() => ruleIncidents.filter((i) => i.status === "open"), [ruleIncidents])
 
 	// Wall clock for the diagnosis's relative-time labels. Deliberately NOT a
 	// live ticker: it refreshes only when the diagnosis's data inputs change
@@ -282,9 +323,7 @@ function RuleDetailContent() {
 
 	if (Result.isInitial(rulesResult)) {
 		return (
-			<DashboardLayout
-				breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}
-			>
+			<DashboardLayout breadcrumbs={[{ label: "Alerts", href: "/alerts" }, { label: "Loading..." }]}>
 				{/* Mirror the settled Overview rhythm so the first paint doesn't snap. */}
 				<div className="space-y-6">
 					<Skeleton className="h-14 w-full" />
@@ -321,11 +360,7 @@ function RuleDetailContent() {
 						<Button variant="outline" size="sm" onClick={() => refreshRules()}>
 							Retry
 						</Button>
-						<Button
-							variant="outline"
-							size="sm"
-							render={<Link to="/alerts" />}
-						>
+						<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
 							Back to rules
 						</Button>
 					</div>
@@ -350,11 +385,7 @@ function RuleDetailContent() {
 							This alert rule could not be found. It may have been deleted.
 						</EmptyDescription>
 					</EmptyHeader>
-					<Button
-						variant="outline"
-						size="sm"
-						render={<Link to="/alerts" />}
-					>
+					<Button variant="outline" size="sm" render={<Link to="/alerts" />}>
 						Back to rules
 					</Button>
 				</Empty>
@@ -420,6 +451,8 @@ function RuleDetailContent() {
 						endTime={search.endTime}
 						presetValue={search.timePreset ?? (search.startTime ? undefined : "24h")}
 						defaultPreset="24h"
+						presets={LONG_RANGE_PRESET_OPTIONS}
+						maxRangeSeconds={ONE_YEAR_SECONDS}
 						onTimeChange={(range) =>
 							navigate({ search: (prev) => applyTimeRangeSearch(prev, range) })
 						}
@@ -454,7 +487,7 @@ function RuleDetailContent() {
 						</h2>
 						<AlertRuleChart
 							preview={preview}
-							checks={checks}
+							checks={chartChecks}
 							incidents={ruleIncidents}
 							threshold={rule.threshold}
 							thresholdUpper={rule.thresholdUpper}
@@ -638,8 +671,13 @@ function RuleDetailContent() {
 						))
 						.orElse(() => (
 							<ChecksPanel
+								key={`${since}|${until}|${checkStatusFilter}`}
 								rule={rule}
 								checks={checks}
+								summaryTotals={checksPage?.summary.totals}
+								nextCursor={checksPage?.nextCursor ?? null}
+								since={since}
+								until={until}
 								loading={Result.isInitial(checksResult)}
 								statusFilter={checkStatusFilter}
 								setStatusFilter={setCheckStatusFilter}
@@ -663,9 +701,7 @@ function RuleDetailContent() {
 									<CircleWarningIcon size={18} />
 								</EmptyMedia>
 								<EmptyTitle>Failed to load incidents</EmptyTitle>
-								<EmptyDescription>
-									{formatBackendError(error).description}
-								</EmptyDescription>
+								<EmptyDescription>{formatBackendError(error).description}</EmptyDescription>
 							</EmptyHeader>
 							<Button variant="outline" size="sm" onClick={() => refreshIncidents()}>
 								Retry
@@ -768,141 +804,162 @@ function RuleDetailContent() {
 											const isExpanded = expandedIncidentId === incident.id
 											return (
 												<Fragment key={incident.id}>
-												<TableRow>
-													<TableCell>
-														<AlertStatusBadge
-															state={isOpen ? "firing" : "resolved"}
-														/>
-													</TableCell>
-													<TableCell>
-														<span className="font-mono text-muted-foreground">
-															{incident.groupKey ?? "all"}
-														</span>
-													</TableCell>
-													<TableCell>
-														<div className="flex flex-wrap gap-1">
-															<Badge
-																variant="secondary"
-																className="text-xs font-mono"
-															>
-																{rule.signalType.replace("_", " ")}:{" "}
-																{formatSignalValue(
-																	rule.signalType,
-																	incident.lastObservedValue,
-																)}
-															</Badge>
-															<Badge
-																variant="secondary"
-																className="text-xs font-mono"
-															>
-																threshold:{" "}
-																{formatSignalValue(
-																	rule.signalType,
-																	incident.threshold,
-																)}
-															</Badge>
-														</div>
-													</TableCell>
-													<TableCell className="text-xs">
-														{formatAlertDateTimeFull(incident.firstTriggeredAt)}
-													</TableCell>
-													<TableCell>
-														<span
-															className={cn(
-																"text-xs tabular-nums",
-																isOpen && "text-destructive font-medium",
-															)}
-														>
-															{formatAlertDuration(
-																incident.firstTriggeredAt,
-																incident.resolvedAt,
-															)}
-														</span>
-													</TableCell>
-													<TableCell>
-														{incident.errorIssueId != null ? (
-															<Link
-																to="/errors/issues/$issueId"
-																params={{ issueId: incident.errorIssueId }}
-																className="text-xs text-primary underline-offset-4 hover:underline"
-															>
-																View
-															</Link>
-														) : (
-															<span className="text-xs text-muted-foreground/60">
-																—
-															</span>
-														)}
-													</TableCell>
-													<TableCell>
-														<div className="flex items-center justify-end gap-1">
-															<Button
-																variant="ghost"
-																size="icon-sm"
-																aria-label={isExpanded ? "Hide AI summary" : "Show AI summary"}
-																aria-expanded={isExpanded}
-																onClick={() =>
-																	setExpandedIncidentId(
-																		isExpanded ? null : incident.id,
-																	)
-																}
-															>
-																<ChevronDownIcon
-																	size={14}
-																	className={cn(
-																		"transition-transform",
-																		isExpanded && "rotate-180",
-																	)}
-																/>
-															</Button>
-															<DropdownMenu>
-																<DropdownMenuTrigger
-																	render={
-																		<Button variant="ghost" size="icon-sm" />
-																	}
-																>
-																	<DotsVerticalIcon size={14} />
-																</DropdownMenuTrigger>
-																<DropdownMenuContent align="end">
-																	<DropdownMenuItem
-																		onClick={() =>
-																			setExpandedIncidentId(
-																				isExpanded ? null : incident.id,
-																			)
-																		}
-																	>
-																		<ChatBubbleSparkleIcon size={14} />
-																		{isExpanded ? "Hide AI summary" : "AI summary"}
-																	</DropdownMenuItem>
-																	<DropdownMenuItem
-																		onClick={() =>
-																			navigate({
-																				to: "/alerts",
-																				search: { tab: "overview" },
-																			})
-																		}
-																	>
-																		View all incidents
-																	</DropdownMenuItem>
-																</DropdownMenuContent>
-															</DropdownMenu>
-														</div>
-													</TableCell>
-												</TableRow>
-												{isExpanded ? (
-													<TableRow className="bg-muted/30 hover:bg-muted/30">
-														<TableCell colSpan={7} className="p-4">
-															<AiTriageCard
-																incidentKind="alert"
-																incidentId={incident.id}
-																issueId={incident.errorIssueId ?? undefined}
-																onOpenChat={(result) =>
-																	openAlertChat(incident, result)
-																}
+													<TableRow>
+														<TableCell>
+															<AlertStatusBadge
+																state={isOpen ? "firing" : "resolved"}
 															/>
 														</TableCell>
+														<TableCell>
+															<span className="font-mono text-muted-foreground">
+																{incident.groupKey ?? "all"}
+															</span>
+														</TableCell>
+														<TableCell>
+															<div className="flex flex-wrap gap-1">
+																<Badge
+																	variant="secondary"
+																	className="text-xs font-mono"
+																>
+																	{rule.signalType.replace("_", " ")}:{" "}
+																	{formatSignalValue(
+																		rule.signalType,
+																		incident.lastObservedValue,
+																	)}
+																</Badge>
+																<Badge
+																	variant="secondary"
+																	className="text-xs font-mono"
+																>
+																	threshold:{" "}
+																	{formatSignalValue(
+																		rule.signalType,
+																		incident.threshold,
+																	)}
+																</Badge>
+															</div>
+														</TableCell>
+														<TableCell className="text-xs">
+															{formatAlertDateTimeFull(
+																incident.firstTriggeredAt,
+															)}
+														</TableCell>
+														<TableCell>
+															<span
+																className={cn(
+																	"text-xs tabular-nums",
+																	isOpen && "text-destructive font-medium",
+																)}
+															>
+																{formatAlertDuration(
+																	incident.firstTriggeredAt,
+																	incident.resolvedAt,
+																)}
+															</span>
+														</TableCell>
+														<TableCell>
+															{incident.errorIssueId != null ? (
+																<Link
+																	to="/errors/issues/$issueId"
+																	params={{
+																		issueId: incident.errorIssueId,
+																	}}
+																	className="text-xs text-primary underline-offset-4 hover:underline"
+																>
+																	View
+																</Link>
+															) : (
+																<span className="text-xs text-muted-foreground/60">
+																	—
+																</span>
+															)}
+														</TableCell>
+														<TableCell>
+															<div className="flex items-center justify-end gap-1">
+																<Button
+																	variant="ghost"
+																	size="icon-sm"
+																	aria-label={
+																		isExpanded
+																			? "Hide AI summary"
+																			: "Show AI summary"
+																	}
+																	aria-expanded={isExpanded}
+																	onClick={() =>
+																		setExpandedIncidentId(
+																			isExpanded ? null : incident.id,
+																		)
+																	}
+																>
+																	<ChevronDownIcon
+																		size={14}
+																		className={cn(
+																			"transition-transform",
+																			isExpanded && "rotate-180",
+																		)}
+																	/>
+																</Button>
+																<DropdownMenu>
+																	<DropdownMenuTrigger
+																		render={
+																			<Button
+																				variant="ghost"
+																				size="icon-sm"
+																			/>
+																		}
+																	>
+																		<DotsVerticalIcon size={14} />
+																	</DropdownMenuTrigger>
+																	<DropdownMenuContent align="end">
+																		<DropdownMenuItem
+																			onClick={() =>
+																				setExpandedIncidentId(
+																					isExpanded
+																						? null
+																						: incident.id,
+																				)
+																			}
+																		>
+																			<ChatBubbleSparkleIcon
+																				size={14}
+																			/>
+																			{isExpanded
+																				? "Hide AI summary"
+																				: "AI summary"}
+																		</DropdownMenuItem>
+																		<DropdownMenuItem
+																			onClick={() =>
+																				navigate({
+																					to: "/alerts",
+																					search: {
+																						tab: "overview",
+																					},
+																				})
+																			}
+																		>
+																			View all incidents
+																		</DropdownMenuItem>
+																	</DropdownMenuContent>
+																</DropdownMenu>
+															</div>
+														</TableCell>
 													</TableRow>
-												) : null}
+													{isExpanded ? (
+														<TableRow className="bg-muted/30 hover:bg-muted/30">
+															<TableCell colSpan={7} className="p-4">
+																<AiTriageCard
+																	incidentKind="alert"
+																	incidentId={incident.id}
+																	issueId={
+																		incident.errorIssueId ?? undefined
+																	}
+																	onOpenChat={(result) =>
+																		openAlertChat(incident, result)
+																	}
+																/>
+															</TableCell>
+														</TableRow>
+													) : null}
 												</Fragment>
 											)
 										})}
@@ -964,36 +1021,99 @@ type CheckStatusFilter = "all" | "breached" | "healthy" | "skipped" | "error"
 function ChecksPanel({
 	rule,
 	checks,
+	summaryTotals,
+	nextCursor: initialNextCursor,
+	since,
+	until,
 	loading,
 	statusFilter,
 	setStatusFilter,
 }: {
 	rule: AlertRuleDocument
 	checks: ReadonlyArray<AlertCheckDocument>
+	summaryTotals:
+		| {
+				readonly total: number
+				readonly breached: number
+				readonly healthy: number
+				readonly skipped: number
+				readonly error: number
+				readonly transitions: number
+		  }
+		| undefined
+	nextCursor: string | null
+	since: IsoDateTimeString
+	until: IsoDateTimeString
 	loading: boolean
 	statusFilter: CheckStatusFilter
 	setStatusFilter: (v: CheckStatusFilter) => void
 }) {
-	const totals = useMemo(() => {
+	const [extraChecks, setExtraChecks] = useState<ReadonlyArray<AlertCheckDocument>>([])
+	const [nextCursorOverride, setNextCursorOverride] = useState<string | null | undefined>(undefined)
+	const [loadingMore, setLoadingMore] = useState(false)
+	const nextCursor = nextCursorOverride === undefined ? initialNextCursor : nextCursorOverride
+	const loadedChecks = useMemo(() => {
+		const byKey = new Map<string, AlertCheckDocument>()
+		for (const check of [...checks, ...extraChecks]) {
+			byKey.set(`${check.timestamp}:${check.groupKey}:${check.status}`, check)
+		}
+		return [...byKey.values()]
+	}, [checks, extraChecks])
+	const loadedTotals = useMemo(() => {
 		let breached = 0
 		let healthy = 0
 		let skipped = 0
 		let errored = 0
 		let transitions = 0
-		for (const c of checks) {
+		for (const c of loadedChecks) {
 			if (c.status === "breached") breached += 1
 			else if (c.status === "healthy") healthy += 1
 			else if (c.status === "error") errored += 1
 			else skipped += 1
 			if (c.incidentTransition !== "none") transitions += 1
 		}
-		return { breached, healthy, skipped, errored, transitions, total: checks.length }
-	}, [checks])
+		return { breached, healthy, skipped, errored, transitions, total: loadedChecks.length }
+	}, [loadedChecks])
+	const totals = summaryTotals
+		? {
+				breached: summaryTotals.breached,
+				healthy: summaryTotals.healthy,
+				skipped: summaryTotals.skipped,
+				errored: summaryTotals.error,
+				transitions: summaryTotals.transitions,
+				total: summaryTotals.total,
+			}
+		: loadedTotals
 
 	const filteredChecks = useMemo(() => {
-		if (statusFilter === "all") return checks
-		return checks.filter((c) => c.status === statusFilter)
-	}, [checks, statusFilter])
+		if (statusFilter === "all") return loadedChecks
+		return loadedChecks.filter((c) => c.status === statusFilter)
+	}, [loadedChecks, statusFilter])
+
+	const loadMore = useCallback(async () => {
+		if (nextCursor === null || loadingMore) return
+		setLoadingMore(true)
+		try {
+			const page = await runMapleApiV2((client) =>
+				client.alertRules.checks({
+					params: { id: rule.id },
+					query: {
+						since,
+						until,
+						limit: 100,
+						cursor: nextCursor,
+						...(statusFilter === "all" ? {} : { status: statusFilter }),
+					},
+				}),
+			)
+			setExtraChecks((current) => [...current, ...page.data.map(v2CheckToDocument)])
+			setNextCursorOverride(page.next_cursor)
+		} catch {
+			toast.error("More alert checks could not be loaded")
+		} finally {
+			setLoadingMore(false)
+		}
+	}, [loadingMore, nextCursor, rule.id, since, statusFilter, until])
 
 	// Ungrouped rules evaluate a single "all" series, so a Group column is a wall
 	// of "all" — only show it when the rule actually fans out per group.
@@ -1009,7 +1129,7 @@ function ChecksPanel({
 		)
 	}
 
-	if (checks.length === 0) {
+	if (loadedChecks.length === 0) {
 		return (
 			<Empty className="py-12">
 				<EmptyHeader>
@@ -1018,8 +1138,8 @@ function ChecksPanel({
 					</EmptyMedia>
 					<EmptyTitle>No checks in this window</EmptyTitle>
 					<EmptyDescription>
-						No evaluations were recorded for the selected time range. Try widening the
-						range, or wait for the scheduler to record the next check.
+						No evaluations were recorded for the selected time range. Try widening the range, or
+						wait for the scheduler to record the next check.
 					</EmptyDescription>
 				</EmptyHeader>
 			</Empty>
@@ -1054,9 +1174,7 @@ function ChecksPanel({
 							{ value: "breached", label: "Breached" },
 							{ value: "healthy", label: "Healthy" },
 							{ value: "skipped", label: "Skipped" },
-							...(totals.errored > 0
-								? [{ value: "error" as const, label: "Failed" }]
-								: []),
+							...(totals.errored > 0 ? [{ value: "error" as const, label: "Failed" }] : []),
 						]}
 						value={statusFilter}
 						onChange={setStatusFilter}
@@ -1076,7 +1194,7 @@ function ChecksPanel({
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{filteredChecks.slice(0, 200).map((check) => {
+						{filteredChecks.map((check) => {
 							const state: "firing" | "ok" | "pending" =
 								check.status === "breached" || check.status === "error"
 									? "firing"
@@ -1176,10 +1294,12 @@ function ChecksPanel({
 						})}
 					</TableBody>
 				</Table>
-				{filteredChecks.length > 200 && (
-					<p className="text-xs text-muted-foreground text-center">
-						Showing first 200 of {filteredChecks.length} matching checks.
-					</p>
+				{nextCursor !== null && (
+					<div className="flex justify-center">
+						<Button variant="outline" size="sm" disabled={loadingMore} onClick={loadMore}>
+							{loadingMore ? "Loading…" : "Load more checks"}
+						</Button>
+					</div>
 				)}
 			</div>
 		</div>

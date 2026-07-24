@@ -64,8 +64,8 @@ export function InvestigationReport({ triage }: InvestigationReportProps) {
 						</EmptyMedia>
 						<EmptyTitle>No automatic diagnosis yet</EmptyTitle>
 						<EmptyDescription>
-							This issue hasn't opened an incident, so there's nothing to diagnose automatically.
-							You can still ask Maple AI about it in the chat.
+							This issue hasn't opened an incident, so there's nothing to diagnose
+							automatically. You can still ask Maple AI about it in the chat.
 						</EmptyDescription>
 					</EmptyHeader>
 				</Empty>
@@ -147,7 +147,9 @@ function Report({ run, result }: { run: AiTriageRunDocument; result: AiTriageRes
 					<div className="space-y-3">
 						{evidence.map((item, index) => (
 							<Card key={index} className="gap-2.5 p-4">
-								{item.note ? <p className="text-sm leading-relaxed text-foreground">{item.note}</p> : null}
+								{item.note ? (
+									<p className="text-sm leading-relaxed text-foreground">{item.note}</p>
+								) : null}
 								{item.traceIds.length || item.logPatterns.length ? (
 									<div className="flex flex-wrap items-center gap-1.5">
 										{item.traceIds.map((traceId) => (

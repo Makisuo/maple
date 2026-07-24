@@ -50,8 +50,7 @@ export const toAlertContext = (
 	...(result?.suspectedCause ? { aiSuspectedCause: result.suspectedCause } : {}),
 })
 
-export const encodeAlertContextToSearchParam = (ctx: AlertContext): string =>
-	toBase64Url(JSON.stringify(ctx))
+export const encodeAlertContextToSearchParam = (ctx: AlertContext): string => toBase64Url(JSON.stringify(ctx))
 
 export const decodeAlertContextFromSearchParam = (raw: string): AlertContext | undefined => {
 	try {

@@ -78,9 +78,7 @@ function isFormReady(form: DestinationFormState, isEditing: boolean): boolean {
 		case "email":
 			// The current selection is prefilled when editing, so a member is
 			// always required.
-			return (
-				form.memberUserIds.length > 0 && form.memberUserIds.length <= MAX_EMAIL_MEMBER_RECIPIENTS
-			)
+			return form.memberUserIds.length > 0 && form.memberUserIds.length <= MAX_EMAIL_MEMBER_RECIPIENTS
 		default:
 			return true
 	}
