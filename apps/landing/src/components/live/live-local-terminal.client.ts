@@ -63,33 +63,25 @@ export function playLocalTerminal(root: HTMLElement) {
 		if (event.propertyName === "filter" && el.style.filter === "blur(0px)") el.style.filter = "none"
 	})
 
+	// Timers, not rAF. The sequence runs once and never rewinds, so per-frame
+	// precision buys nothing — and a rAF chain is suspended outright wherever
+	// `document.visibilityState` is "hidden", which would leave the frame
+	// stalled on a blank box rather than merely un-animated. Timers stay
+	// clamped-but-alive, so the banner always arrives.
 	const typeText = (el: HTMLElement, text: string) =>
 		new Promise<void>((resolve) => {
-			let i = 0
-			const total = text.length
 			const stepMs = 1000 / TYPE_CPS
-			let last = performance.now()
-			const tick = (now: number) => {
-				if (now - last >= stepMs) {
-					i = Math.min(total, i + Math.max(1, Math.round((now - last) / stepMs)))
-					el.textContent = text.slice(0, i)
-					last = now
-				}
-				if (i < total) requestAnimationFrame(tick)
+			const started = performance.now()
+			const tick = () => {
+				const i = Math.min(text.length, Math.round((performance.now() - started) / stepMs))
+				el.textContent = text.slice(0, i)
+				if (i < text.length) setTimeout(tick, stepMs)
 				else resolve()
 			}
-			requestAnimationFrame(tick)
+			tick()
 		})
 
-	const sleep = (ms: number) =>
-		new Promise<void>((resolve) => {
-			const start = performance.now()
-			const tick = (now: number) => {
-				if (now - start >= ms) return resolve()
-				requestAnimationFrame(tick)
-			}
-			requestAnimationFrame(tick)
-		})
+	const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 	const run = async () => {
 		revealSegment(0)

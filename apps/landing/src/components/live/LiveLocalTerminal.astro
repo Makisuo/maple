@@ -75,18 +75,18 @@ const rows: BannerRow[] = [
 		</div>
 
 		<!-- segment 1 — the server is up. -->
-		<div class="lt-line lt-line--lead" data-segment="1">
+		<div class="lt-line lt-banner lt-line--lead" data-segment="1">
 			<span class="lt-leaf">🍁 maple</span>
 			<span class="lt-dim">· local mode</span>
 		</div>
-		<div class="lt-line" data-segment="1">
+		<div class="lt-line lt-banner" data-segment="1">
 			<span class="lt-ok" aria-hidden="true">●</span>
-			<span class="lt-dim">listening on</span>
-			<span class="lt-url">http://127.0.0.1:4318</span>
+			<span class="lt-word">listening on</span>
+			<span class="lt-url lt-url--under">http://127.0.0.1:4318</span>
 		</div>
 
 		<!-- segment 2 — what it mounted, in the CLI's own key gutter. -->
-		<div class="lt-rows">
+		<div class="lt-rows lt-banner">
 			{
 				rows.map((row) => (
 					<div class="lt-line lt-row" data-segment="2">
@@ -162,16 +162,19 @@ const rows: BannerRow[] = [
 		min-height: 1.55em;
 		white-space: nowrap;
 	}
-	/* The banner opens with a blank line, and closes with one before the
-	   prompt returns — the CLI prints both. */
-	.lt-line--lead {
-		margin-top: 1.55em;
-	}
-	.lt-line--tail {
-		margin-top: 1.55em;
-	}
+	/* The banner opens with a blank line, closes with one before the prompt
+	   returns, and separates the two blocks with a third — the CLI prints all
+	   three. */
+	.lt-line--lead,
+	.lt-line--tail,
 	.lt-rows {
 		margin-top: 1.55em;
+	}
+	/* `startBanner()` indents every banner line by two spaces; the shell prompt
+	   lines above and below it sit flush, which is what nests the output under
+	   the command the way a terminal shows it. */
+	.lt-banner {
+		padding-left: 2ch;
 	}
 
 	.lt-cmd {
@@ -202,10 +205,13 @@ const rows: BannerRow[] = [
 		color: var(--foreground);
 		font-weight: 500;
 	}
-	/* cyan(underline(…)) — the underline is the CLI's, kept at a hairline so it
-	   reads as a URL and not as a link affordance on a static mock. */
 	.lt-url {
 		color: var(--chart-4);
+	}
+	/* Only the bind address is `underline()`d in the CLI — the dashboard row is
+	   bare `cyan()`. Keeping that distinction means the one underline in the
+	   frame sits on the address that is actually listening. */
+	.lt-url--under {
 		text-decoration: underline;
 		text-decoration-color: color-mix(in oklab, var(--chart-4) 45%, transparent);
 		text-underline-offset: 3px;
@@ -252,6 +258,14 @@ const rows: BannerRow[] = [
 		.local-term__body {
 			padding: 14px 14px 16px;
 			font-size: 11.5px;
+		}
+		/* Both halves are single statements; letting them wrap turns the bar
+		   into a broken two-column block. Tighten until they sit on one line. */
+		.local-term__foot {
+			gap: 12px;
+			padding: 9px 12px;
+			font-size: 9px;
+			letter-spacing: 0.03em;
 		}
 	}
 
