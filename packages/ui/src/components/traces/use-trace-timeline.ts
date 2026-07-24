@@ -102,31 +102,38 @@ export function layoutSpans(
 // --- State reducer ---
 
 export function clampViewport(vp: ViewportState, traceStartMs: number, traceEndMs: number): ViewportState {
-	const duration = vp.endMs - vp.startMs
-	const traceDuration = traceEndMs - traceStartMs
+	const traceDuration = Math.max(0, traceEndMs - traceStartMs)
+	// Trace boundaries with 5% padding each side.
+	const padding = traceDuration * 0.05
+	const loBound = traceStartMs - padding
+	const hiBound = traceEndMs + padding
+	const boundWidth = hiBound - loBound
+
 	// Absolute floor only — a proportional floor (traceDuration * k) makes long traces
 	// un-zoomable: a 7-min trace would cap the window at tens of ms while the spans you're
 	// trying to inspect are µs-scale, so zoom appears not to work. SpanBar clamps its
 	// rendered width, so extreme zoom can't emit gigapixel nodes.
 	const minDuration = MIN_VISIBLE_ABS_MS
-	const maxDuration = traceDuration * 1.1
+	const maxDuration = Math.max(boundWidth, minDuration)
 
-	let clampedDuration = Math.max(minDuration, Math.min(duration, maxDuration))
-	let startMs = vp.startMs
-	let endMs = startMs + clampedDuration
+	const rawDuration = vp.endMs - vp.startMs
+	const duration = Number.isFinite(rawDuration)
+		? Math.max(minDuration, Math.min(rawDuration, maxDuration))
+		: maxDuration
 
-	// Clamp to trace boundaries with 5% padding
-	const padding = traceDuration * 0.05
-	if (startMs < traceStartMs - padding) {
-		startMs = traceStartMs - padding
-		endMs = startMs + clampedDuration
-	}
-	if (endMs > traceEndMs + padding) {
-		endMs = traceEndMs + padding
-		startMs = endMs - clampedDuration
+	// Window as wide as (or wider than) the padded trace → center it, so neither edge
+	// clamp can push the other back out of bounds (degenerate/near-zero traces included).
+	if (duration >= boundWidth) {
+		const center = (loBound + hiBound) / 2
+		return { startMs: center - duration / 2, endMs: center + duration / 2 }
 	}
 
-	return { startMs, endMs }
+	// Right-clamp before left-clamp: min() first means the subsequent max() can only pull
+	// the window right, never past hiBound (duration < boundWidth guarantees room).
+	const startMs = Number.isFinite(vp.startMs)
+		? Math.max(loBound, Math.min(vp.startMs, hiBound - duration))
+		: loBound
+	return { startMs, endMs: startMs + duration }
 }
 
 export function timelineReducer(state: TimelineState, action: TimelineAction): TimelineState {
@@ -135,7 +142,12 @@ export function timelineReducer(state: TimelineState, action: TimelineAction): T
 			return action.state
 
 		case "SET_VIEWPORT":
-			return { ...state, viewport: action.viewport }
+			// Clamp here (not at dispatch sites) so every path — minimap pan/resize/jump
+			// included — is bounded by the same rules as the other gestures.
+			return {
+				...state,
+				viewport: clampViewport(action.viewport, action.traceStartMs, action.traceEndMs),
+			}
 
 		case "ZOOM": {
 			const { centerMs, factor, traceStartMs, traceEndMs } = action
@@ -199,7 +211,11 @@ export function timelineReducer(state: TimelineState, action: TimelineAction): T
 			const padding = (traceEndMs - traceStartMs) * 0.02
 			return {
 				...state,
-				viewport: { startMs: traceStartMs - padding, endMs: traceEndMs + padding },
+				viewport: clampViewport(
+					{ startMs: traceStartMs - padding, endMs: traceEndMs + padding },
+					traceStartMs,
+					traceEndMs,
+				),
 			}
 		}
 
@@ -348,13 +364,19 @@ export function useTraceTimeline({
 			node.children.forEach(visit)
 		}
 		rootSpans.forEach(visit)
+		let start: number
+		let end: number
 		if (!Number.isFinite(minStart) || !Number.isFinite(maxEnd)) {
-			return { traceStartMs: reportedStart, traceEndMs: reportedStart + totalDurationMs }
+			start = reportedStart
+			end = reportedStart + totalDurationMs
+		} else {
+			start = Math.min(reportedStart, minStart)
+			end = Math.max(reportedStart + totalDurationMs, maxEnd)
 		}
-		return {
-			traceStartMs: Math.min(reportedStart, minStart),
-			traceEndMs: Math.max(reportedStart + totalDurationMs, maxEnd),
-		}
+		// Zero-duration traces (single instantaneous span) get a 1ms synthetic window so every
+		// downstream `x / traceDuration` (minimap %, axis %, ticks, fit padding) stays finite.
+		if (end <= start) end = start + 1
+		return { traceStartMs: start, traceEndMs: end }
 	}, [rootSpans, traceStartTime, totalDurationMs])
 
 	const traceDurationMs = traceEndMs - traceStartMs
@@ -365,8 +387,13 @@ export function useTraceTimeline({
 	const defaultViewport = React.useMemo<ViewportState>(() => {
 		const windowMs = Math.min(traceDurationMs, DEFAULT_MAX_WINDOW_MS)
 		const pad = windowMs * 0.02
-		return { startMs: traceStartMs - pad, endMs: traceStartMs + windowMs + pad }
-	}, [traceStartMs, traceDurationMs])
+		// Route through clampViewport so the min-width floor holds at first paint too.
+		return clampViewport(
+			{ startMs: traceStartMs - pad, endMs: traceStartMs + windowMs + pad },
+			traceStartMs,
+			traceEndMs,
+		)
+	}, [traceStartMs, traceEndMs, traceDurationMs])
 
 	// Initialize with default expanded spans (auto-collapses big subtrees on long traces).
 	const defaultExpanded = React.useMemo(

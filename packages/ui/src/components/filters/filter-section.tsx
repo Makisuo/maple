@@ -1,18 +1,12 @@
-// Checkbox filter sections for the filter sidebar — mirrors the web app's
-// `@/components/filters/filter-section` so local mode reads as the same product.
-
 import * as React from "react"
-import { ChevronDownIcon, MagnifierIcon, XmarkIcon } from "@maple/ui/components/icons"
-import { cn } from "@maple/ui/utils"
-import { Checkbox } from "@maple/ui/components/ui/checkbox"
-import { Label } from "@maple/ui/components/ui/label"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@maple/ui/components/ui/collapsible"
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-} from "@maple/ui/components/ui/input-group"
+
+import { ChevronDownIcon, type IconComponent, MagnifierIcon, XmarkIcon } from "../icons"
+import { Checkbox } from "../ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible"
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "../ui/input-group"
+import { Label } from "../ui/label"
+import { getServiceColor } from "../../lib/colors"
+import { cn } from "../../lib/utils"
 
 export interface FilterOption {
 	name: string
@@ -21,13 +15,19 @@ export interface FilterOption {
 
 interface FilterSectionBaseProps {
 	title: string
-	options: FilterOption[]
+	options: ReadonlyArray<FilterOption>
 	selected: string[]
 	onChange: (selected: string[]) => void
 	defaultOpen?: boolean
 	maxVisible?: number
 	colorMap?: Record<string, string>
+	/** Option-name → icon, rendered before the label (like colorMap's swatch). */
+	getOptionIcon?: (name: string) => IconComponent | undefined
 }
+
+interface FilterSectionProps extends FilterSectionBaseProps {}
+
+interface SearchableFilterSectionProps extends FilterSectionBaseProps {}
 
 function FilterSectionBase({
 	title,
@@ -38,6 +38,7 @@ function FilterSectionBase({
 	maxVisible = 5,
 	searchable,
 	colorMap,
+	getOptionIcon,
 }: FilterSectionBaseProps & { searchable: boolean }) {
 	const [isOpen, setIsOpen] = React.useState(defaultOpen)
 	const [showAll, setShowAll] = React.useState(false)
@@ -74,7 +75,7 @@ function FilterSectionBase({
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={handleOpenChange}>
-			<CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground">
+			<CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-medium hover:text-foreground text-muted-foreground transition-colors">
 				<span>{title}</span>
 				<ChevronDownIcon className={cn("size-4 transition-transform", isOpen && "rotate-180")} />
 			</CollapsibleTrigger>
@@ -111,33 +112,37 @@ function FilterSectionBase({
 				)}
 				<div className="space-y-2">
 					{visibleOptions.length === 0 ? (
-						<p className="py-1 text-xs text-muted-foreground">No matches found</p>
+						<p className="text-xs text-muted-foreground py-1">No matches found</p>
 					) : (
-						visibleOptions.map((option) => (
-							<div key={option.name} className="flex items-center gap-2">
-								<Checkbox
-									id={`${title}-${option.name}`}
-									checked={selected.includes(option.name)}
-									onCheckedChange={() => toggleOption(option.name)}
-								/>
-								<Label
-									htmlFor={`${title}-${option.name}`}
-									className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-xs font-normal text-foreground"
-									title={option.name}
-								>
-									{colorMap?.[option.name] && (
-										<span
-											className="size-2.5 shrink-0 rounded-full"
-											style={{ backgroundColor: colorMap[option.name] }}
-										/>
-									)}
-									<span className="truncate">{option.name}</span>
-								</Label>
-								<span className="text-xs tabular-nums text-muted-foreground">
-									{option.count.toLocaleString()}
-								</span>
-							</div>
-						))
+						visibleOptions.map((option) => {
+							const OptionIcon = getOptionIcon?.(option.name)
+							return (
+								<div key={option.name} className="flex items-center gap-2">
+									<Checkbox
+										id={`${title}-${option.name}`}
+										checked={selected.includes(option.name)}
+										onCheckedChange={() => toggleOption(option.name)}
+									/>
+									<Label
+										htmlFor={`${title}-${option.name}`}
+										className="flex-1 min-w-0 flex items-center gap-1.5 cursor-pointer text-xs text-foreground font-normal"
+										title={option.name}
+									>
+										{colorMap?.[option.name] && (
+											<span
+												className="size-2.5 rounded-[35%] [corner-shape:squircle] shrink-0"
+												style={{ backgroundColor: colorMap[option.name] }}
+											/>
+										)}
+										{OptionIcon && <OptionIcon className="size-3.5 shrink-0" />}
+										<span className="truncate">{option.name}</span>
+									</Label>
+									<span className="text-xs text-muted-foreground tabular-nums">
+										{option.count.toLocaleString()}
+									</span>
+								</div>
+							)
+						})
 					)}
 					{hasMore && (
 						<button
@@ -154,11 +159,16 @@ function FilterSectionBase({
 	)
 }
 
-export function FilterSection(props: FilterSectionBaseProps) {
+/** Option-name → deterministic service color, for Service facets' swatches. */
+export function serviceColorMap(options: ReadonlyArray<FilterOption>): Record<string, string> {
+	return Object.fromEntries(options.map((o) => [o.name, getServiceColor(o.name)]))
+}
+
+export function FilterSection(props: FilterSectionProps) {
 	return <FilterSectionBase {...props} searchable={false} />
 }
 
-export function SearchableFilterSection(props: Omit<FilterSectionBaseProps, "colorMap">) {
+export function SearchableFilterSection(props: SearchableFilterSectionProps) {
 	return <FilterSectionBase {...props} searchable />
 }
 
@@ -179,13 +189,13 @@ export function SingleCheckboxFilter({ title, checked, onChange, count }: Single
 			/>
 			<Label
 				htmlFor={`filter-${title}`}
-				className="min-w-0 flex-1 cursor-pointer truncate text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+				className="flex-1 min-w-0 truncate cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
 				title={title}
 			>
 				{title}
 			</Label>
 			{count !== undefined && (
-				<span className="text-xs tabular-nums text-muted-foreground">{count.toLocaleString()}</span>
+				<span className="text-xs text-muted-foreground tabular-nums">{count.toLocaleString()}</span>
 			)}
 		</div>
 	)

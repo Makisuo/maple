@@ -175,6 +175,19 @@ MapleBrowser.init({
 })
 ```
 
+## Session size limit
+
+A single session records at most **1 GiB** of decompressed rrweb data. Past that
+the recording is truncated at a chunk boundary — earlier chunks stay playable,
+later ones are dropped — and the session is still listed with its metadata and
+linked traces.
+
+Normal sessions are nowhere near this: the ceiling exists to stop a runaway
+recording, which in practice means canvas capture, unmasked media, or a page
+whose DOM mutates continuously. If you are hitting it, `replay.sampleRate` will
+not help (it drops whole sessions, not bytes) — mask or block the noisy subtree
+instead.
+
 ## Framework examples
 
 ### Plain HTML

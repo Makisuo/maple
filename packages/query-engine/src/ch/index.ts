@@ -321,10 +321,14 @@ export {
 
 // Queries — Cloudflare integration usage (integrations-page ingest proof)
 export {
+	BLOCKED_FIREWALL_ACTIONS,
 	CLOUDFLARE_USAGE_METRIC_NAMES,
 	cloudflareUsageQuery,
 	cloudflareUsageRowSchema,
+	cloudflareUsageStatsQuery,
+	cloudflareUsageStatsRowSchema,
 	type CloudflareUsageOutput,
+	type CloudflareUsageStatsOutput,
 } from "./queries/cloudflare-usage"
 
 // Queries — Cloudflare service-map stats (per-zone / per-Worker node rollups)

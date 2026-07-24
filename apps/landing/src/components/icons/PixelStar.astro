@@ -1,0 +1,37 @@
+---
+/**
+ * PixelStar — Nucleo "Pixel Essential" star (icon 1194, set 8). Pixel-art star
+ * outline; stroke-based, inherits color via currentColor.
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className = "size-4" } = Astro.props;
+---
+
+<svg
+	class={className}
+	viewBox="0 0 24 24"
+	fill="none"
+	stroke="currentColor"
+	stroke-width="2"
+	stroke-linecap="square"
+	xmlns="http://www.w3.org/2000/svg"
+	aria-hidden="true"
+>
+	<path d="M12 2.01001L12 2.00001" />
+	<path d="M9 19.01L9 19" />
+	<path d="M15 19.01L15 19" />
+	<path d="M4 12.01L4 12" />
+	<path d="M20 12.01L20 12" />
+	<path d="M4 17V21H7" />
+	<path d="M20 17V21H17" />
+	<path d="M11 17H13" />
+	<path d="M8 8H2V10" />
+	<path d="M16 8L22 8V10" />
+	<path d="M18 14V15" />
+	<path d="M6 14V15" />
+	<path d="M14 4V6" />
+	<path d="M10 4V6" />
+</svg>

@@ -487,6 +487,22 @@ export const hero_subtitle = () => `OpenTelemetry로 받는 트레이스, 로그
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const customers_eyebrow = () => `다음 팀들이 신뢰합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ingest_stats_label = () => `수집된 트레이스 / 월`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sov_eyebrow = () => `01 · Sovereignty`
 
 
@@ -4744,3 +4760,11 @@ export const language_ja = () => `日本語`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const language_ko = () => `한국어`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_github = () => `GitHub`

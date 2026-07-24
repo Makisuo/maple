@@ -1,9 +1,9 @@
 import { useOrganization } from "@clerk/clerk-react"
 import { createFileRoute } from "@tanstack/react-router"
-import { type FormEvent, useState } from "react"
+import { useState } from "react"
 import { Schema } from "effect"
 import { Button } from "@maple/ui/components/ui/button"
-import { Input } from "@maple/ui/components/ui/input"
+import { OTPField, OTPFieldInput, OTPFieldSeparator } from "@maple/ui/components/ui/otp-field"
 import { AuthLayout } from "@/components/layout/auth-layout"
 import { ClerkOrgSwitcherMenu } from "@/components/dashboard/org-switcher-menu"
 import { useMountEffect } from "@/hooks/use-mount-effect"
@@ -106,7 +106,7 @@ const ActiveWorkspaceChoice = isClerkAuthEnabled ? ClerkWorkspaceChoice : Worksp
 
 function CliLoginPage() {
 	const { user_code: initialCode } = Route.useSearch()
-	const [userCode, setUserCode] = useState(() => normalizeCliUserCode(initialCode ?? ""))
+	const [userCode, setUserCode] = useState(() => normalizeCliUserCode(initialCode ?? "").replace("-", ""))
 	const [state, setState] = useState<PageState>(() =>
 		initialCode ? { _tag: "loading" } : { _tag: "entry" },
 	)
@@ -135,11 +135,6 @@ function CliLoginPage() {
 		if (initialCode) void inspect(initialCode)
 	})
 
-	const submitCode = (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault()
-		void inspect(userCode)
-	}
-
 	const decide = async (action: "approve" | "deny") => {
 		if (state._tag !== "ready") return
 		setState({ _tag: "loading" })
@@ -165,28 +160,40 @@ function CliLoginPage() {
 				</div>
 
 				{state._tag === "entry" || state._tag === "error" ? (
-					<form className="space-y-3" onSubmit={submitCode}>
-						<label className="block space-y-1.5">
+					<div className="space-y-3">
+						<div className="space-y-1.5">
 							<span className="text-sm font-medium">One-time code</span>
-							<Input
-								type="text"
+							<OTPField
+								length={8}
+								size="lg"
 								value={userCode}
-								onChange={(event) => setUserCode(normalizeCliUserCode(event.target.value))}
-								placeholder="ABCD-EFGH"
-								autoComplete="one-time-code"
-								className="font-mono uppercase tracking-widest"
+								onValueChange={(value) => setUserCode(value)}
+								onValueComplete={(value) => void inspect(value)}
+								validationType="alphanumeric"
+								normalizeValue={(value) => value.toUpperCase()}
+								aria-label="One-time code"
 								aria-invalid={state._tag === "error"}
-							/>
-						</label>
+							>
+								<OTPFieldInput aria-label="Character 1 of 8" />
+								<OTPFieldInput aria-label="Character 2 of 8" />
+								<OTPFieldInput aria-label="Character 3 of 8" />
+								<OTPFieldInput aria-label="Character 4 of 8" />
+								<OTPFieldSeparator />
+								<OTPFieldInput aria-label="Character 5 of 8" />
+								<OTPFieldInput aria-label="Character 6 of 8" />
+								<OTPFieldInput aria-label="Character 7 of 8" />
+								<OTPFieldInput aria-label="Character 8 of 8" />
+							</OTPField>
+							<p className="text-xs text-muted-foreground">
+								Enter the eight-character code shown in your terminal.
+							</p>
+						</div>
 						{state._tag === "error" ? (
 							<p role="alert" className="text-sm text-destructive">
 								{state.message}
 							</p>
 						) : null}
-						<Button type="submit" className="w-full">
-							Continue
-						</Button>
-					</form>
+					</div>
 				) : null}
 
 				{state._tag === "loading" ? (

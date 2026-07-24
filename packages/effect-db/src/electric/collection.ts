@@ -107,18 +107,27 @@ function createBackoffOnError(
 		// Dispatch error state changed event
 		dispatchErrorStateChanged(collectionId, true)
 
-		// Check if this is a 401 auth error - stop retrying and trigger session expired
+		// Check if this is a 401 auth error - stop this stream and hand recovery to
+		// the app. A 401 here is usually a transient token problem (expired Clerk
+		// token on a long-lived stream, or a stale-org stream after an org switch),
+		// NOT proof the session is gone — permanently killing sync would leave the
+		// collection alive but deaf, so every later optimistic write would await a
+		// txid that can never arrive and time out. The recovery listener recreates
+		// the collections (minting a fresh token via the auth-headers provider)
+		// under a bounded retry budget, so a genuinely dead session degrades to a
+		// stopped stream instead of a loop.
 		const errorStatus = (error as { status?: number })?.status
 		if (errorStatus === 401) {
-			logVia(runtime, "warning", "Authentication error (401), stopping sync and triggering logout", {
+			logVia(runtime, "warning", "Authentication error (401), stopping stream and requesting recovery", {
 				collectionId,
 				status: 401,
 			})
-			// Dispatch session expired event - the app layout will handle redirect to login
 			if (typeof window !== "undefined") {
-				window.dispatchEvent(new CustomEvent("auth:session-expired"))
+				window.dispatchEvent(
+					new CustomEvent("collection:auth-error", { detail: { collectionId } }),
+				)
 			}
-			// Return undefined to stop syncing
+			// Return undefined to stop syncing this (stale-token) stream
 			return
 		}
 

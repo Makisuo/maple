@@ -186,11 +186,9 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 			})
 
 			/** Fetch all pages of a list endpoint (bounded by MAX_PAGES). */
-			const fetchAllPages = Effect.fn("PlanetScaleService.fetchAllPages")(function* <S extends Schema.Top>(
-				basePath: string,
-				authorization: string,
-				itemSchema: S,
-			) {
+			const fetchAllPages = Effect.fn("PlanetScaleService.fetchAllPages")(function* <
+				S extends Schema.Top,
+			>(basePath: string, authorization: string, itemSchema: S) {
 				const decodePage = Schema.decodeUnknownEffect(Schema.fromJsonString(PageSchema(itemSchema)))
 				const items: Array<S["Type"]> = []
 				for (let page = 1; page <= MAX_PAGES; page++) {
@@ -359,7 +357,11 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							.update(planetscaleConnections)
 							.set(
 								error === null
-									? { lastInventoryAt: new Date(now), lastInventoryError: null, updatedAt: new Date(now) }
+									? {
+											lastInventoryAt: new Date(now),
+											lastInventoryError: null,
+											updatedAt: new Date(now),
+										}
 									: { lastInventoryError: error, updatedAt: new Date(now) },
 							)
 							.where(eq(planetscaleConnections.id, connectionId)),
@@ -607,7 +609,7 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 					`/branches/${encodeURIComponent(branch)}/insights` +
 					`?from=${encodeURIComponent(new Date(options.startTime).toISOString())}` +
 					`&to=${encodeURIComponent(new Date(options.endTime).toISOString())}` +
-					`&sort=sum_total_duration_millis&dir=desc&per_page=${limit}`
+					`&sort=totalTime&dir=desc&per_page=${limit}`
 
 				const response = yield* apiGetJson(path, authorization)
 				if (response.status < 200 || response.status >= 300) {
@@ -671,7 +673,10 @@ export class PlanetScaleService extends Context.Service<PlanetScaleService, Plan
 							.select()
 							.from(planetscaleDatabases)
 							.where(
-								and(eq(planetscaleDatabases.orgId, orgId), isNull(planetscaleDatabases.deletedAt)),
+								and(
+									eq(planetscaleDatabases.orgId, orgId),
+									isNull(planetscaleDatabases.deletedAt),
+								),
 							),
 					)
 					.pipe(Effect.mapError(toPersistenceError))

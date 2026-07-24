@@ -52,9 +52,7 @@ const makeLayer = (testDb: TestDb, fetchStub?: typeof globalThis.fetch) => {
 		ScrapeTargetsService.layer.pipe(Layer.provide(Layer.mergeAll(discoveryLive, oauthLive))),
 		oauthLive,
 	).pipe(Layer.provide(testDb.layer), Layer.provide(Env.layer), Layer.provide(makeConfig()))
-	return fetchStub
-		? Layer.mergeAll(composed, Layer.succeed(FetchHttpClient.Fetch, fetchStub))
-		: composed
+	return fetchStub ? Layer.mergeAll(composed, Layer.succeed(FetchHttpClient.Fetch, fetchStub)) : composed
 }
 
 const asOrgId = Schema.decodeUnknownSync(OrgId)
@@ -124,8 +122,9 @@ const BRANCHES_SD_PAYLOAD = ["main", "stg", "pr-12", "pr-13"].map((branch) => ({
 	targets: [`${branch}.metrics.psdb.cloud:443`],
 	labels: {
 		__metrics_path__: "/metrics",
-		planetscale_database_branch_id: branch,
-		planetscale_database: "mydb",
+		planetscale_database_branch_id: `branch-id-${branch}`,
+		planetscale_database_name: "mydb",
+		planetscale_branch_name: branch,
 	},
 }))
 
@@ -144,11 +143,17 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			assert.strictEqual(recorded[0]?.url, "https://api.planetscale.com/v1/organizations/my-org/metrics")
+			assert.strictEqual(
+				recorded[0]?.url,
+				"https://api.planetscale.com/v1/organizations/my-org/metrics",
+			)
 			assert.strictEqual(recorded[0]?.authorization, "token tok_id:tok_secret")
 
 			// The 169.254.* target is dropped by the SSRF guard.
-			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.deepStrictEqual(
+				entries.map((entry) => entry.subTargetKey),
+				["branch-1", "branch-2"],
+			)
 			assert.strictEqual(entries[0]?.url, "https://branch-1.metrics.psdb.cloud:443/metrics")
 			assert.strictEqual(entries[1]?.url, "https://branch-2.metrics.psdb.cloud:443/metrics")
 			// `__`-prefixed Prometheus meta labels are stripped; SD labels survive.
@@ -261,10 +266,7 @@ describe("PlanetScaleDiscoveryService", () => {
 			// Base url + fiber-identity key stay param-free so identity is stable as
 			// PlanetScale rotates the signature each refresh.
 			assert.strictEqual(entries[0]?.url, "https://metrics.psdb.cloud/metrics/branch/3a1nf2gvu9rf")
-			assert.strictEqual(
-				entries[0]?.subTargetKey,
-				"metrics.psdb.cloud/metrics/branch/3a1nf2gvu9rf",
-			)
+			assert.strictEqual(entries[0]?.subTargetKey, "metrics.psdb.cloud/metrics/branch/3a1nf2gvu9rf")
 			// signedUrl carries the auth params the data plane actually verifies.
 			assert.strictEqual(
 				entries[0]?.signedUrl,
@@ -274,6 +276,8 @@ describe("PlanetScaleDiscoveryService", () => {
 			assert.deepStrictEqual(entries[0]?.labels, {
 				planetscale_branch_name: "main",
 				planetscale_database_name: "mydb",
+				planetscale_branch: "main",
+				planetscale_database: "mydb",
 			})
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
@@ -318,7 +322,10 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			assert.deepStrictEqual(stale.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.deepStrictEqual(
+				stale.map((entry) => entry.subTargetKey),
+				["branch-1", "branch-2"],
+			)
 			const lastError = yield* discovery.lastError(row.id)
 			assert.include(lastError ?? "", "HTTP 503")
 		}).pipe(Effect.provide(makeLayer(testDb)))
@@ -390,7 +397,10 @@ describe("PlanetScaleDiscoveryService", () => {
 			).pipe(Effect.provideService(FetchHttpClient.Fetch, fetchStub))
 
 			assert.strictEqual(recorded.length, 1)
-			assert.deepStrictEqual(first?.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
+			assert.deepStrictEqual(
+				first?.map((entry) => entry.subTargetKey),
+				["branch-1", "branch-2"],
+			)
 			assert.deepStrictEqual(second, first)
 			assert.deepStrictEqual(third, first)
 		}).pipe(Effect.provide(makeLayer(testDb)))
@@ -410,7 +420,10 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["main", "stg"])
+			assert.deepStrictEqual(
+				entries.map((entry) => entry.subTargetKey),
+				["branch-id-main", "branch-id-stg"],
+			)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -428,7 +441,10 @@ describe("PlanetScaleDiscoveryService", () => {
 				),
 			)
 
-			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["main", "stg"])
+			assert.deepStrictEqual(
+				entries.map((entry) => entry.subTargetKey),
+				["branch-id-main", "branch-id-stg"],
+			)
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
@@ -486,11 +502,11 @@ describe("PlanetScaleDiscoveryService", () => {
 
 			const sdCall = recorded.find((call) => call.url.includes("/my-org/metrics"))
 			assert.strictEqual(sdCall?.authorization, "Bearer ps-access-token")
-			assert.deepStrictEqual(entries.map((entry) => entry.subTargetKey), ["branch-1", "branch-2"])
-		}).pipe(
-			Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(makeLayer(testDb, stub)),
-		)
+			assert.deepStrictEqual(
+				entries.map((entry) => entry.subTargetKey),
+				["branch-1", "branch-2"],
+			)
+		}).pipe(Effect.provideService(FetchHttpClient.Fetch, stub), Effect.provide(makeLayer(testDb, stub)))
 	})
 
 	it.effect("invalidate drops the cache so the next discover refetches", () => {

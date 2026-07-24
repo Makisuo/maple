@@ -14,6 +14,7 @@ import { runMapleApiV2 } from "@/lib/collections/api-runner"
 import { rowToDashboard } from "@/lib/collections/dashboards"
 import {
 	getOrgCollections,
+	handleCollectionStuck,
 	useActiveOrgId,
 	useCollectionsGeneration,
 } from "@/lib/collections/org-collections"
@@ -78,8 +79,20 @@ function findNextPosition(widgets: DashboardWidget[], newWidth: number): { x: nu
 	return { x: 0, y: maxBottom }
 }
 
+// Walk the `cause` chain for the most specific message. The Electric write
+// handlers wrap every typed failure in a generic UpdateError ("Update operation
+// failed") whose `cause` carries the actual HTTP/auth error — surfacing only the
+// wrapper made prod failures undiagnosable.
+function messageFromErrorChain(error: unknown, depth = 0): string | null {
+	if (depth > 5 || typeof error !== "object" || error === null) return null
+	const cause = (error as { cause?: unknown }).cause
+	const causeMessage = cause !== undefined ? messageFromErrorChain(cause, depth + 1) : null
+	if (causeMessage) return causeMessage
+	return messageFromError(error)
+}
+
 function getErrorMessage(error: unknown): string {
-	const directMessage = messageFromError(error)
+	const directMessage = messageFromErrorChain(error)
 	if (directMessage) return directMessage
 
 	if (isExitLike(error) && Exit.isFailure(error)) {
@@ -93,6 +106,19 @@ function getErrorMessage(error: unknown): string {
 	}
 
 	return "Dashboard persistence is temporarily unavailable"
+}
+
+// Detect the Electric txid-await timing out AFTER the PATCH succeeded: the
+// server persisted the write, but this tab's shape stream is dead/stuck so the
+// txid never appears and TanStack DB rolls the optimistic state back. Latching
+// the read-only banner here would punish a *successful* write; instead the
+// caller triggers the stuck-collection self-heal so a fresh stream re-syncs the
+// saved row.
+function isTxidAwaitTimeout(error: unknown): boolean {
+	if (typeof error !== "object" || error === null) return false
+	const named = error as { name?: unknown; message?: unknown }
+	if (named.name === "TimeoutWaitingForTxIdError") return true
+	return typeof named.message === "string" && named.message.includes("Timeout waiting for txId")
 }
 
 // Detect a server-side concurrency rejection. The persistence layer surfaces
@@ -143,6 +169,11 @@ function toDashboardDocument(dashboard: Dashboard): DashboardDocument {
 	})
 }
 
+// Deep-clone via JSON so present-`undefined` keys are dropped, not preserved
+// (structuredClone keeps them, and the v2 `optionalKey` encode rejects them —
+// see the note in `mutateDashboard`).
+const jsonClone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
+
 function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDashboardDocument {
 	// See `toDashboardDocument`: omit the optionalKey `description`/`tags`/`variables`
 	// rather than forwarding a present `undefined`, which the Schema.Class constructor rejects.
@@ -151,8 +182,8 @@ function toPortableDashboardDocument(dashboard: PortableDashboard): PortableDash
 		...rest,
 		...(description !== undefined && { description }),
 		...(tags !== undefined && { tags: [...tags] }),
-		...(variables !== undefined && { variables: structuredClone(variables) }),
-		widgets: structuredClone(dashboard.widgets),
+		...(variables !== undefined && { variables: jsonClone(variables) }),
+		widgets: jsonClone(dashboard.widgets),
 		timeRange:
 			dashboard.timeRange.type === "absolute"
 				? {
@@ -491,6 +522,13 @@ export function useDashboardMutations() {
 		(error: unknown) => {
 			// TanStack DB has already rolled the optimistic state back by the time the
 			// transaction rejects; surface the reason.
+			if (isTxidAwaitTimeout(error)) {
+				// The write reached the server (the handler returned a txid) — only the
+				// sync-back timed out because this tab's shape stream is dead. Heal the
+				// stream instead of disabling editing; the refetch restores the saved row.
+				handleCollectionStuck()
+				return
+			}
 			const concurrency =
 				error instanceof DashboardConcurrencyError ||
 				(isExitLike(error) && isConcurrencyConflict(error))
@@ -524,10 +562,17 @@ export function useDashboardMutations() {
 			const updated = updater(current)
 			if (updated === current) return // no-op
 
-			// Store a plain (structurally-cloned) document so Immer's draft proxy
-			// never wraps a Schema.Class instance; onUpdate re-decodes it.
+			// Store a plain JSON-round-tripped document so Immer's draft proxy never
+			// wraps a Schema.Class instance; onUpdate re-decodes it. JSON (not
+			// structuredClone) on purpose: widget builders spread optional fields as
+			// present-`undefined` keys (e.g. `transform: undefined`), which
+			// structuredClone preserves — and the v2 PATCH encode (`optionalKey`
+			// fields) rejects a present undefined, failing the whole save
+			// ("Expected object, got undefined at [widgets][i][dataSource][transform]").
+			// The JSON round-trip drops them, exactly matching what the server's
+			// jsonb storage would keep anyway.
 			const nextDoc = toDashboardDocument(updated)
-			const plainDoc = structuredClone(nextDoc) as unknown
+			const plainDoc = JSON.parse(JSON.stringify(nextDoc)) as unknown
 
 			const tx = active.update(dashboardId, (draft) => {
 				draft.payload_json = plainDoc

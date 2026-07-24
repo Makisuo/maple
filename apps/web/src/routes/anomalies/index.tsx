@@ -231,7 +231,7 @@ function AnomaliesPageBody({
 			map.set(key, bucket)
 		}
 		// Cluster each bucket by service+env so the anomalies one event produces
-		// (error spikes, error rate, log volume on the same service) sit together;
+		// (error-frequency, error-rate, and log-volume changes on one service) sit together;
 		// clusters order by their freshest incident, rows within by recency.
 		for (const bucket of map.values()) {
 			const clusterKey = (i: AnomalyIncidentDocument) => `${i.serviceName}\u0000${i.deploymentEnv}`

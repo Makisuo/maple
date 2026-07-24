@@ -248,24 +248,31 @@ export interface AnomalyErrorSpikeTimeseriesOutput {
 	readonly count: number
 }
 
-/** Occurrence buckets for one (fingerprint, env) — pass bucketSeconds=1800 to match the spike window. */
+/**
+ * Fixed-width occurrence buckets for one (fingerprint, env). The anomaly API
+ * requests five-minute buckets, then derives the detector's rolling 30-minute
+ * window in TypeScript so the chart and five-minute detector tick agree.
+ */
 export function anomalyErrorSpikeTimeseriesQuery() {
-	return from(ErrorEventsByTime)
-		.select(($) => ({
-			bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
-			count: CH.count(),
-		}))
-		.where(($) => [
-			$.OrgId.eq(param.string("orgId")),
-			$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
-			$.DeploymentEnv.eq(param.string("deploymentEnv")),
-			$.Timestamp.gte(param.dateTime("startTime")),
-			$.Timestamp.lte(param.dateTime("endTime")),
-		])
-		.groupBy("bucket")
-		.orderBy(["bucket", "asc"])
-		.limit(400)
-		.format("JSON")
+	return (
+		from(ErrorEventsByTime)
+			.select(($) => ({
+				bucket: CH.toStartOfInterval($.Timestamp, param.int("bucketSeconds")),
+				count: CH.count(),
+			}))
+			.where(($) => [
+				$.OrgId.eq(param.string("orgId")),
+				$.FingerprintHash.eq(CH.toUInt64(param.string("fingerprintHash"))),
+				$.DeploymentEnv.eq(param.string("deploymentEnv")),
+				$.Timestamp.gte(param.dateTime("startTime")),
+				$.Timestamp.lte(param.dateTime("endTime")),
+			])
+			.groupBy("bucket")
+			.orderBy(["bucket", "asc"])
+			// Seven days at five-minute grain is 2,016 buckets.
+			.limit(2500)
+			.format("JSON")
+	)
 }
 
 /**

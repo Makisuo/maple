@@ -10,8 +10,10 @@ clients, and use authorization code + S256 PKCE.
 - `GET /.well-known/oauth-authorization-server`
 - `POST /register` — dynamic registration for public clients; redirect URIs must use HTTPS or a
   loopback HTTP address.
-- `GET /oauth/authorize` — validates the client, exact redirect URI, `resource`, `mcp:tools` scope,
-  and PKCE challenge before redirecting to the Maple approval page.
+- `GET /oauth/authorize` — validates the client, registered redirect URI, `resource`, `mcp:tools`
+  scope, and PKCE challenge before redirecting to the Maple approval page. Redirect URIs match
+  exactly except that HTTP loopback clients may use a different port at authorization time, as
+  required by RFC 8252.
 - `POST /oauth/token` — accepts form-encoded `authorization_code` and `refresh_token` grants.
 - `POST /oauth/revoke` — revokes an access token or an entire refresh-token family.
 

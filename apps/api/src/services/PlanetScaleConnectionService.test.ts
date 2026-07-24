@@ -3,7 +3,7 @@ import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { CreateScrapeTargetRequest, OrgId, PlanetScaleMetricsTokenRequest, UserId } from "@maple/domain/http"
 import { FetchHttpClient } from "effect/unstable/http"
 import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, queryFirstRow, type TestDb } from "../lib/test-pglite"
+import { cleanupTestDbs, createTestDb, executeSql, queryFirstRow, type TestDb } from "../lib/test-pglite"
 import { PlanetScaleConnectionService } from "./PlanetScaleConnectionService"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
@@ -41,7 +41,7 @@ const makeLayer = (testDb: TestDb) => {
 	)
 	return Layer.mergeAll(
 		PlanetScaleConnectionService.layer.pipe(
-			Layer.provide(Layer.mergeAll(scrapeTargetsLive, oauthLive)),
+			Layer.provide(Layer.mergeAll(scrapeTargetsLive, discoveryLive, oauthLive)),
 		),
 		scrapeTargetsLive,
 		oauthLive,
@@ -109,7 +109,11 @@ const stubPlanetScaleApi = (options?: {
 				? new Response("up 1\n", { status: 200 })
 				: new Response("forbidden", { status: 403 })
 		}
-		if (options?.sdGroups && requestUrl.includes("api.planetscale.com") && requestUrl.includes("/metrics")) {
+		if (
+			options?.sdGroups &&
+			requestUrl.includes("api.planetscale.com") &&
+			requestUrl.includes("/metrics")
+		) {
 			return new Response(JSON.stringify(options.sdGroups), {
 				status: 200,
 				headers: { "content-type": "application/json" },
@@ -321,7 +325,11 @@ describe("PlanetScaleConnectionService", () => {
 				),
 			)
 			const row = yield* Effect.promise(() =>
-				queryFirstRow<{ auth_type: string; auth_credentials_ciphertext: string | null; enabled: boolean }>(
+				queryFirstRow<{
+					auth_type: string
+					auth_credentials_ciphertext: string | null
+					enabled: boolean
+				}>(
 					testDb,
 					"SELECT auth_type, auth_credentials_ciphertext, enabled FROM scrape_targets WHERE id = $1",
 					[enabled.scrapeTarget!.id],
@@ -439,46 +447,151 @@ describe("PlanetScaleConnectionService", () => {
 		)
 	})
 
-	it.effect("finalizeOrgSelection adopts an existing user-created target and keeps its service token", () => {
+	it.effect(
+		"finalizeOrgSelection adopts an existing user-created target and keeps its service token",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const stub = stubPlanetScaleApi()
+
+			return Effect.gen(function* () {
+				const scrapeTargetsService = yield* ScrapeTargetsService
+				const service = yield* PlanetScaleConnectionService
+				const orgId = asOrgId("org_1")
+
+				const existing = yield* scrapeTargetsService.create(
+					orgId,
+					new CreateScrapeTargetRequest({
+						name: "Manual PlanetScale",
+						targetType: "planetscale",
+						organization: "acme",
+						authType: "token",
+						authCredentials: JSON.stringify({ tokenId: "old", tokenSecret: "old" }),
+					}),
+				)
+
+				yield* storeGrant(orgId)
+				const status = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+
+				// Adopted in place — no second target for the same PlanetScale org, and
+				// the working service token is KEPT: it's the auth PlanetScale's metrics
+				// endpoints actually accept, so clobbering it would break scraping.
+				assert.strictEqual(status.scrapeTarget?.id, existing.id)
+				assert.strictEqual(status.metricsAuth, "service_token")
+				const list = yield* scrapeTargetsService.list(orgId)
+				assert.strictEqual(list.targets.length, 1)
+				assert.match(list.targets[0]?.managedBy ?? "", /^planetscale:/)
+				const row = yield* Effect.promise(() =>
+					queryFirstRow<{ auth_type: string; auth_credentials_ciphertext: string | null }>(
+						testDb,
+						"SELECT auth_type, auth_credentials_ciphertext FROM scrape_targets WHERE id = $1",
+						[existing.id],
+					),
+				)
+				assert.strictEqual(row?.auth_type, "token")
+				assert.isNotNull(row?.auth_credentials_ciphertext)
+			}).pipe(
+				Effect.provideService(FetchHttpClient.Fetch, stub),
+				Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+			)
+		},
+	)
+
+	it.effect("atomically rebinds to another PlanetScale organization and retires the old target", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubPlanetScaleApi({
+			organizations: [
+				{ id: "psorg_1", name: "acme" },
+				{ id: "psorg_2", name: "beta" },
+			],
+		})
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const scrapeTargetsService = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			yield* storeGrant(orgId)
+			const first = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+			const firstTargetId = first.scrapeTarget!.id
+
+			const sameOrg = yield* service.finalizeOrgSelection(orgId, {
+				organization: "acme",
+				includeBranches: ["main"],
+			})
+			assert.strictEqual(sameOrg.scrapeTarget?.id, firstTargetId)
+			assert.deepStrictEqual(sameOrg.scrapeTarget?.includeBranches, ["main"])
+			assert.strictEqual((yield* scrapeTargetsService.list(orgId)).targets.length, 1)
+
+			const rebound = yield* service.finalizeOrgSelection(orgId, { organization: "beta" })
+			assert.strictEqual(rebound.organization, "beta")
+			assert.notStrictEqual(rebound.scrapeTarget?.id, firstTargetId)
+			const targets = yield* scrapeTargetsService.list(orgId)
+			assert.strictEqual(targets.targets.length, 1)
+			assert.strictEqual(targets.targets[0]?.id, rebound.scrapeTarget?.id)
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	it.effect("never deletes a retired target whose ownership changed", () => {
+		const testDb = createTestDb(trackedDbs)
+		const stub = stubPlanetScaleApi({
+			organizations: [
+				{ id: "psorg_1", name: "acme" },
+				{ id: "psorg_2", name: "beta" },
+			],
+		})
+
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleConnectionService
+			const scrapeTargetsService = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			yield* storeGrant(orgId)
+			const first = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+			yield* Effect.promise(() =>
+				executeSql(testDb, "UPDATE scrape_targets SET managed_by = $1 WHERE id = $2", [
+					"planetscale:another-connection",
+					first.scrapeTarget!.id,
+				]),
+			)
+
+			const rebound = yield* service.finalizeOrgSelection(orgId, { organization: "beta" })
+			const targets = yield* scrapeTargetsService.list(orgId)
+			assert.strictEqual(targets.targets.length, 2)
+			assert.isTrue(targets.targets.some((target) => target.id === first.scrapeTarget!.id))
+			assert.isTrue(targets.targets.some((target) => target.id === rebound.scrapeTarget!.id))
+		}).pipe(
+			Effect.provideService(FetchHttpClient.Fetch, stub),
+			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+		)
+	})
+
+	it.effect("compensates a newly created target when the binding transaction fails", () => {
 		const testDb = createTestDb(trackedDbs)
 		const stub = stubPlanetScaleApi()
 
 		return Effect.gen(function* () {
-			const scrapeTargetsService = yield* ScrapeTargetsService
 			const service = yield* PlanetScaleConnectionService
+			const scrapeTargetsService = yield* ScrapeTargetsService
 			const orgId = asOrgId("org_1")
-
-			const existing = yield* scrapeTargetsService.create(
-				orgId,
-				new CreateScrapeTargetRequest({
-					name: "Manual PlanetScale",
-					targetType: "planetscale",
-					organization: "acme",
-					authType: "token",
-					authCredentials: JSON.stringify({ tokenId: "old", tokenSecret: "old" }),
-				}),
-			)
-
 			yield* storeGrant(orgId)
-			const status = yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
-
-			// Adopted in place — no second target for the same PlanetScale org, and
-			// the working service token is KEPT: it's the auth PlanetScale's metrics
-			// endpoints actually accept, so clobbering it would break scraping.
-			assert.strictEqual(status.scrapeTarget?.id, existing.id)
-			assert.strictEqual(status.metricsAuth, "service_token")
-			const list = yield* scrapeTargetsService.list(orgId)
-			assert.strictEqual(list.targets.length, 1)
-			assert.match(list.targets[0]?.managedBy ?? "", /^planetscale:/)
-			const row = yield* Effect.promise(() =>
-				queryFirstRow<{ auth_type: string; auth_credentials_ciphertext: string | null }>(
-					testDb,
-					"SELECT auth_type, auth_credentials_ciphertext FROM scrape_targets WHERE id = $1",
-					[existing.id],
+			yield* Effect.promise(() =>
+				testDb.pglite.exec(
+					`CREATE FUNCTION reject_planetscale_binding() RETURNS trigger AS $$
+						BEGIN RAISE EXCEPTION 'forced binding failure'; END;
+						$$ LANGUAGE plpgsql;
+						CREATE TRIGGER reject_planetscale_binding
+						BEFORE INSERT ON planetscale_connections
+						FOR EACH ROW EXECUTE FUNCTION reject_planetscale_binding();`,
 				),
 			)
-			assert.strictEqual(row?.auth_type, "token")
-			assert.isNotNull(row?.auth_credentials_ciphertext)
+
+			const error = yield* service
+				.finalizeOrgSelection(orgId, { organization: "acme" })
+				.pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsPersistenceError")
+			const targets = yield* scrapeTargetsService.list(orgId)
+			assert.strictEqual(targets.targets.length, 0)
 		}).pipe(
 			Effect.provideService(FetchHttpClient.Fetch, stub),
 			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
@@ -539,33 +652,36 @@ describe("PlanetScaleConnectionService", () => {
 		)
 	})
 
-	it.effect("webhookConfig decrypts the minted secret once bound, and reports unconfigured otherwise", () => {
-		const testDb = createTestDb(trackedDbs)
-		const stub = stubPlanetScaleApi()
+	it.effect(
+		"webhookConfig decrypts the minted secret once bound, and reports unconfigured otherwise",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			const stub = stubPlanetScaleApi()
 
-		return Effect.gen(function* () {
-			const service = yield* PlanetScaleConnectionService
-			const orgId = asOrgId("org_1")
+			return Effect.gen(function* () {
+				const service = yield* PlanetScaleConnectionService
+				const orgId = asOrgId("org_1")
 
-			// No binding yet → nothing to expose (exercises the null-ciphertext branch).
-			const before = yield* service.webhookConfig(orgId)
-			assert.isFalse(before.configured)
-			assert.isNull(before.path)
-			assert.isNull(before.secret)
+				// No binding yet → nothing to expose (exercises the null-ciphertext branch).
+				const before = yield* service.webhookConfig(orgId)
+				assert.isFalse(before.configured)
+				assert.isNull(before.path)
+				assert.isNull(before.secret)
 
-			yield* storeGrant(orgId)
-			yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
+				yield* storeGrant(orgId)
+				yield* service.finalizeOrgSelection(orgId, { organization: "acme" })
 
-			// Bound → the secret decrypts (the only decrypt path for the webhook
-			// secret) and the delivery path is exposed.
-			const after = yield* service.webhookConfig(orgId)
-			assert.isTrue(after.configured)
-			assert.isNotNull(after.secret)
-			assert.isAbove((after.secret ?? "").length, 0)
-			assert.match(after.path ?? "", /^\/api\/integrations\/planetscale\/webhook\//)
-		}).pipe(
-			Effect.provideService(FetchHttpClient.Fetch, stub),
-			Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
-		)
-	})
+				// Bound → the secret decrypts (the only decrypt path for the webhook
+				// secret) and the delivery path is exposed.
+				const after = yield* service.webhookConfig(orgId)
+				assert.isTrue(after.configured)
+				assert.isNotNull(after.secret)
+				assert.isAbove((after.secret ?? "").length, 0)
+				assert.match(after.path ?? "", /^\/api\/integrations\/planetscale\/webhook\//)
+			}).pipe(
+				Effect.provideService(FetchHttpClient.Fetch, stub),
+				Effect.provide(Layer.mergeAll(makeLayer(testDb), Layer.succeed(FetchHttpClient.Fetch, stub))),
+			)
+		},
+	)
 })

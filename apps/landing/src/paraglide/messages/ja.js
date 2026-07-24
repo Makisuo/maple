@@ -487,6 +487,22 @@ export const hero_subtitle = () => `OpenTelemetryで受け取るトレース、�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const customers_eyebrow = () => `次のチームに信頼されています`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const ingest_stats_label = () => `取り込んだトレース / 月`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sov_eyebrow = () => `01 · Sovereignty`
 
 
@@ -4744,3 +4760,11 @@ export const language_ja = () => `日本語`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const language_ko = () => `한국어`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_github = () => `GitHub`

@@ -5,6 +5,17 @@ import { callMcpTool, listMcpTools } from "./dispatcher"
 import { mapleToolDefinitions, toInputSchema } from "./tools/registry"
 
 describe("MCP dispatcher", () => {
+	it("publishes an object input schema for every tool", () => {
+		const invalidSchemas = mapleToolDefinitions
+			.map((definition) => ({
+				name: definition.name,
+				type: toInputSchema(definition.schema).type,
+			}))
+			.filter(({ type }) => type !== "object")
+
+		expect(invalidSchemas).toEqual([])
+	})
+
 	it.effect("publishes the same names, descriptions, and schemas used by HTTP MCP", () =>
 		Effect.gen(function* () {
 			const descriptors = yield* listMcpTools

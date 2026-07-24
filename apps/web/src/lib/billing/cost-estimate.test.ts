@@ -31,7 +31,7 @@ function buildCustomer(
 }
 
 // Mirrors apps/api/autumn.config.ts: $39/mo base, 100 GB included per signal at
-// $0.30/GB overage, 5000 sessions at $0.003/session.
+// $0.30/GB overage, 5000 sessions at $0.002/session.
 const startupPlan = {
 	id: "startup",
 	name: "Startup",
@@ -41,7 +41,7 @@ const startupPlan = {
 		{ featureId: "logs", included: 100, price: { amount: 0.3, billingUnits: 1 } },
 		{ featureId: "traces", included: 100, price: { amount: 0.3, billingUnits: 1 } },
 		{ featureId: "metrics", included: 100, price: { amount: 0.3, billingUnits: 1 } },
-		{ featureId: "browser_sessions", included: 5000, price: { amount: 0.003, billingUnits: 1 } },
+		{ featureId: "browser_sessions", included: 5000, price: { amount: 0.002, billingUnits: 1 } },
 	],
 } as unknown as Plan
 
@@ -89,9 +89,9 @@ describe("estimateCycleCost", () => {
 		const sessions = estimate!.lines.find((l) => l.key === "overage:browser_sessions")
 		// 12.4 GB over → ceil(12.4) = 13 units × $0.30
 		expect(logs!.amount).toBeCloseTo(3.9)
-		// 2000 sessions over × $0.003
-		expect(sessions!.amount).toBeCloseTo(6)
-		expect(estimate!.total).toBeCloseTo(39 + 3.9 + 6)
+		// 2000 sessions over × $0.002
+		expect(sessions!.amount).toBeCloseTo(4)
+		expect(estimate!.total).toBeCloseTo(39 + 3.9 + 4)
 		expect(estimate!.partial).toBe(false)
 	})
 

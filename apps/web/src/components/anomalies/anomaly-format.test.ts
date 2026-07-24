@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { AnomalyIncidentDocument } from "@maple/domain/http"
-import { deviation, formatSignalValue, SEVERITY_TONE, severityToneFor } from "./anomaly-format"
+import {
+	anomalyAffectsServiceHealth,
+	deviation,
+	formatSignalValue,
+	isStaleOpenIncident,
+	SEVERITY_TONE,
+	severityToneFor,
+	SIGNAL_LABEL,
+} from "./anomaly-format"
 
 const incident = (
 	overrides: Partial<
@@ -119,8 +127,45 @@ describe("formatSignalValue", () => {
 		expect(formatSignalValue("log_volume", 0)).toBe("0.0/min")
 	})
 
-	it("formats error spikes as a 30-minute count", () => {
-		expect(formatSignalValue("error_spike", 41.6)).toBe("42 in 30m")
+	it("formats error-frequency increases as a 30-minute count", () => {
+		expect(formatSignalValue("error_spike", 41.6)).toBe("42 occurrences / 30m")
+	})
+})
+
+describe("error-frequency incident semantics", () => {
+	const nowMs = Date.parse("2026-07-23T12:00:00Z")
+	const openIncident = {
+		status: "open" as const,
+		signalType: "error_rate" as const,
+		lastTriggeredAt: "2026-07-23T11:30:00.000Z",
+	}
+
+	it("uses an explicit user-facing label while preserving the internal signal", () => {
+		expect(SIGNAL_LABEL.error_spike).toBe("Error frequency increase")
+	})
+
+	it("marks open incidents stale after one hour", () => {
+		expect(isStaleOpenIncident(openIncident, nowMs)).toBe(false)
+		expect(
+			isStaleOpenIncident({ ...openIncident, lastTriggeredAt: "2026-07-23T10:59:59.999Z" }, nowMs),
+		).toBe(true)
+		expect(
+			isStaleOpenIncident(
+				{ ...openIncident, status: "resolved", lastTriggeredAt: "2026-07-01T00:00:00.000Z" },
+				nowMs,
+			),
+		).toBe(false)
+	})
+
+	it("keeps error-frequency and stale incidents out of service health", () => {
+		expect(anomalyAffectsServiceHealth(openIncident, nowMs)).toBe(true)
+		expect(anomalyAffectsServiceHealth({ ...openIncident, signalType: "error_spike" }, nowMs)).toBe(false)
+		expect(
+			anomalyAffectsServiceHealth(
+				{ ...openIncident, lastTriggeredAt: "2026-07-23T10:00:00.000Z" },
+				nowMs,
+			),
+		).toBe(false)
 	})
 })
 

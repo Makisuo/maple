@@ -49,6 +49,56 @@ export const cloudflareUsageRowSchema: CompiledQueryRowSchema<CloudflareUsageOut
 	lastTimeUnix: Schema.String,
 })
 
+/**
+ * Firewall actions that actually mitigated a request (challenges count as
+ * mitigation; `skip`/`log` are observability-only and excluded). Single source
+ * of truth for the drill-in "blocked" stat.
+ */
+export const BLOCKED_FIREWALL_ACTIONS = ["block", "challenge", "jschallenge", "managed_challenge"] as const
+
+export interface CloudflareUsageStatsOutput {
+	/** Total requests in the previous window `[prevStartTime, currentStartTime)`. */
+	readonly previousRequests: number
+	/** Org-wide mitigated firewall events in the current window `[currentStartTime, endTime]`. */
+	readonly firewallBlockedEvents: number
+}
+
+export const cloudflareUsageStatsRowSchema: CompiledQueryRowSchema<CloudflareUsageStatsOutput> =
+	Schema.Struct({
+		previousRequests: CHNumber,
+		firewallBlockedEvents: CHNumber,
+	})
+
+/**
+ * Single-row companion to {@link cloudflareUsageQuery}: the previous-window
+ * request total (for the "vs previous 24h" delta) and the current-window
+ * mitigated-firewall-event count, in one scan over `[prevStartTime, endTime]`.
+ */
+export function cloudflareUsageStatsQuery() {
+	return from(MetricsSum)
+		.select(($) => ({
+			previousRequests: CH.sumIf(
+				$.Value,
+				$.MetricName.in_(...CLOUDFLARE_USAGE_METRIC_NAMES).and(
+					$.TimeUnix.lt(param.dateTime("currentStartTime")),
+				),
+			),
+			firewallBlockedEvents: CH.sumIf(
+				$.Value,
+				$.MetricName.eq("cloudflare.firewall.events")
+					.and($.Attributes.get("firewall.action").in_(...BLOCKED_FIREWALL_ACTIONS))
+					.and($.TimeUnix.gte(param.dateTime("currentStartTime"))),
+			),
+		}))
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			$.MetricName.in_(...CLOUDFLARE_USAGE_METRIC_NAMES, "cloudflare.firewall.events"),
+			$.TimeUnix.gte(param.dateTime("prevStartTime")),
+			$.TimeUnix.lte(param.dateTime("endTime")),
+		])
+		.format("JSON")
+}
+
 export function cloudflareUsageQuery() {
 	return from(MetricsSum)
 		.select(($) => ({

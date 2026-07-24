@@ -2079,6 +2079,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 					windowEnd: now,
 					bucketSeconds: USAGE_BUCKET_SECONDS,
 					totalRequests: 0,
+					previousTotalRequests: 0,
+					firewallBlockedEvents: 0,
 					services: [],
 				})
 			}
@@ -2111,20 +2113,45 @@ export class CloudflareAnalyticsService extends Context.Service<
 						}),
 				),
 			)
-			const rows = yield* warehouse
-				.compiledQuery(systemTenant(orgId), compiled, {
-					profile: "aggregation",
-					context: "cloudflareUsage",
-					...(clickHouseReady ? {} : { route: "ingest" as const }),
-				})
-				.pipe(
-					Effect.mapError(
-						(error) =>
-							new IntegrationsPersistenceError({
-								message: `Failed to load Cloudflare usage: ${error.message}`,
-							}),
-					),
-				)
+			// Companion scalar stats (previous-24h total + firewall blocked count) share the
+			// readiness decision and run concurrently with the bucketed usage query.
+			const compiledStats = CH.compile(
+				CH.cloudflareUsageStatsQuery(),
+				{
+					orgId,
+					prevStartTime: toWarehouseDateTime64(windowStart - USAGE_WINDOW_MS),
+					currentStartTime: toWarehouseDateTime64(windowStart),
+					endTime: toWarehouseDateTime64(now),
+				},
+				{ rowSchema: CH.cloudflareUsageStatsRowSchema },
+			)
+			const routeOptions = clickHouseReady ? {} : { route: "ingest" as const }
+			const [rows, statsRows] = yield* Effect.all(
+				[
+					warehouse.compiledQuery(systemTenant(orgId), compiled, {
+						profile: "aggregation",
+						context: "cloudflareUsage",
+						...routeOptions,
+					}),
+					warehouse.compiledQuery(systemTenant(orgId), compiledStats, {
+						profile: "aggregation",
+						context: "cloudflareUsageStats",
+						...routeOptions,
+					}),
+				],
+				{ concurrency: 2 },
+			).pipe(
+				Effect.mapError(
+					(error) =>
+						new IntegrationsPersistenceError({
+							message: `Failed to load Cloudflare usage: ${error.message}`,
+						}),
+				),
+			)
+			// Single-row aggregate; absent when the org has no matching rows at all.
+			const stats = statsRows[0]
+			const previousTotalRequests = Math.round(stats?.previousRequests ?? 0)
+			const firewallBlockedEvents = Math.round(stats?.firewallBlockedEvents ?? 0)
 
 			interface ServiceAgg {
 				buckets: Array<CloudflareUsageBucket>
@@ -2191,6 +2218,8 @@ export class CloudflareAnalyticsService extends Context.Service<
 				windowEnd: now,
 				bucketSeconds: USAGE_BUCKET_SECONDS,
 				totalRequests: services.reduce((sum, s) => sum + s.totalRequests, 0),
+				previousTotalRequests,
+				firewallBlockedEvents,
 				services,
 			})
 		})

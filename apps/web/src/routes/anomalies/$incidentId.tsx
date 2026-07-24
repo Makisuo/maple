@@ -11,12 +11,19 @@ import { AnomalyLinkIssueDialog } from "@/components/anomalies/anomaly-link-issu
 import { AnomalyLinkedIssueCard } from "@/components/anomalies/anomaly-linked-issue-card"
 import { AnomalySidebar } from "@/components/anomalies/anomaly-sidebar"
 import { AnomalyTimeseriesChart } from "@/components/anomalies/anomaly-timeseries-chart"
-import { RESOLVE_REASON_LABEL, SIGNAL_LABEL, severityToneFor } from "@/components/anomalies/anomaly-format"
+import {
+	isStaleOpenIncident,
+	RESOLVE_REASON_LABEL,
+	SEVERITY_TONE,
+	SIGNAL_LABEL,
+	severityToneFor,
+} from "@/components/anomalies/anomaly-format"
 import { useAnomalyMutations } from "@/components/anomalies/use-anomaly-mutations"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { SectionHeader } from "@/components/layout/section-header"
 import { useIntervalRefresh } from "@/hooks/use-interval-refresh"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
+import { formatRelativeTime } from "@/lib/format"
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -112,6 +119,7 @@ function AnomalyDetailBody({
 	const [busy, setBusy] = useState(false)
 
 	const isOpen = incident.status === "open"
+	const isStale = isStaleOpenIncident(incident)
 	const tone = severityToneFor(incident)
 
 	const timeseriesQueryAtom = MapleApiAtomClient.query("anomalies", "getIncidentTimeseries", {
@@ -157,8 +165,8 @@ function AnomalyDetailBody({
 			description={incident.deploymentEnv || undefined}
 			headerActions={
 				<div className="flex items-center gap-2">
-					<Badge variant="outline" className={tone.badge}>
-						{isOpen ? (
+					<Badge variant="outline" className={isStale ? SEVERITY_TONE.resolved.badge : tone.badge}>
+						{isOpen && !isStale ? (
 							<span className="flex items-center gap-1.5">
 								<span className="relative inline-flex size-1.5">
 									<span
@@ -176,6 +184,8 @@ function AnomalyDetailBody({
 								</span>
 								{incident.severity}
 							</span>
+						) : isStale ? (
+							`Stale · last seen ${formatRelativeTime(incident.lastTriggeredAt)}`
 						) : incident.resolveReason !== null ? (
 							RESOLVE_REASON_LABEL[incident.resolveReason]
 						) : (

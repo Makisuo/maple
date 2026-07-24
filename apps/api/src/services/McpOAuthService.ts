@@ -147,15 +147,64 @@ const parseScopes = (scope: string | undefined) => {
 const isLoopbackHost = (hostname: string) =>
 	hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1"
 
-export const validateMcpOAuthRedirectUri = (value: string): boolean => {
-	try {
-		const url = new URL(value)
-		if (url.hash || url.username || url.password) return false
-		if (url.protocol === "https:") return true
-		return url.protocol === "http:" && isLoopbackHost(url.hostname)
-	} catch {
-		return false
-	}
+const hasSafeRedirectComponents = (url: URL) => !url.hash && !url.username && !url.password
+
+const McpOAuthRedirectUriSchema = Schema.URLFromString.pipe(
+	Schema.check(
+		Schema.makeFilter(
+			(url) =>
+				hasSafeRedirectComponents(url) &&
+				(url.protocol === "https:" || (url.protocol === "http:" && isLoopbackHost(url.hostname))),
+			{ expected: "an HTTPS or loopback HTTP URL without credentials or a fragment" },
+		),
+	),
+)
+
+const LoopbackMcpOAuthRedirectUriSchema = Schema.URLFromString.pipe(
+	Schema.check(
+		Schema.makeFilter(
+			(url) =>
+				hasSafeRedirectComponents(url) && url.protocol === "http:" && isLoopbackHost(url.hostname),
+			{ expected: "a loopback HTTP URL without credentials or a fragment" },
+		),
+	),
+)
+
+const decodeMcpOAuthRedirectUri = Schema.decodeUnknownOption(McpOAuthRedirectUriSchema)
+const decodeLoopbackMcpOAuthRedirectUri = Schema.decodeUnknownOption(LoopbackMcpOAuthRedirectUriSchema)
+
+export const validateMcpOAuthRedirectUri = (value: string): boolean =>
+	Option.isSome(decodeMcpOAuthRedirectUri(value))
+
+const parseLoopbackRedirectUri = (value: string) =>
+	Option.map(decodeLoopbackMcpOAuthRedirectUri(value), (url) => {
+		// RFC 8252 permits only the port to vary. Keep the original suffix so path and query
+		// matching does not inherit URL parser normalization.
+		const authorityStart = value.indexOf("//") + 2
+		const suffixOffset = value.slice(authorityStart).search(/[/?]/)
+		return {
+			protocol: url.protocol,
+			hostname: url.hostname,
+			suffix: suffixOffset === -1 ? "" : value.slice(authorityStart + suffixOffset),
+		}
+	})
+
+export const matchesMcpOAuthRedirectUri = (registered: string, requested: string): boolean => {
+	if (registered === requested) return validateMcpOAuthRedirectUri(registered)
+
+	return Option.match(
+		Option.all({
+			registered: parseLoopbackRedirectUri(registered),
+			requested: parseLoopbackRedirectUri(requested),
+		}),
+		{
+			onNone: () => false,
+			onSome: ({ registered, requested }) =>
+				registered.protocol === requested.protocol &&
+				registered.hostname === requested.hostname &&
+				registered.suffix === requested.suffix,
+		},
+	)
 }
 
 const appendOAuthParams = (redirectUri: string, params: Record<string, string | undefined>) => {
@@ -349,7 +398,11 @@ export class McpOAuthService extends Context.Service<
 				.pipe(Effect.mapError(persistenceError))
 			const client = clients[0]
 			if (!client) return yield* protocolError("invalid_request", "Unknown client_id")
-			if (!client.redirectUris.includes(input.redirectUri)) {
+			if (
+				!client.redirectUris.some((registered) =>
+					matchesMcpOAuthRedirectUri(registered, input.redirectUri),
+				)
+			) {
 				return yield* protocolError(
 					"invalid_request",
 					"redirect_uri is not registered for this client",

@@ -109,6 +109,9 @@ struct AppConfig {
     autumn_check_cache_ttl_secs: u64,
     ingest_key_cache_ttl_secs: u64,
     org_routing_cache_ttl_secs: u64,
+    /// Ceiling on the total decompressed rrweb payload a single replay session
+    /// may accumulate. 0 disables the cap. See `ReplaySessionBudget`.
+    replay_max_session_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -380,6 +383,17 @@ impl AppConfig {
             1,
         )?;
 
+        // 1 GiB of decompressed rrweb per session. Sized as an absurdity guard,
+        // not a product tier: the observed p99 session is ~594 MB, so this only
+        // trips on runaway recordings (canvas capture, unmasked media, a page
+        // that never stops mutating) while leaving genuinely heavy sessions
+        // untouched.
+        let replay_max_session_bytes = parse_u64(
+            "INGEST_REPLAY_MAX_SESSION_BYTES",
+            std::env::var("INGEST_REPLAY_MAX_SESSION_BYTES").ok(),
+            1024 * 1024 * 1024,
+        )?;
+
         Ok(Self {
             port,
             otlp_grpc_port,
@@ -400,6 +414,7 @@ impl AppConfig {
             autumn_check_cache_ttl_secs,
             ingest_key_cache_ttl_secs,
             org_routing_cache_ttl_secs,
+            replay_max_session_bytes,
         })
     }
 }
@@ -672,6 +687,7 @@ struct AppState {
     cloudflare_resolver: CloudflareConnectorResolver,
     autumn_tracker: Option<AutumnTracker>,
     autumn_entitlements: Option<AutumnEntitlements>,
+    replay_session_budget: ReplaySessionBudget,
 }
 
 #[derive(Clone)]
@@ -1276,6 +1292,7 @@ async fn main() {
         config: config.clone(),
         autumn_tracker,
         autumn_entitlements,
+        replay_session_budget: ReplaySessionBudget::new(config.replay_max_session_bytes),
     });
 
     let cors = CorsLayer::new()
@@ -1627,6 +1644,69 @@ async fn handle_metrics(
 
 // --- Session replay ingest -------------------------------------------------
 
+/// Running total of decompressed rrweb bytes per in-flight replay session, used
+/// to stop a runaway recording from writing an unbounded amount into
+/// `session_replay_events`.
+///
+/// Deliberately best-effort and process-local. Sessions are short-lived and a
+/// browser holds one origin connection for their duration, so a single replica
+/// normally sees every chunk of a session; across N replicas the effective
+/// ceiling degrades to roughly N x the configured limit. That is fine for an
+/// absurdity guard — it still turns "unbounded" into "bounded" — but it is why
+/// this must not be relied on as a billing-accurate quota.
+///
+/// Entries expire on idle rather than at a fixed age so a genuinely long session
+/// keeps its accumulated total, while abandoned ones fall out of the map.
+struct ReplaySessionBudget {
+    totals: Cache<String, Arc<AtomicU64>>,
+    limit: u64,
+}
+
+impl ReplaySessionBudget {
+    fn new(limit: u64) -> Self {
+        Self {
+            totals: Cache::builder()
+                .time_to_idle(Duration::from_secs(2 * 60 * 60))
+                .max_capacity(100_000)
+                .build(),
+            limit,
+        }
+    }
+
+    fn key(org_id: &str, session_id: &str) -> String {
+        format!("{org_id}:{session_id}")
+    }
+
+    /// True once the session has already exceeded its ceiling. Checked before
+    /// gunzipping so rejected chunks cost no decompression CPU.
+    async fn is_exhausted(&self, org_id: &str, session_id: &str) -> bool {
+        if self.limit == 0 {
+            return false;
+        }
+        match self.totals.get(&Self::key(org_id, session_id)).await {
+            Some(total) => total.load(Ordering::Relaxed) >= self.limit,
+            None => false,
+        }
+    }
+
+    /// Add a chunk's decompressed size and return the session's new total. The
+    /// chunk that crosses the limit is still accepted, so playback truncates at
+    /// a chunk boundary instead of on a partial payload; every chunk after it is
+    /// rejected by `is_exhausted`.
+    async fn add(&self, org_id: &str, session_id: &str, bytes: u64) -> u64 {
+        if self.limit == 0 {
+            return 0;
+        }
+        let counter = self
+            .totals
+            .get_with(Self::key(org_id, session_id), async {
+                Arc::new(AtomicU64::new(0))
+            })
+            .await;
+        counter.fetch_add(bytes, Ordering::Relaxed) + bytes
+    }
+}
+
 fn replay_header(headers: &HeaderMap, name: &str) -> Option<String> {
     headers
         .get(name)
@@ -1930,6 +2010,7 @@ async fn handle_replay_blob(
         "maple.org_id" = tracing::field::Empty,
         "maple.ingest.clickhouse_ready" = tracing::field::Empty,
         "maple.ingest.destination" = tracing::field::Empty,
+        "maple.replay.truncated" = tracing::field::Empty,
     );
     let span_handle = span.clone();
     match handle_replay_blob_inner(&state, &headers, body)
@@ -1994,6 +2075,20 @@ async fn handle_replay_blob_inner(
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
+    // Drop chunks for a session that already blew its byte ceiling before paying
+    // to decompress them. The SDK treats a non-2xx as a dropped chunk and does
+    // not retry, so this ends the recording cleanly rather than looping.
+    if state
+        .replay_session_budget
+        .is_exhausted(&org_id, &session_id)
+        .await
+    {
+        metrics::replay_session_chunk_dropped(&org_id);
+        return Err(ApiError::payload_too_large(
+            "session replay exceeded its maximum recorded size",
+        ));
+    }
+
     // The SDK gzips the rrweb event array (native CompressionStream). Decompress
     // here so the events land in ClickHouse as queryable JSON text (the column is
     // ZSTD-compressed by the warehouse) — no R2 blob store on the replay path.
@@ -2004,6 +2099,25 @@ async fn handle_replay_blob_inner(
         .read_to_string(&mut events_json)
         .map_err(|e| ApiError::bad_request(format!("failed to gunzip replay chunk: {e}")))?;
     let byte_size = events_json.len() as u64;
+
+    // Accept the chunk that crosses the ceiling so the recording truncates on a
+    // chunk boundary; `is_exhausted` rejects everything after it.
+    let session_bytes = state
+        .replay_session_budget
+        .add(&org_id, &session_id, byte_size)
+        .await;
+    let limit = state.config.replay_max_session_bytes;
+    if limit > 0 && session_bytes >= limit {
+        warn!(
+            org_id = %org_id,
+            session_id = %session_id,
+            session_bytes,
+            limit,
+            "session replay hit its byte ceiling; truncating recording"
+        );
+        Span::current().record("maple.replay.truncated", true);
+        metrics::replay_session_truncated(&org_id);
+    }
 
     // Row → session_replay_events. Tinybird parses the space-separated datetime
     // into DateTime64(9); `events` is stored verbatim as a String column.
@@ -4839,6 +4953,7 @@ mod tests {
                 autumn_check_cache_ttl_secs: 60,
                 ingest_key_cache_ttl_secs: 60,
                 org_routing_cache_ttl_secs: 5,
+                replay_max_session_bytes: 1024 * 1024 * 1024,
             },
             http_client,
             telemetry_pipeline: Some(telemetry_pipeline),
@@ -4877,7 +4992,44 @@ mod tests {
             },
             autumn_tracker: None,
             autumn_entitlements: None,
+            replay_session_budget: ReplaySessionBudget::new(1024 * 1024 * 1024),
         }
+    }
+
+    #[tokio::test]
+    async fn replay_budget_truncates_session_at_its_ceiling() {
+        let budget = ReplaySessionBudget::new(1_000);
+
+        // Under the ceiling: the session keeps accepting chunks.
+        assert_eq!(budget.add("org_a", "s1", 400).await, 400);
+        assert!(!budget.is_exhausted("org_a", "s1").await);
+        assert_eq!(budget.add("org_a", "s1", 400).await, 800);
+        assert!(!budget.is_exhausted("org_a", "s1").await);
+
+        // The chunk that crosses is still accepted, so the recording truncates on
+        // a chunk boundary rather than mid-payload.
+        assert_eq!(budget.add("org_a", "s1", 400).await, 1_200);
+        assert!(budget.is_exhausted("org_a", "s1").await);
+    }
+
+    #[tokio::test]
+    async fn replay_budget_scopes_totals_per_session_and_org() {
+        let budget = ReplaySessionBudget::new(1_000);
+        budget.add("org_a", "s1", 1_200).await;
+
+        // A different session in the same org is unaffected...
+        assert!(!budget.is_exhausted("org_a", "s2").await);
+        // ...as is the same session id belonging to a different org, so one
+        // tenant cannot exhaust another's budget by guessing session ids.
+        assert!(!budget.is_exhausted("org_b", "s1").await);
+        assert!(budget.is_exhausted("org_a", "s1").await);
+    }
+
+    #[tokio::test]
+    async fn replay_budget_disabled_when_limit_is_zero() {
+        let budget = ReplaySessionBudget::new(0);
+        budget.add("org_a", "s1", u64::MAX / 2).await;
+        assert!(!budget.is_exhausted("org_a", "s1").await);
     }
 
     #[tokio::test]

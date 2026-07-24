@@ -1,3 +1,4 @@
+import { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { describe, expect, it } from "vitest"
 import { formatBackendError } from "./error-messages"
 
@@ -166,6 +167,27 @@ describe("formatBackendError", () => {
 			_tag: "@maple/http/errors/UnauthorizedError",
 		})
 		expect(result.title).toBe("Not authorized")
+	})
+
+	it("tags transport HttpClientError as a network error", () => {
+		const error = new HttpClientError.HttpClientError({
+			reason: new HttpClientError.TransportError({
+				request: HttpClientRequest.get("https://api.maple.dev/v1/services"),
+			}),
+		})
+		const result = formatBackendError(error)
+		expect(result.title).toBe("Cannot reach Maple API")
+		expect(result.kind).toBe("network")
+	})
+
+	it("tags fetch-failure Error messages as network errors", () => {
+		const result = formatBackendError(new Error("Failed to fetch"))
+		expect(result.title).toBe("Cannot reach Maple API")
+		expect(result.kind).toBe("network")
+	})
+
+	it("does not tag non-network errors", () => {
+		expect(formatBackendError(new Error("boom")).kind).toBeUndefined()
 	})
 
 	it("falls back for plain Error", () => {

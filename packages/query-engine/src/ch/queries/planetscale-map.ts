@@ -5,8 +5,8 @@
 // from PlanetScale's Prometheus endpoints, so the service map can overlay live
 // database health onto trace-derived DB nodes and the detail panel can break a
 // database down by branch. The scraper merges PlanetScale's http_sd discovery
-// labels into every data point, so `planetscale_database` / `planetscale_branch`
-// are plain point attributes here.
+// labels into every data point. Current payloads use the `_name` suffix; the
+// legacy aliases are coalesced for already-ingested data.
 //
 // Metric names are PlanetScale's own (pass-through scrape); the registry below
 // covers both products — Vitess/MySQL and Postgres — and was pinned from
@@ -116,7 +116,10 @@ export const planetscaleBranchConnectionsRowSchema: CompiledQueryRowSchema<Plane
 export function planetscaleGaugesSQL() {
 	return from(MetricsGauge)
 		.select(($) => ({
-			database: $.Attributes.get("planetscale_database"),
+			database: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			),
 			cpuMaxPercent: CH.maxIf($.Value, $.MetricName.in_(...CPU_METRIC_NAMES)),
 			memMaxPercent: CH.maxIf($.Value, $.MetricName.in_(...MEMORY_METRIC_NAMES)),
 			replicaLagMaxSeconds: CH.maxIf($.Value, $.MetricName.in_(...REPLICA_LAG_METRIC_NAMES)),
@@ -124,7 +127,10 @@ export function planetscaleGaugesSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...GAUGE_METRIC_NAMES),
-			$.Attributes.get("planetscale_database").neq(""),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).neq(""),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])
@@ -137,8 +143,14 @@ export function planetscaleGaugesSQL() {
 export function planetscaleBranchGaugesSQL() {
 	return from(MetricsGauge)
 		.select(($) => ({
-			database: $.Attributes.get("planetscale_database"),
-			branch: $.Attributes.get("planetscale_branch"),
+			database: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			),
+			branch: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_branch_name"), ""),
+				$.Attributes.get("planetscale_branch"),
+			),
 			cpuMaxPercent: CH.maxIf($.Value, $.MetricName.in_(...CPU_METRIC_NAMES)),
 			memMaxPercent: CH.maxIf($.Value, $.MetricName.in_(...MEMORY_METRIC_NAMES)),
 			replicaLagMaxSeconds: CH.maxIf($.Value, $.MetricName.in_(...REPLICA_LAG_METRIC_NAMES)),
@@ -146,7 +158,10 @@ export function planetscaleBranchGaugesSQL() {
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...GAUGE_METRIC_NAMES),
-			$.Attributes.get("planetscale_database").eq(param.string("database")),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).eq(param.string("database")),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])
@@ -164,14 +179,20 @@ export function planetscaleBranchGaugesSQL() {
 export function planetscaleConnectionsSQL() {
 	const inner = from(MetricsGauge)
 		.select(($) => ({
-			database: $.Attributes.get("planetscale_database"),
+			database: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			),
 			t: $.TimeUnix,
 			totalConnections: CH.sum($.Value),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...CONNECTION_METRIC_NAMES),
-			$.Attributes.get("planetscale_database").neq(""),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).neq(""),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])
@@ -192,15 +213,24 @@ export function planetscaleConnectionsSQL() {
 export function planetscaleBranchConnectionsSQL() {
 	const inner = from(MetricsGauge)
 		.select(($) => ({
-			database: $.Attributes.get("planetscale_database"),
-			branch: $.Attributes.get("planetscale_branch"),
+			database: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			),
+			branch: CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_branch_name"), ""),
+				$.Attributes.get("planetscale_branch"),
+			),
 			t: $.TimeUnix,
 			totalConnections: CH.sum($.Value),
 		}))
 		.where(($) => [
 			$.OrgId.eq(param.string("orgId")),
 			$.MetricName.in_(...CONNECTION_METRIC_NAMES),
-			$.Attributes.get("planetscale_database").eq(param.string("database")),
+			CH.coalesce(
+				CH.nullIf($.Attributes.get("planetscale_database_name"), ""),
+				$.Attributes.get("planetscale_database"),
+			).eq(param.string("database")),
 			$.TimeUnix.gte(param.dateTime("startTime")),
 			$.TimeUnix.lte(param.dateTime("endTime")),
 		])

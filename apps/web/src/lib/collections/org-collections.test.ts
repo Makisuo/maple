@@ -209,6 +209,21 @@ describe("org-collections bounded self-heal", () => {
 		expect(runFork).toHaveBeenCalledTimes(3)
 	})
 
+	it("auth-error (401 stream stop) recreates under the shared budget", async () => {
+		const { mod } = await freshModule()
+		const start = mod.getCollectionsGeneration()
+
+		// A stale-token 401 stops the shape stream; the recovery hook must mint
+		// fresh collections (→ fresh token) rather than leave sync dead forever —
+		// but a genuinely signed-out session exhausts the shared budget and stops.
+		for (let i = 0; i < 10; i++) {
+			mod.handleCollectionAuthError()
+			vi.advanceTimersByTime(6_000)
+		}
+
+		expect(mod.getCollectionsGeneration()).toBe(start + 3)
+	})
+
 	it("collapses a burst of stuck reports into a single recreation", async () => {
 		const { mod } = await freshModule()
 		const start = mod.getCollectionsGeneration()

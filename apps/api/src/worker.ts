@@ -14,6 +14,7 @@ import * as Etag from "effect/unstable/http/Etag"
 import * as HttpPlatform from "effect/unstable/http/HttpPlatform"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { persistSession, preloadSession, type SessionsBinding } from "./mcp/lib/session-store"
+import { classifyWorkerQueue } from "./queue-dispatch"
 
 const WorkerFileSystemLive = FileSystem.layerNoop({})
 
@@ -314,6 +315,28 @@ const handleQueue = async (
 	env: Record<string, unknown>,
 	ctx: ExecutionContext,
 ): Promise<void> => {
+	const queueKind = classifyWorkerQueue(batch.queue, env)
+	if (queueKind === "planetscale-webhook") {
+		const {
+			buildPlanetScaleWebhookLayer,
+			processPlanetScaleWebhookBatch,
+			flushPlanetScaleWebhookTelemetry,
+		} = await import("./planetscale-webhook-runtime")
+		try {
+			await runScheduledEffect(
+				buildPlanetScaleWebhookLayer(env),
+				processPlanetScaleWebhookBatch(batch),
+				ctx,
+			)
+		} finally {
+			ctx.waitUntil(flushPlanetScaleWebhookTelemetry(env))
+		}
+		return
+	}
+	if (queueKind === "unknown") {
+		throw new Error(`No queue consumer configured for "${batch.queue}"`)
+	}
+
 	const { buildVcsSyncLayer, processBatch, flushVcsTelemetry } = await import("./vcs-sync-runtime")
 	try {
 		await runScheduledEffect(buildVcsSyncLayer(env), processBatch(batch), ctx)

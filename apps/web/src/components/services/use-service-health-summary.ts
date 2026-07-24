@@ -3,6 +3,7 @@ import { Result, useAtomValue } from "@/lib/effect-atom"
 import { useAlertIncidentsList } from "@/hooks/use-alerts-list"
 import { openAnomalyIncidentsAtom } from "@/lib/services/atoms/anomaly-atoms"
 import { getServiceOverviewResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
+import { anomalyAffectsServiceHealth } from "@/components/anomalies/anomaly-format"
 import {
 	deriveServiceHealthFromCauses,
 	type ServiceHealth,
@@ -58,6 +59,7 @@ export function useServiceHealthSummary(input: GetServiceOverviewInput): Service
 
 		const anomalyCausesByRow = new Map<string, ServiceHealthCause[]>()
 		for (const incident of anomalies.incidents) {
+			if (!anomalyAffectsServiceHealth(incident)) continue
 			const key = serviceHealthRowKey(incident.serviceName, incident.deploymentEnv)
 			const causes = anomalyCausesByRow.get(key)
 			const cause: ServiceHealthCause = { severity: incident.severity, label: "Anomaly" }

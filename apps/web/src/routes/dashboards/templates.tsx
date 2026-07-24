@@ -7,6 +7,7 @@ import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import { useDashboardMutationSync } from "@/hooks/use-dashboard-store"
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
 import { TemplatePicker } from "@/components/dashboard-builder/templates/template-picker"
+import { TemplateGridSkeleton } from "@/components/dashboard-builder/loading-skeletons"
 import { Button } from "@maple/ui/components/ui/button"
 import { ArrowLeftIcon } from "@/components/icons"
 
@@ -79,7 +80,7 @@ function TemplatesPage() {
 				</div>
 			)}
 			{!Result.isSuccess(listResult) && !failed ? (
-				<div className="py-12 text-sm text-muted-foreground">Loading templates…</div>
+				<TemplateGridSkeleton />
 			) : (
 				<TemplatePicker templates={templates} submitting={submitting} onUse={handleUse} />
 			)}

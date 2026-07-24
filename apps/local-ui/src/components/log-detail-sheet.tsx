@@ -1,3 +1,8 @@
+// Intentionally divergent from the web app's `@/components/logs/log-detail-sheet`:
+// that one is wired to effect-atom (trace timeline, correlated logs) and a wider
+// sub-component family local mode doesn't have. The shareable pieces (AttributesTable,
+// SeverityBadge, severity/format libs) already come from @maple/ui.
+
 import { useMemo, useState } from "react"
 import { Sheet, SheetContent, SheetTitle } from "@maple/ui/components/ui/sheet"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@maple/ui/components/ui/tabs"

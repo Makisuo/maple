@@ -73,9 +73,10 @@ export function formatLatency(ms: number): string {
  */
 export function formatErrorRate(rate: number): string {
 	const pct = rate * 100
-	if (pct < 0.01) {
+	if (pct === 0) {
 		return "0%"
 	}
+	if (pct > 0 && pct < 0.01) return "<0.01%"
 	if (pct < 1) {
 		return `${pct.toFixed(2)}%`
 	}

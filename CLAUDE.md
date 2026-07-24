@@ -126,19 +126,19 @@ Pattern (see `apps/api/src/routes/query-engine.http.ts` and `apps/api/src/servic
 1. **Define the query** as a DSL function in `packages/query-engine/src/ch/queries/*.ts` using `from(Table).select(...).where(...)` and `param.string/int/dateTime(name)` placeholders.
 2. **Export it** from `packages/query-engine/src/ch/index.ts` so it's reachable via `import { CH } from "@maple/query-engine"`.
 3. **Call it** from a service or route handler. Pass a `context` string in `SqlQueryOptions` so the executeSql span carries a semantic label (`query.context`) you can filter traces on:
-    ```typescript
-    const compiled = CH.compile(CH.myQuery({ limit: 50 }), {
-    	orgId,
-    	startTime, // ISO or Tinybird datetime string — resolveParam() quotes it
-    	endTime,
-    })
-    const rows =
-    	yield *
-    	warehouse
-    		.sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
-    		.pipe(Effect.mapError(mapTinybirdError))
-    const typedRows = compiled.castRows(rows)
-    ```
+   ```typescript
+   const compiled = CH.compile(CH.myQuery({ limit: 50 }), {
+     orgId,
+     startTime, // ISO or Tinybird datetime string — resolveParam() quotes it
+     endTime,
+   });
+   const rows =
+     yield *
+     warehouse
+       .sqlQuery(tenant, compiled.sql, { profile: "list", context: "myQuery" })
+       .pipe(Effect.mapError(mapTinybirdError));
+   const typedRows = compiled.castRows(rows);
+   ```
 4. **`sqlQuery` enforces `OrgId` scoping** — every query must include an `OrgId` filter (enforced by `WarehouseQueryService`). DSL queries satisfy this via `$.OrgId.eq(param.string("orgId"))` in their `.where()`.
 
 `packages/domain/src/tinybird/endpoints.ts` is **type-only** — it holds `*Output` / `*Params` shapes for consumers that want to reference query result types. Do not add `defineEndpoint()` calls; they won't be deployed.
@@ -239,6 +239,7 @@ Rankings, higher = better. Cost reflects what I actually pay (OpenAI has really 
 
 | Model    | Cost | Intelligence | Taste |
 | -------- | ---- | ------------ | ----- |
+| gpt-5.6  | 10   | 9            | 7     |
 | gpt-5.5  | 9    | 8            | 5     |
 | sonnet-5 | 5    | 5            | 7     |
 | opus-4.8 | 4    | 7            | 8     |
@@ -254,16 +255,16 @@ How to apply:
 - Never use Haiku model.
 - Mechanics: gpt-5.5 is only reachable through the Codex through the `codex:codex-rescue` subagent (Codex plugin for Claude Code), my `~/.codex/config.toml` defaults to gpt-5.5.
 - Use gpt-5.5 by `/codex:rescue` when you want Codex to:
-    - investigate a bug
-    - try a fix
-    - continue a previous Codex task
-    - take a faster or cheaper pass with a smaller model.
-    - It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
+  - investigate a bug
+  - try a fix
+  - continue a previous Codex task
+  - take a faster or cheaper pass with a smaller model.
+  - It supports `--background`, `--wait`, `--resume`, and `--fresh`. If you omit `--resume` and `--fresh`, the plugin can offer to continue the latest rescue thread for this repo.
 - Use gpt-5.5 by `/codex:transfer` to Creates a persistent Codex thread from the current Claude Code session and prints a `codex resume <session-id>` command. Use it when you started a debugging or implementation conversation in Claude Code and want to continue that same context directly in Codex.
 - Use gpt-5.5 by `/codex:status` to see running and recent Codex jobs for the current repository. Use it to:
-    - check progress on background work
-    - see the latest completed job
-    - confirm whether a task is still running
+  - check progress on background work
+  - see the latest completed job
+  - confirm whether a task is still running
 - Use gpt-5.5 by `/codex:result` to show the final stored Codex output for a finished job. When available, it also includes the Codex session ID so you can reopen that run directly in Codex with `codex resume <session-id>`.
 - Use gpt-5.5 by `/codex:cancel` to cancel an active background Codex job.
 - Claude models (sonnet-5, opus-4.8, fable-5) run via the Agent/Workflow model parameter.

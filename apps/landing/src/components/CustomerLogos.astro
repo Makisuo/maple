@@ -1,0 +1,81 @@
+---
+/**
+ * CustomerLogos — infinite, edge-faded logo marquee ("trusted by" band).
+ * Companies come from the `logos` content collection; each entry's id maps to a
+ * brand logo component in the LOGOS registry below. Pure CSS animation
+ * (logo-marquee keyframe): one copy of the row is duplicated and the belt
+ * translates -50% for a seamless loop. No JS island. `href` is optional:
+ * present → external link, absent → static lockup.
+ */
+import { getCollection } from "astro:content";
+import * as m from "../paraglide/messages";
+import HazelLogo from "./icons/HazelLogo.astro";
+import SakuraLogo from "./icons/SakuraLogo.astro";
+import GymscoreLogo from "./icons/GymscoreLogo.astro";
+import SuperwallLogo from "./icons/SuperwallLogo.astro";
+import HypenLogo from "./icons/HypenLogo.astro";
+
+// Entry id (filename) → brand mark. Add a new customer by dropping a
+// src/content/logos/<id>.md file and registering its logo component here.
+const LOGOS: Record<string, any> = {
+	hazel: HazelLogo,
+	sakura: SakuraLogo,
+	gymscore: GymscoreLogo,
+	superwall: SuperwallLogo,
+	hypen: HypenLogo,
+};
+
+const entries = (await getCollection("logos"))
+	.filter((e) => LOGOS[e.id])
+	.sort((a, b) => a.data.order - b.data.order);
+
+const base = entries.map((e) => ({ id: e.id, name: e.data.name, href: e.data.href }));
+
+// The customer set is small, so repeat it until one "copy" is wide enough to
+// fill a large viewport, then duplicate that copy so the -50% translate loops
+// seamlessly. Only the first real pass is announced to assistive tech.
+const repeats = Math.max(2, Math.ceil(12 / Math.max(base.length, 1)));
+const oneCopy = Array.from({ length: repeats }, () => base).flat();
+const belt = [...oneCopy, ...oneCopy];
+---
+
+<section class="border-y border-border bg-bg">
+	<div class="mx-auto max-w-6xl px-6 py-14 md:py-20">
+		<p class="text-center text-[11px] uppercase tracking-[0.2em] text-fg-muted mb-10">
+			{m.customers_eyebrow()}
+		</p>
+		<div class="logo-marquee">
+			<div class="logo-marquee__belt">
+				{
+					belt.map((logo, i) => {
+						const Logo = LOGOS[logo.id];
+						const decorative = i >= base.length;
+						const inner = (
+							<>
+								<Logo class="logo-cell__mark h-8 w-auto" />
+								<span class="logo-cell__name">{logo.name}</span>
+							</>
+						);
+						return logo.href ? (
+							<a
+								href={logo.href}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="logo-cell"
+								aria-label={logo.name}
+								aria-hidden={decorative ? "true" : undefined}
+								tabindex={decorative ? -1 : undefined}
+							>
+								{inner}
+							</a>
+						) : (
+							<span class="logo-cell" aria-hidden={decorative ? "true" : undefined}>
+								{inner}
+							</span>
+						);
+					})
+				}
+			</div>
+		</div>
+	</div>
+</section>

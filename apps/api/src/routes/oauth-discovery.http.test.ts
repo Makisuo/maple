@@ -93,13 +93,15 @@ describe("MCP OAuth HTTP routes", () => {
 		}
 	})
 
-	it("supports DCR, browser authorization, and a form-encoded PKCE token exchange", async () => {
+	it("supports DCR with an ephemeral loopback port and a form-encoded PKCE token exchange", async () => {
 		const harness = makeHarness()
 		try {
+			const registeredRedirectUri = "http://127.0.0.1:49876/callback"
+			const authorizationRedirectUri = "http://127.0.0.1:51789/callback"
 			const registered = await harness.handler(
 				postJson("https://api.example.com/register", {
 					client_name: "HTTP MCP Client",
-					redirect_uris: ["http://127.0.0.1:49876/callback"],
+					redirect_uris: [registeredRedirectUri],
 					token_endpoint_auth_method: "none",
 					grant_types: ["authorization_code", "refresh_token"],
 					response_types: ["code"],
@@ -114,7 +116,7 @@ describe("MCP OAuth HTTP routes", () => {
 			const authorizeUrl = new URL("https://api.example.com/oauth/authorize")
 			authorizeUrl.search = new URLSearchParams({
 				client_id: client.client_id,
-				redirect_uri: "http://127.0.0.1:49876/callback",
+				redirect_uri: authorizationRedirectUri,
 				response_type: "code",
 				state: "http-state",
 				code_challenge: challenge,
@@ -149,7 +151,7 @@ describe("MCP OAuth HTTP routes", () => {
 				postForm("https://api.example.com/oauth/token", {
 					grant_type: "authorization_code",
 					client_id: client.client_id,
-					redirect_uri: "http://127.0.0.1:49876/callback",
+					redirect_uri: authorizationRedirectUri,
 					code,
 					code_verifier: verifier,
 					resource: "https://api.example.com/mcp",

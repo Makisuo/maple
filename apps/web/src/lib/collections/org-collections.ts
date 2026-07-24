@@ -113,7 +113,7 @@ const resetSchemaHealBudget = (): void => {
 }
 
 /** What tripped a bounded heal — annotates the logs so dev consoles/telemetry show the cause. */
-type HealSource = "schema-error" | "stuck-loading"
+type HealSource = "schema-error" | "stuck-loading" | "auth-error"
 
 /**
  * Schedules a bounded, spaced recreation of the org collections. Both triggers
@@ -136,11 +136,11 @@ const scheduleBoundedHeal = (source: HealSource): void => {
 		pendingHealTimer = null
 		schemaHealAttempts += 1
 		lastSchemaHealAt = Date.now()
-		// The schema path already logs at the effect-db layer; the stuck path has
-		// no other trace, so log the recreate here for dev consoles/telemetry.
-		if (source === "stuck-loading") {
+		// The schema path already logs at the effect-db layer; the stuck and auth
+		// paths' recreate has no other trace, so log it here for dev consoles/telemetry.
+		if (source === "stuck-loading" || source === "auth-error") {
 			mapleRuntime.runFork(
-				Effect.logWarning("Electric sync self-heal: recreating org collections (stuck loading)").pipe(
+				Effect.logWarning(`Electric sync self-heal: recreating org collections (${source})`).pipe(
 					Effect.annotateLogs({ source, attempt: schemaHealAttempts, maxAttempts: MAX_SCHEMA_HEAL_ATTEMPTS }),
 				),
 			)
@@ -162,6 +162,17 @@ export const handleSchemaError = (): void => scheduleBoundedHeal("schema-error")
  * bounded budget as the schema-error heal. Exported for tests.
  */
 export const handleCollectionStuck = (): void => scheduleBoundedHeal("stuck-loading")
+
+/**
+ * Recovery hook for a shape stream the sync layer stopped on a 401
+ * (`collection:auth-error` from @maple/effect-db): the stream's token went
+ * stale (expired Clerk token on a long-lived poll, or an org switch elsewhere),
+ * but the session is usually still alive. Recreating the collections refetches
+ * the shape with a freshly minted token. Shares the bounded budget, so a
+ * genuinely signed-out session stops after a few attempts instead of looping
+ * 401s against the sync proxy. Exported for tests.
+ */
+export const handleCollectionAuthError = (): void => scheduleBoundedHeal("auth-error")
 
 /** Reactive generation counter — re-runs a consumer's collection memo after a self-heal. */
 export const useCollectionsGeneration = (): number =>
@@ -253,6 +264,7 @@ export const getOrgCollections = (orgId: string): OrgCollections => {
 // degrades gracefully instead of looping. Guarded for SSR (no window on the server).
 if (typeof window !== "undefined") {
 	window.addEventListener("collection:schema-error", handleSchemaError)
+	window.addEventListener("collection:auth-error", handleCollectionAuthError)
 }
 
 /** Reactive active-org id (null when signed out / org-less). Mode-agnostic — both Clerk and self-hosted auth publish via setActiveOrgId. */

@@ -6,7 +6,7 @@ import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
 import { ApiKeysService } from "./ApiKeysService"
 import { AuthService } from "./AuthService"
-import { McpOAuthService, validateMcpOAuthRedirectUri } from "./McpOAuthService"
+import { matchesMcpOAuthRedirectUri, McpOAuthService, validateMcpOAuthRedirectUri } from "./McpOAuthService"
 import { resolveMcpTenantContext } from "../mcp/lib/resolve-tenant"
 
 const createdDbs: TestDb[] = []
@@ -50,11 +50,70 @@ describe("McpOAuthService", () => {
 		expect(validateMcpOAuthRedirectUri("https://client.example.com/callback#fragment")).toBe(false)
 	})
 
+	it("matches loopback redirects with any port while preserving every other component", () => {
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"https://client.example.com/callback",
+				"https://client.example.com/callback",
+			),
+		).toBe(true)
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"http://localhost:49152/callback/server-id?source=codex",
+				"http://localhost:51789/callback/server-id?source=codex",
+			),
+		).toBe(true)
+		expect(
+			matchesMcpOAuthRedirectUri("http://127.0.0.1:49152/callback", "http://127.0.0.1:51789/callback"),
+		).toBe(true)
+		expect(matchesMcpOAuthRedirectUri("http://[::1]:49152/callback", "http://[::1]:51789/callback")).toBe(
+			true,
+		)
+
+		expect(
+			matchesMcpOAuthRedirectUri("http://localhost:49152/callback", "http://127.0.0.1:51789/callback"),
+		).toBe(false)
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"http://localhost:49152/callback/server-id",
+				"http://localhost:51789/callback/other-id",
+			),
+		).toBe(false)
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"http://localhost:49152/callback?source=codex",
+				"http://localhost:51789/callback?source=claude",
+			),
+		).toBe(false)
+		expect(
+			matchesMcpOAuthRedirectUri("http://localhost:49152/callback", "https://localhost:51789/callback"),
+		).toBe(false)
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"https://client.example.com:49152/callback",
+				"https://client.example.com:51789/callback",
+			),
+		).toBe(false)
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"https://client.example.com/callback#fragment",
+				"https://client.example.com/callback#fragment",
+			),
+		).toBe(false)
+		expect(
+			matchesMcpOAuthRedirectUri(
+				"http://user@localhost:49152/callback",
+				"http://user@localhost:49152/callback",
+			),
+		).toBe(false)
+	})
+
 	it.effect("issues a role-pinned, audience-bound token through authorization code + PKCE", () => {
 		const db = createTestDb(createdDbs)
 		return Effect.gen(function* () {
 			const oauth = yield* McpOAuthService
 			const apiKeys = yield* ApiKeysService
+			const authorizationRedirectUri = "http://127.0.0.1:51789/callback"
 			const client = yield* oauth.register(
 				{ clientName: "Test MCP Client", redirectUris: [redirectUri] },
 				"127.0.0.1",
@@ -62,7 +121,7 @@ describe("McpOAuthService", () => {
 			const started = yield* oauth.startAuthorization(
 				{
 					clientId: client.client_id,
-					redirectUri,
+					redirectUri: authorizationRedirectUri,
 					responseType: "code",
 					state: "client-state",
 					codeChallenge: challenge,
@@ -86,10 +145,27 @@ describe("McpOAuthService", () => {
 				userEmail: "member@example.com",
 			})
 			const callback = new URL(approved.redirectUri)
+			expect(callback.origin + callback.pathname).toBe(authorizationRedirectUri)
 			expect(callback.searchParams.get("state")).toBe("client-state")
 			const code = callback.searchParams.get("code")!
+			const wrongRedirect = yield* oauth
+				.exchangeAuthorizationCode(
+					{ code, clientId: client.client_id, redirectUri, codeVerifier: verifier, resource },
+					"127.0.0.1",
+				)
+				.pipe(Effect.flip)
+			expect(wrongRedirect._tag).toBe("@maple/api/errors/McpOAuthProtocolError")
+			if (wrongRedirect._tag === "@maple/api/errors/McpOAuthProtocolError") {
+				expect(wrongRedirect.error).toBe("invalid_grant")
+			}
 			const tokens = yield* oauth.exchangeAuthorizationCode(
-				{ code, clientId: client.client_id, redirectUri, codeVerifier: verifier, resource },
+				{
+					code,
+					clientId: client.client_id,
+					redirectUri: authorizationRedirectUri,
+					codeVerifier: verifier,
+					resource,
+				},
 				"127.0.0.1",
 			)
 			expect(tokens.token_type).toBe("Bearer")
@@ -121,7 +197,13 @@ describe("McpOAuthService", () => {
 
 			const reused = yield* oauth
 				.exchangeAuthorizationCode(
-					{ code, clientId: client.client_id, redirectUri, codeVerifier: verifier, resource },
+					{
+						code,
+						clientId: client.client_id,
+						redirectUri: authorizationRedirectUri,
+						codeVerifier: verifier,
+						resource,
+					},
 					"127.0.0.1",
 				)
 				.pipe(Effect.flip)

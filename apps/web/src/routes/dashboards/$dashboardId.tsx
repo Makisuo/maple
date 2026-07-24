@@ -26,6 +26,7 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import type { WidgetMode } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
 import { DashboardHistoryPanel, PreviewedCanvas } from "@/components/dashboard-builder/history"
+import { DashboardViewSkeleton } from "@/components/dashboard-builder/loading-skeletons"
 import { historyPanelOpenAtom, previewedVersionAtom } from "@/atoms/dashboard-history-atoms"
 import { useDashboardVersions } from "@/components/dashboard-builder/history/use-dashboard-history"
 import { Result } from "@/lib/effect-atom"
@@ -146,7 +147,7 @@ function DashboardViewPage() {
 				<DashboardLayout
 					breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}
 				>
-					<div className="py-12 text-sm text-muted-foreground">Loading dashboard…</div>
+					<DashboardViewSkeleton />
 				</DashboardLayout>
 			)
 		}

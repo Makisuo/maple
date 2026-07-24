@@ -159,6 +159,13 @@ export class CloudflareUsageResponse extends Schema.Class<CloudflareUsageRespons
 	windowEnd: Schema.Number,
 	bucketSeconds: Schema.Number,
 	totalRequests: Schema.Number,
+	/**
+	 * Total requests in the previous window `[windowStart − 24h, windowStart)` — backs the
+	 * "vs previous 24h" delta. optionalKey only for deploy-window compat; always sent.
+	 */
+	previousTotalRequests: Schema.optionalKey(Schema.Number),
+	/** Org-wide mitigated firewall events (block/challenge) in the current window. Always sent. */
+	firewallBlockedEvents: Schema.optionalKey(Schema.Number),
 	services: Schema.Array(CloudflareServiceUsage),
 }) {}
 

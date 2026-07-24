@@ -7,6 +7,7 @@ import { Button } from "@maple/ui/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@maple/ui/components/ui/empty"
 
 import { DashboardList } from "@/components/dashboard-builder/list/dashboard-list"
+import { DashboardListSkeleton } from "@/components/dashboard-builder/loading-skeletons"
 import {
 	isPersesDashboardJson,
 	parsePortableDashboardJson,
@@ -162,7 +163,7 @@ function DashboardListPage() {
 }
 
 function ListLoading() {
-	return <div className="py-12 text-sm text-muted-foreground">Loading dashboards…</div>
+	return <DashboardListSkeleton />
 }
 
 function ListLoadError() {

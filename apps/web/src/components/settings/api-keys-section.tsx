@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import { cn } from "@maple/ui/lib/utils"
 
 import { Button } from "@maple/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { Badge } from "@maple/ui/components/ui/badge"
 import {
 	AlertDialog,
@@ -87,6 +86,7 @@ function formatRelative(timestamp: string | null): string | null {
 
 export function ApiKeysSection() {
 	const isAdmin = useIsOrgAdmin()
+	const [view, setView] = useState<"active" | "revoked">("active")
 	const [createOpen, setCreateOpen] = useState(false)
 	const [revokeOpen, setRevokeOpen] = useState(false)
 	const [revokingKey, setRevokingKey] = useState<ApiKey | null>(null)
@@ -133,51 +133,52 @@ export function ApiKeysSection() {
 	const mcpCount = activeKeys.filter((k) => k.kind === "mcp").length
 	const standardCount = activeKeys.length - mcpCount
 
+	const showRevokedSection = view === "active" && revokedKeys.length > 0
+	const visibleActive = view === "active" ? activeKeys : []
+
 	return (
 		<div className="space-y-6">
-			<Card>
-				<CardHeader>
-					<div className="flex items-start justify-between gap-4">
-						<div className="space-y-1">
-							<CardTitle>API Keys</CardTitle>
-							<CardDescription>
-								Manage keys for programmatic access to the Maple API.{" "}
-								<a
-									href="https://maple.dev/docs"
-									target="_blank"
-									rel="noopener noreferrer"
-									className="text-foreground underline underline-offset-2 hover:no-underline"
-								>
-									View API docs
-								</a>
-							</CardDescription>
+			<div className="space-y-3">
+				<div className="flex flex-wrap items-center gap-3">
+					{keys.length > 0 && (
+						<>
+							<div className="border-border flex items-center gap-0.5 rounded-md border p-0.5">
+								<FilterTab active={view === "active"} onClick={() => setView("active")}>
+									Active · {activeKeys.length}
+								</FilterTab>
+								<FilterTab active={view === "revoked"} onClick={() => setView("revoked")}>
+									Revoked · {revokedKeys.length}
+								</FilterTab>
+							</div>
 							{activeKeys.length > 0 && (
-								<div className="text-muted-foreground/80 flex items-center gap-2 pt-1 font-mono text-[11px] uppercase tracking-wider">
+								<span className="text-muted-foreground font-mono text-[11px]">
 									<span className="text-success-foreground">{standardCount} standard</span>
-									<MetaDot />
+									<span className="text-muted-foreground/40"> · </span>
 									<span className="text-info-foreground">{mcpCount} mcp</span>
-									{revokedKeys.length > 0 && (
-										<>
-											<MetaDot />
-											<span className="text-muted-foreground/60">
-												{revokedKeys.length} revoked
-											</span>
-										</>
-									)}
-								</div>
+								</span>
 							)}
-						</div>
-						<Button onClick={() => setCreateOpen(true)} size="sm" disabled={!isAdmin}>
-							<PlusIcon data-icon="inline-start" size={14} />
-							Create key
-						</Button>
-					</div>
-				</CardHeader>
-				<CardContent>
+						</>
+					)}
+					<div className="flex-1" />
+					<a
+						href="https://maple.dev/docs"
+						target="_blank"
+						rel="noopener noreferrer"
+						className="text-muted-foreground hover:text-foreground text-xs transition-colors"
+					>
+						View API docs ↗
+					</a>
+					<Button onClick={() => setCreateOpen(true)} size="sm" disabled={!isAdmin}>
+						<PlusIcon data-icon="inline-start" size={14} />
+						Create key
+					</Button>
+				</div>
+
+				<div className="bg-card rounded-lg border">
 					{isLoading ? (
-						<div className="space-y-2">
-							<Skeleton className="h-[68px] w-full" />
-							<Skeleton className="h-[68px] w-full" />
+						<div className="space-y-2 p-4">
+							<Skeleton className="h-[52px] w-full" />
+							<Skeleton className="h-[52px] w-full" />
 						</div>
 					) : isError ? (
 						<Empty className="py-8">
@@ -210,40 +211,47 @@ export function ApiKeysSection() {
 								</Button>
 							</EmptyContent>
 						</Empty>
+					) : view === "revoked" && revokedKeys.length === 0 ? (
+						<Empty className="py-8">
+							<EmptyHeader>
+								<EmptyMedia variant="icon">
+									<KeyIcon size={16} />
+								</EmptyMedia>
+								<EmptyTitle>No revoked keys</EmptyTitle>
+								<EmptyDescription>Revoked keys will show up here.</EmptyDescription>
+							</EmptyHeader>
+						</Empty>
 					) : (
-						<div className="space-y-4">
-							{activeKeys.length > 0 && (
-								<div className="divide-y">
-									{activeKeys.map((key) => (
-										<ApiKeyListItem
-											key={key.id}
-											apiKey={key}
-											onRoll={() => openRollDialog(key)}
-											onRevoke={() => openRevokeDialog(key)}
-										/>
-									))}
+						<div className="divide-border divide-y">
+							<div className="flex items-center gap-3 px-4 py-2">
+								<span className={cn(COL_HEADER, "min-w-0 flex-1")}>Key</span>
+								<span className={cn(COL_HEADER, COL.prefix)}>Prefix</span>
+								<span className={cn(COL_HEADER, COL.scopes)}>Scopes</span>
+								<span className={cn(COL_HEADER, COL.lastUsed)}>Last used</span>
+								<span className={cn(COL_HEADER, COL.expires)}>Expires</span>
+								<span className={cn(COL.menu)} />
+							</div>
+							{visibleActive.map((key) => (
+								<ApiKeyRow
+									key={key.id}
+									apiKey={key}
+									onRoll={() => openRollDialog(key)}
+									onRevoke={() => openRevokeDialog(key)}
+								/>
+							))}
+							{showRevokedSection && (
+								<div className="bg-muted/20 px-4 py-1.5">
+									<span className="text-muted-foreground/70 font-mono text-[10px] uppercase tracking-[0.15em]">
+										Revoked · {revokedKeys.length}
+									</span>
 								</div>
 							)}
-							{revokedKeys.length > 0 && (
-								<div className="pt-2">
-									<div className="flex items-center gap-2 pb-1">
-										<span className="bg-border h-px flex-1" />
-										<span className="text-muted-foreground/70 font-mono text-[10px] uppercase tracking-[0.15em]">
-											Revoked · {revokedKeys.length}
-										</span>
-										<span className="bg-border h-px flex-1" />
-									</div>
-									<div className="divide-y">
-										{revokedKeys.map((key) => (
-											<ApiKeyListItem key={key.id} apiKey={key} />
-										))}
-									</div>
-								</div>
-							)}
+							{(showRevokedSection || view === "revoked") &&
+								revokedKeys.map((key) => <ApiKeyRow key={key.id} apiKey={key} />)}
 						</div>
 					)}
-				</CardContent>
-			</Card>
+				</div>
+			</div>
 
 			{!isAdmin ? (
 				<p className="text-muted-foreground text-xs">
@@ -296,7 +304,43 @@ export function ApiKeysSection() {
 	)
 }
 
-function ApiKeyListItem({
+// Shared column lanes so the header row and key rows stay aligned. Prefix/scopes/last-used
+// collapse on narrower viewports; the key cell always keeps name + created meta visible.
+const COL = {
+	prefix: "hidden w-[120px] shrink-0 lg:block",
+	scopes: "hidden w-[180px] shrink-0 xl:block",
+	lastUsed: "hidden w-[90px] shrink-0 xl:block",
+	expires: "hidden w-[110px] shrink-0 md:block",
+	menu: "w-7 shrink-0",
+}
+const COL_HEADER = "text-muted-foreground/70 font-mono text-[10px] uppercase tracking-[0.12em]"
+
+function FilterTab({
+	active,
+	onClick,
+	children,
+}: {
+	active: boolean
+	onClick: () => void
+	children: ReactNode
+}) {
+	return (
+		<button
+			type="button"
+			onClick={onClick}
+			className={cn(
+				"rounded px-2.5 py-1 font-mono text-[11px] leading-4 transition-colors",
+				active
+					? "bg-accent text-foreground font-medium"
+					: "text-muted-foreground hover:text-foreground",
+			)}
+		>
+			{children}
+		</button>
+	)
+}
+
+function ApiKeyRow({
 	apiKey,
 	onRoll,
 	onRevoke,
@@ -319,96 +363,88 @@ function ApiKeyListItem({
 	// Type-coded icon tile: emerald for standard keys (live credential), blue for MCP
 	// (agent/machine type). Revoked keys desaturate to neutral so dead keys read as dead.
 	const tileClass = apiKey.revoked
-		? "bg-muted/40 text-muted-foreground border-border"
+		? "bg-muted/40 text-muted-foreground"
 		: isMcp
-			? "bg-info/10 text-info border-info/30"
-			: "bg-success/10 text-success border-success/30"
+			? "bg-info/10 text-info"
+			: "bg-success/10 text-success"
+
+	const createdMeta = [
+		apiKey.description,
+		`Created ${formatDate(apiKey.created_at)}${apiKey.created_by_email ? ` by ${apiKey.created_by_email}` : ""}`,
+	]
+		.filter(Boolean)
+		.join(" · ")
 
 	return (
 		<div
 			className={cn(
-				"flex items-start gap-3 px-2 py-3 transition-colors",
+				"flex items-center gap-3 px-4 py-3 transition-colors",
 				apiKey.revoked ? "opacity-60" : "hover:bg-muted/20",
 			)}
 		>
-			<div className={cn("flex h-9 w-9 shrink-0 items-center justify-center border", tileClass)}>
-				<Icon size={14} />
+			<div className="flex min-w-0 flex-1 items-center gap-2.5">
+				<div
+					className={cn(
+						"flex size-7 shrink-0 items-center justify-center rounded-md",
+						tileClass,
+					)}
+				>
+					<Icon size={13} />
+				</div>
+				<div className="flex min-w-0 flex-col gap-0.5">
+					<div className="flex min-w-0 items-center gap-1.5">
+						<span className="text-foreground truncate text-sm font-medium leading-none">
+							{apiKey.name}
+						</span>
+						{isMcp && (
+							<Badge variant="info" size="sm">
+								MCP
+							</Badge>
+						)}
+						{apiKey.revoked && (
+							<Badge variant="error" size="sm">
+								Revoked
+							</Badge>
+						)}
+						{expiresInPast && !apiKey.revoked && (
+							<Badge variant="outline" size="sm">
+								Expired
+							</Badge>
+						)}
+					</div>
+					<span className="text-muted-foreground truncate text-[11px]" title={createdMeta}>
+						{createdMeta}
+					</span>
+				</div>
 			</div>
 
-			<div className="flex min-w-0 flex-1 flex-col gap-1">
-				<div className="flex flex-wrap items-center gap-1.5">
-					<span className="text-foreground text-sm font-medium leading-none">{apiKey.name}</span>
-					{isMcp && (
-						<Badge variant="info" size="sm">
-							MCP
-						</Badge>
-					)}
-					{apiKey.revoked && (
-						<Badge variant="error" size="sm">
-							Revoked
-						</Badge>
-					)}
-					{expiresInPast && !apiKey.revoked && (
-						<Badge variant="outline" size="sm">
-							Expired
-						</Badge>
-					)}
-				</div>
+			<code className={cn(COL.prefix, "text-foreground/55 truncate font-mono text-[11px] tracking-tight")}>
+				{apiKey.key_prefix}
+			</code>
 
-				{apiKey.description && (
-					<p className="text-foreground/70 text-xs leading-snug">{apiKey.description}</p>
+			<div className={cn(COL.scopes)}>
+				<ScopesCell apiKey={apiKey} />
+			</div>
+
+			<span
+				className={cn(COL.lastUsed, "text-muted-foreground truncate text-[11px]")}
+				title={apiKey.last_used_at ? formatDate(apiKey.last_used_at) : undefined}
+			>
+				{apiKey.last_used_at ? (relativeLastUsed ?? formatDate(apiKey.last_used_at)) : "—"}
+			</span>
+
+			<span
+				className={cn(
+					COL.expires,
+					"truncate text-[11px]",
+					expiresSoon ? "text-warning-foreground" : "text-muted-foreground",
 				)}
+			>
+				{apiKey.expires_at ? formatDate(apiKey.expires_at) : "Never"}
+			</span>
 
-				<div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 pt-0.5">
-					<code className="text-foreground/55 font-mono text-[11px] tracking-tight">
-						{apiKey.key_prefix}
-					</code>
-					<MetaDot />
-					{apiKey.scopes === null ? (
-						<span className="text-muted-foreground/60 text-[11px]">Full access</span>
-					) : (
-						apiKey.scopes.map((scope) => (
-							<code
-								key={scope}
-								className="text-foreground/70 border-border bg-muted/40 border px-1 font-mono text-[10px] tracking-tight"
-							>
-								{scope}
-							</code>
-						))
-					)}
-					<MetaDot />
-					<MetaSpan label="Created">{formatDate(apiKey.created_at)}</MetaSpan>
-					{apiKey.created_by_email && (
-						<>
-							<MetaDot />
-							<MetaSpan label="by" className="max-w-[14rem] truncate">
-								{apiKey.created_by_email}
-							</MetaSpan>
-						</>
-					)}
-					{apiKey.last_used_at && (
-						<>
-							<MetaDot />
-							<MetaSpan label="Last used" title={formatDate(apiKey.last_used_at)}>
-								{relativeLastUsed ?? formatDate(apiKey.last_used_at)}
-							</MetaSpan>
-						</>
-					)}
-					{apiKey.expires_at && (
-						<>
-							<MetaDot />
-							<MetaSpan label={expiresInPast ? "Expired" : "Expires"}>
-								<span className={expiresSoon ? "text-warning-foreground" : undefined}>
-									{formatDate(apiKey.expires_at)}
-								</span>
-							</MetaSpan>
-						</>
-					)}
-				</div>
-			</div>
-
-			{!apiKey.revoked && onRevoke && (
-				<div className="flex shrink-0 items-center">
+			<div className={cn(COL.menu, "flex items-center justify-end")}>
+				{!apiKey.revoked && onRevoke && (
 					<DropdownMenu>
 						<DropdownMenuTrigger
 							render={<Button variant="ghost" size="icon" className="size-7" />}
@@ -429,38 +465,29 @@ function ApiKeyListItem({
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
-				</div>
-			)}
+				)}
+			</div>
 		</div>
 	)
 }
 
-function MetaDot() {
-	return (
-		<span aria-hidden="true" className="text-muted-foreground/40 text-[10px]">
-			·
-		</span>
-	)
-}
-
-function MetaSpan({
-	label,
-	children,
-	className,
-	title,
-}: {
-	label: string
-	children: ReactNode
-	className?: string
-	title?: string
-}) {
+function ScopesCell({ apiKey }: { apiKey: ApiKey }) {
+	if (apiKey.kind === "mcp") {
+		return <span className="text-muted-foreground text-[11px]">MCP tools</span>
+	}
+	if (apiKey.scopes === null) {
+		return <span className="text-foreground/80 text-[11px]">Full access</span>
+	}
+	const compact = apiKey.scopes.map((scope) => scope.replace(/:write$/, ":w").replace(/:read$/, ":r"))
+	const shown = compact.slice(0, 2).join(" · ")
+	const extra = compact.length - 2
 	return (
 		<span
-			className={cn("text-muted-foreground inline-flex items-baseline gap-1 text-[11px]", className)}
-			title={title}
+			className="text-muted-foreground block truncate font-mono text-[11px] tracking-tight"
+			title={apiKey.scopes.join(", ")}
 		>
-			<span className="text-muted-foreground/60">{label}</span>
-			<span className="text-foreground/75">{children}</span>
+			{shown}
+			{extra > 0 ? ` · +${extra}` : ""}
 		</span>
 	)
 }

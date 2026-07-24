@@ -109,6 +109,13 @@ export const subTargetsFromGroup = (group: {
 		if (key.startsWith("__param_")) authParams.set(key.slice("__param_".length), value)
 		else if (!key.startsWith("__")) labels[key] = value
 	}
+	// PlanetScale's current http_sd payload names the human-readable identity
+	// labels with a `_name` suffix. Keep those canonical upstream keys and emit
+	// the historical aliases too so existing Maple dashboards continue to work.
+	const databaseName = labels.planetscale_database_name ?? labels.planetscale_database
+	const branchName = labels.planetscale_branch_name ?? labels.planetscale_branch
+	if (databaseName !== undefined) labels.planetscale_database = databaseName
+	if (branchName !== undefined) labels.planetscale_branch = branchName
 	const query = authParams.toString()
 	const branchId = sdLabels.planetscale_database_branch_id
 
@@ -156,13 +163,15 @@ const dedupeBySubTargetKey = (
 }
 
 /**
- * Branch name a filter pattern matches against: PlanetScale's http_sd exposes
- * the human branch name as `planetscale_branch`; older payloads only carry
- * `planetscale_database_branch_id`. Fall back to the sub-target key so a filter
- * never silently matches nothing.
+ * Branch name a filter pattern matches against: current PlanetScale http_sd
+ * payloads expose `planetscale_branch_name`; Maple also emits the historical
+ * `planetscale_branch` alias. Older payloads may only carry the branch id.
  */
 const branchNameForFilter = (entry: PlanetScaleSubTarget): string =>
-	entry.labels.planetscale_branch ?? entry.labels.planetscale_database_branch_id ?? entry.subTargetKey
+	entry.labels.planetscale_branch_name ??
+	entry.labels.planetscale_branch ??
+	entry.labels.planetscale_database_branch_id ??
+	entry.subTargetKey
 
 /** Glob → anchored RegExp supporting `*` (any run) and `?` (one char). */
 const globToRegExp = (pattern: string): RegExp => {
@@ -352,9 +361,7 @@ export class PlanetScaleDiscoveryService extends Context.Service<
 			if (filters.include.length === 0 && filters.exclude.length === 0) {
 				return entries
 			}
-			const kept = entries.filter((entry) =>
-				branchPassesFilters(branchNameForFilter(entry), filters),
-			)
+			const kept = entries.filter((entry) => branchPassesFilters(branchNameForFilter(entry), filters))
 			if (kept.length < entries.length) {
 				yield* Effect.logInfo("Filtered PlanetScale branches by include/exclude globs").pipe(
 					Effect.annotateLogs({

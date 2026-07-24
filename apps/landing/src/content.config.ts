@@ -45,4 +45,16 @@ const blog = defineCollection({
 	}),
 })
 
-export const collections = { roadmap, docs, blog }
+// Customer logos rendered in the homepage "trusted by" marquee. Frontmatter-only
+// entries (no body) — one file per company. The entry id (filename) maps to a
+// brand logo component in the LOGOS registry inside CustomerLogos.astro.
+const logos = defineCollection({
+	loader: glob({ pattern: "**/*.md", base: "./src/content/logos" }),
+	schema: z.object({
+		name: z.string(),
+		href: z.string().url().optional(), // present → linked, absent → static
+		order: z.number().default(0),
+	}),
+})
+
+export const collections = { roadmap, docs, blog, logos }

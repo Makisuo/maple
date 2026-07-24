@@ -61,6 +61,9 @@
 	"hero_title_accent": "Native to AI.",
 	"hero_subtitle": "Traces, logs, and metrics over OpenTelemetry, stored in ClickHouse. Sub-second queries across billions of rows \u2014 or let your AI agent run them for you.",
 
+	"customers_eyebrow": "Trusted by teams at",
+	"ingest_stats_label": "traces ingested / month",
+	"stat_github": "on GitHub",
 	"sov_eyebrow": "01 \u00b7 Sovereignty",
 	"sov_title": "Your data, your instrumentation, your bill.",
 	"sov_lede": "Maple is the observability backend you'd build if you weren't optimizing for the invoice. OpenTelemetry in. ClickHouse speed out. The source on GitHub the whole time.",

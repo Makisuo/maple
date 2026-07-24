@@ -8,6 +8,8 @@ import { formatRelativeTime } from "@/lib/format"
 import {
 	deviation,
 	formatSignalValue,
+	isStaleOpenIncident,
+	SEVERITY_TONE,
 	SIGNAL_ICON,
 	SIGNAL_LABEL,
 	severityToneFor,
@@ -25,7 +27,10 @@ export interface AnomalyRowProps {
 
 export function AnomalyRow({ incident, focused = false, onFocus, variant = "default" }: AnomalyRowProps) {
 	const isOpen = incident.status === "open"
+	const isStale = isStaleOpenIncident(incident)
+	const isLive = isOpen && !isStale
 	const tone = severityToneFor(incident)
+	const displayTone = isStale ? SEVERITY_TONE.resolved : tone
 	const dev = deviation(incident)
 	const SignalIcon = SIGNAL_ICON[incident.signalType]
 	const triageChip = TRIAGE_STATUS_CHIP[incident.triageStatus]
@@ -47,15 +52,15 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 			<Link
 				to="/anomalies/$incidentId"
 				params={{ incidentId: incident.id }}
-				aria-label={`Open ${SIGNAL_LABEL[incident.signalType]} anomaly on ${incident.serviceName}`}
+				aria-label={`${isLive ? "Open" : "Inspect"} ${isStale ? "stale " : ""}${SIGNAL_LABEL[incident.signalType]} anomaly on ${incident.serviceName}`}
 				className="absolute inset-0 focus-visible:outline-none"
 				tabIndex={-1}
 			/>
 
-			<span aria-hidden className={cn("absolute inset-y-0 left-0 w-[3px]", tone.accent)} />
+			<span aria-hidden className={cn("absolute inset-y-0 left-0 w-px", displayTone.accent)} />
 
 			<span className="relative z-10 flex w-3 shrink-0 items-center justify-center">
-				{isOpen ? (
+				{isLive ? (
 					<span className="relative inline-flex size-1.5" title={`Open · ${incident.severity}`}>
 						<span
 							className={cn(
@@ -66,7 +71,10 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 						<span className={cn("relative inline-flex size-full rounded-full", tone.accent)} />
 					</span>
 				) : (
-					<span className="inline-flex size-1.5 rounded-full bg-border" title="Resolved" />
+					<span
+						className="inline-flex size-1.5 rounded-full bg-border"
+						title={isStale ? "Stale detector state" : "Resolved"}
+					/>
 				)}
 			</span>
 
@@ -78,7 +86,7 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 			<span
 				className={cn(
 					"relative z-10 w-[110px] shrink-0 whitespace-nowrap text-right font-mono text-xs tabular-nums",
-					isOpen ? tone.text : "text-muted-foreground",
+					isLive ? tone.text : "text-muted-foreground",
 				)}
 				title={`Observed ${formatSignalValue(incident.signalType, incident.lastObservedValue)} vs baseline ${formatSignalValue(incident.signalType, incident.baselineMedian)}`}
 			>
@@ -153,10 +161,16 @@ export function AnomalyRow({ incident, focused = false, onFocus, variant = "defa
 			) : null}
 
 			<span
-				className="relative z-10 w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
-				title={`Started ${new Date(incident.firstTriggeredAt).toLocaleString()}`}
+				className="relative z-10 w-24 shrink-0 text-right text-xs tabular-nums text-muted-foreground"
+				title={
+					isStale
+						? `Last triggered ${new Date(incident.lastTriggeredAt).toLocaleString()}`
+						: `Started ${new Date(incident.firstTriggeredAt).toLocaleString()}`
+				}
 			>
-				{formatRelativeTime(incident.firstTriggeredAt)}
+				{isStale
+					? `last seen ${formatRelativeTime(incident.lastTriggeredAt)}`
+					: formatRelativeTime(incident.firstTriggeredAt)}
 			</span>
 		</div>
 	)

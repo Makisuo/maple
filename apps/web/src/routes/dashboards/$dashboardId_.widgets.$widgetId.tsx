@@ -17,6 +17,7 @@ import type {
 	WidgetDisplayConfig,
 } from "@/components/dashboard-builder/types"
 import { useDashboardStore } from "@/hooks/use-dashboard-store"
+import { WidgetEditorSkeleton } from "@/components/dashboard-builder/loading-skeletons"
 import { pickVariableParams, variableSearchRest } from "@/lib/dashboard-variables/search-params"
 import { Button } from "@maple/ui/components/ui/button"
 
@@ -77,7 +78,7 @@ function WidgetConfigurePage() {
 	if (!activeDashboard || !configureWidget) {
 		return (
 			<DashboardLayout breadcrumbs={[{ label: "Dashboards", href: "/dashboards" }, { label: "..." }]}>
-				<div className="py-12 text-sm text-muted-foreground">Loading widget…</div>
+				<WidgetEditorSkeleton />
 			</DashboardLayout>
 		)
 	}

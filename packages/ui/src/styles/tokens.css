@@ -246,6 +246,7 @@
 	--radius-4xl: calc(var(--radius) + 16px);
 	--animate-skeleton: skeleton 2s -1s infinite linear;
 	--animate-caret-blink: 1s ease-out infinite caret-blink;
+	--animate-tile-in: tile-in 0.35s ease both;
 	--color-warning-foreground: var(--warning-foreground);
 	--color-warning: var(--warning);
 	--color-success-foreground: var(--success-foreground);
@@ -259,6 +260,16 @@
 		}
 		to {
 			transform: translateX(100%);
+		}
+	}
+	@keyframes tile-in {
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
 		}
 	}
 	@keyframes caret-blink {

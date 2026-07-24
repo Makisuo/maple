@@ -59,7 +59,6 @@ function InfraPageContent() {
 			data: {
 				startTime,
 				endTime,
-				search: search.trim() || undefined,
 			},
 		}),
 	)
@@ -166,10 +165,14 @@ function FleetView({
 		return c
 	}, [annotated])
 
+	const q = search.trim().toLowerCase()
 	const filtered = useMemo(() => {
-		if (statusFilter === "all") return hosts
-		return annotated.filter((a) => a.status === statusFilter).map((a) => a.host)
-	}, [hosts, annotated, statusFilter])
+		const byStatus =
+			statusFilter === "all"
+				? hosts
+				: annotated.filter((a) => a.status === statusFilter).map((a) => a.host)
+		return q ? byStatus.filter((h) => h.hostName.toLowerCase().includes(q)) : byStatus
+	}, [hosts, annotated, statusFilter, q])
 
 	const showFleetGrid = hosts.length >= FLEET_GRID_THRESHOLD
 
@@ -240,7 +243,21 @@ function FleetView({
 					</div>
 				</div>
 
-				<HostTable hosts={filtered} waiting={waiting} />
+				{q && filtered.length === 0 ? (
+					<Empty className="py-12">
+						<EmptyHeader>
+							<EmptyMedia variant="icon">
+								<MagnifierIcon size={16} />
+							</EmptyMedia>
+							<EmptyTitle>No hosts match “{search}”</EmptyTitle>
+							<EmptyDescription>
+								Try a different name, or clear the search to see all hosts.
+							</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				) : (
+					<HostTable hosts={filtered} waiting={waiting} />
+				)}
 			</div>
 		</div>
 	)

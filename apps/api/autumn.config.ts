@@ -91,7 +91,7 @@ export const startup = plan({
 			featureId: "browser_sessions",
 			included: 5000,
 			price: {
-				amount: 0.003,
+				amount: 0.002,
 				billingUnits: 1,
 				billingMethod: "usage_based",
 				interval: "month",

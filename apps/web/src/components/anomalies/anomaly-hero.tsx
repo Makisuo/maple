@@ -1,7 +1,14 @@
 import type { AnomalyIncidentDocument } from "@maple/domain/http"
 import { cn } from "@maple/ui/lib/utils"
 
-import { deviation, formatSignalValue, SIGNAL_LABEL, severityToneFor } from "./anomaly-format"
+import { formatRelativeTime } from "@/lib/format"
+import {
+	deviation,
+	formatSignalValue,
+	isStaleOpenIncident,
+	SIGNAL_LABEL,
+	severityToneFor,
+} from "./anomaly-format"
 
 export function AnomalyHero({
 	incident,
@@ -11,6 +18,7 @@ export function AnomalyHero({
 	className?: string
 }) {
 	const tone = severityToneFor(incident)
+	const isStale = isStaleOpenIncident(incident)
 	const dev = deviation(incident)
 	const observed = formatSignalValue(incident.signalType, incident.lastObservedValue)
 	const baseline = formatSignalValue(incident.signalType, incident.baselineMedian)
@@ -27,11 +35,11 @@ export function AnomalyHero({
 				{incident.serviceName}
 			</h1>
 			<p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
-				Observed{" "}
+				{isStale ? "Last recorded" : "Observed"}{" "}
 				<span
 					className={cn(
 						"font-mono font-medium",
-						incident.status === "open" ? tone.text : "text-foreground",
+						incident.status === "open" && !isStale ? tone.text : "text-foreground",
 					)}
 				>
 					{observed}
@@ -40,13 +48,16 @@ export function AnomalyHero({
 				<span
 					className={cn(
 						"font-mono font-medium",
-						incident.status === "open" ? tone.text : "text-foreground",
+						incident.status === "open" && !isStale ? tone.text : "text-foreground",
 					)}
 				>
 					{dev.label}
 				</span>
 				{dev.kind === "sigma" ? " above median" : dev.kind === "percent" ? " vs baseline" : ""},
 				threshold <span className="font-mono text-foreground">{threshold}</span>.
+				{isStale
+					? ` Last triggered ${formatRelativeTime(incident.lastTriggeredAt)}; this stale detector state does not represent current service health.`
+					: ""}
 			</p>
 		</div>
 	)

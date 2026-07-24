@@ -14,9 +14,9 @@ import type { TemplateDefinition, WidgetDef } from "../types"
 // PlanetScale branch metrics arrive via the scraper (the integration's managed
 // scrape target) with PlanetScale's own Prometheus metric names, all gauges.
 // The http_sd discovery labels ride along as point attributes, so widgets group
-// and filter on `attr.planetscale_database` / `attr.planetscale_branch`.
+// and filter on PlanetScale's canonical `_name` discovery labels.
 function databaseWhere(database?: string): string {
-	return database ? `attr.planetscale_database = "${escapeMetricStringLiteral(database)}"` : ""
+	return database ? `attr.planetscale_database_name = "${escapeMetricStringLiteral(database)}"` : ""
 }
 
 function gaugeChart(opts: {
@@ -40,7 +40,7 @@ function gaugeChart(opts: {
 			metricType: "gauge",
 			aggregation: opts.aggregation ?? "max",
 			whereClause: opts.where,
-			groupBy: ["attr.planetscale_database"],
+			groupBy: ["attr.planetscale_database_name"],
 		}),
 		display: { title: opts.title, ...(opts.display ?? CHART_DISPLAY_LINE), unit: opts.unit },
 		layout: opts.layout,
@@ -60,7 +60,7 @@ function widgets(database?: string): WidgetDef[] {
 				metricType: "gauge",
 				aggregation: "sum",
 				whereClause: where,
-				groupBy: ["attr.planetscale_database"],
+				groupBy: ["attr.planetscale_database_name"],
 			}),
 			display: { title: "Active Connections (MySQL)", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 0, y: 0, w: 6, h: 4 },
@@ -75,7 +75,7 @@ function widgets(database?: string): WidgetDef[] {
 				metricType: "gauge",
 				aggregation: "sum",
 				whereClause: where,
-				groupBy: ["attr.planetscale_database"],
+				groupBy: ["attr.planetscale_database_name"],
 			}),
 			display: { title: "Active Connections (Postgres)", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 6, y: 0, w: 6, h: 4 },
@@ -126,7 +126,7 @@ function widgets(database?: string): WidgetDef[] {
 				metricType: "gauge",
 				aggregation: "sum",
 				whereClause: combineWhere(where),
-				groupBy: ["attr.planetscale_branch"],
+				groupBy: ["attr.planetscale_branch_name"],
 			}),
 			display: { title: "Connections by Branch", ...CHART_DISPLAY_AREA, unit: "number" },
 			layout: { x: 0, y: 12, w: 6, h: 4 },

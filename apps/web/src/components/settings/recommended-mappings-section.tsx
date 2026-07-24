@@ -7,7 +7,6 @@ import { toast } from "sonner"
 
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@maple/ui/components/ui/card"
 import { cn } from "@maple/ui/lib/utils"
 import {
 	ArrowRotateAnticlockwiseIcon,
@@ -22,15 +21,16 @@ import {
 	ingestAttributeMappingsListAtom,
 	recommendationIssuesListAtom,
 } from "@/lib/services/atoms/ingestion-atoms"
-import { formatRelativeTime } from "@/lib/format"
+import { formatNumber, formatRelativeTime } from "@/lib/format"
 
 type IssueKind = V2Recommendation["kind"]
 type IssueStatus = V2Recommendation["status"]
 
-const KIND_BADGE: Record<IssueKind, { label: string; variant: "success" | "warning" | "info" }> = {
-	rename: { label: "Safe rename", variant: "success" },
-	"double-emission": { label: "Both emitted", variant: "warning" },
-	naming: { label: "Naming", variant: "info" },
+// Mono uppercase kind tags in the row's leading lane (Paper ingestion redesign).
+const KIND_TAG: Record<IssueKind, { label: string; className: string }> = {
+	rename: { label: "Rename", className: "text-info" },
+	"double-emission": { label: "Duplicate", className: "text-warning" },
+	naming: { label: "Naming", className: "text-warning" },
 }
 
 const STATUS_BADGE: Record<IssueStatus, { label: string; variant: "success" | "secondary" }> = {
@@ -178,180 +178,148 @@ export function RecommendedMappingsSection() {
 
 	const rows = tab === "open" ? openIssues : closedIssues
 
-	function TabButton({ id, label, count }: { id: "open" | "closed"; label: string; count: number }) {
+	function FilterTab({ id, label, count }: { id: "open" | "closed"; label: string; count: number }) {
 		const active = tab === id
 		return (
 			<button
 				type="button"
 				onClick={() => setTab(id)}
 				className={cn(
-					"-mb-px flex items-center gap-2 border-b-2 pt-1 pb-2.5 text-sm font-medium transition-colors",
+					"rounded-md px-2.5 py-1 font-mono text-[11px] leading-3.5 transition-colors",
 					active
-						? "border-primary text-foreground"
-						: "text-muted-foreground hover:text-foreground border-transparent",
+						? "bg-accent text-foreground font-medium"
+						: "text-muted-foreground hover:text-foreground border border-transparent",
 				)}
 			>
-				{label}
-				<span
-					className={cn(
-						"rounded-full px-1.5 text-xs tabular-nums",
-						active ? "bg-foreground/10 text-foreground" : "bg-muted text-muted-foreground",
-					)}
-				>
-					{count}
-				</span>
+				{label} · {count}
 			</button>
 		)
 	}
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>Recommendations</CardTitle>
-				<CardDescription>
-					Deprecated or non-conforming OpenTelemetry attribute keys detected on your spans. Apply a
-					fix to create the matching mapping, or dismiss it.
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				{/* tabs */}
-				<div className="border-border/60 -mx-6 flex items-center gap-5 border-b px-6">
-					<TabButton id="open" label="Open" count={openIssues.length} />
-					<TabButton id="closed" label="Closed" count={closedIssues.length} />
-				</div>
-
-				{/* column header */}
-				<div className="text-muted-foreground border-border/60 -mx-6 flex items-center gap-4 border-b px-6 pt-3 pb-2 text-xs">
-					<div className="w-12 shrink-0">#</div>
-					<div className="w-28 shrink-0">Type</div>
-					<div className="flex-1">Recommendation</div>
-					<div className="w-28 shrink-0">{tab === "open" ? "Action" : "Status"}</div>
-					<div className="w-32 shrink-0 text-right">Opened</div>
-				</div>
-
-				{rows.length === 0 ? (
-					<p className="text-muted-foreground py-10 text-center text-sm">
-						{tab === "open"
-							? "No open recommendations — your span attributes look healthy."
-							: "Nothing here yet."}
+		<div className="bg-card flex flex-col rounded-lg border">
+			<div className="flex items-start gap-3 px-4 pt-4 pb-3">
+				<div className="flex flex-col gap-1">
+					<h3 className="text-sm font-medium">Recommendations</h3>
+					<p className="text-muted-foreground text-xs">
+						Deprecated or non-conforming OpenTelemetry attribute keys detected on your spans.
 					</p>
-				) : (
-					<div>
-						{rows.map((issue) => {
-							const badge = KIND_BADGE[issue.kind]
-							const mode = issue.kind === "rename" ? MODE.auto : MODE.manual
-							const ModeIcon = mode.icon
-							const status = STATUS_BADGE[issue.status]
-							const isApplying = applyingId === issue.id
-							const isBusy = busyId === issue.id
+				</div>
+				<div className="grow" />
+				<div className="flex shrink-0 items-center gap-1.5">
+					<FilterTab id="open" label="Open" count={openIssues.length} />
+					<FilterTab id="closed" label="Closed" count={closedIssues.length} />
+				</div>
+			</div>
 
-							return (
-								<div
-									key={issue.id}
-									className="group border-border/60 hover:bg-muted/40 -mx-6 flex items-center gap-4 border-b px-6 py-2.5 transition-colors last:border-b-0"
-								>
-									<Link
-										to="/recommendations/$recommendationKey"
-										params={{ recommendationKey: issue.id }}
-										className="text-muted-foreground hover:text-foreground w-12 shrink-0 font-mono text-[13px] tabular-nums"
-									>
-										#{issue.number}
-									</Link>
-									<div className="w-28 shrink-0">
-										<Badge variant={badge.variant}>{badge.label}</Badge>
-									</div>
-									<Link
-										to="/recommendations/$recommendationKey"
-										params={{ recommendationKey: issue.id }}
-										className="group/link min-w-0 flex-1 truncate text-sm"
-										title={recPlainText(issue)}
-									>
-										<span className="underline-offset-4 decoration-muted-foreground/40 group-hover/link:underline">
-											{recSentence(issue)}
-										</span>
-									</Link>
+			{rows.length === 0 ? (
+				<p className="text-muted-foreground border-t px-4 py-8 text-center text-sm">
+					{tab === "open"
+						? "No open recommendations — your span attributes look healthy."
+						: "Nothing here yet."}
+				</p>
+			) : (
+				rows.map((issue) => {
+					const kindTag = KIND_TAG[issue.kind]
+					const mode = issue.kind === "rename" ? MODE.auto : MODE.manual
+					const status = STATUS_BADGE[issue.status]
+					const isApplying = applyingId === issue.id
+					const isBusy = busyId === issue.id
 
-									<div className="w-28 shrink-0">
-										{tab === "open" ? (
+					return (
+						<div
+							key={issue.id}
+							className="group hover:bg-muted/20 flex items-center gap-3 border-t px-4 py-2.5 transition-colors"
+						>
+							<span
+								className={cn(
+									"w-20 shrink-0 font-mono text-[10px] font-medium uppercase tracking-[0.12em]",
+									kindTag.className,
+								)}
+							>
+								{kindTag.label}
+							</span>
+							<Link
+								to="/recommendations/$recommendationKey"
+								params={{ recommendationKey: issue.id }}
+								className="group/link min-w-0 flex-1 truncate text-sm"
+								title={`${recPlainText(issue)} · ${issue.usage_count.toLocaleString()} spans in 24h · opened ${formatRelativeTime(issue.opened_at)}`}
+							>
+								<span className="underline-offset-4 decoration-muted-foreground/40 group-hover/link:underline">
+									{recSentence(issue)}
+								</span>
+								<span className="text-muted-foreground">
+									{" "}
+									· {formatNumber(issue.usage_count)} spans/24h
+								</span>
+							</Link>
+
+							<div className="flex shrink-0 items-center gap-1.5">
+								{issue.status === "open" ? (
+									<>
+										{issue.kind === "rename" ? (
+											<Button
+												size="sm"
+												onClick={() => handleApply(issue)}
+												disabled={isApplying}
+											>
+												{isApplying ? (
+													<LoaderIcon size={14} className="animate-spin" />
+												) : (
+													<CheckIcon size={14} />
+												)}
+												Apply fix
+											</Button>
+										) : (
 											<Badge
 												variant="outline"
 												className={cn("gap-1", mode.className)}
 												title={mode.title}
 											>
-												<ModeIcon size={11} />
+												<mode.icon size={11} />
 												{mode.label}
 											</Badge>
-										) : (
-											<Badge variant={status.variant}>{status.label}</Badge>
 										)}
-									</div>
-
-									<div className="relative flex w-32 shrink-0 items-center justify-end">
-										<span
-											className="text-muted-foreground text-xs whitespace-nowrap tabular-nums transition-opacity group-hover:opacity-0"
-											title={`${issue.usage_count.toLocaleString()} spans · 24h`}
+										<Button
+											variant="outline"
+											size="sm"
+											className="text-muted-foreground hover:text-foreground"
+											onClick={() => handleDismiss(issue)}
+											disabled={isBusy}
 										>
-											{formatRelativeTime(issue.opened_at)}
-										</span>
-										<div className="absolute right-0 flex items-center gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-											{issue.status === "open" ? (
-												<>
-													{issue.kind === "rename" ? (
-														<Button
-															size="sm"
-															onClick={() => handleApply(issue)}
-															disabled={isApplying}
-														>
-															{isApplying ? (
-																<LoaderIcon
-																	size={14}
-																	className="animate-spin"
-																/>
-															) : (
-																<CheckIcon size={14} />
-															)}
-															Apply
-														</Button>
-													) : null}
-													<Button
-														variant="ghost"
-														size="icon-sm"
-														className="text-muted-foreground hover:text-foreground"
-														onClick={() => handleDismiss(issue)}
-														disabled={isBusy}
-														aria-label="Dismiss recommendation"
-														title="Dismiss"
-													>
-														{isBusy ? (
-															<LoaderIcon size={14} className="animate-spin" />
-														) : (
-															<XmarkIcon size={14} />
-														)}
-													</Button>
-												</>
-											) : issue.status === "dismissed" ? (
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => handleReopen(issue)}
-													disabled={isBusy}
-												>
-													{isBusy ? (
-														<LoaderIcon size={14} className="animate-spin" />
-													) : (
-														<ArrowRotateAnticlockwiseIcon size={14} />
-													)}
-													Reopen
-												</Button>
-											) : null}
-										</div>
-									</div>
-								</div>
-							)
-						})}
-					</div>
-				)}
-			</CardContent>
-		</Card>
+											{isBusy ? (
+												<LoaderIcon size={14} className="animate-spin" />
+											) : (
+												<XmarkIcon size={14} />
+											)}
+											Dismiss
+										</Button>
+									</>
+								) : issue.status === "dismissed" ? (
+									<>
+										<Badge variant={status.variant}>{status.label}</Badge>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => handleReopen(issue)}
+											disabled={isBusy}
+										>
+											{isBusy ? (
+												<LoaderIcon size={14} className="animate-spin" />
+											) : (
+												<ArrowRotateAnticlockwiseIcon size={14} />
+											)}
+											Reopen
+										</Button>
+									</>
+								) : (
+									<Badge variant={status.variant}>{status.label}</Badge>
+								)}
+							</div>
+						</div>
+					)
+				})
+			)}
+		</div>
 	)
 }

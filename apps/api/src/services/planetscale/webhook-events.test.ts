@@ -281,6 +281,55 @@ describe("upsertPlanetScaleIssue", () => {
 			assert.strictEqual(regression?.count, 1)
 		}).pipe(Effect.provide(testDb.layer))
 	})
+
+	it.effect("rolls back issue creation when its audit event fails, then retries cleanly", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const payload = yield* decodePlanetScaleWebhookPayload(OOM_PAYLOAD)
+			const input = {
+				orgId: asOrgId("org_1"),
+				payload,
+				severity: "high" as const,
+				title: "PlanetScale branch out of memory",
+				description: "Branch main of main-db was restarted after running out of memory.",
+				timestamp: 1_000,
+			}
+			yield* Effect.promise(() =>
+				testDb.pglite.exec(`CREATE FUNCTION reject_planetscale_issue_event() RETURNS trigger AS $$
+						BEGIN RAISE EXCEPTION 'forced event failure'; END;
+						$$ LANGUAGE plpgsql;
+						CREATE TRIGGER reject_planetscale_issue_event
+						BEFORE INSERT ON error_issue_events
+						FOR EACH ROW EXECUTE FUNCTION reject_planetscale_issue_event();`),
+			)
+
+			const error = yield* upsertPlanetScaleIssue(input).pipe(Effect.flip)
+			assert.strictEqual(error._tag, "@maple/api/lib/DatabaseError")
+			const afterFailure = yield* Effect.promise(() =>
+				queryFirstRow<{ count: number }>(
+					testDb,
+					"SELECT count(*)::int AS count FROM error_issues WHERE org_id = $1",
+					[input.orgId],
+				),
+			)
+			assert.strictEqual(afterFailure?.count, 0)
+
+			yield* Effect.promise(() =>
+				testDb.pglite.exec(`DROP TRIGGER reject_planetscale_issue_event ON error_issue_events;
+						DROP FUNCTION reject_planetscale_issue_event();`),
+			)
+			const retry = yield* upsertPlanetScaleIssue(input)
+			assert.strictEqual(retry.action, "created")
+			const event = yield* Effect.promise(() =>
+				queryFirstRow<{ count: number }>(
+					testDb,
+					"SELECT count(*)::int AS count FROM error_issue_events WHERE issue_id = $1 AND type = 'created'",
+					[retry.issueId],
+				),
+			)
+			assert.strictEqual(event?.count, 1)
+		}).pipe(Effect.provide(testDb.layer))
+	})
 })
 
 describe("decodePlanetScaleWebhookPayload", () => {

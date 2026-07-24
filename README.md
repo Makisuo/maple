@@ -188,6 +188,8 @@ For ingest + key auth, set these at minimum in your root `.env` when running the
 - `INGEST_FORWARD_TIMEOUT_MS`
 - `INGEST_MAX_REQUEST_BODY_BYTES`
 - `INGEST_REQUIRE_TLS`
+- `INGEST_REPLAY_MAX_SESSION_BYTES` (optional; ceiling on the decompressed rrweb
+  payload one replay session may record, default 1 GiB, `0` disables)
 
 ## Persistence (SQLite / Turso)
 

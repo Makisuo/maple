@@ -24,9 +24,10 @@
  * apps/electric-sync worker to this source (see apps/electric-sync/alchemy.run.ts).
  *
  * `down` deletes every `pr-<n>`/`pr-<n>-*` environment (called on PR close,
- * after `alchemy:destroy:pr`). Environment deletion cascades its services. Each
- * source counts against the Electric plan's max-databases cap and holds a
- * PlanetScale replication slot, so `down` on close is mandatory.
+ * after `alchemy:destroy:pr`), deleting its services first — Electric refuses
+ * to delete an environment that still holds services (`--force` does not
+ * cascade). Each source counts against the Electric plan's max-databases cap
+ * and holds a PlanetScale replication slot, so `down` on close is mandatory.
  *
  * `sweep` deletes every `pr-<n>`/`pr-<n>-*` environment whose PR is already
  * closed. The close-event teardown is best-effort only (GitHub creates no
@@ -421,6 +422,12 @@ const findEnvironments = (projectId: string, base: string): ReadonlyArray<{ id: 
 }
 
 const deleteEnvironment = (env: { id: string; name: string }): void => {
+	// Electric refuses to delete an environment that still holds services —
+	// "Cannot delete environment with existing services. Delete all services
+	// first." (run 30081184677, PR #255 close) — `--force` does NOT cascade.
+	// Drop the services first; each freed service also releases its PlanetScale
+	// replication slot and plan max-databases slot.
+	resetServices(env.id)
 	const removed = runElectric(["environments", "delete", env.id, "--force"])
 	if (removed.exitCode !== 0 && !isNotFound(removed)) {
 		fail(`Failed to delete Electric environment ${env.name} (${env.id})`)
@@ -647,19 +654,18 @@ const up = async (environmentName: string): Promise<void> => {
 	// v0.0.10 result: { id, status, sourceSecret } — the postgres service IS the
 	// shape-API source, so its id is the `source_id` the sync worker forwards.
 	const service = parseJson(createdSvc.stdout, "services create postgres")
-	const sourceId = pick(service, "id", "serviceId", "sourceId")
 	// Fail fast on a CLI output-shape drift: without an id the activation wait
 	// below would be skipped and the run would only die much later (after the
 	// publication-mirror poll) with a message that buries the actual cause.
-	if (!sourceId) {
+	const sourceId =
+		pick(service, "id", "serviceId", "sourceId") ??
 		fail(
 			"`electric services create postgres --json` returned no service id — cannot wait for activation or resolve the source",
 		)
-	}
 	let secret = pick(service, "sourceSecret", "secret", "source_secret")
 
 	// 3b. Wait for the service to become active before the alchemy deploy binds it.
-	if (sourceId) {
+	{
 		const deadline = Date.now() + ACTIVE_TIMEOUT_MS
 		let lastStatus = pick(service, "status") ?? "unknown"
 		console.log(`… service ${sourceId} status: ${lastStatus}`)
@@ -734,15 +740,15 @@ const up = async (environmentName: string): Promise<void> => {
 	}
 
 	// 4. Fetch the source secret if `create` didn't already return it.
-	if (!secret && sourceId) {
+	if (!secret) {
 		const fetched = runElectric(["services", "get-secret", sourceId, "--json"], { secret: true })
 		if (fetched.exitCode !== 0) {
 			fail(`Failed to fetch the source secret for service ${sourceId}`)
 		}
 		secret = pick(parseJson(fetched.stdout, "services get-secret"), "secret", "sourceSecret")
 	}
-	if (!sourceId || !secret) {
-		fail("Could not resolve the Electric source_id + secret from the CLI output")
+	if (!secret) {
+		fail("Could not resolve the Electric source secret from the CLI output")
 	}
 
 	// 5. Hand the source creds to the rest of the workflow. alchemy binds these to
@@ -750,7 +756,7 @@ const up = async (environmentName: string): Promise<void> => {
 	maskAndExport(
 		{
 			ELECTRIC_URL: electricUrl,
-			ELECTRIC_SOURCE_ID: sourceId as string,
+			ELECTRIC_SOURCE_ID: sourceId,
 			ELECTRIC_SECRET: secret as string,
 		},
 		[secret as string],
@@ -836,6 +842,10 @@ const sweep = async (): Promise<void> => {
 			continue
 		}
 		console.log(`… deleting orphan ${candidate.name} (PR #${candidate.prNumber} is closed)`)
+		// The canonical orphan (leaked from a failed close-teardown) still has
+		// its source attached, and Electric refuses to delete an environment
+		// holding services — drop them first, same as deleteEnvironment().
+		resetServices(candidate.id)
 		const removed = runElectric(["environments", "delete", candidate.id, "--force"])
 		if (removed.exitCode !== 0 && !isNotFound(removed)) {
 			failures.push(candidate.name)

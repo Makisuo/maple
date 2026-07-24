@@ -33,7 +33,7 @@ interface MockOptions {
 	 * `/oauth/token/info` verdict (doorkeeper semantics: valid → 200 with token
 	 * details, invalid → 401); omitted → 500 (introspection unavailable).
 	 */
-	readonly introspection?: "valid" | "invalid"
+	readonly introspection?: "active" | "inactive" | "legacy" | "unexpected" | "invalid"
 }
 
 /**
@@ -58,6 +58,9 @@ const mockPlanetScaleFetch = (options: MockOptions = {}): typeof globalThis.fetc
 					401,
 				)
 			}
+			if (options.introspection === "inactive") return jsonResponse({ active: false })
+			if (options.introspection === "active") return jsonResponse({ active: true })
+			if (options.introspection === "unexpected") return jsonResponse({ error: "invalid_token" })
 			// Doorkeeper answers a valid token with its details — no `active` field.
 			return jsonResponse({
 				resource_owner_id: "psuser_1",
@@ -190,43 +193,46 @@ describe("PlanetScaleOAuthService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb, { PLANETSCALE_OAUTH_CLIENT_ID: "ps-client-id" })))
 	})
 
-	it.effect("startConnect builds an authorize URL with the requested scope (no PKCE) and persists a state row", () => {
-		const testDb = createTestDb(trackedDbs)
-		// PlanetScale REQUIRES the scope param — the app's configured scopes are the
-		// allowed maximum, not an implicit default; omitting it fails with `invalid_scope`.
-		const scopes = "user:read_organizations organization:read_databases organization:read_branches"
-		return Effect.gen(function* () {
-			const service = yield* PlanetScaleOAuthService
-			const { redirectUrl, state } = yield* service.startConnect(
-				asOrgId("org_a"),
-				asUserId("user_a"),
-				{ callbackUrl: CALLBACK_URL, returnTo: "/integrations" },
-			)
+	it.effect(
+		"startConnect builds an authorize URL with the requested scope (no PKCE) and persists a state row",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			// PlanetScale REQUIRES the scope param — the app's configured scopes are the
+			// allowed maximum, not an implicit default; omitting it fails with `invalid_scope`.
+			const scopes = "user:read_organizations organization:read_databases organization:read_branches"
+			return Effect.gen(function* () {
+				const service = yield* PlanetScaleOAuthService
+				const { redirectUrl, state } = yield* service.startConnect(
+					asOrgId("org_a"),
+					asUserId("user_a"),
+					{ callbackUrl: CALLBACK_URL, returnTo: "/integrations" },
+				)
 
-			const url = new URL(redirectUrl)
-			// The canonical authorize host from PlanetScale's OAuth discovery doc —
-			// the auth.planetscale.com alias mints tokens the v1 API rejects.
-			assert.strictEqual(url.origin + url.pathname, "https://app.planetscale.com/oauth/authorize")
-			assert.strictEqual(url.searchParams.get("client_id"), "ps-client-id")
-			assert.strictEqual(url.searchParams.get("redirect_uri"), CALLBACK_URL)
-			assert.strictEqual(url.searchParams.get("response_type"), "code")
-			assert.strictEqual(url.searchParams.get("state"), state)
-			// Resource-prefixed, space-delimited scopes; PKCE is not part of PlanetScale's flow.
-			assert.strictEqual(url.searchParams.get("scope"), scopes)
-			assert.isNull(url.searchParams.get("code_challenge"))
+				const url = new URL(redirectUrl)
+				// The canonical authorize host from PlanetScale's OAuth discovery doc —
+				// the auth.planetscale.com alias mints tokens the v1 API rejects.
+				assert.strictEqual(url.origin + url.pathname, "https://app.planetscale.com/oauth/authorize")
+				assert.strictEqual(url.searchParams.get("client_id"), "ps-client-id")
+				assert.strictEqual(url.searchParams.get("redirect_uri"), CALLBACK_URL)
+				assert.strictEqual(url.searchParams.get("response_type"), "code")
+				assert.strictEqual(url.searchParams.get("state"), state)
+				// Resource-prefixed, space-delimited scopes; PKCE is not part of PlanetScale's flow.
+				assert.strictEqual(url.searchParams.get("scope"), scopes)
+				assert.isNull(url.searchParams.get("code_challenge"))
 
-			const row = yield* Effect.promise(() =>
-				queryFirstRow<{ org_id: string; provider: string; return_to: string | null }>(
-					testDb,
-					"SELECT org_id, provider, return_to FROM oauth_auth_states WHERE state = $1",
-					[state],
-				),
-			)
-			assert.strictEqual(row?.org_id, "org_a")
-			assert.strictEqual(row?.provider, "planetscale")
-			assert.strictEqual(row?.return_to, "/integrations")
-		}).pipe(Effect.provide(makeLayer(testDb, { ...withOAuthApp, PLANETSCALE_OAUTH_SCOPES: scopes })))
-	})
+				const row = yield* Effect.promise(() =>
+					queryFirstRow<{ org_id: string; provider: string; return_to: string | null }>(
+						testDb,
+						"SELECT org_id, provider, return_to FROM oauth_auth_states WHERE state = $1",
+						[state],
+					),
+				)
+				assert.strictEqual(row?.org_id, "org_a")
+				assert.strictEqual(row?.provider, "planetscale")
+				assert.strictEqual(row?.return_to, "/integrations")
+			}).pipe(Effect.provide(makeLayer(testDb, { ...withOAuthApp, PLANETSCALE_OAUTH_SCOPES: scopes })))
+		},
+	)
 
 	it.effect("completeConnect exchanges the code, stores the grant, and returns the orgs", () => {
 		const testDb = createTestDb(trackedDbs)
@@ -393,15 +399,46 @@ describe("PlanetScaleOAuthService", () => {
 		)
 	})
 
-	it.effect("completeConnect reports upstream (not revoked) when the auth server says the token is valid", () => {
+	it.effect(
+		"completeConnect reports upstream (not revoked) when the auth server says the token is valid",
+		() => {
+			const testDb = createTestDb(trackedDbs)
+			return Effect.gen(function* () {
+				const service = yield* PlanetScaleOAuthService
+				const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+					callbackUrl: CALLBACK_URL,
+				})
+				// The v1 API keeps rejecting a token the auth server introspects as
+				// active — "reconnect" would be a lie, so this must NOT be RevokedError.
+				const fiber = yield* Effect.forkChild(
+					service.completeConnect("auth-code", state).pipe(Effect.flip),
+					{ startImmediately: true },
+				)
+				yield* TestClock.adjust("2 seconds")
+				const error = yield* Fiber.join(fiber)
+				assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
+				if (error._tag === "@maple/http/errors/IntegrationsUpstreamError") {
+					assert.include(error.message, "auth server reports it as valid")
+				}
+				assert.isFalse(yield* service.hasConnection(asOrgId("org_a")))
+			}).pipe(
+				Effect.provide(
+					Layer.mergeAll(
+						makeLayer(testDb, withOAuthApp),
+						withMockFetch({ organizationsUnauthorizedTimes: 2, introspection: "legacy" }),
+					),
+				),
+			)
+		},
+	)
+
+	it.effect("completeConnect honors an explicit active token-info response", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			const service = yield* PlanetScaleOAuthService
 			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
 				callbackUrl: CALLBACK_URL,
 			})
-			// The v1 API keeps rejecting a token the auth server introspects as
-			// active — "reconnect" would be a lie, so this must NOT be RevokedError.
 			const fiber = yield* Effect.forkChild(
 				service.completeConnect("auth-code", state).pipe(Effect.flip),
 				{ startImmediately: true },
@@ -409,15 +446,59 @@ describe("PlanetScaleOAuthService", () => {
 			yield* TestClock.adjust("2 seconds")
 			const error = yield* Fiber.join(fiber)
 			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsUpstreamError")
-			if (error._tag === "@maple/http/errors/IntegrationsUpstreamError") {
-				assert.include(error.message, "auth server reports it as valid")
-			}
-			assert.isFalse(yield* service.hasConnection(asOrgId("org_a")))
 		}).pipe(
 			Effect.provide(
 				Layer.mergeAll(
 					makeLayer(testDb, withOAuthApp),
-					withMockFetch({ organizationsUnauthorizedTimes: 2, introspection: "valid" }),
+					withMockFetch({ organizationsUnauthorizedTimes: 2, introspection: "active" }),
+				),
+			),
+		)
+	})
+
+	it.effect("completeConnect treats active:false token-info as revoked", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: CALLBACK_URL,
+			})
+			const fiber = yield* Effect.forkChild(
+				service.completeConnect("auth-code", state).pipe(Effect.flip),
+				{ startImmediately: true },
+			)
+			yield* TestClock.adjust("2 seconds")
+			const error = yield* Fiber.join(fiber)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsRevokedError")
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb, withOAuthApp),
+					withMockFetch({ organizationsUnauthorizedTimes: 2, introspection: "inactive" }),
+				),
+			),
+		)
+	})
+
+	it.effect("does not treat an arbitrary 2xx token-info object as valid", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* PlanetScaleOAuthService
+			const { state } = yield* service.startConnect(asOrgId("org_a"), asUserId("user_a"), {
+				callbackUrl: CALLBACK_URL,
+			})
+			const fiber = yield* Effect.forkChild(
+				service.completeConnect("auth-code", state).pipe(Effect.flip),
+				{ startImmediately: true },
+			)
+			yield* TestClock.adjust("2 seconds")
+			const error = yield* Fiber.join(fiber)
+			assert.strictEqual(error._tag, "@maple/http/errors/IntegrationsRevokedError")
+		}).pipe(
+			Effect.provide(
+				Layer.mergeAll(
+					makeLayer(testDb, withOAuthApp),
+					withMockFetch({ organizationsUnauthorizedTimes: 2, introspection: "unexpected" }),
 				),
 			),
 		)
@@ -478,8 +559,7 @@ describe("PlanetScaleOAuthService", () => {
 			// must surface as revoked, not a generic upstream failure — the picker
 			// keys its reconnect CTA on the tag.
 			const deadGrantFetch: typeof globalThis.fetch = async (input, init) => {
-				const url =
-					typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+				const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
 				if (url.includes("/v1/organizations")) {
 					return jsonResponse({ code: "unauthorized" }, 401)
 				}
@@ -514,7 +594,10 @@ describe("PlanetScaleOAuthService", () => {
 			// Two racers on an expired token: without single-flight both refresh, the
 			// loser's rotated-token 400 falsely surfaces as IntegrationsRevokedError.
 			const [a, b] = yield* Effect.all(
-				[service.getValidAccessToken(asOrgId("org_a")), service.getValidAccessToken(asOrgId("org_a"))],
+				[
+					service.getValidAccessToken(asOrgId("org_a")),
+					service.getValidAccessToken(asOrgId("org_a")),
+				],
 				{ concurrency: 2 },
 			)
 			assert.strictEqual(a.accessToken, "ps-access-token-refreshed")

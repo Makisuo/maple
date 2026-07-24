@@ -9,6 +9,7 @@ import { formatRelativeTime } from "@/lib/format"
 import {
 	deviation,
 	formatSignalValue,
+	isStaleOpenIncident,
 	RESOLVE_REASON_LABEL,
 	SEVERITY_TONE,
 	SIGNAL_LABEL,
@@ -31,6 +32,7 @@ export function AnomalySidebar({
 	onUnlink: () => void
 }) {
 	const isOpen = incident.status === "open"
+	const isStale = isStaleOpenIncident(incident)
 	const tone = severityToneFor(incident)
 	const dev = deviation(incident)
 	const triageChip = TRIAGE_STATUS_CHIP[incident.triageStatus]
@@ -69,11 +71,25 @@ export function AnomalySidebar({
 			</SidebarGroup>
 
 			<SidebarGroup label="Details">
+				<Row label="State">
+					<span className="text-right text-sm text-foreground">
+						{isStale
+							? `stale · last seen ${formatRelativeTime(incident.lastTriggeredAt)}`
+							: isOpen
+								? "open"
+								: "resolved"}
+					</span>
+				</Row>
 				<Row label="Signal">
 					<span className="text-sm text-foreground">{SIGNAL_LABEL[incident.signalType]}</span>
 				</Row>
 				<Row label="Severity">
-					<span className={cn("text-sm font-medium", isOpen ? tone.text : "text-muted-foreground")}>
+					<span
+						className={cn(
+							"text-sm font-medium",
+							isOpen && !isStale ? tone.text : "text-muted-foreground",
+						)}
+					>
 						{incident.severity}
 					</span>
 				</Row>
@@ -105,7 +121,7 @@ export function AnomalySidebar({
 					<span
 						className={cn(
 							"font-mono text-sm tabular-nums",
-							isOpen ? tone.text : "text-foreground",
+							isOpen && !isStale ? tone.text : "text-foreground",
 						)}
 					>
 						{fmt(incident.lastObservedValue)}
@@ -130,7 +146,7 @@ export function AnomalySidebar({
 					<span
 						className={cn(
 							"font-mono text-sm tabular-nums",
-							isOpen ? tone.text : "text-foreground",
+							isOpen && !isStale ? tone.text : "text-foreground",
 						)}
 					>
 						{dev.label}

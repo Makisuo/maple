@@ -3,10 +3,22 @@ import { Toaster, toast } from "sonner"
 import { cn } from "@maple/ui/utils"
 import { AttributesProvider } from "@maple/ui/components/attributes"
 import { Badge } from "@maple/ui/components/ui/badge"
-import { CodeIcon, EyeIcon, NetworkNodesIcon } from "@maple/ui/components/icons"
+import {
+	CircleWarningIcon,
+	CodeIcon,
+	DatabaseIcon,
+	EyeIcon,
+	NetworkNodesIcon,
+	PulseIcon,
+} from "@maple/ui/components/icons"
 import { TraceListView } from "./views/trace-list-view"
 import { TraceDetailView } from "./views/trace-detail-view"
 import { LogsView } from "./views/logs-view"
+import { MetricsListView } from "./views/metrics-list-view"
+import { MetricDetailView } from "./views/metric-detail-view"
+import { ErrorsView } from "./views/errors-view"
+import { ServicesListView } from "./views/services-list-view"
+import { ServiceDetailView } from "./views/service-detail-view"
 import { SessionsListView } from "./views/sessions-list-view"
 import { SessionDetailView } from "./views/session-detail-view"
 import { navigate, useLocation } from "./lib/router"
@@ -24,23 +36,38 @@ type Route =
 	| { name: "traces" }
 	| { name: "trace-detail"; traceId: string }
 	| { name: "logs" }
+	| { name: "metrics" }
+	| { name: "metric-detail"; metricName: string }
+	| { name: "services" }
+	| { name: "service-detail"; serviceName: string }
+	| { name: "errors" }
 	| { name: "sessions" }
 	| { name: "session-detail"; sessionId: string }
 
 function parseRoute(path: string): Route {
 	const traceDetail = path.match(/^\/traces\/(.+)$/)
 	if (traceDetail) return { name: "trace-detail", traceId: decodeURIComponent(traceDetail[1]) }
+	const metricDetail = path.match(/^\/metrics\/(.+)$/)
+	if (metricDetail) return { name: "metric-detail", metricName: decodeURIComponent(metricDetail[1]) }
+	const serviceDetail = path.match(/^\/services\/(.+)$/)
+	if (serviceDetail) return { name: "service-detail", serviceName: decodeURIComponent(serviceDetail[1]) }
 	const sessionDetail = path.match(/^\/sessions\/(.+)$/)
 	if (sessionDetail) return { name: "session-detail", sessionId: decodeURIComponent(sessionDetail[1]) }
+	if (path.startsWith("/errors")) return { name: "errors" }
 	if (path.startsWith("/logs")) return { name: "logs" }
+	if (path.startsWith("/metrics")) return { name: "metrics" }
+	if (path.startsWith("/services")) return { name: "services" }
 	if (path.startsWith("/sessions")) return { name: "sessions" }
 	return { name: "traces" }
 }
 
-type Tab = "traces" | "logs" | "sessions"
+type Tab = "traces" | "logs" | "metrics" | "services" | "errors" | "sessions"
 
 function activeTab(route: Route): Tab {
+	if (route.name === "errors") return "errors"
 	if (route.name === "logs") return "logs"
+	if (route.name === "metrics" || route.name === "metric-detail") return "metrics"
+	if (route.name === "services" || route.name === "service-detail") return "services"
 	if (route.name === "sessions" || route.name === "session-detail") return "sessions"
 	return "traces"
 }
@@ -95,6 +122,24 @@ export function App() {
 						onClick={() => switchTab("/logs")}
 					/>
 					<NavTab
+						label="Metrics"
+						icon={<PulseIcon size={14} />}
+						active={tab === "metrics"}
+						onClick={() => switchTab("/metrics")}
+					/>
+					<NavTab
+						label="Services"
+						icon={<DatabaseIcon size={14} />}
+						active={tab === "services"}
+						onClick={() => switchTab("/services")}
+					/>
+					<NavTab
+						label="Errors"
+						icon={<CircleWarningIcon size={14} />}
+						active={tab === "errors"}
+						onClick={() => switchTab("/errors")}
+					/>
+					<NavTab
 						label="Sessions"
 						icon={<EyeIcon size={14} />}
 						active={tab === "sessions"}
@@ -119,6 +164,34 @@ export function App() {
 							sessionId={route.sessionId}
 							onBack={() => navigate("/sessions", carry())}
 							onSelectTrace={(traceId) => navigate(`/traces/${encodeURIComponent(traceId)}`)}
+						/>
+					) : route.name === "metric-detail" ? (
+						<MetricDetailView
+							metricName={route.metricName}
+							onBack={() => navigate("/metrics", carry())}
+						/>
+					) : route.name === "metrics" ? (
+						<MetricsListView
+							onSelectMetric={(metricName) =>
+								navigate(`/metrics/${encodeURIComponent(metricName)}`, carry())
+							}
+						/>
+					) : route.name === "service-detail" ? (
+						<ServiceDetailView
+							serviceName={route.serviceName}
+							onBack={() => navigate("/services", carry())}
+						/>
+					) : route.name === "services" ? (
+						<ServicesListView
+							onSelectService={(serviceName) =>
+								navigate(`/services/${encodeURIComponent(serviceName)}`, carry())
+							}
+						/>
+					) : route.name === "errors" ? (
+						<ErrorsView
+							onSelectTrace={(traceId) =>
+								navigate(`/traces/${encodeURIComponent(traceId)}`, carry())
+							}
 						/>
 					) : route.name === "logs" ? (
 						<LogsView />

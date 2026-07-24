@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Navigate, createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Schema } from "effect"
 import { Result, useAtomValue } from "@/lib/effect-atom"
@@ -26,7 +27,6 @@ import { PageRefreshProvider } from "@/components/time-range-picker/page-refresh
 import { TimeRangeHeaderControls } from "@/components/time-range-picker/time-range-header-controls"
 
 const podsSearchSchema = Schema.Struct({
-	search: Schema.optional(Schema.String),
 	podNames: OptionalStringArrayParam,
 	namespaces: OptionalStringArrayParam,
 	nodeNames: OptionalStringArrayParam,
@@ -58,6 +58,7 @@ function PodsPage() {
 function PodsPageContent() {
 	const search = Route.useSearch()
 	const navigate = useNavigate({ from: Route.fullPath })
+	const [searchText, setSearchText] = useState("")
 
 	const { startTime, endTime } = useEffectiveTimeRange(
 		search.startTime,
@@ -83,7 +84,6 @@ function PodsPageContent() {
 			data: {
 				startTime,
 				endTime,
-				search: search.search?.trim() || undefined,
 				...filters,
 			},
 		}),
@@ -94,7 +94,6 @@ function PodsPageContent() {
 			data: {
 				startTime,
 				endTime,
-				search: search.search?.trim() || undefined,
 			},
 		}),
 	)
@@ -110,6 +109,7 @@ function PodsPageContent() {
 	}
 
 	const onClearFilters = () => {
+		setSearchText("")
 		navigate({
 			search: {
 				startTime: search.startTime,
@@ -164,8 +164,7 @@ function PodsPageContent() {
 						.onError((err) => <QueryErrorState error={err} />)
 						.onSuccess((response, result) => {
 							const pods = response.data
-							const hasAnyFilter =
-								!!search.search?.trim() ||
+							const hasStructuredFilter =
 								(filters.podNames?.length ?? 0) > 0 ||
 								(filters.namespaces?.length ?? 0) > 0 ||
 								(filters.nodeNames?.length ?? 0) > 0 ||
@@ -177,7 +176,7 @@ function PodsPageContent() {
 								(filters.environments?.length ?? 0) > 0 ||
 								(filters.computeTypes?.length ?? 0) > 0
 
-							if (pods.length === 0 && !hasAnyFilter) {
+							if (pods.length === 0 && !hasStructuredFilter) {
 								return (
 									<Empty className="py-16">
 										<EmptyHeader>
@@ -194,14 +193,19 @@ function PodsPageContent() {
 								)
 							}
 
+							const q = searchText.trim().toLowerCase()
+							const filtered = q
+								? pods.filter((p) => p.podName.toLowerCase().includes(q))
+								: pods
+
 							return (
 								<div
 									className={`space-y-4 transition-opacity ${
 										result.waiting ? "opacity-60" : ""
 									}`}
 								>
-									{pods.length >= 4 && (
-										<PodHoneycomb pods={pods} referenceTime={endTime} />
+									{filtered.length >= 4 && (
+										<PodHoneycomb pods={filtered} referenceTime={endTime} />
 									)}
 									<div className="flex flex-wrap items-center justify-between gap-3">
 										<InputGroup className="w-64">
@@ -211,28 +215,14 @@ function PodsPageContent() {
 											<InputGroupInput
 												size="sm"
 												placeholder="Search pods…"
-												value={search.search ?? ""}
-												onChange={(e) =>
-													navigate({
-														search: (prev) => ({
-															...prev,
-															search: e.target.value || undefined,
-														}),
-													})
-												}
+												value={searchText}
+												onChange={(e) => setSearchText(e.target.value)}
 											/>
-											{search.search && (
+											{searchText && (
 												<InputGroupAddon align="inline-end">
 													<InputGroupButton
 														aria-label="Clear search"
-														onClick={() =>
-															navigate({
-																search: (prev) => ({
-																	...prev,
-																	search: undefined,
-																}),
-															})
-														}
+														onClick={() => setSearchText("")}
 													>
 														<XmarkIcon />
 													</InputGroupButton>
@@ -240,10 +230,28 @@ function PodsPageContent() {
 											)}
 										</InputGroup>
 										<span className="text-xs text-muted-foreground">
-											{pods.length} {pods.length === 1 ? "pod" : "pods"}
+											{filtered.length} {filtered.length === 1 ? "pod" : "pods"}
 										</span>
 									</div>
-									<PodTable pods={pods} waiting={result.waiting} referenceTime={endTime} />
+									{q && filtered.length === 0 ? (
+										<Empty className="py-12">
+											<EmptyHeader>
+												<EmptyMedia variant="icon">
+													<MagnifierIcon size={16} />
+												</EmptyMedia>
+												<EmptyTitle>No pods match “{searchText}”</EmptyTitle>
+												<EmptyDescription>
+													Try a different name, or clear the search to see all pods.
+												</EmptyDescription>
+											</EmptyHeader>
+										</Empty>
+									) : (
+										<PodTable
+											pods={filtered}
+											waiting={result.waiting}
+											referenceTime={endTime}
+										/>
+									)}
 								</div>
 							)
 						})

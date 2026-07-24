@@ -101,3 +101,15 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/tinybird-pr-branch.ts sweep
+
+            # Hyperdrive is the one preview resource `alchemy destroy` alone
+            # owns — and close runs execute the PR branch's OLD workflow, so
+            # branches predating the placeholder-MAPLE_PG_URL destroy fix can
+            # NEVER tear down (rerunning them fails identically forever). The
+            # account caps Hyperdrive configs at 25; leaked maple-db-pr-*
+            # configs eventually block every new PR preview.
+            - name: Sweep orphaned Hyperdrive PR configs
+              if: ${{ !cancelled() && env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != '' }}
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: bun scripts/hyperdrive-orphan-sweep.ts

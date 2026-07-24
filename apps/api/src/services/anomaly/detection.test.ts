@@ -3,6 +3,7 @@ import {
 	evaluateErrorSpike,
 	evaluateGoldenSignals,
 	evaluateLogVolume,
+	healthyErrorSpikeRecovery,
 	mad,
 	median,
 	robustSigma,
@@ -281,6 +282,24 @@ describe("evaluateErrorSpike", () => {
 	it("respects the minimum count floor", () => {
 		const e = evaluateErrorSpike(observation(8), { totalCount: 10 }, spikeConfig)
 		expect(e.status).toBe("skipped")
+	})
+
+	it("emits a healthy recovery value below the opening floor for an existing incident", () => {
+		const e = healthyErrorSpikeRecovery(observation(8), 10 / 336, spikeConfig)
+		expect(e).toMatchObject({
+			detectorKey: "error_spike:production:fp1",
+			status: "healthy",
+			value: 8,
+			sampleCount: 8,
+		})
+		expect(e.threshold).toBeGreaterThanOrEqual(10)
+	})
+
+	it("emits a zero-valued recovery when an open fingerprint disappears", () => {
+		const e = healthyErrorSpikeRecovery(observation(0), 1, spikeConfig)
+		expect(e.status).toBe("healthy")
+		expect(e.value).toBe(0)
+		expect(e.baselineMedian).toBe(1)
 	})
 
 	it("stays healthy when a chatty fingerprint is at its usual volume", () => {

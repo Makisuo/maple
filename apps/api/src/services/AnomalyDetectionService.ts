@@ -36,10 +36,7 @@ import {
 import { and, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm"
 import { CH, parseWarehouseDateTime } from "@maple/query-engine"
 import { EdgeCacheService } from "@maple/query-engine/caching"
-import {
-	isOrgWarehouseQuarantined,
-	quarantineOnConfigClassCause,
-} from "../lib/warehouse-org-quarantine"
+import { isOrgWarehouseQuarantined, quarantineOnConfigClassCause } from "../lib/warehouse-org-quarantine"
 import { Array as Arr, Cause, Clock, Context, Effect, Layer, Option, Ref, Schedule, Schema } from "effect"
 import type { TenantContext } from "./AuthService"
 import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage-enqueue"
@@ -48,15 +45,18 @@ import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLiv
 import { dateToMs, msToDate } from "../lib/time"
 import { WarehouseQueryService } from "../lib/WarehouseQueryService"
 import {
+	ERROR_SPIKE_MIN_COUNT,
 	evaluateErrorSpike,
 	evaluateGoldenSignals,
 	evaluateLogVolume,
+	healthyErrorSpikeRecovery,
 	SENSITIVITY,
 	type AnomalyEvaluation,
 	type ErrorSpikeBaseline,
 	type GoldenSignalSeries,
 	type LogVolumeSeries,
 } from "./anomaly/detection"
+import { rollingCountBuckets } from "./anomaly/rolling-counts"
 import { decideTransition, stateMachineConfigFor, type DetectorStateSnapshot } from "./anomaly/state-machine"
 import {
 	attachKeyFor,
@@ -692,39 +692,44 @@ const make = Effect.gen(function* () {
 
 		if (row.signalType === "error_spike") {
 			unit = "count_per_30m"
-			bucketSeconds = SPIKE_WINDOW_MS / 1000
-			// Consolidated incidents (several co-onset fingerprints) chart the
-			// service's full error-event series; a single-fingerprint series
-			// would under-represent the event.
-			const activeFingerprints = parseRowFingerprints(row).filter((e) => e.resolvedAt === null)
-			const compiled =
-				activeFingerprints.length > 1
-					? CH.compile(CH.anomalyErrorSpikeServiceTimeseriesQuery(), {
-							...queryWindow,
-							serviceName: row.serviceName,
-							deploymentEnv: row.deploymentEnv,
-							bucketSeconds,
-						})
-					: CH.compile(CH.anomalyErrorSpikeTimeseriesQuery(), {
-							...queryWindow,
-							fingerprintHash: row.fingerprintHash ?? "",
-							deploymentEnv: row.deploymentEnv,
-							bucketSeconds,
-						})
+			bucketSeconds = TICK_CADENCE_MS / 1000
+			// The incident threshold belongs to the primary fingerprint. Charting
+			// all service errors against that one threshold is mathematically
+			// invalid for consolidated incidents, so keep this series exact.
+			const compiled = CH.compile(CH.anomalyErrorSpikeTimeseriesQuery(), {
+				...queryWindow,
+				// Include the preceding window so the first displayed point has
+				// a complete rolling 30-minute value.
+				startTime: toTinybirdDateTime(startMs - SPIKE_WINDOW_MS),
+				fingerprintHash: row.fingerprintHash ?? "0",
+				deploymentEnv: row.deploymentEnv,
+				bucketSeconds,
+			})
 			const rows = yield* warehouse
 				.compiledQuery(tenant, compiled, {
 					profile: "list",
 					context: "anomalyIncidentTimeseries",
 				})
 				.pipe(Effect.mapError(makePersistenceError))
-			buckets = rows.map((r) => {
-				const count = Number(r.count ?? 0)
-				return new AnomalyTimeseriesBucket({
-					bucket: isoFromEpoch(parseWarehouseDateTime(String(r.bucket ?? ""))),
-					value: count,
-					sampleCount: count,
-				})
-			})
+			buckets = rollingCountBuckets(
+				rows.map((r) => ({
+					bucketMs: parseWarehouseDateTime(String(r.bucket ?? "")),
+					count: Number(r.count ?? 0),
+				})),
+				{
+					startMs,
+					endMs,
+					stepMs: TICK_CADENCE_MS,
+					windowMs: SPIKE_WINDOW_MS,
+				},
+			).map(
+				(point) =>
+					new AnomalyTimeseriesBucket({
+						bucket: isoFromEpoch(point.bucketMs),
+						value: point.count,
+						sampleCount: point.count,
+					}),
+			)
 		} else if (row.signalType === "log_volume") {
 			unit = "per_minute"
 			bucketSeconds = 3600
@@ -1127,6 +1132,16 @@ const make = Effect.gen(function* () {
 			{ concurrency: 3 },
 		)
 
+		// Load state before evaluation: an opening floor suppresses noisy new
+		// fingerprints, but an already-open fingerprint falling below that floor
+		// is positive recovery evidence and must advance healthy hysteresis.
+		const stateRows = yield* dbExecute((db) =>
+			db.select().from(anomalyDetectorStates).where(eq(anomalyDetectorStates.orgId, orgId)),
+		)
+		const stateByKey = new Map<string, AnomalyDetectorStateRow>(
+			stateRows.map((row) => [row.detectorKey, row]),
+		)
+
 		// firstSeenAt per fingerprint so young issues stay with first_seen handling.
 		// Chunked: D1 caps bound parameters at ~100 per statement, so a single
 		// inArray over a busy org's fingerprints fails the whole tick for it
@@ -1157,23 +1172,57 @@ const make = Effect.gen(function* () {
 			evaluations.push(evaluateLogVolume(series, config))
 		}
 		const spikeConfig = { sensitivity, issueFirstSeenAt, nowMs }
+		const observedSpikeKeys = new Set<string>()
 		for (const observation of spikes.observations) {
+			const detectorKey = `error_spike:${observation.deploymentEnv}:${observation.fingerprintHash}`
+			observedSpikeKeys.add(detectorKey)
 			const baseline = spikes.baselines.get(
 				`${observation.fingerprintHash}\u0000${observation.deploymentEnv}`,
 			)
-			evaluations.push(evaluateErrorSpike(observation, baseline, spikeConfig))
+			const state = stateByKey.get(detectorKey)
+			evaluations.push(
+				state?.openIncidentId !== null &&
+					state?.openIncidentId !== undefined &&
+					observation.count < ERROR_SPIKE_MIN_COUNT
+					? healthyErrorSpikeRecovery(
+							observation,
+							state.baselineMedian ?? (baseline?.totalCount ?? 0) / 336,
+							spikeConfig,
+						)
+					: evaluateErrorSpike(observation, baseline, spikeConfig),
+			)
+		}
+
+		// A zero-count fingerprint is absent from the grouped warehouse result.
+		// Synthesize it from persisted state so an open incident resolves after
+		// three healthy ticks instead of freezing until the one-hour stale sweep.
+		for (const state of stateRows) {
+			if (
+				state.signalType !== "error_spike" ||
+				state.openIncidentId === null ||
+				state.fingerprintHash === null ||
+				observedSpikeKeys.has(state.detectorKey)
+			) {
+				continue
+			}
+			evaluations.push(
+				healthyErrorSpikeRecovery(
+					{
+						fingerprintHash: state.fingerprintHash,
+						serviceName: state.serviceName,
+						deploymentEnv: state.deploymentEnv,
+						count: 0,
+					},
+					state.baselineMedian ?? 0,
+					spikeConfig,
+				),
+			)
 		}
 
 		const active = evaluations.filter((e) => !muted.has(e.signalType))
 		stats.seriesEvaluated = active.length
 
-		// Load all detector states + open incidents for the org in two reads.
-		const stateRows = yield* dbExecute((db) =>
-			db.select().from(anomalyDetectorStates).where(eq(anomalyDetectorStates.orgId, orgId)),
-		)
-		const stateByKey = new Map<string, AnomalyDetectorStateRow>(stateRows.map((r) => [r.detectorKey, r]))
-
-		// Open incidents, kept current in memory through the (sequential) loop
+		// Open incidents are kept current in memory through the sequential loop
 		// so same-tick attaches and severity recomputes see each other.
 		interface IncidentRuntime {
 			row: AnomalyIncidentRow
@@ -1598,16 +1647,80 @@ const make = Effect.gen(function* () {
 						lastIncidentId = incidentId
 						stats.incidentsContinued += 1
 					}
+				} else if (
+					transition === "noop" &&
+					evaluation.status === "healthy" &&
+					openIncidentId !== null
+				) {
+					const incidentId = openIncidentId
+					const runtime = incidentById.get(incidentId)
+					if (runtime !== undefined && evaluation.fingerprintHash !== null) {
+						const existing = runtime.entries.find(
+							(entry) => entry.fingerprintHash === evaluation.fingerprintHash,
+						)
+						if (existing !== undefined) {
+							runtime.entries = upsertFingerprintEntry(runtime.entries, {
+								...existing,
+								lastValue: evaluation.value,
+							})
+						}
+					}
+					const isPrimary =
+						runtime === undefined || runtime.row.detectorKey === evaluation.detectorKey
+					const recoverySet = {
+						updatedAt: new Date(nowMs),
+						...(isPrimary
+							? {
+									lastObservedValue: evaluation.value,
+									lastSampleCount: evaluation.sampleCount,
+								}
+							: {}),
+						...(runtime !== undefined && runtime.entries.length > 0
+							? { fingerprintsJson: runtime.entries }
+							: {}),
+					}
+					const updated = yield* dbExecute((db) =>
+						db
+							.update(anomalyIncidents)
+							.set(recoverySet)
+							.where(
+								and(
+									eq(anomalyIncidents.orgId, orgId),
+									eq(anomalyIncidents.id, incidentId),
+									eq(anomalyIncidents.status, "open"),
+								),
+							)
+							.returning({ id: anomalyIncidents.id }),
+					)
+					if (updated.length === 0) {
+						openIncidentId = null
+						lastResolvedAt = nowMs
+						lastIncidentId = incidentId
+						incidentById.delete(incidentId)
+					} else if (runtime !== undefined) {
+						runtime.row = { ...runtime.row, ...recoverySet }
+					}
 				} else if (transition === "resolve" && openIncidentId !== null) {
 					const incidentId = openIncidentId
 					const runtime = incidentById.get(incidentId)
 					if (runtime !== undefined && evaluation.fingerprintHash !== null) {
+						const existing = runtime.entries.find(
+							(entry) => entry.fingerprintHash === evaluation.fingerprintHash,
+						)
+						if (existing !== undefined) {
+							runtime.entries = upsertFingerprintEntry(runtime.entries, {
+								...existing,
+								lastValue: evaluation.value,
+							})
+						}
 						runtime.entries = markFingerprintResolved(
 							runtime.entries,
 							evaluation.fingerprintHash,
 							nowMs,
 						)
 					}
+					const isPrimary =
+						runtime === undefined || runtime.row.detectorKey === evaluation.detectorKey
 					// Refcount: a consolidated incident only resolves once no other
 					// series still points at it.
 					const otherStates = yield* dbExecute((db) =>
@@ -1634,6 +1747,12 @@ const make = Effect.gen(function* () {
 									status: "resolved",
 									resolveReason: "returned_to_baseline",
 									resolvedAt: new Date(nowMs),
+									...(isPrimary
+										? {
+												lastObservedValue: evaluation.value,
+												lastSampleCount: evaluation.sampleCount,
+											}
+										: {}),
 									updatedAt: new Date(nowMs),
 									...(runtime !== undefined && runtime.entries.length > 0
 										? { fingerprintsJson: runtime.entries }
@@ -1660,8 +1779,12 @@ const make = Effect.gen(function* () {
 						// one — `detectorKey` must always point at a live series for the
 						// continue branch and manual resolve to find it.
 						const next = otherStates[0]!
-						const isPrimary =
-							runtime === undefined || runtime.row.detectorKey === evaluation.detectorKey
+						const nextEntry =
+							next.fingerprintHash === null
+								? undefined
+								: runtime?.entries.find(
+										(entry) => entry.fingerprintHash === next.fingerprintHash,
+									)
 						const detachSet = {
 							updatedAt: new Date(nowMs),
 							...(runtime !== undefined && runtime.entries.length > 0
@@ -1671,7 +1794,16 @@ const make = Effect.gen(function* () {
 									}
 								: {}),
 							...(isPrimary
-								? { detectorKey: next.detectorKey, fingerprintHash: next.fingerprintHash }
+								? {
+										detectorKey: next.detectorKey,
+										fingerprintHash: next.fingerprintHash,
+										...(nextEntry !== undefined
+											? {
+													lastObservedValue: nextEntry.lastValue,
+													lastSampleCount: nextEntry.lastValue,
+												}
+											: {}),
+									}
 								: {}),
 						}
 						yield* dbExecute((db) =>
@@ -1876,10 +2008,18 @@ const make = Effect.gen(function* () {
 										if (quarantined) {
 											yield* Effect.logInfo(
 												"Org warehouse rejected queries with a config-class error; quarantined",
-											).pipe(Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }))
+											).pipe(
+												Effect.annotateLogs({
+													orgId: org,
+													error: Cause.pretty(cause),
+												}),
+											)
 										} else {
 											yield* Effect.logError("Anomaly tick failed for org").pipe(
-												Effect.annotateLogs({ orgId: org, error: Cause.pretty(cause) }),
+												Effect.annotateLogs({
+													orgId: org,
+													error: Cause.pretty(cause),
+												}),
 											)
 										}
 										yield* Ref.update(orgFailures, (n) => n + 1)

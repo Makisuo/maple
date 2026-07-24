@@ -6,6 +6,7 @@ import {
 	CloudflareStartConnectResponse,
 	CloudflareTopTrafficResponse,
 	CloudflareTopTrafficRow,
+	CloudflareUsageResponse,
 	CurrentTenant,
 	ExternalUserId,
 	GithubDeleteRepositoryResponse,
@@ -201,7 +202,18 @@ export const HttpIntegrationsLive = HttpApiBuilder.group(MapleApi, "integrations
 				.handle("cloudflareUsage", () =>
 					Effect.gen(function* () {
 						const tenant = yield* CurrentTenant.Context
-						return yield* cloudflareAnalytics.getUsage(tenant.orgId)
+						// Two warehouse aggregations per call — 60s edge cache absorbs page-load
+						// bursts. The window is server-clocked, so orgId alone keys the entry.
+						const cached = yield* edgeCache.getOrCompute(
+							{
+								bucket: "cf-usage",
+								key: tenant.orgId,
+								ttlSeconds: 60,
+								schema: CloudflareUsageResponse,
+							},
+							cloudflareAnalytics.getUsage(tenant.orgId),
+						)
+						return cached.value
 					}),
 				)
 				// No admin gate — any org member may read the inventory (service map needs it).

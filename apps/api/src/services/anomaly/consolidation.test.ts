@@ -118,6 +118,15 @@ describe("markFingerprintResolved", () => {
 		expect(next.find((e) => e.fingerprintHash === "fp1")!.resolvedAt).toBeNull()
 		expect(next.find((e) => e.fingerprintHash === "fp2")!.resolvedAt).toBe(nowMs)
 	})
+
+	it("keeps a consolidated incident active until every fingerprint recovers", () => {
+		const attached = [entry(), entry({ fingerprintHash: "fp2" })]
+		const oneRecovered = markFingerprintResolved(attached, "fp1", nowMs)
+		expect(oneRecovered.some((candidate) => candidate.resolvedAt === null)).toBe(true)
+
+		const allRecovered = markFingerprintResolved(oneRecovered, "fp2", nowMs + 5 * 60 * 1000)
+		expect(allRecovered.every((candidate) => candidate.resolvedAt !== null)).toBe(true)
+	})
 })
 
 describe("canAttach", () => {

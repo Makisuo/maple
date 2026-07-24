@@ -314,6 +314,8 @@ interface CapturedIngest {
 
 interface CompiledQueryStub {
 	rows: ReadonlyArray<Record<string, unknown>>
+	/** Rows served to the `cloudflareUsageStats` companion query (defaults to none). */
+	statsRows?: ReadonlyArray<Record<string, unknown>>
 	calls: Array<{
 		sql: string
 		orgId: string
@@ -350,7 +352,13 @@ const makeWarehouseStub = (
 			Effect.sync(() => {
 				queryStub?.calls.push({ sql: compiled.sql, orgId: tenant.orgId, options })
 			}).pipe(
-				Effect.flatMap(() => compiled.decodeRows(queryStub?.rows ?? [])),
+				Effect.flatMap(() =>
+					compiled.decodeRows(
+						(options?.context === "cloudflareUsageStats"
+							? queryStub?.statsRows
+							: queryStub?.rows) ?? [],
+					),
+				),
 				Effect.orDie,
 			),
 	}) as unknown as WarehouseQueryServiceShape
@@ -1415,6 +1423,8 @@ describe("CloudflareAnalyticsService", () => {
 					lastTimeUnix: "2026-07-02T11:40:00.000Z",
 				},
 			],
+			// String-encoded like a BYO-CH response — exercises the CHNumber coercion.
+			statsRows: [{ previousRequests: "120.4", firewallBlockedEvents: "30" }],
 			calls: [],
 		}
 		return Effect.gen(function* () {
@@ -1427,6 +1437,8 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(usage.windowStart, T0 - 24 * 60 * MIN)
 			assert.strictEqual(usage.bucketSeconds, 3600)
 			assert.strictEqual(usage.totalRequests, 192)
+			assert.strictEqual(usage.previousTotalRequests, 120)
+			assert.strictEqual(usage.firewallBlockedEvents, 30)
 
 			assert.strictEqual(usage.services.length, 2)
 			const zone = usage.services[0]!
@@ -1446,11 +1458,17 @@ describe("CloudflareAnalyticsService", () => {
 			assert.strictEqual(worker.totalRequests, 42)
 
 			// This org has no BYO-CH settings row (managed/Tinybird), so the gateway wrote its
-			// metrics to Tinybird — the usage read must route to the ingest config to find them.
-			assert.strictEqual(queryStub.calls.length, 1)
-			assert.strictEqual(queryStub.calls[0]?.options?.route, "ingest")
-			assert.strictEqual(queryStub.calls[0]?.options?.profile, "aggregation")
-			assert.strictEqual(queryStub.calls[0]?.orgId, ORG)
+			// metrics to Tinybird — both reads (usage + stats) must route to the ingest config.
+			assert.strictEqual(queryStub.calls.length, 2)
+			for (const call of queryStub.calls) {
+				assert.strictEqual(call.options?.route, "ingest")
+				assert.strictEqual(call.options?.profile, "aggregation")
+				assert.strictEqual(call.orgId, ORG)
+			}
+			assert.deepStrictEqual(
+				queryStub.calls.map((call) => call.options?.context).sort(),
+				["cloudflareUsage", "cloudflareUsageStats"],
+			)
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
@@ -1467,8 +1485,10 @@ describe("CloudflareAnalyticsService", () => {
 			const service = yield* CloudflareAnalyticsService
 			yield* service.getUsage(ORG)
 
-			assert.strictEqual(queryStub.calls.length, 1)
-			assert.notStrictEqual(queryStub.calls[0]?.options?.route, "ingest")
+			assert.strictEqual(queryStub.calls.length, 2)
+			for (const call of queryStub.calls) {
+				assert.notStrictEqual(call.options?.route, "ingest")
+			}
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
@@ -1485,8 +1505,10 @@ describe("CloudflareAnalyticsService", () => {
 			const service = yield* CloudflareAnalyticsService
 			yield* service.getUsage(ORG)
 
-			assert.strictEqual(queryStub.calls.length, 1)
-			assert.strictEqual(queryStub.calls[0]?.options?.route, "ingest")
+			assert.strictEqual(queryStub.calls.length, 2)
+			for (const call of queryStub.calls) {
+				assert.strictEqual(call.options?.route, "ingest")
+			}
 		}).pipe(Effect.provide(makeLayer(testDb, captured, {}, {}, queryStub)))
 	})
 
@@ -1543,6 +1565,8 @@ describe("CloudflareAnalyticsService", () => {
 			const service = yield* CloudflareAnalyticsService
 			const usage = yield* service.getUsage(ORG)
 			assert.strictEqual(usage.totalRequests, 0)
+			assert.strictEqual(usage.previousTotalRequests, 0)
+			assert.strictEqual(usage.firewallBlockedEvents, 0)
 			assert.strictEqual(usage.services.length, 0)
 			assert.strictEqual(usage.windowEnd, T0)
 			// Not connected → no warehouse query at all.

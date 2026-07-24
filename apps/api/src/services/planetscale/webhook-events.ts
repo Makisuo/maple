@@ -3,8 +3,8 @@ import type { IssueSeverity, OrgId, WorkflowState } from "@maple/domain/http"
 import { ActorId, ErrorIssueEventId, ErrorIssueId } from "@maple/domain/primitives"
 import { actors, errorIssues, errorIssueEvents, type ErrorIssueRow } from "@maple/db"
 import { and, eq, sql } from "drizzle-orm"
-import { Cause, Clock, Effect, Schema } from "effect"
-import { Database } from "../../lib/DatabaseLive"
+import { Clock, Effect, Schema } from "effect"
+import { Database, type DatabaseError } from "../../lib/DatabaseLive"
 
 /**
  * PlanetScale webhook event handling: signature verification, payload decode,
@@ -153,121 +153,108 @@ export interface UpsertPlanetScaleIssueInput {
 }
 
 export interface UpsertPlanetScaleIssueResult {
-	readonly issueId: ErrorIssueId | null
-	readonly action: "created" | "reopened" | "refreshed" | "skipped" | "error"
+	readonly issueId: ErrorIssueId
+	readonly action: "created" | "reopened" | "refreshed" | "skipped"
 }
-
-const ensureSystemIntegrationsActor = Effect.fn("planetscaleWebhook.ensureActor")(function* (orgId: OrgId) {
-	const database = yield* Database
-	const select = () =>
-		database.execute((db) =>
-			db
-				.select()
-				.from(actors)
-				.where(
-					and(
-						eq(actors.orgId, orgId),
-						eq(actors.type, "agent"),
-						eq(actors.agentName, SYSTEM_INTEGRATIONS_AGENT_NAME),
-					),
-				)
-				.limit(1),
-		)
-	const existing = yield* select()
-	if (existing[0]) return existing[0].id
-
-	const timestamp = yield* Clock.currentTimeMillis
-	yield* database.execute((db) =>
-		db
-			.insert(actors)
-			.values({
-				id: decodeActorId(randomUUID()),
-				orgId,
-				type: "agent",
-				userId: null,
-				agentName: SYSTEM_INTEGRATIONS_AGENT_NAME,
-				model: null,
-				capabilitiesJson: ["system", "integration-issues"],
-				createdBy: null,
-				createdAt: new Date(timestamp),
-				lastActiveAt: new Date(timestamp),
-			})
-			.onConflictDoNothing(),
-	)
-	const after = yield* select()
-	const row = after[0]
-	if (!row) return yield* Effect.die(new Error("Failed to ensure system-integrations actor row"))
-	return row.id
-})
-
-const recordIssueEvent = Effect.fn("planetscaleWebhook.recordIssueEvent")(function* (
-	orgId: OrgId,
-	issueId: ErrorIssueId,
-	actorId: ActorId,
-	type: "created" | "state_change" | "regression",
-	opts: {
-		readonly fromState?: WorkflowState
-		readonly toState?: WorkflowState
-		readonly payload?: Record<string, unknown>
-		readonly timestamp: number
-	},
-) {
-	const database = yield* Database
-	yield* database.execute((db) =>
-		db.insert(errorIssueEvents).values({
-			id: decodeEventId(randomUUID()),
-			orgId,
-			issueId,
-			actorId,
-			type,
-			fromState: opts.fromState ?? null,
-			toState: opts.toState ?? null,
-			payloadJson: opts.payload ?? {},
-			createdAt: new Date(opts.timestamp),
-		}),
-	)
-})
 
 /**
  * Create-or-refresh the triage issue backing a PlanetScale health event.
- * Never fails: every error path is logged and reported via `action: "error"`
- * so a broken issue write can't turn a webhook delivery into a retry storm.
+ * Database failures stay typed so the durable queue consumer can retry the
+ * delivery. The fingerprint makes successful redelivery idempotent.
  */
 export const upsertPlanetScaleIssue: (
 	input: UpsertPlanetScaleIssueInput,
-) => Effect.Effect<UpsertPlanetScaleIssueResult, never, Database> = Effect.fn(
+) => Effect.Effect<UpsertPlanetScaleIssueResult, DatabaseError, Database> = Effect.fn(
 	"planetscaleWebhook.upsertIssue",
-)(
-	function* (input: UpsertPlanetScaleIssueInput) {
-		const database = yield* Database
-		const databaseName = input.payload.database ?? "unknown"
-		const fingerprintHash = planetScaleIssueFingerprint(databaseName, input.payload.event)
-		const serviceName = `planetscale/${databaseName}`
-		const sourceRefJson = {
-			provider: "planetscale",
-			event: input.payload.event,
-			database: databaseName,
-			organization: input.payload.organization ?? null,
-			resource: input.payload.resource ?? null,
-		}
+)(function* (input: UpsertPlanetScaleIssueInput) {
+	const database = yield* Database
+	const databaseName = input.payload.database ?? "unknown"
+	const fingerprintHash = planetScaleIssueFingerprint(databaseName, input.payload.event)
+	const serviceName = `planetscale/${databaseName}`
+	const actorTimestamp = yield* Clock.currentTimeMillis
+	const sourceRefJson = {
+		provider: "planetscale",
+		event: input.payload.event,
+		database: databaseName,
+		organization: input.payload.organization ?? null,
+		resource: input.payload.resource ?? null,
+	}
 
-		const existingRows = yield* database.execute((db) =>
-			db
-				.select()
-				.from(errorIssues)
-				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.fingerprintHash, fingerprintHash)))
-				.limit(1),
-		)
-		const prior: ErrorIssueRow | undefined = existingRows[0]
+	return yield* database.execute((db) =>
+		db.transaction(async (tx) => {
+			const ensureActor = async (): Promise<ActorId> => {
+				const selectActor = () =>
+					tx
+						.select()
+						.from(actors)
+						.where(
+							and(
+								eq(actors.orgId, input.orgId),
+								eq(actors.type, "agent"),
+								eq(actors.agentName, SYSTEM_INTEGRATIONS_AGENT_NAME),
+							),
+						)
+						.limit(1)
+				const existing = await selectActor()
+				if (existing[0]) return existing[0].id
+				await tx
+					.insert(actors)
+					.values({
+						id: decodeActorId(randomUUID()),
+						orgId: input.orgId,
+						type: "agent",
+						userId: null,
+						agentName: SYSTEM_INTEGRATIONS_AGENT_NAME,
+						model: null,
+						capabilitiesJson: ["system", "integration-issues"],
+						createdBy: null,
+						createdAt: new Date(actorTimestamp),
+						lastActiveAt: new Date(actorTimestamp),
+					})
+					.onConflictDoNothing()
+				const row = (await selectActor())[0]
+				if (!row) throw new Error("Failed to ensure system-integrations actor row")
+				return row.id
+			}
 
-		let issueId: ErrorIssueId
-		let action: UpsertPlanetScaleIssueResult["action"]
+			const recordEvent = (
+				issueId: ErrorIssueId,
+				actorId: ActorId,
+				type: "created" | "state_change" | "regression",
+				opts: {
+					readonly fromState?: WorkflowState
+					readonly toState?: WorkflowState
+					readonly payload?: Record<string, unknown>
+				},
+			) =>
+				tx.insert(errorIssueEvents).values({
+					id: decodeEventId(randomUUID()),
+					orgId: input.orgId,
+					issueId,
+					actorId,
+					type,
+					fromState: opts.fromState ?? null,
+					toState: opts.toState ?? null,
+					payloadJson: opts.payload ?? {},
+					createdAt: new Date(input.timestamp),
+				})
 
-		if (prior === undefined) {
-			issueId = decodeIssueId(randomUUID())
-			action = "created"
-			yield* database.execute((db) =>
-				db.insert(errorIssues).values({
+			const prior: ErrorIssueRow | undefined = (
+				await tx
+					.select()
+					.from(errorIssues)
+					.where(
+						and(
+							eq(errorIssues.orgId, input.orgId),
+							eq(errorIssues.fingerprintHash, fingerprintHash),
+						),
+					)
+					.limit(1)
+			)[0]
+
+			if (prior === undefined) {
+				const issueId = decodeIssueId(randomUUID())
+				await tx.insert(errorIssues).values({
 					id: issueId,
 					orgId: input.orgId,
 					kind: "integration",
@@ -296,88 +283,59 @@ export const upsertPlanetScaleIssue: (
 					archivedAt: null,
 					createdAt: new Date(input.timestamp),
 					updatedAt: new Date(input.timestamp),
-				}),
-			)
-			const actorId = yield* ensureSystemIntegrationsActor(input.orgId)
-			yield* recordIssueEvent(input.orgId, issueId, actorId, "created", {
-				toState: "triage",
-				payload: sourceRefJson,
-				timestamp: input.timestamp,
-			})
-		} else {
-			issueId = prior.id
-			// Mirrors the alert issue hub and the errors tick: a wontfix issue with
-			// an active (or indefinite — snoozeUntil null) snooze is left alone
-			// entirely; only done issues and wontfix issues whose snooze expired
-			// re-open on the next firing. "Won't fix" without a deadline is the
-			// operator saying "stop resurfacing this".
+				})
+				const actorId = await ensureActor()
+				await recordEvent(issueId, actorId, "created", {
+					toState: "triage",
+					payload: sourceRefJson,
+				})
+				return { issueId, action: "created" as const }
+			}
+
+			const issueId = prior.id
+			// A wontfix issue with an active or indefinite snooze stays untouched.
 			const snoozeActive =
 				prior.workflowState === "wontfix" &&
 				(prior.snoozeUntil == null || prior.snoozeUntil.getTime() > input.timestamp)
-			if (snoozeActive) {
-				return { issueId, action: "skipped" as const }
-			}
+			if (snoozeActive) return { issueId, action: "skipped" as const }
 
-			yield* database.execute((db) =>
-				db
-					.update(errorIssues)
-					.set({
-						lastSeenAt: new Date(input.timestamp),
-						occurrenceCount: sql`${errorIssues.occurrenceCount} + 1`,
-						exceptionMessage: input.description,
-						sourceRefJson,
-						updatedAt: new Date(input.timestamp),
-					})
-					.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id))),
-			)
+			await tx
+				.update(errorIssues)
+				.set({
+					lastSeenAt: new Date(input.timestamp),
+					occurrenceCount: sql`${errorIssues.occurrenceCount} + 1`,
+					exceptionMessage: input.description,
+					sourceRefJson,
+					updatedAt: new Date(input.timestamp),
+				})
+				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
 
 			const reopenFrom: WorkflowState | null =
 				prior.workflowState === "done" || prior.workflowState === "wontfix"
 					? prior.workflowState
 					: null
-			if (reopenFrom !== null) {
-				action = "reopened"
-				yield* database.execute((db) =>
-					db
-						.update(errorIssues)
-						.set({
-							workflowState: "triage",
-							resolvedAt: null,
-							resolvedByActorId: null,
-							snoozeUntil: null,
-							updatedAt: new Date(input.timestamp),
-						})
-						.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id))),
-				)
-				const actorId = yield* ensureSystemIntegrationsActor(input.orgId)
-				yield* recordIssueEvent(input.orgId, issueId, actorId, "state_change", {
-					fromState: reopenFrom,
-					toState: "triage",
-					payload: { viaRegression: true, event: input.payload.event },
-					timestamp: input.timestamp,
-				})
-				yield* recordIssueEvent(input.orgId, issueId, actorId, "regression", {
-					payload: { event: input.payload.event, database: databaseName },
-					timestamp: input.timestamp,
-				})
-			} else {
-				action = "refreshed"
-			}
-		}
+			if (reopenFrom === null) return { issueId, action: "refreshed" as const }
 
-		return { issueId, action }
-	},
-	(effect, input) =>
-		Effect.catchCause(effect, (cause) =>
-			Effect.gen(function* () {
-				yield* Effect.logError("PlanetScale webhook issue upsert failed").pipe(
-					Effect.annotateLogs({
-						orgId: input.orgId,
-						event: input.payload.event,
-						error: Cause.pretty(cause),
-					}),
-				)
-				return { issueId: null, action: "error" as const }
-			}),
-		),
-)
+			await tx
+				.update(errorIssues)
+				.set({
+					workflowState: "triage",
+					resolvedAt: null,
+					resolvedByActorId: null,
+					snoozeUntil: null,
+					updatedAt: new Date(input.timestamp),
+				})
+				.where(and(eq(errorIssues.orgId, input.orgId), eq(errorIssues.id, prior.id)))
+			const actorId = await ensureActor()
+			await recordEvent(issueId, actorId, "state_change", {
+				fromState: reopenFrom,
+				toState: "triage",
+				payload: { viaRegression: true, event: input.payload.event },
+			})
+			await recordEvent(issueId, actorId, "regression", {
+				payload: { event: input.payload.event, database: databaseName },
+			})
+			return { issueId, action: "reopened" as const }
+		}),
+	)
+})

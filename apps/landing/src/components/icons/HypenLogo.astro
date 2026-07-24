@@ -1,0 +1,25 @@
+---
+/**
+ * HypenLogo — hypen.space mark: the "h" glyph in white with its signature pink
+ * (#FFA7E1) + yellow (#FFECA7) hyphen accents. Source: the site's favicon.svg
+ * (viewBox 795×795); the dark background tile is dropped for the marquee.
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className = "h-5 w-auto" } = Astro.props;
+---
+
+<svg class={className} viewBox="0 0 795 795" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+	<title>Hypen</title>
+	<path
+		d="M414 688H201V609.439C207.956 609.108 238.894 608.644 307.004 609.439C375.114 610.235 414 664 414 688Z"
+		fill="#FFA7E1"></path>
+	<path
+		d="M370.5 609H595.5V687.561C588.544 687.892 557.606 688.356 489.496 687.561C421.386 686.765 451.5 617.5 370.5 609Z"
+		fill="#FFECA7"></path>
+	<path
+		d="M424.4 253.4C464.4 253.4 496.6 265.4 521 289.4C545.8 313.4 558.2 349 558.2 396.2V581H464.6V410.6C464.6 385 459 366 447.8 353.6C436.6 340.8 420.4 334.4 399.2 334.4C375.6 334.4 356.8 341.8 342.8 356.6C328.8 371 321.8 392.6 321.8 421.4V581H228.2V135.8H321.8V291.8C334.2 279.4 349.2 270 366.8 263.6C384.4 256.8 403.6 253.4 424.4 253.4Z"
+		fill="white"></path>
+</svg>

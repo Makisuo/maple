@@ -1,5 +1,6 @@
 import * as React from "react"
 
+import { formatDuration } from "../../lib/format"
 import type { TimelineAction, ViewportState } from "./trace-timeline-types"
 import { DRAG_ZOOM_THRESHOLD_PX } from "./trace-timeline-types"
 
@@ -15,6 +16,8 @@ interface UseTimelineInteractionsOptions {
 	traceStartMs: number
 	traceEndMs: number
 	dispatch: (action: TimelineAction) => void
+	/** Called at the start of any direct gesture (pointer drag, wheel) so callers can cancel in-flight viewport animations. */
+	onGestureStart?: () => void
 }
 
 /** A marquee rectangle, in px relative to `bodyRef`'s left edge. */
@@ -26,10 +29,17 @@ export interface MarqueeRect {
 export interface TimelineInteractions {
 	/** Active drag-to-zoom selection rectangle, or null. */
 	marquee: MarqueeRect | null
-	/** Cursor x within the timeline column (px from bodyRef left), or null when outside. */
-	crosshairX: number | null
+	/**
+	 * Attach to an always-mounted crosshair div; its position/visibility is driven
+	 * imperatively (rAF-coalesced) so mousemove never re-renders the timeline.
+	 */
+	crosshairRef: React.RefObject<HTMLDivElement | null>
+	/** The drag currently in flight ("zoom" marquee or "pan"), or null. */
+	dragMode: DragMode | null
 	/** True while a pan or zoom-marquee drag is in flight (callers can suppress hover, etc.). */
 	isDragging: boolean
+	/** Trace time (ms) under the cursor, or null when the cursor is outside the timeline column. */
+	getCursorTimeMs: () => number | null
 	/** Spread onto `bodyRef`'s element. */
 	handlers: {
 		onPointerDown: (e: React.PointerEvent) => void
@@ -43,7 +53,7 @@ export interface TimelineInteractions {
 	suppressClickRef: React.RefObject<boolean>
 }
 
-type DragMode = "zoom" | "pan"
+export type DragMode = "zoom" | "pan"
 
 interface DragState {
 	mode: DragMode
@@ -74,12 +84,80 @@ export function useTimelineInteractions({
 	traceStartMs,
 	traceEndMs,
 	dispatch,
+	onGestureStart,
 }: UseTimelineInteractionsOptions): TimelineInteractions {
 	const [marquee, setMarquee] = React.useState<MarqueeRect | null>(null)
-	const [crosshairX, setCrosshairX] = React.useState<number | null>(null)
-	const [isDragging, setIsDragging] = React.useState(false)
+	const [dragMode, setDragMode] = React.useState<DragMode | null>(null)
 	const suppressClickRef = React.useRef(false)
 	const dragRef = React.useRef<DragState | null>(null)
+
+	// Live refs so imperative handlers (crosshair label, cursor-time queries) never go stale.
+	const viewportRef = React.useRef(viewport)
+	viewportRef.current = viewport
+	const sidebarWidthRef = React.useRef(sidebarWidth)
+	sidebarWidthRef.current = sidebarWidth
+	const traceStartMsRef = React.useRef(traceStartMs)
+	traceStartMsRef.current = traceStartMs
+
+	const pxToTimeMs = React.useCallback(
+		(x: number): number | null => {
+			const el = bodyRef.current
+			if (!el) return null
+			const sw = sidebarWidthRef.current
+			const width = el.clientWidth - sw
+			if (width <= 0 || x < sw) return null
+			const vp = viewportRef.current
+			return vp.startMs + ((x - sw) / width) * (vp.endMs - vp.startMs)
+		},
+		[bodyRef],
+	)
+
+	// Crosshair is positioned imperatively — mousemove must not re-render the component.
+	const crosshairRef = React.useRef<HTMLDivElement | null>(null)
+	const crosshairXRef = React.useRef<number | null>(null)
+	const crosshairRafRef = React.useRef(0)
+
+	const applyCrosshair = React.useCallback(() => {
+		const node = crosshairRef.current
+		if (!node) return
+		const x = crosshairXRef.current
+		if (x === null) {
+			node.style.display = "none"
+			return
+		}
+		node.style.display = "block"
+		node.style.transform = `translateX(${x}px)`
+		// Time readout riding the crosshair (child span, written imperatively).
+		const label = node.firstElementChild as HTMLElement | null
+		if (label) {
+			const timeMs = pxToTimeMs(x)
+			if (timeMs === null) {
+				label.style.display = "none"
+			} else {
+				label.style.display = "block"
+				label.textContent = `+${formatDuration(timeMs - traceStartMsRef.current)}`
+				// Flip to the left side of the line near the right edge so it stays readable.
+				const el = bodyRef.current
+				const nearRightEdge = el ? x > el.clientWidth - 80 : false
+				label.style.transform = nearRightEdge ? "translateX(calc(-100% - 6px))" : "translateX(6px)"
+			}
+		}
+	}, [bodyRef, pxToTimeMs])
+
+	const setCrosshairX = React.useCallback(
+		(x: number | null) => {
+			crosshairXRef.current = x
+			cancelAnimationFrame(crosshairRafRef.current)
+			if (x === null) {
+				applyCrosshair() // hide immediately; a stale frame must not resurface it
+			} else {
+				crosshairRafRef.current = requestAnimationFrame(applyCrosshair)
+			}
+		},
+		[applyCrosshair],
+	)
+
+	React.useEffect(() => () => cancelAnimationFrame(crosshairRafRef.current), [])
 
 	const onPointerDown = React.useCallback(
 		(e: React.PointerEvent) => {
@@ -91,6 +169,7 @@ export function useTimelineInteractions({
 			// Gestures only originate in the timeline column.
 			if (x < sidebarWidth) return
 			suppressClickRef.current = false
+			onGestureStart?.()
 
 			const mode: DragMode = e.shiftKey || e.button === 1 ? "pan" : "zoom"
 			dragRef.current = {
@@ -110,7 +189,7 @@ export function useTimelineInteractions({
 				const px = ev.clientX - d.bodyLeft
 				if (!d.moved && Math.abs(px - d.startX) > DRAG_ZOOM_THRESHOLD_PX) {
 					d.moved = true
-					setIsDragging(true)
+					setDragMode(d.mode)
 				}
 				if (!d.moved) return
 				if (d.mode === "pan") {
@@ -131,7 +210,7 @@ export function useTimelineInteractions({
 				dragRef.current = null
 				window.removeEventListener("pointermove", handleMove)
 				window.removeEventListener("pointerup", handleUp)
-				setIsDragging(false)
+				setDragMode(null)
 				setMarquee(null)
 				if (!d || !d.moved) return
 				if (d.mode === "zoom") {
@@ -157,7 +236,7 @@ export function useTimelineInteractions({
 			// No preventDefault here — a plain press must still reach the row's onClick. Text
 			// selection during a drag is suppressed via `select-none` on the container.
 		},
-		[bodyRef, dispatch, sidebarWidth, viewport, traceStartMs, traceEndMs],
+		[bodyRef, dispatch, sidebarWidth, viewport, traceStartMs, traceEndMs, onGestureStart],
 	)
 
 	const onPointerMove = React.useCallback(
@@ -169,12 +248,12 @@ export function useTimelineInteractions({
 			const x = e.clientX - rect.left
 			setCrosshairX(x >= sidebarWidth ? x : null)
 		},
-		[bodyRef, sidebarWidth],
+		[bodyRef, sidebarWidth, setCrosshairX],
 	)
 
 	const onPointerLeave = React.useCallback(() => {
 		if (!dragRef.current) setCrosshairX(null)
-	}, [])
+	}, [setCrosshairX])
 
 	const handleWheel = React.useEffectEvent((e: WheelEvent) => {
 		const el = bodyRef.current
@@ -189,11 +268,13 @@ export function useTimelineInteractions({
 		const visible = vp.endMs - vp.startMs
 		if (e.ctrlKey || e.metaKey) {
 			e.preventDefault()
+			onGestureStart?.()
 			const centerMs = pxToMsStatic(x, timelineLeft, timelineWidth, vp)
 			const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
 			dispatch({ type: "ZOOM", centerMs, factor, traceStartMs, traceEndMs })
 		} else if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
 			e.preventDefault()
+			onGestureStart?.()
 			const delta = e.deltaX !== 0 ? e.deltaX : e.deltaY
 			const deltaMs = (delta / Math.max(1, timelineWidth)) * visible
 			dispatch({ type: "PAN", deltaMs, traceStartMs, traceEndMs })
@@ -209,10 +290,17 @@ export function useTimelineInteractions({
 		return () => el.removeEventListener("wheel", handleWheel)
 	}, [bodyRef])
 
+	const getCursorTimeMs = React.useCallback(
+		() => (crosshairXRef.current === null ? null : pxToTimeMs(crosshairXRef.current)),
+		[pxToTimeMs],
+	)
+
 	return {
 		marquee,
-		crosshairX,
-		isDragging,
+		crosshairRef,
+		dragMode,
+		isDragging: dragMode !== null,
+		getCursorTimeMs,
 		handlers: { onPointerDown, onPointerMove, onPointerLeave },
 		suppressClickRef,
 	}

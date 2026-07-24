@@ -13,7 +13,9 @@ describe("planetscaleInfraTimeseriesSQL", () => {
 			database: "main-db",
 		})
 		expect(sql).toContain("FROM metrics_gauge")
-		expect(sql).toContain("planetscale_database'] = 'main-db'")
+		expect(sql).toContain(
+			"coalesce(nullIf(Attributes['planetscale_database_name'], ''), Attributes['planetscale_database']) = 'main-db'",
+		)
 		// Inner per-timestamp grouping, outer bucketed aggregation.
 		expect(sql).toContain("GROUP BY t")
 		expect(sql).toContain("toStartOfInterval")

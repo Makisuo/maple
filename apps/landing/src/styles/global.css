@@ -560,11 +560,71 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Customer logo marquee.
+   Two copies of the logo list laid out in a row; the belt translates
+   left by exactly one copy's width (-50%) and loops seamlessly. A CSS
+   mask fades both edges (works over any background), and the belt
+   pauses while the strip is hovered.
+   ────────────────────────────────────────────────────────────── */
+@keyframes logo-marquee {
+	0% {
+		transform: translate3d(0, 0, 0);
+	}
+	100% {
+		transform: translate3d(-50%, 0, 0);
+	}
+}
+.logo-marquee {
+	position: relative;
+	overflow: hidden;
+	-webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+	mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+}
+.logo-marquee__belt {
+	display: flex;
+	width: max-content;
+	align-items: center;
+	animation: logo-marquee 42s linear infinite;
+	will-change: transform;
+}
+.logo-marquee:hover .logo-marquee__belt {
+	animation-play-state: paused;
+}
+.logo-cell {
+	display: inline-flex;
+	align-items: center;
+	gap: 14px;
+	padding: 0 clamp(30px, 4.5vw, 60px);
+	white-space: nowrap;
+	color: var(--muted-foreground);
+	transition: color 200ms ease;
+}
+.logo-cell:hover {
+	color: var(--foreground);
+}
+.logo-cell__mark {
+	flex-shrink: 0;
+	/* Marks carry each brand's own color; a slight rest-state fade lifts on hover. */
+	opacity: 0.85;
+	transition: opacity 200ms ease;
+}
+.logo-cell:hover .logo-cell__mark {
+	opacity: 1;
+}
+.logo-cell__name {
+	font-family: var(--font-display);
+	font-weight: 600;
+	font-size: 20px;
+	letter-spacing: -0.01em;
+}
+
+/* ──────────────────────────────────────────────────────────────
    Reduced-motion override.
    Every live artifact freezes at a sensible static frame.
    ────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
 	.log-stream__belt,
+	.logo-marquee__belt,
 	.svc-map-flow,
 	.svc-map-node-halo,
 	.mcp-caret,

@@ -1,0 +1,13 @@
+---
+/**
+ * SakuraLogo — sakura.fm ("Sakura AI") actual flower mark, served from
+ * /public/logos/sakura.png (the site's own app-icon flower, resized).
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className = "h-5 w-auto" } = Astro.props;
+---
+
+<img src="/logos/sakura.png" alt="" class={className} width="128" height="128" loading="lazy" decoding="async" />

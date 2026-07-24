@@ -15,14 +15,14 @@ import type { SessionReplaysListOutput } from "@maple/query-engine/ch"
 import { useLocalSessions, useLocalSessionFacets } from "../hooks/use-local-sessions"
 import { useQueryParams } from "../lib/router"
 import { DEFAULT_RANGE, formatRelativeTime } from "../lib/time"
-import { gradientFor, hostFromUrl, isMobileDevice, formatSessionDuration } from "../lib/replay-format"
+import { formatDuration as formatSessionDuration, gradientFor, hostFromUrl, isMobileDevice } from "@maple/ui/lib/replay-format"
 import {
 	FilterSection,
 	SearchableFilterSection,
 	SingleCheckboxFilter,
 	type FilterOption,
-} from "../components/filter-section"
-import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "../components/filter-sidebar"
+} from "@maple/ui/components/filters/filter-section"
+import { FilterSidebarBody, FilterSidebarFrame, FilterSidebarHeader } from "@maple/ui/components/filters/filter-sidebar"
 import { PageShell } from "../components/page-shell"
 import { Toolbar, ToolbarSearch, ToolbarStat, TimeRangeSelect, RefreshButton } from "../components/toolbar"
 import { EmptyState, ErrorState, ListSkeleton } from "../components/view-states"
@@ -58,7 +58,7 @@ export function SessionsListView({ onSelectSession }: SessionsListViewProps) {
 	const facetData = facets.data
 
 	const sidebar = (
-		<FilterSidebarFrame waiting={facets.isFetching}>
+		<FilterSidebarFrame className="w-56 shrink-0 px-4" waiting={facets.isFetching}>
 			<FilterSidebarHeader
 				canClear={hasActiveFilters}
 				onClear={() => setParams({ service: null, browser: null, device: null, errors: null })}

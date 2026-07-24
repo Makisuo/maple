@@ -3,6 +3,11 @@ import { buttonVariants } from "@maple/ui/components/ui/button";
 import AppMock from './AppMock.astro';
 import * as m from "../paraglide/messages";
 import { HeroCta } from "./HeroCta";
+import { DATA_POINTS_INGESTED, formatDataPoints } from "../lib/ingest-stats";
+import { getGitHubStars, formatStars } from "../lib/github-stars";
+import PixelStar from "./icons/PixelStar.astro";
+
+const stars = await getGitHubStars();
 ---
 
 <section class="relative min-h-screen pt-[19px] overflow-hidden">
@@ -41,6 +46,34 @@ import { HeroCta } from "./HeroCta";
             <a href="https://github.com/Makisuo/maple" target="_blank" rel="noopener noreferrer" class={buttonVariants({ variant: "outline", size: "xl" })}>
                 {m.cta_github()}
             </a>
+        </div>
+
+        <!-- Credibility stat row: number over a quiet label, split by a hairline
+             divider. GitHub stars are live (build-time fetch); the ingest figure
+             is the hardcoded platform total. -->
+        <div class="mt-12 flex items-stretch border-t border-border pt-8">
+            {stars !== null && (
+                <a
+                    href="https://github.com/Makisuo/maple"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="group flex flex-col gap-2 pr-8 md:pr-12"
+                >
+                    <span class="font-display text-3xl md:text-4xl font-semibold text-fg tracking-tight tabular-nums transition-colors group-hover:text-primary">
+                        {formatStars(stars)}
+                    </span>
+                    <span class="inline-flex items-center gap-1.5 text-sm text-fg-muted transition-colors group-hover:text-fg">
+                        <PixelStar class="size-4 text-primary" />
+                        {m.stat_github()}
+                    </span>
+                </a>
+            )}
+            <div class={`flex flex-col gap-2 ${stars !== null ? "border-l border-border pl-8 md:pl-12" : ""}`}>
+                <span class="font-display text-3xl md:text-4xl font-semibold text-fg tracking-tight tabular-nums">
+                    {formatDataPoints(DATA_POINTS_INGESTED)}+
+                </span>
+                <span class="text-sm text-fg-muted">{m.ingest_stats_label()}</span>
+            </div>
         </div>
 
         <!-- App mock with glow -->

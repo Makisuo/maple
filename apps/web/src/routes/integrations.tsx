@@ -4,7 +4,10 @@ import { Schema } from "effect"
 import { toast } from "sonner"
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout"
-import { CloudflareAccountCard } from "@/components/integrations/cloudflare-account-card"
+import {
+	CloudflareAccountCard,
+	CloudflareHeaderActions,
+} from "@/components/integrations/cloudflare-account-card"
 import { GithubIntegrationCard } from "@/components/integrations/github-integration-card"
 import { HazelIntegrationCard } from "@/components/integrations/hazel-integration-card"
 import { PlanetScaleIntegrationCard } from "@/components/integrations/planetscale-integration-card"
@@ -27,6 +30,7 @@ import { SettingsNav, useVisibleSettingsSections } from "@/components/settings/s
 import { Alert, AlertDescription } from "@maple/ui/components/ui/alert"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
+import { cn } from "@maple/ui/lib/utils"
 import { ArrowLeftIcon, CircleInfoIcon, ExternalLinkIcon, LoaderIcon } from "@/components/icons"
 
 const IntegrationsSearch = Schema.Struct({
@@ -162,7 +166,15 @@ function IntegrationHeader({ integration }: { integration: IntegrationId }) {
 	const connectFlow = useIntegrationConnect()
 	const overview = useIntegrationOverviews()[integration]
 	const showConnect = connectFlow !== null && overview?.kind === "available"
+	const connected = overview?.kind === "connected" ? overview : null
 	const EntryIcon = entry.icon
+
+	// "Healthy · Acme Corp · synced 2m ago" — the connected identity line under the title.
+	const statusLine = connected
+		? [connected.stateLabel, connected.context, connected.lastSyncLabel]
+				.filter((part): part is string => part != null && part !== "")
+				.join(" · ")
+		: null
 
 	return (
 		<div className="flex items-center gap-3">
@@ -181,11 +193,26 @@ function IntegrationHeader({ integration }: { integration: IntegrationId }) {
 				size={18}
 				plateClassName="size-9 rounded-lg"
 			/>
-			<div className="flex items-center gap-2">
-				<h1 className="text-lg font-semibold">{entry.name}</h1>
-				{status ? <Badge variant={status.variant}>{status.label}</Badge> : null}
+			<div className="flex min-w-0 flex-col gap-0.5">
+				<div className="flex items-center gap-2">
+					<h1 className="text-lg/6 font-semibold">{entry.name}</h1>
+					{/* The badge covers the non-connected states; connected reads as the status line. */}
+					{!connected && status ? <Badge variant={status.variant}>{status.label}</Badge> : null}
+				</div>
+				{connected && statusLine ? (
+					<div className="flex items-center gap-1.5">
+						<span
+							aria-hidden
+							className={cn(
+								"size-1.5 shrink-0 rounded-full",
+								connected.health === "healthy" ? "bg-success" : "bg-warning",
+							)}
+						/>
+						<span className="truncate text-xs text-muted-foreground">{statusLine}</span>
+					</div>
+				) : null}
 			</div>
-			<div className="ml-auto flex items-center gap-3">
+			<div className="ml-auto flex shrink-0 items-center gap-3">
 				{entry.docsUrl ? (
 					<a
 						href={entry.docsUrl}
@@ -197,6 +224,7 @@ function IntegrationHeader({ integration }: { integration: IntegrationId }) {
 						<ExternalLinkIcon size={12} />
 					</a>
 				) : null}
+				{integration === "cloudflare" && connected ? <CloudflareHeaderActions /> : null}
 				{showConnect ? (
 					<Button size="sm" onClick={connectFlow.connect} disabled={connectFlow.busy}>
 						{connectFlow.busy ? (

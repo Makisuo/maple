@@ -16,6 +16,7 @@ import { narrowAlertSignal } from "@/components/ai-triage/breach"
 import {
 	deviation,
 	formatSignalValue as formatAnomalyValue,
+	isStaleOpenIncident,
 	RESOLVE_REASON_LABEL,
 	severityToneFor,
 	SIGNAL_LABEL as ANOMALY_SIGNAL_LABEL,
@@ -103,15 +104,24 @@ export function subjectFromAlertContext(
 		},
 		{ label: "Window", value: `${alert.windowMinutes}min` },
 	]
-	if (alert.groupKey) signalRows.push({ label: "Group", value: alert.groupKey, mono: true, title: alert.groupKey })
-	if (alert.sampleCount !== null) signalRows.push({ label: "Samples", value: alert.sampleCount.toLocaleString() })
+	if (alert.groupKey)
+		signalRows.push({ label: "Group", value: alert.groupKey, mono: true, title: alert.groupKey })
+	if (alert.sampleCount !== null)
+		signalRows.push({ label: "Samples", value: alert.sampleCount.toLocaleString() })
 
 	return {
 		kind: "alert",
 		id: alert.incidentId ?? alert.ruleId,
-		triage: { incidentKind: "alert", incidentId: alert.incidentId, ...(opts?.issueId ? { issueId: opts.issueId } : {}) },
+		triage: {
+			incidentKind: "alert",
+			incidentId: alert.incidentId,
+			...(opts?.issueId ? { issueId: opts.issueId } : {}),
+		},
 		title: alert.ruleName,
-		severity: { label: alert.severity, tone: ALERT_SEVERITY_TONE[alert.severity] ?? "bg-muted text-muted-foreground" },
+		severity: {
+			label: alert.severity,
+			tone: ALERT_SEVERITY_TONE[alert.severity] ?? "bg-muted text-muted-foreground",
+		},
 		status: firing
 			? { label: "Firing", tone: "bg-destructive/10 text-destructive" }
 			: { label: "Resolved", tone: "bg-muted text-muted-foreground" },
@@ -138,12 +148,13 @@ const ANOMALY_SIGNAL_TO_CHAT: Record<string, string> = {
 	error_rate: "error_rate",
 	latency_p95: "p95_latency",
 	throughput: "throughput",
-	error_spike: "error_rate",
+	error_spike: "metric",
 	log_volume: "metric",
 }
 
 export function subjectFromAnomaly(incident: AnomalyIncidentDocument): InvestigationSubject {
 	const open = incident.status === "open"
+	const stale = isStaleOpenIncident(incident)
 	const tone = severityToneFor(incident)
 	const dev = deviation(incident)
 	const fmt = (v: number) => formatAnomalyValue(incident.signalType, v)
@@ -168,20 +179,27 @@ export function subjectFromAnomaly(incident: AnomalyIncidentDocument): Investiga
 		title: `${metric} · ${incident.serviceName}`,
 		subtitle: incident.deploymentEnv || undefined,
 		severity: {
-			label: open ? incident.severity : "Resolved",
-			tone: tone.badge,
+			label: open && !stale ? incident.severity : stale ? "Stale" : "Resolved",
+			tone: stale ? "bg-muted text-muted-foreground" : tone.badge,
 		},
-		status: open
-			? { label: "Open", tone: "bg-destructive/10 text-destructive" }
-			: {
-					label: incident.resolveReason ? RESOLVE_REASON_LABEL[incident.resolveReason] : "Resolved",
+		status: stale
+			? {
+					label: `Stale · last seen ${formatRelativeTime(incident.lastTriggeredAt)}`,
 					tone: "bg-muted text-muted-foreground",
-				},
+				}
+			: open
+				? { label: "Open", tone: "bg-destructive/10 text-destructive" }
+				: {
+						label: incident.resolveReason
+							? RESOLVE_REASON_LABEL[incident.resolveReason]
+							: "Resolved",
+						tone: "bg-muted text-muted-foreground",
+					},
 		headline: {
 			label: "Deviation",
 			primary: dev.label,
 			secondary: `${fmt(incident.lastObservedValue)} vs ${fmt(incident.baselineMedian)} baseline`,
-			bad: open,
+			bad: open && !stale,
 		},
 		groups: [
 			{
@@ -199,7 +217,12 @@ export function subjectFromAnomaly(incident: AnomalyIncidentDocument): Investiga
 				rows: [
 					{ label: "Service", value: incident.serviceName, title: incident.serviceName },
 					{ label: "Environment", value: incident.deploymentEnv || "—" },
-					{ label: "Detector", value: incident.detectorKey, mono: true, title: incident.detectorKey },
+					{
+						label: "Detector",
+						value: incident.detectorKey,
+						mono: true,
+						title: incident.detectorKey,
+					},
 				],
 			},
 		],
@@ -209,7 +232,7 @@ export function subjectFromAnomaly(incident: AnomalyIncidentDocument): Investiga
 			id: incident.id,
 			title: `${metric} · ${incident.serviceName}`,
 			severity: incident.severity,
-			status: open ? "Open" : "Resolved",
+			status: stale ? "Stale" : open ? "Open" : "Resolved",
 			signalType: ANOMALY_SIGNAL_TO_CHAT[incident.signalType] ?? incident.signalType,
 			scope: incident.serviceName,
 			facts,
@@ -256,7 +279,9 @@ export function subjectFromError(
 		},
 		title,
 		subtitle: issue.serviceName,
-		severity: issue.severity ? { label: SEVERITY_LABEL[issue.severity], tone: SEVERITY_TONE[issue.severity] } : undefined,
+		severity: issue.severity
+			? { label: SEVERITY_LABEL[issue.severity], tone: SEVERITY_TONE[issue.severity] }
+			: undefined,
 		status: issue.hasOpenIncident
 			? { label: "Incident open", tone: "bg-destructive/10 text-destructive" }
 			: { label: WORKFLOW_LABEL[issue.workflowState], tone: "bg-muted text-muted-foreground" },
@@ -264,7 +289,9 @@ export function subjectFromError(
 			label: "Occurrences",
 			primary: occurrences,
 			secondary:
-				opts?.totalInWindow !== undefined ? `${opts.totalInWindow.toLocaleString()} in window` : "total events",
+				opts?.totalInWindow !== undefined
+					? `${opts.totalInWindow.toLocaleString()} in window`
+					: "total events",
 		},
 		groups: [
 			{

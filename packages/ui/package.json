@@ -23,7 +23,6 @@
 		"clsx": "catalog:ui",
 		"effect": "catalog:effect",
 		"embla-carousel-react": "^8.6.0",
-		"input-otp": "^1.4.2",
 		"react-day-picker": "^10.0.1",
 		"react-resizable-panels": "^4.9.0",
 		"recharts": "catalog:ui",

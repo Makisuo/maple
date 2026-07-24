@@ -7,6 +7,11 @@ import { encryptAes256Gcm } from "../lib/Crypto"
 import { Database } from "../lib/DatabaseLive"
 import { Env } from "../lib/Env"
 import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import {
+	PlanetScaleWebhookQueue,
+	PlanetScaleWebhookQueueError,
+	type PlanetScaleWebhookJob,
+} from "../services/planetscale/PlanetScaleWebhookQueue"
 import { PlanetScaleWebhookRouter } from "./planetscale-webhook.http"
 
 const trackedDbs: TestDb[] = []
@@ -33,9 +38,14 @@ const makeConfig = () =>
 		}),
 	)
 
-const makeRouterLayer = (testDb: TestDb) =>
+const makeRouterLayer = (
+	testDb: TestDb,
+	send: (job: PlanetScaleWebhookJob) => Effect.Effect<void, PlanetScaleWebhookQueueError> = () =>
+		Effect.void,
+) =>
 	PlanetScaleWebhookRouter.pipe(
 		Layer.provide(testDb.layer),
+		Layer.provide(Layer.succeed(PlanetScaleWebhookQueue, { send })),
 		Layer.provide(Env.layer),
 		Layer.provide(makeConfig()),
 	)
@@ -107,6 +117,128 @@ describe("PlanetScaleWebhookRouter", () => {
 				)
 				assert.strictEqual(accepted.status, 200)
 				assert.strictEqual(yield* Effect.promise(() => accepted.text()), "ok")
+			}).pipe(Effect.ensuring(Effect.promise(dispose)))
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("durably enqueues issue events before returning 202", () => {
+		const testDb = createTestDb(trackedDbs)
+		const jobs: PlanetScaleWebhookJob[] = []
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const encrypted = yield* encryptAes256Gcm(
+				SECRET,
+				ENCRYPTION_KEY,
+				(message) => new Error(message),
+			).pipe(Effect.orDie)
+			const now = new Date("2026-07-11T00:00:00.000Z")
+			yield* database.execute((db) =>
+				db.insert(planetscaleConnections).values({
+					id: CONNECTION_ID,
+					orgId: "org_1",
+					psOrganization: "acme",
+					connectedByUserId: "user_1",
+					webhookSecretCiphertext: encrypted.ciphertext,
+					webhookSecretIv: encrypted.iv,
+					webhookSecretTag: encrypted.tag,
+					createdAt: now,
+					updatedAt: now,
+				}),
+			)
+			const issueBody = JSON.stringify({
+				event: "branch.out_of_memory",
+				organization: "acme",
+				database: "shop",
+				resource: { name: "main" },
+			})
+			const signature = createHmac("sha256", SECRET).update(issueBody, "utf8").digest("hex")
+			const { handler, dispose } = HttpRouter.toWebHandler(
+				makeRouterLayer(testDb, (job) => Effect.sync(() => jobs.push(job))),
+				{ disableLogger: true },
+			)
+
+			yield* Effect.gen(function* () {
+				const rejected = yield* Effect.promise(() =>
+					handler(
+						new Request(`http://api.localhost${WEBHOOK_PATH}`, {
+							method: "POST",
+							headers: { "x-planetscale-signature": "invalid" },
+							body: issueBody,
+						}),
+						Context.make(Database, database),
+					),
+				)
+				assert.strictEqual(rejected.status, 401)
+				assert.strictEqual(jobs.length, 0)
+
+				const accepted = yield* Effect.promise(() =>
+					handler(
+						new Request(`http://api.localhost${WEBHOOK_PATH}`, {
+							method: "POST",
+							headers: { "x-planetscale-signature": signature },
+							body: issueBody,
+						}),
+						Context.make(Database, database),
+					),
+				)
+				assert.strictEqual(accepted.status, 202)
+				assert.strictEqual(jobs.length, 1)
+				assert.strictEqual(jobs[0]?.kind, "planetscale-webhook")
+				assert.strictEqual(jobs[0]?.orgId, "org_1")
+				assert.strictEqual(jobs[0]?.connectionId, CONNECTION_ID)
+				assert.strictEqual(jobs[0]?.payload.event, "branch.out_of_memory")
+			}).pipe(Effect.ensuring(Effect.promise(dispose)))
+		}).pipe(Effect.provide(testDb.layer))
+	})
+
+	it.effect("returns 503 when durable enqueueing fails", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const database = yield* Database
+			const encrypted = yield* encryptAes256Gcm(
+				SECRET,
+				ENCRYPTION_KEY,
+				(message) => new Error(message),
+			).pipe(Effect.orDie)
+			const now = new Date("2026-07-11T00:00:00.000Z")
+			yield* database.execute((db) =>
+				db.insert(planetscaleConnections).values({
+					id: CONNECTION_ID,
+					orgId: "org_1",
+					psOrganization: "acme",
+					connectedByUserId: "user_1",
+					webhookSecretCiphertext: encrypted.ciphertext,
+					webhookSecretIv: encrypted.iv,
+					webhookSecretTag: encrypted.tag,
+					createdAt: now,
+					updatedAt: now,
+				}),
+			)
+			const issueBody = JSON.stringify({
+				event: "branch.anomaly",
+				organization: "acme",
+				database: "shop",
+			})
+			const signature = createHmac("sha256", SECRET).update(issueBody, "utf8").digest("hex")
+			const { handler, dispose } = HttpRouter.toWebHandler(
+				makeRouterLayer(testDb, () =>
+					Effect.fail(new PlanetScaleWebhookQueueError({ message: "queue unavailable" })),
+				),
+				{ disableLogger: true },
+			)
+
+			yield* Effect.gen(function* () {
+				const response = yield* Effect.promise(() =>
+					handler(
+						new Request(`http://api.localhost${WEBHOOK_PATH}`, {
+							method: "POST",
+							headers: { "x-planetscale-signature": signature },
+							body: issueBody,
+						}),
+						Context.make(Database, database),
+					),
+				)
+				assert.strictEqual(response.status, 503)
 			}).pipe(Effect.ensuring(Effect.promise(dispose)))
 		}).pipe(Effect.provide(testDb.layer))
 	})

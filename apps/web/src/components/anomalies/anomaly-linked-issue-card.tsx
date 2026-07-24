@@ -32,7 +32,7 @@ export function AnomalyLinkedIssueCard({
 						<p className="text-sm text-foreground">Not linked to an issue</p>
 						<p className="text-xs text-muted-foreground">
 							{incident.signalType === "error_spike"
-								? "This spike is fingerprint-scoped — an issue with this fingerprint may already exist for the service."
+								? "This frequency increase is fingerprint-scoped — an issue with this fingerprint may already exist for the service."
 								: "Escalate this anomaly by linking it to an existing error issue."}
 						</p>
 						{incident.fingerprintHash !== null ? (

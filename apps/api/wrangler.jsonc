@@ -9,6 +9,8 @@
 	},
 	"vars": {
 		"API_V2_RATE_LIMIT_PARTITION": "local",
+		"PLANETSCALE_WEBHOOK_QUEUE_NAME": "maple-planetscale-webhooks-local",
+		"VCS_SYNC_QUEUE_NAME": "maple-vcs-sync-local",
 	},
 	"ratelimits": [
 		{
@@ -68,10 +70,22 @@
 	// for deploy.) No dead-letter queue: exhausted jobs are acked after recording a
 	// terminal failure in the DB (surfaced by the sync-status UI).
 	"queues": {
-		"producers": [{ "binding": "VCS_SYNC_QUEUE", "queue": "maple-vcs-sync-local" }],
+		"producers": [
+			{ "binding": "VCS_SYNC_QUEUE", "queue": "maple-vcs-sync-local" },
+			{
+				"binding": "PLANETSCALE_WEBHOOK_QUEUE",
+				"queue": "maple-planetscale-webhooks-local",
+			},
+		],
 		"consumers": [
 			{
 				"queue": "maple-vcs-sync-local",
+				"max_batch_size": 10,
+				"max_batch_timeout": 5,
+				"max_retries": 3,
+			},
+			{
+				"queue": "maple-planetscale-webhooks-local",
 				"max_batch_size": 10,
 				"max_batch_timeout": 5,
 				"max_retries": 3,

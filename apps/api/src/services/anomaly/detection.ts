@@ -326,7 +326,7 @@ export function evaluateLogVolume(series: LogVolumeSeries, config: DetectionConf
 
 /** Half-hour windows in 7 days. */
 const HALF_HOURS_PER_WEEK = 336
-const SPIKE_MIN_COUNT = 10
+export const ERROR_SPIKE_MIN_COUNT = 10
 /** Fingerprints younger than this stay with ErrorsService first_seen handling. */
 const SPIKE_MIN_ISSUE_AGE_MS = 24 * 60 * 60 * 1000
 
@@ -347,7 +347,7 @@ export function evaluateErrorSpike(
 
 	const firstSeenAt = config.issueFirstSeenAt.get(fingerprintHash)
 	const tooYoung = firstSeenAt !== undefined && config.nowMs - firstSeenAt < SPIKE_MIN_ISSUE_AGE_MS
-	if (baseline === undefined || tooYoung || count < SPIKE_MIN_COUNT) {
+	if (baseline === undefined || tooYoung || count < ERROR_SPIKE_MIN_COUNT) {
 		return skipped(signal, serviceName, deploymentEnv, count, count, fingerprintHash)
 	}
 
@@ -355,9 +355,9 @@ export function evaluateErrorSpike(
 	const ratioGuard = config.sensitivity.ratio * 2
 	const lambda = baseline.totalCount / HALF_HOURS_PER_WEEK
 	const threshold = Math.max(
-		lambda + Math.max(3 * Math.sqrt(lambda), SPIKE_MIN_COUNT),
+		lambda + Math.max(3 * Math.sqrt(lambda), ERROR_SPIKE_MIN_COUNT),
 		lambda * ratioGuard,
-		SPIKE_MIN_COUNT,
+		ERROR_SPIKE_MIN_COUNT,
 	)
 	const breached = count > threshold
 
@@ -374,5 +374,41 @@ export function evaluateErrorSpike(
 		threshold,
 		sampleCount: count,
 		severity: count >= threshold * 3 ? "critical" : "warning",
+	}
+}
+
+/**
+ * Recovery evaluation for a fingerprint that already owns an open incident.
+ *
+ * The absolute event floor is an opening/noise guard, not evidence that an
+ * existing incident is still firing. Once the fingerprint drops below the
+ * floor (including disappearing from the current query entirely), emit a
+ * healthy evaluation so normal hysteresis can resolve it.
+ */
+export function healthyErrorSpikeRecovery(
+	observation: ErrorSpikeObservation,
+	baselineMedian: number,
+	config: Pick<ErrorSpikeConfig, "sensitivity">,
+): AnomalyEvaluation {
+	const ratioGuard = config.sensitivity.ratio * 2
+	const threshold = Math.max(
+		baselineMedian + Math.max(3 * Math.sqrt(baselineMedian), ERROR_SPIKE_MIN_COUNT),
+		baselineMedian * ratioGuard,
+		ERROR_SPIKE_MIN_COUNT,
+	)
+
+	return {
+		detectorKey: detectorKeyFor("error_spike", observation.deploymentEnv, observation.fingerprintHash),
+		signalType: "error_spike",
+		serviceName: observation.serviceName,
+		deploymentEnv: observation.deploymentEnv,
+		fingerprintHash: observation.fingerprintHash,
+		status: "healthy",
+		value: observation.count,
+		baselineMedian,
+		baselineSigma: Math.sqrt(Math.max(baselineMedian, 1)),
+		threshold,
+		sampleCount: observation.count,
+		severity: "warning",
 	}
 }

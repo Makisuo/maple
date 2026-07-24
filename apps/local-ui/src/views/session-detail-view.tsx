@@ -22,7 +22,7 @@ import {
 	useLocalSessionTranscript,
 } from "../hooks/use-local-session-detail"
 import { formatRelativeTime } from "../lib/time"
-import { formatSessionDuration, gradientFor, hostFromUrl, isMobileDevice } from "../lib/replay-format"
+import { formatDuration as formatSessionDuration, gradientFor, hostFromUrl, isMobileDevice } from "@maple/ui/lib/replay-format"
 import { ErrorState } from "../components/view-states"
 import { RefreshButton } from "../components/toolbar"
 

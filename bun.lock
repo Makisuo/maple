@@ -637,7 +637,6 @@
         "clsx": "catalog:ui",
         "effect": "catalog:effect",
         "embla-carousel-react": "^8.6.0",
-        "input-otp": "^1.4.2",
         "react-day-picker": "^10.0.1",
         "react-resizable-panels": "^4.9.0",
         "recharts": "catalog:ui",
@@ -3651,8 +3650,6 @@
     "ink-text-input": ["ink-text-input@6.0.0", "", { "dependencies": { "chalk": "^5.3.0", "type-fest": "^4.18.2" }, "peerDependencies": { "ink": ">=5", "react": ">=18" } }, "sha512-Fw64n7Yha5deb1rHY137zHTAbSTNelUKuB5Kkk2HACXEtwIHBCf9OH2tP/LQ9fRYTl1F0dZgbW0zPnZk6FA9Lw=="],
 
     "inline-style-parser": ["inline-style-parser@0.2.7", "", {}, "sha512-Nb2ctOyNR8DqQoR0OwRG95uNWIC0C1lCgf5Naz5H6Ji72KZ8OcFZLz2P5sNgwlyoJ8Yif11oMuYs5pBQa86csA=="],
-
-    "input-otp": ["input-otp@1.4.2", "", { "peerDependencies": { "react": "^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc" } }, "sha512-l3jWwYNvrEa6NTCt7BECfCm48GvwuZzkoeG3gBL2w4CHeOXW3eKFmf9UNYkNfYc3mxMrthMnxjIE07MT0zLBQA=="],
 
     "inquirer": ["inquirer@12.11.1", "", { "dependencies": { "@inquirer/ansi": "^1.0.2", "@inquirer/core": "^10.3.2", "@inquirer/prompts": "^7.10.1", "@inquirer/type": "^3.0.10", "mute-stream": "^2.0.0", "run-async": "^4.0.6", "rxjs": "^7.8.2" }, "peerDependencies": { "@types/node": ">=18" }, "optionalPeers": ["@types/node"] }, "sha512-9VF7mrY+3OmsAfjH3yKz/pLbJ5z22E23hENKw3/LNSaA/sAt3v49bDRY+Ygct1xwuKT+U+cBfTzjCPySna69Qw=="],
 

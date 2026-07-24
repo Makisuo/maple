@@ -1,0 +1,23 @@
+---
+/**
+ * GymscoreLogo — gymscore.ai brand mark in its signature lime (#D4FF00, the
+ * favicon accent). Source: the site's favicon.svg (viewBox 1024×1024); the
+ * black background tile is dropped so the glyph + side accents carry the color.
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className = "h-5 w-auto" } = Astro.props;
+---
+
+<svg class={className} viewBox="0 0 1024 1024" fill="#D4FF00" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+	<title>Gymscore</title>
+	<path
+		d="M269 300.348V710.055L371.023 797.961C424.912 797.7 542.735 797.333 582.916 797.961C623.097 798.589 638.374 791.421 640.99 787.758C664.796 764.212 715.702 713.665 728.887 699.852C742.071 686.038 747.983 668.456 749.291 661.392V466.743C749.291 461.719 743.536 458.371 740.659 457.324C674.213 457.062 539.595 456.696 532.689 457.324C525.783 457.952 525.626 461.269 526.411 462.848C519.871 489.263 506.006 543.818 502.867 550.725C499.728 557.632 504.175 557.265 506.791 556.219H626.864V622.933C613.68 663.119 575.33 684.677 556.233 690.433H427.527C388.602 677.875 382.01 654.329 383.579 644.125C382.794 579.242 381.696 423.26 383.579 381.191C385.463 339.121 422.557 337.499 440.869 334.098H754C735.95 304.273 652.982 232.804 645.699 225L614.307 225H347.479L269 300.348Z"
+	></path>
+	<rect x="786.074" y="457.854" width="75.4049" height="219.931"></rect>
+	<path d="M881 516H953L881 619V516Z"></path>
+	<path d="M143 619H71L143 516V619Z"></path>
+	<rect width="75.4049" height="219.931" transform="matrix(-1 0 0 1 237.817 457.854)"></rect>
+</svg>

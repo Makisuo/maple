@@ -48,6 +48,20 @@ static BACKPRESSURE_SHED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
         .build()
 });
 
+static REPLAY_SESSION_TRUNCATED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_replay_session_truncated_total")
+        .with_description("Replay sessions that reached their maximum recorded byte size")
+        .build()
+});
+
+static REPLAY_SESSION_CHUNK_DROPPED_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
+    METER
+        .u64_counter("ingest_replay_session_chunk_dropped_total")
+        .with_description("Replay chunks rejected because their session was already truncated")
+        .build()
+});
+
 static CLOUDFLARE_BATCHES_TOTAL: LazyLock<Counter<u64>> = LazyLock::new(|| {
     METER
         .u64_counter("ingest_cloudflare_batches_total")
@@ -372,6 +386,20 @@ pub fn backpressure_shed(org_id: &str, destination: &str, signal: &str) {
             KeyValue::new("signal", signal.to_string()),
         ],
     );
+}
+
+/// A replay session crossed its byte ceiling — counted once, on the chunk that
+/// crossed it. Recording stops here; every later chunk lands in
+/// `replay_session_chunk_dropped`.
+pub fn replay_session_truncated(org_id: &str) {
+    REPLAY_SESSION_TRUNCATED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
+}
+
+/// A chunk was rejected because its session had already been truncated. A high
+/// ratio against `replay_session_truncated` means one org keeps recording long
+/// after it stopped being stored — worth an SDK-side sampling conversation.
+pub fn replay_session_chunk_dropped(org_id: &str) {
+    REPLAY_SESSION_CHUNK_DROPPED_TOTAL.add(1, &[KeyValue::new("org_id", org_id.to_string())]);
 }
 
 /// Current in-flight request count for an org.

@@ -9,6 +9,7 @@ import { disabledResultAtom } from "@/lib/services/atoms/disabled-result-atom"
 import { useAlertIncidentsList, useAlertRulesList } from "@/hooks/use-alerts-list"
 import { QueryErrorState } from "@/components/common/query-error-state"
 import { AlertFiringHero } from "@/components/alerts/alert-stat-card"
+import { anomalyAffectsServiceHealth } from "@/components/anomalies/anomaly-format"
 import { StatRail, StatRailItem, StatRailLoading } from "@/components/infra/primitives/stat-rail"
 import { ArrowRightIcon, ArrowTrendDownIcon, ArrowTrendUpIcon } from "@/components/icons"
 import type { ServiceHealthSnapshot } from "@/api/warehouse/services"
@@ -76,15 +77,14 @@ const ANOMALY_LABEL: Record<AnomalySignalType, string> = {
 	error_rate: "Error rate anomaly",
 	latency_p95: "Latency anomaly",
 	throughput: "Traffic outage",
-	error_spike: "Error spike",
+	error_spike: "Error frequency increase",
 	log_volume: "Log volume anomaly",
 }
 
-const ANOMALY_METRIC: Record<AnomalySignalType, ServiceHealthCause["metric"]> = {
+const ANOMALY_METRIC: Partial<Record<AnomalySignalType, ServiceHealthCause["metric"]>> = {
 	error_rate: "error",
 	latency_p95: "latency",
 	throughput: "traffic",
-	error_spike: "error",
 	log_volume: "error",
 }
 
@@ -147,6 +147,7 @@ function enrichServices(
 			const anomalyCauses: ServiceHealthCause[] = openAnomalies
 				.filter(
 					(incident) =>
+						anomalyAffectsServiceHealth(incident) &&
 						incident.serviceName === service.serviceName &&
 						incident.deploymentEnv === service.environment,
 				)

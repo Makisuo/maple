@@ -10,8 +10,41 @@ export const SIGNAL_LABEL: Record<AnomalySignalType, string> = {
 	error_rate: "Error rate",
 	latency_p95: "p95 latency",
 	throughput: "Throughput",
-	error_spike: "Error spike",
+	error_spike: "Error frequency increase",
 	log_volume: "Log volume",
+}
+
+export const ANOMALY_STALE_AFTER_MS = 60 * 60 * 1000
+
+export function isStaleOpenIncident(
+	incident: {
+		readonly status: AnomalyIncidentDocument["status"]
+		readonly lastTriggeredAt: string
+	},
+	nowMs = Date.now(),
+): boolean {
+	if (incident.status !== "open") return false
+	const lastTriggeredMs = Date.parse(incident.lastTriggeredAt)
+	return !Number.isFinite(lastTriggeredMs) || nowMs - lastTriggeredMs > ANOMALY_STALE_AFTER_MS
+}
+
+/**
+ * Fingerprint-frequency regressions remain useful investigation events, but
+ * they are not service-health signals. Error-rate incidents own that meaning.
+ */
+export function anomalyAffectsServiceHealth(
+	incident: {
+		readonly status: AnomalyIncidentDocument["status"]
+		readonly signalType: AnomalyIncidentDocument["signalType"]
+		readonly lastTriggeredAt: string
+	},
+	nowMs = Date.now(),
+): boolean {
+	return (
+		incident.status === "open" &&
+		incident.signalType !== "error_spike" &&
+		!isStaleOpenIncident(incident, nowMs)
+	)
 }
 
 export const SIGNAL_ICON: Record<AnomalySignalType, typeof PulseIcon> = {
@@ -32,7 +65,7 @@ export function formatSignalValue(signalType: AnomalySignalType, value: number):
 		case "log_volume":
 			return `${value.toFixed(1)}/min`
 		case "error_spike":
-			return `${Math.round(value)} in 30m`
+			return `${Math.round(value)} occurrences / 30m`
 	}
 }
 

@@ -8,6 +8,7 @@ const MAX_SEARCH_RESULTS = 20
 const DEFAULT_SEARCH_RESULTS = 10
 const MAX_FILE_LINES = 400
 const MAX_FILE_CHARS = 40_000
+const EmptyToolInput = Schema.Record(Schema.String, Schema.Never)
 
 const toSourceError = (operation: string) => (error: { readonly message: string }) =>
 	new McpQueryError({ message: error.message, pipeName: operation, cause: error })
@@ -19,7 +20,7 @@ export function registerSourceCodeTools(server: McpToolRegistrar) {
 	server.tool(
 		"list_source_repositories",
 		"List source repositories connected to this Maple organization. Use before source investigation when telemetry does not identify an exact vcs.repository.url.full. Returns only repositories the organization's GitHub App installation can access.",
-		Schema.Struct({}),
+		EmptyToolInput,
 		Effect.fn("McpTool.listSourceRepositories")(function* () {
 			const tenant = yield* resolveTenant
 			const source = yield* VcsSourceService

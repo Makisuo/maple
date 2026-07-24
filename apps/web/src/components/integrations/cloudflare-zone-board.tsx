@@ -111,16 +111,6 @@ export function describeCloudflareError(raw: string): CloudflareErrorInfo {
 export const isAccountScoped = (raw: string | null): boolean =>
 	raw != null && describeCloudflareError(raw).scope === "account"
 
-/** Small uppercase eyebrow that groups the readout (Zones / Workers). */
-export function SectionLabel({ children, count }: { children: ReactNode; count?: number }) {
-	return (
-		<div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-			<span>{children}</span>
-			{count != null ? <span className="text-muted-foreground/50 tabular-nums">{count}</span> : null}
-		</div>
-	)
-}
-
 /** A resolved error line: friendly summary plus a "Details" tooltip carrying the raw string. */
 function ErrorLine({ info, raw }: { info: CloudflareErrorInfo; raw: string }) {
 	if (info.summary === raw) {
@@ -234,19 +224,16 @@ export function zoneStatus(entry: ZoneEntry, usageLoaded: boolean): ZoneStatusIn
 /**
  * One zone/worker as a single dense line: status dot + name | status detail | 24h sparkline + total.
  * Zones with real traffic link into their `/infra/cloudflare` detail; everything else is a plain row.
- * Worker sub-scripts pass `indent` to nest under the aggregate "Workers" row.
  */
-export function ResourceRow({
+function ResourceRow({
 	name,
 	status,
 	usage,
-	indent,
 	zoneLink,
 }: {
 	name: string
 	status: ZoneStatusInfo
 	usage: RowUsage | null
-	indent?: boolean
 	/** When set, the row navigates to this zone's edge-analytics detail page. */
 	zoneLink?: string
 }) {
@@ -254,27 +241,28 @@ export function ResourceRow({
 
 	const body = (
 		<>
-			<span
-				className={cn("mt-[5px] size-1.5 shrink-0 rounded-full", indent ? "invisible" : status.dot)}
-				aria-hidden
-			/>
+			<span className={cn("mt-[5px] size-1.5 shrink-0 rounded-full", status.dot)} aria-hidden />
 			<div className="min-w-0 flex-1">
 				<span
 					className={cn(
-						"block truncate text-xs",
-						indent ? "pl-3 text-muted-foreground" : "font-medium text-foreground",
+						"block truncate text-xs font-medium text-foreground",
 						zoneLink && "group-hover:text-primary",
 					)}
 					title={name}
 				>
 					{name}
 				</span>
-				{/* On mobile the status column is hidden, so surface the detail under the name instead. */}
-				<div className={cn("mt-0.5 text-[11px] sm:hidden", indent ? "pl-3" : "", status.detailClass)}>
+				{/* In a narrow card the status column is hidden, so surface the detail under the name. */}
+				<div className={cn("mt-0.5 text-[11px] @lg:hidden", status.detailClass)}>
 					{status.detail}
 				</div>
 			</div>
-			<div className={cn("hidden min-w-0 shrink-0 self-center text-[11px] sm:block sm:w-[190px]", status.detailClass)}>
+			<div
+				className={cn(
+					"hidden w-[190px] min-w-0 shrink-0 self-center text-[11px] @lg:block",
+					status.detailClass,
+				)}
+			>
 				{status.detail}
 			</div>
 			<div className="flex w-[124px] shrink-0 items-center justify-end gap-2.5 self-center">
@@ -335,8 +323,10 @@ function ZoneChip({
 			aria-selected={active}
 			onClick={onClick}
 			className={cn(
-				"inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors",
-				active ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+				"inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-colors",
+				active
+					? "bg-muted text-foreground"
+					: "border border-border/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground",
 			)}
 		>
 			{dot ? <span aria-hidden className={cn("size-1.5 rounded-full", dot)} /> : null}
@@ -356,9 +346,14 @@ function ZoneChip({
 export function CloudflareZoneBoard({
 	zones,
 	usageLoaded,
+	banner,
+	className,
 }: {
 	zones: ReadonlyArray<ZoneEntry>
 	usageLoaded: boolean
+	/** Account-scope problem banner (missing scopes, revoked token) rendered inside the card. */
+	banner?: ReactNode
+	className?: string
 }) {
 	const [search, setSearch] = useState("")
 	const [filter, setFilter] = useState<ZoneStatusKind | "all">("all")
@@ -422,45 +417,55 @@ export function CloudflareZoneBoard({
 		setFilter((current) => (current === kind ? "all" : kind))
 
 	return (
-		<div className="flex flex-col gap-2">
-			<SectionLabel>Zones</SectionLabel>
-
-			<div className="overflow-hidden rounded-lg border border-border/60">
-				{/* Toolbar: the health rollup (chips double as a single-select filter) + a name search. */}
-				<div className="flex flex-col gap-2 border-b border-border/60 p-2 sm:flex-row sm:items-center sm:justify-between">
-					<div role="tablist" aria-label="Filter zones by status" className="flex flex-wrap items-center gap-0.5">
-						<ZoneChip label="All" count={decorated.length} active={filter === "all"} onClick={activeChip("all")} />
-						{CHIP_ORDER.filter((kind) => counts[kind] > 0).map((kind) => (
-							<ZoneChip
-								key={kind}
-								label={STATUS_META[kind].label}
-								count={counts[kind]}
-								dot={STATUS_META[kind].dot}
-								active={filter === kind}
-								onClick={activeChip(kind)}
-							/>
-						))}
-					</div>
-					<InputGroup className="sm:w-[200px]">
-						<InputGroupAddon>
-							<MagnifierIcon />
-						</InputGroupAddon>
-						<InputGroupInput
-							size="sm"
-							value={search}
-							onChange={(e) => setSearch(e.target.value)}
-							placeholder="Filter zones…"
-							aria-label="Filter zones by name"
+		<div
+			className={cn(
+				"@container flex flex-col overflow-hidden rounded-lg border border-border/60 bg-card",
+				className,
+			)}
+		>
+			{/* Title bar: the health rollup (chips double as a single-select filter) + a name search. */}
+			<div className="flex flex-wrap items-center gap-2 border-b border-border/60 py-2.5 pl-4 pr-2.5">
+				<h3 className="text-sm font-semibold">Zones</h3>
+				<div
+					role="tablist"
+					aria-label="Filter zones by status"
+					className="ml-auto flex flex-wrap items-center gap-1.5"
+				>
+					<ZoneChip label="All" count={decorated.length} active={filter === "all"} onClick={activeChip("all")} />
+					{CHIP_ORDER.filter((kind) => counts[kind] > 0).map((kind) => (
+						<ZoneChip
+							key={kind}
+							label={STATUS_META[kind].label}
+							count={counts[kind]}
+							dot={STATUS_META[kind].dot}
+							active={filter === kind}
+							onClick={activeChip(kind)}
 						/>
-						{search ? (
-							<InputGroupAddon align="inline-end">
-								<InputGroupButton aria-label="Clear filter" onClick={() => setSearch("")}>
-									<XmarkIcon />
-								</InputGroupButton>
-							</InputGroupAddon>
-						) : null}
-					</InputGroup>
+					))}
 				</div>
+				<InputGroup className="w-full sm:w-[170px]">
+					<InputGroupAddon>
+						<MagnifierIcon />
+					</InputGroupAddon>
+					<InputGroupInput
+						size="sm"
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						placeholder="Filter zones…"
+						aria-label="Filter zones by name"
+					/>
+					{search ? (
+						<InputGroupAddon align="inline-end">
+							<InputGroupButton aria-label="Clear filter" onClick={() => setSearch("")}>
+								<XmarkIcon />
+							</InputGroupButton>
+						</InputGroupAddon>
+					) : null}
+				</InputGroup>
+			</div>
+
+			{banner ? <div className="px-3 pt-3">{banner}</div> : null}
+			<div className="flex flex-col">
 
 				{/* Sortable column header — aligns with the row's leading status-dot via an invisible spacer. */}
 				<div className="flex items-center gap-3 border-b border-border/60 px-3 py-2">
@@ -480,7 +485,7 @@ export function CloudflareZoneBoard({
 						dir={sortDir}
 						onSort={handleSort}
 						width="w-[190px]"
-						hidden="hidden sm:flex"
+						hidden="hidden @lg:flex"
 					/>
 					<ColumnHead<ZoneSortKey>
 						label="24h requests"
@@ -516,6 +521,106 @@ export function CloudflareZoneBoard({
 					</div>
 				)}
 			</div>
+		</div>
+	)
+}
+
+const WORKERS_COLLAPSED_COUNT = 6
+
+/**
+ * The Workers side panel: per-script 24h invocation counts as a compact list,
+ * linking out to the service map where the scripts live as nodes. Collapsed to
+ * the busiest scripts; the aggregate health detail surfaces only when Workers
+ * collection has a problem (rows carry the healthy signal on their own).
+ */
+export function CloudflareWorkersCard({
+	workerEntry,
+	workerServices,
+	usageLoaded,
+	className,
+}: {
+	/** Aggregate Workers state in the zone-entry shape (drives the problem line). */
+	workerEntry: ZoneEntry
+	workerServices: ReadonlyArray<CloudflareServiceUsage>
+	usageLoaded: boolean
+	className?: string
+}) {
+	const [expanded, setExpanded] = useState(false)
+	const aggregate = zoneStatus(workerEntry, usageLoaded)
+	const scripts = useMemo(
+		() => [...workerServices].sort((a, b) => b.totalRequests - a.totalRequests),
+		[workerServices],
+	)
+	const visible = expanded ? scripts : scripts.slice(0, WORKERS_COLLAPSED_COUNT)
+
+	return (
+		<div
+			className={cn(
+				"flex h-fit flex-col overflow-hidden rounded-lg border border-border/60 bg-card",
+				className,
+			)}
+		>
+			<div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+				<h3 className="text-sm font-semibold">Workers</h3>
+				<Link
+					to="/service-map"
+					className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+				>
+					View on map →
+				</Link>
+			</div>
+
+			{aggregate.kind === "issue" || aggregate.kind === "no-data" ? (
+				<div className={cn("border-b border-border/40 px-4 py-2 text-[11px]", aggregate.detailClass)}>
+					{aggregate.detail}
+				</div>
+			) : null}
+
+			{scripts.length === 0 ? (
+				<div className="flex items-center gap-2.5 px-4 py-3">
+					<span className={cn("size-1.5 shrink-0 rounded-full", aggregate.dot)} aria-hidden />
+					<span className={cn("text-[11px]", aggregate.detailClass)}>{aggregate.detail}</span>
+				</div>
+			) : (
+				<div className="flex flex-col px-4 pb-2 pt-1">
+					{visible.map((service) => (
+						<div
+							key={service.serviceName}
+							className="flex items-center justify-between gap-3 border-b border-border/40 py-2.5 last:border-0"
+						>
+							<span className="flex min-w-0 items-center gap-2.5">
+								<span
+									className={cn(
+										"size-1.5 shrink-0 rounded-full",
+										service.totalRequests > 0 ? "bg-success" : "bg-muted-foreground/40",
+									)}
+									aria-hidden
+								/>
+								<span
+									className="truncate text-xs font-medium text-foreground"
+									title={service.displayName}
+								>
+									{service.displayName}
+								</span>
+							</span>
+							<span className="shrink-0 text-xs font-medium tabular-nums text-foreground">
+								{service.totalRequests > 0 ? formatNumber(service.totalRequests) : "—"}
+							</span>
+						</div>
+					))}
+					{scripts.length > WORKERS_COLLAPSED_COUNT ? (
+						<button
+							type="button"
+							onClick={() => setExpanded((current) => !current)}
+							className="pb-1 pt-2.5 text-left text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+						>
+							{expanded
+								? "Show fewer"
+								: `Showing ${visible.length} of ${scripts.length} · View all →`}
+						</button>
+					) : null}
+				</div>
+			)}
 		</div>
 	)
 }

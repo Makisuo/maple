@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react"
 import { Exit } from "effect"
-import { StatSparkline } from "@maple/ui/components/charts/sparkline/stat-sparkline"
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@maple/ui/components/ui/alert"
-import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
@@ -10,7 +8,6 @@ import { toast } from "sonner"
 
 import { CircleWarningIcon, CloudflareIcon, LoaderIcon } from "@/components/icons"
 import { Result, useAtomSet, useAtomValue } from "@/lib/effect-atom"
-import { formatNumber } from "@/lib/format"
 import { MapleApiAtomClient } from "@/lib/services/common/atom-client"
 import { CLOUDFLARE_ACCENT, IntegrationIconPlate } from "./integration-catalog"
 import { useIntegrationConnect } from "./integration-connect"
@@ -23,14 +20,13 @@ import {
 	IntegrationEmptyHint,
 	IntegrationEmptyMedia,
 } from "./integration-empty-state"
+import { CloudflareStatCards } from "./cloudflare-stat-cards"
 import {
+	CloudflareWorkersCard,
 	CloudflareZoneBoard,
-	ResourceRow,
-	SectionLabel,
 	describeCloudflareError,
 	isAccountScoped,
 	toRowUsage,
-	zoneStatus,
 	type CloudflareErrorInfo,
 	type RowUsage,
 	type ZoneEntry,
@@ -58,18 +54,13 @@ export function CloudflareAccountCard() {
 	})
 	const usageResult = useAtomValue(usageQuery)
 
-	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "cloudflareDisconnect"), {
-		mode: "promiseExit",
-	})
-
 	// Connect flow (popup, busy, refresh-on-return) lives in IntegrationConnectProvider —
-	// shared with the drill-in header's Connect button.
+	// shared with the drill-in header's Connect/Reconnect/Disconnect buttons.
 	const connectFlow = useIntegrationConnect()
 	if (connectFlow === null) {
 		throw new Error("CloudflareAccountCard must be rendered inside IntegrationConnectProvider")
 	}
-	const [disconnectBusy, setDisconnectBusy] = useState(false)
-	const actionBusy = connectFlow.busy || disconnectBusy
+	const actionBusy = connectFlow.busy
 
 	const status = Result.builder(statusResult)
 		.onSuccess((s) => s)
@@ -81,16 +72,14 @@ export function CloudflareAccountCard() {
 		.onSuccess((u) => u)
 		.orElse(() => null)
 	const usageLoaded = usage != null
+	// Failure ≠ still-loading: the stat band hides entirely instead of skeleton-ing forever.
+	const usageFailed = Result.isFailure(usageResult)
 
 	const workerServices = useMemo(
 		() => (usage ? usage.services.filter((service) => service.kind === "worker") : []),
 		[usage],
 	)
 	const workersRowUsage = usage && workerServices.length > 0 ? toRowUsage(usage, workerServices) : null
-	const totalPoints = useMemo(
-		() => (usage && usage.totalRequests > 0 ? toRowUsage(usage, usage.services).points : null),
-		[usage],
-	)
 
 	const zoneUsage = (zoneName: string): RowUsage | null => {
 		if (!usage) return null
@@ -136,19 +125,6 @@ export function CloudflareAccountCard() {
 			lastError: null,
 			usage: usage ? toRowUsage(usage, [service]) : null,
 		})
-	}
-
-	async function handleDisconnect() {
-		setDisconnectBusy(true)
-		const result = await disconnect({
-			reactivityKeys: ["cloudflareIntegrationStatus", "cloudflareIntegrationUsage"],
-		})
-		setDisconnectBusy(false)
-		if (Exit.isSuccess(result)) {
-			toast.success("Cloudflare account disconnected")
-		} else {
-			toast.error("Failed to disconnect Cloudflare account")
-		}
 	}
 
 	const isConnected = status?.connected === true
@@ -228,8 +204,8 @@ export function CloudflareAccountCard() {
 	const zoneCount = zoneEntries.length
 	const hasWorkers = status?.workers != null || workerServices.length > 0
 
-	// Aggregate the Workers scripts into one health row, mirroring the zone entry shape so the
-	// same ResourceRow + zoneStatus drive it. Sub-scripts nest below when there's more than one.
+	// Aggregate Workers state in the zone-entry shape so the side card's problem line
+	// derives from the same `zoneStatus` rules as zone rows.
 	const workerEntry: ZoneEntry = {
 		key: "workers",
 		name: "Workers",
@@ -239,157 +215,128 @@ export function CloudflareAccountCard() {
 		usage: usage ? (workersRowUsage ?? { ...EMPTY_USAGE }) : null,
 	}
 
-	return (
-		<div className="overflow-hidden rounded-lg border border-border/60 bg-card">
-			{/* Header band: identity + connection status, with the account actions to the right. */}
-			<div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 p-4">
-				<div className="flex min-w-0 items-start gap-3">
-					<IntegrationIconPlate icon={CloudflareIcon} accent={CLOUDFLARE_ACCENT} />
-					<div className="min-w-0">
-						<div className="flex items-center gap-2">
-							<h3 className="text-sm font-semibold">Cloudflare account</h3>
-							<Badge variant="success">Connected</Badge>
-						</div>
-						<p className="mt-1 text-xs text-muted-foreground">
-							{status?.accountName ? (
-								<>
-									Streaming from{" "}
-									<span
-										className="font-medium text-foreground"
-										title={status.accountId ?? undefined}
-									>
-										{status.accountName}
-									</span>
-									{" — zone and Workers traffic flows into Maple."}
-								</>
-							) : (
-								"Zone and Workers traffic flows into Maple."
-							)}
-						</p>
-					</div>
-				</div>
-
-				<div className="flex shrink-0 items-center gap-1.5">
-					{connectButton("Reconnect", "outline")}
-					<Button size="sm" onClick={handleDisconnect} disabled={actionBusy} variant="outline">
-						{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
-						Disconnect
-					</Button>
-				</div>
-			</div>
-
-			{status ? (
-				<div className="flex flex-col gap-4 p-4">
-					{/* One banner for the whole-account problem — the actionable "what's wrong + how to fix". */}
-					{!status.analyticsCapable ? (
-						<Alert variant="warning">
-							<CircleWarningIcon />
-							<AlertTitle>Update access to collect analytics</AlertTitle>
-							<AlertDescription>
-								Maple needs updated Cloudflare permissions to read traffic analytics from this
-								account.
-							</AlertDescription>
-							<AlertAction>{connectButton("Update access")}</AlertAction>
-						</Alert>
-					) : accountError ? (
-						<Alert variant={accountError.tone}>
-							<CircleWarningIcon />
-							<AlertTitle>Traffic collection paused</AlertTitle>
-							<AlertDescription>
-								<span>{accountError.summary}</span>
-								{accountError.summary !== accountError.raw ? (
-									<Tooltip>
-										<TooltipTrigger
-											render={<span />}
-											className="w-fit cursor-help text-xs font-medium text-muted-foreground underline decoration-dotted underline-offset-2"
-										>
-											Error details
-										</TooltipTrigger>
-										<TooltipContent className="max-w-xs whitespace-pre-wrap break-words font-mono text-[11px]">
-											{accountError.raw}
-										</TooltipContent>
-									</Tooltip>
-								) : null}
-							</AlertDescription>
-							<AlertAction>{connectButton("Reconnect", "outline")}</AlertAction>
-						</Alert>
+	// One banner for the whole-account problem — the actionable "what's wrong + how to
+	// fix". Lives inside the Zones card (the resources it pauses); standalone when there
+	// are no zones to attach it to.
+	const banner =
+		status == null ? null : !status.analyticsCapable ? (
+			<Alert variant="warning">
+				<CircleWarningIcon />
+				<AlertTitle>Update access to collect analytics</AlertTitle>
+				<AlertDescription>
+					Maple needs updated Cloudflare permissions to read traffic analytics from this account.
+				</AlertDescription>
+				<AlertAction>{connectButton("Update access")}</AlertAction>
+			</Alert>
+		) : accountError ? (
+			<Alert variant={accountError.tone}>
+				<CircleWarningIcon />
+				<AlertTitle>Traffic collection paused</AlertTitle>
+				<AlertDescription>
+					<span>{accountError.summary}</span>
+					{accountError.summary !== accountError.raw ? (
+						<Tooltip>
+							<TooltipTrigger
+								render={<span />}
+								className="w-fit cursor-help text-xs font-medium text-muted-foreground underline decoration-dotted underline-offset-2"
+							>
+								Error details
+							</TooltipTrigger>
+							<TooltipContent className="max-w-xs whitespace-pre-wrap break-words font-mono text-[11px]">
+								{accountError.raw}
+							</TooltipContent>
+						</Tooltip>
 					) : null}
+				</AlertDescription>
+				<AlertAction>{connectButton("Reconnect", "outline")}</AlertAction>
+			</Alert>
+		) : null
 
-					{hasReadout ? (
-						<>
-							{/* Aggregate is the hero of the readout: the 24h request shape at a glance. */}
-							{usage && usage.totalRequests > 0 ? (
-								<div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2.5">
-									<div className="min-w-0">
-										<div className="text-xs font-medium text-foreground">Traffic</div>
-										<div className="text-[11px] text-muted-foreground">
-											Requests · last 24h
-										</div>
-									</div>
-									<div className="flex shrink-0 items-center gap-3">
-										{totalPoints ? (
-											<StatSparkline
-												data={totalPoints}
-												color={CLOUDFLARE_ACCENT}
-												className="h-7 w-28"
-											/>
-										) : null}
-										<span className="w-16 text-right text-sm font-semibold tabular-nums text-foreground">
-											{formatNumber(usage.totalRequests)}
-										</span>
-									</div>
-								</div>
-							) : null}
+	return (
+		<div className="flex flex-col gap-4">
+			{hasReadout ? (
+				<>
+					{!usageFailed ? (
+						<CloudflareStatCards usage={usage} workerServices={workerServices} />
+					) : null}
+					{zoneCount === 0 && banner}
+					<div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+						{zoneCount > 0 ? (
+							<CloudflareZoneBoard
+								zones={zoneEntries}
+								usageLoaded={usageLoaded}
+								banner={banner}
+								className="min-w-0 flex-1"
+							/>
+						) : null}
+						{hasWorkers ? (
+							<CloudflareWorkersCard
+								workerEntry={workerEntry}
+								workerServices={workerServices}
+								usageLoaded={usageLoaded}
+								className="lg:w-72 lg:shrink-0 xl:w-80"
+							/>
+						) : null}
+					</div>
+				</>
+			) : (
+				<>
+					{banner}
+					<p className="text-xs text-muted-foreground">
+						Traffic data starts arriving within a few minutes — your zones and Workers will
+						appear here.
+					</p>
+				</>
+			)}
+		</div>
+	)
+}
 
-							{zoneCount > 0 ? (
-								<CloudflareZoneBoard zones={zoneEntries} usageLoaded={usageLoaded} />
-							) : null}
+/**
+ * Reconnect + Disconnect for the drill-in page header — rendered by the route when the
+ * integration is connected, replacing the account card's old header band. Must live
+ * inside IntegrationConnectProvider (same popup flow as Connect).
+ */
+export function CloudflareHeaderActions() {
+	const connectFlow = useIntegrationConnect()
+	const disconnect = useAtomSet(MapleApiAtomClient.mutation("integrations", "cloudflareDisconnect"), {
+		mode: "promiseExit",
+	})
+	const [disconnectBusy, setDisconnectBusy] = useState(false)
+	if (connectFlow === null) {
+		throw new Error("CloudflareHeaderActions must be rendered inside IntegrationConnectProvider")
+	}
+	const actionBusy = connectFlow.busy || disconnectBusy
 
-							{hasWorkers ? (
-								<div className="flex flex-col gap-2">
-									<SectionLabel>Workers</SectionLabel>
-									<div className="overflow-hidden rounded-lg border border-border/60">
-										<ResourceRow
-											name="Workers"
-											status={zoneStatus(workerEntry, usageLoaded)}
-											usage={workerEntry.usage}
-										/>
-										{usage && workerServices.length > 1
-											? [...workerServices]
-													.sort((a, b) => b.totalRequests - a.totalRequests)
-													.map((service) => {
-														const scriptUsage = toRowUsage(usage, [service])
-														const scriptEntry: ZoneEntry = {
-															key: service.serviceName,
-															name: service.displayName,
-															enabled: true,
-															lastSyncedAt: null,
-															lastError: null,
-															usage: scriptUsage,
-														}
-														return (
-															<ResourceRow
-																key={service.serviceName}
-																name={service.displayName}
-																status={zoneStatus(scriptEntry, usageLoaded)}
-																usage={scriptUsage}
-																indent
-															/>
-														)
-													})
-											: null}
-									</div>
-								</div>
-							) : null}
-						</>
-					) : (
-						<p className="text-xs text-muted-foreground">
-							Traffic data starts arriving within a few minutes — your zones and Workers will
-							appear here.
-						</p>
-					)}
-				</div>
-			) : null}
+	async function handleDisconnect() {
+		setDisconnectBusy(true)
+		const result = await disconnect({
+			reactivityKeys: ["cloudflareIntegrationStatus", "cloudflareIntegrationUsage"],
+		})
+		setDisconnectBusy(false)
+		if (Exit.isSuccess(result)) {
+			toast.success("Cloudflare account disconnected")
+		} else {
+			toast.error("Failed to disconnect Cloudflare account")
+		}
+	}
+
+	return (
+		<div className="flex items-center gap-2">
+			<Button size="sm" variant="outline" onClick={connectFlow.connect} disabled={actionBusy}>
+				{connectFlow.busy ? <LoaderIcon size={14} className="animate-spin" /> : null}
+				Reconnect
+			</Button>
+			<Button
+				size="sm"
+				variant="outline"
+				onClick={handleDisconnect}
+				disabled={actionBusy}
+				className="border-destructive/40 text-destructive-foreground hover:bg-destructive/10 hover:text-destructive-foreground"
+			>
+				{disconnectBusy ? <LoaderIcon size={14} className="animate-spin" /> : null}
+				Disconnect
+			</Button>
 		</div>
 	)
 }
