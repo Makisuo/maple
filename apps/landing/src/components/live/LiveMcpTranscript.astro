@@ -10,7 +10,9 @@
  *
  * The frame is a flex column so a caller can pass `class="h-full"` and have
  * the body absorb the slack — the footer bar stays welded to the bottom edge
- * instead of floating mid-cell.
+ * instead of floating mid-cell. The body bottom-anchors its lines (`justify-end`)
+ * so that slack opens *above* the session the way a real terminal fills, rather
+ * than trailing under the last line like unfinished content.
  */
 interface Props {
 	class?: string;
@@ -27,7 +29,7 @@ const { class: className = "" } = Astro.props;
 			LIVE
 		</span>
 	</div>
-	<div class="flex-1 p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
+	<div class="flex flex-1 flex-col justify-end p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
 		<!-- segment 0: opening agent prompt (typed) -->
 		<div class="mcp-line" data-segment="0">
 			<span class="text-fg-muted">&gt; ask maple</span>
