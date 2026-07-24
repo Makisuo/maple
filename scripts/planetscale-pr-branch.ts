@@ -3,8 +3,9 @@
  * Per-PR PlanetScale Postgres branch lifecycle for the PR-preview deploy.
  * Sibling of scripts/tinybird-pr-branch.ts with the same up/down contract.
  *
- *   bun scripts/planetscale-pr-branch.ts up   <pr-number>
- *   bun scripts/planetscale-pr-branch.ts down <pr-number>
+ *   bun scripts/planetscale-pr-branch.ts up    <pr-number>
+ *   bun scripts/planetscale-pr-branch.ts down  <pr-number>
+ *   bun scripts/planetscale-pr-branch.ts sweep
  *
  * `up` ensures an ephemeral PlanetScale branch `pr-<n>` exists and is EMPTY,
  * mints a branch credential, and exports `MAPLE_PG_URL` (one connection string,
@@ -29,6 +30,14 @@
  * credentials. PS-DEV branches bill for time used, so `down` on close is
  * mandatory.
  *
+ * `sweep` deletes every `pr-<n>` branch whose PR is already closed. The
+ * close-event teardown is best-effort only — GitHub silently creates NO
+ * `pull_request: closed` run for a PR that conflicts with its base (so stale
+ * PRs closed without merging never tear down), and close runs on old branches
+ * execute the branch's own (possibly pre-fix) workflow version. The scheduled
+ * cleanup-preview-orphans workflow runs `sweep` as the safety net for
+ * everything the event-driven path misses.
+ *
  * `up` additionally refuses to provision when the PR is already closed (when a
  * GitHub token is available to check) — a delayed/re-run deploy landing after
  * the close-event teardown would otherwise silently recreate the branch with
@@ -42,7 +51,7 @@ import { spawnSync } from "node:child_process"
 import { appendFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-type Subcommand = "up" | "down"
+type Subcommand = "up" | "down" | "sweep"
 
 const FAILURE = 1
 // Our own polling budget on top of `pscale branch create --wait`'s built-in
@@ -58,10 +67,13 @@ const fail = (message: string): never => {
 
 const parseArgs = (): { subcommand: Subcommand; prNumber: string } => {
 	const [, , rawSubcommand, rawPr] = process.argv
-	if (rawSubcommand !== "up" && rawSubcommand !== "down") {
+	if (rawSubcommand !== "up" && rawSubcommand !== "down" && rawSubcommand !== "sweep") {
 		fail(
-			`Usage: bun scripts/planetscale-pr-branch.ts <up|down> <pr-number> (got "${rawSubcommand ?? ""}")`,
+			`Usage: bun scripts/planetscale-pr-branch.ts <up|down> <pr-number> | sweep (got "${rawSubcommand ?? ""}")`,
 		)
+	}
+	if (rawSubcommand === "sweep") {
+		return { subcommand: "sweep", prNumber: "" }
 	}
 	const prNumber = (rawPr ?? "").trim()
 	if (!/^\d+$/.test(prNumber)) {
@@ -371,6 +383,59 @@ const fetchPrState = async (prNumber: string): Promise<"open" | "closed" | "unkn
 }
 
 /**
+ * Delete every `pr-<n>` branch whose PR is closed. Only branches matching the
+ * exact `pr-<digits>` shape are considered — `main`, `stg`, and anything else
+ * are never candidates. Branches whose PR state cannot be determined are
+ * skipped (deleting on uncertainty risks tearing down a live preview).
+ */
+const sweepOrphanBranches = async (database: string): Promise<void> => {
+	// The PR-state lookup is the sweep's only guard against deleting a LIVE
+	// preview; without a token every branch resolves to "unknown" and the run
+	// green-no-ops forever — the exact failure class this safety net exists to
+	// catch. Fail loudly instead.
+	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
+	}
+	const list = runPscale(["branch", "list", database, "--format", "json"], { secret: true })
+	if (list.exitCode !== 0) {
+		fail(`Could not list branches of database ${database}`)
+	}
+	let branches: ReadonlyArray<{ name?: string }>
+	try {
+		branches = JSON.parse(list.stdout) as ReadonlyArray<{ name?: string }>
+	} catch {
+		return fail("Could not parse `pscale branch list --format json` output")
+	}
+	const candidates = branches
+		.map((branch) => branch.name ?? "")
+		.map((name) => ({ name, match: /^pr-(\d+)$/.exec(name) }))
+		.filter((entry): entry is { name: string; match: RegExpExecArray } => entry.match !== null)
+	console.log(`Found ${candidates.length} pr-* branch(es): ${candidates.map((c) => c.name).join(", ") || "—"}`)
+
+	const failures: string[] = []
+	for (const { name, match } of candidates) {
+		const state = await fetchPrState(match[1] as string)
+		if (state === "open") {
+			console.log(`… keeping ${name} (PR #${match[1]} is open)`)
+			continue
+		}
+		if (state === "unknown") {
+			console.log(`⚠ skipping ${name} (PR #${match[1]} state unknown)`)
+			continue
+		}
+		console.log(`… deleting orphan ${name} (PR #${match[1]} is closed)`)
+		const remove = runPscale(["branch", "delete", database, name, "--force"])
+		if (remove.exitCode !== 0 && !isNotFound(remove)) {
+			failures.push(name)
+		}
+	}
+	if (failures.length > 0) {
+		fail(`Failed to delete orphan branch(es): ${failures.join(", ")}`)
+	}
+	console.log("✓ Sweep complete")
+}
+
+/**
  * Create the branch and wait until it's ready. Tolerates "already exists"
  * (a concurrent/earlier create) and the CLI's own `--wait` timeout — in both
  * cases the branch is (still) provisioning, so `waitUntilReady` takes over.
@@ -400,7 +465,7 @@ const resetBranchInPlace = (connectionUrl: string, replicationUrl?: string): boo
 		env: {
 			...process.env,
 			DATABASE_URL: connectionUrl,
-			// The inactive-slot cleanup needs the REPLICATION attribute the main
+			// The inactive-slot sweep needs the REPLICATION attribute the main
 			// role deliberately lacks.
 			...(replicationUrl ? { REPLICATION_DATABASE_URL: replicationUrl } : {}),
 		},
@@ -412,6 +477,10 @@ const main = async () => {
 	const { subcommand, prNumber } = parseArgs()
 	const database = process.env.PLANETSCALE_DATABASE?.trim() || "maple"
 	const branchName = `pr-${prNumber}`
+
+	if (subcommand === "sweep") {
+		return sweepOrphanBranches(database)
+	}
 
 	if (subcommand === "up") {
 		// A deploy landing after the PR closed (delayed event, re-run, approval
@@ -445,7 +514,7 @@ const main = async () => {
 			const credential = createCredential(database, branchName)
 			await ensureClusterParameters(database, branchName, credential.url)
 			// The replication credential is minted BEFORE the reset so the reset's
-			// inactive-slot cleanup can run with the REPLICATION attribute (the main
+			// inactive-slot sweep can run with the REPLICATION attribute (the main
 			// role deliberately lacks it). If the reset fails, the fallback's
 			// branch delete revokes both roles and fresh ones are minted after the
 			// recreate.
