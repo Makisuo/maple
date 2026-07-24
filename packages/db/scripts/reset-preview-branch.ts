@@ -133,7 +133,7 @@ const main = async () => {
 		// Empty `public` object-by-object. Tables first with CASCADE (takes FKs
 		// and dependent views along), then whatever remains of each class.
 		// Composite row-types of tables vanish with their table, so the type
-		// sweep only targets standalone enums/domains (drizzle-kit's pgEnum).
+		// drop pass only targets standalone enums/domains (drizzle-kit's pgEnum).
 		const dropObjects = async (
 			label: string,
 			listQuery: Promise<{ name: string }[]>,
@@ -214,11 +214,11 @@ const main = async () => {
 			WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'S', 'p', 'f')
 		`
 		if (Number(remaining?.count ?? 0) > 0) {
-			fail(`public schema still holds ${remaining?.count} objects after the sweep`)
+			fail(`public schema still holds ${remaining?.count} objects after the drop pass`)
 		}
 		console.log(`→ public schema emptied`)
 
-		// Sweep replication slots orphaned by torn-down Electric sources.
+		// Drop replication slots orphaned by torn-down Electric sources.
 		// pg_drop_replication_slot needs the REPLICATION attribute, which the
 		// main role deliberately lacks (and which is never inherited through
 		// `postgres` membership) — the caller passes the replication-role
@@ -237,7 +237,7 @@ const main = async () => {
 			}
 		} catch (error) {
 			console.log(
-				`⚠ could not sweep inactive replication slots (${(error as Error).message}) — a stale slot pins WAL for the branch's lifetime; continuing`,
+				`⚠ could not drop inactive replication slots (${(error as Error).message}) — a stale slot pins WAL for the branch's lifetime; continuing`,
 			)
 		} finally {
 			if (slotSql !== sql) await slotSql.end()
