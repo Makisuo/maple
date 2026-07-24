@@ -90,12 +90,18 @@ jobs:
             # they SKIP cleanly (the check stays green) rather than fail every PR.
             # Adding the token activates per-PR preview deploys automatically.
 
-            # Create/refresh the ephemeral PlanetScale Postgres branch `pr-<n>`
-            # (created empty — parity with the old per-PR empty D1), mint a
-            # credential, and export MAPLE_PG_URL to GITHUB_ENV so the migrate +
-            # Alchemy steps below bind to the branch.
+            # Ensure the ephemeral PlanetScale Postgres branch `pr-<n>` exists
+            # and is empty (created once per PR — ~9 min provision — then reset
+            # in SQL on later deploys), mint a credential, and export
+            # MAPLE_PG_URL to GITHUB_ENV so the migrate + Alchemy steps below
+            # bind to the branch.
             - name: Create/refresh PlanetScale PR branch
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              # GITHUB_TOKEN lets the script refuse to provision when the PR is
+              # already closed — a delayed/re-run deploy after teardown would
+              # otherwise recreate the branch with nothing left to delete it.
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
               run: bun scripts/planetscale-pr-branch.ts up "$PR_NUMBER"
 
             - name: Run database migrations
@@ -110,8 +116,19 @@ jobs:
               if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:grant
 
+            # Reassign everything this run's ephemeral role created to `postgres`
+            # so the NEXT deploy's role (which inherits postgres) can drop it —
+            # pscale_api_* roles are not grantable to each other, so without this
+            # the in-place reset always fails on the prior run's objects and
+            # falls back to the ~9-minute delete → recreate path. See
+            # packages/db/scripts/normalize-preview-ownership.ts.
+            - name: Normalize preview branch ownership
+              if: ${{ github.event.action != 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
+              run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:normalize-preview
+
             # Create/refresh an Electric Cloud environment `pr-<n>` + a Postgres
-            # source pointed at this PR's PlanetScale branch (MAPLE_PG_URL), and
+            # source pointed at this PR's PlanetScale branch (via the dedicated
+            # replication-role credential MAPLE_PG_ELECTRIC_URL), and
             # export ELECTRIC_URL/ELECTRIC_SOURCE_ID/ELECTRIC_SECRET to GITHUB_ENV so
             # the Alchemy deploy below binds the electric-sync worker to it. Runs
             # after migrations so `0009_electric_publication` exists. Gated on
@@ -149,9 +166,10 @@ jobs:
               if: ${{ !cancelled() && github.event.action == 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: bun scripts/planetscale-pr-branch.ts down "$PR_NUMBER"
 
-            # Delete the Electric Cloud environment `pr-<n>` (cascades its source).
-            # Each source holds a PlanetScale replication slot and a plan
-            # max-databases slot, so teardown on close is mandatory.
+            # Delete the Electric Cloud environment `pr-<n>` (its services are
+            # deleted first — Electric refuses to delete an env holding
+            # services). Each source holds a PlanetScale replication slot and a
+            # plan max-databases slot, so teardown on close is mandatory.
             - name: Remove Electric Cloud PR source
               if: ${{ !cancelled() && github.event.action == 'closed' && env.ELECTRIC_API_TOKEN != '' }}
               run: bun scripts/electric-pr-branch.ts down "$PR_NUMBER"

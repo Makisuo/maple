@@ -160,9 +160,14 @@ PR previews provision an ephemeral Electric Cloud **environment** `pr-<n>` + a
 Postgres **source** per PR, mirroring the PlanetScale/Tinybird branch lifecycle.
 `scripts/electric-pr-branch.ts` (`up`/`down <pr-number>`, driven from
 `.github/workflows/deploy-pr-preview.yml`) uses `@electric-sql/cli`
-(`ELECTRIC_API_TOKEN` auth) to, on open/synchronize: reset any existing `pr-<n>`
-environment, create a fresh one under `ELECTRIC_PROJECT_ID`, create a `postgres`
-source pointed at the PR branch's `MAPLE_PG_URL` (direct 5432), and export
+(`ELECTRIC_API_TOKEN` auth) to, on open/synchronize: reuse (or create under
+`ELECTRIC_PROJECT_ID`) the `pr-<n>` environment, reset its services, create a
+fresh `postgres` source pointed at the PR branch's `MAPLE_PG_ELECTRIC_URL`
+(direct 5432 through a dedicated `--with-replication` role — Electric requires
+the REPLICATION role *attribute*, which is never inherited; the main CI role
+stays non-replication because PlanetScale replication roles aren't grantable,
+which would break the in-place reset's role assumption), polled until active,
+and export
 `ELECTRIC_URL`/`ELECTRIC_SOURCE_ID`/`ELECTRIC_SECRET` to `$GITHUB_ENV` (bound to
 the electric-sync worker by alchemy). On close it deletes the environment
 (cascades the source). Steps are gated on `ELECTRIC_API_TOKEN`, so previews stay
@@ -171,12 +176,14 @@ green (and the worker 503s) until the token lands in Infisical.
 - The web build always reads through the sync path — provisioning the source is
   what makes it work in previews.
 - **Publication:** the migrate step runs `0009` (creates
-  `electric_publication_default`) before the source is created. Prod uses manual
-  publishing against that publication; confirm the `electric services create
-  postgres` flag (`electric services create postgres --help`) and set
-  `ELECTRIC_PUBLICATION` (and/or `ELECTRIC_SERVICE_EXTRA_ARGS`) accordingly. The CI
-  role inherits `postgres`, so auto-managed publishing may also work — validate on
-  one PR branch before relying on it.
+  `electric_publication_default`) before the source is created. The script passes
+  `--manual-table-publishing` by default (prod parity; Electric reads that
+  migration-owned publication — its default name — instead of owning the tables).
+  Set `ELECTRIC_MANUAL_TABLE_PUBLISHING=false` to let Electric auto-manage
+  publishing instead; `ELECTRIC_SERVICE_EXTRA_ARGS` remains the flag escape hatch.
+  The script pins `@electric-sql/cli@0.0.10` (interface verified — `--json` is a
+  global flag, `environments create` returns `environmentId`, the postgres service
+  id is the shape-API `source_id`); re-verify before bumping the pin.
 - **Caps:** each source counts against the Electric plan's max-databases limit and
   holds a PlanetScale replication slot; teardown on close is mandatory.
 
