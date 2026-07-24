@@ -166,9 +166,10 @@ jobs:
               if: ${{ !cancelled() && github.event.action == 'closed' && env.PLANETSCALE_SERVICE_TOKEN != '' }}
               run: bun scripts/planetscale-pr-branch.ts down "$PR_NUMBER"
 
-            # Delete the Electric Cloud environment `pr-<n>` (cascades its source).
-            # Each source holds a PlanetScale replication slot and a plan
-            # max-databases slot, so teardown on close is mandatory.
+            # Delete the Electric Cloud environment `pr-<n>` (its services are
+            # deleted first — Electric refuses to delete an env holding
+            # services). Each source holds a PlanetScale replication slot and a
+            # plan max-databases slot, so teardown on close is mandatory.
             - name: Remove Electric Cloud PR source
               if: ${{ !cancelled() && github.event.action == 'closed' && env.ELECTRIC_API_TOKEN != '' }}
               run: bun scripts/electric-pr-branch.ts down "$PR_NUMBER"

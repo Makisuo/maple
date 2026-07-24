@@ -24,9 +24,10 @@
  * apps/electric-sync worker to this source (see apps/electric-sync/alchemy.run.ts).
  *
  * `down` deletes every `pr-<n>`/`pr-<n>-*` environment (called on PR close,
- * after `alchemy:destroy:pr`). Environment deletion cascades its services. Each
- * source counts against the Electric plan's max-databases cap and holds a
- * PlanetScale replication slot, so `down` on close is mandatory.
+ * after `alchemy:destroy:pr`), deleting its services first — Electric refuses
+ * to delete an environment that still holds services (`--force` does not
+ * cascade). Each source counts against the Electric plan's max-databases cap
+ * and holds a PlanetScale replication slot, so `down` on close is mandatory.
  *
  * `sweep` deletes every `pr-<n>`/`pr-<n>-*` environment whose PR is already
  * closed. The close-event teardown is best-effort only (GitHub creates no
@@ -421,6 +422,12 @@ const findEnvironments = (projectId: string, base: string): ReadonlyArray<{ id: 
 }
 
 const deleteEnvironment = (env: { id: string; name: string }): void => {
+	// Electric refuses to delete an environment that still holds services —
+	// "Cannot delete environment with existing services. Delete all services
+	// first." (run 30081184677, PR #255 close) — `--force` does NOT cascade.
+	// Drop the services first; each freed service also releases its PlanetScale
+	// replication slot and plan max-databases slot.
+	resetServices(env.id)
 	const removed = runElectric(["environments", "delete", env.id, "--force"])
 	if (removed.exitCode !== 0 && !isNotFound(removed)) {
 		fail(`Failed to delete Electric environment ${env.name} (${env.id})`)
