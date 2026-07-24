@@ -480,9 +480,15 @@ const up = async (environmentName: string): Promise<void> => {
 	// input validation, then the server's TLS-less probe of PlanetScale draws
 	// "Database validation failed"). See electric.ax/docs/sync/integrations/planetscale.
 	// planetscale-pr-branch.ts emits `postgres://...?sslmode=verify-full`.
-	const databaseUrl = (process.env.MAPLE_PG_ELECTRIC_URL?.trim() || requireEnv("MAPLE_PG_URL"))
+	const rewrittenUrl = (process.env.MAPLE_PG_ELECTRIC_URL?.trim() || requireEnv("MAPLE_PG_URL"))
 		.replace(/^postgres:\/\//, "postgresql://")
 		.replace(/([?&])sslmode=[^&]*/, "$1sslmode=require")
+	// A URL that never carried sslmode= (a pscale CLI release emitting a bare
+	// database_url) must gain it too — without it Electric's TLS-less probe of
+	// PlanetScale fails with an opaque "Database validation failed".
+	const databaseUrl = /[?&]sslmode=/.test(rewrittenUrl)
+		? rewrittenUrl
+		: `${rewrittenUrl}${rewrittenUrl.includes("?") ? "&" : "?"}sslmode=require`
 	// Defense-in-depth: mask the connection string so any incidental echo (CLI
 	// output, error text) is scrubbed in CI. The command echo already redacts it.
 	maskSecret(databaseUrl)
@@ -642,6 +648,14 @@ const up = async (environmentName: string): Promise<void> => {
 	// shape-API source, so its id is the `source_id` the sync worker forwards.
 	const service = parseJson(createdSvc.stdout, "services create postgres")
 	const sourceId = pick(service, "id", "serviceId", "sourceId")
+	// Fail fast on a CLI output-shape drift: without an id the activation wait
+	// below would be skipped and the run would only die much later (after the
+	// publication-mirror poll) with a message that buries the actual cause.
+	if (!sourceId) {
+		fail(
+			"`electric services create postgres --json` returned no service id — cannot wait for activation or resolve the source",
+		)
+	}
 	let secret = pick(service, "sourceSecret", "secret", "source_secret")
 
 	// 3b. Wait for the service to become active before the alchemy deploy binds it.
@@ -786,6 +800,12 @@ const fetchPrState = async (prNumber: string): Promise<"open" | "closed" | "unkn
 const sweep = async (): Promise<void> => {
 	requireEnv("ELECTRIC_API_TOKEN")
 	const projectId = requireEnv("ELECTRIC_PROJECT_ID")
+	// The PR-state lookup is the sweep's only guard against deleting a LIVE
+	// preview; without a token everything resolves to "unknown" and the run
+	// green-no-ops forever. Fail loudly instead — this is the safety net.
+	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
+	}
 	const listed = runElectric(["environments", "list", "--project", projectId, "--json"], { secret: true })
 	if (listed.exitCode !== 0) {
 		if (isNotFound(listed)) {

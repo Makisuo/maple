@@ -15,6 +15,11 @@ name: Cleanup Preview Orphans
 # a PlanetScale replication slot + a plan max-databases slot) and Tinybird
 # `pr_<n>` branches (they share compute with production), so all three
 # lifecycle scripts run their `sweep` subcommand here.
+#
+# Caveat: sweep maps `pr-<n>` resource names to THIS repo's PR numbers
+# (GITHUB_REPOSITORY). If the PlanetScale database / Electric project /
+# Tinybird workspace is ever shared with another repo using the same naming
+# convention, a closed PR #N here could delete that repo's live pr-N resource.
 
 on:
     schedule:

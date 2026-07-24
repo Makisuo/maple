@@ -71,6 +71,15 @@ const main = async () => {
 	if (!url) {
 		fail("DATABASE_URL is not set — pass the PR branch connection string (MAPLE_PG_URL)")
 	}
+	// Tripwire: this script empties whatever DATABASE_URL points at, and the
+	// connected role inherits `postgres`, so nothing downstream would stop it
+	// from gutting prod/stg. It is only ever meant for ephemeral PR-preview
+	// branches, driven by CI.
+	if (!process.env.CI && process.env.RESET_PREVIEW_CONFIRM !== "1") {
+		fail(
+			"Refusing to reset: this drops ALL objects in the target database. Set RESET_PREVIEW_CONFIRM=1 to confirm DATABASE_URL points at a disposable preview branch (CI runs set CI).",
+		)
+	}
 	const sql = postgres(url as string, { max: 1, fetch_types: false })
 	try {
 		// Take on the previous run's ownership: every role owning the drizzle
@@ -177,6 +186,25 @@ const main = async () => {
 			(quoted) => `DROP TYPE IF EXISTS ${quoted} CASCADE`,
 		)
 
+		// Extra schemas a migration may have created (`CREATE SCHEMA foo`). After
+		// normalize-preview-ownership.ts they belong to `postgres` (or to a role
+		// we inherit), so they are ours to drop; vendor/system schemas that came
+		// with the branch are owned by neither and are left untouched. Without
+		// this, the replayed CREATE SCHEMA migration would hit duplicate_object
+		// on every reused-branch deploy — with no recreate fallback, because the
+		// emptiness verification below only inspects `public`.
+		const extraSchemas = await sql<{ nspname: string }[]>`
+			SELECT n.nspname FROM pg_namespace n
+			JOIN pg_roles r ON r.oid = n.nspowner
+			WHERE n.nspname NOT IN ('public', 'information_schema')
+				AND n.nspname NOT LIKE ${"pg\\_%"}
+				AND (r.rolname = 'postgres' OR pg_has_role(current_user, r.oid, 'USAGE'))
+		`
+		for (const { nspname } of extraSchemas) {
+			await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(nspname)} CASCADE`)
+			console.log(`→ Dropped schema "${nspname}"`)
+		}
+
 		// The reset only succeeded if public is actually empty now — anything
 		// left (an owner we couldn't assume, an object class this script doesn't
 		// know) must push the caller onto the delete → recreate fallback.
@@ -191,17 +219,28 @@ const main = async () => {
 		console.log(`→ public schema emptied`)
 
 		// Sweep replication slots orphaned by torn-down Electric sources.
-		// Non-fatal: a lingering slot wastes WAL, it doesn't break the deploy.
+		// pg_drop_replication_slot needs the REPLICATION attribute, which the
+		// main role deliberately lacks (and which is never inherited through
+		// `postgres` membership) — the caller passes the replication-role
+		// connection string as REPLICATION_DATABASE_URL for this step.
+		// Non-fatal either way, but a stale slot pins WAL for the branch's
+		// whole lifetime, so a failure here is warned loudly.
+		const slotUrl = process.env.REPLICATION_DATABASE_URL?.trim()
+		const slotSql = slotUrl ? postgres(slotUrl, { max: 1, fetch_types: false }) : sql
 		try {
-			const slots = await sql<{ slot_name: string }[]>`
+			const slots = await slotSql<{ slot_name: string }[]>`
 				SELECT slot_name FROM pg_replication_slots WHERE active = false
 			`
 			for (const { slot_name } of slots) {
-				await sql`SELECT pg_drop_replication_slot(${slot_name})`
+				await slotSql`SELECT pg_drop_replication_slot(${slot_name})`
 				console.log(`→ Dropped inactive replication slot "${slot_name}"`)
 			}
 		} catch (error) {
-			console.log(`… could not sweep replication slots (${(error as Error).message}); continuing`)
+			console.log(
+				`⚠ could not sweep inactive replication slots (${(error as Error).message}) — a stale slot pins WAL for the branch's lifetime; continuing`,
+			)
+		} finally {
+			if (slotSql !== sql) await slotSql.end()
 		}
 
 		console.log("✓ Preview branch reset to empty")

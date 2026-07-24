@@ -201,53 +201,27 @@ const ensureClusterParameters = async (
 				// Transient connect failures during the restart window are expected.
 			}
 			if (Date.now() >= deadline) {
-				return fail(`Cluster parameters did not take effect on branch ${branchName} in time`)
+				// Not fatal: Electric sources have been observed to activate fine
+				// without these settings (run 30055008127), helped by the small
+				// --db-pool-size the create passes.
+				console.log(
+					`⚠ cluster parameters did not converge on branch ${branchName} within ${PARAMS_APPLY_TIMEOUT_MS / 60_000} min; continuing`,
+				)
+				return
 			}
 			await sleep(PARAMS_POLL_MS)
 		}
 	}
-	// The CI service token may lack branch-change permission ("User does not have
-	// permission to perform this action"). Fall back to ALTER SYSTEM for the
-	// SIGHUP-reloadable settings (works as `postgres`; max_connections needs a
-	// restart and stays out of reach — the Electric source compensates with a
-	// small --db-pool-size). Non-fatal: previews should deploy either way, and
-	// granting the token resize access later self-heals this path.
-	console.log("… branch resize not permitted; trying ALTER SYSTEM for reloadable settings")
-	try {
-		const bunSpecifier = "bun"
-		const { SQL } = (await import(bunSpecifier)) as {
-			SQL: new (opts: { url: string; max: number }) => {
-				(strings: TemplateStringsArray, ...values: ReadonlyArray<unknown>): Promise<Array<Record<string, unknown>>>
-				unsafe: (query: string) => Promise<unknown>
-				end: () => Promise<void>
-			}
-		}
-		// max:1 pins a single session: SET ROLE must apply to the same connection
-		// the ALTER SYSTEM statements run on (which also cannot be batched — an
-		// implicit multi-statement transaction would reject ALTER SYSTEM).
-		const sql = new SQL({ url: connectionUrl, max: 1 })
-		try {
-			await sql`SET ROLE postgres`
-			for (const { key, want, atLeast } of missing) {
-				if (atLeast !== undefined) continue // restart-required (max_connections) — skip
-				await sql.unsafe(`ALTER SYSTEM SET ${key} = '${want}'`)
-			}
-			await sql`SELECT pg_reload_conf()`
-		} finally {
-			await sql.end()
-		}
-		await sleep(2_000)
-		const still = unsatisfied(await readSettings(connectionUrl))
-		console.log(
-			still.length === 0
-				? "✓ Electric cluster parameters applied via ALTER SYSTEM"
-				: `⚠ cluster parameters still unsatisfied: ${still.map((p) => p.key).join(", ")} — Electric sync may stay pending (grant the PlanetScale service token branch-resize access to fix permanently)`,
-		)
-	} catch (error) {
-		console.log(
-			`⚠ ALTER SYSTEM fallback failed (${error instanceof Error ? error.message : String(error)}) — Electric sync may stay pending`,
-		)
-	}
+	// The CI service token may lack branch-change permission ("User does not
+	// have permission to perform this action"). There is no in-band fallback:
+	// ALTER SYSTEM is equally rejected on PlanetScale ("permission denied to
+	// set parameter", even after SET ROLE postgres). Non-fatal — Electric has
+	// been observed to activate anyway (run 30055008127) with the source's
+	// small --db-pool-size; granting the service token branch-resize access
+	// self-heals this path permanently.
+	console.log(
+		`⚠ branch resize not permitted; leaving cluster parameters unsatisfied: ${missing.map((p) => `${p.key}=${p.want}`).join(", ")} (grant the PlanetScale service token branch-resize access to fix permanently)`,
+	)
 }
 
 const waitUntilReady = async (database: string, branchName: string): Promise<void> => {
@@ -300,7 +274,8 @@ interface BranchCredential {
  * not make replication-attribute roles grantable, so the NEXT deploy's role
  * cannot assume it ("permission denied to grant role") and the in-place reset
  * degrades to the ~9-min delete → recreate path on every push. Electric gets its
- * own replication-attribute role instead (mintReplicationCredential). The branch
+ * own replication-attribute role instead (createCredential with
+ * `{ replication: true }`). The branch
  * is deleted on PR close, which revokes the roles — but a TTL is a safety net in
  * case `down` never runs. JSON field names have drifted across CLI releases, so
  * accept the known spellings.
@@ -414,6 +389,13 @@ const fetchPrState = async (prNumber: string): Promise<"open" | "closed" | "unkn
  * skipped (deleting on uncertainty risks tearing down a live preview).
  */
 const sweepOrphanBranches = async (database: string): Promise<void> => {
+	// The PR-state lookup is the sweep's only guard against deleting a LIVE
+	// preview; without a token every branch resolves to "unknown" and the run
+	// green-no-ops forever — the exact failure class this safety net exists to
+	// catch. Fail loudly instead.
+	if (!process.env.GITHUB_REPOSITORY?.trim() || !(process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN)?.trim()) {
+		fail("sweep requires GITHUB_REPOSITORY and GITHUB_TOKEN (or GH_TOKEN) to check PR state")
+	}
 	const list = runPscale(["branch", "list", database, "--format", "json"], { secret: true })
 	if (list.exitCode !== 0) {
 		fail(`Could not list branches of database ${database}`)
@@ -474,13 +456,19 @@ const createAndAwaitBranch = async (database: string, branchName: string): Promi
  * packages/db/scripts/reset-preview-branch.ts). Returns false on failure so the
  * caller can fall back to delete → recreate.
  */
-const resetBranchInPlace = (connectionUrl: string): boolean => {
+const resetBranchInPlace = (connectionUrl: string, replicationUrl?: string): boolean => {
 	const dbPackageDir = fileURLToPath(new URL("../packages/db", import.meta.url))
 	console.log(`$ bun run --cwd packages/db db:reset-preview`)
 	const proc = spawnSync("bun", ["run", "--cwd", dbPackageDir, "db:reset-preview"], {
 		encoding: "utf8",
 		stdio: "inherit",
-		env: { ...process.env, DATABASE_URL: connectionUrl },
+		env: {
+			...process.env,
+			DATABASE_URL: connectionUrl,
+			// The inactive-slot sweep needs the REPLICATION attribute the main
+			// role deliberately lacks.
+			...(replicationUrl ? { REPLICATION_DATABASE_URL: replicationUrl } : {}),
+		},
 	})
 	return proc.status === 0
 }
@@ -525,11 +513,16 @@ const main = async () => {
 			await waitUntilReady(database, branchName)
 			const credential = createCredential(database, branchName)
 			await ensureClusterParameters(database, branchName, credential.url)
-			if (resetBranchInPlace(credential.url)) {
-				const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
+			// The replication credential is minted BEFORE the reset so the reset's
+			// inactive-slot sweep can run with the REPLICATION attribute (the main
+			// role deliberately lacks it). If the reset fails, the fallback's
+			// branch delete revokes both roles and fresh ones are minted after the
+			// recreate.
+			const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
+			if (resetBranchInPlace(credential.url, electric.url)) {
 				maskAndExport(
 					{ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url },
-					[credential.password, electric.password],
+					[credential.password, electric.password, credential.url, electric.url],
 				)
 				return
 			}
@@ -560,7 +553,7 @@ const main = async () => {
 		const electric = createCredential(database, branchName, { replication: true, suffix: "-repl" })
 		maskAndExport(
 			{ MAPLE_PG_URL: credential.url, MAPLE_PG_ELECTRIC_URL: electric.url },
-			[credential.password, electric.password],
+			[credential.password, electric.password, credential.url, electric.url],
 		)
 		return
 	}

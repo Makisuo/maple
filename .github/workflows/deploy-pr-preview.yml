@@ -127,7 +127,8 @@ jobs:
               run: DATABASE_URL="$MAPLE_PG_URL" bun run --cwd packages/db db:normalize-preview
 
             # Create/refresh an Electric Cloud environment `pr-<n>` + a Postgres
-            # source pointed at this PR's PlanetScale branch (MAPLE_PG_URL), and
+            # source pointed at this PR's PlanetScale branch (via the dedicated
+            # replication-role credential MAPLE_PG_ELECTRIC_URL), and
             # export ELECTRIC_URL/ELECTRIC_SOURCE_ID/ELECTRIC_SECRET to GITHUB_ENV so
             # the Alchemy deploy below binds the electric-sync worker to it. Runs
             # after migrations so `0009_electric_publication` exists. Gated on
