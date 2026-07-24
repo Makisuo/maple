@@ -92,6 +92,12 @@
 	"mcp_eyebrow": "07 \u00b7 Agents",
 	"mcp_title": "Your AI agent reads it too.",
 	"mcp_lede": "Maple ships with a first-class MCP server. Any compatible agent can list services, search traces, find errors, and propose fixes. The transcript on the right walks through the exact tool calls an agent makes.",
+	"mcp_point_1_title": "Reads the code, not just the trace",
+	"mcp_point_1_body": "The agent pulls the source file behind a span, so the fix it proposes cites your actual code.",
+	"mcp_point_2_title": "Writes back",
+	"mcp_point_2_body": "Claim an issue, set its severity, attach a fix. Not a read-only dashboard.",
+	"mcp_point_3_title": "OAuth, no plugin",
+	"mcp_point_3_body": "Point any MCP client at the endpoint and sign in. Open protocol, nothing to install.",
 
 	"sessions_eyebrow": "06 \u00b7 Browser Sessions",
 	"sessions_title": "Watch what the user did.",
@@ -147,7 +153,6 @@
 	"bill_link_vs_dash0": "Full vs Dash0",
 
 	"start_eyebrow": "10 \u00b7 Start",
-	"start_title": "Pick your SDK. First trace in five minutes.",
 	"start_lede": "Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.",
 	"start_endpoint_label": "Endpoint",
 	"start_key_label": "Key",
@@ -670,6 +675,7 @@
 	"incident_lede": "Four surfaces, one trace id. Nothing to stitch, no second tool, no tab you forgot you had open.",
 	"incident_step_1_title": "The alert arrives with context.",
 	"incident_step_1_body": "Error rate on api-gateway crosses 5%. The alert carries the service, the threshold it broke, and the sample traces \u2014 not a number and a shrug. Route it to Slack, Discord, PagerDuty, or any webhook.",
+	"incident_step_2_title": "The trace opens on the failing span.",
 	"incident_step_2_body": "The failing request is a span tree with every attribute intact. Three Stripe retries sit at the bottom, red, each timing out at exactly 1.75 seconds. No sampling gap, no aggregate hiding the outlier.",
 	"incident_step_3_title": "The logs are already correlated.",
 	"incident_step_3_body": "Jump from the failing span to its logs on the trace id. Retry exhaustion, connection pool at 20/20 \u2014 the confirmation, not a second search in a second product.",

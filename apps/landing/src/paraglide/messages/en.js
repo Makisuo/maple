@@ -1111,14 +1111,6 @@ export const start_eyebrow = () => `10 · Start`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Pick your SDK. First trace in five minutes.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
 
 
@@ -5119,22 +5111,6 @@ export const platform_mcp_desc = () => `Any MCP-compatible client can list servi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_name = () => `Connect your cloud`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart. PlanetScale, Cloudflare, and the rest connect in one OAuth click.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const sov_pillar_4_label = () => `Your perimeter`
 
 
@@ -5311,6 +5287,22 @@ export const hero_shots_aria = () => `Product screenshots`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `Connect your cloud`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart. PlanetScale, Cloudflare, and the rest connect in one OAuth click.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_overview_line = () => `See every service at a glance.`
 
 
@@ -5328,3 +5320,59 @@ export const hero_shot_traces_line = () => `Follow one request end to end.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `Watch traffic move between services.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_title = () => `The trace opens on the failing span.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_title = () => `Reads the code, not just the trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_body = () => `The agent pulls the source file behind a span, so the fix it proposes cites your actual code.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_title = () => `Writes back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_body = () => `Claim an issue, set its severity, attach a fix. Not a read-only dashboard.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_title = () => `OAuth, no plugin`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_body = () => `Point any MCP client at the endpoint and sign in. Open protocol, nothing to install.`

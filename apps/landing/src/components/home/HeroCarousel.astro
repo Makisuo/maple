@@ -40,16 +40,15 @@ const slides = [
 		key: "traces",
 		tab: m.hero_shot_traces(),
 		line: m.hero_shot_traces_line(),
-		label: "hero-traces",
-		caption:
-			"The trace waterfall with a span selected and its attribute set open alongside — full page, sidebar included.",
+		label: "A slow database span selected in an 18-span trace waterfall with its query attributes open",
+		src: "/screenshots/hero-traces.webp",
 	},
 	{
-		key: "map",
-		tab: m.hero_shot_map(),
-		line: m.hero_shot_map_line(),
-		label: "hero-map",
-		caption: "The service map — dependencies grouped into namespaces, with live request flow.",
+		key: "services",
+		tab: m.features_col_services(),
+		line: m.features_service_heading(),
+		label: "The service catalog comparing latency percentiles, error-rate trends and throughput across production services",
+		src: "/screenshots/hero-services.webp",
 	},
 ] satisfies { key: string; tab: string; line: string; label: string; src?: string; caption?: string }[];
 ---
@@ -153,8 +152,22 @@ const slides = [
 		let focused = false;
 		const running = () => auto && !manual && onscreen && !focused && !document.hidden;
 
+		// Fetch the plate after this one ahead of its turn. Slides 2-3 ship
+		// `loading="lazy"` so they never compete with the LCP image, but an
+		// in-viewport lazy image is still a race against the dwell — and a lost
+		// race crossfades to an empty frame. Flipping a pending lazy image to
+		// eager starts the fetch immediately.
+		function warm(i: number) {
+			const img = panes[i]?.querySelector("img");
+			if (img && img.loading === "lazy") img.loading = "eager";
+		}
+
 		function show(next: number) {
 			index = next;
+			// The one we're showing (a hand-picked jump can outrun the warm chain)
+			// and the one after it.
+			warm(next);
+			warm((next + 1) % panes.length);
 			panes.forEach((pane, i) => {
 				pane.toggleAttribute("data-on", i === index);
 				// One image alt reaches the screen reader, not three.
@@ -272,6 +285,13 @@ const slides = [
 			},
 			{ threshold: 0.25 },
 		).observe(root);
+
+		// Chain slide 2 off slide 1's load rather than starting both at once: the
+		// LCP image keeps the connection to itself, and the next plate is still
+		// fetching a full dwell before it's needed.
+		const first = panes[0]?.querySelector("img");
+		if (first && !first.complete) first.addEventListener("load", () => warm(1), { once: true });
+		else warm(1);
 
 		if (auto) {
 			if (fills[0]) fills[0].style.transform = "scaleX(0)";

@@ -1111,14 +1111,6 @@ export const start_eyebrow = () => `10 · スタート`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Pick your SDK. First trace in five minutes.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
 
 
@@ -5119,22 +5111,6 @@ export const platform_mcp_desc = () => `MCP対応クライアントなら、サ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_name = () => `クラウドをつなぐ`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `KubernetesはHelmチャート。PlanetScale、Cloudflareなどは OAuth のワンクリックで接続。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const sov_pillar_4_label = () => `あなたの境界線`
 
 
@@ -5311,6 +5287,22 @@ export const hero_shots_aria = () => `製品スクリーンショット`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `クラウドをつなぐ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `KubernetesはHelmチャート。PlanetScale、Cloudflareなどは OAuth のワンクリックで接続。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_overview_line = () => `すべてのサービスを一目で。`
 
 
@@ -5328,3 +5320,59 @@ export const hero_shot_traces_line = () => `1つのリクエストを最初か�
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `サービス間のトラフィックを可視化。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_title = () => `トレースは失敗したスパンで開く。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_title = () => `トレースだけでなく、コードまで読む`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_body = () => `スパンの背後にあるソースファイルまで参照するので、提案される修正はあなたの実際のコードを指し示します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_title = () => `書き込みもできる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_body = () => `イシューの担当、重大度の設定、修正の添付まで。読み取り専用のダッシュボードではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_title = () => `OAuth対応、プラグイン不要`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_body = () => `任意のMCPクライアントをエンドポイントに向けてサインインするだけ。オープンなプロトコルで、インストールは不要です。`

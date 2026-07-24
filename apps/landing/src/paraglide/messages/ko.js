@@ -1111,14 +1111,6 @@ export const start_eyebrow = () => `10 · 시작`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_title = () => `Pick your SDK. First trace in five minutes.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const start_lede = () => `Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.`
 
 
@@ -5119,22 +5111,6 @@ export const platform_mcp_desc = () => `MCP 호환 클라이언트라면 서비�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_name = () => `클라우드 연결`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `Kubernetes는 Helm 차트로. PlanetScale, Cloudflare 등은 OAuth 한 번으로 연결됩니다.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const sov_pillar_4_label = () => `당신의 경계`
 
 
@@ -5311,6 +5287,22 @@ export const hero_shots_aria = () => `제품 스크린샷`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `클라우드 연결`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes는 Helm 차트로. PlanetScale, Cloudflare 등은 OAuth 한 번으로 연결됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_overview_line = () => `모든 서비스를 한눈에.`
 
 
@@ -5328,3 +5320,59 @@ export const hero_shot_traces_line = () => `요청 하나를 끝까지 추적하
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `서비스 간 트래픽을 확인하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_title = () => `트레이스는 실패한 스팬에서 열립니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_title = () => `트레이스만이 아니라 코드까지 읽습니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_body = () => `스팬 뒤에 있는 소스 파일까지 가져오므로, 제안되는 수정이 실제 코드를 가리킵니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_title = () => `쓰기도 합니다`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_body = () => `이슈 담당, 심각도 설정, 수정 첨부까지. 읽기 전용 대시보드가 아닙니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_title = () => `OAuth, 플러그인 불필요`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_body = () => `MCP 클라이언트를 엔드포인트로 향하게 하고 로그인하면 끝. 개방형 프로토콜이라 설치할 것이 없습니다.`

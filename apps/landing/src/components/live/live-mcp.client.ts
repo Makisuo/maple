@@ -13,6 +13,14 @@ const TYPE_CPS = 38 // characters per second for the typed line
 const HOLD_MS = 6500 // dwell on the finished transcript before reset
 const RESET_FADE_MS = 280
 
+/** The homepage's one easing curve — same as HeroCarousel and the scrollstory. */
+const EASE = "cubic-bezier(0.22, 1, 0.36, 1)"
+const REVEAL_MS = 420
+/** Lines inside one segment cascade rather than popping together. */
+const LINE_STAGGER_MS = 70
+/** Text resolves out of focus, the way a terminal line commits. */
+const REVEAL_BLUR_PX = 5
+
 export function playMcp(root: HTMLElement) {
 	const segments = groupBySegment(root)
 	const typedEl = root.querySelector<HTMLElement>("[data-typed]")
@@ -23,21 +31,37 @@ export function playMcp(root: HTMLElement) {
 
 	const hideAll = () => {
 		root.querySelectorAll<HTMLElement>(".mcp-line").forEach((el) => {
-			el.style.opacity = "0"
-			el.style.transform = "translateY(2px)"
 			el.style.transition = "none"
+			el.style.transitionDelay = "0ms"
+			el.style.opacity = "0"
+			el.style.transform = "translateY(4px)"
+			el.style.filter = `blur(${REVEAL_BLUR_PX}px)`
 		})
 		if (typedEl) typedEl.textContent = ""
 	}
 
 	const revealSegment = (idx: number) => {
 		const items = segments[idx] ?? []
-		items.forEach((el) => {
-			el.style.transition = "opacity 220ms ease, transform 220ms ease"
+		items.forEach((el, i) => {
+			el.style.transition = [
+				`opacity ${REVEAL_MS}ms ${EASE}`,
+				`transform ${REVEAL_MS}ms ${EASE}`,
+				`filter ${REVEAL_MS}ms ${EASE}`,
+			].join(", ")
+			el.style.transitionDelay = `${i * LINE_STAGGER_MS}ms`
 			el.style.opacity = "1"
 			el.style.transform = "translateY(0)"
+			// Dropped back to `none` on transitionend so a settled transcript
+			// isn't holding a filter layer per line for the whole 6.5s dwell.
+			el.style.filter = "blur(0px)"
 		})
 	}
+
+	// One delegated listener rather than one per line per cycle.
+	root.addEventListener("transitionend", (event) => {
+		const el = event.target as HTMLElement
+		if (event.propertyName === "filter" && el.style.filter === "blur(0px)") el.style.filter = "none"
+	})
 
 	const typeText = (el: HTMLElement, text: string) =>
 		new Promise<void>((resolve) => {

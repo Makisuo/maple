@@ -8,19 +8,19 @@
  * land. This section is that proof.
  *
  * Both columns stretch to the row height and pin content to both edges: the
- * prose sits at the top, the tool index is pushed down by `mt-auto`, and the
+ * prose sits at the top, the three rules are pushed down by `mt-auto`, and the
  * transcript takes `h-full` so its footer bar lands on the same baseline as
- * the index's last row. A short copy column floating beside a tall terminal
- * was the whole problem with the first pass.
+ * the last rule. A short copy column floating beside a tall terminal was the
+ * whole problem with the first pass.
  *
- * The index is the section's character: 12 real tool names in mono, each
- * carrying the same amber `→` the transcript uses for its own calls, so the
- * left column reads as the API surface the right column is calling into.
+ * The rules deliberately are NOT a tool list. Every observability MCP server
+ * ships a long list of tools, so a count proves nothing; what a competitor's
+ * list doesn't imply is that this one reads your source, writes back, and
+ * needs no plugin.
  *
  * KubernetesSection directly above is also copy-left / media-right on `bg-bg`,
- * which is why this one runs a wider media track and swaps Kubernetes' <dl> +
- * `helm install` <pre> for the index. Without that the two read as one long
- * section split by an accidental rule.
+ * which is why this one runs a wider media track and leads with the endpoint
+ * box rather than a `helm install` <pre>.
  *
  * Surface is `bg-bg`, not `bg-bg-deep`: `.live-frame` is itself `--bg-deep`,
  * so a deep floor would flatten the transcript into the page.
@@ -35,23 +35,13 @@ const featurePath = getRelativeLocaleUrl(locale, "/features/ai-mcp-integration")
 /** The live server. Clients differ on how you register it; they all take a URL. */
 const MCP_ENDPOINT = "https://api.maple.dev/mcp";
 
-// Real tools off `apps/api/src/mcp/tools/registry.ts`, ordered the way an
-// investigation actually runs: find the service, walk the trace, read the
-// logs, then reach for the source. Code identifiers, so no message keys —
-// they read the same in every locale.
-const tools = [
-	"list_services",
-	"search_traces",
-	"inspect_trace",
-	"inspect_span",
-	"find_errors",
-	"error_detail",
-	"search_logs",
-	"mine_log_patterns",
-	"service_map",
-	"run_sql",
-	"read_source_file",
-	"propose_fix",
+// What actually separates this from every other observability MCP server.
+// A tool count is table stakes — every server has a long list — so the slot
+// carries the three things a competitor's list doesn't imply.
+const points = [
+	{ title: m.mcp_point_1_title(), body: m.mcp_point_1_body() },
+	{ title: m.mcp_point_2_title(), body: m.mcp_point_2_body() },
+	{ title: m.mcp_point_3_title(), body: m.mcp_point_3_body() },
 ];
 ---
 
@@ -78,27 +68,19 @@ const tools = [
 				</div>
 
 				<!-- mt-auto is what makes the column span the row: prose at the
-				     top edge, index at the bottom, slack in the middle. -->
-				<div class="mt-auto pt-10">
-					<div
-						class="flex items-baseline justify-between border-b border-border pb-2 text-[10px] uppercase tracking-[0.14em] text-fg-muted"
-					>
-						<span>mcp tools</span>
-						<span class="tabular-nums">50+</span>
-					</div>
-					<ul class="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-[12px] text-fg-muted">
-						{
-							tools.map((tool) => (
-								<li class="truncate">
-									<span class="text-primary" aria-hidden="true">
-										→{" "}
-									</span>
-									{tool}
-								</li>
-							))
-						}
-					</ul>
-				</div>
+				     top edge, these rules at the bottom, slack in the middle. -->
+				<dl class="mt-auto pt-10">
+					{
+						points.map((point) => (
+							<div class="border-t border-border py-4">
+								<dt class="text-[13px] font-medium text-fg">{point.title}</dt>
+								<dd class="mt-1.5 max-w-[52ch] text-[13px] leading-relaxed text-fg-muted">
+									{point.body}
+								</dd>
+							</div>
+						))
+					}
+				</dl>
 
 				<div class="mt-7 text-[13px]">
 					<a href={featurePath} class="text-fg transition-colors hover:text-primary">

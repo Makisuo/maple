@@ -259,11 +259,20 @@
 	flex-direction: column;
 	height: 100%;
 }
+/* The shot settles the last 2% as it fades in, so a swap reads as the plate
+   arriving rather than two stills blinking. Scaling the image and not the
+   frame keeps the border and radius fixed — .live-frame already clips, so the
+   overscan never pokes past the stage. */
 .hero-carousel__pane .live-frame img {
 	height: 100%;
 	width: 100%;
 	object-fit: cover;
 	object-position: top left;
+	transform: scale(1.02);
+	transition: transform var(--hero-swap) var(--hero-ease);
+}
+.hero-carousel__pane[data-on] .live-frame img {
+	transform: scale(1);
 }
 .hero-carousel__pane .media-frame__body {
 	flex: 1;
@@ -881,8 +890,13 @@
 	   timer for everyone, not just this query. */
 	.hero-carousel__pane,
 	[data-hero-carousel] .hero-seg,
-	[data-hero-carousel] .hero-caption__item {
+	[data-hero-carousel] .hero-caption__item,
+	[data-hero-carousel] .live-frame img {
 		transition: none !important;
+	}
+	/* No settle either — the shot sits at its resting scale from the start. */
+	[data-hero-carousel] .live-frame img {
+		transform: none !important;
 	}
 	/* Blur is motion's cousin here — the caption should land sharp, not soft. */
 	[data-hero-carousel] .hero-caption__item[data-on] {
