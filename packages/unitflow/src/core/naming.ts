@@ -1,8 +1,7 @@
-import * as Event from "../event.js"
-import { isFlatten, stateOf as flattenStateOf } from "../internals.js"
-import type { Shape } from "../model.js"
-import type { DebugSink } from "../registry.js"
-import * as Store from "../store.js"
+import * as Event from "./event.js"
+import { isFlatten, stateOf as flattenStateOf } from "./internals.js"
+import type { Shape } from "./model.js"
+import * as Store from "./store.js"
 
 const keyLabel = (key: unknown): string => {
 	if (key === undefined) return ""
@@ -35,17 +34,8 @@ const namePort = (port: unknown, label: string): void => {
  * Setter targets are named before combined sources — the more semantic label
  * wins. Descriptors already named (manually, or by the child model that
  * created and exposed them first) are left untouched.
- *
- * Every touched descriptor is also reported to the debug sink when one is
- * attached — the inspector's directory for retroactive log naming and
- * derived-store snapshots.
  */
-export const namePorts = (
-	shape: Shape,
-	modelKey: string,
-	key: unknown,
-	sink?: Pick<DebugSink, "port"> | undefined,
-): void => {
+export const namePorts = (shape: Shape, modelKey: string, key: unknown): void => {
 	const instance = `${modelKey}${keyLabel(key)}`
 	const visited = new Set<unknown>()
 
@@ -54,7 +44,6 @@ export const namePorts = (
 		visited.add(port)
 		namePort(port, label)
 		const effective = port.name ?? label
-		sink?.port(port)
 		if (Event.isSetter(port)) {
 			cascade(Event.targetOf(port), `${effective}.target`)
 			return
