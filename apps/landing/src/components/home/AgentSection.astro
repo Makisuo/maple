@@ -18,9 +18,13 @@
  * list doesn't imply is that this one reads your source, writes back, and
  * needs no plugin.
  *
+ * The endpoint rides the transcript's status bar rather than sitting in a box
+ * in this column. That is not decoration: the box overshot the terminal's
+ * natural height by ~90px, and `h-full` turned the overshoot into a visible
+ * hole inside the frame. Moving it balances the two columns instead.
+ *
  * KubernetesSection directly above is also copy-left / media-right on `bg-bg`,
- * which is why this one runs a wider media track and leads with the endpoint
- * box rather than a `helm install` <pre>.
+ * which is why this one runs a wider media track and carries no <pre>.
  *
  * Surface is `bg-bg`, not `bg-bg-deep`: `.live-frame` is itself `--bg-deep`,
  * so a deep floor would flatten the transcript into the page.
@@ -60,13 +64,6 @@ const points = [
 				</h2>
 				<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted">{m.mcp_lede()}</p>
 
-				<!-- The endpoint, not a `claude mcp add` line: every client takes
-				     a URL, and CLI flags rot. Same box as Kubernetes' helm line. -->
-				<div class="mt-8 rounded-lg border border-border bg-bg-elevated px-4 py-3">
-					<p class="text-[10px] uppercase tracking-[0.14em] text-fg-muted">{m.start_endpoint_label()}</p>
-					<p class="mt-1.5 overflow-x-auto font-mono text-[12.5px] text-fg">{MCP_ENDPOINT}</p>
-				</div>
-
 				<!-- mt-auto is what makes the column span the row: prose at the
 				     top edge, these rules at the bottom, slack in the middle. -->
 				<dl class="mt-auto pt-8">
@@ -89,7 +86,7 @@ const points = [
 				</div>
 			</div>
 
-			<LiveMcpTranscript class="h-full" />
+			<LiveMcpTranscript class="h-full" endpoint={MCP_ENDPOINT} />
 		</div>
 	</div>
 </section>

@@ -33,7 +33,7 @@ const { class: className = "", endpoint } = Astro.props;
 			LIVE
 		</span>
 	</div>
-	<div class="flex flex-1 flex-col justify-end p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
+	<div class="flex-1 p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
 		<!-- segment 0: opening agent prompt (typed) -->
 		<div class="mcp-line" data-segment="0">
 			<span class="text-fg-muted">&gt; ask maple</span>
@@ -89,7 +89,7 @@ const { class: className = "", endpoint } = Astro.props;
 	</div>
 	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
 		<span>4 tool calls · 4.2s</span>
-		<span>open mcp protocol</span>
+		<span class="truncate normal-case tracking-normal">{endpoint ?? "open mcp protocol"}</span>
 	</div>
 </div>
 
