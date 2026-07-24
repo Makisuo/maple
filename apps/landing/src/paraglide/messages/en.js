@@ -5288,3 +5288,19 @@ export const hero_shot_map = () => `Service map`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shots_aria = () => `Product screenshots`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `Connect your cloud`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart; PlanetScale and Cloudflare connect with one OAuth click. Maple discovers every database branch and zone behind them, and anything else Prometheus-compatible scrapes on a schedule.`

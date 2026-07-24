@@ -2,15 +2,16 @@
 /**
  * HeroCarousel — the hero's product plate, as three auto-advancing slides.
  *
- * The rail above the plate is a row of span bars: the active segment fills
- * left→right over its dwell (scaleX off a left origin, the same construction as
- * .roadmap-seg), spent segments stay full, unspent ones stay empty. Maple's
- * whole visual language is horizontal bars advancing across a time axis, so the
- * hero's own timer is one of them rather than a marketing progress widget.
+ * The rail is a row of span bars: the active one widens to carry its label and
+ * fills left→right over its dwell (scaleX off a left origin, the construction
+ * .roadmap-seg and .span-bar already use), while the others collapse to short
+ * dashes. Maple's whole visual language is horizontal bars advancing across a
+ * time axis, so the hero's own timer is one of them rather than a marketing
+ * progress widget.
  *
- * Panes are stacked MediaFrames that cross-dissolve — same construction as the
- * scrollstory in IncidentStory, and deliberately the same 320ms curve, so the
- * page has one motion vocabulary instead of two.
+ * Motion is one vocabulary: 700ms cubic-bezier(0, 0, 0.2, 1) for the segment
+ * width, the label reveal and the plate crossfade, so the rail and the plate
+ * settle together instead of racing.
  *
  * Filling in a slide is adding `src` to its entry below. Nothing else moves:
  * the stage holds a fixed aspect box, so a placeholder and a real capture
@@ -45,8 +46,14 @@ const slides = [
 ] satisfies { key: string; tab: string; label: string; src?: string; caption?: string }[];
 ---
 
-<div class="hero-carousel" data-hero-carousel data-dwell={DWELL}>
-	<div class="mb-4 flex gap-2 md:gap-3" role="tablist" aria-label={m.hero_shots_aria()}>
+<div
+	data-hero-carousel
+	data-dwell={DWELL}
+	role="group"
+	aria-roledescription="carousel"
+	aria-label={m.hero_shots_aria()}
+>
+	<div class="mb-4 flex items-center gap-3" role="tablist" aria-label={m.hero_shots_aria()}>
 		{
 			slides.map((slide, i) => (
 				<button
@@ -56,9 +63,8 @@ const slides = [
 					aria-controls={`hero-pane-${slide.key}`}
 					aria-selected={i === 0 ? "true" : "false"}
 					tabindex={i === 0 ? 0 : -1}
-					data-go={i}
 					data-on={i === 0 ? "" : undefined}
-					class="group flex flex-1 cursor-pointer flex-col gap-2 rounded-sm py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+					class="hero-tab"
 				>
 					<span class="hero-seg">
 						{/* Slide 1 ships full so the no-JS state reads as "selected"
@@ -66,9 +72,9 @@ const slides = [
 						    first tick. */}
 						<span class="hero-seg__fill" style={i === 0 ? "transform: scaleX(1)" : undefined} />
 					</span>
-					<span class="hidden text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted transition-colors group-hover:text-fg group-data-[on]:text-fg sm:block">
-						{slide.tab}
-					</span>
+					{/* Clipped to zero width when inactive rather than removed, so
+					    every tab keeps its accessible name at every breakpoint. */}
+					<span class="hero-tab__label">{slide.tab}</span>
 				</button>
 			))
 		}
@@ -104,6 +110,7 @@ const slides = [
 	const root = document.querySelector<HTMLElement>("[data-hero-carousel]");
 
 	if (root) {
+		const tablist = root.querySelector<HTMLElement>('[role="tablist"]');
 		const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 		const panes = [...root.querySelectorAll<HTMLElement>("[data-pane]")];
 		const fills = tabs.map((tab) => tab.querySelector<HTMLElement>(".hero-seg__fill"));
@@ -133,10 +140,11 @@ const slides = [
 				tab.setAttribute("aria-selected", i === index ? "true" : "false");
 				tab.tabIndex = i === index ? 0 : -1;
 			});
-			// Spent behind, empty ahead — the rail reads as elapsed time. With
-			// auto-advance off there is no timer, so the active segment sits full.
+			// Only the active segment carries fill; the rest are bare tracks. With
+			// no timer running (manual pick, reduced motion) it rests full, so the
+			// active segment still reads as chosen rather than as barely started.
 			fills.forEach((fill, i) => {
-				if (fill) fill.style.transform = i < index || (!auto && i === index) ? "scaleX(1)" : "scaleX(0)";
+				if (fill) fill.style.transform = !auto && i === index ? "scaleX(1)" : "scaleX(0)";
 			});
 		}
 
@@ -186,37 +194,52 @@ const slides = [
 			tab.addEventListener("click", () => goto(i));
 		});
 
-		root.querySelector('[role="tablist"]')?.addEventListener("keydown", (event) => {
-			const key = (event as KeyboardEvent).key;
+		tablist?.addEventListener("keydown", (event) => {
 			const last = tabs.length - 1;
 			let next: number | null = null;
-			if (key === "ArrowRight") next = index === last ? 0 : index + 1;
-			else if (key === "ArrowLeft") next = index === 0 ? last : index - 1;
-			else if (key === "Home") next = 0;
-			else if (key === "End") next = last;
+			if (event.key === "ArrowRight") next = index === last ? 0 : index + 1;
+			else if (event.key === "ArrowLeft") next = index === 0 ? last : index - 1;
+			else if (event.key === "Home") next = 0;
+			else if (event.key === "End") next = last;
 			if (next === null) return;
 			event.preventDefault();
 			goto(next);
 			tabs[next]?.focus();
 		});
 
-		root.addEventListener("pointerenter", () => {
-			hovered = true;
-			sync();
-		});
-		root.addEventListener("pointerleave", () => {
-			hovered = false;
-			sync();
-		});
+		// Mouse only. On touch, pointerenter fires on tap and the matching
+		// pointerleave may never arrive, which would latch the reel off for good.
+		if (matchMedia("(hover: hover)").matches) {
+			root.addEventListener("pointerenter", (event) => {
+				if (event.pointerType !== "mouse") return;
+				hovered = true;
+				sync();
+			});
+			root.addEventListener("pointerleave", (event) => {
+				if (event.pointerType !== "mouse") return;
+				hovered = false;
+				sync();
+			});
+		}
+
 		root.addEventListener("focusin", () => {
 			focused = true;
 			sync();
 		});
-		root.addEventListener("focusout", () => {
+		root.addEventListener("focusout", (event) => {
+			// Arrowing between tabs fires focusout before focusin; only a move that
+			// actually leaves the carousel should release the hold.
+			if (root.contains(event.relatedTarget as Node | null)) return;
 			focused = false;
 			sync();
 		});
-		document.addEventListener("visibilitychange", sync);
+
+		document.addEventListener("visibilitychange", () => {
+			// A pointer that left while the tab was hidden never fired pointerleave;
+			// drop the hold and let a fresh pointerenter re-take it.
+			if (!document.hidden) hovered = false;
+			sync();
+		});
 
 		// No timer burns while the reader is further down the page.
 		new IntersectionObserver(

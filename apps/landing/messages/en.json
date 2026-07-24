@@ -687,6 +687,8 @@
 	"platform_alerts_desc": "Seven signal types with severity, incident tracking, and auto-resolution. Slack, Discord, PagerDuty, or any webhook.",
 	"platform_mcp_name": "AI & MCP",
 	"platform_mcp_desc": "Any MCP-compatible client can list services, search traces, read the source, and propose a fix. Open protocol, no plugin.",
+	"platform_cloud_name": "Connect your cloud",
+	"platform_cloud_desc": "Kubernetes ships as a Helm chart; PlanetScale and Cloudflare connect with one OAuth click. Maple discovers every database branch and zone behind them, and anything else Prometheus-compatible scrapes on a schedule.",
 
 	"sov_pillar_4_label": "Your perimeter",
 	"sov_pillar_4_body": "Run Maple on your own infrastructure, against a ClickHouse you operate and scale yourself. Your telemetry never has to leave your network \u2014 retention and residency are your call, not a fixed SaaS window.",

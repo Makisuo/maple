@@ -212,10 +212,21 @@
 /* ──────────────────────────────────────────────────────────────
    Hero carousel.
    The timer segments are span bars — scaleX off a left origin, the
-   same construction as .roadmap-seg and .span-bar. Panes cross-
-   dissolve at the scrollstory timing so the page keeps one motion
-   vocabulary. Reduced motion freezes both (see the freeze block).
+   construction .roadmap-seg and .span-bar already use. The active
+   segment widens to carry its label while the others collapse to
+   dashes, so the rail states where you are without a counter.
+
+   One motion vocabulary throughout: --hero-ease over --hero-swap
+   for the segment width, the label reveal and the plate crossfade,
+   so the rail and the plate settle together instead of racing.
+   Reduced motion freezes all of it (see the freeze block).
    ────────────────────────────────────────────────────────────── */
+[data-hero-carousel] {
+	--hero-swap: 700ms;
+	--hero-ease: cubic-bezier(0, 0, 0.2, 1);
+	--hero-seg-idle: 20px;
+	--hero-seg-active: 92px;
+}
 .hero-carousel__stage {
 	position: relative;
 	aspect-ratio: 1400 / 720;
@@ -225,11 +236,15 @@
 	inset: 0;
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
+	/* z-index, not opacity alone: the incoming plate fades in over the outgoing
+	   one, so two dark dashboards don't cross at 50% and read as a dip. */
+	z-index: 0;
+	transition: opacity var(--hero-swap) var(--hero-ease);
 }
 .hero-carousel__pane[data-on] {
 	opacity: 1;
 	pointer-events: auto;
+	z-index: 1;
 }
 /* Both MediaFrame branches fill the stage box exactly, so a real capture and a
    placeholder occupy the same rectangle and the frame never moves. */
@@ -248,13 +263,40 @@
 	flex: 1;
 	aspect-ratio: auto;
 }
+
+/* Fixed row height, so the track thickening on hover grows about its own
+   centre instead of nudging the plate. 24px also keeps the tap target legal
+   once the label is clipped away. */
+.hero-tab {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	height: 24px;
+	cursor: pointer;
+	border-radius: 2px;
+}
+.hero-tab:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 4px;
+}
 .hero-seg {
 	display: block;
 	height: 2px;
-	width: 100%;
+	width: var(--hero-seg-idle);
 	overflow: hidden;
 	border-radius: 999px;
 	background: var(--border);
+	transition:
+		width var(--hero-swap) var(--hero-ease),
+		height 200ms ease-out,
+		background-color 200ms ease-out;
+}
+.hero-tab[data-on] .hero-seg {
+	width: var(--hero-seg-active);
+}
+.hero-tab:hover .hero-seg {
+	height: 6px;
+	background: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
 }
 .hero-seg__fill {
 	display: block;
@@ -263,6 +305,31 @@
 	transform: scaleX(0);
 	transform-origin: left center;
 	background: var(--primary);
+}
+/* Clipped, not hidden — an inactive tab keeps its accessible name. */
+.hero-tab__label {
+	display: block;
+	max-width: 0;
+	overflow: hidden;
+	opacity: 0;
+	white-space: nowrap;
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+	transition:
+		max-width var(--hero-swap) var(--hero-ease),
+		opacity var(--hero-swap) var(--hero-ease),
+		color 200ms ease-out;
+}
+.hero-tab[data-on] .hero-tab__label {
+	max-width: 12rem;
+	opacity: 1;
+	color: var(--foreground);
+}
+.hero-tab:hover .hero-tab__label {
+	color: var(--foreground);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -788,13 +855,13 @@
 
 	/* The hero carousel stops auto-advancing in JS, so it holds slide 1 with a
 	   full segment — the same frame the no-JS state renders. The rail still
-	   switches on click; only the motion is gone. */
-	.hero-carousel__pane {
+	   switches on click; only the motion is gone. Nothing here may touch
+	   .hero-seg__fill: an !important transform would outrank the Web Animations
+	   timer for everyone, not just this query. */
+	.hero-carousel__pane,
+	[data-hero-carousel] .hero-seg,
+	[data-hero-carousel] .hero-tab__label {
 		transition: none !important;
-	}
-	.hero-seg__fill {
-		transition: none !important;
-		animation: none !important;
 	}
 
 	.log-stream__belt,

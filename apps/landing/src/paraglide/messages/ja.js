@@ -5288,3 +5288,8 @@ export const hero_shot_map = () => `サービスマップ`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shots_aria = () => `製品スクリーンショット`
+
+
+export { platform_cloud_name } from "./en.js"
+
+export { platform_cloud_desc } from "./en.js"
