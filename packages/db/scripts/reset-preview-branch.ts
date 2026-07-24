@@ -193,11 +193,20 @@ const main = async () => {
 		// this, the replayed CREATE SCHEMA migration would hit duplicate_object
 		// on every reused-branch deploy — with no recreate fallback, because the
 		// emptiness verification below only inspects `public`.
+		//
+		// RESET_PRESERVE_SCHEMAS (comma-separated) is the ops lever for the day
+		// PlanetScale ships a `postgres`-owned vendor schema this heuristic would
+		// otherwise take out — those names are skipped without a code change.
+		const preservedSchemas = (process.env.RESET_PRESERVE_SCHEMAS ?? "")
+			.split(",")
+			.map((name) => name.trim())
+			.filter(Boolean)
 		const extraSchemas = await sql<{ nspname: string }[]>`
 			SELECT n.nspname FROM pg_namespace n
 			JOIN pg_roles r ON r.oid = n.nspowner
 			WHERE n.nspname NOT IN ('public', 'information_schema')
 				AND n.nspname NOT LIKE ${"pg\\_%"}
+				AND n.nspname != ALL(${preservedSchemas})
 				AND (r.rolname = 'postgres' OR pg_has_role(current_user, r.oid, 'USAGE'))
 		`
 		for (const { nspname } of extraSchemas) {
@@ -207,11 +216,22 @@ const main = async () => {
 
 		// The reset only succeeded if public is actually empty now — anything
 		// left (an owner we couldn't assume, an object class this script doesn't
-		// know) must push the caller onto the delete → recreate fallback.
+		// know) must push the caller onto the delete → recreate fallback. Count
+		// relations AND routines AND standalone enum/domain types: a surviving
+		// enum would otherwise sail past this check and hit duplicate_object at
+		// migrate replay, where there is no recreate fallback anymore.
 		const [remaining] = await sql<{ count: string }[]>`
-			SELECT count(*)::int AS count FROM pg_class c
-			JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'S', 'p', 'f')
+			SELECT (
+				(SELECT count(*) FROM pg_class c
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'S', 'p', 'f'))
+				+ (SELECT count(*) FROM pg_proc p
+					JOIN pg_namespace n ON n.oid = p.pronamespace
+					WHERE n.nspname = 'public')
+				+ (SELECT count(*) FROM pg_type t
+					JOIN pg_namespace n ON n.oid = t.typnamespace
+					WHERE n.nspname = 'public' AND t.typtype IN ('e', 'd'))
+			)::int AS count
 		`
 		if (Number(remaining?.count ?? 0) > 0) {
 			fail(`public schema still holds ${remaining?.count} objects after the drop pass`)
