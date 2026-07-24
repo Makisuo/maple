@@ -5127,7 +5127,7 @@ export const platform_cloud_name = () => `클라우드 연결`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `Kubernetes는 Helm 차트로, PlanetScale과 Cloudflare는 OAuth 한 번으로 연결됩니다. 뒤에 있는 데이터베이스 브랜치와 존을 자동으로 찾아내고, Prometheus 호환 엔드포인트는 주기적으로 스크레이프합니다.`
+export const platform_cloud_desc = () => `Kubernetes는 Helm 차트로. PlanetScale, Cloudflare 등은 OAuth 한 번으로 연결됩니다.`
 
 
 /**

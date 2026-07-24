@@ -23,6 +23,11 @@ import MediaFrame from "./MediaFrame.astro";
 /** Dwell per slide, ms. Long enough to read a dashboard, short enough to cycle. */
 const DWELL = 6000;
 
+/** How long a hand-picked slide holds before the reel takes over again. Two
+ *  dwells — long enough to study the plate you chose, short enough that the
+ *  hero doesn't end up parked on one shot for the rest of the visit. */
+const RESUME = 12000;
+
 const slides = [
 	{
 		key: "overview",
@@ -52,6 +57,7 @@ const slides = [
 <div
 	data-hero-carousel
 	data-dwell={DWELL}
+	data-resume={RESUME}
 	role="group"
 	aria-roledescription="carousel"
 	aria-label={m.hero_shots_aria()}
@@ -130,18 +136,22 @@ const slides = [
 		const captions = [...root.querySelectorAll<HTMLElement>("[data-caption]")];
 		const fills = tabs.map((tab) => tab.querySelector<HTMLElement>(".hero-seg__fill"));
 		const dwell = Number(root.dataset.dwell) || 6000;
+		const resumeAfter = Number(root.dataset.resume) || 12000;
 
 		let index = 0;
 		let anim: Animation | null = null;
+		let resumeTimer = 0;
 
 		// Four independent reasons to be stopped, resolved by one predicate rather
-		// than four competing play/pause calls — otherwise "pointer leaves while
-		// the tab is backgrounded" resumes a timer nobody can see.
-		let auto = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+		// than four competing play/pause calls — otherwise "tab returns to the
+		// foreground while scrolled away" resumes a timer nobody can see.
+		// `auto` is the standing capability (reduced motion turns it off for good);
+		// `manual` is the temporary hold a hand-picked slide takes out.
+		const auto = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+		let manual = false;
 		let onscreen = true;
-		let hovered = false;
 		let focused = false;
-		const running = () => auto && onscreen && !hovered && !focused && !document.hidden;
+		const running = () => auto && !manual && onscreen && !focused && !document.hidden;
 
 		function show(next: number) {
 			index = next;
@@ -159,11 +169,12 @@ const slides = [
 				tab.setAttribute("aria-selected", i === index ? "true" : "false");
 				tab.tabIndex = i === index ? 0 : -1;
 			});
-			// Only the active segment carries fill; the rest are bare tracks. With
-			// no timer running (manual pick, reduced motion) it rests full, so the
-			// active segment still reads as chosen rather than as barely started.
+			// Only the active segment carries fill; the rest are bare tracks. While
+			// no timer will run (hand-picked slide, reduced motion) it rests full,
+			// so the active segment reads as chosen rather than as barely started.
+			const idle = !auto || manual;
 			fills.forEach((fill, i) => {
-				if (fill) fill.style.transform = !auto && i === index ? "scaleX(1)" : "scaleX(0)";
+				if (fill) fill.style.transform = idle && i === index ? "scaleX(1)" : "scaleX(0)";
 			});
 		}
 
@@ -202,11 +213,20 @@ const slides = [
 		}
 
 		function goto(next: number) {
-			// The reader picked a plate. Yanking it away six seconds later is
-			// hostile, so auto-advance ends for the rest of the session.
-			auto = false;
+			// The reader picked a plate, so hold it — but only for a while. Each
+			// new pick restarts the countdown, so walking the rail never leaves a
+			// resume queued from an earlier click.
 			stop();
+			manual = true;
 			show(next);
+			clearTimeout(resumeTimer);
+			if (!auto) return;
+			resumeTimer = window.setTimeout(() => {
+				manual = false;
+				// sync() decides whether it may actually start — offscreen or a
+				// backgrounded tab still wins over an expired hold.
+				sync();
+			}, resumeAfter);
 		}
 
 		tabs.forEach((tab, i) => {
@@ -226,20 +246,9 @@ const slides = [
 			tabs[next]?.focus();
 		});
 
-		// Mouse only. On touch, pointerenter fires on tap and the matching
-		// pointerleave may never arrive, which would latch the reel off for good.
-		if (matchMedia("(hover: hover)").matches) {
-			root.addEventListener("pointerenter", (event) => {
-				if (event.pointerType !== "mouse") return;
-				hovered = true;
-				sync();
-			});
-			root.addEventListener("pointerleave", (event) => {
-				if (event.pointerType !== "mouse") return;
-				hovered = false;
-				sync();
-			});
-		}
+		// Deliberately no hover hold: pointing at the plate to look at it is not a
+		// request to stop the reel, and on touch the pointerenter/pointerleave
+		// pair is unreliable enough to strand it paused.
 
 		root.addEventListener("focusin", () => {
 			focused = true;
@@ -253,12 +262,7 @@ const slides = [
 			sync();
 		});
 
-		document.addEventListener("visibilitychange", () => {
-			// A pointer that left while the tab was hidden never fired pointerleave;
-			// drop the hold and let a fresh pointerenter re-take it.
-			if (!document.hidden) hovered = false;
-			sync();
-		});
+		document.addEventListener("visibilitychange", sync);
 
 		// No timer burns while the reader is further down the page.
 		new IntersectionObserver(

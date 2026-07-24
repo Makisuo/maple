@@ -5127,7 +5127,7 @@ export const platform_cloud_name = () => `クラウドをつなぐ`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `KubernetesはHelmチャート、PlanetScaleとCloudflareはOAuthのワンクリックで接続。背後にあるデータベースブランチやゾーンを自動で検出し、Prometheus互換のエンドポイントは定期スクレイプで取り込みます。`
+export const platform_cloud_desc = () => `KubernetesはHelmチャート。PlanetScale、Cloudflareなどは OAuth のワンクリックで接続。`
 
 
 /**
