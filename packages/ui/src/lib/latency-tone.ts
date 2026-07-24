@@ -49,8 +49,14 @@ export function latencyLevel(ms: number, scale: LatencyScale = "p95", budgetMs?:
 	const budget = budgetMs ?? BUDGET_MS[scale]
 	if (!Number.isFinite(budget) || budget <= 0) return "quiet"
 	const ratio = ms / budget
-	for (const [i, brk] of BREAKS.entries()) {
-		if (ratio < brk) return LEVELS[i]
+	// Indexed loop, not `BREAKS.entries()`: this runs per metric cell per frame
+	// (3 calls x 40 nodes on the service map), so it goes hot fast, and the
+	// iterator-plus-array-destructuring form crashes JavaScriptCore's DFG tier
+	// when it does — EXC_BREAKPOINT in VirtualRegisterAllocationPhase, which
+	// takes the whole WebKit content process down. Plain indexing is also less
+	// work per call.
+	for (let i = 0; i < BREAKS.length; i++) {
+		if (ratio < BREAKS[i]) return LEVELS[i]
 	}
 	return "critical"
 }
