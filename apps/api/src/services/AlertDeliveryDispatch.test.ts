@@ -99,7 +99,8 @@ describe("buildTemplateContext", () => {
 		assert.deepStrictEqual(body.missing, [])
 		assert.include(title.text, "Checkout error rate")
 		assert.include(title.text, "Triggered")
-		assert.include(body.text, "*Observed:* 8% > 5%")
+		assert.include(body.text, "Error Rate is *8%* (> 5%) over the last 5m.")
+		assert.include(body.text, "*Severity:* critical · *Group:* all")
 	})
 })
 
