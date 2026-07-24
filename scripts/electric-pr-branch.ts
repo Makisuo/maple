@@ -654,19 +654,18 @@ const up = async (environmentName: string): Promise<void> => {
 	// v0.0.10 result: { id, status, sourceSecret } — the postgres service IS the
 	// shape-API source, so its id is the `source_id` the sync worker forwards.
 	const service = parseJson(createdSvc.stdout, "services create postgres")
-	const sourceId = pick(service, "id", "serviceId", "sourceId")
 	// Fail fast on a CLI output-shape drift: without an id the activation wait
 	// below would be skipped and the run would only die much later (after the
 	// publication-mirror poll) with a message that buries the actual cause.
-	if (!sourceId) {
+	const sourceId =
+		pick(service, "id", "serviceId", "sourceId") ??
 		fail(
 			"`electric services create postgres --json` returned no service id — cannot wait for activation or resolve the source",
 		)
-	}
 	let secret = pick(service, "sourceSecret", "secret", "source_secret")
 
 	// 3b. Wait for the service to become active before the alchemy deploy binds it.
-	if (sourceId) {
+	{
 		const deadline = Date.now() + ACTIVE_TIMEOUT_MS
 		let lastStatus = pick(service, "status") ?? "unknown"
 		console.log(`… service ${sourceId} status: ${lastStatus}`)
@@ -741,15 +740,15 @@ const up = async (environmentName: string): Promise<void> => {
 	}
 
 	// 4. Fetch the source secret if `create` didn't already return it.
-	if (!secret && sourceId) {
+	if (!secret) {
 		const fetched = runElectric(["services", "get-secret", sourceId, "--json"], { secret: true })
 		if (fetched.exitCode !== 0) {
 			fail(`Failed to fetch the source secret for service ${sourceId}`)
 		}
 		secret = pick(parseJson(fetched.stdout, "services get-secret"), "secret", "sourceSecret")
 	}
-	if (!sourceId || !secret) {
-		fail("Could not resolve the Electric source_id + secret from the CLI output")
+	if (!secret) {
+		fail("Could not resolve the Electric source secret from the CLI output")
 	}
 
 	// 5. Hand the source creds to the rest of the workflow. alchemy binds these to
@@ -757,7 +756,7 @@ const up = async (environmentName: string): Promise<void> => {
 	maskAndExport(
 		{
 			ELECTRIC_URL: electricUrl,
-			ELECTRIC_SOURCE_ID: sourceId as string,
+			ELECTRIC_SOURCE_ID: sourceId,
 			ELECTRIC_SECRET: secret as string,
 		},
 		[secret as string],

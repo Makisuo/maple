@@ -193,6 +193,20 @@ const main = async () => {
 		// this, the replayed CREATE SCHEMA migration would hit duplicate_object
 		// on every reused-branch deploy — with no recreate fallback, because the
 		// emptiness verification below only inspects `public`.
+		//
+		// RESET_PRESERVE_SCHEMAS (comma-separated) is the ops lever for the day
+		// PlanetScale ships a `postgres`-owned vendor schema this heuristic would
+		// otherwise take out — those names are skipped without a code change.
+		const preservedSchemas = (process.env.RESET_PRESERVE_SCHEMAS ?? "")
+			.split(",")
+			.map((name) => name.trim())
+			.filter(Boolean)
+		// No bind parameters here on purpose: with `fetch_types: false`,
+		// postgres.js serializes an empty JS array (`!= ALL(${[]})`) as '' and
+		// the server rejects it with `malformed array literal: ""` — that broke
+		// the in-place reset on EVERY deploy whose merge included the parameter
+		// (runs 30083630959/30086768041). The LIKE pattern is a literal and the
+		// preserved-schema exemption is applied client-side instead.
 		const extraSchemas = await sql<{ nspname: string }[]>`
 			SELECT n.nspname FROM pg_namespace n
 			JOIN pg_roles r ON r.oid = n.nspowner
@@ -201,17 +215,32 @@ const main = async () => {
 				AND (r.rolname = 'postgres' OR pg_has_role(current_user, r.oid, 'USAGE'))
 		`
 		for (const { nspname } of extraSchemas) {
+			if (preservedSchemas.includes(nspname)) {
+				console.log(`… preserving schema "${nspname}" (RESET_PRESERVE_SCHEMAS)`)
+				continue
+			}
 			await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(nspname)} CASCADE`)
 			console.log(`→ Dropped schema "${nspname}"`)
 		}
 
 		// The reset only succeeded if public is actually empty now — anything
 		// left (an owner we couldn't assume, an object class this script doesn't
-		// know) must push the caller onto the delete → recreate fallback.
+		// know) must push the caller onto the delete → recreate fallback. Count
+		// relations AND routines AND standalone enum/domain types: a surviving
+		// enum would otherwise sail past this check and hit duplicate_object at
+		// migrate replay, where there is no recreate fallback anymore.
 		const [remaining] = await sql<{ count: string }[]>`
-			SELECT count(*)::int AS count FROM pg_class c
-			JOIN pg_namespace n ON n.oid = c.relnamespace
-			WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'S', 'p', 'f')
+			SELECT (
+				(SELECT count(*) FROM pg_class c
+					JOIN pg_namespace n ON n.oid = c.relnamespace
+					WHERE n.nspname = 'public' AND c.relkind IN ('r', 'v', 'm', 'S', 'p', 'f'))
+				+ (SELECT count(*) FROM pg_proc p
+					JOIN pg_namespace n ON n.oid = p.pronamespace
+					WHERE n.nspname = 'public')
+				+ (SELECT count(*) FROM pg_type t
+					JOIN pg_namespace n ON n.oid = t.typnamespace
+					WHERE n.nspname = 'public' AND t.typtype IN ('e', 'd'))
+			)::int AS count
 		`
 		if (Number(remaining?.count ?? 0) > 0) {
 			fail(`public schema still holds ${remaining?.count} objects after the sweep`)
@@ -253,10 +282,11 @@ try {
 	await main()
 } catch (error) {
 	// postgres.js errors carry the failing statement — surface it, because the
-	// server's own error report doesn't (run 30083630959: a nondeterministic
-	// `malformed array literal: ""` for "parameter $2" that no query in this
-	// script sends — suspected PlanetScale-side DDL interception; this makes
-	// the next occurrence self-identifying).
+	// server's own error report doesn't. This is how the `malformed array
+	// literal: ""` failure was pinned to the empty-array bind parameter
+	// (`!= ALL(${[]})` under fetch_types:false — run 30086768041's
+	// `parameters: ["pg\\_%", ""]`); keep it so the next mystery identifies
+	// itself too.
 	const query = (error as { query?: unknown }).query
 	const parameters = (error as { parameters?: unknown }).parameters
 	if (query !== undefined) console.error(`✗ failing query: ${String(query).slice(0, 500)}`)
