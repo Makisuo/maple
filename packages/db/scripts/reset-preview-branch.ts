@@ -108,7 +108,7 @@ const main = async () => {
 			) owned
 			JOIN pg_roles r ON r.oid = owned.oid
 			WHERE NOT pg_has_role(current_user, r.oid, 'USAGE')
-				AND r.rolname NOT LIKE ${"pg\\_%"}
+				AND r.rolname NOT LIKE 'pg\\_%'
 		`
 		for (const { owner } of owners) {
 			try {
@@ -133,7 +133,7 @@ const main = async () => {
 		// Empty `public` object-by-object. Tables first with CASCADE (takes FKs
 		// and dependent views along), then whatever remains of each class.
 		// Composite row-types of tables vanish with their table, so the type
-		// drop pass only targets standalone enums/domains (drizzle-kit's pgEnum).
+		// sweep only targets standalone enums/domains (drizzle-kit's pgEnum).
 		const dropObjects = async (
 			label: string,
 			listQuery: Promise<{ name: string }[]>,
@@ -201,15 +201,24 @@ const main = async () => {
 			.split(",")
 			.map((name) => name.trim())
 			.filter(Boolean)
+		// No bind parameters here on purpose: with `fetch_types: false`,
+		// postgres.js serializes an empty JS array (`!= ALL(${[]})`) as '' and
+		// the server rejects it with `malformed array literal: ""` — that broke
+		// the in-place reset on EVERY deploy whose merge included the parameter
+		// (runs 30083630959/30086768041). The LIKE pattern is a literal and the
+		// preserved-schema exemption is applied client-side instead.
 		const extraSchemas = await sql<{ nspname: string }[]>`
 			SELECT n.nspname FROM pg_namespace n
 			JOIN pg_roles r ON r.oid = n.nspowner
 			WHERE n.nspname NOT IN ('public', 'information_schema')
-				AND n.nspname NOT LIKE ${"pg\\_%"}
-				AND n.nspname != ALL(${preservedSchemas})
+				AND n.nspname NOT LIKE 'pg\\_%'
 				AND (r.rolname = 'postgres' OR pg_has_role(current_user, r.oid, 'USAGE'))
 		`
 		for (const { nspname } of extraSchemas) {
+			if (preservedSchemas.includes(nspname)) {
+				console.log(`… preserving schema "${nspname}" (RESET_PRESERVE_SCHEMAS)`)
+				continue
+			}
 			await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(nspname)} CASCADE`)
 			console.log(`→ Dropped schema "${nspname}"`)
 		}
@@ -234,11 +243,11 @@ const main = async () => {
 			)::int AS count
 		`
 		if (Number(remaining?.count ?? 0) > 0) {
-			fail(`public schema still holds ${remaining?.count} objects after the drop pass`)
+			fail(`public schema still holds ${remaining?.count} objects after the sweep`)
 		}
 		console.log(`→ public schema emptied`)
 
-		// Drop replication slots orphaned by torn-down Electric sources.
+		// Sweep replication slots orphaned by torn-down Electric sources.
 		// pg_drop_replication_slot needs the REPLICATION attribute, which the
 		// main role deliberately lacks (and which is never inherited through
 		// `postgres` membership) — the caller passes the replication-role
@@ -257,7 +266,7 @@ const main = async () => {
 			}
 		} catch (error) {
 			console.log(
-				`⚠ could not drop inactive replication slots (${(error as Error).message}) — a stale slot pins WAL for the branch's lifetime; continuing`,
+				`⚠ could not sweep inactive replication slots (${(error as Error).message}) — a stale slot pins WAL for the branch's lifetime; continuing`,
 			)
 		} finally {
 			if (slotSql !== sql) await slotSql.end()
@@ -269,4 +278,18 @@ const main = async () => {
 	}
 }
 
-await main()
+try {
+	await main()
+} catch (error) {
+	// postgres.js errors carry the failing statement — surface it, because the
+	// server's own error report doesn't. This is how the `malformed array
+	// literal: ""` failure was pinned to the empty-array bind parameter
+	// (`!= ALL(${[]})` under fetch_types:false — run 30086768041's
+	// `parameters: ["pg\\_%", ""]`); keep it so the next mystery identifies
+	// itself too.
+	const query = (error as { query?: unknown }).query
+	const parameters = (error as { parameters?: unknown }).parameters
+	if (query !== undefined) console.error(`✗ failing query: ${String(query).slice(0, 500)}`)
+	if (parameters !== undefined) console.error(`✗ query parameters: ${JSON.stringify(parameters)}`)
+	throw error
+}
