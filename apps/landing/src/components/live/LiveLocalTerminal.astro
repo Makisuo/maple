@@ -1,0 +1,266 @@
+---
+/**
+ * LiveLocalTerminal — `maple start`, as it actually prints.
+ *
+ * The banner is a faithful reproduction of `startBanner()` in
+ * `apps/cli/src/commands/server.ts`: same rows, same order, same 11-column key
+ * gutter (`key.padEnd(11)`), and the defaults are the real ones —
+ * `DEFAULT_LOCAL_HOST` / `DEFAULT_LOCAL_PORT` in `apps/cli/src/lib/local-address.ts`.
+ * The CLI's ANSI helpers (`apps/cli/src/lib/style.ts`) map onto tokens rather
+ * than being restyled: amber() → --primary, green() → --chart-3, cyan() →
+ * --chart-4, dim() → --muted-foreground. Chart tokens, not severity or service
+ * ones — DESIGN.md reserves those for log levels and service identity.
+ *
+ * Plays ONCE. Sections 06 and 07 both loop their artifacts; this one starts,
+ * resolves, and then just sits there — which is what `maple start` does.
+ *
+ * Surface: LocalSection's floor is `bg-bg-deep`, and `.live-frame` is itself
+ * `--bg-deep`, so the stock frame would render here as a bare 1px outline.
+ * Rather than move the section off the deep floor (the amber → ink drop is the
+ * page's sharpest tonal event), the frame body is lifted one step to
+ * `--background` per DESIGN.md's Tonal-Depth Rule. Lift by tone, never a shadow
+ * — no glow, no grain, no traffic-light dots.
+ *
+ * SSR renders the finished banner; the client island hides-then-reveals. With
+ * JS off or `prefers-reduced-motion`, the static banner is what ships.
+ */
+interface Props {
+	class?: string;
+}
+
+const { class: className = "" } = Astro.props;
+
+const COMMAND = "maple start";
+
+/** One `row(key, value)` line of the banner. */
+interface BannerRow {
+	/** Left gutter, padded to 11ch by the CLI. Absent = continuation line. */
+	key?: string;
+	/** The foreground segment. */
+	value?: string;
+	/** A `dim()` segment trailing the value. */
+	note?: string;
+	/** A `bold()` tail after the note — only ever `maple stop`. */
+	tail?: string;
+	/** `cyan(underline(…))` in the CLI. */
+	link?: boolean;
+}
+
+const rows: BannerRow[] = [
+	{ key: "OTLP/HTTP", value: "POST", note: "/v1/{traces,logs,metrics}" },
+	{ key: "query", value: "POST", note: "/local/query" },
+	{ key: "dashboard", value: "https://local.maple.dev", link: true },
+	{ note: "· bundled UI: pass --offline" },
+	{ key: "data", value: "~/.maple/data" },
+	{ key: "pid", value: "48213", note: "· stop with", tail: "maple stop" },
+];
+---
+
+<div class={`live-frame local-term flex flex-col ${className}`}>
+	<div class="live-frame__head">
+		<span>local · 127.0.0.1:4318</span>
+		<span class="live-frame__live">
+			<span class="live-frame__live-dot"></span>
+			LIVE
+		</span>
+	</div>
+
+	<div class="local-term__body" data-local-term>
+		<!-- segment 0 — the command, typed. -->
+		<div class="lt-line lt-cmd" data-segment="0">
+			<span class="lt-prompt" aria-hidden="true">$</span><span
+				class="lt-typed"
+				data-typed={COMMAND}>{COMMAND}</span
+			>
+		</div>
+
+		<!-- segment 1 — the server is up. -->
+		<div class="lt-line lt-line--lead" data-segment="1">
+			<span class="lt-leaf">🍁 maple</span>
+			<span class="lt-dim">· local mode</span>
+		</div>
+		<div class="lt-line" data-segment="1">
+			<span class="lt-ok" aria-hidden="true">●</span>
+			<span class="lt-dim">listening on</span>
+			<span class="lt-url">http://127.0.0.1:4318</span>
+		</div>
+
+		<!-- segment 2 — what it mounted, in the CLI's own key gutter. -->
+		<div class="lt-rows">
+			{
+				rows.map((row) => (
+					<div class="lt-line lt-row" data-segment="2">
+						<span class="lt-key">{row.key}</span>
+						<span class="lt-val">
+							{row.value && <span class:list={["lt-word", row.link && "lt-url"]}>{row.value}</span>}
+							{row.note && <span class="lt-dim">{row.note}</span>}
+							{row.tail && <span class="lt-strong">{row.tail}</span>}
+						</span>
+					</div>
+				))
+			}
+		</div>
+
+		<!-- segment 3 — back at the prompt, and staying there. -->
+		<div class="lt-line lt-line--tail" data-segment="3">
+			<span class="lt-prompt" aria-hidden="true">$</span>
+			<span class="lt-caret" aria-hidden="true"></span>
+		</div>
+	</div>
+
+	<div class="local-term__foot">
+		<span>one binary · one port</span>
+		<span>nothing leaves 127.0.0.1</span>
+	</div>
+</div>
+
+<script>
+	import { playLocalTerminal } from "./live-local-terminal.client";
+	const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (!reduced) {
+		document.querySelectorAll<HTMLElement>("[data-local-term]").forEach((el) => {
+			playLocalTerminal(el);
+		});
+	}
+</script>
+
+<style>
+	/* Lifted one tonal step off the section's `--bg-deep` floor so the frame
+	   reads as a surface rather than an outline. The head and foot bars keep
+	   the `--bg-elevated` they have on every other live frame, so the internal
+	   stack (body < bars) survives the lift. */
+	.local-term {
+		background: var(--background);
+	}
+
+	.local-term__body {
+		flex: 1;
+		padding: 16px 16px 18px;
+		font-family: var(--font-mono);
+		font-size: 12.5px;
+		line-height: 1.55;
+		overflow-x: auto;
+	}
+
+	.local-term__foot {
+		display: flex;
+		justify-content: space-between;
+		gap: 16px;
+		padding: 10px 14px;
+		border-top: 1px solid var(--border);
+		background: var(--bg-elevated);
+		font-size: 10px;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--muted-foreground);
+	}
+
+	/* ── Lines ──────────────────────────────────────────────── */
+	.lt-line {
+		display: flex;
+		gap: 8px;
+		min-height: 1.55em;
+		white-space: nowrap;
+	}
+	/* The banner opens with a blank line, and closes with one before the
+	   prompt returns — the CLI prints both. */
+	.lt-line--lead {
+		margin-top: 1.55em;
+	}
+	.lt-line--tail {
+		margin-top: 1.55em;
+	}
+	.lt-rows {
+		margin-top: 1.55em;
+	}
+
+	.lt-cmd {
+		color: var(--foreground);
+	}
+	.lt-prompt {
+		color: var(--primary);
+		user-select: none;
+	}
+	.lt-typed {
+		color: var(--foreground);
+	}
+
+	/* ── ANSI → token ───────────────────────────────────────── */
+	.lt-leaf {
+		color: var(--primary);
+	}
+	.lt-ok {
+		color: var(--chart-3);
+	}
+	.lt-dim {
+		color: var(--muted-foreground);
+	}
+	.lt-word {
+		color: var(--foreground);
+	}
+	.lt-strong {
+		color: var(--foreground);
+		font-weight: 500;
+	}
+	/* cyan(underline(…)) — the underline is the CLI's, kept at a hairline so it
+	   reads as a URL and not as a link affordance on a static mock. */
+	.lt-url {
+		color: var(--chart-4);
+		text-decoration: underline;
+		text-decoration-color: color-mix(in oklab, var(--chart-4) 45%, transparent);
+		text-underline-offset: 3px;
+	}
+
+	/* ── The 11ch key gutter, straight from `key.padEnd(11)` ── */
+	.lt-row {
+		gap: 0;
+	}
+	.lt-key {
+		flex: none;
+		width: 11ch;
+		color: var(--muted-foreground);
+	}
+	.lt-val {
+		display: flex;
+		gap: 8px;
+		min-width: 0;
+	}
+
+	/* ── Caret ──────────────────────────────────────────────── */
+	.lt-caret {
+		display: inline-block;
+		width: 7px;
+		height: 1.1em;
+		background: var(--primary);
+		vertical-align: -0.15em;
+		animation: lt-caret-blink 1.05s steps(1) infinite;
+	}
+	/* Terminal-style 50/50 blink — scoped so it can't bind to the shared
+	   @theme caret-blink, which eases on a different rhythm. */
+	@keyframes lt-caret-blink {
+		0%,
+		49% {
+			opacity: 1;
+		}
+		50%,
+		100% {
+			opacity: 0;
+		}
+	}
+
+	@media (max-width: 640px) {
+		.local-term__body {
+			padding: 14px 14px 16px;
+			font-size: 11.5px;
+		}
+	}
+
+	/* The island never runs under reduced motion, so the only thing left to
+	   settle is the caret. */
+	@media (prefers-reduced-motion: reduce) {
+		.lt-caret {
+			animation: none;
+			opacity: 0.4;
+		}
+	}
+</style>

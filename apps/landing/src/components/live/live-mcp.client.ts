@@ -41,6 +41,12 @@ const REVEAL_BLUR_PX = 5
 type Chunk = { node: Text; full: string }
 
 export function playMcp(root: HTMLElement) {
+	// Second init on the same root would cache the *blanked* text as the
+	// original and leave a transcript that types nothing — silently, since the
+	// lines still reveal. Cheap to make impossible.
+	if (root.dataset.mcpPlaying) return
+	root.dataset.mcpPlaying = "1"
+
 	const lines = Array.from(root.querySelectorAll<HTMLElement>(".mcp-line"))
 	// Captured before anything is blanked — this is the SSR text, and it is the
 	// only copy once typing starts.

@@ -10,11 +10,14 @@
  * muted-foreground rather than full contrast so it reads as a plate title, not
  * a second shout two sections after the amber wall.
  *
- * Commands are the real ones from the repo — no fabricated one-liner.
+ * Commands are the real ones from the repo — no fabricated one-liner. The box
+ * on the left is the copyable install and nothing else; `maple start` and what
+ * it prints belong to the terminal on the right, so neither element says the
+ * same thing twice.
  */
 import { getRelativeLocaleUrl } from "astro:i18n";
 import * as m from "../../paraglide/messages";
-import MediaFrame from "./MediaFrame.astro";
+import LiveLocalTerminal from "../live/LiveLocalTerminal.astro";
 import { getGitHubStars, formatStars } from "../../lib/github-stars";
 
 const locale = Astro.currentLocale ?? "en";
@@ -47,8 +50,7 @@ const stars = await getGitHubStars();
 
 				<div class="mt-8 rounded-xl border border-border bg-bg-elevated p-4">
 					<pre
-						class="overflow-x-auto text-[13px] leading-relaxed text-fg"><code><span class="select-none text-fg-muted">$ </span>brew install Makisuo/tap/maple
-<span class="select-none text-fg-muted">$ </span>maple start</code></pre>
+						class="overflow-x-auto text-[13px] leading-relaxed text-fg"><code><span class="select-none text-fg-muted">$ </span>brew install Makisuo/tap/maple</code></pre>
 					<p class="mt-3 border-t border-border pt-3 text-[11px] text-fg-muted">
 						{m.local_install_alt()}
 						<code class="ml-1 text-fg-muted">curl -fsSL https://maple.dev/cli/install | sh</code>
@@ -74,10 +76,7 @@ const stars = await getGitHubStars();
 				</div>
 			</div>
 
-			<MediaFrame
-				label="local-terminal"
-				caption='Split frame — a terminal showing the "maple start" banner beside local.maple.dev open on a trace waterfall.'
-			/>
+			<LiveLocalTerminal />
 		</div>
 	</div>
 </section>
