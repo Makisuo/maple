@@ -10,15 +10,19 @@
  *
  * The frame is a flex column so a caller can pass `class="h-full"` and have
  * the body absorb the slack — the footer bar stays welded to the bottom edge
- * instead of floating mid-cell. The body bottom-anchors its lines (`justify-end`)
- * so that slack opens *above* the session the way a real terminal fills, rather
- * than trailing under the last line like unfinished content.
+ * instead of floating mid-cell. Keep that slack near zero: a visible gap inside
+ * the terminal reads as broken whichever end it opens at, so the caller's job
+ * is to match the column heights, not to park a hole somewhere polite.
+ *
+ * `endpoint` puts the server URL on the status bar, where a real client shows
+ * its connection, instead of costing the prose column a whole box.
  */
 interface Props {
 	class?: string;
+	endpoint?: string;
 }
 
-const { class: className = "" } = Astro.props;
+const { class: className = "", endpoint } = Astro.props;
 ---
 
 <div class={`live-frame flex flex-col ${className}`}>

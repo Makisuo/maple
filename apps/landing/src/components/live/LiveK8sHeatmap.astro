@@ -308,11 +308,14 @@ const bandHeaders = bands.map((b) => {
 		transition: opacity 120ms ease-out;
 	}
 	.k8s-hm-tip[data-on="1"] { opacity: 1; }
+	/* Neutral by default, because `--severity-warn` IS the amber `--primary` in
+	   this theme — an amber "healthy" dot would make degraded unreadable. Only
+	   the two states that matter get colour; the cpu number carries the rest. */
 	.k8s-hm-tip__dot {
 		width: 6px;
 		height: 6px;
 		border-radius: 50%;
-		background: var(--primary);
+		background: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
 		flex: none;
 	}
 	.k8s-hm-tip__dot[data-state="warn"] { background: var(--severity-warn); }
