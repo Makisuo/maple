@@ -897,9 +897,9 @@
 }
 
 /* One fixed box for all four plates, so the frame can't change height mid-swap.
-   Three of the four captures are exactly 992/600 and fill it edge to edge;
-   surface-mcp is wider, so `contain` insets it against the deep floor rather
-   than cropping 15% off an install command. */
+   All four are authored at exactly 992/600 and fill it edge to edge; `contain`
+   is the safety net, so a future plate at another ratio insets against the deep
+   floor rather than getting cropped. */
 .story-frame__stage {
 	position: relative;
 	aspect-ratio: 992 / 600;
