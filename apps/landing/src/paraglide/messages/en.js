@@ -479,7 +479,7 @@ export const hero_title_accent = () => `Native to AI.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `Traces, logs, and metrics over OpenTelemetry, stored in ClickHouse. Sub-second queries across billions of rows — or let your AI agent run them for you.`
+export const hero_subtitle = () => `Traces, logs, and metrics over OpenTelemetry, powered by ClickHouse. Sub-second queries across billions of rows — or let your AI agent run them for you.`
 
 
 /**

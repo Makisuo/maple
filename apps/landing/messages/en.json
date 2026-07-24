@@ -59,7 +59,7 @@
 	"hero_title": "Open-source observability.",
 	"hero_title_sub": "Built for you.",
 	"hero_title_accent": "Native to AI.",
-	"hero_subtitle": "Traces, logs, and metrics over OpenTelemetry, stored in ClickHouse. Sub-second queries across billions of rows \u2014 or let your AI agent run them for you.",
+	"hero_subtitle": "Traces, logs, and metrics over OpenTelemetry, powered by ClickHouse. Sub-second queries across billions of rows — or let your AI agent run them for you.",
 
 	"customers_eyebrow": "Trusted by teams at",
 	"ingest_stats_label": "traces ingested / month",

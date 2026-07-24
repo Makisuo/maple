@@ -479,7 +479,7 @@ export const hero_title_accent = () => `AIネイティブ。`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `OpenTelemetryで受け取るトレース、ログ、メトリクスをClickHouseに保存。数十億行を1秒未満でクエリ — AIエージェントに任せることも。`
+export const hero_subtitle = () => `OpenTelemetryで受け取るトレース、ログ、メトリクス。ClickHouse搭載で、数十億行を1秒未満でクエリ — AIエージェントに任せることも。`
 
 
 /**

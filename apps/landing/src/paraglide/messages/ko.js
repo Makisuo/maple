@@ -479,7 +479,7 @@ export const hero_title_accent = () => `AI 네이티브.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const hero_subtitle = () => `OpenTelemetry로 받는 트레이스, 로그, 메트릭을 ClickHouse에 저장. 수십억 행을 1초 미만으로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
+export const hero_subtitle = () => `OpenTelemetry로 받는 트레이스, 로그, 메트릭. ClickHouse 기반으로 수십억 행을 1초 미만으로 쿼리 — 또는 AI 에이전트에게 맡기세요.`
 
 
 /**
