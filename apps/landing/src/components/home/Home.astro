@@ -1,0 +1,106 @@
+---
+/**
+ * The homepage, in one place.
+ *
+ * `pages/index.astro`, `pages/ja/index.astro`, and `pages/ko/index.astro` are
+ * thin wrappers around this component. They used to be hand-copied files that
+ * drifted — ja/ko were missing five sections — so the body lives here and the
+ * pages exist only to claim a route. Paraglide resolves every string per
+ * locale, and Layout.astro derives hreflang from the URL, so there is nothing
+ * locale-specific to thread through.
+ *
+ * Section order runs on a numbered spine, 01 Signals → 10 Start, and on a
+ * deliberate tonal cadence rather than a bg-bg / bg-bg-deep checkerboard:
+ * ten sections sit quiet on `bg-bg`, with two amber peaks (Sovereignty just
+ * before the midpoint, the bookend CTA at the very end) and four `bg-bg-deep`
+ * drops. Hairline `border-t` separators appear only where the surface tone
+ * does NOT change from the section above — where the tone steps, the tone is
+ * the separator.
+ */
+import Layout from "../../layouts/Layout.astro";
+import Nav from "../Nav.astro";
+import SeoHead from "../SeoHead.astro";
+import HomeHero from "./HomeHero.astro";
+import SignalsStrip from "./SignalsStrip.astro";
+import IncidentStory from "./IncidentStory.astro";
+import PlatformSheet from "./PlatformSheet.astro";
+import Sovereignty from "../Sovereignty.astro";
+import LocalSection from "./LocalSection.astro";
+import KubernetesSection from "./KubernetesSection.astro";
+import AgentSection from "./AgentSection.astro";
+import BillComparison from "../BillComparison.astro";
+import PricingTable from "../PricingTable.astro";
+import SdkBand from "./SdkBand.astro";
+import FAQ from "../FAQ.astro";
+import FinalCta from "./FinalCta.astro";
+import Footer from "../Footer.astro";
+import * as m from "../../paraglide/messages";
+
+const pageTitle = m.page_home_title();
+const pageDescription = m.page_home_desc();
+
+// Quotable, AI-extractable facts about Maple. Homepages are among the most-cited
+// sources by AI chatbots, so we state the core entity facts plainly (and emit
+// FAQPage schema via FAQ.astro).
+const homeFaqs = [
+    { question: m.faq_home_what_q(), answer: m.faq_home_what_a() },
+    { question: m.faq_home_oss_q(), answer: m.faq_home_oss_a() },
+    { question: m.faq_home_otel_q(), answer: m.faq_home_otel_a() },
+    { question: m.faq_home_price_q(), answer: m.faq_home_price_a() },
+    { question: m.faq_home_agents_q(), answer: m.faq_home_agents_a() },
+    { question: m.faq_selfhost_q(), answer: m.faq_selfhost_a() },
+];
+---
+
+<Layout title={pageTitle} description={pageDescription}>
+    <SeoHead title={pageTitle} description={pageDescription} type="SoftwareApplication" includeOrganization={true} />
+
+    <Nav />
+
+    <HomeHero />
+
+    <!-- 01 — the three surfaces you actually look at. -->
+    <SignalsStrip />
+
+    <!-- 02 — the signature section: one incident, four surfaces, one trace id. -->
+    <IncidentStory />
+
+    <!-- 03 — everything that didn't get a narrative, and the link hub. -->
+    <PlatformSheet />
+
+    <!-- 04 — PEAK 1. The thesis, at full volume. -->
+    <span id="sovereignty"></span>
+    <Sovereignty />
+
+    <!-- 05 — the ink well, straight off the amber with no hairline. -->
+    <LocalSection />
+
+    <!-- 06 — the infrastructure proof point. -->
+    <KubernetesSection />
+
+    <!-- 07 — the same investigation as 02, run by an agent instead of a human. -->
+    <AgentSection />
+
+    <!-- 08 + 09 — the money chapter: one deep floor, two beats, one internal
+         hairline. The bill runs first because Maple's pricing only reads as
+         remarkable next to Datadog's. -->
+    <BillComparison />
+    <PricingTable
+        class="border-t border-border bg-bg-deep"
+        eyebrow={m.pricing_home_eyebrow()}
+        title={m.pricing_home_title()}
+        lede={m.pricing_home_lede()}
+        footerHref="/pricing"
+        footerLabel={m.pricing_home_link()}
+    />
+
+    <!-- The runtimes band — this slot's honest answer to a testimonial wall. -->
+    <SdkBand />
+
+    <FAQ items={homeFaqs} />
+
+    <!-- PEAK 2. Closes the bookend. -->
+    <FinalCta />
+
+    <Footer />
+</Layout>

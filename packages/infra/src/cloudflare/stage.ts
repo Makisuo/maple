@@ -112,13 +112,15 @@ export function resolveMapleDomains(stage: MapleStage): MapleDomains {
 			// under the `maple.dev` zone have no secret in them. They also keep every
 			// inter-app URL a plain string at deploy time, which alchemy v2 requires:
 			// resource attributes like `worker.url` are lazy Outputs that cannot be
-			// string-interpolated into another worker's env. landing/local-ui have no
-			// pr domains (nothing links to them from previews).
+			// string-interpolated into another worker's env. local-ui has no pr
+			// domain (nothing links to it from previews); landing gets one so
+			// marketing-page changes are reviewable on a stable URL.
 			return {
 				web: `app-pr-${stage.prNumber}.maple.dev`,
 				api: `api-pr-${stage.prNumber}.maple.dev`,
 				chat: `chat-pr-${stage.prNumber}.maple.dev`,
 				sync: `sync-pr-${stage.prNumber}.maple.dev`,
+				landing: `landing-pr-${stage.prNumber}.maple.dev`,
 			}
 		case "dev":
 			return {}

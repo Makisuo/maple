@@ -168,6 +168,7 @@ export default Alchemy.Stack(
 						`web_url=${summary.webUrl}`,
 						`api_url=${summary.apiUrl}`,
 						`chat_url=${summary.chatUrl}`,
+						`sync_url=${summary.electricSyncUrl}`,
 						`landing_url=${summary.landingUrl}`,
 					].join("\n")}\n`,
 				)

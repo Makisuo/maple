@@ -7,22 +7,20 @@ const stars = await getGitHubStars();
 ---
 
 <nav id="main-nav" class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-bg transition-colors duration-200">
-    <div class="mx-auto max-w-6xl px-6 h-14 flex items-center">
+    <div class="shell h-16 flex items-center">
         <NavBar locale={locale} stars={stars} client:load />
     </div>
 </nav>
 
 <script>
+    // Past the fold the bar drops one tonal step, rather than brightening its
+    // border. Depth in this system is conveyed by tone, never by chroma — and
+    // the hairline stays a hairline (no blur, no glass: DESIGN.md bans both).
     const nav = document.getElementById("main-nav");
     if (nav) {
         const update = () => {
-            if (window.scrollY > 100) {
-                nav.classList.add("border-foreground/15");
-                nav.classList.remove("border-border");
-            } else {
-                nav.classList.remove("border-foreground/15");
-                nav.classList.add("border-border");
-            }
+            nav.classList.toggle("bg-bg-deep", window.scrollY > 100);
+            nav.classList.toggle("bg-bg", window.scrollY <= 100);
         };
         window.addEventListener("scroll", update, { passive: true });
         update();
