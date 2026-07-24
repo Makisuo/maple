@@ -9,7 +9,7 @@ import { TelemetryLayer } from "../core/telemetry"
 import { isLoopbackHostname } from "../lib/local-address"
 import { acquireChdb, type Chdb, type ChdbError } from "./chdb"
 import { buildInsertStatements } from "./inserts"
-import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch } from "./otlp/encode"
+import { encodeLogs, encodeMetrics, encodeTraces, type EncodedBatch, OtlpFieldError } from "./otlp/encode"
 import { decodeLogsRequest, decodeMetricsRequest, decodeTraceRequest } from "./otlp/proto"
 import schemaSql from "./schema/local-schema.sql" with { type: "text" }
 import { schemaFingerprint } from "./store-version"
@@ -168,8 +168,12 @@ async function ingest(db: Chdb, signal: Signal, req: Request): Promise<IngestRes
 	try {
 		batches = encodeFor(signal, decoded)
 	} catch (error) {
+		// A malformed field is the sender's fault, not ours — reject the batch
+		// with a 400 naming the field instead of silently storing a bad value.
+		const status = error instanceof OtlpFieldError ? 400 : 500
+		const stage = status === 400 ? "decode" : "encode"
 		return {
-			response: text(`encode ${signal}: ${(error as Error).message}`, 500),
+			response: text(`${stage} ${signal}: ${(error as Error).message}`, status),
 			accepted: 0,
 			requestBytes,
 		}

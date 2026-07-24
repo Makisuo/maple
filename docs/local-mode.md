@@ -308,8 +308,18 @@ in remote mode it returns a clear error. Every other command works in both modes
 
 Send OpenTelemetry to the server's OTLP/HTTP endpoints
 (`POST /v1/{traces,logs,metrics}`, protobuf or JSON, optionally gzip-encoded).
-Most OTLP exporters default to protobuf and work out of the box. For OTLP/JSON,
-trace and span IDs follow the OTLP/JSON convention (hex strings).
+Most OTLP exporters default to protobuf and work out of the box.
+
+For OTLP/JSON, `traceId`/`spanId`/`parentSpanId` follow the OTLP/JSON convention
+— **hex strings** (32 chars for a trace id, 16 for a span id), the spec's
+deliberate deviation from proto3 JSON, and what every OTel language SDK emits.
+Base64 of the raw bytes (24 and 12 chars — the proto3 JSON encoding, and what
+the protobuf path decodes to internally) is also accepted; the two are told
+apart by length, so hand-written payloads work either way. Ids that decode to
+any other length are rejected with a `400` naming the field, rather than stored
+mangled: a hex trace id read as base64 yields a *deterministic* 24-byte value,
+so the trace still self-joins and looks correct right up until you compare it
+against the emitting service's logs.
 
 ## Release bundle
 

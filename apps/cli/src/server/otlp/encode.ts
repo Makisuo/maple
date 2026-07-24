@@ -12,7 +12,9 @@
  * Input is the normalized lowerCamelCase object shape produced by both
  * `decode*Request` (protobuf) and `JSON.parse` of an OTLP/JSON body:
  *   - 64-bit ints (`*UnixNano`) are decimal strings
- *   - byte fields (`traceId`, `spanId`, ...) are base64 strings
+ *   - byte fields (`bytesValue`, ...) are base64 strings
+ *   - id fields (`traceId`, `spanId`, `parentSpanId`) are base64 from the
+ *     protobuf path and HEX from the OTLP/JSON path — see `idHex`
  *   - enums (`kind`, `status.code`, `severityNumber`, ...) are numbers
  *   - attributes are arrays of `{ key, value: AnyValue }`
  */
@@ -54,7 +56,11 @@ export function bytesHex(b64: string | undefined): string {
 	if (!b64) {
 		return ""
 	}
-	const bytes = base64ToBytes(b64)
+	return hexFromBytes(base64ToBytes(b64))
+}
+
+/** Lowercase hex for `bytes`, or `""` when it is empty or all zero. */
+function hexFromBytes(bytes: Uint8Array): string {
 	if (bytes.length === 0) {
 		return ""
 	}
@@ -86,6 +92,77 @@ function base64ToBytes(b64: string): Uint8Array {
 	}
 	return bytes
 }
+
+/**
+ * A malformed field in an otherwise well-formed OTLP payload. Surfaces as a
+ * 400 from the ingest handler rather than the generic 500 an encoder crash
+ * would produce.
+ */
+export class OtlpFieldError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "OtlpFieldError"
+	}
+}
+
+const HEX_ONLY = /^[0-9a-fA-F]+$/
+const ALL_ZERO_HEX = /^0+$/
+
+const TRACE_ID_BYTES = 16
+const SPAN_ID_BYTES = 8
+
+/**
+ * Decode a trace/span id field to lowercase hex, accepting BOTH wire encodings
+ * that reach this encoder:
+ *
+ *   - HEX, which is what the OTLP/JSON spec mandates for `traceId`/`spanId`
+ *     (an explicit deviation from proto3 JSON, which would base64 a `bytes`
+ *     field), what every OTel language SDK emits over OTLP/HTTP+JSON, and what
+ *     the Rust ingest gateway accepts on the same endpoints.
+ *   - BASE64, which is what `decode*Request` produces, since protobufjs
+ *     renders proto `bytes` as base64 under `bytes: String`.
+ *
+ * The two never collide: an id is read as hex only at its exact hex length (32
+ * chars for a 16-byte trace id, 16 for an 8-byte span id), and the base64 form
+ * of those same ids is 24 and 12 chars.
+ *
+ * Anything decoding to the wrong length is rejected. Accepting it silently is
+ * worse than it looks: a base64-decoded hex trace id yields a deterministic
+ * 24-byte value, so the trace still self-joins and looks fine right up until
+ * you match it against the emitting service's logs or an OTLP/protobuf sender.
+ */
+function idHex(value: string | undefined, byteLength: number, field: string): string {
+	if (!value) {
+		return ""
+	}
+	if (value.length === byteLength * 2 && HEX_ONLY.test(value)) {
+		const lower = value.toLowerCase()
+		return ALL_ZERO_HEX.test(lower) ? "" : lower
+	}
+	let bytes: Uint8Array | undefined
+	try {
+		bytes = base64ToBytes(value)
+	} catch {
+		bytes = undefined
+	}
+	if (!bytes || bytes.length !== byteLength) {
+		// Report the expectation rather than the decoded byte count: for an input
+		// that looks like hex but is the wrong length, the base64 byte count is
+		// noise ("deadbeef" is 4 hex bytes, but decodes as 6 base64 bytes).
+		const base64Chars = Math.ceil(byteLength / 3) * 4
+		const shown = value.length > 80 ? `${value.slice(0, 80)}…` : value
+		throw new OtlpFieldError(
+			`${field} must be ${byteLength} bytes: expected ${byteLength * 2} hex chars (OTLP/JSON) or ${base64Chars} base64 chars (OTLP/protobuf), got ${JSON.stringify(shown)} (${value.length} chars)`,
+		)
+	}
+	return hexFromBytes(bytes)
+}
+
+export const traceIdHex = (value: string | undefined, field: string): string =>
+	idHex(value, TRACE_ID_BYTES, field)
+
+export const spanIdHex = (value: string | undefined, field: string): string =>
+	idHex(value, SPAN_ID_BYTES, field)
 
 /**
  * Port of Rust `format_timestamp_nano`: nanoseconds-since-epoch (decimal
@@ -394,9 +471,10 @@ function encodeExemplars(exemplars: Exemplar[] | undefined): EncodedExemplars {
 	if (!exemplars) {
 		return out
 	}
-	for (const exemplar of exemplars) {
-		out.exemplars_trace_id.push(bytesHex(exemplar.traceId))
-		out.exemplars_span_id.push(bytesHex(exemplar.spanId))
+	for (let index = 0; index < exemplars.length; index++) {
+		const exemplar = exemplars[index]!
+		out.exemplars_trace_id.push(traceIdHex(exemplar.traceId, `exemplars[${index}].traceId`))
+		out.exemplars_span_id.push(spanIdHex(exemplar.spanId, `exemplars[${index}].spanId`))
 		out.exemplars_timestamp.push(formatTimestampNano(exemplar.timeUnixNano))
 		out.exemplars_value.push(numberPointValue(exemplar))
 		out.exemplars_filtered_attributes.push(attrMap(exemplar.filteredAttributes))
@@ -484,7 +562,7 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 			const scopeVersion = scope?.version ?? ""
 
 			for (const span of scopeSpans.spans ?? []) {
-				const traceId = bytesHex(span.traceId)
+				const traceId = traceIdHex(span.traceId, "span.traceId")
 				const spanAttrs = attrMap(span.attributes)
 
 				const events = span.events ?? []
@@ -493,8 +571,8 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 				rows.push({
 					start_time: formatTimestampNano(span.startTimeUnixNano),
 					trace_id: traceId,
-					span_id: bytesHex(span.spanId),
-					parent_span_id: bytesHex(span.parentSpanId),
+					span_id: spanIdHex(span.spanId, "span.spanId"),
+					parent_span_id: spanIdHex(span.parentSpanId, "span.parentSpanId"),
 					trace_state: span.traceState ?? "",
 					span_name: span.name ?? "",
 					span_kind: spanKind(span.kind),
@@ -512,8 +590,8 @@ export function encodeTraces(req: unknown): EncodedBatch[] {
 					events_timestamp: events.map((event) => formatTimestampNano(event.timeUnixNano)),
 					events_name: events.map((event) => event.name ?? ""),
 					events_attributes: events.map((event) => attrMap(event.attributes)),
-					links_trace_id: links.map((link) => bytesHex(link.traceId)),
-					links_span_id: links.map((link) => bytesHex(link.spanId)),
+					links_trace_id: links.map((link, i) => traceIdHex(link.traceId, `span.links[${i}].traceId`)),
+					links_span_id: links.map((link, i) => spanIdHex(link.spanId, `span.links[${i}].spanId`)),
 					links_trace_state: links.map((link) => link.traceState ?? ""),
 					links_attributes: links.map((link) => attrMap(link.attributes)),
 				})
@@ -578,8 +656,8 @@ export function encodeLogs(req: unknown): EncodedBatch[] {
 
 				rows.push({
 					timestamp: formatTimestampNano(timeNano),
-					trace_id: bytesHex(log.traceId),
-					span_id: bytesHex(log.spanId),
+					trace_id: traceIdHex(log.traceId, "logRecord.traceId"),
+					span_id: spanIdHex(log.spanId, "logRecord.spanId"),
 					flags: asUint32(log.flags),
 					severity_text: severityText,
 					severity_number: log.severityNumber ?? 0,

@@ -7,7 +7,10 @@ import {
 	encodeMetrics,
 	encodeTraces,
 	formatTimestampNano,
+	OtlpFieldError,
+	spanIdHex,
 	statusCode,
+	traceIdHex,
 } from "./encode"
 import { decodeMetricsRequest, decodeTraceRequest, encodeMetricsRequest, encodeTraceRequest } from "./proto"
 
@@ -251,6 +254,74 @@ describe("value-level spot checks", () => {
 		expect(anyValueString({ arrayValue: { values: [{ stringValue: "a" }, { intValue: 1 }] } })).toBe(
 			'["a","1"]',
 		)
+	})
+})
+
+describe("OTLP/JSON hex ids", () => {
+	const spanHex = "b7ad6b7169203331"
+
+	// A hex trace id is 32 chars and its base64 form is 24 (span: 16 vs 12), so
+	// the two encodings are told apart by length alone.
+	it("accepts the hex ids the OTLP/JSON spec mandates, and base64 from protobuf", () => {
+		expect(traceIdHex(hex, "t")).toBe(hex)
+		expect(traceIdHex(b64(hex), "t")).toBe(hex)
+		expect(spanIdHex(spanHex, "s")).toBe(spanHex)
+		expect(spanIdHex(b64(spanHex), "s")).toBe(spanHex)
+	})
+
+	it("normalizes uppercase hex and treats all-zero / absent ids as unset", () => {
+		expect(traceIdHex(hex.toUpperCase(), "t")).toBe(hex)
+		expect(spanIdHex("0000000000000000", "s")).toBe("")
+		expect(spanIdHex(b64("0000000000000000"), "s")).toBe("")
+		expect(spanIdHex("", "s")).toBe("")
+		expect(spanIdHex(undefined, "s")).toBe("")
+	})
+
+	// The regression this guards: before hex was recognized, a 32-char hex trace
+	// id was base64-decoded into 24 bytes and stored as 48 hex chars. Traces
+	// still self-joined, so it looked fine until compared against the emitter.
+	it("stores a hex trace id end-to-end at 32 chars, not 48", () => {
+		const req = sampleTraceReq()
+		const span = req.resourceSpans[0]!.scopeSpans[0]!.spans[0]!
+		span.traceId = hex
+		span.spanId = spanHex
+		span.parentSpanId = "0000000000000000"
+		span.links[0]!.traceId = hex
+		span.links[0]!.spanId = spanHex
+
+		const row = JSON.parse(encodeTraces(req)[0]!.ndjson)
+		expect(row.trace_id).toBe(hex)
+		expect(row.span_id).toBe(spanHex)
+		expect(row.parent_span_id).toBe("")
+		expect(row.links_trace_id).toEqual([hex])
+		expect(row.links_span_id).toEqual([spanHex])
+	})
+
+	it("rejects ids that decode to the wrong length, naming the field", () => {
+		// 24 bytes of base64 — what a hex trace id used to silently become.
+		const tooLong = Buffer.alloc(24, 1).toString("base64")
+		expect(() => traceIdHex(tooLong, "span.traceId")).toThrow(OtlpFieldError)
+		expect(() => traceIdHex(tooLong, "span.traceId")).toThrow(
+			/span\.traceId must be 16 bytes: expected 32 hex chars .* or 24 base64 chars/,
+		)
+		expect(() => spanIdHex(hex, "span.spanId")).toThrow(/span\.spanId must be 8 bytes/)
+		expect(() => traceIdHex("not-hex-and-not-base64!", "span.traceId")).toThrow(OtlpFieldError)
+	})
+
+	it("propagates the rejection out of encodeTraces / encodeLogs", () => {
+		const req = sampleTraceReq()
+		req.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.traceId = "0af7651916cd43dd" // 8 bytes
+		expect(() => encodeTraces(req)).toThrow(OtlpFieldError)
+
+		const logs = {
+			resourceLogs: [
+				{
+					resource: { attributes: [attr("service.name", "api")] },
+					scopeLogs: [{ logRecords: [{ traceId: hex, spanId: "deadbeef" }] }],
+				},
+			],
+		}
+		expect(() => encodeLogs(logs)).toThrow(/logRecord\.spanId must be 8 bytes/)
 	})
 })
 
