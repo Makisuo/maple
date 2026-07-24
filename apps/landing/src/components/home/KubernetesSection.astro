@@ -13,7 +13,7 @@
  */
 import { getRelativeLocaleUrl } from "astro:i18n";
 import * as m from "../../paraglide/messages";
-import MediaFrame from "./MediaFrame.astro";
+import LiveK8sHeatmap from "../live/LiveK8sHeatmap.astro";
 
 const locale = Astro.currentLocale ?? "en";
 const featurePath = getRelativeLocaleUrl(locale, "/features/kubernetes-monitoring");
@@ -96,12 +96,10 @@ const points = [
 				</div>
 			</div>
 
-			<MediaFrame
-				label="A Kubernetes deployment with 324 pods, resource attributes and a 12-hour CPU trend"
-				src="/screenshots/k8s-workloads.webp"
-				width={1488}
-				height={900}
-			/>
+			<!-- The live artifact, not a still: the section's claim is that Maple
+			     watches every pod at once, and 192 breathing cells say that in a way
+			     a screenshot of one workload table cannot. -->
+			<LiveK8sHeatmap />
 		</div>
 	</div>
 </section>

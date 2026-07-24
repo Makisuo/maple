@@ -247,24 +247,7 @@ const defaultId = snippets[0].id;
 
 <section class="relative border-t border-border bg-bg">
 	<div class="shell py-16 md:py-32">
-		<div class="flex flex-wrap items-baseline justify-between gap-4 mb-4">
-			<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted">{m.start_eyebrow()}</div>
-			<div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] font-mono">
-				<span class="text-fg-muted uppercase tracking-wider text-[10px] font-sans">{m.start_endpoint_label()}</span>
-				<span class="inline-flex items-center gap-1.5 text-fg">
-					<span class="relative inline-flex size-1.5" aria-hidden="true">
-						<span class="absolute inset-0 rounded-full bg-primary animate-ping opacity-75"></span>
-						<span class="relative inline-flex size-1.5 rounded-full bg-primary"></span>
-					</span>
-					{INGEST_URL}
-				</span>
-				<span class="text-fg-muted uppercase tracking-wider text-[10px] font-sans">{m.start_key_label()}</span>
-				<span class="text-fg">{API_KEY}</span>
-			</div>
-		</div>
-		<p class="text-sm md:text-base text-fg-muted max-w-[48ch] leading-relaxed">{m.start_lede()}</p>
-
-		<div class="mt-12 overflow-hidden rounded-xl border border-border bg-bg-elevated/30 relative" data-quickstart-tabs role="tablist">
+		<div class="overflow-hidden rounded-xl border border-border bg-bg-elevated/30 relative" data-quickstart-tabs role="tablist">
 			{/* connector spine — vertical line through the rail badges (desktop only) */}
 			<div class="hidden md:block absolute left-[calc(2.75rem+0.5px)] top-12 bottom-12 w-px bg-linear-to-b from-primary/60 via-primary/30 to-primary/10" aria-hidden="true"></div>
 

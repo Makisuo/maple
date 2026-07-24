@@ -28,5 +28,8 @@ describe("SignInPage (clerk mode)", () => {
 		render(<SignInPage />)
 
 		expect(screen.getByText("Clerk Sign In")).toBeTruthy()
-	})
+		// The two dynamic imports pull the route's whole module graph in cold, which
+		// overruns the 5s default when the suite shares the machine with turbo's
+		// typecheck/build tasks.
+	}, 30_000)
 })

@@ -22,12 +22,14 @@ interface Cell {
 
 // Namespace bands (left-to-right blocks of columns). Each band gets its own
 // average heat level so the heatmap reads as "this namespace is busier".
+// `short` is what shows below 720px — a 3-column band gets a ~38px slot there,
+// which ellipses "ingress-nginx" down to "ingr…".
 const bands = [
-	{ name: "default",       cols: 9,  baseHeat: 0.55 },
-	{ name: "observability", cols: 4,  baseHeat: 0.32 },
-	{ name: "kube-system",   cols: 5,  baseHeat: 0.18 },
-	{ name: "ingress-nginx", cols: 3,  baseHeat: 0.42 },
-	{ name: "data",          cols: 3,  baseHeat: 0.68 },
+	{ name: "default",       short: "default",  cols: 9,  baseHeat: 0.55 },
+	{ name: "observability", short: "obs",      cols: 4,  baseHeat: 0.32 },
+	{ name: "kube-system",   short: "kube-sys", cols: 5,  baseHeat: 0.18 },
+	{ name: "ingress-nginx", short: "ingress",  cols: 3,  baseHeat: 0.42 },
+	{ name: "data",          short: "data",     cols: 3,  baseHeat: 0.68 },
 ];
 
 // Pre-marked outliers (col,row) → state. Hand-picked positions so the visual
@@ -77,7 +79,7 @@ const bandHeaders = bands.map((b) => {
 });
 ---
 
-<div class="live-frame">
+<div class="live-frame" data-k8s-heatmap>
 	<div class="live-frame__head">
 		<span>pod heatmap · {totalPods} pods · cluster cpu {Math.round(avgHeat * 100)}%</span>
 		<span class="live-frame__live">
@@ -109,7 +111,7 @@ const bandHeaders = bands.map((b) => {
 		</div>
 	</div>
 
-	<div class="k8s-hm-canvas">
+	<div class="k8s-hm-canvas" data-k8s-canvas>
 		<div
 			class="k8s-hm-bands"
 			style={`grid-template-columns: ${bandHeaders.map((b) => `${b.span}fr`).join(" ")};`}
@@ -117,6 +119,7 @@ const bandHeaders = bands.map((b) => {
 			{bandHeaders.map((b) => (
 				<div class="k8s-hm-band">
 					<span class="k8s-hm-band__name">{b.name}</span>
+					<span class="k8s-hm-band__name k8s-hm-band__name--short">{b.short}</span>
 					<span class="k8s-hm-band__count">{b.span * ROWS}</span>
 				</div>
 			))}
@@ -125,14 +128,28 @@ const bandHeaders = bands.map((b) => {
 		<div
 			class="k8s-hm-grid"
 			style={`grid-template-columns: repeat(${COLS}, 1fr);`}
+			role="img"
+			aria-label={`Pod CPU heatmap: ${totalPods} pods across ${bands.length} namespaces, ${warnCount} degraded and ${errCount} failing.`}
+			data-k8s-grid
 		>
 			{cells.map((c) => (
 				<div
 					class={`k8s-hm-cell k8s-hm-cell--${c.state}`}
 					style={`--heat: ${c.heat.toFixed(3)}; --d: ${c.delay};`}
+					data-pod={`${c.col + 1}-${c.row + 1}`}
+					data-cpu={Math.round(c.heat * 100)}
+					data-state={c.state}
 					title={`pod ${c.col + 1}-${c.row + 1} · ${Math.round(c.heat * 100)}% cpu · ${c.state}`}
 				></div>
 			))}
+		</div>
+
+		<!-- SSR'd hidden, positioned by the client. Lives inside the canvas
+		     because `.live-frame` is `overflow: hidden` — a tooltip anywhere
+		     higher would be clipped at the frame edge. -->
+		<div class="k8s-hm-tip" data-k8s-tip data-on="0" aria-hidden="true">
+			<span class="k8s-hm-tip__dot" data-k8s-tip-dot data-state="ok"></span>
+			<span data-k8s-tip-label></span>
 		</div>
 
 		<div class="k8s-hm-legend">
@@ -191,6 +208,8 @@ const bandHeaders = bands.map((b) => {
 
 	.k8s-hm-canvas {
 		padding: 14px 16px 16px;
+		/* Positioning context for the tooltip. */
+		position: relative;
 	}
 
 	.k8s-hm-bands {
@@ -221,6 +240,8 @@ const bandHeaders = bands.map((b) => {
 		color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
 		font-variant-numeric: tabular-nums;
 	}
+	/* Full names win above 720px; the media query at the bottom flips them. */
+	.k8s-hm-band__name--short { display: none; }
 
 	.k8s-hm-grid {
 		display: grid;
@@ -260,6 +281,42 @@ const bandHeaders = bands.map((b) => {
 		animation: k8s-hm-pulse 0.9s ease-in-out infinite alternate;
 		animation-delay: var(--d, 0s);
 	}
+
+	.k8s-hm-tip {
+		position: absolute;
+		top: 0;
+		left: 0;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 5px 8px;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		background: var(--bg-elevated);
+		box-shadow: 0 4px 14px oklch(0 0 0 / 35%);
+		font-family: var(--font-mono);
+		font-size: 10.5px;
+		line-height: 1;
+		white-space: nowrap;
+		color: var(--foreground);
+		font-variant-numeric: tabular-nums;
+		pointer-events: none;
+		opacity: 0;
+		/* Opacity only — the transform is written every frame and must not lag
+		   the cursor. */
+		transition: opacity 120ms ease-out;
+	}
+	.k8s-hm-tip[data-on="1"] { opacity: 1; }
+	.k8s-hm-tip__dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: var(--primary);
+		flex: none;
+	}
+	.k8s-hm-tip__dot[data-state="warn"] { background: var(--severity-warn); }
+	.k8s-hm-tip__dot[data-state="err"]  { background: var(--severity-error); }
 
 	.k8s-hm-legend {
 		display: flex;
@@ -326,6 +383,9 @@ const bandHeaders = bands.map((b) => {
 			display: none;
 		}
 		.k8s-hm-bands .k8s-hm-band__count { display: none; }
+		/* A 3-column band is ~38px wide here — the full names ellipse. */
+		.k8s-hm-band__name { display: none; }
+		.k8s-hm-band__name--short { display: inline; font-size: 9.5px; }
 	}
 
 	@media (prefers-reduced-motion: reduce) {
@@ -336,3 +396,13 @@ const bandHeaders = bands.map((b) => {
 		}
 	}
 </style>
+
+<script>
+	import { wireHeatmap } from "./live-k8s-heatmap.client";
+
+	// No reduced-motion gate: the tooltip is an interaction affordance, not
+	// decorative motion. The cell animations are frozen in CSS above.
+	document.querySelectorAll<HTMLElement>("[data-k8s-heatmap]").forEach((el) => {
+		wireHeatmap(el);
+	});
+</script>

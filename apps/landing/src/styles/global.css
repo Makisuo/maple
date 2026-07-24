@@ -927,14 +927,16 @@
    next one, so the fill is just `data-passed` and nothing counts steps.
    --story-node-y is the node's centre: the step's top padding plus half the
    9px dot, which is also where the segment has to start to land on the next
-   node instead of stopping short of it. */
+   node instead of stopping short of it. It has to track the step's `py-*`
+   utility by hand — which is also why the copy stays top-aligned in the step
+   box rather than centred: centring would float the node off the rail. */
 .story-steps [data-step] {
 	position: relative;
-	--story-node-y: calc(3rem + 4.5px);
+	--story-node-y: calc(3rem + 5px); /* py-12 + half the 10px label row */
 }
 @media (min-width: 1024px) {
 	.story-steps [data-step] {
-		--story-node-y: calc(4rem + 4.5px);
+		--story-node-y: calc(9rem + 5px); /* lg:py-36 */
 	}
 }
 .story-steps [data-step]::before,

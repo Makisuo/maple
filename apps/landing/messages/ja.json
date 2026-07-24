@@ -152,10 +152,7 @@
 	"bill_link_vs_nr": "Full vs New Relic",
 	"bill_link_vs_dash0": "Full vs Dash0",
 
-	"start_eyebrow": "10 \u00b7 \u30b9\u30bf\u30fc\u30c8",
-	"start_lede": "Drop a snippet into your app, paste your key, run. Six SDKs covered out of the box; any OTel-compatible runtime works.",
 	"start_endpoint_label": "Endpoint",
-	"start_key_label": "Key",
 	"start_key_hint": "generated per project in your dashboard",
 	"start_install_label": "Install",
 	"start_instrument_label": "Instrument",

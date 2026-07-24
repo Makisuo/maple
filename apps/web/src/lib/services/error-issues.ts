@@ -57,11 +57,16 @@ export const buildServiceOpenIssuesQuery = (
 	actionable: "true",
 	sort: "severity",
 	limit: 5,
+	// The env filter is resolved against the warehouse's error events, so it is
+	// inherently window-scoped — the page's time range rides along only when an
+	// environment is selected. The unfiltered panel stays all-time.
 	...(scope?.environment === undefined
 		? {}
-		: { deployment_environment: scope.environment === "unknown" ? "" : scope.environment }),
-	...(scope?.startTime ? { start_time: warehouseDateTimeToIso(scope.startTime) } : {}),
-	...(scope?.endTime ? { end_time: warehouseDateTimeToIso(scope.endTime) } : {}),
+		: {
+				deployment_environment: scope.environment === "unknown" ? "" : scope.environment,
+				...(scope.startTime ? { start_time: warehouseDateTimeToIso(scope.startTime) } : {}),
+				...(scope.endTime ? { end_time: warehouseDateTimeToIso(scope.endTime) } : {}),
+			}),
 })
 
 /** Append a fetched page while keeping the first occurrence of each issue ID. */

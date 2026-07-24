@@ -124,14 +124,17 @@ const steps = [
 					<li
 						data-step={i + 1}
 						data-on={i === 0 ? "" : undefined}
-						class="grid grid-cols-[9px_1fr] gap-x-6 py-12 lg:py-16"
+						class="grid grid-cols-[9px_1fr] gap-x-6 py-12 lg:py-36"
 					>
 						<span class="story-node" aria-hidden="true" />
 						<!-- The pinned frame carries the trace id on desktop; below lg
 						     it's hidden, so each step carries it instead. Four steps,
 						     four surfaces, the same id every time — which is the claim
 						     the lede makes and the only reason it repeats. -->
-						<div class="col-start-2 flex items-baseline justify-between gap-4">
+						<!-- leading-none pins this row to the 10px label, so the node's
+						     centre is a known offset from the step's top padding and the
+						     rail meets it exactly in every locale. -->
+						<div class="col-start-2 flex items-baseline justify-between gap-4 leading-none">
 							<span class="story-surface">{step.surface}</span>
 							<span class="story-trace lg:hidden">
 								trace <span class="text-fg">{TRACE_ID}</span>

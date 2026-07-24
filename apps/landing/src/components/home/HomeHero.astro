@@ -19,14 +19,11 @@ import PixelStar from "../icons/PixelStar.astro";
 
 const stars = await getGitHubStars();
 
-// Four slots, every one a fact we can point at. GitHub stars are a build-time
-// fetch; the rest are the licence and the price, which for this audience are
-// stronger proof than a customer count would be.
+// Two slots, both live numbers we can point at: the GitHub star count (a
+// build-time fetch) and the volume we've ingested.
 const stats = [
 	stars !== null && { value: formatStars(stars), label: m.stat_github(), star: true, href: "https://github.com/Makisuo/maple" },
 	{ value: `${formatDataPoints(DATA_POINTS_INGESTED)}+`, label: m.ingest_stats_label() },
-	{ value: "$0.30", label: m.stat_per_gb() },
-	{ value: "FSL-1.1", label: m.stat_license() },
 ].filter(Boolean) as { value: string; label: string; star?: boolean; href?: string }[];
 ---
 
@@ -87,8 +84,8 @@ const stats = [
 			</a>
 		</div>
 
-		<!-- Stat rail. Hairline dividers only — no cards, no fills. Every slot is
-		     a fact we can point at: two live numbers, the price, the licence. -->
+		<!-- Stat rail. Hairline dividers only — no cards, no fills. Both slots
+		     are live numbers we can point at. -->
 		<dl class="mt-14 grid grid-cols-2 gap-y-6 border-t border-border pt-8 md:flex md:gap-y-0">
 			{
 				stats.map((stat, i) => {
@@ -103,12 +100,16 @@ const stats = [
 							</dt>
 						</>
 					);
-					// Mobile is a 2×2 grid divided on the odd column; from md it
-					// becomes one row divided before every slot but the first.
+					// Mobile is a 2-up grid divided on the odd column; from md the
+					// slots size to their content and sit left, divided before
+					// every slot but the first.
 					const spacing = [
-						"flex flex-col gap-2 md:flex-1",
+						"flex flex-col gap-2",
 						i % 2 === 1 ? "border-l border-border pl-5 md:pl-8" : "md:pl-8",
 						i === 0 ? "md:border-l-0 md:pl-0" : "md:border-l md:border-border",
+						// Content-width slots, so each divider needs its own breathing
+						// room on the leading side too.
+						i < stats.length - 1 ? "md:pr-8" : "",
 					].join(" ");
 					return stat.href ? (
 						<a href={stat.href} target="_blank" rel="noopener noreferrer" class={`group ${spacing}`}>
@@ -121,12 +122,14 @@ const stats = [
 			}
 		</dl>
 
+		<!-- Proof sits above the plate, so the logo row lands inside the first
+		     screen instead of below the carousel. -->
+		<CustomerLogos variant="inline" />
+
 		<!-- The product plate. Sandwiched between two tonal steps, so it reads
 		     raised without a shadow pixel. -->
-		<div class="mt-16 md:mt-20">
+		<div class="pb-4 md:pb-6">
 			<HeroCarousel />
 		</div>
-
-		<CustomerLogos variant="inline" />
 	</div>
 </section>

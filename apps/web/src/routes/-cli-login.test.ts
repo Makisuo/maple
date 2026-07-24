@@ -30,10 +30,12 @@ describe("CLI login approval helpers", () => {
 		)
 
 		await expect(inspectCliDevice("ABCD-EFGH")).resolves.toMatchObject({ status: "pending" })
-		expect(fetchSpy).toHaveBeenCalledWith(
-			expect.stringContaining("/api/auth/cli/device/ABCD-EFGH"),
-			expect.objectContaining({ headers: { authorization: "Bearer browser-session" } }),
-		)
+		// The request goes through tracedFetch, which normalizes the plain header
+		// object into Headers (and adds traceparent), so read the header back out.
+		expect(fetchSpy).toHaveBeenCalledTimes(1)
+		const [input, init] = fetchSpy.mock.calls[0]!
+		expect(String(input)).toContain("/api/auth/cli/device/ABCD-EFGH")
+		expect(new Headers(init?.headers).get("authorization")).toBe("Bearer browser-session")
 	})
 
 	it("surfaces typed API error messages", async () => {
