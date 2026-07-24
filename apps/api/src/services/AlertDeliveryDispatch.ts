@@ -675,10 +675,13 @@ export const dispatchDelivery = (
 								method: "POST",
 								headers: { "content-type": "application/json" },
 								body: JSON.stringify({
-									text: templated?.title ?? buildSlackFallbackText(context),
+									// No top-level `text`: alongside attachments (and no top-level
+									// blocks) Slack renders it as a duplicate line above the color
+									// bar. `fallback` carries the notification-preview one-liner.
 									attachments: [
 										{
 											color: slackAttachmentColor(context.eventType, context.severity),
+											fallback: templated?.title ?? buildSlackFallbackText(context),
 											blocks,
 										},
 									],
@@ -728,13 +731,16 @@ export const dispatchDelivery = (
 									},
 									body: JSON.stringify({
 										channel: config.channelId,
-										text: templated?.title ?? buildSlackFallbackText(context),
 										// Blocks ride inside a colored attachment so the message
 										// carries the severity color bar — same as the webhook
-										// destination (the bar has no Block Kit equivalent).
+										// destination (the bar has no Block Kit equivalent). No
+										// top-level `text`: alongside attachments Slack renders it
+										// as a duplicate line above the bar; `fallback` carries
+										// the notification-preview one-liner instead.
 										attachments: [
 											{
 												color: slackAttachmentColor(context.eventType, context.severity),
+												fallback: templated?.title ?? buildSlackFallbackText(context),
 												blocks,
 											},
 										],

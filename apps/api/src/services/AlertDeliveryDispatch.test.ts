@@ -319,11 +319,18 @@ describe("dispatchDelivery", () => {
 			assert.strictEqual(calls[0]!.url, "https://slack.com/api/chat.postMessage")
 			assert.strictEqual(calls[0]!.auth, "Bearer xoxb-test-token")
 			assert.strictEqual((calls[0]!.body as { channel: string }).channel, "C0789CHAN")
+			// No top-level text — Slack would render it as a duplicate line above
+			// the attachment; the notification preview rides in `fallback`.
+			assert.isUndefined((calls[0]!.body as { text?: string }).text)
 			// Blocks are wrapped in a colored attachment so the severity bar renders.
-			const attachments = (calls[0]!.body as { attachments: Array<{ color: string; blocks: unknown[] }> })
-				.attachments
+			const attachments = (
+				calls[0]!.body as {
+					attachments: Array<{ color: string; fallback: string; blocks: unknown[] }>
+				}
+			).attachments
 			assert.lengthOf(attachments, 1)
 			assert.match(attachments[0]!.color, /^#[0-9a-f]{6}$/)
+			assert.include(attachments[0]!.fallback, "Test alert")
 			assert.isArray(attachments[0]!.blocks)
 			assert.strictEqual(result.providerReference, "1700000000.000100")
 			assert.strictEqual(result.responseCode, 200)
