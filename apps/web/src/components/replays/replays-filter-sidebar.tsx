@@ -18,7 +18,7 @@ import {
 	InputGroupInput,
 } from "@maple/ui/components/ui/input-group"
 import { Label } from "@maple/ui/components/ui/label"
-import { Separator } from "@maple/ui/components/ui/separator"
+import { FILTER_SECTION_LABEL } from "@maple/ui/components/filters/filter-styles"
 import {
 	FilterSidebarBody,
 	FilterSidebarError,
@@ -131,16 +131,12 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 					<FilterSidebarBody>
 						<UserIdFilter value={search.userId} onApply={setUserId} />
 
-						<Separator className="my-2" />
-
 						<SingleCheckboxFilter
 							title="Has errors"
 							checked={search.hasErrors === true}
 							onChange={toggleHasErrors}
 							count={facets.errorCount}
 						/>
-
-						<Separator className="my-2" />
 
 						<RangeFilter
 							title="Session time"
@@ -150,8 +146,6 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 							onApply={setDurationRange}
 						/>
 
-						<Separator className="my-2" />
-
 						<RangeFilter
 							title="Active time"
 							hint="Engaged (non-idle) time, in seconds"
@@ -160,55 +154,35 @@ export function ReplaysFilterSidebar({ facetsResult }: ReplaysFilterSidebarProps
 							onApply={setActiveRange}
 						/>
 
-						{services.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<SearchableFilterSection
-									title="Service"
-									options={services}
-									selected={search.service ? [search.service] : []}
-									onChange={(vals) => setSingle("service", vals)}
-								/>
-							</>
-						)}
+						<SearchableFilterSection
+							title="Service"
+							options={services}
+							selected={search.service ? [search.service] : []}
+							onChange={(vals) => setSingle("service", vals)}
+						/>
 
-						{browsers.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<SearchableFilterSection
-									title="Browser"
-									options={browsers}
-									selected={search.browser ? [search.browser] : []}
-									onChange={(vals) => setSingle("browser", vals)}
-									getOptionIcon={browserIconFor}
-								/>
-							</>
-						)}
+						<SearchableFilterSection
+							title="Browser"
+							options={browsers}
+							selected={search.browser ? [search.browser] : []}
+							onChange={(vals) => setSingle("browser", vals)}
+							getOptionIcon={browserIconFor}
+						/>
 
-						{devices.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<FilterSection
-									title="Device"
-									options={devices}
-									selected={search.deviceType ? [search.deviceType] : []}
-									onChange={(vals) => setSingle("deviceType", vals)}
-									getOptionIcon={deviceIconFor}
-								/>
-							</>
-						)}
+						<FilterSection
+							title="Device"
+							options={devices}
+							selected={search.deviceType ? [search.deviceType] : []}
+							onChange={(vals) => setSingle("deviceType", vals)}
+							getOptionIcon={deviceIconFor}
+						/>
 
-						{countries.length > 0 && (
-							<>
-								<Separator className="my-2" />
-								<SearchableFilterSection
-									title="Country"
-									options={countries}
-									selected={search.country ? [search.country] : []}
-									onChange={(vals) => setSingle("country", vals)}
-								/>
-							</>
-						)}
+						<SearchableFilterSection
+							title="Country"
+							options={countries}
+							selected={search.country ? [search.country] : []}
+							onChange={(vals) => setSingle("country", vals)}
+						/>
 
 						{!hasFacets && (
 							<p className="py-4 text-sm text-muted-foreground">
@@ -254,7 +228,7 @@ function UserIdFilter({ value, onApply }: UserIdFilterProps) {
 		>
 			<Label
 				htmlFor="replays-user-filter"
-				className="mb-2 block text-sm font-medium text-muted-foreground"
+				className={`mb-2 block ${FILTER_SECTION_LABEL} text-muted-foreground`}
 			>
 				User
 			</Label>
@@ -319,7 +293,7 @@ function RangeFilter({ title, hint, min, max, onApply }: RangeFilterProps) {
 				onApply(parse(minText), parse(maxText))
 			}}
 		>
-			<Label className="mb-1 block text-sm font-medium text-muted-foreground">{title}</Label>
+			<Label className={`mb-1 block ${FILTER_SECTION_LABEL} text-muted-foreground`}>{title}</Label>
 			<p className="mb-2 text-xs text-muted-foreground/70">{hint}</p>
 			<div className="flex items-center gap-2">
 				<InputGroup>

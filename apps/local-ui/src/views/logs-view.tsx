@@ -3,7 +3,6 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { LogAttributeChip } from "@maple/ui/components/logs/log-attribute-chip"
 import { CodeIcon } from "@maple/ui/components/icons"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { Separator } from "@maple/ui/components/ui/separator"
 import { pickImportantAttributes } from "@maple/ui/lib/log-attributes"
 import { getSeverityColor } from "@maple/ui/lib/severity"
 import { useLocalLogs, useLocalLogSeverities } from "../hooks/use-local-logs"
@@ -76,25 +75,18 @@ export function LogsView() {
 				onClear={() => setParams({ service: null, severity: null })}
 			/>
 			<FilterSidebarBody>
-				{(severities.data?.length ?? 0) > 0 && (
-					<FilterSection
-						title="Severity"
-						options={(severities.data ?? []).map((o) => ({ name: o.name, count: o.count }))}
-						selected={severity ? [severity] : []}
-						onChange={(vals) => setParams({ severity: vals.at(-1) ?? null })}
-					/>
-				)}
-				{(services.data?.length ?? 0) > 0 && (
-					<>
-						<Separator className="my-2" />
-						<SearchableFilterSection
-							title="Service"
-							options={(services.data ?? []).map((o) => ({ name: o.name, count: o.count }))}
-							selected={service ? [service] : []}
-							onChange={(vals) => setParams({ service: vals.at(-1) ?? null })}
-						/>
-					</>
-				)}
+				<FilterSection
+					title="Severity"
+					options={(severities.data ?? []).map((o) => ({ name: o.name, count: o.count }))}
+					selected={severity ? [severity] : []}
+					onChange={(vals) => setParams({ severity: vals.at(-1) ?? null })}
+				/>
+				<SearchableFilterSection
+					title="Service"
+					options={(services.data ?? []).map((o) => ({ name: o.name, count: o.count }))}
+					selected={service ? [service] : []}
+					onChange={(vals) => setParams({ service: vals.at(-1) ?? null })}
+				/>
 			</FilterSidebarBody>
 		</FilterSidebarFrame>
 	)

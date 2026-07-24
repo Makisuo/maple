@@ -4,6 +4,7 @@ import { ChevronDownIcon, XmarkIcon } from "../icons"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible"
 import { Input } from "../ui/input"
 import { cn } from "../../lib/utils"
+import { FILTER_SECTION_LABEL } from "./filter-styles"
 
 export interface DurationStats {
 	minDurationMs: number
@@ -112,11 +113,16 @@ export function DurationRangeFilter({
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={setIsOpen}>
-			<CollapsibleTrigger className="flex w-full items-center justify-between py-2 text-sm font-medium hover:text-foreground text-muted-foreground transition-colors">
-				<span>Duration</span>
+			<CollapsibleTrigger
+				className={cn(
+					"group flex w-full items-center justify-between gap-2 py-2 hover:text-foreground text-muted-foreground transition-colors",
+					FILTER_SECTION_LABEL,
+				)}
+			>
+				<span className="truncate">Duration</span>
 				<span className="flex items-center gap-1.5">
 					{!isOpen && hasActiveRange && (
-						<span className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-xs tabular-nums text-foreground">
+						<span className="inline-flex items-center gap-1 rounded-sm bg-muted px-1.5 py-0.5 text-[10px] tabular-nums tracking-normal text-foreground">
 							{formatRange(minValue, maxValue)}
 							<span
 								role="button"
@@ -139,7 +145,12 @@ export function DurationRangeFilter({
 							</span>
 						</span>
 					)}
-					<ChevronDownIcon className={cn("size-4 transition-transform", isOpen && "rotate-180")} />
+					<ChevronDownIcon
+						className={cn(
+							"size-3.5 shrink-0 text-muted-foreground/40 transition-[transform,color] group-hover:text-muted-foreground",
+							isOpen && "rotate-180",
+						)}
+					/>
 				</span>
 			</CollapsibleTrigger>
 			<CollapsibleContent className="pb-3">

@@ -4,6 +4,7 @@ import { ScrollArea } from "../ui/scroll-area"
 import { Separator } from "../ui/separator"
 import { Skeleton } from "../ui/skeleton"
 import { cn } from "../../lib/utils"
+import { FILTER_SECTION_LABEL } from "./filter-styles"
 
 interface FilterSidebarFrameProps {
 	children: ReactNode
@@ -35,7 +36,8 @@ export function FilterSidebarHeader({
 }: FilterSidebarHeaderProps) {
 	return (
 		<div className="flex items-center justify-between py-2">
-			<h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</h3>
+			{/* Same size as the section labels below; distinguished by weight and full-strength color. */}
+			<h3 className={cn(FILTER_SECTION_LABEL, "font-semibold text-foreground")}>{title}</h3>
 			{canClear && onClear && (
 				<button
 					type="button"
@@ -55,7 +57,9 @@ export function FilterSidebarBody({ children }: { children: ReactNode }) {
 			<Separator className="my-2" />
 			<div className="relative min-h-0 flex-1">
 				<ScrollArea className="h-full">
-					<div className="space-y-1 pr-4 pb-6">{children}</div>
+					{/* Sections carry no dividers — whitespace alone groups them, so the gap between
+					    sections has to clearly beat the gap between options inside one. */}
+					<div className="space-y-2 pr-4 pb-6">{children}</div>
 				</ScrollArea>
 				<div
 					aria-hidden
@@ -74,13 +78,13 @@ export function FilterSidebarLoading({ sectionCount = 3 }: FilterSidebarLoadingP
 	return (
 		<FilterSidebarFrame>
 			<div className="flex items-center justify-between py-2">
-				<Skeleton className="h-5 w-16" />
+				<Skeleton className="h-3 w-14" />
 			</div>
 			<Separator className="my-2" />
 			<div className="space-y-4">
 				{Array.from({ length: sectionCount }).map((_, i) => (
 					<div key={i} className="space-y-2">
-						<Skeleton className="h-4 w-24" />
+						<Skeleton className="h-3 w-20" />
 						<Skeleton className="h-4 w-full" />
 						<Skeleton className="h-4 w-full" />
 						<Skeleton className="h-4 w-3/4" />

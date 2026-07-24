@@ -3,7 +3,6 @@ import { NetworkNodesIcon } from "@maple/ui/components/icons"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import { Separator } from "@maple/ui/components/ui/separator"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { formatDuration } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
@@ -101,7 +100,6 @@ export function TraceListView({ onSelectTrace }: TraceListViewProps) {
 					onChange={(checked) => setParams({ errors: checked ? "1" : null })}
 					count={facets.data?.errorCount}
 				/>
-				<Separator className="my-2" />
 				<FilterSection
 					title="Environment"
 					options={facets.data?.deploymentEnvs ?? []}
