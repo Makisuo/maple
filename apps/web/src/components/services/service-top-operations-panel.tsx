@@ -4,7 +4,7 @@ import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceOperationsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatLatency } from "@/lib/format"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 import type { ServiceOperation } from "@/api/warehouse/service-operations"
 import { SectionCard } from "./section-card"
 import { callsPerSecond, serviceOperationsQueryInput, windowSeconds } from "./service-operations"
@@ -119,7 +119,7 @@ export function ServiceTopOperationsPanel({
 									>
 										{formatErrorRate(op.errorRate)}
 									</span>
-									<span className="text-muted-foreground/80">{formatLatency(op.p95DurationMs)}</span>
+									<LatencyValue ms={op.p95DurationMs} scale="p95" />
 								</span>
 								<Sparkline
 									data={op.sparkline.map((point) => ({ value: point.count }))}

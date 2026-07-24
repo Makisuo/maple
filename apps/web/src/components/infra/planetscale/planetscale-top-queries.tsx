@@ -2,11 +2,12 @@ import { useMemo } from "react"
 
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { cn } from "@maple/ui/lib/utils"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 
 import { Result } from "@/lib/effect-atom"
 import { useRefreshableAtomValue } from "@/hooks/use-refreshable-atom-value"
 import { planetscaleQueryInsightsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
-import { formatLatency, formatNumber, formatRelativeTime } from "@/lib/format"
+import { formatNumber, formatRelativeTime } from "@/lib/format"
 
 /** Warehouse "YYYY-MM-DD HH:mm:ss" → epoch ms (values are UTC). */
 const warehouseTimeToMs = (value: string): number => new Date(`${value.replace(" ", "T")}Z`).getTime()
@@ -90,14 +91,12 @@ export function PlanetScaleTopQueries({
 						</span>
 					</div>
 					<div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+						<span className="font-mono tabular-nums">{formatNumber(row.queryCount)} calls</span>
 						<span className="font-mono tabular-nums">
-							{formatNumber(row.queryCount)} calls
+							p50 <LatencyValue ms={row.p50LatencyMillis} scale="p50" className="text-[10px]" />
 						</span>
 						<span className="font-mono tabular-nums">
-							p50 {formatLatency(row.p50LatencyMillis)}
-						</span>
-						<span className="font-mono tabular-nums">
-							p99 {formatLatency(row.p99LatencyMillis)}
+							p99 <LatencyValue ms={row.p99LatencyMillis} scale="p99" className="text-[10px]" />
 						</span>
 						<span className="font-mono tabular-nums">
 							{formatNumber(row.rowsReadPerQuery)} rows read/query

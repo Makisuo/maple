@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router"
 import { cn } from "@maple/ui/utils"
-import { formatDuration, formatErrorRate, formatNumber } from "@/lib/format"
+import { LatencyValue } from "@maple/ui/components/latency-value"
+import { formatErrorRate, formatNumber } from "@/lib/format"
 import type { InlineServiceData } from "./types"
 
 export function InlineService({ data }: { data: InlineServiceData }) {
@@ -30,7 +31,7 @@ export function InlineService({ data }: { data: InlineServiceData }) {
 			)}
 			{data.p99Ms != null && (
 				<span className="ml-auto text-[10px] text-muted-foreground">
-					P99: <span className="font-mono">{formatDuration(data.p99Ms)}</span>
+					P99: <LatencyValue ms={data.p99Ms} scale="p99" />
 				</span>
 			)}
 		</Link>

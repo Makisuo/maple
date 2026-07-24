@@ -25,6 +25,7 @@ import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
 import { cn } from "@maple/ui/utils"
 import { getServiceColor, getValueHue } from "@maple/ui/colors"
+import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import {
 	ChartContainer,
 	ChartTooltip,
@@ -326,7 +327,12 @@ function ServiceDetailPanel({
 									</div>
 									<div className="space-y-0.5">
 										<span className="text-[10px] text-muted-foreground">Avg Latency</span>
-										<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+										<p
+											className={cn(
+												"text-xl font-semibold tabular-nums font-mono",
+												latencyToneClass(avgLatencyMs, "avg"),
+											)}
+										>
 											{formatLatency(avgLatencyMs)}
 										</p>
 									</div>
@@ -335,9 +341,12 @@ function ServiceDetailPanel({
 										<p
 											className={cn(
 												"text-xl font-semibold tabular-nums font-mono",
+												// A p95 far above this service's own avg is a tail
+												// problem worth flagging even when the absolute
+												// magnitude is fine, so it outranks the ramp.
 												p95LatencyMs > avgLatencyMs * 3
 													? "text-severity-warn"
-													: "text-foreground",
+													: latencyToneClass(p95LatencyMs, "p95"),
 											)}
 										>
 											{formatLatency(p95LatencyMs)}
@@ -387,7 +396,12 @@ function ServiceDetailPanel({
 										</div>
 										<div className="space-y-0.5">
 											<span className="text-[10px] text-muted-foreground">CPU p99</span>
-											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											<p
+												className={cn(
+													"text-xl font-semibold tabular-nums font-mono",
+													latencyToneClass(cloudflare.cpuP99Ms ?? 0, "cpu"),
+												)}
+											>
 												{formatLatency(cloudflare.cpuP99Ms ?? 0)}
 											</p>
 										</div>
@@ -395,7 +409,12 @@ function ServiceDetailPanel({
 											<span className="text-[10px] text-muted-foreground">
 												Duration p99
 											</span>
-											<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+											<p
+												className={cn(
+													"text-xl font-semibold tabular-nums font-mono",
+													latencyToneClass(cloudflare.latencyP99Ms, "p99"),
+												)}
+											>
 												{formatLatency(cloudflare.latencyP99Ms)}
 											</p>
 										</div>
@@ -1349,7 +1368,12 @@ function DatabaseDetailPanel({
 							</div>
 							<div className="space-y-0.5">
 								<span className="text-[10px] text-muted-foreground">P50 Latency</span>
-								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										latencyToneClass(metricP50LatencyMs, "p50"),
+									)}
+								>
 									{formatLatency(metricP50LatencyMs)}
 								</p>
 							</div>
@@ -1358,9 +1382,11 @@ function DatabaseDetailPanel({
 								<p
 									className={cn(
 										"text-xl font-semibold tabular-nums font-mono",
+										// A p95 far above this node's own p50 is a tail problem
+										// worth flagging even at a fine absolute magnitude.
 										metricP95LatencyMs > metricP50LatencyMs * 3
 											? "text-severity-warn"
-											: "text-foreground",
+											: latencyToneClass(metricP95LatencyMs, "p95"),
 									)}
 								>
 									{formatLatency(metricP95LatencyMs)}
@@ -1368,7 +1394,12 @@ function DatabaseDetailPanel({
 							</div>
 							<div className="space-y-0.5">
 								<span className="text-[10px] text-muted-foreground">Avg Latency</span>
-								<p className="text-xl font-semibold text-foreground tabular-nums font-mono">
+								<p
+									className={cn(
+										"text-xl font-semibold tabular-nums font-mono",
+										latencyToneClass(metricAvgLatencyMs, "avg"),
+									)}
+								>
 									{formatLatency(metricAvgLatencyMs)}
 								</p>
 							</div>
@@ -1444,10 +1475,20 @@ function DatabaseDetailPanel({
 												{formatCompactCount(query.estimatedQueryCount)} calls
 											</span>
 											<span className="font-mono tabular-nums">
-												p50 {formatLatency(query.p50DurationMs)}
+												p50{" "}
+												<span
+													className={latencyToneClass(query.p50DurationMs, "p50")}
+												>
+													{formatLatency(query.p50DurationMs)}
+												</span>
 											</span>
 											<span className="font-mono tabular-nums">
-												p95 {formatLatency(query.p95DurationMs)}
+												p95{" "}
+												<span
+													className={latencyToneClass(query.p95DurationMs, "p95")}
+												>
+													{formatLatency(query.p95DurationMs)}
+												</span>
 											</span>
 											<span className="truncate">
 												{query.serviceCount > 1

@@ -1,6 +1,7 @@
 import { memo } from "react"
 import { Handle, Position } from "@xyflow/react"
 import { cn } from "@maple/ui/utils"
+import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@maple/ui/components/ui/tooltip"
 import {
 	AwsLambdaIcon,
@@ -132,8 +133,16 @@ const Handles = () => (
  * infrastructure dependencies stand out from application services on the map.
  */
 function DatabaseNode({ data }: { data: ServiceNodeData }) {
-	const { throughput, errorRate, avgLatencyMs, p95LatencyMs, dbSystem, dbNamespace, selected, planetscale } =
-		data
+	const {
+		throughput,
+		errorRate,
+		avgLatencyMs,
+		p95LatencyMs,
+		dbSystem,
+		dbNamespace,
+		selected,
+		planetscale,
+	} = data
 	// Named databases show their identity as the title; the system name takes over
 	// the small badge slot (the generic node keeps the coarse category). Databases
 	// behind Cloudflare Hyperdrive collapse to a single "Hyperdrive"-branded node;
@@ -192,8 +201,16 @@ function DatabaseNode({ data }: { data: ServiceNodeData }) {
 							value={`${(errorRate * 100).toFixed(1)}%`}
 							valueClassName={errorRateClass(errorRate)}
 						/>
-						<MetricCell label="avg" value={formatLatency(avgLatencyMs)} />
-						<MetricCell label="p95" value={formatLatency(p95LatencyMs ?? 0)} />
+						<MetricCell
+							label="avg"
+							value={formatLatency(avgLatencyMs)}
+							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
+						/>
+						<MetricCell
+							label="p95"
+							value={formatLatency(p95LatencyMs ?? 0)}
+							valueClassName={latencyToneClass(p95LatencyMs ?? 0, "p95")}
+						/>
 					</div>
 
 					{/* PlanetScale live health (scraped branch metrics, window rollup) */}
@@ -322,7 +339,11 @@ function ServiceNode({ data }: { data: ServiceNodeData }) {
 							valueClassName={errorRateClass(errorRate)}
 						/>
 
-						<MetricCell label="avg" value={formatLatency(avgLatencyMs)} />
+						<MetricCell
+							label="avg"
+							value={formatLatency(avgLatencyMs)}
+							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
+						/>
 
 						{/* Pods badge — empty placeholder when no infra so widths stay stable */}
 						<div className="ml-auto flex flex-col items-end gap-px">
@@ -406,7 +427,11 @@ function NamespaceAggregateNode({ data }: { data: ServiceNodeData }) {
 							value={`${(errorRate * 100).toFixed(1)}%`}
 							valueClassName={errorRateClass(errorRate)}
 						/>
-						<MetricCell label="avg" value={formatLatency(avgLatencyMs)} />
+						<MetricCell
+							label="avg"
+							value={formatLatency(avgLatencyMs)}
+							valueClassName={latencyToneClass(avgLatencyMs, "avg")}
+						/>
 					</div>
 				</div>
 			</div>
@@ -428,7 +453,5 @@ export const ServiceMapNode = memo(function ServiceMapNode({ data }: ServiceMapN
 			<ServiceNode data={data} />
 		)
 	// Focus dim-mode: fade non-neighbors without moving them.
-	return (
-		<div className={cn("transition-opacity duration-200", data.dimmed && "opacity-25")}>{card}</div>
-	)
+	return <div className={cn("transition-opacity duration-200", data.dimmed && "opacity-25")}>{card}</div>
 })

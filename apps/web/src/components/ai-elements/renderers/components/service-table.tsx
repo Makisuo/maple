@@ -1,6 +1,7 @@
 import type { BaseComponentProps } from "@json-render/react"
 import { cn } from "@maple/ui/utils"
-import { formatDuration, formatErrorRate, formatNumber } from "@/lib/format"
+import { LatencyValue } from "@maple/ui/components/latency-value"
+import { formatErrorRate, formatNumber } from "@/lib/format"
 
 interface ServiceTableProps {
 	services: Array<{
@@ -56,14 +57,14 @@ export function ServiceTable({ props }: BaseComponentProps<ServiceTableProps>) {
 							>
 								{formatErrorRate(svc.errorRate)}
 							</td>
-							<td className="py-1 pr-2 text-right font-mono text-muted-foreground">
-								{formatDuration(svc.p50Ms)}
+							<td className="py-1 pr-2 text-right">
+								<LatencyValue ms={svc.p50Ms} scale="p50" />
 							</td>
-							<td className="py-1 pr-2 text-right font-mono text-muted-foreground">
-								{formatDuration(svc.p95Ms)}
+							<td className="py-1 pr-2 text-right">
+								<LatencyValue ms={svc.p95Ms} scale="p95" />
 							</td>
-							<td className="py-1 text-right font-mono text-muted-foreground">
-								{formatDuration(svc.p99Ms)}
+							<td className="py-1 text-right">
+								<LatencyValue ms={svc.p99Ms} scale="p99" />
 							</td>
 						</tr>
 					))}

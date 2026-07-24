@@ -44,6 +44,7 @@ import { openAnomalyIncidentsAtom } from "@/lib/services/atoms/anomaly-atoms"
 import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import type { ServicesSearchParams } from "@/routes/services/index"
 import { ServiceDot } from "@maple/ui/components/service-dot"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 
 // One fleet-level call: open (actionable) error-issue counts grouped by
 // service name. Progressive enrichment — the table renders without it.
@@ -51,19 +52,6 @@ const openIssueCountsAtom = MapleApiV2AtomClient.query("errorIssues", "serviceCo
 	reactivityKeys: ["errorIssues"],
 	timeToLive: 60_000,
 })
-
-function formatLatency(ms: number): string {
-	if (ms == null || Number.isNaN(ms)) {
-		return "-"
-	}
-	if (ms < 1) {
-		return `${(ms * 1000).toFixed(0)}μs`
-	}
-	if (ms < 1000) {
-		return `${ms.toFixed(1)}ms`
-	}
-	return `${(ms / 1000).toFixed(2)}s`
-}
 
 function formatThroughput(rate: number): string {
 	if (rate == null || Number.isNaN(rate) || rate === 0) {
@@ -166,7 +154,10 @@ interface BaselineDelta {
 	className: string
 }
 
-function baselineDelta(p95LatencyMs: number, baseline: LatencyBaselineSignal | undefined): BaselineDelta | undefined {
+function baselineDelta(
+	p95LatencyMs: number,
+	baseline: LatencyBaselineSignal | undefined,
+): BaselineDelta | undefined {
 	if (baseline === undefined || baseline.spanCount < MIN_BASELINE_SPANS || baseline.p95LatencyMs <= 0) {
 		return undefined
 	}
@@ -175,7 +166,11 @@ function baselineDelta(p95LatencyMs: number, baseline: LatencyBaselineSignal | u
 	return {
 		label: `${pct > 0 ? "+" : ""}${pct}% vs 7d`,
 		className:
-			delta >= 1 ? "text-severity-error" : delta >= 0.25 ? "text-severity-warn" : "text-muted-foreground",
+			delta >= 1
+				? "text-severity-error"
+				: delta >= 0.25
+					? "text-severity-warn"
+					: "text-muted-foreground",
 	}
 }
 
@@ -222,7 +217,9 @@ function deriveDeployInfo(commits: CommitBreakdown[]): DeployCellInfo | undefine
 		meaningful.length > 1
 			? {
 					percentage: dominant.percentage,
-					others: real.filter((c) => c !== dominant).toSorted((a, b) => b.percentage - a.percentage),
+					others: real
+						.filter((c) => c !== dominant)
+						.toSorted((a, b) => b.percentage - a.percentage),
 				}
 			: undefined
 
@@ -418,17 +415,19 @@ const ServiceRow = React.memo(function ServiceRow({
 					<div className="truncate text-xs text-muted-foreground">{service.serviceNamespace}</div>
 				) : null}
 			</TableCell>
-			<TableCell className="hidden lg:table-cell font-mono text-xs">
-				{formatLatency(service.p50LatencyMs)}
+			<TableCell className="hidden lg:table-cell text-xs">
+				<LatencyValue ms={service.p50LatencyMs} scale="p50" />
 			</TableCell>
-			<TableCell className="font-mono text-xs">
-				<div>{formatLatency(service.p95LatencyMs)}</div>
+			<TableCell className="text-xs">
+				<div>
+					<LatencyValue ms={service.p95LatencyMs} scale="p95" />
+				</div>
 				{delta !== undefined && (
 					<div className={cn("text-[10px] tabular-nums", delta.className)}>{delta.label}</div>
 				)}
 			</TableCell>
-			<TableCell className="hidden lg:table-cell font-mono text-xs">
-				{formatLatency(service.p99LatencyMs)}
+			<TableCell className="hidden lg:table-cell text-xs">
+				<LatencyValue ms={service.p99LatencyMs} scale="p99" />
 			</TableCell>
 			<TableCell>
 				<div
@@ -474,8 +473,8 @@ const ServiceRow = React.memo(function ServiceRow({
 					{service.hasSampling && (
 						<TooltipContent side="bottom">
 							<p>
-								Estimated from {((1 / service.samplingWeight) * 100).toFixed(0)}% sampled traces
-								(x{service.samplingWeight.toFixed(0)} extrapolation)
+								Estimated from {((1 / service.samplingWeight) * 100).toFixed(0)}% sampled
+								traces (x{service.samplingWeight.toFixed(0)} extrapolation)
 							</p>
 						</TooltipContent>
 					)}
@@ -685,9 +684,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 			}
 
 			return (
-				<div
-					className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}
-				>
+				<div className={`space-y-4 transition-opacity ${combinedResult.waiting ? "opacity-60" : ""}`}>
 					{/* Desktop: full metrics table. Below md the fixed-width columns and
 				    in-cell sparklines force horizontal scroll, so we swap to a list. */}
 					<div className="hidden md:block rounded-md border overflow-auto">
@@ -706,9 +703,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 									<TableHead className="w-[9%]">P95</TableHead>
 									<TableHead className="hidden lg:table-cell w-[7%]">P99</TableHead>
 									<TableHead className="w-[12%]">Error Rate</TableHead>
-									<TableHead className="hidden md:table-cell w-[12%]">
-										Throughput
-									</TableHead>
+									<TableHead className="hidden md:table-cell w-[12%]">Throughput</TableHead>
 									<TableHead className="hidden lg:table-cell w-[7%] text-center">
 										Issues
 									</TableHead>
@@ -793,9 +788,10 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 															<span className="text-muted-foreground/60">
 																P99{" "}
 															</span>
-															<span className="text-foreground">
-																{formatLatency(service.p99LatencyMs)}
-															</span>
+															<LatencyValue
+																ms={service.p99LatencyMs}
+																scale="p99"
+															/>
 														</span>
 														<span>
 															<span className="text-muted-foreground/60">
