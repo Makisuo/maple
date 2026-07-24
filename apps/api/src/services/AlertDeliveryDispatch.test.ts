@@ -6,7 +6,9 @@ import { TestClock } from "effect/testing"
 import {
 	buildAlertChatUrl,
 	buildDiscordEmbedsFromTemplate,
+	buildSlackBlocks,
 	buildSlackBlocksFromTemplate,
+	buildSlackFallbackText,
 	buildTemplateContext,
 	dispatchDelivery,
 	type DispatchContext,
@@ -98,6 +100,77 @@ describe("buildTemplateContext", () => {
 		assert.include(title.text, "Checkout error rate")
 		assert.include(title.text, "Triggered")
 		assert.include(body.text, "*Observed:* 8% > 5%")
+	})
+})
+
+describe("buildSlackBlocks (default format)", () => {
+	type HeaderBlock = { type: string; text: { text: string } }
+	type SectionBlock = { type: string; text: { text: string }; fields: Array<{ text: string }> }
+	type ContextBlock = { type: string; elements: Array<{ text: string }> }
+
+	it("leads with a truncated header and a human-readable summary sentence", () => {
+		const blocks = buildSlackBlocks(baseContext, LINK, CHAT)
+		const header = blocks[0] as HeaderBlock
+		const section = blocks[1] as SectionBlock
+		assert.strictEqual(header.type, "header")
+		assert.include(header.text.text, "Checkout error rate")
+		assert.strictEqual(section.type, "section")
+		assert.include(section.text.text, "*Error Rate* is *8%*")
+		assert.include(section.text.text, "above the 5% threshold")
+		assert.include(section.text.text, "last 5m")
+	})
+
+	it("truncates an over-long default header to Slack's 150-char limit", () => {
+		const blocks = buildSlackBlocks({ ...baseContext, ruleName: "x".repeat(300) }, LINK, CHAT)
+		const header = blocks[0] as HeaderBlock
+		assert.isAtMost(header.text.text.length, 150)
+	})
+
+	it("pairs the severity color with an emoji + capitalized label", () => {
+		const blocks = buildSlackBlocks(baseContext, LINK, CHAT)
+		const section = blocks[1] as SectionBlock
+		assert.isTrue(section.fields.some((f) => f.text.includes("\u{1F534} Critical")))
+	})
+
+	it("omits the group field when the rule has no grouping, escapes it when present", () => {
+		const without = (buildSlackBlocks(baseContext, LINK, CHAT)[1] as SectionBlock).fields
+		assert.isFalse(without.some((f) => f.text.startsWith("*Group*")))
+		const withGroup = (
+			buildSlackBlocks({ ...baseContext, groupKey: "checkout<v2>" }, LINK, CHAT)[1] as SectionBlock
+		).fields
+		const group = withGroup.find((f) => f.text.startsWith("*Group*"))
+		assert.isDefined(group)
+		assert.include(group!.text, "checkout&lt;v2&gt;")
+	})
+
+	it("phrases a resolve event as recovery and includes a local-time timestamp", () => {
+		const blocks = buildSlackBlocks({ ...baseContext, eventType: "resolve" }, LINK, CHAT)
+		const section = blocks[1] as SectionBlock
+		assert.include(section.text.text, "back within its threshold")
+		const context = blocks.at(-1) as ContextBlock
+		assert.strictEqual(context.type, "context")
+		// <!date^…> renders in each viewer's local timezone; ISO fallback for exports.
+		assert.include(context.elements[0]!.text, "<!date^1780358400^")
+		assert.include(context.elements[0]!.text, "2026-06-02T00:00:00.000Z")
+	})
+
+	it("styles buttons per Slack guidance — no danger style on navigation links", () => {
+		const blocks = buildSlackBlocks(baseContext, LINK, CHAT)
+		const actions = blocks.find((b) => (b as { type: string }).type === "actions") as {
+			elements: Array<{ style?: string }>
+		}
+		assert.isDefined(actions)
+		assert.isFalse(actions.elements.some((e) => e.style === "danger"))
+	})
+})
+
+describe("buildSlackFallbackText", () => {
+	it("is a complete one-line summary for notification previews, with mrkdwn escaped", () => {
+		const text = buildSlackFallbackText({ ...baseContext, ruleName: "Errors <prod> & staging" })
+		assert.include(text, "\u{1F6A8}")
+		assert.include(text, "Errors &lt;prod&gt; &amp; staging")
+		assert.include(text, "Triggered")
+		assert.include(text, "Error Rate 8% > 5%")
 	})
 })
 
@@ -245,7 +318,12 @@ describe("dispatchDelivery", () => {
 			assert.strictEqual(calls[0]!.url, "https://slack.com/api/chat.postMessage")
 			assert.strictEqual(calls[0]!.auth, "Bearer xoxb-test-token")
 			assert.strictEqual((calls[0]!.body as { channel: string }).channel, "C0789CHAN")
-			assert.isArray((calls[0]!.body as { blocks: unknown[] }).blocks)
+			// Blocks are wrapped in a colored attachment so the severity bar renders.
+			const attachments = (calls[0]!.body as { attachments: Array<{ color: string; blocks: unknown[] }> })
+				.attachments
+			assert.lengthOf(attachments, 1)
+			assert.match(attachments[0]!.color, /^#[0-9a-f]{6}$/)
+			assert.isArray(attachments[0]!.blocks)
 			assert.strictEqual(result.providerReference, "1700000000.000100")
 			assert.strictEqual(result.responseCode, 200)
 		}),

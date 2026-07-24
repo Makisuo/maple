@@ -211,6 +211,12 @@ export const formatWindow = (minutes: number): string => {
 	return hours % 1 === 0 ? `${hours}h` : `${minutes}m`
 }
 
+export const severityEmoji = (severity: string): string =>
+	severity === "critical" ? "\u{1F534}" : "\u{1F7E0}"
+
+export const formatSeverityLabel = (severity: string): string =>
+	severity.charAt(0).toUpperCase() + severity.slice(1)
+
 export const slackAttachmentColor = (eventType: string, severity: string): string => {
 	if (eventType === "resolve") return "#2eb67d"
 	if (eventType === "test") return "#36c5f0"
@@ -231,13 +237,30 @@ type ObservedContext = Pick<
 	"value" | "signalType" | "comparator" | "threshold" | "thresholdUpper"
 >
 
-export const formatObservedSummary = (context: ObservedContext): string => {
-	const observed = formatSignalMetric(context.value, context.signalType)
-	const comparison =
-		context.comparator === "between" || context.comparator === "not_between"
-			? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-			: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
-	return `${observed} ${comparison}`
+type ThresholdContext = Omit<ObservedContext, "value">
+
+/** The comparator + formatted threshold(s), e.g. `> 5%` or `between 5% and 10%`. */
+export const formatThresholdSummary = (context: ThresholdContext): string =>
+	context.comparator === "between" || context.comparator === "not_between"
+		? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
+		: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
+
+export const formatObservedSummary = (context: ObservedContext): string =>
+	`${formatSignalMetric(context.value, context.signalType)} ${formatThresholdSummary(context)}`
+
+/** Prose form of the breach condition, e.g. "above the 5% threshold". */
+const comparatorBreachPhrase = (context: ThresholdContext): string => {
+	const threshold = formatSignalMetric(context.threshold, context.signalType)
+	const upper = formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)
+	return Match.value(context.comparator).pipe(
+		Match.whenOr("gt", "gte", () => `above the ${threshold} threshold`),
+		Match.whenOr("lt", "lte", () => `below the ${threshold} threshold`),
+		Match.when("eq", () => `at the ${threshold} threshold`),
+		Match.when("neq", () => `away from the ${threshold} target`),
+		Match.when("between", () => `inside the ${threshold}–${upper} range`),
+		Match.when("not_between", () => `outside the ${threshold}–${upper} range`),
+		Match.exhaustive,
+	)
 }
 
 /* -------------------------------------------------------------------------- */
@@ -283,55 +306,105 @@ const runTimedFetch = <A>(
 		}),
 	)
 
-const buildSlackBlocks = (context: DispatchContext, linkUrl: string, chatUrl: string) => [
+/**
+ * Escape Slack mrkdwn control characters in dynamic text (Slack parses `<...>`
+ * as link/mention syntax). Required by https://docs.slack.dev/messaging/formatting-message-text
+ * for any user-controlled value interpolated into mrkdwn.
+ */
+const escapeSlackMrkdwn = (value: string): string =>
+	value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+/**
+ * One human-readable sentence describing what happened — the message lead, per
+ * Slack's Block Kit guidance (header as subject line, then a short clear
+ * sentence, with details relegated to fields/context).
+ */
+const buildSlackSummaryLine = (
+	context: Pick<
+		DispatchContext,
+		"eventType" | "signalType" | "comparator" | "threshold" | "thresholdUpper" | "value" | "windowMinutes"
+	>,
+): string => {
+	const signal = formatSignalLabel(context.signalType)
+	const observed = formatSignalMetric(context.value, context.signalType)
+	const window = formatWindow(context.windowMinutes)
+	if (context.eventType === "test") {
+		return `This is a test notification. Live alerts fire when *${signal}* is ${comparatorBreachPhrase(context)} over a ${window} window.`
+	}
+	if (context.eventType === "resolve") {
+		const now = context.value != null ? ` — now *${observed}*` : ""
+		return `*${signal}* is back within its threshold (${formatThresholdSummary(context)})${now}.`
+	}
+	return `*${signal}* is *${observed}* — ${comparatorBreachPhrase(context)}, measured over the last ${window}.`
+}
+
+const buildSlackActionsBlock = (linkUrl: string, chatUrl: string) => ({
+	type: "actions",
+	elements: [
+		{
+			type: "button",
+			text: { type: "plain_text", text: "Open in Maple", emoji: true },
+			url: linkUrl,
+			style: "primary",
+		},
+		{
+			type: "button",
+			text: { type: "plain_text", text: "✨ Ask Maple AI", emoji: true },
+			url: chatUrl,
+		},
+	],
+})
+
+/**
+ * Footer: brand + incident reference + a `<!date^…>` timestamp so Slack renders
+ * the fire time in each viewer's local timezone (ISO fallback for exports).
+ */
+const buildSlackContextBlock = (context: Pick<DispatchContext, "sentAtMs" | "incidentId">) => {
+	const parts = ["\u{1F341} Maple Alerts"]
+	if (context.incidentId) parts.push(`Incident \`${escapeSlackMrkdwn(context.incidentId)}\``)
+	if (context.sentAtMs != null) {
+		const seconds = Math.floor(context.sentAtMs / 1000)
+		const iso = new Date(context.sentAtMs).toISOString()
+		parts.push(`<!date^${seconds}^{date_short_pretty} at {time}|${iso}>`)
+	}
+	return { type: "context", elements: [{ type: "mrkdwn", text: parts.join("  ·  ") }] }
+}
+
+export const buildSlackBlocks = (context: TemplateRenderContext, linkUrl: string, chatUrl: string) => [
 	{
 		type: "header",
 		text: {
 			type: "plain_text",
-			text: `${eventTypeEmoji(context.eventType)} ${context.ruleName} — ${formatEventTypeLabel(context.eventType)}`,
+			text: truncate(
+				`${eventTypeEmoji(context.eventType)} ${context.ruleName} — ${formatEventTypeLabel(context.eventType)}`,
+				150,
+			),
 			emoji: true,
 		},
 	},
 	{
 		type: "section",
+		text: { type: "mrkdwn", text: buildSlackSummaryLine(context) },
 		fields: [
-			{ type: "mrkdwn", text: `*Severity*\n${context.severity}` },
-			{ type: "mrkdwn", text: `*Signal*\n${formatSignalLabel(context.signalType)}` },
-			{ type: "mrkdwn", text: `*Group*\n${context.groupKey ?? "all"}` },
 			{
 				type: "mrkdwn",
-				text: `*Observed*\n${formatSignalMetric(context.value, context.signalType)} ${
-					context.comparator === "between" || context.comparator === "not_between"
-						? `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)} and ${formatSignalMetric(context.thresholdUpper ?? context.threshold, context.signalType)}`
-						: `${formatComparator(context.comparator)} ${formatSignalMetric(context.threshold, context.signalType)}`
-				}`,
+				text: `*Severity*\n${severityEmoji(context.severity)} ${formatSeverityLabel(context.severity)}`,
 			},
-			{ type: "mrkdwn", text: `*Window*\n${formatWindow(context.windowMinutes)}` },
+			...(context.groupKey != null
+				? [{ type: "mrkdwn", text: `*Group*\n\`${escapeSlackMrkdwn(context.groupKey)}\`` }]
+				: []),
 		],
 	},
-	{ type: "divider" },
-	{
-		type: "actions",
-		elements: [
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Open in Maple", emoji: true },
-				url: linkUrl,
-				...(context.eventType !== "resolve" && { style: "danger" }),
-			},
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Ask Maple AI", emoji: true },
-				url: chatUrl,
-				style: "primary",
-			},
-		],
-	},
-	{
-		type: "context",
-		elements: [{ type: "mrkdwn", text: "\u{1F341} Maple Alerts" }],
-	},
+	buildSlackActionsBlock(linkUrl, chatUrl),
+	buildSlackContextBlock(context),
 ]
+
+/**
+ * Notification-preview fallback (`text` alongside blocks): a complete one-line
+ * summary, since push/desktop previews render only this string.
+ */
+export const buildSlackFallbackText = (context: TemplateRenderContext): string =>
+	`${eventTypeEmoji(context.eventType)} ${escapeSlackMrkdwn(context.ruleName)} — ${formatEventTypeLabel(context.eventType)} · ${formatSignalLabel(context.signalType)} ${formatObservedSummary(context)}`
 
 const buildDiscordEmbeds = (context: DispatchContext, linkUrl: string, chatUrl: string) => [
 	{
@@ -519,7 +592,7 @@ const renderTitleBody = (
 export const buildSlackBlocksFromTemplate = (
 	title: string,
 	body: string,
-	context: Pick<DispatchContext, "eventType">,
+	context: Pick<DispatchContext, "eventType" | "sentAtMs" | "incidentId">,
 	linkUrl: string,
 	chatUrl: string,
 ) => [
@@ -531,28 +604,8 @@ export const buildSlackBlocksFromTemplate = (
 		type: "section",
 		text: { type: "mrkdwn", text: markdownToSlackMrkdwn(body) },
 	},
-	{ type: "divider" },
-	{
-		type: "actions",
-		elements: [
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Open in Maple", emoji: true },
-				url: linkUrl,
-				...(context.eventType !== "resolve" && { style: "danger" }),
-			},
-			{
-				type: "button",
-				text: { type: "plain_text", text: "Ask Maple AI", emoji: true },
-				url: chatUrl,
-				style: "primary",
-			},
-		],
-	},
-	{
-		type: "context",
-		elements: [{ type: "mrkdwn", text: "\u{1F341} Maple Alerts" }],
-	},
+	buildSlackActionsBlock(linkUrl, chatUrl),
+	buildSlackContextBlock(context),
 ]
 
 export const buildDiscordEmbedsFromTemplate = (
@@ -622,9 +675,7 @@ export const dispatchDelivery = (
 								method: "POST",
 								headers: { "content-type": "application/json" },
 								body: JSON.stringify({
-									text:
-										templated?.title ??
-										`${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
+									text: templated?.title ?? buildSlackFallbackText(context),
 									attachments: [
 										{
 											color: slackAttachmentColor(context.eventType, context.severity),
@@ -677,10 +728,16 @@ export const dispatchDelivery = (
 									},
 									body: JSON.stringify({
 										channel: config.channelId,
-										text:
-											templated?.title ??
-											`${context.ruleName}: ${formatEventTypeLabel(context.eventType)}`,
-										blocks,
+										text: templated?.title ?? buildSlackFallbackText(context),
+										// Blocks ride inside a colored attachment so the message
+										// carries the severity color bar — same as the webhook
+										// destination (the bar has no Block Kit equivalent).
+										attachments: [
+											{
+												color: slackAttachmentColor(context.eventType, context.severity),
+												blocks,
+											},
+										],
 									}),
 								}),
 						)
