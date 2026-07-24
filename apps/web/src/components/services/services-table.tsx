@@ -41,17 +41,9 @@ import {
 	getServiceOverviewResultAtom,
 } from "@/lib/services/atoms/warehouse-query-atoms"
 import { openAnomalyIncidentsAtom } from "@/lib/services/atoms/anomaly-atoms"
-import { MapleApiV2AtomClient } from "@/lib/services/common/v2-atom-client"
 import type { ServicesSearchParams } from "@/routes/services/index"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { LatencyValue } from "@maple/ui/components/latency-value"
-
-// One fleet-level call: open (actionable) error-issue counts grouped by
-// service name. Progressive enrichment — the table renders without it.
-const openIssueCountsAtom = MapleApiV2AtomClient.query("errorIssues", "serviceCounts", {
-	reactivityKeys: ["errorIssues"],
-	timeToLive: 60_000,
-})
 
 function formatThroughput(rate: number): string {
 	if (rate == null || Number.isNaN(rate) || rate === 0) {
@@ -354,7 +346,6 @@ interface ServiceRowProps {
 	filters: ServicesSearchParams | undefined
 	health: ServiceHealth | undefined
 	baseline: LatencyBaselineSignal | undefined
-	issueCount: number | undefined
 	navigate: ReturnType<typeof useNavigate>
 }
 
@@ -364,7 +355,6 @@ const ServiceRow = React.memo(function ServiceRow({
 	filters,
 	health,
 	baseline,
-	issueCount,
 	navigate,
 }: ServiceRowProps) {
 	const throughputData = React.useMemo(
@@ -480,21 +470,6 @@ const ServiceRow = React.memo(function ServiceRow({
 					)}
 				</Tooltip>
 			</TableCell>
-			<TableCell className="hidden lg:table-cell text-center">
-				{issueCount !== undefined && issueCount > 0 ? (
-					<Badge
-						variant="secondary"
-						className={cn(
-							"px-1.5 py-0 font-mono text-[10px] tabular-nums",
-							health === "unhealthy" && "bg-destructive/15 text-severity-error",
-						)}
-					>
-						{issueCount}
-					</Badge>
-				) : (
-					<span className="text-xs text-muted-foreground">—</span>
-				)}
-			</TableCell>
 			<TableCell className="hidden lg:table-cell">
 				<DeployCell commits={service.commits} />
 			</TableCell>
@@ -519,8 +494,7 @@ function LoadingState() {
 							<TableHead className="w-[7%]">P99</TableHead>
 							<TableHead className="w-[12%]">Error Rate</TableHead>
 							<TableHead className="w-[12%]">Throughput</TableHead>
-							<TableHead className="w-[7%]">Issues</TableHead>
-							<TableHead className="w-[15%]">Last deploy</TableHead>
+							<TableHead className="w-[18%]">Last deploy</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -543,9 +517,6 @@ function LoadingState() {
 								</TableCell>
 								<TableCell>
 									<Skeleton className="h-8 w-full" />
-								</TableCell>
-								<TableCell>
-									<Skeleton className="h-4 w-8" />
 								</TableCell>
 								<TableCell>
 									<Skeleton className="h-4 w-24" />
@@ -616,9 +587,8 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 		commitShas: filters?.commitShas,
 	})
 
-	// Progressive enrichment — neither blocks first paint. The baseline payload
-	// is hour-snapped upstream, so this atom refetches at most hourly; issue
-	// counts are one cheap Postgres GROUP BY.
+	// Progressive enrichment — does not block first paint. The baseline payload
+	// is hour-snapped upstream, so this atom refetches at most hourly.
 	const baselineResult = useAtomValue(
 		getServiceHealthBaselineResultAtom({
 			data: {
@@ -627,18 +597,12 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 			},
 		}),
 	)
-	const issueCountsResult = useAtomValue(openIssueCountsAtom)
 
 	const baselineData = Result.isSuccess(baselineResult) ? baselineResult.value : undefined
 	const baselineMap = React.useMemo(
 		() => (baselineData === undefined ? undefined : buildBaselineMap(baselineData.data)),
 		[baselineData],
 	)
-	const issueCountsData = Result.isSuccess(issueCountsResult) ? issueCountsResult.value : undefined
-	const issueCountByService = React.useMemo(() => {
-		if (issueCountsData === undefined) return undefined
-		return new Map(issueCountsData.data.map((row) => [row.service_name, row.open_count]))
-	}, [issueCountsData])
 
 	return Result.builder(Result.all([overviewResult, timeSeriesResult, anomaliesResult, incidentsResult]))
 		.onInitial(() => <LoadingState />)
@@ -677,7 +641,6 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 						baseline={baselineMap?.get(
 							baselineKey(service.serviceName, service.serviceNamespace, service.environment),
 						)}
-						issueCount={issueCountByService?.get(service.serviceName)}
 						navigate={navigate}
 					/>
 				)
@@ -704,10 +667,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 									<TableHead className="hidden lg:table-cell w-[7%]">P99</TableHead>
 									<TableHead className="w-[12%]">Error Rate</TableHead>
 									<TableHead className="hidden md:table-cell w-[12%]">Throughput</TableHead>
-									<TableHead className="hidden lg:table-cell w-[7%] text-center">
-										Issues
-									</TableHead>
-									<TableHead className="hidden lg:table-cell w-[15%]">
+									<TableHead className="hidden lg:table-cell w-[18%]">
 										Last deploy
 									</TableHead>
 								</TableRow>
@@ -715,7 +675,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 							<TableBody>
 								{services.length === 0 ? (
 									<TableRow>
-										<TableCell colSpan={8} className="h-24 text-center">
+										<TableCell colSpan={7} className="h-24 text-center">
 											No services found
 										</TableCell>
 									</TableRow>
@@ -723,7 +683,7 @@ export function ServicesTable({ filters }: ServicesTableProps) {
 									groups.map(([environment, envServices]) => (
 										<React.Fragment key={environment}>
 											<TableRow className="bg-muted/30 hover:bg-muted/30">
-												<TableCell colSpan={8} className="py-2">
+												<TableCell colSpan={7} className="py-2">
 													<div className="flex items-center gap-2">
 														<EnvironmentBadge environment={environment} />
 														<span className="text-xs text-muted-foreground">
