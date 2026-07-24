@@ -679,7 +679,7 @@ export const map_lede = () => `Live request flow across your services. Hot servi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_eyebrow = () => `05 · Agents`
+export const mcp_eyebrow = () => `07 · Agents`
 
 
 /**
@@ -855,7 +855,7 @@ export const k8s_summary_cluster_mem = () => `Cluster MEM`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_eyebrow = () => `07 · The bill`
+export const bill_eyebrow = () => `08 · The bill`
 
 
 /**
@@ -1103,7 +1103,7 @@ export const bill_link_vs_dash0 = () => `Full vs Dash0`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `09 · Start`
+export const start_eyebrow = () => `10 · Start`
 
 
 /**
@@ -5119,6 +5119,22 @@ export const platform_mcp_desc = () => `Any MCP-compatible client can list servi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `Connect your cloud`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart; PlanetScale and Cloudflare connect with one OAuth click. Maple discovers every database branch and zone behind them, and anything else Prometheus-compatible scrapes on a schedule.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sov_pillar_4_label = () => `Your perimeter`
 
 
@@ -5175,7 +5191,7 @@ export const local_link_docs = () => `Read the docs →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_eyebrow = () => `08 · Pricing`
+export const pricing_home_eyebrow = () => `09 · Pricing`
 
 
 /**
@@ -5295,7 +5311,7 @@ export const hero_shots_aria = () => `Product screenshots`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_name = () => `Connect your cloud`
+export const hero_shot_overview_line = () => `See every service at a glance.`
 
 
 /**
@@ -5303,4 +5319,12 @@ export const platform_cloud_name = () => `Connect your cloud`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart; PlanetScale and Cloudflare connect with one OAuth click. Maple discovers every database branch and zone behind them, and anything else Prometheus-compatible scrapes on a schedule.`
+export const hero_shot_traces_line = () => `Follow one request end to end.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map_line = () => `Watch traffic move between services.`

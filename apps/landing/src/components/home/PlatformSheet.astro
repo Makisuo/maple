@@ -126,7 +126,7 @@ const cells: Cell[] = [
 		shot: "The metric explorer listing every metric with its type and cardinality",
 		src: "/screenshots/surface-metrics.webp",
 		width: 1280,
-		height: 620,
+		height: 660,
 	},
 	{
 		name: m.map_title(),
@@ -136,7 +136,7 @@ const cells: Cell[] = [
 		shot: "A focused service neighborhood showing API, database, and cache dependencies with live request flow",
 		src: "/screenshots/surface-map.webp",
 		width: 1280,
-		height: 760,
+		height: 660,
 	},
 	{
 		name: m.platform_errors_name(),
@@ -207,10 +207,15 @@ const cells: Cell[] = [
 							/* One bordered well, not a second ruled plate: DESIGN.md
 							   bans nesting cards, and repeating the parent's `gap-px`
 							   construction inside one of its own cells is exactly
-							   that. Wrapping flow rather than a grid because seven
-							   marks leave a ragged row at any column count. */
+							   that.
+
+							   A fixed four-column matrix rather than wrapping flow:
+							   seven marks in a flex-wrap fit one row at 1440 but
+							   orphan the seventh onto a line of its own by `lg`, and
+							   a stray single mark reads as a mistake. 4 + 3 is the
+							   same deliberate shape at every width. */
 							<div class="max-w-[380px] rounded-lg border border-border bg-bg-deep px-5 py-5">
-								<div class="flex flex-wrap items-center gap-x-6 gap-y-5">
+								<div class="grid grid-cols-4 justify-items-center gap-y-5">
 									{cell.marks.map((mark) => (
 										<span
 											class="text-fg-muted opacity-60 transition-opacity hover:opacity-100"

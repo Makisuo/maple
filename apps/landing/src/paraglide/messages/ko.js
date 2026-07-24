@@ -679,7 +679,7 @@ export const map_lede = () => `Live request flow across your services. Hot servi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_eyebrow = () => `05 · Agents`
+export const mcp_eyebrow = () => `07 · Agents`
 
 
 /**
@@ -855,7 +855,7 @@ export const k8s_summary_cluster_mem = () => `Cluster MEM`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_eyebrow = () => `07 · The bill`
+export const bill_eyebrow = () => `08 · The bill`
 
 
 /**
@@ -1103,7 +1103,7 @@ export const bill_link_vs_dash0 = () => `Full vs Dash0`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `09 · 시작`
+export const start_eyebrow = () => `10 · 시작`
 
 
 /**
@@ -5119,6 +5119,22 @@ export const platform_mcp_desc = () => `MCP 호환 클라이언트라면 서비�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `클라우드 연결`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes는 Helm 차트로, PlanetScale과 Cloudflare는 OAuth 한 번으로 연결됩니다. 뒤에 있는 데이터베이스 브랜치와 존을 자동으로 찾아내고, Prometheus 호환 엔드포인트는 주기적으로 스크레이프합니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sov_pillar_4_label = () => `당신의 경계`
 
 
@@ -5175,7 +5191,7 @@ export const local_link_docs = () => `문서 읽기 →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_eyebrow = () => `08 · 요금`
+export const pricing_home_eyebrow = () => `09 · 요금`
 
 
 /**
@@ -5290,6 +5306,25 @@ export const hero_shot_map = () => `서비스 맵`
 export const hero_shots_aria = () => `제품 스크린샷`
 
 
-export { platform_cloud_name } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview_line = () => `모든 서비스를 한눈에.`
 
-export { platform_cloud_desc } from "./en.js"
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces_line = () => `요청 하나를 끝까지 추적하세요.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map_line = () => `서비스 간 트래픽을 확인하세요.`

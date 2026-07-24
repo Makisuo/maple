@@ -7,10 +7,19 @@
  *
  * Loops every ~28s. Skipped entirely under prefers-reduced-motion (the
  * SSR'd content is the static fallback).
+ *
+ * The frame is a flex column so a caller can pass `class="h-full"` and have
+ * the body absorb the slack — the footer bar stays welded to the bottom edge
+ * instead of floating mid-cell.
  */
+interface Props {
+	class?: string;
+}
+
+const { class: className = "" } = Astro.props;
 ---
 
-<div class="live-frame">
+<div class={`live-frame flex flex-col ${className}`}>
 	<div class="live-frame__head">
 		<span>mcp · agent session</span>
 		<span class="live-frame__live">
@@ -18,7 +27,7 @@
 			LIVE
 		</span>
 	</div>
-	<div class="p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
+	<div class="flex-1 p-4 text-[12.5px] leading-[1.55]" data-mcp-root>
 		<!-- segment 0: opening agent prompt (typed) -->
 		<div class="mcp-line" data-segment="0">
 			<span class="text-fg-muted">&gt; ask maple</span>
@@ -73,7 +82,7 @@
 		</div>
 	</div>
 	<div class="px-3.5 py-2.5 border-t border-border bg-bg-elevated text-[10px] uppercase tracking-wider text-fg-muted flex justify-between">
-		<span>5 tool calls · 4.2s</span>
+		<span>4 tool calls · 4.2s</span>
 		<span>open mcp protocol</span>
 	</div>
 </div>

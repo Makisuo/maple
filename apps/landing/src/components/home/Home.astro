@@ -9,12 +9,13 @@
  * locale, and Layout.astro derives hreflang from the URL, so there is nothing
  * locale-specific to thread through.
  *
- * Section order runs on a numbered spine, 01 Signals → 09 Start, and on a
+ * Section order runs on a numbered spine, 01 Signals → 10 Start, and on a
  * deliberate tonal cadence rather than a bg-bg / bg-bg-deep checkerboard:
- * nine sections sit quiet on `bg-bg`, with two amber peaks (Sovereignty at
- * ~52% scroll, the bookend CTA at ~97%) and four `bg-bg-deep` drops. Hairline
- * `border-t` separators appear only where the surface tone does NOT change
- * from the section above — where the tone steps, the tone is the separator.
+ * ten sections sit quiet on `bg-bg`, with two amber peaks (Sovereignty just
+ * before the midpoint, the bookend CTA at the very end) and four `bg-bg-deep`
+ * drops. Hairline `border-t` separators appear only where the surface tone
+ * does NOT change from the section above — where the tone steps, the tone is
+ * the separator.
  */
 import Layout from "../../layouts/Layout.astro";
 import Nav from "../Nav.astro";
@@ -26,6 +27,7 @@ import PlatformSheet from "./PlatformSheet.astro";
 import Sovereignty from "../Sovereignty.astro";
 import LocalSection from "./LocalSection.astro";
 import KubernetesSection from "./KubernetesSection.astro";
+import AgentSection from "./AgentSection.astro";
 import BillComparison from "../BillComparison.astro";
 import PricingTable from "../PricingTable.astro";
 import SdkBand from "./SdkBand.astro";
@@ -77,7 +79,10 @@ const homeFaqs = [
     <!-- 06 — the infrastructure proof point. -->
     <KubernetesSection />
 
-    <!-- 07 + 08 — the money chapter: one deep floor, two beats, one internal
+    <!-- 07 — the same investigation as 02, run by an agent instead of a human. -->
+    <AgentSection />
+
+    <!-- 08 + 09 — the money chapter: one deep floor, two beats, one internal
          hairline. The bill runs first because Maple's pricing only reads as
          remarkable next to Datadog's. -->
     <BillComparison />
@@ -93,7 +98,7 @@ const homeFaqs = [
     <!-- The runtimes band — this slot's honest answer to a testimonial wall. -->
     <SdkBand />
 
-    <!-- 09 — Start. -->
+    <!-- 10 — Start. -->
     <Quickstart />
 
     <FAQ items={homeFaqs} />

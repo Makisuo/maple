@@ -1,0 +1,103 @@
+---
+/**
+ * 07 · Agents — the MCP transcript.
+ *
+ * Restores the section the homepage rebuild dropped. `IncidentStory` step 04
+ * and `PlatformSheet` cell 05 both show the MCP *setup* screen; neither shows
+ * an agent actually working, which is the only thing that makes the claim
+ * land. This section is that proof.
+ *
+ * Both columns stretch to the row height and pin content to both edges: the
+ * prose sits at the top, the tool index is pushed down by `mt-auto`, and the
+ * transcript takes `h-full` so its footer bar lands on the same baseline as
+ * the index's last row. A short copy column floating beside a tall terminal
+ * was the whole problem with the first pass.
+ *
+ * The index is the section's character: 12 real tool names in mono, each
+ * carrying the same amber `→` the transcript uses for its own calls, so the
+ * left column reads as the API surface the right column is calling into.
+ *
+ * KubernetesSection directly above is also copy-left / media-right on `bg-bg`,
+ * which is why this one runs a wider media track and swaps Kubernetes' <dl> +
+ * `helm install` <pre> for the index. Without that the two read as one long
+ * section split by an accidental rule.
+ *
+ * Surface is `bg-bg`, not `bg-bg-deep`: `.live-frame` is itself `--bg-deep`,
+ * so a deep floor would flatten the transcript into the page.
+ */
+import { getRelativeLocaleUrl } from "astro:i18n";
+import * as m from "../../paraglide/messages";
+import LiveMcpTranscript from "../live/LiveMcpTranscript.astro";
+
+const locale = Astro.currentLocale ?? "en";
+const featurePath = getRelativeLocaleUrl(locale, "/features/ai-mcp-integration");
+
+// Real tools off `apps/api/src/mcp/tools/registry.ts`, ordered the way an
+// investigation actually runs: find the service, walk the trace, read the
+// logs, then reach for the source. Code identifiers, so no message keys —
+// they read the same in every locale.
+const tools = [
+	"list_services",
+	"search_traces",
+	"inspect_trace",
+	"inspect_span",
+	"find_errors",
+	"error_detail",
+	"search_logs",
+	"mine_log_patterns",
+	"service_map",
+	"run_sql",
+	"read_source_file",
+	"propose_fix",
+];
+---
+
+<section id="agents" class="border-t border-border bg-bg">
+	<div class="shell py-16 md:py-32">
+		<div class="grid gap-12 lg:grid-cols-[0.78fr_1.22fr] lg:gap-20">
+			<!-- min-w-0: a grid item defaults to `min-width: auto`, so the mono
+			     index would otherwise push the track wider than the viewport. -->
+			<div class="flex min-w-0 flex-col">
+				<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.mcp_eyebrow()}</p>
+
+				<h2
+					class="mt-4 max-w-[18ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+				>
+					{m.mcp_title()}
+				</h2>
+				<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted">{m.mcp_lede()}</p>
+
+				<!-- mt-auto is what makes the column span the row: prose at the
+				     top edge, index at the bottom, slack in the middle. -->
+				<div class="mt-auto pt-12">
+					<div
+						class="flex items-baseline justify-between border-b border-border pb-2 text-[10px] uppercase tracking-[0.14em] text-fg-muted"
+					>
+						<span>mcp tools</span>
+						<span class="tabular-nums">50+</span>
+					</div>
+					<ul class="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 font-mono text-[12px] text-fg-muted">
+						{
+							tools.map((tool) => (
+								<li class="truncate">
+									<span class="text-primary" aria-hidden="true">
+										→{" "}
+									</span>
+									{tool}
+								</li>
+							))
+						}
+					</ul>
+				</div>
+
+				<div class="mt-7 text-[13px]">
+					<a href={featurePath} class="text-fg transition-colors hover:text-primary">
+						{m.nav_ai_mcp()}
+					</a>
+				</div>
+			</div>
+
+			<LiveMcpTranscript class="h-full" />
+		</div>
+	</div>
+</section>

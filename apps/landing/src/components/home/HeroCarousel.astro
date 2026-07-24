@@ -27,12 +27,14 @@ const slides = [
 	{
 		key: "overview",
 		tab: m.hero_shot_overview(),
+		line: m.hero_shot_overview_line(),
 		label: "The Maple overview dashboard — request volume, error rate and latency across every service",
 		src: "/screenshots/hero-dashboard.webp",
 	},
 	{
 		key: "traces",
 		tab: m.hero_shot_traces(),
+		line: m.hero_shot_traces_line(),
 		label: "hero-traces",
 		caption:
 			"The trace waterfall with a span selected and its attribute set open alongside — full page, sidebar included.",
@@ -40,10 +42,11 @@ const slides = [
 	{
 		key: "map",
 		tab: m.hero_shot_map(),
+		line: m.hero_shot_map_line(),
 		label: "hero-map",
 		caption: "The service map — dependencies grouped into namespaces, with live request flow.",
 	},
-] satisfies { key: string; tab: string; label: string; src?: string; caption?: string }[];
+] satisfies { key: string; tab: string; line: string; label: string; src?: string; caption?: string }[];
 ---
 
 <div
@@ -53,7 +56,7 @@ const slides = [
 	aria-roledescription="carousel"
 	aria-label={m.hero_shots_aria()}
 >
-	<div class="mb-4 flex items-center gap-3" role="tablist" aria-label={m.hero_shots_aria()}>
+	<div class="hero-rail" role="tablist" aria-label={m.hero_shots_aria()}>
 		{
 			slides.map((slide, i) => (
 				<button
@@ -62,6 +65,8 @@ const slides = [
 					id={`hero-tab-${slide.key}`}
 					aria-controls={`hero-pane-${slide.key}`}
 					aria-selected={i === 0 ? "true" : "false"}
+					/* The bar carries no text, so the tab is named here. */
+					aria-label={slide.tab}
 					tabindex={i === 0 ? 0 : -1}
 					data-on={i === 0 ? "" : undefined}
 					class="hero-tab"
@@ -72,10 +77,19 @@ const slides = [
 						    first tick. */}
 						<span class="hero-seg__fill" style={i === 0 ? "transform: scaleX(1)" : undefined} />
 					</span>
-					{/* Clipped to zero width when inactive rather than removed, so
-					    every tab keeps its accessible name at every breakpoint. */}
-					<span class="hero-tab__label">{slide.tab}</span>
 				</button>
+			))
+		}
+	</div>
+
+	{/* One grid cell, three lines stacked in it — the box sizes itself to the
+	    tallest, so a longer line in ja/ko never shifts the plate. */}
+	<div class="hero-caption">
+		{
+			slides.map((slide, i) => (
+				<span class="hero-caption__item" data-caption={i} data-on={i === 0 ? "" : undefined} aria-hidden={i === 0 ? "false" : "true"}>
+					{slide.line}
+				</span>
 			))
 		}
 	</div>
@@ -113,6 +127,7 @@ const slides = [
 		const tablist = root.querySelector<HTMLElement>('[role="tablist"]');
 		const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 		const panes = [...root.querySelectorAll<HTMLElement>("[data-pane]")];
+		const captions = [...root.querySelectorAll<HTMLElement>("[data-caption]")];
 		const fills = tabs.map((tab) => tab.querySelector<HTMLElement>(".hero-seg__fill"));
 		const dwell = Number(root.dataset.dwell) || 6000;
 
@@ -134,6 +149,10 @@ const slides = [
 				pane.toggleAttribute("data-on", i === index);
 				// One image alt reaches the screen reader, not three.
 				pane.setAttribute("aria-hidden", i === index ? "false" : "true");
+			});
+			captions.forEach((caption, i) => {
+				caption.toggleAttribute("data-on", i === index);
+				caption.setAttribute("aria-hidden", i === index ? "false" : "true");
 			});
 			tabs.forEach((tab, i) => {
 				tab.toggleAttribute("data-on", i === index);

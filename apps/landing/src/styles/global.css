@@ -229,7 +229,13 @@
 }
 .hero-carousel__stage {
 	position: relative;
+	margin-top: 32px;
 	aspect-ratio: 1400 / 720;
+}
+@media (min-width: 768px) {
+	.hero-carousel__stage {
+		margin-top: 40px;
+	}
 }
 .hero-carousel__pane {
 	position: absolute;
@@ -264,13 +270,18 @@
 	aspect-ratio: auto;
 }
 
+.hero-rail {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	gap: 12px;
+}
 /* Fixed row height, so the track thickening on hover grows about its own
-   centre instead of nudging the plate. 24px also keeps the tap target legal
-   once the label is clipped away. */
+   centre instead of nudging the caption. 24px also keeps the bare bar a legal
+   tap target. */
 .hero-tab {
 	display: flex;
 	align-items: center;
-	gap: 10px;
 	height: 24px;
 	cursor: pointer;
 	border-radius: 2px;
@@ -306,30 +317,40 @@
 	transform-origin: left center;
 	background: var(--primary);
 }
-/* Clipped, not hidden — an inactive tab keeps its accessible name. */
-.hero-tab__label {
-	display: block;
-	max-width: 0;
-	overflow: hidden;
+/* Caption. All three lines share one grid cell, so the box is as tall as the
+   tallest line and a longer ja/ko string never shifts the plate below it.
+   The swap is a blur-and-fade rather than a slide: the outgoing line dissolves
+   in place, which reads as the same sentence resolving into a new one instead
+   of two labels racing past each other. */
+.hero-caption {
+	display: grid;
+	justify-items: center;
+	margin-top: 20px;
+	text-align: center;
+}
+.hero-caption__item {
+	grid-area: 1 / 1;
+	max-width: 34ch;
 	opacity: 0;
-	white-space: nowrap;
-	font-size: 10px;
+	filter: blur(6px);
+	font-family: var(--font-display);
+	font-size: 1.125rem;
 	font-weight: 500;
-	letter-spacing: 0.14em;
-	text-transform: uppercase;
-	color: var(--muted-foreground);
+	line-height: 1.3;
+	letter-spacing: -0.01em;
+	color: var(--foreground);
 	transition:
-		max-width var(--hero-swap) var(--hero-ease),
 		opacity var(--hero-swap) var(--hero-ease),
-		color 200ms ease-out;
+		filter var(--hero-swap) var(--hero-ease);
 }
-.hero-tab[data-on] .hero-tab__label {
-	max-width: 12rem;
+.hero-caption__item[data-on] {
 	opacity: 1;
-	color: var(--foreground);
+	filter: blur(0);
 }
-.hero-tab:hover .hero-tab__label {
-	color: var(--foreground);
+@media (min-width: 768px) {
+	.hero-caption__item {
+		font-size: 1.5rem;
+	}
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -860,8 +881,12 @@
 	   timer for everyone, not just this query. */
 	.hero-carousel__pane,
 	[data-hero-carousel] .hero-seg,
-	[data-hero-carousel] .hero-tab__label {
+	[data-hero-carousel] .hero-caption__item {
 		transition: none !important;
+	}
+	/* Blur is motion's cousin here — the caption should land sharp, not soft. */
+	[data-hero-carousel] .hero-caption__item[data-on] {
+		filter: none !important;
 	}
 
 	.log-stream__belt,

@@ -679,7 +679,7 @@ export const map_lede = () => `Live request flow across your services. Hot servi
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const mcp_eyebrow = () => `05 · Agents`
+export const mcp_eyebrow = () => `07 · Agents`
 
 
 /**
@@ -855,7 +855,7 @@ export const k8s_summary_cluster_mem = () => `Cluster MEM`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const bill_eyebrow = () => `07 · The bill`
+export const bill_eyebrow = () => `08 · The bill`
 
 
 /**
@@ -1103,7 +1103,7 @@ export const bill_link_vs_dash0 = () => `Full vs Dash0`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `09 · スタート`
+export const start_eyebrow = () => `10 · スタート`
 
 
 /**
@@ -5119,6 +5119,22 @@ export const platform_mcp_desc = () => `MCP対応クライアントなら、サ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `クラウドをつなぐ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `KubernetesはHelmチャート、PlanetScaleとCloudflareはOAuthのワンクリックで接続。背後にあるデータベースブランチやゾーンを自動で検出し、Prometheus互換のエンドポイントは定期スクレイプで取り込みます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sov_pillar_4_label = () => `あなたの境界線`
 
 
@@ -5175,7 +5191,7 @@ export const local_link_docs = () => `ドキュメントを読む →`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_eyebrow = () => `08 · 料金`
+export const pricing_home_eyebrow = () => `09 · 料金`
 
 
 /**
@@ -5290,6 +5306,25 @@ export const hero_shot_map = () => `サービスマップ`
 export const hero_shots_aria = () => `製品スクリーンショット`
 
 
-export { platform_cloud_name } from "./en.js"
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview_line = () => `すべてのサービスを一目で。`
 
-export { platform_cloud_desc } from "./en.js"
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces_line = () => `1つのリクエストを最初から最後まで追う。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map_line = () => `サービス間のトラフィックを可視化。`
