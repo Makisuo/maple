@@ -153,12 +153,6 @@
 	"bill_link_vs_dash0": "Full vs Dash0",
 
 	"start_endpoint_label": "Endpoint",
-	"start_key_hint": "generated per project in your dashboard",
-	"start_install_label": "Install",
-	"start_instrument_label": "Instrument",
-	"start_copy": "Copy",
-	"start_copied": "Copied",
-	"start_footnote": "Java, Rust, .NET, Ruby \u2014 anything that speaks OTLP works. The custom tab shows the env-var-only setup.",
 
 	"cta_bookend_title": "Run it yourself.",
 	"cta_bookend_lede": "14-day free trial, card required, no charge until it ends. Self-hosting is supported, and `maple start` needs no account at all.",

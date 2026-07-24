@@ -153,12 +153,6 @@
 	"bill_link_vs_dash0": "Full vs Dash0",
 
 	"start_endpoint_label": "Endpoint",
-	"start_key_hint": "generated per project in your dashboard",
-	"start_install_label": "Install",
-	"start_instrument_label": "Instrument",
-	"start_copy": "Copy",
-	"start_copied": "Copied",
-	"start_footnote": "Java, Rust, .NET, Ruby \u2014 anything that speaks OTLP works. The custom tab shows the env-var-only setup.",
 
 	"cta_bookend_title": "Run it yourself.",
 	"cta_bookend_lede": "14\uc77c \ubb34\ub8cc \uccb4\ud5d8. \uce74\ub4dc \ub4f1\ub85d\uc774 \ud544\uc694\ud558\uc9c0\ub9cc \uae30\uac04\uc774 \ub05d\ub0a0 \ub54c\uae4c\uc9c0 \uccad\uad6c\ub418\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4. \uc140\ud504 \ud638\uc2a4\ud305\ub3c4 \uc9c0\uc6d0\ud558\uba70, `maple start` \ub294 \uacc4\uc815\uc870\ucc28 \ud544\uc694 \uc5c6\uc2b5\ub2c8\ub2e4.",

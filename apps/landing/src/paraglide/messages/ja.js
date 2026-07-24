@@ -1159,54 +1159,6 @@ export const start_endpoint_label = () => `Endpoint`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_key_hint = () => `generated per project in your dashboard`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_install_label = () => `Install`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_instrument_label = () => `Instrument`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_copy = () => `Copy`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_copied = () => `Copied`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const start_footnote = () => `Java, Rust, .NET, Ruby — anything that speaks OTLP works. The custom tab shows the env-var-only setup.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const cta_bookend_title = () => `Run it yourself.`
 
 
