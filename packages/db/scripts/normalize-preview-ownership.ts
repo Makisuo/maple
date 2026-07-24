@@ -40,6 +40,16 @@ const main = async (): Promise<void> => {
 		console.error("✗ DATABASE_URL is not set — pass the PR branch connection string (MAPLE_PG_URL)")
 		process.exit(1)
 	}
+	// Tripwire (same as reset-preview-branch.ts): reassigning ownership is far
+	// less destructive than the reset, but run against prod/stg it would still
+	// silently rewrite object ownership. Only ever meant for ephemeral
+	// PR-preview branches, driven by CI.
+	if (!process.env.CI && process.env.RESET_PREVIEW_CONFIRM !== "1") {
+		console.error(
+			"✗ Refusing to run: this reassigns ownership of everything CURRENT_USER owns in the target database. Set RESET_PREVIEW_CONFIRM=1 to confirm DATABASE_URL points at a disposable preview branch (CI runs set CI).",
+		)
+		process.exit(1)
+	}
 	const sql = postgres(url, { max: 1, fetch_types: false })
 	try {
 		const [who] = await sql`
