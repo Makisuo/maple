@@ -121,7 +121,12 @@ const main = async (): Promise<void> => {
 	if (!listed.ok) {
 		fail(`Could not list Hyperdrive configs (HTTP ${listed.status}): ${JSON.stringify(listed.errors)}`)
 	}
-	const configs = (Array.isArray(listed.result) ? listed.result : []) as ReadonlyArray<HyperdriveConfig>
+	// A success response whose `result` isn't an array means the API shape
+	// changed under us — fail loudly rather than green-no-op'ing the safety net.
+	if (!Array.isArray(listed.result)) {
+		fail(`Unexpected Hyperdrive list response shape (result is ${typeof listed.result}, expected array)`)
+	}
+	const configs = listed.result as ReadonlyArray<HyperdriveConfig>
 	const candidates = configs
 		.map((config) => ({
 			id: config.id ?? "",

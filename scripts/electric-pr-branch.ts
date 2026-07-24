@@ -843,6 +843,10 @@ const sweep = async (): Promise<void> => {
 			continue
 		}
 		console.log(`… deleting orphan ${candidate.name} (PR #${candidate.prNumber} is closed)`)
+		// The canonical orphan (leaked from a failed close-teardown) still has
+		// its source attached, and Electric refuses to delete an environment
+		// holding services — drop them first, same as deleteEnvironment().
+		resetServices(candidate.id)
 		const removed = runElectric(["environments", "delete", candidate.id, "--force"])
 		if (removed.exitCode !== 0 && !isNotFound(removed)) {
 			failures.push(candidate.name)
