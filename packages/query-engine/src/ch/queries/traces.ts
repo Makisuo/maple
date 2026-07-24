@@ -1069,3 +1069,141 @@ export function tracesRootListQuery(opts: TracesRootListOpts) {
 
 	return q
 }
+
+// ---------------------------------------------------------------------------
+// Trace list query (one row per TraceId, for trace list UIs)
+// ---------------------------------------------------------------------------
+
+export interface TraceListOpts extends TracesQueryOpts {
+	limit?: number
+	offset?: number
+	/**
+	 * Keyset pagination cursor — the previous page's last row (`startTime`,
+	 * `traceId`). Composite because root timestamps are not unique: a bare
+	 * `Timestamp < cursor` silently drops every trace sharing the boundary
+	 * timestamp. Strictly preferred over `offset` for deep pagination.
+	 */
+	cursor?: { timestamp: string; traceId: string }
+}
+
+export interface TraceListOutput {
+	readonly traceId: string
+	/** Root span timestamp — the keyset cursor field, paired with `traceId`. */
+	readonly startTime: string
+	/** When the last span finished, so `endTime - startTime` is the duration below. */
+	readonly endTime: string
+	/** Wall-clock extent of the whole trace, not the root span's own duration. */
+	readonly durationMicros: number
+	/** Every span in the trace, not just the ones matching the filters. */
+	readonly spanCount: number
+	/** Root service first, remaining participants sorted. */
+	readonly services: readonly string[]
+	readonly rootSpanName: string
+	readonly rootSpanKind: string
+	readonly rootSpanStatusCode: string
+	readonly rootHttpMethod: string
+	readonly rootHttpRoute: string
+	readonly rootHttpStatusCode: string
+	/** Projected HTTP attribute map (JSON string) for the root span — see `ROOT_SPAN_ATTR_KEYS`. */
+	readonly rootSpanAttributes: string
+	readonly hasError: number
+}
+
+const arraySort = <T>(arr: CH.Expr<ReadonlyArray<T>>): CH.Expr<ReadonlyArray<T>> =>
+	compileFnCall<ReadonlyArray<T>>("arraySort", arr)
+
+const arrayPushFront = <T>(arr: CH.Expr<ReadonlyArray<T>>, el: CH.Expr<T>): CH.Expr<ReadonlyArray<T>> =>
+	compileFnCall<ReadonlyArray<T>>("arrayPushFront", arr, el)
+
+const arrayDistinct = <T>(arr: CH.Expr<ReadonlyArray<T>>): CH.Expr<ReadonlyArray<T>> =>
+	compileFnCall<ReadonlyArray<T>>("arrayDistinct", arr)
+
+const fromUnixTimestamp64Nano = (nanos: CH.Expr<number>): CH.Expr<string> =>
+	compileFnCall<string>("fromUnixTimestamp64Nano", nanos)
+
+/**
+ * Two-stage **trace**-level list: exactly one row per TraceId, carrying the real
+ * span count, every participating service, and the trace's wall-clock duration.
+ *
+ * Distinct from `tracesRootListQuery`, which lists *entry-point spans*
+ * (`SpanKind IN ('Server','Consumer') OR ParentSpanId = ''`). A trace crossing N
+ * services has N entry points, so that query emits N rows for it — correct for a
+ * span list, wrong for anything whose columns say "Trace" and "Spans".
+ *
+ * Stage 1 pages over true roots (`ParentSpanId = ''`, one per trace by
+ * construction) in `traces`, reading only TraceId + Timestamp under the caller's
+ * filters — so filtering, ordering and the cursor stay root-scoped, matching the
+ * `trace_list_mv`-backed sidebar facets. Stage 2 aggregates that page's traces in
+ * `trace_detail_spans`, whose `(OrgId, TraceId, SpanId)` sort key turns the
+ * `limit` trace ids into primary-key seeks; the heavy SpanAttributes lookups are
+ * materialized only there, for at most one page of traces.
+ *
+ * Stage 2 is deliberately not time-bounded: a trace's children can outlive the
+ * requested window, and clipping them would undercount `spanCount` at the window
+ * edge. The TraceId seek is what keeps it cheap, not partition pruning.
+ */
+export function traceListQuery(opts: TraceListOpts) {
+	const limit = opts.limit ?? 25
+	const offset = opts.offset ?? 0
+	const cursor = opts.cursor
+
+	let page = from(Traces)
+		.select(($) => ({ traceId: $.TraceId, ts: $.Timestamp }))
+		.where(($) => [
+			...buildWhereConditions($, opts),
+			$.ParentSpanId.eq(""),
+			cursor
+				? $.Timestamp.lt(cursor.timestamp).or(
+						$.Timestamp.eq(cursor.timestamp).and($.TraceId.lt(cursor.traceId)),
+					)
+				: undefined,
+		])
+		.orderBy(["ts", "desc"], ["traceId", "desc"])
+		.limit(limit)
+	if (offset > 0) {
+		page = page.offset(offset)
+	}
+	const pageSql = compileCH(page, {}, { skipFormat: true }).sql
+
+	// Lexicographic tuple ordering: true root first, earliest span as the
+	// tiebreaker for the (malformed) traces that ship no root at all.
+	const rootOrder = CH.rawExpr<unknown>("(if(ParentSpanId = '', 0, 1), Timestamp)")
+
+	return from(TraceDetailSpans)
+		.select(($) => {
+			const rootServiceName = argMin($.ServiceName, rootOrder)
+			const startNanos = CH.toUnixTimestamp64Nano($.Timestamp)
+			const endNanos = CH.max_(startNanos.add(CH.toInt64($.Duration)))
+			return {
+				traceId: $.TraceId,
+				startTime: argMin($.Timestamp, rootOrder),
+				endTime: fromUnixTimestamp64Nano(endNanos),
+				durationMicros: CH.intDiv(endNanos.sub(CH.min_(startNanos)), 1000),
+				spanCount: CH.count(),
+				services: arrayDistinct(
+					arrayPushFront(arraySort(CH.groupUniqArray($.ServiceName)), rootServiceName),
+				),
+				rootSpanName: argMin($.SpanName, rootOrder),
+				rootSpanKind: argMin($.SpanKind, rootOrder),
+				rootSpanStatusCode: argMin($.StatusCode, rootOrder),
+				rootHttpMethod: argMin($.SpanAttributes.get("http.method"), rootOrder),
+				rootHttpRoute: argMin($.SpanAttributes.get("http.route"), rootOrder),
+				rootHttpStatusCode: argMin($.SpanAttributes.get("http.status_code"), rootOrder),
+				rootSpanAttributes: argMin(
+					CH.toJSONString(buildProjectedMapExpr(ROOT_SPAN_ATTR_KEYS, "SpanAttributes")),
+					rootOrder,
+				),
+				// Root-scoped, matching the `errorsOnly` filter stage 1 applies and
+				// the sidebar's trace_list_mv error count — not "any span errored".
+				hasError: CH.if_(argMin($.StatusCode, rootOrder).eq("Error"), CH.lit(1), CH.lit(0)),
+			}
+		})
+		.where(($) => [
+			$.OrgId.eq(param.string("orgId")),
+			CH.rawCond(`TraceId IN (SELECT traceId FROM (${pageSql}))`),
+		])
+		.groupBy("traceId")
+		.orderBy(["startTime", "desc"], ["traceId", "desc"])
+		.limit(limit)
+		.format("JSON")
+}
