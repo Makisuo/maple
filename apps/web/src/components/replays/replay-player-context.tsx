@@ -244,6 +244,22 @@ export function useReplayPlayer(): ReplayPlayerContextValue {
 
 const EMPTY_EVENTS: unknown[] = []
 
+/**
+ * Read the engine's playhead, treating "not started yet" as 0.
+ *
+ * rrweb builds its player context with `baselineTime: 0`, and
+ * `getCurrentTime()` is `timer.timeOffset + (baselineTime - events[0].timestamp)`
+ * — so until the engine has been driven by a `play()` / `pause(offset)` (the only
+ * things that assign `baselineTime`), it reports `-events[0].timestamp`: a
+ * negative epoch, ~55 years. Feeding that back into `play()` re-bases the whole
+ * stream decades into the future and nothing ever casts, which is what left the
+ * player frozen at 0:00 until the first scrub re-based it for us.
+ */
+function engineTimeMs(replayer: Replayer | null): number {
+	const ms = replayer?.getCurrentTime() ?? 0
+	return Number.isFinite(ms) && ms > 0 ? ms : 0
+}
+
 export function errorMessage(error: unknown): string {
 	if (typeof error === "object" && error !== null && "message" in error) {
 		const message = (error as { message: unknown }).message
@@ -482,7 +498,7 @@ export function ReplayPlayerProvider({
 					setCurrentMs(gap.end)
 				} else if (!gap) {
 					lastJumpedEnd = -1
-					setCurrentMs(Math.min(cur, totalMs))
+					setCurrentMs(Math.min(Math.max(0, cur), totalMs))
 				}
 			}
 			raf = requestAnimationFrame(tick)
@@ -503,7 +519,7 @@ export function ReplayPlayerProvider({
 			replayer.pause()
 			setIsPlaying(false)
 		} else {
-			const engineCurrentMs = replayer.getCurrentTime()
+			const engineCurrentMs = engineTimeMs(replayer)
 			const from = engineCurrentMs >= totalMs ? 0 : engineCurrentMs
 			replayer.play(from)
 			setIsPlaying(true)
@@ -551,7 +567,7 @@ export function ReplayPlayerProvider({
 
 	const seekRelativeDisplay = React.useCallback(
 		(deltaMs: number) => {
-			const currentRealMs = replayerRef.current?.getCurrentTime() ?? 0
+			const currentRealMs = engineTimeMs(replayerRef.current)
 			seekDisplay(timeline.toDisplay(currentRealMs) + deltaMs)
 		},
 		[seekDisplay, timeline],
