@@ -1,12 +1,19 @@
 import { createOpenTelemetryObserver } from "@flue/opentelemetry"
 import { observe } from "@flue/runtime"
 import { flue } from "@flue/runtime/routing"
+import { SpanKind } from "@opentelemetry/api"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 import { instanceIdFromAgentPath, verifyInternalServiceToken, verifyRequest } from "./lib/auth.ts"
 import type { ChatFlueEnv } from "./lib/env.ts"
 import { orgIdFromInstanceId } from "./lib/org.ts"
-import { CHAT_FLUE_SERVICE_NAME, rootContextFromRequest, setupTelemetry } from "./lib/telemetry.ts"
+import {
+	CHAT_FLUE_SERVICE_NAME,
+	emitTelemetryLog,
+	rootContextFromRequest,
+	setupTelemetry,
+} from "./lib/telemetry.ts"
+import { enterSpan } from "./lib/tracing.ts"
 import { appEnv } from "./lib/app-env.ts"
 import { telemetryEnv } from "./lib/telemetry-env.ts"
 
@@ -24,10 +31,12 @@ import { telemetryEnv } from "./lib/telemetry-env.ts"
 // (→ Maple) and are the primary signal for the "chat did nothing" failure mode,
 // regardless of whether the OTel export is on.
 const env = await telemetryEnv()
-const tracerProvider = setupTelemetry({
+const telemetry = setupTelemetry({
 	ingestKey: env.MAPLE_INGEST_KEY,
 	endpoint: env.MAPLE_ENDPOINT,
 	environment: env.MAPLE_ENVIRONMENT,
+	serviceVersion: env.MAPLE_SERVICE_VERSION,
+	commitSha: env.COMMIT_SHA,
 })
 
 // Structured error + per-turn outcome logging — registered for EVERY isolate,
@@ -37,28 +46,36 @@ const tracerProvider = setupTelemetry({
 // dropping (they don't flush reliably from DO isolates).
 observe((event) => {
 	if (event.type === "log" && event.level === "error") {
-		console.error("[chat-flue]", event.message, event.attributes ?? {})
+		emitTelemetryLog("error", "flue.log", {
+			message: event.message,
+			...(event.attributes ? { "flue.attributes": JSON.stringify(event.attributes) } : {}),
+		})
 		return
 	}
 	if (event.type === "run_end") {
 		const errored = "isError" in event ? Boolean(event.isError) : false
-		console.log(`[chat-flue] run_end errored=${errored}`)
+		emitTelemetryLog(errored ? "error" : "info", "flue.run_end", {
+			"flue.run.errored": errored,
+		})
 		return
 	}
 	if ("isError" in event && event.isError) {
 		const label = "toolName" in event ? `tool ${event.toolName}` : event.type
 		const detail = "error" in event ? event.error : undefined
-		console.error(`[chat-flue] ${label} failed`, detail ?? "")
+		emitTelemetryLog("error", "flue.operation_failed", {
+			"flue.operation": label,
+			"error.message": detail === undefined ? "" : String(detail),
+		})
 	}
 })
 
-if (tracerProvider) {
+if (telemetry) {
 	// Flue events → OpenTelemetry spans. Content (prompts, model I/O, tool
 	// args/results, detailed errors) is omitted by default — intentional for an
 	// AI chat; a redacted `exportContent` hook is a future opt-in.
 	observe(
 		createOpenTelemetryObserver({
-			tracer: tracerProvider.getTracer(CHAT_FLUE_SERVICE_NAME),
+			tracer: telemetry.getTracer(CHAT_FLUE_SERVICE_NAME),
 			// Nest chat spans under the caller's (web/mobile) distributed trace
 			// when it propagates `traceparent`; standalone otherwise.
 			resolveRootContext: (_event, ctx) => rootContextFromRequest(ctx.req),
@@ -71,7 +88,7 @@ if (tracerProvider) {
 	// drained from the Hono response middleware below.)
 	observe((event) => {
 		if (event.type === "run_end" || event.type === "idle" || event.type === "agent_end") {
-			void tracerProvider.forceFlush()
+			void telemetry.forceFlush()
 		}
 	})
 }
@@ -123,16 +140,49 @@ app.use(
 // Drain worker-isolate spans before the isolate parks. `executionCtx` is absent
 // under unit tests (`app.fetch(req, env)` with no third arg) — guard it; those
 // spans flush at Flue's run/idle boundaries instead.
-if (tracerProvider) {
+if (telemetry) {
 	app.use("*", async (c, next) => {
 		await next()
 		try {
-			c.executionCtx.waitUntil(tracerProvider.forceFlush())
+			c.executionCtx.waitUntil(telemetry.forceFlush())
 		} catch {
 			// No ExecutionContext available (tests) — nothing to schedule.
 		}
 	})
 }
+
+app.use("*", async (c, next) => {
+	const request = c.req.raw
+	const pathname = new URL(request.url).pathname
+	if (request.method === "OPTIONS" || pathname === "/health") {
+		await next()
+		return
+	}
+
+	await enterSpan(
+		"http.request",
+		async (span) => {
+			const url = new URL(request.url)
+			const route = pathname.startsWith("/agents/")
+				? "/agents/:agent/:instance"
+				: pathname.startsWith("/workflows/")
+					? "/workflows/:workflow"
+					: pathname
+			span.setAttribute("http.request.method", request.method)
+			span.setAttribute("http.route", route)
+			span.setAttribute("server.address", url.hostname)
+			await next()
+			span.setAttribute("http.response.status_code", c.res.status)
+			if (c.res.status >= 500) {
+				span.setError("HttpServerError", `HTTP ${c.res.status}`)
+			}
+		},
+		{
+			kind: SpanKind.SERVER,
+			parentContext: rootContextFromRequest(request),
+		},
+	)
+})
 
 app.get("/health", (c) => c.json({ ok: true }))
 

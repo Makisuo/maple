@@ -17,7 +17,7 @@ export const HttpInvestigationsLive = HttpApiBuilder.group(MapleApi, "investigat
 			.handle("listInvestigations", ({ query }) =>
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
-					yield* Effect.annotateCurrentSpan({ "maple.org_id": tenant.orgId })
+					yield* Effect.annotateCurrentSpan({ orgId: tenant.orgId })
 					return yield* service.listInvestigations(tenant.orgId, {
 						issueId: query.issueId,
 						incidentKind: query.incidentKind,
@@ -31,7 +31,7 @@ export const HttpInvestigationsLive = HttpApiBuilder.group(MapleApi, "investigat
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.investigation.id": params.id,
 					})
 					return yield* service.getInvestigation(tenant.orgId, params.id)
@@ -41,7 +41,7 @@ export const HttpInvestigationsLive = HttpApiBuilder.group(MapleApi, "investigat
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.investigation.subject_type": payload.subject.type,
 					})
 					return yield* service.createInvestigation(tenant.orgId, tenant.userId, payload)
@@ -51,7 +51,7 @@ export const HttpInvestigationsLive = HttpApiBuilder.group(MapleApi, "investigat
 				Effect.gen(function* () {
 					const tenant = yield* CurrentTenant.Context
 					yield* Effect.annotateCurrentSpan({
-						"maple.org_id": tenant.orgId,
+						orgId: tenant.orgId,
 						"maple.investigation.id": params.id,
 						"maple.investigation.status": payload.status,
 					})

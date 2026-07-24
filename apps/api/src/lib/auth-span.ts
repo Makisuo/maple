@@ -7,10 +7,10 @@ import { Effect } from "effect"
  * span scope — so these attributes land on the same span that carries
  * `http.route`, making "which endpoint, by which auth method" queryable.
  *
- * Emits the `maple.*` vendor namespace (see the maple-telemetry-conventions):
+ * Emits the canonical Maple TypeScript telemetry keys:
  * - `maple.auth.method` — `"api_key"` | `"session"`, the auth discriminator
  * - `maple.api_key.id` — the key's opaque DB id (api_key only; never the token)
- * - `maple.org_id` / `tenant.userId` — for per-customer / per-user breakdowns
+ * - `orgId` / `tenant.userId` — for per-customer / per-user breakdowns
  */
 export const annotateAuthSpan = (
 	method: "api_key" | "session",
@@ -18,7 +18,7 @@ export const annotateAuthSpan = (
 ) =>
 	Effect.annotateCurrentSpan({
 		"maple.auth.method": method,
-		"maple.org_id": attrs.orgId,
+		orgId: attrs.orgId,
 		"tenant.userId": attrs.userId,
 		...(attrs.keyId ? { "maple.api_key.id": attrs.keyId } : {}),
 	})

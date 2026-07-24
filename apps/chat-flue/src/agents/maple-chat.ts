@@ -6,6 +6,7 @@ import { connectMapleMcp, MCP_DEFAULT_TIMEOUT_MS } from "../lib/mcp.ts"
 import { buildSystemPrompt, modeFromInstanceId } from "../lib/modes.ts"
 import { investigationIdFromInstanceId, orgIdFromInstanceId } from "../lib/org.ts"
 import { buildSubmitDiagnosisTool } from "../lib/submit-diagnosis.ts"
+import { emitTelemetryLog } from "../lib/telemetry.ts"
 import { enterSpan } from "../lib/tracing.ts"
 
 /**
@@ -60,7 +61,7 @@ export const route: AgentRouteHandler = async (c, next) => {
 	return enterSpan("chat.turn", async (span) => {
 		span.setAttribute("maple.chat.mode", mode)
 		span.setAttribute("gen_ai.request.model", env.MAPLE_CHAT_MODEL ?? DEFAULT_MODEL)
-		if (turnOrgId) span.setAttribute("maple.org_id", turnOrgId)
+		if (turnOrgId) span.setAttribute("orgId", turnOrgId)
 		return next()
 	})
 }
@@ -91,7 +92,7 @@ export default createAgent<unknown, ChatFlueEnv>(async (ctx) => {
 			// span with status `Error` + `error.type`/`error.message` and
 			// `maple.mcp.connected=false`.
 			const maple = await enterSpan("chat.mcp_connect", async (span) => {
-				span.setAttribute("maple.org_id", orgId)
+				span.setAttribute("orgId", orgId)
 				span.setAttribute("maple.mcp.timeout_ms", MCP_DEFAULT_TIMEOUT_MS)
 				try {
 					const connection = await connectMapleMcp(ctx.env, orgId)
@@ -120,10 +121,10 @@ export default createAgent<unknown, ChatFlueEnv>(async (ctx) => {
 				tools = [...tools, buildSubmitDiagnosisTool(ctx.env, orgId, investigationId)]
 			}
 		} catch (error) {
-			console.error(
-				"[chat-flue] MCP connect failed; continuing without Maple tools:",
-				error instanceof Error ? error.message : error,
-			)
+			emitTelemetryLog("error", "chat.mcp_connect_failed", {
+				"error.type": error instanceof Error ? error.name : "UnknownError",
+				"error.message": error instanceof Error ? error.message : String(error),
+			})
 		}
 	}
 

@@ -142,7 +142,7 @@ export function registerGetInstrumentationRecommendationsTool(server: McpToolReg
 			const issues = reconciled.issues.filter(
 				(issue) => statusFilter === undefined || issue.status === statusFilter,
 			)
-			yield* Effect.annotateCurrentSpan("resultCount", issues.length)
+			yield* Effect.annotateCurrentSpan("result.rowCount", issues.length)
 
 			// Coverage degrades gracefully: if the warehouse is unavailable the issue list
 			// (possibly stale) still renders, with the coverage section marked unavailable.

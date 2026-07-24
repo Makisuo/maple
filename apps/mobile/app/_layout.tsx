@@ -14,8 +14,10 @@ import { Slot } from "expo-router"
 import { QueryClientProvider } from "@tanstack/react-query"
 import { setAuthTokenProvider } from "../lib/api"
 import { mobileQueryClient } from "../lib/query"
+import { setupMobileTelemetry } from "../lib/telemetry"
 
 SplashScreen.preventAutoHideAsync()
+setupMobileTelemetry()
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!
 

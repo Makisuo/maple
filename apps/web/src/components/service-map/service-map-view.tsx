@@ -21,6 +21,7 @@ import { serviceMapLayoutAtomFamily, upsertSnapshot } from "@/atoms/service-map-
 import { serviceMapViewPrefsAtomFamily } from "@/atoms/service-map-view-prefs-atoms"
 import { Link } from "@tanstack/react-router"
 import { formatBackendError } from "@/lib/error-messages"
+import { logClientError } from "@/lib/services/common/telemetry"
 import { Bar, BarChart, CartesianGrid, Line, XAxis, YAxis } from "recharts"
 
 import { cn } from "@maple/ui/utils"
@@ -1700,7 +1701,7 @@ function useElkLayout(request: LayoutRequest): {
 				if (!cancelled) setState({ key: request.key, layout, hasEverSettled: true })
 			})
 			.catch((error) => {
-				console.error("Service map ELK layout failed", error)
+				logClientError("service_map.elk_layout_failed", error)
 				if (!cancelled) setState({ key: request.key, layout: null, hasEverSettled: true })
 			})
 		return () => {

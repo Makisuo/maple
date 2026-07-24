@@ -70,7 +70,7 @@ export function registerListAlertRulesTool(server: McpToolRegistrar) {
 				orgId: tenant.orgId,
 				signalType: signal_type ?? "all",
 				severity: severity ?? "all",
-				resultCount: rules.length,
+				"result.rowCount": rules.length,
 			})
 
 			const lines: string[] = [

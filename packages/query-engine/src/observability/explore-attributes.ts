@@ -101,7 +101,7 @@ export const exploreAttributeValues = Effect.fn("Observability.exploreAttributeV
 		{ profile: "discovery" },
 	)
 
-	yield* Effect.annotateCurrentSpan("resultCount", result.data.length)
+	yield* Effect.annotateCurrentSpan("result.rowCount", result.data.length)
 
 	return pipe(
 		result.data,

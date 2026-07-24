@@ -64,8 +64,8 @@ export function registerInspectTraceTool(server: McpToolRegistrar) {
 			})
 
 			yield* Effect.annotateCurrentSpan({
-				"result.count": result.spanCount,
-				renderedSpanCount: overview.renderedCount,
+				"result.rowCount": result.spanCount,
+				"result.renderedSpanCount": overview.renderedCount,
 			})
 
 			const collectServices = (n: SpanNode): string[] => [

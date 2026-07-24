@@ -1,14 +1,14 @@
-import { Effect } from "effect"
-import { onCLS, onINP, onLCP, type Metric } from "web-vitals"
+import { Effect, Metric } from "effect"
+import { onCLS, onINP, onLCP, type Metric as WebVitalMetric } from "web-vitals"
 
 import { runtime } from "./services/common/runtime"
 
 /**
  * Production RUM for the dashboard itself. Emits Core Web Vitals and a periodic
- * main-thread-health summary as structured logs through the existing
- * `mapleOtelLayer` pipeline (the client SDK carries traces + logs only — no
- * metrics — so logs are the encoding; the alerting worker queries them from the
- * warehouse). Attribute keys use the `maple.*` vendor namespace.
+ * main-thread-health summary as Effect metrics and structured logs through the
+ * existing `mapleOtelLayer` pipeline. Logs remain for the alerting worker's
+ * existing warehouse queries; metrics power native dashboards. Attribute keys
+ * use the `maple.*` vendor namespace.
  *
  * Overhead budget: two PerformanceObservers, one 30s timer, and a handful of
  * log rows per session. Everything here must stay off the interaction path —
@@ -42,7 +42,43 @@ function logRow(message: string, attributes: Record<string, string | number | bo
 	runtime.runFork(Effect.logInfo(message).pipe(Effect.annotateLogs(attributes)))
 }
 
-function reportVital(metric: Metric): void {
+const clsMetric = Metric.histogram("web.vitals.cls", {
+	description: "Cumulative Layout Shift",
+	boundaries: [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2],
+})
+const inpMetric = Metric.histogram("web.vitals.inp_ms", {
+	description: "Interaction to Next Paint in milliseconds",
+	boundaries: [50, 100, 200, 300, 500, 800, 1_200, 2_000],
+})
+const lcpMetric = Metric.histogram("web.vitals.lcp_ms", {
+	description: "Largest Contentful Paint in milliseconds",
+	boundaries: [500, 1_000, 1_500, 2_500, 4_000, 6_000, 10_000],
+})
+const vitalRatings = Metric.frequency("web.vitals.ratings_total", {
+	description: "Web Vital ratings by metric and rating",
+})
+const longFramesMetric = Metric.histogram("web.performance.long_frames", {
+	description: "Long frames observed per reporting window",
+	boundaries: [1, 2, 5, 10, 20, 50, 100],
+})
+const totalBlockingMetric = Metric.histogram("web.performance.total_blocking_ms", {
+	description: "Total main-thread blocking time per reporting window",
+	boundaries: [50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000],
+})
+const maxBlockingMetric = Metric.histogram("web.performance.max_blocking_ms", {
+	description: "Maximum main-thread blocking time per reporting window",
+	boundaries: [50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000],
+})
+const heapUsedMetric = Metric.gauge("web.performance.js_heap_used_bytes")
+
+function reportVital(metric: WebVitalMetric): void {
+	const valueMetric = metric.name === "CLS" ? clsMetric : metric.name === "INP" ? inpMetric : lcpMetric
+	runtime.runFork(
+		Effect.all([
+			Metric.update(valueMetric, metric.value),
+			Metric.update(vitalRatings, `${metric.name.toLowerCase()}:${metric.rating}`),
+		]),
+	)
 	logRow("maple.web_vitals", {
 		"maple.vital.name": metric.name,
 		"maple.vital.value": metric.value,
@@ -77,6 +113,14 @@ export function initPerfVitals(): void {
 	const emitSummary = () => {
 		if (longFrames === 0) return
 		const heap = readHeap()
+		runtime.runFork(
+			Effect.all([
+				Metric.update(longFramesMetric, longFrames),
+				Metric.update(totalBlockingMetric, totalBlockingMs),
+				Metric.update(maxBlockingMetric, maxBlockingMs),
+				...(heap ? [Metric.update(heapUsedMetric, heap.usedJSHeapSize)] : []),
+			]),
+		)
 		logRow("maple.web_perf_summary", {
 			"maple.perf.long_frames": longFrames,
 			"maple.perf.total_blocking_ms": Math.round(totalBlockingMs),

@@ -34,7 +34,7 @@ export function registerListServicesTool(server: McpToolRegistrar) {
 				Effect.mapError(toMcpQueryError("service_overview")),
 			)
 
-			yield* Effect.annotateCurrentSpan("resultCount", services.length)
+			yield* Effect.annotateCurrentSpan("result.rowCount", services.length)
 
 			const lines: string[] = [
 				`## Services`,

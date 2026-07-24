@@ -9,8 +9,8 @@ import { ingestUrl } from "./ingest-url"
 // hard nav/tab-close, leaving rootless traces. `MapleFlush` swaps in the
 // buffer-backed tracer and registers `pagehide` + `visibilitychange→hidden`
 // handlers (on by default) that drain the buffer before the tab goes away.
-// Traces + logs only — maple-web emits no client Effect metrics, so nothing is
-// lost vs. `Maple.layer`. `service.namespace` moves into `attributes` because
+// Traces, logs, and Effect metrics share the same unload-safe flush.
+// `service.namespace` moves into `attributes` because
 // the flushable config has no dedicated field for it.
 const telemetry = MapleFlush.make({
 	serviceName: "maple-web",

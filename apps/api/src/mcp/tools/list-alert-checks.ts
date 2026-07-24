@@ -74,7 +74,7 @@ export function registerListAlertChecksTool(server: McpToolRegistrar) {
 				orgId: tenant.orgId,
 				ruleId: rule_id,
 				status: status ?? "all",
-				resultCount: checks.length,
+				"result.rowCount": checks.length,
 			})
 
 			const lines: string[] = [

@@ -1319,7 +1319,9 @@ export class CloudflareAnalyticsService extends Context.Service<
 				const request = HttpClientRequest.post(ingestMetricsUrl, {
 					headers: { authorization: `Bearer ${ingestKey}`, "content-type": "application/json" },
 				}).pipe(HttpClientRequest.bodyJsonUnsafe(payload))
-				const response = yield* client.execute(request)
+				const response = yield* client
+					.execute(request)
+					.pipe(Effect.annotateSpans("peer.service", "ingest"))
 				if (response.status >= 300) {
 					const body = yield* response.text.pipe(Effect.orElseSucceed(() => ""))
 					return yield* Effect.fail(

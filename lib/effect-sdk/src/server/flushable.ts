@@ -14,7 +14,7 @@
 //   await telemetry.flush()        // force an export now
 //   await telemetry.dispose()      // stop the auto-flush timer + final flush
 //
-// Known limitation: traces + logs only (no metrics, unlike `Otlp.layerJson`).
+// Traces, logs, and Effect metric snapshots are flushed together.
 // ---------------------------------------------------------------------------
 
 import { Effect, Layer } from "effect"
@@ -27,6 +27,7 @@ import {
 	type SignalState,
 } from "../shared/flush-core.js"
 import { type LogBuffer, makeLogBuffer } from "../shared/flushable-logger.js"
+import { makeMetricBuffer } from "../shared/flushable-metrics.js"
 import { makeSpanBuffer, type SpanBuffer } from "../shared/flushable-tracer.js"
 import { resolveResource } from "./resource.js"
 
@@ -35,7 +36,7 @@ const DEFAULT_AUTO_FLUSH_MS = 5_000
 
 export interface MapleFlushableConfig {
 	/**
-	 * Service name reported in traces and logs. Falls back to `OTEL_SERVICE_NAME`,
+	 * Service name reported in traces, logs, and metrics. Falls back to `OTEL_SERVICE_NAME`,
 	 * then `"unknown"`.
 	 */
 	readonly serviceName?: string | undefined
@@ -73,6 +74,8 @@ export interface MapleFlushableConfig {
 	readonly tracesPath?: string | undefined
 	/** OTLP logs path appended to `endpoint`. Default `/v1/logs`. */
 	readonly logsPath?: string | undefined
+	/** OTLP metrics path appended to `endpoint`. Default `/v1/metrics`. */
+	readonly metricsPath?: string | undefined
 	/**
 	 * Background auto-flush cadence in milliseconds. Default `5000`. Set to `0`
 	 * or `false` to disable and flush purely on demand (note: the in-memory
@@ -112,10 +115,12 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 		anticipatedErrorIdentifiers: anticipatedIdentifiers,
 	})
 	const logs: LogBuffer = makeLogBuffer({ excludeLogSpans: config.excludeLogSpans })
-	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer)
+	const metrics = makeMetricBuffer()
+	const layer = Layer.mergeAll(spans.tracerLayer, logs.loggerLayer, metrics.layer)
 
 	const tracesState: SignalState = { disabledUntil: 0 }
 	const logsState: SignalState = { disabledUntil: 0 }
+	const metricsState: SignalState = { disabledUntil: 0 }
 	let noOpLogged = false
 
 	// Resolve the resource once, lazily, on first flush. Memoize the PROMISE (not
@@ -130,6 +135,7 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 				buildResolved(r, {
 					tracesPath: config.tracesPath,
 					logsPath: config.logsPath,
+					metricsPath: config.metricsPath,
 					userAgent: "maple-effect-sdk-server/0.0.0",
 				}),
 			)
@@ -143,8 +149,10 @@ export const make = (config: MapleFlushableConfig = {}): FlushableTelemetry => {
 			resolved,
 			spans,
 			logs,
+			metrics,
 			tracesState,
 			logsState,
+			metricsState,
 			transport: fetchTransport,
 			logPrefix: "[MapleServerSDK]",
 			onNoOp: () => {

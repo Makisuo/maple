@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { BunRuntime } from "@effect/platform-bun"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Metric } from "effect"
 import * as Command from "effect/unstable/cli/Command"
 import { FetchHttpClient } from "effect/unstable/http"
 import { cli } from "./cli"
@@ -36,6 +36,13 @@ const MainLayer = WarehouseExecutorFromMode.pipe(
 // scope is the runtime's main scope that `BunRuntime.runMain` closes on exit.
 // Merging it into MainLayer leaves spans unflushed for short-lived commands.
 const checkpointProbeDataDir = process.env[CHECKPOINT_REOPEN_PROBE_ENV]
+const cliInvocations = Metric.counter("cli.invocations_total", {
+	description: "Total Maple CLI command invocations",
+	incremental: true,
+}).pipe(Metric.withConstantInput(1))
+const cliInvocationDuration = Metric.timer("cli.invocation_duration", {
+	description: "Maple CLI command duration",
+})
 
 if (checkpointProbeDataDir !== undefined) {
 	// Private re-exec path used by checkpoint restore. It intentionally bypasses
@@ -52,7 +59,12 @@ if (checkpointProbeDataDir !== undefined) {
 	}
 } else {
 	maybeNotifyUpdate.pipe(
-		Effect.flatMap(() => Command.run(cli, { version: MAPLE_VERSION })),
+		Effect.flatMap(() =>
+			Command.run(cli, { version: MAPLE_VERSION }).pipe(
+				Effect.track(cliInvocations),
+				Effect.trackDuration(cliInvocationDuration),
+			),
+		),
 		Effect.withSpan("maple", { attributes: { "cli.argv": process.argv.slice(2).join(" ") } }),
 		Effect.catchTag("@maple/cli/ArchiveError", (error) =>
 			Effect.sync(() => {

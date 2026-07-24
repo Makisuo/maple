@@ -16,9 +16,11 @@ flate2 = "1.1.5"
 hmac = "0.12.1"
 dotenvy = "0.15.7"
 opentelemetry = "0.31"
+opentelemetry-appender-tracing = "0.31"
 opentelemetry_sdk = { version = "0.31", features = [
 	"rt-tokio",
 	"trace",
+	"logs",
 	"metrics",
 	"experimental_trace_batch_span_processor_with_async_runtime",
 	"experimental_metrics_periodicreader_with_async_runtime",
@@ -28,6 +30,7 @@ opentelemetry-otlp = { version = "0.31", default-features = false, features = [
 	"reqwest-client",
 	"reqwest-rustls",
 	"trace",
+	"logs",
 	"metrics",
 ] }
 opentelemetry-proto = { version = "0.31.0", features = [

@@ -13,6 +13,8 @@ import {
 export interface CreateLocalUiWorkerOptions {
 	stage: MapleStage
 	domains: MapleDomains
+	logsDestination?: Cloudflare.Workers.ObservabilityDestination
+	tracesDestination?: Cloudflare.Workers.ObservabilityDestination
 }
 
 // The local-mode dashboard SPA. Deploying this to `local.maple.dev` decouples UI
@@ -23,7 +25,12 @@ export interface CreateLocalUiWorkerOptions {
 // that same `dist/` via rust-embed — see `apps/cli/src/server/ui-assets.ts`), so
 // the build stays a plain `vite build` via Command.Build and the worker serves
 // the flat `dist/` as assets with the SPA fallback in `src/worker.ts`.
-export const createLocalUiWorker = ({ stage, domains }: CreateLocalUiWorkerOptions) =>
+export const createLocalUiWorker = ({
+	stage,
+	domains,
+	logsDestination,
+	tracesDestination,
+}: CreateLocalUiWorkerOptions) =>
 	Effect.gen(function* () {
 		const build = yield* Command.Build("local-ui-build", {
 			command: "bun run build",
@@ -36,6 +43,18 @@ export const createLocalUiWorker = ({ stage, domains }: CreateLocalUiWorkerOptio
 			main: path.join(import.meta.dirname, "src", "worker.ts"),
 			assets: { directory: build.outdir, hash: Output.map(build.hash, (h) => h.output ?? "") },
 			placement: CLOUDFLARE_WORKER_PLACEMENT,
+			observability: {
+				enabled: true,
+				logs: {
+					enabled: true,
+					invocationLogs: true,
+					destinations: [logsDestination?.slug ?? "maple"],
+				},
+				traces: {
+					enabled: true,
+					destinations: [tracesDestination?.slug ?? "maple"],
+				},
+			},
 			url: true,
 			domain: domains.local,
 		})

@@ -60,7 +60,7 @@ export function registerListAlertIncidentsTool(server: McpToolRegistrar) {
 				orgId: tenant.orgId,
 				status: status ?? "all",
 				severity: severity ?? "all",
-				resultCount: incidents.length,
+				"result.rowCount": incidents.length,
 			})
 
 			const lines: string[] = [

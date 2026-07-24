@@ -40,13 +40,15 @@ use maple_ingest::telemetry::{
 };
 use moka::future::Cache;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry_otlp::{MetricExporter, Protocol, SpanExporter, WithExportConfig};
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+use opentelemetry_otlp::{LogExporter, MetricExporter, Protocol, SpanExporter, WithExportConfig};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use opentelemetry_proto::tonic::common::v1::{any_value, AnyValue, InstrumentationScope, KeyValue};
 use opentelemetry_proto::tonic::logs::v1::{LogRecord, ResourceLogs, ScopeLogs};
 use opentelemetry_proto::tonic::resource::v1::Resource;
+use opentelemetry_sdk::logs::{BatchLogProcessor, SdkLoggerProvider};
 use opentelemetry_sdk::metrics::periodic_reader_with_async_runtime::PeriodicReader;
 use opentelemetry_sdk::metrics::SdkMeterProvider;
 use opentelemetry_sdk::runtime::Tokio as OtelTokio;
@@ -157,15 +159,11 @@ enum KeyStoreBackend {
     // No-DB local backend: every well-formed ingest key resolves to a single
     // override org. Selected for single-tenant local dev so contributors don't
     // need database credentials to boot the service.
-    Static {
-        org_id: String,
-    },
+    Static { org_id: String },
     // PlanetScale Postgres backend used in multi-tenant / production deploys.
     // `url` is the standard pg connection string (PSBouncer port 6432, sslmode
     // require); the API service writes ingest-key rows to the same database.
-    Postgres {
-        url: String,
-    },
+    Postgres { url: String },
 }
 
 impl AppConfig {
@@ -480,9 +478,7 @@ fn resolve_key_store_backend() -> Result<KeyStoreBackend, String> {
         return Err("MAPLE_PG_URL is required for the postgres key store backend".to_string());
     }
 
-    Ok(KeyStoreBackend::Postgres {
-        url,
-    })
+    Ok(KeyStoreBackend::Postgres { url })
 }
 
 struct IngestKeyResolver {
@@ -975,11 +971,16 @@ fn resolve_deployment_env() -> String {
         .unwrap_or_else(|_| "development".to_string())
 }
 
+struct TelemetryProviders {
+    tracer: SdkTracerProvider,
+    logger: SdkLoggerProvider,
+}
+
 fn init_tracing(
     forward_endpoint: &str,
     bind_port: u16,
     service_instance_id: &str,
-) -> Option<SdkTracerProvider> {
+) -> Option<TelemetryProviders> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| "maple_ingest=info,tower_http=info".into());
 
@@ -1035,6 +1036,24 @@ fn init_tracing(
             return None;
         }
     };
+    let log_exporter = match LogExporter::builder()
+        .with_http()
+        .with_endpoint(format!("{forward_endpoint}/v1/logs"))
+        .with_protocol(Protocol::HttpBinary)
+        .build()
+    {
+        Ok(exporter) => exporter,
+        Err(error) => {
+            eprintln!(
+                "Failed to build OTLP log exporter: {error}; falling back to stdout-only tracing"
+            );
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(fmt_layer)
+                .init();
+            return None;
+        }
+    };
 
     let batch_config = BatchConfigBuilder::default()
         .with_max_queue_size(2048)
@@ -1047,22 +1066,40 @@ fn init_tracing(
         .build();
 
     let provider = SdkTracerProvider::builder()
-        .with_resource(resource)
+        .with_resource(resource.clone())
         .with_span_processor(processor)
+        .build();
+    let log_processor = BatchLogProcessor::builder(log_exporter)
+        .with_batch_config(
+            opentelemetry_sdk::logs::BatchConfigBuilder::default()
+                .with_max_queue_size(2048)
+                .with_max_export_batch_size(512)
+                .with_scheduled_delay(Duration::from_secs(5))
+                .build(),
+        )
+        .build();
+    let logger_provider = SdkLoggerProvider::builder()
+        .with_resource(resource)
+        .with_log_processor(log_processor)
         .build();
 
     let tracer = provider.tracer("maple-ingest");
     let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    let log_layer = OpenTelemetryTracingBridge::new(&logger_provider);
 
     tracing_subscriber::registry()
         .with(env_filter)
         .with(fmt_layer)
+        .with(log_layer)
         .with(otel_layer)
         .init();
 
     opentelemetry::global::set_tracer_provider(provider.clone());
 
-    Some(provider)
+    Some(TelemetryProviders {
+        tracer: provider,
+        logger: logger_provider,
+    })
 }
 
 /// Wire up OTLP metric export, mirroring `init_tracing`. The gateway's own
@@ -1146,7 +1183,8 @@ async fn main() {
     // One UUID per process, shared by the trace and metric resources so both
     // signals attribute to the same `service.instance.id`.
     let service_instance_id = uuid::Uuid::new_v4().to_string();
-    let tracer_provider = init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
+    let telemetry_providers =
+        init_tracing(&config.forward_endpoint, config.port, &service_instance_id);
     let meter_provider = init_metrics(&config.forward_endpoint, config.port, &service_instance_id);
 
     let http_client = match Client::builder()
@@ -1376,10 +1414,11 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await;
 
-    if let Some(provider) = tracer_provider {
+    if let Some(providers) = telemetry_providers {
         // Flush buffered spans on graceful exit. Errors here are non-fatal —
         // the process is shutting down anyway.
-        let _ = provider.shutdown();
+        let _ = providers.tracer.shutdown();
+        let _ = providers.logger.shutdown();
     }
 
     if let Some(provider) = meter_provider {
@@ -3759,6 +3798,16 @@ struct PostgresKeyStore {
     pool: deadpool_postgres::Pool,
 }
 
+fn postgres_client_span(operation: &'static str) -> Span {
+    tracing::info_span!(
+        "postgres.query",
+        otel.kind = "client",
+        "db.system.name" = "postgresql",
+        "db.operation.name" = operation,
+        "peer.service" = "planetscale-postgres",
+    )
+}
+
 impl PostgresKeyStore {
     fn new(url: &str) -> Result<Self, String> {
         let pg_config = url
@@ -3811,6 +3860,7 @@ impl PostgresKeyStore {
                  WHERE k.private_key_hash = $1 LIMIT 1",
                 &[&"__ingest_probe_no_match__"],
             )
+            .instrument(postgres_client_span("probe"))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres probe query failed: {error}"))
@@ -3838,6 +3888,7 @@ impl KeyStore for PostgresKeyStore {
         let client = self.client().await?;
         let rows = client
             .query(&sql, &[&revision, &key_hash])
+            .instrument(postgres_client_span("fetch_ingest_key"))
             .await
             .map_err(|error| format!("postgres fetch_ingest_key failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3867,6 +3918,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE c.id = $2 AND c.secret_hash = $3 AND c.enabled = true LIMIT 1",
                 &[&revision, &connector_id, &secret_hash],
             )
+            .instrument(postgres_client_span("fetch_connector"))
             .await
             .map_err(|error| format!("postgres fetch_connector failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3893,6 +3945,7 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_sampling_policies WHERE org_id = $1 LIMIT 1",
                 &[&org_id],
             )
+            .instrument(postgres_client_span("fetch_sampling_policy"))
             .await
             .map_err(|error| format!("postgres fetch_sampling_policy failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3917,6 +3970,7 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_ingest_attribute_mappings WHERE org_id = $1 AND enabled = true",
                 &[&org_id],
             )
+            .instrument(postgres_client_span("fetch_attribute_mappings"))
             .await
             .map_err(|error| format!("postgres fetch_attribute_mappings failed: {error}"))?;
         Ok(rows
@@ -3944,6 +3998,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE org_id = $1 AND sync_status = 'connected' AND schema_version = $2 LIMIT 1",
                 &[&org_id, &revision],
             )
+            .instrument(postgres_client_span("fetch_clickhouse_target"))
             .await
             .map_err(|error| format!("postgres fetch_clickhouse_target failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3970,6 +4025,7 @@ impl KeyStore for PostgresKeyStore {
                  FROM org_clickhouse_settings WHERE org_id = $2 LIMIT 1",
                 &[&revision, &org_id],
             )
+            .instrument(postgres_client_span("fetch_org_routing"))
             .await
             .map_err(|error| format!("postgres fetch_org_routing failed: {error}"))?;
         let Some(row) = rows.into_iter().next() else {
@@ -3996,6 +4052,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $2",
                 &[&now_ms, &connector_id],
             )
+            .instrument(postgres_client_span("record_connector_success"))
             .await
             .map(|_| ())
             .map_err(|error| format!("postgres record_connector_success failed: {error}"))
@@ -4015,6 +4072,7 @@ impl KeyStore for PostgresKeyStore {
                  WHERE id = $3",
                 &[&error, &now_ms, &connector_id],
             )
+            .instrument(postgres_client_span("record_connector_failure"))
             .await
             .map(|_| ())
             .map_err(|err| format!("postgres record_connector_failure failed: {err}"))
@@ -4189,7 +4247,10 @@ async fn build_key_store(config: &AppConfig) -> Result<Arc<dyn KeyStore>, String
             }))
         }
         KeyStoreBackend::Postgres { url } => {
-            info!(backend = "planetscale-postgres", "Key store backend selected");
+            info!(
+                backend = "planetscale-postgres",
+                "Key store backend selected"
+            );
             let store = PostgresKeyStore::new(url)?;
             store
                 .probe()
@@ -4334,7 +4395,10 @@ mod tests {
             "payload_too_large"
         );
         assert_eq!(ApiError::too_many_requests("x").error_kind(), "throttle");
-        assert_eq!(ApiError::service_unavailable("x").error_kind(), "unavailable");
+        assert_eq!(
+            ApiError::service_unavailable("x").error_kind(),
+            "unavailable"
+        );
         assert_eq!(
             ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "x").error_kind(),
             "error"
@@ -5541,5 +5605,4 @@ mod tests {
             .expect("resolve should succeed");
         assert!(resolved.is_none());
     }
-
 }

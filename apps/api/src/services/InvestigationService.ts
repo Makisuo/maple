@@ -178,7 +178,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const listInvestigations: InvestigationServiceShape["listInvestigations"] = Effect.fn(
 				"InvestigationService.listInvestigations",
 			)(function* (orgId, opts) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId })
+				yield* Effect.annotateCurrentSpan({ orgId })
 				const conditions = [
 					eq(investigations.orgId, orgId),
 					opts.issueId ? eq(investigations.issueId, opts.issueId) : undefined,
@@ -203,7 +203,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const getInvestigation: InvestigationServiceShape["getInvestigation"] = Effect.fn(
 				"InvestigationService.getInvestigation",
 			)(function* (orgId, id) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId, "maple.investigation.id": id })
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
 				const row = yield* loadRow(orgId, id)
 				if (!row) {
 					return yield* Effect.fail(
@@ -217,7 +217,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				"InvestigationService.createInvestigation",
 			)(function* (orgId, userId, request) {
 				yield* Effect.annotateCurrentSpan({
-					"maple.org_id": orgId,
+					orgId,
 					"maple.investigation.subject_type": request.subject.type,
 				})
 				const nowMs = yield* Clock.currentTimeMillis
@@ -290,7 +290,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 				"InvestigationService.updateStatus",
 			)(function* (orgId, id, status) {
 				yield* Effect.annotateCurrentSpan({
-					"maple.org_id": orgId,
+					orgId,
 					"maple.investigation.id": id,
 					"maple.investigation.status": status,
 				})
@@ -326,7 +326,7 @@ export class InvestigationService extends Context.Service<InvestigationService, 
 			const submitDiagnosis: InvestigationServiceShape["submitDiagnosis"] = Effect.fn(
 				"InvestigationService.submitDiagnosis",
 			)(function* (orgId, id, request) {
-				yield* Effect.annotateCurrentSpan({ "maple.org_id": orgId, "maple.investigation.id": id })
+				yield* Effect.annotateCurrentSpan({ orgId, "maple.investigation.id": id })
 				const nowMs = yield* Clock.currentTimeMillis
 				const row = yield* loadRow(orgId, id)
 				if (!row) {

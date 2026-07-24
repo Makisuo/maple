@@ -127,9 +127,19 @@ export default Alchemy.Stack(
 			electricSyncUrl,
 		})
 
-		const landing = yield* createLandingWorker({ stage, domains })
+		const landing = yield* createLandingWorker({
+			stage,
+			domains,
+			logsDestination: shared.logsDestination,
+			tracesDestination: shared.tracesDestination,
+		})
 
-		const localUi = yield* createLocalUiWorker({ stage, domains })
+		const localUi = yield* createLocalUiWorker({
+			stage,
+			domains,
+			logsDestination: shared.logsDestination,
+			tracesDestination: shared.tracesDestination,
+		})
 
 		const alerting = yield* createAlertingWorker({
 			stage,

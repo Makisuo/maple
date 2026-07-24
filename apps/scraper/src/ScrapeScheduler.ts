@@ -6,9 +6,11 @@ import {
 	Effect,
 	Fiber,
 	Layer,
+	Metric,
 	Ref,
 	Result,
 	Schedule,
+	Schema,
 	Semaphore,
 } from "effect"
 import { ScrapeResultReport, type InternalScrapeTarget } from "@maple/domain/http"
@@ -17,6 +19,7 @@ import { convertFamiliesToOtlp } from "./prometheus/otlp"
 import { parsePrometheusText } from "./prometheus/parser"
 import { OtlpIngest } from "./OtlpIngest"
 import { ScraperEnv } from "./Env"
+import { activeTargets, bufferedResults, scrapeDurationMs, scrapesTotal } from "./Metrics"
 
 interface SchedulerStats {
 	readonly activeTargets: number
@@ -63,6 +66,17 @@ export interface ScrapeOutcome {
 	/** Upstream `Retry-After` translated to ms, when present. */
 	readonly retryAfterMs: number | null
 }
+
+class ScrapeAttemptFailed extends Schema.TaggedErrorClass<ScrapeAttemptFailed>()("ScrapeAttemptFailed", {
+	outcome: Schema.Struct({
+		error: Schema.NullOr(Schema.String),
+		samplesScraped: Schema.optional(Schema.Number),
+		samplesPostMetricRelabeling: Schema.optional(Schema.Number),
+		rateLimited: Schema.Boolean,
+		authFailed: Schema.Boolean,
+		retryAfterMs: Schema.NullOr(Schema.Number),
+	}),
+}) {}
 
 /** A scrape outcome that must escalate the delay instead of holding cadence. */
 export const shouldBackOff = (outcome: ScrapeOutcome): boolean => outcome.rateLimited || outcome.authFailed
@@ -212,83 +226,97 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 						const scrapeTimeMs = yield* Clock.currentTimeMillis
 
 						const outcome: ScrapeOutcome = yield* Effect.gen(function* () {
-							const response = yield* api.scrapeTarget(target.id, target.subTargetKey)
-							if (response.status < 200 || response.status >= 300) {
-								// A non-2xx is a recorded failure, not an Effect error: only
-								// 429/503 (rate limit) and 401/403 (rejected credential)
-								// trigger backoff, and we need the Retry-After hint.
+							const attempt = yield* Effect.gen(function* () {
+								const response = yield* api.scrapeTarget(target.id, target.subTargetKey)
+								if (response.status < 200 || response.status >= 300) {
+									return {
+										error: `target returned HTTP ${response.status}`,
+										rateLimited: response.status === 429 || response.status === 503,
+										authFailed: response.status === 401 || response.status === 403,
+										retryAfterMs:
+											response.retryAfterSeconds !== null
+												? response.retryAfterSeconds * 1000
+												: null,
+									} satisfies ScrapeOutcome
+								}
+
+								const parsed = parsePrometheusText(response.body)
+								const converted = convertFamiliesToOtlp(parsed.families, {
+									targetId: target.id,
+									targetName: target.name,
+									serviceName: target.serviceName ?? target.name,
+									instance: hostFromUrl(target.url),
+									targetLabels: target.labels,
+									scrapeTimeMs,
+								})
+
+								if (converted.request !== null) {
+									yield* otlp.send(target.ingestKey, converted.request)
+								}
+
+								yield* Effect.annotateCurrentSpan({
+									"maple.scraper.sum_data_points": converted.dataPointCounts.sum,
+									"maple.scraper.gauge_data_points": converted.dataPointCounts.gauge,
+									"maple.scraper.histogram_data_points":
+										converted.dataPointCounts.histogram,
+									"maple.scraper.dropped_series": converted.droppedSeriesCount,
+									"maple.scraper.skipped_lines": parsed.skippedLineCount,
+								})
 								return {
-									error: `target returned HTTP ${response.status}`,
-									rateLimited: response.status === 429 || response.status === 503,
-									authFailed: response.status === 401 || response.status === 403,
-									retryAfterMs:
-										response.retryAfterSeconds !== null
-											? response.retryAfterSeconds * 1000
-											: null,
+									error: null,
+									samplesScraped: parsed.families.reduce(
+										(total, family) => total + family.samples.length,
+										0,
+									),
+									samplesPostMetricRelabeling:
+										converted.dataPointCounts.sum +
+										converted.dataPointCounts.gauge +
+										converted.dataPointCounts.histogram,
+									rateLimited: false,
+									authFailed: false,
+									retryAfterMs: null,
 								} satisfies ScrapeOutcome
-							}
-
-							const parsed = parsePrometheusText(response.body)
-							const converted = convertFamiliesToOtlp(parsed.families, {
-								targetId: target.id,
-								targetName: target.name,
-								serviceName: target.serviceName ?? target.name,
-								instance: hostFromUrl(target.url),
-								targetLabels: target.labels,
-								scrapeTimeMs,
-							})
-
-							// One OTLP export per scrape, through the ingest gateway with
-							// the org's public key: this is what bills the data (Autumn
-							// byte metering + limit enforcement) and routes it to the
-							// org's warehouse (Tinybird or self-managed ClickHouse).
-							// Ingest failures count as scrape failures: lastScrapeAt must
-							// not advance when the data never landed.
-							if (converted.request !== null) {
-								yield* otlp.send(target.ingestKey, converted.request)
-							}
-
-							yield* Effect.annotateCurrentSpan({
-								sumDataPoints: converted.dataPointCounts.sum,
-								gaugeDataPoints: converted.dataPointCounts.gauge,
-								histogramDataPoints: converted.dataPointCounts.histogram,
-								droppedSeries: converted.droppedSeriesCount,
-								skippedLines: parsed.skippedLineCount,
-							})
-							return {
-								error: null,
-								samplesScraped: parsed.families.reduce(
-									(total, family) => total + family.samples.length,
-									0,
+							}).pipe(
+								Effect.catch((error) =>
+									Effect.succeed<ScrapeOutcome>({
+										error: error.message,
+										rateLimited: false,
+										authFailed: false,
+										retryAfterMs: null,
+									}),
 								),
-								samplesPostMetricRelabeling:
-									converted.dataPointCounts.sum +
-									converted.dataPointCounts.gauge +
-									converted.dataPointCounts.histogram,
-								rateLimited: false,
-								authFailed: false,
-								retryAfterMs: null,
-							} satisfies ScrapeOutcome
+								Effect.catchDefect((defect) =>
+									Effect.succeed<ScrapeOutcome>({
+										error: Cause.pretty(Cause.die(defect)),
+										rateLimited: false,
+										authFailed: false,
+										retryAfterMs: null,
+									}),
+								),
+							)
+
+							if (attempt.error !== null) {
+								return yield* new ScrapeAttemptFailed({ outcome: attempt })
+							}
+							return attempt
 						}).pipe(
-							Effect.catch((error) =>
-								Effect.succeed<ScrapeOutcome>({
-									error: error.message,
-									rateLimited: false,
-									authFailed: false,
-									retryAfterMs: null,
-								}),
-							),
-							Effect.catchDefect((defect) =>
-								Effect.succeed<ScrapeOutcome>({
-									error: Cause.pretty(Cause.die(defect)),
-									rateLimited: false,
-									authFailed: false,
-									retryAfterMs: null,
-								}),
-							),
+							Effect.withSpan("scraper.scrape_target", {
+								attributes: {
+									orgId: target.orgId,
+									"maple.scraper.target_id": target.id,
+									"maple.scraper.target_name": target.name,
+									"maple.scraper.interval_seconds": target.scrapeIntervalSeconds,
+									...(target.subTargetKey
+										? { "maple.scraper.sub_target_key": target.subTargetKey }
+										: {}),
+								},
+							}),
+							Effect.catchTag("ScrapeAttemptFailed", ({ outcome }) => Effect.succeed(outcome)),
 						)
 
 						const durationMs = (yield* Clock.currentTimeMillis) - scrapeTimeMs
+						yield* Metric.update(scrapeDurationMs, durationMs)
+						yield* Metric.update(scrapesTotal, outcome.error === null ? "ok" : "error")
 						yield* recordOutcome(target, scrapeTimeMs, durationMs, outcome)
 						if (outcome.error !== null) {
 							yield* Effect.logWarning("Scrape failed").pipe(
@@ -300,17 +328,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							)
 						}
 						return outcome
-					}).pipe(
-						Effect.withSpan("scraper.scrape_target", {
-							attributes: {
-								orgId: target.orgId,
-								targetId: target.id,
-								targetName: target.name,
-								intervalSeconds: target.scrapeIntervalSeconds,
-								...(target.subTargetKey ? { subTargetKey: target.subTargetKey } : {}),
-							},
-						}),
-					),
+					}),
 				)
 
 			// Scrape, then sleep before the next pass. The happy path holds the
@@ -400,7 +418,11 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 
 				yield* Ref.set(fibersRef, next)
 				yield* Ref.set(lastReconcileRef, yield* Clock.currentTimeMillis)
-				yield* Effect.annotateCurrentSpan({ activeTargets: next.size, duplicateTargetsDropped })
+				yield* Metric.update(activeTargets, next.size)
+				yield* Effect.annotateCurrentSpan({
+					"maple.scraper.active_targets": next.size,
+					"maple.scraper.duplicate_targets_dropped": duplicateTargetsDropped,
+				})
 				if (duplicateTargetsDropped > 0) {
 					yield* Effect.logWarning("Dropped duplicate scrape targets sharing one key").pipe(
 						Effect.annotateLogs({ duplicateTargetsDropped, distinctTargets: next.size }),
@@ -418,6 +440,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 
 			const flushResults = Effect.gen(function* () {
 				const results = yield* Ref.getAndSet(resultsRef, [])
+				yield* Metric.update(bufferedResults, 0)
 				if (results.length === 0) return
 				// Send in chunks so one POST never overwhelms the API Worker; re-buffer
 				// only what didn't make it (in front) and retry on the next flush.
@@ -436,6 +459,7 @@ export class ScrapeScheduler extends Context.Service<ScrapeScheduler, ScrapeSche
 							bufferedResults: unsent.length,
 						}),
 					)
+					yield* Metric.update(bufferedResults, unsent.length)
 				}
 			}).pipe(Effect.withSpan("scraper.flush_results"))
 

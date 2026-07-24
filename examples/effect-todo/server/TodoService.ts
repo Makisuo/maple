@@ -49,7 +49,7 @@ export class TodoService extends Context.Service<TodoService>()("@maple-examples
 				return [...map.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 			}).pipe(
 				Effect.withSpan("db.read", {
-					attributes: { "db.system.name": "memory", "db.operation": "scan" },
+					attributes: { "db.system.name": "memory", "db.operation.name": "scan" },
 				}),
 			)
 			yield* Effect.annotateCurrentSpan("todo.count", todos.length)
@@ -64,7 +64,7 @@ export class TodoService extends Context.Service<TodoService>()("@maple-examples
 				yield* Ref.update(store, (map) => new Map(map).set(id, todo))
 			}).pipe(
 				Effect.withSpan("db.persist", {
-					attributes: { "db.system.name": "memory", "db.operation": "insert", "todo.id": id },
+					attributes: { "db.system.name": "memory", "db.operation.name": "insert", "todo.id": id },
 				}),
 			)
 			yield* Effect.logInfo("todo.created").pipe(
@@ -90,7 +90,7 @@ export class TodoService extends Context.Service<TodoService>()("@maple-examples
 			const updated = new Todo({ ...existing, completed: !existing.completed })
 			yield* Ref.update(store, (m) => new Map(m).set(id, updated)).pipe(
 				Effect.withSpan("db.persist", {
-					attributes: { "db.system.name": "memory", "db.operation": "update", "todo.id": id },
+					attributes: { "db.system.name": "memory", "db.operation.name": "update", "todo.id": id },
 				}),
 			)
 			yield* Effect.logInfo("todo.toggled").pipe(
@@ -114,7 +114,7 @@ export class TodoService extends Context.Service<TodoService>()("@maple-examples
 				})
 			}).pipe(
 				Effect.withSpan("db.persist", {
-					attributes: { "db.system.name": "memory", "db.operation": "delete", "todo.id": id },
+					attributes: { "db.system.name": "memory", "db.operation.name": "delete", "todo.id": id },
 				}),
 			)
 			yield* Effect.logInfo("todo.removed").pipe(Effect.annotateLogs({ "todo.id": id }))

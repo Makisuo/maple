@@ -837,7 +837,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			payload: OrgClickHouseSettingsUpsertRequest,
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 			yield* requireAdmin(roles)
 
 			const url = yield* normalizeHttpUrl(payload.url)
@@ -1028,7 +1028,7 @@ export class OrgClickHouseSettingsService extends Context.Service<
 			roles: ReadonlyArray<RoleName>,
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 			yield* requireAdmin(roles)
 			// Ensure BYO ClickHouse is configured before queuing a run.
 			yield* requireActiveRow(orgId)

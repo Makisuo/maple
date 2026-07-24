@@ -101,7 +101,7 @@ export function registerSearchSessionsTool(server: McpToolRegistrar) {
 				}),
 			).pipe(Effect.catchTags(warehouseToMcpHandlers("search_sessions")))
 
-			yield* Effect.annotateCurrentSpan("resultCount", sessions.length)
+			yield* Effect.annotateCurrentSpan("result.rowCount", sessions.length)
 			if (sessions.length === 0) {
 				return {
 					content: [

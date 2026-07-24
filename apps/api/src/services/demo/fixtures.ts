@@ -217,12 +217,12 @@ function generateHttpTrace(timestamp: Date, orgId: string): DemoTraceBatch {
 		status_message: isError ? "Internal server error" : "",
 		resource_attributes: resourceAttrs(route.service, orgId),
 		span_attributes: {
-			"http.method": route.method,
+			"http.request.method": route.method,
 			"http.route": route.route,
-			"http.status_code": String(httpStatus),
-			"http.scheme": "https",
-			"http.host": "api.demo.maple.dev",
-			"net.peer.name": "client",
+			"http.response.status_code": String(httpStatus),
+			"url.scheme": "https",
+			"server.address": "api.demo.maple.dev",
+			"client.address": "client",
 			"maple.demo": "true",
 		},
 		...(isError
@@ -251,9 +251,9 @@ function generateHttpTrace(timestamp: Date, orgId: string): DemoTraceBatch {
 		status_code: "Ok",
 		resource_attributes: resourceAttrs("demo-db", orgId),
 		span_attributes: {
-			"db.system": "postgresql",
-			"db.statement": pick(DB_QUERIES),
-			"db.name": "demo",
+			"db.system.name": "postgresql",
+			"db.query.text": pick(DB_QUERIES),
+			"db.namespace": "demo",
 			"maple.demo": "true",
 		},
 	})

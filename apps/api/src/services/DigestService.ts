@@ -96,7 +96,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			userId: UserId,
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 
 			const rows = yield* database
 				.execute((db) =>
@@ -131,7 +131,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			},
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 
 			const now = yield* Clock.currentTimeMillis
 			const id = crypto.randomUUID()
@@ -172,7 +172,7 @@ export class DigestService extends Context.Service<DigestService>()("@maple/api/
 			userId: UserId,
 		) {
 			yield* Effect.annotateCurrentSpan("orgId", orgId)
-			yield* Effect.annotateCurrentSpan("userId", userId)
+			yield* Effect.annotateCurrentSpan("tenant.userId", userId)
 
 			yield* database
 				.execute((db) =>

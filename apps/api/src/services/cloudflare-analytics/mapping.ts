@@ -165,7 +165,7 @@ export const mapHttpGroups = (input: MapHttpGroupsInput): CloudflareMetricRows =
 		const attributes: Attrs = {
 			"cache.status": group.dimensions.cacheStatus ?? "unknown",
 			"http.status_class": statusClass(group.dimensions.edgeResponseStatus),
-			"http.host": topHosts.has(host) ? host : OTHER_BUCKET,
+			"server.address": topHosts.has(host) ? host : OTHER_BUCKET,
 		}
 		const counters: ReadonlyArray<readonly [string, string, string, number]> = [
 			[
@@ -287,7 +287,7 @@ export const mapFirewallGroups = (input: MapFirewallGroupsInput): CloudflareMetr
 					"firewall.action": group.dimensions.action ?? "unknown",
 					"firewall.source": group.dimensions.source ?? "unknown",
 					"firewall.rule_id": foldRule(group.dimensions.ruleId ?? "unknown"),
-					"http.host": foldHost(group.dimensions.clientRequestHTTPHost ?? "unknown"),
+					"server.address": foldHost(group.dimensions.clientRequestHTTPHost ?? "unknown"),
 				},
 				serviceName,
 				resourceAttributes,

@@ -11,6 +11,7 @@ import { isClerkAuthEnabled } from "@/lib/services/common/auth-mode"
 import { setSelfHostedSessionToken } from "@/lib/services/common/self-hosted-auth"
 import { AuthLayout } from "@/components/layout/auth-layout"
 import { clerkAppearance } from "@/lib/clerk-appearance"
+import { tracedFetch } from "@/lib/services/common/telemetry"
 
 const SignInSearch = Schema.Struct({
 	redirect_url: Schema.optional(Schema.String),
@@ -39,7 +40,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 async function loginSelfHosted(password: string) {
-	const response = await window.fetch(`${apiBaseUrl}/api/auth/login`, {
+	const response = await tracedFetch("maple-api", `${apiBaseUrl}/api/auth/login`, {
 		method: "POST",
 		headers: {
 			"content-type": "application/json",

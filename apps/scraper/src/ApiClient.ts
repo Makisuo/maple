@@ -65,7 +65,11 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			})
 			const response = yield* client
 				.execute(request)
-				.pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(transportError))
+				.pipe(
+					Effect.annotateSpans("peer.service", "maple-api"),
+					Effect.timeout(REQUEST_TIMEOUT),
+					Effect.mapError(transportError),
+				)
 			const text = yield* response.text.pipe(Effect.mapError(transportError))
 			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
@@ -105,7 +109,11 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			)
 			const response = yield* client
 				.execute(request)
-				.pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(transportError))
+				.pipe(
+					Effect.annotateSpans("peer.service", "maple-api"),
+					Effect.timeout(REQUEST_TIMEOUT),
+					Effect.mapError(transportError),
+				)
 			const body = yield* response.text.pipe(Effect.mapError(transportError))
 			const retryAfterRaw = response.headers["retry-after"]
 			const retryAfterSeconds =
@@ -124,7 +132,11 @@ export class ApiClient extends Context.Service<ApiClient, ApiClientShape>()("@ma
 			}).pipe(HttpClientRequest.bodyText(JSON.stringify(results), "application/json"))
 			const response = yield* client
 				.execute(request)
-				.pipe(Effect.timeout(REQUEST_TIMEOUT), Effect.mapError(transportError))
+				.pipe(
+					Effect.annotateSpans("peer.service", "maple-api"),
+					Effect.timeout(REQUEST_TIMEOUT),
+					Effect.mapError(transportError),
+				)
 			if (response.status < 200 || response.status >= 300) {
 				return yield* Effect.fail(
 					new ApiRequestError({

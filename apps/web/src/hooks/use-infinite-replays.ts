@@ -5,6 +5,7 @@ import { Result, useAtomValue } from "@/lib/effect-atom"
 import { listReplays } from "@/api/warehouse/replays"
 import { listReplaysResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import type { SessionRow } from "@/components/replays/sessions-list"
+import { logClientError } from "@/lib/services/common/telemetry"
 
 const PAGE_SIZE = 50
 export const MAX_RETAINED_REPLAYS = 500
@@ -98,7 +99,7 @@ export function useInfiniteReplays(filterInputs: ReplaysFilterInputs) {
 				// asking for more pages. Without this, hasNextPage stays true and the
 				// UI loops on a backend offset cap.
 				setPaginationStopped(true)
-				console.error("Replay pagination failed", error)
+				logClientError("replay.pagination_failed", error)
 			})
 			.finally(() => {
 				if (filterKeyRef.current === currentKey) {

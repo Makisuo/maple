@@ -63,7 +63,7 @@ export function registerMineLogPatternsTool(server: McpToolRegistrar) {
 				Effect.mapError(toMcpQueryError("mine_log_patterns")),
 			)
 
-			yield* Effect.annotateCurrentSpan("resultCount", result.patterns.length)
+			yield* Effect.annotateCurrentSpan("result.rowCount", result.patterns.length)
 
 			if (result.patterns.length === 0) {
 				return {

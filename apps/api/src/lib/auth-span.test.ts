@@ -16,7 +16,7 @@ describe("annotateAuthSpan", () => {
 			})
 			const span = yield* Effect.currentSpan
 			assert.strictEqual(span.attributes.get("maple.auth.method"), "api_key")
-			assert.strictEqual(span.attributes.get("maple.org_id"), "org_test")
+			assert.strictEqual(span.attributes.get("orgId"), "org_test")
 			assert.strictEqual(span.attributes.get("tenant.userId"), "user_test")
 			assert.strictEqual(span.attributes.get("maple.api_key.id"), "key_test")
 		}).pipe(Effect.withSpan("test-root")),
@@ -27,7 +27,7 @@ describe("annotateAuthSpan", () => {
 			yield* annotateAuthSpan("session", { orgId: "org_test", userId: "user_test" })
 			const span = yield* Effect.currentSpan
 			assert.strictEqual(span.attributes.get("maple.auth.method"), "session")
-			assert.strictEqual(span.attributes.get("maple.org_id"), "org_test")
+			assert.strictEqual(span.attributes.get("orgId"), "org_test")
 			assert.strictEqual(span.attributes.get("tenant.userId"), "user_test")
 			assert.strictEqual(span.attributes.get("maple.api_key.id"), undefined)
 		}).pipe(Effect.withSpan("test-root")),

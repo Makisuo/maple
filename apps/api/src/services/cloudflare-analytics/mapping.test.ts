@@ -101,7 +101,7 @@ describe("mapHttpGroups", () => {
 		assert.deepStrictEqual(requests!.metric_attributes, {
 			"cache.status": "hit",
 			"http.status_class": "2xx",
-			"http.host": "unknown",
+			"server.address": "unknown",
 		})
 		assert.strictEqual(requests!.resource_attributes.maple_org_id, "org_test")
 		assert.strictEqual(requests!.resource_attributes["service.name"], "cloudflare/example.com")
@@ -148,7 +148,7 @@ describe("mapHttpGroups", () => {
 		}))
 		const { sumRows } = mapHttpGroups({ ...input, groups, latency: [] })
 		const requestRows = sumRows.filter((row) => row.metric_name === METRIC_HTTP_REQUESTS)
-		const emittedHosts = new Set(requestRows.map((row) => row.metric_attributes["http.host"]))
+		const emittedHosts = new Set(requestRows.map((row) => row.metric_attributes["server.address"]))
 		assert.strictEqual(emittedHosts.size, MAX_HTTP_HOSTS + 1)
 		assert.isTrue(emittedHosts.has("other"))
 		assert.isTrue(emittedHosts.has("h0.example.com"))
@@ -278,7 +278,7 @@ describe("mapFirewallGroups", () => {
 			"firewall.action": "block",
 			"firewall.source": "waf",
 			"firewall.rule_id": "rule-1",
-			"http.host": "api.example.com",
+			"server.address": "api.example.com",
 		})
 	})
 })

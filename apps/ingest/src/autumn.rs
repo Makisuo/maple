@@ -7,7 +7,7 @@ use reqwest::Client;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, Instrument};
 use uuid::Uuid;
 
 pub struct UsageEvent {
@@ -39,10 +39,7 @@ impl AutumnTracker {
 
         tokio::spawn(flush_loop(rx, secret_key, api_url, flush_interval));
 
-        info!(
-            flush_interval_secs,
-            "Autumn usage tracker started"
-        );
+        info!(flush_interval_secs, "Autumn usage tracker started");
 
         Self { tx }
     }
@@ -98,11 +95,19 @@ async fn flush_loop(
                         idempotency_key: Uuid::new_v4().to_string(),
                     };
 
+                    let span = tracing::info_span!(
+                        "autumn.track",
+                        otel.kind = "client",
+                        "http.request.method" = "POST",
+                        "server.address" = "api.useautumn.com",
+                        "peer.service" = "autumn",
+                    );
                     let result: Result<reqwest::Response, reqwest::Error> = client
                         .post(format!("{}/v1/track", api_url))
                         .header("Authorization", format!("Bearer {}", secret_key))
                         .json(&body)
                         .send()
+                        .instrument(span)
                         .await;
 
                     match result {
@@ -195,10 +200,8 @@ async fn flush_all(
     api_url: &str,
     accumulator: &mut HashMap<AccumulatorKey, f64>,
 ) {
-    let entries: Vec<(AccumulatorKey, f64)> = accumulator
-        .iter()
-        .map(|(k, v)| (k.clone(), *v))
-        .collect();
+    let entries: Vec<(AccumulatorKey, f64)> =
+        accumulator.iter().map(|(k, v)| (k.clone(), *v)).collect();
 
     for ((org_id, feature_id), value) in &entries {
         let body = TrackRequest {
@@ -208,11 +211,19 @@ async fn flush_all(
             idempotency_key: Uuid::new_v4().to_string(),
         };
 
+        let span = tracing::info_span!(
+            "autumn.track",
+            otel.kind = "client",
+            "http.request.method" = "POST",
+            "server.address" = "api.useautumn.com",
+            "peer.service" = "autumn",
+        );
         let result: Result<reqwest::Response, reqwest::Error> = client
             .post(format!("{}/v1/track", api_url))
             .header("Authorization", format!("Bearer {}", secret_key))
             .json(&body)
             .send()
+            .instrument(span)
             .await;
 
         match result {
@@ -301,6 +312,13 @@ impl AutumnEntitlements {
             feature_id,
         };
 
+        let span = tracing::info_span!(
+            "autumn.check",
+            otel.kind = "client",
+            "http.request.method" = "POST",
+            "server.address" = "api.useautumn.com",
+            "peer.service" = "autumn",
+        );
         let result = self
             .client
             .post(format!("{}/v1/check", self.api_url))
@@ -308,6 +326,7 @@ impl AutumnEntitlements {
             .timeout(Duration::from_secs(5))
             .json(&body)
             .send()
+            .instrument(span)
             .await;
 
         let response = match result {
@@ -471,7 +490,9 @@ mod tests {
     #[test]
     fn flat_hardcap_with_remaining_allows() {
         assert_eq!(
-            decide(r#"{"allowed": true, "balance": 12.5, "unlimited": false, "overage_allowed": false}"#),
+            decide(
+                r#"{"allowed": true, "balance": 12.5, "unlimited": false, "overage_allowed": false}"#
+            ),
             Some(true)
         );
     }
@@ -481,7 +502,9 @@ mod tests {
         // allowed:false at remaining 0 — and even if `allowed` lagged, remaining
         // gates the decision.
         assert_eq!(
-            decide(r#"{"allowed": false, "balance": 0, "unlimited": false, "overage_allowed": false}"#),
+            decide(
+                r#"{"allowed": false, "balance": 0, "unlimited": false, "overage_allowed": false}"#
+            ),
             Some(false)
         );
     }
@@ -491,7 +514,9 @@ mod tests {
         // Autumn's required_balance:1 makes `allowed:false` here, but 0.5 GB left
         // is not depleted — we must still allow.
         assert_eq!(
-            decide(r#"{"allowed": false, "balance": 0.5, "unlimited": false, "overage_allowed": false}"#),
+            decide(
+                r#"{"allowed": false, "balance": 0.5, "unlimited": false, "overage_allowed": false}"#
+            ),
             Some(true)
         );
     }
@@ -499,7 +524,9 @@ mod tests {
     #[test]
     fn flat_unlimited_allows() {
         assert_eq!(
-            decide(r#"{"allowed": true, "balance": 0, "unlimited": true, "overage_allowed": false}"#),
+            decide(
+                r#"{"allowed": true, "balance": 0, "unlimited": true, "overage_allowed": false}"#
+            ),
             Some(true)
         );
     }
@@ -508,7 +535,9 @@ mod tests {
     fn flat_overage_allows() {
         // Usage-based `startup` plan: never blocked even when over included.
         assert_eq!(
-            decide(r#"{"allowed": true, "balance": -5, "unlimited": false, "overage_allowed": true}"#),
+            decide(
+                r#"{"allowed": true, "balance": -5, "unlimited": false, "overage_allowed": true}"#
+            ),
             Some(true)
         );
     }
@@ -550,7 +579,10 @@ mod tests {
 
     #[test]
     fn null_balance_no_subscription_blocks() {
-        assert_eq!(decide(r#"{"allowed": false, "balance": null, "flag": null}"#), Some(false));
+        assert_eq!(
+            decide(r#"{"allowed": false, "balance": null, "flag": null}"#),
+            Some(false)
+        );
     }
 
     #[test]

@@ -38,7 +38,7 @@ export function registerListDashboardsTool(server: McpToolRegistrar) {
 			yield* Effect.annotateCurrentSpan({
 				orgId: tenant.orgId,
 				search: search ?? "none",
-				resultCount: dashboards.length,
+				"result.rowCount": dashboards.length,
 			})
 
 			const lines: string[] = [

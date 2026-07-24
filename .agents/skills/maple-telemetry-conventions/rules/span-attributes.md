@@ -88,6 +88,7 @@ Used by `packages/query-engine` and `apps/api/src/services/QueryEngineService.ts
 |---|---|---|---|
 | `result.rowCount` | int | `WarehouseQueryService.ts:507` | Rows returned by a query |
 | `result.groupCount` | int | QueryEngineService | Distinct groups in a breakdown |
+| `result.renderedSpanCount` | int | `inspect-trace.ts` | Spans retained after trace-overview rendering limits |
 
 ---
 

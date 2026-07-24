@@ -27,7 +27,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, Instrument};
 
 const WAL_MAGIC: &[u8; 4] = b"MTW1";
 const WAL_V1_HEADER_LEN: usize = 20;
@@ -677,8 +677,14 @@ impl TelemetryPipeline {
         rows: Vec<Vec<u8>>,
         signal: TelemetrySignal,
     ) -> Result<AcceptStats, PipelineError> {
-        self.accept_rows_to(org_id, datasource, rows, signal, ExportDestination::Tinybird)
-            .await
+        self.accept_rows_to(
+            org_id,
+            datasource,
+            rows,
+            signal,
+            ExportDestination::Tinybird,
+        )
+        .await
     }
 
     pub async fn accept_rows_to(
@@ -844,7 +850,9 @@ impl ShardedWal {
             for destination in ExportDestination::ALL {
                 let dest = destination.as_str();
                 let path = cfg.queue_dir.join(format!("shard-{shard:03}-{dest}.wal"));
-                let cursor_path = cfg.queue_dir.join(format!("shard-{shard:03}-{dest}.cursor"));
+                let cursor_path = cfg
+                    .queue_dir
+                    .join(format!("shard-{shard:03}-{dest}.cursor"));
                 let file = OpenOptions::new()
                     .create(true)
                     .read(true)
@@ -879,20 +887,21 @@ impl ShardedWal {
             }
             let read_path = legacy_path.clone();
             let read_cursor = legacy_cursor.clone();
-            let frames =
-                match tokio::task::spawn_blocking(move || read_legacy_frames(&read_path, &read_cursor))
-                    .await
-                {
-                    Ok(Ok(frames)) => frames,
-                    Ok(Err(error)) => {
-                        warn!(shard, error = %error, "Skipping unreadable legacy ingest WAL shard");
-                        continue;
-                    }
-                    Err(error) => {
-                        warn!(shard, error = %error, "Failed to read legacy ingest WAL shard");
-                        continue;
-                    }
-                };
+            let frames = match tokio::task::spawn_blocking(move || {
+                read_legacy_frames(&read_path, &read_cursor)
+            })
+            .await
+            {
+                Ok(Ok(frames)) => frames,
+                Ok(Err(error)) => {
+                    warn!(shard, error = %error, "Skipping unreadable legacy ingest WAL shard");
+                    continue;
+                }
+                Err(error) => {
+                    warn!(shard, error = %error, "Failed to read legacy ingest WAL shard");
+                    continue;
+                }
+            };
             let count = frames.len();
             let mut migrated = true;
             for frame in frames {
@@ -1367,7 +1376,15 @@ impl ExportWorker {
             }
 
             let frames = std::mem::take(&mut buffer);
-            if let Err(error) = self.export_and_mark(frames).await {
+            let batch_size = frames.len();
+            let span = tracing::info_span!(
+                "ingest.export_batch",
+                otel.kind = "internal",
+                "maple.ingest.shard" = self.shard,
+                "maple.ingest.destination" = self.destination.as_str(),
+                "maple.ingest.frame_count" = batch_size,
+            );
+            if let Err(error) = self.export_and_mark(frames).instrument(span).await {
                 error!(shard = self.shard, error = %error, "Telemetry export worker failed batch");
             }
         }
@@ -1381,7 +1398,9 @@ impl ExportWorker {
         // offset per lane) tracks a single export stream. This invariant is what
         // lets Tinybird and ClickHouse drain independently.
         debug_assert!(
-            frames.iter().all(|frame| frame.destination == self.destination),
+            frames
+                .iter()
+                .all(|frame| frame.destination == self.destination),
             "lane {} received a frame for the wrong destination",
             self.lane
         );
@@ -1457,6 +1476,14 @@ impl ExportWorker {
         let mut attempt = 0u32;
         loop {
             let started = Instant::now();
+            let span = tracing::info_span!(
+                "tinybird.export",
+                otel.kind = "client",
+                "http.request.method" = "POST",
+                "server.address" = "api.tinybird.co",
+                "peer.service" = "tinybird",
+                "maple.ingest.datasource" = datasource,
+            );
             let response = self
                 .http
                 .post(&url)
@@ -1465,6 +1492,7 @@ impl ExportWorker {
                 .header(reqwest::header::CONTENT_ENCODING, "gzip")
                 .body(compressed.clone())
                 .send()
+                .instrument(span)
                 .await;
 
             let last_status: String;
@@ -1546,7 +1574,10 @@ impl ExportWorker {
                 metrics::clickhouse_export_dropped(datasource, "circuit_open", rows as u64);
                 warn!(
                     org_id,
-                    datasource, rows, attempt, "Shedding ClickHouse batch: target circuit breaker open"
+                    datasource,
+                    rows,
+                    attempt,
+                    "Shedding ClickHouse batch: target circuit breaker open"
                 );
                 return Ok(ClickHouseExportOutcome::Dropped);
             }
@@ -1669,7 +1700,16 @@ impl ExportWorker {
                 request = request.header("X-ClickHouse-Key", target.password.as_str());
             }
 
-            let response = request.send().await;
+            let span = tracing::info_span!(
+                "clickhouse.export",
+                otel.kind = "client",
+                "http.request.method" = "POST",
+                "db.system.name" = "clickhouse",
+                "db.operation.name" = "INSERT",
+                "peer.service" = "clickhouse",
+                "maple.ingest.datasource" = datasource,
+            );
+            let response = request.send().instrument(span).await;
             match response {
                 Ok(response) if response.status().is_success() => {
                     let bucket = status_bucket(response.status().as_u16());

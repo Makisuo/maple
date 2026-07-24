@@ -12,6 +12,7 @@ import {
 	type WorkflowState,
 } from "@maple/domain/http"
 import { WORKFLOW_LABEL } from "@/components/icons/workflow-ring"
+import { logClientError } from "@/lib/services/common/telemetry"
 
 const INVALIDATE = ["errorIssues"] as const
 
@@ -25,7 +26,9 @@ function describeFailure(result: Exit.Exit<unknown, unknown>): string {
 
 function logFailure(label: string, result: Exit.Exit<unknown, unknown>) {
 	if (Exit.isSuccess(result)) return
-	console.error(`[issue-mutations] ${label} failed`, result.cause)
+	logClientError("issue.mutation_failed", result.cause, {
+		"maple.issue.mutation": label,
+	})
 }
 
 export function useIssueMutations(onSuccess?: () => void) {

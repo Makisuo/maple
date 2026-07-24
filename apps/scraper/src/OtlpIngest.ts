@@ -32,6 +32,7 @@ export class OtlpIngest extends Context.Service<OtlpIngest, OtlpIngestShape>()("
 			}).pipe(HttpClientRequest.bodyText(JSON.stringify(request), "application/json"))
 
 			const response = yield* client.execute(httpRequest).pipe(
+				Effect.annotateSpans("peer.service", "ingest"),
 				Effect.mapError(
 					(error) =>
 						new OtlpIngestError({
