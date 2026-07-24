@@ -5256,3 +5256,35 @@ export const footer_what_is_observability = () => `オブザーバビリティ�
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_best_tools = () => `オープンソースの主要ツール`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview = () => `概要`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces = () => `トレース`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map = () => `サービスマップ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shots_aria = () => `製品スクリーンショット`

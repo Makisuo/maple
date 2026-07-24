@@ -210,6 +210,62 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Hero carousel.
+   The timer segments are span bars — scaleX off a left origin, the
+   same construction as .roadmap-seg and .span-bar. Panes cross-
+   dissolve at the scrollstory timing so the page keeps one motion
+   vocabulary. Reduced motion freezes both (see the freeze block).
+   ────────────────────────────────────────────────────────────── */
+.hero-carousel__stage {
+	position: relative;
+	aspect-ratio: 1400 / 720;
+}
+.hero-carousel__pane {
+	position: absolute;
+	inset: 0;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.hero-carousel__pane[data-on] {
+	opacity: 1;
+	pointer-events: auto;
+}
+/* Both MediaFrame branches fill the stage box exactly, so a real capture and a
+   placeholder occupy the same rectangle and the frame never moves. */
+.hero-carousel__pane .live-frame {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+.hero-carousel__pane .live-frame img {
+	height: 100%;
+	width: 100%;
+	object-fit: cover;
+	object-position: top left;
+}
+.hero-carousel__pane .media-frame__body {
+	flex: 1;
+	aspect-ratio: auto;
+}
+.hero-seg {
+	display: block;
+	height: 2px;
+	width: 100%;
+	overflow: hidden;
+	border-radius: 999px;
+	background: var(--border);
+}
+.hero-seg__fill {
+	display: block;
+	height: 100%;
+	width: 100%;
+	transform: scaleX(0);
+	transform-origin: left center;
+	background: var(--primary);
+}
+
+/* ──────────────────────────────────────────────────────────────
    Live artifact frame.
    Container around every live demo. Soft 1px border, no glass,
    no blur, deep-ink background, generous padding, monospace inset.
@@ -728,6 +784,17 @@
 	}
 	[data-scrollstory] [data-step] {
 		min-height: 0 !important;
+	}
+
+	/* The hero carousel stops auto-advancing in JS, so it holds slide 1 with a
+	   full segment — the same frame the no-JS state renders. The rail still
+	   switches on click; only the motion is gone. */
+	.hero-carousel__pane {
+		transition: none !important;
+	}
+	.hero-seg__fill {
+		transition: none !important;
+		animation: none !important;
 	}
 
 	.log-stream__belt,

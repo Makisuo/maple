@@ -1,0 +1,235 @@
+---
+/**
+ * HeroCarousel — the hero's product plate, as three auto-advancing slides.
+ *
+ * The rail above the plate is a row of span bars: the active segment fills
+ * left→right over its dwell (scaleX off a left origin, the same construction as
+ * .roadmap-seg), spent segments stay full, unspent ones stay empty. Maple's
+ * whole visual language is horizontal bars advancing across a time axis, so the
+ * hero's own timer is one of them rather than a marketing progress widget.
+ *
+ * Panes are stacked MediaFrames that cross-dissolve — same construction as the
+ * scrollstory in IncidentStory, and deliberately the same 320ms curve, so the
+ * page has one motion vocabulary instead of two.
+ *
+ * Filling in a slide is adding `src` to its entry below. Nothing else moves:
+ * the stage holds a fixed aspect box, so a placeholder and a real capture
+ * occupy the same rectangle.
+ */
+import * as m from "../../paraglide/messages";
+import MediaFrame from "./MediaFrame.astro";
+
+/** Dwell per slide, ms. Long enough to read a dashboard, short enough to cycle. */
+const DWELL = 6000;
+
+const slides = [
+	{
+		key: "overview",
+		tab: m.hero_shot_overview(),
+		label: "The Maple overview dashboard — request volume, error rate and latency across every service",
+		src: "/screenshots/hero-dashboard.webp",
+	},
+	{
+		key: "traces",
+		tab: m.hero_shot_traces(),
+		label: "hero-traces",
+		caption:
+			"The trace waterfall with a span selected and its attribute set open alongside — full page, sidebar included.",
+	},
+	{
+		key: "map",
+		tab: m.hero_shot_map(),
+		label: "hero-map",
+		caption: "The service map — dependencies grouped into namespaces, with live request flow.",
+	},
+] satisfies { key: string; tab: string; label: string; src?: string; caption?: string }[];
+---
+
+<div class="hero-carousel" data-hero-carousel data-dwell={DWELL}>
+	<div class="mb-4 flex gap-2 md:gap-3" role="tablist" aria-label={m.hero_shots_aria()}>
+		{
+			slides.map((slide, i) => (
+				<button
+					type="button"
+					role="tab"
+					id={`hero-tab-${slide.key}`}
+					aria-controls={`hero-pane-${slide.key}`}
+					aria-selected={i === 0 ? "true" : "false"}
+					tabindex={i === 0 ? 0 : -1}
+					data-go={i}
+					data-on={i === 0 ? "" : undefined}
+					class="group flex flex-1 cursor-pointer flex-col gap-2 rounded-sm py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+				>
+					<span class="hero-seg">
+						{/* Slide 1 ships full so the no-JS state reads as "selected"
+						    rather than "empty"; the script zeroes it before the
+						    first tick. */}
+						<span class="hero-seg__fill" style={i === 0 ? "transform: scaleX(1)" : undefined} />
+					</span>
+					<span class="hidden text-[10px] font-medium uppercase tracking-[0.14em] text-fg-muted transition-colors group-hover:text-fg group-data-[on]:text-fg sm:block">
+						{slide.tab}
+					</span>
+				</button>
+			))
+		}
+	</div>
+
+	<div class="hero-carousel__stage">
+		{
+			slides.map((slide, i) => (
+				<div
+					class="hero-carousel__pane"
+					data-pane={i}
+					data-on={i === 0 ? "" : undefined}
+					id={`hero-pane-${slide.key}`}
+					role="tabpanel"
+					aria-labelledby={`hero-tab-${slide.key}`}
+					aria-hidden={i === 0 ? "false" : "true"}
+				>
+					<MediaFrame
+						label={slide.label}
+						caption={slide.caption}
+						src={slide.src}
+						width={1400}
+						height={720}
+						loading={i === 0 ? "eager" : "lazy"}
+					/>
+				</div>
+			))
+		}
+	</div>
+</div>
+
+<script>
+	const root = document.querySelector<HTMLElement>("[data-hero-carousel]");
+
+	if (root) {
+		const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+		const panes = [...root.querySelectorAll<HTMLElement>("[data-pane]")];
+		const fills = tabs.map((tab) => tab.querySelector<HTMLElement>(".hero-seg__fill"));
+		const dwell = Number(root.dataset.dwell) || 6000;
+
+		let index = 0;
+		let anim: Animation | null = null;
+
+		// Four independent reasons to be stopped, resolved by one predicate rather
+		// than four competing play/pause calls — otherwise "pointer leaves while
+		// the tab is backgrounded" resumes a timer nobody can see.
+		let auto = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+		let onscreen = true;
+		let hovered = false;
+		let focused = false;
+		const running = () => auto && onscreen && !hovered && !focused && !document.hidden;
+
+		function show(next: number) {
+			index = next;
+			panes.forEach((pane, i) => {
+				pane.toggleAttribute("data-on", i === index);
+				// One image alt reaches the screen reader, not three.
+				pane.setAttribute("aria-hidden", i === index ? "false" : "true");
+			});
+			tabs.forEach((tab, i) => {
+				tab.toggleAttribute("data-on", i === index);
+				tab.setAttribute("aria-selected", i === index ? "true" : "false");
+				tab.tabIndex = i === index ? 0 : -1;
+			});
+			// Spent behind, empty ahead — the rail reads as elapsed time. With
+			// auto-advance off there is no timer, so the active segment sits full.
+			fills.forEach((fill, i) => {
+				if (fill) fill.style.transform = i < index || (!auto && i === index) ? "scaleX(1)" : "scaleX(0)";
+			});
+		}
+
+		// `anim.finished` rejects with AbortError on cancel(); we never touch the
+		// promise, and the handler is cleared first so a cancel can't advance.
+		function stop() {
+			if (!anim) return;
+			anim.onfinish = null;
+			anim.cancel();
+			anim = null;
+		}
+
+		function tick() {
+			stop();
+			if (!running()) return;
+			const fill = fills[index];
+			if (!fill) return;
+			anim = fill.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], {
+				duration: dwell,
+				easing: "linear",
+				fill: "forwards",
+			});
+			anim.onfinish = () => {
+				show((index + 1) % panes.length);
+				tick();
+			};
+		}
+
+		function sync() {
+			if (running()) {
+				if (anim) anim.play();
+				else tick();
+			} else {
+				anim?.pause();
+			}
+		}
+
+		function goto(next: number) {
+			// The reader picked a plate. Yanking it away six seconds later is
+			// hostile, so auto-advance ends for the rest of the session.
+			auto = false;
+			stop();
+			show(next);
+		}
+
+		tabs.forEach((tab, i) => {
+			tab.addEventListener("click", () => goto(i));
+		});
+
+		root.querySelector('[role="tablist"]')?.addEventListener("keydown", (event) => {
+			const key = (event as KeyboardEvent).key;
+			const last = tabs.length - 1;
+			let next: number | null = null;
+			if (key === "ArrowRight") next = index === last ? 0 : index + 1;
+			else if (key === "ArrowLeft") next = index === 0 ? last : index - 1;
+			else if (key === "Home") next = 0;
+			else if (key === "End") next = last;
+			if (next === null) return;
+			event.preventDefault();
+			goto(next);
+			tabs[next]?.focus();
+		});
+
+		root.addEventListener("pointerenter", () => {
+			hovered = true;
+			sync();
+		});
+		root.addEventListener("pointerleave", () => {
+			hovered = false;
+			sync();
+		});
+		root.addEventListener("focusin", () => {
+			focused = true;
+			sync();
+		});
+		root.addEventListener("focusout", () => {
+			focused = false;
+			sync();
+		});
+		document.addEventListener("visibilitychange", sync);
+
+		// No timer burns while the reader is further down the page.
+		new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) onscreen = entry.isIntersecting;
+				sync();
+			},
+			{ threshold: 0.25 },
+		).observe(root);
+
+		if (auto) {
+			if (fills[0]) fills[0].style.transform = "scaleX(0)";
+			tick();
+		}
+	}
+</script>

@@ -708,5 +708,10 @@
 	"nav_blog": "\ube14\ub85c\uadf8",
 	"footer_learn": "\uc54c\uc544\ubcf4\uae30",
 	"footer_what_is_observability": "\uc635\uc800\ubc84\ube4c\ub9ac\ud2f0\ub780?",
-	"footer_best_tools": "\uc624\ud508\uc18c\uc2a4 \ub300\ud45c \ub3c4\uad6c"
+	"footer_best_tools": "\uc624\ud508\uc18c\uc2a4 \ub300\ud45c \ub3c4\uad6c",
+
+	"hero_shot_overview": "\uac1c\uc694",
+	"hero_shot_traces": "\ud2b8\ub808\uc774\uc2a4",
+	"hero_shot_map": "\uc11c\ube44\uc2a4 \ub9f5",
+	"hero_shots_aria": "\uc81c\ud488 \uc2a4\ud06c\ub9b0\uc0f7"
 }

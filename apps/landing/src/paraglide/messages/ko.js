@@ -5256,3 +5256,35 @@ export const footer_what_is_observability = () => `옵저버빌리티란?`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_best_tools = () => `오픈소스 대표 도구`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview = () => `개요`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces = () => `트레이스`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map = () => `서비스 맵`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shots_aria = () => `제품 스크린샷`

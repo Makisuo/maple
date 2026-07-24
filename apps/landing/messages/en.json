@@ -708,5 +708,10 @@
 	"nav_blog": "Blog",
 	"footer_learn": "Learn",
 	"footer_what_is_observability": "What is observability?",
-	"footer_best_tools": "Best open-source tools"
+	"footer_best_tools": "Best open-source tools",
+
+	"hero_shot_overview": "Overview",
+	"hero_shot_traces": "Traces",
+	"hero_shot_map": "Service map",
+	"hero_shots_aria": "Product screenshots"
 }

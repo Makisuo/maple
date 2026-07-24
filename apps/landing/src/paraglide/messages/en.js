@@ -5256,3 +5256,35 @@ export const footer_what_is_observability = () => `What is observability?`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const footer_best_tools = () => `Best open-source tools`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_overview = () => `Overview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_traces = () => `Traces`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shot_map = () => `Service map`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_shots_aria = () => `Product screenshots`

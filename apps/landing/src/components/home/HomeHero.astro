@@ -12,7 +12,7 @@ import { buttonVariants } from "@maple/ui/components/ui/button";
 import * as m from "../../paraglide/messages";
 import { HeroCta } from "../HeroCta";
 import CustomerLogos from "../CustomerLogos.astro";
-import MediaFrame from "./MediaFrame.astro";
+import HeroCarousel from "./HeroCarousel.astro";
 import { DATA_POINTS_INGESTED, formatDataPoints } from "../../lib/ingest-stats";
 import { getGitHubStars, formatStars } from "../../lib/github-stars";
 import PixelStar from "../icons/PixelStar.astro";
@@ -124,13 +124,7 @@ const stats = [
 		<!-- The product plate. Sandwiched between two tonal steps, so it reads
 		     raised without a shadow pixel. -->
 		<div class="mt-16 md:mt-20">
-			<MediaFrame
-				label="The Maple overview dashboard — request volume, error rate and latency across every service"
-				src="/screenshots/hero-dashboard.webp"
-				width={1400}
-				height={720}
-				loading="eager"
-			/>
+			<HeroCarousel />
 		</div>
 
 		<CustomerLogos variant="inline" />
