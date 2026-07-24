@@ -278,21 +278,16 @@ const completeStoreOutstanding = (registry: RegistryService, tracker: Subscripti
 }
 
 /** The full write in one synchronous critical section: the settle count lands
- * before the publish wakes a subscriber (see `trackedModify`). The debug
- * window spans the whole section, so everything dispatched synchronously by
- * the publish (changed events, handler cascades) records this write as its
- * cause. */
+ * before the publish wakes a subscriber (see `trackedModify`). */
 const writeUnsafe = <A>(
 	registry: RegistryService,
 	subscriptionRef: SubscriptionRef.SubscriptionRef<A>,
 	store: Sink<A>,
 	value: A,
 ): void => {
-	const closeWindow = registry.debug !== undefined ? registry.debug.write(store, value) : undefined
 	trackPublish(registry, store.id)
 	setUnsafe(subscriptionRef, value)
 	offerStoreListeners(registry, store, value)
-	closeWindow?.()
 }
 
 const trackedSetSlow = <A>(store: Sink<A>, value: A): Effect.Effect<void, never, Registry> =>
@@ -341,14 +336,6 @@ const getSlow = <A>(store: Source<A>): Effect.Effect<A, never, Registry> => {
 		return resolved
 	}
 	return Effect.map(ref(store), SubscriptionRef.getUnsafe)
-}
-
-/** INTERNAL. The debug inspector's snapshot evaluator: resolves any source —
- * plain, combined, flattened — against materialized refs, synchronously and
- * without effects. `None` when a needed ref is not materialized. */
-export const evalForDebug = (registry: RegistryService, store: Source<any>): Option.Option<unknown> => {
-	const value = evalSync(registry, store, new Map())
-	return value === Unresolved ? Option.none() : Option.some(value)
 }
 
 export const get = <A>(store: Source<A>): Effect.Effect<A, never, Registry> =>
