@@ -249,4 +249,17 @@ const main = async () => {
 	}
 }
 
-await main()
+try {
+	await main()
+} catch (error) {
+	// postgres.js errors carry the failing statement — surface it, because the
+	// server's own error report doesn't (run 30083630959: a nondeterministic
+	// `malformed array literal: ""` for "parameter $2" that no query in this
+	// script sends — suspected PlanetScale-side DDL interception; this makes
+	// the next occurrence self-identifying).
+	const query = (error as { query?: unknown }).query
+	const parameters = (error as { parameters?: unknown }).parameters
+	if (query !== undefined) console.error(`✗ failing query: ${String(query).slice(0, 500)}`)
+	if (parameters !== undefined) console.error(`✗ query parameters: ${JSON.stringify(parameters)}`)
+	throw error
+}
