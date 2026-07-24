@@ -108,7 +108,7 @@ const main = async () => {
 			) owned
 			JOIN pg_roles r ON r.oid = owned.oid
 			WHERE NOT pg_has_role(current_user, r.oid, 'USAGE')
-				AND r.rolname NOT LIKE ${"pg\\_%"}
+				AND r.rolname NOT LIKE 'pg\\_%'
 		`
 		for (const { owner } of owners) {
 			try {
@@ -197,7 +197,7 @@ const main = async () => {
 			SELECT n.nspname FROM pg_namespace n
 			JOIN pg_roles r ON r.oid = n.nspowner
 			WHERE n.nspname NOT IN ('public', 'information_schema')
-				AND n.nspname NOT LIKE ${"pg\\_%"}
+				AND n.nspname NOT LIKE 'pg\\_%'
 				AND (r.rolname = 'postgres' OR pg_has_role(current_user, r.oid, 'USAGE'))
 		`
 		for (const { nspname } of extraSchemas) {
