@@ -503,7 +503,15 @@ export const ingest_stats_label = () => `traces ingested / month`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_eyebrow = () => `01 · Sovereignty`
+export const stat_github = () => `on GitHub`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_eyebrow = () => `04 · Sovereignty`
 
 
 /**
@@ -719,7 +727,7 @@ export const sessions_lede = () => `Session replay with every click, route, cons
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_eyebrow = () => `07 · Kubernetes`
+export const k8s_eyebrow = () => `06 · Kubernetes`
 
 
 /**
@@ -1095,7 +1103,7 @@ export const bill_link_vs_dash0 = () => `Full vs Dash0`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `08 · Start`
+export const start_eyebrow = () => `09 · Start`
 
 
 /**
@@ -1191,7 +1199,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14-day free trial, card required, no charge until it ends. Self-hosting is supported. The dashboard ships with the same live waterfall you just watched.`
+export const cta_bookend_lede = () => `14-day free trial, card required, no charge until it ends. Self-hosting is supported, and \`maple start\` needs no account at all.`
 
 
 /**
@@ -4767,4 +4775,484 @@ export const language_ko = () => `한국어`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const stat_github = () => `on GitHub`
+export const faq_home_what_q = () => `What is Maple?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_what_a = () => `Maple is an observability platform for traces, logs, and metrics, built on OpenTelemetry and backed by ClickHouse. It lets you collect, visualize, and query telemetry from distributed systems in real time — or let an AI agent do it for you over MCP.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_oss_q = () => `Is Maple open source?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_oss_a = () => `Maple's source is on GitHub under the Functional Source License (FSL-1.1) — you can read every line, fork it, and self-host. Each release becomes Apache 2.0 two years after publication. You own your data and your instrumentation, and you can run Maple yourself or use the hosted version.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_otel_q = () => `Is Maple OpenTelemetry-native?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_otel_a = () => `Yes. Maple is built on OpenTelemetry — the open, vendor-neutral standard for telemetry — so there are no proprietary agents and no lock-in. If you already emit OpenTelemetry data, you can point it at Maple without re-instrumenting your code.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_price_q = () => `How is Maple priced?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_price_a = () => `The Startup plan is $39/month with 100 GB of logs, traces, and metrics each included, then a flat $0.30 per GB. No per-host or per-seat fees. Enterprise plans add custom volume and retention.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_agents_q = () => `Does Maple work with AI agents?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_agents_a = () => `Yes. Maple ships a first-class MCP (Model Context Protocol) server, so compatible AI agents can list services, search traces, find errors, and propose fixes directly against your telemetry.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_badge = () => `New`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_text = () => `Maple Local — the whole platform as one binary.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_cta = () => `Read the write-up →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_per_gb = () => `per GB · every signal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_license = () => `→ Apache 2.0 in two years`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_eyebrow = () => `01 · Signals`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_trace_title = () => `Read the trace.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_trace_sub = () => `Every request is a span tree with its attributes intact. Hover a row; see what was on it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_logs_title = () => `Search the logs.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_logs_sub = () => `Structured logs straight from OTLP. Severity, service, message, duration — searchable in seconds.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_session_title = () => `Replay the session.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_session_sub = () => `Every click, route, console line, and failed request. Replay and spans share one session id.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_eyebrow = () => `02 · Incident`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_title = () => `From a 3 AM page to the line that caused it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_lede = () => `Four surfaces, one trace id. Nothing to stitch, no second tool, no tab you forgot you had open.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_1_title = () => `The alert arrives with context.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_1_body = () => `Error rate on api-gateway crosses 5%. The alert carries the service, the threshold it broke, and the sample traces — not a number and a shrug. Route it to Slack, Discord, PagerDuty, or any webhook.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_body = () => `The failing request is a span tree with every attribute intact. Three Stripe retries sit at the bottom, red, each timing out at exactly 1.75 seconds. No sampling gap, no aggregate hiding the outlier.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_3_title = () => `The logs are already correlated.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_3_body = () => `Jump from the failing span to its logs on the trace id. Retry exhaustion, connection pool at 20/20 — the confirmation, not a second search in a second product.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_4_title = () => `Or hand all three steps to an agent.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_4_body = () => `Maple ships a first-class MCP server. Point Claude, Cursor, or any MCP client at it: it lists services, searches traces, finds the errors, reads the source, and proposes the fix.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_eyebrow = () => `03 · Platform`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_title = () => `Everything else you'd have bought separately.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_lede = () => `Metrics, service maps, error grouping, alerting, and an MCP server. One platform, one instrumentation, one bill.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_metrics_name = () => `Metrics & dashboards`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_metrics_desc = () => `Request rate, error rate, latency percentiles. Drag the widgets yourself, or let the agent suggest the board.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_map_desc = () => `Live request flow across your services. The cascade you'd otherwise reconstruct from a postmortem, in the foreground.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_errors_name = () => `Error tracking`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_errors_desc = () => `Errors grouped by type across every service, with trends over time, affected services, and sample traces attached.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_alerts_desc = () => `Seven signal types with severity, incident tracking, and auto-resolution. Slack, Discord, PagerDuty, or any webhook.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_mcp_name = () => `AI & MCP`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_mcp_desc = () => `Any MCP-compatible client can list services, search traces, read the source, and propose a fix. Open protocol, no plugin.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_4_label = () => `Your perimeter`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_4_body = () => `Run Maple on your own infrastructure, against a ClickHouse you operate and scale yourself. Your telemetry never has to leave your network — retention and residency are your call, not a fixed SaaS window.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_eyebrow = () => `05 · Local`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_title = () => `The whole platform, as one binary.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_body = () => `One Bun-compiled maple executable — OTLP ingest, an embedded ClickHouse, a query API, and the dashboard — running on 127.0.0.1. No account, no cloud, no rate limits.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_install_alt = () => `or`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_link_docs = () => `Read the docs →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_eyebrow = () => `08 · Pricing`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_title = () => `Priced the way you'd price it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_lede = () => `No per-host fees. No per-seat fees. $39/month with 100 GB of each signal, then a flat $0.30 per GB — the pricing page and your invoice show the same numbers.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_link = () => `Full plan comparison →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_login = () => `Log in`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_docs = () => `Docs`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_local = () => `Local`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_blog = () => `Blog`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_learn = () => `Learn`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_what_is_observability = () => `What is observability?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_best_tools = () => `Best open-source tools`

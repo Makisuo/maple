@@ -27,6 +27,67 @@
 	--color-amber-soft: var(--amber-soft);
 }
 
+/* ──────────────────────────────────────────────────────────────
+   Page shell.
+   The homepage, nav, and footer run at 1400px; every other page
+   keeps its own narrower container.
+   ────────────────────────────────────────────────────────────── */
+.shell {
+	margin-inline: auto;
+	max-width: 1400px;
+	padding-inline: 24px;
+}
+@media (min-width: 768px) {
+	.shell {
+		padding-inline: 52px;
+	}
+}
+
+/* ──────────────────────────────────────────────────────────────
+   MediaFrame placeholder body.
+   The dot grid is the product's own /infra texture, not a
+   loading affordance — placeholders are deliberate reserved
+   frames, so no shimmer (DESIGN.md: no spinners by default).
+   ────────────────────────────────────────────────────────────── */
+.media-frame__body {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	background-image: radial-gradient(var(--border) 1px, transparent 1px);
+	background-size: 16px 16px;
+}
+.media-frame__note {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	max-width: 46ch;
+	text-align: center;
+}
+.media-frame__play {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 44px;
+	height: 44px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	color: var(--primary);
+	padding-left: 2px;
+}
+.media-frame__caption {
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--muted-foreground);
+}
+.media-frame__spec {
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+}
+
 /* App mock interactive sidebar — CSS-only tab switching */
 .mock-radio {
 	position: absolute;
@@ -619,10 +680,56 @@
 }
 
 /* ──────────────────────────────────────────────────────────────
+   Scroll story — the pinned-pane walkthrough.
+   One IntersectionObserver writes `data-active` on the section;
+   everything else is a sibling selector. `data-active="1"` ships
+   in the markup, so pane 1 is lit before any JS runs.
+   ────────────────────────────────────────────────────────────── */
+[data-scrollstory] [data-pane] {
+	opacity: 0;
+	transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-scrollstory][data-active="1"] [data-pane="1"],
+[data-scrollstory][data-active="2"] [data-pane="2"],
+[data-scrollstory][data-active="3"] [data-pane="3"],
+[data-scrollstory][data-active="4"] [data-pane="4"] {
+	opacity: 1;
+}
+
+[data-scrollstory] [data-step] {
+	opacity: 0.38;
+	transition: opacity 240ms ease;
+}
+[data-scrollstory][data-active="1"] [data-step="1"],
+[data-scrollstory][data-active="2"] [data-step="2"],
+[data-scrollstory][data-active="3"] [data-step="3"],
+[data-scrollstory][data-active="4"] [data-step="4"] {
+	opacity: 1;
+}
+
+/* ──────────────────────────────────────────────────────────────
    Reduced-motion override.
    Every live artifact freezes at a sensible static frame.
    ────────────────────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
+	/* The scroll story unpins entirely: the pinned pane would otherwise
+	   freeze on step 1 while three steps scrolled past it. Same code path
+	   as the <lg layout — one thing to reason about, one thing to test. */
+	[data-scrollstory] [data-pane],
+	[data-scrollstory] [data-step] {
+		opacity: 1 !important;
+		transition: none !important;
+	}
+	[data-scrollstory] [data-sticky] {
+		display: none !important;
+	}
+	[data-scrollstory] [data-inline] {
+		display: block !important;
+	}
+	[data-scrollstory] [data-step] {
+		min-height: 0 !important;
+	}
+
 	.log-stream__belt,
 	.logo-marquee__belt,
 	.svc-map-flow,
@@ -733,7 +840,8 @@ details[open] > summary .details-open\:rotate-180 {
 	transform: rotate(180deg);
 }
 
-/* Smooth scroll */
+/* Smooth scroll. The padding keeps anchor targets clear of the fixed nav. */
 html {
 	scroll-behavior: smooth;
+	scroll-padding-top: 5rem;
 }

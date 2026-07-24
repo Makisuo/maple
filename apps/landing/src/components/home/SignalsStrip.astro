@@ -1,0 +1,72 @@
+---
+/**
+ * 01 · Signals — the three-up strip directly under the hero.
+ *
+ * Three parallel imperatives over three plates. Not the three OTel signals:
+ * metrics is the least differentiated surface Maple has and the least legible
+ * at plate size, while session replay joined to a trace id is a real
+ * differentiator. Metrics gets a named slot in §03 instead.
+ *
+ * Columns are separated by the grid gap, not by rules — vertical rules here
+ * would turn a strip into a table.
+ */
+import * as m from "../../paraglide/messages";
+import MediaFrame from "./MediaFrame.astro";
+
+const columns = [
+	{
+		title: m.signals_trace_title(),
+		sub: m.signals_trace_sub(),
+		shot: "An 18-span trace waterfall, nested by service and operation",
+		src: "/screenshots/strip-trace.webp",
+		width: 992,
+		height: 560,
+	},
+	{
+		title: m.signals_logs_title(),
+		sub: m.signals_logs_sub(),
+		shot: "Structured log search with severity facets and attribute filters",
+		src: "/screenshots/strip-logs.webp",
+		width: 992,
+		height: 600,
+	},
+	{
+		title: m.signals_session_title(),
+		sub: m.signals_session_sub(),
+		shot: "Browser session replays listed with duration, page count and errors",
+		src: "/screenshots/strip-session.webp",
+		width: 992,
+		height: 600,
+	},
+];
+---
+
+<section class="bg-bg-deep">
+	<div class="shell py-16 md:py-32">
+		<p class="mb-10 text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted md:mb-14">
+			{m.signals_eyebrow()}
+		</p>
+
+		<div class="grid gap-12 md:grid-cols-3 md:gap-8">
+			{
+				columns.map((col) => (
+					<div class="flex flex-col gap-5">
+						<div>
+							<h2 class="font-display text-[22px] leading-tight tracking-[-0.01em] text-fg md:text-2xl lg:text-[26px]">
+								{col.title}
+							</h2>
+							<p class="mt-3 max-w-[34ch] text-[13px] leading-relaxed text-fg-muted">{col.sub}</p>
+						</div>
+						<MediaFrame
+							label={col.shot}
+							caption={col.caption}
+							src={col.src}
+							width={col.width}
+							height={col.height}
+						/>
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

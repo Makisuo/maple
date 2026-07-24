@@ -1,0 +1,138 @@
+---
+/**
+ * HomeHero — announcement row, headline, dual CTA, stat rail, logo wall.
+ *
+ * Backdrop is the system's own dot grid (16×16 in --border, the /infra
+ * texture) under a radial mask, not a marketing-only line grid and not a
+ * gradient wash. Lift on the product plate comes from tonal sandwiching —
+ * bg-bg-elevated frame on a bg-bg canvas, with bg-bg-deep immediately below —
+ * never a glow (DESIGN.md: the system has no shadow tokens).
+ */
+import { buttonVariants } from "@maple/ui/components/ui/button";
+import * as m from "../../paraglide/messages";
+import { HeroCta } from "../HeroCta";
+import CustomerLogos from "../CustomerLogos.astro";
+import MediaFrame from "./MediaFrame.astro";
+import { DATA_POINTS_INGESTED, formatDataPoints } from "../../lib/ingest-stats";
+import { getGitHubStars, formatStars } from "../../lib/github-stars";
+import PixelStar from "../icons/PixelStar.astro";
+
+const stars = await getGitHubStars();
+
+// Four slots, every one a fact we can point at. GitHub stars are a build-time
+// fetch; the rest are the licence and the price, which for this audience are
+// stronger proof than a customer count would be.
+const stats = [
+	stars !== null && { value: formatStars(stars), label: m.stat_github(), star: true, href: "https://github.com/Makisuo/maple" },
+	{ value: `${formatDataPoints(DATA_POINTS_INGESTED)}+`, label: m.ingest_stats_label() },
+	{ value: "$0.30", label: m.stat_per_gb() },
+	{ value: "FSL-1.1", label: m.stat_license() },
+].filter(Boolean) as { value: string; label: string; star?: boolean; href?: string }[];
+---
+
+<section class="relative overflow-hidden bg-bg">
+	<!-- Dot grid, faded off toward the edges. -->
+	<div
+		class="absolute inset-0 pointer-events-none"
+		aria-hidden="true"
+		style="
+			background-image: radial-gradient(var(--border) 1px, transparent 1px);
+			background-size: 16px 16px;
+			mask-image: radial-gradient(ellipse 70% 50% at 50% 28%, black, transparent);
+			-webkit-mask-image: radial-gradient(ellipse 70% 50% at 50% 28%, black, transparent);
+		"
+	>
+	</div>
+
+	<div class="relative shell pt-32 md:pt-40">
+		<!-- Announcement row. The frame is sized so a video thumbnail can take
+		     its place later without moving anything. -->
+		<a
+			href="/local"
+			class="group inline-flex items-center gap-3 rounded-full border border-border bg-bg-elevated py-1.5 pl-1.5 pr-4 transition-colors hover:border-input"
+		>
+			<span
+				class="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.14em] text-primary"
+			>
+				{m.hero_announce_badge()}
+			</span>
+			<span class="text-xs text-fg">{m.hero_announce_text()}</span>
+			<span
+				class="hidden text-xs text-fg-muted transition-transform group-hover:translate-x-0.5 sm:inline"
+			>
+				{m.hero_announce_cta()}
+			</span>
+		</a>
+
+		<h1
+			class="mt-8 max-w-4xl font-display text-[2.375rem] font-semibold leading-[1.02] tracking-[-0.025em] text-fg sm:text-6xl lg:text-7xl"
+		>
+			{m.hero_title()}<br />
+			{m.hero_title_sub()} <span class="text-primary">{m.hero_title_accent()}</span>
+		</h1>
+
+		<p class="mt-6 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-base">
+			{m.hero_subtitle()}
+		</p>
+
+		<div class="mt-10 flex flex-wrap items-center gap-3">
+			<HeroCta client:load className={buttonVariants({ size: "xl" })} />
+			<a
+				href="https://github.com/Makisuo/maple"
+				target="_blank"
+				rel="noopener noreferrer"
+				class={buttonVariants({ variant: "outline", size: "xl" })}
+			>
+				{m.cta_github()}
+			</a>
+		</div>
+
+		<!-- Stat rail. Hairline dividers only — no cards, no fills. Every slot is
+		     a fact we can point at: two live numbers, the price, the licence. -->
+		<dl class="mt-14 grid grid-cols-2 gap-y-6 border-t border-border pt-8 md:flex md:gap-y-0">
+			{
+				stats.map((stat, i) => {
+					const body = (
+						<>
+							<dd class="font-display text-2xl font-semibold tabular-nums tracking-tight text-fg transition-colors md:text-3xl">
+								{stat.value}
+							</dd>
+							<dt class="inline-flex items-center gap-1.5 text-xs text-fg-muted transition-colors md:text-sm">
+								{stat.star && <PixelStar class="size-3.5 text-primary" />}
+								{stat.label}
+							</dt>
+						</>
+					);
+					// Mobile is a 2×2 grid divided on the odd column; from md it
+					// becomes one row divided before every slot but the first.
+					const spacing = [
+						"flex flex-col gap-2 md:flex-1",
+						i % 2 === 1 ? "border-l border-border pl-5 md:pl-8" : "md:pl-8",
+						i === 0 ? "md:border-l-0 md:pl-0" : "md:border-l md:border-border",
+					].join(" ");
+					return stat.href ? (
+						<a href={stat.href} target="_blank" rel="noopener noreferrer" class={`group ${spacing}`}>
+							{body}
+						</a>
+					) : (
+						<div class={spacing}>{body}</div>
+					);
+				})
+			}
+		</dl>
+
+		<!-- The product plate. Sandwiched between two tonal steps, so it reads
+		     raised without a shadow pixel. -->
+		<div class="mt-16 md:mt-20">
+			<MediaFrame
+				label="The Maple overview dashboard — request volume, error rate and latency across every service"
+				src="/screenshots/hero-dashboard.webp"
+				width={1400}
+				height={720}
+				loading="eager"
+			/>
+		</div>
+
+		<CustomerLogos variant="inline" />
+	</div>
+</section>

@@ -1,0 +1,122 @@
+---
+/**
+ * 03 · Platform — the contact sheet, and the page's link hub to the feature
+ * pages (SEO load-bearing).
+ *
+ * Deliberately NOT a card grid. DESIGN.md bans repeated card+icon+title+blurb
+ * tiles by name, so this is one ruled plate: cells share edges via `gap-px` on
+ * a `bg-border` fill, carry no individual radius, no individual background
+ * lift, and no icons. Same construction Kubernetes.astro already uses.
+ */
+import { getRelativeLocaleUrl } from "astro:i18n";
+import * as m from "../../paraglide/messages";
+import MediaFrame from "./MediaFrame.astro";
+
+const locale = Astro.currentLocale ?? "en";
+const l = (path: string) => getRelativeLocaleUrl(locale, path);
+
+const cells = [
+	{
+		name: m.platform_metrics_name(),
+		desc: m.platform_metrics_desc(),
+		href: l("/features/metrics-dashboards"),
+		link: m.nav_metrics_dashboards(),
+		shot: "The metric explorer listing every metric with its type and cardinality",
+		src: "/screenshots/surface-metrics.webp",
+		width: 1280,
+		height: 620,
+	},
+	{
+		name: m.map_title(),
+		desc: m.platform_map_desc(),
+		href: l("/features/service-catalog"),
+		link: m.nav_service_catalog(),
+		shot: "The service map — dependencies grouped into namespaces with live request flow",
+		src: "/screenshots/surface-map.webp",
+		width: 1280,
+		height: 760,
+	},
+	{
+		name: m.platform_errors_name(),
+		desc: m.platform_errors_desc(),
+		href: l("/features/error-tracking"),
+		link: m.nav_error_tracking(),
+		shot: "Errors grouped by type with counts, affected services and last-seen times",
+		src: "/screenshots/surface-errors.webp",
+		width: 1280,
+		height: 660,
+	},
+	{
+		name: m.alert_heading(),
+		desc: m.platform_alerts_desc(),
+		href: null,
+		link: null,
+		shot: "Alert rules with severity, signal type and current state",
+		src: "/screenshots/surface-alerts.webp",
+		width: 1280,
+		height: 660,
+	},
+	{
+		name: m.platform_mcp_name(),
+		desc: m.platform_mcp_desc(),
+		href: l("/features/ai-mcp-integration"),
+		link: m.nav_ai_mcp(),
+		shot: "The MCP server page with endpoint and client setup",
+		src: "/screenshots/surface-mcp.webp",
+		width: 1280,
+		height: 660,
+	},
+];
+---
+
+<section id="features" class="border-t border-border bg-bg">
+	<div class="shell py-16 md:py-32">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.platform_eyebrow()}</p>
+		<h2
+			class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px] lg:text-[54px]"
+		>
+			{m.platform_title()}
+		</h2>
+		<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{m.platform_lede()}</p>
+
+		<div
+			class="mt-12 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:mt-16 md:grid-cols-2 lg:grid-cols-3"
+		>
+			{
+				cells.map((cell, i) => (
+					<div class={`flex flex-col gap-4 bg-bg p-6 md:p-8 ${i === 4 ? "lg:col-span-2" : ""}`}>
+						<span class="text-[11px] font-medium tabular-nums text-fg-muted">
+							{String(i + 1).padStart(2, "0")}
+						</span>
+						<div>
+							<h3 class="font-display text-lg leading-snug tracking-[-0.01em] text-fg md:text-xl">
+								{cell.name}
+							</h3>
+							<p class="mt-2.5 max-w-[46ch] text-[13px] leading-relaxed text-fg-muted">{cell.desc}</p>
+						</div>
+						{/* Capped, not stretched: cell 05 spans two columns to
+						    close the row, and an uncapped frame there would be
+						    twice the size of the other four. */}
+						<MediaFrame
+							label={cell.shot}
+							caption={cell.caption}
+							src={cell.src}
+							width={cell.width ?? 320}
+							height={cell.height ?? 200}
+							class="max-w-[380px]"
+						/>
+						{cell.href && (
+							<a
+								href={cell.href}
+								class="group mt-auto inline-flex items-center gap-1.5 pt-2 text-xs text-fg-muted transition-colors hover:text-fg"
+							>
+								{cell.link}
+								<span class="transition-transform group-hover:translate-x-0.5">→</span>
+							</a>
+						)}
+					</div>
+				))
+			}
+		</div>
+	</div>
+</section>

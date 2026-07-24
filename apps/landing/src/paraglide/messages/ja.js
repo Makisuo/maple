@@ -503,7 +503,15 @@ export const ingest_stats_label = () => `取り込んだトレース / 月`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const sov_eyebrow = () => `01 · Sovereignty`
+export const stat_github = () => `GitHub`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_eyebrow = () => `04 · ソブリンティ`
 
 
 /**
@@ -719,7 +727,7 @@ export const sessions_lede = () => `Session replay with every click, route, cons
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const k8s_eyebrow = () => `07 · Kubernetes`
+export const k8s_eyebrow = () => `06 · Kubernetes`
 
 
 /**
@@ -1095,7 +1103,7 @@ export const bill_link_vs_dash0 = () => `Full vs Dash0`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const start_eyebrow = () => `08 · Start`
+export const start_eyebrow = () => `09 · スタート`
 
 
 /**
@@ -1191,7 +1199,7 @@ export const cta_bookend_title = () => `Run it yourself.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const cta_bookend_lede = () => `14日間の無料トライアル(カード登録必須、終了まで課金なし)。セルフホストにも対応。ダッシュボードには、いま見たものと同じライブウォーターフォールが付属します。`
+export const cta_bookend_lede = () => `14日間の無料トライアル。カード登録が必要ですが、期間終了までは課金されません。セルフホストにも対応しており、\`maple start\` にはアカウントすら要りません。`
 
 
 /**
@@ -4767,4 +4775,484 @@ export const language_ko = () => `한국어`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const stat_github = () => `GitHub`
+export const faq_home_what_q = () => `Mapleとは何ですか？`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_what_a = () => `Mapleは、トレース・ログ・メトリクスのためのオブザーバビリティプラットフォームです。OpenTelemetryを基盤とし、ClickHouseをバックエンドに採用しています。分散システムのテレメトリをリアルタイムで収集・可視化・クエリできます。MCP経由でAIエージェントに任せることもできます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_oss_q = () => `Mapleはオープンソースですか？`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_oss_a = () => `MapleのソースはGitHub上でFunctional Source License（FSL-1.1）のもとに公開されています。すべてのコードを読み、フォークし、セルフホストできます。各リリースは公開から2年後にApache 2.0になります。データもインストルメンテーションもあなたのものです。自分で運用することも、ホスト版を使うこともできます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_otel_q = () => `MapleはOpenTelemetryネイティブですか？`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_otel_a = () => `はい。Mapleはベンダー中立のオープン標準であるOpenTelemetryを基盤に構築されています。独自エージェントもロックインもありません。すでにOpenTelemetryのデータを送出しているなら、コードを書き換えることなくMapleへ向けるだけです。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_price_q = () => `Mapleの料金はどうなっていますか？`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_price_a = () => `Startupプランは月額39ドルで、ログ・トレース・メトリクスがそれぞれ100 GBまで含まれます。超過分は一律1 GBあたり0.30ドルです。ホスト単位・シート単位の課金はありません。Enterpriseプランではカスタムの容量と保持期間に対応します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_agents_q = () => `MapleはAIエージェントと連携できますか？`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const faq_home_agents_a = () => `はい。MapleはファーストクラスのMCP（Model Context Protocol）サーバーを備えています。対応するAIエージェントは、サービス一覧の取得、トレース検索、エラーの特定、修正案の提示を、テレメトリに対して直接実行できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_badge = () => `新着`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_text = () => `Maple Local — プラットフォーム全体が、ひとつのバイナリに。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const hero_announce_cta = () => `詳しく読む →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_per_gb = () => `1 GBあたり・全シグナル共通`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const stat_license = () => `→ 2年後にApache 2.0へ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_eyebrow = () => `01 · シグナル`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_trace_title = () => `トレースを読む。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_trace_sub = () => `すべてのリクエストは、属性を保ったままのスパンツリー。行にカーソルを合わせれば、そこに何があったか分かります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_logs_title = () => `ログを検索する。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_logs_sub = () => `OTLPから直接届く構造化ログ。深刻度、サービス、メッセージ、所要時間 — 数秒で検索できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_session_title = () => `セッションを再生する。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const signals_session_sub = () => `クリック、ルート遷移、コンソール出力、失敗したリクエストまで。リプレイとスパンは同じセッションIDを共有します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_eyebrow = () => `02 · インシデント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_title = () => `午前3時のアラートから、原因の一行まで。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_lede = () => `4つの画面を貫くのは、ひとつのトレースID。つなぎ合わせる作業も、2つ目のツールも、開きっぱなしのタブも要りません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_1_title = () => `アラートは文脈を連れてくる。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_1_body = () => `api-gatewayのエラー率が5%を超えた。アラートにはサービス名、超えたしきい値、サンプルトレースが載っています。数字だけ投げて終わりではありません。Slack、Discord、PagerDuty、任意のWebhookに配信できます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_body = () => `失敗したリクエストは、属性がすべて残ったスパンツリーです。ツリーの末端にStripeへのリトライが3本、いずれもちょうど1.75秒でタイムアウトして赤く並びます。サンプリングによる欠落も、外れ値を隠す集計もありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_3_title = () => `ログはすでに紐づいている。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_3_body = () => `失敗したスパンから、同じトレースIDのログへ直行。リトライ枯渇、コネクションプール20/20 — 裏付けがそこにあります。別の製品でもう一度検索する必要はありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_4_title = () => `あるいは、3ステップすべてをエージェントに渡す。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const incident_step_4_body = () => `MapleはファーストクラスのMCPサーバーを備えています。Claude、Cursor、任意のMCPクライアントを向けるだけで、サービスを列挙し、トレースを検索し、エラーを見つけ、ソースを読み、修正案を出します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_eyebrow = () => `03 · プラットフォーム`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_title = () => `本来なら別々に買っていたもの、すべて。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_lede = () => `メトリクス、サービスマップ、エラーのグルーピング、アラート、そしてMCPサーバー。プラットフォームはひとつ、インストルメンテーションもひとつ、請求書もひとつ。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_metrics_name = () => `メトリクスとダッシュボード`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_metrics_desc = () => `リクエスト数、エラー率、レイテンシのパーセンタイル。ウィジェットを自分で並べても、エージェントに提案させてもかまいません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_map_desc = () => `サービス間のリクエストの流れをリアルタイムに。ポストモーテムで再構成するはずだった連鎖が、最初から目の前にあります。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_errors_name = () => `エラートラッキング`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_errors_desc = () => `全サービスを横断して種類ごとにグルーピングされたエラー。推移、影響を受けたサービス、サンプルトレースが付いてきます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_alerts_desc = () => `7種類のシグナルに対応し、深刻度、インシデント追跡、自動解決まで。Slack、Discord、PagerDuty、任意のWebhookへ。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_mcp_name = () => `AIとMCP`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_mcp_desc = () => `MCP対応クライアントなら、サービスの列挙、トレース検索、ソース参照、修正提案まで実行できます。オープンなプロトコルで、プラグインは不要です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_4_label = () => `あなたの境界線`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const sov_pillar_4_body = () => `自分で運用しスケールさせるClickHouseに対して、Mapleを自社インフラ上で動かせます。テレメトリがネットワークの外に出る必要はありません。保持期間もデータの所在も、SaaSの固定枠ではなくあなたが決めます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_eyebrow = () => `05 · ローカル`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_title = () => `プラットフォーム全体が、ひとつのバイナリに。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_body = () => `Bunでコンパイルされた単一のmaple実行ファイル — OTLP受信、組み込みClickHouse、クエリAPI、ダッシュボードまでを含めて127.0.0.1で動きます。アカウント不要、クラウド不要、レート制限なし。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_install_alt = () => `または`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const local_link_docs = () => `ドキュメントを読む →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_eyebrow = () => `08 · 料金`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_title = () => `自分で値付けするなら、こうなる。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_lede = () => `ホスト単位の課金なし。シート単位の課金なし。月額39ドルで各シグナル100 GB、超過分は一律1 GBあたり0.30ドル — 料金ページと請求書に、同じ数字が並びます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_home_link = () => `プラン比較を見る →`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_login = () => `ログイン`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_docs = () => `ドキュメント`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_local = () => `ローカル`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const nav_blog = () => `ブログ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_learn = () => `学ぶ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_what_is_observability = () => `オブザーバビリティとは？`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const footer_best_tools = () => `オープンソースの主要ツール`

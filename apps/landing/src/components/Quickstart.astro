@@ -245,8 +245,8 @@ export OTEL_SERVICE_NAME="my-service"
 const defaultId = snippets[0].id;
 ---
 
-<section class="relative bg-bg">
-	<div class="mx-auto max-w-6xl px-6 py-24 md:py-28">
+<section class="relative border-t border-border bg-bg">
+	<div class="shell py-16 md:py-32">
 		<div class="flex flex-wrap items-baseline justify-between gap-4 mb-4">
 			<div class="text-[10px] uppercase tracking-[0.18em] text-fg-muted">{m.start_eyebrow()}</div>
 			<div class="flex flex-wrap items-center gap-x-5 gap-y-1 text-[11px] font-mono">
@@ -378,34 +378,6 @@ const defaultId = snippets[0].id;
 		</div>
 
 		<p class="mt-10 text-[12px] text-fg-muted max-w-[48ch] leading-relaxed">{m.start_footnote()}</p>
-	</div>
-
-	{/* ──────────────────────────────────────────────────────── */}
-	{/* Bookend                                                 */}
-	{/* ──────────────────────────────────────────────────────── */}
-	<div class="relative overflow-hidden drenched-amber">
-		<div class="relative mx-auto max-w-6xl px-6 py-24 md:py-32">
-			<h2 class="font-display text-4xl sm:text-5xl md:text-6xl font-semibold leading-[1.04] tracking-tight max-w-[24ch]">
-				{m.cta_bookend_title()}
-			</h2>
-			<p class="mt-5 text-base md:text-lg max-w-[48ch] opacity-85 leading-relaxed">{m.cta_bookend_lede()}</p>
-			<div class="mt-10 flex flex-wrap items-center gap-3">
-				<a
-					href="https://app.maple.dev"
-					class="inline-flex items-center justify-center h-11 px-5 rounded-lg bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
-				>
-					{m.cta_bookend_primary()}
-				</a>
-				<a
-					href="https://github.com/Makisuo/maple"
-					target="_blank"
-					rel="noopener noreferrer"
-					class="inline-flex items-center justify-center h-11 px-5 rounded-lg border border-current/40 text-sm font-medium hover:bg-current/10 transition-colors"
-				>
-					{m.cta_bookend_secondary()}
-				</a>
-			</div>
-		</div>
 	</div>
 </section>
 
