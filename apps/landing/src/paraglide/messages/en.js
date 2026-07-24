@@ -703,6 +703,54 @@ export const mcp_lede = () => `Maple ships with a first-class MCP server. Any co
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_title = () => `Reads the code, not just the trace`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_body = () => `The agent pulls the source file behind a span, so the fix it proposes cites your actual code.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_title = () => `Writes back`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_body = () => `Claim an issue, set its severity, attach a fix. Not a read-only dashboard.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_title = () => `OAuth, no plugin`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_body = () => `Point any MCP client at the endpoint and sign in. Open protocol, nothing to install.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sessions_eyebrow = () => `06 · Browser Sessions`
 
 
@@ -4983,6 +5031,14 @@ export const incident_step_1_body = () => `Error rate on api-gateway crosses 5%.
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_title = () => `The trace opens on the failing span.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const incident_step_2_body = () => `The failing request is a span tree with every attribute intact. Three Stripe retries sit at the bottom, red, each timing out at exactly 1.75 seconds. No sampling gap, no aggregate hiding the outlier.`
 
 
@@ -5104,6 +5160,22 @@ export const platform_mcp_name = () => `AI & MCP`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const platform_mcp_desc = () => `Any MCP-compatible client can list services, search traces, read the source, and propose a fix. Open protocol, no plugin.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `Connect your cloud`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart. PlanetScale, Cloudflare, and the rest connect in one OAuth click.`
 
 
 /**
@@ -5287,22 +5359,6 @@ export const hero_shots_aria = () => `Product screenshots`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_name = () => `Connect your cloud`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `Kubernetes ships as a Helm chart. PlanetScale, Cloudflare, and the rest connect in one OAuth click.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_overview_line = () => `See every service at a glance.`
 
 
@@ -5320,59 +5376,3 @@ export const hero_shot_traces_line = () => `Follow one request end to end.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `Watch traffic move between services.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const incident_step_2_title = () => `The trace opens on the failing span.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_1_title = () => `Reads the code, not just the trace`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_1_body = () => `The agent pulls the source file behind a span, so the fix it proposes cites your actual code.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_2_title = () => `Writes back`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_2_body = () => `Claim an issue, set its severity, attach a fix. Not a read-only dashboard.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_3_title = () => `OAuth, no plugin`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_3_body = () => `Point any MCP client at the endpoint and sign in. Open protocol, nothing to install.`

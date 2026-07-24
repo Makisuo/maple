@@ -703,6 +703,54 @@ export const mcp_lede = () => `Mapleはファーストクラスの MCPサーバ�
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_title = () => `トレースだけでなく、コードまで読む`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_1_body = () => `スパンの背後にあるソースファイルまで参照するので、提案される修正はあなたの実際のコードを指し示します。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_title = () => `書き込みもできる`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_2_body = () => `イシューの担当、重大度の設定、修正の添付まで。読み取り専用のダッシュボードではありません。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_title = () => `OAuth対応、プラグイン不要`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const mcp_point_3_body = () => `任意のMCPクライアントをエンドポイントに向けてサインインするだけ。オープンなプロトコルで、インストールは不要です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const sessions_eyebrow = () => `06 · Browser Sessions`
 
 
@@ -4983,6 +5031,14 @@ export const incident_step_1_body = () => `api-gatewayのエラー率が5%を超
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const incident_step_2_title = () => `トレースは失敗したスパンで開く。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const incident_step_2_body = () => `失敗したリクエストは、属性がすべて残ったスパンツリーです。ツリーの末端にStripeへのリトライが3本、いずれもちょうど1.75秒でタイムアウトして赤く並びます。サンプリングによる欠落も、外れ値を隠す集計もありません。`
 
 
@@ -5104,6 +5160,22 @@ export const platform_mcp_name = () => `AIとMCP`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const platform_mcp_desc = () => `MCP対応クライアントなら、サービスの列挙、トレース検索、ソース参照、修正提案まで実行できます。オープンなプロトコルで、プラグインは不要です。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_name = () => `クラウドをつなぐ`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const platform_cloud_desc = () => `KubernetesはHelmチャート。PlanetScale、Cloudflareなどは OAuth のワンクリックで接続。`
 
 
 /**
@@ -5287,22 +5359,6 @@ export const hero_shots_aria = () => `製品スクリーンショット`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_name = () => `クラウドをつなぐ`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const platform_cloud_desc = () => `KubernetesはHelmチャート。PlanetScale、Cloudflareなどは OAuth のワンクリックで接続。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_overview_line = () => `すべてのサービスを一目で。`
 
 
@@ -5320,59 +5376,3 @@ export const hero_shot_traces_line = () => `1つのリクエストを最初か�
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const hero_shot_map_line = () => `サービス間のトラフィックを可視化。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const incident_step_2_title = () => `トレースは失敗したスパンで開く。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_1_title = () => `トレースだけでなく、コードまで読む`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_1_body = () => `スパンの背後にあるソースファイルまで参照するので、提案される修正はあなたの実際のコードを指し示します。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_2_title = () => `書き込みもできる`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_2_body = () => `イシューの担当、重大度の設定、修正の添付まで。読み取り専用のダッシュボードではありません。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_3_title = () => `OAuth対応、プラグイン不要`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const mcp_point_3_body = () => `任意のMCPクライアントをエンドポイントに向けてサインインするだけ。オープンなプロトコルで、インストールは不要です。`

@@ -834,30 +834,175 @@
 
 /* ──────────────────────────────────────────────────────────────
    Scroll story — the pinned-pane walkthrough.
-   One IntersectionObserver writes `data-active` on the section;
-   everything else is a sibling selector. `data-active="1"` ships
-   in the markup, so pane 1 is lit before any JS runs.
+   One IntersectionObserver writes `data-on` / `data-passed` off a
+   single index, so the step count lives in the markup and never in
+   this file. Step one ships marked, and is lit before any JS runs.
+
+   One motion vocabulary throughout: --story-swap over --story-ease
+   for the plate, the route label and the rail alike, so the three
+   settle together instead of racing. 520ms sits between the hero's
+   unhurried 700ms and a blink — a scroll-triggered swap shouldn't
+   dawdle, but it shouldn't snap either.
+
+   Nothing here dims: two steps are on screen at once, so the active
+   one is marked positively (amber label, filled node) rather than by
+   pushing its neighbours under a legible contrast.
    ────────────────────────────────────────────────────────────── */
-[data-scrollstory] [data-pane] {
-	opacity: 0;
-	transition: opacity 320ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-[data-scrollstory][data-active="1"] [data-pane="1"],
-[data-scrollstory][data-active="2"] [data-pane="2"],
-[data-scrollstory][data-active="3"] [data-pane="3"],
-[data-scrollstory][data-active="4"] [data-pane="4"] {
-	opacity: 1;
+[data-scrollstory] {
+	--story-swap: 520ms;
+	--story-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-[data-scrollstory] [data-step] {
-	opacity: 0.38;
-	transition: opacity 240ms ease;
+/* The pinned frame. Same construction as .live-frame — deep-ink body,
+   elevated head, hairline border — so it reads as one of the page's live
+   artifacts rather than a new kind of box. */
+.story-frame {
+	background: var(--bg-deep);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-xl);
+	overflow: hidden;
 }
-[data-scrollstory][data-active="1"] [data-step="1"],
-[data-scrollstory][data-active="2"] [data-step="2"],
-[data-scrollstory][data-active="3"] [data-step="3"],
-[data-scrollstory][data-active="4"] [data-step="4"] {
+.story-frame__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--border);
+	background: var(--bg-elevated);
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+/* All four routes share one grid cell, so the head keeps its width when
+   /alerts becomes /traces and the trace id beside it never shifts. */
+.story-frame__route {
+	display: grid;
+	justify-items: end;
+}
+.story-frame__route > span {
+	grid-area: 1 / 1;
+	opacity: 0;
+	transform: translateY(4px);
+	color: var(--primary);
+	transition:
+		opacity var(--story-swap) var(--story-ease),
+		transform var(--story-swap) var(--story-ease);
+}
+.story-frame__route > span[data-on] {
 	opacity: 1;
+	transform: none;
+}
+
+.story-frame__stage {
+	position: relative;
+	aspect-ratio: 992 / 600;
+}
+/* z-index, not opacity alone: the incoming plate fades in over the outgoing
+   one, so two dark dashboards don't cross at 50% and read as a dip. Same fix
+   the hero carousel carries. */
+.story-frame__stage img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	object-position: top left;
+	opacity: 0;
+	z-index: 0;
+	transform: translateY(10px);
+	transition:
+		opacity var(--story-swap) var(--story-ease),
+		transform var(--story-swap) var(--story-ease);
+}
+.story-frame__stage img[data-on] {
+	opacity: 1;
+	z-index: 1;
+	transform: none;
+}
+
+/* Rail. Each step owns the hairline running from its own node down to the
+   next one, so the fill is just `data-passed` and nothing counts steps.
+   --story-node-y is the node's centre: the step's top padding plus half the
+   9px dot, which is also where the segment has to start to land on the next
+   node instead of stopping short of it. */
+.story-steps [data-step] {
+	position: relative;
+	--story-node-y: calc(3rem + 4.5px);
+}
+@media (min-width: 1024px) {
+	.story-steps [data-step] {
+		--story-node-y: calc(4rem + 4.5px);
+	}
+}
+.story-steps [data-step]::before,
+.story-steps [data-step]::after {
+	content: "";
+	position: absolute;
+	left: 4px;
+	top: var(--story-node-y);
+	width: 1px;
+	height: 100%;
+}
+.story-steps [data-step]::before {
+	background: var(--border);
+}
+.story-steps [data-step]::after {
+	background: var(--primary);
+	transform: scaleY(0);
+	transform-origin: top;
+	transition: transform var(--story-swap) var(--story-ease);
+}
+.story-steps [data-step][data-passed]::after {
+	transform: scaleY(1);
+}
+/* Nothing to connect to below the last node. */
+.story-steps [data-step]:last-child::before,
+.story-steps [data-step]:last-child::after {
+	display: none;
+}
+
+.story-node {
+	align-self: center;
+	width: 9px;
+	height: 9px;
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	background: var(--background);
+	/* Over the rail, so the hairline never shows through the dot. */
+	position: relative;
+	z-index: 1;
+	transition:
+		background-color var(--story-swap) var(--story-ease),
+		border-color var(--story-swap) var(--story-ease),
+		box-shadow var(--story-swap) var(--story-ease);
+}
+.story-steps [data-step][data-passed] .story-node {
+	background: var(--amber-deep);
+	border-color: var(--amber-deep);
+}
+.story-steps [data-step][data-on] .story-node {
+	background: var(--primary);
+	border-color: var(--primary);
+	box-shadow: 0 0 0 4px color-mix(in oklab, var(--primary) 14%, transparent);
+}
+
+.story-surface,
+.story-trace {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	font-weight: 500;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--muted-foreground);
+}
+.story-surface {
+	transition: color var(--story-swap) var(--story-ease);
+}
+.story-steps [data-step][data-on] .story-surface {
+	color: var(--primary);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -867,20 +1012,29 @@
 @media (prefers-reduced-motion: reduce) {
 	/* The scroll story unpins entirely: the pinned pane would otherwise
 	   freeze on step 1 while three steps scrolled past it. Same code path
-	   as the <lg layout — one thing to reason about, one thing to test. */
-	[data-scrollstory] [data-pane],
-	[data-scrollstory] [data-step] {
-		opacity: 1 !important;
-		transition: none !important;
-	}
+	   as the <lg layout — one thing to reason about, one thing to test.
+	   The observer doesn't run here either, so the rail is neutralised
+	   rather than left marking step 1 as the current step forever. */
 	[data-scrollstory] [data-sticky] {
 		display: none !important;
 	}
 	[data-scrollstory] [data-inline] {
 		display: block !important;
 	}
-	[data-scrollstory] [data-step] {
-		min-height: 0 !important;
+	[data-scrollstory] .story-steps [data-step]::after {
+		display: none !important;
+	}
+	[data-scrollstory] .story-node,
+	[data-scrollstory] .story-surface {
+		transition: none !important;
+	}
+	[data-scrollstory] .story-steps [data-step][data-on] .story-node {
+		background: var(--background) !important;
+		border-color: var(--border) !important;
+		box-shadow: none !important;
+	}
+	[data-scrollstory] .story-steps [data-step][data-on] .story-surface {
+		color: var(--muted-foreground) !important;
 	}
 
 	/* The hero carousel stops auto-advancing in JS, so it holds slide 1 with a
