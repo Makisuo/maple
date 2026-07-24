@@ -4,9 +4,9 @@ import { cn } from "@maple/ui/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@maple/ui/components/ui/tooltip"
 import { ChevronDownIcon, ChevronUpIcon, ChevronExpandYIcon } from "@/components/icons"
-import { formatLatency } from "@/lib/format"
 import { DependencyTypeBadge, type DependencyKind } from "./dependency-type-badge"
 import { ServiceDot } from "@maple/ui/components/service-dot"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 
 export interface DependencyRow {
 	id: string
@@ -167,7 +167,10 @@ export function DependencyTable({ serviceName, rows, startTime, endTime, timePre
 												<div className="flex min-w-0 flex-col leading-tight">
 													<span className="flex items-center gap-1.5 truncate text-[12.5px] text-foreground">
 														{row.kind === "service" && (
-															<ServiceDot serviceName={row.name} className="size-1.5" />
+															<ServiceDot
+																serviceName={row.name}
+																className="size-1.5"
+															/>
 														)}
 														<span className="truncate">{row.name}</span>
 													</span>
@@ -225,9 +228,11 @@ export function DependencyTable({ serviceName, rows, startTime, endTime, timePre
 											</span>
 										</BarCell>
 										<TableCell className="py-2 text-right align-middle">
-											<span className="tabular-nums font-mono text-[12.5px] text-muted-foreground/80">
-												{formatLatency(row.avgDurationMs)}
-											</span>
+											<LatencyValue
+												ms={row.avgDurationMs}
+												scale="avg"
+												className="text-[12.5px]"
+											/>
 										</TableCell>
 										<BarCell
 											value={row.p95DurationMs}
@@ -235,9 +240,11 @@ export function DependencyTable({ serviceName, rows, startTime, endTime, timePre
 											tone="latency"
 											align="right"
 										>
-											<span className="tabular-nums font-mono text-[12.5px] text-foreground">
-												{formatLatency(row.p95DurationMs)}
-											</span>
+											<LatencyValue
+												ms={row.p95DurationMs}
+												scale="p95"
+												className="text-[12.5px]"
+											/>
 										</BarCell>
 									</TableRow>
 								)
@@ -336,9 +343,7 @@ export function DependencyTable({ serviceName, rows, startTime, endTime, timePre
 										</span>
 										<span>
 											<span className="text-muted-foreground/60">p95 </span>
-											<span className="text-foreground">
-												{formatLatency(row.p95DurationMs)}
-											</span>
+											<LatencyValue ms={row.p95DurationMs} scale="p95" />
 										</span>
 									</div>
 								</button>

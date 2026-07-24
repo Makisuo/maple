@@ -4,8 +4,8 @@ import { cn } from "@maple/ui/utils"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { Sparkline } from "@maple/ui/components/ui/gradient-chart"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 import { ChevronDownIcon, ChevronUpIcon, ChevronExpandYIcon } from "@/components/icons"
-import { formatLatency } from "@/lib/format"
 import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceOperationsResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
@@ -88,6 +88,10 @@ export function ServiceOperationsTab({
 	)
 
 	const seconds = windowSeconds(effectiveStartTime, effectiveEndTime)
+	const traceDetailLimited = seconds > 30 * 24 * 60 * 60
+	const traceDetailStartTime = traceDetailLimited
+		? new Date(Date.parse(effectiveEndTime) - 30 * 24 * 60 * 60 * 1000).toISOString()
+		: startTime
 
 	const operations = useMemo<ServiceOperation[]>(
 		() =>
@@ -134,9 +138,9 @@ export function ServiceOperationsTab({
 				serviceName,
 				spanName: op.spanName,
 				environments,
-				startTime,
-				endTime,
-				timePreset,
+				startTime: traceDetailStartTime,
+				endTime: traceDetailLimited ? effectiveEndTime : endTime,
+				timePreset: traceDetailLimited ? undefined : timePreset,
 			}),
 		})
 	}
@@ -151,6 +155,12 @@ export function ServiceOperationsTab({
 
 	return (
 		<div className={cn("flex flex-col gap-2 transition-opacity", isWaiting && "opacity-60")}>
+			{traceDetailLimited && (
+				<p className="text-xs text-muted-foreground">
+					Operation summaries cover the selected range; individual trace drill-downs show the latest
+					30 days.
+				</p>
+			)}
 			{/* Desktop: dense sortable table with inline distribution bars. */}
 			<div className="hidden overflow-hidden rounded-lg border bg-card md:block">
 				<Table>
@@ -195,7 +205,10 @@ export function ServiceOperationsTab({
 					<TableBody>
 						{sorted.length === 0 ? (
 							<TableRow>
-								<TableCell colSpan={6} className="py-12 text-center text-xs text-muted-foreground">
+								<TableCell
+									colSpan={6}
+									className="py-12 text-center text-xs text-muted-foreground"
+								>
 									No operations recorded in this window.
 								</TableCell>
 							</TableRow>
@@ -216,7 +229,11 @@ export function ServiceOperationsTab({
 												{op.spanName}
 											</span>
 										</TableCell>
-										<BarCell value={op.estimatedSpanCount} max={maxima.calls} tone="calls">
+										<BarCell
+											value={op.estimatedSpanCount}
+											max={maxima.calls}
+											tone="calls"
+										>
 											<span className="tabular-nums font-mono text-[12.5px] text-foreground">
 												{op.estimatedSpanCount > op.spanCount ? "~" : ""}
 												{formatRate(callsPerSecond(op.estimatedSpanCount, seconds))}
@@ -241,14 +258,18 @@ export function ServiceOperationsTab({
 											</span>
 										</BarCell>
 										<TableCell className="py-2 text-right align-middle">
-											<span className="tabular-nums font-mono text-[12.5px] text-muted-foreground/80">
-												{formatLatency(op.p50DurationMs)}
-											</span>
+											<LatencyValue
+												ms={op.p50DurationMs}
+												scale="p50"
+												className="text-[12.5px]"
+											/>
 										</TableCell>
 										<BarCell value={op.p95DurationMs} max={maxima.p95} tone="latency">
-											<span className="tabular-nums font-mono text-[12.5px] text-foreground">
-												{formatLatency(op.p95DurationMs)}
-											</span>
+											<LatencyValue
+												ms={op.p95DurationMs}
+												scale="p95"
+												className="text-[12.5px]"
+											/>
 										</BarCell>
 										<TableCell className="py-1.5 pr-3 align-middle">
 											<Sparkline
@@ -294,7 +315,10 @@ export function ServiceOperationsTab({
 								)}
 							>
 								{label}
-								<Icon size={11} className={active ? "text-foreground" : "text-muted-foreground/40"} />
+								<Icon
+									size={11}
+									className={active ? "text-foreground" : "text-muted-foreground/40"}
+								/>
 							</button>
 						)
 					})}
@@ -314,7 +338,9 @@ export function ServiceOperationsTab({
 									onClick={() => handleRowClick(op)}
 									className="flex w-full flex-col gap-1 border-b px-3 py-2.5 text-left last:border-b-0 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
 								>
-									<span className="truncate font-mono text-[13px] text-foreground">{op.spanName}</span>
+									<span className="truncate font-mono text-[13px] text-foreground">
+										{op.spanName}
+									</span>
 									<div className="flex items-center gap-3 font-mono text-xs tabular-nums">
 										<span>
 											<span className="text-muted-foreground/60">calls </span>
@@ -337,7 +363,7 @@ export function ServiceOperationsTab({
 										</span>
 										<span>
 											<span className="text-muted-foreground/60">p95 </span>
-											<span className="text-foreground">{formatLatency(op.p95DurationMs)}</span>
+											<LatencyValue ms={op.p95DurationMs} scale="p95" />
 										</span>
 									</div>
 								</button>

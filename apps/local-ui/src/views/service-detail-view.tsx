@@ -2,16 +2,11 @@ import { useMemo } from "react"
 import { ArrowLeftIcon } from "@maple/ui/components/icons"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Button } from "@maple/ui/components/ui/button"
+import { LatencyValue } from "@maple/ui/components/latency-value"
+import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { ServiceDot } from "@maple/ui/components/service-dot"
 import { Spinner } from "@maple/ui/components/ui/spinner"
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@maple/ui/components/ui/table"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@maple/ui/components/ui/table"
 import { QueryBuilderLineChart } from "@maple/ui/components/charts/line/query-builder-line-chart"
 import { formatDuration, formatNumber } from "@maple/ui/format"
 import { cn } from "@maple/ui/utils"
@@ -95,11 +90,7 @@ export function ServiceDetailView({ serviceName, onBack }: ServiceDetailViewProp
 						<Spinner />
 					</div>
 				) : overview.isError ? (
-					<ErrorState
-						label="service"
-						error={overview.error}
-						onRetry={() => overview.refetch()}
-					/>
+					<ErrorState label="service" error={overview.error} onRetry={() => overview.refetch()} />
 				) : !stats ? (
 					<EmptyState
 						title="No spans in this range"
@@ -119,9 +110,21 @@ export function ServiceDetailView({ serviceName, onBack }: ServiceDetailViewProp
 								value={`${(stats.errorRate * 100).toFixed(1)}%`}
 								danger={stats.errorRate > 0.05}
 							/>
-							<StatCard label="p50" value={formatDuration(stats.p50LatencyMs)} />
-							<StatCard label="p95" value={formatDuration(stats.p95LatencyMs)} />
-							<StatCard label="p99" value={formatDuration(stats.p99LatencyMs)} />
+							<StatCard
+								label="p50"
+								value={formatDuration(stats.p50LatencyMs)}
+								valueClassName={latencyToneClass(stats.p50LatencyMs, "p50")}
+							/>
+							<StatCard
+								label="p95"
+								value={formatDuration(stats.p95LatencyMs)}
+								valueClassName={latencyToneClass(stats.p95LatencyMs, "p95")}
+							/>
+							<StatCard
+								label="p99"
+								value={formatDuration(stats.p99LatencyMs)}
+								valueClassName={latencyToneClass(stats.p99LatencyMs, "p99")}
+							/>
 						</section>
 
 						<section className="space-y-2">
@@ -195,19 +198,21 @@ export function ServiceDetailView({ serviceName, onBack }: ServiceDetailViewProp
 															op.errorCount > 0 && "text-destructive",
 														)}
 													>
-														{formatNumber(op.estimatedErrorCount || op.errorCount)}
+														{formatNumber(
+															op.estimatedErrorCount || op.errorCount,
+														)}
 													</TableCell>
 													<TableCell className="text-right tabular-nums">
 														{(op.errorRate * 100).toFixed(1)}%
 													</TableCell>
-													<TableCell className="text-right tabular-nums">
-														{formatDuration(op.avgDurationMs)}
+													<TableCell className="text-right">
+														<LatencyValue ms={op.avgDurationMs} scale="avg" />
 													</TableCell>
-													<TableCell className="text-right tabular-nums">
-														{formatDuration(op.p50DurationMs)}
+													<TableCell className="text-right">
+														<LatencyValue ms={op.p50DurationMs} scale="p50" />
 													</TableCell>
-													<TableCell className="text-right tabular-nums">
-														{formatDuration(op.p95DurationMs)}
+													<TableCell className="text-right">
+														<LatencyValue ms={op.p95DurationMs} scale="p95" />
 													</TableCell>
 												</TableRow>
 											))}
@@ -223,13 +228,30 @@ export function ServiceDetailView({ serviceName, onBack }: ServiceDetailViewProp
 	)
 }
 
-function StatCard({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+function StatCard({
+	label,
+	value,
+	danger,
+	valueClassName,
+}: {
+	label: string
+	value: string
+	danger?: boolean
+	/** Applied after `danger`, so it wins — carries the latency magnitude ramp. */
+	valueClassName?: string
+}) {
 	return (
 		<div className="rounded-md border bg-card px-3 py-2">
 			<div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
 				{label}
 			</div>
-			<div className={cn("text-lg font-semibold tabular-nums", danger && "text-destructive")}>
+			<div
+				className={cn(
+					"text-lg font-semibold tabular-nums",
+					danger && "text-destructive",
+					valueClassName,
+				)}
+			>
 				{value}
 			</div>
 		</div>

@@ -1,5 +1,6 @@
 import type { BaseComponentProps } from "@json-render/react"
 import { cn } from "@maple/ui/utils"
+import { LatencyValue } from "@maple/ui/components/latency-value"
 import { formatDuration } from "@/lib/format"
 import { HttpSpanLabel } from "@maple/ui/components/traces/http-span-label"
 
@@ -29,8 +30,12 @@ export function TraceList({ props }: BaseComponentProps<TraceListProps>) {
 		<div className="space-y-1.5">
 			{stats && (
 				<div className="flex gap-3 text-[10px] text-muted-foreground">
-					<span>P50: {formatDuration(stats.p50Ms)}</span>
-					<span>P95: {formatDuration(stats.p95Ms)}</span>
+					<span>
+						P50: <LatencyValue ms={stats.p50Ms} scale="p50" className="text-[10px]" />
+					</span>
+					<span>
+						P95: <LatencyValue ms={stats.p95Ms} scale="p95" className="text-[10px]" />
+					</span>
 					<span>Min: {formatDuration(stats.minMs)}</span>
 					<span>Max: {formatDuration(stats.maxMs)}</span>
 				</div>

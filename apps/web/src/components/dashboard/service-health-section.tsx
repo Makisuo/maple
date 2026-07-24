@@ -19,6 +19,7 @@ import { Card } from "@maple/ui/components/ui/card"
 import { Badge } from "@maple/ui/components/ui/badge"
 import { Skeleton } from "@maple/ui/components/ui/skeleton"
 import { formatErrorRate, formatLatency } from "@maple/ui/lib/format"
+import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { cn } from "@maple/ui/utils"
 
 import {
@@ -419,6 +420,14 @@ function ServiceHealthRow({
 						label="p95"
 						value={formatLatency(service.p95LatencyMs)}
 						tone={metricTone(latencyCause)}
+						// An open incident/anomaly is a stronger signal than raw
+						// magnitude, so it keeps the tone. Without one, fall back to
+						// the shared magnitude ramp.
+						valueClassName={
+							latencyCause === undefined
+								? latencyToneClass(service.p95LatencyMs, "p95")
+								: undefined
+						}
 					/>
 					<Metric
 						label="rps"
@@ -435,10 +444,13 @@ function Metric({
 	label,
 	value,
 	tone = "ok",
+	valueClassName,
 }: {
 	label: string
 	value: string
 	tone?: "ok" | "warn" | "crit"
+	/** Applied after `tone`, so it wins — used to fall back to a magnitude ramp. */
+	valueClassName?: string
 }) {
 	const toneClass =
 		tone === "crit"
@@ -448,7 +460,7 @@ function Metric({
 				: "text-foreground"
 	return (
 		<div className="flex w-16 flex-col items-end gap-0.5">
-			<span className={cn("leading-none", toneClass)}>{value}</span>
+			<span className={cn("leading-none", toneClass, valueClassName)}>{value}</span>
 			<span className="text-[10px] uppercase tracking-wider text-muted-foreground/60">{label}</span>
 		</div>
 	)

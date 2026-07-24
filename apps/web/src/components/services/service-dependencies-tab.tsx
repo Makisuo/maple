@@ -4,6 +4,7 @@ import { Result } from "@/lib/effect-atom"
 import { useRetainedRefreshableResultValue } from "@/hooks/use-retained-refreshable-result-value"
 import { getServiceDependenciesBundleResultAtom } from "@/lib/services/atoms/warehouse-query-atoms"
 import { toSingleDeploymentEnv } from "@/lib/services/environments"
+import { latencyToneClass } from "@maple/ui/lib/latency-tone"
 import { formatLatency } from "@/lib/format"
 import { normalizeTimestampInput } from "@/lib/timezone-format"
 import { DependencyTable, type DependencyRow } from "./dependency-table"
@@ -82,6 +83,10 @@ export function ServiceDependenciesTab({
 		const e = new Date(normalizeTimestampInput(effectiveEndTime)).getTime()
 		return s > 0 && e > 0 ? Math.max((e - s) / 1000, 1) : 3600
 	}, [effectiveStartTime, effectiveEndTime])
+	const traceDetailLimited = durationSeconds > 30 * 24 * 60 * 60
+	const traceDetailStartTime = traceDetailLimited
+		? new Date(Date.parse(effectiveEndTime) - 30 * 24 * 60 * 60 * 1000).toISOString()
+		: startTime
 
 	const rows = useMemo<DependencyRow[]>(() => {
 		const out: DependencyRow[] = []
@@ -300,17 +305,24 @@ export function ServiceDependenciesTab({
 							label="Slowest p95"
 							name={summary.topByLatency.name}
 							value={formatLatency(summary.topByLatency.p95DurationMs)}
+							valueClassName={latencyToneClass(summary.topByLatency.p95DurationMs, "p95")}
 						/>
 					</div>
 				</div>
 			) : null}
 
+			{traceDetailLimited && (
+				<p className="text-xs text-muted-foreground">
+					Dependency summaries cover the selected range; individual trace drill-downs show the
+					latest 30 days.
+				</p>
+			)}
 			<DependencyTable
 				serviceName={serviceName}
 				rows={dedupedRows}
-				startTime={startTime}
-				endTime={endTime}
-				timePreset={timePreset}
+				startTime={traceDetailStartTime}
+				endTime={traceDetailLimited ? effectiveEndTime : endTime}
+				timePreset={traceDetailLimited ? undefined : timePreset}
 			/>
 		</div>
 	)
@@ -321,9 +333,11 @@ interface HeadlineFactProps {
 	name: string
 	value: string
 	tone?: "error"
+	/** Overrides the default value color — e.g. a magnitude tone for latency. */
+	valueClassName?: string
 }
 
-function HeadlineFact({ label, name, value, tone }: HeadlineFactProps) {
+function HeadlineFact({ label, name, value, tone, valueClassName }: HeadlineFactProps) {
 	return (
 		<span className="flex w-full items-baseline justify-between gap-1.5 sm:inline-flex sm:w-auto sm:justify-start">
 			<span className="flex min-w-0 items-baseline gap-1.5">
@@ -334,6 +348,7 @@ function HeadlineFact({ label, name, value, tone }: HeadlineFactProps) {
 				className={cn(
 					"shrink-0 tabular-nums font-mono",
 					tone === "error" ? "text-severity-error" : "text-foreground",
+					valueClassName,
 				)}
 			>
 				{value}
