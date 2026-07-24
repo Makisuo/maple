@@ -16,7 +16,10 @@ vi.mock("@/lib/collections/org-collections", () => ({
 	useActiveOrgId: () => "org_1",
 	useCollectionsGeneration: () => 0,
 }))
-vi.mock("@/lib/registry", () => ({ mapleRuntime: { runFork: mocks.runFork } }))
+vi.mock("@/lib/registry", async () => {
+	const { Layer } = await import("effect")
+	return { mapleRuntime: { runFork: mocks.runFork }, mapleApiClientLayer: Layer.empty }
+})
 
 import { useApiKeyMutationSync } from "./use-api-keys"
 

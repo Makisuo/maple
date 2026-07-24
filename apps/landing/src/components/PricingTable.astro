@@ -205,11 +205,45 @@ const gridClass =
         ? "grid grid-cols-1 lg:grid-cols-3 gap-4"
         : "grid grid-cols-1 sm:grid-cols-2 gap-4"
 const maxWidthClass = cards.length >= 3 ? "max-w-6xl" : "max-w-4xl"
+
+// Optional header + footer link, used when this table is embedded on the
+// homepage. Unset on /pricing, which supplies its own page heading — so that
+// page renders exactly as before.
+interface Props {
+    title?: string
+    eyebrow?: string
+    lede?: string
+    footerHref?: string
+    footerLabel?: string
+    class?: string
+}
+
+const { title, eyebrow, lede, footerHref, footerLabel, class: className = "" } = Astro.props
+
+// Embedded on the homepage the section adopts the page shell, so its heading
+// lines up with the bill comparison directly above it in the same chapter; the
+// card grid stays capped inside it. Standalone on /pricing, nothing changes.
+const embedded = Boolean(eyebrow || title || lede)
+const containerClass = embedded ? "shell" : `mx-auto ${maxWidthClass} px-6`
+const gridWrapClass = embedded ? `mx-auto ${maxWidthClass}` : ""
 ---
 
-<section class="py-20 md:py-28">
-    <div class={`mx-auto ${maxWidthClass} px-6`}>
-        <div class={gridClass}>
+<section class={`py-20 md:py-28 ${className}`}>
+    <div class={containerClass}>
+        {embedded && (
+            <div class="mb-12 md:mb-16">
+                {eyebrow && (
+                    <p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{eyebrow}</p>
+                )}
+                {title && (
+                    <h2 class="mt-4 max-w-[20ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]">
+                        {title}
+                    </h2>
+                )}
+                {lede && <p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted md:text-[15px]">{lede}</p>}
+            </div>
+        )}
+        <div class={`${gridWrapClass} ${gridClass}`}>
             {cards.map((plan) => (
                 <div class="rounded-xl border border-border bg-bg-elevated flex flex-col">
                     <div class="p-6 md:p-8 flex flex-col flex-1">
@@ -299,5 +333,12 @@ const maxWidthClass = cards.length >= 3 ? "max-w-6xl" : "max-w-4xl"
                 </div>
             ))}
         </div>
+        {footerHref && footerLabel && (
+            <div class="mt-10 flex justify-center">
+                <a href={footerHref} class="text-xs text-fg-muted transition-colors hover:text-fg">
+                    {footerLabel}
+                </a>
+            </div>
+        )}
     </div>
 </section>

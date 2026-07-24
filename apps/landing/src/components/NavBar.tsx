@@ -174,20 +174,24 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 	]
 
 	return (
-		<div className="flex items-center justify-between h-full w-full">
-			{/* Left group: Logo + Navigation */}
-			<div className="flex items-center gap-1">
-				<a href={l("/")} className="flex items-center gap-3 mr-2">
+		<div className="relative flex items-center justify-between h-full w-full">
+			{/* Logo. The nav list is absolutely centred rather than laid out
+			    between the two groups, so the centring survives the asymmetric
+			    right-hand group (star pill + Log in + CTA). */}
+			<div className="flex items-center">
+				<a href={l("/")} className="flex items-center gap-3">
 					<div className="w-7 h-7 bg-primary flex items-center justify-center">
 						<span className="text-primary-foreground text-sm font-bold">M</span>
 					</div>
 					<span className="text-fg font-medium text-sm">Maple</span>
 				</a>
+			</div>
 
-				<NavigationMenu className="hidden sm:flex">
+			<div className="absolute left-1/2 hidden -translate-x-1/2 lg:block">
+				<NavigationMenu className="flex">
 					<NavigationMenuList>
 						<NavigationMenuItem>
-							<NavigationMenuTrigger className="h-8 bg-transparent hover:bg-muted/20 text-fg-muted hover:text-fg data-popup-open:text-fg">
+							<NavigationMenuTrigger className="h-9 bg-transparent hover:bg-muted/20 text-[13px] text-fg-muted hover:text-fg data-popup-open:text-fg">
 								{m.nav_product()}
 							</NavigationMenuTrigger>
 							<NavigationMenuContent className="p-0">
@@ -259,7 +263,7 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 						<NavigationMenuItem>
 							<a
 								href={l("/pricing")}
-								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
 								{m.nav_pricing()}
 							</a>
@@ -268,27 +272,43 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 						<NavigationMenuItem>
 							<a
 								href={l("/local")}
-								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
-								Local
+								{m.nav_local()}
 							</a>
 						</NavigationMenuItem>
 
 						<NavigationMenuItem>
 							<a
 								href="/docs"
-								className="inline-flex h-8 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-xs font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
 							>
-								Docs
+								{m.nav_docs()}
+							</a>
+						</NavigationMenuItem>
+
+						<NavigationMenuItem>
+							<a
+								href="/blog"
+								className="inline-flex h-9 w-max items-center justify-center bg-transparent px-2.5 py-1.5 text-[13px] font-medium text-fg-muted hover:bg-muted/20 hover:text-fg transition-all"
+							>
+								{m.nav_blog()}
 							</a>
 						</NavigationMenuItem>
 					</NavigationMenuList>
 				</NavigationMenu>
 			</div>
 
-			{/* Right group: GitHub + CTA + Mobile menu */}
-			<div className="flex items-center gap-3 sm:gap-6">
+			{/* Right group: GitHub + Log in + CTA + Mobile menu */}
+			<div className="flex items-center gap-3 sm:gap-4">
 				<GithubStarButton stars={stars} className="hidden sm:inline-flex" />
+
+				<a
+					href="https://app.maple.dev"
+					className="hidden text-[13px] font-medium text-fg-muted transition-colors hover:text-fg md:inline-flex"
+				>
+					{m.nav_login()}
+				</a>
 
 				<a
 					href="https://app.maple.dev"
@@ -305,8 +325,10 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 					<CTAButton />
 				</a>
 
+				{/* The centred nav list only fits from lg, so the sheet has to
+				    cover everything below it — not just below sm. */}
 				<button
-					className="sm:hidden p-1.5 text-fg-muted hover:text-fg transition-colors"
+					className="lg:hidden p-1.5 text-fg-muted hover:text-fg transition-colors"
 					onClick={() => setMenuOpen(true)}
 					aria-label="Open menu"
 				>
@@ -372,14 +394,14 @@ function NavBarInner({ locale = "en", stars }: { locale?: string; stars?: number
 								onClick={() => setMenuOpen(false)}
 								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
 							>
-								Local
+								{m.nav_local()}
 							</a>
 							<a
 								href="/docs"
 								onClick={() => setMenuOpen(false)}
 								className="text-xs text-fg hover:text-fg transition-colors py-2 font-medium"
 							>
-								Docs
+								{m.nav_docs()}
 							</a>
 						</div>
 

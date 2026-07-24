@@ -1,0 +1,42 @@
+---
+/**
+ * The bookend CTA — PEAK 2, and the page's full stop.
+ *
+ * Extracted from inside Quickstart.astro, where it was nested in the same
+ * <section> as the SDK tabs and therefore couldn't be reordered.
+ *
+ * Centred, unlike every other section on the page. Centring reads as a
+ * marketing shrug mid-page but as a full stop at the end, and this is the one
+ * place the left axis should break.
+ */
+import * as m from "../../paraglide/messages";
+---
+
+<section class="relative overflow-hidden drenched-amber">
+	<div class="relative shell py-32 text-center md:py-40">
+		<h2
+			class="mx-auto max-w-[24ch] font-display text-4xl font-medium leading-[1.04] tracking-[-0.02em] sm:text-5xl md:text-6xl"
+		>
+			{m.cta_bookend_title()}
+		</h2>
+		<p class="mx-auto mt-5 max-w-[52ch] text-base leading-relaxed opacity-85 md:text-lg">
+			{m.cta_bookend_lede()}
+		</p>
+		<div class="mt-10 flex flex-wrap items-center justify-center gap-3">
+			<a
+				href="https://app.maple.dev"
+				class="inline-flex h-11 items-center justify-center rounded-lg bg-foreground px-5 text-sm font-medium text-background transition-colors hover:bg-foreground/90"
+			>
+				{m.cta_bookend_primary()}
+			</a>
+			<a
+				href="https://github.com/Makisuo/maple"
+				target="_blank"
+				rel="noopener noreferrer"
+				class="inline-flex h-11 items-center justify-center rounded-lg border border-current/40 px-5 text-sm font-medium transition-colors hover:bg-current/10"
+			>
+				{m.cta_bookend_secondary()}
+			</a>
+		</div>
+	</div>
+</section>

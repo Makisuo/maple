@@ -1,0 +1,82 @@
+---
+/**
+ * 05 · Maple Local — the ink well.
+ *
+ * Lands straight off the amber wall with no hairline: amber → deepest ink is
+ * the page's sharpest tonal event and should hit unmediated.
+ *
+ * The wordmark is the one place on the page where tracking opens up instead of
+ * tightening, and the only display-size use of the mono face. It sits in
+ * muted-foreground rather than full contrast so it reads as a plate title, not
+ * a second shout two sections after the amber wall.
+ *
+ * Commands are the real ones from the repo — no fabricated one-liner. The box
+ * on the left is the copyable install and nothing else; `maple start` and what
+ * it prints belong to the terminal on the right, so neither element says the
+ * same thing twice.
+ */
+import { getRelativeLocaleUrl } from "astro:i18n";
+import * as m from "../../paraglide/messages";
+import LiveLocalTerminal from "../live/LiveLocalTerminal.astro";
+import { getGitHubStars, formatStars } from "../../lib/github-stars";
+
+const locale = Astro.currentLocale ?? "en";
+const l = (path: string) => getRelativeLocaleUrl(locale, path);
+const stars = await getGitHubStars();
+---
+
+<section class="bg-bg-deep">
+	<div class="shell py-24 md:py-36">
+		<p class="text-[10px] font-medium uppercase tracking-[0.18em] text-fg-muted">{m.local_eyebrow()}</p>
+
+		<p
+			class="mt-6 select-none font-mono lowercase leading-none text-fg-muted/60"
+			style="font-size: clamp(48px, 11vw, 132px); letter-spacing: 0.06em;"
+			aria-hidden="true"
+		>
+			maple local
+		</p>
+
+		<div class="mt-12 grid gap-12 md:mt-16 lg:grid-cols-[0.9fr_1.1fr] lg:items-center lg:gap-16">
+			<!-- min-w-0 so the install <pre> scrolls inside itself rather than
+			     widening the grid track. -->
+			<div class="min-w-0">
+				<h2
+					class="max-w-[18ch] font-display text-3xl font-medium leading-[1.05] tracking-[-0.02em] text-fg md:text-[40px]"
+				>
+					{m.local_title()}
+				</h2>
+				<p class="mt-5 max-w-[62ch] text-sm leading-relaxed text-fg-muted">{m.local_body()}</p>
+
+				<div class="mt-8 rounded-xl border border-border bg-bg-elevated p-4">
+					<pre
+						class="overflow-x-auto text-[13px] leading-relaxed text-fg"><code><span class="select-none text-fg-muted">$ </span>brew install Makisuo/tap/maple</code></pre>
+					<p class="mt-3 border-t border-border pt-3 text-[11px] text-fg-muted">
+						{m.local_install_alt()}
+						<code class="ml-1 text-fg-muted">curl -fsSL https://maple.dev/cli/install | sh</code>
+					</p>
+				</div>
+
+				<div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+					<a
+						href={l("/local")}
+						class="group inline-flex items-center gap-1.5 text-fg transition-colors hover:text-primary"
+					>
+						{m.local_link_docs()}
+					</a>
+					<a
+						href="https://github.com/Makisuo/maple"
+						target="_blank"
+						rel="noopener noreferrer"
+						class="inline-flex items-center gap-2 text-fg-muted transition-colors hover:text-fg"
+					>
+						{m.cta_github()}
+						{stars !== null && <span class="tabular-nums text-xs">{formatStars(stars)}</span>}
+					</a>
+				</div>
+			</div>
+
+			<LiveLocalTerminal />
+		</div>
+	</div>
+</section>

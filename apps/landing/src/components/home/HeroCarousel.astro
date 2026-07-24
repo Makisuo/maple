@@ -1,0 +1,301 @@
+---
+/**
+ * HeroCarousel — the hero's product plate, as three auto-advancing slides.
+ *
+ * The rail is a row of span bars: the active one widens to carry its label and
+ * fills left→right over its dwell (scaleX off a left origin, the construction
+ * .roadmap-seg and .span-bar already use), while the others collapse to short
+ * dashes. Maple's whole visual language is horizontal bars advancing across a
+ * time axis, so the hero's own timer is one of them rather than a marketing
+ * progress widget.
+ *
+ * Motion is one vocabulary: 700ms cubic-bezier(0, 0, 0.2, 1) for the segment
+ * width, the label reveal and the plate crossfade, so the rail and the plate
+ * settle together instead of racing.
+ *
+ * Filling in a slide is adding `src` to its entry below. Nothing else moves:
+ * the stage holds a fixed aspect box, so a placeholder and a real capture
+ * occupy the same rectangle.
+ */
+import * as m from "../../paraglide/messages";
+import MediaFrame from "./MediaFrame.astro";
+
+/** Dwell per slide, ms. Long enough to read a dashboard, short enough to cycle. */
+const DWELL = 6000;
+
+/** How long a hand-picked slide holds before the reel takes over again. Two
+ *  dwells — long enough to study the plate you chose, short enough that the
+ *  hero doesn't end up parked on one shot for the rest of the visit. */
+const RESUME = 12000;
+
+const slides = [
+	{
+		key: "overview",
+		tab: m.hero_shot_overview(),
+		line: m.hero_shot_overview_line(),
+		label: "The Maple overview dashboard — request volume, error rate and latency across every service",
+		src: "/screenshots/hero-dashboard.webp",
+	},
+	{
+		key: "traces",
+		tab: m.hero_shot_traces(),
+		line: m.hero_shot_traces_line(),
+		label: "A slow database span selected in an 18-span trace waterfall with its query attributes open",
+		src: "/screenshots/hero-traces.webp",
+	},
+	{
+		key: "services",
+		tab: m.features_col_services(),
+		line: m.features_service_heading(),
+		label: "The service catalog comparing latency percentiles, error-rate trends and throughput across production services",
+		src: "/screenshots/hero-services.webp",
+	},
+] satisfies { key: string; tab: string; line: string; label: string; src?: string; caption?: string }[];
+---
+
+<div
+	data-hero-carousel
+	data-dwell={DWELL}
+	data-resume={RESUME}
+	role="group"
+	aria-roledescription="carousel"
+	aria-label={m.hero_shots_aria()}
+>
+	<div class="hero-rail" role="tablist" aria-label={m.hero_shots_aria()}>
+		{
+			slides.map((slide, i) => (
+				<button
+					type="button"
+					role="tab"
+					id={`hero-tab-${slide.key}`}
+					aria-controls={`hero-pane-${slide.key}`}
+					aria-selected={i === 0 ? "true" : "false"}
+					/* The bar carries no text, so the tab is named here. */
+					aria-label={slide.tab}
+					tabindex={i === 0 ? 0 : -1}
+					data-on={i === 0 ? "" : undefined}
+					class="hero-tab"
+				>
+					<span class="hero-seg">
+						{/* Slide 1 ships full so the no-JS state reads as "selected"
+						    rather than "empty"; the script zeroes it before the
+						    first tick. */}
+						<span class="hero-seg__fill" style={i === 0 ? "transform: scaleX(1)" : undefined} />
+					</span>
+				</button>
+			))
+		}
+	</div>
+
+	{/* One grid cell, three lines stacked in it — the box sizes itself to the
+	    tallest, so a longer line in ja/ko never shifts the plate. */}
+	<div class="hero-caption">
+		{
+			slides.map((slide, i) => (
+				<span class="hero-caption__item" data-caption={i} data-on={i === 0 ? "" : undefined} aria-hidden={i === 0 ? "false" : "true"}>
+					{slide.line}
+				</span>
+			))
+		}
+	</div>
+
+	<div class="hero-carousel__stage">
+		{
+			slides.map((slide, i) => (
+				<div
+					class="hero-carousel__pane"
+					data-pane={i}
+					data-on={i === 0 ? "" : undefined}
+					id={`hero-pane-${slide.key}`}
+					role="tabpanel"
+					aria-labelledby={`hero-tab-${slide.key}`}
+					aria-hidden={i === 0 ? "false" : "true"}
+				>
+					<MediaFrame
+						label={slide.label}
+						caption={slide.caption}
+						src={slide.src}
+						width={1400}
+						height={720}
+						loading={i === 0 ? "eager" : "lazy"}
+					/>
+				</div>
+			))
+		}
+	</div>
+</div>
+
+<script>
+	const root = document.querySelector<HTMLElement>("[data-hero-carousel]");
+
+	if (root) {
+		const tablist = root.querySelector<HTMLElement>('[role="tablist"]');
+		const tabs = [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+		const panes = [...root.querySelectorAll<HTMLElement>("[data-pane]")];
+		const captions = [...root.querySelectorAll<HTMLElement>("[data-caption]")];
+		const fills = tabs.map((tab) => tab.querySelector<HTMLElement>(".hero-seg__fill"));
+		const dwell = Number(root.dataset.dwell) || 6000;
+		const resumeAfter = Number(root.dataset.resume) || 12000;
+
+		let index = 0;
+		let anim: Animation | null = null;
+		let resumeTimer = 0;
+
+		// Four independent reasons to be stopped, resolved by one predicate rather
+		// than four competing play/pause calls — otherwise "tab returns to the
+		// foreground while scrolled away" resumes a timer nobody can see.
+		// `auto` is the standing capability (reduced motion turns it off for good);
+		// `manual` is the temporary hold a hand-picked slide takes out.
+		const auto = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+		let manual = false;
+		let onscreen = true;
+		let focused = false;
+		const running = () => auto && !manual && onscreen && !focused && !document.hidden;
+
+		// Fetch the plate after this one ahead of its turn. Slides 2-3 ship
+		// `loading="lazy"` so they never compete with the LCP image, but an
+		// in-viewport lazy image is still a race against the dwell — and a lost
+		// race crossfades to an empty frame. Flipping a pending lazy image to
+		// eager starts the fetch immediately.
+		function warm(i: number) {
+			const img = panes[i]?.querySelector("img");
+			if (img && img.loading === "lazy") img.loading = "eager";
+		}
+
+		function show(next: number) {
+			index = next;
+			// The one we're showing (a hand-picked jump can outrun the warm chain)
+			// and the one after it.
+			warm(next);
+			warm((next + 1) % panes.length);
+			panes.forEach((pane, i) => {
+				pane.toggleAttribute("data-on", i === index);
+				// One image alt reaches the screen reader, not three.
+				pane.setAttribute("aria-hidden", i === index ? "false" : "true");
+			});
+			captions.forEach((caption, i) => {
+				caption.toggleAttribute("data-on", i === index);
+				caption.setAttribute("aria-hidden", i === index ? "false" : "true");
+			});
+			tabs.forEach((tab, i) => {
+				tab.toggleAttribute("data-on", i === index);
+				tab.setAttribute("aria-selected", i === index ? "true" : "false");
+				tab.tabIndex = i === index ? 0 : -1;
+			});
+			// Only the active segment carries fill; the rest are bare tracks. While
+			// no timer will run (hand-picked slide, reduced motion) it rests full,
+			// so the active segment reads as chosen rather than as barely started.
+			const idle = !auto || manual;
+			fills.forEach((fill, i) => {
+				if (fill) fill.style.transform = idle && i === index ? "scaleX(1)" : "scaleX(0)";
+			});
+		}
+
+		// `anim.finished` rejects with AbortError on cancel(); we never touch the
+		// promise, and the handler is cleared first so a cancel can't advance.
+		function stop() {
+			if (!anim) return;
+			anim.onfinish = null;
+			anim.cancel();
+			anim = null;
+		}
+
+		function tick() {
+			stop();
+			if (!running()) return;
+			const fill = fills[index];
+			if (!fill) return;
+			anim = fill.animate([{ transform: "scaleX(0)" }, { transform: "scaleX(1)" }], {
+				duration: dwell,
+				easing: "linear",
+				fill: "forwards",
+			});
+			anim.onfinish = () => {
+				show((index + 1) % panes.length);
+				tick();
+			};
+		}
+
+		function sync() {
+			if (running()) {
+				if (anim) anim.play();
+				else tick();
+			} else {
+				anim?.pause();
+			}
+		}
+
+		function goto(next: number) {
+			// The reader picked a plate, so hold it — but only for a while. Each
+			// new pick restarts the countdown, so walking the rail never leaves a
+			// resume queued from an earlier click.
+			stop();
+			manual = true;
+			show(next);
+			clearTimeout(resumeTimer);
+			if (!auto) return;
+			resumeTimer = window.setTimeout(() => {
+				manual = false;
+				// sync() decides whether it may actually start — offscreen or a
+				// backgrounded tab still wins over an expired hold.
+				sync();
+			}, resumeAfter);
+		}
+
+		tabs.forEach((tab, i) => {
+			tab.addEventListener("click", () => goto(i));
+		});
+
+		tablist?.addEventListener("keydown", (event) => {
+			const last = tabs.length - 1;
+			let next: number | null = null;
+			if (event.key === "ArrowRight") next = index === last ? 0 : index + 1;
+			else if (event.key === "ArrowLeft") next = index === 0 ? last : index - 1;
+			else if (event.key === "Home") next = 0;
+			else if (event.key === "End") next = last;
+			if (next === null) return;
+			event.preventDefault();
+			goto(next);
+			tabs[next]?.focus();
+		});
+
+		// Deliberately no hover hold: pointing at the plate to look at it is not a
+		// request to stop the reel, and on touch the pointerenter/pointerleave
+		// pair is unreliable enough to strand it paused.
+
+		root.addEventListener("focusin", () => {
+			focused = true;
+			sync();
+		});
+		root.addEventListener("focusout", (event) => {
+			// Arrowing between tabs fires focusout before focusin; only a move that
+			// actually leaves the carousel should release the hold.
+			if (root.contains(event.relatedTarget as Node | null)) return;
+			focused = false;
+			sync();
+		});
+
+		document.addEventListener("visibilitychange", sync);
+
+		// No timer burns while the reader is further down the page.
+		new IntersectionObserver(
+			(entries) => {
+				for (const entry of entries) onscreen = entry.isIntersecting;
+				sync();
+			},
+			{ threshold: 0.25 },
+		).observe(root);
+
+		// Chain slide 2 off slide 1's load rather than starting both at once: the
+		// LCP image keeps the connection to itself, and the next plate is still
+		// fetching a full dwell before it's needed.
+		const first = panes[0]?.querySelector("img");
+		if (first && !first.complete) first.addEventListener("load", () => warm(1), { once: true });
+		else warm(1);
+
+		if (auto) {
+			if (fills[0]) fills[0].style.transform = "scaleX(0)";
+			tick();
+		}
+	}
+</script>

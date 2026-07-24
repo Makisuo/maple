@@ -53,25 +53,7 @@ interface SettleState {
 	readonly subscriptions: Map<string, Set<SubscriptionTracker>>
 }
 
-/**
- * The debug tap of one registry (see `Debug.attach`): `write`/`emit` open a
- * causality window around the synchronous dispatch of one publication and
- * return its closer; `instance` records model lifecycle. `undefined` on the
- * registry means debugging is off — the hot paths pay one property check.
- */
-export interface DebugSink {
-	readonly write: (store: { readonly id: string; readonly name?: string }, value: unknown) => () => void
-	readonly emit: (event: { readonly id: string; readonly name?: string }, value: unknown) => () => void
-	readonly instance: (key: InstanceKey, phase: "created" | "disposed") => void
-	/** Called for every descriptor the port-naming walk touches at instance
-	 * construction — the inspector's directory for retroactive log names and
-	 * derived-store snapshot evaluation. */
-	readonly port: (port: { readonly id: string; readonly name?: string }) => void
-}
-
 export interface RegistryService {
-	/** Mutable: installed and removed by `Debug.attach`/`detach`. */
-	debug: DebugSink | undefined
 	readonly scope: Scope.Scope
 	readonly stores: Map<string, SubscriptionRef.SubscriptionRef<any>>
 	readonly events: Map<string, PubSub.PubSub<any>>
@@ -272,7 +254,6 @@ export class Registry extends Context.Service<Registry, RegistryService>()("@uni
 				idleTimeToLive: (key) => lifetimes.get(key.model) ?? defaultIdleTimeToLive,
 			})
 			return Registry.of({
-				debug: undefined,
 				scope,
 				stores: new Map(),
 				events: new Map(),
