@@ -37,6 +37,9 @@ export const Traces = table("traces", {
 	LinksAttributes: T.array(T.map(T.string, T.string)),
 	SampleRate: T.float64,
 	IsEntryPoint: T.uint8,
+	ResourceAttributeItems: T.array(T.string),
+	ScopeAttributeItems: T.array(T.string),
+	SpanAttributeItems: T.array(T.string),
 })
 
 export const TraceDetailSpans = table("trace_detail_spans", {
@@ -94,6 +97,9 @@ export const Logs = table("logs", {
 	ScopeVersion: T.string,
 	ScopeAttributes: T.map(T.string, T.string),
 	LogAttributes: T.map(T.string, T.string),
+	ResourceAttributeItems: T.array(T.string),
+	ScopeAttributeItems: T.array(T.string),
+	LogAttributeItems: T.array(T.string),
 })
 
 export const ServiceOverviewSpans = table("service_overview_spans", {

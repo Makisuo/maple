@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { format } from "oxfmt"
 import { emitJsonPathSpec } from "../packages/domain/src/clickhouse/ddl-emitter"
 import { clickHouseSchemaVersion } from "../packages/domain/src/clickhouse/migrations"
 import { projectRevision as clickHouseProjectRevision } from "../packages/domain/src/generated/clickhouse-schema"
@@ -64,7 +65,7 @@ for (const name of INGEST_DATASOURCES) {
 	ingestDatasources[name] = buildMapping(name, emitJsonPathSpec(ds))
 }
 
-const renderedLocal = `${JSON.stringify(
+const renderedLocalSource = `${JSON.stringify(
 	{
 		projectRevision: clickHouseProjectRevision,
 		orgPlaceholder: ORG_PLACEHOLDER,
@@ -73,6 +74,17 @@ const renderedLocal = `${JSON.stringify(
 	null,
 	2,
 )}\n`
+const renderedLocalResult = await format(localOutputPath, renderedLocalSource, {
+	printWidth: 110,
+	tabWidth: 4,
+	useTabs: true,
+})
+if (renderedLocalResult.errors.length > 0) {
+	throw new Error(
+		`Failed to format generated local insert mappings: ${renderedLocalResult.errors[0]!.message}`,
+	)
+}
+const renderedLocal = renderedLocalResult.code
 
 const renderedRust = renderRustMappings(clickHouseProjectRevision, ingestDatasources)
 

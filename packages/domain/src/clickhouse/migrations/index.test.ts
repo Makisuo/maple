@@ -12,6 +12,7 @@ import {
 	serviceOperationsHourlyBackfill,
 	serviceOverviewHourlyBackfill,
 } from "./0009_one_year_service_history"
+import { migration_0010_search_indexes } from "./0010_search_indexes"
 import { migrations } from "./index"
 
 const backfills = migration_0004_service_namespace_projections.statements.filter(
@@ -26,8 +27,22 @@ const renderedSql = migration_0004_service_namespace_projections.statements
 
 describe("ClickHouse migrations", () => {
 	it("keeps migrations ordered by version", () => {
-		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
-		expect(migrations.at(-1)).toBe(migration_0009_one_year_service_history)
+		expect(migrations.map((m) => m.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+		expect(migrations.at(-1)).toBe(migration_0010_search_indexes)
+	})
+
+	it("adds the portable search substrate without requiring experimental text indexes", () => {
+		const sql = migration_0010_search_indexes.statements.join("\n")
+
+		expect(sql).toContain("ResourceAttributeItems Array(String) DEFAULT arrayMap")
+		expect(sql).toContain("LogAttributeItems Array(String) DEFAULT arrayMap")
+		expect(sql).toContain("SpanAttributeItems Array(String) DEFAULT arrayMap")
+		expect(sql).toContain("concat(k, char(31), v)")
+		expect(sql).toContain("idx_lower_body lower(Body) TYPE tokenbf_v1")
+		expect(sql).toContain("idx_log_attr_keys mapKeys(LogAttributes) TYPE bloom_filter")
+		expect(sql).toContain("MATERIALIZE INDEX idx_lower_body")
+		expect(sql).not.toContain("TYPE text(")
+		expect(sql).not.toContain("OPTIMIZE TABLE")
 	})
 
 	it("adds monthly annual service rollups and coordinated retained-source backfills", () => {

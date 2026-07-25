@@ -1,5 +1,8 @@
 import { defineDatasource, t, engine, column, type InferRow } from "@tinybirdco/sdk"
 
+const attributeItemsExpr = (mapColumn: string): string =>
+	`arrayMap((k, v) -> concat(k, char(31), v), mapKeys(${mapColumn}), mapValues(${mapColumn}))`
+
 /**
  * OpenTelemetry logs datasource
  * Matches the official OpenTelemetry Collector Tinybird exporter format
@@ -36,6 +39,9 @@ export const logs = defineDatasource("logs", {
 		LogAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.log_attributes",
 		}),
+		ResourceAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
+		ScopeAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
+		LogAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("LogAttributes")),
 	},
 	// `TraceId` is not in the sorting key and a trace spans many services (so
 	// `ServiceName` isn't fixed either) — a `WHERE TraceId = ...` lookup would
@@ -48,10 +54,76 @@ export const logs = defineDatasource("logs", {
 			type: "bloom_filter(0.01)",
 			granularity: 1,
 		},
+		{
+			name: "idx_resource_attr_keys",
+			expr: "mapKeys(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_resource_attr_vals",
+			expr: "mapValues(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_keys",
+			expr: "mapKeys(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_vals",
+			expr: "mapValues(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_attr_keys",
+			expr: "mapKeys(LogAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_attr_vals",
+			expr: "mapValues(LogAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_lower_body",
+			expr: "lower(Body)",
+			type: "tokenbf_v1(32768, 3, 0)",
+			granularity: 8,
+		},
+		{
+			name: "idx_resource_attr_items_text",
+			expr: "ResourceAttributeItems",
+			type: "text(tokenizer = 'array')",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_items_text",
+			expr: "ScopeAttributeItems",
+			type: "text(tokenizer = 'array')",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_attr_items_text",
+			expr: "LogAttributeItems",
+			type: "text(tokenizer = 'array')",
+			granularity: 1,
+		},
+		{
+			name: "idx_lower_body_text",
+			expr: "lower(Body)",
+			type: "text(tokenizer = 'splitByNonAlpha')",
+			granularity: 64,
+		},
 	],
 	engine: engine.mergeTree({
 		partitionKey: "toDate(TimestampTime)",
-		sortingKey: ["OrgId", "ServiceName", "TimestampTime", "Timestamp"],
+		sortingKey: ["OrgId", "toStartOfFiveMinutes(Timestamp)", "ServiceName", "Timestamp"],
 		ttl: "toDate(TimestampTime) + INTERVAL 30 DAY",
 	}),
 })
@@ -167,6 +239,9 @@ export const traces = defineDatasource("traces", {
 		 * Server/Consumer kinds, or any root span (ParentSpanId = '').
 		 */
 		IsEntryPoint: t.uint8().defaultExpr(IS_ENTRY_POINT_EXPR),
+		ResourceAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
+		ScopeAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
+		SpanAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("SpanAttributes")),
 	},
 	indexes: [
 		{
@@ -197,6 +272,36 @@ export const traces = defineDatasource("traces", {
 			name: "idx_resource_attr_vals",
 			expr: "mapValues(ResourceAttributes)",
 			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_keys",
+			expr: "mapKeys(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_vals",
+			expr: "mapValues(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_resource_attr_items_text",
+			expr: "ResourceAttributeItems",
+			type: "text(tokenizer = 'array')",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_items_text",
+			expr: "ScopeAttributeItems",
+			type: "text(tokenizer = 'array')",
+			granularity: 1,
+		},
+		{
+			name: "idx_span_attr_items_text",
+			expr: "SpanAttributeItems",
+			type: "text(tokenizer = 'array')",
 			granularity: 1,
 		},
 	],

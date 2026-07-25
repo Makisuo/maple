@@ -15,9 +15,11 @@ import { orgClickHouseSchemaApplyRuns, orgClickHouseSettings } from "@maple/db"
 import { createMaplePgClient, type MaplePgClient } from "@maple/db/client"
 import {
 	clickHouseSchemaVersion,
+	clickHouseSchemaFeatures,
 	computeSchemaDiff,
 	expandMigrationToSteps,
 	extractColumnDefinition,
+	featureSupportedByVersion,
 	migrations as clickHouseMigrations,
 	parseEmittedStatement,
 	qualifyStatementForDatabase,
@@ -116,12 +118,24 @@ const parseJsonEachRow = <T>(text: string): ReadonlyArray<T> => {
 // --- migration bookkeeping (mirrors the service + CLI) ----------------------
 
 const MIGRATIONS_TABLE = "_maple_schema_migrations"
+const FEATURES_TABLE = "_maple_schema_features"
 const quote = (name: string): string => `\`${name.replace(/`/g, "``")}\``
 
 const ensureMigrationsTable = (cfg: ChConfig) =>
 	exec(
 		cfg,
 		`CREATE TABLE IF NOT EXISTS ${quote(MIGRATIONS_TABLE)} (version UInt32, applied_at DateTime64(3) DEFAULT now64(3), description String) ENGINE = MergeTree ORDER BY version`,
+	)
+
+const ensureFeaturesTable = (cfg: ChConfig) =>
+	exec(
+		cfg,
+		`CREATE TABLE IF NOT EXISTS ${quote(FEATURES_TABLE)} (
+  id String,
+  revision UInt32,
+  applied_at DateTime64(3) DEFAULT now64(3),
+  description String
+) ENGINE = ReplacingMergeTree(revision) ORDER BY id`,
 	)
 
 const readAppliedVersions = async (cfg: ChConfig): Promise<Set<number>> => {
@@ -134,6 +148,28 @@ const recordVersion = (cfg: ChConfig, version: number, description: string) =>
 		cfg,
 		`INSERT INTO ${quote(MIGRATIONS_TABLE)} (version, description) VALUES (${version}, '${description.replace(/'/g, "''")}')`,
 	)
+
+const readAppliedFeatureRevisions = async (cfg: ChConfig): Promise<Map<string, number>> => {
+	const text = await exec(
+		cfg,
+		`SELECT id, max(revision) AS revision FROM ${quote(FEATURES_TABLE)} GROUP BY id FORMAT JSONEachRow`,
+	)
+	return new Map(
+		parseJsonEachRow<{ id: string; revision: string | number }>(text).map((row) => [
+			row.id,
+			Number(row.revision),
+		]),
+	)
+}
+
+const recordFeature = (cfg: ChConfig, id: string, revision: number, description: string) =>
+	exec(
+		cfg,
+		`INSERT INTO ${quote(FEATURES_TABLE)} (id, revision, description) VALUES ('${id.replace(/'/g, "''")}', ${revision}, '${description.replace(/'/g, "''")}')`,
+	)
+
+const normalizeExpression = (value: string): string =>
+	value.replace(/`/g, "").replace(/\s+/g, "").toLowerCase()
 
 // --- config load + decrypt (imperative mirror of the service helper) --------
 
@@ -288,6 +324,9 @@ async function runWithDb(
 
 	try {
 		await step.do("ensure-bookkeeping", STEP, () => ensureMigrationsTable(cfg).then(() => undefined))
+		await step.do("ensure-feature-bookkeeping", STEP, () =>
+			ensureFeaturesTable(cfg).then(() => undefined),
+		)
 		const applied = await step.do("read-applied", STEP, () =>
 			readAppliedVersions(cfg).then((s) => [...s]),
 		)
@@ -322,6 +361,52 @@ async function runWithDb(
 				recordVersion(cfg, migration.version, migration.description).then(() => undefined),
 			)
 			appliedVersions.push(migration.version)
+		}
+
+		const serverVersion = await step.do("read-clickhouse-version", STEP, () =>
+			exec(cfg, "SELECT version() FORMAT TabSeparated").then((value) => value.trim()),
+		)
+		const appliedFeatureEntries = await step.do("read-applied-features", STEP, () =>
+			readAppliedFeatureRevisions(cfg).then((entries) => [...entries]),
+		)
+		const appliedFeatureRevisions = new Map(appliedFeatureEntries)
+		for (const feature of clickHouseSchemaFeatures) {
+			if (!featureSupportedByVersion(feature, serverVersion)) continue
+			if ((appliedFeatureRevisions.get(feature.id) ?? 0) >= feature.revision) continue
+
+			let satisfied = false
+			if (feature.satisfiedBySortingKey) {
+				satisfied = await step.do(`feature-${feature.id}:inspect`, STEP, async () => {
+					const table = feature.satisfiedBySortingKey!.table.replace(/'/g, "''")
+					const result = await exec(
+						cfg,
+						`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
+					)
+					const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
+					return (
+						normalizeExpression(row?.sorting_key ?? "") ===
+						normalizeExpression(feature.satisfiedBySortingKey!.expected)
+					)
+				})
+			}
+
+			if (!satisfied) {
+				for (let index = 0; index < feature.statements.length; index++) {
+					const statement = feature.statements[index]!
+					await step.do(`feature-${feature.id}:${index + 1}`, STEP, async () => {
+						await updateRun(
+							db,
+							orgId,
+							{ phase: `feature ${feature.id} · ${index + 1}/${feature.statements.length}` },
+							Date.now(),
+						)
+						await exec(cfg, statement)
+					})
+				}
+			}
+			await step.do(`feature-${feature.id}:record`, STEP, () =>
+				recordFeature(cfg, feature.id, feature.revision, feature.description).then(() => undefined),
+			)
 		}
 
 		// Snapshot-diff additive pass: create snapshot objects missing on the

@@ -19,6 +19,12 @@ import type { TracesMetric, AttributeFilter, MetricType } from "../query-engine"
 import type { OrgId } from "@maple/domain"
 import { unsafeCompiledQuery, type CompiledQuery } from "@maple-dev/clickhouse-builder"
 import { Array as A, Match, Result } from "effect"
+import {
+	attributeIndexMode,
+	baselineWarehouseCapabilities,
+	logBodySearchMode,
+	type WarehouseCapabilities,
+} from "../capabilities"
 
 type CompileTarget = Parameters<typeof CH.compile>[0]
 
@@ -41,7 +47,11 @@ function parseMetricType(value: string | undefined): MetricType | undefined {
  * Compiles a named pipe + params into a SQL string.
  * Returns undefined for unknown pipes (caller should handle gracefully).
  */
-export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiledQuery | undefined {
+export function compilePipeQuery(
+	pipe: string,
+	params: PipeParams,
+	capabilities: WarehouseCapabilities = baselineWarehouseCapabilities(),
+): PipeCompiledQuery | undefined {
 	const orgId = String(params.org_id)
 	const startTime = String(params.start_time ?? "2023-01-01 00:00:00")
 	const endTime = String(params.end_time ?? "2099-12-31 23:59:59")
@@ -84,6 +94,7 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 				eraseType(
 					CH.compile(
 						CH.tracesRootListQuery({
+							attributeIndexMode: attributeIndexMode(capabilities, "traces"),
 							limit: int("limit", 100),
 							offset: int("offset", 0),
 							cursor: str("cursor"),
@@ -204,6 +215,8 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 				eraseType(
 					CH.compile(
 						CH.logsListQuery({
+							attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+							bodySearchMode: logBodySearchMode(capabilities),
 							serviceName: str("service"),
 							severity: str("severity"),
 							minSeverity: int("min_severity"),
@@ -226,6 +239,8 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 				eraseType(
 					CH.compile(
 						CH.logsCountQuery({
+							attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+							bodySearchMode: logBodySearchMode(capabilities),
 							serviceName: str("service"),
 							severity: str("severity"),
 							traceId: str("trace_id"),
@@ -559,7 +574,10 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 			}),
 			// ----- Custom charts -----
 			Match.when("custom_traces_timeseries", () => {
-				const tsOpts = pipeParamsToTracesTimeseriesOpts(params)
+				const tsOpts = {
+					...pipeParamsToTracesTimeseriesOpts(params),
+					attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+				}
 				return eraseType(
 					CH.compile(CH.tracesTimeseriesQuery(tsOpts), {
 						orgId,
@@ -570,7 +588,10 @@ export function compilePipeQuery(pipe: string, params: PipeParams): PipeCompiled
 				)
 			}),
 			Match.when("custom_traces_breakdown", () => {
-				const bdOpts = pipeParamsToTracesBreakdownOpts(params)
+				const bdOpts = {
+					...pipeParamsToTracesBreakdownOpts(params),
+					attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+				}
 				return eraseType(CH.compile(CH.tracesBreakdownQuery(bdOpts), { orgId, startTime, endTime }))
 			}),
 			Match.when("top_operations", () =>

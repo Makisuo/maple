@@ -38,13 +38,36 @@ import type {
 	WarehouseQueryServiceShape,
 	WarehouseSqlClient,
 } from "./ports"
+import {
+	baselineWarehouseCapabilities,
+	deriveWarehouseCapabilities,
+	type WarehouseCapabilities,
+	type WarehouseColumnMetadataRow,
+	type WarehouseIndexMetadataRow,
+	type WarehouseProjectionMetadataRow,
+	type WarehouseSettingMetadataRow,
+} from "../capabilities"
 
 const CLIENT_CACHE_TTL_MS = 30_000
+const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000
+const CAPABILITY_AWARE_PIPES: ReadonlySet<string> = new Set([
+	"list_logs",
+	"logs_count",
+	"list_traces",
+	"custom_traces_timeseries",
+	"custom_traces_breakdown",
+])
 
 interface CachedClient {
 	client: WarehouseSqlClient
 	cacheKey: string
 	expiresAt: number
+}
+
+interface CachedCapabilities {
+	readonly capabilities: WarehouseCapabilities
+	readonly cacheKey: string
+	readonly expiresAt: number
 }
 
 const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
@@ -100,6 +123,7 @@ const clientTimeoutMs = (
  */
 export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQueryServiceShape => {
 	const clientCache = new Map<string, CachedClient>()
+	const capabilitiesCache = new Map<string, CachedCapabilities>()
 
 	const getCachedOrCreateClient = (
 		cacheKey: string,
@@ -115,6 +139,80 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		clientCache.set(cacheKey, { client, cacheKey: configKey, expiresAt: nowMs + CLIENT_CACHE_TTL_MS })
 		return client
 	}
+
+	const inspectCapabilities = async (
+		client: WarehouseSqlClient,
+		allowSettingOverrides: boolean,
+	): Promise<WarehouseCapabilities> => {
+		try {
+			const [versionResult, indexResult, columnResult, projectionResult, settingResult] =
+				await Promise.all([
+					client.sql("SELECT version() AS version"),
+					client.sql(
+						`SELECT table, name, type, expr AS expression
+FROM system.data_skipping_indices
+WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
+					),
+					client.sql(
+						`SELECT table, name
+FROM system.columns
+WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
+					),
+					client
+						.sql(
+							`SELECT table, name
+FROM system.projections
+WHERE database = currentDatabase() AND table = 'logs'`,
+						)
+						.catch(() => ({ data: [] })),
+					client
+						.sql(
+							`SELECT name, value
+FROM system.settings
+WHERE name = 'enable_full_text_index'`,
+						)
+						.catch(() => ({ data: [] })),
+				])
+			const versionRow = versionResult.data[0] as { version?: unknown } | undefined
+			return deriveWarehouseCapabilities({
+				serverVersion: typeof versionRow?.version === "string" ? versionRow.version : undefined,
+				indexes: indexResult.data as unknown as ReadonlyArray<WarehouseIndexMetadataRow>,
+				columns: columnResult.data as unknown as ReadonlyArray<WarehouseColumnMetadataRow>,
+				projections:
+					projectionResult.data as unknown as ReadonlyArray<WarehouseProjectionMetadataRow>,
+				settings: settingResult.data as unknown as ReadonlyArray<WarehouseSettingMetadataRow>,
+				allowSettingOverrides,
+			})
+		} catch {
+			// Metadata permissions are optional for runtime query users. Falling
+			// back is a performance choice, never a request failure.
+			return baselineWarehouseCapabilities()
+		}
+	}
+
+	const resolveCapabilities = Effect.fn("WarehouseQueryService.resolveCapabilities")(function* (
+		tenant: ExecutionTenant,
+		options?: SqlQueryOptions,
+	) {
+		const purpose: RoutePurpose = options?.route === "ingest" ? "ingest" : "read"
+		const resolved = yield* deps.resolveRoute(tenant, purpose, "capabilities")
+		const nowMs = yield* Clock.currentTimeMillis
+		const configKey = sqlClientCacheKey(resolved.config)
+		const cached = capabilitiesCache.get(resolved.clientCacheKey)
+		if (cached && cached.cacheKey === configKey && cached.expiresAt > nowMs) {
+			return cached.capabilities
+		}
+		const client = getCachedOrCreateClient(resolved.clientCacheKey, resolved.config, nowMs)
+		const capabilities = yield* Effect.promise(() =>
+			inspectCapabilities(client, resolved.config.kind !== "tinybird"),
+		)
+		capabilitiesCache.set(resolved.clientCacheKey, {
+			capabilities,
+			cacheKey: configKey,
+			expiresAt: nowMs + CAPABILITIES_CACHE_TTL_MS,
+		})
+		return capabilities
+	})
 
 	// Client-kind is load-bearing: the service-map DB-edge MV
 	// (service_map_db_edges_hourly_mv) only counts SpanKind IN ('Client','Producer').
@@ -304,6 +402,17 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			Effect.catchTag("@maple/http/errors/RawSqlValidationError", Effect.die),
 		)
 
+	const withCapabilitySettings = (
+		capabilities: WarehouseCapabilities | undefined,
+		options?: SqlQueryOptions,
+	): SqlQueryOptions | undefined =>
+		capabilities?.fullTextSearchSetting === "available"
+			? {
+					...options,
+					settings: { ...options?.settings, enableFullTextIndex: 1 },
+				}
+			: options
+
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
@@ -319,10 +428,17 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		}
 
-		const compiled = compilePipeQuery(payload.pipeName, {
-			...payload.params,
-			org_id: tenant.orgId,
-		})
+		const capabilities = CAPABILITY_AWARE_PIPES.has(payload.pipeName)
+			? yield* resolveCapabilities(tenant, options)
+			: undefined
+		const compiled = compilePipeQuery(
+			payload.pipeName,
+			{
+				...payload.params,
+				org_id: tenant.orgId,
+			},
+			capabilities ?? baselineWarehouseCapabilities(),
+		)
 
 		if (!compiled) {
 			return yield* new WarehouseValidationError({
@@ -331,7 +447,12 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		}
 
-		const rows = yield* executeTrustedSql(tenant, compiled.sql, payload.pipeName, options)
+		const rows = yield* executeTrustedSql(
+			tenant,
+			compiled.sql,
+			payload.pipeName,
+			withCapabilitySettings(capabilities, options),
+		)
 		const decodedRows = yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
@@ -391,13 +512,21 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 	): SqlQueryOptions | undefined =>
 		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
 
-	const compiledQuery = Effect.fn("WarehouseQueryService.compiledQuery")(function* <T>(
+	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) {
-		const rows = yield* sqlQuery(tenant, compiled.sql, withCompiledRouting(compiled, options))
-		return yield* compiled.decodeRows(rows).pipe(
+		const capabilities =
+			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
+		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		const executionOptions = withCapabilitySettings(capabilities, options)
+		yield* Effect.annotateCurrentSpan(
+			"query.optimization.capabilityAware",
+			typeof compiled === "function",
+		)
+		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		return yield* selected.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
@@ -409,13 +538,33 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		)
 	})
 
+	const compiledQuery = <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		options?: SqlQueryOptions,
+	) => executeCompiledQuery(tenant, compiled, options)
+
+	const compiledQueryWithCapabilities = <T>(
+		tenant: ExecutionTenant,
+		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
+		options?: SqlQueryOptions,
+	) => executeCompiledQuery(tenant, compile, options)
+
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) {
-		const rows = yield* sqlQuery(tenant, compiled.sql, withCompiledRouting(compiled, options))
-		return yield* compiled.decodeFirstRow(rows).pipe(
+		const capabilities =
+			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
+		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		const executionOptions = withCapabilitySettings(capabilities, options)
+		yield* Effect.annotateCurrentSpan(
+			"query.optimization.capabilityAware",
+			typeof compiled === "function",
+		)
+		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		return yield* selected.decodeFirstRow(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
@@ -540,6 +689,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		sqlQuery,
 		rawSqlQuery,
 		compiledQuery,
+		compiledQueryWithCapabilities,
 		compiledQueryFirst,
 		ingest,
 		asExecutor,

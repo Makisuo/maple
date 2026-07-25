@@ -110,7 +110,19 @@ On a clean install, migration 0001 creates **20 tables** (datasources) and **22 
 - **MV-populated tables**: `service_usage`, `service_map_spans`, `service_map_children`, `service_map_edges_hourly`, `service_overview_spans`, `error_spans`, `error_events`, `trace_list_mv`, `trace_detail_spans`, `attribute_keys_hourly`, `attribute_values_hourly`, `traces_aggregates_hourly`, `logs_aggregates_hourly`
 - **Materialized views**: 22 MVs that fan out from the direct-ingest tables to populate the MV-populated tables
 
-Every table is partitioned by date and carries a 90-day TTL (365 days on metrics) — adjust by writing a follow-up migration if your retention requirements differ.
+Every table is partitioned by date and carries a TTL, tiered by how raw the data is:
+
+| Retention | Tables |
+| --- | --- |
+| **30 days** | `traces`, `trace_detail_spans`, `logs`, `service_map_spans`, `service_map_children`, `service_overview_spans`, `trace_list_mv` |
+| **90 days** | `error_spans`, `error_events`, `error_events_by_time`, `metrics_*`, `attribute_*_hourly`, `metric_catalog` |
+| **365 days** | hourly rollups (`*_hourly`), `service_usage`, `alert_checks` |
+
+Adjust by writing a follow-up migration if your retention requirements differ.
+
+> **Changing a TTL requires an `ALTER`, not just a datasource edit.** Migration 0001 re-exports the generated snapshot, and every statement in it is `CREATE TABLE IF NOT EXISTS` — so on a cluster whose tables already exist, re-running it is a no-op and the old TTL survives. Editing `datasources.ts` alone therefore changes **new installs only**. Ship a paired `ALTER TABLE … MODIFY TTL` delta (see `0011_align_raw_telemetry_retention.ts`) or existing clusters silently keep the previous retention. This exact gap let a production cluster accumulate 3× its intended trace volume until the disk filled.
+>
+> When lowering a TTL, set `ttl_only_drop_parts = 1` **first**. These tables partition on the same expression their TTL keys off, so expired parts are always wholly expired — the setting turns eviction into a whole-partition drop instead of a multi-TiB part rewrite.
 
 ## Ingest options
 

@@ -39,3 +39,9 @@ export {
 	type TableDiffEntry,
 } from "./diff"
 export { projectRevision as clickHouseProjectRevision } from "../generated/clickhouse-schema"
+export {
+	clickHouseSchemaFeatures,
+	clickHouseVersionAtLeast,
+	featureSupportedByVersion,
+	type ClickHouseSchemaFeature,
+} from "./features"

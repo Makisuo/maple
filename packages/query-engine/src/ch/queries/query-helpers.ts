@@ -12,6 +12,7 @@ import type { ColumnAccessor } from "@maple-dev/clickhouse-builder"
 import type { ServiceOverviewSpans, Traces, TracesAggregatesHourly } from "../tables"
 import { MetricsSum, MetricsGauge, MetricsHistogram, MetricsExpHistogram } from "../tables"
 import { buildAttrFilterCondition, httpDisplaySpanName } from "../../traces-shared"
+import type { AttributeIndexMode } from "../../capabilities"
 
 // ---------------------------------------------------------------------------
 // APDEX expressions
@@ -108,6 +109,7 @@ export interface TracesBaseWhereOpts {
 	excludedSpanNames?: readonly string[]
 	excludedEnvironments?: readonly string[]
 	excludedNamespaces?: readonly string[]
+	attributeIndexMode?: AttributeIndexMode
 }
 
 /**
@@ -217,12 +219,12 @@ export function tracesBaseWhereConditions(
 	}
 	if (opts.attributeFilters) {
 		for (const af of opts.attributeFilters) {
-			conditions.push(buildAttrFilterCondition(af, "SpanAttributes"))
+			conditions.push(buildAttrFilterCondition(af, "SpanAttributes", opts.attributeIndexMode))
 		}
 	}
 	if (opts.resourceAttributeFilters) {
 		for (const rf of opts.resourceAttributeFilters) {
-			conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes"))
+			conditions.push(buildAttrFilterCondition(rf, "ResourceAttributes", opts.attributeIndexMode))
 		}
 	}
 	if (opts.excludedServiceNames?.length) {

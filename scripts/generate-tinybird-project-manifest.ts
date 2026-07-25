@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
+import { format } from "oxfmt"
 import {
 	buildTinybirdProjectManifest,
 	renderTinybirdProjectManifestModule,
@@ -12,7 +13,18 @@ const outputPath = fileURLToPath(
 const checkMode = process.argv.includes("--check")
 
 const manifest = await buildTinybirdProjectManifest()
-const renderedModule = renderTinybirdProjectManifestModule(manifest)
+const renderedModuleResult = await format(outputPath, renderTinybirdProjectManifestModule(manifest), {
+	printWidth: 110,
+	semi: false,
+	tabWidth: 4,
+	useTabs: true,
+})
+if (renderedModuleResult.errors.length > 0) {
+	throw new Error(
+		`Failed to format generated Tinybird project manifest: ${renderedModuleResult.errors[0]!.message}`,
+	)
+}
+const renderedModule = renderedModuleResult.code
 let existingModule = ""
 
 try {

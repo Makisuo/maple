@@ -11,12 +11,15 @@
 
 import {
 	expandMigrationToSteps,
+	clickHouseSchemaFeatures,
+	featureSupportedByVersion,
 	migrations as clickHouseMigrations,
 	renderStatementFull,
 } from "@maple/domain/clickhouse"
 import { exec, type ClickHouseConfig } from "./client"
 
 const MIGRATIONS_TABLE = "_maple_schema_migrations"
+const FEATURES_TABLE = "_maple_schema_features"
 
 interface AppliedRow {
 	readonly version: number
@@ -30,6 +33,16 @@ export const bundledMigrations = clickHouseMigrations
 export interface ApplyResult {
 	readonly applied: ReadonlyArray<{ version: number; description: string }>
 	readonly skipped: ReadonlyArray<{ version: number; description: string }>
+	readonly appliedFeatures: ReadonlyArray<{ id: string; description: string }>
+	readonly skippedFeatures: ReadonlyArray<{ id: string; description: string; reason: string }>
+}
+
+export interface SchemaFeaturePlan {
+	readonly id: string
+	readonly description: string
+	readonly state: "pending" | "unsupported"
+	readonly reason?: string
+	readonly statements: ReadonlyArray<string>
 }
 
 /**
@@ -39,10 +52,13 @@ export interface ApplyResult {
  */
 export async function applyMigrations(config: ClickHouseConfig): Promise<ApplyResult> {
 	await ensureMigrationsTable(config)
+	await ensureFeaturesTable(config)
 	const appliedVersions = await readAppliedVersions(config)
 
 	const applied: Array<{ version: number; description: string }> = []
 	const skipped: Array<{ version: number; description: string }> = []
+	const appliedFeatures: Array<{ id: string; description: string }> = []
+	const skippedFeatures: Array<{ id: string; description: string; reason: string }> = []
 
 	for (const migration of bundledMigrations) {
 		if (appliedVersions.has(migration.version)) {
@@ -60,7 +76,48 @@ export async function applyMigrations(config: ClickHouseConfig): Promise<ApplyRe
 		applied.push({ version: migration.version, description: migration.description })
 	}
 
-	return { applied, skipped }
+	const serverVersion = (await exec(config, "SELECT version() FORMAT TabSeparated")).trim()
+	const appliedFeatureRevisions = await readAppliedFeatureRevisions(config)
+	for (const feature of clickHouseSchemaFeatures) {
+		if (!featureSupportedByVersion(feature, serverVersion)) {
+			skippedFeatures.push({
+				id: feature.id,
+				description: feature.description,
+				reason: `requires ClickHouse ${feature.minClickHouseVersion}+`,
+			})
+			continue
+		}
+		if ((appliedFeatureRevisions.get(feature.id) ?? 0) >= feature.revision) {
+			skippedFeatures.push({
+				id: feature.id,
+				description: feature.description,
+				reason: "already present",
+			})
+			continue
+		}
+
+		let satisfied = false
+		if (feature.satisfiedBySortingKey) {
+			const table = feature.satisfiedBySortingKey.table.replace(/'/g, "''")
+			const result = await exec(
+				config,
+				`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
+			)
+			const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
+			satisfied =
+				normalizeExpression(row?.sorting_key ?? "") ===
+				normalizeExpression(feature.satisfiedBySortingKey.expected)
+		}
+		if (!satisfied) {
+			for (const statement of feature.statements) {
+				await exec(config, statement)
+			}
+		}
+		await recordFeature(config, feature.id, feature.revision, feature.description)
+		appliedFeatures.push({ id: feature.id, description: feature.description })
+	}
+
+	return { applied, skipped, appliedFeatures, skippedFeatures }
 }
 
 /**
@@ -80,6 +137,59 @@ export async function pendingMigrations(
 	return bundledMigrations
 		.filter((m) => !applied.has(m.version))
 		.map((m) => ({ version: m.version, description: m.description }))
+}
+
+/**
+ * Read-only reconciliation plan for performance features. An absent feature
+ * bookkeeping table means every supported feature is pending.
+ */
+export async function pendingSchemaFeatures(
+	config: ClickHouseConfig,
+): Promise<ReadonlyArray<SchemaFeaturePlan>> {
+	const serverVersion = (await exec(config, "SELECT version() FORMAT TabSeparated")).trim()
+	const applied = await readAppliedFeatureRevisions(config).catch((err) => {
+		if (err instanceof Error && /UNKNOWN_TABLE|doesn't exist/i.test(err.message)) {
+			return new Map<string, number>()
+		}
+		throw err
+	})
+	const plan: SchemaFeaturePlan[] = []
+
+	for (const feature of clickHouseSchemaFeatures) {
+		if (!featureSupportedByVersion(feature, serverVersion)) {
+			plan.push({
+				id: feature.id,
+				description: feature.description,
+				state: "unsupported",
+				reason: `requires ClickHouse ${feature.minClickHouseVersion}+`,
+				statements: [],
+			})
+			continue
+		}
+		if ((applied.get(feature.id) ?? 0) >= feature.revision) continue
+
+		let satisfied = false
+		if (feature.satisfiedBySortingKey) {
+			const table = feature.satisfiedBySortingKey.table.replace(/'/g, "''")
+			const result = await exec(
+				config,
+				`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
+			)
+			const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
+			satisfied =
+				normalizeExpression(row?.sorting_key ?? "") ===
+				normalizeExpression(feature.satisfiedBySortingKey.expected)
+		}
+		plan.push({
+			id: feature.id,
+			description: feature.description,
+			state: "pending",
+			reason: satisfied ? "sorting key already satisfies this feature; bookkeeping only" : undefined,
+			statements: satisfied ? [] : feature.statements,
+		})
+	}
+
+	return plan
 }
 
 /**
@@ -125,6 +235,18 @@ async function ensureMigrationsTable(config: ClickHouseConfig): Promise<void> {
 	)
 }
 
+async function ensureFeaturesTable(config: ClickHouseConfig): Promise<void> {
+	await exec(
+		config,
+		`CREATE TABLE IF NOT EXISTS ${quote(FEATURES_TABLE)} (
+			id String,
+			revision UInt32,
+			applied_at DateTime64(3) DEFAULT now64(3),
+			description String
+		) ENGINE = ReplacingMergeTree(revision) ORDER BY id`,
+	)
+}
+
 async function readAppliedVersions(config: ClickHouseConfig): Promise<Set<number>> {
 	const text = await exec(config, `SELECT version FROM ${quote(MIGRATIONS_TABLE)} FORMAT JSONEachRow`)
 	const rows = parseJsonEachRow<{ version: number }>(text)
@@ -142,6 +264,34 @@ async function recordMigration(
 		`INSERT INTO ${quote(MIGRATIONS_TABLE)} (version, description) VALUES (${version}, '${safeDescription}')`,
 	)
 }
+
+async function readAppliedFeatureRevisions(config: ClickHouseConfig): Promise<Map<string, number>> {
+	const text = await exec(
+		config,
+		`SELECT id, max(revision) AS revision FROM ${quote(FEATURES_TABLE)} GROUP BY id FORMAT JSONEachRow`,
+	)
+	return new Map(
+		parseJsonEachRow<{ id: string; revision: number | string }>(text).map((row) => [
+			row.id,
+			Number(row.revision),
+		]),
+	)
+}
+
+async function recordFeature(
+	config: ClickHouseConfig,
+	id: string,
+	revision: number,
+	description: string,
+): Promise<void> {
+	await exec(
+		config,
+		`INSERT INTO ${quote(FEATURES_TABLE)} (id, revision, description) VALUES ('${id.replace(/'/g, "''")}', ${revision}, '${description.replace(/'/g, "''")}')`,
+	)
+}
+
+const normalizeExpression = (value: string): string =>
+	value.replace(/`/g, "").replace(/\s+/g, "").toLowerCase()
 
 function quote(name: string): string {
 	return `\`${name.replace(/`/g, "``")}\``

@@ -67,6 +67,71 @@ describe("logsTimeseriesQuery", () => {
 		const { sql } = compileCH(q, baseParams)
 		expect(sql).toContain("SeverityText = 'ERROR'")
 	})
+
+	it("uses text-index candidates for multi-token body search and retains exact semantics", () => {
+		const { sql } = compileCH(
+			logsTimeseriesQuery({
+				search: "Connection Timeout",
+				bodySearchMode: "text",
+			}),
+			baseParams,
+		)
+
+		expect(sql).toContain("hasAllTokens(lower(Body), 'connection timeout')")
+		expect(sql).toContain("Body ILIKE '%Connection Timeout%'")
+	})
+
+	it("uses portable token bloom candidates but leaves partial-word searches scan-only", () => {
+		const indexed = compileCH(
+			logsCountQuery({ search: "Connection Timeout", bodySearchMode: "tokenbf" }),
+			baseParams,
+		).sql
+		expect(indexed).toContain("hasToken(lower(Body), 'connection')")
+		expect(indexed).toContain("hasToken(lower(Body), 'timeout')")
+		expect(indexed).toContain("Body ILIKE '%Connection Timeout%'")
+
+		const partial = compileCH(
+			logsCountQuery({ search: "time", bodySearchMode: "tokenbf" }),
+			baseParams,
+		).sql
+		expect(partial).not.toContain("hasToken(")
+		expect(partial).toContain("Body ILIKE '%time%'")
+
+		const punctuation = compileCH(
+			logsCountQuery({ search: "foo_bar baz", bodySearchMode: "tokenbf" }),
+			baseParams,
+		).sql
+		expect(punctuation).toContain("hasToken(lower(Body), 'foo')")
+		expect(punctuation).toContain("hasToken(lower(Body), 'bar')")
+		expect(punctuation).toContain("hasToken(lower(Body), 'baz')")
+	})
+
+	it("uses exact KV item candidates for text indexes and exact confirmation", () => {
+		const { sql } = compileCH(
+			logsTimeseriesQuery({
+				attributeIndexMode: "text",
+				attributeFilters: [{ key: "request.id", mode: "equals", value: "req_123" }],
+			}),
+			baseParams,
+		)
+
+		expect(sql).toContain("has(LogAttributeItems, concat('request.id', char(31), 'req_123'))")
+		expect(sql).toContain("LogAttributes['request.id'] = 'req_123'")
+	})
+
+	it("uses independent bloom candidates with exact map confirmation", () => {
+		const { sql } = compileCH(
+			logsTimeseriesQuery({
+				attributeIndexMode: "bloom",
+				attributeFilters: [{ key: "request.id", mode: "equals", value: "req_123" }],
+			}),
+			baseParams,
+		)
+
+		expect(sql).toContain("has(mapKeys(LogAttributes), 'request.id')")
+		expect(sql).toContain("has(mapValues(LogAttributes), 'req_123')")
+		expect(sql).toContain("LogAttributes['request.id'] = 'req_123'")
+	})
 })
 
 // ---------------------------------------------------------------------------

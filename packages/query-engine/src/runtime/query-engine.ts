@@ -36,6 +36,12 @@ import {
 	type WarehouseQuerySettings,
 } from "../profiles"
 import { computeBucketSeconds } from "../datetime"
+import {
+	attributeIndexMode,
+	baselineWarehouseCapabilities,
+	logBodySearchMode,
+	type WarehouseCapabilities,
+} from "../capabilities"
 import { makeExecuteRawSql } from "./raw-sql"
 import { decodeEvalSeries, encodeEvalPoints, type BucketGroupObs } from "./evaluate-bucket-codec"
 
@@ -69,6 +75,15 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 	readonly compiledQuery: <Output>(
 		tenant: T,
 		compiled: CH.CompiledQuery<Output>,
+		options?: SqlQueryOptions,
+	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
+	/**
+	 * Optional capability-aware execution path. Older adapters and lightweight
+	 * test warehouses can omit it; callers then compile the conservative plan.
+	 */
+	readonly compiledQueryWithCapabilities?: <Output>(
+		tenant: T,
+		compile: (capabilities: WarehouseCapabilities) => CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
 }
@@ -788,17 +803,24 @@ const executeCHQuery = Effect.fnUntraced(function* <
 >(
 	warehouse: QueryEngineWarehouse<T>,
 	tenant: T,
-	query: CH.CHQuery<any, Output>,
+	query: CH.CHQuery<any, Output> | ((capabilities: WarehouseCapabilities) => CH.CHQuery<any, Output>),
 	params: Params,
 	context: string,
 	profile: QueryProfileName = "aggregation",
 	settings?: WarehouseQuerySettings,
 ) {
+	const options = { profile, context, settings } as const
+	if (typeof query === "function") {
+		const compile = (capabilities: WarehouseCapabilities) => CH.compile(query(capabilities), params)
+		const effect =
+			warehouse.compiledQueryWithCapabilities === undefined
+				? warehouse.compiledQuery(tenant, compile(baselineWarehouseCapabilities()), options)
+				: warehouse.compiledQueryWithCapabilities(tenant, compile, options)
+		return yield* annotateWarehouseError(effect, context)
+	}
+
 	const compiled = CH.compile(query, params)
-	return yield* annotateWarehouseError(
-		warehouse.compiledQuery(tenant, compiled, { profile, context, settings }),
-		context,
-	)
+	return yield* annotateWarehouseError(warehouse.compiledQuery(tenant, compiled, options), context)
 })
 
 /** Same as executeCHQuery but for union queries. */
@@ -1098,23 +1120,26 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			: undefined
 
 		if (request.query.source === "traces" && request.query.kind === "timeseries") {
+			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 
-			if (request.query.allMetrics) {
+			if (tracesQuery.allMetrics) {
 				const rows = yield* executeCHQuery(
 					warehouse,
 					tenant,
-					CH.tracesTimeseriesQuery({
-						...opts,
-						metric: request.query.metric,
-						allMetrics: true,
-						needsSampling: true,
-						groupBy: request.query.groupBy as string[] | undefined,
-						apdexThresholdMs:
-							request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
-						bucketSeconds: bucketSeconds!,
-						seriesLimit: request.query.seriesLimit,
-					}),
+					(capabilities) =>
+						CH.tracesTimeseriesQuery({
+							...opts,
+							attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+							metric: tracesQuery.metric,
+							allMetrics: true,
+							needsSampling: true,
+							groupBy: tracesQuery.groupBy as string[] | undefined,
+							apdexThresholdMs:
+								tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+							bucketSeconds: bucketSeconds!,
+							seriesLimit: tracesQuery.seriesLimit,
+						}),
 					{
 						orgId: tenant.orgId,
 						startTime: request.startTime,
@@ -1136,16 +1161,18 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.tracesTimeseriesQuery({
-					...opts,
-					metric: request.query.metric,
-					needsSampling: false,
-					groupBy: request.query.groupBy as string[] | undefined,
-					apdexThresholdMs:
-						request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
-					bucketSeconds: bucketSeconds!,
-					seriesLimit: request.query.seriesLimit,
-				}),
+				(capabilities) =>
+					CH.tracesTimeseriesQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+						metric: tracesQuery.metric,
+						needsSampling: false,
+						groupBy: tracesQuery.groupBy as string[] | undefined,
+						apdexThresholdMs:
+							tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+						bucketSeconds: bucketSeconds!,
+						seriesLimit: tracesQuery.seriesLimit,
+					}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
@@ -1155,7 +1182,7 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 				"tracesTimeseries",
 			)
 
-			const field = tracesMetricFieldMap[request.query.metric]
+			const field = tracesMetricFieldMap[tracesQuery.metric]
 			return new QueryEngineExecuteResponse({
 				result: {
 					kind: "timeseries",
@@ -1166,16 +1193,20 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "logs" && request.query.kind === "timeseries") {
+			const logsQuery = request.query
 			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.logsTimeseriesQuery({
-					...opts,
-					groupBy: request.query.groupBy as string[] | undefined,
-					bucketSeconds: bucketSeconds!,
-					seriesLimit: request.query.seriesLimit,
-				}),
+				(capabilities) =>
+					CH.logsTimeseriesQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+						bodySearchMode: logBodySearchMode(capabilities),
+						groupBy: logsQuery.groupBy as string[] | undefined,
+						bucketSeconds: bucketSeconds!,
+						seriesLimit: logsQuery.seriesLimit,
+					}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
@@ -1382,25 +1413,28 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "traces" && request.query.kind === "breakdown") {
+			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.tracesBreakdownQuery({
-					...opts,
-					metric: request.query.metric,
-					groupBy: request.query.groupBy,
-					groupByAttributeKey:
-						request.query.groupBy === "attribute" ? opts.groupByAttributeKeys?.[0] : undefined,
-					limit: request.query.limit,
-					apdexThresholdMs:
-						request.query.metric === "apdex" ? request.query.apdexThresholdMs : undefined,
-				}),
+				(capabilities) =>
+					CH.tracesBreakdownQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+						metric: tracesQuery.metric,
+						groupBy: tracesQuery.groupBy,
+						groupByAttributeKey:
+							tracesQuery.groupBy === "attribute" ? opts.groupByAttributeKeys?.[0] : undefined,
+						limit: tracesQuery.limit,
+						apdexThresholdMs:
+							tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+					}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
 				"tracesBreakdown",
 			)
 
-			const field = tracesMetricFieldMap[request.query.metric]
+			const field = tracesMetricFieldMap[tracesQuery.metric]
 			return new QueryEngineExecuteResponse({
 				result: {
 					kind: "breakdown",
@@ -1414,15 +1448,19 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "logs" && request.query.kind === "breakdown") {
+			const logsQuery = request.query
 			const opts = extractLogsOpts(request.query.filters as Record<string, unknown> | undefined)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.logsBreakdownQuery({
-					groupBy: request.query.groupBy as "service" | "severity",
-					...opts,
-					limit: request.query.limit,
-				}),
+				(capabilities) =>
+					CH.logsBreakdownQuery({
+						groupBy: logsQuery.groupBy as "service" | "severity",
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+						bodySearchMode: logBodySearchMode(capabilities),
+						limit: logsQuery.limit,
+					}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
 				"logsBreakdown",
 			)
@@ -1485,25 +1523,28 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		}
 
 		if (request.query.source === "traces" && request.query.kind === "list") {
+			const tracesQuery = request.query
 			const opts = extractTracesOpts(request.query.filters as Record<string, unknown>)
 
 			// Graceful limit clamping: cap at 200, auto-reduce to 50 when no indexed filters
 			const hasIndexedFilter = !!(opts.serviceName || opts.spanName || opts.errorsOnly || opts.rootOnly)
 			const maxLimit = hasIndexedFilter ? 200 : 50
-			const clampedLimit = Math.min(request.query.limit ?? 25, maxLimit)
+			const clampedLimit = Math.min(tracesQuery.limit ?? 25, maxLimit)
 
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.tracesListQuery({
-					...opts,
-					limit: clampedLimit,
-					offset: request.query.offset,
-					cursor: request.query.cursor,
-					columns: (request.query as { columns?: readonly string[] }).columns as
-						| string[]
-						| undefined,
-				}),
+				(capabilities) =>
+					CH.tracesListQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+						limit: clampedLimit,
+						offset: tracesQuery.offset,
+						cursor: tracesQuery.cursor,
+						columns: (tracesQuery as { columns?: readonly string[] }).columns as
+							| string[]
+							| undefined,
+					}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
 				"tracesList",
 				"list",
@@ -1770,18 +1811,16 @@ export const makeQueryEngineExecute = <T extends QueryTenant>(warehouse: QueryEn
 		// ---- Count ----
 		if (request.query.source === "logs" && request.query.kind === "count") {
 			const filters = request.query.filters as Record<string, unknown> | undefined
+			const opts = extractLogsOpts(filters)
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.logsCountQuery({
-					serviceName: filters?.serviceName as string | undefined,
-					severity: filters?.severity as string | undefined,
-					traceId: filters?.traceId as string | undefined,
-					search: filters?.search as string | undefined,
-					environments: filters?.environments as readonly string[] | undefined,
-					namespaces: filters?.namespaces as readonly string[] | undefined,
-					matchModes: logsMatchModes(filters),
-				}),
+				(capabilities) =>
+					CH.logsCountQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+						bodySearchMode: logBodySearchMode(capabilities),
+					}),
 				{ orgId: tenant.orgId, startTime: request.startTime, endTime: request.endTime },
 				"logsCount",
 				"discovery",
@@ -1886,14 +1925,16 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 		const rows = yield* executeCHQuery(
 			warehouse,
 			tenant,
-			CH.tracesTimeseriesQuery({
-				...opts,
-				metric: query.metric,
-				needsSampling: false,
-				groupBy: query.groupBy as readonly string[] | undefined,
-				apdexThresholdMs: query.metric === "apdex" ? query.apdexThresholdMs : undefined,
-				bucketSeconds,
-			}),
+			(capabilities) =>
+				CH.tracesTimeseriesQuery({
+					...opts,
+					attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+					metric: query.metric,
+					needsSampling: false,
+					groupBy: query.groupBy as readonly string[] | undefined,
+					apdexThresholdMs: query.metric === "apdex" ? query.apdexThresholdMs : undefined,
+					bucketSeconds,
+				}),
 			{
 				orgId: tenant.orgId,
 				startTime: request.startTime,
@@ -1917,11 +1958,14 @@ export const computeEvaluateBuckets = Effect.fnUntraced(function* <T extends Que
 		const rows = yield* executeCHQuery(
 			warehouse,
 			tenant,
-			CH.logsTimeseriesQuery({
-				...opts,
-				groupBy: query.groupBy as readonly string[] | undefined,
-				bucketSeconds,
-			}),
+			(capabilities) =>
+				CH.logsTimeseriesQuery({
+					...opts,
+					attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+					bodySearchMode: logBodySearchMode(capabilities),
+					groupBy: query.groupBy as readonly string[] | undefined,
+					bucketSeconds,
+				}),
 			{
 				orgId: tenant.orgId,
 				startTime: request.startTime,
@@ -2045,15 +2089,17 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.tracesTimeseriesQuery({
-					...opts,
-					metric: tracesQuery.metric,
-					needsSampling: false,
-					groupBy: tracesQuery.groupBy as readonly string[] | undefined,
-					apdexThresholdMs:
-						tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
-					bucketSeconds,
-				}),
+				(capabilities) =>
+					CH.tracesTimeseriesQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "traces"),
+						metric: tracesQuery.metric,
+						needsSampling: false,
+						groupBy: tracesQuery.groupBy as readonly string[] | undefined,
+						apdexThresholdMs:
+							tracesQuery.metric === "apdex" ? tracesQuery.apdexThresholdMs : undefined,
+						bucketSeconds,
+					}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
@@ -2078,11 +2124,14 @@ export const makeQueryEngineEvaluate = <T extends QueryTenant>(warehouse: QueryE
 			const rows = yield* executeCHQuery(
 				warehouse,
 				tenant,
-				CH.logsTimeseriesQuery({
-					...opts,
-					groupBy: logsQuery.groupBy as readonly string[] | undefined,
-					bucketSeconds,
-				}),
+				(capabilities) =>
+					CH.logsTimeseriesQuery({
+						...opts,
+						attributeIndexMode: attributeIndexMode(capabilities, "logs"),
+						bodySearchMode: logBodySearchMode(capabilities),
+						groupBy: logsQuery.groupBy as readonly string[] | undefined,
+						bucketSeconds,
+					}),
 				{
 					orgId: tenant.orgId,
 					startTime: request.startTime,
