@@ -1,9 +1,16 @@
 import { afterEach, assert, beforeEach, describe, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { CreateScrapeTargetRequest, OrgId, ScrapeIntervalSeconds, ScrapeTargetId } from "@maple/domain/http"
+import {
+	CreateScrapeTargetRequest,
+	OrgId,
+	ScrapeIntervalSeconds,
+	ScrapeTargetId,
+	UpdateScrapeTargetRequest,
+} from "@maple/domain/http"
 import { Env } from "../lib/Env"
-import { cleanupTestDbs, createTestDb, type TestDb } from "../lib/test-pglite"
+import { runScrapeCheckRetention } from "../lib/scrape-check-retention"
+import { cleanupTestDbs, createTestDb, executeSql, type TestDb } from "../lib/test-pglite"
 import { PlanetScaleDiscoveryService } from "./PlanetScaleDiscoveryService"
 import { PlanetScaleOAuthService } from "./PlanetScaleOAuthService"
 import { ScrapeTargetsService } from "./ScrapeTargetsService"
@@ -382,7 +389,7 @@ describe("ScrapeTargetsService", () => {
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 
-	it.effect("prunes check rows older than the 24h retention window", () => {
+	it.effect("recording results no longer prunes — retention is the cron's job", () => {
 		const testDb = createTestDb(trackedDbs)
 		return Effect.gen(function* () {
 			const service = yield* ScrapeTargetsService
@@ -403,9 +410,117 @@ describe("ScrapeTargetsService", () => {
 				{ targetId: target.id, scrapedAt: now - 60 * 60 * 1000, error: null },
 			])
 
+			// The write path is now pure: both rows land, including the expired one.
 			const checks = yield* service.listChecks(orgId, target.id, {})
-			assert.lengthOf(checks, 1)
-			assert.strictEqual(checks[0]?.checkedAt.getTime(), now - 60 * 60 * 1000)
+			assert.lengthOf(checks, 2)
+
+			// …and the cron reclaims the expired row.
+			yield* runScrapeCheckRetention
+			const pruned = yield* service.listChecks(orgId, target.id, {})
+			assert.lengthOf(pruned, 1)
+			assert.strictEqual(pruned[0]?.checkedAt.getTime(), now - 60 * 60 * 1000)
+			// `makeLayer` consumes the db layer; the retention job needs `Database` directly.
+		}).pipe(Effect.provide(makeLayer(testDb)), Effect.provide(testDb.layer))
+	})
+
+	it.effect("folds a batch of results per target into one final row state", () => {
+		const testDb = createTestDb(trackedDbs)
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			const target = yield* service.create(
+				orgId,
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(15),
+				}),
+			)
+
+			const now = 1750000000000
+			yield* TestClock.setTime(now)
+			// Sequential application semantics: the last success sets lastScrapeAt and
+			// clears the error, then a later failure re-sets the error while leaving
+			// lastScrapeAt on the last good scrape.
+			yield* service.recordScrapeResults([
+				{ targetId: target.id, scrapedAt: now - 3000, error: "first boom" },
+				{ targetId: target.id, scrapedAt: now - 2000, error: null },
+				{ targetId: target.id, scrapedAt: now - 1000, error: "later boom" },
+			])
+
+			const after = yield* service.get(orgId, target.id)
+			assert.strictEqual(after.lastScrapeError, "later boom")
+			assert.strictEqual(
+				after.lastScrapeAt === null ? null : new Date(after.lastScrapeAt).getTime(),
+				now - 2000,
+			)
+			// Every result still gets its own check row.
+			const checks = yield* service.listChecks(orgId, target.id, {})
+			assert.lengthOf(checks, 3)
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("serves repeat proxied scrapes from the memo instead of re-reading Postgres", () => {
+		const testDb = createTestDb(trackedDbs)
+		const scrapedUrls: string[] = []
+		globalThis.fetch = (async (input) => {
+			scrapedUrls.push(
+				typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+			)
+			return new Response("up 1\n", { status: 200 })
+		}) as typeof fetch
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			const target = yield* service.create(
+				orgId,
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(15),
+				}),
+			)
+
+			yield* service.scrapeForCollector(target.id)
+			scrapedUrls.length = 0
+
+			// Mutate the row BEHIND the service so nothing invalidates the memo. If the
+			// second scrape still uses the original URL, it was served from the memo —
+			// i.e. it did not go back to Postgres.
+			yield* Effect.promise(() =>
+				executeSql(testDb, "update scrape_targets set url = $1 where id = $2", [
+					"https://changed.example.com/metrics",
+					target.id,
+				]),
+			)
+
+			yield* service.scrapeForCollector(target.id)
+			assert.deepStrictEqual(scrapedUrls, ["https://metrics.example.com/metrics"])
+		}).pipe(Effect.provide(makeLayer(testDb)))
+	})
+
+	it.effect("re-reads a target from Postgres after an update invalidates the memo", () => {
+		const testDb = createTestDb(trackedDbs)
+		globalThis.fetch = (async () => new Response("up 1\n", { status: 200 })) as typeof fetch
+		return Effect.gen(function* () {
+			const service = yield* ScrapeTargetsService
+			const orgId = asOrgId("org_1")
+			const target = yield* service.create(
+				orgId,
+				new CreateScrapeTargetRequest({
+					name: "Node Exporter",
+					url: "https://metrics.example.com/metrics",
+					scrapeIntervalSeconds: asScrapeIntervalSeconds(15),
+				}),
+			)
+
+			// Warm the memo.
+			yield* service.scrapeForCollector(target.id)
+
+			// Disabling must take effect immediately, not after the memo TTL.
+			yield* service.update(orgId, target.id, new UpdateScrapeTargetRequest({ enabled: false }))
+			const exit = yield* Effect.exit(service.scrapeForCollector(target.id))
+			assert.isTrue(exit._tag === "Failure")
 		}).pipe(Effect.provide(makeLayer(testDb)))
 	})
 

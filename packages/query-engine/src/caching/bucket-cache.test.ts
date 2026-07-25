@@ -400,6 +400,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 		const reads: string[] = []
 		const writes: Array<{ key: string; value: unknown }> = []
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async (_bucket, key) => {
 				reads.push(key)
 				return undefined
@@ -446,6 +447,7 @@ describe("BucketCacheService.getOrComputeBuckets", () => {
 		let writes = 0
 		let computes = 0
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {
 				writes++

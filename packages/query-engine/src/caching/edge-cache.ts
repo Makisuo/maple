@@ -134,7 +134,9 @@ export const makeEdgeCacheService = (
 		const composite = `${options.bucket}:${hash}`
 		yield* Effect.annotateCurrentSpan({
 			"cache.bucket": options.bucket,
+			"cache.backend": backend.name,
 			"cache.hit": false,
+			"cache.outcome": "pending",
 			"cache.read_ms": 0,
 			"cache.read_status": "pending",
 			"cache.read_timed_out": false,
@@ -143,8 +145,14 @@ export const makeEdgeCacheService = (
 		const existing = inFlight.get(composite)
 		if (existing) {
 			const value = (yield* existing.await) as A
+			// NOT `cache.hit`. This request served nothing from storage — it waited
+			// on the leader fiber's read AND compute, with none of the read path's
+			// 250ms bound, so it inherits full miss latency. Counting it as a hit
+			// made the reported hit rate meaningless and put multi-second "hits" in
+			// the p95 when a real storage hit cannot exceed the read deadline.
 			yield* Effect.annotateCurrentSpan({
-				"cache.hit": true,
+				"cache.hit": false,
+				"cache.outcome": "dedup",
 				"cache.dedup.waited": true,
 				"cache.read_status": "deduplicated",
 			})
@@ -226,7 +234,7 @@ export const makeEdgeCacheService = (
 					)
 					if (Option.isSome(decoded)) {
 						yield* Deferred.succeed(deferred, decoded.value)
-						yield* Effect.annotateCurrentSpan("cache.hit", true)
+						yield* Effect.annotateCurrentSpan({ "cache.hit": true, "cache.outcome": "hit" })
 						return { value: decoded.value, hit: true }
 					}
 					// Fall through to recompute on decode failure (poisoned/stale entry).
@@ -234,13 +242,14 @@ export const makeEdgeCacheService = (
 				} else {
 					const value = read.value as A
 					yield* Deferred.succeed(deferred, value)
-					yield* Effect.annotateCurrentSpan("cache.hit", true)
+					yield* Effect.annotateCurrentSpan({ "cache.hit": true, "cache.outcome": "hit" })
 					return { value, hit: true }
 				}
 			}
 
 			const value = yield* compute
 			yield* writeAndPublish(value)
+			yield* Effect.annotateCurrentSpan("cache.outcome", "miss")
 			return { value, hit: false }
 		}).pipe(
 			Effect.tapError((error) => Deferred.fail(deferred, error)),

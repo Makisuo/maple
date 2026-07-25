@@ -226,7 +226,11 @@ export const ScraperInternalRouter = HttpRouter.use((router) =>
 						Effect.as(errorText("Scrape result persistence unavailable", 503)),
 					),
 				),
-				Effect.withSpan("ScraperInternal.recordResults"),
+				// No wrapper span: everything measurable here happens inside
+				// `ScrapeTargetsService.recordScrapeResults`, and the two spans were
+				// byte-identical in duration (8,065/day each at 546.8ms avg) on the
+				// second-busiest route in the service. The `http.server POST` span
+				// already bounds the request.
 			)
 
 		yield* router.add("GET", "/api/internal/scrape-targets", listTargets)

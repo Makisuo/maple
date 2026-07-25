@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm"
 import { boolean, index, integer, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core"
 
 export const scrapeTargets = pgTable(
@@ -32,6 +33,10 @@ export const scrapeTargets = pgTable(
 	(table) => [
 		index("scrape_targets_org_idx").on(table.orgId),
 		index("scrape_targets_org_enabled_idx").on(table.orgId, table.enabled),
+		// The scraper's `listAllEnabled` filters on `enabled` alone (no org), which
+		// neither index above can serve — `org_id` leads both — so it seq-scanned.
+		// Partial, because the query only ever asks for the true side.
+		index("scrape_targets_enabled_idx").on(table.enabled).where(sql`${table.enabled}`),
 	],
 )
 

@@ -22,9 +22,11 @@
 			},
 		},
 	],
-	// Periodic VCS sync backstop every 12h — handler: worker.ts `scheduled`. (Mirrored in alchemy.run.ts for deploy.)
+	// Cron schedules — handler: worker.ts `scheduled`, dispatched on `event.cron`.
+	// "0 */12 * * *" = VCS sync backstop; "0 * * * *" = scrape_target_checks
+	// retention. (Mirrored in alchemy.run.ts for deploy.)
 	"triggers": {
-		"crons": ["0 */12 * * *"],
+		"crons": ["0 */12 * * *", "0 * * * *"],
 	},
 	// Local dev: wrangler connects the binding straight to localConnectionString
 	// (the docker-compose Postgres; see `bun run db:up` + `bun run db:migrate:local`).

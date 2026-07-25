@@ -129,6 +129,18 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		yield* Effect.annotateCurrentSpan("orgId", tenant.orgId)
 		yield* Effect.annotateCurrentSpan("tenant.userId", tenant.userId)
 		yield* Effect.annotateCurrentSpan("tenant.authMode", tenant.authMode)
+		// Identify the query BEFORE anything that can block. `resolveRoute` below
+		// reads org config from Postgres and has been observed consuming a whole
+		// 30s request budget; annotating after it left those spans with no
+		// `query.context`, no `db.query.text` and no fingerprint — i.e. the slowest
+		// queries in the system were the only ones we couldn't identify. `db.query.*`
+		// still lands later because the final SQL isn't known until settings are
+		// applied, but the label and pipe are known right here.
+		yield* Effect.annotateCurrentSpan("query.pipe", pipe)
+		// Always set, never conditionally: an absent attribute is indistinguishable
+		// from an unlabeled call site. `pipe` is the fallback label.
+		yield* Effect.annotateCurrentSpan("query.context", options?.context ?? pipe)
+		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 
 		const leftoverParam = sql.match(/__PARAM_(\w+)__/)
 		if (leftoverParam) {
@@ -184,9 +196,6 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		yield* Effect.annotateCurrentSpan("db.query.length", sqlLength)
 		yield* Effect.annotateCurrentSpan("db.query.truncated", sqlTruncated)
 		yield* Effect.annotateCurrentSpan("db.query.fingerprint", fingerprintSql(finalSql))
-		yield* Effect.annotateCurrentSpan("query.pipe", pipe)
-		if (options?.context) yield* Effect.annotateCurrentSpan("query.context", options.context)
-		if (options?.profile) yield* Effect.annotateCurrentSpan("query.profile", options.profile)
 		if (settings) yield* Effect.annotateCurrentSpan("ch.settings", JSON.stringify(settings))
 
 		const client = getCachedOrCreateClient(

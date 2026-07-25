@@ -20,6 +20,7 @@ const makeRecordingBackend = () => {
 	const inner = makeMemoryBackend()
 	const puts: number[] = []
 	const backend: EdgeCacheBackend = {
+		name: inner.name,
 		get: inner.get,
 		put: (bucket, hash, value, ttlSeconds, nowMs) => {
 			puts.push(ttlSeconds)

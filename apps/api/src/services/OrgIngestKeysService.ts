@@ -37,6 +37,19 @@ const toEncryptionError = (message: string) => new IngestKeyEncryptionError({ me
 const decodeOrgIdSync = Schema.decodeUnknownSync(OrgId)
 const decodeIsoDateTimeStringSync = Schema.decodeUnknownSync(IsoDateTimeString)
 
+// TTL for the in-isolate memo of the per-org key row. The scraper's target-list
+// poll calls `getOrCreate` once per distinct org on every reconcile (~5.7k
+// Postgres round-trips/day) behind only a request-scoped Map, and the row
+// changes solely on an explicit reroll — which busts the entry in the writing
+// isolate. Matches `OrgClickHouseSettingsService`'s config memo TTL, so
+// cross-isolate staleness after a reroll is bounded to minutes.
+//
+// The Map itself is built per service instance (not at module scope) so it is
+// scoped to the layer that owns the connection it caches — module scope would
+// share one memo across every database in a process, which is exactly wrong for
+// tests that build a fresh PGlite per case.
+const ORG_INGEST_KEYS_MEMO_TTL_MS = 300_000
+
 const parseEncryptionKey = (raw: string): Effect.Effect<Buffer, IngestKeyEncryptionError> =>
 	parseBase64Aes256GcmKey(raw, (message) =>
 		toEncryptionError(
@@ -79,6 +92,11 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 	{
 		make: Effect.gen(function* () {
 			const database = yield* Database
+			/** Holds the ENCRYPTED row exactly as stored — `toResponse` decrypts per request. */
+			const ingestKeysMemo = new Map<
+				string,
+				{ row: typeof orgIngestKeys.$inferSelect; expiresAt: number }
+			>()
 			const env = yield* Env
 			const encryptionKey = yield* parseEncryptionKey(
 				Redacted.value(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY),
@@ -94,7 +112,11 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 				Effect.annotateLogs({ hmac_fingerprint: computeHmacFingerprint(lookupHmacKey) }),
 			)
 
-			const selectRow = Effect.fn("OrgIngestKeysService.selectRow")(function* (orgId: OrgId) {
+			// Untraced: this wraps a single `Database.execute`, which already emits its
+			// own client span. A named `Effect.fn` here only added a second span of
+			// byte-identical duration on a hot path — the exact noise CLAUDE.md warns
+			// against ("be careful adding spans to per-request hot paths").
+			const selectRow = Effect.fnUntraced(function* (orgId: OrgId) {
 				const rows = yield* database
 					.execute((db) =>
 						db.select().from(orgIngestKeys).where(eq(orgIngestKeys.orgId, orgId)).limit(1),
@@ -104,9 +126,8 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 				return Option.fromNullishOr(rows[0])
 			})
 
-			const toResponse = Effect.fn("OrgIngestKeysService.toResponse")(function* (
-				row: typeof orgIngestKeys.$inferSelect,
-			) {
+			// Untraced: synchronous AES-GCM decrypt, ~0ms — never worth a span.
+			const toResponse = Effect.fnUntraced(function* (row: typeof orgIngestKeys.$inferSelect) {
 				const privateKey = yield* decryptPrivateKey(
 					{
 						ciphertext: row.privateKeyCiphertext,
@@ -124,14 +145,26 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 				})
 			})
 
-			const ensureRow = Effect.fn("OrgIngestKeysService.ensureRow")(function* (
-				orgId: OrgId,
-				userId: UserId,
-			) {
-				const existing = yield* selectRow(orgId)
-				if (Option.isSome(existing)) return existing.value
-
+			// Untraced for the same reason as `selectRow`: on the steady-state path it
+			// early-returns and contributes nothing but a duplicate span.
+			const ensureRow = Effect.fnUntraced(function* (orgId: OrgId, userId: UserId) {
 				const now = yield* Clock.currentTimeMillis
+				const memoized = ingestKeysMemo.get(orgId)
+				if (memoized !== undefined && memoized.expiresAt > now) {
+					yield* Effect.annotateCurrentSpan("ingestKeys.memoHit", true)
+					return memoized.row
+				}
+				yield* Effect.annotateCurrentSpan("ingestKeys.memoHit", false)
+
+				const existing = yield* selectRow(orgId)
+				if (Option.isSome(existing)) {
+					ingestKeysMemo.set(orgId, {
+						row: existing.value,
+						expiresAt: now + ORG_INGEST_KEYS_MEMO_TTL_MS,
+					})
+					return existing.value
+				}
+
 				const publicKey = generatePublicKey()
 				const privateKey = generatePrivateKey()
 				const publicKeyHash = hashIngestKey(publicKey, lookupHmacKey)
@@ -169,6 +202,10 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 						}),
 					)
 				}
+				ingestKeysMemo.set(orgId, {
+					row: row.value,
+					expiresAt: now + ORG_INGEST_KEYS_MEMO_TTL_MS,
+				})
 
 				return row.value
 			})
@@ -206,6 +243,10 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 					)
 					.pipe(Effect.mapError(toPersistenceError))
 
+				// The memoized row is now stale in this isolate; others fall off within
+				// the TTL. Must come before the re-read so it repopulates with the new key.
+				ingestKeysMemo.delete(orgId)
+
 				const row = yield* selectRow(orgId)
 				if (Option.isNone(row)) {
 					return yield* Effect.fail(
@@ -214,6 +255,7 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 						}),
 					)
 				}
+				ingestKeysMemo.set(orgId, { row: row.value, expiresAt: now + ORG_INGEST_KEYS_MEMO_TTL_MS })
 
 				return yield* toResponse(row.value)
 			})
@@ -246,6 +288,8 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 					)
 					.pipe(Effect.mapError(toPersistenceError))
 
+				ingestKeysMemo.delete(orgId)
+
 				const row = yield* selectRow(orgId)
 				if (Option.isNone(row)) {
 					return yield* Effect.fail(
@@ -254,6 +298,7 @@ export class OrgIngestKeysService extends Context.Service<OrgIngestKeysService>(
 						}),
 					)
 				}
+				ingestKeysMemo.set(orgId, { row: row.value, expiresAt: now + ORG_INGEST_KEYS_MEMO_TTL_MS })
 
 				return yield* toResponse(row.value)
 			})

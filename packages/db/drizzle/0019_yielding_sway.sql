@@ -1,0 +1,1 @@
+CREATE INDEX "scrape_targets_enabled_idx" ON "scrape_targets" USING btree ("enabled") WHERE "scrape_targets"."enabled";
