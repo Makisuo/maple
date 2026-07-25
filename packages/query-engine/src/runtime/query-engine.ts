@@ -134,10 +134,31 @@ export const withTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		Effect.timeoutOrElse({
 			duration: QUERY_ENGINE_TIMEOUT,
 			orElse: () =>
-				Effect.fail(
-					new QueryEngineTimeoutError({
-						message: "Query execution timed out after 30 seconds",
-					}),
+				// Mark the span before failing. Hitting this ceiling interrupts every
+				// descendant, and the tracer records interrupt-only spans as `Ok`
+				// (deliberately — a client disconnect or a cron teardown is normal
+				// lifecycle, see flushable-tracer). That left a whole 30s timeout
+				// looking healthy in any dashboard keyed on `StatusCode`. This
+				// attribute makes the ceiling itself queryable without reclassifying
+				// every ordinary interrupt as an error.
+				Effect.annotateCurrentSpan({
+					"query.timeout": true,
+					"query.timeout_ms": Duration.toMillis(QUERY_ENGINE_TIMEOUT),
+				}).pipe(
+					Effect.flatMap(() =>
+						Effect.logError("Query engine timeout").pipe(
+							Effect.annotateLogs({
+								timeoutMs: Duration.toMillis(QUERY_ENGINE_TIMEOUT),
+							}),
+						),
+					),
+					Effect.flatMap(() =>
+						Effect.fail(
+							new QueryEngineTimeoutError({
+								message: "Query execution timed out after 30 seconds",
+							}),
+						),
+					),
 				),
 		}),
 	)

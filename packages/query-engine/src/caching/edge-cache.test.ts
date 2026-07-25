@@ -15,6 +15,7 @@ const makeJsonRoundtripBackend = (): EdgeCacheBackend & {
 	const store = new Map<string, string>()
 	const composite = (bucket: string, hash: string) => `${bucket}:${hash}`
 	return {
+		name: "memory",
 		store,
 		get: async (bucket, hash) => {
 			const raw = store.get(composite(bucket, hash))
@@ -37,6 +38,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 	it.live("fails open to computation when a backend read exceeds its deadline", () => {
 		let computeCalls = 0
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {},
 			delete: async () => {},
@@ -61,6 +63,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 		let getCalls = 0
 		let computeCalls = 0
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => {
 				getCalls += 1
 				return await new Promise<never>(() => {})
@@ -114,6 +117,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 	it.effect("derives the TTL from the computed value when ttlSeconds is a function", () => {
 		const puts: number[] = []
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => undefined, // force a miss → always computes → always writes
 			put: async (_bucket, _hash, _value, ttlSeconds) => {
 				puts.push(ttlSeconds)
@@ -142,6 +146,7 @@ describe("EdgeCacheService.getOrCompute (no schema)", () => {
 describe("EdgeCacheService.rawGet", () => {
 	it.live("reports hit, miss, and timeout outcomes without collapsing them", () => {
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async (bucket) => {
 				if (bucket === "hit") return { value: 42 }
 				if (bucket === "slow") return await new Promise<never>(() => {})
@@ -168,6 +173,7 @@ describe("EdgeCacheService.rawGet", () => {
 
 	it.live("treats a backend read timeout as a cache miss", () => {
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => await new Promise<never>(() => {}),
 			put: async () => {},
 			delete: async () => {},
@@ -182,6 +188,7 @@ describe("EdgeCacheService.rawGet", () => {
 
 	it.effect("retains EdgeCacheIOError for backend failures", () => {
 		const backend: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => {
 				throw new Error("kv unavailable")
 			},
@@ -235,6 +242,7 @@ describe("EdgeCacheService.invalidate", () => {
 
 	it.effect("swallows backend delete failures (best-effort)", () => {
 		const failing: EdgeCacheBackend = {
+			name: "memory",
 			get: async () => undefined,
 			put: async () => {},
 			delete: async () => {

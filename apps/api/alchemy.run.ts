@@ -134,8 +134,12 @@ export const createMapleApi = ({ stage, domains }: CreateMapleApiOptions) =>
 			// pr-stage hostnames would be authoritative NXDOMAIN. Custom domains
 			// provision DNS + edge certs automatically.
 			domain: domains.api,
-			// Periodic VCS sync backstop (every 12h) — enqueues a refresh per installation; see worker.ts `scheduled`.
-			crons: ["0 */12 * * *"],
+			// Dispatched on `event.cron` in worker.ts `scheduled`:
+			//   every 12h — VCS sync backstop, enqueues a refresh per installation
+			//   hourly    — scrape_target_checks retention (was inline on the
+			//               scrape-results write path; a busy target writes ~75k
+			//               rows/day, so the 10k cap binds within hours)
+			crons: ["0 */12 * * *", "0 * * * *"],
 			env: {
 				// Ref stages attach MAPLE_DB via worker.bind below.
 				...(mapleDb ? { MAPLE_DB: mapleDb } : {}),

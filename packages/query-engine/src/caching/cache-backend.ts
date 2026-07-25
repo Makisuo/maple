@@ -8,6 +8,14 @@ import { Context, Layer } from "effect"
  * have a default without pulling a runtime binding into the package.
  */
 export interface EdgeCacheBackend {
+	/**
+	 * Which storage is actually behind this backend, surfaced on every
+	 * `EdgeCacheService.getOrCompute` span as `cache.backend`. Without it there is
+	 * no signal distinguishing the shared Workers cache from the per-isolate
+	 * `memory` fallback — which is silently selected whenever `caches` is
+	 * undefined, and makes every cross-request hit disappear.
+	 */
+	readonly name: "workers-cache" | "memory"
 	readonly get: (bucket: string, hash: string, nowMs: number) => Promise<unknown | undefined>
 	readonly put: (
 		bucket: string,
@@ -35,6 +43,7 @@ export const makeMemoryBackend = (): EdgeCacheBackend => {
 	const composite = (bucket: string, hash: string) => `${bucket}:${hash}`
 
 	return {
+		name: "memory",
 		get: async (bucket, hash, nowMs) => {
 			const entry = store.get(composite(bucket, hash))
 			if (!entry) return undefined

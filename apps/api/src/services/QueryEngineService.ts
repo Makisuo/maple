@@ -409,22 +409,28 @@ export class QueryEngineService extends Context.Service<QueryEngineService, Quer
 				)
 			})
 
+			// `withTimeout` INSIDE the span, not outside it. `Effect.timeoutOrElse` is
+			// `raceFirst(self, flatMap(sleep, orElse))`, so `orElse` runs as a sibling
+			// of `self` — with the wrapping the other way round, the `query.timeout`
+			// attribute it sets landed on whatever span was current at the call site.
+			// These two are plain arrows with no `Effect.fn` of their own, so that was
+			// `AlertsService.evaluateRule` (AlertsService.ts:1613, :2988, :3008): a 30s
+			// query-engine ceiling tagged on an alerting span, invisible to any
+			// dashboard scoped to query-engine spans. This ordering also lets the span
+			// record the `QueryEngineTimeoutError` (504, so `Error` status) instead of
+			// closing interrupt-only as `Ok` — which is the point of marking timeouts.
 			const evaluateRawSql = (tenant: TenantContext, request: QueryEngineRawSqlEvaluateRequest) =>
-				withTimeout(
-					evaluateRawSqlImpl(tenant, request).pipe(
-						Effect.withSpan("QueryEngineService.evaluateRawSql", {
-							attributes: { orgId: tenant.orgId },
-						}),
-					),
+				withTimeout(evaluateRawSqlImpl(tenant, request)).pipe(
+					Effect.withSpan("QueryEngineService.evaluateRawSql", {
+						attributes: { orgId: tenant.orgId },
+					}),
 				)
 
 			const evaluateSeries = (tenant: TenantContext, request: QueryEngineEvaluateRequest) =>
-				withTimeout(
-					evaluateSeriesImpl(tenant, request).pipe(
-						Effect.withSpan("QueryEngineService.evaluateSeries", {
-							attributes: { orgId: tenant.orgId },
-						}),
-					),
+				withTimeout(evaluateSeriesImpl(tenant, request)).pipe(
+					Effect.withSpan("QueryEngineService.evaluateSeries", {
+						attributes: { orgId: tenant.orgId },
+					}),
 				)
 
 			return {

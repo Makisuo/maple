@@ -223,6 +223,7 @@ const makeSpyEdgeBackend = () => {
 	const puts: Array<string> = []
 	const gets: Array<string> = []
 	const backend: ReturnType<typeof makeMemoryBackend> = {
+		name: inner.name,
 		get: (bucket, hash, nowMs) => {
 			gets.push(bucket)
 			return inner.get(bucket, hash, nowMs)

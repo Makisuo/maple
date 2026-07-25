@@ -345,10 +345,32 @@ const handleQueue = async (
 	}
 }
 
-// Cron handler (every 12h, see wrangler.jsonc `triggers.crons`): enqueue a
-// periodic VCS sync per installation. Single cron expression — no `event.cron`
-// dispatch needed.
-const handleScheduled = async (env: Record<string, unknown>, ctx: ExecutionContext): Promise<void> => {
+// Cron handler. Two schedules (see wrangler.jsonc / alchemy.run.ts
+// `triggers.crons`), dispatched on `event.cron`:
+//   "0 */12 * * *" — enqueue a periodic VCS sync per installation
+//   "0 * * * *"    — apply scrape-check retention
+// Retention is hourly rather than 12-hourly because a busy target can write
+// ~75k check rows a day, so the 10k-row cap binds within a few hours.
+const SCRAPE_RETENTION_CRON = "0 * * * *"
+
+const handleScheduled = async (
+	event: ScheduledController,
+	env: Record<string, unknown>,
+	ctx: ExecutionContext,
+): Promise<void> => {
+	if (event.cron === SCRAPE_RETENTION_CRON) {
+		const { buildScrapeRetentionLayer, flushVcsTelemetry } = await import("./vcs-sync-runtime")
+		const { runScrapeCheckRetention } = await import("./lib/scrape-check-retention")
+		try {
+			await runScheduledEffect(buildScrapeRetentionLayer(env), runScrapeCheckRetention, ctx, {
+				onInterrupt: "graceful",
+			})
+		} finally {
+			ctx.waitUntil(flushVcsTelemetry(env))
+		}
+		return
+	}
+
 	const { buildVcsScheduledLayer, runScheduledSync, flushVcsTelemetry } = await import("./vcs-sync-runtime")
 	try {
 		// Graceful on interrupt: a teardown mid-cron is expected lifecycle, and the
@@ -377,8 +399,8 @@ export default class MapleApiWorker extends WorkerEntrypoint<Record<string, unkn
 		return handleQueue(batch, this.env, this.ctx)
 	}
 
-	override scheduled(_event: ScheduledController): Promise<void> {
-		return handleScheduled(this.env, this.ctx)
+	override scheduled(event: ScheduledController): Promise<void> {
+		return handleScheduled(event, this.env, this.ctx)
 	}
 
 	listMcpTools() {
