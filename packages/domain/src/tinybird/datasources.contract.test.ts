@@ -133,8 +133,16 @@ function topLevelKey(jsonPath: string): string | null {
 function emittedTopLevelKeys(datasource: DatasourceDefinition): Set<string> {
 	const keys = new Set<string>()
 	for (const column of Object.values(datasource.options.schema)) {
+		const defaultExpression = (
+			column as {
+				readonly type?: {
+					readonly modifiers?: { readonly defaultExpression?: string }
+				}
+			}
+		).type?.modifiers?.defaultExpression
+		if (defaultExpression !== undefined) continue
 		const path = getColumnJsonPath(column)
-		if (!path) continue // defaultExpr-only columns (SampleRate, IsEntryPoint) are computed in CH, not ingested
+		if (!path) continue
 		const top = topLevelKey(path)
 		if (top) keys.add(top)
 	}

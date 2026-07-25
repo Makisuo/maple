@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { TracesMetric, AttributeFilter } from "./query-engine"
+import type { AttributeIndexMode } from "./capabilities"
 
 // ---------------------------------------------------------------------------
 // Metric → column needs mapping
@@ -101,6 +102,7 @@ export function httpDisplaySpanName(
 export function buildAttrFilterCondition(
 	af: AttributeFilter,
 	mapName: "SpanAttributes" | "LogAttributes" | "ResourceAttributes",
+	indexMode: AttributeIndexMode = "none",
 ): CH.Condition {
 	const mapExpr = CH.dynamicColumn<Record<string, string>>(mapName)
 	// Span attributes renamed across OTel semconv versions match either spelling,
@@ -111,7 +113,13 @@ export function buildAttrFilterCondition(
 
 	const positive = ((): CH.Condition => {
 		if (af.mode === "exists") {
-			return anyMapContains(mapExpr, keys)
+			const exact = anyMapContains(mapExpr, keys)
+			if (af.negated || indexMode === "none") return exact
+			let candidate = CH.has(CH.mapKeys(mapExpr), CH.lit(keys[0]!))
+			for (let i = 1; i < keys.length; i++) {
+				candidate = candidate.or(CH.has(CH.mapKeys(mapExpr), CH.lit(keys[i]!)))
+			}
+			return candidate.and(exact)
 		}
 		if (af.mode === "contains") {
 			return CH.positionCaseInsensitive(colExpr, CH.lit(value)).gt(0)
@@ -129,7 +137,35 @@ export function buildAttrFilterCondition(
 			return CH.toFloat64OrZero(colExpr).lte(Number(value))
 		}
 		// equals (default)
-		return colExpr.eq(value)
+		const exact = colExpr.eq(value)
+		// Empty values intentionally share ClickHouse Map's "missing key returns
+		// default empty string" behavior. A KV-items prefilter would exclude
+		// missing keys and change that contract, so keep the baseline predicate.
+		if (af.negated || value === "" || indexMode === "none") return exact
+
+		if (indexMode === "text") {
+			const itemColumnByMap = {
+				SpanAttributes: "SpanAttributeItems",
+				LogAttributes: "LogAttributeItems",
+				ResourceAttributes: "ResourceAttributeItems",
+			} as const
+			const items = CH.dynamicColumn<ReadonlyArray<string>>(itemColumnByMap[mapName])
+			let candidate = CH.has(items, CH.concat(keys[0]!, CH.rawExpr<string>("char(31)"), value))
+			for (let i = 1; i < keys.length; i++) {
+				candidate = candidate.or(
+					CH.has(items, CH.concat(keys[i]!, CH.rawExpr<string>("char(31)"), value)),
+				)
+			}
+			return candidate.and(exact)
+		}
+
+		// Bloom filters index keys and values independently. The original map
+		// equality remains as exact confirmation, preventing cross-key matches.
+		let keyCandidate = CH.has(CH.mapKeys(mapExpr), CH.lit(keys[0]!))
+		for (let i = 1; i < keys.length; i++) {
+			keyCandidate = keyCandidate.or(CH.has(CH.mapKeys(mapExpr), CH.lit(keys[i]!)))
+		}
+		return keyCandidate.and(CH.has(CH.mapValues(mapExpr), CH.lit(value))).and(exact)
 	})()
 
 	return af.negated ? CH.not(positive) : positive

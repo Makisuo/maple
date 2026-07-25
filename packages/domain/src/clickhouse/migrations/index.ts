@@ -8,6 +8,7 @@ import { migration_0006_db_edge_namespace } from "./0006_db_edge_namespace"
 import { migration_0007_db_namespace_hyperdrive } from "./0007_db_namespace_hyperdrive"
 import { migration_0008_service_operations_minutely } from "./0008_service_operations_minutely"
 import { migration_0009_one_year_service_history } from "./0009_one_year_service_history"
+import { migration_0010_search_indexes } from "./0010_search_indexes"
 
 /**
  * A migration statement is either a raw SQL string (structural DDL) or a
@@ -20,6 +21,8 @@ export interface ClickHouseMigration {
 	readonly version: number
 	readonly description: string
 	readonly statements: ReadonlyArray<MigrationStatement>
+	/** Performance-only migrations are applied normally but do not gate direct ingest. */
+	readonly requiredForIngest?: boolean
 }
 
 /**
@@ -46,6 +49,7 @@ export const migrations: ReadonlyArray<ClickHouseMigration> = [
 	migration_0007_db_namespace_hyperdrive,
 	migration_0008_service_operations_minutely,
 	migration_0009_one_year_service_history,
+	migration_0010_search_indexes,
 ] as const
 
 /** Highest migration `version` bundled — i.e. the schema level a fully-applied
@@ -60,15 +64,23 @@ export const latestMigrationVersion: number = migrations.reduce(
  * (`org_clickhouse_settings.schema_version`): the ingest gateway routes an org's
  * frames to its own ClickHouse only when the stored value equals this.
  *
- * Deliberately the migration version — NOT the `clickHouseProjectRevision` hash,
+ * Deliberately the latest ingest-required migration version — NOT the
+ * `clickHouseProjectRevision` hash,
  * which is shared with the Tinybird manifest and therefore bumps on Tinybird-only
  * schema changes. Keying on that global hash silently un-readied every BYO-CH org
  * (routing their ingest to managed Tinybird while the dashboard kept reading their
  * ClickHouse → invisible data) whenever an unrelated Tinybird datasource changed.
- * The migration version only changes when the ClickHouse DDL actually changes.
+ * Performance-only migrations set `requiredForIngest: false`; they can improve
+ * query speed without interrupting routing to an otherwise compatible schema.
  *
  * Stamped into D1 by the API's applySchema workflow and the schemaDiff self-heal,
  * and compared by the Rust ingest gateway (emitted as `SCHEMA_VERSION` into
  * `clickhouse_insert_mappings.rs` by `scripts/generate-clickhouse-insert-mappings.ts`).
  */
-export const clickHouseSchemaVersion: string = String(latestMigrationVersion)
+export const clickHouseSchemaVersion: string = String(
+	migrations.reduce(
+		(max, migration) =>
+			migration.requiredForIngest === false ? max : Math.max(max, migration.version),
+		0,
+	),
+)

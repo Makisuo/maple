@@ -53,6 +53,12 @@ describe("appendSettings", () => {
 		expect(appendSettings("SELECT 1", { maxBlockSize: 512 })).toBe("SELECT 1 SETTINGS max_block_size=512")
 	})
 
+	it("appends the verified full-text feature setting", () => {
+		expect(appendSettings("SELECT 1", { enableFullTextIndex: 1 })).toBe(
+			"SELECT 1 SETTINGS enable_full_text_index=1",
+		)
+	})
+
 	// Regression: Tinybird rejects `FORMAT JSON SETTINGS …` with
 	// "Syntax error: failed at position … (FORMAT)" — SETTINGS must precede
 	// a trailing FORMAT clause.
@@ -97,6 +103,10 @@ describe("stripTinybirdRestrictedSettings", () => {
 
 	it("strips the body-search settings down to profile-safe values", () => {
 		expect(stripTinybirdRestrictedSettings({ ...LOGS_BODY_SEARCH_SETTINGS })).toEqual({})
+	})
+
+	it("strips full-text feature settings from managed Tinybird requests", () => {
+		expect(stripTinybirdRestrictedSettings({ enableFullTextIndex: 1 })).toEqual({})
 	})
 })
 

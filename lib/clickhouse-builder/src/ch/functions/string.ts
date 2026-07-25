@@ -1,5 +1,7 @@
 import { defineFn, compileFnCall } from "../define-fn"
-import type { Expr } from "../expr"
+import { makeCond } from "../expr"
+import { compile, raw } from "../../sql/sql-fragment"
+import type { Condition, Expr } from "../expr"
 
 // ---------------------------------------------------------------------------
 // Standard string functions (defineFn one-liners)
@@ -35,4 +37,14 @@ export function replaceOne(haystack: Expr<string>, pattern: string, replacement:
 
 export function concat(...exprs: Array<Expr<string> | string>): Expr<string> {
 	return compileFnCall<string>("concat", ...exprs)
+}
+
+export function hasToken(haystack: Expr<string>, token: Expr<string> | string): Condition {
+	const call = compileFnCall<boolean>("hasToken", haystack, token)
+	return makeCond(raw(compile(call.toFragment())))
+}
+
+export function hasAllTokens(haystack: Expr<string>, tokens: Expr<string> | string): Condition {
+	const call = compileFnCall<boolean>("hasAllTokens", haystack, tokens)
+	return makeCond(raw(compile(call.toFragment())))
 }

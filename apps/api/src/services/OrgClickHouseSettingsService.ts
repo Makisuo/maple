@@ -22,6 +22,7 @@ import {
 	computeSchemaDiff,
 	migrations as clickHouseMigrations,
 	parseEmittedStatement,
+	performanceOnlySearchColumns,
 	type ActualTable,
 	type DesiredTable,
 	type TableDiffEntry,
@@ -462,7 +463,12 @@ const parseDesiredTables = (): ReadonlyArray<DesiredTable> => {
 		out.push({
 			name: parsed.name,
 			kind: parsed.kind,
-			columns: parsed.kind === "table" ? parsed.columns : [],
+			columns:
+				parsed.kind === "table"
+					? parsed.columns.filter(
+							(column) => !performanceOnlySearchColumns.has(`${parsed.name}.${column.name}`),
+						)
+					: [],
 			createStatement: stmt,
 		})
 	}

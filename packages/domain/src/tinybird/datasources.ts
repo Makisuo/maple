@@ -1,5 +1,8 @@
 import { defineDatasource, t, engine, column, type InferRow } from "@tinybirdco/sdk"
 
+const attributeItemsExpr = (mapColumn: string): string =>
+	`arrayMap((k, v) -> concat(k, char(31), v), mapKeys(${mapColumn}), mapValues(${mapColumn}))`
+
 /**
  * OpenTelemetry logs datasource
  * Matches the official OpenTelemetry Collector Tinybird exporter format
@@ -36,7 +39,29 @@ export const logs = defineDatasource("logs", {
 		LogAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.log_attributes",
 		}),
+		ResourceAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
+			{ jsonPath: "$.ResourceAttributeItems[:]" },
+		),
+		ScopeAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
+			{ jsonPath: "$.ScopeAttributeItems[:]" },
+		),
+		LogAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("LogAttributes")), {
+			jsonPath: "$.LogAttributeItems[:]",
+		}),
 	},
+	// Changing the logs sorting key rebuilds the 30-day raw table. Carry every
+	// live row forward and initialize the search-only arrays without attempting
+	// to recompute them during the deployment backfill.
+	forwardQuery: `SELECT
+		OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags,
+		SeverityText, SeverityNumber, ServiceName, Body,
+		ResourceSchemaUrl, ResourceAttributes,
+		ScopeSchemaUrl, ScopeName, ScopeVersion, ScopeAttributes, LogAttributes,
+		defaultValueOfTypeName('Array(String)') AS ResourceAttributeItems,
+		defaultValueOfTypeName('Array(String)') AS ScopeAttributeItems,
+		defaultValueOfTypeName('Array(String)') AS LogAttributeItems`,
 	// `TraceId` is not in the sorting key and a trace spans many services (so
 	// `ServiceName` isn't fixed either) — a `WHERE TraceId = ...` lookup would
 	// otherwise scan whole daily partitions. The bloom filter lets ClickHouse
@@ -48,10 +73,52 @@ export const logs = defineDatasource("logs", {
 			type: "bloom_filter(0.01)",
 			granularity: 1,
 		},
+		{
+			name: "idx_resource_attr_keys",
+			expr: "mapKeys(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_resource_attr_vals",
+			expr: "mapValues(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_keys",
+			expr: "mapKeys(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_vals",
+			expr: "mapValues(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_attr_keys",
+			expr: "mapKeys(LogAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_log_attr_vals",
+			expr: "mapValues(LogAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_lower_body",
+			expr: "lower(Body)",
+			type: "tokenbf_v1(32768, 3, 0)",
+			granularity: 8,
+		},
 	],
 	engine: engine.mergeTree({
 		partitionKey: "toDate(TimestampTime)",
-		sortingKey: ["OrgId", "ServiceName", "TimestampTime", "Timestamp"],
+		sortingKey: ["OrgId", "toStartOfFiveMinutes(Timestamp)", "ServiceName", "Timestamp"],
 		ttl: "toDate(TimestampTime) + INTERVAL 30 DAY",
 	}),
 })
@@ -167,6 +234,17 @@ export const traces = defineDatasource("traces", {
 		 * Server/Consumer kinds, or any root span (ParentSpanId = '').
 		 */
 		IsEntryPoint: t.uint8().defaultExpr(IS_ENTRY_POINT_EXPR),
+		ResourceAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
+			{ jsonPath: "$.ResourceAttributeItems[:]" },
+		),
+		ScopeAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
+			{ jsonPath: "$.ScopeAttributeItems[:]" },
+		),
+		SpanAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("SpanAttributes")), {
+			jsonPath: "$.SpanAttributeItems[:]",
+		}),
 	},
 	indexes: [
 		{
@@ -196,6 +274,18 @@ export const traces = defineDatasource("traces", {
 		{
 			name: "idx_resource_attr_vals",
 			expr: "mapValues(ResourceAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_keys",
+			expr: "mapKeys(ScopeAttributes)",
+			type: "bloom_filter(0.01)",
+			granularity: 1,
+		},
+		{
+			name: "idx_scope_attr_vals",
+			expr: "mapValues(ScopeAttributes)",
 			type: "bloom_filter(0.01)",
 			granularity: 1,
 		},
@@ -1170,6 +1260,9 @@ export const attributeKeysHourly = defineDatasource("attribute_keys_hourly", {
 		AttributeScope: t.string().lowCardinality(),
 		UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
+	// Preserve hours older than the 30-day raw source while the source schema
+	// change causes Tinybird to rebuild dependent materialized pipes.
+	forwardQuery: `SELECT *`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		sortingKey: ["OrgId", "AttributeScope", "Hour", "AttributeKey"],
@@ -1195,6 +1288,9 @@ export const attributeValuesHourly = defineDatasource("attribute_values_hourly",
 		AttributeScope: t.string().lowCardinality(),
 		UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
+	// Preserve hours older than the 30-day raw source while the source schema
+	// change causes Tinybird to rebuild dependent materialized pipes.
+	forwardQuery: `SELECT *`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		sortingKey: ["OrgId", "AttributeScope", "AttributeKey", "Hour", "AttributeValue"],
@@ -1483,6 +1579,9 @@ export const logsAggregatesHourly = defineDatasource("logs_aggregates_hourly", {
 		SizeBytes: t.simpleAggregateFunction("sum", t.uint64()),
 		ServiceNamespace: t.string().lowCardinality(),
 	},
+	// Preserve annual aggregate history while `logs` is rebuilt from its
+	// 30-day retained source.
+	forwardQuery: `SELECT *`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		// ServiceNamespace is a grouping dimension, so it must live in the sorting

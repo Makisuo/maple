@@ -135,6 +135,7 @@ export const WarehouseServiceStubLayer = Layer.succeed(WarehouseQueryService, {
 	sqlQuery: die,
 	rawSqlQuery: die,
 	compiledQuery: die,
+	compiledQueryWithCapabilities: die,
 	compiledQueryFirst: die,
 	ingest: die,
 	asExecutor: dieSync,

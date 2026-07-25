@@ -1,6 +1,6 @@
-import { makeExpr } from "../expr"
+import { makeCond, makeExpr, toFragment } from "../expr"
 import { raw, str, compile } from "../../sql/sql-fragment"
-import type { Expr } from "../expr"
+import type { Condition, Expr } from "../expr"
 
 // ---------------------------------------------------------------------------
 // Array constructors (handwritten — bracket syntax, not fn() call)
@@ -32,4 +32,9 @@ export function arrayFilter(fn: string, arr: Expr<any>): Expr<any> {
 
 export function arrayJoin<T>(arr: Expr<ReadonlyArray<T>>): Expr<T> {
 	return makeExpr<T>(raw(`arrayJoin(${compile(arr.toFragment())})`))
+}
+
+export function has<T>(arr: Expr<ReadonlyArray<T>>, value: Expr<T> | T): Condition {
+	const valueFragment = toFragment(value)
+	return makeCond(raw(`has(${compile(arr.toFragment())}, ${compile(valueFragment)})`))
 }

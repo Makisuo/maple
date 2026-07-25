@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Ref, Schedule } from "effect"
+import { Cause, Clock, Deferred, Duration, Effect, HashMap, Option, Ref, Schedule, Schema } from "effect"
 import {
 	MAX_RAW_SQL_RESULT_BYTES,
 	MAX_RAW_SQL_RESULT_ROWS,
@@ -38,13 +38,64 @@ import type {
 	WarehouseQueryServiceShape,
 	WarehouseSqlClient,
 } from "./ports"
+import {
+	baselineWarehouseCapabilities,
+	attributeIndexMode,
+	deriveWarehouseCapabilities,
+	logBodySearchMode,
+	type WarehouseCapabilities,
+	type WarehouseProjectionMetadataRow,
+	type WarehouseSettingMetadataRow,
+	WarehouseColumnMetadataSchema,
+	WarehouseIndexMetadataSchema,
+	WarehouseProjectionMetadataSchema,
+	WarehouseSettingMetadataSchema,
+	WarehouseVersionMetadataSchema,
+} from "../capabilities"
 
 const CLIENT_CACHE_TTL_MS = 30_000
+const CAPABILITIES_CACHE_TTL_MS = 5 * 60_000
+const CAPABILITIES_INSPECTION_TIMEOUT = Duration.seconds(2)
+const WarehouseCapabilityMetadataTarget = Schema.Literals([
+	"version",
+	"indexes",
+	"columns",
+	"projections",
+	"settings",
+])
+type WarehouseCapabilityMetadataTarget = Schema.Schema.Type<typeof WarehouseCapabilityMetadataTarget>
+
+class WarehouseCapabilityProbeError extends Schema.TaggedErrorClass<WarehouseCapabilityProbeError>()(
+	"@maple/query-engine/execution/WarehouseCapabilityProbeError",
+	{
+		target: WarehouseCapabilityMetadataTarget,
+		message: Schema.String,
+		cause: Schema.Unknown,
+	},
+) {}
+
+const CAPABILITY_AWARE_PIPES: ReadonlySet<string> = new Set([
+	"list_logs",
+	"logs_count",
+	"list_traces",
+	"custom_traces_timeseries",
+	"custom_traces_breakdown",
+])
 
 interface CachedClient {
 	client: WarehouseSqlClient
 	cacheKey: string
 	expiresAt: number
+}
+
+interface CachedCapabilities {
+	readonly capabilities: WarehouseCapabilities
+	readonly cacheKey: string
+	readonly expiresAt: number
+}
+
+interface CapabilityAwaiter {
+	readonly await: Effect.Effect<WarehouseCapabilities>
 }
 
 const sqlClientCacheKey = (config: ResolvedWarehouseConfig): string =>
@@ -100,6 +151,8 @@ const clientTimeoutMs = (
  */
 export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQueryServiceShape => {
 	const clientCache = new Map<string, CachedClient>()
+	const capabilitiesCache = Ref.makeUnsafe(HashMap.empty<string, CachedCapabilities>())
+	const capabilitiesInFlight = Ref.makeUnsafe(HashMap.empty<string, CapabilityAwaiter>())
 
 	const getCachedOrCreateClient = (
 		cacheKey: string,
@@ -115,6 +168,217 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		clientCache.set(cacheKey, { client, cacheKey: configKey, expiresAt: nowMs + CLIENT_CACHE_TTL_MS })
 		return client
 	}
+
+	const inspectCapabilities = (
+		client: WarehouseSqlClient,
+		allowSettingOverrides: boolean,
+	): Effect.Effect<WarehouseCapabilities> => {
+		const probeError = (target: WarehouseCapabilityMetadataTarget, cause: unknown) =>
+			new WarehouseCapabilityProbeError({
+				target,
+				message: cause instanceof Error ? cause.message : String(cause),
+				cause,
+			})
+		const queryRows = (target: WarehouseCapabilityMetadataTarget, sql: string) =>
+			Effect.tryPromise({
+				try: () => client.sql(sql),
+				catch: (cause) => probeError(target, cause),
+			}).pipe(Effect.map((result) => result.data))
+		const logProbeFailure = (error: WarehouseCapabilityProbeError) =>
+			Effect.logWarning("Warehouse capability metadata probe failed").pipe(
+				Effect.annotateLogs({
+					target: error.target,
+					error: error.message,
+				}),
+			)
+
+		const inspection = Effect.all(
+			[
+				queryRows("version", "SELECT version() AS version").pipe(
+					Effect.flatMap((rows) =>
+						Schema.decodeUnknownEffect(WarehouseVersionMetadataSchema)(rows),
+					),
+					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("version", cause))),
+				),
+				queryRows(
+					"indexes",
+					`SELECT table, name, type, expr AS expression
+FROM system.data_skipping_indices
+WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
+				).pipe(
+					Effect.flatMap((rows) => Schema.decodeUnknownEffect(WarehouseIndexMetadataSchema)(rows)),
+					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("indexes", cause))),
+				),
+				queryRows(
+					"columns",
+					`SELECT table, name
+FROM system.columns
+WHERE database = currentDatabase() AND table IN ('logs', 'traces')`,
+				).pipe(
+					Effect.flatMap((rows) => Schema.decodeUnknownEffect(WarehouseColumnMetadataSchema)(rows)),
+					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("columns", cause))),
+				),
+				queryRows(
+					"projections",
+					`SELECT table, name
+FROM system.projections
+WHERE database = currentDatabase() AND table = 'logs'`,
+				).pipe(
+					Effect.flatMap((rows) =>
+						Schema.decodeUnknownEffect(WarehouseProjectionMetadataSchema)(rows),
+					),
+					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("projections", cause))),
+					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
+						logProbeFailure(error).pipe(
+							Effect.as<ReadonlyArray<WarehouseProjectionMetadataRow>>([]),
+						),
+					),
+				),
+				queryRows(
+					"settings",
+					`SELECT name, value
+FROM system.settings
+WHERE name = 'enable_full_text_index'`,
+				).pipe(
+					Effect.flatMap((rows) =>
+						Schema.decodeUnknownEffect(WarehouseSettingMetadataSchema)(rows),
+					),
+					Effect.catchTag("SchemaError", (cause) => Effect.fail(probeError("settings", cause))),
+					Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
+						logProbeFailure(error).pipe(
+							Effect.as<ReadonlyArray<WarehouseSettingMetadataRow>>([]),
+						),
+					),
+				),
+			],
+			{ concurrency: "unbounded" },
+		).pipe(
+			Effect.map(([versions, indexes, columns, projections, settings]) =>
+				deriveWarehouseCapabilities({
+					serverVersion: versions[0]?.version,
+					indexes,
+					columns,
+					projections,
+					settings,
+					allowSettingOverrides,
+				}),
+			),
+		)
+
+		const timed: Effect.Effect<
+			WarehouseCapabilities,
+			WarehouseCapabilityProbeError | Cause.TimeoutError
+		> = inspection.pipe(Effect.timeout(CAPABILITIES_INSPECTION_TIMEOUT))
+		const probeRecovered: Effect.Effect<WarehouseCapabilities, Cause.TimeoutError> = timed.pipe(
+			Effect.catchTag("@maple/query-engine/execution/WarehouseCapabilityProbeError", (error) =>
+				logProbeFailure(error).pipe(Effect.as(baselineWarehouseCapabilities())),
+			),
+		)
+		return probeRecovered.pipe(
+			Effect.catchTag("TimeoutError", (error) =>
+				Effect.logWarning("Warehouse capability inspection fell back to conservative plan").pipe(
+					Effect.annotateLogs({ target: "inspection", error: error.message }),
+					Effect.as(baselineWarehouseCapabilities()),
+				),
+			),
+		)
+	}
+
+	const resolveCapabilities = Effect.fn("WarehouseQueryService.resolveCapabilities")(function* (
+		tenant: ExecutionTenant,
+		options?: SqlQueryOptions,
+	) {
+		const purpose: RoutePurpose = options?.route === "ingest" ? "ingest" : "read"
+		const resolved = yield* deps.resolveRoute(tenant, purpose, "capabilities")
+		const nowMs = yield* Clock.currentTimeMillis
+		const configKey = sqlClientCacheKey(resolved.config)
+		const inFlightKey = `${resolved.clientCacheKey}\u0000${configKey}`
+		const cache = yield* Ref.get(capabilitiesCache)
+		const cached = Option.getOrUndefined(HashMap.get(cache, resolved.clientCacheKey))
+		if (cached && cached.cacheKey === configKey && cached.expiresAt > nowMs) {
+			yield* Effect.annotateCurrentSpan({
+				"maple.query.capabilities.cache": "hit",
+				"maple.query.capabilities.metadata_available": cached.capabilities.metadataAvailable,
+			})
+			return cached.capabilities
+		}
+
+		const deferred = yield* Deferred.make<WarehouseCapabilities>()
+		const candidate = { await: Deferred.await(deferred) } satisfies CapabilityAwaiter
+		type CapabilitySelection = {
+			readonly awaiter: CapabilityAwaiter
+			readonly leader: boolean
+		}
+		const selected = yield* Ref.modify(
+			capabilitiesInFlight,
+			(current): readonly [CapabilitySelection, HashMap.HashMap<string, CapabilityAwaiter>] =>
+				Option.match(HashMap.get(current, inFlightKey), {
+					onNone: () => [
+						{ awaiter: candidate, leader: true },
+						HashMap.set(current, inFlightKey, candidate),
+					],
+					onSome: (awaiter) => [{ awaiter, leader: false }, current],
+				}),
+		)
+
+		const dialect = BackendDialect[resolved.config.kind]
+		const cacheOutcome = selected.leader ? "miss" : "deduplicated"
+		let capabilities: WarehouseCapabilities
+		if (selected.leader) {
+			capabilities = yield* Deferred.complete(
+				deferred,
+				inspectCapabilities(
+					getCachedOrCreateClient(resolved.clientCacheKey, resolved.config, nowMs),
+					!dialect.stripTinybirdRestrictedSettings,
+				).pipe(
+					Effect.tap((result) =>
+						Ref.update(capabilitiesCache, (current) =>
+							HashMap.set(current, resolved.clientCacheKey, {
+								capabilities: result,
+								cacheKey: configKey,
+								expiresAt: nowMs + CAPABILITIES_CACHE_TTL_MS,
+							}),
+						),
+					),
+					Effect.withSpan("WarehouseQueryService.inspectCapabilities", {
+						kind: "client",
+						attributes: {
+							orgId: tenant.orgId,
+							"db.client": dialect.dbClient,
+							"db.system.name": dialect.dbSystemName,
+							"peer.service": dialect.peerService,
+							"warehouse.backend": resolved.config.kind,
+							"warehouse.route": purpose,
+							"warehouse.config_source": resolved.source,
+							"maple.query.capabilities.cache": "miss",
+						},
+					}),
+				),
+			).pipe(
+				Effect.andThen(candidate.await),
+				Effect.ensuring(
+					Ref.update(capabilitiesInFlight, (current) =>
+						Option.match(HashMap.get(current, inFlightKey), {
+							onNone: () => current,
+							onSome: (awaiter) =>
+								awaiter === candidate ? HashMap.remove(current, inFlightKey) : current,
+						}),
+					),
+				),
+			)
+		} else {
+			capabilities = yield* selected.awaiter.await
+		}
+		yield* Effect.annotateCurrentSpan({
+			"maple.query.capabilities.cache": cacheOutcome,
+			"maple.query.capabilities.metadata_available": capabilities.metadataAvailable,
+			"warehouse.backend": resolved.config.kind,
+			"warehouse.route": purpose,
+			"warehouse.config_source": resolved.source,
+			orgId: tenant.orgId,
+		})
+		return capabilities
+	})
 
 	// Client-kind is load-bearing: the service-map DB-edge MV
 	// (service_map_db_edges_hourly_mv) only counts SpanKind IN ('Client','Producer').
@@ -304,6 +568,26 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			Effect.catchTag("@maple/http/errors/RawSqlValidationError", Effect.die),
 		)
 
+	const withCapabilitySettings = (
+		capabilities: WarehouseCapabilities | undefined,
+		options?: SqlQueryOptions,
+	): SqlQueryOptions | undefined =>
+		capabilities?.fullTextSearchSetting === "available"
+			? {
+					...options,
+					settings: { ...options?.settings, enableFullTextIndex: 1 },
+				}
+			: options
+
+	const annotateCapabilityPlan = (capabilities: WarehouseCapabilities) =>
+		Effect.annotateCurrentSpan({
+			"maple.query.capabilities.metadata_available": capabilities.metadataAvailable,
+			"maple.query.plan.log_body": logBodySearchMode(capabilities),
+			"maple.query.plan.log_attributes": attributeIndexMode(capabilities, "logs"),
+			"maple.query.plan.trace_attributes": attributeIndexMode(capabilities, "traces"),
+			"maple.query.plan.full_text_setting": capabilities.fullTextSearchSetting,
+		})
+
 	const query = Effect.fn("WarehouseQueryService.query")(function* (
 		tenant: ExecutionTenant,
 		payload: WarehouseQueryRequest,
@@ -319,10 +603,18 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		}
 
-		const compiled = compilePipeQuery(payload.pipeName, {
-			...payload.params,
-			org_id: tenant.orgId,
-		})
+		const capabilities = CAPABILITY_AWARE_PIPES.has(payload.pipeName)
+			? yield* resolveCapabilities(tenant, options)
+			: undefined
+		if (capabilities) yield* annotateCapabilityPlan(capabilities)
+		const compiled = compilePipeQuery(
+			payload.pipeName,
+			{
+				...payload.params,
+				org_id: tenant.orgId,
+			},
+			capabilities ?? baselineWarehouseCapabilities(),
+		)
 
 		if (!compiled) {
 			return yield* new WarehouseValidationError({
@@ -331,7 +623,12 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 			})
 		}
 
-		const rows = yield* executeTrustedSql(tenant, compiled.sql, payload.pipeName, options)
+		const rows = yield* executeTrustedSql(
+			tenant,
+			compiled.sql,
+			payload.pipeName,
+			withCapabilitySettings(capabilities, options),
+		)
 		const decodedRows = yield* compiled.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
@@ -391,13 +688,22 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 	): SqlQueryOptions | undefined =>
 		compiled.routing === "ingest" ? { ...options, route: "ingest" } : options
 
-	const compiledQuery = Effect.fn("WarehouseQueryService.compiledQuery")(function* <T>(
+	const executeCompiledQuery = Effect.fn("WarehouseQueryService.executeCompiledQuery")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) {
-		const rows = yield* sqlQuery(tenant, compiled.sql, withCompiledRouting(compiled, options))
-		return yield* compiled.decodeRows(rows).pipe(
+		const capabilities =
+			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
+		if (capabilities) yield* annotateCapabilityPlan(capabilities)
+		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		const executionOptions = withCapabilitySettings(capabilities, options)
+		yield* Effect.annotateCurrentSpan(
+			"query.optimization.capabilityAware",
+			typeof compiled === "function",
+		)
+		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		return yield* selected.decodeRows(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
@@ -409,13 +715,34 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		)
 	})
 
+	const compiledQuery = <T>(
+		tenant: ExecutionTenant,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		options?: SqlQueryOptions,
+	) => executeCompiledQuery(tenant, compiled, options)
+
+	const compiledQueryWithCapabilities = <T>(
+		tenant: ExecutionTenant,
+		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
+		options?: SqlQueryOptions,
+	) => executeCompiledQuery(tenant, compile, options)
+
 	const compiledQueryFirst = Effect.fn("WarehouseQueryService.compiledQueryFirst")(function* <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) {
-		const rows = yield* sqlQuery(tenant, compiled.sql, withCompiledRouting(compiled, options))
-		return yield* compiled.decodeFirstRow(rows).pipe(
+		const capabilities =
+			typeof compiled === "function" ? yield* resolveCapabilities(tenant, options) : undefined
+		if (capabilities) yield* annotateCapabilityPlan(capabilities)
+		const selected = typeof compiled === "function" ? compiled(capabilities!) : compiled
+		const executionOptions = withCapabilitySettings(capabilities, options)
+		yield* Effect.annotateCurrentSpan(
+			"query.optimization.capabilityAware",
+			typeof compiled === "function",
+		)
+		const rows = yield* sqlQuery(tenant, selected.sql, withCompiledRouting(selected, executionOptions))
+		return yield* selected.decodeFirstRow(rows).pipe(
 			Effect.mapError(
 				(error) =>
 					new WarehouseSchemaDriftError({
@@ -540,6 +867,7 @@ export const makeWarehouseExecutor = (deps: WarehouseExecutorDeps): WarehouseQue
 		sqlQuery,
 		rawSqlQuery,
 		compiledQuery,
+		compiledQueryWithCapabilities,
 		compiledQueryFirst,
 		ingest,
 		asExecutor,

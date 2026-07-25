@@ -8,6 +8,7 @@ import type {
 } from "@maple/domain/http"
 import type { ResolvedWarehouseConfig } from "./backend"
 import type { CompiledQuery } from "../ch"
+import type { WarehouseCapabilities } from "../capabilities"
 import type { WarehouseExecutorShape } from "../observability"
 import type { SqlQueryOptions } from "../profiles"
 import type { WarehouseSqlError } from "./errors"
@@ -98,12 +99,17 @@ export interface WarehouseQueryServiceShape {
 	) => Effect.Effect<ReadonlyArray<Record<string, unknown>>, WarehouseSqlError | RawSqlValidationError>
 	readonly compiledQuery: <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
+		options?: SqlQueryOptions,
+	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
+	readonly compiledQueryWithCapabilities: <T>(
+		tenant: ExecutionTenant,
+		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
 	readonly compiledQueryFirst: <T>(
 		tenant: ExecutionTenant,
-		compiled: CompiledQuery<T>,
+		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) => Effect.Effect<Option.Option<T>, WarehouseSqlError | WarehouseValidationError>
 	readonly ingest: <T>(
