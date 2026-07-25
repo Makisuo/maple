@@ -2551,14 +2551,6 @@ export const footer_terms = () => `Terms of Service`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_14day_retention = () => `14-day retention`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_30day_retention = () => `30-day retention`
 
 
@@ -2615,63 +2607,7 @@ export const pricing_ai_triage = () => `AI error triaging`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_email_support = () => `Email support`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_private_channel = () => `Private Channel support`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `No per-seat or per-host fees`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_data_included = () => `Data included`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_platform_features = () => `Platform features`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_free_forever = () => `Trial included`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_small = () => `For individuals and small projects`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_growing = () => `For growing teams`
 
 
 /**
@@ -2680,14 +2616,6 @@ export const pricing_for_growing = () => `For growing teams`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_trial_badge = (params) => `${params.duration}-day trial`
-
-
-/**
- * @param {{ duration: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = (params) => `You won't be charged for ${params.duration} days · Credit card required`
 
 
 /**
@@ -2703,14 +2631,6 @@ export const pricing_enterprise = () => `Enterprise`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom = () => `Custom`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_enterprise_price = () => `From $2,000`
 
 
@@ -2719,47 +2639,7 @@ export const pricing_enterprise_price = () => `From $2,000`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_enterprise_desc = () => `Tailored pricing for high-volume teams with dedicated support and custom retention.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_talk_to_founder = () => `Talk to Founder`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom_retention = () => `Custom retention`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_otel_data_help = () => `Hands-on help improving your OTel data`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_priority_support = () => `Priority support`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_subscribe = () => `Subscribe`
 
 
 /**
@@ -2792,6 +2672,86 @@ export const pricing_metrics = () => `Metrics`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_start_trial = (params) => `Start ${params.duration}-day free trial`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_everything_included = () => `Everything is included.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_host = () => `per host`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_seat = () => `per seat`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_query = () => `per query`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_included_monthly = () => `Included every month`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_gb = (params) => `then ${params.rate} / GB`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_session = (params) => `then ${params.rate} / session`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_trial_reassure = (params) => `Free for ${params.duration} days · Cancel anytime · Card required to start`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_enterprise_rail = () => `Higher volume, custom retention, priority support.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_estimate_link = () => `Estimate your bill →`
 
 
 /**
@@ -5183,15 +5143,7 @@ export const pricing_home_title = () => `Priced the way you'd price it.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_lede = () => `No per-host fees. No per-seat fees. $39/month with 100 GB of each signal, then a flat $0.30 per GB — the pricing page and your invoice show the same numbers.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_link = () => `Full plan comparison →`
+export const pricing_home_lede = () => `No per-host fees. No per-seat fees. The pricing page and your invoice show the same numbers.`
 
 
 /**

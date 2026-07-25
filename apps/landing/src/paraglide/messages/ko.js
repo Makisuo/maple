@@ -2551,14 +2551,6 @@ export const footer_terms = () => `이용약관`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_14day_retention = () => `14일 보존`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_30day_retention = () => `30일 보존`
 
 
@@ -2615,63 +2607,7 @@ export const pricing_ai_triage = () => `AI 오류 분류`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_email_support = () => `이메일 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_private_channel = () => `전용 채널 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `시트·호스트 요금 없음`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_data_included = () => `포함된 데이터`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_platform_features = () => `플랫폼 기능`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_free_forever = () => `평가판 포함`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_small = () => `개인 및 소규모 프로젝트용`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_growing = () => `성장하는 팀용`
 
 
 /**
@@ -2680,14 +2616,6 @@ export const pricing_for_growing = () => `성장하는 팀용`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_trial_badge = (params) => `${params.duration}일 무료 체험`
-
-
-/**
- * @param {{ duration: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = (params) => `${params.duration}일간 과금되지 않습니다 · 신용카드 필요`
 
 
 /**
@@ -2703,14 +2631,6 @@ export const pricing_enterprise = () => `엔터프라이즈`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom = () => `맞춤형`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_enterprise_price = () => `$2,000부터`
 
 
@@ -2719,47 +2639,7 @@ export const pricing_enterprise_price = () => `$2,000부터`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_enterprise_desc = () => `대규모 팀을 위한 맞춤형 요금. 전담 지원과 맞춤형 보존 기간 포함.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_talk_to_founder = () => `창업자와 상담`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom_retention = () => `맞춤형 보존 기간`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_otel_data_help = () => `OTel 데이터 개선 직접 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_priority_support = () => `우선 지원`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_subscribe = () => `구독`
 
 
 /**
@@ -2792,6 +2672,86 @@ export const pricing_metrics = () => `메트릭`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_start_trial = (params) => `${params.duration}일 무료 체험 시작`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_everything_included = () => `모든 기능이 포함됩니다.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_host = () => `호스트당`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_seat = () => `좌석당`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_query = () => `쿼리당`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_included_monthly = () => `매월 포함`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_gb = (params) => `초과분 ${params.rate} / GB`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_session = (params) => `초과분 ${params.rate} / 세션`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_trial_reassure = (params) => `${params.duration}일 무료 · 언제든 취소 · 시작 시 카드 필요`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_enterprise_rail = () => `대용량, 맞춤 보존 기간, 우선 지원.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_estimate_link = () => `청구액 추정 →`
 
 
 /**
@@ -5183,15 +5143,7 @@ export const pricing_home_title = () => `직접 값을 매긴다면 이렇게.`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_lede = () => `호스트당 비용 없음. 좌석당 비용 없음. 월 39달러에 시그널별 100GB, 이후에는 GB당 0.30달러 정액 — 요금 페이지와 청구서에 같은 숫자가 적힙니다.`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_link = () => `전체 플랜 비교 →`
+export const pricing_home_lede = () => `호스트당 비용 없음. 좌석당 비용 없음. 요금 페이지와 청구서에 같은 숫자가 적힙니다.`
 
 
 /**

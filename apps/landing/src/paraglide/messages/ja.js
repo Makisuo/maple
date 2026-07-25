@@ -2551,14 +2551,6 @@ export const footer_terms = () => `利用規約`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_14day_retention = () => `14日間の保持`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_30day_retention = () => `30日間の保持`
 
 
@@ -2615,63 +2607,7 @@ export const pricing_ai_triage = () => `AIエラートリアージ`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_email_support = () => `メールサポート`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_private_channel = () => `プライベートチャネルサポート`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_no_usage_charges = () => `シート課金・ホスト課金なし`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_data_included = () => `含まれるデータ`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_platform_features = () => `プラットフォーム機能`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_free_forever = () => `トライアル付き`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_small = () => `個人と小規模プロジェクト向け`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_for_growing = () => `成長中のチーム向け`
 
 
 /**
@@ -2680,14 +2616,6 @@ export const pricing_for_growing = () => `成長中のチーム向け`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_trial_badge = (params) => `${params.duration}日間無料トライアル`
-
-
-/**
- * @param {{ duration: NonNullable<unknown> }} params
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_trial_notice = (params) => `${params.duration}日間は課金されません · クレジットカードが必要です`
 
 
 /**
@@ -2703,14 +2631,6 @@ export const pricing_enterprise = () => `エンタープライズ`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom = () => `カスタム`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_enterprise_price = () => `$2,000から`
 
 
@@ -2719,47 +2639,7 @@ export const pricing_enterprise_price = () => `$2,000から`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_enterprise_desc = () => `大規模チーム向けのカスタム料金。専任サポートとカスタム保持期間付き。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const pricing_talk_to_founder = () => `創業者に相談`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_custom_retention = () => `カスタム保持期間`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_otel_data_help = () => `OTelデータ改善のハンズオン支援`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_priority_support = () => `優先サポート`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_subscribe = () => `購読`
 
 
 /**
@@ -2792,6 +2672,86 @@ export const pricing_metrics = () => `メトリクス`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const pricing_start_trial = (params) => `${params.duration}日間の無料トライアルを開始`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_everything_included = () => `すべての機能が含まれます。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_host = () => `ホスト単位`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_seat = () => `シート単位`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_zero_query = () => `クエリ単位`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_included_monthly = () => `毎月含まれるデータ`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_gb = (params) => `超過分 ${params.rate} / GB`
+
+
+/**
+ * @param {{ rate: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_rate_session = (params) => `超過分 ${params.rate} / セッション`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_trial_reassure = (params) => `${params.duration}日間無料 · いつでもキャンセル可 · 開始にはカードが必要`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_enterprise_rail = () => `大容量、カスタム保持期間、優先サポート。`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const pricing_estimate_link = () => `請求額を試算 →`
 
 
 /**
@@ -5183,15 +5143,7 @@ export const pricing_home_title = () => `自分で値付けするなら、こう
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_lede = () => `ホスト単位の課金なし。シート単位の課金なし。月額39ドルで各シグナル100 GB、超過分は一律1 GBあたり0.30ドル — 料金ページと請求書に、同じ数字が並びます。`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const pricing_home_link = () => `プラン比較を見る →`
+export const pricing_home_lede = () => `ホスト単位の課金なし。シート単位の課金なし。料金ページと請求書に、同じ数字が並びます。`
 
 
 /**
