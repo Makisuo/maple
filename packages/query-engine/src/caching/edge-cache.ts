@@ -145,18 +145,26 @@ export const makeEdgeCacheService = (
 		const existing = inFlight.get(composite)
 		if (existing) {
 			const value = (yield* existing.await) as A
-			// NOT `cache.hit`. This request served nothing from storage — it waited
-			// on the leader fiber's read AND compute, with none of the read path's
-			// 250ms bound, so it inherits full miss latency. Counting it as a hit
-			// made the reported hit rate meaningless and put multi-second "hits" in
-			// the p95 when a real storage hit cannot exceed the read deadline.
+			// NOT a hit — on the span OR in the returned flag. This request served
+			// nothing from storage: it waited on the leader fiber's read AND compute,
+			// with none of the read path's 250ms bound, so it inherits full miss
+			// latency. Counting it as a hit made the reported hit rate meaningless and
+			// put multi-second "hits" in the p95 when a real storage hit cannot exceed
+			// the read deadline.
+			//
+			// The returned flag matters as much as the annotation: callers re-publish
+			// it onto their own span and into `cacheHitsTotal`
+			// (QueryEngineService.recordCacheOutcome), so leaving it `true` here would
+			// leave the metric wrong and make parent and child spans disagree on
+			// `cache.hit` within one trace. `cache.dedup.waited` remains the way to
+			// tell a deduplicated wait from a genuine compute.
 			yield* Effect.annotateCurrentSpan({
 				"cache.hit": false,
 				"cache.outcome": "dedup",
 				"cache.dedup.waited": true,
 				"cache.read_status": "deduplicated",
 			})
-			return { value, hit: true }
+			return { value, hit: false }
 		}
 
 		const deferred = yield* Deferred.make<A, E>()
