@@ -21,6 +21,33 @@ const CHECK_RETENTION_MS = 24 * 60 * 60 * 1000
 /** …with a per-target row cap as backstop against very short intervals. */
 const CHECK_MAX_ROWS_PER_TARGET = 10_000
 
+/** What retention needs to know about a target to prune its check history. */
+export interface RetentionTarget {
+	readonly id: string
+	readonly targetType: string
+	readonly scrapeIntervalSeconds: number
+}
+
+/**
+ * Can this target still hold more than the row cap after the 24h delete?
+ *
+ * A plain target writes exactly one check row per interval, so 24h of history
+ * is `86400 / interval` rows — under the 10k cap for anything slower than
+ * ~8.6s, which is every real configuration. `planetscale` targets fan out to
+ * one row per discovered branch per interval, so their row count is not
+ * derivable from the interval alone and they always get probed.
+ *
+ * This gate is what makes the cap affordable: the probe below has to walk
+ * `CHECK_MAX_ROWS_PER_TARGET` index entries to find the Nth-newest row, which
+ * across ~740 targets every hour read 136M rows a day — 6.5% of all database
+ * time — to return a boundary for a handful of them.
+ */
+export const canExceedRowCap = (target: RetentionTarget): boolean => {
+	if (target.targetType === "planetscale") return true
+	if (target.scrapeIntervalSeconds <= 0) return true
+	return CHECK_RETENTION_MS / 1000 / target.scrapeIntervalSeconds >= CHECK_MAX_ROWS_PER_TARGET
+}
+
 /**
  * Apply retention to the given targets.
  *
@@ -29,12 +56,13 @@ const CHECK_MAX_ROWS_PER_TARGET = 10_000
  * what costs, not the statement count.
  */
 export const pruneChecksForTargets = Effect.fn("ScrapeCheckRetention.pruneForTargets")(function* (
-	targetIds: ReadonlyArray<string>,
+	targets: ReadonlyArray<RetentionTarget>,
 ) {
-	if (targetIds.length === 0) return
+	if (targets.length === 0) return
 	const now = yield* Clock.currentTimeMillis
 	const cutoff = new Date(now - CHECK_RETENTION_MS)
-	const ids = [...targetIds]
+	const ids = targets.map((target) => target.id)
+	const capCandidates = targets.filter(canExceedRowCap)
 	const database = yield* Database
 
 	yield* database.execute(async (db) => {
@@ -46,11 +74,11 @@ export const pruneChecksForTargets = Effect.fn("ScrapeCheckRetention.pruneForTar
 		// older than the Nth-newest row per target. The OFFSET probe rides the
 		// (target_id, checked_at) index, so it stays cheaper than a window
 		// function over the target's full history.
-		for (const targetId of ids) {
+		for (const target of capCandidates) {
 			const capBoundary = await db
 				.select({ checkedAt: scrapeTargetChecks.checkedAt })
 				.from(scrapeTargetChecks)
-				.where(eq(scrapeTargetChecks.targetId, targetId))
+				.where(eq(scrapeTargetChecks.targetId, target.id))
 				.orderBy(desc(scrapeTargetChecks.checkedAt))
 				.limit(1)
 				.offset(CHECK_MAX_ROWS_PER_TARGET - 1)
@@ -60,11 +88,15 @@ export const pruneChecksForTargets = Effect.fn("ScrapeCheckRetention.pruneForTar
 				.delete(scrapeTargetChecks)
 				.where(
 					and(
-						eq(scrapeTargetChecks.targetId, targetId),
+						eq(scrapeTargetChecks.targetId, target.id),
 						lt(scrapeTargetChecks.checkedAt, boundary.checkedAt),
 					),
 				)
 		}
+	})
+	yield* Effect.annotateCurrentSpan({
+		"scrape.retention.targets": targets.length,
+		"scrape.retention.cap_probed": capCandidates.length,
 	})
 })
 
@@ -72,9 +104,15 @@ export const pruneChecksForTargets = Effect.fn("ScrapeCheckRetention.pruneForTar
 export const runScrapeCheckRetention = Effect.gen(function* () {
 	const database = yield* Database
 	const rows = yield* database.execute((db) =>
-		db.select({ id: scrapeTargets.id }).from(scrapeTargets),
+		db
+			.select({
+				id: scrapeTargets.id,
+				targetType: scrapeTargets.targetType,
+				scrapeIntervalSeconds: scrapeTargets.scrapeIntervalSeconds,
+			})
+			.from(scrapeTargets),
 	)
-	yield* pruneChecksForTargets(rows.map((row) => row.id))
+	yield* pruneChecksForTargets(rows)
 	yield* Effect.annotateCurrentSpan({
 		"scrape.retention.targets": rows.length,
 		"scrape.retention.outcome": "completed",

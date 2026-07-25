@@ -375,10 +375,17 @@ impl AppConfig {
             60,
         )?;
 
+        // Routing (self-managed + ClickHouse-readiness flags) is re-read per
+        // ingest request on a cache miss. A 1s TTL made that ~11 QPS against
+        // org_clickhouse_settings — 961k statements a day, a quarter of ALL
+        // traffic on the application database — to observe a value that changes
+        // when an operator finishes a schema apply. 30s matches the sampling and
+        // attribute-mapping caches; the only cost is that an org flipping to
+        // ClickHouse-ready keeps routing to Tinybird for up to another 30s.
         let org_routing_cache_ttl_secs = parse_u64(
             "INGEST_ORG_ROUTING_CACHE_TTL_SECS",
             std::env::var("INGEST_ORG_ROUTING_CACHE_TTL_SECS").ok(),
-            1,
+            30,
         )?;
 
         // 1 GiB of decompressed rrweb per session. Sized as an absurdity guard,
@@ -3566,7 +3573,7 @@ impl IngestKeyResolver {
         // LEFT JOIN against org_clickhouse_settings so the initial routing state
         // is resolved in the same roundtrip as org_id. Warm auth-cache hits keep
         // the key identity cached while the separate org-routing cache refreshes
-        // ClickHouse readiness on its shorter TTL.
+        // ClickHouse readiness on its own TTL.
         let Some(row) = self.store.fetch_ingest_key(&key_hash, hash_column).await? else {
             return Ok(None);
         };
