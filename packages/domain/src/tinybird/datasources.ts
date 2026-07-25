@@ -51,6 +51,17 @@ export const logs = defineDatasource("logs", {
 			jsonPath: "$.LogAttributeItems[:]",
 		}),
 	},
+	// Changing the logs sorting key rebuilds the 30-day raw table. Carry every
+	// live row forward and initialize the search-only arrays without attempting
+	// to recompute them during the deployment backfill.
+	forwardQuery: `SELECT
+		OrgId, Timestamp, TimestampTime, TraceId, SpanId, TraceFlags,
+		SeverityText, SeverityNumber, ServiceName, Body,
+		ResourceSchemaUrl, ResourceAttributes,
+		ScopeSchemaUrl, ScopeName, ScopeVersion, ScopeAttributes, LogAttributes,
+		defaultValueOfTypeName('Array(String)') AS ResourceAttributeItems,
+		defaultValueOfTypeName('Array(String)') AS ScopeAttributeItems,
+		defaultValueOfTypeName('Array(String)') AS LogAttributeItems`,
 	// `TraceId` is not in the sorting key and a trace spans many services (so
 	// `ServiceName` isn't fixed either) — a `WHERE TraceId = ...` lookup would
 	// otherwise scan whole daily partitions. The bloom filter lets ClickHouse
@@ -1249,6 +1260,9 @@ export const attributeKeysHourly = defineDatasource("attribute_keys_hourly", {
 		AttributeScope: t.string().lowCardinality(),
 		UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
+	// Preserve hours older than the 30-day raw source while the source schema
+	// change causes Tinybird to rebuild dependent materialized pipes.
+	forwardQuery: `SELECT *`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		sortingKey: ["OrgId", "AttributeScope", "Hour", "AttributeKey"],
@@ -1274,6 +1288,9 @@ export const attributeValuesHourly = defineDatasource("attribute_values_hourly",
 		AttributeScope: t.string().lowCardinality(),
 		UsageCount: t.simpleAggregateFunction("sum", t.uint64()),
 	},
+	// Preserve hours older than the 30-day raw source while the source schema
+	// change causes Tinybird to rebuild dependent materialized pipes.
+	forwardQuery: `SELECT *`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		sortingKey: ["OrgId", "AttributeScope", "AttributeKey", "Hour", "AttributeValue"],
@@ -1562,6 +1579,9 @@ export const logsAggregatesHourly = defineDatasource("logs_aggregates_hourly", {
 		SizeBytes: t.simpleAggregateFunction("sum", t.uint64()),
 		ServiceNamespace: t.string().lowCardinality(),
 	},
+	// Preserve annual aggregate history while `logs` is rebuilt from its
+	// 30-day retained source.
+	forwardQuery: `SELECT *`,
 	engine: engine.aggregatingMergeTree({
 		partitionKey: "toDate(Hour)",
 		// ServiceNamespace is a grouping dimension, so it must live in the sorting
