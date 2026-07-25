@@ -52,21 +52,13 @@ describe("ClickHouse DDL emitter", () => {
 		expect(ddl).toContain("INDEX idx_resource_attr_vals mapValues(ResourceAttributes)")
 	})
 
-	it("keeps portable DDL compatible and includes text indexes only when requested", async () => {
+	it("keeps generated DDL portable while text indexes are reconciled separately", async () => {
 		const manifest = await buildTinybirdProjectManifest()
 		const logs = manifest.datasources.find((ds) => ds.name === "logs")
 
 		const portable = emitCreateTable(logs!)
 		expect(portable).toContain("INDEX idx_lower_body lower(Body) TYPE tokenbf_v1")
 		expect(portable).not.toContain("TYPE text(")
-
-		const modern = emitCreateTable(logs!, { includeTextIndexes: true })
-		expect(modern).toContain(
-			"INDEX idx_lower_body_text lower(Body) TYPE text(tokenizer = 'splitByNonAlpha')",
-		)
-		expect(modern).toContain(
-			"INDEX idx_log_attr_items_text LogAttributeItems TYPE text(tokenizer = 'array')",
-		)
 	})
 
 	it("does not include FORWARD_QUERY blocks (Tinybird-only)", async () => {

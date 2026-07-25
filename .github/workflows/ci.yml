@@ -66,6 +66,9 @@ jobs:
 
             - run: bun install --frozen-lockfile
 
+            - name: Build ClickHouse query DSL
+              run: bun turbo build --filter=@maple-dev/clickhouse-builder
+
             - name: Replay migrations and verify search indexes
               env:
                   CLICKHOUSE_E2E: "1"

@@ -25,19 +25,12 @@ export interface EmitterOptions {
 	readonly database?: string
 	readonly engineFlavor?: EngineFlavor
 	readonly ifNotExists?: boolean
-	/**
-	 * Full-text indexes require newer ClickHouse releases. The generated
-	 * self-hosted snapshot stays 24.8-compatible by default; the schema feature
-	 * reconciler installs these indexes after probing a capable server.
-	 */
-	readonly includeTextIndexes?: boolean
 }
 
 const defaultOptions: Required<EmitterOptions> = {
 	database: "",
 	engineFlavor: "MergeTree",
 	ifNotExists: true,
-	includeTextIndexes: false,
 }
 
 const resolve = (options?: EmitterOptions): Required<EmitterOptions> => ({
@@ -322,16 +315,14 @@ export const emitCreateTable = (datasource: ResourceContent, options?: EmitterOp
 
 	const ifNotExists = opts.ifNotExists ? "IF NOT EXISTS " : ""
 	const tableRef = qualified(datasource.name, opts.database)
-	const activeIndexes = parsed.indexes.filter(
-		(idx) => opts.includeTextIndexes || !/\bTYPE\s+text\s*\(/i.test(idx),
-	)
 
 	const innerLines = [
 		...parsed.columns.map(
-			(col, i) => `${col}${i < parsed.columns.length - 1 || activeIndexes.length > 0 ? "," : ""}`,
+			(col, i) =>
+				`${col}${i < parsed.columns.length - 1 || parsed.indexes.length > 0 ? "," : ""}`,
 		),
-		...activeIndexes.map(
-			(idx, i) => `${buildIndexClause(idx)}${i < activeIndexes.length - 1 ? "," : ""}`,
+		...parsed.indexes.map(
+			(idx, i) => `${buildIndexClause(idx)}${i < parsed.indexes.length - 1 ? "," : ""}`,
 		),
 	]
 
