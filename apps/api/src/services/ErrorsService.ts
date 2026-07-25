@@ -74,6 +74,7 @@ import { AI_TRIAGE_WORKFLOW_BINDING, maybeEnqueueTriage } from "../lib/ai-triage
 import { escalationDedupeKey, escalationReasonFor } from "../lib/issue-severity"
 import { WorkerEnvironment } from "@maple/effect-cloudflare/worker-environment"
 import { Database, DatabaseError, type DatabaseClient } from "../lib/DatabaseLive"
+import { selectDistinctOrgIds } from "../lib/distinct-org-ids"
 import { readTxid, txidColumn } from "../lib/electric-txid"
 import { Env } from "../lib/Env"
 import { dateToMs, msToDate } from "../lib/time"
@@ -123,7 +124,14 @@ const ACTIVE_ORGS_CACHE_KEY = "active"
 const ACTIVE_ORGS_CACHE_TTL_S = 6 * 60 * 60
 const RESOLVED_RETENTION_DAYS = 14
 const ARCHIVED_RETENTION_DAYS = 90
-const RETENTION_PHASE_EVERY_N_TICKS = 30
+/**
+ * Retention runs one tick an hour. The phase is bucketed on the CRON period,
+ * not on `TICK_WINDOW_MS`: the alerting cron fires every minute while the scan
+ * window is two minutes wide, so bucketing on the window put two consecutive
+ * ticks in the same bucket and ran retention twice an hour for every org.
+ */
+const RETENTION_PHASE_PERIOD_MS = 60_000
+const RETENTION_PHASE_EVERY_N_TICKS = 60
 const DAY_MS = 24 * 60 * 60 * 1000
 const DEFAULT_LEASE_DURATION_MS = 30 * 60_000
 const SYSTEM_AGENT_NAME = "system-errors-tick"
@@ -2301,12 +2309,38 @@ const make: Effect.Effect<
 	// Scheduled tick
 	// ---------------------------------------------------------------
 
-	const expireLeasesForOrg = Effect.fn("ErrorsService.expireLeases")(function* (
+	/**
+	 * The four unconditional reads at the head of every per-org tick, in ONE
+	 * `Database.execute`. Under `DatabasePgLive` each execute dials and tears
+	 * down its own postgres.js client, so the handshake count is what costs, not
+	 * the statement count — same trade as `scrape-check-retention.ts`.
+	 *
+	 * The stale-incident sweep is deliberately NOT batched in here: it has to
+	 * observe the `last_triggered_at` writes the fingerprint loop makes, so
+	 * prefetching it would auto-resolve incidents this same tick re-triggered.
+	 */
+	const loadOrgTickPreamble = Effect.fn("ErrorsService.loadOrgTickPreamble")(function* (
 		orgId: OrgId,
 		nowMs: number,
 	) {
-		const expired = yield* dbExecute((db) =>
-			db
+		return yield* dbExecute(async (db) => {
+			const actorRows = await db
+				.select()
+				.from(actors)
+				.where(
+					and(
+						eq(actors.orgId, orgId),
+						eq(actors.type, "agent"),
+						eq(actors.agentName, SYSTEM_AGENT_NAME),
+					),
+				)
+				.limit(1)
+			const policyRows = await db
+				.select()
+				.from(errorNotificationPolicies)
+				.where(eq(errorNotificationPolicies.orgId, orgId))
+				.limit(1)
+			const expiredLeases = await db
 				.select()
 				.from(errorIssues)
 				.where(
@@ -2315,11 +2349,37 @@ const make: Effect.Effect<
 						isNotNull(errorIssues.leaseExpiresAt),
 						lt(errorIssues.leaseExpiresAt, new Date(nowMs)),
 					),
-				),
-		)
+				)
+			// Wake up wontfix issues whose snooze has elapsed, so that new events
+			// observed in this tick are treated as regressions rather than skipped.
+			const wakeCandidates = await db
+				.select()
+				.from(errorIssues)
+				.where(
+					and(
+						eq(errorIssues.orgId, orgId),
+						eq(errorIssues.workflowState, "wontfix"),
+						isNotNull(errorIssues.snoozeUntil),
+						lt(errorIssues.snoozeUntil, new Date(nowMs)),
+					),
+				)
+			return {
+				actorRow: actorRows[0] ?? null,
+				policyRow: policyRows[0] ?? null,
+				expiredLeases,
+				wakeCandidates,
+			}
+		})
+	})
+
+	const expireLeasesForOrg = Effect.fn("ErrorsService.expireLeases")(function* (
+		orgId: OrgId,
+		nowMs: number,
+		expired: ReadonlyArray<ErrorIssueRow>,
+		systemActor: ActorDocument,
+	) {
 		if (expired.length === 0) return 0
 
-		const systemActor = yield* ensureSystemActor(orgId)
 		yield* Effect.forEach(expired, (row) =>
 			Effect.gen(function* () {
 				const prevActorId = row.leaseHolderActorId
@@ -2359,26 +2419,22 @@ const make: Effect.Effect<
 	) {
 		yield* Effect.annotateCurrentSpan({ orgId, runRetention, isActive })
 		const tenant = systemTenant(orgId)
-		const systemActor = yield* ensureSystemActor(orgId)
-		const policy = (yield* loadPolicyRow(orgId)) ?? defaultPolicy(orgId, windowEndMs)
+		const preamble = yield* loadOrgTickPreamble(orgId, windowEndMs)
+		// The actor exists after an org's first tick, so the insert path is a
+		// once-per-org cost rather than a per-tick round-trip.
+		const systemActor = preamble.actorRow
+			? rowToActor(preamble.actorRow)
+			: yield* ensureSystemActor(orgId)
+		const policy = preamble.policyRow ?? defaultPolicy(orgId, windowEndMs)
 
-		const leasesExpired = yield* expireLeasesForOrg(orgId, windowEndMs)
-
-		// Wake up wontfix issues whose snooze has elapsed, so that new events
-		// observed in this tick are treated as regressions rather than skipped.
-		const wakeCandidates = yield* dbExecute((db) =>
-			db
-				.select()
-				.from(errorIssues)
-				.where(
-					and(
-						eq(errorIssues.orgId, orgId),
-						eq(errorIssues.workflowState, "wontfix"),
-						isNotNull(errorIssues.snoozeUntil),
-						lt(errorIssues.snoozeUntil, new Date(windowEndMs)),
-					),
-				),
+		const leasesExpired = yield* expireLeasesForOrg(
+			orgId,
+			windowEndMs,
+			preamble.expiredLeases,
+			systemActor,
 		)
+
+		const wakeCandidates = preamble.wakeCandidates
 		yield* Effect.forEach(wakeCandidates, (row) =>
 			applyTransition(orgId, systemActor.id, row, "triage", {
 				payload: { viaSnoozeWakeup: true },
@@ -2389,9 +2445,9 @@ const make: Effect.Effect<
 
 		// `isActive` is false only for orgs with neither recent errors nor existing
 		// issue/incident state, so skipping the scan loses nothing: there is
-		// nothing to detect and nothing to resolve. The cheap D1 housekeeping above
-		// (lease expiry, snooze wakeup) and below (retention) still runs for every
-		// known org regardless.
+		// nothing to detect and nothing to resolve. Such orgs no longer reach
+		// `processOrg` at all (see `scanOrgs` in `runTick`) — this branch now only
+		// covers an org that went inactive between discovery and the scan.
 		const issuesCompiled = CH.compile(CH.errorIssuesQuery({ limit: 500 }), {
 			orgId,
 			startTime: toTinybirdDateTime(windowStartMs),
@@ -2843,36 +2899,37 @@ const make: Effect.Effect<
 		const endMs = yield* Clock.currentTimeMillis
 		const startMs = endMs - TICK_WINDOW_MS
 
-		const retentionRan = Math.floor(endMs / TICK_WINDOW_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
+		const retentionRan =
+			Math.floor(endMs / RETENTION_PHASE_PERIOD_MS) % RETENTION_PHASE_EVERY_N_TICKS === 0
 
+		// `error_issue_states` and `error_issues` hold hundreds of thousands of rows
+		// across a couple dozen orgs, so a plain `SELECT DISTINCT` scanned 160k/270k
+		// rows a call — together ~36% of all database CPU. Walk the btree instead.
+		// `org_ingest_keys` stays a plain DISTINCT on purpose: it is ~1 row per org,
+		// where a loose index scan costs an index descent per row and wins nothing.
 		const stateOrgs = yield* dbExecute((db) =>
-			db.selectDistinct({ orgId: errorIssueStates.orgId }).from(errorIssueStates),
+			selectDistinctOrgIds(db, errorIssueStates, errorIssueStates.orgId),
 		)
-		const issueOrgs = yield* dbExecute((db) =>
-			db
-				.selectDistinct({ orgId: errorIssues.orgId })
-				.from(errorIssues)
-				.where(isNotNull(errorIssues.orgId)),
-		)
+		const issueOrgs = yield* dbExecute((db) => selectDistinctOrgIds(db, errorIssues, errorIssues.orgId))
 		const ingestOrgs = yield* dbExecute((db) =>
 			db.selectDistinct({ orgId: orgIngestKeys.orgId }).from(orgIngestKeys),
 		)
-		const knownOrgs = new Set<string>([
-			...stateOrgs.map((r) => r.orgId),
-			...issueOrgs.map((r) => r.orgId),
-			...ingestOrgs.map((r) => r.orgId),
-		])
+		const knownOrgs = new Set<string>([...stateOrgs, ...issueOrgs, ...ingestOrgs.map((r) => r.orgId)])
 
 		const activeOrgs = yield* resolveActiveOrgs([...knownOrgs], endMs)
 		// Orgs that hold issue/incident state must be scanned even with no recent
 		// errors: the scan returning empty is what drives auto-resolution and
 		// aging. Only pure ingest-key-only orgs with neither recent errors nor
 		// existing state are skipped.
-		const withState = new Set<string>([
-			...stateOrgs.map((r) => r.orgId),
-			...issueOrgs.map((r) => r.orgId),
-		])
+		const withState = new Set<string>([...stateOrgs, ...issueOrgs])
 		const isActive = (org: string) => activeOrgs.has(org) || withState.has(org)
+		// Everything `processOrg` does for an inactive org is a no-op read: lease
+		// expiry, snooze wake-up and stale-incident resolution can only match rows
+		// in error_issues / error_issue_states / error_incidents, and an org holding
+		// any of those is in `withState` by construction. Visiting the rest cost 5
+		// Postgres round-trips each per minute — ~1.6M/day, most of the statement
+		// volume on the database — to discover nothing.
+		const scanOrgs = [...knownOrgs].filter(isActive)
 
 		const emptyResult = {
 			issuesTouched: 0,
@@ -2886,7 +2943,7 @@ const make: Effect.Effect<
 
 		const orgFailures = yield* Ref.make(0)
 		const results = yield* Effect.forEach(
-			[...knownOrgs],
+			scanOrgs,
 			(org) =>
 				Effect.gen(function* () {
 					// Orgs whose warehouse rejected queries with an auth/config-class error
@@ -2951,13 +3008,13 @@ const make: Effect.Effect<
 
 		yield* Effect.annotateCurrentSpan({
 			orgsKnown: knownOrgs.size,
-			orgsScanned: activeOrgs.size,
+			orgsScanned: scanOrgs.length,
 			orgFailures: yield* Ref.get(orgFailures),
 			...totals,
 		})
 
 		return {
-			orgsProcessed: knownOrgs.size,
+			orgsProcessed: scanOrgs.length,
 			...totals,
 			retentionRan,
 		}
