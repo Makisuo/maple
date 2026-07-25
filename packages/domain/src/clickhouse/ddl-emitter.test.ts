@@ -99,6 +99,9 @@ describe("ClickHouse DDL emitter", () => {
 		expect(orgId?.jsonPath).toBe("$.resource_attributes.maple_org_id")
 		const body = spec.find((c) => c.column === "Body")
 		expect(body?.jsonPath).toBe("$.body")
+		const resourceItems = spec.find((c) => c.column === "ResourceAttributeItems")
+		expect(resourceItems?.jsonPath).toBe("$.ResourceAttributeItems[:]")
+		expect(resourceItems?.hasDefaultExpression).toBe(true)
 
 		// Datasources populated only by MVs (e.g. service_usage) have no JSONPaths.
 		const serviceUsage = manifest.datasources.find((ds) => ds.name === "service_usage")

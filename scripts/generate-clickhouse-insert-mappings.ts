@@ -130,7 +130,12 @@ if (checkMode) {
 
 function buildMapping(
 	table: string,
-	spec: ReadonlyArray<{ column: string; type: string; jsonPath: string | null }>,
+	spec: ReadonlyArray<{
+		column: string
+		type: string
+		jsonPath: string | null
+		hasDefaultExpression: boolean
+	}>,
 ): DatasourceMapping {
 	const columns: string[] = []
 	const selects: string[] = []
@@ -142,17 +147,18 @@ function buildMapping(
 	// the input schema only.
 	const seenLeaves = new Set<string>()
 
-	for (const { column, type, jsonPath } of spec) {
+	for (const { column, type, jsonPath, hasDefaultExpression } of spec) {
 		if (column === "OrgId") {
 			// Single-tenant local mode pins OrgId; never extracted from JSON.
 			columns.push(column)
 			selects.push(ORG_PLACEHOLDER)
 			continue
 		}
-		if (jsonPath === null || jsonPath === `$.${column}`) {
-			// No JSON path, or a PascalCase-identity path (a computed DEFAULT/
-			// MATERIALIZED column the gateway never emits, e.g. SampleRate,
-			// IsEntryPoint). Omit so the table's DEFAULT expression computes it.
+		const isComputedIdentityPath =
+			jsonPath === `$.${column}` || jsonPath === `$.${column}[:]`
+		if (jsonPath === null || (hasDefaultExpression && isComputedIdentityPath)) {
+			// No JSON path, or a computed DEFAULT column the gateway never emits.
+			// Omit it so ClickHouse/Tinybird computes the default expression.
 			continue
 		}
 		const leaf = jsonLeaf(table, column, jsonPath)

@@ -37,6 +37,45 @@ jobs:
               run: bun run check:bundle
               working-directory: apps/web
 
+    clickhouse-schema-e2e:
+        name: ClickHouse schema E2E (${{ matrix.clickhouse }})
+        runs-on: blacksmith-4vcpu-ubuntu-2404
+        timeout-minutes: 20
+        strategy:
+            fail-fast: false
+            matrix:
+                clickhouse: ["24.8", "26.2"]
+        services:
+            clickhouse:
+                image: clickhouse/clickhouse-server:${{ matrix.clickhouse }}
+                env:
+                    CLICKHOUSE_USER: maple
+                    CLICKHOUSE_PASSWORD: maple
+                    CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+                ports:
+                    - 8123:8123
+                options: >-
+                    --health-cmd "clickhouse-client --user maple --password maple --query 'SELECT 1'"
+                    --health-interval 5s
+                    --health-timeout 5s
+                    --health-retries 20
+        steps:
+            - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+            - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+            - run: bun install --frozen-lockfile
+
+            - name: Replay migrations and verify search indexes
+              env:
+                  CLICKHOUSE_E2E: "1"
+                  CLICKHOUSE_E2E_URL: http://127.0.0.1:8123
+                  CLICKHOUSE_E2E_USER: maple
+                  CLICKHOUSE_E2E_PASSWORD: maple
+              run: >-
+                  bun run --filter=@maple/api test --
+                  src/lib/WarehouseQueryService.clickhouse.e2e.test.ts
+
     knip:
         name: Knip
         runs-on: blacksmith-4vcpu-ubuntu-2404

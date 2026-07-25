@@ -381,7 +381,12 @@ export const emitCreateMaterializedView = (pipe: ResourceContent, options?: Emit
  */
 export const emitJsonPathSpec = (
 	datasource: ResourceContent,
-): ReadonlyArray<{ readonly column: string; readonly type: string; readonly jsonPath: string | null }> => {
+): ReadonlyArray<{
+	readonly column: string
+	readonly type: string
+	readonly jsonPath: string | null
+	readonly hasDefaultExpression: boolean
+}> => {
 	const parsed = parseDatasource(datasource.content)
 	const original = datasource.content.split("\n")
 
@@ -403,6 +408,7 @@ export const emitJsonPathSpec = (
 			column: name,
 			type,
 			jsonPath: colJsonPath.get(name) ?? null,
+			hasDefaultExpression: /\s+DEFAULT\s+/i.test(col),
 		}
 	})
 }

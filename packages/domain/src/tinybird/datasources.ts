@@ -39,9 +39,17 @@ export const logs = defineDatasource("logs", {
 		LogAttributes: column(t.map(t.string().lowCardinality(), t.string()), {
 			jsonPath: "$.log_attributes",
 		}),
-		ResourceAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
-		ScopeAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
-		LogAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("LogAttributes")),
+		ResourceAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
+			{ jsonPath: "$.ResourceAttributeItems[:]" },
+		),
+		ScopeAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
+			{ jsonPath: "$.ScopeAttributeItems[:]" },
+		),
+		LogAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("LogAttributes")), {
+			jsonPath: "$.LogAttributeItems[:]",
+		}),
 	},
 	// `TraceId` is not in the sorting key and a trace spans many services (so
 	// `ServiceName` isn't fixed either) — a `WHERE TraceId = ...` lookup would
@@ -239,9 +247,17 @@ export const traces = defineDatasource("traces", {
 		 * Server/Consumer kinds, or any root span (ParentSpanId = '').
 		 */
 		IsEntryPoint: t.uint8().defaultExpr(IS_ENTRY_POINT_EXPR),
-		ResourceAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
-		ScopeAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
-		SpanAttributeItems: t.array(t.string()).defaultExpr(attributeItemsExpr("SpanAttributes")),
+		ResourceAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ResourceAttributes")),
+			{ jsonPath: "$.ResourceAttributeItems[:]" },
+		),
+		ScopeAttributeItems: column(
+			t.array(t.string()).defaultExpr(attributeItemsExpr("ScopeAttributes")),
+			{ jsonPath: "$.ScopeAttributeItems[:]" },
+		),
+		SpanAttributeItems: column(t.array(t.string()).defaultExpr(attributeItemsExpr("SpanAttributes")), {
+			jsonPath: "$.SpanAttributeItems[:]",
+		}),
 	},
 	indexes: [
 		{

@@ -102,7 +102,7 @@ export interface WarehouseQueryServiceShape {
 		compiled: CompiledQuery<T> | ((capabilities: WarehouseCapabilities) => CompiledQuery<T>),
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<T>, WarehouseSqlError | WarehouseValidationError>
-	readonly compiledQueryWithCapabilities?: <T>(
+	readonly compiledQueryWithCapabilities: <T>(
 		tenant: ExecutionTenant,
 		compile: (capabilities: WarehouseCapabilities) => CompiledQuery<T>,
 		options?: SqlQueryOptions,

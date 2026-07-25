@@ -38,7 +38,6 @@ import {
 import { computeBucketSeconds } from "../datetime"
 import {
 	attributeIndexMode,
-	baselineWarehouseCapabilities,
 	logBodySearchMode,
 	type WarehouseCapabilities,
 } from "../capabilities"
@@ -77,11 +76,8 @@ export interface QueryEngineWarehouse<T extends QueryTenant = QueryTenant> {
 		compiled: CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
 	) => Effect.Effect<ReadonlyArray<Output>, WarehouseError>
-	/**
-	 * Optional capability-aware execution path. Older adapters and lightweight
-	 * test warehouses can omit it; callers then compile the conservative plan.
-	 */
-	readonly compiledQueryWithCapabilities?: <Output>(
+	/** Capability-aware execution; adapters may deliberately compile the baseline plan. */
+	readonly compiledQueryWithCapabilities: <Output>(
 		tenant: T,
 		compile: (capabilities: WarehouseCapabilities) => CH.CompiledQuery<Output>,
 		options?: SqlQueryOptions,
@@ -812,11 +808,10 @@ const executeCHQuery = Effect.fnUntraced(function* <
 	const options = { profile, context, settings } as const
 	if (typeof query === "function") {
 		const compile = (capabilities: WarehouseCapabilities) => CH.compile(query(capabilities), params)
-		const effect =
-			warehouse.compiledQueryWithCapabilities === undefined
-				? warehouse.compiledQuery(tenant, compile(baselineWarehouseCapabilities()), options)
-				: warehouse.compiledQueryWithCapabilities(tenant, compile, options)
-		return yield* annotateWarehouseError(effect, context)
+		return yield* annotateWarehouseError(
+			warehouse.compiledQueryWithCapabilities(tenant, compile, options),
+			context,
+		)
 	}
 
 	const compiled = CH.compile(query, params)

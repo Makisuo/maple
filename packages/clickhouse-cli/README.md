@@ -57,6 +57,13 @@ The user passed via `--user` needs DDL privileges (`CREATE TABLE`,
 `system.columns` for status checks. After the schema is in place, the
 collector / app user only needs `SELECT` + `INSERT` on the Maple tables.
 
+Performance features are best-effort. The CLI records a feature only after all
+of its DDL succeeds; an unsupported or failed optional index is reported in the
+summary without rolling back correctness migrations. Search indexes apply to
+newly written parts. Maple deliberately does not run cluster-wide
+`MATERIALIZE INDEX` or `SELECT *` projection backfills automatically; existing
+30-day telemetry ages into full coverage through TTL turnover.
+
 ## CI usage
 
 ```yaml

@@ -116,7 +116,9 @@ async function runApply(config: ClickHouseConfig): Promise<number> {
 
 		const result = await applyMigrations(config)
 		for (const m of result.skipped) {
-			process.stdout.write(`  skip   ${m.version}  ${m.description}\n`)
+			process.stdout.write(
+				`  skip   ${m.version}  ${m.description}${m.reason ? ` (${m.reason})` : ""}\n`,
+			)
 		}
 		for (const m of result.applied) {
 			process.stdout.write(`  apply  ${m.version}  ${m.description}\n`)

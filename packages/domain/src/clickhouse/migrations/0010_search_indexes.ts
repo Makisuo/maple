@@ -15,8 +15,15 @@ const addColumn = (table: string, name: keyof typeof ATTRIBUTE_ITEMS): string =>
 const addBloom = (table: string, name: string, expression: string): string =>
 	`ALTER TABLE ${table} ADD INDEX IF NOT EXISTS ${name} ${expression} TYPE bloom_filter(0.01) GRANULARITY 1`
 
-const materializeIndex = (table: string, name: string): string =>
-	`ALTER TABLE ${table} MATERIALIZE INDEX ${name}`
+/** Columns introduced solely to support capability-gated search indexes. */
+export const performanceOnlySearchColumns: ReadonlySet<string> = new Set([
+	"logs.ResourceAttributeItems",
+	"logs.ScopeAttributeItems",
+	"logs.LogAttributeItems",
+	"traces.ResourceAttributeItems",
+	"traces.ScopeAttributeItems",
+	"traces.SpanAttributeItems",
+])
 
 /**
  * Portable search substrate for every supported ClickHouse release.
@@ -28,6 +35,7 @@ const materializeIndex = (table: string, name: string): string =>
 export const migration_0010_search_indexes = {
 	version: 10,
 	description: "Add portable log/trace attribute indexes and log token search",
+	requiredForIngest: false,
 	statements: [
 		addColumn("logs", "ResourceAttributeItems"),
 		addColumn("logs", "ScopeAttributeItems"),
@@ -47,14 +55,5 @@ export const migration_0010_search_indexes = {
 		addBloom("traces", "idx_scope_attr_keys", "mapKeys(ScopeAttributes)"),
 		addBloom("traces", "idx_scope_attr_vals", "mapValues(ScopeAttributes)"),
 
-		materializeIndex("logs", "idx_resource_attr_keys"),
-		materializeIndex("logs", "idx_resource_attr_vals"),
-		materializeIndex("logs", "idx_scope_attr_keys"),
-		materializeIndex("logs", "idx_scope_attr_vals"),
-		materializeIndex("logs", "idx_log_attr_keys"),
-		materializeIndex("logs", "idx_log_attr_vals"),
-		materializeIndex("logs", "idx_lower_body"),
-		materializeIndex("traces", "idx_scope_attr_keys"),
-		materializeIndex("traces", "idx_scope_attr_vals"),
 	],
 } as const

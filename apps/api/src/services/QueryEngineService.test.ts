@@ -3,11 +3,12 @@ import { Effect, Exit, Option, Schema } from "effect"
 import { strict as nodeAssert } from "node:assert"
 import { MetricName, OrgId, ServiceName, UserId } from "@maple/domain"
 import { RawSqlValidationError } from "@maple/domain/http"
-import type {
-	QueryEngineEvaluateRequest,
-	QueryEngineExecuteRequest,
-	QueryEngineResult,
-	TimeseriesPoint,
+import {
+	baselineWarehouseCapabilities,
+	type QueryEngineEvaluateRequest,
+	type QueryEngineExecuteRequest,
+	type QueryEngineResult,
+	type TimeseriesPoint,
 } from "@maple/query-engine"
 import {
 	makeQueryEngineEvaluate,
@@ -85,6 +86,14 @@ function makeTinybirdStub(overrides: Partial<Parameters<typeof makeQueryEngineEx
 				sqlQuery(tenant, compiled.sql, options).pipe(
 					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
 				)),
+		compiledQueryWithCapabilities:
+			overrides.compiledQueryWithCapabilities ??
+			((tenant, compile, options) => {
+				const compiled = compile(baselineWarehouseCapabilities())
+				return sqlQuery(tenant, compiled.sql, options).pipe(
+					Effect.flatMap((rows) => compiled.decodeRows(rows).pipe(Effect.orDie)),
+				)
+			}),
 	} satisfies Parameters<typeof makeQueryEngineExecute>[0]
 }
 

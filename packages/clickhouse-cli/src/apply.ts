@@ -32,7 +32,7 @@ export const bundledMigrations = clickHouseMigrations
 
 export interface ApplyResult {
 	readonly applied: ReadonlyArray<{ version: number; description: string }>
-	readonly skipped: ReadonlyArray<{ version: number; description: string }>
+	readonly skipped: ReadonlyArray<{ version: number; description: string; reason?: string }>
 	readonly appliedFeatures: ReadonlyArray<{ id: string; description: string }>
 	readonly skippedFeatures: ReadonlyArray<{ id: string; description: string; reason: string }>
 }
@@ -45,41 +45,34 @@ export interface SchemaFeaturePlan {
 	readonly statements: ReadonlyArray<string>
 }
 
-/**
- * Apply any unapplied migrations to the target server. Already-applied
- * migrations are skipped. Returns a summary so the caller can render a
- * sensible CLI report.
- */
-export async function applyMigrations(config: ClickHouseConfig): Promise<ApplyResult> {
-	await ensureMigrationsTable(config)
-	await ensureFeaturesTable(config)
-	const appliedVersions = await readAppliedVersions(config)
+interface ApplySchemaFeaturesOptions {
+	readonly serverVersion: string
+	readonly appliedFeatureRevisions: ReadonlyMap<string, number>
+	readonly execute: (sql: string) => Promise<string>
+	readonly record: (feature: (typeof clickHouseSchemaFeatures)[number]) => Promise<void>
+}
 
-	const applied: Array<{ version: number; description: string }> = []
-	const skipped: Array<{ version: number; description: string }> = []
+interface ReconcileSchemaFeaturesOptions {
+	readonly ensureBookkeeping: () => Promise<void>
+	readonly readServerVersion: () => Promise<string>
+	readonly readAppliedFeatureRevisions: () => Promise<ReadonlyMap<string, number>>
+	readonly execute: ApplySchemaFeaturesOptions["execute"]
+	readonly record: ApplySchemaFeaturesOptions["record"]
+}
+
+/**
+ * Execute optional feature DDL against an injected adapter. A feature is
+ * recorded only after every statement succeeds; failures remain retryable and
+ * never invalidate already-applied correctness migrations.
+ */
+export async function applySchemaFeatures(
+	options: ApplySchemaFeaturesOptions,
+): Promise<Pick<ApplyResult, "appliedFeatures" | "skippedFeatures">> {
 	const appliedFeatures: Array<{ id: string; description: string }> = []
 	const skippedFeatures: Array<{ id: string; description: string; reason: string }> = []
 
-	for (const migration of bundledMigrations) {
-		if (appliedVersions.has(migration.version)) {
-			skipped.push({ version: migration.version, description: migration.description })
-			continue
-		}
-		// Expand backfills into day-window chunks so a single huge INSERT…SELECT
-		// never holds one connection for minutes (which also trips port-forward /
-		// proxy idle timeouts). Structural DDL stays 1:1.
-		const steps = await expandMigrationToSteps(migration, config.database, (sql) => exec(config, sql))
-		for (const step of steps) {
-			await exec(config, step.sql)
-		}
-		await recordMigration(config, migration.version, migration.description)
-		applied.push({ version: migration.version, description: migration.description })
-	}
-
-	const serverVersion = (await exec(config, "SELECT version() FORMAT TabSeparated")).trim()
-	const appliedFeatureRevisions = await readAppliedFeatureRevisions(config)
 	for (const feature of clickHouseSchemaFeatures) {
-		if (!featureSupportedByVersion(feature, serverVersion)) {
+		if (!featureSupportedByVersion(feature, options.serverVersion)) {
 			skippedFeatures.push({
 				id: feature.id,
 				description: feature.description,
@@ -87,7 +80,7 @@ export async function applyMigrations(config: ClickHouseConfig): Promise<ApplyRe
 			})
 			continue
 		}
-		if ((appliedFeatureRevisions.get(feature.id) ?? 0) >= feature.revision) {
+		if ((options.appliedFeatureRevisions.get(feature.id) ?? 0) >= feature.revision) {
 			skippedFeatures.push({
 				id: feature.id,
 				description: feature.description,
@@ -96,26 +89,111 @@ export async function applyMigrations(config: ClickHouseConfig): Promise<ApplyRe
 			continue
 		}
 
-		let satisfied = false
-		if (feature.satisfiedBySortingKey) {
-			const table = feature.satisfiedBySortingKey.table.replace(/'/g, "''")
-			const result = await exec(
-				config,
-				`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
-			)
-			const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
-			satisfied =
-				normalizeExpression(row?.sorting_key ?? "") ===
-				normalizeExpression(feature.satisfiedBySortingKey.expected)
-		}
-		if (!satisfied) {
-			for (const statement of feature.statements) {
-				await exec(config, statement)
+		try {
+			let satisfied = false
+			if (feature.satisfiedBySortingKey) {
+				const table = feature.satisfiedBySortingKey.table.replace(/'/g, "''")
+				const result = await options.execute(
+					`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
+				)
+				const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
+				satisfied =
+					normalizeExpression(row?.sorting_key ?? "") ===
+					normalizeExpression(feature.satisfiedBySortingKey.expected)
 			}
+			if (!satisfied) {
+				for (const statement of feature.statements) await options.execute(statement)
+			}
+			await options.record(feature)
+			appliedFeatures.push({ id: feature.id, description: feature.description })
+		} catch (error) {
+			skippedFeatures.push({
+				id: feature.id,
+				description: feature.description,
+				reason: error instanceof Error ? error.message : String(error),
+			})
 		}
-		await recordFeature(config, feature.id, feature.revision, feature.description)
-		appliedFeatures.push({ id: feature.id, description: feature.description })
 	}
+
+	return { appliedFeatures, skippedFeatures }
+}
+
+/**
+ * Best-effort boundary around all optional feature bookkeeping and DDL.
+ * Correctness migrations have already completed before this runs.
+ */
+export async function reconcileSchemaFeatures(
+	options: ReconcileSchemaFeaturesOptions,
+): Promise<Pick<ApplyResult, "appliedFeatures" | "skippedFeatures">> {
+	try {
+		await options.ensureBookkeeping()
+		const serverVersion = await options.readServerVersion()
+		const appliedFeatureRevisions = await options.readAppliedFeatureRevisions()
+		return await applySchemaFeatures({
+			serverVersion,
+			appliedFeatureRevisions,
+			execute: options.execute,
+			record: options.record,
+		})
+	} catch (error) {
+		return {
+			appliedFeatures: [],
+			skippedFeatures: [
+				{
+					id: "feature_reconciliation",
+					description: "Reconcile optional schema features",
+					reason: error instanceof Error ? error.message : String(error),
+				},
+			],
+		}
+	}
+}
+
+/**
+ * Apply any unapplied migrations to the target server. Already-applied
+ * migrations are skipped. Returns a summary so the caller can render a
+ * sensible CLI report.
+ */
+export async function applyMigrations(config: ClickHouseConfig): Promise<ApplyResult> {
+	await ensureMigrationsTable(config)
+	const appliedVersions = await readAppliedVersions(config)
+
+	const applied: Array<{ version: number; description: string }> = []
+	const skipped: Array<{ version: number; description: string; reason?: string }> = []
+
+	for (const migration of bundledMigrations) {
+		if (appliedVersions.has(migration.version)) {
+			skipped.push({ version: migration.version, description: migration.description })
+			continue
+		}
+		try {
+			// Expand backfills into day-window chunks so a single huge INSERT…SELECT
+			// never holds one connection for minutes (which also trips port-forward /
+			// proxy idle timeouts). Structural DDL stays 1:1.
+			const steps = await expandMigrationToSteps(migration, config.database, (sql) => exec(config, sql))
+			for (const step of steps) {
+				await exec(config, step.sql)
+			}
+			await recordMigration(config, migration.version, migration.description)
+			applied.push({ version: migration.version, description: migration.description })
+		} catch (error) {
+			if (migration.requiredForIngest !== false) throw error
+			skipped.push({
+				version: migration.version,
+				description: migration.description,
+				reason: error instanceof Error ? error.message : String(error),
+			})
+		}
+	}
+
+	const { appliedFeatures, skippedFeatures } = await reconcileSchemaFeatures({
+		ensureBookkeeping: () => ensureFeaturesTable(config),
+		readServerVersion: () =>
+			exec(config, "SELECT version() FORMAT TabSeparated").then((value) => value.trim()),
+		readAppliedFeatureRevisions: () => readAppliedFeatureRevisions(config),
+		execute: (sql) => exec(config, sql),
+		record: (feature) => recordFeature(config, feature.id, feature.revision, feature.description),
+	})
 
 	return { applied, skipped, appliedFeatures, skippedFeatures }
 }

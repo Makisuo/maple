@@ -22,6 +22,7 @@ import {
 	featureSupportedByVersion,
 	migrations as clickHouseMigrations,
 	parseEmittedStatement,
+	performanceOnlySearchColumns,
 	qualifyStatementForDatabase,
 	type ActualTable,
 	type DesiredTable,
@@ -53,6 +54,41 @@ export interface WorkflowStepLike {
 }
 export interface WorkflowEventLike<T> {
 	readonly payload: T
+}
+
+interface LoadOptionalFeatureStateOptions {
+	readonly ensureBookkeeping: () => Promise<void>
+	readonly readServerVersion: () => Promise<string>
+	readonly readAppliedFeatureRevisions: () => Promise<ReadonlyMap<string, number>>
+}
+
+export type OptionalFeatureState =
+	| {
+			readonly available: true
+			readonly serverVersion: string
+			readonly appliedFeatureRevisions: ReadonlyMap<string, number>
+	  }
+	| { readonly available: false; readonly reason: string }
+
+/**
+ * Optional feature metadata must never decide whether the correctness schema
+ * is ready for ingest. Keeping this boundary explicit also makes the workflow
+ * policy testable without a live durable-workflow runtime.
+ */
+export async function loadOptionalFeatureState(
+	options: LoadOptionalFeatureStateOptions,
+): Promise<OptionalFeatureState> {
+	try {
+		await options.ensureBookkeeping()
+		const serverVersion = await options.readServerVersion()
+		const appliedFeatureRevisions = await options.readAppliedFeatureRevisions()
+		return { available: true, serverVersion, appliedFeatureRevisions }
+	} catch (error) {
+		return {
+			available: false,
+			reason: error instanceof Error ? error.message : String(error),
+		}
+	}
 }
 
 /**
@@ -245,7 +281,12 @@ const parseDesiredTables = (): ReadonlyArray<DesiredTable> => {
 		out.push({
 			name: parsed.name,
 			kind: parsed.kind,
-			columns: parsed.kind === "table" ? parsed.columns : [],
+			columns:
+				parsed.kind === "table"
+					? parsed.columns.filter(
+							(column) => !performanceOnlySearchColumns.has(`${parsed.name}.${column.name}`),
+						)
+					: [],
 			createStatement: stmt,
 		})
 	}
@@ -310,6 +351,7 @@ async function runWithDb(
 	const encryptionKey = Buffer.from(env.MAPLE_INGEST_KEY_ENCRYPTION_KEY.trim(), "base64")
 	const startedAt = Date.now()
 	const appliedVersions: number[] = []
+	const skippedFeatures: Array<{ readonly id: string; readonly reason: string }> = []
 
 	const cfg = await step.do("load-config", STEP, async () => {
 		const c = await loadConfig(db, orgId, encryptionKey)
@@ -324,15 +366,13 @@ async function runWithDb(
 
 	try {
 		await step.do("ensure-bookkeeping", STEP, () => ensureMigrationsTable(cfg).then(() => undefined))
-		await step.do("ensure-feature-bookkeeping", STEP, () =>
-			ensureFeaturesTable(cfg).then(() => undefined),
-		)
 		const applied = await step.do("read-applied", STEP, () =>
 			readAppliedVersions(cfg).then((s) => [...s]),
 		)
 		const appliedSet = new Set(applied)
 
 		for (const migration of clickHouseMigrations) {
+			if (migration.requiredForIngest === false) continue
 			if (appliedSet.has(migration.version)) continue
 
 			const steps = await step.do(`plan-m${migration.version}`, STEP, () =>
@@ -363,52 +403,6 @@ async function runWithDb(
 			appliedVersions.push(migration.version)
 		}
 
-		const serverVersion = await step.do("read-clickhouse-version", STEP, () =>
-			exec(cfg, "SELECT version() FORMAT TabSeparated").then((value) => value.trim()),
-		)
-		const appliedFeatureEntries = await step.do("read-applied-features", STEP, () =>
-			readAppliedFeatureRevisions(cfg).then((entries) => [...entries]),
-		)
-		const appliedFeatureRevisions = new Map(appliedFeatureEntries)
-		for (const feature of clickHouseSchemaFeatures) {
-			if (!featureSupportedByVersion(feature, serverVersion)) continue
-			if ((appliedFeatureRevisions.get(feature.id) ?? 0) >= feature.revision) continue
-
-			let satisfied = false
-			if (feature.satisfiedBySortingKey) {
-				satisfied = await step.do(`feature-${feature.id}:inspect`, STEP, async () => {
-					const table = feature.satisfiedBySortingKey!.table.replace(/'/g, "''")
-					const result = await exec(
-						cfg,
-						`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
-					)
-					const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
-					return (
-						normalizeExpression(row?.sorting_key ?? "") ===
-						normalizeExpression(feature.satisfiedBySortingKey!.expected)
-					)
-				})
-			}
-
-			if (!satisfied) {
-				for (let index = 0; index < feature.statements.length; index++) {
-					const statement = feature.statements[index]!
-					await step.do(`feature-${feature.id}:${index + 1}`, STEP, async () => {
-						await updateRun(
-							db,
-							orgId,
-							{ phase: `feature ${feature.id} · ${index + 1}/${feature.statements.length}` },
-							Date.now(),
-						)
-						await exec(cfg, statement)
-					})
-				}
-			}
-			await step.do(`feature-${feature.id}:record`, STEP, () =>
-				recordFeature(cfg, feature.id, feature.revision, feature.description).then(() => undefined),
-			)
-		}
-
 		// Snapshot-diff additive pass: create snapshot objects missing on the
 		// cluster + add missing columns (metadata-only, fits a step easily).
 		await step.do("snapshot-diff", STEP, async () => {
@@ -437,18 +431,148 @@ async function runWithDb(
 			}
 		})
 
-		const finishedAt = Date.now()
-		await step.do("finalize", STEP, async () => {
+		// Correctness is complete before optional performance work begins. This
+		// keeps direct ingest ready even when a version-gated index cannot be
+		// installed due to permissions, server support, or transient load.
+		await step.do("stamp-correctness", STEP, async () => {
+			const stampedAt = Date.now()
 			await db
 				.update(orgClickHouseSettings)
 				.set({
-					lastSyncAt: new Date(finishedAt),
+					lastSyncAt: new Date(stampedAt),
 					lastSyncError: null,
 					syncStatus: "connected",
 					schemaVersion: clickHouseSchemaVersion,
-					updatedAt: new Date(finishedAt),
+					updatedAt: new Date(stampedAt),
 				})
 				.where(eq(orgClickHouseSettings.orgId, orgId))
+		})
+
+		for (const migration of clickHouseMigrations) {
+			if (migration.requiredForIngest !== false || appliedSet.has(migration.version)) continue
+			try {
+				const steps = await step.do(`plan-performance-m${migration.version}`, STEP, () =>
+					expandMigrationToSteps(migration, cfg.database, (sql) => exec(cfg, sql)).then((s) => [
+						...s,
+					]),
+				)
+				for (const [index, migrationStep] of steps.entries()) {
+					await step.do(
+						`performance-m${migration.version}:${migrationStep.name}`,
+						STEP,
+						async () => {
+							await updateRun(
+								db,
+								orgId,
+								{
+									phase: `performance migration ${migration.version} · ${index + 1}/${steps.length}`,
+									currentMigration: migration.version,
+									stepsTotal: steps.length,
+									stepsDone: index,
+								},
+								Date.now(),
+							)
+							await exec(cfg, migrationStep.sql)
+						},
+					)
+				}
+				await step.do(`record-performance-m${migration.version}`, STEP, () =>
+					recordVersion(cfg, migration.version, migration.description).then(() => undefined),
+				)
+				appliedSet.add(migration.version)
+				appliedVersions.push(migration.version)
+			} catch (error) {
+				skippedFeatures.push({
+					id: `migration_${migration.version}`,
+					reason: error instanceof Error ? error.message : String(error),
+				})
+			}
+		}
+
+		const optionalFeatureState = await loadOptionalFeatureState({
+			ensureBookkeeping: () =>
+				step.do("ensure-feature-bookkeeping", STEP, () =>
+					ensureFeaturesTable(cfg).then(() => undefined),
+				),
+			readServerVersion: () =>
+				step.do("read-clickhouse-version", STEP, () =>
+					exec(cfg, "SELECT version() FORMAT TabSeparated").then((value) => value.trim()),
+				),
+			readAppliedFeatureRevisions: () =>
+				step
+					.do("read-applied-features", STEP, () =>
+						readAppliedFeatureRevisions(cfg).then((entries) => [...entries]),
+					)
+					.then((entries) => new Map(entries)),
+		})
+		if (!optionalFeatureState.available) {
+			skippedFeatures.push({
+				id: "feature_reconciliation",
+				reason: optionalFeatureState.reason,
+			})
+		}
+		if (optionalFeatureState.available) {
+			const { serverVersion, appliedFeatureRevisions } = optionalFeatureState
+			for (const feature of clickHouseSchemaFeatures) {
+				if (!featureSupportedByVersion(feature, serverVersion)) {
+					skippedFeatures.push({
+						id: feature.id,
+						reason: `requires ClickHouse ${feature.minClickHouseVersion}+`,
+					})
+					continue
+				}
+				if ((appliedFeatureRevisions.get(feature.id) ?? 0) >= feature.revision) continue
+
+				try {
+					let satisfied = false
+					const sortingKeyRequirement = feature.satisfiedBySortingKey
+					if (sortingKeyRequirement) {
+						satisfied = await step.do(`feature-${feature.id}:inspect`, STEP, async () => {
+							const table = sortingKeyRequirement.table.replace(/'/g, "''")
+							const result = await exec(
+								cfg,
+								`SELECT sorting_key FROM system.tables WHERE database = currentDatabase() AND name = '${table}' FORMAT JSONEachRow`,
+							)
+							const row = parseJsonEachRow<{ sorting_key?: string }>(result)[0]
+							return (
+								normalizeExpression(row?.sorting_key ?? "") ===
+								normalizeExpression(sortingKeyRequirement.expected)
+							)
+						})
+					}
+
+					if (!satisfied) {
+						for (let index = 0; index < feature.statements.length; index++) {
+							const statement = feature.statements[index]!
+							await step.do(`feature-${feature.id}:${index + 1}`, STEP, async () => {
+								await updateRun(
+									db,
+									orgId,
+									{
+										phase: `feature ${feature.id} · ${index + 1}/${feature.statements.length}`,
+									},
+									Date.now(),
+								)
+								await exec(cfg, statement)
+							})
+						}
+					}
+					await step.do(`feature-${feature.id}:record`, STEP, () =>
+						recordFeature(cfg, feature.id, feature.revision, feature.description).then(
+							() => undefined,
+						),
+					)
+				} catch (error) {
+					skippedFeatures.push({
+						id: feature.id,
+						reason: error instanceof Error ? error.message : String(error),
+					})
+				}
+			}
+		}
+
+		const finishedAt = Date.now()
+		await step.do("finalize", STEP, async () => {
 			await updateRun(
 				db,
 				orgId,
@@ -457,6 +581,7 @@ async function runWithDb(
 					phase: "done",
 					currentMigration: null,
 					appliedVersions,
+					skipped: skippedFeatures,
 					finishedAt: new Date(finishedAt),
 				},
 				finishedAt,

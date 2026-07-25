@@ -21,6 +21,8 @@ export interface ClickHouseMigration {
 	readonly version: number
 	readonly description: string
 	readonly statements: ReadonlyArray<MigrationStatement>
+	/** Performance-only migrations are applied normally but do not gate direct ingest. */
+	readonly requiredForIngest?: boolean
 }
 
 /**
@@ -62,15 +64,23 @@ export const latestMigrationVersion: number = migrations.reduce(
  * (`org_clickhouse_settings.schema_version`): the ingest gateway routes an org's
  * frames to its own ClickHouse only when the stored value equals this.
  *
- * Deliberately the migration version — NOT the `clickHouseProjectRevision` hash,
+ * Deliberately the latest ingest-required migration version — NOT the
+ * `clickHouseProjectRevision` hash,
  * which is shared with the Tinybird manifest and therefore bumps on Tinybird-only
  * schema changes. Keying on that global hash silently un-readied every BYO-CH org
  * (routing their ingest to managed Tinybird while the dashboard kept reading their
  * ClickHouse → invisible data) whenever an unrelated Tinybird datasource changed.
- * The migration version only changes when the ClickHouse DDL actually changes.
+ * Performance-only migrations set `requiredForIngest: false`; they can improve
+ * query speed without interrupting routing to an otherwise compatible schema.
  *
  * Stamped into D1 by the API's applySchema workflow and the schemaDiff self-heal,
  * and compared by the Rust ingest gateway (emitted as `SCHEMA_VERSION` into
  * `clickhouse_insert_mappings.rs` by `scripts/generate-clickhouse-insert-mappings.ts`).
  */
-export const clickHouseSchemaVersion: string = String(latestMigrationVersion)
+export const clickHouseSchemaVersion: string = String(
+	migrations.reduce(
+		(max, migration) =>
+			migration.requiredForIngest === false ? max : Math.max(max, migration.version),
+		0,
+	),
+)

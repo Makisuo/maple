@@ -62,7 +62,15 @@ export interface Condition {
 // ---------------------------------------------------------------------------
 
 export function toFragment(value: unknown): SqlFragment {
-	if (value != null && typeof value === "object" && "_brand" in value) {
+	if (
+		value != null &&
+		typeof value === "object" &&
+		"_brand" in value &&
+		((value as { readonly _brand?: unknown })._brand === "Expr" ||
+			(value as { readonly _brand?: unknown })._brand === "Condition") &&
+		"toFragment" in value &&
+		typeof (value as { readonly toFragment?: unknown }).toFragment === "function"
+	) {
 		return (value as Expr<unknown>).toFragment()
 	}
 	if (typeof value === "string") return str(value)

@@ -20,6 +20,7 @@ export {
 	type ClickHouseMigration,
 	type MigrationStatement,
 } from "./migrations"
+export { performanceOnlySearchColumns } from "./migrations/0010_search_indexes"
 export {
 	type BackfillSpec,
 	isBackfill,
@@ -43,5 +44,6 @@ export {
 	clickHouseSchemaFeatures,
 	clickHouseVersionAtLeast,
 	featureSupportedByVersion,
+	ClickHouseSchemaFeatureId,
 	type ClickHouseSchemaFeature,
 } from "./features"

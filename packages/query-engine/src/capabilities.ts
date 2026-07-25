@@ -4,6 +4,7 @@
  * useful context, but an optimization is enabled only when the matching live
  * column/index is present.
  */
+import { Schema } from "effect"
 
 export type WarehouseSearchFeature =
 	| "logs.body.tokenbf"
@@ -52,6 +53,28 @@ export interface WarehouseSettingMetadataRow {
 	readonly name: string
 	readonly value: string | number
 }
+
+export const WarehouseVersionMetadataSchema = Schema.Array(
+	Schema.Struct({ version: Schema.String }),
+)
+export const WarehouseIndexMetadataSchema = Schema.Array(
+	Schema.Struct({
+		table: Schema.String,
+		name: Schema.String,
+		type: Schema.String,
+		expression: Schema.optionalKey(Schema.String),
+		expr: Schema.optionalKey(Schema.String),
+	}),
+)
+export const WarehouseColumnMetadataSchema = Schema.Array(
+	Schema.Struct({ table: Schema.String, name: Schema.String }),
+)
+export const WarehouseProjectionMetadataSchema = Schema.Array(
+	Schema.Struct({ table: Schema.String, name: Schema.String }),
+)
+export const WarehouseSettingMetadataSchema = Schema.Array(
+	Schema.Struct({ name: Schema.String, value: Schema.Union([Schema.String, Schema.Number]) }),
+)
 
 export const baselineWarehouseCapabilities = (): WarehouseCapabilities => ({
 	serverVersion: undefined,
