@@ -23,6 +23,11 @@ Toolchain (bun/node/rust/python) is pinned in [`mise.toml`](mise.toml); `mise ru
 first-time install + `.env.local` + portless CA. mise is optional but bump versions there when
 upgrading a runtime (keep `bun` in sync with `packageManager`).
 
+**After 10 PM local time, don't run heavy local compute** — no full test suite (`bun run test`),
+repo-wide `bun typecheck`, full builds, cargo builds, or `bun dev` across all apps. Scope to what's
+needed instead (single-package test/typecheck via `--filter`, a single dev app) and tell the user
+which heavy commands were skipped so they can run them later.
+
 ## Warehouse queries
 
 **No Tinybird pipes/endpoints exist.** All backend queries use the ClickHouse DSL in
